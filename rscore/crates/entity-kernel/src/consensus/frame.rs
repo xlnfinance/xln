@@ -20,7 +20,10 @@ use super::encoding::{
 const ENTITY_FRAME_TXS_DOMAIN: &[u8] = b"xln:entity-frame-txs:binary";
 const ENTITY_FRAME_DOMAIN: &str = "xln:entity-frame:binary-context-digest";
 const ENTITY_EVENTS_PARITY_DOMAIN: &[u8] = b"xln.rscore.events-parity.v1";
-const MAX_ENTITY_FRAME_BYTES: usize = 10_000_000;
+pub const MAX_ENTITY_FRAME_BYTES: usize = 10_000_000;
+pub const MAX_ENTITY_FRAME_TX_BYTES: usize = MAX_ENTITY_FRAME_BYTES / 2;
+pub const MAX_ENTITY_PROPOSAL_WIRE_BYTES: usize =
+    MAX_ENTITY_FRAME_BYTES - MAX_ENTITY_FRAME_BYTES / 3 - MAX_ENTITY_FRAME_BYTES / 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanonicalEntityTx {
@@ -213,7 +216,9 @@ fn canonical_root(field: &'static str, value: &str) -> Result<String, EntityFram
         })
 }
 
-fn txs_commitment(txs: &[CanonicalEntityTx]) -> Result<(String, usize), EntityFrameError> {
+fn txs_commitment<'a>(
+    txs: impl IntoIterator<Item = &'a CanonicalEntityTx>,
+) -> Result<(String, usize), EntityFrameError> {
     let mut digest = Sha256::new();
     digest.update(ENTITY_FRAME_TXS_DOMAIN);
     let mut total_bytes = 0_usize;
@@ -268,15 +273,47 @@ pub struct EntityFrameBody<'a> {
     pub j_prefix_certificate: Option<&'a CanonicalValue>,
 }
 
-pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, EntityFrameError> {
-    let state_root = canonical_root("stateRoot", body.state_root)?;
-    let authority_root = canonical_root("authorityRoot", body.authority_root)?;
-    let tx_count =
-        u64::try_from(body.txs.len()).map_err(|_| EntityFrameError::TxPreimageTooLarge)?;
-    let context = binary_payload(body.entity_context)?;
+/// Borrowed pre-apply view over the exact canonical Entity-frame encoder.
+/// Live prefix fitting uses this instead of maintaining a second size oracle.
+pub struct EntityFrameWireMeasureBody<'a> {
+    pub parent_frame_hash: &'a str,
+    pub height: u64,
+    pub timestamp: u64,
+    pub txs: &'a [&'a CanonicalEntityTx],
+    pub events: &'a [EntityFrameEvent],
+    pub entity_id: &'a str,
+    pub state_root: &'a str,
+    pub authority_root: &'a str,
+    pub entity_context: &'a CanonicalValue,
+    pub j_prefix_certificate: Option<&'a CanonicalValue>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntityFrameWireMeasure {
+    pub total_bytes: usize,
+    pub tx_bytes: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_entity_frame_wire<'a>(
+    parent_frame_hash: &str,
+    height: u64,
+    timestamp: u64,
+    txs: impl ExactSizeIterator<Item = &'a CanonicalEntityTx>,
+    events: &[EntityFrameEvent],
+    entity_id: &str,
+    state_root: &str,
+    authority_root: &str,
+    entity_context: &CanonicalValue,
+    j_prefix_certificate: Option<&CanonicalValue>,
+) -> Result<(Vec<u8>, EntityFrameWireMeasure), EntityFrameError> {
+    let state_root = canonical_root("stateRoot", state_root)?;
+    let authority_root = canonical_root("authorityRoot", authority_root)?;
+    let tx_count = u64::try_from(txs.len()).map_err(|_| EntityFrameError::TxPreimageTooLarge)?;
+    let context = binary_payload(entity_context)?;
     let context_digest = hex_digest(&Sha256::digest(&context));
-    let events = events_value(body.events);
-    let event_bytes = if body.events.is_empty() {
+    let events = events_value(events);
+    let event_bytes = if events == CanonicalValue::Array(Vec::new()) {
         0
     } else {
         binary_payload(&events)?.len()
@@ -287,22 +324,22 @@ pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, E
             limit: MAX_ENTITY_FRAME_BYTES,
         });
     }
-    let (txs_digest, tx_bytes) = txs_commitment(body.txs)?;
+    let (txs_digest, tx_bytes) = txs_commitment(txs)?;
     let header = object(vec![
         ("domain", text(ENTITY_FRAME_DOMAIN)),
-        ("prevFrameHash", text(body.parent_frame_hash)),
-        ("height", number("frame.height", body.height)?),
-        ("timestamp", number("frame.timestamp", body.timestamp)?),
+        ("prevFrameHash", text(parent_frame_hash)),
+        ("height", number("frame.height", height)?),
+        ("timestamp", number("frame.timestamp", timestamp)?),
         ("txCount", number("frame.txCount", tx_count)?),
         ("txsDigest", text(txs_digest)),
         ("events", events),
-        ("entityId", text(body.entity_id)),
+        ("entityId", text(entity_id)),
         ("stateRoot", text(state_root)),
         ("authorityRoot", text(authority_root)),
         ("entityContextDigest", text(context_digest)),
         (
             "jPrefixCertificate",
-            body.j_prefix_certificate
+            j_prefix_certificate
                 .cloned()
                 .unwrap_or(CanonicalValue::Null),
         ),
@@ -313,9 +350,49 @@ pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, E
         .checked_add(context.len())
         .and_then(|value| value.checked_add(tx_bytes))
         .ok_or(EntityFrameError::TxPreimageTooLarge)?;
-    if total_bytes > MAX_ENTITY_FRAME_BYTES {
+    Ok((
+        encoded_header,
+        EntityFrameWireMeasure {
+            total_bytes,
+            tx_bytes,
+        },
+    ))
+}
+
+pub fn measure_entity_frame_wire(
+    body: &EntityFrameWireMeasureBody<'_>,
+) -> Result<EntityFrameWireMeasure, EntityFrameError> {
+    encode_entity_frame_wire(
+        body.parent_frame_hash,
+        body.height,
+        body.timestamp,
+        body.txs.iter().copied(),
+        body.events,
+        body.entity_id,
+        body.state_root,
+        body.authority_root,
+        body.entity_context,
+        body.j_prefix_certificate,
+    )
+    .map(|(_, measure)| measure)
+}
+
+pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, EntityFrameError> {
+    let (encoded_header, measure) = encode_entity_frame_wire(
+        body.parent_frame_hash,
+        body.height,
+        body.timestamp,
+        body.txs.iter(),
+        body.events,
+        body.entity_id,
+        body.state_root,
+        body.authority_root,
+        body.entity_context,
+        body.j_prefix_certificate,
+    )?;
+    if measure.total_bytes > MAX_ENTITY_FRAME_BYTES {
         return Err(EntityFrameError::TotalByteLimitExceeded {
-            actual: total_bytes,
+            actual: measure.total_bytes,
             limit: MAX_ENTITY_FRAME_BYTES,
         });
     }

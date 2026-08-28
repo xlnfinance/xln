@@ -5,9 +5,9 @@ use thiserror::Error;
 use xln_rscore_batch::{AccountId, AccountInputRow, AccountsCheckpoint, ResidentConsensusEngine};
 use xln_rscore_entity_kernel::{
     CanonicalEntityTx, DeterministicContext, EntityFrame, EntityKernelError, EntityKernelOutput,
-    EntitySingleSigner, EntityStateSlice, EntityTransitionError, LocalEntityFinancialTx,
-    LocalEntityOutput, ResidentEntityConsensusReplica, ResidentEntityError, ScheduledWake,
-    SchedulerError, SignedEntityCommandV1, decode_local_entity_financial_tx,
+    EntitySingleSigner, EntityStateSlice, EntityTransitionError, EntityTxKind,
+    LocalEntityFinancialTx, LocalEntityOutput, ResidentEntityConsensusReplica, ResidentEntityError,
+    ScheduledWake, SchedulerError, SignedEntityCommandV1, decode_local_entity_financial_tx,
     decode_signed_entity_command,
 };
 use xln_rscore_protocol::CanonicalValue;
@@ -29,8 +29,15 @@ pub enum RuntimeTx {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum EntityExecutionStep {
+/// RAM-only Entity mempool unit. Every variant becomes exactly one canonical
+/// Entity-frame transaction once selected; the Runtime WAL separately keeps
+/// the complete authenticated EntityInput that admitted it.
+#[derive(Clone, Debug)]
+pub(crate) enum EntityPendingWork {
+    Account {
+        projected: CanonicalEntityTx,
+        row: AccountInputRow,
+    },
     LocalBatch {
         projected: Vec<CanonicalEntityTx>,
         native: Vec<LocalEntityFinancialTx>,
@@ -39,6 +46,16 @@ pub(super) enum EntityExecutionStep {
         projected: CanonicalEntityTx,
         command: Box<SignedEntityCommandV1>,
     },
+    Projected(CanonicalEntityTx),
+}
+
+impl EntityPendingWork {
+    pub(super) fn scheduled_wake(&self) -> Option<&CanonicalValue> {
+        match self {
+            Self::Projected(tx) if tx.kind == EntityTxKind::ScheduledWake => Some(&tx.wire_data),
+            _ => None,
+        }
+    }
 }
 
 /// One canonical Entity FIFO item.
@@ -55,9 +72,7 @@ pub struct RuntimeEntityInput {
     /// Exact already-validated Entity-frame projection. In particular an
     /// AccountInput contains `canonicalAccountInputCommitment`, never the raw
     /// nested Account frame body. Admission computes this once.
-    canonical_entity_txs: Vec<CanonicalEntityTx>,
-    account_inputs: Vec<AccountInputRow>,
-    execution_steps: Vec<EntityExecutionStep>,
+    pending_work: Vec<EntityPendingWork>,
     /// Exact width measured once by the strict tagged-storage admission codec.
     canonical_wire_bytes: usize,
 }
@@ -111,9 +126,7 @@ impl RuntimeEntityInput {
                 .ok_or(RuntimeMachineError::EntityInputTxsArrayRequired)?,
             None => &[],
         };
-        let mut canonical_entity_txs = Vec::with_capacity(txs.len());
-        let mut account_inputs = Vec::new();
-        let mut execution_steps = Vec::new();
+        let mut pending_work = Vec::with_capacity(txs.len());
         let mut local_projected = Vec::new();
         let mut local_native = Vec::new();
         let mut local_phase_started = false;
@@ -125,22 +138,24 @@ impl RuntimeEntityInput {
                 }
                 let operation_index =
                     u64::try_from(index).map_err(|_| RuntimeMachineError::InputCountOverflow)?;
-                account_inputs.push(crate::decode_entity_account_input_row(
-                    entity_id_text,
-                    operation_index,
-                    tx,
-                )?);
-                canonical_entity_txs.push(projection);
+                pending_work.push(EntityPendingWork::Account {
+                    row: crate::decode_entity_account_input_row(
+                        entity_id_text,
+                        operation_index,
+                        tx,
+                    )?,
+                    projected: projection,
+                });
             } else {
                 local_phase_started = true;
                 if projection.kind == xln_rscore_entity_kernel::EntityTxKind::EntityCommand {
                     if !local_projected.is_empty() {
-                        execution_steps.push(EntityExecutionStep::LocalBatch {
+                        pending_work.push(EntityPendingWork::LocalBatch {
                             projected: std::mem::take(&mut local_projected),
                             native: std::mem::take(&mut local_native),
                         });
                     }
-                    execution_steps.push(EntityExecutionStep::Command {
+                    pending_work.push(EntityPendingWork::Command {
                         command: Box::new(
                             decode_signed_entity_command(&projection.data)
                                 .map_err(RuntimeMachineError::EntityCommand)?,
@@ -161,7 +176,7 @@ impl RuntimeEntityInput {
             }
         }
         if !local_projected.is_empty() {
-            execution_steps.push(EntityExecutionStep::LocalBatch {
+            pending_work.push(EntityPendingWork::LocalBatch {
                 projected: local_projected,
                 native: local_native,
             });
@@ -176,9 +191,7 @@ impl RuntimeEntityInput {
             entity_id,
             signer_id,
             canonical,
-            canonical_entity_txs,
-            account_inputs,
-            execution_steps,
+            pending_work,
             canonical_wire_bytes,
         })
     }
@@ -200,30 +213,27 @@ impl RuntimeEntityInput {
     }
 
     pub fn account_input_count(&self) -> usize {
-        self.account_inputs.len()
+        self.pending_work
+            .iter()
+            .filter(|work| matches!(work, EntityPendingWork::Account { .. }))
+            .count()
     }
 
     /// Exact already-validated Entity-frame tx projections, in wire order.
     /// Used by the entity-height durability barrier to detect a
     /// `scheduledWake` tx.
-    pub(super) fn canonical_entity_txs(&self) -> &[CanonicalEntityTx] {
-        &self.canonical_entity_txs
+    pub(super) fn has_entity_txs(&self) -> bool {
+        !self.pending_work.is_empty()
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        Value,
-        Vec<CanonicalEntityTx>,
-        Vec<AccountInputRow>,
-        Vec<EntityExecutionStep>,
-    ) {
-        (
-            self.canonical,
-            self.canonical_entity_txs,
-            self.account_inputs,
-            self.execution_steps,
-        )
+    pub(super) fn scheduled_wake(&self) -> Option<&CanonicalValue> {
+        self.pending_work
+            .iter()
+            .find_map(EntityPendingWork::scheduled_wake)
+    }
+
+    pub(super) fn into_parts(self) -> (Value, Vec<EntityPendingWork>) {
+        (self.canonical, self.pending_work)
     }
 
     /// Entity-frame projections without the full decode path, for barrier
@@ -237,9 +247,10 @@ impl RuntimeEntityInput {
             entity_id: super::tests::owner_bytes(),
             signer_id: super::tests::SIGNER.to_string(),
             canonical,
-            canonical_entity_txs,
-            account_inputs: Vec::new(),
-            execution_steps: Vec::new(),
+            pending_work: canonical_entity_txs
+                .into_iter()
+                .map(EntityPendingWork::Projected)
+                .collect(),
             canonical_wire_bytes: 1,
         }
     }
@@ -250,9 +261,7 @@ impl RuntimeEntityInput {
             entity_id: super::tests::owner_bytes(),
             signer_id: super::tests::SIGNER.to_string(),
             canonical,
-            canonical_entity_txs: Vec::new(),
-            account_inputs: Vec::new(),
-            execution_steps: Vec::new(),
+            pending_work: Vec::new(),
             canonical_wire_bytes,
         }
     }
@@ -266,9 +275,14 @@ impl RuntimeEntityInput {
             entity_id: super::tests::owner_bytes(),
             signer_id: super::tests::SIGNER.to_string(),
             canonical,
-            canonical_entity_txs: Vec::new(),
-            account_inputs: vec![account_input],
-            execution_steps: Vec::new(),
+            pending_work: vec![EntityPendingWork::Account {
+                projected: CanonicalEntityTx::from_frame_projection(
+                    EntityTxKind::AccountInput,
+                    CanonicalValue::Null,
+                )
+                .expect("fixture Account projection"),
+                row: account_input,
+            }],
             canonical_wire_bytes: 1,
         }
     }
@@ -492,7 +506,7 @@ impl RuntimeLimits {
             max_entity_inputs_per_frame: 0,
             max_account_inputs_per_frame: 0,
             max_entity_wire_bytes_per_frame: 10_000_000,
-            checkpoint_period_frames: 100,
+            checkpoint_period_frames: 1_000,
             canonical_hash_period_frames: 0,
         }
     }
@@ -537,6 +551,10 @@ pub struct RuntimeReplica {
     /// checkpoint-bearing frame is reproduced.
     pub(crate) last_materialized_height: u64,
     pub mempool: RuntimeMempool,
+    /// Admitted Entity work deferred only by the canonical Entity-frame byte
+    /// budget. The admitting RuntimeInputs live in WAL; replay rebuilds this
+    /// RAM-only FIFO, so it is never rooted or checkpointed.
+    pub(crate) entity_mempool: VecDeque<EntityPendingWork>,
     pub scheduled_wakes: super::ScheduledWakeIndex,
     pub limits: RuntimeLimits,
 }
@@ -614,6 +632,7 @@ impl RuntimeReplica {
             certified_board_registry: crate::CertifiedBoardRegistry::empty(),
             last_materialized_height,
             mempool: RuntimeMempool::empty(),
+            entity_mempool: VecDeque::new(),
             scheduled_wakes,
             limits,
         })
@@ -651,6 +670,11 @@ pub struct AppliedRuntimeInput {
     pub entity_inputs: usize,
     pub account_inputs: usize,
     pub canonical_wire_bytes: usize,
+    /// RAM-only fitter diagnostics. They are never encoded into Runtime state
+    /// or WAL metadata; the complete accepted Runtime input remains the WAL
+    /// authority while the tail is reconstructed by replay.
+    pub entity_txs_selected: usize,
+    pub entity_txs_pending: usize,
     pub wake: Option<RuntimeWake>,
 }
 
@@ -670,6 +694,7 @@ pub struct AppliedRuntimeFrame {
 /// an external effect and never a RuntimeTx.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeWake {
+    pub entity_mempool: bool,
     pub account_mempool: bool,
     pub scheduled: Option<ScheduledWake>,
 }

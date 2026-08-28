@@ -8,13 +8,16 @@
 pub(in crate::transport) mod envelope;
 mod frame;
 mod listener;
+mod reactor;
 mod reply;
 mod session;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{
+    Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError, sync_channel,
+};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -23,7 +26,7 @@ pub use envelope::InboundEntityInputs;
 pub use reply::InboundSessionTable;
 
 use super::RuntimeTransportError;
-use super::crypto::{EncryptionIdentity, derive_local_runtime_id, encryption_identity};
+use super::crypto::{EncryptionIdentity, encryption_identity};
 
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -50,7 +53,7 @@ impl DirectRuntimeIngressConfig {
             io_timeout: Duration::from_secs(30),
             hello_skew: Duration::from_secs(30),
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
-            queue_capacity: 256,
+            queue_capacity: 4_096,
             runtime_seed: runtime_seed.into(),
             runtime_signer_label: runtime_signer_label.into(),
         }
@@ -83,8 +86,7 @@ struct ValidatedIngressConfig {
     io_timeout: Duration,
     hello_skew: Duration,
     max_message_bytes: usize,
-    runtime_seed: String,
-    runtime_signer_label: String,
+    runtime_signer_key: [u8; 32],
     runtime_id: String,
     encryption_identity: EncryptionIdentity,
 }
@@ -120,8 +122,14 @@ impl DirectRuntimeIngress {
         let local_address = listener
             .local_addr()
             .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
-        let runtime_id =
-            derive_local_runtime_id(&config.runtime_seed, &config.runtime_signer_label)?;
+        let runtime_signer_key = xln_rscore_crypto::derive_signer_key(
+            &config.runtime_seed,
+            &config.runtime_signer_label,
+        )
+        .map_err(|_| RuntimeTransportError::Crypto("signer-key"))?;
+        let runtime_address = xln_rscore_crypto::address_of_private_key(&runtime_signer_key)
+            .ok_or(RuntimeTransportError::Crypto("runtime-id"))?;
+        let runtime_id = format!("0x{}", super::crypto::hex_lower(&runtime_address));
         let (sender, receiver) = sync_channel(config.queue_capacity);
         let shared = Arc::new(SharedIngress {
             config: ValidatedIngressConfig {
@@ -130,8 +138,7 @@ impl DirectRuntimeIngress {
                 hello_skew: config.hello_skew,
                 max_message_bytes: config.max_message_bytes,
                 encryption_identity: encryption_identity(&config.runtime_seed),
-                runtime_seed: config.runtime_seed,
-                runtime_signer_label: config.runtime_signer_label,
+                runtime_signer_key,
                 runtime_id: runtime_id.clone(),
             },
             sender,
@@ -185,6 +192,20 @@ impl DirectRuntimeIngress {
                 Ok(None)
             }
             Err(RecvTimeoutError::Disconnected) => Err(RuntimeTransportError::Inbound(
+                "writer-channel-disconnected".into(),
+            )),
+        }
+    }
+
+    /// Drain one already-authenticated batch without waiting. The live
+    /// single-writer uses this to coalesce the bounded channel FIFO into one
+    /// Runtime frame instead of paying one WAL fsync per socket message.
+    pub fn try_recv(&self) -> Result<Option<InboundEntityInputs>, RuntimeTransportError> {
+        self.check_fatal()?;
+        match self.receiver.try_recv() {
+            Ok(value) => Ok(Some(value)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(RuntimeTransportError::Inbound(
                 "writer-channel-disconnected".into(),
             )),
         }
@@ -293,6 +314,7 @@ fn enqueue(
 }
 
 fn session_failed(shared: &SharedIngress, error: &RuntimeTransportError) {
+    eprintln!("RRS_DIRECT_SESSION_FAILED:{error}");
     shared
         .counters
         .rejected_sessions

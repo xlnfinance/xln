@@ -1,11 +1,7 @@
 use std::net::TcpStream;
-use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
 
-use mio::unix::SourceFd;
-use mio::{Events, Interest, Poll, Token, Waker};
 use serde_json::Value;
 use tungstenite::WebSocket;
 use tungstenite::handshake::server::{Callback, ErrorResponse, Request, Response};
@@ -14,14 +10,14 @@ use tungstenite::protocol::WebSocketConfig;
 use super::super::RuntimeTransportError;
 use super::super::crypto::{
     SessionKeys, derive_session_keys, ephemeral_identity, ephemeral_public_hex, frame_digest,
-    hello_digest, hex_lower, parse_public_hex, sign, static_public_hex, verify_peer_signature,
+    hello_digest, hex_lower, parse_public_hex, sign_with_key, static_public_hex,
+    verify_peer_signature,
 };
-use super::super::entity_inputs_frame::{SessionCounters, SessionFrameContext, send_entity_inputs};
-use super::super::wire::{object, read_value, send_value, try_read_value, unix_ms};
-use super::reply::OutboundWork;
-use super::{SharedIngress, enqueue, session_failed};
+use super::super::entity_inputs_frame::SessionCounters;
+use super::super::wire::{object, read_value, send_value, unix_ms};
+use super::SharedIngress;
 
-struct PeerGuard {
+pub(super) struct PeerGuard {
     peer: String,
     shared: Arc<SharedIngress>,
 }
@@ -48,17 +44,22 @@ impl Drop for PeerGuard {
     }
 }
 
-pub(super) fn run(stream: TcpStream, serial: u64, shared: Arc<SharedIngress>) {
-    let result = run_inner(stream, Arc::clone(&shared));
-    super::listener::remove_socket(&shared, serial);
-    if let Err(error) = result
-        && !shared.stop.load(Ordering::Acquire)
-    {
-        session_failed(&shared, &error);
-    }
+pub(super) struct AcceptedSession {
+    pub serial: u64,
+    pub socket: WebSocket<TcpStream>,
+    pub accepted: AcceptedHello,
+    pub keys: SessionKeys,
+    pub audience: String,
+    pub challenge: String,
+    pub outbound: SessionCounters,
+    pub peer_guard: PeerGuard,
 }
 
-fn run_inner(stream: TcpStream, shared: Arc<SharedIngress>) -> Result<(), RuntimeTransportError> {
+pub(super) fn accept(
+    stream: TcpStream,
+    serial: u64,
+    shared: Arc<SharedIngress>,
+) -> Result<AcceptedSession, RuntimeTransportError> {
     stream
         .set_nodelay(true)
         .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
@@ -89,7 +90,7 @@ fn run_inner(stream: TcpStream, shared: Arc<SharedIngress>) -> Result<(), Runtim
     )?;
     let hello = read_value(&mut socket)?;
     let accepted = accept_hello(&shared, &hello, &challenge, &audience)?;
-    let _peer_guard = register_peer(&shared, &accepted.peer_runtime_id)?;
+    let peer_guard = register_peer(&shared, &accepted.peer_runtime_id)?;
 
     let server_ephemeral = ephemeral_identity()?;
     let session_public = ephemeral_public_hex(&server_ephemeral);
@@ -115,9 +116,8 @@ fn run_inner(stream: TcpStream, shared: Arc<SharedIngress>) -> Result<(), Runtim
     // rejects it as session replay (lastInboundAuthTimestamp already 1).
     let mut outbound = SessionCounters::default();
     let auth_timestamp = outbound.consume_hello_ack_auth()?;
-    let signature = sign(
-        &shared.config.runtime_seed,
-        &shared.config.runtime_signer_label,
+    let signature = sign_with_key(
+        &shared.config.runtime_signer_key,
         &frame_digest(&unsigned_ack, &audience, &challenge, auth_timestamp)?,
     )?;
     let mut acknowledgement = unsigned_ack
@@ -144,119 +144,24 @@ fn run_inner(stream: TcpStream, shared: Arc<SharedIngress>) -> Result<(), Runtim
         .get_mut()
         .set_read_timeout(None)
         .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
+    socket
+        .get_mut()
+        .set_nonblocking(true)
+        .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
     shared
         .counters
         .authenticated_sessions
         .fetch_add(1, Ordering::Relaxed);
-    serve_authenticated(
-        &mut socket,
-        &shared,
-        &accepted,
-        &keys,
-        &audience,
-        &challenge,
+    Ok(AcceptedSession {
+        serial,
+        socket,
+        accepted,
+        keys,
+        audience,
+        challenge,
         outbound,
-    )
-}
-
-fn serve_authenticated(
-    socket: &mut WebSocket<TcpStream>,
-    shared: &Arc<SharedIngress>,
-    accepted: &AcceptedHello,
-    keys: &SessionKeys,
-    audience: &str,
-    challenge: &str,
-    mut outbound: SessionCounters,
-) -> Result<(), RuntimeTransportError> {
-    socket
-        .get_ref()
-        .set_nonblocking(true)
-        .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
-    let mut poll =
-        Poll::new().map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
-    let waker = Arc::new(
-        Waker::new(poll.registry(), Token(0))
-            .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?,
-    );
-    let raw_fd = socket.get_ref().as_raw_fd();
-    poll.registry()
-        .register(&mut SourceFd(&raw_fd), Token(1), Interest::READABLE)
-        .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
-    let (work_tx, work_rx) = sync_channel(1);
-    let _reply = shared
-        .replies
-        .register(&accepted.peer_runtime_id, work_tx, Arc::clone(&waker))?;
-    let mut inbound_state = super::frame::FrameState::default();
-    let encryption_public_hex = static_public_hex(&shared.config.encryption_identity);
-    let mut events = Events::with_capacity(4);
-    while !shared.stop.load(Ordering::Acquire) {
-        poll.poll(&mut events, None)
-            .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
-        if shared.stop.load(Ordering::Acquire) {
-            break;
-        }
-        drain_outbound(
-            socket,
-            &work_rx,
-            &mut SessionFrameContext {
-                key: &keys.s2c,
-                from: &shared.config.runtime_id,
-                to: &accepted.peer_runtime_id,
-                encryption_public_hex: &encryption_public_hex,
-                audience,
-                challenge,
-                counters: &mut outbound,
-            },
-            shared.config.max_message_bytes,
-        )?;
-        while let Some(message) = try_read_value(socket)? {
-            let batch = super::frame::decode(
-                message,
-                accepted,
-                keys,
-                audience,
-                challenge,
-                &shared.config.runtime_id,
-                &mut inbound_state,
-            )?;
-            enqueue(shared, batch)?;
-        }
-    }
-    let _ = poll.registry().deregister(&mut SourceFd(&raw_fd));
-    Ok(())
-}
-
-fn drain_outbound(
-    socket: &mut WebSocket<TcpStream>,
-    work_rx: &Receiver<OutboundWork>,
-    frame: &mut SessionFrameContext<'_>,
-    max_message_bytes: usize,
-) -> Result<(), RuntimeTransportError> {
-    loop {
-        match work_rx.try_recv() {
-            Ok(work) => {
-                let result = send_entity_inputs(socket, &work.envelope, frame, max_message_bytes);
-                if result.is_ok()
-                    && frame.counters.encryption_sequence == 1
-                    && frame.counters.auth_timestamp != 2
-                {
-                    return Err(RuntimeTransportError::Inbound(
-                        "entity-inputs-hello-ack-auth-not-consumed".into(),
-                    ));
-                }
-                let reported = match &result {
-                    Ok(()) => Ok(()),
-                    Err(error) => Err(RuntimeTransportError::Inbound(error.to_string())),
-                };
-                let _ = work.done.send(reported);
-                result?;
-            }
-            Err(TryRecvError::Empty) => return Ok(()),
-            Err(TryRecvError::Disconnected) => {
-                return Err(RuntimeTransportError::Inbound("session-closed".into()));
-            }
-        }
-    }
+        peer_guard,
+    })
 }
 
 pub(super) struct AcceptedHello {

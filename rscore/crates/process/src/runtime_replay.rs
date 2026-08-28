@@ -39,6 +39,9 @@ use expectations::ReplayExpectations;
 pub struct RuntimeReplayMetrics {
     pub frames: u64,
     pub ingress: u64,
+    /// Submitted directPayment txs decoded from the WAL. Fixture cardinality
+    /// for replay diagnostics, never a delivery or throughput claim.
+    pub direct_payments: u64,
     pub egress: u64,
     pub elapsed: Duration,
     pub setup_elapsed: Duration,
@@ -55,6 +58,38 @@ pub struct RuntimeReplayMetrics {
     /// Resident Account sharding observability per phase kind. Timing-only:
     /// serialized once after replay and never part of committed state.
     pub account_phase_metrics: Vec<xln_rscore_batch::AccountPhaseMetric>,
+}
+
+/// Submitted directPayment txs in one decoded input. Counted from the
+/// canonical input the decode already holds; fixture cardinality only.
+fn direct_payment_count(input: &xln_rscore_runtime::RuntimeInput) -> Result<u64, String> {
+    input
+        .entity_inputs
+        .iter()
+        .try_fold(0_u64, |total, entity_input| {
+            let txs = entity_input
+                .canonical()
+                .as_object()
+                .and_then(|value| value.get("entityTxs"))
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let payments = txs
+                .iter()
+                .filter(|tx| {
+                    tx.as_object()
+                        .and_then(|value| value.get("type"))
+                        .and_then(Value::as_str)
+                        == Some("directPayment")
+                })
+                .count();
+            total
+                .checked_add(
+                    u64::try_from(payments)
+                        .map_err(|_| "RUNTIME_REPLAY_PAYMENT_COUNT_OVERFLOW".to_string())?,
+                )
+                .ok_or_else(|| "RUNTIME_REPLAY_PAYMENT_COUNT_OVERFLOW".to_string())
+        })
 }
 
 fn object<'a>(value: &'a Value, path: &str) -> Result<&'a Map<String, Value>, String> {
@@ -109,7 +144,7 @@ fn routes_from_wal(
         let source = reader
             .concrete_wal_source(height)
             .map_err(|error| format!("RUNTIME_REPLAY_SOURCE:{height}:{error}"))?;
-        for (index, bytes) in source.outputs.iter().enumerate() {
+        for (index, bytes) in source.outputs().iter().enumerate() {
             let value = decode_storage_payload(bytes)
                 .map_err(|error| format!("RUNTIME_REPLAY_ROUTE_ROW:{height}:{index}:{error}"))?;
             let value = object(&value, "outboxRow")?;
@@ -153,12 +188,11 @@ fn assert_source_commitments(
     source: &xln_rscore_runtime::restore::ConcreteWalSource,
     actual: &RuntimeDurableCommitments,
 ) -> Result<(), String> {
-    let expected = validate_runtime_frame(&source.frame_bytes)
-        .map_err(|error| format!("RUNTIME_REPLAY_FRAME:{height}:{error}"))?;
+    let expected = source.validated();
     if expected.height != height
         || actual.height != height
         || expected.frame_hash != actual.runtime_frame_hash
-        || expected.output_count != source.outputs.len()
+        || expected.output_count != source.outputs().len()
         || u64::try_from(expected.output_count).ok() != Some(actual.runtime_output_count)
         || expected.output_digest != actual.runtime_outputs_digest
     {
@@ -268,11 +302,7 @@ pub fn replay_runtime_wal(
             reader
                 .concrete_wal_source(checkpoint_height)
                 .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT:{error}"))
-                .and_then(|source| {
-                    validate_runtime_frame(&source.frame_bytes)
-                        .map(|frame| frame.frame_hash)
-                        .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT_FRAME:{error}"))
-                })
+                .map(|source| source.validated().frame_hash)
         })
         .transpose()?;
 
@@ -349,6 +379,7 @@ pub fn replay_runtime_wal(
     let mut metrics = RuntimeReplayMetrics {
         frames: 0,
         ingress: 0,
+        direct_payments: 0,
         egress: 0,
         elapsed: Duration::ZERO,
         setup_elapsed: setup_started.elapsed(),
@@ -377,8 +408,8 @@ pub fn replay_runtime_wal(
             .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
             .state
             .finalized_j_height;
-        // The decode below runs verify_wal_source itself; a separate verify
-        // here only re-parsed the same frame to read one timestamp field.
+        // ConcreteWalSource owns the one canonical parse/validation for this
+        // read; decode and post-apply assertions borrow that sealed result.
         let mut decoded =
             decode_concrete_runtime_wal_frame(&source, &context_policy, finalized_j_height, false)
                 .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))?;
@@ -397,6 +428,11 @@ pub fn replay_runtime_wal(
             add(&mut metrics.runtime_roots_compared, 1, "runtimeRoots")?;
         }
         let input = &mut decoded.input;
+        add(
+            &mut metrics.direct_payments,
+            direct_payment_count(input)?,
+            "directPayments",
+        )?;
         let ingress = input.entity_inputs.iter().try_fold(0_u64, |total, input| {
             let count = u64::try_from(input.account_input_count())
                 .map_err(|_| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())?;

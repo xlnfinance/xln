@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::restore::{
     ConcreteCheckpointSource, ConcreteRestoreSourceError, ConcreteWalSource, VerifiedEntityContext,
-    context_refs, verify_checkpoint_source, verify_wal_source,
+    VerifiedWalFrame, verify_checkpoint_source,
 };
 use crate::storage::native::{
     CheckpointGraph, EntityContextPayloadRow, EntityContextPayloadRows, NativeStorageError,
@@ -348,13 +348,13 @@ impl RuntimeWalReader {
         // Reading both families from either database would accept a layout
         // that production never writes and makes a real checkpoint impossible
         // to import.  Join them only after each side has been decoded exactly.
-        let keys = state_reader.checkpoint_state_keys()?;
+        let rows = state_reader.checkpoint_state_rows()?;
         let mut state_rows = BTreeMap::new();
-        for key in keys {
+        for (key, owner) in rows {
             let value = if dedicated_field_row(&key) {
-                state_reader.required_raw(&key)?
+                owner
             } else {
-                state_reader.required_bounded_bytes(&key)?
+                state_reader.bounded_bytes_from_owner(&key, owner)?
             };
             state_rows.insert(key, value);
         }
@@ -380,19 +380,8 @@ impl RuntimeWalReader {
         height: u64,
     ) -> Result<ConcreteWalSource, RuntimeLevelDbError> {
         let frame_bytes = self.required_bounded_bytes(&frame_key(height))?;
-        let validated =
-            validate_runtime_frame(&frame_bytes).map_err(NativeStorageError::FrameCodec)?;
-        if validated.height != height {
-            return Err(RuntimeLevelDbError::Output(format!(
-                "WAL_FRAME_HEIGHT:expected={height}:actual={}",
-                validated.height,
-            )));
-        }
-        let frame = decode_storage_payload(&frame_bytes)?;
-        let frame = frame
-            .as_object()
-            .ok_or_else(|| RuntimeLevelDbError::Output("WAL_FRAME_OBJECT".into()))?;
-        let expected_contexts = context_refs(frame)?;
+        let verified = VerifiedWalFrame::new(height, frame_bytes)?;
+        let expected_contexts = verified.context_refs().clone();
 
         let stored_contexts = self.native_entity_context_rows(height)?;
         let stored_refs = stored_contexts
@@ -415,17 +404,12 @@ impl RuntimeWalReader {
         }
         let outputs = self.runtime_output_bytes(
             height,
-            validated.output_count,
-            &format!("0x{}", hex(&validated.output_digest)),
+            verified.validated().output_count,
+            &format!("0x{}", hex(&verified.validated().output_digest)),
         )?;
-        let source = ConcreteWalSource {
-            height,
-            frame_bytes,
-            entity_contexts,
-            outputs,
-        };
-        verify_wal_source(&source)?;
-        Ok(source)
+        verified
+            .into_source(entity_contexts, outputs)
+            .map_err(Into::into)
     }
 
     /// Read one complete canonical TypeScript checkpoint into the exact native
@@ -528,15 +512,15 @@ impl RuntimeWalReader {
         Ok(rows)
     }
 
-    fn checkpoint_state_keys(&mut self) -> Result<Vec<Vec<u8>>, RuntimeLevelDbError> {
+    fn checkpoint_state_rows(&mut self) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {
         let mut iterator = self
             .database
             .new_iter()
             .map_err(|error| RuntimeLevelDbError::Iterator(error.to_string()))?;
         iterator.seek(&[0x17]);
-        let mut keys = Vec::new();
+        let mut rows = Vec::new();
         let mut owners = std::collections::BTreeSet::new();
-        while let Some((key, _)) = iterator.current() {
+        while let Some((key, value)) = iterator.current() {
             let Some(tag) = key.first().copied() else {
                 return Err(RuntimeLevelDbError::Output(
                     "CHECKPOINT_STATE_KEY_EMPTY".into(),
@@ -552,7 +536,7 @@ impl RuntimeWalReader {
                     .and_then(|value| <[u8; 32]>::try_from(value).ok())
                     .ok_or_else(|| RuntimeLevelDbError::Output("CHECKPOINT_STATE_OWNER".into()))?;
                 owners.insert(owner);
-                keys.push(key.to_vec());
+                rows.push((key.to_vec(), value.to_vec()));
             } else if !checkpoint_non_state_tag(tag) {
                 return Err(RuntimeLevelDbError::Output(format!(
                     "CHECKPOINT_STATE_TAG_NONCANONICAL:{tag:#04x}",
@@ -568,7 +552,7 @@ impl RuntimeWalReader {
                 owners.len(),
             )));
         }
-        Ok(keys)
+        Ok(rows)
     }
 
     fn required_decoded(&mut self, key: &[u8]) -> Result<Value, RuntimeLevelDbError> {
@@ -578,6 +562,14 @@ impl RuntimeWalReader {
 
     fn required_bounded_bytes(&mut self, key: &[u8]) -> Result<Vec<u8>, RuntimeLevelDbError> {
         let owner = self.required_raw(key)?;
+        self.bounded_bytes_from_owner(key, owner)
+    }
+
+    fn bounded_bytes_from_owner(
+        &mut self,
+        key: &[u8],
+        owner: Vec<u8>,
+    ) -> Result<Vec<u8>, RuntimeLevelDbError> {
         let decoded = decode_storage_payload(&owner)?;
         let Some(manifest) = bounded_manifest(&decoded)? else {
             return Ok(owner);
@@ -1226,9 +1218,9 @@ mod tests {
     fn concrete_wal_source_preserves_exact_frame_context_and_outbox() {
         let (mut reader, path) = wal_reader(WalCorruption::None);
         let source = reader.concrete_wal_source(7).expect("exact WAL source");
-        assert_eq!(source.height, 7);
-        assert_eq!(source.entity_contexts.len(), 1);
-        assert_eq!(source.outputs.len(), 1);
+        assert_eq!(source.height(), 7);
+        assert_eq!(source.entity_contexts().len(), 1);
+        assert_eq!(source.outputs().len(), 1);
         drop(reader);
         std::fs::remove_dir_all(path).expect("clean fixture");
     }

@@ -22,11 +22,14 @@ pub use entity_context::{
     EntityContextPayloadRow, EntityContextPayloadRows,
 };
 pub(crate) use entity_context::{entity_context_height_prefix, parse_entity_context_payload_key};
+pub(crate) use frame::decode_and_validate_runtime_frame;
 pub use frame::{
     AccountAuthorityCheckpointRef, CanonicalRuntimeFrameDraft, CanonicalStateCommitment,
     EncodedRuntimeFrame, RuntimeFrameCodecError, RuntimeFrameEntityHash, RuntimeMachineGraphRoot,
     TouchedAccount, ValidatedRuntimeFrame, build_runtime_frame_commit, validate_runtime_frame,
 };
+#[cfg(test)]
+pub(crate) use frame::{reset_runtime_frame_validation_count, runtime_frame_validation_count};
 pub use keys::PathNodeKey;
 pub(crate) use keys::valid_path_key;
 pub use store::NativeRuntimeStore;

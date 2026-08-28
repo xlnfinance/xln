@@ -11,7 +11,7 @@ use crate::storage::native::{
 
 use super::{
     ConcreteCheckpointSource, ConcreteRestoreSourceError, ConcreteWalSource, VerifiedEntityContext,
-    verify_checkpoint_source, verify_wal_source,
+    verify_checkpoint_source,
 };
 
 pub struct NativeConcreteRestoreSources {
@@ -111,12 +111,11 @@ fn wal_source(frame: RecoveredWalFrame) -> Result<ConcreteWalSource, NativeResto
             ))
         })
         .collect::<Result<BTreeMap<_, _>, NativeRestoreSourceError>>()?;
-    let source = ConcreteWalSource {
-        height: frame.height,
-        frame_bytes: frame.frame_bytes,
+    ConcreteWalSource::new(
+        frame.height,
+        frame.frame_bytes,
         entity_contexts,
-        outputs: frame.outputs,
-    };
-    verify_wal_source(&source)?;
-    Ok(source)
+        frame.outputs,
+    )
+    .map_err(Into::into)
 }

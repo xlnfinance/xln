@@ -7,6 +7,8 @@
 //! WAL fsync and publication.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use thiserror::Error;
 use xln_rscore_protocol::CanonicalValue;
@@ -31,6 +33,11 @@ use super::single_signer::{
     EntityCertificationError, EntitySingleSigner, PresignedManifest,
     certify_single_signer_entity_frame,
 };
+
+fn profile_entity_certification() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
+}
 
 /// Entity consensus fields whose values are derived by the native Entity and
 /// Account machines. Import, live execution and checkpoint projection must
@@ -290,6 +297,9 @@ pub struct CertifiedEntityTransition {
     pub state_root: String,
     pub authority_root: String,
     pub local_outputs: Vec<LocalEntityOutput>,
+    /// Exact manifest witnesses, returned so Runtime can persist local
+    /// Account resend evidence only after Entity certification succeeds.
+    pub manifest_hankos: EntityHankoWitnessMap,
 }
 
 #[derive(Debug, Error)]
@@ -452,6 +462,7 @@ pub fn certify_entity_transition(
     mut consensus: ResidentEntityConsensusReplica,
     request: EntityTransitionCertificationRequest<'_>,
 ) -> Result<CertifiedEntityTransition, EntityTransitionError> {
+    let total_started = Instant::now();
     let expected = expected_height(&consensus)?;
     if request.post_state.height != expected {
         return Err(EntityTransitionError::Height {
@@ -500,6 +511,7 @@ pub fn certify_entity_transition(
         request.accounts_root,
         request.account_count,
     )?;
+    let owned_done = total_started.elapsed();
     let sections = project_entity_consensus_sections(
         &consensus.state.sections,
         owned,
@@ -507,6 +519,7 @@ pub fn certify_entity_transition(
     )?;
     let state_root = compute_entity_consensus_root(&sections)?;
     let authority_root = request.post_authority.root()?;
+    let roots_done = total_started.elapsed();
     let parent_hash = lineage_parent_hash(&consensus);
     let j_prefix_certificate = j_prefix::build_required_j_prefix_certificate(
         signer,
@@ -516,6 +529,7 @@ pub fn certify_entity_transition(
         parent_hash,
         request.j_prefix_pending_local_event,
     )?;
+    let j_prefix_done = total_started.elapsed();
     let body = EntityFrameBody {
         parent_frame_hash: parent_hash,
         height: request.post_state.height,
@@ -535,6 +549,7 @@ pub fn certify_entity_transition(
         request.secondary_hashes,
         request.presigned_manifest,
     )?;
+    let frame_done = total_started.elapsed();
     if certified.frame.hashes_to_sign.len() != certified.manifest_hankos.len() {
         return Err(EntityTransitionError::OutputLayout);
     }
@@ -577,26 +592,41 @@ pub fn certify_entity_transition(
         .into_iter()
         .collect::<Option<Vec<_>>>()
         .ok_or(EntityTransitionError::OutputLayout)?;
-    let certified_frame_hash = certified.frame.hash.clone();
-    let link = build_certified_entity_frame_link(
-        &request.post_state.entity_id,
-        request.post_state.height,
-        &certified_frame_hash,
-        &state_root,
-        certified.frame,
-        request.post_authority.clone(),
-    )?;
+    let outputs_done = total_started.elapsed();
+    // `certify_single_signer_entity_frame` just built and proof-checked this
+    // frame from the exact post-state roots above. Recomputing its full hash
+    // here encoded every Entity tx and the HTLC context a second time. Keep
+    // `build_certified_entity_frame_link` for untrusted/restored frames; this
+    // internal path already owns the validated constructor output.
+    let link = CertifiedEntityFrameLink {
+        frame: certified.frame,
+        post_authority: request.post_authority.clone(),
+    };
     consensus
         .htlc_notes
         .index_certified_frame(&link.frame.txs, &link.frame.entity_context)?;
     consensus.state.sections = sections;
     consensus.state.authority = request.post_authority;
     consensus.certified_frame_head = Some(link);
+    if profile_entity_certification() {
+        let total = total_started.elapsed();
+        eprintln!(
+            "RSCORE_ENTITY_CERT_PHASE owned={} roots={} jPrefix={} frame={} outputs={} lineage={} total={}",
+            owned_done.as_micros(),
+            roots_done.saturating_sub(owned_done).as_micros(),
+            j_prefix_done.saturating_sub(roots_done).as_micros(),
+            frame_done.saturating_sub(j_prefix_done).as_micros(),
+            outputs_done.saturating_sub(frame_done).as_micros(),
+            total.saturating_sub(outputs_done).as_micros(),
+            total.as_micros(),
+        );
+    }
     Ok(CertifiedEntityTransition {
         consensus,
         state_root,
         authority_root,
         local_outputs,
+        manifest_hankos,
     })
 }
 

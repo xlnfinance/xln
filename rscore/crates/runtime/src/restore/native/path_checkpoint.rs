@@ -220,9 +220,7 @@ fn tree_value(
 }
 
 fn account_nodes(
-    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
-    owner: &[u8; 32],
-    account: &[u8; 32],
+    rows: &[(&Vec<u8>, &Vec<u8>)],
     namespace: u8,
     j_claim_roots: Option<&[JClaimAccumulatorRef; 2]>,
 ) -> Result<Vec<Value>, PathCheckpointRestoreError> {
@@ -230,9 +228,9 @@ fn account_nodes(
     let mut leaf_keys = BTreeSet::new();
     let mut j_claim_rows = Vec::new();
     let mut radix_rows = Vec::new();
-    for (key, bytes) in owner_rows(rows, ACCOUNT_NODE_TAG, owner) {
-        if key.len() < 68 || key.get(33..65) != Some(account.as_slice()) || key[65] != namespace {
-            continue;
+    for &(key, bytes) in rows {
+        if key.len() < 68 || key[65] != namespace {
+            return Err(invalid("ACCOUNT_NODE_KEY"));
         }
         let kind = key[66];
         let payload = &key[67..];
@@ -427,6 +425,21 @@ pub fn restore_path_checkpoint(
         }
     }
     let meta = account_meta(rows, owner)?;
+    let mut nodes_by_account = BTreeMap::<([u8; 32], u8), Vec<(&Vec<u8>, &Vec<u8>)>>::new();
+    for (key, bytes) in owner_rows(rows, ACCOUNT_NODE_TAG, &owner) {
+        let account = key
+            .get(33..65)
+            .and_then(|value| <[u8; 32]>::try_from(value).ok())
+            .ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
+        let namespace = *key.get(65).ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
+        if !(1..=6).contains(&namespace) || key.len() < 68 {
+            return Err(invalid("ACCOUNT_NODE_KEY"));
+        }
+        nodes_by_account
+            .entry((account, namespace))
+            .or_default()
+            .push((key, bytes));
+    }
     let mut accounts = Vec::new();
     let mut seen = BTreeSet::new();
     for (key, bytes) in owner_rows(rows, ACCOUNT_ROW_TAG, &owner) {
@@ -452,10 +465,11 @@ pub fn restore_path_checkpoint(
         row.push(tagged_bytes(&account));
         row.extend([account_meta[0].clone(), account_meta[1].clone()]);
         for namespace in 1..=6 {
+            let node_rows = nodes_by_account
+                .remove(&(account, namespace))
+                .unwrap_or_default();
             row.push(Value::Array(account_nodes(
-                rows,
-                &owner,
-                &account,
+                &node_rows,
                 namespace,
                 (namespace == 6).then_some(&j_claim_roots),
             )?));
@@ -470,14 +484,8 @@ pub fn restore_path_checkpoint(
             accounts.len()
         )));
     }
-    for (key, _) in owner_rows(rows, ACCOUNT_NODE_TAG, &owner) {
-        let account = key
-            .get(33..65)
-            .and_then(|value| <[u8; 32]>::try_from(value).ok())
-            .ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
-        if !seen.contains(&account) {
-            return Err(invalid("ACCOUNT_NODE_ORPHAN"));
-        }
+    if !nodes_by_account.is_empty() {
+        return Err(invalid("ACCOUNT_NODE_ORPHAN"));
     }
     let checkpoint = StoredRscoreCheckpoint {
         owner_entity_id: owner,

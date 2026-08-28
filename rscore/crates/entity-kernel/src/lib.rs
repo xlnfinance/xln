@@ -41,16 +41,18 @@ pub use consensus::{
     CertifiedEntityTransition, ConsensusMode, ENTITY_OWNED_CONSENSUS_FIELDS, EntityAuthorityError,
     EntityCertificationError, EntityConsensusConfig, EntityConsensusError, EntityConsensusSection,
     EntityConsensusState, EntityEncodingError, EntityFrame, EntityFrameAuthority, EntityFrameBody,
-    EntityFrameError, EntityFrameEvent, EntityFrameLeader, EntityHankoWitness,
-    EntityHankoWitnessMap, EntityHtlcNoteIndex, EntityLeaderState, EntityLineageError,
-    EntityOutputError, EntitySingleSigner, EntityTransitionCertificationRequest,
-    EntityTransitionError, EntityTxCatalogError, EntityTxKind, EntityTxSupport, HashToSign,
-    HashType, LocalEntityOutput, LocalEntityOutputTx, PendingNonMutatingWake, PresignedManifest,
-    PresignedManifestEntry, ResidentEntityConsensusReplica, build_certified_entity_frame_link,
-    build_entity_hash_manifest, certify_entity_transition, certify_single_signer_entity_frame,
-    compute_entity_consensus_root, compute_entity_events_parity_digest, compute_entity_frame_hash,
-    compute_entity_section_digest, is_entity_owned_consensus_field,
-    project_entity_consensus_sections,
+    EntityFrameError, EntityFrameEvent, EntityFrameLeader, EntityFrameWireMeasure,
+    EntityFrameWireMeasureBody, EntityHankoWitness, EntityHankoWitnessMap, EntityHtlcNoteIndex,
+    EntityLeaderState, EntityLineageError, EntityOutputError, EntitySingleSigner,
+    EntityTransitionCertificationRequest, EntityTransitionError, EntityTxCatalogError,
+    EntityTxKind, EntityTxSupport, HashToSign, HashType, LocalEntityOutput, LocalEntityOutputTx,
+    MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
+    PendingNonMutatingWake, PresignedManifest, PresignedManifestEntry,
+    ResidentEntityConsensusReplica, build_certified_entity_frame_link, build_entity_hash_manifest,
+    build_required_j_prefix_certificate, certify_entity_transition,
+    certify_single_signer_entity_frame, compute_entity_consensus_root,
+    compute_entity_events_parity_digest, compute_entity_frame_hash, compute_entity_section_digest,
+    is_entity_owned_consensus_field, measure_entity_frame_wire, project_entity_consensus_sections,
 };
 pub use error::EntityKernelError;
 pub use j_events::{
@@ -61,8 +63,8 @@ pub use j_events::{
 };
 pub use kernel::apply_entity_kernel;
 pub use local_financial::{
-    DirectPaymentEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx, PlaceSwapOfferEntityTx,
-    ProposeCancelSwapEntityTx, decode_local_entity_financial_tx,
+    DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx,
+    PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx, decode_local_entity_financial_tx,
 };
 pub use orderbook::{
     BookOrder, BookPricePageEntrySnapshot, BookPricePageSnapshot, BookState, BookStateSnapshot,

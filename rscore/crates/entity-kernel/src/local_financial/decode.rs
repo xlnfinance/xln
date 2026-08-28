@@ -6,8 +6,8 @@ use xln_rscore_protocol::encode_canonical_consensus_bytes;
 use crate::{CanonicalEntityTx, EntityKernelError, EntityTxKind, OriginatedHtlcDeliveryMode};
 
 use super::types::{
-    DirectPaymentEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx, PlaceSwapOfferEntityTx,
-    ProposeCancelSwapEntityTx,
+    DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx,
+    PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx,
 };
 
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -268,6 +268,26 @@ fn htlc_payment(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Entity
     }))
 }
 
+fn extend_credit(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
+    const KIND: &str = "extendCredit";
+    let data = object(&tx.data, KIND)?;
+    exact_fields(
+        data,
+        &["counterpartyEntityId", "tokenId", "amount"],
+        &[],
+        KIND,
+    )?;
+    Ok(LocalEntityFinancialTx::ExtendCredit(ExtendCreditEntityTx {
+        counterparty_entity_id: entity_id(
+            field(data, "counterpartyEntityId", KIND)?,
+            KIND,
+            "COUNTERPARTY",
+        )?,
+        token_id: token(field(data, "tokenId", KIND)?, KIND)?,
+        amount: bigint(field(data, "amount", KIND)?, KIND, "AMOUNT")?,
+    }))
+}
+
 fn place_swap_offer(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
     const KIND: &str = "placeSwapOffer";
     let data = object(&tx.data, KIND)?;
@@ -347,6 +367,7 @@ pub fn decode_local_entity_financial_tx(
 ) -> Result<Option<LocalEntityFinancialTx>, EntityKernelError> {
     match tx.kind {
         EntityTxKind::DirectPayment => direct_payment(tx).map(Some),
+        EntityTxKind::ExtendCredit => extend_credit(tx).map(Some),
         EntityTxKind::HtlcPayment => htlc_payment(tx).map(Some),
         EntityTxKind::PlaceSwapOffer => place_swap_offer(tx).map(Some),
         EntityTxKind::ProposeCancelSwap => cancel_swap(tx).map(Some),

@@ -1,7 +1,8 @@
-//! Long-lived worker actors for resident Account shards.
+//! Long-lived executors for resident Account shards.
 //!
-//! A worker state is moved into its thread exactly once at startup. Calls send
-//! only typed operation batches; Account replicas and Patricia nodes never
+//! A single state remains on the coordinator thread. With multiple workers,
+//! each state is moved into its actor thread exactly once at startup and calls
+//! send only typed operation batches; Account replicas and Patricia nodes never
 //! cross back to the coordinator. This is deliberately separate from Rayon:
 //! work stealing is useful for stateless jobs, but it cannot express permanent
 //! ownership of a shard's mutable replica state.
@@ -24,16 +25,33 @@ struct ResidentWorker<S> {
     join: Option<JoinHandle<()>>,
 }
 
-/// A fixed set of actor threads, each permanently owning one state value.
+/// A fixed set of resident state owners.
+///
+/// A single worker stays on the coordinator thread. Multiple workers retain
+/// the actor-thread ownership model so their lanes can execute concurrently.
 pub(crate) struct ResidentWorkerPool<S> {
-    workers: Vec<ResidentWorker<S>>,
+    backend: ResidentWorkerBackend<S>,
+}
+
+enum ResidentWorkerBackend<S> {
+    Inline { state: S },
+    Threaded { workers: Vec<ResidentWorker<S>> },
 }
 
 impl<S: Send + 'static> ResidentWorkerPool<S> {
-    /// Move each initial state into its permanent worker thread.
+    /// Keep one state inline or move multiple states into permanent workers.
     pub(crate) fn start(thread_prefix: &str, states: Vec<S>) -> Result<Self, BatchError> {
         if states.is_empty() {
             return Err(BatchError::InvalidWorkerCount(0));
+        }
+        if states.len() == 1 {
+            let state = states
+                .into_iter()
+                .next()
+                .expect("single resident worker state");
+            return Ok(Self {
+                backend: ResidentWorkerBackend::Inline { state },
+            });
         }
         let mut workers = Vec::with_capacity(states.len());
         for (worker, mut state) in states.into_iter().enumerate() {
@@ -58,11 +76,16 @@ impl<S: Send + 'static> ResidentWorkerPool<S> {
                 join: Some(join),
             });
         }
-        Ok(Self { workers })
+        Ok(Self {
+            backend: ResidentWorkerBackend::Threaded { workers },
+        })
     }
 
     pub(crate) fn worker_count(&self) -> usize {
-        self.workers.len()
+        match &self.backend {
+            ResidentWorkerBackend::Inline { .. } => 1,
+            ResidentWorkerBackend::Threaded { workers } => workers.len(),
+        }
     }
 
     /// Execute one batch on every non-empty lane and return results by worker.
@@ -80,12 +103,29 @@ impl<S: Send + 'static> ResidentWorkerPool<S> {
         R: Send + 'static,
         F: Fn(&mut S, T) -> R + Send + Sync + 'static,
     {
-        if lanes.len() != self.workers.len() {
+        let worker_count = self.worker_count();
+        if lanes.len() != worker_count {
             return Err(BatchError::ResidentLaneCount {
                 actual: lanes.len(),
-                expected: self.workers.len(),
+                expected: worker_count,
             });
         }
+        if let ResidentWorkerBackend::Inline { state } = &mut self.backend {
+            let items = lanes
+                .into_iter()
+                .next()
+                .expect("validated single resident lane");
+            let rows = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                items.into_iter().map(|item| apply(state, item)).collect()
+            })) {
+                Ok(rows) => rows,
+                Err(_) => std::process::abort(),
+            };
+            return Ok(vec![rows]);
+        }
+        let ResidentWorkerBackend::Threaded { workers } = &mut self.backend else {
+            unreachable!("inline resident worker returned above");
+        };
         let apply = Arc::new(apply);
         let active = lanes.iter().filter(|lane| !lane.is_empty()).count();
         let (reply_sender, reply_receiver) = sync_channel::<(usize, Vec<R>)>(active.max(1));
@@ -106,7 +146,7 @@ impl<S: Send + 'static> ResidentWorkerPool<S> {
                     std::process::abort();
                 }
             });
-            if self.workers[worker]
+            if workers[worker]
                 .sender
                 .send(ResidentCommand::Run(job))
                 .is_err()
@@ -115,7 +155,7 @@ impl<S: Send + 'static> ResidentWorkerPool<S> {
             }
         }
         drop(reply_sender);
-        let mut replies = (0..self.workers.len())
+        let mut replies = (0..workers.len())
             .map(|_| None)
             .collect::<Vec<Option<Vec<R>>>>();
         for _ in 0..active {
@@ -130,10 +170,13 @@ impl<S: Send + 'static> ResidentWorkerPool<S> {
 
 impl<S> Drop for ResidentWorkerPool<S> {
     fn drop(&mut self) {
-        for worker in &self.workers {
+        let ResidentWorkerBackend::Threaded { workers } = &mut self.backend else {
+            return;
+        };
+        for worker in workers.iter() {
             let _ = worker.sender.send(ResidentCommand::Stop);
         }
-        for (index, worker) in self.workers.iter_mut().enumerate() {
+        for (index, worker) in workers.iter_mut().enumerate() {
             let Some(join) = worker.join.take() else {
                 continue;
             };
@@ -147,10 +190,42 @@ impl<S> Drop for ResidentWorkerPool<S> {
 #[cfg(test)]
 mod tests {
     use super::ResidentWorkerPool;
+    use std::thread;
 
     #[derive(Default)]
     struct WorkerState {
         values: Vec<u64>,
+    }
+
+    #[test]
+    fn one_worker_runs_inline_and_preserves_resident_state() {
+        let caller = thread::current().id();
+        let mut pool =
+            ResidentWorkerPool::start("resident-inline-test", vec![WorkerState::default()])
+                .expect("pool");
+
+        let first = pool
+            .run_lanes(vec![vec![1, 2]], |state, value| {
+                state.values.push(value);
+                (thread::current().id(), state.values.clone())
+            })
+            .expect("first");
+        assert_eq!(first[0][0], (caller, vec![1]));
+        assert_eq!(first[0][1], (caller, vec![1, 2]));
+
+        let empty = pool
+            .run_lanes::<u64, u64, _>(vec![vec![]], |_, value| value)
+            .expect("empty");
+        assert_eq!(empty, vec![Vec::<u64>::new()]);
+
+        let second = pool
+            .run_lanes(vec![vec![3]], |state, value| {
+                state.values.push(value);
+                state.values.clone()
+            })
+            .expect("second");
+        assert_eq!(second, vec![vec![vec![1, 2, 3]]]);
+        assert_eq!(pool.worker_count(), 1);
     }
 
     #[test]

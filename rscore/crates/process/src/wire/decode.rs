@@ -755,12 +755,13 @@ pub(crate) fn decode_dispute_draft(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let row = exact(tuple(value)?, 4, "disputeDraft")?;
+    let row = exact(tuple(value)?, 5, "disputeDraft")?;
     Ok(Some(xln_rscore_engine::DisputeDraft {
-        hash: fixed_bytes(&row[0], "disputeHash")?,
-        proof_body_hash: fixed_bytes(&row[1], "disputeProofBodyHash")?,
-        nonce: js_number(&row[2], "disputeProofNonce")?,
-        proposer_is_left: boolean(&row[3], "disputeProposerIsLeft")?,
+        hanko: optional_bytes(&row[0], "disputeHanko")?,
+        hash: fixed_bytes(&row[1], "disputeHash")?,
+        proof_body_hash: fixed_bytes(&row[2], "disputeProofBodyHash")?,
+        nonce: js_number(&row[3], "disputeProofNonce")?,
+        proposer_is_left: boolean(&row[4], "disputeProposerIsLeft")?,
     }))
 }
 

@@ -75,6 +75,10 @@ pub struct ProposedFrame {
     /// digest a second time on the coordinator thread.
     pub signature: [u8; 65],
     pub hanko: Vec<u8>,
+    /// Dispute witness authored on the same resident Account worker. The
+    /// Entity manifest consumes these bytes after the worker result returns.
+    pub dispute_signature: Option<[u8; 65]>,
+    pub dispute_hanko: Option<Vec<u8>>,
     pub dropped: Vec<DroppedTx>,
     /// The recovery proof this proposal travels with, when it carries one.
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
@@ -285,6 +289,13 @@ pub fn propose_account_frame(
         None => None,
         Some(transformer) => account.refresh_dispute_draft(&candidate, &transformer)?,
     };
+    let (dispute_signature, dispute_hanko) = match proposal_dispute.as_ref() {
+        Some(dispute) if dispute.hanko.is_none() => {
+            let (signature, hanko) = identity.sign_frame_with_raw(&dispute.hash)?;
+            (Some(signature), Some(hanko))
+        }
+        Some(_) | None => (None, None),
+    };
     let transaction_count = applied.len();
     let frame = AccountFrame {
         height,
@@ -323,6 +334,8 @@ pub fn propose_account_frame(
         state_hash,
         signature,
         hanko,
+        dispute_signature,
+        dispute_hanko,
         dropped,
         dispute: proposal_dispute,
         events: published_events,

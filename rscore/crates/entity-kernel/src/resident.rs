@@ -13,8 +13,9 @@ use std::time::Instant;
 
 use thiserror::Error;
 use xln_rscore_batch::{
-    AccountId, AccountInputVerdict, BatchError, EntityInboundRequest, EntityOutboundRequest,
-    EntityRoundResult, FailedHtlcRoute, ResidentConsensusEngine,
+    AccountId, AccountInputKind, AccountInputVerdict, AccountPeerInput, AccountResponseDirective,
+    BatchError, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute,
+    ResidentConsensusEngine,
 };
 use xln_rscore_engine::{AccountOutput, CommittedFrameEvidence, EntityId};
 
@@ -86,6 +87,12 @@ pub enum ResidentEntityError {
     CrontabMissing,
     #[error("ENTITY_RESIDENT_MANIFEST_WITNESS_DUPLICATE:{0}")]
     ManifestWitnessDuplicate(String),
+    #[error("ACCOUNT_FORCED_RESPONSE_ROW_MISSING:{0}")]
+    ForcedResponseRowMissing(String),
+    #[error("ACCOUNT_FORCED_RESPONSE_ENVELOPE_MISMATCH:{0}")]
+    ForcedResponseEnvelopeMismatch(String),
+    #[error("ACCOUNT_FORCED_ACK_NOT_BUNDLED:{account_id}:{height}")]
+    ForcedAckNotBundled { account_id: String, height: u64 },
     #[error(transparent)]
     Scheduler(#[from] SchedulerError),
 }
@@ -216,6 +223,69 @@ fn account_id(value: &str) -> Result<AccountId, ResidentEntityError> {
         .map_err(|_| ResidentEntityError::InvalidAccountId {
             value: value.to_string(),
         })
+}
+
+fn forced_account_responses(
+    applied: &[xln_rscore_batch::AccountInputResult],
+) -> Vec<(AccountId, AccountPeerInput)> {
+    let mut responses = Vec::<(AccountId, AccountPeerInput)>::new();
+    for result in applied {
+        let position = responses
+            .iter()
+            .position(|(account_id, _)| *account_id == result.account_id);
+        match &result.response {
+            AccountResponseDirective::Preserve => {}
+            AccountResponseDirective::Clear => {
+                if let Some(position) = position {
+                    responses.remove(position);
+                }
+            }
+            AccountResponseDirective::Force(response) => match position {
+                Some(position) => responses[position].1 = response.clone(),
+                None => responses.push((result.account_id, response.clone())),
+            },
+        }
+    }
+    responses
+}
+
+fn account_input_ack(input: &AccountPeerInput) -> Option<&xln_rscore_engine::IncomingAck> {
+    match &input.kind {
+        AccountInputKind::Ack(ack) | AccountInputKind::FrameAck { ack, .. } => Some(ack),
+        _ => None,
+    }
+}
+
+fn preserve_forced_account_responses(
+    outbound: &mut EntityRoundResult,
+    responses: &[(AccountId, AccountPeerInput)],
+) -> Result<(), ResidentEntityError> {
+    for (account_id, required) in responses {
+        let row = outbound
+            .proposals
+            .iter_mut()
+            .find(|row| row.account_id == *account_id)
+            .ok_or_else(|| {
+                ResidentEntityError::ForcedResponseRowMissing(account_text(*account_id))
+            })?;
+        let Some(final_input) = row.outbound_input.as_ref() else {
+            row.outbound_input = Some(required.clone());
+            continue;
+        };
+        if final_input.envelope != required.envelope {
+            return Err(ResidentEntityError::ForcedResponseEnvelopeMismatch(
+                account_text(*account_id),
+            ));
+        }
+        let required_ack = account_input_ack(required).expect("forced Account response is an ACK");
+        if account_input_ack(final_input) != Some(required_ack) {
+            return Err(ResidentEntityError::ForcedAckNotBundled {
+                account_id: account_text(*account_id),
+                height: required_ack.height,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn local_financial_view_requests(
@@ -455,6 +525,8 @@ fn collect_verdict_certification(
             state_hash,
             ack_signature,
             ack_hanko,
+            ack_dispute_signature,
+            ack_dispute_hanko,
             events: committed_events,
             ack_dispute,
             ..
@@ -482,11 +554,35 @@ fn collect_verdict_certification(
             {
                 return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
             }
-            if let Some(dispute) = ack_dispute {
+            if let Some(dispute) = ack_dispute.as_ref().filter(|draft| draft.hanko.is_none()) {
+                let signature =
+                    ack_dispute_signature.ok_or_else(|| ResidentEntityError::FrameHash {
+                        detail: "ACCOUNT_ACK_DISPUTE_SIGNATURE_MISSING".into(),
+                    })?;
+                let hanko =
+                    ack_dispute_hanko
+                        .clone()
+                        .ok_or_else(|| ResidentEntityError::FrameHash {
+                            detail: "ACCOUNT_ACK_DISPUTE_HANKO_MISSING".into(),
+                        })?;
+                let hash = hex_prefixed(&dispute.hash);
                 hashes.push(HashToSign {
-                    hash: hex_prefixed(&dispute.hash),
+                    hash: hash.clone(),
                     kind: HashType::Dispute,
                     context: dispute_hash_context(account_id, "ack-dispute"),
+                });
+                if presigned
+                    .insert(
+                        hash.clone(),
+                        PresignedManifestEntry::dispute(signature, hanko),
+                    )
+                    .is_some()
+                {
+                    return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
+                }
+            } else if ack_dispute_signature.is_some() || ack_dispute_hanko.is_some() {
+                return Err(ResidentEntityError::FrameHash {
+                    detail: "ACCOUNT_ACK_DISPUTE_WITNESS_UNEXPECTED".into(),
                 });
             }
         }
@@ -541,11 +637,42 @@ fn collect_round_certification(
         {
             return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
         }
-        if let Some(dispute) = &proposed.dispute {
+        if let Some(dispute) = proposed
+            .dispute
+            .as_ref()
+            .filter(|draft| draft.hanko.is_none())
+        {
+            let signature =
+                proposed
+                    .dispute_signature
+                    .ok_or_else(|| ResidentEntityError::FrameHash {
+                        detail: "ACCOUNT_DISPUTE_SIGNATURE_MISSING".into(),
+                    })?;
+            let hanko =
+                proposed
+                    .dispute_hanko
+                    .clone()
+                    .ok_or_else(|| ResidentEntityError::FrameHash {
+                        detail: "ACCOUNT_DISPUTE_HANKO_MISSING".into(),
+                    })?;
+            let hash = hex_prefixed(&dispute.hash);
             hashes.push(HashToSign {
-                hash: hex_prefixed(&dispute.hash),
+                hash: hash.clone(),
                 kind: HashType::Dispute,
                 context: dispute_hash_context(row.account_id, "dispute"),
+            });
+            if presigned
+                .insert(
+                    hash.clone(),
+                    PresignedManifestEntry::dispute(signature, hanko),
+                )
+                .is_some()
+            {
+                return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
+            }
+        } else if proposed.dispute_signature.is_some() || proposed.dispute_hanko.is_some() {
+            return Err(ResidentEntityError::FrameHash {
+                detail: "ACCOUNT_DISPUTE_WITNESS_UNEXPECTED".into(),
             });
         }
     }
@@ -737,6 +864,7 @@ pub fn apply_resident_entity_round_core(
     let phase_started = Instant::now();
     let inbound = accounts.entity_inbound(request.inbound)?;
     let inbound_micros = phase_started.elapsed().as_micros();
+    let forced_responses = forced_account_responses(&inbound.applied);
     for created in &inbound.created_accounts {
         state
             .known_accounts
@@ -820,6 +948,11 @@ pub fn apply_resident_entity_round_core(
             propose.push(target);
         }
     }
+    for (target, _) in &forced_responses {
+        if proposed.insert(*target) {
+            propose.push(*target);
+        }
+    }
     let mut materialize = inbound
         .touched
         .iter()
@@ -832,7 +965,7 @@ pub fn apply_resident_entity_round_core(
     let failed_routes_micros = failed_routes_started.elapsed().as_micros();
     let worklist_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
-    let outbound = accounts.entity_outbound(EntityOutboundRequest {
+    let mut outbound = accounts.entity_outbound(EntityOutboundRequest {
         owner_entity_id,
         timestamp: request.outbound_timestamp,
         j_height: kernel.state.last_finalized_j_height,
@@ -844,6 +977,7 @@ pub fn apply_resident_entity_round_core(
         checkpoint_due: request.checkpoint_due,
         post_accounts: request.post_accounts,
     })?;
+    preserve_forced_account_responses(&mut outbound, &forced_responses)?;
     let outbound_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
     apply_admitted_account_hooks(
@@ -898,4 +1032,67 @@ pub fn apply_resident_entity_round_core(
         account_touch_order,
         proposal_work: kernel.proposal_work,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use xln_rscore_batch::{EntityRoundResult, ProposalRow, ProposedRow};
+    use xln_rscore_engine::{AccountFrame, DisputeDraft, OutboundAck};
+
+    use super::*;
+
+    #[test]
+    fn certified_bundled_ack_dispute_does_not_reenter_the_entity_hanko_manifest() {
+        let account_id = AccountId::from_bytes([0xaa; 32]);
+        let dispute = DisputeDraft {
+            hanko: Some(vec![0x24]),
+            hash: [0x22; 32],
+            proof_body_hash: [0x23; 32],
+            nonce: 4,
+            proposer_is_left: true,
+        };
+        let proposed = ProposedRow {
+            frame: AccountFrame {
+                height: 2,
+                timestamp: 3,
+                j_height: 4,
+                txs: Vec::new(),
+                prev_frame_hash: "genesis".into(),
+                account_state_root: [0x31; 32],
+            },
+            state_hash: [0x11; 32],
+            signature: [0x41; 65],
+            hanko: vec![0x42],
+            dispute_signature: None,
+            dispute_hanko: None,
+            dispute: None,
+            events: Vec::new(),
+            outputs: Vec::new(),
+            outputs_by_tx: Vec::new(),
+            bundled_ack: Some(OutboundAck {
+                height: 1,
+                frame_hash: [0x51; 32],
+                frame_hanko: vec![0x52],
+                dispute: Some(dispute.clone()),
+            }),
+        };
+        let outbound = EntityRoundResult {
+            proposals: vec![ProposalRow {
+                account_id,
+                outbound_input: None,
+                proposed: Some(proposed),
+                failed_htlc_locks: Vec::new(),
+                dropped: Vec::new(),
+            }],
+            ..EntityRoundResult::default()
+        };
+        let (_, hashes, _) =
+            collect_round_certification(&EntityRoundResult::default(), &outbound, Vec::new())
+                .expect("manifest");
+        assert!(!hashes.iter().any(|entry| {
+            entry.hash == hex_prefixed(&dispute.hash)
+                && entry.kind == HashType::Dispute
+                && entry.context.ends_with(":ack-dispute")
+        }));
+    }
 }

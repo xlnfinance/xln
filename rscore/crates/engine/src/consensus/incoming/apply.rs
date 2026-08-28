@@ -105,6 +105,10 @@ pub enum IncomingOutcome {
         /// commits it in the same manifest without repeating ECDSA signing.
         ack_signature: [u8; 65],
         ack_hanko: Vec<u8>,
+        /// Worker-authored witness for the ACK dispute, when the draft still
+        /// needs the parent Entity manifest to attach its Hanko.
+        ack_dispute_signature: Option<[u8; 65]>,
+        ack_dispute_hanko: Option<Vec<u8>>,
         outputs: Vec<AccountOutput>,
         /// What this frame's transactions said they did, in transaction order.
         /// The Entity frame commits them, so they travel with the verdict
@@ -792,6 +796,13 @@ pub fn apply_incoming_frame_with_authority(
             account.refresh_ack_dispute_draft(&candidate, &transformer, proposer == Side::Left)?
         }
     };
+    let (ack_dispute_signature, ack_dispute_hanko) = match ack_dispute.as_ref() {
+        Some(dispute) if dispute.hanko.is_none() => {
+            let (signature, hanko) = identity.sign_frame_with_raw(&dispute.hash)?;
+            (Some(signature), Some(hanko))
+        }
+        Some(_) | None => (None, None),
+    };
     let domain = candidate.state().identity().domain().clone();
     account.commit_from_peer(
         candidate,
@@ -814,6 +825,8 @@ pub fn apply_incoming_frame_with_authority(
         state_hash,
         ack_signature,
         ack_hanko,
+        ack_dispute_signature,
+        ack_dispute_hanko,
         outputs,
         events,
         rolled_back,

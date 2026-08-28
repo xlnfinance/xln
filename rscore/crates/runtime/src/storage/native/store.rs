@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use rusty_leveldb::{DB, LdbIterator, Options, WriteBatch};
 
-use super::bounded::{physical_rows, previous_physical_keys};
+use super::bounded::{physical_keys_for_value, physical_rows, previous_physical_keys};
 use super::codec::{
     decode_head, encode_checkpoint, encode_head, output_digest, validate_storage_row,
 };
@@ -86,7 +86,7 @@ impl NativeRuntimeStore {
     /// untouched while native-owned rows are replaced in the same WAL batch.
     pub(crate) fn current_checkpoint_path_nodes(
         &mut self,
-    ) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, NativeStorageError> {
+    ) -> Result<&BTreeMap<Vec<u8>, Vec<u8>>, NativeStorageError> {
         self.ensure_healthy()?;
         if self.checkpoint_path_nodes.is_none() {
             self.checkpoint_path_nodes = Some(self.path_node_rows()?.into_iter().collect());
@@ -101,7 +101,10 @@ impl NativeRuntimeStore {
                 );
             }
         }
-        Ok(self.checkpoint_path_nodes.clone().expect("populated above"))
+        Ok(self
+            .checkpoint_path_nodes
+            .as_ref()
+            .expect("populated above"))
     }
 
     pub fn append_frame(
@@ -331,7 +334,7 @@ impl NativeRuntimeStore {
 
     fn persist_frame(
         &mut self,
-        prepared: PreparedRuntimeFrame,
+        mut prepared: PreparedRuntimeFrame,
     ) -> Result<DurableRuntimeFrame, NativeStorageError> {
         let mut batch = WriteBatch::default();
         if prepared
@@ -353,6 +356,7 @@ impl NativeRuntimeStore {
                     &mut batch,
                     prepared.frame.height,
                     checkpoint,
+                    self.checkpoint_path_nodes.as_ref(),
                 )?;
             }
         }
@@ -365,17 +369,25 @@ impl NativeRuntimeStore {
             self.poisoned = true;
             return Err(error);
         }
-        match prepared.frame.checkpoint.as_ref() {
+        match prepared.frame.checkpoint.as_mut() {
             Some(checkpoint) if checkpoint.full => {
-                // A full rewrite replaced the whole graph; reload lazily.
-                self.checkpoint_path_nodes = None;
+                self.checkpoint_path_nodes = Some(
+                    std::mem::take(&mut checkpoint.node_changes)
+                        .into_iter()
+                        .filter_map(|change| {
+                            change
+                                .value
+                                .map(|value| (change.key.as_bytes().to_vec(), value))
+                        })
+                        .collect(),
+                );
             }
             Some(checkpoint) if prepared.materialized_state => {
                 if let Some(cache) = self.checkpoint_path_nodes.as_mut() {
-                    for change in &checkpoint.node_changes {
-                        match &change.value {
+                    for change in std::mem::take(&mut checkpoint.node_changes) {
+                        match change.value {
                             Some(value) => {
-                                cache.insert(change.key.as_bytes().to_vec(), value.clone());
+                                cache.insert(change.key.as_bytes().to_vec(), value);
                             }
                             None => {
                                 cache.remove(change.key.as_bytes());
@@ -593,9 +605,19 @@ fn put_checkpoint_rows(
     batch: &mut WriteBatch,
     height: u64,
     checkpoint: &super::types::CheckpointGraph,
+    prior: Option<&BTreeMap<Vec<u8>, Vec<u8>>>,
 ) -> Result<(), NativeStorageError> {
     for PathNodeChange { key, value } in &checkpoint.node_changes {
-        for physical_key in previous_physical_keys(database, key.as_bytes())? {
+        let previous_keys = if checkpoint.full {
+            Vec::new()
+        } else if let Some(prior) = prior {
+            prior.get(key.as_bytes()).map_or(Ok(Vec::new()), |value| {
+                physical_keys_for_value(key.as_bytes(), value)
+            })?
+        } else {
+            previous_physical_keys(database, key.as_bytes())?
+        };
+        for physical_key in previous_keys {
             batch.delete(&physical_key);
         }
         if let Some(value) = value {

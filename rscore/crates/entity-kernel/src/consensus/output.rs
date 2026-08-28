@@ -78,29 +78,6 @@ pub enum EntityOutputError {
     AccountHankoMismatch { kind: &'static str, hash: String },
 }
 
-fn require_account_hanko<'a>(
-    witnesses: &'a EntityHankoWitnessMap,
-    digest: &[u8; 32],
-    expected: HashType,
-    label: &'static str,
-) -> Result<&'a [u8], EntityOutputError> {
-    let hash = bytes32_text(digest);
-    let witness = witnesses
-        .get(&hash)
-        .ok_or_else(|| EntityOutputError::AccountHankoMissing {
-            kind: label,
-            hash: hash.clone(),
-        })?;
-    if witness.kind != expected {
-        return Err(EntityOutputError::AccountHankoType {
-            hash,
-            expected: label,
-            actual: witness.kind.clone(),
-        });
-    }
-    Ok(&witness.hanko)
-}
-
 fn attach_or_assert_hanko(
     current: &mut Option<Vec<u8>>,
     witness: &[u8],
@@ -126,22 +103,29 @@ fn attach_frame_hankos(
     frame: &mut xln_rscore_engine::IncomingFrame,
     witnesses: &EntityHankoWitnessMap,
 ) -> Result<(), EntityOutputError> {
-    let frame_hanko = require_account_hanko(
-        witnesses,
-        &frame.state_hash,
-        HashType::AccountFrame,
-        "accountFrame",
-    )?;
-    attach_or_assert_hanko(
-        &mut frame.frame_hanko,
-        frame_hanko,
-        &frame.state_hash,
-        "accountFrame",
-    )?;
+    let frame_hash = bytes32_text(&frame.state_hash);
+    if let Some(witness) = witnesses.get(&frame_hash) {
+        if witness.kind != HashType::AccountFrame {
+            return Err(EntityOutputError::AccountHankoType {
+                hash: frame_hash,
+                expected: "accountFrame",
+                actual: witness.kind.clone(),
+            });
+        }
+        attach_or_assert_hanko(
+            &mut frame.frame_hanko,
+            &witness.hanko,
+            &frame.state_hash,
+            "accountFrame",
+        )?;
+    } else if frame.frame_hanko.as_ref().is_none_or(Vec::is_empty) {
+        return Err(EntityOutputError::AccountHankoMissing {
+            kind: "accountFrame",
+            hash: frame_hash,
+        });
+    }
     if let Some(dispute) = &mut frame.dispute {
-        let dispute_hanko =
-            require_account_hanko(witnesses, &dispute.hash, HashType::Dispute, "dispute")?;
-        attach_or_assert_hanko(&mut dispute.hanko, dispute_hanko, &dispute.hash, "dispute")?;
+        attach_dispute_hanko(dispute, witnesses)?;
     }
     Ok(())
 }
@@ -316,6 +300,59 @@ mod tests {
             panic!("frame output");
         };
         assert_eq!(frame.frame_hanko.as_ref(), Some(&vec![0x31, 0x32]));
+        assert_eq!(
+            frame
+                .dispute
+                .as_ref()
+                .and_then(|proof| proof.hanko.as_ref()),
+            Some(&dispute_hanko),
+        );
+    }
+
+    #[test]
+    fn account_output_reuses_certified_frame_and_dispute_hankos_without_resigning() {
+        let frame_hanko = vec![0x31, 0x32];
+        let dispute_hanko = vec![0x41, 0x42];
+        let input = AccountPeerInput {
+            envelope: AccountPeerEnvelope {
+                from_entity_id: [0xaa; 32],
+                to_entity_id: [0xbb; 32],
+                domain: AccountDomain::new(
+                    1,
+                    DepositoryAddress::parse(&format!("0x{}", "cc".repeat(20)))
+                        .expect("depository"),
+                )
+                .expect("domain"),
+                dispute_config: AccountDisputeConfig::new(10, 20).expect("dispute config"),
+                watch_seed: None,
+            },
+            kind: AccountInputKind::Frame(Box::new(IncomingFrame {
+                frame: AccountFrame {
+                    height: 1,
+                    timestamp: 2,
+                    j_height: 3,
+                    txs: Vec::new(),
+                    prev_frame_hash: "genesis".into(),
+                    account_state_root: [0xee; 32],
+                },
+                state_hash: [0x11; 32],
+                frame_hanko: Some(frame_hanko.clone()),
+                dispute: Some(CounterpartyDispute {
+                    hanko: Some(dispute_hanko.clone()),
+                    hash: [0x22; 32],
+                    proof_body_hash: [0x23; 32],
+                    nonce: 4,
+                    proposer_is_left: true,
+                }),
+            })),
+        };
+        let output = LocalEntityOutput::account_input(input, &EntityHankoWitnessMap::new())
+            .expect("historical certified witnesses remain valid");
+        let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0];
+        let AccountInputKind::Frame(frame) = &input.kind else {
+            panic!("frame output");
+        };
+        assert_eq!(frame.frame_hanko.as_ref(), Some(&frame_hanko));
         assert_eq!(
             frame
                 .dispute

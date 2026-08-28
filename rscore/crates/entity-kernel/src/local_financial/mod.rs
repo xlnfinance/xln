@@ -1,5 +1,6 @@
 mod decode;
 mod direct_payment;
+mod extend_credit;
 mod htlc_payment;
 mod swap_requests;
 mod types;
@@ -15,8 +16,8 @@ use crate::{
 pub use decode::decode_local_entity_financial_tx;
 pub(crate) use types::LocalAccountFinancialView;
 pub use types::{
-    DirectPaymentEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx, PlaceSwapOfferEntityTx,
-    ProposeCancelSwapEntityTx,
+    DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LocalEntityFinancialTx,
+    PlaceSwapOfferEntityTx, ProposeCancelSwapEntityTx,
 };
 
 pub(crate) struct LocalFinancialResult {
@@ -45,6 +46,13 @@ pub(crate) fn apply_local_entity_financial_txs(
                 &mut events,
                 &mut wake_targets,
             )?,
+            LocalEntityFinancialTx::ExtendCredit(tx) => extend_credit::apply_extend_credit(
+                state,
+                tx,
+                &mut account_txs,
+                &mut events,
+                &mut wake_targets,
+            ),
             LocalEntityFinancialTx::HtlcPayment(tx) => htlc_payment::apply_htlc_payment(
                 state,
                 tx,

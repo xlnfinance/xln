@@ -37,12 +37,19 @@ pub(crate) fn prepare_replica_meta(
     let signer_id = normalize_hex(&head.frame.leader.proposer_signer_id, 20).ok_or_else(|| {
         ReplicaMetaProjectionError::Signer(head.frame.leader.proposer_signer_id.clone())
     })?;
-    let mut meta = result
+    let source_meta = result
         .replica
         .replica_metadata
         .as_object()
-        .cloned()
         .ok_or_else(|| ReplicaMetaProjectionError::Envelope("OBJECT_REQUIRED".into()))?;
+    // The previous certified head can be tens of megabytes under HLT. It is
+    // replaced below, so cloning the whole metadata object first duplicated
+    // dead frame tx/context bytes on every Runtime frame.
+    let mut meta = source_meta
+        .iter()
+        .filter(|(field, _)| field.as_str() != "certifiedFrameHead")
+        .map(|(field, value)| (field.clone(), value.clone()))
+        .collect::<Map<_, _>>();
     meta.insert("entityId".into(), Value::String(entity_id.clone()));
     meta.insert("signerId".into(), Value::String(signer_id.clone()));
     meta.insert("isProposer".into(), Value::Bool(true));
@@ -195,7 +202,7 @@ fn frame(frame: &EntityFrame) -> Result<Value, ReplicaMetaProjectionError> {
         ),
         (
             "entityContext".into(),
-            super::output::canonical_json(frame.entity_context.clone())?,
+            super::output::canonical_json_ref(&frame.entity_context)?,
         ),
         (
             "txs".into(),
@@ -206,7 +213,7 @@ fn frame(frame: &EntityFrame) -> Result<Value, ReplicaMetaProjectionError> {
                     .map(|tx| {
                         Ok(object([
                             ("type", Value::String(tx.kind.as_str().into())),
-                            ("data", super::output::canonical_json(tx.wire_data.clone())?),
+                            ("data", super::output::canonical_json_ref(&tx.wire_data)?),
                         ]))
                     })
                     .collect::<Result<Vec<_>, ReplicaMetaProjectionError>>()?,
@@ -268,7 +275,7 @@ fn frame(frame: &EntityFrame) -> Result<Value, ReplicaMetaProjectionError> {
     if let Some(certificate) = &frame.j_prefix_certificate {
         value.insert(
             "jPrefixCertificate".into(),
-            super::output::canonical_json(certificate.clone())?,
+            super::output::canonical_json_ref(certificate)?,
         );
     }
     Ok(Value::Object(value))
@@ -286,13 +293,13 @@ fn leader(frame: &EntityFrame) -> Result<Value, ReplicaMetaProjectionError> {
     if let Some(certificate) = &leader.certificate {
         value.insert(
             "certificate".into(),
-            super::output::canonical_json(certificate.clone())?,
+            super::output::canonical_json_ref(certificate)?,
         );
     }
     if let Some(certificate) = &leader.relay_certificate {
         value.insert(
             "relayCertificate".into(),
-            super::output::canonical_json(certificate.clone())?,
+            super::output::canonical_json_ref(certificate)?,
         );
     }
     Ok(Value::Object(value))

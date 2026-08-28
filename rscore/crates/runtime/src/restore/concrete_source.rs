@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::storage::native::{ValidatedRuntimeFrame, validate_runtime_frame};
+use crate::storage::native::{
+    ValidatedRuntimeFrame, decode_and_validate_runtime_frame, validate_runtime_frame,
+};
 use crate::{
     RuntimeMachineGraphError, StorageMessagePackError, decode_storage_payload,
     rebuild_runtime_machine_graph,
@@ -38,10 +40,23 @@ pub struct VerifiedEntityContext {
 /// One exact Runtime WAL row after native framing/outbox validation. Contexts
 /// are explicit because frame bytes contain only authenticated references.
 pub struct ConcreteWalSource {
-    pub height: u64,
-    pub frame_bytes: Vec<u8>,
-    pub entity_contexts: BTreeMap<String, VerifiedEntityContext>,
-    pub outputs: Vec<Vec<u8>>,
+    height: u64,
+    frame_bytes: Vec<u8>,
+    frame: Value,
+    validated: ValidatedRuntimeFrame,
+    entity_contexts: BTreeMap<String, VerifiedEntityContext>,
+    outputs: Vec<Vec<u8>>,
+}
+
+/// A canonical Runtime frame decoded and fully validated exactly once. This
+/// staged value lets storage read the context/outbox rows named by the frame
+/// without decoding, encoding or hashing the frame a second time.
+pub(crate) struct VerifiedWalFrame {
+    height: u64,
+    frame_bytes: Vec<u8>,
+    frame: Value,
+    validated: ValidatedRuntimeFrame,
+    context_refs: BTreeMap<String, [u8; 32]>,
 }
 
 #[derive(Debug, Error)]
@@ -67,6 +82,107 @@ fn hex(bytes: &[u8; 32]) -> String {
         output.push_str(&format!("{byte:02x}"));
     }
     output
+}
+
+impl VerifiedWalFrame {
+    pub(crate) fn new(
+        height: u64,
+        frame_bytes: Vec<u8>,
+    ) -> Result<Self, ConcreteRestoreSourceError> {
+        let (frame, validated) = decode_and_validate_runtime_frame(&frame_bytes)
+            .map_err(|error| ConcreteRestoreSourceError::Frame(error.to_string()))?;
+        if validated.height != height {
+            return Err(invalid(format!(
+                "WAL_FRAME_HEIGHT:expected={height}:actual={}",
+                validated.height,
+            )));
+        }
+        let context_refs = context_refs(object(&frame, "frame")?)?;
+        Ok(Self {
+            height,
+            frame_bytes,
+            frame,
+            validated,
+            context_refs,
+        })
+    }
+
+    pub(crate) fn validated(&self) -> &ValidatedRuntimeFrame {
+        &self.validated
+    }
+
+    pub(crate) fn context_refs(&self) -> &BTreeMap<String, [u8; 32]> {
+        &self.context_refs
+    }
+
+    pub(crate) fn into_source(
+        self,
+        entity_contexts: BTreeMap<String, VerifiedEntityContext>,
+        outputs: Vec<Vec<u8>>,
+    ) -> Result<ConcreteWalSource, ConcreteRestoreSourceError> {
+        if self.validated.output_count != outputs.len() {
+            return Err(invalid("WAL_HEADER"));
+        }
+        let actual = entity_contexts
+            .iter()
+            .map(|(replica, context)| (replica.clone(), context.commitment))
+            .collect::<BTreeMap<_, _>>();
+        if self.context_refs != actual {
+            let expected_keys = self.context_refs.keys().cloned().collect::<BTreeSet<_>>();
+            let actual_keys = actual.keys().cloned().collect::<BTreeSet<_>>();
+            return Err(invalid(format!(
+                "CONTEXT_SET:missing={:?}:extra={:?}",
+                expected_keys.difference(&actual_keys).collect::<Vec<_>>(),
+                actual_keys.difference(&expected_keys).collect::<Vec<_>>(),
+            )));
+        }
+        Ok(ConcreteWalSource {
+            height: self.height,
+            frame_bytes: self.frame_bytes,
+            frame: self.frame,
+            validated: self.validated,
+            entity_contexts,
+            outputs,
+        })
+    }
+}
+
+impl ConcreteWalSource {
+    /// Validate framing plus the exact set of authenticated 0x14 contexts.
+    /// The processor may not omit an unused-looking context or attach a newer
+    /// value. Successful construction seals the parsed and validated frame.
+    pub fn new(
+        height: u64,
+        frame_bytes: Vec<u8>,
+        entity_contexts: BTreeMap<String, VerifiedEntityContext>,
+        outputs: Vec<Vec<u8>>,
+    ) -> Result<Self, ConcreteRestoreSourceError> {
+        VerifiedWalFrame::new(height, frame_bytes)?.into_source(entity_contexts, outputs)
+    }
+
+    pub fn height(&self) -> u64 {
+        self.height
+    }
+
+    pub fn frame_bytes(&self) -> &[u8] {
+        &self.frame_bytes
+    }
+
+    pub fn frame(&self) -> &Value {
+        &self.frame
+    }
+
+    pub fn validated(&self) -> &ValidatedRuntimeFrame {
+        &self.validated
+    }
+
+    pub fn entity_contexts(&self) -> &BTreeMap<String, VerifiedEntityContext> {
+        &self.entity_contexts
+    }
+
+    pub fn outputs(&self) -> &[Vec<u8>] {
+        &self.outputs
+    }
 }
 
 fn object<'a>(
@@ -195,33 +311,6 @@ pub fn verify_checkpoint_source(
     .map_err(Into::into)
 }
 
-/// Validate framing plus the exact set of authenticated 0x14 contexts. The
-/// processor may not omit an unused-looking context or attach a newer value.
-pub fn verify_wal_source(source: &ConcreteWalSource) -> Result<Value, ConcreteRestoreSourceError> {
-    let validated = crate::storage::native::validate_runtime_frame(&source.frame_bytes)
-        .map_err(|error| ConcreteRestoreSourceError::Frame(error.to_string()))?;
-    if validated.height != source.height || validated.output_count != source.outputs.len() {
-        return Err(invalid("WAL_HEADER"));
-    }
-    let frame = decode_storage_payload(&source.frame_bytes)?;
-    let expected = context_refs(object(&frame, "frame")?)?;
-    let actual = source
-        .entity_contexts
-        .iter()
-        .map(|(replica, context)| (replica.clone(), context.commitment))
-        .collect::<BTreeMap<_, _>>();
-    if expected != actual {
-        let expected_keys = expected.keys().cloned().collect::<BTreeSet<_>>();
-        let actual_keys = actual.keys().cloned().collect::<BTreeSet<_>>();
-        return Err(invalid(format!(
-            "CONTEXT_SET:missing={:?}:extra={:?}",
-            expected_keys.difference(&actual_keys).collect::<Vec<_>>(),
-            actual_keys.difference(&expected_keys).collect::<Vec<_>>(),
-        )));
-    }
-    Ok(frame)
-}
-
 #[cfg(test)]
 mod tests {
     use sha2::{Digest as _, Sha256};
@@ -321,5 +410,30 @@ mod tests {
                 RuntimeMachineGraphError::LeafCount { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn wal_source_validation_and_decode_share_one_canonical_pass() {
+        let checkpoint = graph_fixture();
+        crate::storage::native::reset_runtime_frame_validation_count();
+        let source = ConcreteWalSource::new(
+            checkpoint.height,
+            checkpoint.frame_bytes,
+            BTreeMap::new(),
+            Vec::new(),
+        )
+        .expect("verified WAL source");
+        assert_eq!(crate::storage::native::runtime_frame_validation_count(), 1);
+
+        let decoded = crate::restore::decode_concrete_runtime_wal_frame(
+            &source,
+            &serde_json::json!({}),
+            0,
+            false,
+        )
+        .expect("decode cached verified frame");
+        assert_eq!(decoded.height, checkpoint.height);
+        assert_eq!(decoded.expected_frame_hash, source.validated().frame_hash);
+        assert_eq!(crate::storage::native::runtime_frame_validation_count(), 1);
     }
 }

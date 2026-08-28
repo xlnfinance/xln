@@ -34,12 +34,17 @@ struct ResidentWorkerState<V> {
     shards: BTreeMap<usize, ResidentLogicalShard<V>>,
     rollback: Option<ResidentWorkerRollback<V>>,
     checkpoint_dirty: BTreeSet<AccountId>,
+    checkpoint_forced: BTreeSet<AccountId>,
 }
 
 struct ResidentWorkerRollback<V> {
     phase: u64,
-    shards: BTreeMap<usize, ResidentLogicalShard<V>>,
+    /// The exact pre-phase representation of every touched shard. `None`
+    /// means the shard was not materialized before this phase, so rollback
+    /// must remove a lazily-created resident instead of retaining an empty one.
+    shards: BTreeMap<usize, Option<ResidentLogicalShard<V>>>,
     checkpoint_dirty: BTreeSet<AccountId>,
+    checkpoint_forced: BTreeSet<AccountId>,
 }
 
 #[cfg(test)]
@@ -78,6 +83,7 @@ struct WorkerMutationReply<R> {
     /// without a second read visit.
     rows: Vec<(usize, AccountId, [u8; 32], R)>,
     changed: Vec<AccountId>,
+    envelope_changed: Vec<AccountId>,
     descriptors: Vec<PersistentRadixShardDescriptor>,
     metrics: Vec<ShardPhaseMetric>,
     /// Wall time the worker spent on this phase before the shared barrier.
@@ -215,6 +221,11 @@ pub(crate) enum ResidentAccountAction<V, R> {
         value_digest: [u8; 32],
         result: R,
     },
+    ReplaceEnvelope {
+        value: V,
+        expected_digest: [u8; 32],
+        result: R,
+    },
 }
 
 #[derive(Debug)]
@@ -288,27 +299,19 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                     })?;
         }
         let plan = AccountShardPlan::weighted(worker_count, &shard_weights)?;
-        let mut states = (0..worker_count)
+        let states = (0..worker_count)
             .map(|_| ResidentWorkerState {
                 shards: BTreeMap::new(),
                 rollback: None,
                 checkpoint_dirty: BTreeSet::new(),
+                checkpoint_forced: BTreeSet::new(),
             })
             .collect::<Vec<_>>();
         let mut descriptors = Vec::with_capacity(PERSISTENT_RADIX_SHARD_COUNT);
         for shard in 0..PERSISTENT_RADIX_SHARD_COUNT {
-            let state = PersistentRadixShard::empty(shard)
+            let state = PersistentRadixShard::<V>::empty(shard)
                 .map_err(|error| forest_error(AccountId::from_bytes([0; 32]), error))?;
             descriptors.push(state.descriptor());
-            states[plan.worker(shard)].shards.insert(
-                shard,
-                ResidentLogicalShard {
-                    base: state.clone(),
-                    inbound: None,
-                    candidate: None,
-                    checkpoint: state,
-                },
-            );
         }
         let mut workers = ResidentWorkerPool::start("rscore-account-resident", states)?;
 
@@ -388,6 +391,38 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
 
     pub(crate) fn worker_count(&self) -> usize {
         self.workers.worker_count()
+    }
+
+    /// Run independent, stateless batches on the resident worker threads.
+    /// Contiguous lanes and worker-index reply order preserve input order;
+    /// no Account value is read or mutated by the callback.
+    pub(crate) fn map_stateless_ordered<T, R, F>(
+        &mut self,
+        items: Vec<T>,
+        apply: F,
+    ) -> Result<Vec<R>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: Fn(T) -> R + Send + Sync + 'static,
+    {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.workers.worker_count() == 1 || items.len() == 1 {
+            return Ok(items.into_iter().map(apply).collect());
+        }
+        let lane_size = items.len().div_ceil(self.workers.worker_count());
+        let mut items = items.into_iter();
+        let lanes = (0..self.workers.worker_count())
+            .map(|_| items.by_ref().take(lane_size).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        Ok(self
+            .workers
+            .run_lanes(lanes, move |_state, item| apply(item))?
+            .into_iter()
+            .flatten()
+            .collect())
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -873,6 +908,10 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             self.checkpoint_workers
                 .insert(self.plan.worker(logical_account_shard(*account_id)));
         }
+        for account_id in &reply.envelope_changed {
+            self.checkpoint_workers
+                .insert(self.plan.worker(logical_account_shard(*account_id)));
+        }
         for metric in &reply.metrics {
             self.plan
                 .record_work(metric.shard, metric.items, metric.work_elapsed);
@@ -1030,6 +1069,15 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         })?;
         Ok(replies.into_iter().flatten().collect())
     }
+
+    #[cfg(test)]
+    fn materialized_shard_count(&mut self) -> Result<usize, BatchError> {
+        let lanes = (0..self.workers.worker_count()).map(|_| vec![()]).collect();
+        let replies = self
+            .workers
+            .run_lanes(lanes, |state, ()| state.shards.len())?;
+        Ok(replies.into_iter().flatten().sum())
+    }
 }
 
 type WorkerMutationBatches<T> = (Vec<Vec<ShardMutationBatch<T>>>, BTreeSet<usize>);
@@ -1103,6 +1151,12 @@ where
     finish_worker_phase(state, phase, failed)?;
     if !failed && let Ok(reply) = &result {
         state.checkpoint_dirty.extend(reply.changed.iter().copied());
+        state
+            .checkpoint_dirty
+            .extend(reply.envelope_changed.iter().copied());
+        state
+            .checkpoint_forced
+            .extend(reply.envelope_changed.iter().copied());
     }
     result.map(|mut reply| {
         reply.work_wall = work_wall;
@@ -1143,6 +1197,7 @@ where
     let mut reply = WorkerMutationReply {
         rows: Vec::new(),
         changed: Vec::new(),
+        envelope_changed: Vec::new(),
         descriptors: Vec::new(),
         metrics: Vec::new(),
         work_wall: Duration::ZERO,
@@ -1207,11 +1262,12 @@ fn reconcile_worker_head<V: Clone>(
             resident.checkpoint = resident.base.clone();
         }
         state.checkpoint_dirty.clear();
+        state.checkpoint_forced.clear();
     }
     Ok(())
 }
 
-fn prepare_worker_outbound<V>(
+fn prepare_worker_outbound<V: Clone>(
     state: &mut ResidentWorkerState<V>,
     reconcile: &[usize],
     mutation_shards: &BTreeSet<usize>,
@@ -1242,10 +1298,7 @@ where
 {
     let started = Instant::now();
     let items = batch.entries.len();
-    let resident = state
-        .shards
-        .get_mut(&batch.shard)
-        .ok_or(BatchError::ResidentShardMissing { shard: batch.shard })?;
+    let resident = resident_shard_mut(state, batch.shard)?;
     let mut changed_in_shard = 0;
     for (position, account_id, payload) in batch.entries {
         let current = phase_shard(resident, mode)?
@@ -1278,6 +1331,27 @@ where
                 reply
                     .rows
                     .push((position, account_id, value_digest, result));
+            }
+            ResidentAccountAction::ReplaceEnvelope {
+                value,
+                expected_digest,
+                result,
+            } => {
+                if stored_digest != Some(expected_digest) {
+                    return Err(BatchError::CheckpointAccountLeaf {
+                        account_id,
+                        actual: stored_digest.map_or_else(|| "missing".to_string(), root_hex),
+                        expected: root_hex(expected_digest),
+                    });
+                }
+                let updated = phase_shard(resident, mode)?
+                    .replaced_value(account_id.as_bytes().to_vec(), value, expected_digest)
+                    .map_err(|error| forest_error(account_id, error))?;
+                *phase_shard_mut(resident, mode)? = updated;
+                reply.envelope_changed.push(account_id);
+                reply
+                    .rows
+                    .push((position, account_id, expected_digest, result));
             }
         }
     }
@@ -1349,10 +1423,17 @@ where
     V: Clone,
     F: Fn(AccountId, &V, Option<&V>, T) -> Result<R, BatchError>,
 {
-    let resident = state
-        .shards
-        .get(&batch.shard)
-        .ok_or(BatchError::ResidentShardMissing { shard: batch.shard })?;
+    let resident = match state.shards.get(&batch.shard) {
+        Some(resident) => resident,
+        None => {
+            let account_id = batch
+                .entries
+                .first()
+                .map(|(_, account_id, _)| *account_id)
+                .ok_or(BatchError::ResidentShardMissing { shard: batch.shard })?;
+            return Err(BatchError::CandidateAccountNotFound(account_id));
+        }
+    };
     let current_shard = resident
         .candidate
         .as_ref()
@@ -1405,7 +1486,9 @@ where
                 return Err(BatchError::ResidentCheckpointAccountRemoved(*account_id));
             }
             (Some(current), previous) => {
-                if previous.is_some_and(|(_, digest)| digest == current.1) {
+                if !state.checkpoint_forced.contains(account_id)
+                    && previous.is_some_and(|(_, digest)| digest == current.1)
+                {
                     continue;
                 }
                 rows.push((
@@ -1435,13 +1518,10 @@ fn snapshot_worker_shards<V: Clone>(
         phase,
         shards: BTreeMap::new(),
         checkpoint_dirty: state.checkpoint_dirty.clone(),
+        checkpoint_forced: state.checkpoint_forced.clone(),
     });
     for shard in touched {
-        let resident = state
-            .shards
-            .get(shard)
-            .ok_or(BatchError::ResidentShardMissing { shard: *shard })?
-            .clone();
+        let resident = state.shards.get(shard).cloned();
         let rollback = state
             .rollback
             .as_mut()
@@ -1470,9 +1550,17 @@ fn finish_worker_phase<V>(
     }
     if rollback {
         for (shard, resident) in rollback_state.shards {
-            state.shards.insert(shard, resident);
+            match resident {
+                Some(resident) => {
+                    state.shards.insert(shard, resident);
+                }
+                None => {
+                    state.shards.remove(&shard);
+                }
+            }
         }
         state.checkpoint_dirty = rollback_state.checkpoint_dirty;
+        state.checkpoint_forced = rollback_state.checkpoint_forced;
     }
     Ok(())
 }
@@ -1483,6 +1571,7 @@ fn collect_worker_replies<R>(
     let mut combined = WorkerMutationReply {
         rows: Vec::new(),
         changed: Vec::new(),
+        envelope_changed: Vec::new(),
         descriptors: Vec::new(),
         metrics: Vec::new(),
         work_wall: Duration::ZERO,
@@ -1509,6 +1598,7 @@ fn collect_worker_replies<R>(
             Ok(reply) => {
                 combined.rows.extend(reply.rows);
                 combined.changed.extend(reply.changed);
+                combined.envelope_changed.extend(reply.envelope_changed);
                 combined.descriptors.extend(reply.descriptors);
                 combined.metrics.extend(reply.metrics);
             }
@@ -1531,6 +1621,7 @@ fn collect_worker_replies<R>(
     .map(|(position, (account_id, digest, row))| (position, account_id, digest, row))
     .collect();
     combined.changed.sort_unstable();
+    combined.envelope_changed.sort_unstable();
     combined
         .descriptors
         .sort_by_key(|descriptor| descriptor.index());
@@ -1583,14 +1674,23 @@ fn next_revision(revision: u64, changed: bool) -> Result<u64, BatchError> {
     revision.checked_add(1).ok_or(BatchError::RevisionOverflow)
 }
 
-fn resident_shard_mut<V>(
+fn resident_shard_mut<V: Clone>(
     state: &mut ResidentWorkerState<V>,
     shard: usize,
 ) -> Result<&mut ResidentLogicalShard<V>, BatchError> {
-    state
-        .shards
-        .get_mut(&shard)
-        .ok_or(BatchError::ResidentShardMissing { shard })
+    match state.shards.entry(shard) {
+        std::collections::btree_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            let empty = PersistentRadixShard::empty(shard)
+                .map_err(|error| forest_error(zero_account(), error))?;
+            Ok(entry.insert(ResidentLogicalShard {
+                base: empty.clone(),
+                inbound: None,
+                candidate: None,
+                checkpoint: empty,
+            }))
+        }
+    }
 }
 
 fn empty_lanes<T>(worker_count: usize) -> Vec<Vec<T>> {
@@ -1672,6 +1772,139 @@ mod tests {
                 .expect("serial seed");
         }
         map
+    }
+
+    #[test]
+    fn empty_restore_materializes_no_worker_shards_and_keeps_canonical_root() {
+        let serial = PersistentRadixMap::<u64>::empty();
+        let mut forest = ResidentAccountForest::<u64>::restore(4, 7, Vec::new()).expect("restore");
+
+        assert_eq!(forest.materialized_shard_count().expect("count"), 0);
+        assert_eq!(forest.len(), 0);
+        assert_eq!(forest.accounts_root(), serial.root_hash());
+        assert_eq!(forest.revision(), 7);
+    }
+
+    #[test]
+    fn restore_materializes_only_seeded_shards_and_keeps_serial_root() {
+        let initial = vec![
+            (account(0x123, 0), 10, digest(10)),
+            (account(0x123, 1), 11, digest(11)),
+            (account(0x456, 0), 12, digest(12)),
+        ];
+        let serial = serial_map(&initial);
+        let mut forest = ResidentAccountForest::restore(4, 7, initial).expect("restore");
+
+        assert_eq!(forest.materialized_shard_count().expect("count"), 2);
+        assert_eq!(forest.len(), 3);
+        assert_eq!(forest.accounts_root(), serial.root_hash());
+    }
+
+    #[test]
+    fn failed_first_touch_removes_lazily_materialized_shards_atomically() {
+        let mut forest = ResidentAccountForest::<u64>::restore(2, 7, Vec::new()).expect("restore");
+        let root = forest.accounts_root();
+        let fail = account(1, 0);
+
+        let error = forest
+            .apply_inbound(
+                root,
+                vec![(account(0, 0), 10), (fail, 11)],
+                move |account_id, current, value| {
+                    if account_id == fail {
+                        return Err(BatchError::EmptyBatch);
+                    }
+                    put(account_id, current, value)
+                },
+            )
+            .expect_err("cross-worker failure");
+
+        assert_eq!(error, BatchError::EmptyBatch);
+        assert_eq!(forest.accounts_root(), root);
+        assert_eq!(forest.revision(), 7);
+        assert_eq!(forest.materialized_shard_count().expect("count"), 0);
+        assert!(forest.shard_snapshots().expect("snapshots").is_empty());
+        assert!(
+            forest
+                .rollback_snapshot_sizes()
+                .expect("rollback cleared")
+                .iter()
+                .all(|size| *size == 0)
+        );
+    }
+
+    #[test]
+    fn first_touch_checkpoint_and_ack_keep_exact_root_and_baseline() {
+        let account_id = account(0x123, 0);
+        let continued_account_id = account(0x456, 0);
+        let mut forest = ResidentAccountForest::<u64>::restore(2, 5, Vec::new()).expect("restore");
+        let empty_root = forest.accounts_root();
+        forest
+            .apply_inbound(
+                empty_root,
+                Vec::<(AccountId, ())>::new(),
+                |_account_id, _current, ()| Ok(ResidentAccountAction::Keep(())),
+            )
+            .expect("open round");
+        forest
+            .apply_outbound(vec![(account_id, 50)], put)
+            .expect("create account");
+        let candidate = forest
+            .apply_outbound_continue(vec![(continued_account_id, 60)], put)
+            .expect("continue into absent shard");
+        let serial = serial_map(&[
+            (account_id, 50, digest(50)),
+            (continued_account_id, 60, digest(60)),
+        ]);
+        assert_eq!(candidate.accounts_root, serial.root_hash());
+        assert_eq!(forest.materialized_shard_count().expect("count"), 2);
+
+        let pending = forest
+            .export_checkpoint_dirty(|_account_id, current, previous| {
+                Ok((*current, previous.copied()))
+            })
+            .expect("checkpoint");
+        assert_eq!(
+            pending.rows,
+            vec![(account_id, (50, None)), (continued_account_id, (60, None)),]
+        );
+        forest
+            .apply_inbound(
+                candidate.accounts_root,
+                Vec::<(AccountId, ())>::new(),
+                |_account_id, _current, ()| Ok(ResidentAccountAction::Keep(())),
+            )
+            .expect("ack checkpoint");
+        let next = forest
+            .export_checkpoint_dirty(|_account_id, current, previous| {
+                Ok((*current, previous.copied()))
+            })
+            .expect("next checkpoint");
+        assert!(next.rows.is_empty());
+        assert_eq!(next.base_revision, pending.revision);
+        assert_eq!(next.accounts_root, candidate.accounts_root);
+    }
+
+    #[test]
+    fn absent_read_reports_account_not_found_without_materializing_shard() {
+        let account_id = account(0xabc, 0);
+        let mut forest = ResidentAccountForest::<u64>::restore(2, 1, Vec::new()).expect("restore");
+        let root = forest.accounts_root();
+        forest
+            .apply_inbound(
+                root,
+                Vec::<(AccountId, ())>::new(),
+                |_account_id, _current, ()| Ok(ResidentAccountAction::Keep(())),
+            )
+            .expect("open round");
+
+        let error = forest
+            .read_outbound(vec![(account_id, ())], |_account_id, current, _base, ()| {
+                Ok::<_, BatchError>(*current)
+            })
+            .expect_err("missing account");
+        assert_eq!(error, BatchError::CandidateAccountNotFound(account_id));
+        assert_eq!(forest.materialized_shard_count().expect("count"), 0);
     }
 
     #[test]
@@ -1982,6 +2215,51 @@ mod tests {
                 (account(0x123, 0), (30, Some(0x123 + 10))),
                 (account(0x456, 0), (40, Some(0x456 + 10))),
             ]
+        );
+    }
+
+    #[test]
+    fn envelope_only_change_keeps_root_and_is_forced_into_checkpoint() {
+        let account_id = account(0x123, 0);
+        let committed = digest(7);
+        let mut forest = ResidentAccountForest::restore(
+            2,
+            5,
+            vec![(account_id, "before".to_string(), committed)],
+        )
+        .expect("restore");
+        let root = forest.accounts_root();
+        forest
+            .apply_inbound(
+                root,
+                Vec::<(AccountId, ())>::new(),
+                |_account_id, _current, ()| Ok::<_, BatchError>(ResidentAccountAction::Keep(())),
+            )
+            .expect("open round");
+        let batch = forest
+            .apply_outbound(vec![(account_id, ())], move |_account_id, current, ()| {
+                assert_eq!(current.as_deref(), Some("before"));
+                Ok(ResidentAccountAction::ReplaceEnvelope {
+                    value: "after".to_string(),
+                    expected_digest: committed,
+                    result: (),
+                })
+            })
+            .expect("replace envelope");
+        assert_eq!(batch.accounts_root, root);
+        assert_eq!(batch.revision, 5);
+
+        let checkpoint = forest
+            .export_checkpoint_dirty(|_account_id, current, previous| {
+                Ok((current.clone(), previous.cloned()))
+            })
+            .expect("checkpoint");
+        assert_eq!(
+            checkpoint.rows,
+            vec![(
+                account_id,
+                ("after".to_string(), Some("before".to_string()))
+            )]
         );
     }
 

@@ -667,6 +667,10 @@ fn dispute_draft(value: Option<&xln_rscore_engine::DisputeDraft>) -> AbiValue {
     match value {
         None => AbiValue::Nil,
         Some(draft) => tuple(vec![
+            draft
+                .hanko
+                .as_ref()
+                .map_or(AbiValue::Nil, |hanko| AbiValue::Bytes(hanko.clone())),
             AbiValue::Bytes(draft.hash.to_vec()),
             AbiValue::Bytes(draft.proof_body_hash.to_vec()),
             integer(draft.nonce),
@@ -686,6 +690,8 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             state_hash,
             ack_signature: _,
             ack_hanko,
+            ack_dispute_signature: _,
+            ack_dispute_hanko: _,
             outputs,
             events,
             rolled_back,

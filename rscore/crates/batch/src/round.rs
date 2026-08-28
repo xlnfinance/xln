@@ -15,9 +15,7 @@
 use xln_rscore_engine::{AccountDomain, AccountTx, ReceiverClock};
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint};
-use crate::consensus::{
-    AccountAdmissionResult, AccountInputResult, AccountInputRow, ProposalRow,
-};
+use crate::consensus::{AccountAdmissionResult, AccountInputResult, AccountInputRow, ProposalRow};
 use crate::types::{AccountId, AccountSeed};
 
 /// Everything one Entity input carries inward.

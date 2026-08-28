@@ -167,8 +167,15 @@ pub(super) fn sign(
 ) -> Result<String, RuntimeTransportError> {
     let key = xln_rscore_crypto::derive_signer_key(seed, signer_id)
         .map_err(|_| RuntimeTransportError::Crypto("signer-key"))?;
-    let signature = xln_rscore_crypto::sign_digest(&key, digest)
-        .ok_or(RuntimeTransportError::Crypto("sign"))?;
+    sign_with_key(&key, digest)
+}
+
+pub(super) fn sign_with_key(
+    key: &[u8; 32],
+    digest: &[u8; 32],
+) -> Result<String, RuntimeTransportError> {
+    let signature =
+        xln_rscore_crypto::sign_digest(key, digest).ok_or(RuntimeTransportError::Crypto("sign"))?;
     Ok(format!("0x{}", hex_lower(&signature)))
 }
 

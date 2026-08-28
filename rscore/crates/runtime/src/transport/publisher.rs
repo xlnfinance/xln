@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
-use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use crate::storage::native::{DurableRuntimeFrame, NativeRuntimeStore};
 
@@ -17,12 +17,14 @@ const DEFAULT_MAX_QUEUE_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_MAX_ENVELOPE_ROWS: usize = 10_000;
 const DEFAULT_MAX_PLAINTEXT_BYTES: usize = 24 * 1024 * 1024;
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+const TARGET_RETRY_BACKOFF: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug)]
 pub struct DirectOutboxPublisherConfig {
     pub source_seed: String,
     pub source_signer_id: String,
     pub routes: DirectRouteTable,
+    pub allowed_targets: BTreeSet<String>,
     pub local_entity_signers: BTreeMap<String, String>,
     pub max_queue_rows: usize,
     pub max_queue_bytes: usize,
@@ -39,10 +41,12 @@ impl DirectOutboxPublisherConfig {
         source_signer_id: impl Into<String>,
         routes: DirectRouteTable,
     ) -> Self {
+        let allowed_targets = routes.targets().map(str::to_owned).collect();
         Self {
             source_seed: source_seed.into(),
             source_signer_id: source_signer_id.into(),
             routes,
+            allowed_targets,
             local_entity_signers: BTreeMap::new(),
             max_queue_rows: DEFAULT_MAX_QUEUE_ROWS,
             max_queue_bytes: DEFAULT_MAX_QUEUE_BYTES,
@@ -52,6 +56,17 @@ impl DirectOutboxPublisherConfig {
             reconnect_attempts: 2,
             io_timeout: Duration::from_secs(10),
         }
+    }
+
+    pub fn with_allowed_targets<'a>(
+        mut self,
+        targets: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Self, RuntimeTransportError> {
+        for target in targets {
+            self.allowed_targets
+                .insert(super::routing::normalize_runtime_id(target)?);
+        }
+        Ok(self)
     }
 
     pub fn with_local_entity(
@@ -84,6 +99,18 @@ pub struct PublicationReport {
     pub envelopes_published: usize,
     pub durable_bytes: usize,
     pub reconnects: usize,
+    pub targets_pending: usize,
+    pub rows_pending: usize,
+    pub bytes_pending: usize,
+    pub failed_targets: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PublicationBacklog {
+    pub targets: usize,
+    pub rows: usize,
+    pub bytes: usize,
+    pub failures: BTreeMap<String, String>,
 }
 
 pub struct DirectOutboxPublisher {
@@ -92,15 +119,13 @@ pub struct DirectOutboxPublisher {
     identity: EncryptionIdentity,
     sessions: BTreeMap<String, DirectSession>,
     inbound: InboundSessionTable,
-    pending: Option<PendingPublication>,
-    last_published_height: Option<u64>,
-}
-
-struct PendingPublication {
-    height: u64,
-    durable_bytes: usize,
-    envelopes: Vec<OutboundEnvelope>,
-    next_envelope: usize,
+    pending: BTreeMap<String, VecDeque<OutboundEnvelope>>,
+    target_order: VecDeque<String>,
+    retry_after: BTreeMap<String, Instant>,
+    last_errors: BTreeMap<String, String>,
+    pending_rows: usize,
+    pending_bytes: usize,
+    last_staged_height: Option<u64>,
 }
 
 impl DirectOutboxPublisher {
@@ -115,8 +140,13 @@ impl DirectOutboxPublisher {
             identity,
             sessions: BTreeMap::new(),
             inbound: InboundSessionTable::default(),
-            pending: None,
-            last_published_height: None,
+            pending: BTreeMap::new(),
+            target_order: VecDeque::new(),
+            retry_after: BTreeMap::new(),
+            last_errors: BTreeMap::new(),
+            pending_rows: 0,
+            pending_bytes: 0,
+            last_staged_height: None,
         })
     }
 
@@ -137,31 +167,26 @@ impl DirectOutboxPublisher {
     ) -> Result<PublicationReport, RuntimeTransportError> {
         let prepared = self.prepare_durable(store, durable)?;
         if self
-            .last_published_height
+            .last_staged_height
             .is_some_and(|height| durable.height() <= height)
         {
-            return Ok(PublicationReport {
+            let mut report = PublicationReport {
                 durable_height: durable.height(),
                 ..PublicationReport::default()
-            });
+            };
+            self.flush_pending(&mut report)?;
+            return Ok(report);
         }
-        if let Some(pending) = &self.pending
-            && pending.height != durable.height()
-        {
-            return Err(RuntimeTransportError::PendingFrame {
-                pending: pending.height,
-                requested: durable.height(),
-            });
-        }
-        if self.pending.is_none() {
-            self.pending = Some(PendingPublication {
-                height: durable.height(),
-                durable_bytes: prepared.bytes,
-                envelopes: prepared.envelopes,
-                next_envelope: 0,
-            });
-        }
-        self.resume_pending()
+        self.ensure_queue_capacity(&prepared)?;
+        let mut report = PublicationReport {
+            durable_height: durable.height(),
+            durable_bytes: prepared.bytes,
+            ..PublicationReport::default()
+        };
+        self.stage(prepared)?;
+        self.last_staged_height = Some(durable.height());
+        self.flush_pending(&mut report)?;
+        Ok(report)
     }
 
     /// Replay-only terminal for the production durable path. It re-reads the
@@ -180,6 +205,7 @@ impl DirectOutboxPublisher {
             envelopes_published: prepared.envelopes.len(),
             durable_bytes: prepared.bytes,
             reconnects: 0,
+            ..PublicationReport::default()
         })
     }
 
@@ -190,26 +216,44 @@ impl DirectOutboxPublisher {
     ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
         let prepared = self.decode_durable(store, durable)?;
         for envelope in &prepared.envelopes {
-            if self.target_is_publishable(&envelope.target_runtime_id)? {
-                continue;
+            if !self
+                .config
+                .allowed_targets
+                .contains(&envelope.target_runtime_id)
+                && !self.inbound.has_open(&envelope.target_runtime_id)?
+            {
+                return Err(RuntimeTransportError::Route(format!(
+                    "missing:{}",
+                    envelope.target_runtime_id
+                )));
             }
-            self.config.routes.url(&envelope.target_runtime_id)?;
         }
         Ok(prepared)
     }
 
-    pub(crate) fn can_publish(
+    pub(crate) fn can_stage(
         &self,
         store: &mut NativeRuntimeStore,
         durable: &DurableRuntimeFrame,
     ) -> Result<bool, RuntimeTransportError> {
         let prepared = self.decode_durable(store, durable)?;
         for envelope in &prepared.envelopes {
-            if !self.target_is_publishable(&envelope.target_runtime_id)? {
-                return Ok(false);
+            if !self
+                .config
+                .allowed_targets
+                .contains(&envelope.target_runtime_id)
+                && !self.inbound.has_open(&envelope.target_runtime_id)?
+            {
+                return Err(RuntimeTransportError::Route(format!(
+                    "missing:{}",
+                    envelope.target_runtime_id
+                )));
             }
         }
-        Ok(true)
+        Ok(
+            self.pending_rows.saturating_add(prepared.row_count) <= self.config.max_queue_rows
+                && self.pending_bytes.saturating_add(prepared.bytes) <= self.config.max_queue_bytes,
+        )
     }
 
     fn decode_durable(
@@ -236,46 +280,187 @@ impl DirectOutboxPublisher {
         Ok(prepared)
     }
 
-    fn target_is_publishable(&self, target: &str) -> Result<bool, RuntimeTransportError> {
-        Ok(self.inbound.has_open(target)? || self.config.routes.contains(target))
+    fn ensure_queue_capacity(
+        &self,
+        prepared: &PreparedEnvelopeBatch,
+    ) -> Result<(), RuntimeTransportError> {
+        let rows = self
+            .pending_rows
+            .checked_add(prepared.row_count)
+            .ok_or(RuntimeTransportError::Config("queue-row-overflow"))?;
+        let bytes = self
+            .pending_bytes
+            .checked_add(prepared.bytes)
+            .ok_or(RuntimeTransportError::Config("queue-byte-overflow"))?;
+        if rows > self.config.max_queue_rows || bytes > self.config.max_queue_bytes {
+            return Err(RuntimeTransportError::Queue { rows, bytes });
+        }
+        Ok(())
     }
 
-    fn resume_pending(&mut self) -> Result<PublicationReport, RuntimeTransportError> {
-        let pending = self
-            .pending
-            .as_ref()
-            .ok_or(RuntimeTransportError::Config("pending-missing"))?;
+    fn stage(&mut self, prepared: PreparedEnvelopeBatch) -> Result<(), RuntimeTransportError> {
+        for envelope in prepared.envelopes {
+            let target = envelope.target_runtime_id.clone();
+            if !self.pending.contains_key(&target) {
+                self.pending.insert(target.clone(), VecDeque::new());
+                self.target_order.push_back(target.clone());
+            }
+            self.pending_rows = self
+                .pending_rows
+                .checked_add(envelope.row_count)
+                .ok_or(RuntimeTransportError::Config("queue-row-overflow"))?;
+            self.pending_bytes = self
+                .pending_bytes
+                .checked_add(envelope.durable_bytes)
+                .ok_or(RuntimeTransportError::Config("queue-byte-overflow"))?;
+            self.pending
+                .get_mut(&target)
+                .ok_or(RuntimeTransportError::Config("target-queue-missing"))?
+                .push_back(envelope);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn retry_pending(&mut self) -> Result<PublicationReport, RuntimeTransportError> {
         let mut report = PublicationReport {
-            durable_height: pending.height,
-            durable_bytes: pending.durable_bytes,
+            durable_height: self.last_staged_height.unwrap_or(0),
             ..PublicationReport::default()
         };
-        loop {
-            let envelope = self
-                .pending
-                .as_ref()
-                .and_then(|pending| pending.envelopes.get(pending.next_envelope))
-                .cloned();
-            let Some(envelope) = envelope else { break };
-            report.reconnects += self.publish_one(&envelope)?;
-            report.rows_published = report
-                .rows_published
-                .checked_add(envelope.row_count)
-                .ok_or(RuntimeTransportError::Config("report-row-overflow"))?;
-            report.envelopes_published += 1;
-            self.pending
-                .as_mut()
-                .ok_or(RuntimeTransportError::Config("pending-lost"))?
-                .next_envelope += 1;
-        }
-        self.last_published_height = Some(report.durable_height);
-        self.pending = None;
+        self.flush_pending(&mut report)?;
         Ok(report)
+    }
+
+    fn flush_pending(
+        &mut self,
+        report: &mut PublicationReport,
+    ) -> Result<(), RuntimeTransportError> {
+        let mut blocked = BTreeSet::new();
+        loop {
+            let targets = self.target_order.len();
+            let mut batch = Vec::with_capacity(targets);
+            for _ in 0..targets {
+                let target = self
+                    .target_order
+                    .pop_front()
+                    .ok_or(RuntimeTransportError::Config("target-order-missing"))?;
+                let retry_ready = !blocked.contains(&target)
+                    && (self.inbound.has_open(&target)?
+                        || self
+                            .retry_after
+                            .get(&target)
+                            .is_none_or(|deadline| *deadline <= Instant::now()));
+                let envelope = retry_ready
+                    .then(|| self.pending.get_mut(&target).and_then(VecDeque::pop_front))
+                    .flatten();
+                if let Some(envelope) = envelope {
+                    batch.push((target, envelope));
+                } else {
+                    self.finish_target(target);
+                }
+            }
+            if batch.is_empty() {
+                break;
+            }
+            let envelopes = batch
+                .iter()
+                .map(|(_, envelope)| envelope.clone())
+                .collect::<Vec<_>>();
+            let results = self
+                .inbound
+                .publish_open_batch(&envelopes, self.config.io_timeout);
+            for ((target, envelope), result) in batch.into_iter().zip(results) {
+                let result = match result {
+                    Ok(true) => Ok(0),
+                    Ok(false) => self.publish_one(&envelope),
+                    Err(error) => Err(error),
+                };
+                match result {
+                    Ok(reconnects) => {
+                        self.finish_published(report, &target, &envelope, reconnects)?
+                    }
+                    Err(error) => {
+                        self.retain_failed(&target, envelope, &error)?;
+                        blocked.insert(target.clone());
+                    }
+                }
+                self.finish_target(target);
+            }
+        }
+        report.targets_pending = self.pending.len();
+        report.rows_pending = self.pending_rows;
+        report.bytes_pending = self.pending_bytes;
+        report.failed_targets = self.last_errors.keys().cloned().collect();
+        Ok(())
+    }
+
+    fn finish_published(
+        &mut self,
+        report: &mut PublicationReport,
+        target: &str,
+        envelope: &OutboundEnvelope,
+        reconnects: usize,
+    ) -> Result<(), RuntimeTransportError> {
+        report.reconnects = report
+            .reconnects
+            .checked_add(reconnects)
+            .ok_or(RuntimeTransportError::Config("report-reconnect-overflow"))?;
+        report.rows_published = report
+            .rows_published
+            .checked_add(envelope.row_count)
+            .ok_or(RuntimeTransportError::Config("report-row-overflow"))?;
+        report.envelopes_published = report
+            .envelopes_published
+            .checked_add(1)
+            .ok_or(RuntimeTransportError::Config("report-envelope-overflow"))?;
+        self.pending_rows -= envelope.row_count;
+        self.pending_bytes -= envelope.durable_bytes;
+        self.retry_after.remove(target);
+        self.last_errors.remove(target);
+        Ok(())
+    }
+
+    fn retain_failed(
+        &mut self,
+        target: &str,
+        envelope: OutboundEnvelope,
+        error: &RuntimeTransportError,
+    ) -> Result<(), RuntimeTransportError> {
+        self.pending
+            .get_mut(target)
+            .ok_or(RuntimeTransportError::Config("target-queue-lost"))?
+            .push_front(envelope);
+        self.last_errors.insert(target.into(), error.to_string());
+        self.retry_after
+            .insert(target.into(), Instant::now() + TARGET_RETRY_BACKOFF);
+        Ok(())
+    }
+
+    fn finish_target(&mut self, target: String) {
+        if self
+            .pending
+            .get(&target)
+            .is_some_and(|queue| queue.is_empty())
+        {
+            self.pending.remove(&target);
+            self.retry_after.remove(&target);
+            self.last_errors.remove(&target);
+        } else {
+            self.target_order.push_back(target);
+        }
     }
 
     pub fn close(mut self) {
         for (_, session) in std::mem::take(&mut self.sessions) {
             session.close();
+        }
+    }
+
+    pub fn backlog(&self) -> PublicationBacklog {
+        PublicationBacklog {
+            targets: self.pending.len(),
+            rows: self.pending_rows,
+            bytes: self.pending_bytes,
+            failures: self.last_errors.clone(),
         }
     }
 

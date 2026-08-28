@@ -40,8 +40,13 @@ impl DirectRouteTable {
             .ok_or_else(|| RuntimeTransportError::Route(format!("missing:{target}")))
     }
 
+    #[cfg(test)]
     pub(crate) fn contains(&self, target: &str) -> bool {
         self.0.contains_key(target)
+    }
+
+    pub(crate) fn targets(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
     }
 }
 
@@ -54,6 +59,7 @@ pub(crate) struct OutboundEnvelope {
     pub transaction_count: u64,
     pub value: Value,
     pub row_count: usize,
+    pub durable_bytes: usize,
 }
 
 pub(super) struct PreparedEnvelopeBatch {
@@ -72,7 +78,7 @@ pub(super) fn prepare_envelopes(
     max_plaintext_bytes: usize,
 ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
     let source = normalize_runtime_id(source_runtime_id)?;
-    let mut groups = BTreeMap::<GroupKey, Vec<(usize, Value)>>::new();
+    let mut groups = Vec::<(GroupKey, Vec<(usize, Value)>)>::new();
     let mut remote_rows = 0_usize;
     let mut remote_bytes = 0_usize;
     for (index, row) in rows.iter().enumerate() {
@@ -113,9 +119,14 @@ pub(super) fn prepare_envelopes(
         let mut deliverable = object.clone();
         deliverable.remove("sourceRuntimeFrame");
         deliverable.remove("atomicCrossJurisdictionPair");
+        let key = (target, height, timestamp);
+        if groups.last().is_none_or(|(current, _)| current != &key) {
+            groups.push((key, Vec::new()));
+        }
         groups
-            .entry((target, height, timestamp))
-            .or_default()
+            .last_mut()
+            .expect("group inserted above")
+            .1
             .push((index, Value::Object(deliverable)));
         remote_rows = remote_rows
             .checked_add(1)
@@ -135,7 +146,9 @@ pub(super) fn prepare_envelopes(
                 && (chunk.len() == max_rows
                     || raw_bytes.saturating_add(estimate) > max_plaintext_bytes)
             {
-                envelopes.push(build_envelope(&source, &target, height, timestamp, chunk)?);
+                envelopes.push(build_envelope(
+                    &source, &target, height, timestamp, chunk, raw_bytes,
+                )?);
                 chunk = Vec::new();
                 raw_bytes = 0;
             }
@@ -145,7 +158,9 @@ pub(super) fn prepare_envelopes(
             chunk.push(value);
         }
         if !chunk.is_empty() {
-            envelopes.push(build_envelope(&source, &target, height, timestamp, chunk)?);
+            envelopes.push(build_envelope(
+                &source, &target, height, timestamp, chunk, raw_bytes,
+            )?);
         }
     }
     Ok(PreparedEnvelopeBatch {
@@ -161,6 +176,7 @@ fn build_envelope(
     height: u64,
     timestamp: u64,
     entity_inputs: Vec<Value>,
+    durable_bytes: usize,
 ) -> Result<OutboundEnvelope, RuntimeTransportError> {
     let row_count = entity_inputs.len();
     let entity_id = (row_count == 1)
@@ -194,6 +210,7 @@ fn build_envelope(
         transaction_count,
         value,
         row_count,
+        durable_bytes,
     })
 }
 

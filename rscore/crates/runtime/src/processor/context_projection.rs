@@ -16,7 +16,7 @@ pub(crate) fn prepare_entity_context_rows(
     applied_replica_id: &str,
     context: &CanonicalValue,
 ) -> Result<EntityContextPayloadRows, EntityContextProjectionError> {
-    let context = super::output::canonical_json(context.clone())?;
+    let context = super::output::canonical_json_ref(context)?;
     let source = context
         .as_object()
         .ok_or(EntityContextProjectionError::ContextObject)?;

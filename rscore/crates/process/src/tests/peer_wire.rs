@@ -260,6 +260,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
     let result = AccountInputResult {
         operation_index: 17,
         account_id,
+        response: xln_rscore_batch::AccountResponseDirective::Preserve,
         verdict: AccountInputVerdict::FrameAckApplied {
             ack: Box::new(AccountInputVerdict::AckStale { height: 42 }),
             frame: Box::new(AccountInputVerdict::FrameCollisionIgnored {
@@ -288,6 +289,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
     let rejected = AccountInputResult {
         operation_index: 18,
         account_id,
+        response: xln_rscore_batch::AccountResponseDirective::Preserve,
         verdict: AccountInputVerdict::FrameAckRejected {
             phase: FrameAckPhase::Frame,
             reason: "proposal rejected".into(),
@@ -306,6 +308,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
     let wrong_domains = AccountInputResult {
         operation_index: 19,
         account_id,
+        response: xln_rscore_batch::AccountResponseDirective::Preserve,
         verdict: AccountInputVerdict::FrameAckApplied {
             ack: Box::new(AccountInputVerdict::FrameCollisionIgnored {
                 height: 1,
@@ -322,6 +325,7 @@ fn dispute_required_verdict_carries_exact_secret_and_signed_frame() {
     let result = AccountInputResult {
         operation_index: 20,
         account_id: AccountId::from_bytes([0x11; 32]),
+        response: xln_rscore_batch::AccountResponseDirective::Preserve,
         verdict: AccountInputVerdict::FrameDisputeRequired {
             reason: "HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT".into(),
             evidence_secrets: vec![HtlcEvidenceSecret {

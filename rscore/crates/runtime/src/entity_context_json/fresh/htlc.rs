@@ -168,11 +168,27 @@ pub(super) fn materialize_inbound_htlc_context(
     if inputs.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let decrypted = decrypt_htlc_materialize_inputs(
-        inputs,
-        &infrastructure.entity_encryption_public_key,
-        &infrastructure.entity_encryption_private_key,
-    )?;
+    let worker_count = request.replica.accounts.worker_count();
+    let chunk_size = inputs.len().div_ceil(worker_count);
+    let mut inputs = inputs.into_iter();
+    let chunks = (0..worker_count)
+        .map(|_| inputs.by_ref().take(chunk_size).collect::<Vec<_>>())
+        .filter(|chunk| !chunk.is_empty())
+        .collect::<Vec<_>>();
+    let public_key = infrastructure.entity_encryption_public_key;
+    let private_key = infrastructure.entity_encryption_private_key;
+    let decrypted = request
+        .replica
+        .accounts
+        .map_stateless_ordered(chunks, move |chunk| {
+            decrypt_htlc_materialize_inputs(chunk, &public_key, &private_key)
+        })
+        .map_err(|error| FreshEntityContextError::HtlcAccountRead(error.to_string()))?
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     let requested = required_htlc_account_tokens(&decrypted);
     let account_requests = requested
         .iter()

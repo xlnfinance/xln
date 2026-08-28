@@ -19,9 +19,10 @@ use xln_rscore_engine::{
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
-    FailedHtlcLockRow, ProposalRow, UpstreamHtlcResolutionRow, apply_one, build_signing_identity,
-    inbound_genesis_account, leaf_root, proposable, proposal_row, restore_checkpoint_account,
-    restore_seed_account, state_error, validate_genesis_seed, verdict_commits_genesis,
+    FailedHtlcLockRow, ProposalRow, UpstreamHtlcResolutionRow, account_response_directive,
+    apply_one, build_signing_identity, inbound_genesis_account, leaf_root, proposable,
+    proposal_row, restore_checkpoint_account, restore_seed_account, state_error,
+    validate_genesis_seed, verdict_commits_genesis,
 };
 use crate::parallel::{ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
@@ -334,6 +335,21 @@ impl ResidentConsensusEngine {
         self.forest.worker_count()
     }
 
+    /// Reuse the configured resident worker set for pure, ordered batches
+    /// that precede an Account phase. The callback cannot access worker state.
+    pub fn map_stateless_ordered<T, R, F>(
+        &mut self,
+        items: Vec<T>,
+        apply: F,
+    ) -> Result<Vec<R>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: Fn(T) -> R + Send + Sync + 'static,
+    {
+        self.forest.map_stateless_ordered(items, apply)
+    }
+
     /// Integration tests compile this crate without `cfg(test)`, so the
     /// barrier counter cannot live on the production struct. The thread-local
     /// is RAM-only and is not part of any Account/Entity root.
@@ -352,6 +368,129 @@ impl ResidentConsensusEngine {
 
     pub fn account_count(&self) -> usize {
         self.forest.len()
+    }
+
+    /// Attach freshly certified local dispute witnesses to the worker-owned
+    /// Account replicas. Hanko bytes are envelope evidence, so every leaf and
+    /// the aggregate Account root must remain byte-identical.
+    pub fn attach_local_dispute_hankos(
+        &mut self,
+        account_ids: &[AccountId],
+        witnesses: BTreeMap<[u8; 32], Vec<u8>>,
+    ) -> Result<(), BatchError> {
+        if witnesses.is_empty() {
+            return Ok(());
+        }
+        let before_root = self.forest.accounts_root();
+        let expected = witnesses.keys().copied().collect::<BTreeSet<_>>();
+        let witnesses = Arc::new(witnesses);
+        let rows = self.forest.apply_outbound_continue(
+            account_ids.iter().copied().map(|account_id| (account_id, ())).collect(),
+            move |account_id, account, ()| {
+                let mut account = account.ok_or(BatchError::CandidateAccountNotFound(account_id))?;
+                let hashes = account.unsigned_local_dispute_hashes();
+                if hashes.is_empty() {
+                    return Ok(ResidentAccountAction::Keep(None));
+                }
+                let before_leaf = leaf_root(account_id, &account)?;
+                for hash in &hashes {
+                    let hanko = match witnesses.get(hash).cloned() {
+                        Some(hanko) => hanko,
+                        None => {
+                            let snapshot = account.consensus_snapshot();
+                            let current = snapshot.dispute.as_ref().is_some_and(|draft| draft.hash == *hash);
+                            let last_ack = snapshot
+                                .last_outbound_ack
+                                .as_ref()
+                                .and_then(|ack| ack.dispute.as_ref())
+                                .is_some_and(|draft| draft.hash == *hash);
+                            let proposal = snapshot
+                                .pending
+                                .as_ref()
+                                .and_then(|pending| pending.proposal_dispute.as_ref())
+                                .is_some_and(|draft| draft.hash == *hash);
+                            let bundled_ack = snapshot
+                                .pending
+                                .as_ref()
+                                .and_then(|pending| pending.bundled_ack.as_ref())
+                                .and_then(|ack| ack.dispute.as_ref())
+                                .is_some_and(|draft| draft.hash == *hash);
+                            return Err(BatchError::Signing(format!(
+                                "LOCAL_DISPUTE_HANKO_MISSING:account={}:hash={}:available={}:current={current}:lastAck={last_ack}:proposal={proposal}:bundledAck={bundled_ack}",
+                                root_hex(*account_id.as_bytes()),
+                                root_hex(*hash),
+                                witnesses.len(),
+                            )));
+                        }
+                    };
+                    account
+                        .attach_local_dispute_hanko(*hash, hanko)
+                        .map_err(|error| state_error(account_id, &error))?;
+                }
+                let after_leaf = leaf_root(account_id, &account)?;
+                if after_leaf != before_leaf {
+                    return Err(BatchError::CheckpointAccountLeaf {
+                        account_id,
+                        actual: root_hex(after_leaf),
+                        expected: root_hex(before_leaf),
+                    });
+                }
+                Ok(ResidentAccountAction::ReplaceEnvelope {
+                    value: account,
+                    expected_digest: after_leaf,
+                    result: Some(hashes),
+                })
+            },
+        )?;
+        let attached = rows
+            .rows
+            .into_iter()
+            .filter_map(|(_, _, hashes)| hashes)
+            .flatten()
+            .collect::<BTreeSet<_>>();
+        if attached != expected {
+            return Err(BatchError::Signing(
+                "LOCAL_DISPUTE_HANKO_UNUSED".to_string(),
+            ));
+        }
+        let after_root = self.forest.accounts_root();
+        if after_root != before_root {
+            return Err(BatchError::CheckpointRoot {
+                actual: root_hex(after_root),
+                expected: root_hex(before_root),
+            });
+        }
+        Ok(())
+    }
+
+    /// Export the exact dirty Account rows only after the parent Entity has
+    /// attached every fresh witness to the resident candidate.
+    pub fn export_checkpoint(&mut self) -> Result<AccountsCheckpoint, BatchError> {
+        let signer_digest = self.checkpoint_signer_digest()?;
+        let account_count = self.forest.len();
+        let signer_id = Arc::clone(&self.signer_id);
+        let exported =
+            self.forest
+                .export_checkpoint_dirty(move |account_id, account, previous| {
+                    let leaf = leaf_root(account_id, account)?;
+                    account_rows(account_id, account, previous, leaf, &signer_id)
+                        .map_err(|error| state_error(account_id, &error))
+                })?;
+        Ok(AccountsCheckpoint {
+            token: CheckpointToken {
+                base_revision: exported.base_revision,
+                revision: exported.revision,
+                accounts_root: exported.accounts_root,
+                signer_digest,
+                account_count,
+            },
+            accounts: exported
+                .rows
+                .into_iter()
+                .map(|(_, account)| account)
+                .collect(),
+            removed: exported.removed,
+        })
     }
 
     pub fn account_shard_metrics(&self) -> Vec<crate::AccountShardMetric> {
@@ -527,6 +666,7 @@ impl ResidentConsensusEngine {
                 for (row_index, row) in work.rows.into_iter().enumerate() {
                     let authority = row.certified_board_authority.certified()?;
                     let local_authority = row.local_certified_board_authority.certified()?;
+                    let pure_ack = matches!(&row.input.kind, crate::AccountInputKind::Ack(_));
                     let (verdict, row_changed) = apply_one(
                         account_id,
                         &mut account,
@@ -553,10 +693,12 @@ impl ResidentConsensusEngine {
                         );
                     }
                     changed |= row_changed;
+                    let response = account_response_directive(&account, pure_ack, &verdict);
                     applied.push(AccountInputResult {
                         operation_index: row.operation_index,
                         account_id,
                         verdict,
+                        response,
                     });
                 }
                 let leaf = leaf_root(account_id, &account)?;
@@ -611,7 +753,12 @@ impl ResidentConsensusEngine {
             }
         }
         result.applied.sort_by_key(|row| row.operation_index);
-        if identity_is_new && created_any {
+        // An exact empty checkpoint still belongs to one Entity authority.
+        // Its empty inbound half has no Account row from which to retain the
+        // derived signer, but the matching checkpoint-only outbound half must
+        // be able to commit the empty forest. Non-empty forests still require
+        // a real created Account before admitting a new owner binding.
+        if identity_is_new && (created_any || self.forest.len() == 0) {
             self.identities.insert(owner, identity);
         }
         self.inbound_proposable = Some(inbound_proposable);
@@ -718,31 +865,7 @@ impl ResidentConsensusEngine {
                 .collect::<Result<Vec<_>, _>>()?
         };
         let checkpoint = if request.checkpoint_due {
-            let signer_digest = self.checkpoint_signer_digest()?;
-            let account_count = self.forest.len();
-            let signer_id = Arc::clone(&self.signer_id);
-            let exported =
-                self.forest
-                    .export_checkpoint_dirty(move |account_id, account, previous| {
-                        let leaf = leaf_root(account_id, account)?;
-                        account_rows(account_id, account, previous, leaf, &signer_id)
-                            .map_err(|error| state_error(account_id, &error))
-                    })?;
-            Some(AccountsCheckpoint {
-                token: CheckpointToken {
-                    base_revision: exported.base_revision,
-                    revision: exported.revision,
-                    accounts_root: exported.accounts_root,
-                    signer_digest,
-                    account_count,
-                },
-                accounts: exported
-                    .rows
-                    .into_iter()
-                    .map(|(_, account)| account)
-                    .collect(),
-                removed: exported.removed,
-            })
+            Some(self.export_checkpoint()?)
         } else {
             None
         };
@@ -1104,11 +1227,6 @@ fn apply_outbound_work(
     } else {
         None
     };
-    // This runs after proposal construction. A draft created by inbound is
-    // therefore not reusable inside the same Entity candidate, while the
-    // candidate returned to the parent remembers that its manifest must
-    // certify the draft. Root-based rollback discards this bit with the value.
-    changed |= account.certify_local_dispute_after_outbound();
     let result = OutboundOutcome {
         proposal,
         proposable: proposable(&account)?,

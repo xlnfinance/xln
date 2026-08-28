@@ -15,6 +15,17 @@ fn entity_id_text(entity_id: [u8; 32]) -> String {
     output
 }
 
+pub(super) fn empty_entity_input(entity_id: [u8; 32], signer_id: &str) -> Value {
+    Value::Object(Map::from_iter([
+        (
+            "entityId".to_string(),
+            Value::String(entity_id_text(entity_id)),
+        ),
+        ("signerId".to_string(), Value::String(signer_id.to_string())),
+        ("entityTxs".to_string(), Value::Array(Vec::new())),
+    ]))
+}
+
 fn job_kind(kind: ScheduledWakeJobKind) -> &'static str {
     match kind {
         ScheduledWakeJobKind::Hook => "hook",

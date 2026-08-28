@@ -253,13 +253,13 @@ fn entity_input_is_decoded_into_one_consistent_owned_projection() -> Result<(), 
     assert_eq!(input.signer_id(), SIGNER);
     assert_eq!(input.account_input_count(), 1);
     assert!(input.canonical_wire_bytes() > 0);
-    let (retained, projected, rows, local_financial_txs) = input.into_parts();
+    let (retained, pending) = input.into_parts();
     assert_eq!(retained, canonical);
-    assert_eq!(projected.len(), 1);
-    assert_eq!(projected[0].kind, EntityTxKind::AccountInput);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].operation_index, 0);
-    assert!(local_financial_txs.is_empty());
+    assert!(matches!(
+        pending.as_slice(),
+        [super::types::EntityPendingWork::Account { projected, row }]
+            if projected.kind == EntityTxKind::AccountInput && row.operation_index == 0
+    ));
     Ok(())
 }
 
@@ -298,14 +298,12 @@ fn direct_payment_is_decoded_into_the_typed_local_financial_lane() -> Result<(),
         }]
     });
     let input = RuntimeEntityInput::decode(canonical)?;
-    let (_, projected, account_rows, execution_steps) = input.into_parts();
+    let (_, pending) = input.into_parts();
     // Local financial requests are not themselves Entity-frame transactions;
     // the Runtime signs their canonical entityCommand wrapper during apply.
-    assert!(projected.is_empty());
-    assert!(account_rows.is_empty());
     assert!(matches!(
-        execution_steps.as_slice(),
-        [super::types::EntityExecutionStep::LocalBatch { native, .. }]
+        pending.as_slice(),
+        [super::types::EntityPendingWork::LocalBatch { native, .. }]
             if matches!(native.as_slice(), [
                 xln_rscore_entity_kernel::LocalEntityFinancialTx::DirectPayment(tx)
             ]
@@ -316,18 +314,31 @@ fn direct_payment_is_decoded_into_the_typed_local_financial_lane() -> Result<(),
 }
 
 #[test]
-fn recognized_but_unconnected_local_entity_tx_is_loud() {
+fn extend_credit_is_decoded_into_the_typed_local_financial_lane() -> Result<(), RuntimeMachineError>
+{
+    let peer = format!("0x{}", "ff".repeat(32));
     let canonical = serde_json::json!({
         "entityId": hex32(owner_bytes()),
         "signerId": SIGNER,
-        "entityTxs": [{"type":"extendCredit","data":{}}]
+        "entityTxs": [{
+            "type":"extendCredit",
+            "data":{
+                "counterpartyEntityId":peer,
+                "tokenId":2,
+                "amount":{"__xlnType":"BigInt","value":"7"}
+            }
+        }]
     });
+    let input = RuntimeEntityInput::decode(canonical)?;
+    let (_, pending) = input.into_parts();
     assert!(matches!(
-        RuntimeEntityInput::decode(canonical),
-        Err(RuntimeMachineError::EntityTxExecutionUnsupported(
-            "extendCredit"
-        ))
+        pending.as_slice(),
+        [super::types::EntityPendingWork::LocalBatch { native, .. }]
+            if matches!(native.as_slice(), [
+                xln_rscore_entity_kernel::LocalEntityFinancialTx::ExtendCredit(tx)
+            ] if tx.amount == 7.into() && tx.token_id.get() == 2)
     ));
+    Ok(())
 }
 
 #[test]
@@ -473,6 +484,79 @@ fn no_work_does_not_advance_runtime() -> Result<(), RuntimeMachineError> {
     assert!(result.applied_input.is_none());
     assert!(result.applied_frame.is_none());
     assert!(result.outputs.local_entity_outputs.is_empty());
+    Ok(())
+}
+
+#[test]
+fn entity_wire_tail_replays_from_full_input_and_blocks_checkpoint_until_drain()
+-> Result<(), RuntimeMachineError> {
+    let limits = RuntimeLimits {
+        checkpoint_period_frames: 1,
+        ..RuntimeLimits::hlt()
+    };
+    let large = || {
+        CanonicalEntityTx::from_frame_projection(
+            EntityTxKind::DirectPayment,
+            CanonicalValue::String("x".repeat(3_000_000)),
+        )
+        .expect("large canonical Entity tx")
+    };
+    let accepted = serde_json::json!({"accepted": "complete Runtime EntityInput"});
+    let input =
+        RuntimeEntityInput::fixture_with_entity_txs(accepted.clone(), vec![large(), large()]);
+    let first_input = frame(200, vec![input]);
+    let second_input = frame(300, Vec::new());
+
+    let run = |first_input: RuntimeInput, second_input: RuntimeInput| {
+        let first = apply_runtime(replica(limits)?, first_input)?;
+        assert_eq!(
+            first
+                .applied_frame
+                .as_ref()
+                .map(|frame| &frame.entity_inputs),
+            Some(&vec![accepted.clone()])
+        );
+        assert_eq!(
+            first
+                .applied_input
+                .as_ref()
+                .map(|input| (input.entity_txs_selected, input.entity_txs_pending,)),
+            Some((1, 1))
+        );
+        assert!(first.outputs.checkpoint.is_none());
+        assert_eq!(first.replica.entity_mempool.len(), 1);
+        let first_hash = first
+            .certified_entity_frame()
+            .map(|frame| frame.hash.clone())
+            .expect("first certified frame");
+
+        let second = apply_runtime(first.replica, second_input)?;
+        assert_eq!(
+            second
+                .applied_input
+                .as_ref()
+                .map(|input| (input.entity_txs_selected, input.entity_txs_pending,)),
+            Some((1, 0))
+        );
+        assert_eq!(second.replica.entity_mempool.len(), 0);
+        assert!(second.outputs.checkpoint.is_some());
+        assert_eq!(
+            second
+                .applied_frame
+                .as_ref()
+                .map(|frame| frame.entity_inputs.len()),
+            Some(1),
+        );
+        let second_hash = second
+            .certified_entity_frame()
+            .map(|frame| frame.hash.clone())
+            .expect("second certified frame");
+        Ok::<_, RuntimeMachineError>((first_hash, second_hash))
+    };
+
+    let live = run(first_input.clone(), second_input.clone())?;
+    let replay = run(first_input, second_input)?;
+    assert_eq!(live, replay);
     Ok(())
 }
 

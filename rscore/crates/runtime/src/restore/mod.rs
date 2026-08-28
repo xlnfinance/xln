@@ -64,10 +64,10 @@ pub use concrete::{
     ConcreteRestoreError, DecodedRuntimeCheckpoint, DecodedRuntimeWalFrame, RestoredRuntime,
     replay_decoded_runtime_wal, restore_decoded_runtime_checkpoint,
 };
-pub(crate) use concrete_source::context_refs;
+pub(crate) use concrete_source::VerifiedWalFrame;
 pub use concrete_source::{
     ConcreteCheckpointSource, ConcreteRestoreSourceError, ConcreteWalSource, VerifiedEntityContext,
-    verify_checkpoint_source, verify_wal_source,
+    verify_checkpoint_source,
 };
 pub use decode_checkpoint::{
     ConcreteCheckpointConfiguration, ConcreteCheckpointDecodeError, MigrationOrigin,

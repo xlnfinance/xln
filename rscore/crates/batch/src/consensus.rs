@@ -118,6 +118,8 @@ pub enum AccountInputVerdict {
         /// the parent Entity builds this Runtime frame's signature manifest.
         ack_signature: [u8; 65],
         ack_hanko: Vec<u8>,
+        ack_dispute_signature: Option<[u8; 65]>,
+        ack_dispute_hanko: Option<Vec<u8>>,
         outputs: Vec<AccountOutput>,
         /// Exactly what the committed transactions said they did. The Entity
         /// frame hashes these strings, so a publisher that re-derived them
@@ -196,6 +198,24 @@ pub struct AccountInputResult {
     pub operation_index: u64,
     pub account_id: AccountId,
     pub verdict: AccountInputVerdict,
+    /// Exact transient Entity flush instruction produced by this Account
+    /// transition. It is deliberately not encoded as result evidence or
+    /// stored: the parent either bundles these bytes into a same-round frame
+    /// or publishes them as the Account response after Runtime WAL commit.
+    pub response: AccountResponseDirective,
+}
+
+#[derive(Clone, Debug)]
+pub enum AccountResponseDirective {
+    /// This input neither creates nor cancels an earlier response in the same
+    /// Entity batch. Stale and rejected traffic must not erase a prior ACK.
+    Preserve,
+    /// A pure ACK committed our pending frame, so an earlier forced response
+    /// for this Account in the same Entity batch is no longer current.
+    Clear,
+    /// Exact Account-authored response bytes. The Entity may only attach a
+    /// new proposal around this ACK; it must never reconstruct the response.
+    Force(AccountPeerInput),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -247,6 +267,10 @@ pub struct ProposedRow {
     /// manifest. It is ephemeral and never changes the Account wire shape.
     pub signature: [u8; 65],
     pub hanko: Vec<u8>,
+    /// Ephemeral worker-authored dispute witness for the parent Entity
+    /// manifest. It never enters the Account replica or durable leaf.
+    pub dispute_signature: Option<[u8; 65]>,
+    pub dispute_hanko: Option<Vec<u8>>,
     /// The recovery proof the proposal travels with, when it carries one.
     pub dispute: Option<xln_rscore_engine::DisputeDraft>,
     /// What the proposer publishes at signing time, before any ack exists.
@@ -353,29 +377,36 @@ fn dropped_rows(
         .collect()
 }
 
-fn outgoing_account_input(account: &AccountConsensus, proposed: &ProposedRow) -> AccountPeerInput {
+fn outgoing_envelope(account: &AccountConsensus) -> AccountPeerEnvelope {
     let replica = account.replica();
-    let envelope = AccountPeerEnvelope {
+    AccountPeerEnvelope {
         from_entity_id: *replica.owner().as_bytes(),
         to_entity_id: *replica.counterparty().as_bytes(),
         domain: replica.state().identity().domain().clone(),
         dispute_config: replica.state().dispute_config(),
         watch_seed: Some(replica.state().identity().watch_seed().clone()),
-    };
+    }
+}
+
+fn dispute_input(
+    draft: &xln_rscore_engine::DisputeDraft,
+) -> xln_rscore_engine::CounterpartyDispute {
+    xln_rscore_engine::CounterpartyDispute {
+        hanko: draft.hanko.clone(),
+        hash: draft.hash,
+        proof_body_hash: draft.proof_body_hash,
+        nonce: draft.nonce,
+        proposer_is_left: draft.proposer_is_left,
+    }
+}
+
+fn outgoing_account_input(account: &AccountConsensus, proposed: &ProposedRow) -> AccountPeerInput {
+    let envelope = outgoing_envelope(account);
     let frame = IncomingFrame {
         frame: proposed.frame.clone(),
         state_hash: proposed.state_hash,
         frame_hanko: Some(proposed.hanko.clone()),
-        dispute: proposed
-            .dispute
-            .as_ref()
-            .map(|draft| xln_rscore_engine::CounterpartyDispute {
-                hanko: None,
-                hash: draft.hash,
-                proof_body_hash: draft.proof_body_hash,
-                nonce: draft.nonce,
-                proposer_is_left: draft.proposer_is_left,
-            }),
+        dispute: proposed.dispute.as_ref().map(dispute_input),
     };
     let kind = match &proposed.bundled_ack {
         Some(ack) => AccountInputKind::FrameAck {
@@ -383,22 +414,55 @@ fn outgoing_account_input(account: &AccountConsensus, proposed: &ProposedRow) ->
                 height: ack.height,
                 frame_hash: ack.frame_hash,
                 frame_hanko: Some(ack.frame_hanko.clone()),
-                dispute: ack
-                    .dispute
-                    .as_ref()
-                    .map(|draft| xln_rscore_engine::CounterpartyDispute {
-                        hanko: None,
-                        hash: draft.hash,
-                        proof_body_hash: draft.proof_body_hash,
-                        nonce: draft.nonce,
-                        proposer_is_left: draft.proposer_is_left,
-                    }),
+                dispute: ack.dispute.as_ref().map(dispute_input),
             },
             frame: Box::new(frame),
         },
         None => AccountInputKind::Frame(Box::new(frame)),
     };
     AccountPeerInput { envelope, kind }
+}
+
+fn response_ack(verdict: &AccountInputVerdict) -> Option<IncomingAck> {
+    match verdict {
+        AccountInputVerdict::FrameCommitted {
+            height,
+            state_hash,
+            ack_hanko,
+            ack_dispute,
+            ..
+        }
+        | AccountInputVerdict::FrameDuplicate {
+            height,
+            state_hash,
+            ack_hanko,
+            ack_dispute,
+        } => Some(IncomingAck {
+            height: *height,
+            frame_hash: *state_hash,
+            frame_hanko: Some(ack_hanko.clone()),
+            dispute: ack_dispute.as_ref().map(dispute_input),
+        }),
+        AccountInputVerdict::FrameAckApplied { frame, .. } => response_ack(frame),
+        _ => None,
+    }
+}
+
+pub(crate) fn account_response_directive(
+    account: &AccountConsensus,
+    pure_ack: bool,
+    verdict: &AccountInputVerdict,
+) -> AccountResponseDirective {
+    if let Some(ack) = response_ack(verdict) {
+        return AccountResponseDirective::Force(AccountPeerInput {
+            envelope: outgoing_envelope(account),
+            kind: AccountInputKind::Ack(ack),
+        });
+    }
+    if pure_ack && matches!(verdict, AccountInputVerdict::AckCommitted { .. }) {
+        return AccountResponseDirective::Clear;
+    }
+    AccountResponseDirective::Preserve
 }
 
 pub(crate) fn proposal_row(
@@ -422,6 +486,8 @@ pub(crate) fn proposal_row(
                 state_hash: proposed.state_hash,
                 signature: proposed.signature,
                 hanko: proposed.hanko,
+                dispute_signature: proposed.dispute_signature,
+                dispute_hanko: proposed.dispute_hanko,
                 dispute: proposed.dispute,
                 events: proposed.events,
                 outputs: proposed.outputs,
@@ -559,6 +625,8 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             state_hash,
             ack_signature,
             ack_hanko,
+            ack_dispute_signature,
+            ack_dispute_hanko,
             outputs,
             events,
             rolled_back,
@@ -569,6 +637,8 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             state_hash,
             ack_signature,
             ack_hanko,
+            ack_dispute_signature,
+            ack_dispute_hanko,
             outputs,
             events,
             rolled_back,
@@ -1262,4 +1332,3 @@ fn hex_of(bytes: &[u8]) -> String {
     }
     output
 }
-

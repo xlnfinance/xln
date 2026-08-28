@@ -31,9 +31,9 @@ pub use checkpoint_wire::{
 };
 pub use consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
-    AccountInputRow, AccountInputVerdict, AccountPeerInput, CertifiedBoardAuthorityResolver,
-    DroppedRow, FailedHtlcLockRow, PeerBoardAuthority, ProposalRow, ProposedRow,
-    UpstreamHtlcResolutionRow,
+    AccountInputRow, AccountInputVerdict, AccountPeerInput, AccountResponseDirective,
+    CertifiedBoardAuthorityResolver, DroppedRow, FailedHtlcLockRow, PeerBoardAuthority,
+    ProposalRow, ProposedRow, UpstreamHtlcResolutionRow,
 };
 pub use error::BatchError;
 pub use parallel::{AccountPhaseKind, AccountPhaseMetric, AccountShardMetric};

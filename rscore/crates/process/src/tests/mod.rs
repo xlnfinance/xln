@@ -102,6 +102,69 @@ fn account_outbound_decodes_the_exact_failed_htlc_route_closure() {
 }
 
 #[test]
+fn authority_empty_forest_exports_an_exact_checkpoint() {
+    use crate::test_fixture::{authority_entity, hello_authority};
+
+    const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+    let tuple = |fields| AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields));
+    let owner = authority_entity(SEED, "1");
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello_authority(0, SEED, "1")).envelope);
+    let loaded = session
+        .handle(request(
+            1,
+            OpTag::BootstrapAccounts,
+            vec![
+                AbiValue::Text(crate::PROCESS_PROFILE.into()),
+                AbiValue::Integer(0),
+                tuple(Vec::new()),
+                AbiValue::Bool(true),
+            ],
+        ))
+        .envelope;
+    assert_ok(loaded.clone());
+    let accounts_root = body_bytes(&loaded, 1);
+    let inbound = session
+        .handle(request(
+            2,
+            OpTag::AccountInbound,
+            vec![
+                AbiValue::Bytes(owner.to_vec()),
+                AbiValue::Bytes(accounts_root),
+                tuple(vec![AbiValue::Integer(1), AbiValue::Integer(1)]),
+                tuple(Vec::new()),
+                AbiValue::Bool(false),
+            ],
+        ))
+        .envelope;
+    assert_ok(inbound);
+    let outbound = session
+        .handle(request(
+            3,
+            OpTag::AccountOutbound,
+            vec![
+                AbiValue::Bytes(owner.to_vec()),
+                AbiValue::Integer(1),
+                AbiValue::Integer(1),
+                tuple(Vec::new()),
+                tuple(Vec::new()),
+                tuple(Vec::new()),
+                tuple(Vec::new()),
+                tuple(Vec::new()),
+                AbiValue::Bool(false),
+                AbiValue::Bool(true),
+            ],
+        ))
+        .envelope;
+    assert_ok(outbound.clone());
+    let fields = body_fields(&outbound);
+    let manifest = exact_tuple(&fields[8], 4, "empty checkpoint manifest");
+    let restore_token = exact_tuple(&manifest[1], 5, "empty checkpoint restore token");
+    assert_eq!(restore_token[4], AbiValue::Integer(0));
+    exact_tuple(&manifest[2], 0, "empty checkpoint rows");
+}
+
+#[test]
 fn authority_process_uses_only_resident_inbound_outbound_and_piggybacks_checkpoint() {
     use crate::test_fixture::{authority_entity, authority_genesis_account, hello_authority};
 

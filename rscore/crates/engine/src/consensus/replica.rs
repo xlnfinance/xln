@@ -108,10 +108,34 @@ pub struct CounterpartyDispute {
 /// (core/types/account.ts), replaced together by `replaceLocalDisputeDraft`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisputeDraft {
+    /// Exact local certificate once the parent Entity commits this proof.
+    /// Absent only inside the in-flight Entity candidate before certification.
+    /// The Account leaf deliberately excludes these bytes.
+    pub hanko: Option<Vec<u8>>,
     pub hash: [u8; 32],
     pub proof_body_hash: [u8; 32],
     pub nonce: u64,
     pub proposer_is_left: bool,
+}
+
+fn attach_matching_dispute(
+    slot: &mut Option<DisputeDraft>,
+    hash: [u8; 32],
+    hanko: &[u8],
+) -> Result<bool, StateError> {
+    let Some(draft) = slot.as_mut().filter(|draft| draft.hash == hash) else {
+        return Ok(false);
+    };
+    match draft.hanko.as_deref() {
+        Some(existing) if existing == hanko => Ok(false),
+        Some(_) => Err(StateError::Signing(
+            "LOCAL_DISPUTE_HANKO_CONFLICT".to_string(),
+        )),
+        None => {
+            draft.hanko = Some(hanko.to_vec());
+            Ok(true)
+        }
+    }
 }
 
 /// What a lost collision put back on the queue.
@@ -193,14 +217,6 @@ pub struct AccountConsensus {
     /// nonce it will spend. Both are committed in the account leaf, and a
     /// proposal that moves the state moves them with it.
     dispute: Option<DisputeDraft>,
-    /// Whether the parent Entity has had a chance to certify `dispute`.
-    ///
-    /// A draft created during inbound must not be reused by a proposal in the
-    /// same Entity candidate: its Hanko does not exist yet.  The resident
-    /// coordinator marks it certified only after finishing the outbound visit.
-    /// That bit lives inside the candidate selected by the next parent root,
-    /// so rolling the candidate back also rolls this authority fact back.
-    local_dispute_certified: bool,
     next_proof_nonce: u64,
     /// The counterparty's proof, and the digest of their signature over it —
     /// the leaf commits the digest, not the kilobyte of hex.
@@ -226,7 +242,6 @@ impl AccountConsensus {
             counterparty_frame_hanko_digest: None,
             last_outbound_ack: None,
             dispute: None,
-            local_dispute_certified: false,
             // TypeScript's canonical H=0 Account genesis starts at nonce 1.
             // Nonce 0 is not a usable proof nonce: proposal/ACK construction
             // already clamps against jNonce + 1, but the Entity account leaf
@@ -517,13 +532,11 @@ impl AccountConsensus {
         if !changed {
             // Nothing new to sign; a proof already certified for exactly this
             // body travels with the acknowledgement instead.
-            return Ok(self
-                .dispute
-                .clone()
-                .filter(|_| self.local_dispute_certified));
+            return Ok(self.dispute.clone().filter(|draft| draft.hanko.is_some()));
         }
         let identity = self.replica.state().identity();
         let draft = DisputeDraft {
+            hanko: None,
             hash: crate::dispute::dispute_proof_hash(
                 identity.domain().chain_id(),
                 identity.domain().depository_address().bytes(),
@@ -543,7 +556,6 @@ impl AccountConsensus {
             proposer_is_left,
         };
         self.dispute = Some(draft.clone());
-        self.local_dispute_certified = false;
         self.replica
             .forget_envelope_field("currentDisputeProofHanko");
         self.next_proof_nonce = nonce + 1;
@@ -673,6 +685,38 @@ impl AccountConsensus {
         self.dispute.as_ref()
     }
 
+    /// Fresh local proofs retained anywhere in the Account envelope. The
+    /// list is tiny (current, pending proposal, and at most two ACK copies)
+    /// and preserves first occurrence without a global scan or index.
+    pub fn unsigned_local_dispute_hashes(&self) -> Vec<[u8; 32]> {
+        let mut hashes = Vec::new();
+        let drafts = self
+            .dispute
+            .iter()
+            .chain(
+                self.last_outbound_ack
+                    .iter()
+                    .filter_map(|ack| ack.dispute.as_ref()),
+            )
+            .chain(
+                self.pending
+                    .iter()
+                    .filter_map(|pending| pending.proposal_dispute.as_ref()),
+            )
+            .chain(self.pending.iter().filter_map(|pending| {
+                pending
+                    .bundled_ack
+                    .as_ref()
+                    .and_then(|ack| ack.dispute.as_ref())
+            }));
+        for draft in drafts {
+            if draft.hanko.is_none() && !hashes.contains(&draft.hash) {
+                hashes.push(draft.hash);
+            }
+        }
+        hashes
+    }
+
     pub const fn counterparty_dispute(&self) -> Option<&CounterpartyDispute> {
         self.counterparty_dispute.as_ref()
     }
@@ -711,7 +755,7 @@ impl AccountConsensus {
             // Parity target: the second branch of `resolveDisputeHanko`
             // (core/account/consensus/proposal/finalize.ts).
             return Ok(self.dispute.clone().filter(|draft| {
-                self.local_dispute_certified
+                draft.hanko.is_some()
                     && draft.proof_body_hash == proof_body_hash
                     && draft.proposer_is_left == proposer_is_left
                     && draft.nonce > j_nonce
@@ -720,6 +764,7 @@ impl AccountConsensus {
         let nonce = self.next_proof_nonce.max(j_nonce + 1);
         let identity = candidate.state().identity();
         self.dispute = Some(DisputeDraft {
+            hanko: None,
             hash: crate::dispute::dispute_proof_hash(
                 identity.domain().chain_id(),
                 identity.domain().depository_address().bytes(),
@@ -738,7 +783,6 @@ impl AccountConsensus {
             nonce,
             proposer_is_left,
         });
-        self.local_dispute_certified = false;
         // A Hanko certifies one exact hash, so the witness for the proof this
         // replaces does not carry over.
         //
@@ -750,18 +794,38 @@ impl AccountConsensus {
         Ok(self.dispute.clone())
     }
 
-    /// Seal the local recovery draft at the parent Account boundary.
-    ///
-    /// The caller invokes this after every outbound visit, never before the
-    /// proposal logic in that visit.  An accepted Entity root keeps this bit;
-    /// an unselected Account candidate is discarded with it.  No Hanko bytes
-    /// are fabricated here—the Entity manifest remains their sole authority.
-    pub fn certify_local_dispute_after_outbound(&mut self) -> bool {
-        if self.dispute.is_none() || self.local_dispute_certified {
-            return false;
+    /// Install the exact Hanko produced by the parent Entity manifest.
+    /// Every retained copy of the same outbound proof is updated so later
+    /// resends never re-sign historical evidence.
+    pub fn attach_local_dispute_hanko(
+        &mut self,
+        hash: [u8; 32],
+        hanko: Vec<u8>,
+    ) -> Result<bool, StateError> {
+        if hanko.is_empty() {
+            return Err(StateError::Signing("LOCAL_DISPUTE_HANKO_EMPTY".to_string()));
         }
-        self.local_dispute_certified = true;
-        true
+        crate::consensus::signing::verify_frame_hanko(
+            &hanko,
+            &hash,
+            self.replica.owner().as_bytes(),
+        )?;
+        let mut changed = attach_matching_dispute(&mut self.dispute, hash, &hanko)?;
+        if let Some(ack) = &mut self.last_outbound_ack {
+            changed |= attach_matching_dispute(&mut ack.dispute, hash, &hanko)?;
+        }
+        if let Some(pending) = &mut self.pending {
+            changed |= attach_matching_dispute(&mut pending.proposal_dispute, hash, &hanko)?;
+            if let Some(ack) = &mut pending.bundled_ack {
+                changed |= attach_matching_dispute(&mut ack.dispute, hash, &hanko)?;
+            }
+        }
+        if !changed {
+            return Err(StateError::Signing(
+                "LOCAL_DISPUTE_HANKO_UNREFERENCED".to_string(),
+            ));
+        }
+        Ok(changed)
     }
 
     pub(crate) const fn last_rollback_frame_hash(&self) -> Option<&[u8; 32]> {
@@ -866,11 +930,40 @@ impl AccountConsensus {
             counterparty_dispute,
             local_committed_frame_hanko,
         } = snapshot;
-        // Exact checkpoints are installed only after the parent WAL made the
-        // corresponding Entity candidate durable. A stored local draft is
-        // therefore certified; an uncommitted candidate never reaches this
-        // restore boundary.
-        let local_dispute_certified = dispute.is_some();
+        // Exact checkpoints are installed only after parent Entity
+        // certification. An unsigned local draft at this boundary is corrupt,
+        // not something restore may silently re-sign.
+        for draft in dispute
+            .iter()
+            .chain(
+                last_outbound_ack
+                    .iter()
+                    .filter_map(|ack| ack.dispute.as_ref()),
+            )
+            .chain(
+                pending
+                    .iter()
+                    .filter_map(|pending| pending.proposal_dispute.as_ref()),
+            )
+            .chain(pending.iter().filter_map(|pending| {
+                pending
+                    .bundled_ack
+                    .as_ref()
+                    .and_then(|ack| ack.dispute.as_ref())
+            }))
+        {
+            let hanko = draft.hanko.as_deref().ok_or_else(|| {
+                StateError::CheckpointRestore("LOCAL_DISPUTE_HANKO_MISSING".to_string())
+            })?;
+            crate::consensus::signing::verify_frame_hanko(
+                hanko,
+                &draft.hash,
+                replica.owner().as_bytes(),
+            )
+            .map_err(|error| {
+                StateError::CheckpointRestore(format!("LOCAL_DISPUTE_HANKO_INVALID:{error}"))
+            })?;
+        }
         if let Some(ack) = last_outbound_ack.as_ref() {
             verify_restored_outbound_ack(&replica, ack)?;
         }
@@ -937,7 +1030,6 @@ impl AccountConsensus {
             counterparty_frame_hanko,
             last_outbound_ack,
             dispute,
-            local_dispute_certified,
             next_proof_nonce,
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,

@@ -53,8 +53,16 @@ pub struct ProposeCancelSwapEntityTx {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtendCreditEntityTx {
+    pub counterparty_entity_id: String,
+    pub token_id: TokenId,
+    pub amount: BigInt,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocalEntityFinancialTx {
     DirectPayment(DirectPaymentEntityTx),
+    ExtendCredit(ExtendCreditEntityTx),
     HtlcPayment(HtlcPaymentEntityTx),
     PlaceSwapOffer(PlaceSwapOfferEntityTx),
     ProposeCancelSwap(ProposeCancelSwapEntityTx),

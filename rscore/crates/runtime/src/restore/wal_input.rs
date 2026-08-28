@@ -8,7 +8,7 @@ use crate::{
     canonical_value_from_tagged_json, decode_entity_deterministic_context,
 };
 
-use super::{ConcreteWalSource, DecodedRuntimeWalFrame, verify_wal_source};
+use super::{ConcreteWalSource, DecodedRuntimeWalFrame};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -185,7 +185,7 @@ pub fn decode_concrete_runtime_wal_frame(
     finalized_j_height: u64,
     hub_rebalance_has_pending_work: bool,
 ) -> Result<DecodedRuntimeWalFrame, ConcreteWalDecodeError> {
-    let frame = verify_wal_source(source).map_err(|error| invalid(error.to_string()))?;
+    let frame = source.frame();
     let height = safe_unsigned(field(&frame, "height", "frame")?, "frame.height")?;
     let timestamp = safe_unsigned(field(&frame, "timestamp", "frame")?, "frame.timestamp")?;
     let runtime_input = field(&frame, "runtimeInput", "frame")?;
@@ -224,15 +224,16 @@ pub fn decode_concrete_runtime_wal_frame(
     })
     .collect::<Result<Vec<_>, _>>()?;
     let entity_context_required = !entity_inputs.is_empty();
-    if source.entity_contexts.len() > 1
-        || (entity_context_required && source.entity_contexts.len() != 1)
+    if source.entity_contexts().len() > 1
+        || (entity_context_required && source.entity_contexts().len() != 1)
     {
         return Err(invalid(format!(
             "ENTITY_CONTEXT_COUNT:{height}:{}",
-            source.entity_contexts.len()
+            source.entity_contexts().len()
         )));
     }
-    let (entity_context, canonical_entity_context) = match source.entity_contexts.values().next() {
+    let (entity_context, canonical_entity_context) = match source.entity_contexts().values().next()
+    {
         Some(context) => (
             decode_entity_deterministic_context(context_policy, &context.value)
                 .map_err(|error| invalid(format!("ENTITY_CONTEXT:{height}:{error}")))?,
@@ -244,8 +245,7 @@ pub fn decode_concrete_runtime_wal_frame(
             xln_rscore_protocol::CanonicalValue::Object(Vec::new()),
         ),
     };
-    let validated = crate::storage::native::validate_runtime_frame(&source.frame_bytes)
-        .map_err(|error| invalid(error.to_string()))?;
+    let validated = source.validated();
     Ok(DecodedRuntimeWalFrame {
         height,
         timestamp,

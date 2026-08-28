@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::persistent_node::{
     Node, NodeRef, delete_node, ensure_root_branch, make_branch, make_leaf, node_hash, node_path,
-    path_slots, put_node, validate_child_edge,
+    path_slots, put_node, replace_leaf_value, validate_child_edge,
 };
 use crate::{EMPTY_RADIX_ROOT, hash_branch16, hash_extension16};
 
@@ -67,6 +67,10 @@ pub enum PersistentRadixMapError {
     ShardKey { actual: usize, expected: usize },
     #[error("PERSISTENT_RADIX_SHARD_DUPLICATE:{index}")]
     DuplicateShard { index: usize },
+    #[error("PERSISTENT_RADIX_VALUE_MISSING")]
+    ValueMissing,
+    #[error("PERSISTENT_RADIX_VALUE_DIGEST_MISMATCH")]
+    ValueDigestMismatch,
     #[error("PERSISTENT_RADIX_SHARD_EMPTY_LENGTH:{index}:len={len}")]
     EmptyShardLength { index: usize, len: usize },
     #[error("PERSISTENT_RADIX_SHARD_LENGTH:{actual}:expected={expected}")]
@@ -362,6 +366,36 @@ impl<V: Clone> PersistentRadixShard<V> {
             shard = shard.updated(key, value, value_digest)?;
         }
         Ok(shard)
+    }
+
+    /// Replace envelope data without changing the canonical leaf digest.
+    /// This is intentionally separate from `updated`: equal digests remain a
+    /// no-op there, while live replicas sometimes carry non-committed evidence
+    /// that must survive the next checkpoint.
+    pub fn replaced_value(
+        &self,
+        key: Vec<u8>,
+        value: V,
+        expected_digest: [u8; 32],
+    ) -> Result<Self, PersistentRadixMapError> {
+        let path = validate_shard_key(self.index, &key)?;
+        let Some((_, actual_digest)) = self.get_with_digest(&key)? else {
+            return Err(PersistentRadixMapError::ValueMissing);
+        };
+        if actual_digest != expected_digest {
+            return Err(PersistentRadixMapError::ValueDigestMismatch);
+        }
+        let child = self
+            .child
+            .as_ref()
+            .ok_or(PersistentRadixMapError::ValueMissing)?;
+        let child = replace_leaf_value(child, &path, &key, value)?;
+        validate_child_edge(&[], &child)?;
+        Ok(Self {
+            index: self.index,
+            child: Some(child),
+            len: self.len,
+        })
     }
 
     pub fn removed(&self, key: &[u8]) -> Result<Self, PersistentRadixMapError> {

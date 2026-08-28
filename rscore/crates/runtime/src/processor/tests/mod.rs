@@ -265,6 +265,22 @@ fn live_socket_output(
     target_entity_id: &str,
     target_signer_id: &str,
 ) -> Vec<u8> {
+    live_socket_output_at(
+        target_runtime_id,
+        target_entity_id,
+        target_signer_id,
+        1,
+        150,
+    )
+}
+
+fn live_socket_output_at(
+    target_runtime_id: &str,
+    target_entity_id: &str,
+    target_signer_id: &str,
+    height: u64,
+    timestamp: u64,
+) -> Vec<u8> {
     crate::encode_storage_payload(&CanonicalValue::Object(vec![
         (
             "runtimeId".into(),
@@ -282,8 +298,8 @@ fn live_socket_output(
         (
             "sourceRuntimeFrame".into(),
             CanonicalValue::Object(vec![
-                ("height".into(), canonical_number(1)),
-                ("timestamp".into(), canonical_number(150)),
+                ("height".into(), canonical_number(height)),
+                ("timestamp".into(), canonical_number(timestamp)),
             ]),
         ),
     ]))
@@ -420,7 +436,7 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
 }
 
 #[test]
-fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
+fn two_authenticated_socket_messages_coalesce_into_one_durable_runtime_frame() {
     let target_path = path();
     let source_path = target_path.with_extension("source");
     let _ = std::fs::remove_dir_all(&target_path);
@@ -463,7 +479,7 @@ fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
     let source_signer = "source";
     let mut source_store = NativeRuntimeStore::open(&source_path, NativeStorageConfig::default())
         .expect("source store");
-    let commit = build_runtime_frame_commit(
+    let first_encoded = build_runtime_frame_commit(
         CanonicalRuntimeFrameDraft {
             height: 1,
             timestamp: 150,
@@ -487,9 +503,43 @@ fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
         )],
         None,
     )
-    .expect("source frame")
-    .commit;
-    let durable = source_store.append_frame(commit).expect("source fsync");
+    .expect("source frame");
+    let first_hash = first_encoded.frame_hash;
+    let first = source_store
+        .append_frame(first_encoded.commit)
+        .expect("source first fsync");
+    let second = source_store
+        .append_frame(
+            build_runtime_frame_commit(
+                CanonicalRuntimeFrameDraft {
+                    height: 2,
+                    timestamp: 151,
+                    prev_frame_hash: first_hash,
+                    replica_meta_digest: [0x11; 32],
+                    runtime_component_digests: Vec::new(),
+                    materialized_state: false,
+                    canonical_state: None,
+                    runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+                    runtime_machine_root: None,
+                    account_authority_checkpoints: Vec::new(),
+                    touched_entities: Vec::new(),
+                    touched_accounts: Vec::new(),
+                    touched_book_entities: Vec::new(),
+                },
+                crate::storage::native::EntityContextPayloadRows::empty(),
+                vec![live_socket_output_at(
+                    &target_runtime_id,
+                    &target_entity_id,
+                    &target_signer_id,
+                    2,
+                    151,
+                )],
+                None,
+            )
+            .expect("second source frame")
+            .commit,
+        )
+        .expect("source second fsync");
     let routes = DirectRouteTable::new([DirectRoute {
         target_runtime_id: target_runtime_id.clone(),
         url: format!("ws://{}/ws", service.local_address()),
@@ -502,8 +552,16 @@ fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
     ))
     .expect("source publisher");
     publisher
-        .publish_durable(&mut source_store, &durable)
-        .expect("authenticated socket publish");
+        .publish_durable(&mut source_store, &first)
+        .expect("first authenticated socket publish");
+    publisher
+        .publish_durable(&mut source_store, &second)
+        .expect("second authenticated socket publish");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while service.ingress_metrics().accepted_batches < 2 && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(service.ingress_metrics().accepted_batches, 2);
 
     let report = service
         .process_next(std::time::Duration::from_secs(3))
@@ -518,6 +576,13 @@ fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
             .state
             .height,
         1
+    );
+    assert!(
+        service
+            .process_next(std::time::Duration::from_millis(20))
+            .expect("socket queue remains healthy")
+            .is_none(),
+        "the second socket message must not create a second Runtime frame",
     );
     publisher.close();
     service.shutdown().expect("target shutdown");
@@ -617,7 +682,7 @@ fn live_service_resends_the_durable_outbox_before_accepting_input() {
 }
 
 #[test]
-fn restart_holds_one_inbound_batch_until_inbound_only_outbox_is_publishable() {
+fn restart_stages_inbound_only_outbox_without_blocking_new_input() {
     let path = path();
     let _ = std::fs::remove_dir_all(&path);
     let user_seed = "rrs-inbound-only-user";
@@ -696,14 +761,14 @@ fn restart_holds_one_inbound_batch_until_inbound_only_outbox_is_publishable() {
         }))),
     )
     .expect("restart without dialing the user");
-    assert!(service.processor().has_pending_publication());
+    assert!(!service.processor().has_pending_publication());
     assert!(
         service
             .process_next(std::time::Duration::from_millis(50))
-            .expect("idle while pending")
+            .expect("idle while peer is disconnected")
             .is_none()
     );
-    assert!(service.processor().has_pending_publication());
+    assert!(!service.processor().has_pending_publication());
     let hub_runtime_id = service.runtime_id().to_owned();
     let mut user = DirectSession::connect(SessionConfig {
         url: &format!("ws://{}/ws", service.local_address()),
@@ -734,6 +799,7 @@ fn restart_holds_one_inbound_batch_until_inbound_only_outbox_is_publishable() {
             }],
         }),
         row_count: 1,
+        durable_bytes: 1,
     })
     .expect("user inbound batch");
     let report = service.process_next(std::time::Duration::from_secs(3));
@@ -932,7 +998,7 @@ fn an_uncertain_fsync_poison_stops_the_processor_before_publication() {
 }
 
 #[test]
-fn failed_socket_after_fsync_blocks_the_next_runtime_input() {
+fn failed_socket_after_fsync_does_not_block_the_next_runtime_input() {
     let path = path();
     let _ = std::fs::remove_dir_all(&path);
     let replica = processor_replica();
@@ -954,28 +1020,33 @@ fn failed_socket_after_fsync_blocks_the_next_runtime_input() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("processor");
-    assert!(matches!(
-        processor.process(input),
-        Err(DurableRuntimeProcessorError::Transport(_))
-    ));
+    let first = processor
+        .process(input)
+        .expect("durable frame stages despite unavailable peer");
+    assert_eq!(first.outputs_published, 0);
     assert_eq!(
         processor.replica().expect("durable replica").state.height,
         1
     );
     let next = no_external_input(processor.replica().expect("replica"), 2, 300);
-    assert!(matches!(
-        processor.process(next),
-        Err(DurableRuntimeProcessorError::PublicationPending(1))
-    ));
+    processor
+        .process(next)
+        .expect("unavailable peer does not block the next Runtime input");
+    assert_eq!(
+        processor.replica().expect("advanced replica").state.height,
+        2
+    );
     drop(processor);
 
     let mut reopened = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
         .expect("reopen durable frame");
     let recovered = reopened.recover().expect("recover");
     assert_eq!(recovered.checkpoint.as_ref().map(|row| row.height), Some(1));
-    assert!(recovered.wal_frames.is_empty());
-    assert_eq!(recovered.pending_outbox.len(), 1);
+    assert_eq!(recovered.wal_frames.len(), 1);
+    assert_eq!(recovered.wal_frames[0].height, 2);
+    assert_eq!(recovered.pending_outbox.len(), 2);
     assert_eq!(recovered.pending_outbox[0].outputs.len(), 1);
+    assert!(recovered.pending_outbox[1].outputs.is_empty());
     let decoded = recovered.pending_outbox[0]
         .outputs
         .iter()

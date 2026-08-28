@@ -6,6 +6,8 @@
 //! quorum.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use thiserror::Error;
 use xln_rscore_engine::{
@@ -21,19 +23,37 @@ use super::frame::{
 
 type SignedManifest = (Vec<Vec<u8>>, Vec<Vec<u8>>);
 
+fn profile_entity_certification() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
+}
+
 /// Signature/Hanko bytes already authored by the resident Account worker for
 /// one Account-frame digest. The constructor is crate-private so an external
 /// caller cannot smuggle unverified bytes into Entity consensus; only the
 /// Account result collector can create one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PresignedManifestEntry {
+    kind: HashType,
     signature: [u8; 65],
     hanko: Vec<u8>,
 }
 
 impl PresignedManifestEntry {
     pub(crate) fn account(signature: [u8; 65], hanko: Vec<u8>) -> Self {
-        Self { signature, hanko }
+        Self {
+            kind: HashType::AccountFrame,
+            signature,
+            hanko,
+        }
+    }
+
+    pub(crate) fn dispute(signature: [u8; 65], hanko: Vec<u8>) -> Self {
+        Self {
+            kind: HashType::Dispute,
+            signature,
+            hanko,
+        }
     }
 }
 
@@ -181,14 +201,36 @@ impl EntitySingleSigner {
     fn sign_manifest(
         &self,
         manifest: &[HashToSign],
-        mut presigned: PresignedManifest,
+        presigned: PresignedManifest,
     ) -> Result<SignedManifest, EntityCertificationError> {
         let identity = self.signing_identity();
         let mut signatures = Vec::with_capacity(manifest.len());
         let mut hankos = Vec::with_capacity(manifest.len());
-        for entry in manifest {
-            if let Some(witness) = presigned.remove(&entry.hash) {
-                if entry.kind != HashType::AccountFrame {
+        let mut presigned = presigned.into_iter().peekable();
+        for (index, entry) in manifest.iter().enumerate() {
+            let witness = if index == 0 {
+                if presigned
+                    .peek()
+                    .is_some_and(|(hash, _)| hash == &entry.hash)
+                {
+                    return Err(EntityCertificationError::PresignedKindInvalid(
+                        entry.hash.clone(),
+                    ));
+                }
+                None
+            } else {
+                match presigned.peek() {
+                    Some((hash, _)) if hash < &entry.hash => {
+                        return Err(EntityCertificationError::PresignedUnused(hash.clone()));
+                    }
+                    Some((hash, _)) if hash == &entry.hash => {
+                        presigned.next().map(|(_, witness)| witness)
+                    }
+                    Some(_) | None => None,
+                }
+            };
+            if let Some(witness) = witness {
+                if entry.kind != witness.kind {
                     return Err(EntityCertificationError::PresignedKindInvalid(
                         entry.hash.clone(),
                     ));
@@ -206,7 +248,7 @@ impl EntitySingleSigner {
             signatures.push(signature.to_vec());
             hankos.push(hanko);
         }
-        if let Some(hash) = presigned.into_keys().next() {
+        if let Some((hash, _)) = presigned.next() {
             return Err(EntityCertificationError::PresignedUnused(hash));
         }
         Ok((signatures, hankos))
@@ -255,6 +297,7 @@ pub fn certify_single_signer_entity_frame(
     secondary_hashes: Vec<HashToSign>,
     presigned_manifest: PresignedManifest,
 ) -> Result<CertifiedEntityProposal, EntityCertificationError> {
+    let total_started = Instant::now();
     if !authority.is_single_signer()? {
         return Err(EntityCertificationError::SingleSignerAuthorityRequired);
     }
@@ -277,10 +320,14 @@ pub fn certify_single_signer_entity_frame(
             received: body.authority_root.to_string(),
         });
     }
+    let authority_done = total_started.elapsed();
     let frame_hash = compute_entity_frame_hash(&body)?;
+    let hash_done = total_started.elapsed();
     let manifest =
         build_entity_hash_manifest(body.entity_id, body.height, &frame_hash, secondary_hashes)?;
+    let manifest_done = total_started.elapsed();
     let (signatures, hankos) = signer.sign_manifest(&manifest, presigned_manifest)?;
+    let sign_done = total_started.elapsed();
     let entity_hanko = hankos
         .first()
         .cloned()
@@ -306,7 +353,24 @@ pub fn certify_single_signer_entity_frame(
         collected_sigs: BTreeMap::from([(signer.signer_id().to_string(), signatures)]),
         hankos: vec![entity_hanko],
     };
+    let frame_done = total_started.elapsed();
     frame.require_certified_proof_shape()?;
+    if profile_entity_certification() {
+        let total = total_started.elapsed();
+        eprintln!(
+            "RSCORE_ENTITY_FRAME_PHASE authority={} hash={} manifest={} sign={} clone={} proof={} total={} txs={} events={} hashes={}",
+            authority_done.as_micros(),
+            hash_done.saturating_sub(authority_done).as_micros(),
+            manifest_done.saturating_sub(hash_done).as_micros(),
+            sign_done.saturating_sub(manifest_done).as_micros(),
+            frame_done.saturating_sub(sign_done).as_micros(),
+            total.saturating_sub(frame_done).as_micros(),
+            total.as_micros(),
+            frame.txs.len(),
+            frame.events.len(),
+            frame.hashes_to_sign.len(),
+        );
+    }
     Ok(CertifiedEntityProposal {
         frame,
         manifest_hankos: hankos,
@@ -409,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn account_worker_signature_reuse_is_byte_identical_to_entity_signing() {
+    fn account_worker_signature_reuse_is_byte_identical_for_frame_and_dispute() {
         let entity = "0x1b7a1f31158ced332b779dd6b985ff695b22358470d1cbf6fac0c6db84478d08";
         let key: [u8; 32] =
             hex::decode("309b1f6e8dd69428a1954d7ab5ef05460264d9885d1cee151ccb277b9f27d01e")
@@ -426,11 +490,19 @@ mod tests {
         let events = Vec::new();
         let state_root = format!("0x{}", "11".repeat(32));
         let account_hash = format!("0x{}", "33".repeat(32));
-        let secondary = vec![HashToSign {
-            hash: account_hash.clone(),
-            kind: HashType::AccountFrame,
-            context: "account:fixture:frame:1".into(),
-        }];
+        let dispute_hash = format!("0x{}", "44".repeat(32));
+        let secondary = vec![
+            HashToSign {
+                hash: account_hash.clone(),
+                kind: HashType::AccountFrame,
+                context: "account:fixture:frame:1".into(),
+            },
+            HashToSign {
+                hash: dispute_hash.clone(),
+                kind: HashType::Dispute,
+                context: "account:fixture:dispute".into(),
+            },
+        ];
         let body = || EntityFrameBody {
             parent_frame_hash: "genesis",
             height: 1,
@@ -457,15 +529,26 @@ mod tests {
             .signing_identity()
             .sign_frame_with_raw(&digest)
             .expect("account worker signature");
+        let dispute_digest = parse_digest(&dispute_hash).expect("dispute hash");
+        let (dispute_signature, dispute_hanko) = signer
+            .signing_identity()
+            .sign_frame_with_raw(&dispute_digest)
+            .expect("account worker dispute signature");
         let reused = certify_single_signer_entity_frame(
             &signer,
             &authority,
             body(),
             secondary,
-            PresignedManifest::from([(
-                account_hash,
-                PresignedManifestEntry::account(signature, hanko),
-            )]),
+            PresignedManifest::from([
+                (
+                    account_hash,
+                    PresignedManifestEntry::account(signature, hanko),
+                ),
+                (
+                    dispute_hash,
+                    PresignedManifestEntry::dispute(dispute_signature, dispute_hanko),
+                ),
+            ]),
         )
         .expect("reused");
 

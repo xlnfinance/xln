@@ -167,7 +167,7 @@ fn inbound_session_replies_after_wal_without_a_second_dial() {
 }
 
 #[test]
-fn inbound_publish_timeout_leaves_the_durable_outbox_pending() {
+fn stalled_inbound_target_does_not_block_a_healthy_target() {
     let table = InboundSessionTable::default();
     let poll = mio::Poll::new().expect("poll");
     let waker =
@@ -185,31 +185,63 @@ fn inbound_publish_timeout_leaves_the_durable_outbox_pending() {
     let _ = fs::remove_dir_all(&base);
     let mut store = NativeRuntimeStore::open(base.join("db"), NativeStorageConfig::default())
         .expect("native store");
+    let mut healthy = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        "rrs-ingress-healthy-target",
+        "healthy",
+    ))
+    .expect("bind healthy target");
+    let healthy_runtime_id = healthy.runtime_id().to_owned();
     let first = store
-        .append_frame(frame(1, vec![output_row(&user, 1)]))
+        .append_frame(frame(
+            1,
+            vec![output_row(&user, 1), output_row(&healthy_runtime_id, 1)],
+        ))
         .expect("durable height 1");
     let second = store
-        .append_frame(frame(2, vec![output_row(&user, 2)]))
+        .append_frame(frame(2, vec![output_row(&healthy_runtime_id, 2)]))
         .expect("durable height 2");
     let mut config = DirectOutboxPublisherConfig::production(
         "rrs-ingress-timeout-server",
         "server",
-        DirectRouteTable::new([]).expect("no dial routes"),
+        DirectRouteTable::new([DirectRoute {
+            target_runtime_id: healthy_runtime_id.clone(),
+            url: format!("ws://{}/ws", healthy.local_address()),
+        }])
+        .expect("healthy direct route"),
     );
     config.io_timeout = Duration::from_millis(50);
     let mut publisher = DirectOutboxPublisher::new(config).expect("publisher");
     publisher.attach_inbound_sessions(table);
-    let error = publisher
+    let first_report = publisher
         .publish_durable(&mut store, &first)
-        .expect_err("timeout is loud");
-    assert!(error.to_string().contains("session-io-timeout"));
-    assert!(matches!(
-        publisher.publish_durable(&mut store, &second),
-        Err(RuntimeTransportError::PendingFrame {
-            pending: 1,
-            requested: 2
-        })
-    ));
+        .expect("target failure is reported without blocking healthy target");
+    assert_eq!(
+        (first_report.rows_published, first_report.rows_pending),
+        (1, 1)
+    );
+    assert_eq!(first_report.failed_targets, vec![user.clone()]);
+    let first_received = healthy
+        .recv_timeout(Duration::from_secs(1))
+        .expect("healthy ingress")
+        .expect("healthy target receives first frame");
+    assert_eq!(first_received.source_runtime_height, 1);
+
+    let second_report = publisher
+        .publish_durable(&mut store, &second)
+        .expect("next durable frame stages while dead target remains pending");
+    assert_eq!(
+        (second_report.rows_published, second_report.rows_pending),
+        (1, 1)
+    );
+    assert_eq!(second_report.failed_targets, vec![user]);
+    let second_received = healthy
+        .recv_timeout(Duration::from_secs(1))
+        .expect("healthy ingress")
+        .expect("healthy target receives second frame");
+    assert_eq!(second_received.source_runtime_height, 2);
+    publisher.close();
+    healthy.shutdown().expect("healthy shutdown");
     drop(store);
     fs::remove_dir_all(base).expect("remove timeout fixture");
 }
@@ -244,6 +276,7 @@ fn user_to_hub_envelope(hub_runtime_id: &str, user_runtime_id: &str) -> Outbound
             }],
         }),
         row_count: 1,
+        durable_bytes: 1,
     }
 }
 

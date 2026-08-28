@@ -310,6 +310,57 @@ pub(crate) fn canonical_json(value: CanonicalValue) -> Result<Value, EntityOutpu
     }
 }
 
+pub(crate) fn canonical_json_ref(
+    value: &CanonicalValue,
+) -> Result<Value, EntityOutputEncodingError> {
+    match value {
+        CanonicalValue::Null => Ok(Value::Null),
+        CanonicalValue::Bool(value) => Ok(Value::Bool(*value)),
+        CanonicalValue::Number(value) => value
+            .as_str()
+            .parse::<Number>()
+            .map(Value::Number)
+            .map_err(|_| EntityOutputEncodingError::CanonicalNumber(value.as_str().into())),
+        CanonicalValue::BigInt(value) => Ok(tagged_bigint(value)),
+        CanonicalValue::String(value) => Ok(Value::String(value.clone())),
+        CanonicalValue::Array(values) => Ok(Value::Array(
+            values
+                .iter()
+                .map(canonical_json_ref)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        CanonicalValue::Object(entries) => Ok(Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| Ok((key.clone(), canonical_json_ref(value)?)))
+                .collect::<Result<Map<_, _>, EntityOutputEncodingError>>()?,
+        )),
+        CanonicalValue::Map(entries) => Ok(tagged(
+            "Map",
+            Value::Array(
+                entries
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok(Value::Array(vec![
+                            canonical_json_ref(key)?,
+                            canonical_json_ref(value)?,
+                        ]))
+                    })
+                    .collect::<Result<Vec<_>, EntityOutputEncodingError>>()?,
+            ),
+        )),
+        CanonicalValue::Set(entries) => Ok(tagged(
+            "Set",
+            Value::Array(
+                entries
+                    .iter()
+                    .map(canonical_json_ref)
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        )),
+    }
+}
+
 fn tagged_bigint(value: &BigInt) -> Value {
     tagged("BigInt", Value::String(value.to_string()))
 }

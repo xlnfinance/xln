@@ -2,9 +2,8 @@
 
 //! Direct Account+paybook+orderbook replay of a previously verified process
 //! transcript. This intentionally does not claim to be a Runtime replay: its
-//! purpose is to measure the resident Rust financial kernel without IPC.
-
-use std::time::{Duration, Instant};
+//! purpose is smoke/parity validation of the resident Rust financial kernel.
+//! It deliberately emits no timing or rate that could be quoted as live TPS.
 
 use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_entity_kernel::{apply_resident_entity_round_core, compute_entity_owned_sections};
@@ -22,7 +21,6 @@ struct ReplayMetrics {
     rounds: u64,
     ingress: u64,
     egress: u64,
-    elapsed: Duration,
     accounts_root: String,
     paybook_root: String,
     orderbook_root: String,
@@ -127,7 +125,6 @@ fn replay(pairs: &[TranscriptPair], workers: usize) -> Result<ReplayMetrics, Str
         if request.inbound.expected_accounts_root != current_root {
             return Err(format!("NATIVE_REPLAY_PARENT_ROOT:index={pair_index}"));
         }
-        let started = Instant::now();
         let core = apply_resident_entity_round_core(&mut accounts, state, request, &context)
             .map_err(|error| format!("NATIVE_REPLAY_ENGINE:index={pair_index}:{error}"))?;
         let sections = compute_entity_owned_sections(
@@ -136,8 +133,6 @@ fn replay(pairs: &[TranscriptPair], workers: usize) -> Result<ReplayMetrics, Str
             accounts.account_count(),
         )
         .map_err(|error| format!("NATIVE_REPLAY_SECTIONS:index={pair_index}:{error}"))?;
-        metrics.elapsed += started.elapsed();
-
         let result = core
             .with_canonical_commitments()
             .map_err(|error| format!("NATIVE_REPLAY_DIAGNOSTICS:index={pair_index}:{error}"))?;
@@ -190,13 +185,12 @@ fn main() -> Result<(), String> {
     }
     let pairs = read_transcript(&transcript).map_err(|error| error.to_string())?;
     let result = replay(&pairs, workers)?;
-    let seconds = result.elapsed.as_secs_f64().max(0.000_001);
     println!(
         concat!(
-            "{{\"benchmark\":\"rscore-native-apo-replay\",\"workers\":{},",
+            "{{\"evidence\":\"smoke-parity-only-not-tps\",",
+            "\"benchmark\":\"rscore-native-apo-smoke\",\"workers\":{},",
             "\"payments\":{},\"rounds\":{},\"ingress\":{},\"egress\":{},",
-            "\"elapsedMs\":{:.3},\"paymentsPerSecond\":{:.2},",
-            "\"ingressPerSecond\":{:.2},\"egressPerSecond\":{:.2},\"accountsRoot\":\"{}\",",
+            "\"accountsRoot\":\"{}\",",
             "\"paybookRoot\":\"{}\",\"orderbookRoot\":\"{}\"}}"
         ),
         workers,
@@ -204,10 +198,6 @@ fn main() -> Result<(), String> {
         result.rounds,
         result.ingress,
         result.egress,
-        seconds * 1_000.0,
-        payments as f64 / seconds,
-        result.ingress as f64 / seconds,
-        result.egress as f64 / seconds,
         result.accounts_root,
         result.paybook_root,
         result.orderbook_root,

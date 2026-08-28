@@ -36,6 +36,21 @@ pub(crate) struct ProjectedRuntimeFrame {
     /// transition. This is deliberately diagnostic-only: it is returned only
     /// after WAL fsync and never becomes a second consensus commitment.
     pub account_commits: Vec<crate::AccountCommitEvidence>,
+    pub accepted_payments: usize,
+    pub completed_payments: usize,
+    pub matched_swaps: usize,
+    pub lock_book_open: usize,
+    pub runtime_entity_inputs: usize,
+    pub account_inputs: usize,
+    pub canonical_input_bytes: usize,
+    pub entity_txs_selected: usize,
+    pub entity_txs_pending: usize,
+    pub projection_input: std::time::Duration,
+    pub projection_machine: std::time::Duration,
+    pub projection_meta: std::time::Duration,
+    pub projection_context: std::time::Duration,
+    pub projection_checkpoint: std::time::Duration,
+    pub projection_encode: std::time::Duration,
 }
 
 pub(crate) enum DurableProjection {
@@ -52,13 +67,27 @@ pub(crate) fn project_durable_frame(
 ) -> Result<DurableProjection, RuntimeFrameProjectionError> {
     let Some(applied) = result.applied_frame.take() else {
         if result.applied_input.is_some()
-            || result.certified_entity_frame().is_some()
+            || !result.outputs.entity_events.is_empty()
             || !result.outputs.local_entity_outputs.is_empty()
+            || result.outputs.entity_state_root.is_some()
+            || result.outputs.entity_authority_root.is_some()
+            || result.outputs.checkpoint.is_some()
+            || result.outputs.touches != crate::RuntimeFrameTouches::default()
+            || !result.account_commits.is_empty()
         {
             return Err(RuntimeFrameProjectionError::IdleShape);
         }
         return Ok(DurableProjection::Idle(Box::new(result.replica)));
     };
+    let applied_input = result
+        .applied_input
+        .as_ref()
+        .ok_or(RuntimeFrameProjectionError::AppliedInputMissing)?;
+    let runtime_entity_inputs = applied_input.entity_inputs;
+    let account_inputs = applied_input.account_inputs;
+    let canonical_input_bytes = applied_input.canonical_wire_bytes;
+    let entity_txs_selected = applied_input.entity_txs_selected;
+    let entity_txs_pending = applied_input.entity_txs_pending;
     let entity_frame_committed = applied.entity_frame_committed;
     if result.outputs.checkpoint.is_some() && prior_checkpoint_rows.is_none() {
         // A cadence checkpoint is one indivisible graph. Persisting only its
@@ -100,6 +129,41 @@ pub(crate) fn project_durable_frame(
         xln_rscore_entity_kernel::compute_entity_effects_parity_digest(
             &result.outputs.entity_events,
         )?;
+    let accepted_payments = result
+        .outputs
+        .entity_events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                xln_rscore_entity_kernel::EntityKernelOutput::HtlcForwardAccepted { .. }
+            )
+        })
+        .count();
+    let completed_payments = result
+        .outputs
+        .entity_events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                xln_rscore_entity_kernel::EntityKernelOutput::HtlcReceived { .. }
+            )
+        })
+        .count();
+    let matched_swaps = result
+        .outputs
+        .entity_events
+        .iter()
+        .try_fold(0_u64, |total, event| match event {
+            xln_rscore_entity_kernel::EntityKernelOutput::SwapMatched { count, .. } => total
+                .checked_add(*count)
+                .ok_or(RuntimeFrameProjectionError::SwapCount(*count)),
+            _ => Ok(total),
+        })?;
+    let matched_swaps = usize::try_from(matched_swaps)
+        .map_err(|_| RuntimeFrameProjectionError::SwapCount(matched_swaps))?;
+    let lock_book_open = result.replica.state.entity.lock_book.len();
     let account_commits = std::mem::take(&mut result.account_commits);
 
     let local_outputs = super::encode_local_entity_outputs(std::mem::take(
@@ -122,15 +186,17 @@ pub(crate) fn project_durable_frame(
         .get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_PROJECTION").as_deref() == Ok("1"));
     let phase_started = std::time::Instant::now();
     let runtime_input = runtime_input(applied.runtime_txs, applied.entity_inputs)?;
-    let input_micros = phase_started.elapsed().as_micros();
+    let projection_input = phase_started.elapsed();
     let machine = runtime_machine(&result);
     let replay_view = replay_verifiable_view(&result);
     let component_digests = component_digests(&replay_view)?;
-    let machine_micros = phase_started.elapsed().as_micros();
+    let machine_done = phase_started.elapsed();
+    let projection_machine = machine_done.saturating_sub(projection_input);
     let replica_meta = prepare_replica_meta(&result, result.outputs.checkpoint.is_some())?;
     let replica_meta_digest = replica_meta.digest;
     let signer_id = replica_meta.signer_id;
-    let meta_micros = phase_started.elapsed().as_micros();
+    let meta_done = phase_started.elapsed();
+    let projection_meta = meta_done.saturating_sub(machine_done);
 
     let replica_id = format!(
         "{}:{}",
@@ -142,7 +208,8 @@ pub(crate) fn project_durable_frame(
     } else {
         crate::storage::native::EntityContextPayloadRows::empty()
     };
-    let context_micros = phase_started.elapsed().as_micros();
+    let context_done = phase_started.elapsed();
+    let projection_context = context_done.saturating_sub(meta_done);
 
     let expected_previous_hash = result.replica.durable.prev_frame_hash();
     let checkpoint_changes = match (result.outputs.checkpoint.as_ref(), prior_checkpoint_rows) {
@@ -221,19 +288,40 @@ pub(crate) fn project_durable_frame(
             .collect(),
         touched_book_entities: result.outputs.touches.book_entity_ids.clone(),
     };
-    let pre_encode_micros = phase_started.elapsed().as_micros();
+    let pre_encode_done = phase_started.elapsed();
+    let projection_checkpoint = pre_encode_done.saturating_sub(context_done);
     let encoded =
         build_runtime_frame_commit(draft, entity_contexts, bound_outputs.rows, frame_graph)?;
+    let projection_encode = phase_started.elapsed().saturating_sub(pre_encode_done);
     if profile {
         let total = phase_started.elapsed().as_micros();
+        let (checkpoint_rows, checkpoint_bytes) = encoded
+            .commit
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| {
+                (
+                    checkpoint.node_changes.len(),
+                    checkpoint
+                        .node_changes
+                        .iter()
+                        .filter_map(|change| change.value.as_ref())
+                        .map(Vec::len)
+                        .sum::<usize>(),
+                )
+            })
+            .unwrap_or_default();
+        let output_bytes = encoded.commit.outputs.iter().map(Vec::len).sum::<usize>();
         eprintln!(
-            "RSCORE_PROJECTION_PHASE h={} input={input_micros} machine={} meta={} context={} checkpoint_canonical={} encode={} total={total}",
+            "RSCORE_PROJECTION_PHASE h={} input={input_micros} machine={} meta={} context={} checkpoint_canonical={} encode={} total={total} checkpoint_rows={checkpoint_rows} checkpoint_bytes={checkpoint_bytes} frame_bytes={} output_bytes={output_bytes}",
             result.replica.state.height,
-            machine_micros - input_micros,
-            meta_micros - machine_micros,
-            context_micros - meta_micros,
-            pre_encode_micros - context_micros,
-            total - pre_encode_micros,
+            projection_machine.as_micros(),
+            projection_meta.as_micros(),
+            projection_context.as_micros(),
+            projection_checkpoint.as_micros(),
+            projection_encode.as_micros(),
+            encoded.commit.frame_bytes.len(),
+            input_micros = projection_input.as_micros(),
         );
     }
     let commitments = super::RuntimeDurableCommitments {
@@ -259,6 +347,21 @@ pub(crate) fn project_durable_frame(
         replica: result.replica,
         commitments,
         account_commits,
+        accepted_payments,
+        completed_payments,
+        matched_swaps,
+        lock_book_open,
+        runtime_entity_inputs,
+        account_inputs,
+        canonical_input_bytes,
+        entity_txs_selected,
+        entity_txs_pending,
+        projection_input,
+        projection_machine,
+        projection_meta,
+        projection_context,
+        projection_checkpoint,
+        projection_encode,
     })))
 }
 
@@ -493,6 +596,8 @@ pub(crate) enum RuntimeFrameProjectionError {
     IdleShape,
     #[error("RRS_PROCESSOR_RUNTIME_TX_UNSUPPORTED:{0}")]
     RuntimeTx(String),
+    #[error("RRS_PROCESSOR_APPLIED_INPUT_MISSING")]
+    AppliedInputMissing,
     #[error("RRS_PROCESSOR_CERTIFIED_FRAME_MISSING")]
     CertifiedFrameMissing,
     #[error("RRS_PROCESSOR_CERTIFIED_FRAME_MISMATCH")]
@@ -507,6 +612,8 @@ pub(crate) enum RuntimeFrameProjectionError {
     EventCount(usize),
     #[error("RRS_PROCESSOR_ENTITY_EFFECT_COUNT:{0}")]
     EntityEffectCount(usize),
+    #[error("RRS_PROCESSOR_SWAP_COUNT:{0}")]
+    SwapCount(u64),
     #[error("RRS_PROCESSOR_OUTPUT_COUNT:{0}")]
     OutputCount(usize),
     #[error("RRS_PROCESSOR_CHECKPOINT_GRAPH_UNAVAILABLE:{0}")]

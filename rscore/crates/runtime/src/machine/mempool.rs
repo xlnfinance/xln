@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
 use serde_json::Value;
-use xln_rscore_entity_kernel::EntityTxKind;
 use xln_rscore_protocol::CanonicalValue;
 
 use super::{
@@ -164,6 +163,8 @@ pub fn select_runtime_frame(
             entity_inputs: selected.len(),
             account_inputs,
             canonical_wire_bytes: wire_bytes,
+            entity_txs_selected: 0,
+            entity_txs_pending: 0,
             wake: None,
         },
         entity_inputs: selected,
@@ -178,7 +179,7 @@ pub fn select_runtime_frame(
 /// varies: an input without `entityTxs` shares the bare lane key, otherwise
 /// the authenticated `from` provenance separates it.
 fn merge_group(input: &RuntimeEntityInput) -> Option<String> {
-    if input.canonical_entity_txs().is_empty() {
+    if !input.has_entity_txs() {
         return None;
     }
     Some(
@@ -196,11 +197,7 @@ fn merge_group(input: &RuntimeEntityInput) -> Option<String> {
 /// the transaction shape, so the retained wire data is the whole identity TS
 /// compares.
 fn scheduled_wake(input: &RuntimeEntityInput) -> Option<&CanonicalValue> {
-    input
-        .canonical_entity_txs()
-        .iter()
-        .find(|tx| tx.kind == EntityTxKind::ScheduledWake)
-        .map(|tx| &tx.wire_data)
+    input.scheduled_wake()
 }
 
 /// Port of `core/runtime/mempool/entity-height-barrier.ts` for the single

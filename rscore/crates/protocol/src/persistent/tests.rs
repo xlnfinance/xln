@@ -52,6 +52,27 @@ fn top_records(map: &PersistentRadixMap<[u8; 32]>) -> Vec<PersistentNodeRecord<(
 fn assert_value_free_coordinator_type(_: &PersistentRadixShardCoordinator) {}
 
 #[test]
+fn shard_envelope_replacement_preserves_commitment_and_updates_value() {
+    let key = account_key(0x7ff, 1);
+    let committed = digest(7);
+    let shard = PersistentRadixShard::empty(0x7ff)
+        .expect("empty shard")
+        .updated(key.clone(), "before", committed)
+        .expect("insert");
+    let descriptor = shard.descriptor();
+    let root = shard.root_hash();
+
+    let replaced = shard
+        .replaced_value(key.clone(), "after", committed)
+        .expect("replace envelope");
+
+    assert_eq!(replaced.get(&key).expect("lookup"), Some(&"after"));
+    assert_eq!(replaced.root_hash(), root);
+    assert_eq!(replaced.descriptor(), descriptor);
+    assert_eq!(replaced.len(), shard.len());
+}
+
+#[test]
 fn matches_typescript_persistent_root_sequence() {
     let empty = PersistentRadixMap::empty();
     let one = empty

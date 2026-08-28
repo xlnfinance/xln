@@ -72,44 +72,6 @@ fn recording_range(root: &Value) -> Result<(u64, u64), String> {
     Ok((from, target))
 }
 
-fn recorded_direct_payments(root: &Value, from: u64, to: u64) -> Result<u64, String> {
-    let bundles = root
-        .pointer("/recording/bundles")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "RUNTIME_REPLAY_BUNDLES_ARRAY".to_string())?;
-    let mut payments = 0_u64;
-    for bundle in bundles {
-        let Some(frames) = bundle.get("frames").and_then(Value::as_array) else {
-            continue;
-        };
-        for frame in frames {
-            let height = unsigned(frame.get("height"), "recording.frame.height")?;
-            if height < from || height > to {
-                continue;
-            }
-            let inputs = frame
-                .pointer("/runtimeInput/entityInputs")
-                .and_then(Value::as_array)
-                .ok_or_else(|| format!("RUNTIME_REPLAY_ENTITY_INPUTS:{height}"))?;
-            for input in inputs {
-                for tx in input
-                    .get("entityTxs")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    if tx.get("type").and_then(Value::as_str) == Some("directPayment") {
-                        payments = payments
-                            .checked_add(1)
-                            .ok_or_else(|| "RUNTIME_REPLAY_PAYMENT_COUNT_OVERFLOW".to_string())?;
-                    }
-                }
-            }
-        }
-    }
-    Ok(payments)
-}
-
 fn main() -> Result<(), String> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let wal_path = argument(&args, "--wal")?;
@@ -161,7 +123,6 @@ fn main() -> Result<(), String> {
             .map(|height| height.min(recorded_to))
             .ok_or_else(|| "RUNTIME_REPLAY_HEIGHT_OVERFLOW".to_string())
     })?;
-    let direct_payments = recorded_direct_payments(&recording, from, to)?;
     let runtime_seed = std::fs::read_to_string(runtime_seed_path)
         .map_err(|error| format!("RUNTIME_REPLAY_SEED_READ:{error}"))?;
     let runtime_seed = runtime_seed.trim();
@@ -192,7 +153,6 @@ fn main() -> Result<(), String> {
         offline_ts_import.then_some(MigrationOrigin::OfflineTsImport),
         &diff_path,
     )?;
-    let seconds = metrics.elapsed.as_secs_f64().max(0.000_001);
     // Serialized once after replay; timing-only observability that never
     // touches committed state. Mean worker times are derived from sums.
     let phase_metrics = metrics
@@ -235,8 +195,7 @@ fn main() -> Result<(), String> {
             "\"workers\":{},\"frames\":{},\"ingress\":{},\"egress\":{},",
             "\"setupMs\":{:.3},\"elapsedMs\":{:.3},\"engineMs\":{:.3},",
             "\"applyMs\":{:.3},\"projectionMs\":{:.3},\"storageMs\":{:.3},\"publicationMs\":{:.3},",
-            "\"directPayments\":{},\"paymentReplayPerSecond\":{:.2},",
-            "\"ingressPerSecond\":{:.2},\"egressPerSecond\":{:.2},",
+            "\"directPayments\":{},",
             "\"effectDigestsCompared\":{},",
             "\"outboxDigestsCompared\":{},\"postStateHashesCompared\":{},",
             "\"runtimeRootsCompared\":{},\"accountsRoot\":\"{}\",",
@@ -247,16 +206,13 @@ fn main() -> Result<(), String> {
         metrics.ingress,
         metrics.egress,
         metrics.setup_elapsed.as_secs_f64() * 1_000.0,
-        seconds * 1_000.0,
+        metrics.elapsed.as_secs_f64() * 1_000.0,
         metrics.engine_elapsed.as_secs_f64() * 1_000.0,
         metrics.apply_elapsed.as_secs_f64() * 1_000.0,
         metrics.projection_elapsed.as_secs_f64() * 1_000.0,
         metrics.storage_elapsed.as_secs_f64() * 1_000.0,
         metrics.publication_elapsed.as_secs_f64() * 1_000.0,
-        direct_payments,
-        direct_payments as f64 / seconds,
-        metrics.ingress as f64 / seconds,
-        metrics.egress as f64 / seconds,
+        metrics.direct_payments,
         metrics.effect_digests_compared,
         metrics.outbox_digests_compared,
         metrics.post_state_hashes_compared,

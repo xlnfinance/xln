@@ -204,6 +204,10 @@ fn optional_ack(value: Option<&OutboundAck>) -> AbiValue {
 fn optional_dispute(value: Option<&DisputeDraft>) -> AbiValue {
     value.map_or(AbiValue::Nil, |draft| {
         tuple(vec![
+            draft
+                .hanko
+                .as_ref()
+                .map_or(AbiValue::Nil, |hanko| AbiValue::Bytes(hanko.clone())),
             AbiValue::Bytes(draft.hash.to_vec()),
             AbiValue::Bytes(draft.proof_body_hash.to_vec()),
             integer(draft.nonce),

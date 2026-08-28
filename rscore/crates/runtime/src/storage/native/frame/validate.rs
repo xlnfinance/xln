@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 
@@ -10,6 +13,21 @@ use super::types::{
 };
 use super::value::{encode, encode_frame_record};
 use super::{FRAME_DOMAIN, MAX_SAFE_INTEGER};
+
+#[cfg(test)]
+thread_local! {
+    static RUNTIME_FRAME_VALIDATION_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_runtime_frame_validation_count() {
+    RUNTIME_FRAME_VALIDATION_COUNT.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_frame_validation_count() -> usize {
+    RUNTIME_FRAME_VALIDATION_COUNT.get()
+}
 
 const REQUIRED_FIELDS: [&str; 13] = [
     "height",
@@ -234,9 +252,11 @@ fn byte_window(bytes: &[u8], offset: usize) -> String {
         .collect::<String>()
 }
 
-pub fn validate_runtime_frame(
+pub(crate) fn decode_and_validate_runtime_frame(
     bytes: &[u8],
-) -> Result<ValidatedRuntimeFrame, RuntimeFrameCodecError> {
+) -> Result<(Value, ValidatedRuntimeFrame), RuntimeFrameCodecError> {
+    #[cfg(test)]
+    RUNTIME_FRAME_VALIDATION_COUNT.set(RUNTIME_FRAME_VALIDATION_COUNT.get() + 1);
     let value = decode_storage_payload(bytes)?;
     let frame = object(&value, "object")?;
     validate_fields(frame)?;
@@ -266,15 +286,24 @@ pub fn validate_runtime_frame(
         return Err(RuntimeFrameCodecError::FrameHash);
     }
     validate_exact_bytes(bytes, &value)?;
-    Ok(ValidatedRuntimeFrame {
-        height,
-        timestamp,
-        prev_frame_hash,
-        frame_hash,
-        materialized_state,
-        output_count,
-        output_digest,
-        canonical_state_hash,
-        runtime_machine_root,
-    })
+    Ok((
+        value,
+        ValidatedRuntimeFrame {
+            height,
+            timestamp,
+            prev_frame_hash,
+            frame_hash,
+            materialized_state,
+            output_count,
+            output_digest,
+            canonical_state_hash,
+            runtime_machine_root,
+        },
+    ))
+}
+
+pub fn validate_runtime_frame(
+    bytes: &[u8],
+) -> Result<ValidatedRuntimeFrame, RuntimeFrameCodecError> {
+    decode_and_validate_runtime_frame(bytes).map(|(_, validated)| validated)
 }

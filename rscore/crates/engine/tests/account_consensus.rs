@@ -1939,6 +1939,8 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
     };
     let proposed = *proposed;
     let proposal_dispute = proposed.dispute.clone().expect("proposal dispute");
+    assert!(proposed.dispute_signature.is_some());
+    assert!(proposed.dispute_hanko.is_some());
 
     let outcome = apply_incoming_frame(
         &mut right.account,
@@ -1949,9 +1951,17 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
         &market(),
     )
     .expect("verified frame");
-    let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
+    let IncomingOutcome::Committed {
+        ack_hanko,
+        ack_dispute_signature,
+        ack_dispute_hanko,
+        ..
+    } = outcome
+    else {
         panic!("expected commit, got {outcome:?}");
     };
+    assert!(ack_dispute_signature.is_some());
+    assert!(ack_dispute_hanko.is_some());
     let stored = right
         .account
         .counterparty_dispute()
@@ -2091,7 +2101,15 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
     };
     let first = *first;
     let first_dispute = first.dispute.clone().expect("first recovery draft");
-    assert!(left.account.certify_local_dispute_after_outbound());
+    let first_dispute_hanko = left
+        .identity
+        .sign_frame(&first_dispute.hash)
+        .expect("certify first dispute");
+    assert!(
+        left.account
+            .attach_local_dispute_hanko(first_dispute.hash, first_dispute_hanko.clone())
+            .expect("attach first dispute")
+    );
 
     let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
         &mut right.account,
@@ -2133,7 +2151,13 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
     .expect("second proposal") else {
         panic!("expected second proposal");
     };
-    assert_eq!(second.dispute.as_ref(), Some(&first_dispute));
+    assert_eq!(
+        second
+            .dispute
+            .as_ref()
+            .and_then(|draft| draft.hanko.as_ref()),
+        Some(&first_dispute_hanko)
+    );
 }
 
 /// A valid frame certificate does not bless its attached dispute witness. A

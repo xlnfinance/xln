@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use super::entity_context::EntityContextPayloadRows;
 use super::keys::PathNodeKey;
 
-pub const DEFAULT_CHECKPOINT_PERIOD_FRAMES: u64 = 100;
+pub const DEFAULT_CHECKPOINT_PERIOD_FRAMES: u64 = 1_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeStorageConfig {

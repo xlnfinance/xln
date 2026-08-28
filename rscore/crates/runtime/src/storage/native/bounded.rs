@@ -83,6 +83,23 @@ pub(super) fn previous_physical_keys(
     Ok(keys)
 }
 
+/// Derive the exact physical keys from the already-verified logical value in
+/// the resident checkpoint cache. The hot checkpoint path must not re-read
+/// every owner row (and every chunk) from LevelDB before overwriting it.
+pub(super) fn physical_keys_for_value(
+    owner_key: &[u8],
+    encoded: &[u8],
+) -> Result<Vec<Vec<u8>>, NativeStorageError> {
+    let mut keys = Vec::new();
+    if uses_generic_bounded_layout(owner_key) && encoded.len() >= MAX_PHYSICAL_VALUE_BYTES {
+        for index in 0..encoded.len().div_ceil(CHUNK_PAYLOAD_BYTES) {
+            keys.push(chunk_key(owner_key, index)?);
+        }
+    }
+    keys.push(owner_key.to_vec());
+    Ok(keys)
+}
+
 pub(super) fn collapse(
     database: &mut DB,
     owner_key: &[u8],
@@ -216,6 +233,23 @@ mod tests {
         );
         assert_eq!(rows[1].1.len(), 9_000);
         assert_eq!(rows[2].1.len(), 1_000);
+    }
+
+    #[test]
+    fn resident_logical_value_derives_the_same_physical_keys_as_encoding() {
+        let mut owner = vec![0x18];
+        owner.extend_from_slice(&[0x42; 64]);
+        for value in [vec![0x5a; 99], vec![0x5a; 10_000], vec![0x5a; 27_001]] {
+            let mut encoded = physical_rows(&owner, &value)
+                .expect("physical rows")
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<Vec<_>>();
+            let mut resident = physical_keys_for_value(&owner, &value).expect("resident keys");
+            encoded.sort();
+            resident.sort();
+            assert_eq!(resident, encoded);
+        }
     }
 
     fn hex(bytes: &[u8]) -> String {

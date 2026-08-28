@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::{RecvTimeoutError, SyncSender, TrySendError, sync_channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mio::Waker;
 
@@ -98,6 +98,44 @@ impl InboundSessionTable {
         }
     }
 
+    /// Queue one envelope per open peer before waiting for any socket write.
+    /// Reactors then flush independent sovereign sessions concurrently while
+    /// preserving each target's FIFO order. The returned booleans retain the
+    /// single-envelope contract: `false` means no inbound session existed.
+    pub(in crate::transport) fn publish_open_batch(
+        &self,
+        envelopes: &[OutboundEnvelope],
+        timeout: Duration,
+    ) -> Vec<Result<bool, RuntimeTransportError>> {
+        let mut results = (0..envelopes.len()).map(|_| None).collect::<Vec<_>>();
+        let mut queued = Vec::with_capacity(envelopes.len());
+        for (index, envelope) in envelopes.iter().enumerate() {
+            match self.queue_if_open(envelope) {
+                Ok(Some(done)) => queued.push((index, done)),
+                Ok(None) => results[index] = Some(Ok(false)),
+                Err(error) => results[index] = Some(Err(error)),
+            }
+        }
+        let started = Instant::now();
+        for (index, done) in queued {
+            let remaining = timeout.saturating_sub(started.elapsed());
+            results[index] = Some(match done.recv_timeout(remaining) {
+                Ok(Ok(())) => Ok(true),
+                Ok(Err(error)) => Err(error),
+                Err(RecvTimeoutError::Timeout) => {
+                    Err(RuntimeTransportError::Inbound("session-io-timeout".into()))
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    Err(RuntimeTransportError::Inbound("session-closed".into()))
+                }
+            });
+        }
+        results
+            .into_iter()
+            .map(|result| result.expect("every inbound batch result is assigned"))
+            .collect()
+    }
+
     fn queue_if_open(
         &self,
         envelope: &OutboundEnvelope,
@@ -177,6 +215,7 @@ mod tests {
             transaction_count: 0,
             value: json!({}),
             row_count: 1,
+            durable_bytes: 1,
         };
         let started = Instant::now();
         let error = table

@@ -88,7 +88,7 @@ fn validate_draft(draft: &CanonicalRuntimeFrameDraft) -> Result<(), RuntimeFrame
 }
 
 fn required_fields(
-    draft: &CanonicalRuntimeFrameDraft,
+    draft: &mut CanonicalRuntimeFrameDraft,
     output_count: usize,
     outputs_digest: &Digest,
 ) -> Result<Map<String, Value>, RuntimeFrameCodecError> {
@@ -113,7 +113,10 @@ fn required_fields(
             "materializedState".into(),
             Value::Bool(draft.materialized_state),
         ),
-        ("runtimeInput".into(), draft.runtime_input.clone()),
+        (
+            "runtimeInput".into(),
+            std::mem::take(&mut draft.runtime_input),
+        ),
         (
             "runtimeOutputCount".into(),
             number("runtimeOutputCount", count)?,
@@ -177,17 +180,30 @@ fn add_optional_fields(
     Ok(())
 }
 
-fn compute_frame_hash(fields: &Map<String, Value>) -> Result<Digest, RuntimeFrameCodecError> {
-    let mut committed = fields.clone();
+fn compute_frame_hash(fields: &mut Map<String, Value>) -> Result<Digest, RuntimeFrameCodecError> {
+    let mut committed = std::mem::take(fields);
     committed.insert("kind".into(), text(FRAME_DOMAIN));
-    committed
-        .entry("canonicalEntityHashes")
-        .or_insert_with(|| Value::Array(vec![]));
-    Ok(Sha256::digest(encode(&Value::Object(committed))?).into())
+    let inserted_empty_entity_hashes = if committed.contains_key("canonicalEntityHashes") {
+        false
+    } else {
+        committed.insert("canonicalEntityHashes".into(), Value::Array(vec![]));
+        true
+    };
+    let committed_value = Value::Object(committed);
+    let encoded = encode(&committed_value);
+    let Value::Object(mut committed) = committed_value else {
+        unreachable!("runtime frame hash preimage is always an object")
+    };
+    committed.remove("kind");
+    if inserted_empty_entity_hashes {
+        committed.remove("canonicalEntityHashes");
+    }
+    *fields = committed;
+    Ok(Sha256::digest(encoded?).into())
 }
 
 pub fn build_runtime_frame_commit(
-    draft: CanonicalRuntimeFrameDraft,
+    mut draft: CanonicalRuntimeFrameDraft,
     entity_contexts: EntityContextPayloadRows,
     outputs: Vec<Vec<u8>>,
     checkpoint: Option<CheckpointGraph>,
@@ -196,9 +212,9 @@ pub fn build_runtime_frame_commit(
     let digest = output_digest(&outputs)
         .map_err(|_| RuntimeFrameCodecError::Field("runtimeOutputsDigest"))?;
     let post_state_hash = post_state_hash(&draft, outputs.len(), &digest)?;
-    let mut fields = required_fields(&draft, outputs.len(), &digest)?;
+    let mut fields = required_fields(&mut draft, outputs.len(), &digest)?;
     add_optional_fields(&mut fields, &draft, &entity_contexts)?;
-    let frame_hash = compute_frame_hash(&fields)?;
+    let frame_hash = compute_frame_hash(&mut fields)?;
     fields.insert("frameHash".into(), text(format_hash(&frame_hash)));
     let frame_bytes = encode_frame_record(&Value::Object(fields))?;
     let validated = ValidatedRuntimeFrame {

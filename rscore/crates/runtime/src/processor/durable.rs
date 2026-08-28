@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::storage::native::RecoveredWalFrame;
 use crate::storage::native::{DurableRuntimeFrame, NativeRuntimeStore, NativeStorageError};
 use crate::transport::{
-    DirectOutboxPublisher, DirectOutboxPublisherConfig, InboundSessionTable, PublicationReport,
-    RuntimeTransportError, derive_local_runtime_id,
+    DirectOutboxPublisher, DirectOutboxPublisherConfig, InboundSessionTable, PublicationBacklog,
+    PublicationReport, RuntimeTransportError, derive_local_runtime_id,
 };
 use crate::{
     EntityInfraMaterializer, RuntimeApplyResult, RuntimeInput, RuntimeLiveInput,
@@ -32,6 +32,22 @@ pub struct RuntimeProcessReport {
     /// It is exposed only after WAL fsync for replay diagnostics and is not a
     /// stored or consensus-authoritative history surface.
     pub account_commits: Vec<crate::AccountCommitEvidence>,
+    /// Committed economic events from this exact frame. These mirror the TS
+    /// post-WAL `HtlcForwardAccepted`/`HtlcReceived` counters and never count
+    /// ingress, rejected work or proposals.
+    pub accepted_payments: usize,
+    pub completed_payments: usize,
+    pub matched_swaps: usize,
+    /// Post-frame Entity lock-book size. `Some(0)` is required together with
+    /// completed-payment cardinality before HLT may call a payment delivered.
+    pub lock_book_open: Option<usize>,
+    /// Exact selected production work in this Runtime frame. These counters
+    /// prove batching and worker feed without decoding the WAL a second time.
+    pub runtime_entity_inputs: usize,
+    pub account_inputs: usize,
+    pub canonical_input_bytes: usize,
+    pub entity_txs_selected: usize,
+    pub entity_txs_pending: usize,
     /// Non-consensus diagnostics for locating production Runtime cost. These
     /// durations never enter a frame, checkpoint or replay decision.
     pub timings: RuntimeProcessTimings,
@@ -43,6 +59,12 @@ pub struct RuntimeProcessTimings {
     pub projection: Duration,
     pub storage: Duration,
     pub publication: Duration,
+    pub projection_input: Duration,
+    pub projection_machine: Duration,
+    pub projection_meta: Duration,
+    pub projection_context: Duration,
+    pub projection_checkpoint: Duration,
+    pub projection_encode: Duration,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,8 +115,9 @@ impl RuntimeSignerLabel {
 
 /// The only production mutation seam. `replica` is absent after any
 /// pre-fsync failure because `apply_runtime` consumes it; continuing would
-/// guess an inverse transition. A post-fsync publication failure retains the
-/// exact durable token and blocks the next input until best-effort resend.
+/// guess an inverse transition. Post-fsync publication is staged once into
+/// bounded per-target RAM FIFOs; only aggregate capacity exhaustion blocks a
+/// later input.
 pub struct DurableRuntimeProcessor {
     replica: Option<RuntimeReplica>,
     store: NativeRuntimeStore,
@@ -184,6 +207,7 @@ impl DurableRuntimeProcessor {
             source_signer_label.into_inner(),
             routes.direct_routes(),
         )
+        .with_allowed_targets(routes.runtime_ids())?
         .with_local_entity(&replica.state.entity.entity_id, &replica.signer_id)?;
         let publisher = DirectOutboxPublisher::new(publisher_config)?;
         Ok(Self {
@@ -261,6 +285,7 @@ impl DurableRuntimeProcessor {
         apply: impl FnOnce(RuntimeReplica) -> Result<RuntimeApplyResult, RuntimeMachineError>,
     ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
         self.ensure_healthy()?;
+        self.retry_publication()?;
         if let Some(pending) = self.pending_publications.front() {
             return Err(DurableRuntimeProcessorError::PublicationPending(
                 pending.height(),
@@ -285,14 +310,12 @@ impl DurableRuntimeProcessor {
         } else {
             None
         };
-        let projected =
-            match project_durable_frame(applied, &self.routes, prior_checkpoint_rows.as_ref()) {
-                Ok(projected) => projected,
-                Err(error) => {
-                    return self
-                        .fail_stop(DurableRuntimeProcessorError::Projection(error.to_string()));
-                }
-            };
+        let projected = match project_durable_frame(applied, &self.routes, prior_checkpoint_rows) {
+            Ok(projected) => projected,
+            Err(error) => {
+                return self.fail_stop(DurableRuntimeProcessorError::Projection(error.to_string()));
+            }
+        };
         let projected = match projected {
             DurableProjection::Idle(replica) => {
                 self.replica = Some(*replica);
@@ -308,6 +331,10 @@ impl DurableRuntimeProcessor {
             DurableProjection::Frame(projected) => *projected,
         };
         let projection_elapsed = projection_started.elapsed();
+        let accepted_payments = projected.accepted_payments;
+        let completed_payments = projected.completed_payments;
+        let matched_swaps = projected.matched_swaps;
+        let lock_book_open = projected.lock_book_open;
         let storage_started = Instant::now();
         let projected_frame_hash = projected.encoded.frame_hash;
         let durable = match self.store.append_encoded_frame(projected.encoded) {
@@ -331,11 +358,26 @@ impl DurableRuntimeProcessor {
         let publication_elapsed = publication_started.elapsed();
         report.commitments = Some(projected.commitments);
         report.account_commits = projected.account_commits;
+        report.accepted_payments = accepted_payments;
+        report.completed_payments = completed_payments;
+        report.matched_swaps = matched_swaps;
+        report.lock_book_open = Some(lock_book_open);
+        report.runtime_entity_inputs = projected.runtime_entity_inputs;
+        report.account_inputs = projected.account_inputs;
+        report.canonical_input_bytes = projected.canonical_input_bytes;
+        report.entity_txs_selected = projected.entity_txs_selected;
+        report.entity_txs_pending = projected.entity_txs_pending;
         report.timings = RuntimeProcessTimings {
             apply: apply_elapsed,
             projection: projection_elapsed,
             storage: storage_elapsed,
             publication: publication_elapsed,
+            projection_input: projected.projection_input,
+            projection_machine: projected.projection_machine,
+            projection_meta: projected.projection_meta,
+            projection_context: projected.projection_context,
+            projection_checkpoint: projected.projection_checkpoint,
+            projection_encode: projected.projection_encode,
         };
         Ok(report)
     }
@@ -349,28 +391,17 @@ impl DurableRuntimeProcessor {
         &mut self,
     ) -> Result<Option<RuntimeProcessReport>, DurableRuntimeProcessorError> {
         self.ensure_healthy()?;
-        if self.pending_publications.is_empty() {
-            return Ok(None);
-        }
         let mut aggregate = RuntimeProcessReport::default();
+        let retried = self.publisher.retry_pending()?;
+        if retried.rows_published > 0 {
+            merge_publication_report(&mut aggregate, process_report(retried))?;
+        }
         while !self.pending_publications.is_empty() {
-            if !self.front_is_publishable()? {
+            if !self.front_is_stageable()? {
                 break;
             }
             let report = self.publish_pending()?;
-            aggregate.durable_height = report.durable_height;
-            aggregate.outputs_published = aggregate
-                .outputs_published
-                .checked_add(report.outputs_published)
-                .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
-            aggregate.envelopes_published = aggregate
-                .envelopes_published
-                .checked_add(report.envelopes_published)
-                .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
-            aggregate.durable_bytes_published = aggregate
-                .durable_bytes_published
-                .checked_add(report.durable_bytes_published)
-                .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
+            merge_publication_report(&mut aggregate, report)?;
         }
         if aggregate.durable_height.is_none() {
             return Ok(None);
@@ -382,11 +413,15 @@ impl DurableRuntimeProcessor {
         !self.pending_publications.is_empty()
     }
 
-    fn front_is_publishable(&mut self) -> Result<bool, DurableRuntimeProcessorError> {
+    pub fn publication_backlog(&self) -> PublicationBacklog {
+        self.publisher.backlog()
+    }
+
+    fn front_is_stageable(&mut self) -> Result<bool, DurableRuntimeProcessorError> {
         let Some(durable) = self.pending_publications.front() else {
             return Ok(true);
         };
-        Ok(self.publisher.can_publish(&mut self.store, durable)?)
+        Ok(self.publisher.can_stage(&mut self.store, durable)?)
     }
 
     fn publish_pending(&mut self) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
@@ -432,8 +467,37 @@ fn process_report(report: PublicationReport) -> RuntimeProcessReport {
         durable_bytes_published: report.durable_bytes,
         commitments: None,
         account_commits: Vec::new(),
+        accepted_payments: 0,
+        completed_payments: 0,
+        matched_swaps: 0,
+        lock_book_open: None,
+        runtime_entity_inputs: 0,
+        account_inputs: 0,
+        canonical_input_bytes: 0,
+        entity_txs_selected: 0,
+        entity_txs_pending: 0,
         timings: RuntimeProcessTimings::default(),
     }
+}
+
+fn merge_publication_report(
+    aggregate: &mut RuntimeProcessReport,
+    report: RuntimeProcessReport,
+) -> Result<(), DurableRuntimeProcessorError> {
+    aggregate.durable_height = report.durable_height.or(aggregate.durable_height);
+    aggregate.outputs_published = aggregate
+        .outputs_published
+        .checked_add(report.outputs_published)
+        .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
+    aggregate.envelopes_published = aggregate
+        .envelopes_published
+        .checked_add(report.envelopes_published)
+        .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
+    aggregate.durable_bytes_published = aggregate
+        .durable_bytes_published
+        .checked_add(report.durable_bytes_published)
+        .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
+    Ok(())
 }
 
 #[derive(Debug, Error)]

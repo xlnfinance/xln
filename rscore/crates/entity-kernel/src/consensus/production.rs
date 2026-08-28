@@ -27,9 +27,11 @@ pub use catalog::{EntityTxCatalogError, EntityTxKind, EntityTxSupport};
 pub use encoding::EntityEncodingError;
 pub use frame::{
     CanonicalEntityTx, EntityFrame, EntityFrameBody, EntityFrameError, EntityFrameEvent,
-    EntityFrameLeader, HashToSign, HashType, compute_entity_events_parity_digest,
-    compute_entity_frame_hash,
+    EntityFrameLeader, EntityFrameWireMeasure, EntityFrameWireMeasureBody, HashToSign, HashType,
+    MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
+    compute_entity_events_parity_digest, compute_entity_frame_hash, measure_entity_frame_wire,
 };
+pub use j_prefix::build_required_j_prefix_certificate;
 pub use lineage::{
     CertifiedEntityFrameLink, EntityLineageError, build_certified_entity_frame_link,
 };

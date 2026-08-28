@@ -21,7 +21,9 @@ pub use inbound::{
     DirectRuntimeIngress, DirectRuntimeIngressConfig, DirectRuntimeIngressMetrics,
     InboundEntityInputs, InboundSessionTable,
 };
-pub use publisher::{DirectOutboxPublisher, DirectOutboxPublisherConfig, PublicationReport};
+pub use publisher::{
+    DirectOutboxPublisher, DirectOutboxPublisherConfig, PublicationBacklog, PublicationReport,
+};
 pub use routing::{DirectRoute, DirectRouteTable};
 
 #[cfg(test)]

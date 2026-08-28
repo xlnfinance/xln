@@ -39,8 +39,8 @@ pub fn write_runtime_replay_diff(
     input: RuntimeReplayDiffInput<'_>,
 ) -> Result<RuntimeReplayDiff, String> {
     let expected_value = replay_value(
-        &input.expected.frame_bytes,
-        &input.expected.outputs,
+        input.expected.frame_bytes(),
+        input.expected.outputs(),
         "expected",
     )?;
     let actual_value = replay_value(&input.actual.frame_bytes, &input.actual.outputs, "actual")?;
@@ -50,7 +50,7 @@ pub fn write_runtime_replay_diff(
         differences.push(difference(
             "$bytes",
             "canonical-bytes-mismatch",
-            &Value::String(bytes_digest(&input.expected.frame_bytes)),
+            &Value::String(bytes_digest(input.expected.frame_bytes())),
             &Value::String(bytes_digest(&input.actual.frame_bytes)),
         ));
     }

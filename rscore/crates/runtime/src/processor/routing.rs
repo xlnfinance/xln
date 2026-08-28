@@ -119,6 +119,12 @@ impl EntityRouteTable {
         self.direct_routes.clone()
     }
 
+    pub(crate) fn runtime_ids(&self) -> impl Iterator<Item = &str> {
+        self.by_entity
+            .values()
+            .map(|route| route.runtime_id.as_str())
+    }
+
     /// Entity profiles explicitly installed by the operator. The resident
     /// Runtime uses this same deterministic set both for output routing and
     /// for HTLC liveness assertions; no gossip lookup occurs mid-frame.

@@ -206,6 +206,54 @@ pub(super) fn put_node<V>(
     }
 }
 
+/// Replace only the in-memory value carried by an existing leaf.
+///
+/// The caller has already verified the key and canonical value digest. This
+/// path-copies the leaf ancestry so envelope data can change while every
+/// commitment hash remains identical.
+pub(super) fn replace_leaf_value<V>(
+    node: &NodeRef<V>,
+    path: &[u8],
+    key: &[u8],
+    value: V,
+) -> Result<NodeRef<V>, PersistentRadixMapError> {
+    if !path.starts_with(node_path(node)) {
+        return Err(PersistentRadixMapError::KeyPrefixCollision);
+    }
+    match &**node {
+        Node::Leaf {
+            key: stored,
+            value_digest,
+            ..
+        } => {
+            if stored != key {
+                return Err(PersistentRadixMapError::ValueMissing);
+            }
+            Ok(make_leaf(key.to_vec(), value, *value_digest))
+        }
+        Node::Branch {
+            path: branch_path,
+            children,
+            ..
+        } => {
+            let slot = *path
+                .get(branch_path.len())
+                .ok_or(PersistentRadixMapError::KeyPrefixCollision)?
+                as usize;
+            let child = children[slot]
+                .as_ref()
+                .ok_or(PersistentRadixMapError::ValueMissing)?;
+            let updated = replace_leaf_value(child, path, key, value)?;
+            let mut next = children.clone();
+            next[slot] = Some(updated);
+            make_branch(
+                branch_path.clone(),
+                &next.iter().flatten().cloned().collect::<Vec<_>>(),
+            )
+        }
+    }
+}
+
 fn put_against_leaf<V>(
     node: &NodeRef<V>,
     leaf: NodeRef<V>,

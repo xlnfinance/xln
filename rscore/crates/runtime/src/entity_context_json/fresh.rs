@@ -52,9 +52,9 @@ pub enum FreshEntityContextError {
 pub struct EntityInfraMaterializeRequest<'a> {
     pub replica: &'a mut RuntimeReplica,
     /// Exact Account rows remaining after Runtime FIFO and Entity wire fitting.
-    pub account_inputs: &'a [AccountInputRow],
+    pub account_inputs: &'a [&'a AccountInputRow],
     /// Exact effective local operations after Entity-command expansion.
-    pub local_financial_txs: &'a [LocalEntityFinancialTx],
+    pub local_financial_txs: &'a [&'a LocalEntityFinancialTx],
     pub timestamp: u64,
     pub finalized_j_height: u64,
 }
