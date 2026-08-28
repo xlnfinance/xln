@@ -136,14 +136,19 @@ describe('React wallet assets and accounts projection', () => {
 
   test('uses the shared query observer and tears down the real adapter boundary', () => {
     const source = readFileSync('frontend/apps/wallet/src/wallet-portfolio-source.ts', 'utf8');
+    const boundary = readFileSync('frontend/apps/wallet/src/wallet-runtime-read-boundary.ts', 'utf8');
     const view = readFileSync('frontend/apps/wallet/src/wallet-portfolio.tsx', 'utf8');
-    expect(source).toContain('RuntimeQueryClient');
+    expect(source).toContain('createWalletRuntimeQueryClient');
     expect(source).toContain('RuntimeQueryObserver');
-    expect(source).toContain("import('../../../../core/api/runtime-adapter/remote.ts')");
-    expect(source.indexOf("import('../../../../core/support/process/runtime-process.ts')"))
-      .toBeLessThan(source.indexOf("import('../../../../core/api/runtime-adapter/remote.ts')"));
+    expect(boundary).toContain('RuntimeQueryClient');
+    expect(boundary).toContain("import('../../../../core/api/runtime-adapter/remote.ts')");
+    expect(boundary.indexOf("import('../../../../core/support/process/runtime-process.ts')"))
+      .toBeLessThan(boundary.indexOf("import('../../../../core/api/runtime-adapter/remote.ts')"));
+    expect(boundary).toContain('catch (error: unknown)');
+    expect(boundary).toContain('adapter.disconnect()');
     expect(source).toContain('this.observer?.destroy()');
     expect(source).toContain('this.adapter?.disconnect()');
+    expect(source).toContain('this.started = false');
     expect(source).toContain("snapshot.status === 'error' && this.adapter?.status === 'error'");
     expect(view).toContain('useSyncExternalStore');
     expect(view).toContain('No optimistic or sample values.');

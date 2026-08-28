@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, AND REACT WALLET ASSETS/ACCOUNTS IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, REACT WALLET ASSETS/ACCOUNTS, AND REACT WALLET FINANCIAL HEALTH IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -805,6 +805,27 @@ zero unsafe-type findings. The production entry is 250.47 kB JavaScript /
 77.40 kB gzip plus 31.82 kB CSS / 6.09 kB gzip; the canonical adapter remains
 isolated in a route-only 722.07 kB / 223.29 kB gzip lazy chunk.
 
+The React `/app` shell now owns the remaining read-only financial-health flow
+at `?health=1`: bounded open debt ledgers, Runtime-wide conservation evidence,
+committed Account dispute lifecycle gates, and persisted activity history.
+Solvency reads pin the Entity view to the exact reported Runtime height;
+`null` Depository evidence remains visibly unchecked rather than green. Debt
+amounts and perspective, conservation arithmetic, Account ownership, activity
+amounts, pagination, and every unknown adapter payload are validated before
+rendering. The shared remote-read boundary now disconnects failed initial
+adapters, and both financial sources unlatch after failure so visible retry is
+bounded and functional. Five direct tests plus the affected portfolio, shell,
+and identity suites pass 21 tests with 84 expectations; the wallet local check
+covers 486 files with zero unsafe-type findings. The production entry is
+272.78 kB JavaScript / 82.09 kB gzip plus 40.25 kB CSS / 7.07 kB gzip, while
+the canonical adapter remains in the 722.07 kB / 223.29 kB gzip lazy chunk.
+Real persisted-Runtime evidence covers two Entities, one bilateral Account,
+three asset lanes, Entity switching, on/off-chain history, and explicit
+connection failure/retry. Success has zero console errors or warnings at
+390×844, 1366×900, and 1920×1080; the unavailable endpoint emits only its two
+Strict Mode connection attempts, adds exactly one on explicit retry, and stays
+quiet afterward.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte
@@ -960,7 +981,7 @@ any mismatch. Never compile on production.
    the other wallet or ops input families.
 2. Continue WP5/WP6 with the wallet boot, shell, canonical Brain Vault and
    mnemonic identity choices, onboarding, recovery, and the flows after the
-   implemented settings, diagnostics, assets, and accounts surfaces;
+   implemented settings, diagnostics, assets, accounts, and financial-health surfaces;
    keep Runtime projections in shared client adapters and do not move
    transition logic into the frontend. Remote link decoding and consent are
    ready in `packages/runtime-client`, and adapter session storage is ready in

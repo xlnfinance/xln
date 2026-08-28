@@ -1,0 +1,297 @@
+.wallet-health {
+  animation: wallet-shell-enter 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.wallet-health-heading h1 {
+  max-width: 11ch;
+  margin: 0;
+  color: #f6f7f2;
+  font-size: clamp(2.7rem, 6vw, 5.8rem);
+  font-weight: 620;
+  letter-spacing: -0.07em;
+  line-height: 0.95;
+}
+
+.wallet-health-heading > p:last-child {
+  max-width: 48rem;
+  margin: 1.2rem 0 0;
+  color: #8f9699;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.wallet-health-context {
+  display: grid;
+  grid-template-columns: auto minmax(13rem, 1fr) auto auto;
+  gap: 0.8rem;
+  align-items: center;
+  margin-top: clamp(2.5rem, 6vw, 4.5rem);
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-health-context label,
+.wallet-health-context > span {
+  color: #737a7d;
+  font: 0.64rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wallet-health-context select,
+.wallet-health-context button,
+.wallet-health-unavailable button {
+  padding: 0.7rem 0.85rem;
+  color: #dce0d9;
+  font: 600 0.76rem/1.2 inherit;
+  background: #111314;
+  border: 1px solid #303436;
+  border-radius: 0.45rem;
+}
+
+.wallet-health-context button,
+.wallet-health-unavailable button,
+.wallet-health-pagination button {
+  cursor: pointer;
+}
+
+.wallet-health-context button:hover:not(:disabled),
+.wallet-health-unavailable button:hover,
+.wallet-health-context button:focus-visible,
+.wallet-health-unavailable button:focus-visible {
+  color: #10120f;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wallet-health-context button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.wallet-health-section {
+  margin-top: clamp(3rem, 7vw, 5.5rem);
+  border-top: 1px solid var(--line);
+}
+
+.wallet-health-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0 1.15rem;
+}
+
+.wallet-health-section-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.wallet-health-section-heading p,
+.wallet-health-section-heading h2 {
+  margin: 0;
+}
+
+.wallet-health-section-heading p,
+.wallet-health-section-heading > span {
+  color: #62686c;
+  font: 0.64rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wallet-health-section-heading h2 {
+  color: #e7e9e3;
+  font-size: 1rem;
+  font-weight: 620;
+}
+
+.wallet-health-empty {
+  margin: 0;
+  padding: 1.6rem 0;
+  color: #767d80;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-health-note,
+.wallet-health-boundary {
+  margin: 0;
+  padding: 1rem 0;
+  color: #666c6f;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-health-boundary {
+  margin-top: 3rem;
+  border-top: 1px solid var(--line);
+}
+
+.wallet-health-debt-list,
+.wallet-health-debt-group {
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-health-debt-group > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.2rem 0;
+}
+
+.wallet-health-debt-group > header > div {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.wallet-health-debt-group h3,
+.wallet-health-debt-group strong {
+  margin: 0;
+  color: #e4e7e0;
+}
+
+.wallet-health-debt-group h3 {
+  font-size: 1.15rem;
+}
+
+.wallet-health-debt-group small,
+.wallet-health-direction {
+  color: #747b7e;
+  font: 0.62rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wallet-health-direction.is-out { color: #f1ad66; }
+.wallet-health-direction.is-in { color: var(--accent); }
+
+.wallet-health-debt-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1.4fr) repeat(3, minmax(9rem, 1fr)) minmax(5rem, 0.55fr);
+  gap: 1rem;
+  align-items: center;
+  min-width: 48rem;
+  padding: 0.85rem 0;
+  color: #bfc4bd;
+  font-size: 0.75rem;
+  border-top: 1px solid #1d2021;
+}
+
+.wallet-health-debt-row.is-heading {
+  color: #62686c;
+  font: 0.61rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wallet-health-debt-row > span:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.wallet-health-debt-row code,
+.wallet-health-disputes code {
+  color: #60676a;
+  font: 0.61rem/1.3 "SFMono-Regular", Consolas, monospace;
+}
+
+.wallet-health-solvency-status {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 1.1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-health-solvency-status > span {
+  width: 0.55rem;
+  height: 0.55rem;
+  background: #f0b25d;
+  border-radius: 50%;
+}
+
+.wallet-health-solvency-status.is-balanced > span { background: var(--accent); }
+.wallet-health-solvency-status.is-mismatch > span { background: #ef6f67; }
+
+.wallet-health-solvency-status > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.wallet-health-solvency-status strong { color: #dfe2dc; font-size: 0.82rem; }
+.wallet-health-solvency-status small { color: #6f7679; font-size: 0.68rem; }
+
+.wallet-health-solvency-grid > article,
+.wallet-health-disputes > article {
+  padding: 1.15rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-health-solvency-grid header,
+.wallet-health-disputes header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.wallet-health-solvency-grid header > div,
+.wallet-health-disputes header > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.wallet-health-solvency-grid header strong,
+.wallet-health-disputes header strong { color: #e2e5de; font-size: 0.9rem; }
+.wallet-health-solvency-grid header small { color: #666d70; font-size: 0.64rem; }
+
+.wallet-health-solvency-grid header > span,
+.wallet-health-disputes header > span {
+  color: #f0b25d;
+  font: 0.61rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wallet-health-solvency-grid header > span.is-balanced { color: var(--accent); }
+.wallet-health-solvency-grid header > span.is-mismatch,
+.wallet-health-disputes header > span.is-disputed { color: #ef756d; }
+
+.wallet-health-solvency-grid dl,
+.wallet-health-disputes dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 0;
+}
+
+.wallet-health-disputes dl { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wallet-health-solvency-grid dt,
+.wallet-health-disputes dt { margin-bottom: 0.35rem; color: #5f6669; font-size: 0.61rem; text-transform: uppercase; }
+.wallet-health-solvency-grid dd,
+.wallet-health-disputes dd { overflow: hidden; margin: 0; color: #b9beb7; font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+
+.wallet-health-event {
+  display: grid;
+  grid-template-columns: 0.8rem minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #202324;
+}
+
+.wallet-health-event-marker { width: 0.42rem; height: 0.42rem; margin-top: 0.3rem; background: #777e81; border-radius: 50%; }
+.wallet-health-event.is-onchain .wallet-health-event-marker { background: #b79af2; }
+.wallet-health-event.is-in .wallet-health-event-marker { background: var(--accent); }
+.wallet-health-event.is-out .wallet-health-event-marker { background: #f1ad66; }
+
+.wallet-health-event-copy header { display: flex; justify-content: space-between; gap: 1rem; }
+.wallet-health-event-copy header strong { color: #dce0d9; font-size: 0.82rem; }
+.wallet-health-event-copy header span { color: #72797c; font-size: 0.65rem; text-transform: uppercase; }
+.wallet-health-event-copy p { margin: 0.3rem 0 0; color: #8c9396; font-size: 0.75rem; line-height: 1.45; }
+.wallet-health-event-copy footer { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 0.55rem; color: #5f6669; font: 0.61rem/1.3 "SFMono-Regular", Consolas, monospace; }
+.wallet-health-event-copy footer strong { margin-left: auto; color: #aeb4ad; }

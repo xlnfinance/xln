@@ -15,6 +15,7 @@ describe('React wallet identity onboarding', () => {
   test('opens identity for explicit setup and disposable demo links', () => {
     expect(resolveWalletAppView('')).toBe('overview');
     expect(resolveWalletAppView('?portfolio=1')).toBe('portfolio');
+    expect(resolveWalletAppView('?health=1')).toBe('health');
     expect(resolveWalletAppView('?setup=1')).toBe('identity');
     expect(resolveWalletAppView('?demo=A')).toBe('identity');
     expect(resolveWalletAppView('?settings=1')).toBe('settings');

@@ -1,4 +1,12 @@
-import { normalizeEntityIdForRuntimeView } from '../../../packages/runtime-client/src/runtime-view-model';
+import {
+  normalizeRequiredRuntimeEntityId,
+  optionalRuntimeInteger,
+  requireRuntimeBigInt,
+  requireRuntimeInteger,
+  requireRuntimeMap,
+  requireRuntimeRecord,
+  requireRuntimeString,
+} from './wallet-runtime-decode';
 
 export type WalletPortfolioDelta = Readonly<{
   tokenId: number;
@@ -80,66 +88,30 @@ export type WalletPortfolioProjection = Readonly<{
   accountsTotal: number;
 }>;
 
-const requireRecord = (value: unknown, label: string): Record<string, unknown> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label}_INVALID`);
-  }
-  return value as Record<string, unknown>;
-};
-
-const requireString = (value: unknown, label: string): string => {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}_INVALID`);
-  return value.trim();
-};
-
-const requireInteger = (value: unknown, label: string, minimum = 0): number => {
-  if (!Number.isSafeInteger(value) || Number(value) < minimum) throw new Error(`${label}_INVALID`);
-  return Number(value);
-};
-
-const optionalInteger = (value: unknown, fallback: number, label: string): number =>
-  value === undefined ? fallback : requireInteger(value, label);
-
-const requireBigInt = (value: unknown, label: string): bigint => {
-  if (typeof value !== 'bigint') throw new Error(`${label}_INVALID`);
-  return value;
-};
-
-const requireMap = (value: unknown, label: string): ReadonlyMap<unknown, unknown> => {
-  if (!(value instanceof Map)) throw new Error(`${label}_INVALID`);
-  return value;
-};
-
-const normalizeRequiredEntityId = (value: unknown, label: string): string => {
-  const normalized = normalizeEntityIdForRuntimeView(requireString(value, label));
-  if (!normalized) throw new Error(`${label}_INVALID`);
-  return normalized;
-};
-
 const decodeDelta = (value: unknown, tokenId: number): WalletPortfolioDelta => {
-  const root = requireRecord(value, 'WALLET_PORTFOLIO_DELTA');
-  const payloadTokenId = requireInteger(root['tokenId'], 'WALLET_PORTFOLIO_DELTA_TOKEN', 1);
+  const root = requireRuntimeRecord(value, 'WALLET_PORTFOLIO_DELTA');
+  const payloadTokenId = requireRuntimeInteger(root['tokenId'], 'WALLET_PORTFOLIO_DELTA_TOKEN', 1);
   if (payloadTokenId !== tokenId) throw new Error('WALLET_PORTFOLIO_DELTA_TOKEN_MISMATCH');
   return {
     tokenId,
-    collateral: requireBigInt(root['collateral'], 'WALLET_PORTFOLIO_DELTA_COLLATERAL'),
-    ondelta: requireBigInt(root['ondelta'], 'WALLET_PORTFOLIO_DELTA_ONDELTA'),
-    offdelta: requireBigInt(root['offdelta'], 'WALLET_PORTFOLIO_DELTA_OFFDELTA'),
-    leftCreditLimit: requireBigInt(root['leftCreditLimit'], 'WALLET_PORTFOLIO_DELTA_LEFT_CREDIT'),
-    rightCreditLimit: requireBigInt(root['rightCreditLimit'], 'WALLET_PORTFOLIO_DELTA_RIGHT_CREDIT'),
-    leftAllowance: requireBigInt(root['leftAllowance'], 'WALLET_PORTFOLIO_DELTA_LEFT_ALLOWANCE'),
-    rightAllowance: requireBigInt(root['rightAllowance'], 'WALLET_PORTFOLIO_DELTA_RIGHT_ALLOWANCE'),
-    leftHold: requireBigInt(root['leftHold'], 'WALLET_PORTFOLIO_DELTA_LEFT_HOLD'),
-    rightHold: requireBigInt(root['rightHold'], 'WALLET_PORTFOLIO_DELTA_RIGHT_HOLD'),
+    collateral: requireRuntimeBigInt(root['collateral'], 'WALLET_PORTFOLIO_DELTA_COLLATERAL'),
+    ondelta: requireRuntimeBigInt(root['ondelta'], 'WALLET_PORTFOLIO_DELTA_ONDELTA'),
+    offdelta: requireRuntimeBigInt(root['offdelta'], 'WALLET_PORTFOLIO_DELTA_OFFDELTA'),
+    leftCreditLimit: requireRuntimeBigInt(root['leftCreditLimit'], 'WALLET_PORTFOLIO_DELTA_LEFT_CREDIT'),
+    rightCreditLimit: requireRuntimeBigInt(root['rightCreditLimit'], 'WALLET_PORTFOLIO_DELTA_RIGHT_CREDIT'),
+    leftAllowance: requireRuntimeBigInt(root['leftAllowance'], 'WALLET_PORTFOLIO_DELTA_LEFT_ALLOWANCE'),
+    rightAllowance: requireRuntimeBigInt(root['rightAllowance'], 'WALLET_PORTFOLIO_DELTA_RIGHT_ALLOWANCE'),
+    leftHold: requireRuntimeBigInt(root['leftHold'], 'WALLET_PORTFOLIO_DELTA_LEFT_HOLD'),
+    rightHold: requireRuntimeBigInt(root['rightHold'], 'WALLET_PORTFOLIO_DELTA_RIGHT_HOLD'),
   };
 };
 
 const decodeEntity = (value: unknown): WalletPortfolioEntity => {
-  const root = requireRecord(value, 'WALLET_PORTFOLIO_ENTITY');
+  const root = requireRuntimeRecord(value, 'WALLET_PORTFOLIO_ENTITY');
   return {
-    entityId: normalizeRequiredEntityId(root['entityId'], 'WALLET_PORTFOLIO_ENTITY_ID'),
-    label: requireString(root['label'], 'WALLET_PORTFOLIO_ENTITY_LABEL'),
-    height: requireInteger(root['height'], 'WALLET_PORTFOLIO_ENTITY_HEIGHT'),
+    entityId: normalizeRequiredRuntimeEntityId(root['entityId'], 'WALLET_PORTFOLIO_ENTITY_ID'),
+    label: requireRuntimeString(root['label'], 'WALLET_PORTFOLIO_ENTITY_LABEL'),
+    height: requireRuntimeInteger(root['height'], 'WALLET_PORTFOLIO_ENTITY_HEIGHT'),
     isHub: root['isHub'] === true,
   };
 };
@@ -150,7 +122,7 @@ const decodePosition = (
   isLeft: boolean,
   math: WalletPortfolioMath,
 ): WalletPortfolioPosition => {
-  const tokenId = requireInteger(tokenIdValue, 'WALLET_PORTFOLIO_TOKEN_ID', 1);
+  const tokenId = requireRuntimeInteger(tokenIdValue, 'WALLET_PORTFOLIO_TOKEN_ID', 1);
   const derived = math.deriveDelta(decodeDelta(deltaValue, tokenId), isLeft);
   const token = math.getTokenInfo(tokenId);
   return {
@@ -175,10 +147,10 @@ const decodeAccount = (
   entityLabels: ReadonlyMap<string, string>,
   math: WalletPortfolioMath,
 ): WalletPortfolioAccount => {
-  const root = requireRecord(value, 'WALLET_PORTFOLIO_ACCOUNT');
-  const state = requireRecord(root['state'], 'WALLET_PORTFOLIO_ACCOUNT_STATE');
-  const leftEntity = normalizeRequiredEntityId(state['leftEntity'], 'WALLET_PORTFOLIO_ACCOUNT_LEFT');
-  const rightEntity = normalizeRequiredEntityId(state['rightEntity'], 'WALLET_PORTFOLIO_ACCOUNT_RIGHT');
+  const root = requireRuntimeRecord(value, 'WALLET_PORTFOLIO_ACCOUNT');
+  const state = requireRuntimeRecord(root['state'], 'WALLET_PORTFOLIO_ACCOUNT_STATE');
+  const leftEntity = normalizeRequiredRuntimeEntityId(state['leftEntity'], 'WALLET_PORTFOLIO_ACCOUNT_LEFT');
+  const rightEntity = normalizeRequiredRuntimeEntityId(state['rightEntity'], 'WALLET_PORTFOLIO_ACCOUNT_RIGHT');
   if (activeEntityId !== leftEntity && activeEntityId !== rightEntity) {
     throw new Error('WALLET_PORTFOLIO_ACCOUNT_PERSPECTIVE_MISMATCH');
   }
@@ -187,7 +159,7 @@ const decodeAccount = (
   if (isLeft !== (activeEntityId === leftEntity)) {
     throw new Error('WALLET_PORTFOLIO_ACCOUNT_ROLE_MISMATCH');
   }
-  const deltas = requireMap(state['deltas'], 'WALLET_PORTFOLIO_ACCOUNT_DELTAS');
+  const deltas = requireRuntimeMap(state['deltas'], 'WALLET_PORTFOLIO_ACCOUNT_DELTAS');
   const positions = [...deltas.entries()]
     .map(([tokenId, delta]) => decodePosition(tokenId, delta, isLeft, math))
     .sort((left, right) => left.tokenId - right.tokenId);
@@ -222,8 +194,8 @@ const accumulateAssets = (
     return current;
   };
   for (const [tokenIdValue, reserveValue] of reserves.entries()) {
-    const tokenId = requireInteger(tokenIdValue, 'WALLET_PORTFOLIO_RESERVE_TOKEN', 1);
-    read(tokenId).reserve = requireBigInt(reserveValue, 'WALLET_PORTFOLIO_RESERVE_AMOUNT');
+    const tokenId = requireRuntimeInteger(tokenIdValue, 'WALLET_PORTFOLIO_RESERVE_TOKEN', 1);
+    read(tokenId).reserve = requireRuntimeBigInt(reserveValue, 'WALLET_PORTFOLIO_RESERVE_AMOUNT');
   }
   for (const account of accounts) {
     for (const position of account.positions) {
@@ -250,8 +222,8 @@ export const decodeWalletPortfolioProjection = (
   payload: unknown,
   math: WalletPortfolioMath,
 ): WalletPortfolioProjection => {
-  const root = requireRecord(payload, 'WALLET_PORTFOLIO_FRAME');
-  const height = requireInteger(root['height'], 'WALLET_PORTFOLIO_HEIGHT');
+  const root = requireRuntimeRecord(payload, 'WALLET_PORTFOLIO_FRAME');
+  const height = requireRuntimeInteger(root['height'], 'WALLET_PORTFOLIO_HEIGHT');
   const entitiesRaw = root['entities'];
   if (!Array.isArray(entitiesRaw)) throw new Error('WALLET_PORTFOLIO_ENTITIES_INVALID');
   const entities = entitiesRaw.map(decodeEntity);
@@ -269,16 +241,16 @@ export const decodeWalletPortfolioProjection = (
     };
   }
   const entityLabels = new Map(entities.map((entity) => [entity.entityId, entity.label]));
-  const activeEntityId = normalizeRequiredEntityId(root['activeEntityId'], 'WALLET_PORTFOLIO_ACTIVE_ID');
-  const active = requireRecord(root['activeEntity'], 'WALLET_PORTFOLIO_ACTIVE_ENTITY');
-  const core = requireRecord(active['core'], 'WALLET_PORTFOLIO_ACTIVE_CORE');
-  const coreEntityId = normalizeRequiredEntityId(core['entityId'], 'WALLET_PORTFOLIO_CORE_ID');
+  const activeEntityId = normalizeRequiredRuntimeEntityId(root['activeEntityId'], 'WALLET_PORTFOLIO_ACTIVE_ID');
+  const active = requireRuntimeRecord(root['activeEntity'], 'WALLET_PORTFOLIO_ACTIVE_ENTITY');
+  const core = requireRuntimeRecord(active['core'], 'WALLET_PORTFOLIO_ACTIVE_CORE');
+  const coreEntityId = normalizeRequiredRuntimeEntityId(core['entityId'], 'WALLET_PORTFOLIO_CORE_ID');
   if (coreEntityId !== activeEntityId) throw new Error('WALLET_PORTFOLIO_ACTIVE_ID_MISMATCH');
-  const page = requireRecord(active['accounts'], 'WALLET_PORTFOLIO_ACCOUNTS_PAGE');
+  const page = requireRuntimeRecord(active['accounts'], 'WALLET_PORTFOLIO_ACCOUNTS_PAGE');
   const items = page['items'];
   if (!Array.isArray(items)) throw new Error('WALLET_PORTFOLIO_ACCOUNT_ITEMS_INVALID');
   const accounts = items.map((account) => decodeAccount(account, activeEntityId, entityLabels, math));
-  const reserves = requireMap(core['reserves'], 'WALLET_PORTFOLIO_RESERVES');
+  const reserves = requireRuntimeMap(core['reserves'], 'WALLET_PORTFOLIO_RESERVES');
   return {
     height,
     entities,
@@ -286,8 +258,8 @@ export const decodeWalletPortfolioProjection = (
     activeEntityLabel: entityLabels.get(activeEntityId) ?? activeEntityId,
     assets: accumulateAssets(reserves, accounts, math),
     accounts,
-    accountsPage: optionalInteger(page['pageIndex'], 0, 'WALLET_PORTFOLIO_ACCOUNT_PAGE'),
-    accountsPageCount: optionalInteger(page['pageCount'], items.length > 0 ? 1 : 0, 'WALLET_PORTFOLIO_ACCOUNT_PAGE_COUNT'),
-    accountsTotal: optionalInteger(page['totalItems'], items.length, 'WALLET_PORTFOLIO_ACCOUNT_TOTAL'),
+    accountsPage: optionalRuntimeInteger(page['pageIndex'], 0, 'WALLET_PORTFOLIO_ACCOUNT_PAGE'),
+    accountsPageCount: optionalRuntimeInteger(page['pageCount'], items.length > 0 ? 1 : 0, 'WALLET_PORTFOLIO_ACCOUNT_PAGE_COUNT'),
+    accountsTotal: optionalRuntimeInteger(page['totalItems'], items.length, 'WALLET_PORTFOLIO_ACCOUNT_TOTAL'),
   };
 };

@@ -3,6 +3,7 @@ import type { RuntimeAdapterStorageSnapshot } from '../../../packages/browser/sr
 export const WALLET_APP_LINKS = [
   { href: '/app', label: 'Overview', view: 'overview' },
   { href: '/app?portfolio=1', label: 'Assets', view: 'portfolio' },
+  { href: '/app?health=1', label: 'Health', view: 'health' },
   { href: '/app?setup=1', label: 'Identity', view: 'identity' },
   { href: '/app?settings=1', label: 'Settings', view: 'settings' },
   { href: '/app?diagnostics=1', label: 'Status', view: 'diagnostics' },
@@ -11,12 +12,13 @@ export const WALLET_APP_LINKS = [
   { href: '/docs', label: 'Docs', view: null },
 ] as const;
 
-export type WalletAppView = 'overview' | 'portfolio' | 'identity' | 'settings' | 'diagnostics';
+export type WalletAppView = 'overview' | 'portfolio' | 'health' | 'identity' | 'settings' | 'diagnostics';
 
 export const resolveWalletAppView = (search: string): WalletAppView => {
   const params = new URLSearchParams(search);
   if (params.get('setup') === '1' || params.has('demo')) return 'identity';
   if (params.get('portfolio') === '1') return 'portfolio';
+  if (params.get('health') === '1') return 'health';
   if (params.get('settings') === '1') return 'settings';
   return params.get('diagnostics') === '1' ? 'diagnostics' : 'overview';
 };

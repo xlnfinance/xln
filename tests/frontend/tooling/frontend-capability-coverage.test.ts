@@ -51,6 +51,7 @@ describe('frontend capability inventory', () => {
       'wallet-shell-and-identity',
       'wallet-browser-lifecycle',
       'wallet-runtime-discovery',
+      'wallet-finance',
       'wallet-native-and-offline',
     ].includes(id)).every(
       ({ status }) => status === 'unstarted',
@@ -190,6 +191,11 @@ describe('frontend capability inventory', () => {
       .toContain('framework-neutral RuntimeView refresh leases and invalidation');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('framework-neutral RuntimeView selection snapshots and revisions');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-finance')?.status).toBe('in_progress');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-finance')?.currentSources)
+      .toContain('frontend/apps/wallet/src/wallet-financial-health.tsx');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-finance')?.behavior)
+      .toContain('React-owned debt, Runtime solvency evidence, Account dispute gates, and committed history');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-native-and-offline')?.status).toBe('in_progress');
   });
 

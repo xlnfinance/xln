@@ -1,0 +1,54 @@
+.wallet-health-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 0;
+  color: #747b7e;
+  font-size: 0.7rem;
+}
+
+.wallet-health-pagination button {
+  color: #c9cdc7;
+  background: transparent;
+  border: 0;
+}
+
+.wallet-health-pagination button:disabled {
+  color: #4e5457;
+  cursor: default;
+}
+
+.wallet-health-unavailable {
+  max-width: 46rem;
+  margin-top: clamp(3rem, 8vw, 7rem);
+  padding: 1.5rem 0;
+  border-top: 1px solid #71532f;
+  border-bottom: 1px solid #42351f;
+}
+
+.wallet-health-unavailable h2 {
+  margin: 0;
+  color: #e7e9e3;
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  font-weight: 560;
+  letter-spacing: -0.04em;
+}
+
+.wallet-health-unavailable > p:not(.wallet-shell-eyebrow) {
+  margin: 0.8rem 0 0;
+  color: #9b9f9b;
+  line-height: 1.55;
+}
+
+.wallet-health-unavailable > div {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1.25rem;
+}
+
+.wallet-health-unavailable a {
+  color: var(--accent);
+  font-size: 0.78rem;
+}
