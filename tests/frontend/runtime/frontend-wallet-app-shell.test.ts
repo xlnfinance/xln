@@ -13,6 +13,7 @@ describe('React wallet app shell', () => {
       { href: '/app', label: 'Overview', view: 'overview' },
       { href: '/app?setup=1', label: 'Identity', view: 'identity' },
       { href: '/app?settings=1', label: 'Settings', view: 'settings' },
+      { href: '/app?diagnostics=1', label: 'Status', view: 'diagnostics' },
       { href: '/testnet', label: 'Testnet', view: null },
       { href: '/health', label: 'Network', view: null },
       { href: '/docs', label: 'Docs', view: null },

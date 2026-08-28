@@ -4,17 +4,19 @@ export const WALLET_APP_LINKS = [
   { href: '/app', label: 'Overview', view: 'overview' },
   { href: '/app?setup=1', label: 'Identity', view: 'identity' },
   { href: '/app?settings=1', label: 'Settings', view: 'settings' },
+  { href: '/app?diagnostics=1', label: 'Status', view: 'diagnostics' },
   { href: '/testnet', label: 'Testnet', view: null },
   { href: '/health', label: 'Network', view: null },
   { href: '/docs', label: 'Docs', view: null },
 ] as const;
 
-export type WalletAppView = 'overview' | 'identity' | 'settings';
+export type WalletAppView = 'overview' | 'identity' | 'settings' | 'diagnostics';
 
 export const resolveWalletAppView = (search: string): WalletAppView => {
   const params = new URLSearchParams(search);
   if (params.get('setup') === '1' || params.has('demo')) return 'identity';
-  return params.get('settings') === '1' ? 'settings' : 'overview';
+  if (params.get('settings') === '1') return 'settings';
+  return params.get('diagnostics') === '1' ? 'diagnostics' : 'overview';
 };
 
 export type WalletRuntimeSummary = Readonly<{

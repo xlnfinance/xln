@@ -17,6 +17,7 @@ describe('React wallet identity onboarding', () => {
     expect(resolveWalletAppView('?setup=1')).toBe('identity');
     expect(resolveWalletAppView('?demo=A')).toBe('identity');
     expect(resolveWalletAppView('?settings=1')).toBe('settings');
+    expect(resolveWalletAppView('?diagnostics=1')).toBe('diagnostics');
   });
 
   test('creates a canonical default Brain Vault draft', () => {

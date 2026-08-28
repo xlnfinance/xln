@@ -9,6 +9,7 @@ import {
   type WalletRuntimeSummary,
 } from './app-shell-model';
 import { IdentityOnboarding } from './identity-onboarding';
+import { WalletDiagnostics } from './wallet-diagnostics';
 import { WalletSettings } from './wallet-settings';
 import { readWalletPreferences } from './wallet-settings-model';
 import './styles/app-shell.css';
@@ -52,6 +53,7 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
         <div className="wallet-shell-action-links">
           <a href="/app?setup=1">Set up wallet identity <span aria-hidden="true">→</span></a>
           <a href="/app?settings=1">Adjust wallet settings <span aria-hidden="true">→</span></a>
+          <a href="/app?diagnostics=1">Review wallet diagnostics <span aria-hidden="true">→</span></a>
           <a href="/testnet">Open testnet tools <span aria-hidden="true">↗</span></a>
           <a href="/health">Inspect network health <span aria-hidden="true">↗</span></a>
           <a href="/docs">Read documentation <span aria-hidden="true">↗</span></a>
@@ -67,6 +69,7 @@ export function WalletAppShell() {
   const [authScheme, setAuthScheme] = useState<WalletAuthScheme>(() => (
     readWalletPreferences(localStorage).authScheme
   ));
+  const usesIdentityAppearance = view === 'identity' || view === 'settings';
 
   useEffect(() => {
     const refreshRuntime = () => setRuntime(readRuntimeSummary());
@@ -81,7 +84,7 @@ export function WalletAppShell() {
   }, []);
 
   return (
-    <main className={`wallet-shell${view !== 'overview' && authScheme === 'light' ? ' is-auth-light' : ''}`}>
+    <main className={`wallet-shell${usesIdentityAppearance && authScheme === 'light' ? ' is-auth-light' : ''}`}>
       <aside className="wallet-shell-rail">
         <a className="wallet-shell-brand" href="/app" aria-label="xln wallet">xln</a>
         <nav className="wallet-shell-nav" aria-label="Wallet navigation">
@@ -111,6 +114,7 @@ export function WalletAppShell() {
         <div className="wallet-shell-workspace">
           {view === 'identity' ? <IdentityOnboarding /> : null}
           {view === 'settings' ? <WalletSettings onAuthSchemeChange={setAuthScheme} /> : null}
+          {view === 'diagnostics' ? <WalletDiagnostics runtime={runtime} /> : null}
           {view === 'overview' ? <WalletOverview runtime={runtime} /> : null}
         </div>
       </div>

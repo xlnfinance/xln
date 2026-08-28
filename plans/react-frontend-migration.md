@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, AND BROWSER-BRAINVAULT-FINALIZATION COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, AND REACT WALLET DIAGNOSTICS IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -773,6 +773,21 @@ state, and authority remain outside the preference boundary. Focused default,
 invalid, persistence, reset, failure, route, and secret-boundary coverage
 accompanies wallet typecheck, build, and responsive dark/light browser evidence.
 
+The React `/app` shell now owns redacted device diagnostics at
+`?diagnostics=1`. It reports the selected Runtime configuration without
+claiming a live handshake or exposing the tab-confined capability, reads actual
+browser connectivity and platform support, and compares the stored deploy
+version with the canonical no-cache `/api/jurisdictions` response. Offline,
+blocked-storage, malformed-payload, deploy-change, and endpoint-unavailable
+states remain explicit; the report never reads identity secrets, Runtime state,
+or financial data. Five direct diagnostics tests plus the affected shell,
+identity, preference, deploy-version, and capability checks pass 38 tests with
+271 expectations. The wallet local check covers 476 files with zero unsafe-type
+findings; the production artifact is 230.81 kB JavaScript / 72.18 kB gzip plus
+26.11 kB CSS / 5.30 kB gzip. Responsive browser evidence covers local and
+remote configuration, offline and blocked-storage states, explicit endpoint
+failure, refresh, and cleanup at phone, laptop, and wide-desktop viewports.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte
@@ -927,7 +942,8 @@ any mismatch. Never compile on production.
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
 2. Continue WP5/WP6 with the wallet boot, shell, canonical Brain Vault and
-   mnemonic identity choices, onboarding, recovery, settings, and diagnostics;
+   mnemonic identity choices, onboarding, recovery, and the flows after the
+   implemented settings and diagnostics surfaces;
    keep Runtime projections in shared client adapters and do not move
    transition logic into the frontend. Remote link decoding and consent are
    ready in `packages/runtime-client`, and adapter session storage is ready in
