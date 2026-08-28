@@ -10,12 +10,17 @@ pub const DEFAULT_CHECKPOINT_PERIOD_FRAMES: u64 = 1_000;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeStorageConfig {
     pub checkpoint_period_frames: u64,
+    /// When false, LevelDB writes skip per-frame fsync and directory sync.
+    /// Only valid for derived, restartable databases (replay verification);
+    /// every production store must keep the default.
+    pub durable_fsync: bool,
 }
 
 impl Default for NativeStorageConfig {
     fn default() -> Self {
         Self {
             checkpoint_period_frames: DEFAULT_CHECKPOINT_PERIOD_FRAMES,
+            durable_fsync: true,
         }
     }
 }

@@ -1196,6 +1196,7 @@ mod tests {
             &native_path,
             crate::storage::native::NativeStorageConfig {
                 checkpoint_period_frames: 100,
+                ..crate::storage::native::NativeStorageConfig::default()
             },
         )
         .expect("native store");

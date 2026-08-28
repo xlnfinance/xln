@@ -316,6 +316,7 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("native store");
@@ -356,6 +357,7 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen after process crash");
@@ -405,6 +407,7 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("native store");
@@ -824,6 +827,7 @@ fn canonical_hash_cadence_does_not_materialize_path_nodes() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("native store");
@@ -855,6 +859,7 @@ fn canonical_hash_cadence_does_not_materialize_path_nodes() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen");
@@ -875,6 +880,7 @@ fn cadence_100_is_measured_from_the_first_materialized_runtime_frame() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("native store");
@@ -908,6 +914,7 @@ fn cadence_100_is_measured_from_the_first_materialized_runtime_frame() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen");

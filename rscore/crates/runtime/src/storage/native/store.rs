@@ -52,8 +52,13 @@ impl NativeRuntimeStore {
             return Err(NativeStorageError::CheckpointPeriod);
         }
         let path = path.as_ref().to_path_buf();
+        let env: Box<dyn rusty_leveldb::env::Env> = if config.durable_fsync {
+            Box::new(DurableEnv::default())
+        } else {
+            Box::new(rusty_leveldb::PosixDiskEnv::new())
+        };
         let options = Options {
-            env: Rc::new(Box::new(DurableEnv::default())),
+            env: Rc::new(env),
             // Runtime frames are already an append-only WAL stream. Keep one
             // checkpoint interval resident so LevelDB does not synchronously
             // compact the same hot bytes between every few frame fsyncs.
@@ -361,13 +366,15 @@ impl NativeRuntimeStore {
             }
         }
         batch.put(KEY_HEAD, &encode_head(&prepared.next_head)?);
-        if let Err(error) = self.database.write(batch, true) {
+        if let Err(error) = self.database.write(batch, self.config.durable_fsync) {
             self.poisoned = true;
             return Err(NativeStorageError::Database(error.to_string()));
         }
-        if let Err(error) = sync_database_directory(&self.path) {
-            self.poisoned = true;
-            return Err(error);
+        if self.config.durable_fsync {
+            if let Err(error) = sync_database_directory(&self.path) {
+                self.poisoned = true;
+                return Err(error);
+            }
         }
         match prepared.frame.checkpoint.as_mut() {
             Some(checkpoint) if checkpoint.full => {

@@ -405,6 +405,7 @@ fn dropping_a_prepared_frame_cannot_publish_outputs() {
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("open");
@@ -450,6 +451,7 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("open");
@@ -491,6 +493,7 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 2,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen");
@@ -553,6 +556,7 @@ fn large_account_rows_use_canonical_chunks_and_overwrite_prunes_them() {
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 1,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("open");
@@ -616,6 +620,7 @@ fn large_account_rows_use_canonical_chunks_and_overwrite_prunes_them() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 1,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen");
@@ -657,6 +662,7 @@ fn exact_checkpoint_import_installs_one_synced_head_without_fake_frames() {
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("open");
@@ -674,6 +680,7 @@ fn exact_checkpoint_import_installs_one_synced_head_without_fake_frames() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen");
@@ -719,6 +726,7 @@ fn rejected_checkpoint_import_is_atomic_and_a_valid_retry_survives_reopen() {
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("open");
@@ -738,6 +746,7 @@ fn rejected_checkpoint_import_is_atomic_and_a_valid_retry_survives_reopen() {
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("reopen empty");
@@ -748,6 +757,7 @@ fn rejected_checkpoint_import_is_atomic_and_a_valid_retry_survives_reopen() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen durable");
@@ -786,6 +796,7 @@ fn watcher_cursor_overwrites_with_the_consuming_frame_and_is_not_merkle_state() 
             &path,
             NativeStorageConfig {
                 checkpoint_period_frames: 1,
+                ..NativeStorageConfig::default()
             },
         )
         .expect("open");
@@ -795,6 +806,7 @@ fn watcher_cursor_overwrites_with_the_consuming_frame_and_is_not_merkle_state() 
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 1,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("reopen");
@@ -885,6 +897,7 @@ fn missing_due_checkpoint_is_rejected_before_any_database_write() {
         &path,
         NativeStorageConfig {
             checkpoint_period_frames: 2,
+            ..NativeStorageConfig::default()
         },
     )
     .expect("open");

@@ -159,6 +159,7 @@ fn restore_native_runtime(
         &path,
         NativeStorageConfig {
             checkpoint_period_frames,
+            ..NativeStorageConfig::default()
         },
     )
     .map_err(|error| format!("RRS_NATIVE_RESTART_REOPEN:{error}"))?;
