@@ -529,7 +529,6 @@ describe('remote runtime import manager utilities', () => {
       helloAudience: `xln-runtime:${peerRuntimeId}`,
       signerId: '7',
       seed: 'test test test test test test test test test test test junk',
-      maxReconnectAttempts: 1,
     });
     expect((clientOptions[0] as { encryptionKeyPair?: { publicKey?: Uint8Array; privateKey?: Uint8Array } })
       .encryptionKeyPair?.publicKey?.length).toBe(32);
@@ -639,7 +638,9 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
     expect(runtimeCreation).not.toContain('live-runtime-section');
     expect(runtimeCreation).not.toContain('hydrateRemoteRuntimeImportSource');
-    expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
+    expect(runtimeCreation).toContain('discover: ({ seed, runtimeId }) => discoverRuntimeRecoveryCandidates(seed, {');
+    expect(runtimeCreation).toContain('peers: buildRemoteRuntimeRecoveryPeerSources({ runtimeId })');
+    expect(runtimeCreation).toContain('const outcome = await walletRecoveryDiscovery.run({');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
     expect(runtimeCreation).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
     expect(runtimeCreation).toContain("errorLog.log(message, 'Runtime Creation', details)");
@@ -659,7 +660,7 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
-    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);');
+    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = hasWalletRuntimeBootstrapInput({');
     expect(appLayout).toContain('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;');
     expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromHash()')).toBeLessThan(
       appLayout.indexOf('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;'),

@@ -7,6 +7,7 @@ import {
   type StoredRemoteRuntimeImportEntry,
 } from './remoteRuntimeImport';
 import { validateRemoteRuntimeEntry, type RemoteRuntimeValidationProgress } from './remoteRuntimeValidation';
+import { writeRemoteRuntimeAdapterSession } from '../../../../packages/browser/src/runtime-adapter-session';
 
 export const REMOTE_RUNTIME_IMPORT_CONCURRENCY = 4;
 
@@ -102,11 +103,11 @@ export const writeRemoteRuntimeImportSummary = (
 
 export const persistActiveRemoteRuntimeImport = (entry: StoredRemoteRuntimeImportEntry): void => {
   if (typeof localStorage === 'undefined' || typeof sessionStorage === 'undefined') return;
-  localStorage.setItem('xln-runtime-adapter-mode', 'remote');
-  localStorage.setItem('xln-runtime-adapter-ws', entry.wsUrl);
-  localStorage.setItem('xln-runtime-adapter-access', entry.access);
-  localStorage.removeItem('xln-runtime-adapter-key');
-  sessionStorage.setItem('xln-runtime-adapter-key', entry.token);
+  writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {
+    wsUrl: entry.wsUrl,
+    access: entry.access,
+    authKey: entry.token,
+  });
 };
 
 export const validateRemoteRuntimeImportEntries = async (

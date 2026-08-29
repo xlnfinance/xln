@@ -64,14 +64,6 @@ export type BrainVaultWorkEstimate = {
   totalMemoryWorkMb: number;
 };
 
-export const BRAINVAULT_SHARD_TIME_MIN_MS = 100;
-export const BRAINVAULT_SHARD_TIME_MAX_MS = 86_400_000;
-
-export function normalizeBrainVaultShardTimeSample(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
-  return Math.min(BRAINVAULT_SHARD_TIME_MAX_MS, Math.max(BRAINVAULT_SHARD_TIME_MIN_MS, value));
-}
-
 export function estimateBrainVaultWork(
   shardCount: number,
   shardMemoryMb: number,

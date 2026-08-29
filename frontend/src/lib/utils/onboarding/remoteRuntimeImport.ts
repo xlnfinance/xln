@@ -1,9 +1,15 @@
 import { normalizeWsConnectUrl } from '../runtime/wsUrl';
 import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
 import { REMOTE_RUNTIME } from '@xln/core/config/constants';
+import {
+  REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+  REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
+} from '../../../../packages/runtime-client/src/remote-runtime-request';
 
-export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;
-export const REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM = REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM;
+export {
+  REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+  REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
+};
 export const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_STORAGE_KEY;
 export const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_RESULT_STORAGE_KEY;
 export const MAX_REMOTE_RUNTIME_IMPORTS = REMOTE_RUNTIME.MAX_IMPORTS;

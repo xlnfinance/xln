@@ -23,7 +23,6 @@
   import { tabOperations } from '$lib/stores/ui/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vault/vaultStore';
-  import { resolveDeployVersionAction } from '$lib/utils/deployVersionPolicy';
   import { resetEverything } from '$lib/utils/control/resetEverything';
   import { parseStorageSchemaMismatch } from '$lib/utils/recovery/storageSchemaRecovery';
   import {
@@ -52,11 +51,25 @@
     readRemoteRuntimeImportPayloadFromHash,
     readRemoteRuntimeImportSourceFromHash,
     readRemoteRuntimeRequestFromUrl,
-    remoteAcceptKey,
     remoteRuntimeRequiresConsent,
     stripRemoteRuntimeParamsFromHistory,
     type RemoteRuntimeRequest,
   } from '$lib/utils/runtime/runtimeConnection';
+  import {
+    isRemoteRuntimeAdapterPreferred,
+    writeEmbeddedRuntimeAdapterSession,
+  } from '../../../packages/browser/src/runtime-adapter-session';
+  import { runWalletBootLifecycle } from '../../../packages/browser/src/wallet-boot-lifecycle';
+  import {
+    WalletDeployVersionCoordinator,
+    walletDeployVersionRecoveryMessage,
+  } from '../../../packages/browser/src/wallet-deploy-version';
+  import {
+    WalletRuntimeBootstrapCoordinator,
+    hasWalletRuntimeBootstrapInput,
+  } from '../../../packages/browser/src/wallet-runtime-bootstrap';
+  import { WalletRuntimeConsentCoordinator } from '../../../packages/browser/src/wallet-runtime-consent';
+  import { resolveWalletShellPhase } from '../../../packages/browser/src/wallet-shell-state';
 
   let { children } = $props();
 
@@ -76,14 +89,49 @@
   let claimingActiveTabLock = $state(false);
   let runtimeImportLocationInFlight = false;
   let releaseActiveTabLock: (() => void) | null = null;
+  const walletDeployVersion = browser
+    ? new WalletDeployVersionCoordinator({
+      durable: localStorage,
+      readCurrentPayload: fetchCurrentDeployVersionPayload,
+      resetEphemeralTestnet: () => resetEverything({
+        confirmed: true,
+        reason: 'deploy-version-change-testnet',
+      }),
+    })
+    : null;
+  const walletRuntimeBootstrap = new WalletRuntimeBootstrapCoordinator({
+    pairLocalRuntime: pairLocalRuntimeIntoApp,
+    importRemoteRuntimes: importRemoteRuntimesIntoApp,
+    requiresRemoteConsent: remoteRuntimeRequiresConsent,
+    publishPendingConsent: (request) => {
+      pendingRemoteRuntime = request;
+    },
+    persistRemoteRequest: persistRemoteRuntimeRequest,
+    stripRemoteRuntimeParams,
+  });
+  const walletRuntimeConsent = new WalletRuntimeConsentCoordinator({
+    publishAuthError: (message) => {
+      remoteRuntimeAuthError = message;
+    },
+    persistRemoteRequest: persistRemoteRuntimeRequest,
+    selectEmbeddedRuntime: () => {
+      writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
+    },
+    stripRemoteRuntimeParams,
+    activateRuntimeChoice: activateAppAfterRuntimeChoice,
+  });
   const pageSearch = $derived(browser ? $page.url.search : '');
   const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
-  const DEPLOY_VERSION_KEY = 'xln-deploy-version';
-  type DeployVersionPayload = {
-    version: string;
-    ephemeralTestnet: boolean;
-  };
-
+  const walletShellPhase = $derived(resolveWalletShellPhase({
+    activeTabLockReady,
+    hasActiveTabLock,
+    hasError: Boolean($error),
+    hasPendingRemoteRuntime: pendingRemoteRuntime !== null,
+    lockTestMode,
+    scenarioPreviewMode,
+    runtimeLoading: $isLoading,
+    runtimeReady: $xlnFunctions.isReady,
+  }));
   function logAppShellDiagnostic(message: string, details?: unknown): void {
     errorLog.log(message, 'App Shell', details);
   }
@@ -170,7 +218,7 @@
 
   function shouldBootRemoteRuntime(): boolean {
     if (!browser) return false;
-    return localStorage.getItem('xln-runtime-adapter-mode') === 'remote';
+    return isRemoteRuntimeAdapterPreferred(localStorage);
   }
 
   function stripRemoteRuntimeParams(): void {
@@ -227,24 +275,15 @@
   async function processRemoteRuntimeBootstrapFromLocation(
     parsedRemoteRequest?: ReturnType<typeof readRemoteRuntimeRequestFromUrl>,
   ): Promise<RemoteRuntimeBootstrapResult> {
-    const pairingToken = readLocalRuntimePairingToken();
-    const importPayload = readRemoteRuntimeImportPayloadFromHash();
-    const importSource = readRemoteRuntimeImportSourceFromHash();
-    const remoteRequest = parsedRemoteRequest ?? readRemoteRuntimeRequestFromUrl();
-    await pairLocalRuntimeIntoApp(pairingToken);
-    await importRemoteRuntimesIntoApp({
-      payload: importPayload,
-      source: importSource,
+    const result = await walletRuntimeBootstrap.process({
+      pairingToken: readLocalRuntimePairingToken(),
+      importPayload: readRemoteRuntimeImportPayloadFromHash(),
+      importSource: readRemoteRuntimeImportSourceFromHash(),
+      remoteRequest: parsedRemoteRequest ?? readRemoteRuntimeRequestFromUrl(),
     });
-    if (remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)) {
-      pendingRemoteRuntime = remoteRequest;
-      stripRemoteRuntimeParams();
+    if (result.status === 'pending-consent') {
       showInactiveTabStandby();
       return 'pending-auth';
-    }
-    if (remoteRequest) {
-      persistRemoteRuntimeRequest(remoteRequest);
-      stripRemoteRuntimeParams();
     }
     return 'continue';
   }
@@ -254,14 +293,16 @@
     const pairingToken = readLocalRuntimePairingToken();
     const importPayload = readRemoteRuntimeImportPayloadFromHash();
     const importSource = readRemoteRuntimeImportSourceFromHash();
-    if (!pairingToken && !importPayload && !importSource) return;
+    const bootstrapInput = {
+      pairingToken,
+      importPayload,
+      importSource,
+      remoteRequest: null,
+    };
+    if (!hasWalletRuntimeBootstrapInput(bootstrapInput)) return;
     runtimeImportLocationInFlight = true;
     try {
-      await pairLocalRuntimeIntoApp(pairingToken);
-      await importRemoteRuntimesIntoApp({
-        payload: importPayload,
-        source: importSource,
-      });
+      await walletRuntimeBootstrap.process(bootstrapInput);
       await activateAppAfterRuntimeChoice();
     } catch (err) {
       logAppShellDiagnostic('Remote runtime import failed', err);
@@ -308,7 +349,7 @@
       await bootApp();
       if (options.persistDeployVersionAfterBoot) {
         try {
-          persistDeployVersion((await fetchCurrentDeployVersion()).version);
+          await requireWalletDeployVersion().refreshStoredVersion();
         } catch (deployError) {
           logAppShellDiagnostic('Deploy version persistence failed after boot', deployError);
         }
@@ -351,29 +392,11 @@
   async function acceptRemoteRuntime(): Promise<void> {
     const request = pendingRemoteRuntime;
     if (!request) return;
-    const authKey = request.requiresAuthPaste ? remoteRuntimeAuthInput.trim() : request.authKey;
-    if (request.requiresAuthPaste && !authKey.startsWith('xlnra1.')) {
-      remoteRuntimeAuthError = 'Paste the capability token to connect.';
-      return;
-    }
-    remoteRuntimeAuthError = '';
-    persistRemoteRuntimeRequest({
-      ...request,
-      authKey,
-      acceptKey: remoteAcceptKey(request.wsUrl, authKey),
-    });
-    stripRemoteRuntimeParams();
-    await activateAppAfterRuntimeChoice();
+    await walletRuntimeConsent.acceptRemote(request, remoteRuntimeAuthInput);
   }
 
   async function useLocalBrowserRuntime(): Promise<void> {
-    localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
-    localStorage.removeItem('xln-runtime-adapter-ws');
-    localStorage.removeItem('xln-runtime-adapter-access');
-    localStorage.removeItem('xln-runtime-adapter-key');
-    sessionStorage.removeItem('xln-runtime-adapter-key');
-    stripRemoteRuntimeParams();
-    await activateAppAfterRuntimeChoice();
+    await walletRuntimeConsent.useEmbedded();
   }
 
   async function changeRemotePage(kind: 'accounts' | 'books', pageIndex: number): Promise<void> {
@@ -381,31 +404,12 @@
     await refreshCurrentRuntimeProjection();
   }
 
-  function readStoredDeployVersion(): string {
-    if (!browser) return '';
-    return String(localStorage.getItem(DEPLOY_VERSION_KEY) || '').trim();
+  function requireWalletDeployVersion(): WalletDeployVersionCoordinator {
+    if (!walletDeployVersion) throw new Error('WALLET_DEPLOY_VERSION_BROWSER_REQUIRED');
+    return walletDeployVersion;
   }
 
-  function persistDeployVersion(version: string): void {
-    if (!browser || !version) return;
-    localStorage.setItem(DEPLOY_VERSION_KEY, version);
-  }
-
-  function parseDeployVersionPayload(payload: unknown): DeployVersionPayload {
-    if (!payload || typeof payload !== 'object') {
-      throw new Error('INVALID_DEPLOY_VERSION_PAYLOAD');
-    }
-
-    const root = payload as Record<string, unknown>;
-    const version = String(root['deployVersion'] || root['networkVersion'] || root['version'] || '').trim();
-    if (!version) {
-      throw new Error('MISSING_DEPLOY_VERSION');
-    }
-
-    return { version, ephemeralTestnet: root['ephemeralTestnet'] === true };
-  }
-
-  async function fetchCurrentDeployVersion(): Promise<DeployVersionPayload> {
+  async function fetchCurrentDeployVersionPayload(): Promise<unknown> {
     const response = await fetch(`/api/jurisdictions?ts=${Date.now()}`, {
       cache: 'no-store',
       headers: {
@@ -416,34 +420,24 @@
     if (!response.ok) {
       throw new Error(`DEPLOY_VERSION_FETCH_FAILED:${response.status}`);
     }
-    const payload = parseDeployVersionPayload(await response.json());
-    return payload;
+    return response.json();
   }
 
   async function ensureCurrentDeployVersion(): Promise<boolean> {
-    let current: DeployVersionPayload;
-    try {
-      current = await fetchCurrentDeployVersion();
-    } catch (error) {
-      logAppShellDiagnostic('Deploy version fetch failed', error);
+    const result = await requireWalletDeployVersion().check();
+    if (result.status === 'unavailable') {
+      logAppShellDiagnostic('Deploy version fetch failed', result.error);
       return false;
     }
-
-    const storedVersion = readStoredDeployVersion();
-    const action = resolveDeployVersionAction(storedVersion, current.version, current.ephemeralTestnet);
-    if (action === 'persist-current') {
-      persistDeployVersion(current.version);
-      return false;
+    if (result.status === 'require-recovery') {
+      error.set(walletDeployVersionRecoveryMessage(
+        result.storedVersion,
+        result.current.version,
+      ));
+      isLoading.set(false);
     }
-    if (action === 'continue') return false;
-    if (action === 'reset-ephemeral-testnet') {
-      await resetEverything({ confirmed: true, reason: 'deploy-version-change-testnet' });
-      return true;
-    }
-
-    error.set(`Deploy version changed from ${storedVersion} to ${current.version}. Review recovery coverage before resetting local data.`);
-    isLoading.set(false);
-    return true;
+    return result.status === 'reset-ephemeral-testnet'
+      || result.status === 'require-recovery';
   }
 
   $effect(() => {
@@ -471,28 +465,22 @@
   async function bootApp(): Promise<void> {
     if (!hasActiveTabLock) return;
     const generation = ++bootGeneration;
+    const isCurrentBoot = () => generation === bootGeneration && hasActiveTabLock;
     try {
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      settingsOperations.initialize();
-      tabOperations.loadFromStorage();
-      tabOperations.initializeDefaultTabs();
-      const bootingRemoteRuntime = shouldBootRemoteRuntime();
-      if (!bootingRemoteRuntime) {
-        await vaultOperations.initialize();
-      }
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      await initializeXLN();
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      if (!bootingRemoteRuntime && $runtimeControllerHandle.mode !== 'remote') {
-        await vaultOperations.initialize();
-      }
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      await tick();
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      timeOperations.initialize();
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
+      await runWalletBootLifecycle({
+        isCurrent: isCurrentBoot,
+        initializeSettings: () => settingsOperations.initialize(),
+        loadTabs: () => tabOperations.loadFromStorage(),
+        initializeDefaultTabs: () => tabOperations.initializeDefaultTabs(),
+        isRemoteRuntimePreferred: shouldBootRemoteRuntime,
+        initializeVault: () => vaultOperations.initialize(),
+        initializeRuntime: () => initializeXLN(),
+        readRuntimeMode: () => $runtimeControllerHandle.mode,
+        afterRuntimeReady: () => tick(),
+        initializeTime: () => timeOperations.initialize(),
+      });
     } catch (err) {
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
+      if (!isCurrentBoot()) return;
       logAppShellDiagnostic('XLN initialization failed', err);
       error.set((err as Error)?.message || 'Initialization failed');
     }
@@ -524,7 +512,12 @@
       const importSource = readRemoteRuntimeImportSourceFromHash();
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
       if (await maybeHandleResetHash()) return;
-      const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);
+      const hasExplicitRemoteRuntimeBootstrap = hasWalletRuntimeBootstrapInput({
+        pairingToken,
+        importPayload,
+        importSource,
+        remoteRequest,
+      });
       if (isInactiveTabStandby()) {
         showInactiveTabStandby();
         return;
@@ -544,7 +537,7 @@
         isLoading.set(false);
         error.set(null);
         try {
-          persistDeployVersion((await fetchCurrentDeployVersion()).version);
+          await requireWalletDeployVersion().refreshStoredVersion();
         } catch (error) {
           logAppShellDiagnostic('Deploy version persistence failed in lock test mode', error);
         }
@@ -552,7 +545,7 @@
       }
       await bootApp();
       try {
-        persistDeployVersion((await fetchCurrentDeployVersion()).version);
+        await requireWalletDeployVersion().refreshStoredVersion();
       } catch (error) {
         logAppShellDiagnostic('Deploy version persistence failed after app boot', error);
       }
@@ -582,7 +575,7 @@
   <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
-{#if activeTabLockReady && !hasActiveTabLock && !$error}
+{#if walletShellPhase === 'remote-runtime-consent'}
   {#if pendingRemoteRuntime}
     <div class="remote-login-screen" data-testid="remote-runtime-login-screen">
       <section class="remote-login-card">
@@ -623,27 +616,27 @@
         </div>
       </section>
     </div>
-  {:else}
-    <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
-      <h2>Inactive Tab</h2>
-      <p>This wallet tab lost the active lock to a newer tab.</p>
-      <button
-        data-testid="inactive-tab-acquire"
-        disabled={claimingActiveTabLock}
-        onclick={claimActiveTabLockInPlace}
-      >
-        {claimingActiveTabLock ? 'Claiming active lock...' : 'Take active lock'}
-      </button>
-    </div>
   {/if}
-{:else if lockTestMode && scenarioPreviewMode}
+{:else if walletShellPhase === 'inactive-tab'}
+  <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
+    <h2>Inactive Tab</h2>
+    <p>This wallet tab lost the active lock to a newer tab.</p>
+    <button
+      data-testid="inactive-tab-acquire"
+      disabled={claimingActiveTabLock}
+      onclick={claimActiveTabLockInPlace}
+    >
+      {claimingActiveTabLock ? 'Claiming active lock...' : 'Take active lock'}
+    </button>
+  </div>
+{:else if walletShellPhase === 'scenario-preview'}
   <div class="scenario-preview-banner" data-testid="scenario-preview-wallet-banner">
     Scenario preview. Runtime writes and wallet bootstrap are disabled in this view.
   </div>
   {@render children?.()}
-{:else if lockTestMode}
+{:else if walletShellPhase === 'lock-test-ready'}
   <main class="app-shell-ready app-shell-ready--empty" data-testid="app-runtime-ready"></main>
-{:else if $error}
+{:else if walletShellPhase === 'error'}
   <div class="error-screen" data-testid="app-initialization-error">
     {#if storageSchemaMismatch}
       <h2>Local runtime needs recovery</h2>
@@ -688,7 +681,7 @@
       </button>
     {/if}
   </div>
-{:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
+{:else if walletShellPhase === 'loading'}
   <div class="loading-screen" data-testid="app-loading-screen">
     <RuntimeStateCard
       title="Starting XLN"

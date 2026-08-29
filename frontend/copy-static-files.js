@@ -3,7 +3,6 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -142,9 +141,12 @@ function copyContracts(requireAllSources) {
       if (requireAllSources) {
         throw new Error(`CONTRACT_SOURCE_REQUIRED:${srcPath}. Build every contract before verifying bundled artifacts.`);
       }
-      if (!existsSync(destPath) || statSync(destPath).size === 0) {
-        throw new Error(`CONTRACT_STATIC_MISSING:${destPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
+      const bundledPath = fromFrontend(file.dest);
+      if (!existsSync(bundledPath) || statSync(bundledPath).size === 0) {
+        throw new Error(`CONTRACT_STATIC_MISSING:${bundledPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
       }
+      ensureDir(dirname(destPath));
+      if (resolve(bundledPath) !== resolve(destPath)) copyFileSync(bundledPath, destPath);
       console.log(`[static] using bundled ${file.dest}; source artifact is not present`);
       continue;
     }
@@ -155,26 +157,6 @@ function copyContracts(requireAllSources) {
     writeFileSync(destPath, `${JSON.stringify(artifact, null, 2)}\n`);
     console.log(`[static] copied ${file.src} -> ${file.dest}`);
   }
-}
-
-function copyScenarios() {
-  const scenariosSrc = fromFrontend('../scenarios');
-  const scenariosDest = fromStatic('scenarios');
-
-  try {
-    const stats = lstatSync(scenariosDest);
-    if (stats.isSymbolicLink()) {
-      console.log('[static] static/scenarios is symlinked; skipping copy');
-      return;
-    }
-  } catch {
-    // no-op
-  }
-
-  if (!existsSync(scenariosSrc)) return;
-  ensureDir(scenariosDest);
-  cpSync(scenariosSrc, scenariosDest, { recursive: true });
-  console.log('[static] copied scenarios/ -> static/scenarios/');
 }
 
 function walkMarkdownFiles(rootDir) {
@@ -354,7 +336,7 @@ function buildDocsManifest(docsSrc) {
   items.sort((a, b) => {
     if (a.sectionOrder !== b.sectionOrder) return a.sectionOrder - b.sectionOrder;
     if (a.order !== b.order) return a.order - b.order;
-    return a.title.localeCompare(b.title);
+    return a.title < b.title ? -1 : a.title > b.title ? 1 : 0;
   });
 
   const sections = getSectionDefinitions()
@@ -372,7 +354,7 @@ function buildDocsManifest(docsSrc) {
   const archiveCount = items.filter((item) => item.kind === 'archive').length;
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: process.env.XLN_GENERATED_AT || new Date().toISOString(),
     counts: {
       total: items.length,
       live: liveCount,
@@ -448,12 +430,25 @@ function generateLlmsStaticFiles() {
 }
 
 const contractsOnly = process.argv.includes('--contracts-only');
+const docsOnly = process.argv.includes('--docs-only');
+const walletOnly = process.argv.includes('--wallet-only');
+const skipLlms = process.argv.includes('--skip-llms');
 const requireAllContractSources = process.argv.includes('--require-all-contract-sources');
 
-copyContracts(requireAllContractSources);
-if (!contractsOnly) {
+if ([contractsOnly, docsOnly, walletOnly].filter(Boolean).length > 1) {
+  throw new Error('STATIC_COPY_SCOPE_CONFLICT');
+}
+if (docsOnly) {
+  copyDocsAndManifest();
+  if (!skipLlms) generateLlmsStaticFiles();
+} else if (walletOnly) {
+  copyContracts(requireAllContractSources);
   buildBrainvaultWorker();
-  copyScenarios();
+} else {
+  copyContracts(requireAllContractSources);
+}
+if (!contractsOnly && !docsOnly && !walletOnly) {
+  buildBrainvaultWorker();
   copyDocsAndManifest();
   generateLlmsStaticFiles();
 }

@@ -1,0 +1,64 @@
+@media (max-width: 900px) {
+  .wallet-health-debt-table { overflow-x: auto; }
+
+  .wallet-health-solvency-grid dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .wallet-health-context {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .wallet-health-context > span {
+    grid-column: 1 / 2;
+  }
+
+  .wallet-health-disputes dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .wallet-health-section-heading {
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .wallet-health-section-heading > span {
+    margin-left: 2rem;
+  }
+
+  .wallet-health-debt-group > header {
+    align-items: start;
+  }
+
+  .wallet-health-solvency-grid dl,
+  .wallet-health-disputes dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wallet-health-event-copy header {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .wallet-health-event-copy footer strong {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .wallet-health-pagination {
+    justify-content: space-between;
+  }
+
+  .wallet-health-unavailable > div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wallet-health { animation: none; }
+}

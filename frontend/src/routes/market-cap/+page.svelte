@@ -2,88 +2,47 @@
   import { onMount } from 'svelte';
   import type { ProfileEntityKind, ProfileEntitySector } from '@xln/core/entity/profile';
   import {
-    decodeMarketCapPublicResponse,
     type MarketCapDirection,
     type MarketCapPublicResponse,
     type MarketCapRole,
     type MarketCapSort,
     type MarketCapTaxonomyFilter,
   } from '@xln/core/network/relay/market/cap/market-cap-wire';
+  import type { EntityMarketCapStatus } from '@xln/core/network/relay/market/cap/market-cap';
   import {
-    ENTITY_SHARE_SUPPLY,
-    type EntityMarketCapEntry,
-    type EntityMarketCapStatus,
-  } from '@xln/core/network/relay/market/cap/market-cap';
-  import { readJsonUnknown } from '$lib/utils/boundary';
+    controlsForMarketCapRanking,
+    DEFAULT_MARKET_CAP_CONTROLS,
+    fetchMarketCapResponse,
+    formatMarketCapUsd,
+    MARKET_CAP_RANKINGS,
+    marketCapJurisdictionLabel,
+    marketCapRankingLabel,
+    marketCapRankingValue,
+    type MarketCapRanking,
+  } from '$lib/market-cap/market-cap-page-model';
   import MarketCapBoard from './MarketCapBoard.svelte';
 
   let data: MarketCapPublicResponse | null = null;
   let loading = true;
   let error = '';
-  let status: EntityMarketCapStatus | 'all' = 'all';
-  let role: MarketCapRole = 'all';
-  let jurisdiction = 'all';
-  let entityKind: MarketCapTaxonomyFilter<ProfileEntityKind> = 'all';
-  let sector: MarketCapTaxonomyFilter<ProfileEntitySector> = 'all';
-  let sort: MarketCapSort = 'valuation';
-  let direction: MarketCapDirection = 'desc';
+  let status: EntityMarketCapStatus | 'all' = DEFAULT_MARKET_CAP_CONTROLS.status;
+  let role: MarketCapRole = DEFAULT_MARKET_CAP_CONTROLS.role;
+  let jurisdiction = DEFAULT_MARKET_CAP_CONTROLS.jurisdiction;
+  let entityKind: MarketCapTaxonomyFilter<ProfileEntityKind> = DEFAULT_MARKET_CAP_CONTROLS.entityKind;
+  let sector: MarketCapTaxonomyFilter<ProfileEntitySector> = DEFAULT_MARKET_CAP_CONTROLS.sector;
+  let sort: MarketCapSort = DEFAULT_MARKET_CAP_CONTROLS.sort;
+  let direction: MarketCapDirection = DEFAULT_MARKET_CAP_CONTROLS.direction;
   let query = '';
   let queryTimer: ReturnType<typeof setTimeout> | null = null;
   let loadSequence = 0;
-  let ranking: 'overall' | 'hubs' | 'control' | 'dividend' | 'jurisdictions' = 'overall';
-
-  const statusLabel = (value: EntityMarketCapStatus): string =>
-    value === 'fresh' ? 'Live' : value === 'stale' ? 'Stale' : 'No price';
-
-  const formatUsdTicks = (value: string | null): string => {
-    if (value === null) return '—';
-    const dollars = BigInt(value) / 10_000n;
-    const units = [
-      { threshold: 1_000_000_000_000n, divisor: 1_000_000_000_000n, suffix: 'T' },
-      { threshold: 1_000_000_000n, divisor: 1_000_000_000n, suffix: 'B' },
-      { threshold: 1_000_000n, divisor: 1_000_000n, suffix: 'M' },
-      { threshold: 1_000n, divisor: 1_000n, suffix: 'K' },
-    ];
-    const unit = units.find(candidate => dollars >= candidate.threshold);
-    if (!unit) return `$${dollars.toString()}`;
-    const tenths = (dollars * 10n) / unit.divisor;
-    return `$${(tenths / 10n).toString()}.${(tenths % 10n).toString()}${unit.suffix}`;
-  };
-
-  const jurisdictionLabel = (value: string): string => {
-    const [, chainId, address] = value.split(':');
-    return `Chain ${chainId} · ${address?.slice(0, 6)}…${address?.slice(-4)}`;
-  };
-  const rankingValue = (entry: EntityMarketCapEntry): string | null => {
-    if (sort === 'control') return entry.control.priceTicks === null
-      ? null
-      : (ENTITY_SHARE_SUPPLY * BigInt(entry.control.priceTicks)).toString();
-    if (sort === 'dividend') return entry.dividend.priceTicks === null
-      ? null
-      : (ENTITY_SHARE_SUPPLY * BigInt(entry.dividend.priceTicks)).toString();
-    return entry.marketCapUsdTicks;
-  };
-  const rankingLabel = (entry: EntityMarketCapEntry): string =>
-    `${sort === 'control' ? 'CONTROL cap · ' : sort === 'dividend' ? 'DIVIDEND cap · ' : ''}${statusLabel(entry.status)}`;
+  let ranking: MarketCapRanking = 'overall';
 
   async function load(): Promise<void> {
     const sequence = ++loadSequence;
     loading = true;
     error = '';
-    const params = new URLSearchParams({
-      status, role, jurisdiction, kind: entityKind, sector, sort, direction, limit: '100',
-    });
-    if (query.trim()) params.set('q', query.trim());
     try {
-      const response = await fetch(`/api/market-cap?${params.toString()}`, { cache: 'no-store' });
-      const payload = await readJsonUnknown(response);
-      if (!response.ok) {
-        const message = payload && typeof payload === 'object' && 'error' in payload
-          ? String(payload.error)
-          : `HTTP ${response.status}`;
-        throw new Error(message);
-      }
-      const decoded = decodeMarketCapPublicResponse(payload);
+      const decoded = await fetchMarketCapResponse({ status, role, jurisdiction, entityKind, sector, sort, direction, query });
       if (sequence !== loadSequence) return;
       data = decoded;
     } catch (cause) {
@@ -105,16 +64,11 @@
     void load();
   }
 
-  function selectRanking(next: typeof ranking): void {
+  function selectRanking(next: MarketCapRanking): void {
     ranking = next;
-    if (next === 'jurisdictions') return;
-    status = 'all';
-    role = next === 'hubs' ? 'hub' : 'all';
-    jurisdiction = 'all';
-    entityKind = 'all';
-    sector = 'all';
-    sort = next === 'control' ? 'control' : next === 'dividend' ? 'dividend' : 'valuation';
-    direction = 'desc';
+    const controls = controlsForMarketCapRanking(next);
+    if (!controls) return;
+    ({ status, role, jurisdiction, entityKind, sector, sort, direction } = controls);
     query = '';
     void load();
   }
@@ -173,18 +127,16 @@
   </section>
 
   <nav class="rankings" aria-label="Market cap rankings">
-    <button class:active={ranking === 'overall'} on:click={() => selectRanking('overall')}>Top Entities</button>
-    <button class:active={ranking === 'hubs'} on:click={() => selectRanking('hubs')}>Top Hubs</button>
-    <button class:active={ranking === 'control'} on:click={() => selectRanking('control')}>Top CONTROL</button>
-    <button class:active={ranking === 'dividend'} on:click={() => selectRanking('dividend')}>Top DIVIDEND</button>
-    <button class:active={ranking === 'jurisdictions'} on:click={() => selectRanking('jurisdictions')}>Top Jurisdictions</button>
+    {#each MARKET_CAP_RANKINGS as item}
+      <button class:active={ranking === item.id} on:click={() => selectRanking(item.id)}>{item.label}</button>
+    {/each}
   </nav>
 
   {#if ranking === 'jurisdictions' && data}
     <section class="jurisdictions" aria-label="Jurisdiction leaders">
       <div class="jurisdiction-heading"><span class="section-label">JURISDICTION RANKING</span><h2>Top Jurisdictions</h2><p>Combined priced Entity valuations; stale prices remain explicitly counted.</p></div>
       {#each data.jurisdictionLeaders as item, index}
-        <article><b>{index + 1}</b><div><strong>{jurisdictionLabel(item.jurisdictionRef)}</strong><span>{item.entityCount} Entities · {item.pricedEntityCount} priced · {item.freshEntityCount} live</span></div><em>{formatUsdTicks(item.marketCapUsdTicks)}</em></article>
+        <article><b>{index + 1}</b><div><strong>{marketCapJurisdictionLabel(item.jurisdictionRef)}</strong><span>{item.entityCount} Entities · {item.pricedEntityCount} priced · {item.freshEntityCount} live</span></div><em>{formatMarketCapUsd(item.marketCapUsdTicks)}</em></article>
       {/each}
     </section>
   {:else if data && data.entries.length > 0 && direction === 'desc' && status === 'all' && !query}
@@ -199,8 +151,8 @@
             <small class:online={entry.online}>{entry.online ? 'Online' : 'Offline'}{entry.isHub ? ' · Hub' : ''}</small>
           </div>
           <div class="leader-value">
-            <strong>{formatUsdTicks(rankingValue(entry))}</strong>
-            <span class:status-fresh={entry.status === 'fresh'} class:status-stale={entry.status === 'stale'}>{rankingLabel(entry)}</span>
+            <strong>{formatMarketCapUsd(marketCapRankingValue(entry, sort))}</strong>
+            <span class:status-fresh={entry.status === 'fresh'} class:status-stale={entry.status === 'stale'}>{marketCapRankingLabel(entry, sort)}</span>
           </div>
         </article>
       {/each}

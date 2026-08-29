@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.react-base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "$lib/*": ["src/lib/*"],
+      "@xln/core/*": ["../core/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../config/surfaces.ts",
+    "../../packages/browser/src/**/*.ts",
+    "../../packages/runtime-client/src/**/*.ts",
+    "../../packages/ui/src/**/*.ts",
+    "../../packages/ui/src/**/*.tsx"
+  ]
+}

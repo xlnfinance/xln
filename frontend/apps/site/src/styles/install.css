@@ -1,0 +1,75 @@
+.install-hero { position: relative; min-height: 820px; padding: clamp(90px, 10vw, 160px) clamp(20px, 4vw, 72px) 90px; border-bottom: 1px solid var(--line); background: radial-gradient(circle at 78% 12%, rgb(185 255 102 / 12%), transparent 32rem); }
+.install-hero::after { position: absolute; top: 0; right: 12%; width: 1px; height: 58%; background: linear-gradient(var(--line), transparent); content: ''; }
+.install-hero h1 { margin: 34px 0 0; font-size: clamp(88px, 13vw, 220px); font-weight: 500; letter-spacing: -.1em; line-height: .72; }
+.install-hero h1 em, .install-final h2 em { color: var(--acid); font-style: normal; }
+.install-lede { max-width: 520px; margin: 64px 0 34px 45%; color: var(--paper-muted); font-size: clamp(16px, 1.5vw, 22px); line-height: 1.55; }
+
+.copy-command { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; width: min(760px, 55%); min-height: 68px; margin-left: 45%; padding: 10px 10px 10px 20px; border: 1px solid var(--line-bright); background: rgb(185 255 102 / 3%); }
+.copy-command > span { color: var(--acid); font: 500 13px/1 "SFMono-Regular", Consolas, monospace; }
+.copy-command code { overflow-wrap: anywhere; color: #d8ddcf; font: 400 12px/1.45 "SFMono-Regular", Consolas, monospace; }
+.copy-command button { align-self: stretch; min-width: 78px; border: 0; color: var(--ink); background: var(--acid); font: 500 9px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.copy-command p { position: absolute; top: calc(100% + 10px); right: 0; margin: 0; color: #ff9b8b; font-size: 11px; }
+.copy-command.is-compact { width: 100%; margin: 34px 0 0; }
+
+.runtime-rail { display: grid; grid-template-columns: 1fr .45fr 1fr .45fr 1fr; align-items: center; width: min(980px, 82%); margin: 96px auto 0; }
+.runtime-rail > div { display: grid; min-height: 115px; padding: 20px; border: 1px solid var(--line); background: var(--ink); }
+.runtime-rail span, .runtime-rail small { color: #636960; font: 400 8px/1.3 "SFMono-Regular", Consolas, monospace; letter-spacing: .11em; text-transform: uppercase; }
+.runtime-rail strong { align-self: center; font-size: clamp(14px, 1.4vw, 21px); font-weight: 500; letter-spacing: -.035em; }
+.runtime-rail small { align-self: end; }
+.runtime-rail > i { position: relative; height: 1px; overflow: hidden; background: var(--line-bright); }
+.runtime-rail > i b { position: absolute; inset: -3px 0; background: linear-gradient(90deg, transparent, var(--acid), transparent); animation: signal-pass 2.2s linear infinite; }
+
+.channel-section { padding: clamp(90px, 11vw, 170px) clamp(20px, 4vw, 72px); background: var(--paper); color: var(--ink); }
+.channel-section .kicker { color: #587735; }
+.channel-section > header { display: grid; grid-template-columns: 1fr 2fr; align-items: start; margin-bottom: 100px; }
+.channel-section h2 { margin: 0; font-size: clamp(62px, 8vw, 132px); font-weight: 500; letter-spacing: -.085em; line-height: .82; }
+.channel-list { border-top: 1px solid #c8cbc0; }
+.channel-row { display: grid; grid-template-columns: .45fr .8fr 1.65fr .6fr; gap: 30px; align-items: start; min-height: 230px; padding: 34px 0; border-bottom: 1px solid #c8cbc0; }
+.channel-row.is-primary { background: linear-gradient(90deg, rgb(185 255 102 / 22%), transparent 70%); }
+.channel-index { display: grid; gap: 52px; }
+.channel-index span, .channel-index small, .channel-name p { font: 500 9px/1.4 "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.channel-index small { color: #587735; }
+.channel-name h3 { margin: -7px 0 17px; font-size: clamp(29px, 2.8vw, 48px); font-weight: 500; letter-spacing: -.06em; }
+.channel-name p { margin: 0; color: #747a70; line-height: 1.6; }
+.channel-detail > p { max-width: 500px; margin: 0; color: #4f554c; font-size: 14px; line-height: 1.6; }
+.channel-detail dl { display: grid; gap: 7px; margin: 28px 0 0; }
+.channel-detail dl div { display: grid; grid-template-columns: 18px 1fr; gap: 7px; }
+.channel-detail dt { color: #587735; font: 500 12px/1.5 "SFMono-Regular", Consolas, monospace; }
+.channel-detail dd { margin: 0; color: #777c73; font-size: 11px; line-height: 1.5; }
+.channel-row > a { display: inline-flex; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #979c91; font: 500 9px/1.3 "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.channel-row > a:hover { border-color: #587735; color: #587735; }
+
+.install-final { display: grid; grid-template-columns: 1.15fr .85fr; gap: 10vw; align-items: end; min-height: 800px; padding: clamp(90px, 12vw, 190px) clamp(20px, 4vw, 72px); background: radial-gradient(circle at 25% 65%, rgb(185 255 102 / 10%), transparent 27rem), var(--ink-raised); }
+.install-final h2 { margin: 34px 0 0; font-size: clamp(74px, 10vw, 165px); font-weight: 500; letter-spacing: -.095em; line-height: .77; }
+.install-final > div:last-child > p { max-width: 470px; margin: 0; color: var(--paper-muted); font-size: 15px; line-height: 1.7; }
+
+@media (max-width: 980px) {
+  .install-lede, .copy-command { width: min(100%, 760px); margin-left: 0; }
+  .runtime-rail { width: 100%; }
+  .channel-row { grid-template-columns: .4fr 1fr 1.5fr; }
+  .channel-row > a { grid-column: 2; width: fit-content; }
+  .install-final { grid-template-columns: 1fr; gap: 80px; }
+}
+
+@media (max-width: 680px) {
+  .install-hero { min-height: auto; padding-top: 84px; }
+  .install-hero h1 { font-size: clamp(82px, 26vw, 122px); }
+  .install-lede { margin-top: 52px; }
+  .copy-command { grid-template-columns: auto minmax(0, 1fr); padding: 18px; }
+  .copy-command button { grid-column: 1 / -1; min-height: 46px; }
+  .runtime-rail { grid-template-columns: 1fr; gap: 0; margin-top: 74px; }
+  .runtime-rail > div { min-height: 96px; }
+  .runtime-rail > i { width: 1px; height: 30px; margin-left: 50%; }
+  .runtime-rail > i b { inset: 0 -3px; background: linear-gradient(transparent, var(--acid), transparent); animation: signal-pass-vertical 2.2s linear infinite; }
+  .channel-section > header { grid-template-columns: 1fr; gap: 30px; margin-bottom: 60px; }
+  .channel-section h2 { font-size: 64px; }
+  .channel-row { grid-template-columns: 45px 1fr; gap: 24px; min-height: auto; padding: 34px 0 42px; }
+  .channel-index { gap: 12px; }
+  .channel-name { grid-column: 2; }
+  .channel-detail { grid-column: 2; }
+  .channel-row > a { grid-column: 2; }
+  .install-final { min-height: 720px; }
+  .install-final h2 { font-size: 78px; }
+}
+
+@keyframes signal-pass-vertical { from { transform: translateY(-100%); } to { transform: translateY(100%); } }

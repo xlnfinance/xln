@@ -23,6 +23,25 @@ import {
   runtimeControllerHandle,
   setRuntimeControllerPendingRuntimeId,
 } from './runtimeControllerStore';
+import {
+  readRuntimeAdapterStorageSnapshot as readBrowserRuntimeAdapterStorageSnapshot,
+  restoreRuntimeAdapterStorageSnapshot as restoreBrowserRuntimeAdapterStorageSnapshot,
+  RUNTIME_ADAPTER_WS_KEY,
+  writeEmbeddedRuntimeAdapterSession,
+  writeRemoteRuntimeAdapterSession,
+  type RuntimeAdapterStorageSnapshot,
+} from '../../../packages/browser/src/runtime-adapter-session';
+import {
+  createRuntimeSelectionCoordinator,
+  type RuntimeSelectionLease,
+} from '../../../packages/runtime-client/src/runtime-selection';
+import {
+  activateEmbeddedRuntimeTarget,
+  activateRemoteRuntimeTarget,
+  type RuntimeActivationTarget,
+} from '../../../packages/runtime-client/src/runtime-adapter-activation';
+
+export type { RuntimeSelectionLease };
 
 export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
@@ -92,13 +111,6 @@ export const activeEnv = derived(
   ($activeRuntimeEntry) => $activeRuntimeEntry?.env || null
 );
 
-type RuntimeAdapterStorageSnapshot = {
-  mode: string | null;
-  wsUrl: string | null;
-  access: string | null;
-  sessionKey: string | null;
-};
-
 const getEnvRuntimeId = (env: RuntimeReplica | null | undefined): string => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const runtimeId = typeof runtimeEnv?.runtimeId === 'string' ? runtimeEnv.runtimeId.trim() : '';
@@ -122,68 +134,44 @@ const setRuntimeEntry = (
 
 const persistActiveRemoteRuntime = (runtime: Runtime): boolean => {
   if (typeof window === 'undefined' || runtime.type !== 'remote' || !runtime.wsUrl) return false;
-  localStorage.setItem('xln-runtime-adapter-mode', 'remote');
-  localStorage.setItem('xln-runtime-adapter-ws', runtime.wsUrl);
-  localStorage.setItem('xln-runtime-adapter-access', 'admin');
-  localStorage.removeItem('xln-runtime-adapter-key');
-  if (runtime.apiKey) sessionStorage.setItem('xln-runtime-adapter-key', runtime.apiKey);
-  else sessionStorage.removeItem('xln-runtime-adapter-key');
+  writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {
+    wsUrl: runtime.wsUrl,
+    access: 'admin',
+    ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
+  });
   return true;
 };
 
 const readRuntimeAdapterStorageSnapshot = (): RuntimeAdapterStorageSnapshot | null => {
   if (typeof window === 'undefined') return null;
-  return {
-    mode: localStorage.getItem('xln-runtime-adapter-mode'),
-    wsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
-    access: localStorage.getItem('xln-runtime-adapter-access'),
-    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
-  };
-};
-
-const writeStorageValue = (
-  storage: Storage,
-  key: string,
-  value: string | null,
-): void => {
-  if (value === null) storage.removeItem(key);
-  else storage.setItem(key, value);
+  return readBrowserRuntimeAdapterStorageSnapshot({ durable: localStorage, session: sessionStorage });
 };
 
 const restoreRuntimeAdapterStorageSnapshot = (snapshot: RuntimeAdapterStorageSnapshot | null): void => {
   if (typeof window === 'undefined' || !snapshot) return;
-  writeStorageValue(localStorage, 'xln-runtime-adapter-mode', snapshot.mode);
-  writeStorageValue(localStorage, 'xln-runtime-adapter-ws', snapshot.wsUrl);
-  writeStorageValue(localStorage, 'xln-runtime-adapter-access', snapshot.access);
-  localStorage.removeItem('xln-runtime-adapter-key');
-  writeStorageValue(sessionStorage, 'xln-runtime-adapter-key', snapshot.sessionKey);
+  restoreBrowserRuntimeAdapterStorageSnapshot(
+    { durable: localStorage, session: sessionStorage },
+    snapshot,
+  );
 };
 
 const clearActiveRemoteRuntimeStorage = (runtime: Runtime | null | undefined): boolean => {
   if (typeof window === 'undefined' || runtime?.type !== 'remote') return false;
   let matchesActiveStorage = false;
   try {
-    const storedWs = localStorage.getItem('xln-runtime-adapter-ws') || '';
+    const storedWs = localStorage.getItem(RUNTIME_ADAPTER_WS_KEY) || '';
     matchesActiveStorage = !!runtime.wsUrl && normalizeRemoteRuntimeWsUrl(storedWs) === normalizeRemoteRuntimeWsUrl(runtime.wsUrl);
   } catch {
     matchesActiveStorage = false;
   }
   if (!matchesActiveStorage) return false;
-  localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
-  localStorage.removeItem('xln-runtime-adapter-ws');
-  localStorage.removeItem('xln-runtime-adapter-access');
-  localStorage.removeItem('xln-runtime-adapter-key');
-  sessionStorage.removeItem('xln-runtime-adapter-key');
+  writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
   return true;
 };
 
 const persistActiveEmbeddedRuntime = (): void => {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
-  localStorage.removeItem('xln-runtime-adapter-ws');
-  localStorage.removeItem('xln-runtime-adapter-access');
-  localStorage.removeItem('xln-runtime-adapter-key');
-  sessionStorage.removeItem('xln-runtime-adapter-key');
+  writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
 };
 
 const switchToRuntimeAdapter = async (config: RuntimeAdapterConfig): Promise<void> => {
@@ -251,84 +239,42 @@ const fetchRemoteRuntimeImportSource = async (
   return parseRemoteRuntimeImportSourcePayload(await response.json());
 };
 
-export type RuntimeSelectionLease = Readonly<{
-  revision: number;
-  token: symbol;
-}>;
-
-let runtimeSelectionRevision = 0;
-let runtimeSelectionQueue: Promise<void> = Promise.resolve();
-let activeRuntimeSelectionLease: RuntimeSelectionLease | null = null;
-
-const runtimeSelectionLeaseIsCurrent = (lease: RuntimeSelectionLease): boolean =>
-  activeRuntimeSelectionLease === lease && lease.revision === runtimeSelectionRevision;
+const runtimeSelectionCoordinator = createRuntimeSelectionCoordinator();
 
 export const coordinateRuntimeSelection = async <T>(
   operation: (lease: RuntimeSelectionLease) => Promise<T>,
-): Promise<T | null> => {
-  const lease: RuntimeSelectionLease = Object.freeze({
-    revision: ++runtimeSelectionRevision,
-    token: Symbol('runtime-selection'),
-  });
-  const previous = runtimeSelectionQueue;
-  let release!: () => void;
-  runtimeSelectionQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    if (lease.revision !== runtimeSelectionRevision) return null;
-    activeRuntimeSelectionLease = lease;
-    const result = await operation(lease);
-    return runtimeSelectionLeaseIsCurrent(lease) ? result : null;
-  } finally {
-    if (activeRuntimeSelectionLease === lease) activeRuntimeSelectionLease = null;
-    release();
-  }
-};
+): Promise<T | null> => runtimeSelectionCoordinator.runLatest(operation);
 
 const performRuntimeSelection = async (id: string): Promise<boolean> => {
   const runtime = get(runtimes).get(id);
   if (runtime?.type === 'remote') {
-    if (!runtime.wsUrl) throw new Error(`REMOTE_RUNTIME_WS_MISSING:${id}`);
-    const previousStorage = readRuntimeAdapterStorageSnapshot();
-    const previousPendingRuntimeId = get(runtimeControllerHandle).pendingRuntimeId;
-    const persisted = persistActiveRemoteRuntime(runtime);
-    if (!persisted) return false;
-    setRuntimeControllerPendingRuntimeId(id);
-    if (!runtimeControllerAlreadyTargets(runtime, id)) {
-      try {
-        await switchToRuntimeAdapter({
-          mode: 'remote',
-          runtimeId: id,
-          wsUrl: runtime.wsUrl,
-          ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
-        });
-      } catch (error) {
-        restoreRuntimeAdapterStorageSnapshot(previousStorage);
-        setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId);
-        throw error;
-      }
-    }
-    if (!runtimeControllerAlreadyTargets(runtime, id)) {
-      throw new Error(`REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH:${id}`);
-    }
-    return persistActiveRemoteRuntime(runtime);
+    return activateRemoteRuntimeTarget({
+      mode: 'remote',
+      runtimeId: id,
+      wsUrl: runtime.wsUrl || '',
+      ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
+    }, {
+      readPendingRuntimeId: () => get(runtimeControllerHandle).pendingRuntimeId,
+      setPendingRuntimeId: setRuntimeControllerPendingRuntimeId,
+      readSessionSnapshot: readRuntimeAdapterStorageSnapshot,
+      restoreSessionSnapshot: restoreRuntimeAdapterStorageSnapshot,
+      persistRemote: () => persistActiveRemoteRuntime(runtime),
+      isCurrent: () => runtimeControllerAlreadyTargets(runtime, id),
+      switchAdapter: switchToRuntimeAdapter,
+    });
   }
-  const previousPendingRuntimeId = get(runtimeControllerHandle).pendingRuntimeId;
-  setRuntimeControllerPendingRuntimeId(id);
-  try {
-    if (runtime && !runtimeControllerAlreadyTargets(runtime, id)) {
-      await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id });
-    } else if (!runtime) {
-      await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id });
-    }
-  } catch (error) {
-    setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId);
-    throw error;
-  }
-  persistActiveEmbeddedRuntime();
-  return true;
+  const target = {
+    mode: 'embedded',
+    runtimeId: id,
+    registered: Boolean(runtime),
+  } satisfies RuntimeActivationTarget;
+  return activateEmbeddedRuntimeTarget(target, {
+    readPendingRuntimeId: () => get(runtimeControllerHandle).pendingRuntimeId,
+    setPendingRuntimeId: setRuntimeControllerPendingRuntimeId,
+    persistEmbedded: persistActiveEmbeddedRuntime,
+    isCurrent: () => Boolean(runtime && runtimeControllerAlreadyTargets(runtime, id)),
+    switchAdapter: switchToRuntimeAdapter,
+  });
 };
 
 // Operations
@@ -392,12 +338,10 @@ export const runtimeOperations = {
   // Switch active runtime
   async selectRuntime(id: string, lease?: RuntimeSelectionLease): Promise<boolean> {
     if (lease) {
-      if (activeRuntimeSelectionLease !== lease) {
-        throw new Error('RUNTIME_SELECTION_LEASE_INVALID');
-      }
-      if (!runtimeSelectionLeaseIsCurrent(lease)) return false;
+      runtimeSelectionCoordinator.assertActive(lease);
+      if (!runtimeSelectionCoordinator.isCurrent(lease)) return false;
       const selected = await performRuntimeSelection(id);
-      return runtimeSelectionLeaseIsCurrent(lease) && selected;
+      return runtimeSelectionCoordinator.isCurrent(lease) && selected;
     }
     const selected = await coordinateRuntimeSelection((currentLease) =>
       runtimeOperations.selectRuntime(id, currentLease)

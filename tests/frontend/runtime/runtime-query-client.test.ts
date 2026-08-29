@@ -18,6 +18,7 @@ import {
   runtimeViewPublicationMatches,
   runtimeViewSelectionMatches,
   setRuntimeViewActiveEntityId,
+  setRuntimeViewPage,
 } from '../../../frontend/src/lib/stores/runtimeViewStore';
 import {
   ensureRuntimeHistoryContext,
@@ -35,27 +36,34 @@ const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => voi
 
 test('runtime query client exposes typed projection reads and bounded cache', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
+  const boundary = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-query-client.ts',
+    'utf8',
+  );
 
   expect(source).toContain('export class RuntimeQueryClient');
-  expect(source).toContain('readHead()');
-  expect(source).toContain('readFrameSummary');
-  expect(source).toContain('readEntities');
-  expect(source).toContain('readViewFrame');
-  expect(source).toContain('readHistoryFrameBatch');
-  expect(source).toContain('readActivity');
-  expect(source).toContain('readSolvencySummary');
-  expect(source).toContain('readSwapHistory');
-  expect(source).toContain('/swap-history`');
-  expect(source).toContain('readReceiptStatus');
-  expect(source).toContain('readRecoveryBundles');
-  expect(source).toContain("'solvency-summary'");
-  expect(source).toContain("`receipt/${encodeURIComponent(id)}`");
-  expect(source).toContain("`recovery/bundles/${encodeURIComponent(key)}`");
-  expect(source).toContain('MAX_QUERY_CACHE_ENTRIES = 200');
+  expect(source).toContain('extends RuntimeQueryClientBoundary<');
+  expect(boundary).toContain('readHead()');
+  expect(boundary).toContain('readFrameSummary');
+  expect(boundary).toContain('readEntities');
+  expect(boundary).toContain('readViewFrame');
+  expect(boundary).toContain('readHistoryFrameBatch');
+  expect(boundary).toContain('readActivity');
+  expect(boundary).toContain('readSolvencySummary');
+  expect(boundary).toContain('readSwapHistory');
+  expect(boundary).toContain('/swap-history`');
+  expect(boundary).toContain('readReceiptStatus');
+  expect(boundary).toContain('readRecoveryBundles');
+  expect(boundary).toContain("'solvency-summary'");
+  expect(boundary).toContain("`receipt/${encodeURIComponent(id)}`");
+  expect(boundary).toContain("`recovery/bundles/${encodeURIComponent(key)}`");
+  expect(boundary).toContain('MAX_QUERY_CACHE_ENTRIES = 200');
   expect(source).toContain('clearRuntimeQueryCache');
   expect(source).toContain('runtimeAdapter.subscribe(() => clearRuntimeQueryCache())');
-  expect(source).toContain('private readonly cacheRuntimeId?: string');
-  expect(source).toContain('this.cacheRuntimeId || handle.id');
+  expect(boundary).toContain('private readonly cacheRuntimeId?: string');
+  expect(boundary).toContain('this.cacheRuntimeId || this.dependencies.readRuntimeId()');
+  expect(boundary).not.toContain('svelte');
+  expect(boundary).not.toContain('@xln/core');
 });
 
 test('remote history cache clears synchronously and rejects a superseded selection', () => {
@@ -107,26 +115,35 @@ test('remote history cache clears synchronously and rejects a superseded selecti
 
 test('runtime view store owns the active projected RuntimeView without RuntimeReplica access', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
+  const modelSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-model.ts',
+    'utf8',
+  );
+  const publicationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-publication.ts',
+    'utf8',
+  );
 
   expect(source).toContain('export type RuntimeView');
+  expect(source).toContain("from '../../../packages/runtime-client/src/runtime-view-model'");
   expect(source).toContain('export const runtimeView');
   expect(source).toContain('export const refreshRuntimeView');
   expect(source).toContain('export const refreshSelectedRuntimeView');
   expect(source).toContain('refreshRuntimeView(currentRuntimeViewQuery())');
-  expect(source).toContain('if (get(runtimeViewActiveEntityId) === normalizedEntityId) return;');
+  expect(source).toContain('runtimeViewSelectionCoordinator.setActiveEntityId(entityId)');
   expect(source).toContain('runtimeQueryClient.readHead()');
   expect(source).toContain('runtimeQueryClient.readViewFrame(query)');
   expect(source).toContain('runtimeControllerHandle');
   expect(source).toContain('export const resetRuntimeView');
-  expect(source).toContain('runtimeViewRefreshId += 1;');
-  expect(source).toContain('const expectedRuntimeId = handle.id;');
-  expect(source).toContain('const expectedRuntimeMode = handle.mode;');
-  expect(source).toContain('const requestStillCurrent = (): boolean =>');
-  expect(source).toContain('current.id === expectedRuntimeId');
-  expect(source).toContain('current.mode === expectedRuntimeMode');
+  expect(source).toContain('new RuntimeViewRefreshCoordinator({');
+  expect(source).toContain('new RuntimeViewPublicationCoordinator<');
+  expect(publicationSource).toContain('const refreshLease = this.dependencies.refresh.begin();');
+  expect(publicationSource).toContain('const requestStillCurrent = (): boolean =>');
+  expect(publicationSource).toContain('this.dependencies.refresh.isCurrent(refreshLease)');
+  expect(source).not.toContain('let runtimeViewRefreshId');
   expect(source).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
-  expect(source).toContain('if (!requestStillCurrent()) return next;');
-  expect(source).not.toContain('if (!requestStillCurrent()) throw error;');
+  expect(publicationSource).toContain('if (!requestStillCurrent()) return next;');
+  expect(publicationSource).not.toContain('if (!requestStillCurrent()) throw error;');
   expect(source).toContain('runtimeAdapter.subscribe');
   expect(source).toContain('resetRuntimeView();');
   expect(source).toContain('runtimeAdapterHeight.subscribe');
@@ -136,14 +153,18 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).not.toContain('getEnv');
   expect(source).not.toContain('setXlnEnvironment');
   expect(source).not.toContain('runtimeAdapterStore');
+  expect(modelSource).toContain('export type RuntimeViewPageInfo');
+  expect(modelSource).not.toContain('svelte');
+  expect(modelSource).not.toContain('@xln/core');
+  expect(modelSource).not.toContain('runtimeQueryClient');
 });
 
 test('re-pinning the same wallet Entity preserves account pagination', () => {
   resetRuntimeViewSelection();
   try {
     setRuntimeViewActiveEntityId('0xentity-a');
-    runtimeViewAccountsPage.set(3);
-    runtimeViewBooksPage.set(4);
+    setRuntimeViewPage('accounts', 3);
+    setRuntimeViewPage('books', 4);
 
     setRuntimeViewActiveEntityId(' 0xENTITY-A ');
 
@@ -231,16 +252,26 @@ test('runtime view queues committed heights that arrive during the initial proje
   expect(runtimeViewTracksHeightAdvance(loadingLiveView, 'connected', 0)).toBe(false);
 
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
-  expect(source).toContain('pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);');
-  expect(source).toContain('if (!view.frame) return;');
+  const boundary = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-catchup.ts',
+    'utf8',
+  );
+  expect(boundary).toContain('this.pendingHeight = Math.max(this.pendingHeight, nextHeight);');
+  expect(boundary).toContain('if (!state.hasFrame) return;');
+  expect(source).toContain('runtimeViewCatchup.observeHeight(nextHeight);');
   expect(source).toContain('continueRuntimeViewCatchup();');
 });
 
 test('runtime view catch-up retries back off instead of spinning', () => {
   expect([0, 1, 2, 3, 20].map(runtimeViewHeightRetryDelayMs)).toEqual([50, 100, 200, 250, 250]);
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
-  expect(source).not.toContain('while (pendingHeightRefresh');
-  expect(source).toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
+  const boundary = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-catchup.ts',
+    'utf8',
+  );
+  expect(boundary).not.toContain('while (this.pendingHeight');
+  expect(boundary).toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
+  expect(source).not.toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
 });
 
 test('persisted receipt probes reuse the live Runtime module singleton', () => {
@@ -460,6 +491,10 @@ test('runtime recovery bundles read through typed query client without cache reu
 test('runtime controller exposes only typed debug projection queries', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
   const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
+  const queryBoundarySource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-query-client.ts',
+    'utf8',
+  );
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const remoteE2ESource = [
@@ -484,12 +519,16 @@ test('runtime controller exposes only typed debug projection queries', () => {
   expect(controllerSource).not.toContain('send: runtimeAdapterSend');
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
   expect(appTypes).not.toContain('read: <T = unknown>');
-  expect(storeSource).toContain('runtimeQueryClient.readReceiptStatus(id)');
+  expect(storeSource).toContain('const observeRemoteRuntimeCommand = async');
+  expect(storeSource).toContain('waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1)');
+  expect(storeSource).toContain('progress.observed(projectedHeight)');
+  expect(storeSource).not.toContain('runtimeQueryClient.readReceiptStatus');
   expect(storeSource).not.toContain("adapter.read<RuntimeReceiptStatus>(`receipt/");
   expect(storeSource).not.toContain("adapter.read<RemoteRuntimeReceiptStatus>(`receipt/");
   expect(queryClientSource).not.toContain('export const runtimeQueryRead');
-  expect(queryClientSource).toContain('private async read<T>');
-  expect(queryClientSource).toContain('private async cachedRead<T>');
+  expect(queryClientSource).toContain('extends RuntimeQueryClientBoundary<');
+  expect(queryBoundarySource).toContain('private async read<T>');
+  expect(queryBoundarySource).toContain('private async cachedRead<T>');
   expect(remoteE2ESource).toContain('RuntimeAdapterDebugSurface');
   expect(remoteE2ESource).toContain('adapter.query.viewFrame');
   expect(remoteE2ESource).not.toContain('adapter.read');

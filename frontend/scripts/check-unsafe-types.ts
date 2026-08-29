@@ -10,6 +10,13 @@ type Finding = {
 
 const frontendRoot = join(import.meta.dir, '..');
 const sourceRoot = join(frontendRoot, 'src');
+const scanRoots = [
+  sourceRoot,
+  join(frontendRoot, 'apps'),
+  join(frontendRoot, 'packages'),
+  join(frontendRoot, 'config'),
+  join(frontendRoot, 'scripts'),
+];
 
 const sourceFiles = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -17,11 +24,14 @@ const sourceFiles = (directory: string): string[] =>
     if (entry.isDirectory()) {
       return target === join(sourceRoot, 'routes', 'ai') ? [] : sourceFiles(target);
     }
-    return entry.isFile() && (target.endsWith('.ts') || target.endsWith('.svelte')) ? [target] : [];
+    return entry.isFile() && (
+      target.endsWith('.ts') || target.endsWith('.tsx') || target.endsWith('.svelte')
+    ) ? [target] : [];
   });
 
 const inspectScript = (file: string, sourceText: string, lineOffset: number): Finding[] => {
-  const source = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const scriptKind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, scriptKind);
   const findings: Finding[] = [];
   const record = (node: ts.Node, kind: Finding['kind']): void => {
     findings.push({
@@ -52,7 +62,7 @@ const inspectFile = (file: string): Finding[] => {
       ? [{ file: relative(frontendRoot, file), line: index + 1, kind: 'ts-suppression' as const }]
       : [],
   );
-  if (file.endsWith('.ts')) return [...inspectScript(file, text, 0), ...suppressions];
+  if (!file.endsWith('.svelte')) return [...inspectScript(file, text, 0), ...suppressions];
   const scripts = [...text.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
   return [
     ...scripts.flatMap((match) => {
@@ -66,7 +76,8 @@ const inspectFile = (file: string): Finding[] => {
   ];
 };
 
-const findings = sourceFiles(sourceRoot).sort().flatMap(inspectFile);
+const scannedFiles = scanRoots.flatMap(sourceFiles).sort();
+const findings = scannedFiles.flatMap(inspectFile);
 if (findings.length > 0) {
   console.error('Frontend unsafe TypeScript invariant failed:');
   for (const finding of findings) {
@@ -75,4 +86,4 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
-console.log(`FRONTEND_UNSAFE_TYPES_OK files=${sourceFiles(sourceRoot).length} findings=0`);
+console.log(`FRONTEND_UNSAFE_TYPES_OK files=${scannedFiles.length} findings=0`);

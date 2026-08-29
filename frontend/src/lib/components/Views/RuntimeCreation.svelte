@@ -14,6 +14,7 @@
     DEFAULT_VAULT_UNLOCK_DURATION_MS,
     type RuntimeRecoveryCandidate,
     type RuntimeRecoveryDiscoveryFailure,
+    type RuntimeRecoveryDiscoveryResult,
   } from '$lib/stores/vault/vaultStore';
   import type { VaultUnlockDurationMs } from '$lib/security/vaultProtection';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
@@ -36,14 +37,11 @@
     getRuntimeControllerAdapter,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
-  import type { RuntimeAdapterBrainVaultResult } from '@xln/core/api/runtime-adapter/types';
+  import type {
+    RuntimeAdapterBrainVaultRecovery,
+    RuntimeAdapterBrainVaultResult,
+  } from '@xln/core/api/runtime-adapter/types';
   import { generateLazyEntityIdPreview } from '$lib/utils/identity/lazyEntityId';
-  import {
-    BRAINVAULT_WORKER_CAP_STORAGE_KEY,
-    computeBrainVaultWorkerCap,
-    isBrainVaultWasmMemoryError,
-    nextBrainVaultWorkerCapAfterFailure,
-  } from '$lib/brainvault/workers';
   import {
     FACTOR_INFO,
     WALLET_MODE_TRADEOFFS,
@@ -54,8 +52,74 @@
     generateBase58Secret,
     hasSupportedMnemonicWordCount,
     normalizeMnemonicPhrase,
-    normalizeBrainVaultShardTimeSample,
   } from './runtime-creation-model';
+  import {
+    resolveWalletIdentityModeNavigation,
+    selectWalletIdentityMode,
+    type WalletIdentityMode,
+  } from '../../../../packages/browser/src/wallet-identity-entry';
+  import {
+    evaluateWalletRecoveryRehearsal,
+    resetWalletRecoveryRehearsal,
+    type WalletRecoveryRehearsalMode,
+    type WalletRecoveryRehearsalState,
+  } from '../../../../packages/browser/src/wallet-recovery-rehearsal';
+  import {
+    mergeWalletRecoveryCandidate,
+    resolveWalletRecoveryContinuation,
+    summarizeWalletRecoveryCandidates,
+  } from '../../../../packages/browser/src/wallet-recovery-choice';
+  import {
+    WalletRecoveryDiscoveryCoordinator,
+    type WalletRecoveryDiscoveryRequest,
+  } from '../../../../packages/browser/src/wallet-recovery-discovery';
+  import {
+    resolveWalletRuntimeOpeningPlan,
+    walletRuntimeOpeningNeedsLocalLookup,
+  } from '../../../../packages/browser/src/wallet-runtime-opening';
+  import { WalletNodeMnemonicRevealCoordinator } from '../../../../packages/browser/src/wallet-node-mnemonic-reveal';
+  import {
+    assertWalletNodeBrainVaultResult,
+    nextWalletNodeShardTimeMs,
+    resolveWalletNodeBrainVaultAccess,
+    validateWalletNodeBrainVaultProgress,
+  } from '../../../../packages/browser/src/wallet-node-brainvault-validation';
+  import {
+    decodeWalletBrainVaultWorkerMessage,
+    normalizeWalletBrainVaultShardTimeSample,
+    normalizeWalletBrainVaultWorkerError,
+    type WalletBrainVaultShardCompleteMessage,
+    validateWalletBrainVaultShardCompletion,
+  } from '../../../../packages/browser/src/wallet-brainvault-worker-validation';
+  import {
+    hasPendingWalletBrainVaultShardWork,
+    resolveWalletBrainVaultShardDispatch,
+    resolveWalletBrainVaultShardRetry,
+    resolveWalletBrainVaultWorkerScale,
+  } from '../../../../packages/browser/src/wallet-brainvault-worker-scheduling';
+  import {
+    BRAINVAULT_WORKER_CAP_STORAGE_KEY,
+    computeBrainVaultWorkerCap,
+    isBrainVaultWasmMemoryError,
+    resolveWalletBrainVaultMemoryReduction,
+    resolveWalletBrainVaultShardWatchdog,
+    resolveWalletBrainVaultWorkerInitRetry,
+    walletBrainVaultWorkerInitFailureMessage,
+  } from '../../../../packages/browser/src/wallet-brainvault-worker-resilience';
+  import {
+    resolveWalletBrainVaultFinalizationCommit,
+    resolveWalletBrainVaultFinalizationShardOrder,
+    resolveWalletBrainVaultFinalizationStart,
+  } from '../../../../packages/browser/src/wallet-brainvault-finalization';
+  import {
+    WALLET_AUTH_SCHEME_STORAGE_KEY,
+    parseWalletBrainVaultWorkerCap,
+    resolveWalletAuthScheme,
+    resolveWalletUnlockDurationMs,
+    serializeWalletBrainVaultWorkerCap,
+    type WalletAuthScheme,
+    type WalletUnlockDurationChoice,
+  } from '../../../../packages/browser/src/wallet-runtime-preferences';
 
   // Props
   export let embedded: boolean = false;
@@ -107,8 +171,8 @@
   // ============================================================================
 
   type Phase = 'input' | 'deriving' | 'recovery' | 'node-ready';
-  type InputMode = 'brainvault' | 'mnemonic';
-  type RecoveryRehearsalMode = 'mnemonic';
+  type InputMode = WalletIdentityMode;
+  type RecoveryRehearsalMode = WalletRecoveryRehearsalMode;
   type BrainVaultDerivationRun = Readonly<{
     name: string;
     passphrase: string;
@@ -118,24 +182,23 @@
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
-  let unlockDurationChoice: '10m' | '1d' | 'forever' = '10m';
-  $: unlockDurationMs = (
-    unlockDurationChoice === 'forever'
-      ? null
-      : unlockDurationChoice === '1d'
-        ? 86_400_000
-        : DEFAULT_VAULT_UNLOCK_DURATION_MS
+  let unlockDurationChoice: WalletUnlockDurationChoice = '10m';
+  $: unlockDurationMs = resolveWalletUnlockDurationMs(
+    unlockDurationChoice,
+    DEFAULT_VAULT_UNLOCK_DURATION_MS,
   ) satisfies VaultUnlockDurationMs;
 
   function selectInputMode(next: InputMode): void {
-    if (phase !== 'input') return;
-    if (rehearsalMode !== null && next !== rehearsalMode) return;
-    if (next !== inputMode) {
-      if (inputMode === 'brainvault') passphrase = '';
-      if (inputMode === 'mnemonic') mnemonicInput = '';
-      showPassphrase = false;
-    }
-    inputMode = next;
+    const nextState = selectWalletIdentityMode({
+      state: { mode: inputMode, passphrase, mnemonicInput, showPassphrase },
+      phase,
+      rehearsalMode,
+      nextMode: next,
+    });
+    inputMode = nextState.mode;
+    passphrase = nextState.passphrase;
+    mnemonicInput = nextState.mnemonicInput;
+    showPassphrase = nextState.showPassphrase;
   }
 
   function focusWalletModeTab(next: InputMode): void {
@@ -144,31 +207,21 @@
   }
 
   function handleWalletModeKeydown(event: KeyboardEvent): void {
-    const enabledModes = (['brainvault', 'mnemonic'] as const).filter((mode) => (
-      rehearsalMode === null || mode === rehearsalMode
-    ));
-    const currentIndex = enabledModes.indexOf(inputMode);
-    const nextIndex = event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? enabledModes.length - 1
-        : event.key === 'ArrowRight'
-          ? (currentIndex + 1) % enabledModes.length
-          : event.key === 'ArrowLeft'
-            ? (currentIndex - 1 + enabledModes.length) % enabledModes.length
-            : -1;
-    if (nextIndex < 0) return;
+    const nextMode = resolveWalletIdentityModeNavigation({
+      currentMode: inputMode,
+      key: event.key,
+      rehearsalMode,
+    });
+    if (!nextMode) return;
     event.preventDefault();
-    focusWalletModeTab(enabledModes[nextIndex]!);
+    focusWalletModeTab(nextMode);
   }
 
   // Visual scheme for the standalone auth screen: 'dark' (default "vault") or 'light' (minimalist fintech skin)
-  type AuthScheme = 'dark' | 'light';
-  const AUTH_SCHEME_STORAGE_KEY = 'xln-auth-scheme';
-  let scheme: AuthScheme = 'dark';
-  function setScheme(next: AuthScheme): void {
+  let scheme: WalletAuthScheme = 'dark';
+  function setScheme(next: WalletAuthScheme): void {
     scheme = next;
-    if (typeof localStorage !== 'undefined') localStorage.setItem(AUTH_SCHEME_STORAGE_KEY, next);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(WALLET_AUTH_SCHEME_STORAGE_KEY, next);
   }
 
   // Advanced options (security work factor etc.) are collapsed by default for a minimalist screen
@@ -190,7 +243,7 @@
   let nodeDerivationResult: RuntimeAdapterBrainVaultResult | null = null;
   let revealedNodeMnemonic = '';
   let revealingNodeMnemonic = false;
-  let nodeRevealRunToken = 0;
+  const walletNodeMnemonicReveal = new WalletNodeMnemonicRevealCoordinator<RuntimeAdapterBrainVaultRecovery>();
 
   const isCurrentDerivationRun = (run: BrainVaultDerivationRun): boolean =>
     derivationRun === run && phase === 'deriving';
@@ -232,7 +285,7 @@
 
   function readPersistedShardTime(): number | null {
     if (typeof localStorage === 'undefined') return null;
-    return normalizeBrainVaultShardTimeSample(
+    return normalizeWalletBrainVaultShardTimeSample(
       Number(localStorage.getItem(BRAINVAULT_SHARD_TIME_STORAGE_KEY)),
     );
   }
@@ -249,13 +302,17 @@
 
   function readPersistedWorkerCap(): number | null {
     if (typeof localStorage === 'undefined') return null;
-    const value = Number(localStorage.getItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY));
-    return Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+    return parseWalletBrainVaultWorkerCap(
+      localStorage.getItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY),
+    );
   }
 
   function persistWorkerCap(cap: number): void {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY, String(Math.max(1, Math.floor(cap))));
+    localStorage.setItem(
+      BRAINVAULT_WORKER_CAP_STORAGE_KEY,
+      serializeWalletBrainVaultWorkerCap(cap),
+    );
   }
 
   const computeMaxWorkers = () => computeBrainVaultWorkerCap({
@@ -326,7 +383,14 @@
   let selectedRecoveryCandidateId = '';
   let localRuntimeAvailable = false;
   let backupFileInput: HTMLInputElement | null = null;
-  let recoveryRunToken = 0;
+  const walletRecoveryDiscovery = new WalletRecoveryDiscoveryCoordinator<
+    WalletRecoveryDiscoveryRequest,
+    RuntimeRecoveryDiscoveryResult
+  >({
+    discover: ({ seed, runtimeId }) => discoverRuntimeRecoveryCandidates(seed, {
+      peers: buildRemoteRuntimeRecoveryPeerSources({ runtimeId }),
+    }),
+  });
 
   // ============================================================================
   // LIFECYCLE - Load vault on mount
@@ -360,7 +424,10 @@
 
   $: savedVaults = $allRuntimes;
 
-  $: selectedRecoveryCandidate = recoveryCandidates.find((candidate) => candidate.id === selectedRecoveryCandidateId) || recoveryCandidates[0] || null;
+  $: selectedRecoveryCandidate = summarizeWalletRecoveryCandidates(
+    recoveryCandidates,
+    selectedRecoveryCandidateId,
+  ).selectedCandidate;
 
   const shortRuntimeId = (value: string): string => {
     const text = String(value || '').trim();
@@ -378,7 +445,7 @@
   };
 
   function resetRecoveryDecision(): void {
-    recoveryRunToken += 1;
+    walletRecoveryDiscovery.invalidate();
     recoveryChecking = false;
     recoveryRuntimeId = '';
     recoveryLabel = '';
@@ -395,8 +462,6 @@
   async function prepareRecoveryDecisionFromCurrentSeed(labelOverride?: string): Promise<boolean> {
     if (!mnemonic24 || !ethereumAddress) return false;
 
-    const runToken = ++recoveryRunToken;
-
     derivationError = '';
     recoveryChecking = true;
     recoveryRuntimeId = ethereumAddress.toLowerCase();
@@ -410,29 +475,32 @@
     selectedRecoveryCandidateId = '';
     localRuntimeAvailable = vaultOperations.runtimeExists(recoveryRuntimeId);
 
+    const outcome = await walletRecoveryDiscovery.run({
+      seed: mnemonic24,
+      runtimeId: recoveryRuntimeId,
+    });
+    if (outcome.status === 'cancelled') return false;
     try {
-      const discovery = await discoverRuntimeRecoveryCandidates(mnemonic24, {
-        peers: buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId }),
-      });
-      if (runToken !== recoveryRunToken) return false;
+      if (outcome.status === 'failed') {
+        recoveryErrors = [outcome.message];
+        recoveryFailures = [];
+        return true;
+      }
+      const { discovery } = outcome;
       recoveryCandidates = discovery.candidates;
       recoveryErrors = discovery.errors;
       recoveryFailures = discovery.failures;
       recoveryCheckedTowers = discovery.checkedTowers;
       recoveryCheckedPeers = discovery.checkedPeers;
-      recoveryPeerBackupCount = recoveryCandidates.filter((candidate) => candidate.source === 'peer').length;
-      selectedRecoveryCandidateId = recoveryCandidates[0]?.id || '';
+      const recoverySummary = summarizeWalletRecoveryCandidates(recoveryCandidates, '');
+      recoveryPeerBackupCount = recoverySummary.peerBackupCount;
+      selectedRecoveryCandidateId = recoverySummary.selectedCandidate?.id || '';
       if (recoveryCandidates.length > 0) {
         phase = 'recovery';
       }
       return true;
-    } catch (err) {
-      if (runToken !== recoveryRunToken) return false;
-      recoveryErrors = [err instanceof Error ? err.message : String(err)];
-      recoveryFailures = [];
-      return true;
     } finally {
-      if (runToken === recoveryRunToken) recoveryChecking = false;
+      recoveryChecking = false;
     }
   }
 
@@ -450,12 +518,16 @@
   }
 
   async function continueAfterRecoveryDiscovery(): Promise<void> {
-    if (recoveryCandidates.length > 0) {
+    const continuation = resolveWalletRecoveryContinuation({
+      hasCandidates: recoveryCandidates.length > 0,
+      localRuntimeAvailable,
+    });
+    if (continuation === 'choose-backup') {
       phase = 'recovery';
       return;
     }
     writeCurrentRecoveryDiscoveryStatus();
-    if (localRuntimeAvailable) {
+    if (continuation === 'open-local') {
       await openLocalRuntime();
     } else {
       await createFreshRuntime();
@@ -476,20 +548,40 @@
     derivationError = '';
     try {
       const runtimeId = ethereumAddress;
-      const label = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+      const openingChoice = {
+        openLocal: options.openLocal === true,
+        forceFresh: options.forceFresh === true,
+        hasRecoveryCandidate: options.recoveryCandidate !== undefined,
+      };
+      const openingPlan = resolveWalletRuntimeOpeningPlan({
+        runtimeId,
+        name,
+        labelOverride,
+        seed: mnemonic24,
+        mnemonic12,
+        devicePassphrase,
+        loginType: createLoginType,
+        unlockDurationMs,
+        recoveryCandidate: options.recoveryCandidate,
+        forceFresh: openingChoice.forceFresh,
+        openLocal: openingChoice.openLocal,
+        localRuntimeExists: walletRuntimeOpeningNeedsLocalLookup(openingChoice)
+          ? vaultOperations.runtimeExists(runtimeId)
+          : false,
+      });
 
-      if (options.openLocal || (!options.forceFresh && !options.recoveryCandidate && vaultOperations.runtimeExists(runtimeId))) {
-        await vaultOperations.unlockRuntime(runtimeId, mnemonic24, unlockDurationMs);
+      if (openingPlan.action === 'unlock-local') {
+        await vaultOperations.unlockRuntime(
+          openingPlan.runtimeId,
+          openingPlan.seed,
+          openingPlan.unlockDurationMs,
+        );
       } else {
-        const runtime = await vaultOperations.createRuntime(label, mnemonic24, {
-          loginType: createLoginType,
-          requiresOnboarding: createLoginType !== 'demo',
-          mnemonic12: mnemonic12.trim().split(/\s+/).join(' ') || undefined,
-          devicePassphrase: devicePassphrase || undefined,
-          recoveryCandidate: options.recoveryCandidate,
-          skipRecoveryRestore: !options.recoveryCandidate,
-          unlockDurationMs,
-        });
+        const runtime = await vaultOperations.createRuntime(
+          openingPlan.label,
+          openingPlan.seed,
+          openingPlan.options,
+        );
         entityId = runtime.signers[0]?.entityId || entityId;
       }
       createLoginType = 'manual';
@@ -538,13 +630,7 @@
       const candidate = await parseRuntimeRecoveryCandidateFile(mnemonic24, await file.text(), {
         sourceLabel: file.name || 'Local backup file',
       });
-      recoveryCandidates = [
-        candidate,
-        ...recoveryCandidates.filter((existing) => existing.id !== candidate.id),
-      ].sort((left, right) => {
-        if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
-        return right.createdAt - left.createdAt;
-      });
+      recoveryCandidates = mergeWalletRecoveryCandidate(recoveryCandidates, candidate);
       selectedRecoveryCandidateId = candidate.id;
     } catch (err) {
       derivationError = err instanceof Error ? err.message : String(err);
@@ -634,46 +720,48 @@
 
   function armWorkerShardWatchdog(worker: Worker, shardIndex: number): void {
     clearWorkerShardWatchdog(worker);
-    const timeoutMs = Math.min(600_000, Math.max(300_000, Math.ceil(estimatedShardTimeMs * 10)));
+    const watchdog = resolveWalletBrainVaultShardWatchdog(estimatedShardTimeMs, shardIndex);
     workerShardWatchdogs.set(worker, setTimeout(() => {
       if (workerActiveShard.get(worker) !== shardIndex) return;
-      handleWorkerFailure(worker, new Error(`Shard ${shardIndex + 1} timed out after ${Math.ceil(timeoutMs / 1000)}s`));
-    }, timeoutMs));
-  }
-
-  function workerErrorMessage(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    if (err && typeof err === 'object' && 'message' in err) {
-      return String((err as { message?: unknown }).message ?? 'Worker failed');
-    }
-    return String(err || 'Worker failed');
+      handleWorkerFailure(worker, new Error(watchdog.message));
+    }, watchdog.timeoutMs));
   }
 
   function hasPendingShardWork(): boolean {
-    return retryShardQueue.length > 0 || nextShardToDispatch < shardCount;
+    return hasPendingWalletBrainVaultShardWork({
+      retryQueue: retryShardQueue,
+      nextShardToDispatch,
+      shardCount,
+    });
   }
 
   function requeueShard(shardIndex: number, message: string): boolean {
-    if (shardResults.has(shardIndex)) return true;
-    const attempts = (shardRetryCounts.get(shardIndex) ?? 0) + 1;
-    shardRetryCounts.set(shardIndex, attempts);
-    if (attempts > 3) {
-      derivationError = `BrainVault shard ${shardIndex + 1} failed repeatedly: ${message}`;
+    const retry = resolveWalletBrainVaultShardRetry(shardIndex, message, {
+      alreadyCompleted: shardResults.has(shardIndex),
+      currentAttempts: shardRetryCounts.get(shardIndex) ?? 0,
+      retryQueue: retryShardQueue,
+    });
+    if (retry.status === 'completed') return true;
+    shardRetryCounts.set(shardIndex, retry.attempts);
+    retryShardQueue = [...retry.retryQueue];
+    if (retry.status === 'failed') {
+      derivationError = retry.message;
       return false;
-    }
-    if (!retryShardQueue.includes(shardIndex)) {
-      retryShardQueue.unshift(shardIndex);
     }
     return true;
   }
 
   function reduceWorkerCapAfterMemoryError(message: string): void {
-    const current = Math.max(activeWorkerCount, effectiveTargetWorkerCount, 1);
-    const reduced = nextBrainVaultWorkerCapAfterFailure(current);
-    maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+    const reduction = resolveWalletBrainVaultMemoryReduction({
+      activeWorkerCount,
+      effectiveTargetWorkerCount,
+      maxWorkers,
+      targetWorkerCount,
+    });
+    maxWorkers = reduction.maxWorkers;
     persistWorkerCap(maxWorkers);
-    targetWorkerCount = Math.max(1, Math.min(targetWorkerCount, maxWorkers));
-    workerLimitNotice = `Browser memory pressure detected. BrainVault is continuing with ${maxWorkers} worker${maxWorkers === 1 ? '' : 's'}.`;
+    targetWorkerCount = reduction.targetWorkerCount;
+    workerLimitNotice = reduction.notice;
     logRuntimeCreationDiagnostic('BrainVault worker cap reduced after Wasm memory pressure', { maxWorkers, message });
   }
 
@@ -685,7 +773,7 @@
   }
 
   function invalidateNodeReveal(): void {
-    nodeRevealRunToken += 1;
+    walletNodeMnemonicReveal.invalidate();
     revealedNodeMnemonic = '';
     revealingNodeMnemonic = false;
   }
@@ -722,43 +810,49 @@
     vaultUiOperations.hideVault();
   }
 
-  function beginRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): void {
-    rehearsalMode = mode;
-    rehearsalExpectedAddress = address.toLowerCase();
-    derivationRun = null;
-    clearDerivedWalletMaterial();
-    showAdvanced = false;
-    mnemonicInput = '';
-    inputMode = mode;
-    derivationError = '';
-    phase = 'input';
+  function currentRecoveryRehearsalState(): WalletRecoveryRehearsalState {
+    return { enabled: rehearsalEnabled, mode: rehearsalMode, expectedAddress: rehearsalExpectedAddress };
+  }
+
+  function publishRecoveryRehearsalState(state: WalletRecoveryRehearsalState): void {
+    rehearsalEnabled = state.enabled;
+    rehearsalMode = state.mode;
+    rehearsalExpectedAddress = state.expectedAddress;
   }
 
   function acceptRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): boolean {
-    if (!rehearsalEnabled && rehearsalMode === null) return true;
-    if (rehearsalMode === null) {
-      beginRecoveryRehearsal(mode, address);
-      return false;
-    }
-    if (rehearsalMode !== mode || rehearsalExpectedAddress !== address.toLowerCase()) {
+    const result = evaluateWalletRecoveryRehearsal({
+      state: currentRecoveryRehearsalState(),
+      mode,
+      address,
+    });
+    if (result.status === 'skipped') return true;
+    if (result.status === 'begin') {
+      publishRecoveryRehearsalState(result.state);
       derivationRun = null;
       clearDerivedWalletMaterial();
-      derivationError = 'Recovery rehearsal did not reproduce the same wallet. Check every input and try again.';
+      showAdvanced = false;
+      mnemonicInput = '';
+      inputMode = mode;
+      derivationError = '';
       phase = 'input';
       return false;
     }
-    rehearsalMode = null;
-    rehearsalExpectedAddress = '';
-    rehearsalEnabled = false;
+    if (result.status === 'mismatch') {
+      derivationRun = null;
+      clearDerivedWalletMaterial();
+      derivationError = result.message;
+      phase = 'input';
+      return false;
+    }
+    publishRecoveryRehearsalState(result.state);
     showAdvanced = false;
     return true;
   }
 
   function cancelRecoveryRehearsal(): void {
     clearSensitiveWalletMaterial();
-    rehearsalEnabled = false;
-    rehearsalMode = null;
-    rehearsalExpectedAddress = '';
+    publishRecoveryRehearsalState(resetWalletRecoveryRehearsal());
     showAdvanced = false;
     derivationError = '';
   }
@@ -773,7 +867,7 @@
   }
 
   function handleWorkerFailure(worker: Worker, err: unknown): void {
-    const message = workerErrorMessage(err);
+    const message = normalizeWalletBrainVaultWorkerError(err);
     const shardIndex = workerActiveShard.get(worker);
     logRuntimeCreationDiagnostic('BrainVault worker failed', { shardIndex, message });
 
@@ -802,42 +896,29 @@
     opts: { onReady?: () => void; onError?: (err: unknown) => void; handleErrors?: boolean } = {}
   ): void {
     worker.onmessage = (e) => {
-      if (!e.data || typeof e.data !== 'object' || typeof e.data.type !== 'string') {
-        const error = new Error('BRAINVAULT_WORKER_MESSAGE_INVALID');
+      const message = decodeWalletBrainVaultWorkerMessage(e.data, BRAINVAULT_V1_SPEC_ID);
+      if (message.kind === 'invalid') {
+        const error = new Error(message.message);
         opts.onError?.(error);
         if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
         return;
       }
-      const { type, data } = e.data;
-
-      if (type === 'ready') {
-        if (data?.specId !== BRAINVAULT_V1_SPEC_ID) {
-          const error = new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(data?.specId)}:${BRAINVAULT_V1_SPEC_ID}`);
-          opts.onError?.(error);
-          if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
-          return;
-        }
+      if (message.kind === 'ready') {
         opts.onReady?.();
-      } else if (type === 'probe_result') {
-        const probeTime = normalizeBrainVaultShardTimeSample(data?.estimatedShardTimeMs);
-        if (probeTime !== null) {
-          estimatedShardTimeMs = probeTime;
+      } else if (message.kind === 'probe-result') {
+        if (message.measuredShardTimeMs !== null) {
+          estimatedShardTimeMs = message.measuredShardTimeMs;
         } else {
-          logRuntimeCreationDiagnostic('BrainVault worker returned invalid probe timing', data?.estimatedShardTimeMs);
+          logRuntimeCreationDiagnostic('BrainVault worker returned invalid probe timing', message.reportedShardTimeMs);
         }
-      } else if (type === 'shard_complete') {
-        void handleShardComplete(worker, data?.shardIndex, data?.resultHex, data?.elapsedMs)
-          .catch((err) => failDerivation(workerErrorMessage(err)));
-      } else if (type === 'error') {
-        const error = data?.message ?? 'Worker failed';
-        opts.onError?.(error);
-        if (opts.handleErrors !== false) {
-          handleWorkerFailure(worker, error);
-        }
+      } else if (message.kind === 'shard-complete') {
+        void handleShardComplete(worker, message)
+          .catch((err) => failDerivation(normalizeWalletBrainVaultWorkerError(err)));
       } else {
-        const error = new Error(`BRAINVAULT_WORKER_MESSAGE_UNKNOWN:${type}`);
-        opts.onError?.(error);
-        if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
+        opts.onError?.(message.error);
+        if (opts.handleErrors !== false) {
+          handleWorkerFailure(worker, message.error);
+        }
       }
     };
 
@@ -935,7 +1016,7 @@
               },
               onError: (err) => {
                 clearTimeout(timeout);
-                reject(new Error(workerErrorMessage(err)));
+                reject(new Error(normalizeWalletBrainVaultWorkerError(err)));
               },
               handleErrors: false,
             });
@@ -953,19 +1034,22 @@
         } catch (err) {
           if (!isCurrentDerivationRun(run)) return;
           terminateWorkers();
-          const message = workerErrorMessage(err);
-          if (attempts < 4 && isBrainVaultWasmMemoryError(message) && initialWorkers > 1) {
-            const reduced = nextBrainVaultWorkerCapAfterFailure(initialWorkers);
-            if (reduced === initialWorkers) {
-              throw err;
-            }
-            initialWorkers = reduced;
-            maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+          const message = normalizeWalletBrainVaultWorkerError(err);
+          const retry = resolveWalletBrainVaultWorkerInitRetry({
+            attempts,
+            initialWorkers,
+            maxWorkers,
+            targetWorkerCount,
+            message,
+          });
+          if (retry.status === 'retry') {
+            initialWorkers = retry.initialWorkers;
+            maxWorkers = retry.maxWorkers;
             persistWorkerCap(maxWorkers);
             activeWorkerCount = initialWorkers;
-            targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
-            attempts += 1;
-            workerLimitNotice = `Browser memory pressure detected. BrainVault is retrying with ${initialWorkers} worker${initialWorkers === 1 ? '' : 's'}.`;
+            targetWorkerCount = retry.targetWorkerCount;
+            attempts = retry.attempts;
+            workerLimitNotice = retry.notice;
             logRuntimeCreationDiagnostic('BrainVault reducing workers after init failure', { workerCount: initialWorkers, message });
             continue;
           }
@@ -984,12 +1068,10 @@
       dispatchShards();
     } catch (err) {
       if (!isCurrentDerivationRun(run)) return;
-      const message = workerErrorMessage(err);
+      const message = normalizeWalletBrainVaultWorkerError(err);
       logRuntimeCreationDiagnostic('BrainVault worker initialization failed', { message });
       terminateWorkers();
-      derivationError = isBrainVaultWasmMemoryError(message)
-        ? `BrainVault could not allocate browser Wasm memory. Reduce other tabs or retry with 1 worker. ${message}`
-        : `BrainVault worker initialization failed: ${message}`;
+      derivationError = walletBrainVaultWorkerInitFailureMessage(message);
       derivationRun = null;
       phase = 'input';
     }
@@ -998,21 +1080,19 @@
   async function startNodeDerivation(run: BrainVaultDerivationRun): Promise<void> {
     invalidateNodeReveal();
     const adapter = getRuntimeControllerAdapter();
-    if (!adapter || adapter.mode !== 'remote' || adapter.status !== 'connected') {
-      failDerivation('The selected node is not connected. Reconnect it before BrainVault recovery.');
+    const access = resolveWalletNodeBrainVaultAccess(adapter);
+    if (access.status === 'blocked') {
+      failDerivation(access.message);
       return;
     }
-    if (adapter.authLevel !== 'admin') {
-      failDerivation('Admin access to the selected node is required for BrainVault recovery.');
-      return;
-    }
+    const nodeAdapter = access.adapter;
     const abort = new AbortController();
     nodeDerivationAbort = abort;
     const isCurrentNodeRun = (): boolean =>
       nodeDerivationAbort === abort && isCurrentDerivationRun(run);
     nodeShardTimeMs = 0;
     try {
-      const result = await adapter.deriveBrainVault({
+      const result = await nodeAdapter.deriveBrainVault({
         specId: BRAINVAULT_V1_SPEC_ID,
         name: run.name,
         passphrase: run.passphrase,
@@ -1024,24 +1104,21 @@
         signal: abort.signal,
         onProgress: sample => {
           if (!isCurrentNodeRun()) return;
-          if (sample.total !== run.shardCount || sample.completed < 0 || sample.completed > sample.total) {
+          const progressValidation = validateWalletNodeBrainVaultProgress(sample, run.shardCount);
+          if (!progressValidation.valid) {
             abort.abort();
-            derivationError = 'The node returned invalid BrainVault progress and was cancelled.';
+            derivationError = progressValidation.message;
             return;
           }
           shardCount = sample.total;
           shardsCompleted = sample.completed;
           activeWorkerCount = sample.workers;
-          nodeShardTimeMs = nodeShardTimeMs > 0
-            ? nodeShardTimeMs * 0.7 + sample.lastShardMs * 0.3
-            : sample.lastShardMs;
+          nodeShardTimeMs = nextWalletNodeShardTimeMs(nodeShardTimeMs, sample.lastShardMs);
         },
       });
       if (!isCurrentNodeRun()) return;
       if (abort.signal.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
-      if (result.specId !== BRAINVAULT_V1_SPEC_ID || result.shardCount !== run.shardCount) {
-        throw new Error('BRAINVAULT_NODE_RESULT_SPEC_MISMATCH');
-      }
+      assertWalletNodeBrainVaultResult(result, BRAINVAULT_V1_SPEC_ID, run.shardCount);
       nodeDerivationResult = result;
       ethereumAddress = result.ethereumAddress;
       entityId = result.entityId;
@@ -1068,23 +1145,28 @@
       derivationError = 'The node is no longer connected.';
       return;
     }
-    const runToken = ++nodeRevealRunToken;
-    const isCurrentReveal = (): boolean =>
-      runToken === nodeRevealRunToken
-      && phase === 'node-ready'
-      && nodeDerivationResult === expectedResult
-      && getRuntimeControllerAdapter() === adapter;
     revealingNodeMnemonic = true;
     derivationError = '';
+    const outcome = await walletNodeMnemonicReveal.run({
+      reveal: () => adapter.revealBrainVaultMnemonic(),
+      isCurrent: () => (
+        phase === 'node-ready'
+        && nodeDerivationResult === expectedResult
+        && getRuntimeControllerAdapter() === adapter
+      ),
+    });
+    if (outcome.status === 'cancelled') {
+      if (outcome.latest) revealingNodeMnemonic = false;
+      return;
+    }
     try {
-      const recovery = await adapter.revealBrainVaultMnemonic();
-      if (!isCurrentReveal()) return;
-      revealedNodeMnemonic = recovery.mnemonic24;
-    } catch (err) {
-      if (!isCurrentReveal()) return;
-      derivationError = err instanceof Error ? err.message : String(err);
+      if (outcome.status === 'failed') {
+        derivationError = outcome.message;
+        return;
+      }
+      revealedNodeMnemonic = outcome.recovery.mnemonic24;
     } finally {
-      if (runToken === nodeRevealRunToken) revealingNodeMnemonic = false;
+      revealingNodeMnemonic = false;
     }
   }
 
@@ -1113,64 +1195,61 @@
     const run = derivationRun;
     if (!run) throw new Error('BRAINVAULT_DERIVATION_RUN_MISSING');
     if (isWorkerDraining(worker)) return;
-    while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
-      nextShardToDispatch++;
-    }
-    while (retryShardQueue.length > 0 && shardResults.has(retryShardQueue[0]!)) {
-      retryShardQueue.shift();
-    }
-    if (retryShardQueue.length === 0 && nextShardToDispatch >= shardCount) return;
-
-    const shardIndex = retryShardQueue.length > 0 ? retryShardQueue.shift()! : nextShardToDispatch++;
-    workerActiveShard.set(worker, shardIndex);
-    armWorkerShardWatchdog(worker, shardIndex);
+    const dispatch = resolveWalletBrainVaultShardDispatch({
+      retryQueue: retryShardQueue,
+      nextShardToDispatch,
+      shardCount,
+    }, shardResults);
+    retryShardQueue = [...dispatch.retryQueue];
+    nextShardToDispatch = dispatch.nextShardToDispatch;
+    if (dispatch.status === 'idle') return;
+    workerActiveShard.set(worker, dispatch.shardIndex);
+    armWorkerShardWatchdog(worker, dispatch.shardIndex);
 
     worker.postMessage({
       type: 'derive_shard',
-      id: shardIndex,
+      id: dispatch.shardIndex,
       data: {
         name: run.name,
         passphrase: run.passphrase,
-        shardIndex,
+        shardIndex: dispatch.shardIndex,
         shardCount: run.shardCount,
       }
     });
   }
 
-  async function handleShardComplete(worker: Worker, shardIndex: unknown, resultHex: unknown, elapsedMs: unknown) {
+  async function handleShardComplete(
+    worker: Worker,
+    message: WalletBrainVaultShardCompleteMessage,
+  ) {
     const activeShard = workerActiveShard.get(worker);
-    if (!Number.isSafeInteger(shardIndex) || Number(shardIndex) < 0 || Number(shardIndex) >= shardCount) {
-      throw new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${String(shardIndex)}`);
-    }
-    if (activeShard !== shardIndex) {
-      throw new Error(`BRAINVAULT_WORKER_SHARD_MISMATCH:${String(activeShard)}:${String(shardIndex)}`);
-    }
-    if (typeof resultHex !== 'string' || resultHex.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
-      throw new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${typeof resultHex === 'string' ? resultHex.length : typeof resultHex}`);
-    }
-    const measuredShardTimeMs = normalizeBrainVaultShardTimeSample(elapsedMs);
-    const validatedShardIndex = Number(shardIndex);
+    const completion = validateWalletBrainVaultShardCompletion(message, {
+      activeShard,
+      shardCount,
+      expectedResultHexLength: BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2,
+      alreadyCompleted: Number.isSafeInteger(message.shardIndex)
+        && shardResults.has(Number(message.shardIndex)),
+    });
     clearWorkerShardWatchdog(worker);
     workerActiveShard.delete(worker);
-    if (shardResults.has(validatedShardIndex)) {
-      throw new Error(`BRAINVAULT_WORKER_DUPLICATE_SHARD:${validatedShardIndex}`);
-    }
-
-    shardResults.set(validatedShardIndex, hexToBytes(resultHex));
+    shardResults.set(completion.shardIndex, hexToBytes(completion.resultHex));
     shardsCompleted = shardResults.size;
 
     // Timing is telemetry: invalid or extreme samples must never discard valid Argon2 output.
-    if (measuredShardTimeMs === null) {
-      logRuntimeCreationDiagnostic('BrainVault worker returned invalid shard timing', { shardIndex, elapsedMs });
+    if (completion.measuredShardTimeMs === null) {
+      logRuntimeCreationDiagnostic('BrainVault worker returned invalid shard timing', {
+        shardIndex: message.shardIndex,
+        elapsedMs: message.elapsedMs,
+      });
     } else {
-      if (measuredShardTimeMs !== elapsedMs) {
+      if (completion.measuredShardTimeMs !== message.elapsedMs) {
         logRuntimeCreationDiagnostic('BrainVault worker shard timing was clamped', {
-          shardIndex,
-          elapsedMs,
-          measuredShardTimeMs,
+          shardIndex: message.shardIndex,
+          elapsedMs: message.elapsedMs,
+          measuredShardTimeMs: completion.measuredShardTimeMs,
         });
       }
-      recordMeasuredShardTime(measuredShardTimeMs);
+      recordMeasuredShardTime(completion.measuredShardTimeMs);
     }
 
     if (isWorkerDraining(worker)) {
@@ -1179,15 +1258,18 @@
       dispatchNextShard(worker);
     }
 
-    // Check if all done
-    if (!finalizeInProgress && shardResults.size >= shardCount) {
-      finalizeInProgress = true;
-      try {
-        await finalizeDeriv();
-      } catch (err) {
-        finalizeInProgress = false;
-        throw err;
-      }
+    const finalization = resolveWalletBrainVaultFinalizationStart({
+      completedShardCount: shardResults.size,
+      shardCount,
+      finalizeInProgress,
+    });
+    if (finalization.status !== 'start') return;
+    finalizeInProgress = true;
+    try {
+      await finalizeDeriv();
+    } catch (err) {
+      finalizeInProgress = false;
+      throw err;
     }
   }
 
@@ -1203,19 +1285,22 @@
     };
     terminateWorkers();
 
-    // Collect results in order
     const orderedResults: Uint8Array[] = [];
-    for (let i = 0; i < run.shardCount; i++) {
-      const shard = runShardResults.get(i);
-      if (!shard) throw new Error(`Missing shard ${i}`);
-      orderedResults.push(shard);
-    }
-
     let masterKey: Uint8Array | null = null;
     let entropy: Uint8Array | null = null;
     let entropy12: Uint8Array | null = null;
     let deviceKey: Uint8Array | null = null;
     try {
+      const shardOrder = resolveWalletBrainVaultFinalizationShardOrder(
+        run.shardCount,
+        new Set(runShardResults.keys()),
+      );
+      for (const shardIndex of shardOrder) {
+        const shard = runShardResults.get(shardIndex);
+        if (!shard) throw new Error(`Missing shard ${shardIndex}`);
+        orderedResults.push(shard);
+      }
+
       masterKey = await combineShards(orderedResults, run.factor);
       if (!isCurrentRun()) return;
       wipeRunShards();
@@ -1234,7 +1319,12 @@
       const nextDevicePassphrase = bytesToHex(deviceKey);
 
       const nextEthereumAddress = await deriveEthereumAddress(nextMnemonic24);
-      if (!isCurrentRun()) return;
+      const commit = resolveWalletBrainVaultFinalizationCommit({
+        isCurrentRun: isCurrentRun(),
+        name: run.name,
+        ethereumAddress: nextEthereumAddress,
+      });
+      if (commit.status === 'cancelled') return;
       const nextEntityId = generateLazyEntityIdPreview([nextEthereumAddress], 1n);
 
       // Commit derived strings together only after every async crypto step
@@ -1249,7 +1339,7 @@
       passphrase = '';
       derivationRun = null;
 
-      if (await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`)) {
+      if (await prepareRecoveryDecisionFromCurrentSeed(commit.recoveryLabel)) {
         await continueAfterRecoveryDiscovery();
       }
     } finally {
@@ -1282,24 +1372,24 @@
   // Dynamic worker scaling based on user slider
   async function adjustWorkers() {
     if (phase !== 'deriving') return;
-
-    const currentCount = activeWorkerCount;
-    const target = Math.min(effectiveTargetWorkerCount, usableWorkerCap);
-
-    if (target < currentCount) {
+    const scale = resolveWalletBrainVaultWorkerScale(
+      activeWorkerCount,
+      effectiveTargetWorkerCount,
+      usableWorkerCap,
+      hasPendingShardWork(),
+    );
+    if (scale.status === 'drain') {
       // Scale down: drain excess workers (no new shards assigned)
       const activeWorkers = workers.filter(worker => !drainingWorkers.has(worker));
-      const excess = currentCount - target;
-      const toDrain = activeWorkers.slice(-1 * excess);
+      const toDrain = activeWorkers.slice(-1 * scale.count);
       for (const worker of toDrain) {
         markWorkerDraining(worker);
       }
-    } else if (target > currentCount && hasPendingShardWork()) {
+    } else if (scale.status === 'add') {
       // Scale up: add more workers
-      const workersToAdd = target - currentCount;
       const currentTotal = workers.length;
 
-      for (let i = 0; i < workersToAdd && hasPendingShardWork(); i++) {
+      for (let i = 0; i < scale.count && hasPendingShardWork(); i++) {
         const worker = createBrainVaultWorker();
         workers.push(worker);
 
@@ -1331,9 +1421,7 @@
     derivationError = '';
     workerLimitNotice = '';
     createLoginType = 'manual';
-    rehearsalEnabled = false;
-    rehearsalMode = null;
-    rehearsalExpectedAddress = '';
+    publishRecoveryRehearsalState(resetWalletRecoveryRehearsal());
     showAdvanced = false;
     clearSensitiveWalletMaterial();
     nodeShardTimeMs = 0;
@@ -1342,7 +1430,7 @@
   }
 
   onDestroy(() => {
-    recoveryRunToken += 1;
+    walletRecoveryDiscovery.invalidate();
     nodeDerivationAbort?.abort();
     nodeDerivationAbort = null;
     clearSensitiveWalletMaterial();
@@ -1354,8 +1442,8 @@
     let unsubscribe: (() => void) | undefined;
 
     // Restore the saved auth scheme (dark default)
-    if (typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_SCHEME_STORAGE_KEY) === 'light') {
-      scheme = 'light';
+    if (typeof localStorage !== 'undefined') {
+      scheme = resolveWalletAuthScheme(localStorage.getItem(WALLET_AUTH_SCHEME_STORAGE_KEY));
     }
 
     // Run async init

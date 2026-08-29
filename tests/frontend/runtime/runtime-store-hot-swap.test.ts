@@ -29,6 +29,7 @@ test('runtime selector hot-swaps adapters instead of reloading the app', () => {
 
 test('runtime controller is the single adapter lifecycle owner', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
+  const handleSource = readFileSync('frontend/packages/runtime-client/src/runtime-handle.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const contextSwitcherSource = readFileSync('frontend/src/lib/components/Entity/workspace/shell/ContextSwitcher.svelte', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
@@ -37,9 +38,9 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(controllerSource).toContain('new RemoteRuntimeAdapter');
   expect(controllerSource).toContain('export const connectRuntimeAdapter');
   expect(controllerSource).toContain('export const runtimeControllerHandle');
-  expect(controllerSource).toContain('pendingRuntimeId: string');
+  expect(handleSource).toContain('pendingRuntimeId: string');
   expect(controllerSource).toContain('export const setRuntimeControllerPendingRuntimeId');
-  expect(controllerSource).toContain('runtimeId: id');
+  expect(handleSource).toContain('runtimeId: id');
   expect(queryClientSource).toContain('const adapter = getRuntimeControllerAdapter();');
   expect(queryClientSource).toContain('const handle = get(runtimeControllerHandle)');
   expect(queryClientSource).toContain('runtimeId: handle.runtimeId');
@@ -129,7 +130,8 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(storeSource).not.toContain('export const xlnEnvironment = derived');
   expect(storeSource).not.toContain('export function setXlnEnvironment');
   expect(embeddedSource).toContain('const bootstrapEnvironment = writable<RuntimeReplica | null>(null);');
-  expect(derivedSource).toContain('return runtimeEntry?.env ?? null;');
+  expect(derivedSource).toContain("if (selectedRuntimeId) return $runtimes.get(selectedRuntimeId)?.env ?? null;");
+  expect(derivedSource).toContain('return $bootstrapEnvironment;');
   expect(derivedSource).not.toContain('if (runtimeEntry) return runtimeEntry.env ?? null;');
   expect(embeddedSource).toContain("import { errorLog } from '../errorLogStore';");
   expect(setEnvSource).toContain('const canPublishActiveEnv = !selectedRuntimeId || (envRuntimeId !== \'\' && envRuntimeId === selectedRuntimeId);');
@@ -165,11 +167,16 @@ test('remote time-machine history requires radapter batch reads', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const source = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');
   const querySource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
+  const queryBoundarySource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-query-client.ts',
+    'utf8',
+  );
   const scanStart = source.indexOf('export const scanRuntimeAdapterHistoryAtHeight');
   expect(scanStart).toBeGreaterThan(0);
   const scanSource = source.slice(scanStart);
   expect(source).toContain('runtimeQueryClient.readHistoryFrameBatch');
-  expect(querySource).toContain("'history-frame-batch'");
+  expect(queryBoundarySource).toContain("'history-frame-batch'");
+  expect(querySource).toContain('extends RuntimeQueryClientBoundary<');
   expect(xlnStoreSource).not.toContain('export const scanRuntimeAdapterHistoryAtHeight');
   expect(source).not.toContain('unsupported adapter path: history-frame-batch');
   expect(source).not.toContain('buildRemoteAdapterEnvSnapshot');
@@ -185,29 +192,40 @@ test('remote time-machine history requires radapter batch reads', () => {
 test('remote adapter resolver restores active auth from the remote runtime registry', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).toContain('resolveStoredRemoteRuntimeAuthKey');
-  expect(source).toContain("const storedAuthKey = readStoredAdapterValue('xln-runtime-adapter-key').trim()");
+  expect(source).toContain('const storedAuthKey = readStoredAdapterValue(RUNTIME_ADAPTER_AUTH_KEY).trim()');
   expect(source).toContain('restoredAuthKey = resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl).trim()');
   expect(source).toContain("readRemoteRuntimeTokenAccess(storedAuthKey) !== 'admin'");
   expect(source).toContain('const authKey = restoredAuthKey || storedAuthKey;');
-  expect(source).toContain("sessionStorage.setItem('xln-runtime-adapter-key', restoredAuthKey)");
+  expect(source).toContain('writeRemoteRuntimeAdapterAuth(');
 });
 
 test('direct remote runtime URL reuses saved capability before showing paste prompt', () => {
-  const source = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
-  const readStart = source.indexOf('export function readRemoteRuntimeRequestFromUrl');
-  const payloadStart = source.indexOf('export function runtimeImportPayloadFromParams', readStart);
+  const adapter = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
+  const boundary = readFileSync('frontend/packages/runtime-client/src/remote-runtime-request.ts', 'utf8');
+  const readStart = adapter.indexOf('export function readRemoteRuntimeRequestFromUrl');
+  const readEnd = adapter.indexOf('export function readRemoteRuntimeImportPayloadFromHash', readStart);
   expect(readStart).toBeGreaterThan(0);
-  expect(payloadStart).toBeGreaterThan(readStart);
-  const readSource = source.slice(readStart, payloadStart);
+  expect(readEnd).toBeGreaterThan(readStart);
+  const readSource = adapter.slice(readStart, readEnd);
 
   expect(readSource).toContain('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
   expect(readSource).toContain('window.location.hash');
-  expect(readSource).not.toContain("params.get('token')");
-  expect(readSource).toContain('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()');
-  expect(readSource).toContain('const requiresAuthPaste = !authKey');
-  expect(readSource).not.toContain('if (keyParam) stripRemoteRuntimeParamsFromHistory()');
-  expect(readSource.indexOf('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()'))
-    .toBeLessThan(readSource.indexOf('const requiresAuthPaste = !authKey'));
+  expect(readSource).toContain('stripRemoteRuntimeParamsFromHistory()');
+  expect(readSource).toContain('decodeRemoteRuntimeRequest(');
+  expect(readSource).toContain('resolveStoredAuthKey: resolveStoredRemoteRuntimeAuthKey');
+
+  const decodeStart = boundary.indexOf('export const decodeRemoteRuntimeRequest =');
+  const decodeEnd = boundary.indexOf('export const runtimeImportPayloadFromParams', decodeStart);
+  expect(decodeStart).toBeGreaterThan(0);
+  expect(decodeEnd).toBeGreaterThan(decodeStart);
+  const decodeSource = boundary.slice(decodeStart, decodeEnd);
+  expect(decodeSource).toContain("hash.get('token')");
+  expect(decodeSource).toContain('dependencies.resolveStoredAuthKey(wsUrl).trim()');
+  expect(decodeSource).toContain('const requiresAuthPaste = !authKey');
+  expect(decodeSource).not.toContain('window');
+  expect(decodeSource).not.toContain('Storage');
+  expect(decodeSource.indexOf('dependencies.resolveStoredAuthKey(wsUrl).trim()'))
+    .toBeLessThan(decodeSource.indexOf('const requiresAuthPaste = !authKey'));
 });
 
 test('remote projection never materializes fake RuntimeReplica snapshots', () => {
@@ -243,7 +261,7 @@ test('remote runtime switch resets runtime-scoped view selection without droppin
   const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
   expect(source).toContain('shouldResetRuntimeAdapterViewSelection(previousConfig, normalizedConfig)');
   expect(source).toContain('resetRuntimeAdapterViewSelection');
-  expect(source).toContain("import { clearRuntimeQueryCache, runtimeQueryClient, type RuntimeReceiptStatus } from './runtimeQueryClient'");
+  expect(source).toContain("import { clearRuntimeQueryCache } from './runtimeQueryClient';");
   expect(source).toContain('resetRuntimeView,');
   expect(source).toContain("const previousRuntimeId = normalizeRuntimeConfigId(previousConfig.runtimeId || '')");
   expect(source).toContain("const nextRuntimeId = normalizeRuntimeConfigId(nextConfig.runtimeId || '')");
@@ -289,21 +307,21 @@ test('stale remote entity selection fails loudly without resetting to another en
   expect(source).not.toContain("refreshView('')");
 });
 
-test('remote RuntimeInput command waits for observed receipt before projection refresh', () => {
+test('remote RuntimeInput command waits for the first committed projection after acceptance', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).toContain('const waitForRemoteRuntimeProjectionAtHeight = async');
   expect(source).toContain('REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS');
   expect(source).toContain('REMOTE_RUNTIME_PROJECTION_TIMEOUT');
-  expect(source).toContain('const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);');
-  expect(source).toContain('const observedHeight = Number(observed?.observedHeight ?? accepted.height);');
-  expect(source).toContain('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);');
-  expect(source).toContain('progress.observed(Number(observed?.observedHeight ?? projectedHeight));');
-  expect(source.indexOf('const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);'))
-    .toBeLessThan(source.indexOf('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);'));
+  expect(source).toContain('const observeRemoteRuntimeCommand = async');
+  expect(source).toContain('await progress.accepted(accepted.height);');
+  expect(source).toContain('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1);');
+  expect(source).toContain('await progress.observed(projectedHeight);');
+  expect(source.indexOf('await progress.accepted(accepted.height);'))
+    .toBeLessThan(source.indexOf('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1);'));
+  expect(source).not.toContain('waitForRemoteRuntimeReceiptObserved');
   expect(source).not.toContain('waitForRemoteRuntimeCommit');
   expect(source).toContain('latestHeight = Math.max(');
   expect(source).toContain('get(runtimeView).height');
-  expect(source).toContain("if (!receiptId) throw new Error('REMOTE_RUNTIME_RECEIPT_ID_MISSING');");
 });
 
 test('remote runtime refresh ignores unchanged ticks and debounces projection reads', () => {
@@ -444,22 +462,29 @@ test('view runtime frame stores expose the canonical live snapshot debug surface
 
 test('local runtime selection persists embedded mode without deleting saved remote registry', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
-  const persistStart = source.indexOf('const persistActiveEmbeddedRuntime =');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const switchStart = source.indexOf('const performRuntimeSelection =');
-  expect(persistStart).toBeGreaterThan(0);
-  expect(switchStart).toBeGreaterThan(persistStart);
-  const persistSource = source.slice(persistStart, switchStart);
-  expect(persistSource).toContain("localStorage.setItem('xln-runtime-adapter-mode', 'embedded')");
-  expect(persistSource).toContain("localStorage.removeItem('xln-runtime-adapter-ws')");
-  expect(persistSource).toContain("sessionStorage.removeItem('xln-runtime-adapter-key')");
-  expect(persistSource).not.toContain('REMOTE_RUNTIME.IMPORT_STORAGE_KEY');
-  expect(source.slice(switchStart)).toContain('persistActiveEmbeddedRuntime();');
-  expect(source.slice(switchStart)).toContain("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
-  expect(source.slice(switchStart)).toContain('runtimeId: id');
+  expect(switchStart).toBeGreaterThan(0);
+  expect(source).toContain(
+    'writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage })',
+  );
+  expect(source).not.toContain('REMOTE_RUNTIME.IMPORT_STORAGE_KEY');
+  expect(source.slice(switchStart)).toContain('registered: Boolean(runtime)');
+  expect(source.slice(switchStart)).toContain('persistEmbedded: persistActiveEmbeddedRuntime');
+  expect(source.slice(switchStart)).toContain('switchAdapter: switchToRuntimeAdapter');
+  expect(activationSource).toContain('if (!target.registered || !dependencies.isCurrent(target))');
+  expect(activationSource).toContain('dependencies.persistEmbedded();');
 });
 
 test('selecting the already connected runtime does not reconnect the adapter', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const helperStart = source.indexOf('const runtimeControllerAlreadyTargets =');
   const selectStart = source.indexOf('const performRuntimeSelection =');
   expect(helperStart).toBeGreaterThan(0);
@@ -470,17 +495,17 @@ test('selecting the already connected runtime does not reconnect the adapter', (
   expect(helperSource).toContain("handle.status !== 'connected'");
   expect(helperSource).toContain('handle.authLevel === expectedAuth');
   expect(helperSource).toContain('normalizeRemoteRuntimeWsUrl(config.wsUrl) === normalizeRemoteRuntimeWsUrl(runtime.wsUrl)');
-  expect(selectSource).toContain('if (!runtimeControllerAlreadyTargets(runtime, id)) {');
-  const reconnectGuardIndex = selectSource.indexOf('if (!runtimeControllerAlreadyTargets(runtime, id)) {');
-  const reconnectIndex = selectSource.indexOf('await switchToRuntimeAdapter({', reconnectGuardIndex);
-  const guardEndIndex = selectSource.indexOf('return persistActiveRemoteRuntime(runtime);', reconnectIndex);
-  expect(reconnectGuardIndex).toBeGreaterThan(0);
-  expect(reconnectIndex).toBeGreaterThan(reconnectGuardIndex);
-  expect(guardEndIndex).toBeGreaterThan(reconnectIndex);
+  expect(selectSource).toContain('isCurrent: () => runtimeControllerAlreadyTargets(runtime, id)');
+  expect(activationSource).toContain('if (!dependencies.isCurrent(target)) {');
+  expect(activationSource).toContain('await dependencies.switchAdapter(activationConfig(target));');
 });
 
 test('runtime selection persists websocket before switch with rollback and reaffirms active endpoint after success', () => {
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const selectStart = runtimeStoreSource.indexOf('const performRuntimeSelection =');
   const activateStart = runtimeStoreSource.indexOf('// Operations', selectStart);
@@ -490,13 +515,24 @@ test('runtime selection persists websocket before switch with rollback and reaff
 
   expect(runtimeStoreSource).toContain('const readRuntimeAdapterStorageSnapshot =');
   expect(runtimeStoreSource).toContain('const restoreRuntimeAdapterStorageSnapshot =');
-  const remoteSwitchIndex = selectSource.indexOf("await switchToRuntimeAdapter({\n          mode: 'remote'");
-  const remotePersistIndex = selectSource.indexOf('const persisted = persistActiveRemoteRuntime(runtime)');
-  const remoteRollbackIndex = selectSource.indexOf('restoreRuntimeAdapterStorageSnapshot(previousStorage)');
-  const remotePendingIndex = selectSource.indexOf('setRuntimeControllerPendingRuntimeId(id)', remotePersistIndex);
-  const remotePendingRollbackIndex = selectSource.indexOf('setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId)', remoteRollbackIndex);
-  const remoteTargetAssertIndex = selectSource.indexOf('REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH', remoteSwitchIndex);
-  const remoteFinalPersistIndex = selectSource.indexOf('return persistActiveRemoteRuntime(runtime);', remoteSwitchIndex);
+  expect(selectSource).toContain('readSessionSnapshot: readRuntimeAdapterStorageSnapshot');
+  expect(selectSource).toContain('restoreSessionSnapshot: restoreRuntimeAdapterStorageSnapshot');
+  expect(selectSource).toContain('persistRemote: () => persistActiveRemoteRuntime(runtime)');
+  expect(selectSource).toContain('setPendingRuntimeId: setRuntimeControllerPendingRuntimeId');
+  expect(selectSource).toContain('switchAdapter: switchToRuntimeAdapter');
+
+  const remoteStart = activationSource.indexOf('export const activateRemoteRuntimeTarget =');
+  const embeddedStart = activationSource.indexOf('export const activateEmbeddedRuntimeTarget =');
+  const remoteSource = activationSource.slice(remoteStart, embeddedStart);
+  const remotePersistIndex = remoteSource.indexOf('if (!dependencies.persistRemote(target))');
+  const remotePendingIndex = remoteSource.indexOf('dependencies.setPendingRuntimeId(target.runtimeId)');
+  const remoteSwitchIndex = remoteSource.indexOf('await dependencies.switchAdapter(activationConfig(target))');
+  const remoteRollbackIndex = remoteSource.indexOf('dependencies.restoreSessionSnapshot(previousSession)');
+  const remotePendingRollbackIndex = remoteSource.indexOf('dependencies.setPendingRuntimeId(previousPendingRuntimeId)');
+  const remoteTargetAssertIndex = remoteSource.indexOf('REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH');
+  const remoteFinalPersistIndex = remoteSource.indexOf('return dependencies.persistRemote(target);');
+  expect(remoteStart).toBeGreaterThan(0);
+  expect(embeddedStart).toBeGreaterThan(remoteStart);
   expect(remoteSwitchIndex).toBeGreaterThan(0);
   expect(remotePersistIndex).toBeGreaterThan(0);
   expect(remotePersistIndex).toBeLessThan(remoteSwitchIndex);
@@ -507,13 +543,13 @@ test('runtime selection persists websocket before switch with rollback and reaff
   expect(remoteTargetAssertIndex).toBeGreaterThan(remoteSwitchIndex);
   expect(remoteFinalPersistIndex).toBeGreaterThan(remoteTargetAssertIndex);
 
-  const embeddedSwitchIndex = selectSource.indexOf("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
-  const embeddedPersistIndex = selectSource.indexOf('persistActiveEmbeddedRuntime();');
-  const embeddedPendingIndex = selectSource.lastIndexOf('setRuntimeControllerPendingRuntimeId(id)', embeddedSwitchIndex);
-  const embeddedPendingRollbackIndex = selectSource.lastIndexOf('setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId)');
-  expect(embeddedPendingIndex).toBeGreaterThan(remotePendingRollbackIndex);
+  const embeddedSource = activationSource.slice(embeddedStart);
+  const embeddedPendingIndex = embeddedSource.indexOf('dependencies.setPendingRuntimeId(target.runtimeId)');
+  const embeddedSwitchIndex = embeddedSource.indexOf('await dependencies.switchAdapter(activationConfig(target))');
+  const embeddedPendingRollbackIndex = embeddedSource.indexOf('dependencies.setPendingRuntimeId(previousPendingRuntimeId)');
+  const embeddedPersistIndex = embeddedSource.indexOf('dependencies.persistEmbedded();');
+  expect(embeddedPendingIndex).toBeGreaterThan(0);
   expect(embeddedPendingIndex).toBeLessThan(embeddedSwitchIndex);
-  expect(embeddedSwitchIndex).toBeGreaterThan(remotePendingRollbackIndex);
   expect(embeddedPersistIndex).toBeGreaterThan(embeddedSwitchIndex);
   expect(embeddedPendingRollbackIndex).toBeGreaterThan(embeddedSwitchIndex);
 
@@ -523,6 +559,11 @@ test('runtime selection persists websocket before switch with rollback and reaff
 
 test('runtime controller handle carries selected runtime identity', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
+  const handleSource = readFileSync('frontend/packages/runtime-client/src/runtime-handle.ts', 'utf8');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const activeStart = runtimeStoreSource.indexOf('export const activeRuntimeId = derived');
@@ -531,13 +572,14 @@ test('runtime controller handle carries selected runtime identity', () => {
   expect(activeEnd).toBeGreaterThan(activeStart);
   const activeSource = runtimeStoreSource.slice(activeStart, activeEnd);
 
-  expect(controllerSource).toContain('runtimeId: string');
-  expect(controllerSource).toContain('pendingRuntimeId: string');
-  expect(controllerSource).toContain('const adapterRuntimeId =');
-  expect(controllerSource).toContain('normalizeRuntimeId(adapter?.runtimeId) || configId(config)');
-  expect(controllerSource).toContain('const id = adapterRuntimeId(adapter, config)');
-  expect(controllerSource).toContain('currentRuntimeId === nextRuntimeId');
-  expect(runtimeStoreSource).toContain("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
+  expect(handleSource).toContain('runtimeId: string');
+  expect(handleSource).toContain('pendingRuntimeId: string');
+  expect(handleSource).toContain('export const runtimeAdapterId =');
+  expect(handleSource).toContain('normalizeRuntimeHandleId(adapter?.runtimeId) || runtimeAdapterConfigId(config)');
+  expect(controllerSource).toContain('const handle = createRuntimeHandle({');
+  expect(handleSource).toContain('currentRuntimeId === nextRuntimeId');
+  expect(runtimeStoreSource).toContain('activateEmbeddedRuntimeTarget(target, {');
+  expect(activationSource).toContain("{ mode: 'embedded', runtimeId: target.runtimeId }");
   expect(runtimeStoreSource).toContain('runtimeId: id');
   expect(activeSource).toContain('if (pendingId && $runtimes.has(pendingId))');
   expect(activeSource).toContain('controllerId && controllerId !== \'embedded\' && $runtimes.has(controllerId)');
@@ -618,6 +660,7 @@ test('embedded env initialization publishes active runtime snapshot before app s
 
 test('app embedded boot restores vault runtimes before default browser runtime initialization', () => {
   const source = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const boundary = readFileSync('frontend/packages/browser/src/wallet-boot-lifecycle.ts', 'utf8');
   const helperStart = source.indexOf('function shouldBootRemoteRuntime()');
   const bootStart = source.indexOf('async function bootApp()');
   const mountStart = source.indexOf('onMount(() => {', bootStart);
@@ -626,11 +669,16 @@ test('app embedded boot restores vault runtimes before default browser runtime i
   expect(mountStart).toBeGreaterThan(bootStart);
 
   const bootSource = source.slice(bootStart, mountStart);
-  expect(source.slice(helperStart, bootStart)).toContain("localStorage.getItem('xln-runtime-adapter-mode')");
-  expect(bootSource).toContain('const bootingRemoteRuntime = shouldBootRemoteRuntime();');
-  expect(bootSource).toContain('if (!bootingRemoteRuntime) {');
-  expect(bootSource.indexOf('await vaultOperations.initialize();')).toBeLessThan(bootSource.indexOf('await initializeXLN();'));
-  expect(bootSource).toContain("if (!bootingRemoteRuntime && $runtimeControllerHandle.mode !== 'remote')");
+  expect(source.slice(helperStart, bootStart)).toContain('isRemoteRuntimeAdapterPreferred(localStorage)');
+  expect(bootSource).toContain('await runWalletBootLifecycle({');
+  expect(bootSource).toContain('isRemoteRuntimePreferred: shouldBootRemoteRuntime');
+  expect(bootSource).toContain('initializeVault: () => vaultOperations.initialize()');
+  expect(bootSource).toContain('initializeRuntime: () => initializeXLN()');
+  expect(bootSource).toContain('readRuntimeMode: () => $runtimeControllerHandle.mode');
+  expect(boundary.indexOf('await dependencies.initializeVault()')).toBeLessThan(
+    boundary.indexOf('await dependencies.initializeRuntime()'),
+  );
+  expect(boundary).toContain("if (!bootingRemoteRuntime && dependencies.readRuntimeMode() !== 'remote')");
 });
 
 test('vault bootstrap commands submit explicit runtime env through command bus helper', () => {
@@ -658,8 +706,9 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
 
   const acceptSlice = source.slice(acceptStart, localStart);
   const localSlice = source.slice(localStart, pageChangeStart);
-  expect(acceptSlice).toContain('await activateAppAfterRuntimeChoice()');
-  expect(localSlice).toContain('await activateAppAfterRuntimeChoice()');
+  expect(acceptSlice).toContain('await walletRuntimeConsent.acceptRemote(');
+  expect(localSlice).toContain('await walletRuntimeConsent.useEmbedded()');
+  expect(source).toContain('activateRuntimeChoice: activateAppAfterRuntimeChoice');
   expect(acceptSlice).not.toContain('window.location.reload');
   expect(localSlice).not.toContain('window.location.reload');
   expect(source).not.toContain('window.location.reload');
@@ -672,8 +721,18 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
 
 test('embedded remote capability never bypasses explicit runtime consent', () => {
   const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const runtimeBootstrap = readFileSync(
+    'frontend/packages/browser/src/wallet-runtime-bootstrap.ts',
+    'utf8',
+  );
   const runtimeConnection = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
-  expect(appLayout).toContain('remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)');
+  expect(appLayout).toContain('requiresRemoteConsent: remoteRuntimeRequiresConsent');
+  expect(runtimeBootstrap).toContain(
+    'if (this.#dependencies.requiresRemoteConsent(input.remoteRequest))',
+  );
+  expect(runtimeBootstrap).toContain(
+    'this.#dependencies.publishPendingConsent(input.remoteRequest)',
+  );
   expect(runtimeConnection).toContain('export function remoteRuntimeRequiresConsent');
 
   const projectionStart = runtimeConnection.indexOf('export async function ensureProjectionRuntimeConnected');
@@ -696,13 +755,15 @@ test('accepted remote runtime links persist into the shared runtime registry', (
   expect(acceptStart).toBeGreaterThan(persistStart);
   const persistSource = source.slice(persistStart, acceptStart);
 
-  expect(persistSource).toContain("localStorage.setItem('xln-runtime-adapter-mode', 'remote')");
-  expect(persistSource).toContain("sessionStorage.setItem('xln-runtime-adapter-key', request.authKey)");
+  expect(persistSource).toContain(
+    'writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {',
+  );
   expect(persistSource).toContain('persistRemoteRuntimeImports([{');
   expect(persistSource).toContain('runtimeId: readRemoteRuntimeTokenAudience(request.authKey) || remoteRuntimeIdForWsUrl(request.wsUrl)');
   expect(persistSource).toContain("authLevel: 'admin'");
   expect(persistSource).not.toContain("authLevel: access === 'admin' ? 'admin' : 'inspect'");
   expect(persistSource).toContain('], { merge: true })');
+  expect(persistSource).toContain('markRemoteRuntimeRequestAccepted(sessionStorage, request)');
   expect(persistSource).not.toContain("localStorage.setItem('xln-runtime-adapter-key'");
 });
 
@@ -722,6 +783,10 @@ test('remote app can page through full hub account and book projections', () => 
   const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
+  const runtimeViewModelSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-model.ts',
+    'utf8',
+  );
 
   expect(layoutSource).toContain("import {");
   expect(layoutSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
@@ -751,10 +816,11 @@ test('remote app can page through full hub account and book projections', () => 
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterPageInfo');
   expect(xlnStoreSource).toContain('accountsPage,');
   expect(xlnStoreSource).toContain('booksPage,');
-  expect(runtimeViewSource).toContain('accountsPageIndex: number');
-  expect(runtimeViewSource).toContain('accountsPageCount: number');
-  expect(runtimeViewSource).toContain('accountsHasMore: boolean');
-  expect(runtimeViewSource).toContain('export const runtimeViewPageNeedsNavigation');
+  expect(runtimeViewModelSource).toContain('accountsPageIndex: number');
+  expect(runtimeViewModelSource).toContain('accountsPageCount: number');
+  expect(runtimeViewModelSource).toContain('accountsHasMore: boolean');
+  expect(runtimeViewModelSource).toContain('export const runtimeViewPageNeedsNavigation');
+  expect(runtimeViewSource).toContain("from '../../../packages/runtime-client/src/runtime-view-model'");
   expect(runtimeViewSource).toContain('export const runtimeViewPageInfo');
 });
 
@@ -896,32 +962,36 @@ test('frontend surfaces do not bypass RuntimeController when switching active ru
 });
 
 test('active Runtime ownership uses Web Locks and releases only after quiesce', () => {
-  const lockSource = readFileSync('frontend/src/lib/utils/control/activeTabLock.ts', 'utf8');
+  const lockSource = readFileSync('frontend/packages/browser/src/active-tab-lock.ts', 'utf8');
+  const browserSource = readFileSync('frontend/packages/browser/src/active-tab-lock-support.ts', 'utf8');
   const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   const loseStart = lockSource.indexOf('const loseWebLockTo');
-  const loseEnd = lockSource.indexOf('async function handleHardResetRequest', loseStart);
+  const loseEnd = lockSource.indexOf('const handleHardResetRequest', loseStart);
   const loseSource = lockSource.slice(loseStart, loseEnd);
 
-  expect(lockSource).toContain("navigator.locks.request(ACTIVE_TAB_WEB_LOCK_NAME, { mode: 'exclusive' }");
+  expect(browserSource).toContain('navigator.locks.request(name, options, callback)');
+  expect(lockSource).toContain("browser.requestLock(ACTIVE_TAB_WEB_LOCK_NAME, { mode: 'exclusive' }");
   expect(lockSource).not.toContain("localStorage.getItem('xln-active-tab-lock')");
-  expect(lockSource).not.toContain("sessionStorage.getItem(ACTIVE_TAB_ID_KEY)");
-  expect(loseSource.indexOf('await onLoseLockHandler?.()')).toBeGreaterThan(0);
-  expect(loseSource.indexOf('releaseWebLock()')).toBeGreaterThan(loseSource.indexOf('await onLoseLockHandler?.()'));
+  expect(lockSource).not.toContain('ACTIVE_TAB_ID_KEY');
+  expect(loseSource.indexOf('await state.onLoseLockHandler?.()')).toBeGreaterThan(0);
+  expect(loseSource.indexOf('releaseWebLock(state)')).toBeGreaterThan(
+    loseSource.indexOf('await state.onLoseLockHandler?.()'),
+  );
   expect(layoutSource).toContain("logAppShellDiagnostic('Inactive tab activity suspension failed', err);\n      throw err;");
 });
 
 test('projection routes never evict or duplicate an active embedded Runtime', () => {
-  const lockSource = readFileSync('frontend/src/lib/utils/control/activeTabLock.ts', 'utf8');
+  const lockSource = readFileSync('frontend/packages/browser/src/active-tab-lock.ts', 'utf8');
   const connectionSource = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const ownershipStart = connectionSource.indexOf('const ensureProjectionEmbeddedRuntimeOwnership');
   const bootstrapStart = connectionSource.indexOf("if (!hasStoredRemoteRuntimePreference())");
   const bootstrapSource = connectionSource.slice(bootstrapStart);
 
   expect(lockSource).toContain("{ mode: 'exclusive', ifAvailable: true }");
-  expect(lockSource).toContain('if (!acquiredLock) rejectAttempt(error);');
-  expect(lockSource).toContain('await lossInFlight;');
-  expect(lockSource).toContain('acquireInFlight = true;');
-  expect(lockSource).toContain('activeChannel && !acquireInFlight && !releaseHeldLock && !ownsWebLock');
+  expect(lockSource).toContain('if (!acquiredLock) attempted.reject(error);');
+  expect(lockSource).toContain('await state.lossInFlight;');
+  expect(lockSource).toContain('state.acquireInFlight = true;');
+  expect(lockSource).toContain('state.activeChannel && !state.acquireInFlight && !state.releaseHeldLock && !state.ownsWebLock');
   expect(connectionSource).toContain('const release = adoptActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('?? await tryInitializeActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('if (ownsActiveTabLock()) {');
