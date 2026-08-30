@@ -12,7 +12,7 @@ describe('exclusive sampling summary', () => {
       traces: [
         { frames: [{ name: 'samplingProfilerStackTraces' }, { name: 'applyFrame', sourceID: 1, line: 40 }] },
         { frames: [{ name: 'applyFrame', sourceID: 1, line: 40 }] },
-        { frames: [{ name: 'encodeUncached', sourceURL: '/Users/zigota/xln/core/protocol/serialization/canonical-consensus-value.ts', line: 116 }] },
+        { frames: [{ name: 'canonicalize', sourceURL: '/Users/zigota/xln/core/protocol/serialization/binary-codec.ts', line: 56 }] },
         { frames: [] },
       ],
     }, 10);

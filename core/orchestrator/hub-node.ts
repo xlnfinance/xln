@@ -1211,76 +1211,6 @@ const ensureBootstrapReserves = async (
   return reserveHealth;
 };
 
-const ensurePeerBootstrapReserves = async (
-  env: RuntimeReplica,
-  peerProfiles: VisibleHubProfile[],
-  tokenCatalog: JTokenInfo[],
-  reportProgress: (step: string) => void,
-): Promise<void> => {
-  if (!resolvedArgs.deployTokens || peerProfiles.length === 0) return;
-  const profilesByJurisdiction = new Map<string, { jurisdiction: VisibleHubProfile; profiles: VisibleHubProfile[] }>();
-  for (const profile of peerProfiles) {
-    const jurisdictionKey = String(profile.jurisdictionRef || '').trim();
-    if (!jurisdictionKey) {
-      throw new Error(`PEER_RESERVE_JURISDICTION_MISSING: entity=${profile.entityId}`);
-    }
-    const group = profilesByJurisdiction.get(jurisdictionKey) ?? { jurisdiction: profile, profiles: [] };
-    group.profiles.push(profile);
-    profilesByJurisdiction.set(jurisdictionKey, group);
-  }
-
-  const activeReplicaName = String(env.activeJurisdiction || '');
-  const activeReplica = activeReplicaName ? env.state.jReplicas?.get(activeReplicaName) : undefined;
-  const activeJurisdiction = activeReplica
-    ? { ...activeReplica, name: activeReplica.name || activeReplicaName }
-    : activeReplicaName;
-  for (const [jurisdictionKey, group] of profilesByJurisdiction) {
-    const { jurisdiction, profiles } = group;
-    const jurisdictionName = String(jurisdiction.jurisdictionName || jurisdictionKey).trim();
-    const resolvedReplica = resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef);
-    const replicaName = resolvedReplica?.replica?.name || resolvedReplica?.name || jurisdictionName;
-    const jadapter = resolvedReplica
-      ? getLiveJAdapter(env, resolvedReplica.name)
-      : undefined;
-    if (!jadapter) {
-      throw new Error(
-        `PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionKey} ` +
-        `known=${Array.from(env.state.jReplicas?.keys?.() || []).join(',')}`,
-      );
-    }
-    const catalog = sameJurisdictionRef(jurisdiction, activeJurisdiction)
-      ? tokenCatalog
-      : await ensureTokenCatalog(jadapter, true, replicaName);
-    reportProgress(`catalog:${replicaName}:ready`);
-    const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });
-    const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
-    for (const peer of profiles) {
-      for (const token of bootstrapTokens) {
-        const tokenId = Number(token.tokenId);
-        const decimals = Number(token.decimals);
-        const target = getBootstrapTokenAmount(tokenId, decimals);
-        reportProgress(`chain-reserve:${replicaName}:${tokenId}:start`);
-        const current = await jadapter.getReserves(peer.entityId, tokenId);
-        reportProgress(`chain-reserve:${replicaName}:${tokenId}:done`);
-        if (current >= target) continue;
-        mints.push({
-          entityId: peer.entityId,
-          tokenId,
-          amount: target - current,
-        });
-      }
-    }
-    if (mints.length === 0) continue;
-    reportProgress(`fund-batch:${replicaName}:start`);
-    const events = await jadapter.debugFundReservesBatch(mints);
-    reportProgress(`fund-batch:${replicaName}:done`);
-    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${replicaName}`, jadapter);
-    reportProgress(`fund-events:${replicaName}:applied`);
-    await settleRuntimeFor(env, 20);
-    reportProgress(`runtime:${replicaName}:settled`);
-  }
-};
-
 const getEntityJurisdictionName = (env: RuntimeReplica, entityId: string | null): string => {
   if (!entityId) return '';
   const replica = getEntityReplicaById(env, entityId);
@@ -1771,6 +1701,12 @@ const handleAccountStatusRequest = (
       tokens: tokenIds.map(tokenId => ({
         tokenId,
         hasDelta: Boolean(account?.state.deltas?.has(tokenId)),
+        hubGranted: account
+          ? getCreditGrantedByEntity(account, hubEntityId, tokenId).toString()
+          : '0',
+        peerGranted: account
+          ? getCreditGrantedByEntity(account, counterpartyEntityId, tokenId).toString()
+          : '0',
         hubOutCapacity: account
           ? getEntityOutCapacity(account, hubEntityId, tokenId).toString()
           : '0',
@@ -2234,35 +2170,13 @@ type HubMeshBootstrapInput = {
 const ensureHubMeshReserves = async (
   input: HubMeshBootstrapInput,
 ): Promise<boolean> => {
-  let peerReady = true;
-  if (resolvedArgs.deployTokens) {
-    input.markProgress('peer-reserve-funding');
-    const localIds = new Set(
-      input.hubBootstraps.map(entry => normalizeEntityId(entry.entityId)),
-    );
-    const peerProfiles = readVisibleHubProfiles(input.env, '').filter(
-      profile => !localIds.has(normalizeEntityId(profile.entityId)),
-    );
-    const expected =
-      Math.max(0, resolvedArgs.meshHubNames.length - 1) *
-      input.hubBootstraps.length;
-    peerReady = peerProfiles.length >= expected;
-    if (peerReady) {
-      await ensurePeerBootstrapReserves(
-        input.env,
-        peerProfiles,
-        input.tokenCatalog,
-        step => input.markProgress(`peer-reserve:${step}`),
-      );
-    }
-  }
   input.markProgress('local-reserve-funding');
   const health = await ensureHubBootstrapReserves(
     input.env,
     input.hubBootstraps,
     step => input.markProgress(`local-reserve:${step}`),
   );
-  return health.targetMet === true && peerReady;
+  return health.targetMet === true;
 };
 
 const advanceHubMeshBootstrap = async (

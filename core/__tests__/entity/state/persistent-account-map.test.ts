@@ -22,8 +22,6 @@ const RIGHT = id('22');
 
 const productionAccount = (): AccountReplica => {
   const replica = makeAccount(LEFT, RIGHT);
-  delete (replica as { swapOrderHistory?: unknown }).swapOrderHistory;
-  delete (replica as { swapClosedOrders?: unknown }).swapClosedOrders;
   replica.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
     'pendingWithdrawals',
     replica.pendingWithdrawals,
@@ -336,7 +334,7 @@ describe('PersistentEntityAccountMap', () => {
       kind: 'frame',
       proposal: { frame: { ...shell.currentFrame, accountTxs: [], deltas: [] } },
     };
-    shell.lastOutboundFrameAck = {
+    shell.lastOutboundAckFrame = {
       height: shell.currentHeight,
       counterpartyEntityId: RIGHT,
       response: {
@@ -351,10 +349,10 @@ describe('PersistentEntityAccountMap', () => {
 
     overlay.rootHash();
     shell.pendingAccountInput.proposal.frameHanko = `0x${'11'.repeat(65)}`;
-    shell.lastOutboundFrameAck.response.ack.frameHanko = `0x${'22'.repeat(65)}`;
+    shell.lastOutboundAckFrame.response.ack.frameHanko = `0x${'22'.repeat(65)}`;
 
     expect(shell.pendingAccountInput.proposal.frameHanko).toBe(`0x${'11'.repeat(65)}`);
-    expect(shell.lastOutboundFrameAck.response.ack.frameHanko).toBe(`0x${'22'.repeat(65)}`);
+    expect(shell.lastOutboundAckFrame.response.ack.frameHanko).toBe(`0x${'22'.repeat(65)}`);
     expect(base.get(RIGHT)?.pendingAccountInput).toBeUndefined();
   });
 

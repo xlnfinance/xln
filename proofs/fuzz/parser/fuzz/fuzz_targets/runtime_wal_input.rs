@@ -5,10 +5,9 @@
 //! crate has since moved it into `runtime::restore`).
 //!
 //! Public surface reached:
-//! - `decode_concrete_runtime_wal_frame(ConcreteWalSource, context_policy, …)`
-//!   → `verify_wal_source` → `storage::native::validate_runtime_frame`
-//!   (msgpack decode + typed field validation + frame-hash recompute +
-//!   exact-canonical-bytes check) and the WAL header/context-set gates.
+//! - `ConcreteWalSource::new` performs msgpack decode, typed field validation,
+//!   frame-hash recompute, exact-canonical-bytes and header/context-set gates;
+//!   `decode_concrete_runtime_wal_frame` then consumes that sealed result.
 //! - `RuntimeEntityInput::decode` — the exact per-row decoder wal_input.rs
 //!   invokes on every `frame.runtimeInput.entityInputs[i]` entry (entity
 //!   transport validation, `project_entity_tx`, signed-command decode,
@@ -37,11 +36,11 @@ use std::collections::BTreeMap;
 
 use libfuzzer_sys::fuzz_target;
 use xln_parser_fuzz_harness::Cursor;
+use xln_rscore_runtime::RuntimeEntityInput;
 use xln_rscore_runtime::restore::{
     ConcreteWalSource, VerifiedEntityContext, decode_concrete_runtime_wal_frame,
 };
 use xln_rscore_runtime::storage::native::validate_runtime_frame;
-use xln_rscore_runtime::RuntimeEntityInput;
 
 fn lower_hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -57,7 +56,14 @@ fn lower_hex(bytes: &[u8]) -> String {
 /// Deterministic per-execution WAL source from raw fuzz bytes: frame bytes
 /// verbatim, plus header/context knobs that drive the WAL_HEADER and
 /// CONTEXT_SET gates once framing itself passes.
-fn wal_source_from_cursor(cursor: &mut Cursor) -> ConcreteWalSource {
+fn wal_source_parts(
+    cursor: &mut Cursor,
+) -> (
+    u64,
+    Vec<u8>,
+    BTreeMap<String, VerifiedEntityContext>,
+    Vec<Vec<u8>>,
+) {
     let height = cursor.be_u64(4);
     let outputs_count = usize::from(cursor.u8() % 8);
     let outputs: Vec<Vec<u8>> = (0..outputs_count)
@@ -86,7 +92,8 @@ fn wal_source_from_cursor(cursor: &mut Cursor) -> ConcreteWalSource {
             bytes
         });
         let value_len = (cursor.be_u64(2) as usize).min(1024);
-        let value = serde_json::from_slice(cursor.take(value_len)).unwrap_or(serde_json::Value::Null);
+        let value =
+            serde_json::from_slice(cursor.take(value_len)).unwrap_or(serde_json::Value::Null);
         entity_contexts.insert(
             format!("{entity}:{signer}"),
             VerifiedEntityContext {
@@ -97,12 +104,7 @@ fn wal_source_from_cursor(cursor: &mut Cursor) -> ConcreteWalSource {
     }
     let frame_len = (cursor.be_u64(3) as usize).min(65536);
     let frame_bytes = cursor.take(frame_len).to_vec();
-    ConcreteWalSource {
-        height,
-        frame_bytes,
-        entity_contexts,
-        outputs,
-    }
+    (height, frame_bytes, entity_contexts, outputs)
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -121,12 +123,16 @@ fuzz_target!(|data: &[u8]| {
         // Modes 0/1: the WAL framing gate over raw bytes. Mode 1 additionally
         // truncates the frame (length-prefix / EOF boundary probing).
         0 | 1 => {
-            let mut source = wal_source_from_cursor(&mut cursor);
-            if mode == 1 && !source.frame_bytes.is_empty() {
-                let cut = usize::from(cursor.u8() % 16).min(source.frame_bytes.len());
-                let keep = source.frame_bytes.len() - cut;
-                source.frame_bytes.truncate(keep);
+            let (height, mut frame_bytes, entity_contexts, outputs) = wal_source_parts(&mut cursor);
+            if mode == 1 && !frame_bytes.is_empty() {
+                let cut = usize::from(cursor.u8() % 16).min(frame_bytes.len());
+                let keep = frame_bytes.len() - cut;
+                frame_bytes.truncate(keep);
             }
+            let Ok(source) = ConcreteWalSource::new(height, frame_bytes, entity_contexts, outputs)
+            else {
+                return;
+            };
             match decode_concrete_runtime_wal_frame(
                 &source,
                 &context_policy,
@@ -134,7 +140,7 @@ fuzz_target!(|data: &[u8]| {
                 hub_rebalance_has_pending_work,
             ) {
                 Ok(frame) => {
-                    let validated = validate_runtime_frame(&source.frame_bytes)
+                    let validated = validate_runtime_frame(source.frame_bytes())
                         .expect("WAL_DECODE_ACCEPTED_UNVALIDATED: decoder accepted bytes the framing validator rejects");
                     assert_eq!(
                         frame.height, validated.height,

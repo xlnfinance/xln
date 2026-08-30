@@ -55,12 +55,12 @@ pub enum StandaloneInputOutcome {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameAckPhase {
+pub enum AckFramePhase {
     Ack,
     Frame,
 }
 
-impl fmt::Display for FrameAckPhase {
+impl fmt::Display for AckFramePhase {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Ack => "ack",
@@ -69,20 +69,20 @@ impl fmt::Display for FrameAckPhase {
     }
 }
 
-/// The single result of applying a canonical `frame_ack` input.
+/// The single result of applying a canonical `ack_frame` input.
 ///
 /// `Applied` means the ACK phase was non-rejecting and the proposal phase was
 /// attempted. Its nested frame may itself be rejected; a committed ACK is not
 /// rolled back. `Rejected` is reserved for an ACK-phase rejection, before any
 /// phase could mutate the caller's account.
 #[derive(Clone, Debug)]
-pub enum FrameAckOutcome {
+pub enum AckFrameOutcome {
     Applied {
         ack: Box<super::apply::AckOutcome>,
         frame: Box<super::apply::IncomingOutcome>,
     },
     Rejected {
-        phase: FrameAckPhase,
+        phase: AckFramePhase,
         reason: String,
     },
 }

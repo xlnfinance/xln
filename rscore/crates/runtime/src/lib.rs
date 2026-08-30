@@ -18,6 +18,8 @@ mod commitment;
 mod entity_checkpoint;
 mod entity_context_json;
 mod entity_frame;
+mod j_import;
+pub mod j_submit;
 mod j_watcher;
 mod leveldb;
 mod machine;
@@ -60,9 +62,15 @@ pub use entity_context_json::{
     materialize_fresh_entity_context,
 };
 pub use entity_frame::{EntityFrameError, fit_entity_account_input_prefix};
+pub use j_import::{
+    JurisdictionContracts, JurisdictionImportRequest, JurisdictionImportResult,
+    JurisdictionTokenInfo,
+};
 pub use j_watcher::{
-    FinalizedJEventBatch, FinalizedWatcherCursor, HttpJsonRpc, JClaimIngress, JReserveUpdate,
-    JWatcherConfig, JWatcherError, JWatcherPoll, JsonRpc, poll_finalized_j_events,
+    FinalizedJEventBatch, FinalizedJHeader, FinalizedWatcherCursor, HttpJsonRpc, JClaimIngress,
+    JReserveUpdate, JWatcherConfig, JWatcherError, JWatcherPoll, JsonRpc, ObserveJRange,
+    WatchedExternalWallet, WatchedHashLadder, decode_observe_j_range, encode_observe_j_range,
+    observation_from_poll, poll_finalized_j_events,
 };
 pub use leveldb::{
     RawConcreteWalRows, RuntimeLevelDbError, RuntimeWalReader, StoredRscoreCheckpoint,
@@ -70,21 +78,27 @@ pub use leveldb::{
 };
 pub use machine::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
-    RuntimeApplyResult, RuntimeEntityInput, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
+    RewindJHistory, RuntimeAdapterCommandMarker, RuntimeApplyResult, RuntimeEntityFrameContext,
+    RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs, RuntimeEntityReplica,
+    RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
     RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeOutputs,
-    RuntimeReplica, RuntimeState, RuntimeTx, RuntimeWake, ScheduledWakeIndex, SelectedRuntimeFrame,
-    apply_runtime, apply_runtime_live, enqueue_runtime_input, select_runtime_frame,
+    RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx, RuntimeWake,
+    SelectedRuntimeFrame, apply_runtime, apply_runtime_live, enqueue_runtime_input,
+    select_runtime_frame,
 };
 pub use machine_graph::{RuntimeMachineGraphError, rebuild_runtime_machine_graph};
 pub use mesh_seed::{MeshSeedError, derive_mesh_child_seed};
 pub use processor::{
     DurableRuntimeProcessor, DurableRuntimeProcessorError, ResidentRuntimeService,
-    ResidentRuntimeServiceError, RuntimeDurableCommitments, RuntimeDurableEnvelope,
-    RuntimeDurableEnvelopeError, RuntimeOperatorConfig, RuntimeProcessReport, RuntimeSignerLabel,
+    ResidentRuntimeServiceError, RuntimeDurableCommitments, RuntimeDurableEntityCommitment,
+    RuntimeDurableEnvelope, RuntimeDurableEnvelopeError, RuntimeOperatorConfig,
+    RuntimeProcessReport, RuntimeSignerLabel,
 };
 pub use recording::{
     RecordingPostStateCheck, RuntimeRecordingError, verify_recording_post_state_hashes,
     verify_wal_post_state_hash,
 };
 pub use storage_msgpack::{StorageMessagePackError, decode_storage_payload};
-pub use tagged_json::{TaggedJsonError, canonical_value_from_tagged_json};
+pub use tagged_json::{
+    TaggedJsonError, canonical_value_from_tagged_json, tagged_json_from_canonical_value,
+};

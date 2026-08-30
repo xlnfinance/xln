@@ -24,7 +24,7 @@ import {
 } from '../../../rscore/shadow-wire';
 import { decodeWave } from '../../../rscore/wave-decode';
 import { addr, makeAccount } from '../../helpers/cross-j';
-const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xlnrs');
 
 if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
   throw new Error(`RSCORE_BINARY_MISSING:${BINARY}`);
@@ -197,13 +197,15 @@ const rawErrorCode = (reply: RawProcessReply): string => {
 };
 
 const rawOk = (reply: RawProcessReply): unknown => {
-  expect(reply.messageKind).toBe(1);
+  if (reply.messageKind !== 1) {
+    throw new Error(`RSCORE_TEST_RAW_EXPECTED_OK:${reply.messageKind}:${String(reply.result)}`);
+  }
   return reply.result;
 };
 
 describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(37);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(38);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
       .toBe('0d0e71b61e8319a6a3514059b0167b56f0b03a22422937731184b4b3a9cfaceb');
     const staleAbi = new RawProcessSession(identity());
@@ -253,7 +255,7 @@ describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
           accountConsensusWire(account),
           addr('77'),
         )], true],
-      )), 2, 'root bootstrap');
+      )), 3, 'root bootstrap');
       const expectedRoot = exactBytes(loaded[1], 32, 'root bootstrap root');
       const ownerBytes = hexToWireBytes(owner, 32, 'TEST_ROOT_OWNER');
       expect(rawErrorCode(await raw.request(RSCORE_OP.accountInbound, [
@@ -279,7 +281,6 @@ describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
         [],
         [],
         [],
-        [],
         false,
         false,
       ])));
@@ -289,7 +290,6 @@ describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
         ownerBytes,
         1_700_000_000_000,
         100,
-        [],
         [],
         [],
         [],

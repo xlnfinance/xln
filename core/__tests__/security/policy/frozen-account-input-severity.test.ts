@@ -35,9 +35,9 @@ describe('frozen Account input severity', () => {
     expect(canProcessFrozenAccountInput('disputed', false, false, [])).toBe(false);
   });
 
-  test('classifies an authenticated in-flight frame_ack after durable on-chain freeze as expected terminal traffic', () => {
-    expect(frozenAccountInputLogLevel(account(true), input('frame_ack'))).toBe('info');
-    expect(frozenAccountInputLogLevel(account(undefined), input('frame_ack'))).toBe('info');
+  test('classifies an authenticated in-flight ack_frame after durable on-chain freeze as expected terminal traffic', () => {
+    expect(frozenAccountInputLogLevel(account(true), input('ack_frame'))).toBe('info');
+    expect(frozenAccountInputLogLevel(account(undefined), input('ack_frame'))).toBe('info');
   });
 
   test('classifies a retried ACK during either freeze phase as a visible non-fatal no-op', () => {
@@ -47,7 +47,7 @@ describe('frozen Account input severity', () => {
   });
 
   test('keeps pre-finality and non-ACK frozen traffic at error severity', () => {
-    expect(frozenAccountInputLogLevel(account(false), input('frame_ack'))).toBe('error');
+    expect(frozenAccountInputLogLevel(account(false), input('ack_frame'))).toBe('error');
     expect(frozenAccountInputLogLevel(account(true), input('frame'))).toBe('error');
     expect(frozenAccountInputLogLevel(account(true), input('proposal'))).toBe('error');
   });

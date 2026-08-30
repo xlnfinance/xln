@@ -16,16 +16,21 @@ type RscoreEntityOutput =
       description: string | null; startedAtMs: number;
     }>
   | Readonly<{ kind: 'htlcForwardAccepted'; entityId: string; hashlock: string }>
-  | Readonly<{ kind: 'htlcFailed'; entityId: string; hashlock: string; lockId: string | null; reason: string }>
+  | Readonly<{
+      kind: 'htlcFailed'; entityId: string; hashlock: string; lockId: string | null;
+      reason: string; description: string | null;
+    }>
   | Readonly<{
       kind: 'htlcReceived'; entityId: string; fromEntity: string; toEntity: string;
       hashlock: string; lockId: string; tokenId: number | null; amount: bigint | null;
-      startedAtMs: number | null; jurisdictionId: string | null; receivedAtMs: number;
+      description: string | null; startedAtMs: number | null;
+      jurisdictionId: string | null; receivedAtMs: number;
     }>
   | Readonly<{
       kind: 'htlcFinalized'; entityId: string; fromEntity: string; toEntity: string | null;
       hashlock: string; secret: string; lockId: string | null; tokenId: number | null;
-      amount: bigint | null; startedAtMs: number | null; jurisdictionId: string | null;
+      amount: bigint | null; description: string | null; startedAtMs: number | null;
+      jurisdictionId: string | null;
       finalizedAtMs: number;
     }>
   | Readonly<{ kind: 'swapMatched'; entityId: string; count: number }>;
@@ -57,7 +62,6 @@ const preparedWire = (entry: PreparedHtlcEntry): RscoreWireValue[] => {
     ],
     bytes(binding.accountFrameHash, 32, 'RSCORE_ENTITY_PREPARED_FRAME_HASH'),
     binding.accountHeight,
-    bytes(binding.lockId, 32, 'RSCORE_ENTITY_PREPARED_LOCK'),
     bytes(binding.envelopeHash, 32, 'RSCORE_ENTITY_PREPARED_ENVELOPE_HASH'),
     bytes(binding.hashlock, 32, 'RSCORE_ENTITY_PREPARED_HASHLOCK'),
     binding.tokenId,
@@ -177,17 +181,18 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
       };
     }
     case 1: {
-      const row = tuple(value, 5, 'RSCORE_ENTITY_HTLC_FAILED');
+      const row = tuple(value, 6, 'RSCORE_ENTITY_HTLC_FAILED');
       return {
         kind: 'htlcFailed',
         entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
         hashlock: digest(row[2], 32, 'RSCORE_ENTITY_OUTPUT_HASHLOCK'),
         lockId: optionalDigest(row[3], 32, 'RSCORE_ENTITY_OUTPUT_LOCK'),
         reason: text(row[4], 'RSCORE_ENTITY_OUTPUT_REASON'),
+        description: optionalText(row[5], 'RSCORE_ENTITY_OUTPUT_DESCRIPTION'),
       };
     }
     case 2: {
-      const row = tuple(value, 11, 'RSCORE_ENTITY_HTLC_RECEIVED');
+      const row = tuple(value, 12, 'RSCORE_ENTITY_HTLC_RECEIVED');
       return {
         kind: 'htlcReceived',
         entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
@@ -197,13 +202,14 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
         lockId: digest(row[5], 32, 'RSCORE_ENTITY_OUTPUT_LOCK'),
         tokenId: optionalInteger(row[6], 'RSCORE_ENTITY_OUTPUT_TOKEN'),
         amount: optionalBigint(row[7], 'RSCORE_ENTITY_OUTPUT_AMOUNT'),
-        startedAtMs: optionalInteger(row[8], 'RSCORE_ENTITY_OUTPUT_STARTED'),
-        jurisdictionId: optionalText(row[9], 'RSCORE_ENTITY_OUTPUT_JURISDICTION'),
-        receivedAtMs: integer(row[10], 'RSCORE_ENTITY_OUTPUT_RECEIVED_AT'),
+        description: optionalText(row[8], 'RSCORE_ENTITY_OUTPUT_DESCRIPTION'),
+        startedAtMs: optionalInteger(row[9], 'RSCORE_ENTITY_OUTPUT_STARTED'),
+        jurisdictionId: optionalText(row[10], 'RSCORE_ENTITY_OUTPUT_JURISDICTION'),
+        receivedAtMs: integer(row[11], 'RSCORE_ENTITY_OUTPUT_RECEIVED_AT'),
       };
     }
     case 3: {
-      const row = tuple(value, 12, 'RSCORE_ENTITY_HTLC_FINALIZED');
+      const row = tuple(value, 13, 'RSCORE_ENTITY_HTLC_FINALIZED');
       return {
         kind: 'htlcFinalized',
         entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
@@ -214,9 +220,10 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
         lockId: optionalDigest(row[6], 32, 'RSCORE_ENTITY_OUTPUT_LOCK'),
         tokenId: optionalInteger(row[7], 'RSCORE_ENTITY_OUTPUT_TOKEN'),
         amount: optionalBigint(row[8], 'RSCORE_ENTITY_OUTPUT_AMOUNT'),
-        startedAtMs: optionalInteger(row[9], 'RSCORE_ENTITY_OUTPUT_STARTED'),
-        jurisdictionId: optionalText(row[10], 'RSCORE_ENTITY_OUTPUT_JURISDICTION'),
-        finalizedAtMs: integer(row[11], 'RSCORE_ENTITY_OUTPUT_FINALIZED_AT'),
+        description: optionalText(row[9], 'RSCORE_ENTITY_OUTPUT_DESCRIPTION'),
+        startedAtMs: optionalInteger(row[10], 'RSCORE_ENTITY_OUTPUT_STARTED'),
+        jurisdictionId: optionalText(row[11], 'RSCORE_ENTITY_OUTPUT_JURISDICTION'),
+        finalizedAtMs: integer(row[12], 'RSCORE_ENTITY_OUTPUT_FINALIZED_AT'),
       };
     }
     case 4: {

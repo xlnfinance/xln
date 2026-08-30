@@ -1,4 +1,4 @@
-import { decodeAccountTxs } from '../../account/tx-validation';
+import type { AccountTx } from '../../types/account';
 import { decodeAccountPeerInput } from '../../account/validation/input-validation';
 import { parseAccountJClaimNode } from '../../account/j-claims/j-claim-codec';
 import { validateJReplicas } from '../../storage/wal/runtime-machine-schema/j';
@@ -124,7 +124,14 @@ const decodeOutboundPayload = (
         worker,
         requireString(row['accountId'], `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_ACCOUNT`),
       ),
-      txs: decodeAccountTxs(row['txs'], `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_VALUE`),
+      // These are already-typed Entity-owned Account transactions crossing an
+      // internal isolate boundary, not a new protocol admission boundary.
+      // Preserve the sequential path exactly: enqueue first, then let the one
+      // canonical Account transition accept or reject the candidate frame.
+      txs: requireArray(
+        row['txs'],
+        `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_VALUE`,
+      ) as AccountTx[],
     };
   });
   const proposals = requireArray(input['proposals'], 'TS_ACCOUNT_WORKER_OUTBOUND_PROPOSALS')

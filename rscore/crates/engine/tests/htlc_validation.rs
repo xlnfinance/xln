@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 mod common;
 #[allow(dead_code)]
 mod htlc_support;
@@ -45,6 +44,16 @@ fn resolve(lock_id: &str, outcome: HtlcResolveOutcome) -> AccountTx {
     })
 }
 
+fn indexed_lock(index: u8, amount: BigInt) -> AccountTx {
+    let hashlock = format!("0x{index:02x}{}", "00".repeat(31));
+    let mut tx = lock_tx(&hashlock, amount);
+    let AccountTx::HtlcLock(lock) = &mut tx else {
+        unreachable!("fixture is an HTLC lock")
+    };
+    lock.hashlock = HtlcHashlock::parse(&hashlock).expect("indexed hashlock");
+    tx
+}
+
 #[test]
 fn decoder_boundaries_are_canonical_and_fail_loudly() {
     assert_eq!(
@@ -71,7 +80,7 @@ fn reveal_height_boundary_matches_typescript_safe_integer_range() {
     const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
     let base = left_base(100);
-    let mut maximum_height = lock_tx("maximum-safe-height", 10.into());
+    let mut maximum_height = lock_tx(HASHLOCK, 10.into());
     let AccountTx::HtlcLock(lock) = &mut maximum_height else {
         unreachable!("fixture is an HTLC lock")
     };
@@ -89,13 +98,13 @@ fn reveal_height_boundary_matches_typescript_safe_integer_range() {
             .candidate()
             .expect("accepted lock candidate")
             .state()
-            .htlc_lock("maximum-safe-height")
+            .htlc_lock(HASHLOCK)
             .expect("committed maximum-height lock")
             .reveal_before_height(),
         MAX_SAFE_INTEGER,
     );
 
-    let mut unsafe_height = lock_tx("unsafe-height", 10.into());
+    let mut unsafe_height = lock_tx(HASHLOCK, 10.into());
     let AccountTx::HtlcLock(lock) = &mut unsafe_height else {
         unreachable!("fixture is an HTLC lock")
     };
@@ -125,67 +134,47 @@ fn reveal_height_boundary_matches_typescript_safe_integer_range() {
 fn lock_validation_order_and_inclusive_deadlines_match_typescript() {
     let base = left_base(100);
     assert_eq!(
-        rejected_message(
-            &base,
-            Side::Left,
-            &lock_tx("equal-time", 10.into()),
-            2_000,
-            10
-        )
-        .1,
+        rejected_message(&base, Side::Left, &lock_tx(HASHLOCK, 10.into()), 2_000, 10).1,
         "Timelock 2000 already expired (timestamp)"
     );
     assert_eq!(
-        rejected_message(&base, Side::Left, &lock_tx("equal-j", 10.into()), 1_999, 20).1,
+        rejected_message(&base, Side::Left, &lock_tx(HASHLOCK, 10.into()), 1_999, 20).1,
         "revealBeforeHeight 20 already passed (current J height: 20)"
     );
     assert_eq!(
-        rejected_message(&base, Side::Left, &lock_tx("zero", 0.into()), 1_000, 10).1,
+        rejected_message(&base, Side::Left, &lock_tx(HASHLOCK, 0.into()), 1_000, 10).1,
         "Invalid amount: 0 (min 1, max 340282366920938463463374607431768211455)"
     );
     let too_large = BigInt::from(1_u8) << 128;
     assert_eq!(
-        rejected_message(&base, Side::Left, &lock_tx("large", too_large), 1_000, 10).1,
+        rejected_message(&base, Side::Left, &lock_tx(HASHLOCK, too_large), 1_000, 10).1,
         "Invalid amount: 340282366920938463463374607431768211456 (min 1, max 340282366920938463463374607431768211455)"
     );
 
     let accepted = SequentialAccountEngine::apply_with_context(
         &base,
         Side::Left,
-        &lock_tx("all-capacity", 100.into()),
+        &lock_tx(HASHLOCK, 100.into()),
         &execution_context(1_000, 10),
     )
     .expect("capacity equality");
     assert_eq!(accepted.verdict(), &AccountVerdict::Applied);
     assert_eq!(
-        rejected_message(
-            &base,
-            Side::Left,
-            &lock_tx("over-capacity", 101.into()),
-            1_000,
-            10,
-        )
-        .1,
+        rejected_message(&base, Side::Left, &lock_tx(HASHLOCK, 101.into()), 1_000, 10,).1,
         "Insufficient capacity: need 101, available 100"
     );
 
-    let locked = commit_lock(&base, Side::Left, "duplicate");
-    let duplicate = rejected_message(
-        &locked,
-        Side::Left,
-        &lock_tx("duplicate", 0.into()),
-        2_000,
-        20,
-    );
+    let locked = commit_lock(&base, Side::Left, HASHLOCK);
+    let duplicate = rejected_message(&locked, Side::Left, &lock_tx(HASHLOCK, 0.into()), 2_000, 20);
     assert_eq!(duplicate.0, "ACCOUNT_TX_VALIDATION");
-    assert_eq!(duplicate.1, "Lock duplicate already exists");
+    assert_eq!(duplicate.1, format!("Lock {HASHLOCK} already exists"));
 }
 
 #[test]
 fn thirty_third_lock_has_typed_capacity_disposition() {
     let mut current = left_base(100);
     for index in 0..32 {
-        let tx = lock_tx(&format!("lock-{index:02}"), 1.into());
+        let tx = indexed_lock(index + 1, 1.into());
         current = SequentialAccountEngine::apply_with_context(
             &current,
             Side::Left,
@@ -198,13 +187,7 @@ fn thirty_third_lock_has_typed_capacity_disposition() {
     }
     assert_eq!(current.state().htlc_count(), 32);
     assert_eq!(
-        rejected_message(
-            &current,
-            Side::Left,
-            &lock_tx("lock-32", 1.into()),
-            1_000,
-            10,
-        ),
+        rejected_message(&current, Side::Left, &indexed_lock(33, 1.into()), 1_000, 10,),
         (
             "ACCOUNT_HTLC_LOCK_CAPACITY".into(),
             "Too many active HTLC locks: max 32".into(),
@@ -215,12 +198,12 @@ fn thirty_third_lock_has_typed_capacity_disposition() {
 #[test]
 fn secret_validation_is_deadline_first_and_j_height_is_resolve_inclusive() {
     let base = left_base(100);
-    let locked = commit_lock(&base, Side::Left, "secret");
+    let locked = commit_lock(&base, Side::Left, HASHLOCK);
     let at_height = SequentialAccountEngine::apply_with_context(
         &locked,
         Side::Right,
         &resolve(
-            "secret",
+            HASHLOCK,
             HtlcResolveOutcome::Secret {
                 secret: SECRET.into(),
             },
@@ -231,7 +214,7 @@ fn secret_validation_is_deadline_first_and_j_height_is_resolve_inclusive() {
     assert_eq!(at_height.verdict(), &AccountVerdict::Applied);
 
     let malformed = resolve(
-        "secret",
+        HASHLOCK,
         HtlcResolveOutcome::Secret {
             secret: "not-hex".into(),
         },
@@ -255,7 +238,7 @@ fn secret_validation_is_deadline_first_and_j_height_is_resolve_inclusive() {
             &locked,
             Side::Right,
             &resolve(
-                "secret",
+                HASHLOCK,
                 HtlcResolveOutcome::Secret {
                     secret: wrong_secret.into(),
                 },
@@ -271,9 +254,9 @@ fn secret_validation_is_deadline_first_and_j_height_is_resolve_inclusive() {
 #[test]
 fn error_authority_and_timeout_boundary_match_typescript() {
     let base = left_base(100);
-    let locked = commit_lock(&base, Side::Left, "error");
+    let locked = commit_lock(&base, Side::Left, HASHLOCK);
     let custom = resolve(
-        "error",
+        HASHLOCK,
         HtlcResolveOutcome::Error {
             reason: Some("downstream".into()),
         },
@@ -283,7 +266,7 @@ fn error_authority_and_timeout_boundary_match_typescript() {
         "Only beneficiary can release an active HTLC; payer can cancel only after expiry"
     );
     let timeout = resolve(
-        "error",
+        HASHLOCK,
         HtlcResolveOutcome::Error {
             reason: Some("timeout".into()),
         },
@@ -336,7 +319,7 @@ fn typed_htlc_rejection_round_trip_is_not_a_string_fallback() {
 
 #[test]
 fn explicit_lock_tx_type_has_no_implicit_timeout_variant() {
-    let AccountTx::HtlcLock(HtlcLockTx { delivery_mode, .. }) = lock_tx("typed", 1.into()) else {
+    let AccountTx::HtlcLock(HtlcLockTx { delivery_mode, .. }) = lock_tx(HASHLOCK, 1.into()) else {
         unreachable!("literal HTLC lock")
     };
     assert_eq!(delivery_mode, None);
@@ -345,7 +328,7 @@ fn explicit_lock_tx_type_has_no_implicit_timeout_variant() {
 #[test]
 fn context_required_transitions_never_run_against_a_fake_zero_clock() {
     let error =
-        SequentialAccountEngine::apply(&left_base(100), Side::Left, &lock_tx("context", 1.into()))
+        SequentialAccountEngine::apply(&left_base(100), Side::Left, &lock_tx(HASHLOCK, 1.into()))
             .err()
             .expect("context-free HTLC must fail");
     assert_eq!(

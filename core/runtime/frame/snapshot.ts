@@ -1,6 +1,6 @@
 import {
-  hasRuntimeHistoryTraceForTesting,
-} from '../observability/history-retention';
+  hasRuntimeTraceForTesting,
+} from '../observability/runtime-trace';
 import { readRuntimeFrameEvents } from '../observability/env-events';
 import type { RuntimeReplica, RuntimeInput } from '../types';
 import { buildCanonicalEnvSnapshot } from '../../storage/wal/snapshot';
@@ -17,7 +17,7 @@ export const prepareRuntimeFrameCommit = (
 ): boolean => {
   const frameAdvanced = env.state.height !== frameHeightBeforeTick;
   profile.metrics.frameAdvanced = frameAdvanced;
-  if (frameAdvanced && hasRuntimeHistoryTraceForTesting(liveEnv)) {
+  if (frameAdvanced && hasRuntimeTraceForTesting(liveEnv)) {
     const logs = readRuntimeFrameEvents(env);
     frame.pendingTraceSnapshot = buildCanonicalEnvSnapshot(env, {
       runtimeInput: appliedInput ?? { runtimeTxs: [], entityInputs: [] },

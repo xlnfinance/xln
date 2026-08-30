@@ -25,23 +25,15 @@
 
   type LockDirection = 'incoming' | 'outgoing';
 
-  type LockBookEntryView = {
-    lockId?: string;
-    accountId: string;
-    tokenId?: number;
+  type PaymentFlowView = {
+    hashlock: string;
+    counterpartyId: string;
+    tokenId: number;
     amount: bigint;
-    hashlock?: string;
     direction: LockDirection;
-    createdAt?: bigint;
-  };
-
-  type HtlcRouteView = {
-    hashlock?: string;
-    inboundEntity?: string;
-    inboundLockId?: string;
-    outboundEntity?: string;
-    outboundLockId?: string;
+    description?: string;
     secretAckPending?: boolean;
+    startedAtMs: number;
   };
 
   type ActiveFlowSummary = {
@@ -53,25 +45,35 @@
     subtitle: string;
   };
 
-  const isLockBookEntryView = (value: unknown): value is LockBookEntryView => {
-    if (typeof value !== 'object' || value === null) return false;
-    const candidate = value as Partial<LockBookEntryView>;
-    return (
-      typeof candidate.accountId === 'string' &&
-      typeof candidate.amount === 'bigint' &&
-      (candidate.direction === 'incoming' || candidate.direction === 'outgoing')
-    );
-  };
-
-  const isHtlcRouteView = (value: unknown): value is HtlcRouteView => {
-    if (typeof value !== 'object' || value === null) return false;
-    const candidate = value as Partial<HtlcRouteView>;
-    return (
-      typeof candidate.hashlock === 'string' ||
-      typeof candidate.inboundLockId === 'string' ||
-      typeof candidate.outboundLockId === 'string'
-    );
-  };
+  function buildPaymentFlowsByCounterparty(current: EntityReplica | null): Map<string, PaymentFlowView[]> {
+    const flows = new Map<string, PaymentFlowView[]>();
+    if (!current) return flows;
+    const append = (
+      counterpartyId: string | undefined,
+      direction: LockDirection,
+      payment: EntityReplica['state']['paybook']['entries'] extends Map<string, infer Entry> ? Entry : never,
+    ): void => {
+      const counterparty = normalizeId(counterpartyId || '');
+      if (!counterparty || payment.tokenId === undefined || payment.amount === undefined) return;
+      const rows = flows.get(counterparty) ?? [];
+      rows.push({
+        hashlock: payment.hashlock,
+        counterpartyId: counterparty,
+        tokenId: payment.tokenId,
+        amount: payment.amount,
+        direction,
+        ...(payment.description ? { description: payment.description } : {}),
+        ...(payment.secretAckPending ? { secretAckPending: true } : {}),
+        startedAtMs: payment.startedAtMs ?? payment.createdTimestamp,
+      });
+      flows.set(counterparty, rows);
+    };
+    for (const payment of current.state.paybook.entries.values()) {
+      append(payment.inboundEntity, 'incoming', payment);
+      append(payment.outboundEntity, 'outgoing', payment);
+    }
+    return flows;
+  }
 
   $: accountSearchKey = accountSearch.trim().toLowerCase();
   $: if (accountSearchKey !== lastAccountSearchKey) {
@@ -85,6 +87,7 @@
 	  $: accountTotal = isAccountsMapLike(replica?.state?.accounts)
 	    ? replica.state.accounts.size
 	    : visibleAccounts.length;
+  $: paymentFlowsByCounterparty = buildPaymentFlowsByCounterparty(replica);
 
   function selectAccount(event: CustomEvent) {
     dispatch('select', event.detail);
@@ -119,20 +122,14 @@
       outgoingAmount: 0n,
     };
 
-    const lockBook = replica?.state?.lockBook;
-    if (!lockBook || typeof lockBook.values !== 'function') return summary;
-
     const cpNorm = normalizeId(counterpartyId);
-    for (const lock of lockBook.values()) {
-      if (!isLockBookEntryView(lock)) continue;
-      if (normalizeId(lock.accountId) !== cpNorm) continue;
-      const amount = lock.amount;
-      if (lock.direction === 'incoming') {
+    for (const payment of paymentFlowsByCounterparty.get(cpNorm) ?? []) {
+      if (payment.direction === 'incoming') {
         summary.incomingCount += 1;
-        summary.incomingAmount += amount;
+        summary.incomingAmount += payment.amount;
       } else {
         summary.outgoingCount += 1;
-        summary.outgoingAmount += amount;
+        summary.outgoingAmount += payment.amount;
       }
     }
 
@@ -141,61 +138,28 @@
 
   function getActiveFlowSummary(counterpartyId: string): { items: ActiveFlowSummary[]; overflowCount: number } {
     const items: Array<ActiveFlowSummary & { createdAt: number }> = [];
-    const lockBook = replica?.state?.lockBook;
-    const notes = replica?.htlcNotes;
-    const routes = replica?.state?.htlcRoutes;
-    if (!lockBook || typeof lockBook.values !== 'function') return { items: [], overflowCount: 0 };
-
     const cpNorm = normalizeId(counterpartyId);
-    for (const lock of lockBook.values()) {
-      if (!isLockBookEntryView(lock)) continue;
-      if (normalizeId(lock.accountId) !== cpNorm) continue;
-
-      const tokenId = Number(lock.tokenId ?? 0);
+    for (const payment of paymentFlowsByCounterparty.get(cpNorm) ?? []) {
+      const tokenId = Number(payment.tokenId);
       if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-
-      let matchedRoute: HtlcRouteView | null = null;
-      if (routes && typeof routes.values === 'function') {
-        for (const route of routes.values()) {
-          if (!isHtlcRouteView(route)) continue;
-          if (
-            (typeof route.outboundLockId === 'string' && route.outboundLockId === lock.lockId) ||
-            (typeof route.inboundLockId === 'string' && route.inboundLockId === lock.lockId) ||
-            (typeof route.hashlock === 'string' && route.hashlock === lock.hashlock)
-          ) {
-            matchedRoute = route;
-            break;
-          }
-        }
-      }
-
-      const paymentNote = typeof notes?.get === 'function'
-        ? (() => {
-            const hashKey = typeof lock.hashlock === 'string' ? notes.get(`hashlock:${lock.hashlock}`) : '';
-            return typeof hashKey === 'string' ? hashKey.trim() : '';
-          })()
-        : '';
-
-      const peerEntityId = lock.direction === 'incoming'
-        ? String(matchedRoute?.inboundEntity || counterpartyId)
-        : String(matchedRoute?.outboundEntity || counterpartyId);
+      const peerEntityId = payment.counterpartyId || counterpartyId;
       const peerName = resolveAccountListEntityName(peerEntityId, replica?.entityId || '', entityNames, 'You');
 
-      const subtitle = paymentNote
-        || (matchedRoute?.secretAckPending
+      const subtitle = payment.description
+        || (payment.secretAckPending
           ? 'Awaiting secret ACK'
-          : lock.direction === 'incoming'
+          : payment.direction === 'incoming'
             ? `From ${peerName}`
             : `To ${peerName}`);
 
       items.push({
-        id: String(lock.lockId || lock.hashlock || `${counterpartyId}-${items.length}`),
-        direction: lock.direction,
+        id: `${payment.hashlock}:${payment.direction}`,
+        direction: payment.direction,
         tokenId,
-        amount: lock.amount,
-        title: lock.direction === 'incoming' ? 'Incoming HTLC' : 'Outgoing HTLC',
-        subtitle: subtitle || `Hash ${shortHash(String(lock.hashlock || ''))}`,
-        createdAt: typeof lock.createdAt === 'bigint' ? Number(lock.createdAt) : 0,
+        amount: payment.amount,
+        title: payment.direction === 'incoming' ? 'Incoming HTLC' : 'Outgoing HTLC',
+        subtitle: subtitle || `Hash ${shortHash(payment.hashlock)}`,
+        createdAt: payment.startedAtMs,
       });
     }
 

@@ -19,6 +19,9 @@ import {
   makeJurisdiction,
   makeState,
   partialBinary,
+  getTestAccountForWrite,
+  putTestAccountPull,
+  putTestAccountSwapOffer,
   secret,
 } from '../../helpers/cross-j';
 
@@ -98,8 +101,8 @@ describe('cross-jurisdiction security invariants', () => {
       filledTargetAmount: 450_000_000_000_000_000n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const account = state.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    const account = getTestAccountForWrite(state, sourceUser);
+    putTestAccountSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: route.source.tokenId,
       giveAmount: route.source.amount,
@@ -150,9 +153,8 @@ describe('cross-jurisdiction security invariants', () => {
     const tron = makeJurisdiction('Tron', 2, '21', '22');
     const route = buildRoute('cross-target-dispute-needs-source-args', 'cross-target-dispute-needs-source-args');
     const state = makeState(route.target.counterpartyEntityId, addr('41'), tron, route.target.entityId);
-    const account = state.accounts.get(route.target.entityId)!;
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(route.targetPull!.pullId, {
+    const account = getTestAccountForWrite(state, route.target.entityId);
+    putTestAccountPull(account, route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
@@ -182,9 +184,8 @@ describe('cross-jurisdiction security invariants', () => {
     const tron = makeJurisdiction('Tron', 2, '21', '22');
     const route = buildRoute('cross-target-dispute-with-source-args', 'cross-target-dispute-with-source-args');
     const state = makeState(route.target.counterpartyEntityId, addr('42'), tron, route.target.entityId);
-    const account = state.accounts.get(route.target.entityId)!;
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(route.targetPull!.pullId, {
+    const account = getTestAccountForWrite(state, route.target.entityId);
+    putTestAccountPull(account, route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,

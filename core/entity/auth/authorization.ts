@@ -1,5 +1,5 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
-import { ethers } from 'ethers';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import { LIMITS } from '../../config/constants';
 import type { ConsensusConfig, EntityState, ProposalAction } from '../types';
@@ -9,7 +9,10 @@ import { isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j';
 import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
 
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
-import { isCrossJurisdictionSiblingPair } from '../../extensions/cross-j/boundary';
+import {
+  crossJurisdictionRouteSigner,
+  isCrossJurisdictionRouteParticipant,
+} from '../../extensions/cross-j/boundary';
 
 const ENTITY_PROPOSAL_ACTION_DOMAIN = 'xln:entity-proposal-action:v1' as const;
 
@@ -80,6 +83,26 @@ const individualTxTypes = new Set<EntityTx['type']>([
   'vote',
 ]);
 
+/**
+ * Exact next-frame work emitted by a certified Entity frame back to itself.
+ *
+ * These are control continuations, not a second command lane: the producing
+ * frame already committed their bytes, Runtime only carries them across its
+ * WAL boundary, and every handler revalidates current state before mutation.
+ * Never add ordinary user/financial commands here.
+ */
+const selfRuntimeContinuationTxTypes = new Set<EntityTx['type']>([
+  'disputeFinalize',
+  'j_abort_sent_batch',
+  'j_broadcast',
+  'orderbookSweepCrossJurisdiction',
+  'prepareDispute',
+  'processHtlcTimeouts',
+  'requestCrossJurisdictionClear',
+  'settle_execute',
+  'settle_propose',
+]);
+
 export const isEntityProtocolTx = (tx: EntityTx): boolean => protocolTxTypes.has(tx.type);
 
 /** Security allowlist: new EntityTx variants are collective until explicitly reviewed. */
@@ -97,12 +120,10 @@ const assertTxBatchShape: (txs: unknown, code: string) => asserts txs is EntityT
       throw new Error(`${code}_TX_INVALID`);
     }
   }
-  const byteLength = new TextEncoder().encode(
-    encodeCanonicalConsensusValue({
-      domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
-      txs,
-    }),
-  ).byteLength;
+  const byteLength = encodeCanonicalConsensusBytes({
+    domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
+    txs,
+  }).byteLength;
   if (byteLength > LIMITS.MAX_FRAME_SIZE_BYTES) {
     throw new Error(`${code}_BYTE_LIMIT_EXCEEDED:${byteLength}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
   }
@@ -116,17 +137,11 @@ const hashCollectiveEntityActionTxs = (txs: EntityTx[]): string => {
       throw new Error(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}`);
     }
   }
-  return ethers
-    .keccak256(
-      ethers.toUtf8Bytes(
-        encodeCanonicalConsensusValue({
-          domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
-          version: 1,
-          txs,
-        }),
-      ),
-    )
-    .toLowerCase();
+  return keccakBytesHash(encodeCanonicalConsensusBytes({
+    domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
+    version: 1,
+    txs,
+  }));
 };
 
 export const buildEntityTransactionProposalAction = (
@@ -184,16 +199,10 @@ export const assertEntityProposalAction = (value: unknown): ProposalAction => {
 
 export const hashEntityProposalAction = (value: unknown): string => {
   const action = assertEntityProposalAction(value);
-  return ethers
-    .keccak256(
-      ethers.toUtf8Bytes(
-        encodeCanonicalConsensusValue({
-          domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
-          action,
-        }),
-      ),
-    )
-    .toLowerCase();
+  return keccakBytesHash(encodeCanonicalConsensusBytes({
+    domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
+    action,
+  }));
 };
 
 export const assertIndividualEntityCommandTxs = (txs: EntityTx[]): void => {
@@ -460,9 +469,9 @@ const assertRuntimeOutputSemanticAuthority = (
   tx: EntityTx,
   currentState: EntityState,
 ): void => {
-  // The outer Hanko proves which Entity emitted the output. Every nested
-  // variant must also bind that Entity to its economic role; a type allowlist
-  // alone would let A sign bytes whose payload falsely claims source C.
+  // The committed source Runtime binds the emitting Entity and signer. Every
+  // nested variant also binds that Entity to its economic role; a type
+  // allowlist alone would let A submit bytes whose payload claims source C.
   if (assertRuntimeBookOutputAuthority(source, target, tx, currentState)) return;
   if (assertRuntimeBookLifecycleAuthority(source, target, tx, currentState)) return;
   if (assertRuntimeCrossJRecoveryAuthority(source, target, tx, currentState)) return;
@@ -486,18 +495,83 @@ const assertRuntimeOutputSemanticAuthority = (
   }
 };
 
-export const assertRuntimeOutputAuthorization = (
-  sourceEntityId: string,
-  targetEntityId: string,
+const assertSelfRuntimeContinuations = (
+  source: string,
+  sourceSigner: string,
+  target: string,
+  txs: EntityTx[],
+  currentState: EntityState,
+): boolean => {
+  if (source !== target || !txs.every(tx => selfRuntimeContinuationTxTypes.has(tx.type))) {
+    return false;
+  }
+    const board = resolveCanonicalEntityBoardShares(currentState.config);
+    if (!board.bySigner.has(sourceSigner)) {
+      throw new Error(
+        `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${sourceSigner}:current-board`,
+      );
+    }
+    for (const tx of txs) {
+      if (protocolTxTypes.has(tx.type)) {
+        throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
+      }
+      if (tx.type !== 'requestCrossJurisdictionClear') continue;
+      const route = currentState.crossJurisdictionSwaps?.get(tx.data.orderId);
+      const expectedSourceSigner = route && crossJurisdictionRouteSigner(route, source);
+      if (
+        !route ||
+        !isCrossJurisdictionRouteParticipant(route, source)
+      ) {
+        throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
+      }
+      if (!expectedSourceSigner || expectedSourceSigner !== sourceSigner) {
+        throw new Error(
+          `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${sourceSigner}:` +
+            `${expectedSourceSigner || 'missing'}`,
+        );
+      }
+      assertRuntimeOutputSemanticAuthority(source, target, tx, currentState);
+    }
+    return true;
+};
+
+const runtimeOutputRouteId = (tx: EntityTx): string | undefined => {
+  switch (tx.type) {
+    case 'crossJurisdictionFillNotice':
+    case 'applyCrossJurisdictionBookProgress':
+    case 'removeCrossJurisdictionBookOrder':
+    case 'requestCrossJurisdictionClear':
+      return tx.data.orderId;
+    case 'crossJurisdictionSalvage':
+      return tx.data.routeId;
+    case 'resolveHtlcLock':
+      return tx.data.crossJurisdictionRouteId;
+    case 'disputeStart':
+      return tx.data.crossJurisdictionRouteId;
+    default:
+      return undefined;
+  }
+};
+
+const runtimeOutputSemanticRoute = (
+  tx: EntityTx,
+  currentState: EntityState,
+): CrossJurisdictionSwapRoute | undefined => {
+  const routeId = runtimeOutputRouteId(tx);
+  if (routeId) return currentState.crossJurisdictionSwaps?.get(routeId);
+  if ('data' in tx && tx.data && typeof tx.data === 'object' && 'route' in tx.data) {
+    return (tx.data as { route?: CrossJurisdictionSwapRoute }).route;
+  }
+  return undefined;
+};
+
+const assertSiblingRuntimeOutputs = (
+  source: string,
+  sourceSigner: string,
+  target: string,
   txs: EntityTx[],
   currentState: EntityState,
 ): void => {
-  const source = normalizeEntityRef(sourceEntityId);
-  const target = normalizeEntityRef(targetEntityId);
-  if (!source || !target || target !== normalizeEntityRef(currentState.entityId)) {
-    throw new Error(`RUNTIME_OUTPUT_TARGET_MISMATCH:${target || 'missing'}:${currentState.entityId}`);
-  }
-  if (txs.length === 0) throw new Error('RUNTIME_OUTPUT_TXS_MISSING');
   if (
     source === target &&
     !txs.every(
@@ -506,49 +580,45 @@ export const assertRuntimeOutputAuthorization = (
         normalizeEntityRef(tx.data.route.source.counterpartyEntityId) === source,
     )
   ) {
-    throw new Error(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}`);
+    throw new Error(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}:${txs.map(tx => tx.type).join(',')}`);
   }
   for (const tx of txs) {
     if (protocolTxTypes.has(tx.type)) {
       throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
     }
-    const suppliedRoute =
-      tx.type === 'crossJurisdictionFillNotice' ||
-      tx.type === 'applyCrossJurisdictionBookProgress' ||
-      tx.type === 'removeCrossJurisdictionBookOrder' ||
-      tx.type === 'requestCrossJurisdictionClear' ||
-      tx.type === 'crossJurisdictionSalvage' ||
-      tx.type === 'resolveHtlcLock' ||
-      tx.type === 'disputeStart'
-        ? undefined
-        : 'data' in tx && tx.data && typeof tx.data === 'object' && 'route' in tx.data
-          ? (tx.data as { route?: CrossJurisdictionSwapRoute }).route
-          : undefined;
-    const semanticRoute =
-      suppliedRoute ??
-      (() => {
-        const orderId =
-          tx.type === 'crossJurisdictionFillNotice' ||
-          tx.type === 'applyCrossJurisdictionBookProgress'
-            ? tx.data.orderId
-            : tx.type === 'removeCrossJurisdictionBookOrder' || tx.type === 'requestCrossJurisdictionClear'
-              ? tx.data.orderId
-              : tx.type === 'crossJurisdictionSalvage'
-                ? tx.data.routeId
-                : tx.type === 'resolveHtlcLock'
-                  ? tx.data.crossJurisdictionRouteId
-                  : tx.type === 'disputeStart'
-                    ? tx.data.crossJurisdictionRouteId
-                    : undefined;
-        return orderId ? currentState.crossJurisdictionSwaps?.get(orderId) : undefined;
-      })();
-    const selfSourceRegistration =
-      source === target &&
-      tx.type === 'registerCrossJurisdictionSwap' &&
-      normalizeEntityRef(semanticRoute?.source.counterpartyEntityId) === source;
-    if (!semanticRoute || (!selfSourceRegistration && !isCrossJurisdictionSiblingPair(semanticRoute, source, target))) {
+    const semanticRoute = runtimeOutputSemanticRoute(tx, currentState);
+    if (
+      !semanticRoute ||
+      !isCrossJurisdictionRouteParticipant(semanticRoute, source) ||
+      !isCrossJurisdictionRouteParticipant(semanticRoute, target)
+    ) {
       throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
+    }
+    const expectedSourceSigner = crossJurisdictionRouteSigner(semanticRoute, source);
+    if (!expectedSourceSigner || expectedSourceSigner !== sourceSigner) {
+      throw new Error(
+        `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${sourceSigner}:` +
+          `${expectedSourceSigner || 'missing'}`,
+      );
     }
     assertRuntimeOutputSemanticAuthority(source, target, tx, currentState);
   }
+};
+
+export const assertRuntimeOutputAuthorization = (
+  sourceEntityId: string,
+  sourceSignerId: string,
+  targetEntityId: string,
+  txs: EntityTx[],
+  currentState: EntityState,
+): void => {
+  const source = normalizeEntityRef(sourceEntityId);
+  const sourceSigner = normalizeEntityRef(sourceSignerId);
+  const target = normalizeEntityRef(targetEntityId);
+  if (!source || !sourceSigner || !target || target !== normalizeEntityRef(currentState.entityId)) {
+    throw new Error(`RUNTIME_OUTPUT_TARGET_MISMATCH:${target || 'missing'}:${currentState.entityId}`);
+  }
+  if (txs.length === 0) throw new Error('RUNTIME_OUTPUT_TXS_MISSING');
+  if (assertSelfRuntimeContinuations(source, sourceSigner, target, txs, currentState)) return;
+  assertSiblingRuntimeOutputs(source, sourceSigner, target, txs, currentState);
 };

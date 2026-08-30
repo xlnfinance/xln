@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
 import { verifyAccountSignature } from '../../../account/crypto';
 import type { ConsensusConfig, EntityReplica, HashToSign, EntityFrame } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
@@ -59,7 +59,7 @@ const frameBodyAndLeaderMatchesLocalReplay = (
   // Leader certificates are not part of the frame hash. Require the exact
   // metadata this validator already accepted; otherwise public frame QC bytes
   // could be attached to a forged proposer/view and steal the capped slot.
-  return encodeCanonicalConsensusValue(candidate.leader) === encodeCanonicalConsensusValue(localFrame.leader);
+  return canonicalConsensusValuesEqual(candidate.leader, localFrame.leader);
 };
 
 const signerShares = (config: ConsensusConfig, signerId: string): bigint | null => {

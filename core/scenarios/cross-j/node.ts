@@ -481,7 +481,7 @@ const runHubs = async (): Promise<void> => {
 
   // Do NOT extend credit until users also finished ACCOUNTS_OPEN. Racing
   // set_credit_limit while the left proposer is still finishing height-1
-  // leaves hub pending forever (frame_ack h=2 never ACKed).
+  // leaves hub pending forever (ack_frame h=2 never ACKed).
   await waitForBarrier('accounts-open.ready', env);
 
   // ── PHASE 2: hub → MM credit (trusted hub extends first) ───────────

@@ -6,6 +6,7 @@ use sha2::{Digest as _, Sha256};
 use sha3::Keccak256;
 use xln_rscore_batch::{AccountInputRow, EntityAccountGenesisPolicy};
 use xln_rscore_engine::{AccountDomain, DepositoryAddress};
+use xln_rscore_entity_kernel::KnownAccounts;
 use xln_rscore_protocol::{CanonicalValue, PersistentRadixMap, encode_account_state_value};
 
 use super::RuntimeMachineError;
@@ -20,7 +21,7 @@ const DEFAULT_MAX_FEE: u64 = 15;
 /// these fields; this is the Rust twin of `resolveInboundAccount` in TS.
 pub(super) fn attach_inbound_genesis_policies(
     rows: &mut [AccountInputRow],
-    known_accounts: &BTreeSet<String>,
+    known_accounts: &KnownAccounts,
     jurisdiction: Option<&CanonicalValue>,
     j_replicas: &Value,
 ) -> Result<(), RuntimeMachineError> {
@@ -49,7 +50,7 @@ pub(super) fn attach_inbound_genesis_policies(
     Ok(())
 }
 
-fn derive_policy(
+pub(super) fn derive_policy(
     jurisdiction: &CanonicalValue,
     j_replicas: &Value,
 ) -> Result<EntityAccountGenesisPolicy, RuntimeMachineError> {
@@ -66,19 +67,23 @@ fn derive_policy(
     let overrides = fields
         .iter()
         .find_map(|(name, value)| (name == "rebalancePolicyUsd").then_some(value));
+    let shadow_policy_rows = shadow_policy_rows(overrides)?;
     Ok(EntityAccountGenesisPolicy {
-        shadow_policy_root: shadow_policy_root(overrides)?,
+        shadow_policy_root: shadow_policy_root(&shadow_policy_rows)?,
+        shadow_policy_rows,
         delta_transformer: resolve_delta_transformer(j_replicas, chain_id, depository_text)?,
         expected_domain,
         public_pinned: false,
     })
 }
 
-fn shadow_policy_root(overrides: Option<&CanonicalValue>) -> Result<[u8; 32], RuntimeMachineError> {
+fn shadow_policy_rows(
+    overrides: Option<&CanonicalValue>,
+) -> Result<Vec<(u32, CanonicalValue)>, RuntimeMachineError> {
     let override_fields = overrides
         .map(|value| canonical_object(value, "REBALANCE_POLICY_OBJECT"))
         .transpose()?;
-    let mut map = PersistentRadixMap::empty();
+    let mut rows = Vec::with_capacity(DEFAULT_POLICY_TOKENS.len());
     for (token_id, decimals) in DEFAULT_POLICY_TOKENS {
         let scale = BigInt::from(10_u8).pow(decimals);
         let amount = |name: &str, default: u64| -> Result<BigInt, RuntimeMachineError> {
@@ -101,9 +106,18 @@ fn shadow_policy_root(overrides: Option<&CanonicalValue>) -> Result<[u8; 32], Ru
             ("hardLimit".into(), CanonicalValue::BigInt(hard)),
             ("maxAcceptableFee".into(), CanonicalValue::BigInt(max_fee)),
         ]);
-        let encoded = encode_account_state_value(&value)
+        rows.push((u32::from(token_id), value));
+    }
+    Ok(rows)
+}
+
+fn shadow_policy_root(rows: &[(u32, CanonicalValue)]) -> Result<[u8; 32], RuntimeMachineError> {
+    let mut map = PersistentRadixMap::empty();
+    for (token_id, value) in rows {
+        let encoded = encode_account_state_value(value)
             .map_err(|error| policy_error(&format!("POLICY_ENCODING:{error}")))?;
         let digest: [u8; 32] = Sha256::digest(encoded).into();
+        let token_id = u16::try_from(*token_id).map_err(|_| policy_error("POLICY_TOKEN"))?;
         map = map
             .updated(token_key(token_id), (), digest)
             .map_err(|error| policy_error(&format!("POLICY_TREE:{error}")))?;
@@ -406,7 +420,10 @@ mod tests {
     use num_bigint::BigInt;
     use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
-    use super::{derive_policy, floor_canonical_decimal_text, parse_address, shadow_policy_root};
+    use super::{
+        derive_policy, floor_canonical_decimal_text, parse_address, shadow_policy_root,
+        shadow_policy_rows,
+    };
 
     fn number(value: u64) -> CanonicalValue {
         CanonicalValue::Number(CanonicalNumber::try_from_u64(value).expect("safe fixture"))
@@ -414,7 +431,8 @@ mod tests {
 
     #[test]
     fn default_shadow_policy_root_matches_typescript() {
-        let root = shadow_policy_root(None).expect("default policy");
+        let rows = shadow_policy_rows(None).expect("default policy rows");
+        let root = shadow_policy_root(&rows).expect("default policy");
         assert_eq!(
             hex::encode(root),
             "b6f09b549aac6b836985696c609df76b43c4563570749bcd1c967d261a485e09"

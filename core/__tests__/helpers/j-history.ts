@@ -1,4 +1,5 @@
 import { signAccountFrame } from '../../account/crypto';
+import { createAccountConsensusContext } from '../../entity/account/account-consensus-context';
 import { applyJEvent } from '../../entity/tx/j-events';
 import {
   buildJEventRangeDigest,
@@ -95,4 +96,9 @@ export const applyJEventRange = async (
   state: EntityState,
   data: TestJEventRangeInput,
   env: RuntimeReplica,
-): Promise<JEventApplyResult> => applyJEvent(state, buildJEventRangeData(state, data, env), env);
+): Promise<JEventApplyResult> => applyJEvent(
+  state,
+  buildJEventRangeData(state, data, env),
+  env,
+  createAccountConsensusContext(env),
+);

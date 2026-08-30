@@ -20,7 +20,7 @@ import type { AccountStateCollection } from '../account/state/persistent-state-m
  * Reference: 2024 StoredSubcontract (ChannelState.ts:4-11)
  */
 export interface HtlcLock {
-  lockId: string;              // keccak256(hash + height + nonce)
+  lockId: string;              // Wire name only; canonical value equals hashlock.
   hashlock: string;            // keccak256(abi.encode(secret)) - 32 bytes hex
   timelock: bigint;            // Expiry timestamp (unix-ms)
   revealBeforeHeight: number;  // J-block height deadline (enforced on-chain)
@@ -82,54 +82,7 @@ export interface SwapOffer {
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
-/**
- * HTLC Routing Context (replaces 2024 User.hashlockMap)
- * Tracks inbound/outbound hops for automatic secret propagation
- */
-export interface HtlcRoute {
-  hashlock: string;
-  tokenId?: number;
-  amount?: bigint;
-  startedAtMs?: number;
-  /** True when this Entity created the payment; remains true for a self-cycle's returning hop. */
-  originated?: true;
-
-  // Inbound hop (who sent us this HTLC)
-  inboundEntity?: string;
-  inboundLockId?: string;
-
-  // Outbound hop (who we forwarded to)
-  outboundEntity?: string;
-  outboundLockId?: string;
-  /** Self-cycle legs may commit in either order and are retained until both are terminal. */
-  inboundSettled?: true;
-  outboundSettled?: true;
-
-  // Resolution
-  secret?: string;
-  // Waiting for inbound counterparty to ACK secret-return (htlc_resolve(secret)).
-  secretAckPending?: boolean;
-  secretAckStartedAt?: number;
-  secretAckDeadlineAt?: number;
-  secretAckedAt?: number;
-  pendingFee?: bigint; // Fee to accrue on successful reveal (not on forward)
-  crossJurisdictionRelay?: CrossJurisdictionSecretRelay;
-  createdTimestamp: number;
-}
-
-interface CrossJurisdictionSecretRelay {
-  routeId: string;
-  fillRatio: number;
-  sourceAmount: bigint;
-  targetAmount: bigint;
-  targetEntityId: string;
-  targetSignerId?: string;
-  targetCounterpartyEntityId: string;
-  targetLockId: string;
-}
-
 /** End-to-end payment notes stored locally by the canonical HTLC hashlock. */
-export type HtlcNoteKey = `hashlock:${string}`;
 
 type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
 
@@ -231,8 +184,8 @@ export interface AccountReplica {
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
   /** Exact signed proposal evidence awaiting the counterparty ACK. */
-  pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>;
-  lastOutboundFrameAck?: {
+  pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'ack_frame' }>;
+  lastOutboundAckFrame?: {
     height: number;
     counterpartyEntityId: string;
     response: Extract<AccountInput, { kind: 'ack' }>;
@@ -386,18 +339,6 @@ export interface AccountFrame {
   stateHash: string;
 }
 
-export type AccountHistoryRecord =
-  {
-    kind: 'accountFrame';
-    entityId: string;
-    counterpartyId: string;
-    accountHeight: number;
-    source: 'ackCommit' | 'peerCommit';
-    frame: AccountFrame;
-    runtimeHeight?: number;
-    timestamp?: number;
-  };
-
 export type RuntimeOverlayRecord =
   | { family: 'entity'; entityId: string }
   | { family: 'account'; entityId: string; counterpartyId: string }
@@ -425,7 +366,7 @@ export type AccountDisputeHanko = {
   proposerIsLeft: boolean;
 };
 
-export type AccountFrameAck = {
+export type AccountAckFrame = {
   height: number;
   /** Exact Account frame committed by this acknowledgement. */
   frameHash: string;
@@ -439,7 +380,7 @@ export type AccountFrameAck = {
  * state. It must never manufacture a new Account frame or consume a dispute
  * nonce, so the exact certified hashes travel in a separate control input.
  */
-export type AccountBoardHankoRefresh = AccountFrameAck & {
+export type AccountBoardHankoRefresh = AccountAckFrame & {
   /** Exact ordered EVM log position of the on-chain board activation. */
   boardActivationJHeight: number;
   boardActivationLogIndex: number;
@@ -503,11 +444,11 @@ export type AccountPeerInput =
     })
   | (AccountInputBase & {
       kind: 'ack';
-      ack: AccountFrameAck;
+      ack: AccountAckFrame;
     })
   | (AccountInputBase & {
-      kind: 'frame_ack';
-      ack: AccountFrameAck;
+      kind: 'ack_frame';
+      ack: AccountAckFrame;
       proposal: AccountFrameProposal;
     })
   | (AccountInputBase & {
@@ -550,6 +491,7 @@ export type AccountSwapOfferSnapshot = Readonly<{
   createdHeight: number;
   quantizedGive: bigint;
   quantizedWant: bigint;
+  crossJurisdiction?: CrossJurisdictionSwapRoute;
   /** Internal proof that this row came from the authoritative child engine. */
   accountOutputVerified?: true;
 }>;

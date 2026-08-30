@@ -10,6 +10,7 @@ import {
 } from '../../../jurisdiction/machine/jurisdiction-runtime';
 import type { AccountTx } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import * as crossJurisdictionBoundary from '../../../extensions/cross-j/boundary';
 import type { EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 
@@ -68,17 +69,7 @@ export const validateCrossJurisdictionRouteTransition = (
 export const isCrossJurisdictionRouteParticipant = (
   entityId: string,
   route: CrossJurisdictionSwapRoute,
-): boolean => {
-  const current = normalizeEntityRef(entityId);
-  return [
-    route.source.entityId,
-    route.source.counterpartyEntityId,
-    route.target.entityId,
-    route.target.counterpartyEntityId,
-    route.bookOwnerEntityId,
-    route.hubEntityId,
-  ].some(candidate => candidate && normalizeEntityRef(candidate) === current);
-};
+): boolean => crossJurisdictionBoundary.isCrossJurisdictionRouteParticipant(route, entityId);
 
 export const canonicalizeCrossJurisdictionRouteForKnownEntities = (
   env: EntityRuntimeContext,

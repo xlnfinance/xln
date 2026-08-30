@@ -34,4 +34,9 @@ describe('Rust canonical consensus MessagePack parity', () => {
     );
     expect(hex([{ x: 1 }, { x: 2 }])).toBe('92d4724091a178014002');
   });
+
+  test('encodes canonical long hex as bytes and preserves its string value', () => {
+    const value = `0x${'ab'.repeat(32)}`;
+    expect(hex(value)).toBe(`c72048${'ab'.repeat(32)}`);
+  });
 });

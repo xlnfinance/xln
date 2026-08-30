@@ -1,20 +1,51 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountDomain, AccountOutput, AccountSettledEvent, AccountTx, DepositoryAddress, EntityId,
-    JEventClaimTx, JEventMetadata, JurisdictionEvent, TokenId, canonical_tx_digest,
+    ExternalAllowance, ExternalTokenBalance, ExternalWalletDeltaEvent, ExternalWalletSnapshotEvent,
+    JEventClaimTx, JEventMetadata, JurisdictionEvent, ReserveUpdatedEvent, TokenId,
+    canonical_tx_digest,
 };
 use xln_rscore_entity_kernel::{
-    CommittedAccountTransition, DeterministicContext, EMPTY_J_HISTORY_ROOT, EntityKernelError,
-    EntityKernelOutput, EntityStateSlice, FinalizedJEventBatch, JClaimIngress, JReserveUpdate,
-    JurisdictionScope, OrderedAccountCommit, apply_entity_kernel, apply_finalized_j_event_batches,
-    canonical_j_event_blocks, canonical_j_event_range_hash, capture_entity_state,
-    compute_entity_owned_sections, fold_j_history_root, j_event_range_digest, restore_entity_state,
+    CommittedAccountTransition, ConsensusMode, DeterministicContext, EMPTY_J_HISTORY_ROOT,
+    EntityConsensusConfig, EntityFrameAuthority, EntityFrameEvent, EntityKernelError,
+    EntityKernelOutput, EntityLeaderState, EntityStateSlice, FinalizedJEventBatch, JClaimIngress,
+    JReserveUpdate, JurisdictionScope, OrderedAccountCommit, apply_entity_kernel,
+    apply_finalized_j_event_batches, canonical_j_event_blocks, canonical_j_event_range_hash,
+    capture_entity_state, compute_entity_owned_sections, fold_j_history_root, j_event_range_digest,
+    restore_entity_state,
 };
 
 fn entity(byte: u8) -> EntityId {
     EntityId::parse(&format!("0x{}", format!("{byte:02x}").repeat(32))).expect("entity")
+}
+
+fn metadata(height: u64, block: u8, tx: u8, log_index: u64) -> JEventMetadata {
+    JEventMetadata {
+        block_number: Some(height),
+        block_hash: Some([block; 32]),
+        transaction_hash: Some([tx; 32]),
+        log_index: Some(log_index),
+        event_index: None,
+    }
+}
+
+fn authority(validator: String) -> EntityFrameAuthority {
+    EntityFrameAuthority {
+        config: EntityConsensusConfig {
+            mode: ConsensusMode::ProposerBased,
+            threshold: 1,
+            validators: vec![validator.clone()],
+            shares: BTreeMap::from([(validator.clone(), 1)]),
+            jurisdiction: None,
+        },
+        leader_state: EntityLeaderState {
+            active_validator_id: validator,
+            view: 0,
+            changed_at_height: 0,
+        },
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // Fixture builder mirrors the signed claim fields one-for-one.
@@ -62,9 +93,42 @@ fn claim(
         JReserveUpdate {
             token_id: token.get(),
             own_reserve: own_reserve.into(),
-            counterparty_id: counterparty.clone(),
         },
     )
+}
+
+fn claim_events(claims: &[&JClaimIngress]) -> Vec<JurisdictionEvent> {
+    claims
+        .iter()
+        .flat_map(|claim| match &claim.tx {
+            AccountTx::JEventClaim(tx) => tx.events.clone(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reserve_event(
+    owner: &EntityId,
+    height: u64,
+    block: u8,
+    tx: u8,
+    log_index: u64,
+    token_id: i64,
+    balance: i64,
+) -> JurisdictionEvent {
+    JurisdictionEvent::ReserveUpdated(ReserveUpdatedEvent {
+        metadata: JEventMetadata {
+            block_number: Some(height),
+            block_hash: Some([block; 32]),
+            transaction_hash: Some([tx; 32]),
+            log_index: Some(log_index),
+            event_index: None,
+        },
+        entity: owner.as_hex(),
+        token_id,
+        new_balance: balance.into(),
+    })
 }
 
 #[test]
@@ -78,12 +142,25 @@ fn watcher_ingress_matches_typescript_claim_and_reserves_goldens() {
     let batch = FinalizedJEventBatch {
         j_height: 43,
         j_block_hash: [0xcc; 32],
+        events: {
+            let mut events = claim_events(&[&claim]);
+            events.push(reserve_event(&owner, 43, 0xcc, 0xdd, 2, 1, 0));
+            xln_rscore_engine::canonical_events(&events).expect("events")
+        },
+        dispute_finalization_evidence: vec![],
         reserve_updates: vec![reserve],
         account_claims: vec![claim],
     };
-    let result =
-        apply_finalized_j_event_batches(&mut state, 43, &[batch], &BTreeSet::from([peer.as_hex()]))
-            .expect("watcher ingress");
+    let result = apply_finalized_j_event_batches(
+        &mut state,
+        43,
+        &[batch],
+        "runtime-seed",
+        None,
+        &BTreeSet::from([peer.as_hex()]),
+        &BTreeMap::new(),
+    )
+    .expect("watcher ingress");
     assert_eq!(state.last_finalized_j_height, 43);
     assert_eq!(state.reserves.get(&1), Some(&BigInt::from(0)));
     assert_eq!(result.proposal_work.len(), 1);
@@ -106,20 +183,119 @@ fn watcher_ingress_matches_typescript_claim_and_reserves_goldens() {
         "0xcb9a8dce0258ce9096584ba054f8b44b1696072dd38079c62a2d0df3509be0d6"
     );
     assert_eq!(result.queued_claims[0].counterparty_id, peer.as_hex());
+    assert_eq!(
+        result.frame_events,
+        vec![
+            EntityFrameEvent::Status {
+                message: "⚖️ OBSERVED: bbbb | coll=1.0 USDC | j-block 43 (awaiting 2-of-2)".into(),
+            },
+            EntityFrameEvent::Status {
+                message: "📊 RESERVE: 0 raw units of token #1 | Block 43 | Tx 0xdddddddd...".into(),
+            },
+        ]
+    );
     let snapshot = capture_entity_state(&state, [0; 32], 1).expect("snapshot");
     let restored = restore_entity_state(snapshot, [0; 32], 1).expect("restore");
     assert_eq!(restored.reserves, state.reserves);
 }
 
 #[test]
+fn watcher_ingress_applies_external_wallet_snapshot_then_delta() {
+    let owner = entity(0xaa);
+    let wallet_owner = [0x11; 20];
+    let token = [0x22; 20];
+    let spender = [0x33; 20];
+    let snapshot = JurisdictionEvent::ExternalWalletSnapshot(ExternalWalletSnapshotEvent {
+        metadata: metadata(43, 0x43, 0x44, 1),
+        entity_id: owner.as_hex(),
+        owner: wallet_owner,
+        native_balance: Some(BigInt::from(5)),
+        token_balances: vec![ExternalTokenBalance {
+            token_address: token,
+            token_id: Some(7),
+            balance: BigInt::from(100),
+        }],
+        allowances: vec![ExternalAllowance {
+            token_address: token,
+            spender,
+            allowance: BigInt::from(10),
+        }],
+    });
+    let delta = JurisdictionEvent::ExternalWalletDelta(ExternalWalletDeltaEvent {
+        metadata: metadata(43, 0x43, 0x45, 2),
+        entity_id: owner.as_hex(),
+        owner: wallet_owner,
+        token_address: token,
+        token_id: Some(7),
+        balance_delta: Some(BigInt::from(7)),
+        spender: Some(spender),
+        allowance: Some(BigInt::from(9)),
+    });
+    let events = xln_rscore_engine::canonical_events(&[snapshot, delta]).expect("events");
+    let mut state = EntityStateSlice::empty(owner.as_hex(), 1);
+    let result = apply_finalized_j_event_batches(
+        &mut state,
+        43,
+        &[FinalizedJEventBatch {
+            j_height: 43,
+            j_block_hash: [0x43; 32],
+            events,
+            dispute_finalization_evidence: vec![],
+            reserve_updates: vec![],
+            account_claims: vec![],
+        }],
+        "runtime-seed",
+        Some(&authority(format!("0x{}", hex::encode(wallet_owner)))),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .expect("wallet ingress");
+    assert_eq!(
+        result.frame_events,
+        vec![
+            EntityFrameEvent::Status {
+                message: "💼 EXTERNAL: 0x11111111 snapshot | Block 43 | Tx 0x44444444...".into(),
+            },
+            EntityFrameEvent::Status {
+                message: "💼 EXTERNAL: 0x11111111 delta | Block 43 | Tx 0x45454545...".into(),
+            },
+        ]
+    );
+    let wallet = state.external_wallet.as_ref().expect("wallet state");
+    assert_eq!(
+        wallet
+            .balance(&wallet_owner, &token)
+            .expect("token balance")
+            .balance,
+        BigInt::from(107)
+    );
+    assert_eq!(
+        wallet
+            .balance(&wallet_owner, &[0; 20])
+            .expect("native balance")
+            .balance,
+        BigInt::from(5)
+    );
+    assert_eq!(
+        wallet
+            .allowance(&wallet_owner, &token, &spender)
+            .expect("allowance")
+            .allowance,
+        BigInt::from(9)
+    );
+}
+
+#[test]
 fn j_history_range_hashes_match_typescript_goldens() {
     let owner = entity(0xaa);
     let peer = entity(0xbb);
-    let (claim, reserve) = claim(&owner, &peer, 43, 0xcc, 0xdd, 1, 1, 0, 1_000_000, 0);
+    let (claim, _reserve) = claim(&owner, &peer, 43, 0xcc, 0xdd, 1, 1, 0, 1_000_000, 0);
     let batch = FinalizedJEventBatch {
         j_height: 43,
         j_block_hash: [0xcc; 32],
-        reserve_updates: vec![reserve],
+        events: claim_events(&[&claim]),
+        dispute_finalization_evidence: vec![],
+        reserve_updates: vec![],
         account_claims: vec![claim],
     };
     let blocks = canonical_j_event_blocks(&[batch]).expect("canonical J blocks");
@@ -180,10 +356,24 @@ fn ingress_orders_claims_but_updates_every_observed_reserve() {
         &[FinalizedJEventBatch {
             j_height: 43,
             j_block_hash: [0x43; 32],
+            events: {
+                let mut events = claim_events(&[&claim_b, &claim_c, &claim_d, &claim_e]);
+                events.extend([
+                    reserve_event(&owner, 43, 0x43, 0x11, 5, 1, 10),
+                    reserve_event(&owner, 43, 0x43, 0x12, 6, 2, 20),
+                    reserve_event(&owner, 43, 0x43, 0x13, 7, 3, 30),
+                    reserve_event(&owner, 43, 0x43, 0x14, 8, 4, 40),
+                ]);
+                xln_rscore_engine::canonical_events(&events).expect("events")
+            },
+            dispute_finalization_evidence: vec![],
             reserve_updates: vec![reserve_b, reserve_c, reserve_d, reserve_e],
             account_claims: vec![claim_c, claim_b, claim_d, claim_e],
         }],
+        "runtime-seed",
+        None,
         &BTreeSet::from([active_b.as_hex(), active_c.as_hex()]),
+        &BTreeMap::new(),
     )
     .expect("ordered ingress");
     assert_eq!(
@@ -215,35 +405,53 @@ fn malformed_watcher_projection_is_atomic_and_unsupported_tx_is_loud() {
             &[FinalizedJEventBatch {
                 j_height: 43,
                 j_block_hash: [0x43; 32],
+                events: claim_events(&[&claim]),
+                dispute_finalization_evidence: vec![],
                 reserve_updates: vec![reserve],
                 account_claims: vec![claim],
             }],
+            "runtime-seed",
+            None,
             &BTreeSet::from([peer.as_hex()]),
+            &BTreeMap::new(),
         ),
         Err(EntityKernelError::JEventInvalid { detail })
             if detail == "ACCOUNT_SETTLED_RESERVE_PROJECTION"
     ));
     assert_eq!(state, before);
 
-    assert!(matches!(
-        apply_finalized_j_event_batches(
-            &mut state,
-            43,
-            &[FinalizedJEventBatch {
-                j_height: 43,
-                j_block_hash: [0x43; 32],
-                reserve_updates: vec![],
-                account_claims: vec![JClaimIngress {
-                    account_id: peer.clone(),
-                    tx: AccountTx::AddDelta {
-                        token_id: TokenId::new(1).expect("token")
-                    },
-                }],
+    let error = apply_finalized_j_event_batches(
+        &mut state,
+        43,
+        &[FinalizedJEventBatch {
+            j_height: 43,
+            j_block_hash: [0x43; 32],
+            events: vec![reserve_event(&owner, 43, 0x43, 0x22, 1, 1, 7)],
+            dispute_finalization_evidence: vec![],
+            reserve_updates: vec![JReserveUpdate {
+                token_id: 1,
+                own_reserve: 7.into(),
             }],
-            &BTreeSet::from([peer.as_hex()]),
+            account_claims: vec![JClaimIngress {
+                account_id: peer.clone(),
+                tx: AccountTx::AddDelta {
+                    token_id: TokenId::new(1).expect("token"),
+                },
+            }],
+        }],
+        "runtime-seed",
+        None,
+        &BTreeSet::from([peer.as_hex()]),
+        &BTreeMap::new(),
+    )
+    .expect_err("non J-event Account transaction must be rejected");
+    assert!(
+        matches!(
+            error,
+            EntityKernelError::UnsupportedJEventIngress { kind: "add_delta" }
         ),
-        Err(EntityKernelError::UnsupportedJEventIngress { kind: "add_delta" })
-    ));
+        "unexpected error: {error:?}",
+    );
 }
 
 #[test]

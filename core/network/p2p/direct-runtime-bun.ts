@@ -56,6 +56,12 @@ type DirectRuntimeWsOptions = {
     timestamp?: number,
     sessionAuthenticated?: boolean,
   ) => Promise<void> | void;
+  /**
+   * Public, separately Hanko-authenticated directory data admitted over the
+   * already Runtime-authenticated direct session. The callback must still
+   * verify every profile; socket identity is liveness, not Entity authority.
+   */
+  onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
   /** Signs an envelope for a session without keys; keyed sessions send unsigned. */
   signEnvelope?: (to: string, envelope: RuntimeEntityInputsEnvelope) => RuntimeEntityInputsEnvelope;
   /**
@@ -158,7 +164,7 @@ const countEntityInputEnvelopeKinds = (
   let entityTxs = 0;
   let accountInputs = 0;
   let accountFrames = 0;
-  let frameAcks = 0;
+  let ackFrames = 0;
   let acks = 0;
   let htlcLocks = 0;
   let htlcResolves = 0;
@@ -172,7 +178,7 @@ const countEntityInputEnvelopeKinds = (
       accountInputs += 1;
       countOp(`${prefix}.accountInput.${tx.data.kind}`);
       if (tx.data.kind === 'frame') accountFrames += 1;
-      else if (tx.data.kind === 'frame_ack') frameAcks += 1;
+      else if (tx.data.kind === 'ack_frame') ackFrames += 1;
       else if (tx.data.kind === 'ack') acks += 1;
       for (const accountTx of accountInputProposal(tx.data)?.frame.accountTxs ?? []) {
         countOp(`${prefix}.accountTx.${accountTx.type}`);
@@ -188,7 +194,7 @@ const countEntityInputEnvelopeKinds = (
     entityTxs,
     accountInputs,
     accountFrames,
-    frameAcks,
+    ackFrames,
     acks,
     htlcLocks,
     htlcResolves,
@@ -698,6 +704,31 @@ const handleRecoveryRequest = async (
   return true;
 };
 
+const handleGossipAnnounce = async (
+  context: DirectRuntimeWsContext,
+  session: DirectWsSession,
+  msg: RuntimeWsMessage,
+): Promise<boolean> => {
+  if (msg.type !== 'gossip_announce') return false;
+  const fromRuntimeId = validateMessageRoute(context, session, msg, 'Direct gossip announce');
+  if (!fromRuntimeId) return true;
+  if (!context.options.onGossipAnnounce) {
+    rejectDirectMessage(context, session, msg, 'Direct gossip announce unavailable');
+    return true;
+  }
+  try {
+    await context.options.onGossipAnnounce(fromRuntimeId, msg.payload);
+  } catch (error) {
+    rejectDirectMessage(
+      context,
+      session,
+      msg,
+      `Direct gossip announce failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return true;
+};
+
 
 const handleEntityInputs = async (
   context: DirectRuntimeWsContext,
@@ -862,6 +893,7 @@ const handleDirectMessage = async (
   if (msg.type === 'hello' || msg.type === 'debug_event') return;
   session.lastSeen = Date.now();
   if (handlePeerDeliveryFailure(context, session, msg)) return;
+  if (await handleGossipAnnounce(context, session, msg)) return;
   if (await handleRecoveryRequest(context, session, msg)) return;
   const inputsAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   await handleEntityInputs(context, session, msg);

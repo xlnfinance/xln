@@ -296,6 +296,27 @@ const validateImportResult = (
       throw new Error(`IMPORT_J_RESULT_${label}_INVALID:${String(value)}`);
     }
   }
+  const tokenIds = new Set<number>();
+  const tokenAddresses = new Set<string>();
+  for (const [index, token] of raw.tokenRegistry.entries()) {
+    const prefix = `IMPORT_J_RESULT_TOKEN_${index}`;
+    if (!Number.isSafeInteger(token.tokenId) || token.tokenId < 1 || tokenIds.has(token.tokenId)) {
+      throw new Error(`${prefix}_ID_INVALID:${String(token.tokenId)}`);
+    }
+    if (![0, 1, 2].includes(token.tokenType)) throw new Error(`${prefix}_TYPE_INVALID:${String(token.tokenType)}`);
+    if (!Number.isSafeInteger(token.decimals) || token.decimals < 0 || token.decimals > 255) {
+      throw new Error(`${prefix}_DECIMALS_INVALID:${String(token.decimals)}`);
+    }
+    const address = normalizeAddress(token.address, `${prefix}_ADDRESS`);
+    if (tokenAddresses.has(address)) throw new Error(`${prefix}_ADDRESS_DUPLICATE:${address}`);
+    if (typeof token.symbol !== 'string' || typeof token.name !== 'string' || token.externalTokenId < 0n) {
+      throw new Error(`${prefix}_METADATA_INVALID`);
+    }
+    tokenIds.add(token.tokenId);
+    tokenAddresses.add(address);
+    token.address = address;
+  }
+  raw.tokenRegistry.sort((left, right) => left.tokenId - right.tokenId);
   return { ...structuredClone(raw), contracts };
 };
 
@@ -307,7 +328,8 @@ const assertReplicaMatchesResult = (
   if (
     replica.blockNumber.toString() !== result.blockNumber ||
     Number(replica.watcherConfirmationDepth) !== result.watcherConfirmationDepth ||
-    Number(replica.entityProviderDeploymentBlock) !== result.entityProviderDeploymentBlock
+    Number(replica.entityProviderDeploymentBlock) !== result.entityProviderDeploymentBlock ||
+    safeStringify(replica.tokenRegistry) !== safeStringify(result.tokenRegistry)
   ) throw new Error(`IMPORT_J_RESULT_EXISTING_REPLICA_CONFLICT:${result.name}`);
 };
 
@@ -361,6 +383,7 @@ export const applyCompleteImportJurisdiction = (
       rpcs: [...result.rpcs],
       chainId: result.chainId,
       watcherConfirmationDepth: result.watcherConfirmationDepth,
+      tokenRegistry: structuredClone(result.tokenRegistry),
     });
   }
   if (result.browserVMState) env.browserVMState = structuredClone(result.browserVMState);
@@ -483,6 +506,7 @@ const buildPreparedJurisdictionImportResult = async (
     throw new Error(`IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${request.name}`);
   }
   const browserVMState = isBrowserVM ? await adapter.dumpState() : undefined;
+  const tokenRegistry = await adapter.getTokenRegistry();
   if (isBrowserVM && (!browserVMState || typeof browserVMState === 'string')) {
     throw new Error(`IMPORT_J_BROWSERVM_STATE_UNAVAILABLE:${request.name}`);
   }
@@ -497,6 +521,7 @@ const buildPreparedJurisdictionImportResult = async (
     blockNumber: (await resolveInitialBlockNumber(adapter, request)).toString(),
     stateRoot: stateRootBytes ? ethers.hexlify(stateRootBytes) : null,
     watcherConfirmationDepth,
+    tokenRegistry,
     entityProviderDeploymentBlock,
     contracts,
     ...(browserVMState && typeof browserVMState !== 'string'

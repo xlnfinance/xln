@@ -1,21 +1,20 @@
 //! The authoritative account store: replicas the engine itself drives.
 //!
-//! The mirror engine in `stateful.rs` applies transitions the runtime already
-//! decided. This one owns the accounts instead — their mempools, their frames
-//! and their signatures — so a wave costs one message rather than one replica
-//! shell per frame. Both keep the same commitment: a radix-16 Patricia tree
-//! keyed by account id, leaf digest = the Entity's account leaf.
+//! The engine owns Account mempools, frames and signatures. Its commitment is
+//! the canonical radix-16 Patricia tree keyed by account id, with the Entity's
+//! Account leaf as each value digest.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, OnceLock};
 
 use xln_rscore_engine::{
-    AccountConsensus, AccountEnvelope, AccountFrame, AccountIdentity, AccountOutput,
-    AccountPeerEnvelope, AccountReplica, AccountState, AccountTx, AckOutcome, BoardDelays,
-    BoardHankoRefreshInput, CertifiedBoardAuthority, CommittedFrameEvidence, CounterpartyDispute,
-    Disposition, FrameAckOutcome, FrameAckPhase, IncomingAck, IncomingFrame,
+    AccountConsensus, AccountDomain, AccountEnvelope, AccountFrame, AccountIdentity, AccountOutput,
+    AccountPeerEnvelope, AccountReplica, AccountState, AccountTx, AckFrameOutcome, AckFramePhase,
+    AckOutcome, BoardDelays, BoardHankoRefreshInput, CertifiedBoardAuthority,
+    CommittedFrameEvidence, CounterpartyDispute, Disposition, IncomingAck, IncomingFrame,
     IncomingFrameSecurityContext, IncomingOutcome, ProposalOutcome, SignedIncomingFrame,
     SigningIdentity, StandaloneInputOutcome, StateError, apply_board_hanko_refresh,
-    apply_incoming_ack_with_authority, apply_incoming_frame_ack_with_authority,
+    apply_incoming_ack_frame_with_authority, apply_incoming_ack_with_authority,
     apply_incoming_frame_with_authority, apply_standalone_dispute, canonical_tx_digest,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
@@ -23,14 +22,14 @@ use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 use crate::checkpoint::AccountRestore;
 use crate::{AccountId, AccountSeed, BatchError};
 
-/// What arrives for one account. `FrameAck` is one canonical wire input whose
+/// What arrives for one account. `AckFrame` is one canonical wire input whose
 /// phases execute ACK-first: a valid ACK commits even if the bundled frame is
 /// rejected, matching the TypeScript bilateral machine.
 #[derive(Clone, Debug)]
 pub enum AccountInputKind {
     Frame(Box<IncomingFrame>),
     Ack(IncomingAck),
-    FrameAck {
+    AckFrame {
         ack: IncomingAck,
         frame: Box<IncomingFrame>,
     },
@@ -120,7 +119,6 @@ pub enum AccountInputVerdict {
         ack_hanko: Vec<u8>,
         ack_dispute_signature: Option<[u8; 65]>,
         ack_dispute_hanko: Option<Vec<u8>>,
-        outputs: Vec<AccountOutput>,
         /// Exactly what the committed transactions said they did. The Entity
         /// frame hashes these strings, so a publisher that re-derived them
         /// would be signing its own guess.
@@ -158,7 +156,6 @@ pub enum AccountInputVerdict {
     AckCommitted {
         height: u64,
         state_hash: [u8; 32],
-        outputs: Vec<AccountOutput>,
         /// The pending frame's own events, released on the same ACK as its
         /// outputs.
         events: Vec<String>,
@@ -170,12 +167,12 @@ pub enum AccountInputVerdict {
     AckRejected {
         reason: String,
     },
-    FrameAckApplied {
+    AckFrameApplied {
         ack: Box<AccountInputVerdict>,
         frame: Box<AccountInputVerdict>,
     },
-    FrameAckRejected {
-        phase: FrameAckPhase,
+    AckFrameRejected {
+        phase: AckFramePhase,
         reason: String,
     },
     DisputeApplied,
@@ -215,7 +212,7 @@ pub enum AccountResponseDirective {
     Clear,
     /// Exact Account-authored response bytes. The Entity may only attach a
     /// new proposal around this ACK; it must never reconstruct the response.
-    Force(AccountPeerInput),
+    Force(Box<AccountPeerInput>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -261,7 +258,10 @@ pub struct ProposalRow {
 /// The frame an attempt produced.
 #[derive(Clone)]
 pub struct ProposedRow {
-    pub frame: AccountFrame,
+    /// Certification needs only the signed frame height. The complete frame
+    /// already lives in `ProposalRow::outbound_input`; retaining it here made
+    /// a second full copy of every proposed Account transaction vector.
+    pub frame_height: u64,
     pub state_hash: [u8; 32],
     /// Raw owner signature paired with `hanko`, for the parent Entity's
     /// manifest. It is ephemeral and never changes the Account wire shape.
@@ -273,45 +273,34 @@ pub struct ProposedRow {
     pub dispute_hanko: Option<Vec<u8>>,
     /// The recovery proof the proposal travels with, when it carries one.
     pub dispute: Option<xln_rscore_engine::DisputeDraft>,
-    /// What the proposer publishes at signing time, before any ack exists.
-    /// The frame's committed effects are released with the peer's ack; these
-    /// are the strings the Entity frame commits and the outputs it acts on
-    /// the moment the window executed.
+    /// The proposal status strings the Entity frame commits.
     pub events: Vec<String>,
-    pub outputs: Vec<AccountOutput>,
-    /// Exact outputs of each transaction in `frame.txs` order. The process
-    /// wire keeps its existing flattened output field; resident Entity
-    /// composition consumes this lossless form directly.
-    pub outputs_by_tx: Vec<Vec<AccountOutput>>,
+    /// Sole exact effect representation in `frame.txs` order. The process
+    /// encoder streams its existing flat wire field from these rows; resident
+    /// Entity does not release proposal effects before acknowledgement.
+    pub outputs_by_tx: Arc<Vec<Vec<AccountOutput>>>,
     /// Present when this proposal also carries the acknowledgement this side
-    /// owed, which makes it a `frame_ack` on the wire.
+    /// owed, which makes it a `ack_frame` on the wire.
     pub bundled_ack: Option<xln_rscore_engine::OutboundAck>,
 }
 
 impl ProposalRow {
+    /// Borrow the exact frame carried to the counterparty.
+    pub fn incoming_ref(&self) -> Option<&xln_rscore_engine::IncomingFrame> {
+        match &self.outbound_input.as_ref()?.kind {
+            AccountInputKind::Frame(frame) | AccountInputKind::AckFrame { frame, .. } => {
+                Some(frame)
+            }
+            AccountInputKind::Ack(_)
+            | AccountInputKind::Dispute(_)
+            | AccountInputKind::BoardHankoRefresh(_) => None,
+        }
+    }
+
     /// The frame as the counterparty receives it, or `None` when the attempt
     /// produced none.
     pub fn incoming(&self) -> Option<xln_rscore_engine::IncomingFrame> {
-        self.proposed
-            .as_ref()
-            .map(|proposed| xln_rscore_engine::IncomingFrame {
-                frame: proposed.frame.clone(),
-                state_hash: proposed.state_hash,
-                frame_hanko: Some(proposed.hanko.clone()),
-                // The proposer's signature over their proof is not modelled
-                // here: this path hands one engine's own proposal to another
-                // inside a test, where both sides build the same proof from
-                // the same state.
-                dispute: proposed.dispute.as_ref().map(|draft| {
-                    xln_rscore_engine::CounterpartyDispute {
-                        hanko: None,
-                        hash: draft.hash,
-                        proof_body_hash: draft.proof_body_hash,
-                        nonce: draft.nonce,
-                        proposer_is_left: draft.proposer_is_left,
-                    }
-                }),
-            })
+        self.incoming_ref().cloned()
     }
 }
 
@@ -362,17 +351,37 @@ fn dropped_rows(
     account_id: AccountId,
     dropped: &[xln_rscore_engine::DroppedTx],
 ) -> Result<Vec<DroppedRow>, BatchError> {
+    static PROFILE_DROPS: OnceLock<bool> = OnceLock::new();
+    let profile_drops = *PROFILE_DROPS
+        .get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"));
     dropped
         .iter()
         .map(|dropped| {
-            Ok(DroppedRow {
+            let row = DroppedRow {
                 index: dropped.index,
                 tx_digest: canonical_tx_digest(&dropped.tx)
                     .map_err(|error| state_error(account_id, &error))?,
                 code: dropped.rejection.code(),
                 message: dropped.rejection.message(),
                 disposition: dropped.disposition,
-            })
+            };
+            if profile_drops {
+                let (kind, operation_id) = match &dropped.tx {
+                    AccountTx::SwapOffer { offer_id, .. } => ("swapOffer", offer_id.as_str()),
+                    AccountTx::SwapResolve { offer_id, .. } => ("swapResolve", offer_id.as_str()),
+                    AccountTx::SwapCancelRequest { offer_id } => {
+                        ("swapCancel", offer_id.as_str())
+                    }
+                    AccountTx::HtlcLock(lock) => ("htlcLock", lock.lock_id.as_str()),
+                    AccountTx::HtlcResolve(resolve) => ("htlcResolve", resolve.lock_id.as_str()),
+                    _ => ("other", "-"),
+                };
+                eprintln!(
+                    "RSCORE_ACCOUNT_TX_DROPPED account={} kind={} operationId={} code={} disposition={:?}",
+                    account_id, kind, operation_id, row.code, row.disposition,
+                );
+            }
+            Ok(row)
         })
         .collect()
 }
@@ -400,16 +409,23 @@ fn dispute_input(
     }
 }
 
-fn outgoing_account_input(account: &AccountConsensus, proposed: &ProposedRow) -> AccountPeerInput {
+fn outgoing_account_input(
+    account: &AccountConsensus,
+    frame: AccountFrame,
+    state_hash: [u8; 32],
+    hanko: Vec<u8>,
+    dispute: Option<&xln_rscore_engine::DisputeDraft>,
+    bundled_ack: Option<&xln_rscore_engine::OutboundAck>,
+) -> AccountPeerInput {
     let envelope = outgoing_envelope(account);
     let frame = IncomingFrame {
-        frame: proposed.frame.clone(),
-        state_hash: proposed.state_hash,
-        frame_hanko: Some(proposed.hanko.clone()),
-        dispute: proposed.dispute.as_ref().map(dispute_input),
+        frame,
+        state_hash,
+        frame_hanko: Some(hanko),
+        dispute: dispute.map(dispute_input),
     };
-    let kind = match &proposed.bundled_ack {
-        Some(ack) => AccountInputKind::FrameAck {
+    let kind = match bundled_ack {
+        Some(ack) => AccountInputKind::AckFrame {
             ack: IncomingAck {
                 height: ack.height,
                 frame_hash: ack.frame_hash,
@@ -443,26 +459,76 @@ fn response_ack(verdict: &AccountInputVerdict) -> Option<IncomingAck> {
             frame_hanko: Some(ack_hanko.clone()),
             dispute: ack_dispute.as_ref().map(dispute_input),
         }),
-        AccountInputVerdict::FrameAckApplied { frame, .. } => response_ack(frame),
+        AccountInputVerdict::AckFrameApplied { frame, .. } => response_ack(frame),
         _ => None,
     }
 }
 
+fn same_dispute_binding(
+    expected: &Option<xln_rscore_engine::CounterpartyDispute>,
+    stored: &Option<xln_rscore_engine::DisputeDraft>,
+) -> bool {
+    match (expected, stored) {
+        (None, None) => true,
+        (Some(expected), Some(stored)) => {
+            expected.hash == stored.hash
+                && expected.proof_body_hash == stored.proof_body_hash
+                && expected.nonce == stored.nonce
+                && expected.proposer_is_left == stored.proposer_is_left
+                && expected
+                    .hanko
+                    .as_ref()
+                    .is_none_or(|hanko| stored.hanko.as_ref() == Some(hanko))
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn account_response_directive(
+    account_id: AccountId,
     account: &AccountConsensus,
     pure_ack: bool,
     verdict: &AccountInputVerdict,
-) -> AccountResponseDirective {
-    if let Some(ack) = response_ack(verdict) {
-        return AccountResponseDirective::Force(AccountPeerInput {
-            envelope: outgoing_envelope(account),
-            kind: AccountInputKind::Ack(ack),
-        });
+) -> Result<AccountResponseDirective, BatchError> {
+    if let Some(expected) = response_ack(verdict) {
+        // The Account resident is the sole source after local certification:
+        // it contains the same ACK binding plus the freshly attached dispute
+        // Hanko. Rebuilding from the pre-attach verdict creates two bytewise
+        // representations of one required response and breaks AckFrame
+        // bundling during inbound genesis.
+        let stored = account
+            .outbound_ack()
+            .ok_or_else(|| BatchError::AccountsTree {
+                account_id,
+                detail: "ACCOUNT_ACK_STATE:MISSING".to_string(),
+            })?;
+        if stored.height != expected.height
+            || stored.frame_hash != expected.frame_hash
+            || expected.frame_hanko.as_deref() != Some(stored.frame_hanko.as_slice())
+            || !same_dispute_binding(&expected.dispute, &stored.dispute)
+        {
+            return Err(BatchError::AccountsTree {
+                account_id,
+                detail: "ACCOUNT_ACK_STATE:BINDING_MISMATCH".to_string(),
+            });
+        }
+        let ack = IncomingAck {
+            height: stored.height,
+            frame_hash: stored.frame_hash,
+            frame_hanko: Some(stored.frame_hanko.clone()),
+            dispute: stored.dispute.as_ref().map(dispute_input),
+        };
+        return Ok(AccountResponseDirective::Force(Box::new(
+            AccountPeerInput {
+                envelope: outgoing_envelope(account),
+                kind: AccountInputKind::Ack(ack),
+            },
+        )));
     }
     if pure_ack && matches!(verdict, AccountInputVerdict::AckCommitted { .. }) {
-        return AccountResponseDirective::Clear;
+        return Ok(AccountResponseDirective::Clear);
     }
-    AccountResponseDirective::Preserve
+    Ok(AccountResponseDirective::Preserve)
 }
 
 pub(crate) fn proposal_row(
@@ -479,10 +545,20 @@ pub(crate) fn proposal_row(
             dropped: dropped_rows(account_id, &dropped)?,
         },
         ProposalOutcome::Proposed(proposed) => {
+            let proposed = *proposed;
             let failed_htlc_locks = failed_htlc_locks(&proposed.dropped);
             let dropped = dropped_rows(account_id, &proposed.dropped)?;
+            let frame_height = proposed.frame.height;
+            let outbound_input = Some(outgoing_account_input(
+                account,
+                proposed.frame,
+                proposed.state_hash,
+                proposed.hanko.clone(),
+                proposed.dispute.as_ref(),
+                proposed.bundled_ack.as_ref(),
+            ));
             let proposed = ProposedRow {
-                frame: proposed.frame,
+                frame_height,
                 state_hash: proposed.state_hash,
                 signature: proposed.signature,
                 hanko: proposed.hanko,
@@ -490,11 +566,9 @@ pub(crate) fn proposal_row(
                 dispute_hanko: proposed.dispute_hanko,
                 dispute: proposed.dispute,
                 events: proposed.events,
-                outputs: proposed.outputs,
                 outputs_by_tx: proposed.outputs_by_tx,
                 bundled_ack: proposed.bundled_ack,
             };
-            let outbound_input = Some(outgoing_account_input(account, &proposed));
             ProposalRow {
                 account_id,
                 outbound_input,
@@ -558,7 +632,7 @@ pub(crate) fn apply_one(
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
             }
         }
-        AccountInputKind::FrameAck { ack, frame } => match apply_incoming_frame_ack_with_authority(
+        AccountInputKind::AckFrame { ack, frame } => match apply_incoming_ack_frame_with_authority(
             account,
             identity,
             &input.envelope,
@@ -571,7 +645,7 @@ pub(crate) fn apply_one(
                 local_certified_board_authority: local_authority,
             },
         ) {
-            Ok(outcome) => frame_ack_verdict(outcome),
+            Ok(outcome) => ack_frame_verdict(outcome),
             Err(error) => AccountInputVerdict::Failed(error.to_string()),
         },
         AccountInputKind::Dispute(dispute) => {
@@ -627,7 +701,6 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             ack_hanko,
             ack_dispute_signature,
             ack_dispute_hanko,
-            outputs,
             events,
             rolled_back,
             committed_frame,
@@ -637,13 +710,12 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             state_hash,
             ack_signature,
             ack_hanko,
-            ack_dispute_signature,
+            ack_dispute_signature: ack_dispute_signature.map(|signature| *signature),
             ack_dispute_hanko,
-            outputs,
             events,
             rolled_back,
             committed_frame,
-            ack_dispute,
+            ack_dispute: ack_dispute.map(|draft| *draft),
         },
         IncomingOutcome::CollisionIgnored { height, queued } => {
             AccountInputVerdict::FrameCollisionIgnored { height, queued }
@@ -657,7 +729,7 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             height,
             state_hash,
             ack_hanko,
-            ack_dispute,
+            ack_dispute: ack_dispute.map(|draft| *draft),
         },
         IncomingOutcome::Stale {
             height,
@@ -684,13 +756,11 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
         AckOutcome::Committed {
             height,
             state_hash,
-            outputs,
             events,
             committed_frame,
         } => AccountInputVerdict::AckCommitted {
             height,
             state_hash,
-            outputs,
             events,
             committed_frame,
         },
@@ -699,14 +769,14 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
     }
 }
 
-fn frame_ack_verdict(outcome: FrameAckOutcome) -> AccountInputVerdict {
+fn ack_frame_verdict(outcome: AckFrameOutcome) -> AccountInputVerdict {
     match outcome {
-        FrameAckOutcome::Applied { ack, frame } => AccountInputVerdict::FrameAckApplied {
+        AckFrameOutcome::Applied { ack, frame } => AccountInputVerdict::AckFrameApplied {
             ack: Box::new(ack_verdict(*ack)),
             frame: Box::new(incoming_verdict(*frame)),
         },
-        FrameAckOutcome::Rejected { phase, reason } => {
-            AccountInputVerdict::FrameAckRejected { phase, reason }
+        AckFrameOutcome::Rejected { phase, reason } => {
+            AccountInputVerdict::AckFrameRejected { phase, reason }
         }
     }
 }
@@ -717,7 +787,7 @@ fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
         | AccountInputVerdict::AckCommitted { .. }
         | AccountInputVerdict::DisputeApplied
         | AccountInputVerdict::BoardHankoRefreshApplied { .. } => true,
-        AccountInputVerdict::FrameAckApplied { ack, frame } => {
+        AccountInputVerdict::AckFrameApplied { ack, frame } => {
             verdict_changes_account(ack) || verdict_changes_account(frame)
         }
         AccountInputVerdict::FrameCollisionIgnored { .. }
@@ -727,7 +797,7 @@ fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
         | AccountInputVerdict::FrameRejected { .. }
         | AccountInputVerdict::AckStale { .. }
         | AccountInputVerdict::AckRejected { .. }
-        | AccountInputVerdict::FrameAckRejected { .. }
+        | AccountInputVerdict::AckFrameRejected { .. }
         | AccountInputVerdict::DisputeRejected { .. }
         | AccountInputVerdict::BoardHankoRefreshRejected { .. }
         | AccountInputVerdict::Failed(_) => false,
@@ -737,7 +807,7 @@ fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
 pub(crate) fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
     match verdict {
         AccountInputVerdict::FrameCommitted { height: 1, .. } => true,
-        AccountInputVerdict::FrameAckApplied { frame, .. } => verdict_commits_genesis(frame),
+        AccountInputVerdict::AckFrameApplied { frame, .. } => verdict_commits_genesis(frame),
         AccountInputVerdict::FrameCommitted { .. }
         | AccountInputVerdict::FrameCollisionIgnored { .. }
         | AccountInputVerdict::FrameDuplicate { .. }
@@ -747,7 +817,7 @@ pub(crate) fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
         | AccountInputVerdict::AckCommitted { .. }
         | AccountInputVerdict::AckStale { .. }
         | AccountInputVerdict::AckRejected { .. }
-        | AccountInputVerdict::FrameAckRejected { .. }
+        | AccountInputVerdict::AckFrameRejected { .. }
         | AccountInputVerdict::DisputeApplied
         | AccountInputVerdict::DisputeRejected { .. }
         | AccountInputVerdict::BoardHankoRefreshApplied { .. }
@@ -899,8 +969,86 @@ fn validate_genesis_envelope(
             )
         })
         .collect();
-    AccountEnvelope::new(carried, Vec::new())
-        .map_err(|error| create_envelope_error(account_id, error.to_string()))
+    AccountEnvelope::new_with_rebalance_shadow_rows(
+        carried,
+        Vec::new(),
+        replica.envelope().rebalance_shadow_policy_rows(),
+        Vec::new(),
+    )
+    .map_err(|error| create_envelope_error(account_id, error.to_string()))
+}
+
+/// Build the one canonical locally-opened H=0 Account shell. Entity code
+/// supplies intent; the Account layer owns every shell byte and validates the
+/// result through the same Create gate used by resident workers.
+#[derive(Clone, Debug)]
+pub struct LocalGenesisSeedParams {
+    pub owner_entity_id: [u8; 32],
+    pub account_id: AccountId,
+    pub domain: AccountDomain,
+    pub watch_seed: xln_rscore_engine::WatchSeed,
+    pub dispute_config: xln_rscore_engine::AccountDisputeConfig,
+    pub delta_transformer: [u8; 20],
+    pub public_pinned: bool,
+    pub policy_rows: Vec<(u32, CanonicalValue)>,
+}
+
+pub fn build_local_genesis_seed(params: LocalGenesisSeedParams) -> Result<AccountSeed, BatchError> {
+    let LocalGenesisSeedParams {
+        owner_entity_id,
+        account_id,
+        domain,
+        watch_seed,
+        dispute_config,
+        delta_transformer,
+        public_pinned,
+        policy_rows,
+    } = params;
+    let owner =
+        parse_entity_id(owner_entity_id).map_err(|error| state_error(account_id, &error))?;
+    let peer =
+        parse_entity_id(*account_id.as_bytes()).map_err(|error| state_error(account_id, &error))?;
+    if owner == peer {
+        return Err(BatchError::WaveCreateCounterparty {
+            account_id,
+            counterparty: hex_of(account_id.as_bytes()),
+        });
+    }
+    let (left, right) = if owner < peer {
+        (owner.clone(), peer)
+    } else {
+        (peer, owner.clone())
+    };
+    let identity = AccountIdentity::new(domain, left, right, watch_seed)
+        .map_err(|error| state_error(account_id, &error))?;
+    let state = AccountState::new(identity, dispute_config, Vec::new())
+        .map_err(|error| state_error(account_id, &error))?;
+    let mut replica =
+        AccountReplica::new(owner, state).map_err(|error| state_error(account_id, &error))?;
+    replica.set_delta_transformer(delta_transformer);
+    let empty_root = format!("0x{}", hex_of(&[0_u8; 32]));
+    let fields = genesis_envelope_fields(&replica, public_pinned, &empty_root);
+    let envelope = AccountEnvelope::new(fields, Vec::new())
+        .map_err(|error| create_envelope_error(account_id, error.to_string()))?;
+    replica.set_envelope(envelope);
+    for (token_id, policy) in policy_rows {
+        let token = xln_rscore_engine::TokenId::new(token_id)
+            .map_err(|error| state_error(account_id, &error))?;
+        replica
+            .set_rebalance_shadow_policy(token, policy)
+            .map_err(|error| state_error(account_id, &error))?;
+    }
+    let seed = AccountSeed {
+        account_id,
+        replica,
+        consensus: None,
+    };
+    let canonical = validate_genesis_seed(owner_entity_id, &seed)?;
+    Ok(AccountSeed {
+        account_id,
+        replica: canonical.replica().clone(),
+        consensus: None,
+    })
 }
 
 fn genesis_envelope_fields(
@@ -1069,26 +1217,28 @@ fn create_envelope_error(account_id: AccountId, detail: String) -> BatchError {
     BatchError::WaveCreateEnvelope { account_id, detail }
 }
 
+pub(crate) fn active(account: &AccountConsensus) -> Result<bool, BatchError> {
+    Ok(
+        match account
+            .replica()
+            .envelope()
+            .fields()
+            .iter()
+            .find(|(name, _)| name == "status")
+            .map(|(_, value)| value)
+        {
+            None => true,
+            Some(CanonicalValue::String(value)) => value == "active",
+            Some(_) => false,
+        },
+    )
+}
+
 pub(crate) fn proposable(account: &AccountConsensus) -> Result<bool, BatchError> {
-    if account.replica().settlement_workspace_present() {
-        return Err(BatchError::ProposabilitySettlementUnrepresented);
-    }
     if account.pending().is_some() {
         return Ok(false);
     }
-    let active = match account
-        .replica()
-        .envelope()
-        .fields()
-        .iter()
-        .find(|(name, _)| name == "status")
-        .map(|(_, value)| value)
-    {
-        None => true,
-        Some(CanonicalValue::String(value)) => value == "active",
-        Some(_) => false,
-    };
-    if !active {
+    if !active(account)? {
         return Ok(false);
     }
     let locks_full = account.replica().state().htlc_slots_full();
@@ -1221,7 +1371,7 @@ pub(crate) fn inbound_genesis_account(
         });
     };
     let frame_height = match &input.kind {
-        AccountInputKind::Frame(frame) | AccountInputKind::FrameAck { frame, .. } => {
+        AccountInputKind::Frame(frame) | AccountInputKind::AckFrame { frame, .. } => {
             frame.frame.height
         }
         AccountInputKind::Ack(_)
@@ -1239,40 +1389,24 @@ pub(crate) fn inbound_genesis_account(
             detail: "HEIGHT_NOT_ONE".to_string(),
         });
     }
-    let owner = parse_entity_id(owner_entity_id).map_err(|_| BatchError::InboundGenesis {
-        account_id,
-        detail: "OWNER_ID".to_string(),
-    })?;
-    let peer =
-        parse_entity_id(envelope.from_entity_id).map_err(|_| BatchError::InboundGenesis {
-            account_id,
-            detail: "PEER_ID".to_string(),
-        })?;
-    let (left, right) = if owner < peer {
-        (owner.clone(), peer)
-    } else {
-        (peer, owner.clone())
-    };
-    let identity = AccountIdentity::new(policy.expected_domain.clone(), left, right, watch_seed)
-        .map_err(|error| state_error(account_id, &error))?;
-    let state = AccountState::new(identity, envelope.dispute_config, Vec::new())
-        .map_err(|error| state_error(account_id, &error))?;
-    let mut replica =
-        AccountReplica::new(owner, state).map_err(|error| state_error(account_id, &error))?;
-    replica.set_delta_transformer(policy.delta_transformer);
-    let policy_root = format!("0x{}", hex_of(&policy.shadow_policy_root));
-    let fields = genesis_envelope_fields(&replica, false, &policy_root);
-    let full_envelope = AccountEnvelope::new(fields, Vec::new())
-        .map_err(|error| create_envelope_error(account_id, error.to_string()))?;
-    replica.set_envelope(full_envelope);
-    validate_genesis_seed(
+    let seed = build_local_genesis_seed(LocalGenesisSeedParams {
         owner_entity_id,
-        &AccountSeed {
+        account_id,
+        domain: policy.expected_domain.clone(),
+        watch_seed,
+        dispute_config: envelope.dispute_config,
+        delta_transformer: policy.delta_transformer,
+        public_pinned: false,
+        policy_rows: policy.shadow_policy_rows.clone(),
+    })?;
+    let actual_root = validate_genesis_shadow(account_id, seed.replica.envelope().field("shadow"))?;
+    if actual_root != format!("0x{}", hex_of(&policy.shadow_policy_root)) {
+        return Err(BatchError::InboundGenesis {
             account_id,
-            replica,
-            consensus: None,
-        },
-    )
+            detail: "POLICY_ROWS_ROOT".to_string(),
+        });
+    }
+    Ok(AccountConsensus::new(seed.replica))
 }
 
 fn parse_entity_id(bytes: [u8; 32]) -> Result<xln_rscore_engine::EntityId, StateError> {

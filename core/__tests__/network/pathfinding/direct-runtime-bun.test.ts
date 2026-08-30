@@ -1078,6 +1078,41 @@ describe('direct runtime websocket route', () => {
     ]);
   });
 
+  test('admits a gossip announcement only after direct Runtime authentication', async () => {
+    const serverSeed = 'direct-route-server-gossip';
+    const clientSeed = 'direct-route-client-gossip';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const admitted: Array<{ from: string; payload: unknown }> = [];
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInputs: () => undefined,
+      onGossipAnnounce: (from, payload) => {
+        admitted.push({ from, payload });
+      },
+    });
+    const { ws, closed } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(
+      ws,
+      serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)),
+    );
+    const payload = { profiles: [], jurisdictions: [] };
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'gossip_announce',
+      id: 'direct-gossip-1',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      timestamp: Date.now(),
+      payload,
+    }));
+
+    expect(admitted).toEqual([{ from: clientRuntimeId, payload }]);
+    expect(closed).toEqual([]);
+  });
+
   test('preserves direct socket root errors in a terminal delivery failure', async () => {
     const serverSeed = 'direct-route-server-send-error';
     const clientSeed = 'direct-route-client-send-error';

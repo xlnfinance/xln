@@ -8,7 +8,34 @@ pub(crate) mod handlers;
 
 use num_bigint::BigInt;
 
-use crate::{HtlcLockTx, HtlcResolveTx, JEventClaimTx, TokenId};
+use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, TokenId};
+
+pub const ACCOUNT_TX_TYPES: [&str; 24] = [
+    "direct_payment",
+    "lending_fund",
+    "lending_borrow_request",
+    "lending_repay",
+    "lending_credit",
+    "lending_close_request",
+    "lending_close_payout",
+    "add_delta",
+    "set_credit_limit",
+    "reserve_to_collateral",
+    "request_collateral",
+    "rebalance_refund",
+    "rebalance_policy",
+    "htlc_lock",
+    "htlc_resolve",
+    "cross_pull_lock",
+    "cross_pull_close",
+    "cross_pull_progress",
+    "swap_offer",
+    "swap_cancel_request",
+    "swap_resolve",
+    "cross_swap_fill_ack",
+    "settle_transition",
+    "j_event_claim",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliveryMode {
@@ -23,16 +50,63 @@ pub enum LendingTermId {
     OneMonth,
 }
 
+impl LendingTermId {
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::OneHour => "1h",
+            Self::OneDay => "1d",
+            Self::OneMonth => "1m",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LendingAction {
     Grant,
     Revoke,
 }
 
+impl LendingAction {
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Grant => "grant",
+            Self::Revoke => "revoke",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReserveSide {
     Receiving,
     Counterparty,
+}
+
+impl ReserveSide {
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Receiving => "receiving",
+            Self::Counterparty => "counterparty",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RebalanceRefundReason {
+    PolicyMismatch,
+    Timeout,
+    FeeTooLow,
+    Manual,
+}
+
+impl RebalanceRefundReason {
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::PolicyMismatch => "policy_mismatch",
+            Self::Timeout => "timeout",
+            Self::FeeTooLow => "fee_too_low",
+            Self::Manual => "manual",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +140,7 @@ pub enum AccountTx {
         min_net_receive: BigInt,
         time_in_force: Option<u8>,
         price_ticks: Option<BigInt>,
+        cross_jurisdiction: Option<CanonicalValue>,
     },
     SwapResolve {
         offer_id: String,
@@ -159,6 +234,70 @@ pub enum AccountTx {
         block_number: i64,
         transaction_hash: String,
     },
+    RequestCollateral {
+        token_id: TokenId,
+        amount: BigInt,
+        fee_token_id: Option<TokenId>,
+        fee_amount: BigInt,
+        policy_version: u64,
+    },
+    RebalanceRefund {
+        request_id: String,
+        request_token_id: TokenId,
+        amount: BigInt,
+        reason: RebalanceRefundReason,
+    },
+    /// The five cross-j/settlement transactions retain their exact canonical
+    /// TypeScript data object. Their nested route, close-proof and Hanko
+    /// records are already consensus values; representing them a second time
+    /// as a parallel Rust object graph would create a second codec and invite
+    /// omitted-field parity bugs. Handlers project only the fields they own.
+    CrossPullLock {
+        data: CanonicalValue,
+    },
+    CrossPullClose {
+        data: CanonicalValue,
+    },
+    CrossPullProgress {
+        data: CanonicalValue,
+    },
+    CrossSwapFillAck {
+        data: CanonicalValue,
+    },
+    SettleTransition {
+        data: CanonicalValue,
+    },
     HtlcLock(HtlcLockTx),
     HtlcResolve(HtlcResolveTx),
+}
+
+impl AccountTx {
+    pub const fn wire_name(&self) -> &'static str {
+        match self {
+            Self::DirectPayment { .. } => "direct_payment",
+            Self::LendingFund { .. } => "lending_fund",
+            Self::LendingBorrowRequest { .. } => "lending_borrow_request",
+            Self::LendingRepay { .. } => "lending_repay",
+            Self::LendingCredit { .. } => "lending_credit",
+            Self::LendingCloseRequest { .. } => "lending_close_request",
+            Self::LendingClosePayout { .. } => "lending_close_payout",
+            Self::AddDelta { .. } => "add_delta",
+            Self::SetCreditLimit { .. } => "set_credit_limit",
+            Self::ReserveToCollateral { .. } => "reserve_to_collateral",
+            Self::RequestCollateral { .. } => "request_collateral",
+            Self::RebalanceRefund { .. } => "rebalance_refund",
+            Self::RebalancePolicy { .. } => "rebalance_policy",
+            Self::HtlcLock(_) => "htlc_lock",
+            Self::HtlcResolve(_) => "htlc_resolve",
+            Self::CrossPullLock { .. } => "cross_pull_lock",
+            Self::CrossPullClose { .. } => "cross_pull_close",
+            Self::CrossPullProgress { .. } => "cross_pull_progress",
+            Self::SwapOffer { .. } => "swap_offer",
+            Self::SwapCancelRequest { .. } => "swap_cancel_request",
+            Self::SwapResolve { .. } => "swap_resolve",
+            Self::CrossSwapFillAck { .. } => "cross_swap_fill_ack",
+            Self::SettleTransition { .. } => "settle_transition",
+            Self::JEventClaim(_) => "j_event_claim",
+        }
+    }
 }

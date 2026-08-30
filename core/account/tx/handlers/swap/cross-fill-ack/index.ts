@@ -14,7 +14,7 @@ import type {
 
 /**
  * Commits a book-owner fill acknowledgement into bilateral Account state.
- * Admission and exact amount proofs run before any route or history mutation.
+ * Admission and exact amount proofs run before any route or financial-state mutation.
  */
 export async function handleCrossSwapFillAck(
   account: AccountDraftReplica,

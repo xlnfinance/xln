@@ -51,14 +51,14 @@ const routedAccountInput = (
 });
 
 describe('account proposal outbox settlement', () => {
-  test('keeps a bundled frame_ack after the successor pending frame is gone', () => {
+  test('keeps a bundled ack_frame after the successor pending frame is gone', () => {
     const live = makeAccount(FROM, TO);
     live.currentHeight = 11;
     live.currentFrame = accountFrame(11, `0x${'11'.repeat(32)}`);
     const env = withAccount(live);
     const proposal = accountFrame(12, `0x${'12'.repeat(32)}`);
     const output = routedAccountInput(live, {
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       fromEntityId: FROM,
       toEntityId: TO,
       domain: { ...live.state.domain },

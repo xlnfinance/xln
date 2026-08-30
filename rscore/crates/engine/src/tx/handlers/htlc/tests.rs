@@ -49,16 +49,41 @@ fn replica() -> AccountReplica {
     .expect("literal replica")
 }
 
+const HASHLOCK: &str = "0xcebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc";
+
+#[test]
+fn lock_id_must_equal_hashlock_without_mutating_the_account() {
+    let context = AccountExecutionContext::new(1_000, 1_000, 10, 7, 10);
+    let lock = AccountTx::HtlcLock(HtlcLockTx {
+        lock_id: format!("0x{}", "11".repeat(32)),
+        hashlock: HtlcHashlock::parse(HASHLOCK).expect("literal hashlock"),
+        timelock: 2_000.into(),
+        reveal_before_height: 20,
+        amount: 10.into(),
+        token_id: TokenId::new(1).expect("literal token"),
+        delivery_mode: None,
+        envelope: None,
+    });
+    let rejected =
+        SequentialAccountEngine::apply_with_context(&replica(), Side::Left, &lock, &context)
+            .expect("typed mismatch rejection");
+    assert!(matches!(
+        rejected.verdict(),
+        AccountVerdict::Rejected(AccountRejection::Validation(ValidationRejection::Htlc(
+            HtlcRejection::LockIdMismatch { .. }
+        )))
+    ));
+    assert!(rejected.candidate().is_none());
+    assert!(rejected.outputs().is_empty());
+}
+
 #[test]
 fn hold_underflow_is_a_typed_atomic_rejection() {
     let context = AccountExecutionContext::new(1_000, 1_000, 10, 7, 10);
     let token_id = TokenId::new(1).expect("literal token");
     let lock = AccountTx::HtlcLock(HtlcLockTx {
-        lock_id: "underflow".into(),
-        hashlock: HtlcHashlock::parse(
-            "0xcebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc",
-        )
-        .expect("literal hashlock"),
+        lock_id: HASHLOCK.into(),
+        hashlock: HtlcHashlock::parse(HASHLOCK).expect("literal hashlock"),
         timelock: 2_000.into(),
         reveal_before_height: 20,
         amount: 10.into(),
@@ -90,7 +115,7 @@ fn hold_underflow_is_a_typed_atomic_rejection() {
         .expect("construct underflow fixture");
 
     let resolve = AccountTx::HtlcResolve(HtlcResolveTx {
-        lock_id: "underflow".into(),
+        lock_id: HASHLOCK.into(),
         outcome: HtlcResolveOutcome::Error {
             reason: Some("downstream".into()),
         },

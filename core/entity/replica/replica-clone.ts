@@ -98,9 +98,6 @@ export const forkEntityReplicaForInput = (
         replica.entityProviderActionSubmitState,
       ),
     }),
-    ...(replica.htlcNotes && {
-      htlcNotes: new Map(replica.htlcNotes),
-    }),
   };
 
   if (forked.entityId !== forked.state.entityId) {

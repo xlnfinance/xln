@@ -20,7 +20,7 @@ use super::{
     ConcreteRestoreSourceError, DecodedRuntimeCheckpoint, EntityConsensusRestoreError,
     EntityGraphRestoreError, EntitySnapshotRestoreError, OrderbookGraphRestoreError,
     PathCheckpointRestoreError, decode_account_rows, entity_snapshot_from_graph,
-    hydrate_certified_board_registry, hydrate_entity_consensus, hydrate_entity_graph,
+    hydrate_certified_board_state, hydrate_entity_consensus, hydrate_entity_graph,
     hydrate_orderbook_graph, restore_orderbook_accounts, restore_path_checkpoint,
 };
 
@@ -74,6 +74,8 @@ pub enum ConcreteCheckpointDecodeError {
     Envelope(#[from] RuntimeDurableEnvelopeError),
     #[error(transparent)]
     EntityContext(#[from] crate::EntityContextJsonError),
+    #[error(transparent)]
+    EntityKernel(#[from] xln_rscore_entity_kernel::EntityKernelError),
 }
 
 fn invalid(detail: impl Into<String>) -> ConcreteCheckpointDecodeError {
@@ -188,19 +190,6 @@ fn expected_entity_root(
     )
 }
 
-fn decimal(value: &Value, path: &str) -> Result<u64, ConcreteCheckpointDecodeError> {
-    let value = value
-        .as_str()
-        .ok_or_else(|| invalid(format!("DECIMAL:{path}")))?;
-    if value != "0" && (value.starts_with('0') || !value.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return Err(invalid(format!("DECIMAL:{path}")));
-    }
-    value
-        .parse()
-        .map_err(|_| invalid(format!("DECIMAL:{path}")))
-}
-
 fn tagged_bigint(value: &Value, path: &str) -> Result<BigInt, ConcreteCheckpointDecodeError> {
     let value = object(value, path)?;
     exact_fields(value, &["__xlnType", "value"], path)?;
@@ -217,14 +206,9 @@ fn tagged_bigint(value: &Value, path: &str) -> Result<BigInt, ConcreteCheckpoint
 
 fn htlc_infrastructure_state(
     core: &Map<String, Value>,
-) -> Result<([u8; 32], u32, BigInt), ConcreteCheckpointDecodeError> {
-    let public_key = digest(
-        core.get("entityEncryptionPublicKey")
-            .ok_or_else(|| invalid("ENTITY_ENCRYPTION_PUBLIC_KEY"))?,
-        "entityEncryptionPublicKey",
-    )?;
+) -> Result<(u32, BigInt), ConcreteCheckpointDecodeError> {
     let Some(config) = core.get("hubRebalanceConfig") else {
-        return Ok((public_key, 1, BigInt::from(0)));
+        return Ok((1, BigInt::from(0)));
     };
     let config = object(config, "hubRebalanceConfig")?;
     let routing_fee_ppm = config
@@ -242,54 +226,20 @@ fn htlc_infrastructure_state(
     if routing_base_fee < BigInt::from(0) {
         return Err(invalid("HUB_ROUTING_BASE_FEE_NEGATIVE"));
     }
-    Ok((public_key, routing_fee_ppm, routing_base_fee))
+    Ok((routing_fee_ppm, routing_base_fee))
 }
 
-fn verify_account_checkpoint_ref(
+fn verify_native_checkpoint_frame(
     frame: &Map<String, Value>,
-    stored: &crate::StoredRscoreCheckpoint,
 ) -> Result<(), ConcreteCheckpointDecodeError> {
-    let rows = frame
-        .get("accountAuthorityCheckpoints")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid("ACCOUNT_CHECKPOINT_REFS"))?;
-    if rows.len() != 1 {
-        return Err(invalid(format!(
-            "ACCOUNT_CHECKPOINT_REF_COUNT:{}",
-            rows.len()
-        )));
-    }
-    let row = object(&rows[0], "accountAuthorityCheckpoints[0]")?;
-    exact_fields(
-        row,
-        &[
-            "ownerEntityId",
-            "protocolFingerprint",
-            "baseRevision",
-            "revision",
-            "accountsRoot",
-            "signerDigest",
-            "accountCount",
-        ],
-        "accountAuthorityCheckpoints[0]",
-    )?;
-    let account_count = row
-        .get("accountCount")
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-        .ok_or_else(|| invalid("ACCOUNT_CHECKPOINT_REF_COUNT_VALUE"))?;
-    let matches = digest(&row["ownerEntityId"], "checkpoint.owner")? == stored.owner_entity_id
-        && digest(&row["protocolFingerprint"], "checkpoint.fingerprint")?
-            == stored.protocol_fingerprint
-        && decimal(&row["baseRevision"], "checkpoint.baseRevision")? == stored.base_revision
-        && decimal(&row["revision"], "checkpoint.revision")? == stored.revision
-        && digest(&row["accountsRoot"], "checkpoint.accountsRoot")? == stored.accounts_root
-        && digest(&row["signerDigest"], "checkpoint.signerDigest")? == stored.signer_digest
-        && account_count == stored.account_count;
-    if matches {
-        Ok(())
+    // Account checkpoint rows are part of the one path-keyed checkpoint graph.
+    // Their reconstructed accounts root is checked again through the Entity
+    // consensus root below. A frame-level descriptor would be a second copy of
+    // the same authority and is not emitted by the canonical production path.
+    if frame.contains_key("accountAuthorityCheckpoints") {
+        Err(invalid("NATIVE_ACCOUNT_CHECKPOINT_REF_FORBIDDEN"))
     } else {
-        Err(invalid("ACCOUNT_CHECKPOINT_REF_MISMATCH"))
+        Ok(())
     }
 }
 
@@ -364,12 +314,12 @@ fn decode_checkpoint(
     let (frame_value, validated_frame) = verified_checkpoint_frame(&source)?;
     let frame = object(&frame_value, "frame")?;
     let graph = hydrate_entity_graph(&source.state_rows)?;
-    let certified_board_registry = hydrate_certified_board_registry(&source.state_rows, &graph)?;
+    let hydrated_certified_board = hydrate_certified_board_state(&source.state_rows, &graph)?;
     let owner = graph.entity_id;
     let (stored_accounts, metadata) = restore_path_checkpoint(&source.state_rows, owner)?;
     match binding {
         AccountCheckpointBinding::SignedRuntimeFrame => {
-            verify_account_checkpoint_ref(frame, &stored_accounts)?;
+            verify_native_checkpoint_frame(frame)?;
         }
         AccountCheckpointBinding::OfflineTsImport => {
             verify_offline_import_rows(frame, &source.state_rows, &stored_accounts)?;
@@ -383,8 +333,7 @@ fn decode_checkpoint(
         .collect::<BTreeSet<_>>();
     let restored_orderbook_accounts = restore_orderbook_accounts(&account_rows);
     let core = object(&graph.core, "entity.core")?;
-    let (entity_encryption_public_key, htlc_routing_fee_ppm, htlc_routing_base_fee) =
-        htlc_infrastructure_state(core)?;
+    let (htlc_routing_fee_ppm, htlc_routing_base_fee) = htlc_infrastructure_state(core)?;
     let active_jurisdiction = machine
         .as_object()
         .and_then(|value| value.get("activeJurisdiction"));
@@ -395,12 +344,18 @@ fn decode_checkpoint(
         core,
         restored_orderbook_accounts,
     )?;
-    let entity_snapshot = entity_snapshot_from_graph(
+    let mut entity_snapshot = entity_snapshot_from_graph(
         &graph,
         known_accounts,
         stored_accounts.accounts_root,
         orderbook,
     )?;
+    match entity_snapshot.certified_board_state.as_mut() {
+        Some(state) => state.restore_records(hydrated_certified_board.records)?,
+        None if hydrated_certified_board.records.is_empty() => {}
+        None => return Err(invalid("CERTIFIED_BOARD_RECORDS_WITHOUT_STATE")),
+    }
+    let certified_board_registry = hydrated_certified_board.registry;
     let signer_private_key = derive_bound_signer_key(
         &configuration.runtime_seed,
         &configuration.signer_derivation_label,
@@ -413,20 +368,28 @@ fn decode_checkpoint(
         configuration.board_delays,
     )?;
     let durable_envelope = RuntimeDurableEnvelope::decode(&machine, validated_frame.frame_hash)?;
+    // A same-engine restart retains its operator persistence cadence. During
+    // the explicit offline TS -> Rust ownership transfer, the supplied native
+    // limits are the new operator configuration: inheriting the bootstrap's
+    // period=1 would rebuild and fsync the entire checkpoint graph every live
+    // frame. Cadence changes no financial state or frame ordering.
     let mut limits = configuration.limits;
-    if let Some(period) = durable_envelope
-        .runtime_config()
-        .materialize_period_frames()
-    {
-        limits.checkpoint_period_frames = period;
-    }
-    if let Some(period) = durable_envelope
-        .runtime_config()
-        .canonical_hash_period_frames()
-    {
-        limits.canonical_hash_period_frames = period;
+    if matches!(binding, AccountCheckpointBinding::SignedRuntimeFrame) {
+        if let Some(period) = durable_envelope
+            .runtime_config()
+            .materialize_period_frames()
+        {
+            limits.checkpoint_period_frames = period;
+        }
+        if let Some(period) = durable_envelope
+            .runtime_config()
+            .canonical_hash_period_frames()
+        {
+            limits.canonical_hash_period_frames = period;
+        }
     }
     Ok(DecodedRuntimeCheckpoint {
+        runtime_seed: configuration.runtime_seed,
         runtime_height: source.height,
         runtime_timestamp: validated_frame.timestamp,
         durable_envelope,
@@ -437,7 +400,6 @@ fn decode_checkpoint(
         entity_signer,
         certified_board_registry,
         entity_context_policy,
-        entity_encryption_public_key,
         htlc_routing_fee_ppm,
         htlc_routing_base_fee,
         replica_metadata: metadata.value,
@@ -558,6 +520,19 @@ mod tests {
             error
                 .to_string()
                 .contains("OFFLINE_IMPORT_FRAME_REF_PRESENT")
+        );
+    }
+
+    #[test]
+    fn native_checkpoint_uses_only_the_path_keyed_account_graph() {
+        verify_native_checkpoint_frame(&Map::new()).expect("canonical native frame has no sidecar");
+        let frame = Map::from_iter([("accountAuthorityCheckpoints".into(), Value::Array(vec![]))]);
+        let error = verify_native_checkpoint_frame(&frame)
+            .expect_err("a second Account checkpoint descriptor is forbidden");
+        assert!(
+            error
+                .to_string()
+                .contains("NATIVE_ACCOUNT_CHECKPOINT_REF_FORBIDDEN")
         );
     }
 }

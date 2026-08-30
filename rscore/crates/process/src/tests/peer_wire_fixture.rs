@@ -59,7 +59,7 @@ pub(super) fn peer_row(kind: AbiValue) -> AbiValue {
     ])
 }
 
-pub(super) fn frame_ack_row() -> AbiValue {
+pub(super) fn ack_frame_row() -> AbiValue {
     peer_row(tuple(vec![AbiValue::Integer(2), ack(), proposal()]))
 }
 

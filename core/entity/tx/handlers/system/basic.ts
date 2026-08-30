@@ -135,7 +135,7 @@ export const handleProposeEntityTx = (
       proposerPower: proposerPower.toString(),
       threshold: entityState.config.threshold.toString(),
     });
-    // Presence is pending. Certified frame history records completion; keeping
+    // Presence is pending. The next certified frame records completion; keeping
     // a terminal proposal here would re-hash the same body forever.
   } else {
     basicLog.debug('proposal.pending_votes', {

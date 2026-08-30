@@ -188,6 +188,38 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): DeliverableEnt
 };
 
 describe('runtime output routing', () => {
+  test('batches same-lane runtime outputs inside one authenticated wrapper', () => {
+    const targetRuntimeId = runtimeId('81');
+    const targetEntityId = entityId('82');
+    const targetSignerId = runtimeId('83');
+    const sourceEntityId = entityId('84');
+    const sourceSignerId = runtimeId('85');
+    const output = (marker: string): DeliverableEntityInput => ({
+      runtimeId: targetRuntimeId,
+      entityId: targetEntityId,
+      signerId: targetSignerId,
+      entityTxs: [{
+        type: 'runtimeOutput',
+        data: {
+          protocol: 'cross-j',
+          sourceEntityId,
+          sourceSignerId,
+          targetEntityId,
+          entityTxs: [{ type: 'crossJurisdictionFillNotice', data: { marker } } as never],
+        },
+      }],
+    });
+
+    const delivered = dispatchFrameOutputs([output('first'), output('second')]);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.entityTxs).toHaveLength(1);
+    const wrapper = delivered[0]?.entityTxs?.[0];
+    expect(wrapper?.type).toBe('runtimeOutput');
+    if (wrapper?.type !== 'runtimeOutput') throw new Error('TEST_RUNTIME_OUTPUT_WRAPPER_MISSING');
+    expect(wrapper.data.entityTxs.map(tx => (tx.data as { marker: string }).marker))
+      .toEqual(['first', 'second']);
+  });
+
   test('fails loud when a raw Account output has no target runtime route', () => {
     const sourceEntityId = entityId('a4');
     const targetEntityId = entityId('a5');

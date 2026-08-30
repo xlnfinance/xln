@@ -24,6 +24,7 @@ import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/e
 import { EMPTY_J_HISTORY_ROOT } from '../../../jurisdiction/machine/history-consensus';
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import { createEmptyEnv } from '../../../runtime';
+import { cloneEntityState, emptyEntityAccountMap } from '../../helpers/entity-account-map';
 import type { EntityReplica, EntityState } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
@@ -110,7 +111,7 @@ const prefixState = (validators: string[]): EntityState => ({
     },
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: emptyEntityAccountMap(`0x${'55'.repeat(32)}`),
   lastFinalizedJHeight: 10,
   jHistoryFinality: {
     jurisdictionRef: `stack:31337:0x${'44'.repeat(20)}`,
@@ -123,9 +124,7 @@ const prefixState = (validators: string[]): EntityState => ({
     entityHeight: 0,
   },
   profile: { name: 'J budget', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const historyThrough = (
@@ -157,10 +156,13 @@ const validatorEventBlock = (height: number): ValidatorJEventBlock => {
 const withExactFramePayloadBytes = (targetBytes: number): EntityTx => {
   const empty = jRangeTx(10, 11, [eventBlock(11)]);
   const baseBytes = canonicalEntityFrameJRangePayloadByteLength([empty]);
-  const paddingBytes = targetBytes - baseBytes;
+  let paddingBytes = targetBytes - baseBytes;
   if (paddingBytes < 0) throw new Error(`TEST_TARGET_BELOW_BASE:${targetBytes}:${baseBytes}`);
-  const exact = jRangeTx(10, 11, [eventBlock(11, 'x'.repeat(paddingBytes))]);
-  const actual = canonicalEntityFrameJRangePayloadByteLength([exact]);
+  let exact = jRangeTx(10, 11, [eventBlock(11, 'x'.repeat(paddingBytes))]);
+  let actual = canonicalEntityFrameJRangePayloadByteLength([exact]);
+  paddingBytes += targetBytes - actual;
+  exact = jRangeTx(10, 11, [eventBlock(11, 'x'.repeat(paddingBytes))]);
+  actual = canonicalEntityFrameJRangePayloadByteLength([exact]);
   if (actual !== targetBytes) throw new Error(`TEST_EXACT_PAYLOAD_SIZE_MISMATCH:${actual}:${targetBytes}`);
   return exact;
 };
@@ -168,10 +170,13 @@ const withExactFramePayloadBytes = (targetBytes: number): EntityTx => {
 const withExactBodyPayloadBytes = (targetBytes: number): EntityTx => {
   const empty = jRangeTx(10, 11, [eventBlock(11)]);
   const baseBytes = canonicalJRangeBodiesByteLength([empty.data]);
-  const paddingBytes = targetBytes - baseBytes;
+  let paddingBytes = targetBytes - baseBytes;
   if (paddingBytes < 0) throw new Error(`TEST_BODY_TARGET_BELOW_BASE:${targetBytes}:${baseBytes}`);
-  const exact = jRangeTx(10, 11, [eventBlock(11, 'x'.repeat(paddingBytes))]);
-  const actual = canonicalJRangeBodiesByteLength([exact.data]);
+  let exact = jRangeTx(10, 11, [eventBlock(11, 'x'.repeat(paddingBytes))]);
+  let actual = canonicalJRangeBodiesByteLength([exact.data]);
+  paddingBytes += targetBytes - actual;
+  exact = jRangeTx(10, 11, [eventBlock(11, 'x'.repeat(paddingBytes))]);
+  actual = canonicalJRangeBodiesByteLength([exact.data]);
   if (actual !== targetBytes) throw new Error(`TEST_EXACT_BODY_SIZE_MISMATCH:${actual}:${targetBytes}`);
   return exact;
 };
@@ -191,7 +196,7 @@ describe('Entity frame J-range budget', () => {
     if (oversizedTx.type !== 'j_event') throw new Error('TEST_J_RANGE_TX_MISSING');
     const oversized = structuredClone(oversizedTx.data);
     oversized.from = proposerId;
-    const before = structuredClone(state);
+    const before = cloneEntityState(state);
 
     await expect(applyJEvent(state, oversized, env))
       .rejects.toThrow(
@@ -320,7 +325,7 @@ describe('budgeted exact J-prefix catch-up', () => {
       entityId: state.entityId,
       signerId: proposerId,
       entityEncPubKey: '',
-      state: structuredClone(state),
+      state: cloneEntityState(state),
       mempool: [],
       isProposer: true,
       jHistory: structuredClone(history),
@@ -329,7 +334,7 @@ describe('budgeted exact J-prefix catch-up', () => {
       ...proposerReplica,
       signerId: validatorId,
       isProposer: false,
-      state: structuredClone(state),
+      state: cloneEntityState(state),
       jHistory: structuredClone(history),
     };
     const proposerHead = buildLocalJPrefixAttestation(env, proposerReplica)!;
@@ -351,7 +356,7 @@ describe('budgeted exact J-prefix catch-up', () => {
     expect(() => assertEntityFrameJRangeBudget([failoverTx])).not.toThrow();
     expect(proposerTx.data.blocks).toEqual(failoverTx.data.blocks);
 
-    const advancedState = structuredClone(state);
+    const advancedState = cloneEntityState(state);
     advancedState.lastFinalizedJHeight = 75;
     advancedState.jHistoryFinality = {
       ...advancedState.jHistoryFinality!,

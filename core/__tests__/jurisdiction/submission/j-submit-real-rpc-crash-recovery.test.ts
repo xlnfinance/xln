@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
 
 const CHAIN_ID = 31_337;
-const fixture = join(import.meta.dir, '../../fixtures/j-submit/j-submit-real-rpc-crash-child.ts');
+const fixture = join(import.meta.dir, '../../fixtures/jurisdiction/j-submit-real-rpc-crash-child.ts');
 const repoRoot = resolve(import.meta.dir, '../../../..');
 
 type ManagedAnvil = {

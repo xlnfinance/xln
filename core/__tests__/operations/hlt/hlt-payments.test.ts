@@ -11,17 +11,59 @@ import {
 import { buildHltPlan } from '../../../scripts/operations/hlt/economy';
 import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundary/worker-payment-boundary';
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
-import { buildRoundPayment } from '../../../scripts/operations/hlt/workload/worker-payments';
+import {
+  buildRoundPayment,
+  waitForHltEconomicStartGate,
+} from '../../../scripts/operations/hlt/workload/worker-payments';
 import { buildPacedOperationSchedule } from '../../../scripts/operations/hlt/workload/operation-pacer';
+import { summarizeRecordedPaymentWork } from '../../../scripts/operations/hlt/replay/payment-work-ledger';
+import type { PersistedFrameJournal } from '../../../storage/types';
 import {
   HLT_FAUCET_AMOUNT,
   HLT_FAUCET_TOKEN_ID,
   HLT_USER_RECEIVE_WINDOW,
 } from '../../../scripts/operations/hlt/lanes/worker-lanes';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 describe('hlt payment population', () => {
+  test('recording cardinality comes from unique two-leg HTLC work, never the faucet', () => {
+    const accountInput = (fromEntityId: string, toEntityId: string, stateHash: string) => ({
+      type: 'accountInput' as const,
+      data: {
+        kind: 'frame' as const,
+        fromEntityId,
+        toEntityId,
+        proposal: {
+          frame: {
+            height: 1,
+            stateHash,
+            accountTxs: [
+              { type: 'htlc_lock' as const, data: { lockId: 'payment-1' } },
+              { type: 'htlc_resolve' as const, data: { lockId: 'payment-1' } },
+            ],
+          },
+        },
+      },
+    });
+    const frames = [{
+      runtimeInput: { entityInputs: [{
+        entityTxs: [
+          { type: 'directPayment', data: {} },
+          accountInput('sender', 'hub', 'sender-hub'),
+          accountInput('hub', 'receiver', 'hub-receiver'),
+        ],
+      }] },
+      runtimeOutputs: [],
+    }] as unknown as PersistedFrameJournal[];
+    const ledger = summarizeRecordedPaymentWork(frames);
+    expect(ledger.economicPayments).toBe(1);
+    expect(ledger.uniqueLockLegs).toBe(2);
+    expect(ledger.uniqueResolveLegs).toBe(2);
+    expect(ledger.nonHubEntities).toBe(2);
+  });
+
   test('every economic payment has exactly two Account legs through one H1', () => {
     const sender = { entityId: 'sender', signerId: 'sender-signer' };
     const receiver = { entityId: 'receiver', signerId: 'receiver-signer' };
@@ -52,21 +94,20 @@ describe('hlt payment population', () => {
       'utf8',
     );
     expect(source).toContain('receiverIdsBySender');
-    expect(source).toContain('READ_CONCURRENCY');
-    expect(source).toContain('forEachLimited');
-    expect(source).toContain('pendingReads');
-    expect(source).toContain('isTransientGossipSocketError');
-    expect(source).toContain('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
+    expect(source).toContain('readLaneRouteReadiness');
+    expect(source).not.toContain('gossipProfilesCounterparties');
+    expect(source).not.toContain('forEachLimited');
     expect(source).toContain('buildPacedOperationSchedule');
-    // One wave per batch of same-instant operations, not per payment: the
-    // pacer's own instants are what the load host's accept queue sees.
+    // One wave per time window, not per payment. Repeated operations owned by
+    // one sovereign Runtime remain distinct ordered EntityTxs in one input.
     expect(source).toContain('queueLaneRuntimeInputWave(batchIndex, submissions)');
-    expect(source).toContain('batchParticipants.has(operation.participantIndex)');
+    expect(source).toContain('const byParticipant = new Map<number, typeof batch>()');
+    expect(source).toContain('entityInputs: [{');
     expect(source).not.toContain('sendEnqueued');
     expect(source).toContain('waitForHubSettlement');
     expect(source).toContain('core.completedPayments - completedPaymentsBefore');
     expect(source).toContain("type: 'settlement-evidence', book: null, accounts: []");
-    expect(source).toContain('DELIVERY_TIMEOUT_MS = 600_000');
+    expect(source).toContain('DELIVERY_TIMEOUT_MS = 20_000');
     expect(source).toContain('HLT_PAYMENT_STALLED_FAIL_FAST');
     expect(source).not.toContain('HLT_PAYMENT_DRAIN_GATE_FAILED');
     expect(source).not.toContain('readHubReceiverCredits');
@@ -78,8 +119,42 @@ describe('hlt payment population', () => {
     expect(laneSource).toContain('waitForLaneHostReadiness');
     expect(laneSource).toContain('waitForLaneFinancialReadiness');
     expect(laneSource).toContain('options.hub.control.waitForDirectRuntimeSessions');
+    expect(laneSource).toContain('laneIndexOffset: options.laneOffset');
     expect(laneSource).not.toContain('waitForOwnReceiveReadyProfile');
     expect(laneSource).not.toContain('gossipPollMs');
+  });
+
+  test('economic gate separates setup from the unchanged live load window', async () => {
+    const gateDir = mkdtempSync(join(tmpdir(), 'xln-hlt-economic-gate-'));
+    const previous = process.env['XLN_HLT_ECONOMIC_GATE_DIR'];
+    process.env['XLN_HLT_ECONOMIC_GATE_DIR'] = gateDir;
+    try {
+      const waiting = waitForHltEconomicStartGate();
+      for (let attempt = 0; attempt < 20 && !existsSync(join(gateDir, 'ready')); attempt += 1) {
+        await Bun.sleep(5);
+      }
+      expect(existsSync(join(gateDir, 'ready'))).toBe(true);
+      expect(existsSync(join(gateDir, 'started'))).toBe(false);
+      writeFileSync(join(gateDir, 'start'), 'start\n');
+      await waiting;
+      expect(existsSync(join(gateDir, 'started'))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env['XLN_HLT_ECONOMIC_GATE_DIR'];
+      else process.env['XLN_HLT_ECONOMIC_GATE_DIR'] = previous;
+      rmSync(gateDir, { recursive: true, force: true });
+    }
+  });
+
+  test('two-phase launcher never charges setup time to the economic deadline', () => {
+    const source = readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/build-chains.ts'),
+      'utf8',
+    );
+    expect(source).toContain(
+      "timeout: process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ? undefined : 30_000",
+    );
+    expect(source).not.toContain('timeout: 50_000');
+    expect(source).not.toContain('XLN_HLT_RUNTIMES_PER_WORKER:');
   });
 
   test('1000 users are evenly paced at one operation per millisecond', () => {
@@ -288,7 +363,7 @@ describe('hlt payment population', () => {
     expect(args.plan?.offeredSwapOrderRatePerSecond).toBe(8);
   });
 
-  test('population receives one real $5000 token-1 faucet without synthetic H1 grants', () => {
+  test('population receives one real workload-sized token-1 faucet without synthetic H1 grants', () => {
     expect(HLT_FAUCET_TOKEN_ID).toBe(1);
     expect(HLT_FAUCET_AMOUNT).toBe(5_000_000_000n);
     expect(HLT_USER_RECEIVE_WINDOW).toBe(10_000_000_000n);
@@ -297,9 +372,10 @@ describe('hlt payment population', () => {
       'utf8',
     );
     expect(source).toContain("type: 'directPayment' as const");
-    expect(source).toContain("description: 'HLT $5000 token-1 faucet'");
-    expect(source).toContain('r2cRequestSoftLimit: HLT_FAUCET_AMOUNT');
-    expect(source).toContain('hardLimit: HLT_FAUCET_AMOUNT');
+    expect(source).toContain("description: 'HLT token-1 faucet'");
+    expect(source).toContain('amount: entry.faucetAmount ?? HLT_FAUCET_AMOUNT');
+    expect(source).toContain('r2cRequestSoftLimit: faucetAmount');
+    expect(source).toContain('hardLimit: faucetAmount');
     expect(source).not.toContain('grantBilateralTokenCredit');
   });
 
@@ -312,9 +388,12 @@ describe('hlt payment population', () => {
     expect(source).toContain('extraEntityTxs');
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
     expect(source).toContain("execution: 'balanced'");
-    expect(source).toContain('decodeHubMinTradeSize(\n      await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}`)');
+    expect(source).toContain('? rustH1.ready.orderbookMinTradeSize');
+    expect(source).toContain('await requireHub().adapter.read<unknown>(`entity/${hubIdentity.entityId}`)');
     expect(source).not.toContain('decodeHubMinTradeSize(\n      await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}/settlement-counters`)');
     expect(source).toContain('actionsPerFrame: 1');
+    expect(source.indexOf('await waitForHltEconomicStartGate()'))
+      .toBeLessThan(source.indexOf('const economicStartedAtUnixMs = Date.now()'));
     expect(source).toContain('const expectedSubmittedOffers = prepared.distribution.submittedOffers');
     expect(source).toContain('const matchedDrain = await waitForExpectedMatchedTrades({');
     expect(source).toContain('allowAdditionalTrades: true');
@@ -330,8 +409,19 @@ describe('hlt payment population', () => {
       join(import.meta.dir, '../../../scripts/operations/hlt/workload/worker-same-lanes.ts'),
       'utf8',
     );
-    expect(laneSource).toContain('plan.baseCredit,\n        highestVisibleAsk');
-    expect(laneSource).toContain('HLT_TRADER_INVENTORY_DEPTH_INSUFFICIENT');
+    expect(laneSource).toContain('initialAmount: plan.baseCredit');
+    expect(laneSource).not.toContain('buildMakerInventorySeedOffer');
+    expect(laneSource).not.toContain('waitForTradeDelta');
+    const populationSource = readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
+      'utf8',
+    );
+    expect(populationSource).toContain('const setupTxs = population.flatMap');
+    expect(populationSource).toContain("description: 'HLT token-1 faucet'");
+    expect(laneSource).toContain('plan.quoteCredit + (options.additionalQuoteDebits?.[index] ?? 0n)');
+    expect(source).toContain(
+      'paymentTotalForSender(senderIndex, args.rounds, amountRange) * CREDIT_HEADROOM_MULTIPLE',
+    );
     expect(source).not.toContain('hlt-mixed-pay-${tick + 1}');
   });
 });
@@ -353,14 +443,14 @@ describe('hlt payment report boundary', () => {
     hubAcceptedPaymentsBefore: 7, hubAcceptedPaymentsAfter: 327,
     hubIngressElapsedMs: 25,
     settlementSamples: [
-      { elapsedMs: 5, runtimeHeight: 12, acceptedPayments: 0, completedPayments: 0, lockBookOpen: 0 },
-      { elapsedMs: 25, runtimeHeight: 20, acceptedPayments: 320, completedPayments: 100, lockBookOpen: 220 },
-      { elapsedMs: 30, runtimeHeight: 40, acceptedPayments: 320, completedPayments: 320, lockBookOpen: 0 },
+      { elapsedMs: 5, runtimeHeight: 12, acceptedPayments: 0, completedPayments: 0, paybookOpen: 0 },
+      { elapsedMs: 25, runtimeHeight: 20, acceptedPayments: 320, completedPayments: 100, paybookOpen: 220 },
+      { elapsedMs: 30, runtimeHeight: 40, acceptedPayments: 320, completedPayments: 320, paybookOpen: 0 },
     ],
     walBytesBefore: 100, walBytesAfter: 200,
     hubDurableBefore: frame, hubDurableAfter: { ...frame, height: 40 },
     environment: {
-      disputeHankos: 'always', certifiedHistory: true, hubWalSync: true, lanePersistence: true, laneWalSync: true,
+      disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
       laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
     },
   };

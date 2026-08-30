@@ -14,16 +14,22 @@ use std::time::Instant;
 use thiserror::Error;
 use xln_rscore_batch::{
     AccountId, AccountInputKind, AccountInputVerdict, AccountPeerInput, AccountResponseDirective,
-    BatchError, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute,
-    ResidentConsensusEngine,
+    BatchError, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcFollowup,
+    PreparedEntityOutbound, ResidentConsensusEngine,
 };
-use xln_rscore_engine::{AccountOutput, CommittedFrameEvidence, EntityId};
+use xln_rscore_engine::{
+    AccountTx, CommittedFrameEvidence, EntityId, HtlcResolveOutcome, HtlcResolveTx,
+};
+use xln_rscore_protocol::{
+    CanonicalNumber, CanonicalValue, PersistentRadixBatchError, PersistentRadixMapError,
+    SlotOutcome, SlotWork,
+};
 
 use crate::commitment::compute_commitments;
 use crate::frame_tx_effects::{apply_admitted_account_hooks, apply_committed_frame_hooks};
 use crate::kernel::apply_entity_transitions;
 use crate::local_financial::LocalAccountFinancialView;
-use crate::paybook::terminate_route;
+use crate::paybook::{PaybookChanges, paybook_entry, terminate_route};
 use crate::scheduler_runtime::validate_scheduled_wake;
 use crate::{
     AccountProposalWork, CommittedAccountTransition, DeterministicContext, EntityFrameEvent,
@@ -39,12 +45,12 @@ fn profile_resident_round() -> bool {
     *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
 }
 
-fn report_resident_round_profile(phases: [u128; 9], total: u128) {
+fn report_resident_round_profile(phases: [u128; 11], total: u128) {
     if !profile_resident_round() {
         return;
     }
     eprintln!(
-        "RSCORE_ENTITY_PHASE inbound={} commits={} entity={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={}",
+        "RSCORE_ENTITY_PHASE inbound={} commits={} entityApply={} paybookCommit={} jIngress={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={}",
         phases[0],
         phases[1],
         phases[2],
@@ -54,8 +60,62 @@ fn report_resident_round_profile(phases: [u128; 9], total: u128) {
         phases[6],
         phases[7],
         phases[8],
+        phases[9],
+        phases[10],
         total,
     );
+}
+
+fn commit_paybook_changes(
+    accounts: &mut ResidentConsensusEngine,
+    state: &mut EntityStateSlice,
+    changes: PaybookChanges,
+) -> Result<(), ResidentEntityError> {
+    let mutations = changes.into_mutations()?;
+    let updated: Result<_, PersistentRadixBatchError<BatchError>> = state
+        .paybook
+        .entries
+        .try_mutated_batch_two_levels(mutations, |slots| {
+            let mut outcomes = (0..slots.len())
+                .map(|_| None)
+                .collect::<Vec<Option<Result<SlotOutcome<_>, PersistentRadixMapError>>>>();
+            let mut active = Vec::new();
+            for (index, slot) in slots.into_iter().enumerate() {
+                if slot.has_work() {
+                    active.push((index, slot));
+                } else {
+                    outcomes[index] = Some(slot.apply());
+                }
+            }
+            for (index, outcome) in accounts
+                .map_entity_stage_ordered(active, |(index, slot): (usize, SlotWork<_>)| {
+                    (index, slot.apply())
+                })?
+            {
+                outcomes[index] = Some(outcome);
+            }
+            let outcomes = outcomes
+                .into_iter()
+                .map(|outcome| outcome.expect("all 256 paybook slots return exactly once"))
+                .collect::<Vec<_>>();
+            outcomes
+                .try_into()
+                .map_err(|outcomes: Vec<_>| BatchError::ResidentWorkerResultCount {
+                    expected: 256,
+                    actual: outcomes.len(),
+                })
+        });
+    state.paybook.entries = match updated {
+        Ok(updated) => updated,
+        Err(PersistentRadixBatchError::Mapper(error)) => return Err(error.into()),
+        Err(PersistentRadixBatchError::Radix(error)) => {
+            return Err(EntityKernelError::CommitmentEncoding {
+                detail: error.to_string(),
+            }
+            .into());
+        }
+    };
+    Ok(())
 }
 
 #[derive(Debug, Error)]
@@ -81,8 +141,6 @@ pub enum ResidentEntityError {
         txs: usize,
         rows: usize,
     },
-    #[error("ENTITY_RESIDENT_OUTPUT_FLATTEN_MISMATCH:account={account_id}:height={height}")]
-    OutputFlattenMismatch { account_id: String, height: u64 },
     #[error("ENTITY_RESIDENT_CRONTAB_MISSING")]
     CrontabMissing,
     #[error("ENTITY_RESIDENT_MANIFEST_WITNESS_DUPLICATE:{0}")]
@@ -93,6 +151,8 @@ pub enum ResidentEntityError {
     ForcedResponseEnvelopeMismatch(String),
     #[error("ACCOUNT_FORCED_ACK_NOT_BUNDLED:{account_id}:{height}")]
     ForcedAckNotBundled { account_id: String, height: u64 },
+    #[error("ENTITY_RESIDENT_OPERATION_PLAN:{0}")]
+    OperationPlan(String),
     #[error(transparent)]
     Scheduler(#[from] SchedulerError),
 }
@@ -100,13 +160,63 @@ pub enum ResidentEntityError {
 /// Runtime-owned facts that surround one Entity transition. Account state is
 /// deliberately absent: replicas and their Patricia nodes already reside in
 /// `ResidentConsensusEngine`.
+#[derive(Clone, Debug)]
+pub enum ResidentEntityOperation {
+    /// One contiguous WAL-ordered run of AccountInput transactions. All rows
+    /// in the run enter the shard workers together, then their returned
+    /// effects fold before the next operation.
+    AccountRange { start: usize, len: usize },
+    /// One authenticated Entity command expanded to its native transactions.
+    /// The wrapper remains one Entity-frame tx; these children execute at that
+    /// exact positional point.
+    Local(Vec<crate::AdmittedLocalEntityTx>),
+}
+
+fn validate_operation_plan(
+    operations: &[ResidentEntityOperation],
+    row_count: usize,
+) -> Result<(), ResidentEntityError> {
+    let mut next_row = 0_usize;
+    for operation in operations {
+        match operation {
+            ResidentEntityOperation::AccountRange { start, len } => {
+                if *start != next_row || *len == 0 {
+                    return Err(ResidentEntityError::OperationPlan(format!(
+                        "ACCOUNT_RANGE:{start}:{len}:EXPECTED:{next_row}"
+                    )));
+                }
+                next_row = start.checked_add(*len).ok_or_else(|| {
+                    ResidentEntityError::OperationPlan("ACCOUNT_RANGE_OVERFLOW".into())
+                })?;
+                if next_row > row_count {
+                    return Err(ResidentEntityError::OperationPlan(format!(
+                        "ACCOUNT_RANGE_END:{next_row}:ROWS:{row_count}"
+                    )));
+                }
+            }
+            ResidentEntityOperation::Local(_) => {}
+        }
+    }
+    if next_row != row_count {
+        return Err(ResidentEntityError::OperationPlan(format!(
+            "ACCOUNT_ROWS_UNCOVERED:{next_row}:{row_count}"
+        )));
+    }
+    Ok(())
+}
+
 pub struct ResidentEntityRequest {
     pub inbound: EntityInboundRequest,
+    /// Parent-registry authority for this local Entity's current board.
+    pub local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority,
     pub entity_height: u64,
     pub outbound_timestamp: u64,
     pub outbound_j_height: u64,
     pub checkpoint_due: bool,
     pub post_accounts: bool,
+    /// Transient operator seed used only by the default proposer to derive
+    /// public cross-J ladder witnesses. It is never committed or checkpointed.
+    pub runtime_seed: Option<String>,
     pub scheduled_wake: Option<ScheduledWake>,
     pub expected_proposer_signer_id: String,
     pub hub_rebalance_has_pending_work: bool,
@@ -114,17 +224,25 @@ pub struct ResidentEntityRequest {
     /// Runtime must place it in an Entity-only frame; this layer merges the
     /// resulting Account claims into the existing single outbound visit.
     pub finalized_j_events: Option<ResidentJEventProjection>,
-    /// Strictly decoded local Entity financial work. AccountInput transactions
-    /// stay in `inbound`; the Runtime decoder rejects interleaving so this
-    /// phase exactly follows all inbound Account effects.
-    pub local_financial_txs: Vec<LocalEntityFinancialTx>,
+    /// Current certified Entity authority. Required by governance txs and
+    /// rejected loudly when absent from a proposal/vote frame.
+    pub entity_authority: Option<crate::EntityFrameAuthority>,
+    /// Runtime-derived owner policy for locally-created H=0 Accounts. Peer
+    /// bytes never choose this value.
+    pub local_account_genesis_policy: Option<xln_rscore_batch::EntityAccountGenesisPolicy>,
+    /// Exact positional execution plan over `inbound.rows` and authenticated
+    /// local commands. It is transient and never enters committed state.
+    pub operations: Vec<ResidentEntityOperation>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentJEventProjection {
     pub scanned_through: u64,
     pub batches: Vec<FinalizedJEventBatch>,
-    pub active_account_ids: BTreeSet<String>,
+    pub runtime_seed: String,
+    pub claim: crate::JPrefixRangeClaim,
+    pub proposer_signer_id: String,
+    pub proposer_signature: String,
 }
 
 fn merge_proposal_work(target: &mut Vec<AccountProposalWork>, appended: Vec<AccountProposalWork>) {
@@ -143,6 +261,94 @@ fn merge_proposal_work(target: &mut Vec<AccountProposalWork>, appended: Vec<Acco
     }
 }
 
+fn j_word(value: &str, field: &'static str) -> Result<[u8; 32], EntityKernelError> {
+    let body = value
+        .strip_prefix("0x")
+        .filter(|body| body.len() == 64)
+        .ok_or_else(|| EntityKernelError::JEventInvalid {
+            detail: format!("J_FINALITY_{field}"),
+        })?;
+    let mut bytes = [0_u8; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&body[index * 2..index * 2 + 2], 16).map_err(|_| {
+            EntityKernelError::JEventInvalid {
+                detail: format!("J_FINALITY_{field}"),
+            }
+        })?;
+    }
+    Ok(bytes)
+}
+
+fn j_number(value: u64) -> Result<CanonicalValue, EntityKernelError> {
+    CanonicalNumber::try_from_u64(value)
+        .map(CanonicalValue::Number)
+        .map_err(|_| EntityKernelError::JEventInvalid {
+            detail: "J_FINALITY_NUMBER".into(),
+        })
+}
+
+fn commit_j_range_finality(
+    state: &mut EntityStateSlice,
+    authority: Option<&crate::EntityFrameAuthority>,
+    entity_height: u64,
+    projection: &ResidentJEventProjection,
+) -> Result<(), EntityKernelError> {
+    let claim = &projection.claim;
+    if claim.scanned_through_height != projection.scanned_through
+        || state.last_finalized_j_height != projection.scanned_through
+    {
+        return Err(EntityKernelError::JEventInvalid {
+            detail: "J_FINALITY_HEIGHT_BINDING".into(),
+        });
+    }
+    let jurisdiction = authority
+        .and_then(|authority| authority.config.jurisdiction.as_ref())
+        .ok_or_else(|| EntityKernelError::JEventInvalid {
+            detail: "CERTIFIED_BOARD_ENTITY_JURISDICTION_MISSING".into(),
+        })?;
+    let stack_key = crate::certified_board_stack_key(jurisdiction)?;
+    let tip = j_word(&claim.tip_block_hash, "TIP")?;
+    let history_root = j_word(&claim.event_history_root, "ROOT")?;
+    let registry = state
+        .certified_board_state
+        .get_or_insert_with(|| crate::CertifiedBoardState::empty(stack_key));
+    if registry.stack_key != stack_key {
+        return Err(EntityKernelError::JEventInvalid {
+            detail: "CERTIFIED_BOARD_STACK_MISMATCH".into(),
+        });
+    }
+    registry.advance_finality(projection.scanned_through, tip, history_root)?;
+    state.j_history_finality = Some(CanonicalValue::Object(vec![
+        (
+            "jurisdictionRef".into(),
+            CanonicalValue::String(claim.jurisdiction_ref.clone()),
+        ),
+        ("baseHeight".into(), j_number(claim.base_height)?),
+        (
+            "finalizedThroughHeight".into(),
+            j_number(claim.scanned_through_height)?,
+        ),
+        (
+            "tipBlockHash".into(),
+            CanonicalValue::String(claim.tip_block_hash.clone()),
+        ),
+        (
+            "eventHistoryRoot".into(),
+            CanonicalValue::String(claim.event_history_root.clone()),
+        ),
+        (
+            "proposerSignerId".into(),
+            CanonicalValue::String(projection.proposer_signer_id.clone()),
+        ),
+        (
+            "proposerSignature".into(),
+            CanonicalValue::String(projection.proposer_signature.clone()),
+        ),
+        ("entityHeight".into(), j_number(entity_height)?),
+    ]));
+    Ok(())
+}
+
 /// Exact result of the fused Entity+Account transition. `inbound` and
 /// `outbound` remain separate evidence so parity diagnostics can identify the
 /// phase without adding another execution path.
@@ -155,6 +361,8 @@ pub struct ResidentEntityResult {
     pub inbound: EntityRoundResult,
     pub outbound: EntityRoundResult,
     pub non_mutating_wake_targets: Vec<String>,
+    pub routed_entity_outputs: Vec<crate::LocalEntityOutput>,
+    pub j_outputs: Vec<crate::EntityJOutput>,
 }
 
 /// Production result before canonical Entity commitments are materialized.
@@ -178,11 +386,15 @@ pub struct ResidentEntityCoreResult {
     /// Exact TS empty self EntityInputs emitted by local direct/swap handlers.
     /// They are non-mutating and unsigned, but their outbox slots are real.
     pub non_mutating_wake_targets: Vec<String>,
+    /// Cross-j EntityInputs already authorized by the Entity transition.
+    pub routed_entity_outputs: Vec<crate::LocalEntityOutput>,
+    pub j_outputs: Vec<crate::EntityJOutput>,
     /// Account leaves in canonical TS `storageChanges` first-touch order.
     /// Worker completion order is deliberately excluded: execution may run in
     /// parallel, while the Runtime frame hash commits deterministic input and
     /// Entity-transition order.
     pub account_touch_order: Vec<AccountId>,
+    pub pending_settlement_hankos: Vec<xln_rscore_batch::PendingSettlementHankoDraft>,
     proposal_work: Vec<crate::AccountProposalWork>,
 }
 
@@ -198,6 +410,8 @@ impl ResidentEntityCoreResult {
             inbound: self.inbound,
             outbound: self.outbound,
             non_mutating_wake_targets: self.non_mutating_wake_targets,
+            routed_entity_outputs: self.routed_entity_outputs,
+            j_outputs: self.j_outputs,
         })
     }
 }
@@ -228,30 +442,33 @@ fn account_id(value: &str) -> Result<AccountId, ResidentEntityError> {
 fn forced_account_responses(
     applied: &[xln_rscore_batch::AccountInputResult],
 ) -> Vec<(AccountId, AccountPeerInput)> {
-    let mut responses = Vec::<(AccountId, AccountPeerInput)>::new();
+    let mut responses = Vec::<Option<(AccountId, AccountPeerInput)>>::new();
+    let mut positions = BTreeMap::<AccountId, usize>::new();
     for result in applied {
-        let position = responses
-            .iter()
-            .position(|(account_id, _)| *account_id == result.account_id);
         match &result.response {
             AccountResponseDirective::Preserve => {}
             AccountResponseDirective::Clear => {
-                if let Some(position) = position {
-                    responses.remove(position);
+                if let Some(position) = positions.remove(&result.account_id) {
+                    responses[position] = None;
                 }
             }
-            AccountResponseDirective::Force(response) => match position {
-                Some(position) => responses[position].1 = response.clone(),
-                None => responses.push((result.account_id, response.clone())),
-            },
+            AccountResponseDirective::Force(response) => {
+                if let Some(position) = positions.get(&result.account_id).copied() {
+                    responses[position] = Some((result.account_id, response.as_ref().clone()));
+                } else {
+                    let position = responses.len();
+                    responses.push(Some((result.account_id, response.as_ref().clone())));
+                    positions.insert(result.account_id, position);
+                }
+            }
         }
     }
-    responses
+    responses.into_iter().flatten().collect()
 }
 
 fn account_input_ack(input: &AccountPeerInput) -> Option<&xln_rscore_engine::IncomingAck> {
     match &input.kind {
-        AccountInputKind::Ack(ack) | AccountInputKind::FrameAck { ack, .. } => Some(ack),
+        AccountInputKind::Ack(ack) | AccountInputKind::AckFrame { ack, .. } => Some(ack),
         _ => None,
     }
 }
@@ -260,14 +477,17 @@ fn preserve_forced_account_responses(
     outbound: &mut EntityRoundResult,
     responses: &[(AccountId, AccountPeerInput)],
 ) -> Result<(), ResidentEntityError> {
+    let proposal_positions = outbound
+        .proposals
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.account_id, index))
+        .collect::<BTreeMap<_, _>>();
     for (account_id, required) in responses {
-        let row = outbound
-            .proposals
-            .iter_mut()
-            .find(|row| row.account_id == *account_id)
-            .ok_or_else(|| {
-                ResidentEntityError::ForcedResponseRowMissing(account_text(*account_id))
-            })?;
+        let position = proposal_positions.get(account_id).copied().ok_or_else(|| {
+            ResidentEntityError::ForcedResponseRowMissing(account_text(*account_id))
+        })?;
+        let row = &mut outbound.proposals[position];
         let Some(final_input) = row.outbound_input.as_ref() else {
             row.outbound_input = Some(required.clone());
             continue;
@@ -291,108 +511,163 @@ fn preserve_forced_account_responses(
 fn local_financial_view_requests(
     state: &EntityStateSlice,
     txs: &[LocalEntityFinancialTx],
+    commits: &[OrderedAccountCommit],
     context: &DeterministicContext,
-) -> Result<Vec<(AccountId, Vec<xln_rscore_engine::TokenId>)>, ResidentEntityError> {
-    let mut requested = BTreeMap::<AccountId, BTreeSet<xln_rscore_engine::TokenId>>::new();
+) -> Result<
+    Vec<(
+        AccountId,
+        xln_rscore_batch::ResidentAccountFinancialViewRequest,
+    )>,
+    ResidentEntityError,
+> {
+    #[derive(Default)]
+    struct RequestedView {
+        token_ids: BTreeSet<xln_rscore_engine::TokenId>,
+        htlc_lock_ids: BTreeSet<String>,
+        pull_ids: BTreeSet<String>,
+        swap_offer_ids: BTreeSet<String>,
+        dispute: bool,
+    }
+    let mut requested = BTreeMap::<AccountId, RequestedView>::new();
     for tx in txs {
-        let LocalEntityFinancialTx::HtlcPayment(tx) = tx else {
-            continue;
-        };
-        let Some(prepared) = context.originated_htlcs.get(&tx.tx_hash) else {
-            continue;
-        };
-        if !state.known_accounts.contains(&prepared.next_hop_entity_id) {
-            continue;
+        match tx {
+            LocalEntityFinancialTx::CrossJurisdictionForceSiblingDispute(tx) => {
+                let counterparty = crate::cross_j::force_sibling_dispute_counterparty(
+                    state,
+                    &tx.route_id,
+                    &tx.observed_counterparty_entity_id,
+                )?;
+                requested
+                    .entry(account_id(&counterparty)?)
+                    .or_default()
+                    .dispute = true;
+            }
+            LocalEntityFinancialTx::HtlcPayment(tx) => {
+                let Some(prepared) = context.originated_htlcs.get(&tx.tx_hash) else {
+                    continue;
+                };
+                if state.known_accounts.contains(&prepared.next_hop_entity_id) {
+                    requested
+                        .entry(account_id(&prepared.next_hop_entity_id)?)
+                        .or_default()
+                        .token_ids
+                        .insert(tx.token_id);
+                }
+            }
+            LocalEntityFinancialTx::LendingOffer(tx) => {
+                if state.known_accounts.contains(&tx.hub_entity_id) {
+                    requested
+                        .entry(account_id(&tx.hub_entity_id)?)
+                        .or_default()
+                        .token_ids
+                        .insert(tx.token_id);
+                }
+            }
+            LocalEntityFinancialTx::QuoteBackedR2c(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default()
+                    .token_ids
+                    .insert(tx.token_id);
+            }
+            LocalEntityFinancialTx::PrepareDispute(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default()
+                    .dispute = true;
+            }
+            LocalEntityFinancialTx::DisputeStart(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default()
+                    .dispute = true;
+            }
+            LocalEntityFinancialTx::DisputeFinalize(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default()
+                    .dispute = true;
+            }
+            LocalEntityFinancialTx::ResolveHtlcLock(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default()
+                    .htlc_lock_ids
+                    .insert(tx.lock_id.clone());
+            }
+            LocalEntityFinancialTx::SettleApprove(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default();
+            }
+            LocalEntityFinancialTx::SettleExecute(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default();
+            }
+            LocalEntityFinancialTx::SettlePropose(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default();
+            }
+            LocalEntityFinancialTx::SettleReject(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default();
+            }
+            LocalEntityFinancialTx::SettleUpdate(tx) => {
+                requested
+                    .entry(account_id(&tx.counterparty_entity_id)?)
+                    .or_default();
+            }
+            _ => {}
         }
-        requested
-            .entry(account_id(&prepared.next_hop_entity_id)?)
-            .or_default()
-            .insert(tx.token_id);
+    }
+    for commit in commits {
+        for transition in &commit.transitions {
+            let token = match &transition.tx {
+                AccountTx::LendingBorrowRequest { token_id, .. } => u32::try_from(*token_id)
+                    .ok()
+                    .and_then(|value| xln_rscore_engine::TokenId::new(value).ok()),
+                AccountTx::LendingRepay { token_id, .. } => Some(*token_id),
+                AccountTx::LendingCloseRequest { position_id, .. } => state
+                    .lending
+                    .as_ref()
+                    .and_then(|lending| lending.pool(position_id))
+                    .and_then(|pool| {
+                        xln_rscore_engine::TokenId::new(u32::from(pool.token_id)).ok()
+                    }),
+                _ => continue,
+            };
+            let entry = &mut requested
+                .entry(account_id(&commit.account_id)?)
+                .or_default()
+                .token_ids;
+            if let Some(token) = token {
+                entry.insert(token);
+            }
+        }
     }
     Ok(requested
         .into_iter()
-        .map(|(account_id, token_ids)| (account_id, token_ids.into_iter().collect()))
+        .map(|(account_id, request)| {
+            (
+                account_id,
+                xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                    token_ids: request.token_ids.into_iter().collect(),
+                    htlc_lock_ids: request.htlc_lock_ids.into_iter().collect(),
+                    pull_ids: request.pull_ids.into_iter().collect(),
+                    swap_offer_ids: request.swap_offer_ids.into_iter().collect(),
+                    dispute: request.dispute,
+                },
+            )
+        })
         .collect())
-}
-
-fn digest32(value: &str) -> Result<[u8; 32], ResidentEntityError> {
-    let Some(payload) = value.strip_prefix("0x") else {
-        return Err(ResidentEntityError::FrameHash {
-            detail: value.to_string(),
-        });
-    };
-    if payload.len() != 64 {
-        return Err(ResidentEntityError::FrameHash {
-            detail: value.to_string(),
-        });
-    }
-    let mut output = [0_u8; 32];
-    for (index, byte) in output.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&payload[index * 2..index * 2 + 2], 16).map_err(|_| {
-            ResidentEntityError::FrameHash {
-                detail: value.to_string(),
-            }
-        })?;
-    }
-    Ok(output)
-}
-
-fn failed_route_closure(
-    state: &EntityStateSlice,
-    proposal_accounts: &[AccountId],
-) -> Result<Vec<FailedHtlcRoute>, ResidentEntityError> {
-    let mut routes_by_outbound =
-        std::collections::BTreeMap::<AccountId, Vec<(&String, &String, &String, &String)>>::new();
-    for (hashlock, route) in &state.htlc_routes {
-        let (
-            Some(outbound_entity),
-            Some(outbound_lock_id),
-            Some(inbound_entity),
-            Some(inbound_lock_id),
-        ) = (
-            route.outbound_entity.as_ref(),
-            route.outbound_lock_id.as_ref(),
-            route.inbound_entity.as_ref(),
-            route.inbound_lock_id.as_ref(),
-        )
-        else {
-            continue;
-        };
-        routes_by_outbound
-            .entry(account_id(outbound_entity)?)
-            .or_default()
-            .push((hashlock, outbound_lock_id, inbound_entity, inbound_lock_id));
-    }
-    let mut active = proposal_accounts.iter().copied().collect::<BTreeSet<_>>();
-    let mut frontier = active.clone();
-    let mut selected = std::collections::BTreeMap::<[u8; 32], FailedHtlcRoute>::new();
-    while let Some(outbound_account_id) = frontier.pop_first() {
-        for (hashlock, outbound_lock_id, inbound_entity, inbound_lock_id) in routes_by_outbound
-            .get(&outbound_account_id)
-            .into_iter()
-            .flatten()
-        {
-            let inbound_account_id = account_id(inbound_entity)?;
-            let hashlock = digest32(hashlock)?;
-            selected.entry(hashlock).or_insert_with(|| FailedHtlcRoute {
-                hashlock,
-                outbound_account_id,
-                outbound_lock_id: (*outbound_lock_id).clone(),
-                inbound_account_id,
-                inbound_lock_id: (*inbound_lock_id).clone(),
-            });
-            if active.insert(inbound_account_id) {
-                frontier.insert(inbound_account_id);
-            }
-        }
-    }
-    Ok(selected.into_values().collect())
 }
 
 fn validate_effect_binding(
     account_id: &str,
     state_hash: &[u8; 32],
-    flat_outputs: &[AccountOutput],
     evidence: &CommittedFrameEvidence,
 ) -> Result<(), ResidentEntityError> {
     if evidence.frame.txs.len() != evidence.outputs_by_tx.len() {
@@ -409,34 +684,19 @@ fn validate_effect_binding(
             height: evidence.frame.height,
         });
     }
-    if evidence
-        .outputs_by_tx
-        .iter()
-        .flatten()
-        .ne(flat_outputs.iter())
-    {
-        return Err(ResidentEntityError::OutputFlattenMismatch {
-            account_id: account_id.to_string(),
-            height: evidence.frame.height,
-        });
-    }
     Ok(())
 }
 
 fn ordered_commit(
     account_id: AccountId,
     state_hash: &[u8; 32],
-    flat_outputs: &[AccountOutput],
-    evidence: &CommittedFrameEvidence,
+    evidence: &mut CommittedFrameEvidence,
 ) -> Result<OrderedAccountCommit, ResidentEntityError> {
     let account_id = account_text(account_id);
-    validate_effect_binding(&account_id, state_hash, flat_outputs, evidence)?;
-    let transitions = evidence
-        .frame
-        .txs
-        .iter()
-        .cloned()
-        .zip(evidence.outputs_by_tx.iter().cloned())
+    validate_effect_binding(&account_id, state_hash, evidence)?;
+    let transitions = std::mem::take(&mut evidence.frame.txs)
+        .into_iter()
+        .zip(std::mem::take(&mut evidence.outputs_by_tx))
         .map(|(tx, outputs)| CommittedAccountTransition { tx, outputs })
         .collect();
     Ok(OrderedAccountCommit {
@@ -456,28 +716,21 @@ fn ordered_commit(
 
 fn collect_verdict_commits(
     account_id: AccountId,
-    verdict: &AccountInputVerdict,
+    verdict: &mut AccountInputVerdict,
     commits: &mut Vec<OrderedAccountCommit>,
 ) -> Result<(), ResidentEntityError> {
     match verdict {
         AccountInputVerdict::FrameCommitted {
             state_hash,
-            outputs,
             committed_frame,
             ..
         }
         | AccountInputVerdict::AckCommitted {
             state_hash,
-            outputs,
             committed_frame,
             ..
-        } => commits.push(ordered_commit(
-            account_id,
-            state_hash,
-            outputs,
-            committed_frame,
-        )?),
-        AccountInputVerdict::FrameAckApplied { ack, frame } => {
+        } => commits.push(ordered_commit(account_id, state_hash, committed_frame)?),
+        AccountInputVerdict::AckFrameApplied { ack, frame } => {
             // TS applies the ACK half before the peer-frame half.
             collect_verdict_commits(account_id, ack, commits)?;
             collect_verdict_commits(account_id, frame, commits)?;
@@ -590,7 +843,7 @@ fn collect_verdict_certification(
             events: committed_events,
             ..
         } => append_status_events(events, committed_events),
-        AccountInputVerdict::FrameAckApplied { ack, frame } => {
+        AccountInputVerdict::AckFrameApplied { ack, frame } => {
             collect_verdict_certification(account_id, ack, events, hashes, presigned)?;
             collect_verdict_certification(account_id, frame, events, hashes, presigned)?;
         }
@@ -626,7 +879,7 @@ fn collect_round_certification(
         hashes.push(HashToSign {
             hash: hash.clone(),
             kind: HashType::AccountFrame,
-            context: account_hash_context(row.account_id, "frame", proposed.frame.height),
+            context: account_hash_context(row.account_id, "frame", proposed.frame_height),
         });
         if presigned
             .insert(
@@ -680,13 +933,224 @@ fn collect_round_certification(
 }
 
 fn ordered_commits(
-    inbound: &EntityRoundResult,
+    inbound: &mut EntityRoundResult,
 ) -> Result<Vec<OrderedAccountCommit>, ResidentEntityError> {
     let mut commits = Vec::new();
-    for row in &inbound.applied {
-        collect_verdict_commits(row.account_id, &row.verdict, &mut commits)?;
+    for row in &mut inbound.applied {
+        collect_verdict_commits(row.account_id, &mut row.verdict, &mut commits)?;
     }
     Ok(commits)
+}
+
+fn merge_inbound_round(target: &mut EntityRoundResult, mut next: EntityRoundResult) {
+    target.revision = next.revision;
+    target.accounts_root = next.accounts_root;
+    target.applied.append(&mut next.applied);
+    target.admissions.append(&mut next.admissions);
+    target.proposals.append(&mut next.proposals);
+    let mut touched = target
+        .touched
+        .iter()
+        .enumerate()
+        .map(|(index, (account, _))| (*account, index))
+        .collect::<BTreeMap<_, _>>();
+    for (account, leaf) in next.touched {
+        if let Some(index) = touched.get(&account).copied() {
+            target.touched[index].1 = leaf;
+        } else {
+            touched.insert(account, target.touched.len());
+            target.touched.push((account, leaf));
+        }
+    }
+    target.post_accounts.append(&mut next.post_accounts);
+    target.created_accounts.append(&mut next.created_accounts);
+    if next.checkpoint.is_some() {
+        target.checkpoint = next.checkpoint;
+    }
+}
+
+#[derive(Default)]
+struct EntityTransitionAccumulator {
+    account_creates: Vec<xln_rscore_batch::AccountSeed>,
+    proposal_work: Vec<AccountProposalWork>,
+    outputs: Vec<EntityKernelOutput>,
+    local_events: Vec<crate::EntityFrameEvent>,
+    non_mutating_wake_targets: Vec<String>,
+    routed_entity_outputs: Vec<crate::LocalEntityOutput>,
+    j_outputs: Vec<crate::EntityJOutput>,
+    local_hashes_to_sign: Vec<crate::HashToSign>,
+    account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
+}
+
+impl EntityTransitionAccumulator {
+    fn merge(&mut self, next: crate::kernel::EntityTransitionResult) -> EntityStateSlice {
+        let crate::kernel::EntityTransitionResult {
+            state,
+            mut account_creates,
+            proposal_work,
+            mut outputs,
+            mut local_events,
+            mut non_mutating_wake_targets,
+            mut routed_entity_outputs,
+            mut j_outputs,
+            mut local_hashes_to_sign,
+            mut account_envelope_mutations,
+            paybook_changes: _,
+        } = next;
+        self.account_creates.append(&mut account_creates);
+        merge_proposal_work(&mut self.proposal_work, proposal_work);
+        self.outputs.append(&mut outputs);
+        self.local_events.append(&mut local_events);
+        self.non_mutating_wake_targets
+            .append(&mut non_mutating_wake_targets);
+        self.routed_entity_outputs
+            .append(&mut routed_entity_outputs);
+        self.j_outputs.append(&mut j_outputs);
+        self.local_hashes_to_sign.append(&mut local_hashes_to_sign);
+        self.account_envelope_mutations
+            .append(&mut account_envelope_mutations);
+        state
+    }
+}
+
+fn local_account_views(
+    accounts: &mut ResidentConsensusEngine,
+    state: &EntityStateSlice,
+    local_txs: &[crate::AdmittedLocalEntityTx],
+    commits: &[OrderedAccountCommit],
+    context: &DeterministicContext,
+) -> Result<BTreeMap<String, LocalAccountFinancialView>, ResidentEntityError> {
+    let mut financial = Vec::new();
+    let mut cross_jurisdiction = Vec::new();
+    for admitted in local_txs {
+        match &admitted.tx {
+            crate::LocalEntityTx::Financial(tx) => financial.push(tx.clone()),
+            crate::LocalEntityTx::CrossJurisdiction(tx) => cross_jurisdiction.push(tx.clone()),
+            crate::LocalEntityTx::RuntimeOutput(output) => {
+                for nested in &output.entity_txs {
+                    match crate::decode_local_entity_tx(nested)? {
+                        Some(crate::LocalEntityTx::Financial(tx)) => financial.push(tx),
+                        Some(crate::LocalEntityTx::CrossJurisdiction(tx)) => {
+                            cross_jurisdiction.push(tx)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            crate::LocalEntityTx::Control(_) => {}
+        }
+    }
+    let mut requests = local_financial_view_requests(state, &financial, commits, context)?;
+    let mut positions = requests
+        .iter()
+        .enumerate()
+        .map(|(index, (account, _))| (*account, index))
+        .collect::<BTreeMap<_, _>>();
+    for request in
+        crate::cross_j::cross_jurisdiction_account_view_requests(state, &cross_jurisdiction)?
+    {
+        let account = account_id(&request.account_id)?;
+        let view = if let Some(index) = positions.get(&account).copied() {
+            &mut requests[index].1
+        } else {
+            positions.insert(account, requests.len());
+            requests.push((account, Default::default()));
+            &mut requests.last_mut().expect("inserted request").1
+        };
+        view.pull_ids.extend(request.pull_ids);
+        view.swap_offer_ids.extend(request.swap_offer_ids);
+        view.dispute |= request.dispute;
+    }
+    Ok(accounts
+        .local_financial_views(requests)?
+        .into_iter()
+        .map(|(account_id, view)| {
+            (
+                account_text(account_id),
+                LocalAccountFinancialView::from(view),
+            )
+        })
+        .collect())
+}
+
+fn materialize_deferred_settlement_approvals(
+    accounts: &mut ResidentConsensusEngine,
+    state: &mut EntityStateSlice,
+    proposal_work: &[crate::AccountProposalWork],
+    events: &mut Vec<EntityFrameEvent>,
+    hashes: &mut Vec<HashToSign>,
+) -> Result<Vec<xln_rscore_batch::PendingSettlementHankoDraft>, ResidentEntityError> {
+    let Some(deferred) = state.deferred_account_proposals.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let busy = proposal_work
+        .iter()
+        .map(|work| work.account_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let requests = deferred
+        .text_entries()?
+        .into_iter()
+        .filter(|(account, _)| !busy.contains(account.as_str()))
+        .map(|(account, value)| {
+            let CanonicalValue::String(workspace_hash) = value else {
+                return Err(EntityKernelError::local(
+                    "settle_approve",
+                    "SETTLEMENT_DEFERRED_HASH_INVALID",
+                )
+                .into());
+            };
+            Ok((account_id(&account)?, workspace_hash))
+        })
+        .collect::<Result<Vec<_>, ResidentEntityError>>()?;
+    let dispositions = accounts.deferred_settlement_approvals(requests)?;
+    let mut ready = Vec::new();
+    for disposition in dispositions {
+        match disposition {
+            xln_rscore_batch::DeferredSettlementApproval::Wait { .. } => {}
+            xln_rscore_batch::DeferredSettlementApproval::Invalid { account_id } => {
+                let account = account_text(account_id);
+                state
+                    .deferred_account_proposals
+                    .as_mut()
+                    .expect("deferred collection exists")
+                    .remove(&account)?;
+                events.push(EntityFrameEvent::Status {
+                    message: "⚠️ Settlement approval expired because the workspace changed".into(),
+                });
+            }
+            xln_rscore_batch::DeferredSettlementApproval::Ready(pending) => {
+                let account = account_text(pending.account_id);
+                let suffix = account
+                    .get(account.len().saturating_sub(8)..)
+                    .unwrap_or(&account);
+                if let Some(hash) = pending.draft.settlement_hash {
+                    hashes.push(HashToSign {
+                        hash: hex_prefixed(&hash),
+                        kind: HashType::Settlement,
+                        context: format!(
+                            "settlement:{suffix}:nonce:{}",
+                            pending.draft.settlement_nonce
+                        ),
+                    });
+                }
+                hashes.push(HashToSign {
+                    hash: hex_prefixed(&pending.draft.dispute_hash),
+                    kind: HashType::Dispute,
+                    context: format!(
+                        "settlement:{suffix}:post-dispute:nonce:{}",
+                        pending.draft.proof_nonce
+                    ),
+                });
+                state
+                    .deferred_account_proposals
+                    .as_mut()
+                    .expect("deferred collection exists")
+                    .remove(&account)?;
+                ready.push(*pending);
+            }
+        }
+    }
+    Ok(ready)
 }
 
 fn apply_scheduled_wake(
@@ -704,11 +1168,7 @@ fn apply_scheduled_wake(
         .as_ref()
         .ok_or(ResidentEntityError::CrontabMissing)?;
     let mut requested_locks = BTreeMap::<AccountId, Vec<String>>::new();
-    for hook in crontab
-        .hooks
-        .values()
-        .filter(|hook| hook.trigger_at <= state.timestamp)
-    {
+    for hook in crontab.hooks.due(state.timestamp) {
         let (account, lock_id) = match &hook.kind {
             ScheduledHookKind::HtlcTimeout {
                 account_id,
@@ -744,8 +1204,7 @@ fn apply_scheduled_wake(
         .as_ref()
         .ok_or(ResidentEntityError::CrontabMissing)?
         .hooks
-        .values()
-        .filter(|hook| hook.trigger_at <= state.timestamp)
+        .due(state.timestamp)
         .filter_map(|hook| match &hook.kind {
             ScheduledHookKind::HtlcSecretAckTimeout {
                 hashlock,
@@ -760,7 +1219,7 @@ fn apply_scheduled_wake(
         })
         .collect::<Vec<_>>();
     for (hashlock, counterparty, inbound_lock_id) in due_secret_hooks {
-        let Some(route) = state.htlc_routes.get(&hashlock) else {
+        let Some(route) = paybook_entry(state, &hashlock)? else {
             continue;
         };
         if !route.secret_ack_pending {
@@ -769,7 +1228,7 @@ fn apply_scheduled_wake(
         if active_text.contains(&(counterparty, inbound_lock_id)) {
             secret_acks_requiring_dispute.insert(hashlock);
         } else {
-            terminate_route(state, &hashlock);
+            terminate_route(state, &hashlock)?;
         }
     }
 
@@ -789,36 +1248,60 @@ fn apply_scheduled_wake(
     Ok(execution.commands)
 }
 
-/// Proposal-time HTLC failures are Entity effects even though the failed
-/// Account frame never commits. Account fixed-point processing already queues
-/// the upstream resolve; this closes the matching paybook route in the same
-/// fused call, exactly where TypeScript consumes `failedHtlcLocks`.
-fn apply_failed_proposal_routes(
+/// Resolve only hashlocks that an Account worker actually removed. Forwarded
+/// failures become one later batched Account wave; originated failures end at
+/// Entity. No Paybook route is enumerated and no route closure is copied.
+fn failed_proposal_followups(
     state: &mut EntityStateSlice,
-    outbound: &EntityRoundResult,
+    outbound: &PreparedEntityOutbound,
     outputs: &mut Vec<EntityKernelOutput>,
-) {
-    for failed in outbound
-        .proposals
-        .iter()
-        .flat_map(|proposal| proposal.failed_htlc_locks.iter())
-    {
-        let hashlock = hex_prefixed(&failed.hashlock);
-        let Some(route) = terminate_route(state, &hashlock) else {
-            continue;
-        };
-        if let Some(lock_id) = route.outbound_lock_id.as_ref() {
-            state.lock_book.remove(lock_id);
-        }
-        if route.inbound_entity.is_none() {
+) -> Result<Vec<FailedHtlcFollowup>, ResidentEntityError> {
+    let mut followups = Vec::new();
+    for proposal in outbound.proposals() {
+        for failed in &proposal.failed_htlc_locks {
+            let hashlock = hex_prefixed(&failed.hashlock);
+            if failed.lock_id != hashlock {
+                return Err(ResidentEntityError::Entity(EntityKernelError::htlc(
+                    "PAYBOOK_FAILED_LOCK_ID_MISMATCH",
+                )));
+            }
+            let Some(route) = paybook_entry(state, &hashlock)?.cloned() else {
+                continue;
+            };
+            let outbound_account = account_text(proposal.account_id);
+            if route.outbound_entity.as_deref() != Some(outbound_account.as_str()) {
+                return Err(ResidentEntityError::Entity(EntityKernelError::htlc(
+                    "PAYBOOK_FAILED_OUTBOUND_ACCOUNT_MISMATCH",
+                )));
+            }
+            if let Some(inbound_entity) = route.inbound_entity.as_ref() {
+                let reason = format!("forward_failed:{}", failed.reason);
+                followups.push(FailedHtlcFollowup {
+                    failed_account_id: proposal.account_id,
+                    hashlock: failed.hashlock,
+                    upstream_account_id: account_id(inbound_entity)?,
+                    tx: AccountTx::HtlcResolve(HtlcResolveTx {
+                        lock_id: hashlock.clone(),
+                        outcome: HtlcResolveOutcome::Error {
+                            reason: Some(reason.clone()),
+                        },
+                    }),
+                    reason,
+                });
+                terminate_route(state, &hashlock)?;
+                continue;
+            }
+            terminate_route(state, &hashlock)?;
             outputs.push(EntityKernelOutput::HtlcFailed {
                 entity_id: state.entity_id.clone(),
-                hashlock,
-                lock_id: route.outbound_lock_id,
+                hashlock: hashlock.clone(),
+                lock_id: Some(hashlock),
                 reason: failed.reason.clone(),
+                description: route.description,
             });
         }
     }
+    Ok(followups)
 }
 
 /// Apply one Entity transition over resident Account shards.
@@ -838,7 +1321,7 @@ pub fn apply_resident_entity_round(
 pub fn apply_resident_entity_round_core(
     accounts: &mut ResidentConsensusEngine,
     mut state: EntityStateSlice,
-    request: ResidentEntityRequest,
+    mut request: ResidentEntityRequest,
     context: &DeterministicContext,
 ) -> Result<ResidentEntityCoreResult, ResidentEntityError> {
     let total_started = Instant::now();
@@ -852,6 +1335,7 @@ pub fn apply_resident_entity_round_core(
     }
     state.height = request.entity_height;
     state.timestamp = request.outbound_timestamp;
+    validate_operation_plan(&request.operations, request.inbound.rows.len())?;
     if let Some(wake) = request.scheduled_wake.as_ref() {
         validate_scheduled_wake(wake, &request.expected_proposer_signer_id, state.timestamp)?;
     }
@@ -861,40 +1345,172 @@ pub fn apply_resident_entity_round_core(
         .iter()
         .map(|row| row.account_id)
         .collect::<Vec<_>>();
-    let phase_started = Instant::now();
-    let inbound = accounts.entity_inbound(request.inbound)?;
-    let inbound_micros = phase_started.elapsed().as_micros();
-    let forced_responses = forced_account_responses(&inbound.applied);
-    for created in &inbound.created_accounts {
-        state
-            .known_accounts
-            .insert(account_text(created.account_id));
-    }
-    let local_account_views = accounts
-        .local_financial_views(local_financial_view_requests(
-            &state,
-            &request.local_financial_txs,
-            context,
-        )?)?
+    let owner_entity_id = request.inbound.owner_entity_id;
+    let clock = request.inbound.clock;
+    let mut expected_root = request.inbound.expected_accounts_root;
+    let mut rows = std::mem::take(&mut request.inbound.rows)
         .into_iter()
-        .map(|(account_id, view)| {
-            (
-                account_text(account_id),
-                LocalAccountFinancialView {
-                    active: view.active,
-                    owner_out_capacity: view.owner_out_capacity,
-                },
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let phase_started = Instant::now();
-    let commits = ordered_commits(&inbound)?;
-    let created_accounts = inbound
-        .created_accounts
-        .iter()
-        .map(|created| account_text(created.account_id))
-        .collect::<BTreeSet<_>>();
-    apply_committed_frame_hooks(&mut state, &commits);
+        .map(Some)
+        .collect::<Vec<_>>();
+    let operations = std::mem::take(&mut request.operations);
+    let mut inbound = EntityRoundResult::default();
+    let mut inbound_started = false;
+    let mut inbound_micros = 0_u128;
+    let mut commits_micros = 0_u128;
+    let mut entity_apply_micros = 0_u128;
+    let mut paybook_commit_micros = 0_u128;
+    let mut accumulated = EntityTransitionAccumulator::default();
+    let mut ordered_events = Vec::new();
+    let mut ordered_hashes = Vec::new();
+    let mut ordered_presigned = PresignedManifest::new();
+
+    for operation in operations {
+        match operation {
+            ResidentEntityOperation::AccountRange { start, len } => {
+                let mut segment_rows = rows[start..start + len]
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(index, row)| {
+                        let mut row = row.take().ok_or_else(|| {
+                            ResidentEntityError::OperationPlan(format!(
+                                "ACCOUNT_ROW_REUSED:{}",
+                                start + index
+                            ))
+                        })?;
+                        row.operation_index = u64::try_from(index).map_err(|_| {
+                            ResidentEntityError::OperationPlan("ACCOUNT_INDEX_OVERFLOW".into())
+                        })?;
+                        Ok(row)
+                    })
+                    .collect::<Result<Vec<_>, ResidentEntityError>>()?;
+                let phase_started = Instant::now();
+                let mut segment = accounts.entity_inbound(EntityInboundRequest {
+                    owner_entity_id,
+                    expected_accounts_root: expected_root,
+                    clock,
+                    rows: std::mem::take(&mut segment_rows),
+                    post_accounts: false,
+                })?;
+                inbound_micros = inbound_micros.saturating_add(phase_started.elapsed().as_micros());
+                inbound_started = true;
+                expected_root = segment.accounts_root;
+                let (mut events, mut hashes, presigned) = collect_round_certification(
+                    &segment,
+                    &EntityRoundResult::default(),
+                    Vec::new(),
+                )?;
+                ordered_events.append(&mut events);
+                ordered_hashes.append(&mut hashes);
+                for (hash, witness) in presigned {
+                    if ordered_presigned.insert(hash.clone(), witness).is_some() {
+                        return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
+                    }
+                }
+                let phase_started = Instant::now();
+                let commits = ordered_commits(&mut segment)?;
+                let created_accounts = segment
+                    .created_accounts
+                    .iter()
+                    .map(|created| account_text(created.account_id))
+                    .collect::<BTreeSet<_>>();
+                for account in &created_accounts {
+                    state.known_accounts.insert(account.clone());
+                }
+                apply_committed_frame_hooks(&mut state, &commits)?;
+                let views = local_account_views(accounts, &state, &[], &commits, context)?;
+                commits_micros = commits_micros.saturating_add(phase_started.elapsed().as_micros());
+                let phase_started = Instant::now();
+                let mut next = apply_entity_transitions(
+                    state,
+                    commits,
+                    &created_accounts,
+                    Vec::new(),
+                    &views,
+                    request.local_account_genesis_policy.as_ref(),
+                    request.entity_authority.as_ref(),
+                    request.runtime_seed.as_deref(),
+                    context,
+                    &[],
+                )?;
+                ordered_events.append(&mut next.local_events);
+                ordered_hashes.append(&mut next.local_hashes_to_sign);
+                entity_apply_micros =
+                    entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
+                let phase_started = Instant::now();
+                commit_paybook_changes(
+                    accounts,
+                    &mut next.state,
+                    std::mem::take(&mut next.paybook_changes),
+                )?;
+                paybook_commit_micros =
+                    paybook_commit_micros.saturating_add(phase_started.elapsed().as_micros());
+                state = accumulated.merge(next);
+                merge_inbound_round(&mut inbound, segment);
+            }
+            ResidentEntityOperation::Local(local_txs) => {
+                if !inbound_started {
+                    let phase_started = Instant::now();
+                    let segment = accounts.entity_inbound(EntityInboundRequest {
+                        owner_entity_id,
+                        expected_accounts_root: expected_root,
+                        clock,
+                        rows: Vec::new(),
+                        post_accounts: false,
+                    })?;
+                    inbound_micros =
+                        inbound_micros.saturating_add(phase_started.elapsed().as_micros());
+                    inbound_started = true;
+                    expected_root = segment.accounts_root;
+                    merge_inbound_round(&mut inbound, segment);
+                }
+                let views = local_account_views(accounts, &state, &local_txs, &[], context)?;
+                let phase_started = Instant::now();
+                let mut next = apply_entity_transitions(
+                    state,
+                    Vec::new(),
+                    &BTreeSet::new(),
+                    local_txs,
+                    &views,
+                    request.local_account_genesis_policy.as_ref(),
+                    request.entity_authority.as_ref(),
+                    request.runtime_seed.as_deref(),
+                    context,
+                    &[],
+                )?;
+                ordered_events.append(&mut next.local_events);
+                ordered_hashes.append(&mut next.local_hashes_to_sign);
+                entity_apply_micros =
+                    entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
+                let phase_started = Instant::now();
+                commit_paybook_changes(
+                    accounts,
+                    &mut next.state,
+                    std::mem::take(&mut next.paybook_changes),
+                )?;
+                paybook_commit_micros =
+                    paybook_commit_micros.saturating_add(phase_started.elapsed().as_micros());
+                state = accumulated.merge(next);
+            }
+        }
+    }
+    if rows.iter().any(Option::is_some) {
+        return Err(ResidentEntityError::OperationPlan(
+            "ACCOUNT_ROWS_UNCONSUMED".into(),
+        ));
+    }
+    if !inbound_started {
+        let phase_started = Instant::now();
+        let segment = accounts.entity_inbound(EntityInboundRequest {
+            owner_entity_id,
+            expected_accounts_root: expected_root,
+            clock,
+            rows: Vec::new(),
+            post_accounts: false,
+        })?;
+        inbound_micros = inbound_micros.saturating_add(phase_started.elapsed().as_micros());
+        merge_inbound_round(&mut inbound, segment);
+    }
+    let forced_responses = forced_account_responses(&inbound.applied);
     let scheduled_commands = apply_scheduled_wake(
         accounts,
         &mut state,
@@ -902,17 +1518,47 @@ pub fn apply_resident_entity_round_core(
         &request.expected_proposer_signer_id,
         request.hub_rebalance_has_pending_work,
     )?;
-    let commits_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
-    let mut kernel = apply_entity_transitions(
+    let mut final_transition = apply_entity_transitions(
         state,
-        &commits,
-        &created_accounts,
-        request.local_financial_txs,
-        &local_account_views,
+        Vec::new(),
+        &BTreeSet::new(),
+        Vec::new(),
+        &BTreeMap::new(),
+        request.local_account_genesis_policy.as_ref(),
+        request.entity_authority.as_ref(),
+        request.runtime_seed.as_deref(),
         context,
         &scheduled_commands,
     )?;
+    entity_apply_micros = entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
+    let paybook_commit_started = Instant::now();
+    // The frame overlay already collapsed repeated writes by hashlock. Reuse
+    // the resident worker pool for only the non-empty canonical radix slots;
+    // the coordinator reconnects returned slot roots in their original 0..255
+    // positions and performs no financial transition itself.
+    commit_paybook_changes(
+        accounts,
+        &mut final_transition.state,
+        std::mem::take(&mut final_transition.paybook_changes),
+    )?;
+    paybook_commit_micros =
+        paybook_commit_micros.saturating_add(paybook_commit_started.elapsed().as_micros());
+    let state = accumulated.merge(final_transition);
+    let mut kernel = crate::kernel::EntityTransitionResult {
+        state,
+        account_creates: accumulated.account_creates,
+        proposal_work: accumulated.proposal_work,
+        outputs: accumulated.outputs,
+        local_events: accumulated.local_events,
+        non_mutating_wake_targets: accumulated.non_mutating_wake_targets,
+        routed_entity_outputs: accumulated.routed_entity_outputs,
+        j_outputs: accumulated.j_outputs,
+        local_hashes_to_sign: accumulated.local_hashes_to_sign,
+        account_envelope_mutations: accumulated.account_envelope_mutations,
+        paybook_changes: crate::paybook::PaybookChanges::default(),
+    };
+    let j_ingress_started = Instant::now();
     if let Some(j_events) = request.finalized_j_events.as_ref() {
         if j_events.scanned_through != request.outbound_j_height {
             return Err(EntityKernelError::JEventInvalid {
@@ -923,20 +1569,158 @@ pub fn apply_resident_entity_round_core(
             }
             .into());
         }
+        let claim_account_ids = j_events
+            .batches
+            .iter()
+            .flat_map(|batch| batch.account_claims.iter())
+            .filter(|claim| {
+                kernel
+                    .state
+                    .known_accounts
+                    .contains(&claim.account_id.as_hex())
+            })
+            .map(|claim| AccountId::from_bytes(*claim.account_id.as_bytes()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let active_account_ids = accounts
+            .active_account_ids(claim_account_ids)?
+            .into_iter()
+            .map(account_text)
+            .collect();
+        let owner = kernel.state.entity_id.to_ascii_lowercase();
+        let mut dispute_account_ids = j_events
+            .batches
+            .iter()
+            .flat_map(|batch| batch.events.iter())
+            .filter_map(|event| match event {
+                xln_rscore_engine::JurisdictionEvent::DisputeStarted(value) => {
+                    Some((&value.sender, &value.counterentity))
+                }
+                xln_rscore_engine::JurisdictionEvent::DisputeFinalized(value) => {
+                    Some((&value.sender, &value.counterentity))
+                }
+                xln_rscore_engine::JurisdictionEvent::CounterDisputeRegistered(value) => {
+                    Some((&value.sender, &value.counterentity))
+                }
+                _ => None,
+            })
+            .map(|(sender, counter)| {
+                if sender.eq_ignore_ascii_case(&owner) {
+                    counter.to_ascii_lowercase()
+                } else {
+                    sender.to_ascii_lowercase()
+                }
+            })
+            .filter(|account| kernel.state.known_accounts.contains(account))
+            .collect::<BTreeSet<_>>();
+        if j_events.batches.iter().any(|batch| {
+            batch.events.iter().any(|event| {
+                matches!(
+                    event,
+                    xln_rscore_engine::JurisdictionEvent::HankoBatchProcessed(_)
+                )
+            })
+        }) {
+            dispute_account_ids.extend(
+                crate::cross_j::pending_registry_reveal_account_ids(&kernel.state)?
+                    .into_iter()
+                    .filter(|account| kernel.state.known_accounts.contains(account)),
+            );
+        }
+        let dispute_views = accounts
+            .local_financial_views(
+                dispute_account_ids
+                    .iter()
+                    .map(|account| {
+                        Ok((
+                            account_id(account)?,
+                            xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                                dispute: true,
+                                ..Default::default()
+                            },
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, ResidentEntityError>>()?,
+            )?
+            .into_iter()
+            .filter_map(|(account, view)| view.dispute.map(|view| (account_text(account), view)))
+            .collect::<BTreeMap<_, _>>();
         let ingress = apply_finalized_j_event_batches(
             &mut kernel.state,
             j_events.scanned_through,
             &j_events.batches,
-            &j_events.active_account_ids,
+            &j_events.runtime_seed,
+            request.entity_authority.as_ref(),
+            &active_account_ids,
+            &dispute_views,
+        )?;
+        commit_j_range_finality(
+            &mut kernel.state,
+            request.entity_authority.as_ref(),
+            request.entity_height,
+            j_events,
         )?;
         merge_proposal_work(&mut kernel.proposal_work, ingress.proposal_work);
+        kernel
+            .account_envelope_mutations
+            .extend(ingress.account_envelope_mutations);
+        kernel
+            .routed_entity_outputs
+            .extend(ingress.routed_entity_outputs);
+        kernel.local_events.extend(ingress.frame_events);
     }
-    let entity_micros = phase_started.elapsed().as_micros();
+    let j_ingress_micros = j_ingress_started.elapsed().as_micros();
+
+    let pending_settlement_hankos = materialize_deferred_settlement_approvals(
+        accounts,
+        &mut kernel.state,
+        &kernel.proposal_work,
+        &mut kernel.local_events,
+        &mut kernel.local_hashes_to_sign,
+    )?;
+    let deferred_accounts = pending_settlement_hankos
+        .iter()
+        .map(|pending| pending.account_id)
+        .collect::<BTreeSet<_>>();
 
     let phase_started = Instant::now();
+    let envelope_updates = std::mem::take(&mut kernel.account_envelope_mutations)
+        .into_iter()
+        .map(|(account, update)| {
+            let update = match update {
+                crate::AccountEnvelopeMutation::ClearRebalanceActiveQuote => {
+                    xln_rscore_batch::AccountEnvelopeUpdate::ClearRebalanceActiveQuote
+                }
+                crate::AccountEnvelopeMutation::SetRebalancePolicy { token_id, policy } => {
+                    xln_rscore_batch::AccountEnvelopeUpdate::SetRebalancePolicy { token_id, policy }
+                }
+                crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+                    status,
+                    dispute_prepare,
+                    active_dispute,
+                } => xln_rscore_batch::AccountEnvelopeUpdate::ReplaceDisputeLifecycle {
+                    status,
+                    dispute_prepare,
+                    active_dispute,
+                },
+                crate::AccountEnvelopeMutation::ApplyDisputeStarted(finality) => {
+                    xln_rscore_batch::AccountEnvelopeUpdate::ApplyDisputeStarted(finality)
+                }
+                crate::AccountEnvelopeMutation::ApplyDisputeFinality(finality) => {
+                    xln_rscore_batch::AccountEnvelopeUpdate::ApplyDisputeFinality(finality)
+                }
+                crate::AccountEnvelopeMutation::ConfirmDisputeBookRemoval { order_id } => {
+                    xln_rscore_batch::AccountEnvelopeUpdate::ConfirmDisputeBookRemoval { order_id }
+                }
+            };
+            Ok((account_id(&account)?, vec![update]))
+        })
+        .collect::<Result<Vec<_>, ResidentEntityError>>()?;
     let mut admits = Vec::with_capacity(kernel.proposal_work.len());
     let proposable_started = Instant::now();
     let mut propose = accounts.proposable_account_ids()?;
+    propose.retain(|account_id| !deferred_accounts.contains(account_id));
     let mut proposed = propose.iter().copied().collect::<BTreeSet<_>>();
     let proposable_micros = proposable_started.elapsed().as_micros();
     let prepare_outbound_started = Instant::now();
@@ -953,30 +1737,43 @@ pub fn apply_resident_entity_round_core(
             propose.push(*target);
         }
     }
-    let mut materialize = inbound
-        .touched
-        .iter()
-        .map(|(account_id, _)| *account_id)
-        .collect::<BTreeSet<_>>();
-    materialize.extend(propose.iter().copied());
+    // The inbound worker reply already carries the exact post-inbound leaf.
+    // Accounts with admissions or proposals are named by `admits`/`propose`
+    // below and their final leaf comes back from the outbound worker reply.
+    // Sending every other inbound Account through outbound again was a pure
+    // second visit used only by the diagnostic full-account projection.
+    let materialize = if request.post_accounts {
+        {
+            inbound
+                .touched
+                .iter()
+                .map(|(account_id, _)| *account_id)
+                .chain(propose.iter().copied())
+                .collect::<BTreeSet<_>>()
+        }
+    } else {
+        Default::default()
+    };
     let prepare_outbound_micros = prepare_outbound_started.elapsed().as_micros();
-    let failed_routes_started = Instant::now();
-    let failed_htlc_routes = failed_route_closure(&kernel.state, &propose)?;
-    let failed_routes_micros = failed_routes_started.elapsed().as_micros();
     let worklist_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
-    let mut outbound = accounts.entity_outbound(EntityOutboundRequest {
+    let prepared = accounts.prepare_entity_outbound(EntityOutboundRequest {
         owner_entity_id,
+        local_certified_board_authority: request.local_certified_board_authority,
         timestamp: request.outbound_timestamp,
         j_height: kernel.state.last_finalized_j_height,
-        creates: Vec::new(),
+        creates: std::mem::take(&mut kernel.account_creates),
+        envelope_updates,
         admits,
         propose,
         materialize: materialize.into_iter().collect(),
-        failed_htlc_routes,
         checkpoint_due: request.checkpoint_due,
         post_accounts: request.post_accounts,
     })?;
+    let failed_routes_started = Instant::now();
+    let followups = failed_proposal_followups(&mut kernel.state, &prepared, &mut kernel.outputs)?;
+    let failed_routes_micros = failed_routes_started.elapsed().as_micros();
+    let mut outbound = accounts.finish_entity_outbound(prepared, followups)?;
     preserve_forced_account_responses(&mut outbound, &forced_responses)?;
     let outbound_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
@@ -985,9 +1782,22 @@ pub fn apply_resident_entity_round_core(
         &kernel.proposal_work,
         &outbound.admissions,
     )?;
-    apply_failed_proposal_routes(&mut kernel.state, &outbound, &mut kernel.outputs);
-    let (entity_frame_events, secondary_hashes, presigned_manifest) =
-        collect_round_certification(&inbound, &outbound, kernel.local_events)?;
+    let (mut final_events, mut final_hashes, final_presigned) = collect_round_certification(
+        &EntityRoundResult::default(),
+        &outbound,
+        std::mem::take(&mut kernel.local_events),
+    )?;
+    final_hashes.extend(std::mem::take(&mut kernel.local_hashes_to_sign));
+    ordered_events.append(&mut final_events);
+    ordered_hashes.append(&mut final_hashes);
+    for (hash, witness) in final_presigned {
+        if ordered_presigned.insert(hash.clone(), witness).is_some() {
+            return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
+        }
+    }
+    let entity_frame_events = ordered_events;
+    let secondary_hashes = ordered_hashes;
+    let presigned_manifest = ordered_presigned;
     let actual_touches = inbound
         .touched
         .iter()
@@ -1010,7 +1820,9 @@ pub fn apply_resident_entity_round_core(
         [
             inbound_micros,
             commits_micros,
-            entity_micros,
+            entity_apply_micros,
+            paybook_commit_micros,
+            j_ingress_micros,
             worklist_micros,
             proposable_micros,
             prepare_outbound_micros,
@@ -1029,7 +1841,10 @@ pub fn apply_resident_entity_round_core(
         inbound,
         outbound,
         non_mutating_wake_targets: kernel.non_mutating_wake_targets,
+        routed_entity_outputs: kernel.routed_entity_outputs,
+        j_outputs: kernel.j_outputs,
         account_touch_order,
+        pending_settlement_hankos,
         proposal_work: kernel.proposal_work,
     })
 }
@@ -1037,7 +1852,7 @@ pub fn apply_resident_entity_round_core(
 #[cfg(test)]
 mod tests {
     use xln_rscore_batch::{EntityRoundResult, ProposalRow, ProposedRow};
-    use xln_rscore_engine::{AccountFrame, DisputeDraft, OutboundAck};
+    use xln_rscore_engine::{DisputeDraft, OutboundAck};
 
     use super::*;
 
@@ -1052,14 +1867,7 @@ mod tests {
             proposer_is_left: true,
         };
         let proposed = ProposedRow {
-            frame: AccountFrame {
-                height: 2,
-                timestamp: 3,
-                j_height: 4,
-                txs: Vec::new(),
-                prev_frame_hash: "genesis".into(),
-                account_state_root: [0x31; 32],
-            },
+            frame_height: 2,
             state_hash: [0x11; 32],
             signature: [0x41; 65],
             hanko: vec![0x42],
@@ -1067,8 +1875,7 @@ mod tests {
             dispute_hanko: None,
             dispute: None,
             events: Vec::new(),
-            outputs: Vec::new(),
-            outputs_by_tx: Vec::new(),
+            outputs_by_tx: std::sync::Arc::new(Vec::new()),
             bundled_ack: Some(OutboundAck {
                 height: 1,
                 frame_hash: [0x51; 32],

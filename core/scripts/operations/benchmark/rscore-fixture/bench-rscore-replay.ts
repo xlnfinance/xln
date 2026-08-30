@@ -1,14 +1,18 @@
 #!/usr/bin/env bun
 
 /**
- * Zero-JS native replay benchmark via rscore-runtime-replay.
+ * Zero-JS native replay benchmark via `xlnrs replay`.
  * Invokes the proven Rust binary directly. No TS cutover, no shadow.
  *
  * Captures: phase metrics (per-worker CPU/wall/barrier, touched shards),
  * OS telemetry (CPU%, effective cores, RSS, threads), exact root/digest counts.
  *
- * Args: --paths-json <fixture.paths.json> [--workers <1|8>] [--max-seconds <20>]
- * Outputs CSV + JSON for both w=1 and w=8, with digest equality assertion.
+ * Scale evidence requires manifest cardinality: >=1,000 active accounts,
+ * >=1,000 Runtime frames and >=1,000 payments. `--allow-smoke` is parity-only
+ * and is deliberately labelled as a diagnostic, never TPS evidence.
+ * Args: --paths-json <fixture.paths.json> [--max-seconds <20>] [--allow-smoke]
+ * Runs w=1/2/4/8 sequentially against independent native DBs inside one
+ * 20-second process budget, with exact digest equality assertion.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -28,6 +32,15 @@ const requiredManifestPath = (manifest: unknown, field: string): string => {
   const value = (manifest as Record<string, unknown>)[field];
   if (typeof value !== 'string' || value.length === 0) throw new Error(`PATHS_MANIFEST_FIELD:${field}`);
   return value;
+};
+
+const requiredManifestCount = (manifest: unknown, field: string): number => {
+  if (!manifest || typeof manifest !== 'object') throw new Error('PATHS_MANIFEST_OBJECT');
+  const value = (manifest as Record<string, unknown>)[field];
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new Error(`PATHS_MANIFEST_COUNT:${field}:${String(value)}`);
+  }
+  return Number(value);
 };
 
 const psRows = (): { pid: number; ppid: number; cpu: number; rss: number; threads: number }[] => {
@@ -79,7 +92,6 @@ type BenchResult = {
   ingress: number;
   egress: number;
   payments: number;
-  paymentReplayPerSecond: number;
   engineMs: number;
   applyMs: number;
   projectionMs: number;
@@ -105,6 +117,9 @@ const runReplay = async (
   workers: number,
   maxSec: number,
 ): Promise<BenchResult> => {
+  if (!Number.isFinite(maxSec) || maxSec <= 0 || maxSec > 20) {
+    throw new Error(`REPLAY_TIMEOUT_LIMIT:max=${maxSec}:allowed=20`);
+  }
   const paths = safeParse(readFileSync(pathsJson, 'utf8'));
   const walDb = requiredManifestPath(paths, 'walDb');
   const stateDb = requiredManifestPath(paths, 'stateDb');
@@ -115,7 +130,7 @@ const runReplay = async (
   if (!existsSync(stateDb)) throw new Error(`STATE_DB_MISSING:${stateDb}`);
   if (!existsSync(recording)) throw new Error(`RECORDING_MISSING:${recording}`);
 
-  const binary = resolve(import.meta.dir, '../../../../../rscore/target/release/rscore-runtime-replay');
+  const binary = resolve(import.meta.dir, '../../../../../rscore/target/release/xlnrs');
   if (!existsSync(binary)) throw new Error(`BINARY_MISSING:${binary}`);
 
   // The native store imports the checkpoint itself. Copying the TS state DB
@@ -123,7 +138,7 @@ const runReplay = async (
   const nativeParent = mkdtempSync(join(dirname(pathsJson), `.native-w${workers}-`));
   const nativeDir = join(nativeParent, 'db');
 
-  const args = [
+  const args = ['replay',
     '--wal', walDb,
     '--state-db', stateDb,
     '--recording', recording,
@@ -219,7 +234,6 @@ const runReplay = async (
     ingress: Number(data['ingress'] ?? 0),
     egress: Number(data['egress'] ?? 0),
     payments: Number(data['directPayments'] ?? 0),
-    paymentReplayPerSecond: Number(data['paymentReplayPerSecond'] ?? 0),
     engineMs: Number(data['engineMs'] ?? 0),
     applyMs: Number(data['applyMs'] ?? 0),
     projectionMs: Number(data['projectionMs'] ?? 0),
@@ -254,47 +268,92 @@ if (import.meta.main) {
 
   if (!existsSync(pathsJson)) { console.error('paths-json not found'); process.exit(1); }
 
-  const r1 = await runReplay(pathsJson, 1, maxSec);
-  const r8 = await runReplay(pathsJson, 8, maxSec);
+  const pathsManifest = safeParse(readFileSync(pathsJson, 'utf8'));
+  const fixtureAccounts = requiredManifestCount(pathsManifest, 'fixtureAccounts');
+  const fixturePayments = requiredManifestCount(pathsManifest, 'fixturePayments');
+  const fixtureRuntimeFrames = requiredManifestCount(pathsManifest, 'fixtureRuntimeFrames');
+  const minimumScaleCardinality = 1_000;
+  const scaleEligible = fixtureAccounts >= minimumScaleCardinality
+    && fixturePayments >= minimumScaleCardinality
+    && fixtureRuntimeFrames >= minimumScaleCardinality;
+  if (!allowSmoke && !scaleEligible) {
+    throw new Error(
+      `REPLAY_SCALE_FIXTURE_TOO_SMALL:min=${minimumScaleCardinality}:` +
+      `accounts=${fixtureAccounts}:payments=${fixturePayments}:frames=${fixtureRuntimeFrames}:` +
+      'use --allow-smoke only for parity diagnostics',
+    );
+  }
 
-  const failed = [r1, r8].filter(result => !result.ok);
+  const deadline = performance.now() + maxSec * 1_000;
+  const results: BenchResult[] = [];
+  for (const workers of [1, 2, 4, 8]) {
+    const remainingSeconds = (deadline - performance.now()) / 1_000;
+    if (remainingSeconds <= 0) {
+      results.push({ workers, ok: false, elapsedMs: 0, error: `global-timeout=${maxSec}s` } as BenchResult);
+      break;
+    }
+    results.push(await runReplay(pathsJson, workers, remainingSeconds));
+  }
+
+  const failed = results.filter(result => !result.ok);
   if (failed.length > 0) {
     for (const result of failed) {
       console.error(`REPLAY_FAILED:w=${result.workers}:${result.error ?? 'unknown'}`);
     }
     process.exit(1);
   }
-  const minimumScaleFrames = 1_000;
-  if (!allowSmoke && (r1.frames < minimumScaleFrames || r8.frames < minimumScaleFrames)) {
+  if (!allowSmoke && results.some(result => result.frames < minimumScaleCardinality)) {
     throw new Error(
-      `REPLAY_SCALE_FIXTURE_TOO_SMALL:min=${minimumScaleFrames}:w1=${r1.frames}:w8=${r8.frames}:` +
+      `REPLAY_SCALE_RESULT_TOO_SMALL:min=${minimumScaleCardinality}:` +
+      results.map(result => `w${result.workers}=${result.frames}`).join(':') + ':' +
       'pass --allow-smoke only for diagnostics',
     );
   }
 
   // Print table
   console.log('\n========================================');
-  console.log(' NATIVE REPLAY BENCH (rscore-runtime-replay)');
+  console.log(allowSmoke
+    ? ' SMOKE/PARITY DIAGNOSTIC — NOT TPS EVIDENCE'
+    : ' PRODUCTION-SHAPED REPLAY SCALING — NOT LIVE TPS');
   console.log('========================================');
-  console.log(' w  elapsedMs  payments  pay/s    engineMs  applyMs   avgCpu  peakRSS  threads  effCores  in+e');
-  for (const r of [r1, r8]) {
-    console.log(
-      `${String(r.workers).padStart(2)}  ` +
-      `${String(Math.round(r.elapsedMs)).padStart(8)}  ` +
-      `${String(r.payments).padStart(8)}  ` +
-      `${r.paymentReplayPerSecond.toFixed(1).padStart(7)}  ` +
-      `${Math.round(r.engineMs).toString().padStart(8)}  ` +
-      `${Math.round(r.applyMs).toString().padStart(7)}  ` +
-      `${r.avgCpuCores.toFixed(2).padStart(6)}  ` +
-      `${Math.round(r.peakRssMiB).toString().padStart(5)}M  ` +
-      `${String(r.peakThreads).padStart(7)}  ` +
-      `${r.effectiveCores.toFixed(2).padStart(8)}  ` +
-      `${r.ingress}+${r.egress}`,
-    );
+  console.log(` accounts=${fixtureAccounts} payments=${fixturePayments} frames=${fixtureRuntimeFrames}`);
+  const scalingBaseline = results[0]!;
+  if (allowSmoke) {
+    // A small fixture proves only that every worker count executes the same
+    // bytes. Do not print elapsed time, CPU or any derived rate: those numbers
+    // are too easy to misquote as production capacity.
+    console.log(' w  frames  payments  effectDigests  outboxDigests  root');
+    for (const r of results) {
+      console.log(
+        `${String(r.workers).padStart(2)}  ` +
+        `${String(r.frames).padStart(6)}  ` +
+        `${String(r.payments).padStart(8)}  ` +
+        `${String(r.effectDigestsCompared).padStart(13)}  ` +
+        `${String(r.outboxDigestsCompared).padStart(13)}  ` +
+        `${r.accountsRoot}`,
+      );
+    }
+  } else {
+    console.log(' w  elapsedMs  speedup  payments engineMs  applyMs   avgCpu  peakRSS  threads  effCores  in+e');
+    for (const r of results) {
+      console.log(
+        `${String(r.workers).padStart(2)}  ` +
+        `${String(Math.round(r.elapsedMs)).padStart(8)}  ` +
+        `${(scalingBaseline.elapsedMs / r.elapsedMs).toFixed(2).padStart(7)}  ` +
+        `${String(r.payments).padStart(8)}  ` +
+        `${Math.round(r.engineMs).toString().padStart(8)}  ` +
+        `${Math.round(r.applyMs).toString().padStart(7)}  ` +
+        `${r.avgCpuCores.toFixed(2).padStart(6)}  ` +
+        `${Math.round(r.peakRssMiB).toString().padStart(5)}M  ` +
+        `${String(r.peakThreads).padStart(7)}  ` +
+        `${r.effectiveCores.toFixed(2).padStart(8)}  ` +
+        `${r.ingress}+${r.egress}`,
+      );
+    }
   }
 
   // Phase details
-  for (const r of [r1, r8]) {
+  for (const r of allowSmoke ? [] : results) {
     if (r.phaseSummary.length === 0) continue;
     console.log(`\nw=${r.workers} phase detail:`);
     console.log('  kind              workMaxMs  shards  workersWithWork');
@@ -308,7 +367,7 @@ if (import.meta.main) {
 
   // Exact digest verification
   console.log('\n--- EXACT VERIFICATION (compared against recording) ---');
-  for (const r of [r1, r8]) {
+  for (const r of results) {
     console.log(
       `w=${r.workers}: effectDigests=${r.effectDigestsCompared} outboxDigests=${r.outboxDigestsCompared} ` +
       `postState=${r.postStateHashesCompared} runtimeRoots=${r.runtimeRootsCompared}`,
@@ -316,15 +375,37 @@ if (import.meta.main) {
   }
 
   // Cross-worker digest equality
-  if (r1.ok && r8.ok) {
-    const same = r1.payments === r8.payments && r1.frames === r8.frames && r1.accountsRoot === r8.accountsRoot;
-    console.log(`\nDIGEST_EQUALITY w=1 vs w=8: ${same ? 'OK' : 'MISMATCH'}`);
-    if (!same) {
-      console.error(`MISMATCH: w1 payments=${r1.payments} frames=${r1.frames} root=${r1.accountsRoot}`);
-      console.error(`         w8 payments=${r8.payments} frames=${r8.frames} root=${r8.accountsRoot}`);
+  const baseline = results[0]!;
+  const same = results.every(result =>
+    result.payments === baseline.payments &&
+    result.frames === baseline.frames &&
+    result.accountsRoot === baseline.accountsRoot);
+  console.log(`\nDIGEST_EQUALITY w=1/2/4/8: ${same ? 'OK' : 'MISMATCH'}`);
+  if (!same) {
+    for (const result of results) {
+      console.error(
+        `w${result.workers}: payments=${result.payments} frames=${result.frames} root=${result.accountsRoot}`,
+      );
     }
+    process.exitCode = 1;
   }
 
   // Full JSON output
-  console.log(`\nBENCH_COMPLETE ${safeStringify({ pathsJson, results: [r1, r8] })}\n`);
+  console.log(`\nBENCH_COMPLETE ${safeStringify({
+    pathsJson,
+    evidence: allowSmoke ? 'smoke-parity-only' : 'replay-scaling-diagnostic-not-live-tps',
+    results: allowSmoke
+      ? results.map(result => ({
+          workers: result.workers,
+          ok: result.ok,
+          frames: result.frames,
+          payments: result.payments,
+          effectDigestsCompared: result.effectDigestsCompared,
+          outboxDigestsCompared: result.outboxDigestsCompared,
+          postStateHashesCompared: result.postStateHashesCompared,
+          runtimeRootsCompared: result.runtimeRootsCompared,
+          accountsRoot: result.accountsRoot,
+        }))
+      : results,
+  })}\n`);
 }

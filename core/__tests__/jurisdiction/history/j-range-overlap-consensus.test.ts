@@ -11,6 +11,8 @@ import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-his
 import { markLocalJAuthorityRuntimeTx } from '../../../jurisdiction/machine/registration-evidence';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import { createEmptyEnv } from '../../../runtime';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
+import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 import type { EntityInput, EntityReplica, EntityState } from '../../../entity/types';
 
 const seed = 'j-range-overlap-consensus';
@@ -62,12 +64,10 @@ const initialState = (): EntityState => ({
     },
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: emptyEntityAccountMap(entityId),
   lastFinalizedJHeight: 0,
   profile: { name: 'test', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const frameAtHeight = (outputs: EntityInput[], height: number): NonNullable<EntityInput['proposedFrame']> => {
@@ -79,13 +79,16 @@ const frameAtHeight = (outputs: EntityInput[], height: number): NonNullable<Enti
 describe('overlapping finalized J-range consensus', () => {
   test('checks the certified prefix, rejects conflicts, and commits only the matching suffix', async () => {
     const env = createEmptyEnv(seed);
+    const entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     env.quietRuntimeLogs = true;
     const leaderKey = `${entityId}:${leaderId}`;
+    const leaderState = initialState();
+    leaderState.entityEncryptionPublicKey = entityEncryptionPublicKey;
     const leader: EntityReplica = {
       entityId,
       signerId: leaderId,
       entityEncPubKey: '',
-      state: initialState(),
+      state: leaderState,
       mempool: [],
       isProposer: true,
     };
@@ -149,11 +152,13 @@ describe('overlapping finalized J-range consensus', () => {
       })),
       blocks: [eventBlock(7, '7')],
     });
+    const initialValidatorState = initialState();
+    initialValidatorState.entityEncryptionPublicKey = entityEncryptionPublicKey;
     const initialValidator: EntityReplica = {
       entityId,
       signerId: validatorId,
       entityEncPubKey: '',
-      state: initialState(),
+      state: initialValidatorState,
       mempool: [],
       isProposer: false,
       jHistory: initialValidatorHistory,
@@ -291,8 +296,8 @@ describe('overlapping finalized J-range consensus', () => {
     expect(secondValidation.outcome.kind).toBe('committed');
     expect(secondValidation.workingReplica.state.lastFinalizedJHeight).toBe(12);
     expect(secondValidation.workingReplica.state.reserves.get(1)).toBe(12n);
-    expect(secondValidation.workingReplica.state.jBlockChain.map((block) => block.jHeight))
-      .toEqual([7, 12]);
+    expect(secondValidation.workingReplica.state.jBlockChain).toBeUndefined();
+    expect(secondValidation.workingReplica.state.jHistoryFinality?.finalizedThroughHeight).toBe(12);
     const secondPrecommit = secondValidation.outputs.find((output) => output.hashPrecommits);
     if (!secondPrecommit) throw new Error('TEST_SECOND_PRECOMMIT_MISSING');
 
@@ -303,7 +308,8 @@ describe('overlapping finalized J-range consensus', () => {
     );
     expect(secondCommit.workingReplica.state.lastFinalizedJHeight).toBe(12);
     expect(secondCommit.workingReplica.state.reserves.get(1)).toBe(12n);
-    expect(secondCommit.workingReplica.state.jBlockChain.map((block) => block.jHeight)).toEqual([7, 12]);
+    expect(secondCommit.workingReplica.state.jBlockChain).toBeUndefined();
+    expect(secondCommit.workingReplica.state.jHistoryFinality?.finalizedThroughHeight).toBe(12);
 
     const replay = await applyJEvent(secondCommit.workingReplica.state, firstRange.data, env);
     expect(replay.newState).toBe(secondCommit.workingReplica.state);

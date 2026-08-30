@@ -15,12 +15,13 @@ import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-bu
 import { safeStringify } from '../../protocol/serialization';
 import {
   materializeRscoreAccountReplica,
+  planRscoreLocalWitnesses,
   type RscoreAccountLocalWitnessPlan,
   type RscoreAccountMaterializerBinding,
 } from '../../rscore/checkpoint/account-materializer';
 import { decodeRscoreAccountRestoreRow } from '../../rscore/checkpoint/checkpoint-restore';
 import type { RscoreAccountCheckpointRow } from '../../rscore/checkpoint/wave-checkpoint-decode';
-import { accountEnvelopeWire, accountTxWire } from '../../rscore/shadow-wire';
+import { accountEnvelopeWire, accountTxWire, canonicalValueWire } from '../../rscore/shadow-wire';
 import type { RscoreWireValue } from '../../rscore/process-wire-value';
 import type {
   AccountDisputeHanko,
@@ -89,6 +90,9 @@ const offerWire = (value: SwapOffer): RscoreWireValue[] => [
   value.createdHeight,
   value.quantizedGive?.toString() ?? failTest('offer quantized give'),
   value.quantizedWant?.toString() ?? failTest('offer quantized want'),
+  value.crossJurisdiction === undefined
+    ? null
+    : canonicalValueWire(value.crossJurisdiction),
 ];
 
 const policySnapshotWire = (
@@ -180,6 +184,7 @@ const ackWire = (
   bytes(frameHash),
   hankoBytes(frameHanko),
   dispute === undefined ? null : [
+    dispute.hanko === undefined ? null : hankoBytes(dispute.hanko),
     bytes(dispute.hash),
     bytes(dispute.proofBodyHash),
     dispute.proofNonce,
@@ -187,16 +192,23 @@ const ackWire = (
   ],
 ];
 
-const consensusWire = (account: AccountReplica, localCommittedHanko?: string): RscoreWireValue[] => {
+const consensusWire = (
+  account: AccountReplica,
+  localCommittedHanko?: string,
+  includeDisputeHankos = true,
+): RscoreWireValue[] => {
   const pending = account.pendingFrame;
   const pendingInput = account.pendingAccountInput;
-  const bundledAck = pendingInput?.kind === 'frame_ack' ? pendingInput.ack : undefined;
-  const lastAck = account.lastOutboundFrameAck?.response.ack;
+  const bundledAck = pendingInput?.kind === 'ack_frame' ? pendingInput.ack : undefined;
+  const lastAck = account.lastOutboundAckFrame?.response.ack;
   const localDraft = account.currentDisputeHash === undefined
     || account.currentDisputeProofBodyHash === undefined
     || account.currentDisputeProofNonce === undefined
     ? null
     : [
+        includeDisputeHankos && account.currentDisputeProofHanko !== undefined
+          ? hankoBytes(account.currentDisputeProofHanko)
+          : null,
         bytes(account.currentDisputeHash),
         bytes(account.currentDisputeProofBodyHash),
         account.currentDisputeProofNonce,
@@ -224,6 +236,9 @@ const consensusWire = (account: AccountReplica, localCommittedHanko?: string): R
           pendingInput?.proposal.disputeHanko === undefined
             ? null
             : [
+                includeDisputeHankos && pendingInput.proposal.disputeHanko.hanko !== undefined
+                  ? hankoBytes(pendingInput.proposal.disputeHanko.hanko)
+                  : null,
                 bytes(pendingInput.proposal.disputeHanko.hash),
                 bytes(pendingInput.proposal.disputeHanko.proofBodyHash),
                 pendingInput.proposal.disputeHanko.proofNonce,
@@ -282,6 +297,7 @@ const restoreWire = (
       ],
       accountEnvelopeWire(account),
       null,
+      null,
     ],
     [...state.deltas.values()].map(deltaWire),
     [...state.locks.values()].map(lockWire),
@@ -294,6 +310,7 @@ const restoreWire = (
       tokenId,
       [policySnapshotWire(policy.left), policySnapshotWire(policy.right)],
     ]),
+    [...(state.pulls ?? new Map()).values()].map(pull => canonicalValueWire(pull)),
     [],
     consensus,
   ];
@@ -313,6 +330,7 @@ const checkpointRow = (wire: RscoreWireValue[]): RscoreAccountCheckpointRow => {
       lendingIntents: descriptor,
       swapOffers: descriptor,
       rebalanceFeePolicies: descriptor,
+      pulls: descriptor,
     },
     nodeChanges: {
       deltas: changes,
@@ -320,9 +338,10 @@ const checkpointRow = (wire: RscoreWireValue[]): RscoreAccountCheckpointRow => {
       lendingIntents: changes,
       swapOffers: changes,
       rebalanceFeePolicies: changes,
+      pulls: changes,
     },
     jClaimNodeChanges: { puts: [], dels: [] },
-    consensus: wire[9] as readonly RscoreWireValue[],
+    consensus: wire[10] as readonly RscoreWireValue[],
     decoded,
     wire: [],
   };
@@ -448,7 +467,7 @@ describe('rscore Account materializer', () => {
     expect(computeEntityAccountValueHash(result)).toBe(computeEntityAccountValueHash(target));
   });
 
-  test('replaces all five Rust maps and restores pending/ACK/Hanko/rollback consensus', () => {
+  test('replaces all six Rust maps and restores pending/ACK/Hanko/rollback consensus', () => {
     const state = nonemptyState();
     const target = replica(state);
     const current: AccountFrame = {
@@ -482,7 +501,7 @@ describe('rscore Account materializer', () => {
     target.lastRollbackFrameHash = `0x${'99'.repeat(32)}`;
     target.mempool = [{ type: 'add_delta', data: { tokenId: 3 } }];
     target.pendingAccountInput = {
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       fromEntityId: OWNER,
       toEntityId: PEER,
       domain: { ...state.domain },
@@ -491,7 +510,7 @@ describe('rscore Account materializer', () => {
       ack: { height: 1, frameHash: current.stateHash, frameHanko: ackHanko },
       proposal: { frame: pending, frameHanko: pendingHanko },
     };
-    target.lastOutboundFrameAck = {
+    target.lastOutboundAckFrame = {
       height: 1,
       counterpartyEntityId: PEER,
       response: {
@@ -527,10 +546,10 @@ describe('rscore Account materializer', () => {
     expect(result.state.rebalanceFeePolicies?.get(1)).toEqual(state.rebalanceFeePolicies?.get(1));
     expect(result.pendingFrame).toEqual(pending);
     expect(result.pendingAccountInput?.proposal.frameHanko).toBeUndefined();
-    expect(result.pendingAccountInput?.kind === 'frame_ack'
+    expect(result.pendingAccountInput?.kind === 'ack_frame'
       ? result.pendingAccountInput.ack.frameHanko
-      : failTest('pending frame_ack')).toBeUndefined();
-    expect(result.lastOutboundFrameAck?.response.ack.frameHanko).toBeUndefined();
+      : failTest('pending ack_frame')).toBeUndefined();
+    expect(result.lastOutboundAckFrame?.response.ack.frameHanko).toBeUndefined();
     expect(result.currentFrameHanko).toBeUndefined();
     expect(result.counterpartyFrameHanko).toBe(peerHanko);
     expect(result.rollbackCount).toBe(2);
@@ -560,13 +579,13 @@ describe('rscore Account materializer', () => {
     ]);
     expect(attachHankoWitnessesToState(entityState, entityWitness, 9, [PEER])).toBe(3);
     const certified = accounts.get(PEER) ?? failTest('certified account');
-    expect(certified.lastOutboundFrameAck?.response.ack.frameHanko).toBe('0x1111');
+    expect(certified.lastOutboundAckFrame?.response.ack.frameHanko).toBe('0x1111');
     expect(certified.pendingAccountInput?.proposal.frameHanko).toBe('0x2222');
     expect(certified.currentFrameHanko).toBe('0x2222');
     expect(accounts.rootHash()).toBe(rootBeforeWitness);
   });
 
-  test('root-checks carried bodies and supports non-empty H0 shadow policy only from the Entity shell', () => {
+  test('root-checks carried bodies and restores non-empty H0 shadow policy without prior TS state', () => {
     const policy: RebalancePolicy = {
       r2cRequestSoftLimit: 10n,
       hardLimit: 20n,
@@ -586,8 +605,9 @@ describe('rscore Account materializer', () => {
       noFreshWitnesses,
     ).account.shadow.rebalance.policy.get(1))
       .toEqual(policy);
-    expect(() => materializeRscoreAccountReplica(binding, PEER, row, null, noFreshWitnesses))
-      .toThrow('RSCORE_MATERIALIZE_CREATE_REBALANCE_POLICY_ABI_INCOMPLETE');
+    expect(materializeRscoreAccountReplica(binding, PEER, row, null, noFreshWitnesses)
+      .account.shadow.rebalance.policy.get(1))
+      .toEqual(policy);
 
     const stale = replica();
     stale.state.requestedRebalance = PersistentAccountStateMap.fromEntries(
@@ -628,7 +648,7 @@ describe('rscore Account materializer', () => {
 
   test('keeps fresh Rust local frame/dispute drafts unsigned until Entity quorum attaches witnesses', () => {
     const { account: rust, frame, dispute } = pendingDisputeReplica('0xf0f0', '0xf1f1');
-    const row = checkpointRow(restoreWire(rust));
+    const row = checkpointRow(restoreWire(rust, consensusWire(rust, undefined, false)));
     expect(() => materializeRscoreAccountReplica(
       binding,
       PEER,
@@ -706,5 +726,47 @@ describe('rscore Account materializer', () => {
     expect(materialized.account.currentDisputeProofHanko).toBe('0xd2d2');
     expect(materialized.account.pendingAccountInput?.proposal.frameHanko).toBe('0xc1c1');
     expect(materialized.account.pendingAccountInput?.proposal.disputeHanko?.hanko).toBe('0xd2d2');
+  });
+
+  test('strips a Rust-local genesis ACK dispute Hanko for the Entity witness pass', () => {
+    const { account: rust, frame, dispute } = pendingDisputeReplica('0xf0f0', '0xf1f1');
+    rust.currentFrame = frame;
+    rust.currentHeight = frame.height;
+    rust.counterpartyFrameHanko = '0xe0e0';
+    delete rust.pendingFrame;
+    delete rust.pendingAccountInput;
+    rust.lastOutboundAckFrame = {
+      height: frame.height,
+      counterpartyEntityId: PEER,
+      response: {
+        kind: 'ack',
+        fromEntityId: OWNER,
+        toEntityId: PEER,
+        domain: { ...rust.state.domain },
+        disputeConfig: { ...rust.state.disputeConfig },
+        watchSeed: rust.state.watchSeed,
+        ack: {
+          height: frame.height,
+          frameHash: frame.stateHash,
+          frameHanko: '0xf0f0',
+          disputeHanko: dispute,
+        },
+      },
+    };
+    const prior = replica();
+    const row = checkpointRow(restoreWire(rust));
+    const plan = planRscoreLocalWitnesses(
+      PEER,
+      { ...row, consensus: row.decoded.consensus },
+      prior,
+    );
+    const materialized = materializeRscoreAccountReplica(binding, PEER, row, prior, plan);
+    expect(plan.freshHashesToSign).toContainEqual({
+      hash: dispute.hash,
+      type: 'dispute',
+      context: `account:${PEER.slice(-8)}:ack-dispute`,
+    });
+    expect(materialized.account.lastOutboundAckFrame?.response.ack.disputeHanko?.hanko)
+      .toBeUndefined();
   });
 });

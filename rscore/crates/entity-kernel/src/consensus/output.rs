@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 use xln_rscore_batch::{AccountInputKind, AccountPeerInput};
 
-use super::frame::HashType;
+use super::frame::{CanonicalEntityTx, HashType};
 
 /// Exact Entity-local output before Runtime binds validator/runtime routing.
 /// This is the Rust equivalent of TS `EntityOutput`: target Entity plus one
@@ -22,7 +22,11 @@ pub struct LocalEntityOutput {
 
 #[derive(Clone, Debug)]
 pub enum LocalEntityOutputTx {
-    AccountInput(AccountPeerInput),
+    AccountInput(Box<AccountPeerInput>),
+    /// Canonical Entity transaction routed to a different Runtime. This is
+    /// the same `{type,data}` payload committed in the producing Entity frame;
+    /// Runtime adds transport routing only after WAL fsync.
+    Projected(CanonicalEntityTx),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,13 +63,15 @@ impl LocalEntityOutput {
         attach_account_input_hankos(&mut input, witnesses)?;
         Ok(Self {
             entity_id: bytes32_text(&input.envelope.to_entity_id),
-            entity_txs: vec![LocalEntityOutputTx::AccountInput(input)],
+            entity_txs: vec![LocalEntityOutputTx::AccountInput(Box::new(input))],
         })
     }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum EntityOutputError {
+    #[error("ENTITY_OUTPUT_PROJECTED_DATA_MISSING:{0}")]
+    ProjectedDataMissing(&'static str),
     #[error("ACCOUNT_OUTPUT_HANKO_WITNESS_MISSING:{kind}:{hash}")]
     AccountHankoMissing { kind: &'static str, hash: String },
     #[error("ACCOUNT_OUTPUT_HANKO_WITNESS_TYPE:{hash}:expected={expected}:actual={actual:?}")]
@@ -191,7 +197,7 @@ fn attach_account_input_hankos(
 ) -> Result<(), EntityOutputError> {
     match &mut input.kind {
         AccountInputKind::Frame(frame) => attach_frame_hankos(frame, witnesses),
-        AccountInputKind::FrameAck { ack, frame } => {
+        AccountInputKind::AckFrame { ack, frame } => {
             attach_ack_hankos(ack, witnesses)?;
             attach_frame_hankos(frame, witnesses)
         }
@@ -295,7 +301,9 @@ mod tests {
             ),
         ]);
         let output = LocalEntityOutput::account_input(input, &witnesses).expect("certified output");
-        let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0];
+        let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0] else {
+            panic!("account input expected")
+        };
         let AccountInputKind::Frame(frame) = &input.kind else {
             panic!("frame output");
         };
@@ -348,7 +356,9 @@ mod tests {
         };
         let output = LocalEntityOutput::account_input(input, &EntityHankoWitnessMap::new())
             .expect("historical certified witnesses remain valid");
-        let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0];
+        let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0] else {
+            panic!("account input expected")
+        };
         let AccountInputKind::Frame(frame) = &input.kind else {
             panic!("frame output");
         };

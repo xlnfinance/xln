@@ -18,8 +18,6 @@ const makePersistentAccount = (): AccountReplica => {
   const account = makeAccount(LEFT, RIGHT);
   // Historical swap rows belong to the certified frame-history store, never
   // the live Account replica exercised by this transition test.
-  delete (account as { swapOrderHistory?: unknown }).swapOrderHistory;
-  delete (account as { swapClosedOrders?: unknown }).swapClosedOrders;
   account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', account.state.deltas);
   account.state.locks = PersistentAccountStateMap.fromEntries('locks', account.state.locks);
   account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', account.state.swapOffers);

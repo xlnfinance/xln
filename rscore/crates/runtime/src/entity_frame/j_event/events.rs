@@ -5,7 +5,8 @@ use serde_json::{Map, Value};
 
 use super::normalize::{
     int_value, is_action_kind, is_positive_uint256, normalize_address, normalize_big_numberish,
-    normalize_bytes32, normalize_entity, normalize_int, normalize_string, record, string_value,
+    normalize_bytes32, normalize_entity, normalize_hex_bytes, normalize_int, normalize_string,
+    record, string_value,
 };
 
 fn insert(map: &mut Map<String, Value>, name: &str, value: Value) {
@@ -43,6 +44,134 @@ fn as_int(value: &Value) -> Option<Value> {
 }
 fn as_string(value: &Value) -> Option<Value> {
     normalize_string(value).map(string_value)
+}
+
+fn bigint_value(value: &Value, non_negative: bool) -> Option<Value> {
+    let text = normalize_big_numberish(value)?;
+    let parsed = text.parse::<BigInt>().ok()?;
+    if non_negative && parsed < BigInt::from(0) {
+        return None;
+    }
+    Some(Value::Object(Map::from_iter([
+        ("__xlnType".into(), Value::String("BigInt".into())),
+        ("value".into(), Value::String(parsed.to_string())),
+    ])))
+}
+
+fn exact_fields(value: &Map<String, Value>, names: &[&str]) -> bool {
+    value.len() == names.len() && names.iter().all(|name| value.contains_key(*name))
+}
+
+fn proof_body(value: &Value) -> Option<Value> {
+    let proof = record(value)?;
+    let names = [
+        "watchSeed",
+        "leftResponseSeconds",
+        "rightResponseSeconds",
+        "offdeltas",
+        "tokenIds",
+        "transformers",
+    ];
+    if !exact_fields(proof, &names) {
+        return None;
+    }
+    let bigints = |name: &str, non_negative: bool| -> Option<Value> {
+        Some(Value::Array(
+            proof
+                .get(name)?
+                .as_array()?
+                .iter()
+                .map(|value| bigint_value(value, non_negative))
+                .collect::<Option<Vec<_>>>()?,
+        ))
+    };
+    let transformers = proof
+        .get("transformers")?
+        .as_array()?
+        .iter()
+        .map(|value| {
+            let transformer = record(value)?;
+            if !exact_fields(
+                transformer,
+                &["transformerAddress", "encodedBatch", "allowances"],
+            ) {
+                return None;
+            }
+            let allowances = transformer
+                .get("allowances")?
+                .as_array()?
+                .iter()
+                .map(|value| {
+                    let allowance = record(value)?;
+                    if !exact_fields(
+                        allowance,
+                        &["deltaIndex", "rightAllowance", "leftAllowance"],
+                    ) {
+                        return None;
+                    }
+                    Some(Value::Object(Map::from_iter([
+                        (
+                            "deltaIndex".into(),
+                            bigint_value(allowance.get("deltaIndex")?, false)?,
+                        ),
+                        (
+                            "rightAllowance".into(),
+                            bigint_value(allowance.get("rightAllowance")?, false)?,
+                        ),
+                        (
+                            "leftAllowance".into(),
+                            bigint_value(allowance.get("leftAllowance")?, false)?,
+                        ),
+                    ])))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(Value::Object(Map::from_iter([
+                (
+                    "transformerAddress".into(),
+                    string_value(normalize_string(transformer.get("transformerAddress")?)?),
+                ),
+                (
+                    "encodedBatch".into(),
+                    string_value(normalize_string(transformer.get("encodedBatch")?)?),
+                ),
+                ("allowances".into(), Value::Array(allowances)),
+            ])))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Value::Object(Map::from_iter([
+        (
+            "watchSeed".into(),
+            string_value(normalize_string(proof.get("watchSeed")?)?),
+        ),
+        (
+            "leftResponseSeconds".into(),
+            int_value(normalize_int(proof.get("leftResponseSeconds")?)?),
+        ),
+        (
+            "rightResponseSeconds".into(),
+            int_value(normalize_int(proof.get("rightResponseSeconds")?)?),
+        ),
+        ("offdeltas".into(), bigints("offdeltas", false)?),
+        ("tokenIds".into(), bigints("tokenIds", true)?),
+        ("transformers".into(), Value::Array(transformers)),
+    ])))
+}
+
+fn as_proof_body(value: &Value) -> Option<Value> {
+    proof_body(value)
+}
+
+fn bytes32_quartet(value: &Value) -> Option<Value> {
+    let values = value.as_array()?;
+    if values.len() != 4 {
+        return None;
+    }
+    Some(Value::Array(
+        values
+            .iter()
+            .map(|value| normalize_bytes32(value).map(string_value))
+            .collect::<Option<Vec<_>>>()?,
+    ))
 }
 
 fn cmp_text(left: &str, right: &str) -> std::cmp::Ordering {
@@ -322,6 +451,108 @@ pub(super) fn normalize_event_data(kind: &str, data: &Map<String, Value>) -> Opt
             ],
         )
         .map(Value::Object),
+        "DisputeStarted" => {
+            let mut decoded = decode_object(
+                data,
+                &[
+                    ("sender", as_entity),
+                    ("counterentity", as_entity),
+                    ("nonce", as_big),
+                    ("proofbodyHash", as_string),
+                    ("watchSeed", as_bytes32),
+                    ("starterInitialArguments", |value| {
+                        normalize_hex_bytes(value).map(string_value)
+                    }),
+                    ("starterCounterArguments", |value| {
+                        normalize_hex_bytes(value).map(string_value)
+                    }),
+                    ("starterCounterProofCommitment", as_bytes32),
+                    ("initialProofbody", as_proof_body),
+                    ("disputeTimeout", as_int),
+                    ("disputeStartTimestamp", as_int),
+                    ("leftResponseSeconds", as_int),
+                    ("rightResponseSeconds", as_int),
+                ],
+            )?;
+            let proposer = data.get("proposerIsLeft")?.as_bool()?;
+            let start = decoded["disputeStartTimestamp"].as_i64()?;
+            let left = decoded["leftResponseSeconds"].as_i64()?;
+            let right = decoded["rightResponseSeconds"].as_i64()?;
+            let timeout = decoded["disputeTimeout"].as_i64()?;
+            if start <= 0
+                || left < 0
+                || right < 0
+                || start.checked_add(left)?.checked_add(right)? != timeout
+            {
+                return None;
+            }
+            insert(&mut decoded, "proposerIsLeft", Value::Bool(proposer));
+            if let Some(batch_nonce) = data.get("batchNonce").and_then(normalize_int) {
+                insert(&mut decoded, "batchNonce", int_value(batch_nonce));
+            }
+            Some(Value::Object(decoded))
+        }
+        "DisputeFinalized" => {
+            let mut decoded = decode_object(
+                data,
+                &[
+                    ("sender", as_entity),
+                    ("counterentity", as_entity),
+                    ("initialNonce", as_big),
+                    ("initialProofbodyHash", as_string),
+                    ("finalProofbodyHash", as_string),
+                    ("finalizationEvidenceHash", as_string),
+                    ("finalProofbody", as_proof_body),
+                ],
+            )?;
+            if let Some(batch_nonce) = data.get("batchNonce").and_then(normalize_int) {
+                insert(&mut decoded, "batchNonce", int_value(batch_nonce));
+            }
+            Some(Value::Object(decoded))
+        }
+        "CounterDisputeRegistered" => {
+            let mut decoded = decode_object(
+                data,
+                &[
+                    ("sender", as_entity),
+                    ("counterentity", as_entity),
+                    ("nonce", as_int),
+                    ("proofbodyHash", as_bytes32),
+                    ("counterProofbody", as_proof_body),
+                ],
+            )?;
+            insert(
+                &mut decoded,
+                "proposerIsLeft",
+                Value::Bool(data.get("proposerIsLeft")?.as_bool()?),
+            );
+            Some(Value::Object(decoded))
+        }
+        "HashLadderRevealRegistered" => {
+            let mut decoded = decode_object(
+                data,
+                &[
+                    ("entity", as_entity),
+                    ("counterpartyEntity", as_entity),
+                    ("ladderHash", as_bytes32),
+                    ("fillRatio", as_int),
+                    ("fullSecret", as_bytes32),
+                    ("reveals", bytes32_quartet),
+                    ("revealedAt", as_int),
+                ],
+            )?;
+            let fill_ratio = decoded["fillRatio"].as_i64()?;
+            let revealed_at = decoded["revealedAt"].as_i64()?;
+            if !(1..=0xffff).contains(&fill_ratio) || revealed_at <= 0 {
+                return None;
+            }
+            insert(
+                &mut decoded,
+                "targetRole",
+                Value::Bool(data.get("targetRole")?.as_bool()?),
+            );
+            Some(Value::Object(decoded))
+        }
         "DebtEnforced" => decode_object(
             data,
             &[

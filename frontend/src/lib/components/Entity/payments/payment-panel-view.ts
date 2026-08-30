@@ -20,11 +20,7 @@ export type PaymentRuntimeGraph = {
   ) => Promise<PaymentRoute[]>;
 };
 
-export type PaymentReplicaView = LocalReplicaLike & {
-  state: LocalReplicaLike['state'] & {
-    lockBook: Map<string, unknown>;
-  };
-};
+export type PaymentReplicaView = LocalReplicaLike;
 
 export type PaymentPanelView = {
   replicaMap: Map<string, PaymentReplicaView>;
@@ -145,10 +141,7 @@ export function buildPaymentPanelViewFromRuntimeView(input: {
     }
     const signerId = String(active.core.signerId || active.summary.entityId || activeEntityId).trim().toLowerCase();
     replicaMap.set(`${activeEntityId}:${signerId}`, {
-      state: {
-        accounts,
-        lockBook: active.core.lockBook instanceof Map ? new Map(active.core.lockBook) : new Map(),
-      },
+      state: { accounts },
     });
   }
 
@@ -167,10 +160,7 @@ function projectReplica(replica: EntityReplica): PaymentReplicaView {
     accounts.set(String(counterpartyId), clonePaymentAccount(account));
   }
   return {
-    state: {
-      accounts,
-      lockBook: replica.state.lockBook instanceof Map ? new Map(replica.state.lockBook) : new Map(),
-    },
+    state: { accounts },
   };
 }
 

@@ -42,7 +42,8 @@ const emptyHeader = (): RscoreWireValue[] => [
     [Buffer.from(EMPTY_ACCOUNT_J_CLAIM_ROOT.slice(2), 'hex'), 0],
     [Buffer.from(EMPTY_ACCOUNT_J_CLAIM_ROOT.slice(2), 'hex'), 0],
   ],
-  [[8, []], []],
+  [[8, []], [], [], []],
+  null,
   null,
 ];
 
@@ -60,13 +61,14 @@ const emptyPostAccount = (
     accountId,
     leaf,
     emptyHeader(),
-    [descriptor, descriptor, descriptor, descriptor, descriptor],
+    [descriptor, descriptor, descriptor, descriptor, descriptor, descriptor],
     changes,
     changes,
     changes,
     changes,
     changes,
     changes,
+    [[], []],
     emptyConsensus(),
   ];
 };
@@ -374,7 +376,7 @@ describe('rscore staged wave decoder', () => {
     const raw = rawWave();
     const ackStateHash = bytes(32, 0x66);
     const frameStateHash = bytes(32, 0x77);
-    requiredAt(raw[2] as RscoreWireValue[][], 0, 'FRAME_ACK_APPLIED')[2] = [
+    requiredAt(raw[2] as RscoreWireValue[][], 0, 'ACK_FRAME_APPLIED')[2] = [
       9,
       [
         5,
@@ -406,7 +408,7 @@ describe('rscore staged wave decoder', () => {
     const wave = decodeWave(withParityDigest(raw));
     expect(wave.applied).toHaveLength(1);
     const verdict = wave.applied[0]?.verdict;
-    if (verdict?.kind !== 'frameAckApplied') throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_APPLIED');
+    if (verdict?.kind !== 'ackFrameApplied') throw new Error('RSCORE_TEST_EXPECTED_ACK_FRAME_APPLIED');
     expect(verdict.ackVerdict).toMatchObject({
       kind: 'ackCommitted',
       height: 1,
@@ -427,10 +429,10 @@ describe('rscore staged wave decoder', () => {
       },
     });
     if (verdict.ackVerdict.kind !== 'ackCommitted') {
-      throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_ACK_COMMIT');
+      throw new Error('RSCORE_TEST_EXPECTED_ACK_FRAME_ACK_COMMIT');
     }
     if (verdict.frameVerdict.kind !== 'frameCommitted') {
-      throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_FRAME_COMMIT');
+      throw new Error('RSCORE_TEST_EXPECTED_ACK_FRAME_FRAME_COMMIT');
     }
     expect(verdict.ackVerdict.outputs).toEqual([
       { kind: 'swapOfferRemove', offerId: 'ack-remove', makerIsRight: 0 },
@@ -460,13 +462,13 @@ describe('rscore staged wave decoder', () => {
   test('decodes frame-ACK rejection phases by name', () => {
     for (const [phaseTag, phase] of [[0, 'ack'], [1, 'frame']] as const) {
       const raw = rawWave();
-      requiredAt(raw[2] as RscoreWireValue[][], 0, `FRAME_ACK_REJECTED_${phase}`)[2] = [
+      requiredAt(raw[2] as RscoreWireValue[][], 0, `ACK_FRAME_REJECTED_${phase}`)[2] = [
         10,
         phaseTag,
         `${phase} rejected`,
       ];
       expect(decodeWave(withParityDigest(raw)).applied[0]?.verdict).toEqual({
-        kind: 'frameAckRejected',
+        kind: 'ackFrameRejected',
         phase,
         reason: `${phase} rejected`,
       });
@@ -539,7 +541,7 @@ describe('rscore staged wave decoder', () => {
       message: string,
     ): void => {
       const raw = rawWave();
-      requiredAt(raw[2] as RscoreWireValue[][], 0, 'BAD_FRAME_ACK')[2] = verdict;
+      requiredAt(raw[2] as RscoreWireValue[][], 0, 'BAD_ACK_FRAME')[2] = verdict;
       expect(() => decodeWave(raw)).toThrow(message);
     };
 
@@ -552,30 +554,30 @@ describe('rscore staged wave decoder', () => {
     rejects([9, [9, [6, 1], [4, 'nested']], [4, 'frame rejected']], 'ackVerdict.tag:9:ackDomain');
     rejects([9, [6, 1], [10, 1, 'nested']], 'frameVerdict.tag:10:frameDomain');
     rejects([9, [11], [4, 'frame rejected']], 'ackVerdict.tag:11:ackDomain');
-    rejects([9, [6, 1]], 'frameAckApplied:arity:2:3');
-    rejects([10, 2, 'bad phase'], 'frameAckRejected.phase:2');
+    rejects([9, [6, 1]], 'ackFrameApplied:arity:2:3');
+    rejects([10, 2, 'bad phase'], 'ackFrameRejected.phase:2');
   });
 
   test('binds both frame-ACK children into the parity digest', () => {
-    const withFrameAck = (ackHeight: number, currentFrameHeight: number): RscoreWireValue[] => {
+    const withAckFrame = (ackHeight: number, currentFrameHeight: number): RscoreWireValue[] => {
       const raw = rawWave();
-      requiredAt(raw[2] as RscoreWireValue[][], 0, 'FRAME_ACK_DIGEST')[2] = [
+      requiredAt(raw[2] as RscoreWireValue[][], 0, 'ACK_FRAME_DIGEST')[2] = [
         9,
         [6, ackHeight],
         [3, 1, currentFrameHeight],
       ];
       return raw;
     };
-    const original = withFrameAck(1, 2);
-    const changedAck = withFrameAck(2, 2);
-    const changedFrame = withFrameAck(1, 3);
+    const original = withAckFrame(1, 2);
+    const changedAck = withAckFrame(2, 2);
+    const changedFrame = withAckFrame(1, 3);
     expect(waveParityDigestFromWireForTests(original))
       .not.toBe(waveParityDigestFromWireForTests(changedAck));
     expect(waveParityDigestFromWireForTests(original))
       .not.toBe(waveParityDigestFromWireForTests(changedFrame));
 
-    const signed = withParityDigest(withFrameAck(1, 2));
-    const applied = requiredAt(signed[2] as RscoreWireValue[][], 0, 'SIGNED_FRAME_ACK');
+    const signed = withParityDigest(withAckFrame(1, 2));
+    const applied = requiredAt(signed[2] as RscoreWireValue[][], 0, 'SIGNED_ACK_FRAME');
     ((applied[2] as RscoreWireValue[])[1] as RscoreWireValue[])[1] = 2;
     expect(() => decodeWave(signed)).toThrow('wave.parityDigest');
   });
@@ -662,7 +664,7 @@ describe('rscore staged wave decoder', () => {
       changedConsensus[6] as RscoreWireValue[][],
       0,
       'CHANGED_CONSENSUS_POST',
-    )[10] as RscoreWireValue[];
+    )[11] as RscoreWireValue[];
     changedConsensusRow[3] = 1;
     expect(() => resolve(changedConsensus)).toThrow('ACCOUNT_LEAF_MISMATCH');
 

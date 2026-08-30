@@ -1,13 +1,6 @@
 import { packRadixMerklePath, unpackRadixMerklePath, type RadixMerkleRadix } from '../protocol/state/radix-merkle';
 import { toEntityId, type EntityId } from '../protocol/identity';
-import {
-  toAccountHeight,
-  toEntityHeight,
-  toRuntimeHeight,
-  type AccountHeight,
-  type EntityHeight,
-  type RuntimeHeight,
-} from '../protocol/units';
+import { toRuntimeHeight, type RuntimeHeight } from '../protocol/units';
 import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/bytes/integrity-checksum';
 
 /**
@@ -15,7 +8,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/bytes/integrity-checks
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 3;
+export const STORAGE_SCHEMA_VERSION = 4;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -62,14 +55,12 @@ export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
 // state never changes because of this local policy.
 export const DEFAULT_RETAIN_SNAPSHOTS = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_EPOCH_MAX_BYTES = Number.MAX_SAFE_INTEGER;
-export const DEFAULT_HISTORY_VIEW_MAX_BYTES = Number.MAX_SAFE_INTEGER;
-export const DEFAULT_HISTORY_VIEW_RETAIN_FRAMES = Number.MAX_SAFE_INTEGER;
-export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 100;
+export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 1_000;
 export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
 export const KEY_HEAD = Buffer.from([0x20]);
 export const KEY_FRAME = 0x10;
-/** Static continuation rows for any oversized WAL/history value. */
+/** Static continuation rows for any oversized WAL or checkpoint value. */
 export const KEY_BOUNDED_VALUE_CHUNK = 0x11;
 export const KEY_SNAPSHOT_MANIFEST = 0x12;
 /** Flat Runtime outbox row keyed by permanent `(height, outputIndex)`. */
@@ -114,14 +105,6 @@ export const KEY_LIVE_ENTITY_BRANCH = 0x37;
 export const KEY_LIVE_ENTITY_LEAF = 0x38;
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 
-export const KEY_HISTORY_VIEW_HEAD = Buffer.from([0x00]);
-export const HISTORY_VIEW_ACCOUNT_FRAME = 0x01;
-export const HISTORY_VIEW_RUNTIME_ACTIVITY = 0x02;
-export const HISTORY_VIEW_ENTITY_FRAME = 0x03;
-/** Rebuildable Account swap events, indexed by `(account, offer, accountHeight)`. */
-export const HISTORY_VIEW_ACCOUNT_SWAP_EVENT = 0x04;
-/** Rebuildable Account swap events, indexed by `(account, accountHeight, offer)` for newest-first pages. */
-export const HISTORY_VIEW_ACCOUNT_SWAP_RECENCY = 0x05;
 export const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 export const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
@@ -199,23 +182,6 @@ export const keyBoundedValueChunk = (ownerKey: Buffer, chunkIndex: number): Buff
   const index = Buffer.allocUnsafe(4);
   index.writeUInt32BE(chunkIndex);
   return Buffer.concat([keyBoundedValueChunkPrefix(ownerKey), index]);
-};
-
-export const parseBoundedValueChunkKey = (
-  key: Buffer,
-): Readonly<{ ownerKey: Buffer; chunkIndex: number }> => {
-  if (key.byteLength < 8 || key[0] !== KEY_BOUNDED_VALUE_CHUNK) {
-    throw new Error(`STORAGE_BOUNDED_CHUNK_KEY_INVALID:${key.toString('hex')}`);
-  }
-  const ownerLength = key.readUInt16BE(1);
-  const expectedLength = 3 + ownerLength + 4;
-  if (ownerLength < 1 || key.byteLength !== expectedLength) {
-    throw new Error(`STORAGE_BOUNDED_CHUNK_KEY_LENGTH_INVALID:${key.byteLength}:${expectedLength}`);
-  }
-  return {
-    ownerKey: Buffer.from(key.subarray(3, 3 + ownerLength)),
-    chunkIndex: key.readUInt32BE(3 + ownerLength),
-  };
 };
 
 export const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
@@ -377,7 +343,7 @@ const keyRscoreAccountNode = (
   kind: 0 | 1,
   payload: Uint8Array,
 ): Buffer => {
-  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 6) {
+  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 7) {
     throw new Error(`STORAGE_RSCORE_NAMESPACE_INVALID:${String(namespaceTag)}`);
   }
   return Buffer.concat([
@@ -934,115 +900,6 @@ export const parseAccountJClaimPathNodeKey = (key: Buffer) => {
     counterpartyId: decodeEntityId(key.subarray(33, 65)),
     side,
     path: parseBinaryPatriciaStoragePath(key.subarray(66), 'STORAGE_ACCOUNT_J_CLAIM'),
-  };
-};
-
-export const keyHistoryViewAccountFrame = (
-  entityId: string,
-  counterpartyId: string,
-  accountHeight: number,
-): Buffer => Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId), encodeHeight(accountHeight)]);
-
-export const keyHistoryViewRuntimeActivity = (height: number): Buffer =>
-  Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(height)]);
-
-export const keyHistoryViewEntityFrame = (entityId: string, entityHeight: number): Buffer =>
-  Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME]), hexBytes(entityId), encodeHeight(entityHeight)]);
-
-export const keyHistoryViewEntityFramePrefix = (entityId?: string): Buffer =>
-  entityId
-    ? Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME]), hexBytes(entityId)])
-    : Buffer.from([HISTORY_VIEW_ENTITY_FRAME]);
-
-export const parseHistoryViewEntityFrameKey = (key: Buffer): { entityId: EntityId; entityHeight: EntityHeight } => {
-  if (key.length !== 41 || key[0] !== HISTORY_VIEW_ENTITY_FRAME) {
-    throw new Error(`STORAGE_HISTORY_VIEW_ENTITY_KEY_INVALID:${key.toString('hex')}`);
-  }
-  return {
-    entityId: decodeEntityId(key.subarray(1, 33)),
-    entityHeight: toEntityHeight(decodeHeight(key, 33)),
-  };
-};
-
-export const keyHistoryViewAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
-  if (entityId && counterpartyId) return Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
-  if (entityId) return Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId)]);
-  return Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]);
-};
-
-export const keyHistoryViewAccountSwapEvent = (
-  entityId: string,
-  counterpartyId: string,
-  offerId: string,
-  accountHeight: number,
-  txType: string,
-): Buffer => Buffer.concat([
-  Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_EVENT]),
-  hexBytes(entityId),
-  hexBytes(counterpartyId),
-  Buffer.from(offerId, 'utf8'),
-  Buffer.from([0]),
-  Buffer.from(txType, 'utf8'),
-  Buffer.from([0]),
-  encodeHeight(accountHeight),
-]);
-
-export const keyHistoryViewAccountSwapEventPrefix = (
-  entityId: string,
-  counterpartyId: string,
-  offerId?: string,
-): Buffer => Buffer.concat([
-  Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_EVENT]),
-  hexBytes(entityId),
-  hexBytes(counterpartyId),
-  ...(offerId === undefined ? [] : [Buffer.from(offerId, 'utf8'), Buffer.from([0])]),
-]);
-
-export const keyHistoryViewAccountSwapRecency = (
-  entityId: string,
-  counterpartyId: string,
-  accountHeight: number,
-  offerId: string,
-): Buffer => Buffer.concat([
-  Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_RECENCY]),
-  hexBytes(entityId),
-  hexBytes(counterpartyId),
-  encodeHeight(accountHeight),
-  Buffer.from(offerId, 'utf8'),
-]);
-
-export const keyHistoryViewAccountSwapRecencyPrefix = (
-  entityId: string,
-  counterpartyId: string,
-): Buffer => Buffer.concat([
-  Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_RECENCY]), hexBytes(entityId), hexBytes(counterpartyId)]);
-
-export const parseHistoryViewAccountSwapRecencyKey = (key: Buffer): {
-  accountHeight: AccountHeight;
-  offerId: string;
-} => {
-  if (key.length <= 73 || key[0] !== HISTORY_VIEW_ACCOUNT_SWAP_RECENCY) {
-    throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_SWAP_RECENCY_KEY_INVALID:${key.toString('hex')}`);
-  }
-  const offerId = key.subarray(73).toString('utf8');
-  if (!offerId || Buffer.from(offerId, 'utf8').compare(key.subarray(73)) !== 0) {
-    throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_SWAP_RECENCY_OFFER_INVALID:${key.toString('hex')}`);
-  }
-  return { accountHeight: toAccountHeight(decodeHeight(key, 65)), offerId };
-};
-
-export const parseHistoryViewAccountFrameKey = (key: Buffer): {
-  entityId: EntityId;
-  counterpartyId: EntityId;
-  accountHeight: AccountHeight;
-} => {
-  if (key.length !== 73 || key[0] !== HISTORY_VIEW_ACCOUNT_FRAME) {
-    throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
-  }
-  return {
-    entityId: decodeEntityId(key.subarray(1, 33)),
-    counterpartyId: decodeEntityId(key.subarray(33, 65)),
-    accountHeight: toAccountHeight(decodeHeight(key, 65)),
   };
 };
 

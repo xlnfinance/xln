@@ -463,10 +463,17 @@ fn execute(envelope: Envelope) -> Result<Envelope, Box<dyn Error>> {
     })
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn run() -> Result<(), Box<dyn Error>> {
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
     let response = execute(decode_envelope(&input, REQUEST_ARITY)?)?;
     io::stdout().write_all(&encode_envelope(&response)?)?;
     Ok(())
+}
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("DIFFERENTIAL_ERROR:{error:#}");
+        std::process::exit(1);
+    }
 }

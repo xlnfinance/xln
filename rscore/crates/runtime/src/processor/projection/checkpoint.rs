@@ -18,7 +18,7 @@ const MAX_SAFE_INTEGER: i128 = 9_007_199_254_740_991;
 const ACCOUNT_META_TAG: u8 = 0x17;
 const ACCOUNT_ROW_TAG: u8 = 0x18;
 const ACCOUNT_NODE_TAG: u8 = 0x19;
-const J_CLAIM_NAMESPACE: u8 = 6;
+const J_CLAIM_NAMESPACE: u8 = 7;
 
 pub(crate) struct PreparedAccountCheckpoint {
     pub(crate) changes: Vec<PathNodeChange>,
@@ -61,7 +61,7 @@ pub(crate) fn prepare_account_checkpoint(
     for row in &checkpoint.accounts {
         let encoded = encode_account_checkpoint_rows(row, true)?;
         let fields = tuple(&encoded, "account")?;
-        if fields.len() != 11 {
+        if fields.len() != 12 {
             return Err(AccountCheckpointProjectionError::Shape("account"));
         }
         let account_id = *row.account_id.as_bytes();
@@ -71,7 +71,7 @@ pub(crate) fn prepare_account_checkpoint(
             Some(encode_value(&Value::Array(vec![
                 abi_json(&fields[1])?,
                 abi_json(&fields[2])?,
-                abi_json(&fields[10])?,
+                abi_json(&fields[11])?,
             ]))?),
         );
         for tree in &nodes.trees {

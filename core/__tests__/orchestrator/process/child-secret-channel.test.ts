@@ -21,7 +21,7 @@ describe('orchestrator child secret channel', () => {
   test('passes secrets through inherited FD without exposing them in argv', async () => {
     const secret = 'fd-only-runtime-seed alpha beta gamma';
     const code = [
-      "import { readInheritedChildSecrets } from './runtime/support/process/child-secrets.ts';",
+      "import { readInheritedChildSecrets } from './core/support/process/child-secrets.ts';",
       "process.stdout.write(JSON.stringify({ secrets: readInheritedChildSecrets(), argv: process.argv }));",
     ].join('');
     const child = spawn(process.execPath, ['-e', code], {
@@ -51,8 +51,8 @@ describe('orchestrator child secret channel', () => {
     const childSeed = 'derived-h1-runtime-seed';
     const childAuthSeed = 'derived-h1-radapter-auth-seed-32-bytes';
     const code = [
-      "import { readInheritedChildSecrets, resolveChildSecret } from './runtime/support/process/child-secrets.ts';",
-      "import { registerRuntimeAdapterAuthSeed, resolveRuntimeAdapterAuthSeed } from './runtime/api/runtime-adapter/security/auth.ts';",
+      "import { readInheritedChildSecrets, resolveChildSecret } from './core/support/process/child-secrets.ts';",
+      "import { registerRuntimeAdapterAuthSeed, resolveRuntimeAdapterAuthSeed } from './core/api/runtime-adapter/security/auth.ts';",
       'const secrets = readInheritedChildSecrets();',
       "const seed = resolveChildSecret(secrets, 'runtimeSeed', process.env['XLN_RUNTIME_SEED'] || '');",
       "const radapterAuthSeed = resolveChildSecret(secrets, 'radapterAuthSeed', process.env['XLN_RADAPTER_AUTH_SEED'] || '');",
@@ -115,7 +115,7 @@ describe('orchestrator child secret channel', () => {
 
   test('managed custody child reliably receives the exact startup signer through the FD', async () => {
     const code = [
-      "import { readInheritedChildSecrets } from './runtime/support/process/child-secrets.ts';",
+      "import { readInheritedChildSecrets } from './core/support/process/child-secrets.ts';",
       'process.stdout.write(JSON.stringify(readInheritedChildSecrets()));',
     ].join('');
     for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -150,12 +150,17 @@ describe('orchestrator child secret channel', () => {
       join(root, 'core/orchestrator/process/hub-runtime-env.ts'),
       'utf8',
     );
+    const marketMakerSpawner = readFileSync(
+      join(root, 'core/orchestrator/process/spawn/market-maker.ts'),
+      'utf8',
+    );
     const custody = readFileSync(join(root, 'core/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
 
     expect(orchestrator).not.toContain("'--seed', child.seed");
     expect(orchestrator).not.toContain("'--seed', marketMakerChild.seed");
-    expect(orchestrator.match(/buildManagedRuntimeChildSecretEnv\(process\.env\)/g)).toHaveLength(1);
+    expect(orchestrator).not.toContain('buildManagedRuntimeChildSecretEnv(');
     expect(hubRuntimeEnv).toContain('...buildManagedRuntimeChildSecretEnv(source),');
+    expect(marketMakerSpawner.match(/buildManagedRuntimeChildSecretEnv\(process\.env\)/g)).toHaveLength(1);
     expect(orchestrator).not.toContain('...childSecretFdEnv(),');
     expect(custody.match(/buildManagedRuntimeChildSecretEnv\(process\.env, false\)/g)).toHaveLength(2);
     expect(custody).not.toContain("'--seed', options.seed");

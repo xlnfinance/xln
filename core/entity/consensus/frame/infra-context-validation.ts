@@ -1,7 +1,7 @@
 import { timePerfPhase } from '../../../support/performance/profile';
 import { parseProfile, type DecodedProfile } from '../../profile';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
-import { validateHtlcPreparedInfraContext } from '../../htlc/prepared-context-validation';
+import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
+import { validateHtlcPreparedInfraContext } from '../../paybook/prepared-context-validation';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { verifyProfileSignature } from '../../profile/profile-signing';
@@ -29,7 +29,10 @@ const exactKeys = (value: unknown, keys: readonly string[], code: string): Recor
 
 const canonicalProfile = (value: unknown): DecodedProfile => {
   const parsed = parseProfile(value);
-  if (encodeCanonicalConsensusValue(value) !== encodeCanonicalConsensusValue(parsed)) {
+  // `parseProfile` preserves identity only for an object already proven and
+  // frozen by that parser. Remote/WAL objects are distinct and retain the
+  // byte-for-byte canonicality comparison.
+  if (value !== parsed && !canonicalConsensusValuesEqual(value, parsed)) {
     throw new Error(`ENTITY_INFRA_PROFILE_NONCANONICAL:${parsed.entityId}`);
   }
   return parsed;

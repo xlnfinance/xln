@@ -62,6 +62,7 @@ impl NativeRuntimeStore {
                     output_count: frame.outputs.len(),
                     output_digest: output_digest(&frame.outputs)?,
                     resident_outputs: None,
+                    resident_output_values: std::cell::RefCell::new(None),
                 })
             })
             .collect()

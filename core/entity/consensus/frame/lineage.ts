@@ -1,4 +1,5 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
 import { cloneIsolatedProposedEntityFrame } from '../../state/input-clone';
 import type {
   CertifiedEntityFrameLink,
@@ -100,6 +101,21 @@ export const buildCertifiedEntityFrameLink = (
     throw new Error(`ENTITY_CERTIFIED_LINK_FRAME_MANIFEST_INVALID:${frame.height}:${frame.hash}`);
   }
   const cloned = cloneIsolatedProposedEntityFrame(frame);
+  const manifestHead = cloned.hashesToSign[0];
+  if (!manifestHead) {
+    throw new Error(`ENTITY_CERTIFIED_LINK_FRAME_MANIFEST_MISSING:${frame.height}:${frame.hash}`);
+  }
+  cloned.hashesToSign = [{ ...manifestHead }];
+  cloned.collectedSigs = new Map(
+    [...(cloned.collectedSigs ?? new Map<string, string[]>())].map(([signerId, signatures]) => {
+      const signature = signatures[0];
+      if (!signature) {
+        throw new Error(`ENTITY_CERTIFIED_LINK_FRAME_SIGNATURE_MISSING:${frame.height}:${signerId}`);
+      }
+      return [signerId, [signature]];
+    }),
+  );
+  if (cloned.hankos) cloned.hankos = cloned.hankos.slice(0, 1);
   trustLocallyCertifiedEntityFrame(cloned);
   return { frame: cloned, postAuthority };
 };
@@ -109,18 +125,22 @@ export const buildCertifiedEntityFrameLink = (
  * `frame.hash` already binds txs, events, context and roots. Leader metadata
  * and postAuthority are outside that hash and must still distinguish variants.
  */
-export const certifiedEntityFrameLinkFingerprint = (link: CertifiedEntityFrameLink): string =>
-  encodeCanonicalConsensusValue({
+export const projectCertifiedEntityFrameLinkIdentity = (
+  link: CertifiedEntityFrameLink,
+): Readonly<Record<string, unknown>> => ({
     frameHash: link.frame.hash.toLowerCase(),
     parentFrameHash: link.frame.parentFrameHash,
     stateRoot: link.frame.stateRoot.toLowerCase(),
     authorityRoot: link.frame.authorityRoot.toLowerCase(),
     leader: link.frame.leader,
-    hashesToSign: link.frame.hashesToSign,
-    collectedSigs: link.frame.collectedSigs,
-    hankos: link.frame.hankos,
+    ...(link.frame.hashesToSign ? { hashesToSign: link.frame.hashesToSign } : {}),
+    ...(link.frame.collectedSigs ? { collectedSigs: link.frame.collectedSigs } : {}),
+    ...(link.frame.hankos ? { hankos: link.frame.hankos } : {}),
     postAuthority: link.postAuthority,
   });
+
+export const certifiedEntityFrameLinkFingerprint = (link: CertifiedEntityFrameLink): string =>
+  keccakBytesHash(encodeCanonicalConsensusBytes(projectCertifiedEntityFrameLinkIdentity(link)));
 
 export const appendCertifiedEntityFrameLink = (
   replica: EntityReplica,
@@ -152,7 +172,7 @@ export const appendCertifiedEntityFrameLink = (
     );
   }
   candidateEffects.push({
-    kind: 'entityFrameHistory',
+    kind: 'entityFrameCommitted',
     entityId: replica.entityId,
     signerId: replica.signerId,
     link,

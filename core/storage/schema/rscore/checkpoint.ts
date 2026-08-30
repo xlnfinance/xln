@@ -44,8 +44,8 @@ import {
 import { accountJClaimKeyBit } from '../../../account/j-claims/j-claim-codec';
 import type { AccountJClaimNode } from '../../../types/finance/account-j-claims';
 
-const TREE_TAGS = [1, 2, 3, 4, 5] as const;
-const J_CLAIM_NODE_NAMESPACE = 6;
+const TREE_TAGS = [1, 2, 3, 4, 5, 6] as const;
+const J_CLAIM_NODE_NAMESPACE = 7;
 const OWNER_PATTERN = /^0x[0-9a-f]{64}$/;
 
 export type RscoreCheckpointStorageInput = Readonly<{
@@ -162,7 +162,7 @@ type StoredJClaimEntry = Readonly<{
 }>;
 
 const jClaimRoots = (headerValue: unknown): readonly [string, string] => {
-  const header = rscoreCheckpointTuple(headerValue, 9, 'J_CLAIM_HEADER');
+  const header = rscoreCheckpointTuple(headerValue, 10, 'J_CLAIM_HEADER');
   const carried = rscoreCheckpointTuple(header[6], 6, 'J_CLAIM_CARRIED');
   const root = (index: 4 | 5): string => {
     const accumulator = rscoreCheckpointTuple(carried[index], 2, `J_CLAIM_ACCUMULATOR_${index}`);
@@ -438,21 +438,21 @@ export const prepareRscoreCheckpointStorage = async (
     }
     const changedIds = new Set<string>();
     for (const raw of input.checkpoint.accounts) {
-      const row = rscoreCheckpointTuple(raw, 11, 'ACCOUNT');
+      const row = rscoreCheckpointTuple(raw, 12, 'ACCOUNT');
       const account = hex32(rscoreCheckpointBytes(row[0], 32, 'ACCOUNT_ID'));
       if (changedIds.has(account)) throw new Error(`STORAGE_RSCORE_ACCOUNT_DUPLICATE:${account}`);
       changedIds.add(account);
-      const header = rscoreCheckpointTuple(row[2], 9, 'HEADER');
+      const header = rscoreCheckpointTuple(row[2], 10, 'HEADER');
       if (hex32(rscoreCheckpointBytes(header[0], 32, 'HEADER_OWNER')) !== owner) {
         throw new Error(`STORAGE_RSCORE_ACCOUNT_OWNER:${account}`);
       }
-      rscoreCheckpointTuple(row[3], 5, 'SECTIONS');
-      rscoreCheckpointTuple(row[10], 11, 'CONSENSUS');
+      rscoreCheckpointTuple(row[3], 6, 'SECTIONS');
+      rscoreCheckpointTuple(row[11], 11, 'CONSENSUS');
       const accountKey = keyRscoreAccount(owner, account);
       const accountMutation = await prepareBoundedStorageValueMutation(
         db,
         accountKey,
-        encodeBuffer([row[1], row[2], row[10]]),
+        encodeBuffer([row[1], row[2], row[11]]),
       );
       for (const key of accountMutation.dels) addDel(puts, dels, key);
       for (const put of accountMutation.puts) addEncodedPut(puts, dels, put.key, put.value);
@@ -476,7 +476,7 @@ export const prepareRscoreCheckpointStorage = async (
           for (const put of nodeMutation.puts) addEncodedPut(puts, dels, put.key, put.value);
         }
       }
-      const jClaimChanges = decodeRscoreJClaimNodeChanges(row[9], 'STORAGE_J_CLAIM_NODES');
+      const jClaimChanges = decodeRscoreJClaimNodeChanges(row[10], 'STORAGE_J_CLAIM_NODES');
       const storedJClaims = await readStoredJClaimEntries(db, owner, account);
       for (const hash of jClaimChanges.dels) {
         storedJClaims.entries.delete(hex32(hash));
@@ -623,6 +623,7 @@ export const loadRscoreCheckpoint = async (
       await leafValues(db, owner, account, 3),
       await leafValues(db, owner, account, 4),
       await leafValues(db, owner, account, 5),
+      await leafValues(db, owner, account, 6),
       await jClaimNodeValues(db, owner, account, accountMeta[1]),
       accountMeta[2],
     ] as RscoreWireValue[]);

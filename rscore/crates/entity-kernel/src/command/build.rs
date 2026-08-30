@@ -112,7 +112,11 @@ pub fn build_collective_entity_command(
     {
         return Err(invalid("ENTITY_COMMAND_SIGNER_BINDING_MISMATCH"));
     }
-    let raw = txs.iter().map(CanonicalEntityTx::canonical_value).collect();
+    let raw = txs
+        .iter()
+        .map(CanonicalEntityTx::canonical_value)
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| invalid("ENTITY_COMMAND_TX_FRAME_DATA_MISSING"))?;
     let command_txs = vec![proposal_tx(board, raw)?];
     let value = signed_command_value(
         signer,

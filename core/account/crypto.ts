@@ -223,6 +223,12 @@ export function deriveSignerKeySync(masterSeed: Uint8Array | string, signerId: s
   return hmac(sha256, toSeedBytes(masterSeed), message);
 }
 
+const privateKeyToAddress = (privateKey: Uint8Array): string => {
+  const publicKey = secp256k1.getPublicKey(privateKey, false); // uncompressed 65 bytes
+  const hash = keccak256(publicKey.slice(1));
+  return `0x${hash.slice(-40)}`.toLowerCase();
+};
+
 export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): string[] {
   if (!Number.isSafeInteger(count) || count <= 0) {
     throw new Error(`SIGNER_CACHE_PREWARM_COUNT_INVALID:${String(count)}`);
@@ -231,7 +237,7 @@ export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): st
   for (let i = 1; i <= count; i++) {
     const indexId = String(i);
     const privateKey = deriveSignerKeySync(seed, indexId);
-    const address = deriveSignerAddressSync(seed, indexId).toLowerCase();
+    const address = privateKeyToAddress(privateKey);
     registerSignerKey(seed, address, privateKey);
     warmed.push(address);
   }
@@ -259,12 +265,6 @@ const equalBytes = (left: Uint8Array, right: Uint8Array): boolean => {
     if (left[i] !== right[i]) return false;
   }
   return true;
-};
-
-const privateKeyToAddress = (privateKey: Uint8Array): string => {
-  const publicKey = secp256k1.getPublicKey(privateKey, false); // uncompressed 65 bytes
-  const hash = keccak256(publicKey.slice(1));
-  return `0x${hash.slice(-40)}`.toLowerCase();
 };
 
 const assertSignerKeyMatchesId = (signerId: string, privateKey: Uint8Array, context: string): void => {

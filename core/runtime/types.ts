@@ -1,10 +1,6 @@
 import type { Level } from 'level';
 import type { RuntimeP2P } from '../network/p2p/p2p';
-import type {
-  AccountHistoryRecord,
-  AccountReplica,
-  RuntimeOverlayRecord,
-} from '../types/account';
+import type { AccountReplica, RuntimeOverlayRecord } from '../types/account';
 import type { FrameLogEntry, LogCategory } from '../types/logging';
 import type {
   CertifiedRegistrationEvidence,
@@ -19,7 +15,6 @@ import type {
   RetryEntityProviderActionData,
 } from '../types/entity-provider-actions';
 import type {
-  CertifiedEntityFrameLink,
   ConsensusConfig,
   EntityInput,
   EntityReplica,
@@ -216,6 +211,7 @@ export type JurisdictionImportResult = {
   blockNumber: string;
   stateRoot: string | null;
   watcherConfirmationDepth: number;
+  tokenRegistry: import('../jurisdiction/adapter/types').JTokenInfo[];
   entityProviderDeploymentBlock: number;
   contracts: {
     depository: string;
@@ -262,7 +258,7 @@ export type RuntimeTx =
         config: ConsensusConfig;
         isProposer: boolean;
         /**
-         * Canonical 64-byte Entity seed committed to Runtime history by owner decision.
+         * Canonical 64-byte Entity seed committed through the Runtime WAL by owner decision.
          * Disclosure of a WAL/export therefore compromises the Entity key and historical onions.
          */
         entitySeed: string;
@@ -439,15 +435,6 @@ export interface DeliverableEntityInput extends RoutedEntityInput {
   runtimeId: string;
 }
 
-export type RuntimeHistoryRecord = AccountHistoryRecord | {
-  kind: 'entityFrame';
-  entityId: string;
-  entityHeight: number;
-  link: CertifiedEntityFrameLink;
-  runtimeHeight?: number;
-  timestamp?: number;
-};
-
 export type BrowserVMState = import('../jurisdiction/adapter/browservm/browservm-state').BrowserVmSerializedState;
 
 /**
@@ -466,14 +453,12 @@ export interface RuntimeState {
 
 /** One live Runtime instance: committed State plus local machine machinery. */
 interface RuntimeInfrastructure {
-  /** Derived Entity secrets keyed by canonical entityId; source seeds live in Runtime history. */
+  /** Derived Entity secrets keyed by canonical entityId; source seeds live in the Runtime WAL. */
   entityEncryptionPrivateKeys?: Map<string, string>;
   /** Canonical import seeds retained in authoritative snapshots after WAL compaction. */
   entityEncryptionSeeds?: Map<string, string>;
   /** Exact WAL-committed contexts installed only while replaying one Runtime frame. */
   replayEntityContexts?: Map<string, EntityInfraContext>;
-  /** HLT replay-only exact certified Entity proposal boundaries. */
-  replayEntityProposalOracle?: Map<string, import('../entity/consensus/proposal/replay-oracle').EntityProposalReplayOracleEntry>;
   /**
    * Process-local chain clients, keyed by canonical jurisdiction name.
    *
@@ -557,8 +542,8 @@ interface RuntimeInfrastructure {
   storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
   storagePreviousDbOpened?: boolean;
   storageCurrentProjectionVerified?: boolean;
-  /** History reconciliation is settled when the namespace opens, not per frame. */
-  storageHistoryRecovered?: boolean;
+  /** WAL/current projection reconciliation is settled when the namespace opens, not per frame. */
+  storageWalRecovered?: boolean;
   storageVerifiedPreviousHeight?: number;
   storageVerifiedWalHeight?: number;
   storageEpochRotatePromise?: Promise<void> | null;
@@ -594,9 +579,6 @@ interface RuntimeInfrastructure {
    * handle and is the only replica allowed to close it.
    */
   runtimeWalDbBorrowed?: boolean;
-  /** Rebuildable Entity/Account/J history indexes. Runtime WAL remains authoritative. */
-  historyViewDb?: Level<Buffer, Buffer> | null | undefined;
-  historyViewDbOpenPromise?: Promise<boolean> | null | undefined;
   infraDb?: Level<Buffer, Buffer> | null | undefined;
   infraDbOpenPromise?: Promise<boolean> | null | undefined;
   infraDbClosing?: boolean;
@@ -634,7 +616,6 @@ interface RuntimeInfrastructure {
     transactionHash: string;
     observedAt: number;
   }>;
-  pendingHistoryRecords?: RuntimeHistoryRecord[];
   cleanLogs?: string[];
   routeDeferState?: Map<string, {
     warnAt: number;
@@ -707,7 +688,7 @@ export interface RuntimeReplica {
   /** Injected lifecycle only; production leaves this absent until result ABI cutover. */
   accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */
-  accountAuthorityEntityStage?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStage | undefined;
+  accountAuthorityEntityStage?: import('../entity/runtime-context').AccountAuthorityEntityStageCapability | undefined;
   /**
    * Ephemeral checkpoint cadence for the active Runtime frame. Rust consumes
    * it on the outbound Account visit; it is never consensus state or WAL.
@@ -746,8 +727,6 @@ export interface RuntimeReplica {
       snapshotPeriodFrames?: number;
       retainSnapshots?: number;
       epochMaxBytes?: number;
-      historyViewMaxBytes?: number;
-      historyViewRetainFrames?: number;
       materializePeriodFrames?: number;
       canonicalHashPeriodFrames?: number;
       accountMerkleRadix?: 16 | 256;

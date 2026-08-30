@@ -4,7 +4,7 @@ use xln_rscore_engine::{
     SwapOffer,
 };
 
-use super::{encode_bigint, integer, tuple};
+use super::{encode_bigint, encode_canonical_value, integer, tuple};
 
 pub(super) fn encode_lock(value: &HtlcLock) -> AbiValue {
     tuple(vec![
@@ -43,6 +43,9 @@ pub(super) fn encode_swap_offer(value: &SwapOffer) -> AbiValue {
         integer(value.created_height()),
         encode_bigint(value.quantized_give()),
         encode_bigint(value.quantized_want()),
+        value
+            .cross_jurisdiction()
+            .map_or(AbiValue::Nil, encode_canonical_value),
     ])
 }
 

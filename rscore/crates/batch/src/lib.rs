@@ -10,13 +10,12 @@ mod checkpoint;
 mod checkpoint_wire;
 mod consensus;
 mod error;
-mod execution;
 mod parallel;
-mod query;
 mod resident_consensus;
 mod round;
-mod stateful;
 mod types;
+
+pub const MAX_BATCH_WORKERS: usize = 256;
 
 pub use checkpoint::{
     AccountCheckpointHeader, AccountCheckpointRows, AccountCheckpointSections, AccountRestore,
@@ -26,30 +25,29 @@ pub use checkpoint_wire::{
     AccountCheckpointNamespace, AccountWireEncodeError, EncodedAccountCheckpointNodeAddress,
     EncodedAccountCheckpointNodeMutation, EncodedAccountCheckpointNodes,
     EncodedAccountCheckpointTreeChanges, EncodedAccountJClaimChanges, EncodedAccountJClaimNodePut,
-    encode_account_checkpoint_nodes, encode_account_checkpoint_rows, encode_account_envelope,
-    encode_account_tx, encode_bigint, encode_canonical_value, encode_delta, encode_j_claim_node,
+    JEventWireError, decode_jurisdiction_event, encode_account_checkpoint_nodes,
+    encode_account_checkpoint_rows, encode_account_envelope, encode_account_tx, encode_bigint,
+    encode_canonical_value, encode_delta, encode_j_claim_node, encode_jurisdiction_event,
 };
 pub use consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
     AccountInputRow, AccountInputVerdict, AccountPeerInput, AccountResponseDirective,
-    CertifiedBoardAuthorityResolver, DroppedRow, FailedHtlcLockRow, PeerBoardAuthority,
-    ProposalRow, ProposedRow, UpstreamHtlcResolutionRow,
+    CertifiedBoardAuthorityResolver, DroppedRow, FailedHtlcLockRow, LocalGenesisSeedParams,
+    PeerBoardAuthority, ProposalRow, ProposedRow, UpstreamHtlcResolutionRow,
+    build_local_genesis_seed,
 };
 pub use error::BatchError;
 pub use parallel::{AccountPhaseKind, AccountPhaseMetric, AccountShardMetric};
-pub use resident_consensus::{ResidentAccountFinancialView, ResidentConsensusEngine};
+pub use resident_consensus::{
+    CertifiedSettlementHankoDraft, DeferredSettlementApproval, PendingSettlementHankoDraft,
+    PreparedEntityOutbound, ResidentAccountDisputeView, ResidentAccountFinancialView,
+    ResidentAccountFinancialViewRequest, ResidentAccountStatusView, ResidentConsensusEngine,
+    ResidentCrossJMaterializationView, ResidentOrderbookAccountSnapshot,
+};
 pub use round::{
-    EntityAccountGenesisPolicy, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult,
-    FailedHtlcRoute,
+    AccountEnvelopeUpdate, EntityAccountGenesisPolicy, EntityInboundRequest, EntityOutboundRequest,
+    EntityRoundResult, FailedHtlcFollowup,
 };
-// The receiver clock is part of this layer's boundary: a caller cannot apply
-// an input without saying what time it is on its own machine.
-pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};
-pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};
-pub use types::{
-    AccountId, AccountInputAuthority, AccountSeed, BatchJob, BatchResponse, BatchVerdict,
-    CandidateId, EngineGeneration, IndexedOutput, IndexedResult, PreparedBatch,
-    PreparedPaymentProfileRoot,
-};
+pub use types::{AccountId, AccountSeed, EngineGeneration};
 pub use xln_rscore_engine::CommittedFrameEvidence;
 pub use xln_rscore_engine::ReceiverClock;

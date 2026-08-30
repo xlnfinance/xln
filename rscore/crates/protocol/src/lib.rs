@@ -2,7 +2,6 @@
 
 //! Byte-exact protocol primitives shared by the Rust Account engine.
 
-mod canonical_text;
 mod consensus_msgpack;
 mod flat;
 mod persistent;
@@ -18,15 +17,15 @@ mod value;
 #[path = "persistent/tests.rs"]
 mod persistent_tests;
 
-pub use canonical_text::{CanonicalTextError, encode_canonical_consensus_text};
 pub use consensus_msgpack::{ConsensusMessagePackError, encode_canonical_consensus_bytes};
 pub use flat::compute_flat_integrity_root;
 pub use persistent::{
     PERSISTENT_RADIX_SHARD_COUNT, PERSISTENT_RADIX_SHARD_DEPTH, PersistentChildRecord,
-    PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
-    PersistentRadixMapError, PersistentRadixOverlayWork, PersistentRadixShard,
-    PersistentRadixShardCoordinator, PersistentRadixShardDescriptor, PersistentRadixShardOverlay,
-    PersistentRadixSubtreeKind, PersistentRadixSubtreeRoot, SlotOutcome, SlotWork,
+    PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef, PersistentRadixBatchError,
+    PersistentRadixMap, PersistentRadixMapError, PersistentRadixMutation,
+    PersistentRadixOverlayWork, PersistentRadixShard, PersistentRadixShardCoordinator,
+    PersistentRadixShardDescriptor, PersistentRadixShardOverlay, PersistentRadixSubtreeKind,
+    PersistentRadixSubtreeRoot, SlotOutcome, SlotWork,
 };
 pub use radix::{
     EMPTY_RADIX_ROOT, RadixLeaf, RadixMerkleError, RadixMerkleResult, build_radix16_merkle,

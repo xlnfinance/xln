@@ -34,6 +34,7 @@ import { createEntityFrameCandidateState } from '../../state-clone';
 import {
   getEntityAccountForWrite,
 } from '../../state/persistent-account-map';
+import { ensureEntityCollectionCandidate } from '../../state/persistent-collection-map';
 import { getAccountPerspective } from '../../../account/state/perspective';
 import { emitScopedEvents } from '../../../support/scoped-events';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../../frame-events';
@@ -76,14 +77,10 @@ import {
 } from '../../tx/handlers/account';
 import { buildSettlementHankoDraft } from '../../tx/handlers/payments/settle';
 import {
-  assertOriginatedHtlcRoutesHaveLiveLocks,
-  failOriginatedHtlcRoute,
-  terminateHtlcRoute,
-} from '../../tx/j-events-htlc/route-lifecycle';
-import {
-  failedForwardHtlcRouteClosure,
-  hasInboundHtlcRoute,
-} from '../../htlc/route-views';
+  failOriginatedPayment,
+  terminatePayment,
+} from '../../paybook/lifecycle';
+import { hasInboundPayment } from '../../paybook/views';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
@@ -165,6 +162,7 @@ const applyRuntimeOutput = async (
   if (tx.data.protocol !== 'cross-j') throw new Error(`RUNTIME_OUTPUT_PROTOCOL_INVALID:${tx.data.protocol}`);
   assertRuntimeOutputAuthorization(
     tx.data.sourceEntityId,
+    tx.data.sourceSignerId,
     tx.data.targetEntityId,
     tx.data.entityTxs,
     currentEntityState,
@@ -542,7 +540,10 @@ function refreshStaleUncommittedSettlementHankos(state: EntityState, storageChan
       return false;
     });
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
-    state.deferredAccountProposals ??= new Map();
+    state.deferredAccountProposals = ensureEntityCollectionCandidate(
+      state.deferredAccountProposals,
+      value => value,
+    );
     const existing = state.deferredAccountProposals.get(accountId);
     if (existing && existing !== workspaceHash) {
       throw new Error(`SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${accountId}:${existing}:${workspaceHash}`);
@@ -599,10 +600,10 @@ const proposeAccountFrameCandidate = async (
     collectedHashes.push(...proposal.hashesToSign);
   }
   for (const { hashlock, reason } of ('failedHtlcLocks' in proposal ? proposal.failedHtlcLocks : undefined) ?? []) {
-    const route = state.htlcRoutes.get(hashlock);
+    const route = state.paybook.entries.get(hashlock);
     if (!route) continue;
-    if (!hasInboundHtlcRoute(route)) {
-      if (!failOriginatedHtlcRoute(state, context.candidateEffects, hashlock, reason)) {
+    if (!hasInboundPayment(route)) {
+      if (!failOriginatedPayment(state, context.candidateEffects, hashlock, reason)) {
         throw haltRuntimeFailure(
           'HTLC_ORIGINATED_FAILURE_ROUTE_REQUIRED',
           `HTLC_ORIGINATED_FAILURE_ROUTE_REQUIRED:${hashlock}`,
@@ -623,7 +624,7 @@ const proposeAccountFrameCandidate = async (
       { kind: 'enqueue', txs: [{
         type: 'htlc_resolve',
         data: {
-          lockId: route.inboundLockId,
+          lockId: hashlock,
           outcome: 'error',
           reason: `forward_failed:${reason}`,
         },
@@ -638,8 +639,7 @@ const proposeAccountFrameCandidate = async (
     recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
     markProposableAccount(proposableAccounts, route.inboundEntity);
     scheduleAccount(route.inboundEntity);
-    if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
-    terminateHtlcRoute(state, hashlock, state.timestamp);
+    terminatePayment(state, hashlock);
   }
   return proposal;
 };
@@ -1528,10 +1528,6 @@ const applyPostEntityTxPhases = async (
       accounts: currentEntityState.accounts,
       accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
       proposalAccountIds,
-      failedHtlcRoutes: failedForwardHtlcRouteClosure(
-        currentEntityState.htlcRoutes,
-        proposalAccountIds,
-      ),
       timestamp: currentEntityState.timestamp,
       jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
     });
@@ -1559,7 +1555,6 @@ const applyPostEntityTxPhases = async (
     currentEntityState,
     context,
   );
-  assertOriginatedHtlcRoutesHaveLiveLocks(currentEntityState);
   return {
     currentEntityState,
     orderbookStats,
@@ -1667,7 +1662,6 @@ const applyEntityFrameWithIsolation = async (
           accountId,
         ),
         proposalAccountIds: [],
-        failedHtlcRoutes: [],
         timestamp: working.currentEntityState.timestamp,
         jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
       });
@@ -1715,29 +1709,6 @@ const applyEntityFrameWithIsolation = async (
  * waits for quorum Hanko. Standalone reducer tests also use this pure boundary.
  */
 export const applyEntityFrame = (
-  env: EntityRuntimeContext,
-  entityState: EntityState,
-  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
-  entityTxs: EntityTx[],
-  frameTimestamp?: number,
-  inProcessInfraValidated = false,
-): Promise<EntityFrameResult> =>
-  applyEntityFrameWithIsolation(
-    env,
-    entityState,
-    entityContext,
-    entityTxs,
-    frameTimestamp,
-    true,
-    inProcessInfraValidated,
-  );
-
-/**
- * Execute a single-signer frame through the same dirty-path candidate boundary.
- * Runtime ownership does not authorize mutation of the certified Entity root:
- * rejection and WAL failure must be able to discard the candidate in O(dirty).
- */
-export const applyRuntimeOwnedEntityFrame = (
   env: EntityRuntimeContext,
   entityState: EntityState,
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,

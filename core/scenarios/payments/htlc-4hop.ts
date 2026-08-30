@@ -129,14 +129,14 @@ export async function htlc4hop(env: RuntimeReplica): Promise<void> {
 
   assert((aliceHub1Account?.state.locks.size || 0) === 0, 'All locks cleared after concurrent payments');
 
-  const totalFeesEarned = (hub1Rep.state.htlcFeesEarned || 0n) +
-                          (hub2Rep.state.htlcFeesEarned || 0n) +
-                          (hub3Rep.state.htlcFeesEarned || 0n);
+  const totalFeesEarned = hub1Rep.state.paybook.feesEarned +
+                          hub2Rep.state.paybook.feesEarned +
+                          hub3Rep.state.paybook.feesEarned;
 
   console.log(`   Fees collected (across ${paymentAmounts.length} payments):`);
-  console.log(`   Hub1: ${hub1Rep.state.htlcFeesEarned || 0n}`);
-  console.log(`   Hub2: ${hub2Rep.state.htlcFeesEarned || 0n}`);
-  console.log(`   Hub3: ${hub3Rep.state.htlcFeesEarned || 0n}`);
+  console.log(`   Hub1: ${hub1Rep.state.paybook.feesEarned}`);
+  console.log(`   Hub2: ${hub2Rep.state.paybook.feesEarned}`);
+  console.log(`   Hub3: ${hub3Rep.state.paybook.feesEarned}`);
   console.log(`   Total earned: ${totalFeesEarned}`);
   console.log(`   Expected: dynamic (directional fees)\n`);
 

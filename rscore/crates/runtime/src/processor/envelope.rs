@@ -13,12 +13,22 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::{TaggedJsonError, canonical_value_from_tagged_json, restore::MigrationOrigin};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
-const INFRASTRUCTURE_FIELDS: [&str; 5] = [
+const INFRASTRUCTURE_MAP_FIELDS: [&str; 6] = [
     "accountJClaimNodes",
     "certifiedBoardNodes",
     "certifiedRegistrationEvidence",
     "entityEncryptionSeeds",
     "runtimeAdapterCommandFrontiers",
+    "pendingJurisdictionImports",
+];
+const INFRASTRUCTURE_FIELDS: [&str; 7] = [
+    "accountJClaimNodes",
+    "certifiedBoardNodes",
+    "certifiedRegistrationEvidence",
+    "entityEncryptionSeeds",
+    "runtimeAdapterCommandFrontiers",
+    "pendingCommittedJOutbox",
+    "pendingJurisdictionImports",
 ];
 const J_REPLICA_REQUIRED_FIELDS: [&str; 7] = [
     "blockDelayMs",
@@ -29,7 +39,7 @@ const J_REPLICA_REQUIRED_FIELDS: [&str; 7] = [
     "position",
     "stateRoot",
 ];
-const J_REPLICA_OPTIONAL_FIELDS: [&str; 7] = [
+const J_REPLICA_OPTIONAL_FIELDS: [&str; 8] = [
     "blockTimeMs",
     "blockReady",
     "watcherConfirmationDepth",
@@ -37,6 +47,7 @@ const J_REPLICA_OPTIONAL_FIELDS: [&str; 7] = [
     "chainId",
     "entityProviderDeploymentBlock",
     "contracts",
+    "tokenRegistry",
 ];
 const STORAGE_CONFIG_FIELDS: [&str; 7] = [
     "enabled",
@@ -180,7 +191,7 @@ impl RuntimeOperatorConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RuntimeDurableEnvelope {
     runtime_id: String,
     prev_frame_hash: [u8; 32],
@@ -188,6 +199,19 @@ pub struct RuntimeDurableEnvelope {
     runtime_config: RuntimeOperatorConfig,
     infrastructure: Value,
     j_replicas: Value,
+    /// Derived-only memo of the per-frame component digests. Never part of
+    /// identity or persistence; invalidated by the one mutation that can
+    /// change a committed component (`advance_j_watcher_cursor`).
+    component_digests: ComponentDigestCache,
+}
+
+/// `runtime_id` and `infrastructure` cannot change after decode; `j_replicas`
+/// changes only through `advance_j_watcher_cursor`, which clears its cell.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ComponentDigestCache {
+    pub(crate) runtime_id: std::cell::RefCell<Option<String>>,
+    pub(crate) infrastructure: std::cell::RefCell<Option<String>>,
+    pub(crate) j_replicas: std::cell::RefCell<Option<String>>,
 }
 
 impl RuntimeDurableEnvelope {
@@ -241,7 +265,12 @@ impl RuntimeDurableEnvelope {
             runtime_config,
             infrastructure,
             j_replicas,
+            component_digests: ComponentDigestCache::default(),
         })
+    }
+
+    pub(crate) fn component_digest_cache(&self) -> &ComponentDigestCache {
+        &self.component_digests
     }
 
     pub fn runtime_id(&self) -> &str {
@@ -262,6 +291,26 @@ impl RuntimeDurableEnvelope {
 
     pub fn infrastructure(&self) -> &Value {
         &self.infrastructure
+    }
+
+    pub(crate) fn infrastructure_mut(&mut self) -> &mut Value {
+        &mut self.infrastructure
+    }
+
+    pub(crate) fn j_replicas_mut(&mut self) -> &mut Value {
+        &mut self.j_replicas
+    }
+
+    pub(crate) fn set_active_jurisdiction(&mut self, value: String) {
+        self.active_jurisdiction = value;
+    }
+
+    pub(crate) fn invalidate_j_replicas_digest(&mut self) {
+        *self.component_digests.j_replicas.borrow_mut() = None;
+    }
+
+    pub(crate) fn invalidate_infrastructure_digest(&mut self) {
+        *self.component_digests.infrastructure.borrow_mut() = None;
     }
 
     pub fn j_replicas(&self) -> &Value {
@@ -313,6 +362,7 @@ impl RuntimeDurableEnvelope {
                 json!({"__xlnType":"BigInt","value":block_number.to_string()}),
             );
         }
+        *self.component_digests.j_replicas.borrow_mut() = None;
         Ok(())
     }
 
@@ -335,7 +385,25 @@ impl RuntimeDurableEnvelope {
     pub(crate) fn fixture() -> Self {
         Self::decode(&tests::fixture(), [0; 32]).expect("durable envelope fixture")
     }
+}
 
+/// Equality is over the committed authority only; the derived digest memo is
+/// deliberately invisible to it.
+impl PartialEq for RuntimeDurableEnvelope {
+    fn eq(&self, other: &Self) -> bool {
+        self.runtime_id == other.runtime_id
+            && self.prev_frame_hash == other.prev_frame_hash
+            && self.active_jurisdiction == other.active_jurisdiction
+            && self.runtime_config == other.runtime_config
+            && self.infrastructure == other.infrastructure
+            && self.j_replicas == other.j_replicas
+    }
+}
+
+impl Eq for RuntimeDurableEnvelope {}
+
+#[cfg(test)]
+impl RuntimeDurableEnvelope {
     #[cfg(test)]
     pub(crate) fn fixture_for_runtime(runtime_id: &str, prev_frame_hash: [u8; 32]) -> Self {
         let mut machine = tests::fixture();
@@ -423,7 +491,7 @@ fn decode_storage_config(
 fn validate_infrastructure(value: &Value) -> Result<(), RuntimeDurableEnvelopeError> {
     let object = object(value, "infrastructure")?;
     exact_fields(object, &[], &INFRASTRUCTURE_FIELDS, "infrastructure")?;
-    for field in INFRASTRUCTURE_FIELDS {
+    for field in INFRASTRUCTURE_MAP_FIELDS {
         let Some(value) = object.get(field) else {
             continue;
         };
@@ -435,6 +503,111 @@ fn validate_infrastructure(value: &Value) -> Result<(), RuntimeDurableEnvelopeEr
             return Err(RuntimeDurableEnvelopeError::InfrastructureMap(field));
         }
         canonical_value_from_tagged_json(value)?;
+    }
+    crate::j_submit::decode_pending_j_submit_attempts(value)
+        .map_err(|error| RuntimeDurableEnvelopeError::JSubmit(error.to_string()))?;
+    if let Some(frontiers) = object.get("runtimeAdapterCommandFrontiers") {
+        validate_runtime_adapter_command_frontiers(frontiers)?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_adapter_command_frontiers(
+    value: &Value,
+) -> Result<(), RuntimeDurableEnvelopeError> {
+    let tagged = value
+        .as_object()
+        .ok_or_else(|| RuntimeDurableEnvelopeError::RuntimeAdapterCommand("MAP_OBJECT".into()))?;
+    if tagged.len() != 2 || tagged.get("__xlnType").and_then(Value::as_str) != Some("Map") {
+        return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+            "MAP_TAG".into(),
+        ));
+    }
+    let rows = tagged
+        .get("value")
+        .and_then(Value::as_array)
+        .ok_or_else(|| RuntimeDurableEnvelopeError::RuntimeAdapterCommand("MAP_ROWS".into()))?;
+    if rows.len() > 1_024 {
+        return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+            "CAPACITY".into(),
+        ));
+    }
+    let mut prior = None::<&str>;
+    for row in rows {
+        let pair = row
+            .as_array()
+            .filter(|pair| pair.len() == 2)
+            .ok_or_else(|| RuntimeDurableEnvelopeError::RuntimeAdapterCommand("ROW".into()))?;
+        let lane = pair[0]
+            .as_str()
+            .filter(|lane| canonical_hex(lane, 32))
+            .ok_or_else(|| RuntimeDurableEnvelopeError::RuntimeAdapterCommand("LANE".into()))?;
+        if prior.is_some_and(|prior| prior >= lane) {
+            return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+                "LANE_ORDER".into(),
+            ));
+        }
+        prior = Some(lane);
+        let frontier = pair[1]
+            .as_object()
+            .ok_or_else(|| RuntimeDurableEnvelopeError::RuntimeAdapterCommand("FRONTIER".into()))?;
+        let fields = [
+            "lastContiguousSequence",
+            "lastInputHash",
+            "lastCommandId",
+            "observedHeight",
+            "expiresAtMs",
+        ];
+        if frontier.len() != fields.len()
+            || !fields.iter().all(|field| frontier.contains_key(*field))
+        {
+            return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+                "FRONTIER_FIELDS".into(),
+            ));
+        }
+        for field in ["lastContiguousSequence", "observedHeight"] {
+            let number = frontier[field]
+                .as_u64()
+                .filter(|number| *number <= MAX_SAFE_INTEGER)
+                .ok_or_else(|| {
+                    RuntimeDurableEnvelopeError::RuntimeAdapterCommand(format!("FRONTIER_{field}"))
+                })?;
+            if field == "lastContiguousSequence" && number == 0 {
+                return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+                    "FRONTIER_SEQUENCE".into(),
+                ));
+            }
+        }
+        for field in ["lastInputHash"] {
+            if !frontier[field]
+                .as_str()
+                .is_some_and(|value| canonical_hex(value, 32))
+            {
+                return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(format!(
+                    "FRONTIER_{field}"
+                )));
+            }
+        }
+        let command_id_valid = frontier["lastCommandId"].as_str().is_some_and(|value| {
+            (16..=128).contains(&value.len())
+                && value.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')
+                })
+        });
+        if !command_id_valid {
+            return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+                "FRONTIER_COMMAND_ID".into(),
+            ));
+        }
+        if !frontier["expiresAtMs"].is_null()
+            && !frontier["expiresAtMs"]
+                .as_u64()
+                .is_some_and(|value| value > 0 && value <= MAX_SAFE_INTEGER)
+        {
+            return Err(RuntimeDurableEnvelopeError::RuntimeAdapterCommand(
+                "FRONTIER_EXPIRY".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -498,6 +671,10 @@ fn validate_j_replicas(value: &Value) -> Result<(), RuntimeDurableEnvelopeError>
             if !contracts.values().all(Value::is_string) {
                 return Err(RuntimeDurableEnvelopeError::JReplicaRow(index));
             }
+        }
+        if let Some(tokens) = replica.get("tokenRegistry") {
+            crate::j_import::decode_token_registry(tokens)
+                .map_err(|_| RuntimeDurableEnvelopeError::JReplicaRow(index))?;
         }
         let block_number = required(replica, "blockNumber")?;
         match canonical_value_from_tagged_json(block_number)? {
@@ -716,6 +893,8 @@ pub enum RuntimeDurableEnvelopeError {
     Boolean(&'static str),
     #[error("RRS_RUNTIME_ENVELOPE_INFRASTRUCTURE_MAP:{0}")]
     InfrastructureMap(&'static str),
+    #[error("RRS_RUNTIME_ENVELOPE_RADAPTER_COMMAND:{0}")]
+    RuntimeAdapterCommand(String),
     #[error("RRS_RUNTIME_ENVELOPE_J_REPLICA_ROW:{0}")]
     JReplicaRow(usize),
     #[error("RRS_RUNTIME_ENVELOPE_J_REPLICA_NAME:{0}")]
@@ -732,6 +911,8 @@ pub enum RuntimeDurableEnvelopeError {
     Lineage,
     #[error(transparent)]
     Tagged(#[from] TaggedJsonError),
+    #[error("RRS_RUNTIME_ENVELOPE_J_SUBMIT:{0}")]
+    JSubmit(String),
 }
 
 #[cfg(test)]

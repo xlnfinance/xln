@@ -17,6 +17,7 @@ mod wire;
 
 pub(crate) use crypto::derive_local_runtime_id;
 pub use error::RuntimeTransportError;
+pub(crate) use inbound::InboundRuntimeEvent;
 pub use inbound::{
     DirectRuntimeIngress, DirectRuntimeIngressConfig, DirectRuntimeIngressMetrics,
     InboundEntityInputs, InboundSessionTable,

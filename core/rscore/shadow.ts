@@ -114,7 +114,7 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
     ];
   }
   if (tag === 3) {
-    wireTuple(output, 'SHADOW_ENGINE_OFFER', 18);
+    wireTuple(output, 'SHADOW_ENGINE_OFFER', 19);
     const makerSide = wireInteger(output[14], 'SHADOW_ENGINE_OFFER_MAKER');
     if (makerSide !== 0 && makerSide !== 1) throw new Error(`SHADOW_ENGINE_OFFER_MAKER:${makerSide}`);
     return [
@@ -138,6 +138,12 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
       wireInteger(output[15], 'SHADOW_ENGINE_OFFER_HEIGHT'),
       wireText(output[16], 'SHADOW_ENGINE_OFFER_QUANTIZED_GIVE'),
       wireText(output[17], 'SHADOW_ENGINE_OFFER_QUANTIZED_WANT'),
+      output[18] === null || output[18] === undefined
+        ? null
+        : (() => {
+            decodeRscoreCanonicalValue(output[18], 'SHADOW_ENGINE_OFFER_CROSS_JURISDICTION');
+            return output[18] as RscoreWireValue;
+          })(),
     ];
   }
   if (tag === 4) {
@@ -722,7 +728,7 @@ const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwa
   const chunkBytes = new Map<PendingSubwave, number>();
   const occurrence = new Map<string, number>();
   for (const pendingFrame of pending) {
-    // frame_ack can commit the ACKed frame and the peer's next proposal in one
+    // ack_frame can commit the ACKed frame and the peer's next proposal in one
     // Runtime frame. The nth frame of each account belongs in the nth subwave.
     const depth = occurrence.get(pendingFrame.frame.accountKey) ?? 0;
     occurrence.set(pendingFrame.frame.accountKey, depth + 1);
@@ -2320,7 +2326,7 @@ export class RscoreShadowMirror {
     const client = this.#makeClient(this.#binaryPath);
     try {
       await this.#hello(client);
-      const restored = wireTuple(await client.bootstrapAccounts(0, seeds), 'SHADOW_PRIME_RESTORE', 2);
+      const restored = wireTuple(await client.bootstrapAccounts(0, seeds), 'SHADOW_PRIME_RESTORE', 3);
       return { client, restored };
     } catch (error) {
       client.kill();

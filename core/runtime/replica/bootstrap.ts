@@ -19,10 +19,12 @@ export type RuntimeLocalSigner = Readonly<{
 export type RuntimeCreationOptions = Readonly<{
   trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
   localSigners?: readonly RuntimeLocalSigner[];
+  /** Cache warmup only; omitted numeric signers remain available lazily. */
+  numericSignerPrewarmCount?: number;
 }>;
 
 export type RuntimeBootstrapDeps = {
-  createRuntime(seed: string | null): RuntimeReplica;
+  createRuntime(seed: string | null, numericSignerPrewarmCount?: number): RuntimeReplica;
   loadRuntime(
     runtimeId?: string | null,
     runtimeSeed?: string | null,
@@ -92,9 +94,16 @@ export const bootstrapRuntime = async (
   options?: RuntimeCreationOptions,
 ): Promise<RuntimeReplica> => {
   const runtimeSeed = runtimeSeedOverride ?? null;
+  const numericSignerPrewarmCount = options?.numericSignerPrewarmCount;
+  if (
+    numericSignerPrewarmCount !== undefined &&
+    (!Number.isSafeInteger(numericSignerPrewarmCount) || numericSignerPrewarmCount < 1 || numericSignerPrewarmCount > 100)
+  ) {
+    throw new Error(`RUNTIME_SIGNER_PREWARM_COUNT_INVALID:${String(numericSignerPrewarmCount)}`);
+  }
   registerLocalRuntimeSigners(runtimeSeed, options?.localSigners ?? []);
   const restored = await restoreRuntimeAtBootstrap(
-    deps.createRuntime(runtimeSeed),
+    deps.createRuntime(runtimeSeed, numericSignerPrewarmCount),
     options,
     deps,
   );

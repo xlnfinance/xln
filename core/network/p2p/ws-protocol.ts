@@ -302,7 +302,7 @@ const assertRuntimeWsMessagePack = (bytes: Uint8Array): void => {
 };
 
 const runtimeWsEnvelopeCodec: Codec<RuntimeWsEnvelope> = {
-  encode: (envelope) => encodeBinaryPayload(validateRuntimeWsEnvelope(envelope), 'msgpack'),
+  encode: (envelope) => encodeBinaryPayload(validateRuntimeWsEnvelope(envelope)),
   decode: (bytes) => {
     assertRuntimeWsMessagePack(bytes);
     return decodeValidatedBinaryPayload(bytes, validateRuntimeWsEnvelope);
@@ -326,7 +326,7 @@ const buildRuntimeWsEnvelope = (message: RuntimeWsMessage): RuntimeWsEnvelope =>
 const oversizedWsPayloadCensus = (payload: unknown): string => {
   const encodedSize = (value: unknown): number => {
     try {
-      return encodeBinaryPayload(value as never, 'msgpack').byteLength;
+      return encodeBinaryPayload(value as never).byteLength;
     } catch {
       return -1;
     }
@@ -476,7 +476,6 @@ const frameAuthPreimage = (
   }
   return encodeBinaryPayload(
     [FRAME_DOMAIN, audience, nonce, authTimestamp, unsigned],
-    'msgpack',
   );
 };
 

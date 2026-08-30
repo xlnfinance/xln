@@ -79,10 +79,9 @@ export const LIMITS = {
   MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 20,
 
   /** Maximum canonical swap offer identifier length. */
-  MAX_ACCOUNT_SWAP_HISTORY_TEXT: 256,
+  MAX_SWAP_OFFER_ID_LENGTH: 256,
 
   /** Two lookup keys for every live HTLC across every allowed Entity account. */
-  MAX_ENTITY_HTLC_NOTES: 64_000,
 
   /** Payment descriptions are UI metadata, never an unbounded storage blob. */
   MAX_ENTITY_HTLC_NOTE_LENGTH: 256,

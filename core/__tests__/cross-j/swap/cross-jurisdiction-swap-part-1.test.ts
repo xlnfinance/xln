@@ -5,7 +5,7 @@ import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../../../entity/tx/apply';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -861,6 +861,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       'entityTxs',
       'protocol',
       'sourceEntityId',
+      'sourceSignerId',
       'targetEntityId',
     ]);
     expect(runtimeOutput.data.entityTxs.map(tx => tx.type)).toEqual(['registerCrossJurisdictionSwap']);
@@ -1112,8 +1113,16 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(committedSaturatedTarget.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash).toBe(intent.routeHash);
     expect(saturatedEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.mempool).toHaveLength(LIMITS.MEMPOOL_SIZE);
 
-    sourceState.crossJurisdictionSwaps?.set(secondForwardIntent.orderId, secondForwardIntent);
-    targetState.crossJurisdictionSwaps?.set(reverseIntent.orderId, reverseIntent);
+    const sourceReplicaKey = `${sourceHub}:${sourceHubSigner}`;
+    const targetReplicaKey = `${targetHub}:${targetHubSigner}`;
+    const writableSourceReplica = forkEntityReplicaForInput(env.state.eReplicas.get(sourceReplicaKey)!);
+    const writableTargetReplica = forkEntityReplicaForInput(env.state.eReplicas.get(targetReplicaKey)!);
+    writableSourceReplica.state = createEntityFrameCandidateState(writableSourceReplica.state);
+    writableTargetReplica.state = createEntityFrameCandidateState(writableTargetReplica.state);
+    writableSourceReplica.state.crossJurisdictionSwaps?.set(secondForwardIntent.orderId, secondForwardIntent);
+    writableTargetReplica.state.crossJurisdictionSwaps?.set(reverseIntent.orderId, reverseIntent);
+    env.state.eReplicas.set(sourceReplicaKey, writableSourceReplica);
+    env.state.eReplicas.set(targetReplicaKey, writableTargetReplica);
     expect(resolveEntityProposerId(env, sourceUser, 'cross-j-cascade-fixture')).toBe(sourceUserSigner);
     expect(resolveEntityProposerId(env, targetUser, 'cross-j-cascade-fixture')).toBe(targetUserSigner);
     const pass = await applyMergedEntityInputs(env, [sourceInput, reverseInput], [], {
@@ -1166,7 +1175,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       .toEqual(firstAccountFrameOrderIds);
     expect(new Set(crossJOrderIds(sourceRegisteredAccount.mempool))).toEqual(queuedAccountFrameOrderIds);
     expect(new Set(crossJOrderIds(targetRegisteredAccount.mempool))).toEqual(queuedAccountFrameOrderIds);
-    expect(pass.entityOutbox.some(output => output.localRuntimeProtocol !== undefined)).toBe(false);
     expect(
       pass.entityOutbox
         .map(output => ({

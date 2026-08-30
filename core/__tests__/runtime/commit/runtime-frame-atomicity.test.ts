@@ -6,6 +6,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { isPersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { safeStringify } from '../../../protocol/serialization';
 import {
@@ -139,9 +140,7 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   crontabState: initCrontab(),
   swapTradingPairs: [],
   pendingCrossJurisdictionFillAcks: new Map(),
@@ -221,7 +220,7 @@ const corruptCurrentHeadAhead = async (env: RuntimeReplica): Promise<void> => {
   // A live Runtime reconciles inherited disk once, when the namespace opens.
   // This helper sabotages current after that decision, so the next persist
   // must re-read heads the way a freshly opened process would.
-  if (env.infrastructure) env.infrastructure.storageHistoryRecovered = false;
+  if (env.infrastructure) env.infrastructure.storageWalRecovered = false;
 };
 
 const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
@@ -230,6 +229,20 @@ const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
 };
 
 describe('runtime frame atomicity', () => {
+  test('imported Entity collections are storage-ready persistent radix maps', async () => {
+    const env = createEmptyEnv(`runtime import persistent collections ${TEST_RUN_ID}`);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    installJurisdiction(env);
+    const imported = importReplicaTx('d');
+
+    await applyRuntimeInput(env, { runtimeTxs: [imported], entityInputs: [] });
+
+    const replica = env.state.eReplicas.get(`${imported.entityId}:${imported.signerId}`);
+    expect(replica).toBeDefined();
+    expect(isPersistentEntityCollectionMap(replica!.state.deferredAccountProposals)).toBe(true);
+  });
+
   test('a caller waiting for the writer lock cannot resume after Runtime halts', async () => {
     const env = createEmptyEnv(`runtime sticky halt waiter ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
@@ -368,7 +381,7 @@ describe('runtime frame atomicity', () => {
           entityTxs: [],
         }],
       });
-      await expect(processRuntime(env)).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
+      await expect(processRuntime(env)).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_WAL');
       expect(env.infrastructure?.inFlightEntityInputs).toBe(0);
     } finally {
       await closeTestEnv(env);
@@ -644,7 +657,7 @@ describe('runtime frame atomicity', () => {
     enqueueRuntimeInput(env, ingress);
 
     try {
-      await expect(processRuntime(env)).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
+      await expect(processRuntime(env)).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_WAL');
 
       // Runtime owns its State and no longer pays O(total state) for a working
       // clone. Once mutation starts, RAM is deliberately unreadable: only the
@@ -715,7 +728,7 @@ describe('runtime frame atomicity', () => {
     try {
       expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.state.timestamp))
         .toEqual({ kind: 'queued' });
-      await expect(processPromise).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
+      await expect(processPromise).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_WAL');
 
       expect(env.infrastructure?.halted).toBe(true);
       expect(env.infrastructure?.fatalDebugPayload?.message)

@@ -198,8 +198,12 @@ fn poll(log: Value) -> Result<xln_rscore_runtime::JWatcherPoll, JWatcherError> {
     let config = JWatcherConfig {
         chain_id: CHAIN_ID,
         depository_address: [0x11; 20],
+        entity_provider_address: [0x12; 20],
         entity_id: xln_rscore_engine::EntityId::parse(&repeat_hex(0xaa, 32))
             .expect("harness entity"),
+        erc20_tokens: Default::default(),
+        external_wallets: Vec::new(),
+        hash_ladders: Default::default(),
         confirmation_depth: 0,
         max_blocks_per_poll: 16,
     };

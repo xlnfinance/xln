@@ -6,11 +6,12 @@ out="$1"; interval="${2:-5}"
 : > "$out"
 while :; do
   ts=$(date +%H:%M:%S)
-  ps -Ao pid,pcpu,rss,etime,time,command | grep -E 'bun|anvil' | grep -v grep | grep -v cpu-sampler | \
+  ps -Ao pid,pcpu,rss,etime,time,command | grep -E 'bun|anvil|xlnrs' | grep -v grep | grep -v cpu-sampler | \
     awk -v ts="$ts" '{
       pid=$1; cpu=$2; rss=$3; et=$4; ct=$5; $1=$2=$3=$4=$5=""; cmd=$0;
       label="other";
-      if (cmd ~ /load-lane-/) label="lane";
+      if (cmd ~ /xlnrs/) label="rust-h1";
+      else if (cmd ~ /load-lane-/) label="lane";
       else if (cmd ~ /hub-node/) label="hub";
       else if (cmd ~ /market-maker|mm-node/) label="mm";
       else if (cmd ~ /relay/) label="relay";

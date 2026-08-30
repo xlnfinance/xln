@@ -140,7 +140,7 @@ export const seedFreshStorageEpoch = async (options: {
   }
 
   // Rotation is allowed only at a materialized head, so no overlay window crosses
-  // the epoch boundary. The old epoch stays immutable for audit/history.
+  // the epoch boundary. The bounded prior WAL epoch stays immutable until deletion.
   const livePrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ENTITY_FIELD]),
@@ -173,7 +173,7 @@ export const seedFreshStorageEpoch = async (options: {
       latestMaterializedHeight: options.snapshotHeight,
       latestSnapshotHeight: options.snapshotHeight,
       epochReplayBytes: 0,
-      retainedHistoryBytes: 0,
+      retainedWalBytes: 0,
     } satisfies StorageHead),
   );
   await writeBatch(batch);
@@ -408,7 +408,7 @@ export const maybeRotateSnapshots = async (
   return removedBytes;
 };
 
-export const pruneHistoryBeforeHeight = async (
+export const pruneWalBeforeHeight = async (
   db: RuntimeDbLike,
   heightInclusive: number,
   onPersistenceBoundary?: StoragePersistenceBoundaryHook,

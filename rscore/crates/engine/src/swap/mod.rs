@@ -11,6 +11,7 @@ mod transition;
 
 pub(crate) use cancel::apply_cancel_request;
 pub use market::{SwapMarketPolicy, SwapToken};
+pub(crate) use offer::{MAX_ACCOUNT_CROSS_J_SWAP_OFFERS, MAX_ACCOUNT_SWAP_OFFERS};
 pub use offer::{SwapOffer, SwapOfferSnapshot};
 pub(crate) use resolve::{SwapResolveTx, apply_resolve};
 pub(crate) use transition::{SwapOfferTx, apply_offer};

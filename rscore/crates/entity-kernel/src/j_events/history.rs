@@ -1,5 +1,8 @@
 use sha3::{Digest as _, Keccak256};
-use xln_rscore_engine::{JurisdictionEvent, canonical_events, canonical_events_hash};
+use xln_rscore_engine::{
+    DisputeFinalizationEvidence, JurisdictionEvent, canonical_dispute_finalization_evidence_hash,
+    canonical_events, canonical_events_hash, normalize_dispute_finalization_evidence,
+};
 
 use crate::EntityKernelError;
 
@@ -21,6 +24,8 @@ pub struct CanonicalJEventBlock {
     pub j_block_hash: [u8; 32],
     pub events_hash: [u8; 32],
     pub events: Vec<JurisdictionEvent>,
+    pub dispute_finalization_evidence_hash: [u8; 32],
+    pub dispute_finalization_evidence: Vec<DisputeFinalizationEvidence>,
 }
 
 fn invalid(detail: impl Into<String>) -> EntityKernelError {
@@ -93,7 +98,10 @@ pub fn canonical_j_event_blocks(
         if batch.j_height == 0 || batch.j_height <= prior {
             return Err(invalid("J_RANGE_BLOCK_ORDER"));
         }
-        let mut events = Vec::new();
+        // The authenticated watcher block is the single event-history source.
+        // Account claims are a derived bilateral projection and may contain
+        // only the Account-owned subset; rebuilding history from them silently
+        // dropped every EntityProvider, reserve, dispute and wallet event.
         for ingress in &batch.account_claims {
             let xln_rscore_engine::AccountTx::JEventClaim(claim) = &ingress.tx else {
                 return Err(invalid("J_RANGE_ACCOUNT_TX"));
@@ -101,15 +109,24 @@ pub fn canonical_j_event_blocks(
             if claim.j_height != batch.j_height || claim.j_block_hash != batch.j_block_hash {
                 return Err(invalid("J_RANGE_CLAIM_BINDING"));
             }
-            events.extend(claim.events.iter().cloned());
         }
-        let events = canonical_events(&events).map_err(|error| invalid(error.to_string()))?;
+        let events = canonical_events(&batch.events).map_err(|error| invalid(error.to_string()))?;
+        let evidence =
+            normalize_dispute_finalization_evidence(&batch.dispute_finalization_evidence)
+                .map_err(|error| invalid(error.to_string()))?;
         blocks.push(CanonicalJEventBlock {
             j_height: batch.j_height,
             j_block_hash: batch.j_block_hash,
             events_hash: canonical_events_hash(&events)
                 .map_err(|error| invalid(error.to_string()))?,
             events,
+            dispute_finalization_evidence_hash: if evidence.is_empty() {
+                [0_u8; 32]
+            } else {
+                canonical_dispute_finalization_evidence_hash(&evidence)
+                    .map_err(|error| invalid(error.to_string()))?
+            },
+            dispute_finalization_evidence: evidence,
         });
         prior = batch.j_height;
     }
@@ -128,7 +145,7 @@ pub fn fold_j_history_root(
             word(block.j_height),
             text_hash(&render_hex(&block.j_block_hash)),
             block.events_hash,
-            [0_u8; 32],
+            block.dispute_finalization_evidence_hash,
         ]);
         root = keccak_words(&[text_hash(HISTORY_FOLD_DOMAIN_TEXT), root, leaf]);
     }
@@ -150,7 +167,10 @@ pub fn canonical_j_event_range_hash(
         .iter()
         .map(|block| block.events_hash)
         .collect::<Vec<_>>();
-    let evidence_hashes = vec![[0_u8; 32]; blocks.len()];
+    let evidence_hashes = blocks
+        .iter()
+        .map(|block| block.dispute_finalization_evidence_hash)
+        .collect::<Vec<_>>();
     Ok(Keccak256::digest(range_abi(
         &heights,
         &block_hashes,

@@ -50,12 +50,13 @@ const validateRuntimeOutput = (value: unknown, code: string, depth: number): voi
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     data,
-    ['protocol', 'sourceEntityId', 'targetEntityId', 'entityTxs'],
+    ['protocol', 'sourceEntityId', 'sourceSignerId', 'targetEntityId', 'entityTxs'],
     [],
     `${code}_FIELDS`,
   );
   if (data['protocol'] !== 'cross-j') throw new Error(`${code}_PROTOCOL`);
   requireString(data['sourceEntityId'], `${code}_SOURCE`);
+  requireString(data['sourceSignerId'], `${code}_SOURCE_SIGNER`);
   requireString(data['targetEntityId'], `${code}_TARGET`);
   validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
 };

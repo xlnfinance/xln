@@ -62,6 +62,8 @@ export type ConnectedRuntime = Readonly<{
   wsUrl: string;
 }>;
 
+const HLT_SCRIPT_TIMEOUT_MS = 20_000;
+
 const opCounterResetUrl = (rawUrl: string): string => {
   const url = new URL(rawUrl);
   url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
@@ -97,11 +99,10 @@ const resetProcessOpCounters = async (rawUrl: string, label: string): Promise<vo
 };
 
 export const hltProcessOpCounterResetTargets = (
-  portBase: number,
+  _portBase: number,
   runtimes: readonly Readonly<{ wsUrl: string; label: string }>[],
 ): ReadonlyArray<readonly [url: string, label: string]> => {
-  const processes = new Map<string, string>(HUB_NAMES.map((label, index) =>
-    [opCounterResetUrl(`http://127.0.0.1:${portBase + 10 + index}`), label]));
+  const processes = new Map<string, string>();
   for (const runtime of runtimes) processes.set(opCounterResetUrl(runtime.wsUrl), runtime.label);
   return [...processes];
 };
@@ -122,9 +123,12 @@ export const resetHltProcessOpCounters = async (
 
 export const stopHltHubBackgroundIo = async (
   args: Pick<WorkerArgs, 'portBase'>,
+  hubLabels: readonly string[],
 ): Promise<void> => {
-  await Promise.all([10, 11, 12].map(async offset => {
-    const label = `H${offset - 9}`;
+  await Promise.all(hubLabels.map(async label => {
+    const hubIndex = HUB_NAMES.indexOf(label as (typeof HUB_NAMES)[number]);
+    if (hubIndex < 0) throw new Error(`HLT_BACKGROUND_STOP_HUB_INVALID:${label}`);
+    const offset = 10 + hubIndex;
     const response = await fetch(hltBackgroundStopUrl(`http://127.0.0.1:${args.portBase + offset}`), {
       method: 'POST',
     });
@@ -229,14 +233,24 @@ export const findForbiddenHltHubIo = (
 export const assertHltHubProcessIsolation = async (
   args: Pick<WorkerArgs, 'portBase' | 'workDir'>,
   loadHubLabels: readonly string[] = ['H1'],
+  unavailableHubLabels: readonly string[] = [],
 ): Promise<Readonly<Record<string, Readonly<Record<string, HltOpCounter>>>>> => {
   const carriesLoad = new Set(loadHubLabels.map(label => label.toUpperCase()));
+  const unavailable = new Set(unavailableHubLabels.map(label => label.toUpperCase()));
   const ioByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
   const countersByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
   // Hub `H<n>` answers on portBase + 10 + (n - 1), the same offset the mesh
   // assigns it. Listing the three by hand made every shard past the third
   // invisible to the isolation proof.
   for (const [offset, label] of HUB_NAMES.map((label, index) => [10 + index, label] as const)) {
+    if (unavailable.has(label)) {
+      // Native Rust H1 has no TypeScript op-counter endpoint. Keep the report's
+      // exact Hub cardinality; native socket/WAL/publication metrics are proved
+      // separately by the Rust H1 gate and must not be fabricated here.
+      ioByHub[label] = {};
+      countersByHub[label] = {};
+      continue;
+    }
     const counters = await readProcessOpCounters(`http://127.0.0.1:${args.portBase + offset}`, label);
     assertSocketCounterCoverage(counters, label);
     ioByHub[label] = summarizeHltIoCounters(counters);
@@ -321,9 +335,9 @@ const parseHltPlanArgs = (values: ReadonlyMap<string, string>, mode: string): Hl
   return buildHltPlan({
     users: parsePositiveInteger(users, 'HLT_USERS_INVALID'),
     ratePerUserPerSecond: parsePositiveInteger(values.get('--rate-per-user') ?? '1', 'HLT_RATE_PER_USER_INVALID'),
-    // Ten seconds is the primary sustained HLT gate. The 60-second soak is an
-    // explicit follow-up, so profiling iterations never inherit soak duration.
-    durationSeconds: parsePositiveInteger(values.get('--duration-s') ?? '10', 'HLT_DURATION_INVALID'),
+    // Twenty seconds is the primary sustained HLT gate. The 60-second soak is
+    // an explicit follow-up, so profiling iterations never inherit soak duration.
+    durationSeconds: parsePositiveInteger(values.get('--duration-s') ?? '20', 'HLT_DURATION_INVALID'),
     mix: parseHltMix(values.get('--mix') ?? defaultMixForMode(mode)),
     baseTokenId: parsePositiveInteger(
       values.get('--base-token') ?? String(HLT_DEFAULT_BASE_TOKEN_ID),
@@ -487,7 +501,7 @@ export const connectRuntime = async (
   wsUrl = entry.wsUrl,
 ): Promise<ConnectedRuntime> => {
   const adapter = new RemoteRuntimeAdapter();
-  await adapter.connect({ mode: 'remote', wsUrl, authKey: entry.token, requestTimeoutMs: 30_000 });
+  await adapter.connect({ mode: 'remote', wsUrl, authKey: entry.token, requestTimeoutMs: HLT_SCRIPT_TIMEOUT_MS });
   if (!adapter.commandReady || adapter.nextCommandSequence === null) {
     const reason = adapter.commandReadyReason ?? (
       adapter.nextCommandSequence === null ? 'command-frontier-missing' : 'unknown'
@@ -507,7 +521,7 @@ export const connectRuntime = async (
   const baseUrl = url.toString().replace(/\/$/, '');
   return {
     adapter,
-    control: new DaemonControlClient({ baseUrl, authKey: entry.token, timeoutMs: 30_000 }),
+    control: new DaemonControlClient({ baseUrl, authKey: entry.token, timeoutMs: HLT_SCRIPT_TIMEOUT_MS }),
     entry,
     wsUrl,
   };
@@ -523,7 +537,7 @@ export const reconnectRuntimeControl = async (runtime: ConnectedRuntime): Promis
     mode: 'remote',
     wsUrl: runtime.wsUrl,
     authKey: runtime.entry.token,
-    requestTimeoutMs: 30_000,
+    requestTimeoutMs: HLT_SCRIPT_TIMEOUT_MS,
   });
   if (!runtime.adapter.commandReady || runtime.adapter.nextCommandSequence === null) {
     const reason = runtime.adapter.commandReadyReason ?? (
@@ -552,7 +566,7 @@ export const exportReplayBaseSnapshotIfConfigured = async (
   );
 };
 
-const COMMAND_OBSERVATION_TIMEOUT_MS = 120_000;
+const COMMAND_OBSERVATION_TIMEOUT_MS = HLT_SCRIPT_TIMEOUT_MS;
 
 // RuntimeAdapter's owner command frontier is strictly contiguous. Concurrent
 // callers may share one authenticated adapter, but two commands must never

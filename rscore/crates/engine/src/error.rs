@@ -82,6 +82,9 @@ pub enum StateError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationRejection {
+    AccountTx {
+        message: String,
+    },
     CreditLimitNegative {
         amount: BigInt,
     },
@@ -181,6 +184,7 @@ pub enum ValidationRejection {
 impl ValidationRejection {
     pub fn message(&self) -> String {
         match self {
+            Self::AccountTx { message } => message.clone(),
             Self::CreditLimitNegative { amount } => format!("Credit limit cannot be negative: {amount}"),
             Self::CreditLimitAboveMaximum { amount, maximum } => {
                 format!("Credit limit exceeds maximum: {amount} > {maximum}")

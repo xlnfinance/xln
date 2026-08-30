@@ -6,7 +6,7 @@
 import { recordOpEvent, runWithOpScopes } from '../../support/performance/op-counters';
 import { TIMING } from '../../config/constants';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { recordRuntimeHistoryTraceForTesting } from '../observability/history-retention';
+import { recordRuntimeTraceForTesting } from '../observability/runtime-trace';
 import { createStructuredLogger } from '../../support/logger';
 import type { createRuntimeLoopApi } from '../loop/loop.ts';
 import { materializePendingJurisdictionImportResults } from '../j-submit/jurisdiction-import';
@@ -191,14 +191,14 @@ const recordRuntimeFrameIngress = (
 ): void => {
   let entityTxs = 0;
   let accountFrames = 0;
-  let frameAcks = 0;
+  let ackFrames = 0;
   let acks = 0;
   for (const input of runtimeInput.entityInputs) {
     for (const tx of input.entityTxs ?? []) {
       entityTxs += 1;
       if (tx.type !== 'accountInput') continue;
       if (tx.data.kind === 'frame') accountFrames += 1;
-      else if (tx.data.kind === 'frame_ack') frameAcks += 1;
+      else if (tx.data.kind === 'ack_frame') ackFrames += 1;
       else if (tx.data.kind === 'ack') acks += 1;
     }
   }
@@ -209,7 +209,7 @@ const recordRuntimeFrameIngress = (
     entityInputs: runtimeInput.entityInputs.length,
     entityTxs,
     accountFrames,
-    frameAcks,
+    ackFrames,
     acks,
   });
 };
@@ -349,7 +349,7 @@ const publishCommittedRuntimeFrame = (
   recordCommittedRuntimeEntityMetrics(env, env.state.height, committedEvents);
   const state = ensureRuntimeInfrastructure(env);
   if (frame.pendingTraceSnapshot) {
-    recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);
+    recordRuntimeTraceForTesting(env, frame.pendingTraceSnapshot);
   }
   if (!quietLogs) runtimeLog.debug('storage.save.done', { height: env.state.height });
   profile.mark('publish');

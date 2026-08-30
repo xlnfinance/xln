@@ -19,6 +19,7 @@ use crate::consensus::signing::{CertifiedBoardAuthority, verify_dispute_hanko_wi
 use crate::error::StateError;
 use crate::state::AccountReplica;
 use crate::state::identity::Side;
+use xln_rscore_protocol::CanonicalValue;
 
 const JS_MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 
@@ -39,11 +40,42 @@ struct Swap {
     sub_amount: BigInt,
 }
 
-/// What one clause may move on each side, ascending by delta index.
-struct Allowance {
+/// One cross-j hash-ladder clause.  Pull bodies are already canonical Account
+/// state; dispute construction must project that exact body instead of silently
+/// hashing an empty pull array (which produces a proof the peer and Depository
+/// do not recognize).
+struct Pull {
     delta_index: usize,
-    right_allowance: BigInt,
-    left_allowance: BigInt,
+    amount: BigInt,
+    claimed_ratio: u16,
+    full_hash: [u8; 32],
+    partial_root: [u8; 32],
+    target_role: bool,
+}
+
+/// What one clause may move on each side, ascending by delta index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisputeAllowance {
+    pub delta_index: usize,
+    pub right_allowance: BigInt,
+    pub left_allowance: BigInt,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisputeTransformerClause {
+    pub transformer_address: [u8; 20],
+    pub encoded_batch: Vec<u8>,
+    pub allowances: Vec<DisputeAllowance>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisputeProofBody {
+    pub watch_seed: [u8; 32],
+    pub left_response_seconds: u32,
+    pub right_response_seconds: u32,
+    pub offdeltas: Vec<BigInt>,
+    pub token_ids: Vec<u32>,
+    pub transformers: Vec<DisputeTransformerClause>,
 }
 
 const INT256_MIN_SHIFT: u32 = 255;
@@ -98,6 +130,86 @@ fn word_from_address(address: &[u8; 20]) -> [u8; 32] {
     let mut word = [0_u8; 32];
     word[12..].copy_from_slice(address);
     word
+}
+
+fn object_field<'a>(
+    value: &'a CanonicalValue,
+    name: &'static str,
+) -> Result<&'a CanonicalValue, StateError> {
+    let CanonicalValue::Object(fields) = value else {
+        return Err(StateError::DisputeProof("pull:object".into()));
+    };
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+        .ok_or_else(|| StateError::DisputeProof(format!("pull:{name}")))
+}
+
+fn optional_object_field<'a>(value: &'a CanonicalValue, name: &str) -> Option<&'a CanonicalValue> {
+    let CanonicalValue::Object(fields) = value else {
+        return None;
+    };
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+}
+
+fn canonical_u64(value: &CanonicalValue, field: &'static str) -> Result<u64, StateError> {
+    let CanonicalValue::Number(value) = value else {
+        return Err(StateError::DisputeProof(format!("pull:{field}")));
+    };
+    value
+        .as_str()
+        .parse::<u64>()
+        .map_err(|_| StateError::DisputeProof(format!("pull:{field}")))
+}
+
+fn canonical_bigint<'a>(
+    value: &'a CanonicalValue,
+    field: &'static str,
+) -> Result<&'a BigInt, StateError> {
+    let CanonicalValue::BigInt(value) = value else {
+        return Err(StateError::DisputeProof(format!("pull:{field}")));
+    };
+    Ok(value)
+}
+
+fn canonical_hex32(value: &CanonicalValue, field: &'static str) -> Result<[u8; 32], StateError> {
+    let CanonicalValue::String(value) = value else {
+        return Err(StateError::DisputeProof(format!("pull:{field}")));
+    };
+    let payload = value
+        .strip_prefix("0x")
+        .filter(|payload| payload.len() == 64)
+        .ok_or_else(|| StateError::DisputeProof(format!("pull:{field}")))?;
+    let mut bytes = [0_u8; 32];
+    for (index, pair) in payload.as_bytes().chunks_exact(2).enumerate() {
+        let nibble = |byte: u8| -> Option<u8> {
+            match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            }
+        };
+        let high =
+            nibble(pair[0]).ok_or_else(|| StateError::DisputeProof(format!("pull:{field}")))?;
+        let low =
+            nibble(pair[1]).ok_or_else(|| StateError::DisputeProof(format!("pull:{field}")))?;
+        bytes[index] = (high << 4) | low;
+    }
+    Ok(bytes)
+}
+
+fn pull_target_role(value: &CanonicalValue) -> Result<bool, StateError> {
+    let binding = object_field(value, "crossJurisdiction")?;
+    let CanonicalValue::String(leg) = object_field(binding, "leg")? else {
+        return Err(StateError::DisputeProof("pull:leg".into()));
+    };
+    match leg.as_str() {
+        "source" => Ok(false),
+        "target" => Ok(true),
+        _ => Err(StateError::DisputeProof("pull:leg".into())),
+    }
 }
 
 /// The proof body's hash, and the dispute hash a validator signs over it.
@@ -293,7 +405,24 @@ pub fn proof_body_hash(
     replica: &AccountReplica,
     delta_transformer: &[u8; 20],
 ) -> Result<[u8; 32], StateError> {
+    let body = build_dispute_proof_body(replica, delta_transformer)?;
+    Ok(Keccak256::digest(encode_proof_body(&body)?).into())
+}
+
+/// Build the exact value later submitted to Depository. Hashing and JBatch
+/// projection consume this same object; no Entity-side proof reconstruction
+/// or second formula is permitted.
+pub fn build_dispute_proof_body(
+    replica: &AccountReplica,
+    delta_transformer: &[u8; 20],
+) -> Result<DisputeProofBody, StateError> {
     let state = replica.state();
+    if state.carried().subcontracts_root != [0; 32] {
+        // Rust does not keep a second opaque subcontract body behind the
+        // committed root.  Silently omitting it would certify a different
+        // ProofBody; refuse until that canonical collection is resident.
+        return Err(StateError::DisputeProof("subcontracts:bodyMissing".into()));
+    }
     let mut token_ids: Vec<u32> = Vec::new();
     let mut offdeltas: Vec<BigInt> = Vec::new();
     for delta in state.deltas() {
@@ -345,6 +474,9 @@ pub fn proof_body_hash(
     offers.sort_by(|left, right| left.offer_id().cmp(right.offer_id()));
     let mut swaps = Vec::with_capacity(offers.len());
     for offer in offers {
+        if offer.cross_jurisdiction().is_some() {
+            continue;
+        }
         swaps.push(Swap {
             owner_is_left: offer.maker_is_left(),
             add_delta_index: index_of(offer.give_token_id(), "swapGiveToken")?,
@@ -354,25 +486,62 @@ pub fn proof_body_hash(
         });
     }
 
+    let mut pulls = Vec::with_capacity(state.pull_count());
+    for (_, value) in state.pulls() {
+        let token_id = u32::try_from(canonical_u64(object_field(value, "tokenId")?, "tokenId")?)
+            .map_err(|_| StateError::DisputeProof("pull:tokenId".into()))?;
+        let claimed_ratio = optional_object_field(value, "claimedRatio")
+            .map(|value| canonical_u64(value, "claimedRatio"))
+            .transpose()?
+            .unwrap_or(0)
+            .min(u64::from(u16::MAX)) as u16;
+        pulls.push(Pull {
+            delta_index: index_of(token_id, "pullToken")?,
+            amount: canonical_bigint(object_field(value, "amount")?, "amount")?.clone(),
+            claimed_ratio,
+            full_hash: canonical_hex32(object_field(value, "fullHash")?, "fullHash")?,
+            partial_root: canonical_hex32(object_field(value, "partialRoot")?, "partialRoot")?,
+            target_role: pull_target_role(value)?,
+        });
+    }
+
     // One clause per non-empty collection, in the order DeltaTransformer runs
     // them. A batch with nothing in it is not a clause.
-    let mut clauses: Vec<(Vec<u8>, Vec<Allowance>)> = Vec::new();
+    let mut clauses: Vec<DisputeTransformerClause> = Vec::new();
     if !payments.is_empty() {
         let allowances = payment_allowances(&payments)?;
-        clauses.push((encode_batch(&payments, &[])?, allowances));
+        clauses.push(DisputeTransformerClause {
+            transformer_address: *delta_transformer,
+            encoded_batch: encode_batch(&payments, &[], &[])?,
+            allowances,
+        });
     }
     if !swaps.is_empty() {
         let allowances = swap_allowances(&swaps)?;
-        clauses.push((encode_batch(&[], &swaps)?, allowances));
+        clauses.push(DisputeTransformerClause {
+            transformer_address: *delta_transformer,
+            encoded_batch: encode_batch(&[], &swaps, &[])?,
+            allowances,
+        });
     }
-    Ok(Keccak256::digest(encode_proof_body(
-        replica,
-        delta_transformer,
-        &token_ids,
-        &offdeltas,
-        &clauses,
-    )?)
-    .into())
+    if !pulls.is_empty() {
+        let allowances = pull_allowances(&pulls);
+        clauses.push(DisputeTransformerClause {
+            transformer_address: *delta_transformer,
+            encoded_batch: encode_batch(&[], &[], &pulls)?,
+            allowances,
+        });
+    }
+    let identity = state.identity();
+    let dispute = state.dispute_config();
+    Ok(DisputeProofBody {
+        watch_seed: *identity.watch_seed().bytes(),
+        left_response_seconds: dispute.left_response_seconds(),
+        right_response_seconds: dispute.right_response_seconds(),
+        offdeltas,
+        token_ids,
+        transformers: clauses,
+    })
 }
 
 fn add_allowance(
@@ -400,18 +569,20 @@ fn add_allowance(
     }
 }
 
-fn finish_allowances(mut rows: Vec<(usize, BigInt, BigInt)>) -> Vec<Allowance> {
+fn finish_allowances(mut rows: Vec<(usize, BigInt, BigInt)>) -> Vec<DisputeAllowance> {
     rows.sort_by_key(|(index, _, _)| *index);
     rows.into_iter()
-        .map(|(delta_index, left_allowance, right_allowance)| Allowance {
-            delta_index,
-            right_allowance,
-            left_allowance,
-        })
+        .map(
+            |(delta_index, left_allowance, right_allowance)| DisputeAllowance {
+                delta_index,
+                right_allowance,
+                left_allowance,
+            },
+        )
         .collect()
 }
 
-fn payment_allowances(payments: &[Payment]) -> Result<Vec<Allowance>, StateError> {
+fn payment_allowances(payments: &[Payment]) -> Result<Vec<DisputeAllowance>, StateError> {
     let mut rows: Vec<(usize, BigInt, BigInt)> = Vec::new();
     for payment in payments {
         add_allowance(&mut rows, payment.delta_index, &payment.amount);
@@ -419,7 +590,7 @@ fn payment_allowances(payments: &[Payment]) -> Result<Vec<Allowance>, StateError
     Ok(finish_allowances(rows))
 }
 
-fn swap_allowances(swaps: &[Swap]) -> Result<Vec<Allowance>, StateError> {
+fn swap_allowances(swaps: &[Swap]) -> Result<Vec<DisputeAllowance>, StateError> {
     let mut rows: Vec<(usize, BigInt, BigInt)> = Vec::new();
     for swap in swaps {
         // The maker gives on one delta and wants on the other, and the sign of
@@ -440,9 +611,21 @@ fn swap_allowances(swaps: &[Swap]) -> Result<Vec<Allowance>, StateError> {
     Ok(finish_allowances(rows))
 }
 
+fn pull_allowances(pulls: &[Pull]) -> Vec<DisputeAllowance> {
+    let mut rows: Vec<(usize, BigInt, BigInt)> = Vec::new();
+    for pull in pulls {
+        add_allowance(&mut rows, pull.delta_index, &pull.amount);
+    }
+    finish_allowances(rows)
+}
+
 /// `abi.encode(DeltaTransformer.Batch)` — three arrays of static tuples, so
 /// each array is a length followed by its elements inline.
-fn encode_batch(payments: &[Payment], swaps: &[Swap]) -> Result<Vec<u8>, StateError> {
+fn encode_batch(
+    payments: &[Payment],
+    swaps: &[Swap],
+    pulls: &[Pull],
+) -> Result<Vec<u8>, StateError> {
     let mut payment_bytes = Vec::new();
     payment_bytes.extend_from_slice(&word_from_u64(payments.len() as u64));
     for payment in payments {
@@ -460,9 +643,16 @@ fn encode_batch(payments: &[Payment], swaps: &[Swap]) -> Result<Vec<u8>, StateEr
         swap_bytes.extend_from_slice(&word_from_u64(swap.sub_delta_index as u64));
         swap_bytes.extend_from_slice(&word_from_uint(&swap.sub_amount, "swapSubAmount")?);
     }
-    // No pulls: the engine carries that section's root and never builds it, so
-    // an account holding one is refused before it reaches this process.
-    let pull_bytes = word_from_u64(0).to_vec();
+    let mut pull_bytes = Vec::new();
+    pull_bytes.extend_from_slice(&word_from_u64(pulls.len() as u64));
+    for pull in pulls {
+        pull_bytes.extend_from_slice(&word_from_u64(pull.delta_index as u64));
+        pull_bytes.extend_from_slice(&word_from_int(&pull.amount, "pullAmount")?);
+        pull_bytes.extend_from_slice(&word_from_u64(u64::from(pull.claimed_ratio)));
+        pull_bytes.extend_from_slice(&pull.full_hash);
+        pull_bytes.extend_from_slice(&pull.partial_root);
+        pull_bytes.extend_from_slice(&word_from_u64(u64::from(pull.target_role)));
+    }
 
     let head = 32 * 3;
     let mut encoded = Vec::new();
@@ -481,30 +671,23 @@ fn encode_batch(payments: &[Payment], swaps: &[Swap]) -> Result<Vec<u8>, StateEr
 }
 
 /// `abi.encode(ProofBody)`.
-fn encode_proof_body(
-    replica: &AccountReplica,
-    delta_transformer: &[u8; 20],
-    token_ids: &[u32],
-    offdeltas: &[BigInt],
-    clauses: &[(Vec<u8>, Vec<Allowance>)],
-) -> Result<Vec<u8>, StateError> {
-    let identity = replica.state().identity();
-    let dispute = replica.state().dispute_config();
-
+fn encode_proof_body(body: &DisputeProofBody) -> Result<Vec<u8>, StateError> {
     let mut offdelta_bytes = Vec::new();
-    offdelta_bytes.extend_from_slice(&word_from_u64(offdeltas.len() as u64));
-    for offdelta in offdeltas {
+    offdelta_bytes.extend_from_slice(&word_from_u64(body.offdeltas.len() as u64));
+    for offdelta in &body.offdeltas {
         offdelta_bytes.extend_from_slice(&word_from_int(offdelta, "offdelta")?);
     }
     let mut token_bytes = Vec::new();
-    token_bytes.extend_from_slice(&word_from_u64(token_ids.len() as u64));
-    for token_id in token_ids {
+    token_bytes.extend_from_slice(&word_from_u64(body.token_ids.len() as u64));
+    for token_id in &body.token_ids {
         token_bytes.extend_from_slice(&word_from_u64(u64::from(*token_id)));
     }
 
     // Each transformer clause is a dynamic tuple, so the array holds offsets.
-    let mut clause_bodies = Vec::with_capacity(clauses.len());
-    for (batch, allowances) in clauses {
+    let mut clause_bodies = Vec::with_capacity(body.transformers.len());
+    for clause_value in &body.transformers {
+        let batch = &clause_value.encoded_batch;
+        let allowances = &clause_value.allowances;
         let mut allowance_bytes = Vec::new();
         allowance_bytes.extend_from_slice(&word_from_u64(allowances.len() as u64));
         for allowance in allowances {
@@ -524,7 +707,7 @@ fn encode_proof_body(
 
         let head = 32 * 3;
         let mut clause = Vec::new();
-        clause.extend_from_slice(&word_from_address(delta_transformer));
+        clause.extend_from_slice(&word_from_address(&clause_value.transformer_address));
         clause.extend_from_slice(&word_from_u64(head as u64));
         clause.extend_from_slice(&word_from_u64((head + batch_bytes.len()) as u64));
         clause.extend_from_slice(&batch_bytes);
@@ -545,9 +728,9 @@ fn encode_proof_body(
     let head = 32 * 6;
     let mut encoded = Vec::new();
     encoded.extend_from_slice(&word_from_u64(32));
-    encoded.extend_from_slice(identity.watch_seed().bytes());
-    encoded.extend_from_slice(&word_from_u64(u64::from(dispute.left_response_seconds())));
-    encoded.extend_from_slice(&word_from_u64(u64::from(dispute.right_response_seconds())));
+    encoded.extend_from_slice(&body.watch_seed);
+    encoded.extend_from_slice(&word_from_u64(u64::from(body.left_response_seconds)));
+    encoded.extend_from_slice(&word_from_u64(u64::from(body.right_response_seconds)));
     encoded.extend_from_slice(&word_from_u64(head as u64));
     encoded.extend_from_slice(&word_from_u64((head + offdelta_bytes.len()) as u64));
     encoded.extend_from_slice(&word_from_u64(

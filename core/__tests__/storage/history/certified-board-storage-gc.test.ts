@@ -130,10 +130,6 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
   const historyDb = new Level<Buffer, Buffer>(join(dbRoot, 'history'), {
     keyEncoding: 'buffer', valueEncoding: 'buffer',
   });
-  const historyViewDb = new Level<Buffer, Buffer>(join(dbRoot, 'history-views'), {
-    keyEncoding: 'buffer',
-    valueEncoding: 'buffer',
-  });
   await Promise.all([currentDb.open(), historyDb.open()]);
   env.runtimeConfig = {
     storage: {
@@ -152,11 +148,6 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
       getRuntimeDb: () => currentDb,
       tryOpenRuntimeWalDb: async () => true,
       getRuntimeWalDb: () => historyDb,
-      tryOpenHistoryViewDb: async () => {
-        await historyViewDb.open();
-        return true;
-      },
-      getHistoryViewDb: () => historyViewDb,
       getPerfMs,
       formatPerfMs: (value) => value.toFixed(2),
     });
@@ -222,7 +213,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
       records.push(record);
 
       if (epoch === 1) {
-        expect((await readStorageHead(historyDb))?.retainedHistoryBytes).toBe(await measureRetainedBytes());
+        expect((await readStorageHead(historyDb))?.retainedWalBytes).toBe(await measureRetainedBytes());
         const stats = await inspectStorage({
           env,
           tryOpenDb: async () => true,
@@ -239,7 +230,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
     }
 
     expect(await snapshotHasBoardHash(historyDb, 1, roots[0]!)).toBe(false);
-    expect((await readStorageHead(historyDb))?.retainedHistoryBytes).toBe(await measureRetainedBytes());
+    expect((await readStorageHead(historyDb))?.retainedWalBytes).toBe(await measureRetainedBytes());
     for (const index of [1, 2]) {
       const restored = createEmptyEnv(`certified board gc restore ${index} alpha beta gamma`);
       await hydrateCertifiedBoardRootNodesFromStorage(restored, historyDb, roots[index], index + 1);
@@ -251,15 +242,8 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
     try {
       await currentDb.close();
     } finally {
-      try {
-        await historyDb.close();
-      } finally {
-        try {
-          await historyViewDb.close();
-        } finally {
-          rmSync(dbRoot, { recursive: true, force: true });
-        }
-      }
+      await historyDb.close();
+      rmSync(dbRoot, { recursive: true, force: true });
     }
   }
 });

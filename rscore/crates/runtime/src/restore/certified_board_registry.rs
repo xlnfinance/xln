@@ -6,6 +6,9 @@ use serde_json::{Map, Value};
 use sha3::{Digest as _, Keccak256};
 use thiserror::Error;
 use xln_rscore_engine::CertifiedBoardAuthority;
+use xln_rscore_entity_kernel::{
+    CertifiedBoardRecord as EntityCertifiedBoardRecord, CertifiedBoardSource,
+};
 
 use crate::certified_board_registry::EntityCommandCertifiedBoard;
 use crate::{CertifiedBoardRegistry, StorageMessagePackError, decode_storage_payload};
@@ -62,6 +65,11 @@ struct StoredNode {
     physical_key: Vec<u8>,
     path: PhysicalPath,
     node: CertifiedBoardNode,
+}
+
+pub struct HydratedCertifiedBoardRegistry {
+    pub registry: CertifiedBoardRegistry,
+    pub records: Vec<EntityCertifiedBoardRecord>,
 }
 
 fn invalid(detail: impl Into<String>) -> CertifiedBoardRegistryRestoreError {
@@ -387,6 +395,7 @@ struct Walker<'a> {
     used: BTreeSet<[u8; 32]>,
     authorities: BTreeMap<[u8; 32], CertifiedBoardAuthority>,
     command_boards: BTreeMap<[u8; 32], EntityCommandCertifiedBoard>,
+    records: Vec<EntityCertifiedBoardRecord>,
 }
 
 impl Walker<'_> {
@@ -416,6 +425,25 @@ impl Walker<'_> {
                 if certified_board_entity_key(record.stack_key, record.entity_id) != key {
                     return Err(invalid("RECORD_KEY_MISMATCH"));
                 }
+                let source = match record.source {
+                    1 => CertifiedBoardSource::FoundationBootstrapped,
+                    2 => CertifiedBoardSource::EntityRegistered,
+                    3 => CertifiedBoardSource::BoardActivated,
+                    _ => return Err(invalid("RECORD_SOURCE")),
+                };
+                self.records.push(EntityCertifiedBoardRecord {
+                    stack_key: record.stack_key,
+                    entity_id: record.entity_id,
+                    board_hash: record.board_hash,
+                    board_epoch: record.board_epoch,
+                    previous_board_hash: record.previous_board_hash,
+                    previous_board_valid_until: record.previous_board_valid_until,
+                    activated_at_j_height: record.activated_at_j_height,
+                    log_index: record.log_index,
+                    block_hash: record.block_hash,
+                    transaction_hash: record.transaction_hash,
+                    source,
+                });
                 let authority = CertifiedBoardAuthority {
                     entity_id: record.entity_id,
                     registered_board_hash: record.board_hash,
@@ -472,13 +500,25 @@ pub fn hydrate_certified_board_registry(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
     graph: &HydratedEntityGraph,
 ) -> Result<CertifiedBoardRegistry, CertifiedBoardRegistryRestoreError> {
+    Ok(hydrate_certified_board_state(rows, graph)?.registry)
+}
+
+/// Authenticate the path-keyed board tree once and return both consumers of
+/// that same proof: Account authority lookup and the Entity machine's records.
+pub fn hydrate_certified_board_state(
+    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+    graph: &HydratedEntityGraph,
+) -> Result<HydratedCertifiedBoardRegistry, CertifiedBoardRegistryRestoreError> {
     let board_rows = rows
         .iter()
         .filter(|(key, _)| key.first() == Some(&CERTIFIED_BOARD_TAG))
         .collect::<Vec<_>>();
     let Some((stack_key, root)) = parse_state(graph)? else {
         if board_rows.is_empty() {
-            return Ok(CertifiedBoardRegistry::empty());
+            return Ok(HydratedCertifiedBoardRegistry {
+                registry: CertifiedBoardRegistry::empty(),
+                records: Vec::new(),
+            });
         }
         return Err(invalid("ROWS_WITHOUT_STATE"));
     };
@@ -486,12 +526,15 @@ pub fn hydrate_certified_board_registry(
         if !board_rows.is_empty() {
             return Err(invalid("ROWS_FOR_EMPTY_ROOT"));
         }
-        return Ok(CertifiedBoardRegistry::restored(
-            stack_key,
-            root,
-            BTreeMap::new(),
-            BTreeMap::new(),
-        ));
+        return Ok(HydratedCertifiedBoardRegistry {
+            registry: CertifiedBoardRegistry::restored(
+                stack_key,
+                root,
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
+            records: Vec::new(),
+        });
     }
     let mut nodes = BTreeMap::new();
     for (key, value) in board_rows {
@@ -507,6 +550,7 @@ pub fn hydrate_certified_board_registry(
         used: BTreeSet::new(),
         authorities: BTreeMap::new(),
         command_boards: BTreeMap::new(),
+        records: Vec::new(),
     };
     walker.visit(root, None)?;
     if walker.used.len() != nodes.len() {
@@ -517,12 +561,15 @@ pub fn hydrate_certified_board_registry(
             .unwrap_or_default();
         return Err(invalid(format!("NODE_ORPHAN:{}", hex(orphan))));
     }
-    Ok(CertifiedBoardRegistry::restored(
-        stack_key,
-        root,
-        walker.authorities,
-        walker.command_boards,
-    ))
+    Ok(HydratedCertifiedBoardRegistry {
+        registry: CertifiedBoardRegistry::restored(
+            stack_key,
+            root,
+            walker.authorities,
+            walker.command_boards,
+        ),
+        records: walker.records,
+    })
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -620,9 +667,16 @@ mod tests {
             hex(&root),
             "20b786c1f8ecdae119ddcc7e840d4c96b25a3dc195d3eb106100aa91807eab67"
         );
-        let registry =
-            hydrate_certified_board_registry(&BTreeMap::from([(key, value)]), &core(root))
-                .expect("restored registry");
+        let hydrated = hydrate_certified_board_state(&BTreeMap::from([(key, value)]), &core(root))
+            .expect("restored registry and Entity records");
+        assert_eq!(hydrated.records.len(), 1);
+        assert_eq!(hydrated.records[0].entity_id, [0x22; 32]);
+        assert_eq!(hydrated.records[0].board_hash, [0x33; 32]);
+        assert_eq!(
+            hydrated.records[0].source,
+            CertifiedBoardSource::BoardActivated
+        );
+        let registry = hydrated.registry;
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.stack_key(), Some(&[0x11; 32]));
         assert_eq!(registry.root(), Some(&root));
@@ -803,7 +857,18 @@ mod tests {
             &core(registry_root),
         )
         .expect("checkpoint board registry");
-        runtime.install_certified_board_registry(registry);
+        let entity_key = runtime
+            .state
+            .e_replicas
+            .keys()
+            .next()
+            .expect("fixture Entity key")
+            .clone();
+        runtime
+            .e_replicas
+            .get_mut(&entity_key)
+            .expect("fixture Entity replica")
+            .install_certified_board_registry(registry);
         let row = AccountInputRow {
             operation_index: 77,
             account_id,
@@ -838,15 +903,34 @@ mod tests {
                 timestamp: 200,
                 finalized_j_height: 9,
                 hub_rebalance_has_pending_work: false,
-                entity_context: DeterministicContext::hlt_default(),
-                canonical_entity_context: CanonicalValue::Object(Vec::new()),
+                entity_contexts: BTreeMap::from([(
+                    entity_key.clone(),
+                    std::collections::VecDeque::from([crate::RuntimeEntityFrameContext {
+                        execution: DeterministicContext::hlt_default(),
+                        canonical: CanonicalValue::Object(Vec::new()),
+                    }]),
+                )]),
             },
         };
-        let initial_root = runtime.state.accounts_root;
+        let initial_root = runtime
+            .state
+            .e_replicas
+            .get(&entity_key)
+            .expect("fixture Entity state")
+            .accounts_root;
         let applied = crate::apply_runtime(runtime, input).expect("registered frame accepted");
         assert_eq!(applied.account_commits.len(), 1);
         assert_eq!(applied.account_commits[0].frame_height, 1);
-        assert_ne!(applied.replica.state.accounts_root, initial_root);
+        assert_ne!(
+            applied
+                .replica
+                .state
+                .e_replicas
+                .get(&entity_key)
+                .expect("applied Entity state")
+                .accounts_root,
+            initial_root
+        );
     }
 
     #[test]

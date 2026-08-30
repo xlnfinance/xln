@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -37,6 +38,28 @@ pub enum PersistentNodeRecord<V> {
 pub enum PersistentNodeRef {
     Branch { path: Vec<u8> },
     Leaf { path: Vec<u8>, key: Vec<u8> },
+}
+
+/// One final keyed mutation for a batched Patricia commit. Callers collapse
+/// repeated writes before entering the tree; the map owns sharding, path
+/// validation and canonical root reconstruction.
+pub enum PersistentRadixMutation<V> {
+    Put {
+        key: Vec<u8>,
+        value: V,
+        value_digest: [u8; 32],
+    },
+    Remove {
+        key: Vec<u8>,
+    },
+}
+
+impl<V> PersistentRadixMutation<V> {
+    fn key(&self) -> &[u8] {
+        match self {
+            Self::Put { key, .. } | Self::Remove { key } => key,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,6 +103,16 @@ pub enum PersistentRadixMapError {
         actual: [u8; 32],
         expected: [u8; 32],
     },
+    #[error("PERSISTENT_RADIX_LENGTH_OVERFLOW")]
+    LengthOverflow,
+}
+
+#[derive(Debug, Error)]
+pub enum PersistentRadixBatchError<E> {
+    #[error(transparent)]
+    Radix(#[from] PersistentRadixMapError),
+    #[error("PERSISTENT_RADIX_BATCH_MAPPER:{0}")]
+    Mapper(E),
 }
 
 /// One top-level slot handed to the caller's mapper: the subtree that lives
@@ -87,13 +120,19 @@ pub enum PersistentRadixMapError {
 /// caller decides only *where* each slot runs, never what a node looks like.
 pub struct SlotWork<V> {
     child: Option<NodeRef<V>>,
-    leaves: Vec<NodeRef<V>>,
+    mutations: Vec<SlotMutation<V>>,
+}
+
+enum SlotMutation<V> {
+    Put(NodeRef<V>),
+    Remove(Vec<u8>),
 }
 
 /// The rebuilt subtree of one slot, ready to be hung back under the root.
 pub struct SlotOutcome<V> {
     child: Option<NodeRef<V>>,
     inserted: usize,
+    deleted: usize,
 }
 
 /// The canonical Patricia subtree for one exact three-nibble prefix.
@@ -181,11 +220,11 @@ impl<V: Clone> SlotWork<V> {
     /// handed back, but it is not work worth a thread hop; the caller decides
     /// where to run the batch and needs to see how much of it is real.
     pub fn has_work(&self) -> bool {
-        !self.leaves.is_empty()
+        !self.mutations.is_empty()
     }
 
     pub fn work_len(&self) -> usize {
-        self.leaves.len()
+        self.mutations.len()
     }
 
     /// Fold this slot's leaves into its subtree, and hash the result while it
@@ -193,15 +232,32 @@ impl<V: Clone> SlotWork<V> {
     pub fn apply(self) -> Result<SlotOutcome<V>, PersistentRadixMapError> {
         let mut child = self.child;
         let mut inserted = 0;
-        for leaf in self.leaves {
-            let (node, added) = put_node(child.as_ref(), leaf)?;
-            child = Some(node);
-            inserted += usize::from(added);
+        let mut deleted = 0;
+        for mutation in self.mutations {
+            match mutation {
+                SlotMutation::Put(leaf) => {
+                    let (node, added) = put_node(child.as_ref(), leaf)?;
+                    child = Some(node);
+                    inserted += usize::from(added);
+                }
+                SlotMutation::Remove(key) => {
+                    let Some(current) = child.as_ref() else {
+                        continue;
+                    };
+                    let (node, removed) = delete_node(current, &path_slots(&key), &key)?;
+                    child = node;
+                    deleted += usize::from(removed);
+                }
+            }
         }
         if let Some(node) = child.as_ref() {
             node_hash(node);
         }
-        Ok(SlotOutcome { child, inserted })
+        Ok(SlotOutcome {
+            child,
+            inserted,
+            deleted,
+        })
     }
 }
 
@@ -941,22 +997,23 @@ impl<V: Clone> PersistentRadixMap<V> {
         if !path.is_empty() {
             return self.fold_updates(entries);
         }
-        let mut buckets: [Vec<NodeRef<V>>; 16] = std::array::from_fn(|_| Vec::new());
+        let mut buckets: [Vec<SlotMutation<V>>; 16] = std::array::from_fn(|_| Vec::new());
         for (key, value, digest) in entries {
             let slot = usize::from(path_slots(&key)[0]);
-            buckets[slot].push(make_leaf(key, value, digest));
+            buckets[slot].push(SlotMutation::Put(make_leaf(key, value, digest)));
         }
         let mut bucket_iter = buckets.into_iter();
         let mut child_iter = children.iter();
         let work: [SlotWork<V>; 16] = std::array::from_fn(|_| SlotWork {
             child: child_iter.next().and_then(Option::as_ref).map(Arc::clone),
-            leaves: bucket_iter.next().unwrap_or_default(),
+            mutations: bucket_iter.next().unwrap_or_default(),
         });
         let updated = map_slots(work);
         let mut next: [Option<NodeRef<V>>; 16] = std::array::from_fn(|_| None);
         let mut inserted = 0;
         for (slot, result) in updated.into_iter().enumerate() {
             let outcome = result?;
+            debug_assert_eq!(outcome.deleted, 0);
             next[slot] = outcome.child;
             inserted += outcome.inserted;
         }
@@ -987,20 +1044,66 @@ impl<V: Clone> PersistentRadixMap<V> {
     where
         V: Send + Sync,
     {
-        if entries.is_empty() {
+        self.mutated_batch_two_levels(
+            entries
+                .into_iter()
+                .map(|(key, value, value_digest)| PersistentRadixMutation::Put {
+                    key,
+                    value,
+                    value_digest,
+                })
+                .collect(),
+            map_slots,
+        )
+    }
+
+    /// Apply final keyed puts/removes as 256 independent Patricia prefixes.
+    ///
+    /// This is the common frame-commit primitive for large keyed state. The
+    /// caller may collapse repeated writes in a transient overlay, but it does
+    /// not own Patricia layout, hashing, or canonical root reconstruction.
+    pub fn mutated_batch_two_levels(
+        &self,
+        mutations: Vec<PersistentRadixMutation<V>>,
+        map_slots: impl Fn([SlotWork<V>; 256]) -> [Result<SlotOutcome<V>, PersistentRadixMapError>; 256],
+    ) -> Result<Self, PersistentRadixMapError>
+    where
+        V: Send + Sync,
+    {
+        match self
+            .try_mutated_batch_two_levels(mutations, |work| Ok::<_, Infallible>(map_slots(work)))
+        {
+            Ok(map) => Ok(map),
+            Err(PersistentRadixBatchError::Radix(error)) => Err(error),
+            Err(PersistentRadixBatchError::Mapper(never)) => match never {},
+        }
+    }
+
+    pub fn try_mutated_batch_two_levels<E>(
+        &self,
+        mutations: Vec<PersistentRadixMutation<V>>,
+        map_slots: impl FnOnce(
+            [SlotWork<V>; 256],
+        )
+            -> Result<[Result<SlotOutcome<V>, PersistentRadixMapError>; 256], E>,
+    ) -> Result<Self, PersistentRadixBatchError<E>>
+    where
+        V: Send + Sync,
+    {
+        if mutations.is_empty() {
             return Ok(self.clone());
         }
-        for (key, _, _) in &entries {
-            validate_key_path(key)?;
+        for mutation in &mutations {
+            validate_key_path(mutation.key())?;
         }
         let Some(root) = self.root.as_ref() else {
-            return self.fold_updates(entries);
+            return self.fold_mutations(mutations).map_err(Into::into);
         };
         let Node::Branch { path, children, .. } = &**root else {
-            return self.fold_updates(entries);
+            return self.fold_mutations(mutations).map_err(Into::into);
         };
         if !path.is_empty() {
-            return self.fold_updates(entries);
+            return self.fold_mutations(mutations).map_err(Into::into);
         }
 
         let mut existing: [Option<NodeRef<V>>; 256] = std::array::from_fn(|_| None);
@@ -1030,27 +1133,36 @@ impl<V: Clone> PersistentRadixMap<V> {
             }
         }
 
-        let mut buckets: [Vec<NodeRef<V>>; 256] = std::array::from_fn(|_| Vec::new());
-        for (key, value, digest) in entries {
-            let path = path_slots(&key);
+        let mut buckets: [Vec<SlotMutation<V>>; 256] = std::array::from_fn(|_| Vec::new());
+        for mutation in mutations {
+            let path = path_slots(mutation.key());
             let slot = usize::from(path[0]) * 16 + usize::from(path[1]);
-            buckets[slot].push(make_leaf(key, value, digest));
+            buckets[slot].push(match mutation {
+                PersistentRadixMutation::Put {
+                    key,
+                    value,
+                    value_digest,
+                } => SlotMutation::Put(make_leaf(key, value, value_digest)),
+                PersistentRadixMutation::Remove { key } => SlotMutation::Remove(key),
+            });
         }
         let mut existing = existing.into_iter();
         let mut buckets = buckets.into_iter();
         let work: [SlotWork<V>; 256] = std::array::from_fn(|_| SlotWork {
             child: existing.next().flatten(),
-            leaves: buckets.next().unwrap_or_default(),
+            mutations: buckets.next().unwrap_or_default(),
         });
-        let updated = map_slots(work);
+        let updated = map_slots(work).map_err(PersistentRadixBatchError::Mapper)?;
         let mut outcomes = updated.into_iter();
         let mut root_children: [Option<NodeRef<V>>; 16] = std::array::from_fn(|_| None);
         let mut inserted = 0;
+        let mut deleted = 0;
         for (root_slot, root_child) in root_children.iter_mut().enumerate() {
             let mut children = Vec::new();
             for _ in 0..16 {
                 let outcome = outcomes.next().ok_or(PersistentRadixMapError::EmptyKey)??;
                 inserted += outcome.inserted;
+                deleted += outcome.deleted;
                 if let Some(child) = outcome.child {
                     children.push(child);
                 }
@@ -1061,12 +1173,14 @@ impl<V: Clone> PersistentRadixMap<V> {
                 _ => Some(make_branch(vec![root_slot as u8], &children)?),
             };
         }
+        let root_children = root_children.iter().flatten().cloned().collect::<Vec<_>>();
         Ok(Self {
-            root: Some(make_branch(
-                Vec::new(),
-                &root_children.iter().flatten().cloned().collect::<Vec<_>>(),
-            )?),
-            len: self.len + inserted,
+            root: if root_children.is_empty() {
+                None
+            } else {
+                Some(make_branch(Vec::new(), &root_children)?)
+            },
+            len: adjusted_len(self.len, inserted, deleted)?,
         })
     }
 
@@ -1121,7 +1235,10 @@ impl<V: Clone> PersistentRadixMap<V> {
         let work = existing
             .into_iter()
             .zip(buckets)
-            .map(|(child, leaves)| SlotWork { child, leaves })
+            .map(|(child, leaves)| SlotWork {
+                child,
+                mutations: leaves.into_iter().map(SlotMutation::Put).collect(),
+            })
             .collect::<Vec<_>>();
         let updated = map_slots(work);
         if updated.len() != PERSISTENT_RADIX_SHARD_COUNT {
@@ -1141,6 +1258,7 @@ impl<V: Clone> PersistentRadixMap<V> {
                     actual: PERSISTENT_RADIX_SHARD_COUNT - outcomes.len(),
                     expected: PERSISTENT_RADIX_SHARD_COUNT,
                 })??;
+                debug_assert_eq!(outcome.deleted, 0);
                 inserted += outcome.inserted;
                 if let Some(child) = outcome.child {
                     children.push(child);
@@ -1174,6 +1292,24 @@ impl<V: Clone> PersistentRadixMap<V> {
         let mut map = self.clone();
         for (key, value, digest) in entries {
             map = map.updated(key, value, digest)?;
+        }
+        Ok(map)
+    }
+
+    fn fold_mutations(
+        &self,
+        mutations: Vec<PersistentRadixMutation<V>>,
+    ) -> Result<Self, PersistentRadixMapError> {
+        let mut map = self.clone();
+        for mutation in mutations {
+            map = match mutation {
+                PersistentRadixMutation::Put {
+                    key,
+                    value,
+                    value_digest,
+                } => map.updated(key, value, value_digest)?,
+                PersistentRadixMutation::Remove { key } => map.removed(&key)?,
+            };
         }
         Ok(map)
     }
@@ -1225,6 +1361,41 @@ impl<V: Clone> PersistentRadixMap<V> {
         PersistentRadixIter {
             stack: self.root.iter().map(Arc::as_ref).collect(),
         }
+    }
+
+    /// Ordered traversal of one exact byte prefix without visiting unrelated
+    /// Patricia subtrees. This is the shared point/range primitive for
+    /// sharded Entity collections such as a per-token debt bucket.
+    pub fn iter_prefix(&self, prefix: &[u8]) -> PersistentRadixIter<'_, V> {
+        let prefix_path = path_slots(prefix);
+        let mut node = self.root.as_deref();
+        while let Some(current) = node {
+            match current {
+                Node::Leaf { key, .. } => {
+                    return PersistentRadixIter {
+                        stack: key
+                            .starts_with(prefix)
+                            .then_some(current)
+                            .into_iter()
+                            .collect(),
+                    };
+                }
+                Node::Branch { path, children, .. } => {
+                    if path.starts_with(&prefix_path) {
+                        return PersistentRadixIter {
+                            stack: vec![current],
+                        };
+                    }
+                    if !prefix_path.starts_with(path) {
+                        break;
+                    }
+                    node = prefix_path
+                        .get(path.len())
+                        .and_then(|slot| children[usize::from(*slot)].as_deref());
+                }
+            }
+        }
+        PersistentRadixIter { stack: Vec::new() }
     }
 
     /// Return the lexicographically last entry whose key starts with `prefix`.
@@ -1666,6 +1837,17 @@ fn prefix_index(path: &[u8], depth: usize) -> Result<usize, PersistentRadixMapEr
     Ok(path[..depth]
         .iter()
         .fold(0_usize, |index, nibble| index * 16 + usize::from(*nibble)))
+}
+
+fn adjusted_len(
+    current: usize,
+    inserted: usize,
+    deleted: usize,
+) -> Result<usize, PersistentRadixMapError> {
+    current
+        .checked_add(inserted)
+        .and_then(|len| len.checked_sub(deleted))
+        .ok_or(PersistentRadixMapError::LengthOverflow)
 }
 
 fn collect_prefix_subtrees<V>(

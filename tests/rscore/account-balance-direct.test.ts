@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { execFileSync } from 'node:child_process';
 
 import { applyAccountTxToMutableReplica } from '../../core/account/tx/apply';
 import { computeAccountStateRoot } from '../../core/account/commitment/state-root';
 import { createDefaultDelta } from '../../core/account/state/delta';
 import { PersistentAccountStateMap } from '../../core/account/state/persistent-state-map';
-import { packTransportValue } from '../../core/protocol/serialization/binary-codec';
+import { packWireValue, unpackWireValue } from '../../core/rscore/process-wire-value';
 import { hashHtlcSecret } from '../../core/protocol/htlc/utils';
 import type { AccountOutput, AccountReplica, AccountTx, Delta, HtlcLock } from '../../core/types/account';
 import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j';
@@ -204,7 +205,7 @@ const bodyDigest = (body: Uint8Array, kind: number): Uint8Array =>
   );
 
 const encodeEnvelope = (body: WireValue[], kind: 0 | 1): Uint8Array => {
-  const bodyBytes = packTransportValue(body);
+  const bodyBytes = packWireValue(body);
   const outer: WireValue[] = [
     'xln.rscore.account',
     1,
@@ -221,7 +222,7 @@ const encodeEnvelope = (body: WireValue[], kind: 0 | 1): Uint8Array => {
     bodyDigest(bodyBytes, kind),
     body,
   ];
-  return concatBytes(Uint8Array.of(3), packTransportValue(outer));
+  return concatBytes(Uint8Array.of(3), packWireValue(outer));
 };
 
 const deltaWire = (delta: Delta): WireValue[] => [
@@ -390,27 +391,28 @@ const executeTypescript = async (): Promise<WireValue[]> => {
 
 const runRust = async (request: Uint8Array): Promise<Uint8Array> => {
   const repository = `${import.meta.dir}/../..`;
-  const child = Bun.spawn({
-    cmd: ['cargo', 'run', '--quiet', '--manifest-path', 'tools/rscore-differential/Cargo.toml'],
+  const stdout = execFileSync(
+    'cargo',
+    ['run', '--quiet', '--manifest-path', 'tools/rscore-differential/Cargo.toml'],
+    {
     cwd: repository,
     env: { ...Bun.env, CARGO_TARGET_DIR: `${repository}/rscore/target` },
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  child.stdin.write(request);
-  child.stdin.end();
-  const [status, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).arrayBuffer(),
-    new Response(child.stderr).text(),
-  ]);
-  if (status !== 0) throw new Error(`DIFFERENTIAL_RUST_FAILED:${status}:${stderr}`);
-  if (stderr.trim() !== '') throw new Error(`DIFFERENTIAL_RUST_STDERR:${stderr}`);
-  return new Uint8Array(stdout);
+      input: Buffer.from(request),
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  return new Uint8Array(stdout.buffer, stdout.byteOffset, stdout.byteLength);
 };
 
 const digestHex = (bytes: Uint8Array): string => Buffer.from(sha256(bytes)).toString('hex');
+
+const decodeEnvelopeBody = (bytes: Uint8Array): unknown => {
+  const envelope = unpackWireValue(Buffer.from(bytes.subarray(1)));
+  if (!Array.isArray(envelope) || envelope.length !== 14) {
+    throw new Error('DIFFERENTIAL_RESPONSE_ENVELOPE_INVALID');
+  }
+  return envelope[13];
+};
 
 describe('rscore exact-byte payment differential', () => {
   test('TypeScript and Rust consume one ABI corpus and emit identical evidence', async () => {
@@ -427,6 +429,7 @@ describe('rscore exact-byte payment differential', () => {
     if (fixture.request.sha256 === 'pending') console.error(JSON.stringify(observed));
     expect(observed).toEqual(fixture);
     const actual = await runRust(request);
+    expect(decodeEnvelopeBody(actual)).toEqual(decodeEnvelopeBody(expected));
     expect(actual).toEqual(expected);
   }, 30_000);
 });

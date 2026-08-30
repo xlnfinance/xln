@@ -90,9 +90,7 @@ const baseState = (entityId: string, config: ConsensusConfig, timestamp: number)
   accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   lastFinalizedJHeight: 0,
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const installCertifiedBoardAuthority = (env: RuntimeReplica, state: EntityState): void => {

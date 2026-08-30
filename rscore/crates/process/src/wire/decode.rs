@@ -2,14 +2,14 @@
 
 use num_bigint::BigInt;
 use xln_rscore_abi::{AbiValue, Envelope, OpTag};
-use xln_rscore_batch::{AccountId, AccountInputAuthority, AccountSeed, BatchJob};
+use xln_rscore_batch::{AccountId, AccountSeed};
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountFrame, AccountIdentity,
-    AccountReplica, AccountSettledEvent, AccountState, AccountStateSeed, AccountTx,
-    BilateralRebalanceFeePolicy, CarriedSections, DeliveryMode, Delta, DepositoryAddress,
-    HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
-    JClaimAccumulator, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
-    JEventMetadata, JurisdictionEvent, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, Side,
+    AccountDisputeConfig, AccountDomain, AccountFrame, AccountIdentity, AccountReplica,
+    AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy, CarriedSections,
+    DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx,
+    HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode, JClaimProof, JClaimRecord,
+    JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction, LendingTermId,
+    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, ReserveSide, Side,
     SwapMarketPolicy, SwapOffer, SwapToken, TokenId, WatchSeed,
 };
 
@@ -19,8 +19,8 @@ use crate::wire_value::{
 };
 use crate::{PROCESS_ABI_VERSION, PROCESS_PROFILE, ProcessError};
 
-/// What an authoritative session needs that a mirror session does not: the
-/// key it signs with, and the id the runtime knows that key by. The runtime
+/// The key the authoritative session signs with and the id the runtime knows
+/// that key by. The runtime
 /// derives its keys from labels of its own choosing, which this process cannot
 /// reconstruct from an address, so it is handed one key rather than the seed
 /// that makes all of them.
@@ -52,36 +52,7 @@ pub enum Command {
         expected: xln_rscore_batch::CheckpointToken,
         accounts: Vec<xln_rscore_batch::AccountRestore>,
     },
-    Prepare {
-        jobs: Vec<BatchJob>,
-    },
-    Commit {
-        candidate_token: [u8; 32],
-    },
-    Abort {
-        candidate_token: [u8; 32],
-    },
     Shutdown,
-    ReadCapacityBatch {
-        requests: Vec<xln_rscore_batch::CapacityRequest>,
-    },
-    ReadAccountSummaryPage {
-        cursor: Option<AccountId>,
-        limit: usize,
-        token_ids: Vec<xln_rscore_engine::TokenId>,
-    },
-    ReadAccountEnvelope {
-        account_id: AccountId,
-    },
-    UpsertAccounts {
-        accounts: Vec<AccountSeed>,
-    },
-    UpdateAccountShells {
-        shells: Vec<(AccountId, xln_rscore_engine::AccountEnvelope)>,
-    },
-    RemoveAccounts {
-        account_ids: Vec<AccountId>,
-    },
     /// Every retired authority candidate/checkpoint command collapses to one
     /// loud rejection. Keeping decoded payloads here would retain a second,
     /// unused authority protocol beside the resident two-call path.
@@ -107,16 +78,17 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
     match envelope.op_tag {
         OpTag::Hello => decode_hello(payload),
         OpTag::BootstrapAccounts => decode_bootstrap(payload),
-        OpTag::ExecuteWave => decode_prepare(payload),
-        OpTag::CommitRuntime => decode_commit(payload),
-        OpTag::AbortRuntime => decode_abort(payload),
         OpTag::Shutdown => decode_shutdown(payload),
-        OpTag::UpdateAccountShells => decode_update_shells(payload),
-        OpTag::RemoveAccounts => decode_remove_accounts(payload),
-        OpTag::ReadCapacityBatch => decode_capacity_batch(payload),
-        OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
-        OpTag::UpsertAccounts => decode_upsert_accounts(payload),
-        OpTag::PrepareAccountWave
+        OpTag::ExecuteWave
+        | OpTag::CommitRuntime
+        | OpTag::AbortRuntime
+        | OpTag::UpdateAccountShells
+        | OpTag::RemoveAccounts
+        | OpTag::ReadCapacityBatch
+        | OpTag::ReadAccountSummaryPage
+        | OpTag::ReadAccountEnvelope
+        | OpTag::UpsertAccounts
+        | OpTag::PrepareAccountWave
         | OpTag::BeginEntity
         | OpTag::ApplyAccountWave
         | OpTag::ProposeAccountWave
@@ -130,7 +102,6 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::AccountOutbound => decode_account_outbound(payload),
         OpTag::BootstrapEntity => decode_bootstrap_entity(payload),
         OpTag::EntityRound => decode_entity_round(payload),
-        OpTag::ReadAccountEnvelope => decode_read_envelope(payload),
         OpTag::RestoreExact => decode_restore_exact(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
@@ -145,19 +116,33 @@ fn decode_bootstrap_entity(fields: &[AbiValue]) -> Result<Command, ProcessError>
 
 fn decode_entity_round(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 7, "entityRound")?;
+    let inbound = decode_account_inbound_request(tuple(&fields[0])?)?;
+    let operations = (!inbound.rows.is_empty())
+        .then_some(
+            xln_rscore_entity_kernel::ResidentEntityOperation::AccountRange {
+                start: 0,
+                len: inbound.rows.len(),
+            },
+        )
+        .into_iter()
+        .collect();
     Ok(Command::EntityRound {
         request: Box::new(xln_rscore_entity_kernel::ResidentEntityRequest {
-            inbound: decode_account_inbound_request(tuple(&fields[0])?)?,
+            inbound,
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             entity_height: js_number(&fields[1], "entityHeight")?,
             outbound_timestamp: js_number(&fields[2], "outboundTimestamp")?,
             outbound_j_height: js_number(&fields[3], "outboundJHeight")?,
             checkpoint_due: strict_boolean(&fields[4], "checkpointDue")?,
             post_accounts: strict_boolean(&fields[5], "postAccounts")?,
+            runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: String::new(),
             hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
-            local_financial_txs: Vec::new(),
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations,
         }),
         context: Box::new(crate::entity_wire::decode_context(&fields[6])?),
     })
@@ -180,9 +165,8 @@ fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-/// `null` for a mirror session, or `(privateKey, signerId)` for one that owns
-/// the accounts. The key never leaves this process again: the engine signs
-/// with it and returns signatures, not key material.
+/// `(privateKey, signerId)` for the Account authority. `null` still decodes so
+/// Hello can reject the retired non-authority role with one precise error.
 fn decode_authority_config(value: &AbiValue) -> Result<Option<AuthorityConfig>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
@@ -247,62 +231,9 @@ fn decode_bootstrap(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-/// Which account's committed projection to read back.
-fn decode_read_envelope(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "readAccountEnvelope")?;
-    Ok(Command::ReadAccountEnvelope {
-        account_id: AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?),
-    })
-}
-
 fn decode_restore_exact(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let (expected, accounts) = crate::checkpoint_wire::restore_request(fields)?;
     Ok(Command::RestoreExact { expected, accounts })
-}
-
-fn decode_upsert_accounts(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "upsertAccounts")?;
-    Ok(Command::UpsertAccounts {
-        accounts: tuple(&fields[0])?
-            .iter()
-            .map(decode_seed_account)
-            .collect::<Result<_, _>>()?,
-    })
-}
-
-/// `[(accountId, envelope)]`: the authority re-projected these replica shells
-/// at a Runtime boundary. Financial state is untouched by this operation.
-fn decode_update_shells(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "updateAccountShells")?;
-    let mut shells = Vec::new();
-    for row in tuple(&fields[0])? {
-        let row = exact(tuple(row)?, 2, "accountShell")?;
-        let account_id = AccountId::from_bytes(fixed_bytes(&row[0], "accountId")?);
-        let envelope = crate::canonical::envelope(&row[1])?
-            .ok_or(ProcessError::Expected("accountShellEnvelope"))?;
-        shells.push((account_id, envelope));
-    }
-    Ok(Command::UpdateAccountShells { shells })
-}
-
-fn decode_remove_accounts(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "removeAccounts")?;
-    Ok(Command::RemoveAccounts {
-        account_ids: tuple(&fields[0])?
-            .iter()
-            .map(|row| Ok(AccountId::from_bytes(fixed_bytes(row, "accountId")?)))
-            .collect::<Result<_, ProcessError>>()?,
-    })
-}
-
-fn decode_prepare(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "prepare")?;
-    Ok(Command::Prepare {
-        jobs: tuple(&fields[0])?
-            .iter()
-            .map(decode_job)
-            .collect::<Result<_, _>>()?,
-    })
 }
 
 const MAX_WAVE_OP_ROWS: usize = 1_000_000;
@@ -360,16 +291,28 @@ fn decode_entity_account_genesis_policy(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let fields = exact(tuple(value)?, 4, "accountGenesisPolicy")?;
+    let fields = exact(tuple(value)?, 5, "accountGenesisPolicy")?;
     let domain = exact(tuple(&fields[0])?, 2, "accountGenesisDomain")?;
+    let shadow_policy_rows = tuple(&fields[2])?
+        .iter()
+        .map(|value| {
+            let row = exact(tuple(value)?, 2, "accountGenesisPolicyRow")?;
+            Ok((
+                u32::try_from(js_number(&row[0], "accountGenesisPolicyToken")?)
+                    .map_err(|_| ProcessError::Expected("accountGenesisPolicyToken"))?,
+                crate::canonical::canonical_value(&row[1])?,
+            ))
+        })
+        .collect::<Result<Vec<_>, ProcessError>>()?;
     Ok(Some(xln_rscore_batch::EntityAccountGenesisPolicy {
         expected_domain: AccountDomain::new(
             js_number(&domain[0], "accountGenesisChainId")?,
             DepositoryAddress::parse(&hex_fixed(&domain[1], "accountGenesisDepository", 20)?)?,
         )?,
         shadow_policy_root: fixed_bytes(&fields[1], "accountGenesisPolicyRoot")?,
-        delta_transformer: fixed_bytes(&fields[2], "accountGenesisDeltaTransformer")?,
-        public_pinned: strict_boolean(&fields[3], "accountGenesisPublicPinned")?,
+        shadow_policy_rows,
+        delta_transformer: fixed_bytes(&fields[3], "accountGenesisDeltaTransformer")?,
+        public_pinned: strict_boolean(&fields[4], "accountGenesisPublicPinned")?,
     }))
 }
 
@@ -432,26 +375,25 @@ fn decode_account_inbound_request(
 
 /// One Entity input's outbound half: creates, admissions, proposal worklist.
 fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 10, "accountOutbound")?;
+    let fields = exact(fields, 9, "accountOutbound")?;
     let creates = tuple(&fields[3])?;
     let admits = tuple(&fields[4])?;
     let propose = tuple(&fields[5])?;
     let materialize = tuple(&fields[6])?;
-    let failed_htlc_routes = tuple(&fields[7])?;
-    if creates.len() + admits.len() + propose.len() + materialize.len() + failed_htlc_routes.len()
-        > MAX_WAVE_OP_ROWS
-    {
+    if creates.len() + admits.len() + propose.len() + materialize.len() > MAX_WAVE_OP_ROWS {
         return Err(ProcessError::Expected("waveOpRows"));
     }
     Ok(Command::AccountOutbound {
         request: Box::new(xln_rscore_batch::EntityOutboundRequest {
             owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             timestamp: js_number(&fields[1], "timestamp")?,
             j_height: js_number(&fields[2], "jHeight")?,
             creates: creates
                 .iter()
                 .map(decode_seed_account)
                 .collect::<Result<_, _>>()?,
+            envelope_updates: Vec::new(),
             admits: admits
                 .iter()
                 .map(|value| {
@@ -473,27 +415,8 @@ fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError>
                 .iter()
                 .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
                 .collect::<Result<_, ProcessError>>()?,
-            failed_htlc_routes: failed_htlc_routes
-                .iter()
-                .map(|value| {
-                    let row = exact(tuple(value)?, 5, "failedHtlcRoute")?;
-                    Ok(xln_rscore_batch::FailedHtlcRoute {
-                        hashlock: fixed_bytes(&row[0], "hashlock")?,
-                        outbound_account_id: AccountId::from_bytes(fixed_bytes(
-                            &row[1],
-                            "outboundAccountId",
-                        )?),
-                        outbound_lock_id: text(&row[2])?.to_owned(),
-                        inbound_account_id: AccountId::from_bytes(fixed_bytes(
-                            &row[3],
-                            "inboundAccountId",
-                        )?),
-                        inbound_lock_id: text(&row[4])?.to_owned(),
-                    })
-                })
-                .collect::<Result<_, ProcessError>>()?,
-            post_accounts: strict_boolean(&fields[8], "postAccounts")?,
-            checkpoint_due: strict_boolean(&fields[9], "checkpointDue")?,
+            post_accounts: strict_boolean(&fields[7], "postAccounts")?,
+            checkpoint_due: strict_boolean(&fields[8], "checkpointDue")?,
         }),
     })
 }
@@ -515,8 +438,8 @@ fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputK
             ))
         }
         2 => {
-            let fields = exact(fields, 3, "accountFrameAckInput")?;
-            Ok(xln_rscore_batch::AccountInputKind::FrameAck {
+            let fields = exact(fields, 3, "accountAckFrameInput")?;
+            Ok(xln_rscore_batch::AccountInputKind::AckFrame {
                 ack: decode_incoming_ack(&fields[1])?,
                 frame: Box::new(decode_incoming_frame(&fields[2])?),
             })
@@ -561,66 +484,9 @@ fn decode_incoming_ack(value: &AbiValue) -> Result<xln_rscore_engine::IncomingAc
     })
 }
 
-fn decode_commit(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "commit")?;
-    Ok(Command::Commit {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
-    })
-}
-
-fn decode_abort(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "abort")?;
-    Ok(Command::Abort {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
-    })
-}
-
 fn decode_shutdown(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     exact(fields, 0, "shutdown")?;
     Ok(Command::Shutdown)
-}
-
-const MAX_CAPACITY_BATCH_ROWS: usize = 4_096;
-const MAX_SUMMARY_PAGE_LIMIT: u32 = 1_024;
-const MAX_SUMMARY_TOKEN_IDS: usize = 64;
-
-fn decode_capacity_batch(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "capacityBatch")?;
-    let rows = tuple(&fields[0])?;
-    if rows.len() > MAX_CAPACITY_BATCH_ROWS {
-        return Err(ProcessError::Expected("capacityBatchRows"));
-    }
-    Ok(Command::ReadCapacityBatch {
-        requests: rows
-            .iter()
-            .map(|row| {
-                let row = exact(tuple(row)?, 3, "capacityRequest")?;
-                Ok(xln_rscore_batch::CapacityRequest {
-                    account_id: AccountId::from_bytes(fixed_bytes(&row[0], "accountId")?),
-                    token_id: token(&row[1])?,
-                    side: side(&row[2], "side")?,
-                })
-            })
-            .collect::<Result<_, ProcessError>>()?,
-    })
-}
-
-fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 3, "summaryPage")?;
-    let cursor = optional_fixed_bytes(&fields[0], "cursor")?.map(AccountId::from_bytes);
-    let limit = bounded_u32(&fields[1], "limit")?;
-    if limit == 0 || limit > MAX_SUMMARY_PAGE_LIMIT {
-        return Err(ProcessError::Expected("summaryPageLimit"));
-    }
-    let token_ids = tuple(&fields[2])?;
-    if token_ids.len() > MAX_SUMMARY_TOKEN_IDS {
-        return Err(ProcessError::Expected("summaryTokenIds"));
-    }
-    Ok(Command::ReadAccountSummaryPage {
-        cursor,
-        limit: limit as usize,
-        token_ids: token_ids.iter().map(token).collect::<Result<_, _>>()?,
-    })
 }
 
 pub(crate) fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
@@ -673,18 +539,20 @@ pub(crate) fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, Proce
             carried: decode_carried_sections(&fields[11])?,
             rebalance_fee_policies: decode_rebalance_policies(&fields[11])?,
             swap_offers: decode_swap_offers(&fields[11])?,
+            pulls: decode_pulls(&fields[11])?,
             // The wire seed carries no lending intents: no supported account
             // transaction opens one, so a seeded account starts without any.
             // A checkpoint restore fills this from what it saved.
             lending_intents: Vec::new(),
+            settlement_workspace: decode_settlement_workspace(&fields[11])?,
         })?,
     )?;
     if let Some(envelope) = crate::canonical::envelope(&fields[12])? {
         replica.set_envelope(envelope);
     }
     // Present when this session builds its own recovery proofs; a mirror seed
-    // leaves it out, because it is told what each frame was and never signs a
-    // proof of its own.
+    // may leave it out only for an Account whose jurisdiction defines no
+    // transformer.
     if !matches!(&fields[14], AbiValue::Nil) {
         replica.set_delta_transformer(fixed_bytes(&fields[14], "deltaTransformer")?);
     }
@@ -695,11 +563,9 @@ pub(crate) fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, Proce
     })
 }
 
-/// Where the account stands in its own consensus, or `null` for a seed that
-/// starts at genesis. A mirror session is re-seeded per frame and never
-/// proposes, so it sends none; an authoritative session proposes the account's
-/// *next* frame and would otherwise propose height one against an account the
-/// entity holds at height three.
+/// Where the Account stands in its own consensus, or `null` only for genesis.
+/// Recovery must carry the snapshot or authority would propose height one
+/// against an Account the Entity already holds at a later height.
 fn decode_consensus_snapshot(
     value: &AbiValue,
 ) -> Result<Option<xln_rscore_engine::ConsensusSnapshot>, ProcessError> {
@@ -785,13 +651,12 @@ pub(crate) fn decode_outbound_ack(
     }))
 }
 
-/// Sections the engine carries but never interprets: their roots are committed
-/// verbatim so a live account whose swap/pull/rebalance/J-claim state is
-/// non-empty still reproduces its exact TypeScript account state root.
+/// Sections the engine still carries without interpreting. Pulls are decoded
+/// separately from slot zero because native Account handlers own their body.
 pub(crate) fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessError> {
-    let fields = exact(tuple(value)?, 8, "carriedSections")?;
+    let fields = exact(tuple(value)?, 9, "carriedSections")?;
     Ok(CarriedSections {
-        pulls_root: fixed_bytes(&fields[0], "pullsRoot")?,
+        pulls_root: [0; 32],
         subcontracts_root: fixed_bytes(&fields[2], "subcontractsRoot")?,
         requested_rebalance_root: fixed_bytes(&fields[3], "requestedRebalanceRoot")?,
         requested_rebalance_fee_state_root: fixed_bytes(
@@ -803,30 +668,77 @@ pub(crate) fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSection
     })
 }
 
+fn decode_settlement_workspace(
+    value: &AbiValue,
+) -> Result<Option<xln_rscore_engine::CanonicalValue>, ProcessError> {
+    let fields = exact(tuple(value)?, 9, "carriedSections")?;
+    if matches!(&fields[8], AbiValue::Nil) {
+        return Ok(None);
+    }
+    let workspace = crate::canonical::canonical_value(&fields[8])?;
+    if !matches!(workspace, xln_rscore_engine::CanonicalValue::Object(_)) {
+        return Err(ProcessError::Expected("settlementWorkspace"));
+    }
+    Ok(Some(workspace))
+}
+
+pub(crate) fn decode_pulls(
+    value: &AbiValue,
+) -> Result<Vec<(String, xln_rscore_engine::CanonicalValue)>, ProcessError> {
+    let fields = exact(tuple(value)?, 9, "carriedSections")?;
+    tuple(&fields[0])?
+        .iter()
+        .map(|entry| {
+            let row = exact(tuple(entry)?, 2, "seedPull")?;
+            let pull_id = text(&row[0])?.to_owned();
+            let pull = crate::canonical::canonical_value(&row[1])?;
+            let object = match &pull {
+                xln_rscore_engine::CanonicalValue::Object(fields) => fields,
+                _ => return Err(ProcessError::Expected("seedPullObject")),
+            };
+            let embedded = object
+                .iter()
+                .find(|(key, _)| key == "pullId")
+                .and_then(|(_, value)| match value {
+                    xln_rscore_engine::CanonicalValue::String(value) => Some(value.as_str()),
+                    _ => None,
+                })
+                .ok_or(ProcessError::Expected("seedPullId"))?;
+            if embedded != pull_id {
+                return Err(ProcessError::Expected("seedPullIdMatchesKey"));
+            }
+            Ok((pull_id, pull))
+        })
+        .collect()
+}
+
 /// Slot 1 of the carried tuple is no longer a carried root either: the engine
 /// owns the resting same-jurisdiction offers and recomputes their root.
 pub(crate) fn decode_swap_offers(value: &AbiValue) -> Result<Vec<SwapOffer>, ProcessError> {
-    let fields = exact(tuple(value)?, 8, "carriedSections")?;
+    let fields = exact(tuple(value)?, 9, "carriedSections")?;
     tuple(&fields[1])?
         .iter()
         .map(decode_seed_swap_offer)
         .collect()
 }
 
-/// Bootstrap accepts only the legacy 13-field snapshot whose eligibility
-/// guard requires the quantized amounts to equal the resting amounts. Exact
-/// recovery has its own 15-field codec and never guesses these two values.
+/// Bootstrap receives the complete resting offer. Quantized lots equal the
+/// resting amounts only at live cutover; exact recovery preserves them below.
 fn decode_seed_swap_offer(value: &AbiValue) -> Result<SwapOffer, ProcessError> {
-    let row = exact(tuple(value)?, 13, "seedSwapOffer")?;
+    let row = exact(tuple(value)?, 14, "seedSwapOffer")?;
     let give_amount = bigint(&row[3], "giveAmount")?;
     let want_amount = bigint(&row[6], "wantAmount")?;
     let mut offer = decode_swap_offer_fields(row, give_amount.clone(), want_amount.clone())?;
     offer.restore_quantized(give_amount, want_amount)?;
+    offer.set_cross_jurisdiction(optional_canonical_object(
+        &row[13],
+        "seedSwapOfferCrossJurisdiction",
+    )?);
     Ok(offer)
 }
 
 pub(crate) fn decode_swap_offer_state(value: &AbiValue) -> Result<SwapOffer, ProcessError> {
-    let row = exact(tuple(value)?, 15, "swapOffer")?;
+    let row = exact(tuple(value)?, 16, "swapOffer")?;
     let mut offer = decode_swap_offer_fields(
         row,
         bigint(&row[3], "giveAmount")?,
@@ -836,7 +748,25 @@ pub(crate) fn decode_swap_offer_state(value: &AbiValue) -> Result<SwapOffer, Pro
         bigint(&row[13], "quantizedGive")?,
         bigint(&row[14], "quantizedWant")?,
     )?;
+    offer.set_cross_jurisdiction(optional_canonical_object(
+        &row[15],
+        "swapOfferCrossJurisdiction",
+    )?);
     Ok(offer)
+}
+
+fn optional_canonical_object(
+    value: &AbiValue,
+    field: &'static str,
+) -> Result<Option<xln_rscore_engine::CanonicalValue>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let value = crate::canonical::canonical_value(value)?;
+    if !matches!(value, xln_rscore_engine::CanonicalValue::Object(_)) {
+        return Err(ProcessError::Expected(field));
+    }
+    Ok(Some(value))
 }
 
 fn decode_swap_offer_fields(
@@ -937,7 +867,7 @@ fn decode_swap_cancel_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessE
 pub(crate) fn decode_rebalance_policies(
     value: &AbiValue,
 ) -> Result<Vec<(TokenId, BilateralRebalanceFeePolicy)>, ProcessError> {
-    let fields = exact(tuple(value)?, 8, "carriedSections")?;
+    let fields = exact(tuple(value)?, 9, "carriedSections")?;
     tuple(&fields[5])?
         .iter()
         .map(|row| {
@@ -1010,51 +940,6 @@ pub(crate) fn decode_delta(value: &AbiValue) -> Result<Delta, ProcessError> {
     )?)
 }
 
-fn decode_job(value: &AbiValue) -> Result<BatchJob, ProcessError> {
-    let fields = exact(tuple(value)?, 7, "job")?;
-    Ok(BatchJob {
-        input_index: bounded_u32(&fields[0], "inputIndex")?,
-        account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
-        proposer: side(&fields[2], "proposer")?,
-        context: decode_context(&fields[3])?,
-        tx: decode_tx(&fields[4])?,
-        envelope: crate::canonical::envelope(&fields[5])?,
-        authority: decode_authority(&fields[6])?,
-    })
-}
-
-/// `null`, or `(digest, signature, expectedSigner)` — the proof that this input
-/// came from the counterparty it claims. The engine recovers the signer before
-/// the transaction touches the account.
-fn decode_authority(value: &AbiValue) -> Result<Option<AccountInputAuthority>, ProcessError> {
-    if matches!(value, AbiValue::Nil) {
-        return Ok(None);
-    }
-    let fields = exact(tuple(value)?, 3, "authority")?;
-    let mut signature: [u8; 65] = fixed_bytes(&fields[1], "authoritySignature")?;
-    signature[64] =
-        xln_rscore_engine::normalize_recovery_byte(signature[64]).ok_or(ProcessError::Integer {
-            field: "authorityRecovery",
-            value: i128::from(signature[64]),
-        })?;
-    Ok(Some(AccountInputAuthority {
-        digest: fixed_bytes(&fields[0], "authorityDigest")?,
-        signature,
-        expected_signer: fixed_bytes(&fields[2], "authoritySigner")?,
-    }))
-}
-
-fn decode_context(value: &AbiValue) -> Result<AccountExecutionContext, ProcessError> {
-    let fields = exact(tuple(value)?, 5, "context")?;
-    Ok(AccountExecutionContext::new(
-        js_number(&fields[0], "committedTimestamp")?,
-        js_number(&fields[1], "enforcementTimestamp")?,
-        js_number(&fields[2], "enforcementJHeight")?,
-        js_number(&fields[3], "currentAccountHeight")?,
-        js_number(&fields[4], "frameJHeight")?,
-    ))
-}
-
 pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
     let fields = tuple(value)?;
     let tag = fields.first().ok_or(ProcessError::Expected("txTag"))?;
@@ -1069,8 +954,190 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         7 => decode_swap_cancel_request(fields),
         8 => decode_swap_resolve(fields),
         9 => decode_j_event_claim(fields),
+        10 => decode_lending_fund(fields),
+        11 => decode_lending_borrow_request(fields),
+        12 => decode_lending_repay(fields),
+        13 => decode_lending_credit(fields),
+        14 => decode_lending_close_request(fields),
+        15 => decode_lending_close_payout(fields),
+        16 => decode_reserve_to_collateral(fields),
+        17 => decode_request_collateral(fields),
+        18 => decode_rebalance_refund(fields),
+        19 => decode_canonical_tx(fields, "crossPullLock", |data| AccountTx::CrossPullLock {
+            data,
+        }),
+        20 => decode_canonical_tx(fields, "crossPullClose", |data| AccountTx::CrossPullClose {
+            data,
+        }),
+        21 => decode_canonical_tx(fields, "crossPullProgress", |data| {
+            AccountTx::CrossPullProgress { data }
+        }),
+        22 => decode_canonical_tx(fields, "crossSwapFillAck", |data| {
+            AccountTx::CrossSwapFillAck { data }
+        }),
+        23 => decode_canonical_tx(fields, "settleTransition", |data| {
+            AccountTx::SettleTransition { data }
+        }),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
+}
+
+fn decode_canonical_tx(
+    fields: &[AbiValue],
+    field: &'static str,
+    build: impl FnOnce(xln_rscore_engine::CanonicalValue) -> AccountTx,
+) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 2, field)?;
+    let data = crate::canonical::canonical_value(&fields[1])?;
+    if !matches!(data, xln_rscore_engine::CanonicalValue::Object(_)) {
+        return Err(ProcessError::Expected(field));
+    }
+    Ok(build(data))
+}
+
+fn decode_lending_term(value: &AbiValue) -> Result<LendingTermId, ProcessError> {
+    match integer(value)? {
+        0 => Ok(LendingTermId::OneHour),
+        1 => Ok(LendingTermId::OneDay),
+        2 => Ok(LendingTermId::OneMonth),
+        value => Err(ProcessError::Tag {
+            field: "lendingTerm",
+            value,
+        }),
+    }
+}
+
+fn decode_lending_fund(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 8, "lendingFund")?;
+    Ok(AccountTx::LendingFund {
+        position_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        lender_entity_id: text(&fields[3])?.into(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
+        term_id: decode_lending_term(&fields[6])?,
+        interest_bps: i64::try_from(integer(&fields[7])?)
+            .map_err(|_| ProcessError::Expected("interestBps"))?,
+    })
+}
+
+fn decode_lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 8, "lendingBorrowRequest")?;
+    Ok(AccountTx::LendingBorrowRequest {
+        request_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        borrower_entity_id: text(&fields[3])?.into(),
+        token_id: unsigned(&fields[4], "tokenId")?,
+        amount: bigint(&fields[5], "amount")?,
+        term_id: decode_lending_term(&fields[6])?,
+        max_interest_bps: i64::try_from(integer(&fields[7])?)
+            .map_err(|_| ProcessError::Expected("maxInterestBps"))?,
+    })
+}
+
+fn decode_lending_repay(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 6, "lendingRepay")?;
+    Ok(AccountTx::LendingRepay {
+        loan_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        borrower_entity_id: text(&fields[3])?.into(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
+    })
+}
+
+fn decode_lending_credit(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 7, "lendingCredit")?;
+    Ok(AccountTx::LendingCredit {
+        action: match integer(&fields[1])? {
+            0 => LendingAction::Grant,
+            1 => LendingAction::Revoke,
+            value => {
+                return Err(ProcessError::Tag {
+                    field: "lendingAction",
+                    value,
+                });
+            }
+        },
+        loan_id: text(&fields[2])?.into(),
+        hub_entity_id: text(&fields[3])?.into(),
+        borrower_entity_id: text(&fields[4])?.into(),
+        token_id: token(&fields[5])?,
+        credit_limit: bigint(&fields[6], "creditLimit")?,
+    })
+}
+
+fn decode_lending_close_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 4, "lendingCloseRequest")?;
+    Ok(AccountTx::LendingCloseRequest {
+        position_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        lender_entity_id: text(&fields[3])?.into(),
+    })
+}
+
+fn decode_lending_close_payout(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 6, "lendingClosePayout")?;
+    Ok(AccountTx::LendingClosePayout {
+        position_id: text(&fields[1])?.into(),
+        hub_entity_id: text(&fields[2])?.into(),
+        lender_entity_id: text(&fields[3])?.into(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
+    })
+}
+
+fn decode_reserve_to_collateral(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 7, "reserveToCollateral")?;
+    Ok(AccountTx::ReserveToCollateral {
+        token_id: token(&fields[1])?,
+        collateral: text(&fields[2])?.into(),
+        ondelta: text(&fields[3])?.into(),
+        side: match integer(&fields[4])? {
+            0 => ReserveSide::Receiving,
+            1 => ReserveSide::Counterparty,
+            value => {
+                return Err(ProcessError::Tag {
+                    field: "reserveSide",
+                    value,
+                });
+            }
+        },
+        block_number: i64::try_from(integer(&fields[5])?)
+            .map_err(|_| ProcessError::Expected("blockNumber"))?,
+        transaction_hash: text(&fields[6])?.into(),
+    })
+}
+
+fn decode_request_collateral(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 6, "requestCollateral")?;
+    Ok(AccountTx::RequestCollateral {
+        token_id: token(&fields[1])?,
+        amount: bigint(&fields[2], "amount")?,
+        fee_token_id: match &fields[3] {
+            AbiValue::Nil => None,
+            value => Some(token(value)?),
+        },
+        fee_amount: bigint(&fields[4], "feeAmount")?,
+        policy_version: js_number(&fields[5], "policyVersion")?,
+    })
+}
+
+fn decode_rebalance_refund(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 5, "rebalanceRefund")?;
+    let reason = match text(&fields[4])? {
+        "policy_mismatch" => RebalanceRefundReason::PolicyMismatch,
+        "timeout" => RebalanceRefundReason::Timeout,
+        "fee_too_low" => RebalanceRefundReason::FeeTooLow,
+        "manual" => RebalanceRefundReason::Manual,
+        _ => return Err(ProcessError::Expected("rebalanceRefundReason")),
+    };
+    Ok(AccountTx::RebalanceRefund {
+        request_id: text(&fields[1])?.into(),
+        request_token_id: token(&fields[2])?,
+        amount: bigint(&fields[3], "amount")?,
+        reason,
+    })
 }
 
 fn decode_j_event_claim(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
@@ -1094,42 +1161,8 @@ fn decode_j_event_claim(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> 
 }
 
 fn decode_jurisdiction_event(value: &AbiValue) -> Result<JurisdictionEvent, ProcessError> {
-    let fields = exact(tuple(value)?, 10, "jurisdictionEvent")?;
-    match integer(&fields[0])? {
-        0 => Ok(JurisdictionEvent::AccountSettled(AccountSettledEvent {
-            metadata: decode_j_event_metadata(&fields[1])?,
-            left_entity: entity(&fields[2], "settledLeftEntity")?,
-            right_entity: entity(&fields[3], "settledRightEntity")?,
-            token_id: token(&fields[4])?,
-            left_reserve: bigint(&fields[5], "settledLeftReserve")?,
-            right_reserve: bigint(&fields[6], "settledRightReserve")?,
-            collateral: bigint(&fields[7], "settledCollateral")?,
-            ondelta: bigint(&fields[8], "settledOndelta")?,
-            nonce: js_number(&fields[9], "settledNonce")?,
-        })),
-        value => Err(ProcessError::Tag {
-            field: "jurisdictionEvent",
-            value,
-        }),
-    }
-}
-
-fn decode_j_event_metadata(value: &AbiValue) -> Result<JEventMetadata, ProcessError> {
-    let fields = exact(tuple(value)?, 5, "jEventMetadata")?;
-    Ok(JEventMetadata {
-        block_number: optional_js_number(&fields[0], "jEventBlockNumber")?,
-        block_hash: optional_fixed_bytes(&fields[1], "jEventBlockHash")?,
-        transaction_hash: optional_fixed_bytes(&fields[2], "jEventTransactionHash")?,
-        log_index: optional_js_number(&fields[3], "jEventLogIndex")?,
-        event_index: optional_js_number(&fields[4], "jEventIndex")?,
-    })
-}
-
-fn optional_js_number(value: &AbiValue, field: &'static str) -> Result<Option<u64>, ProcessError> {
-    match value {
-        AbiValue::Nil => Ok(None),
-        value => Ok(Some(js_number(value, field)?)),
-    }
+    xln_rscore_batch::decode_jurisdiction_event(value)
+        .map_err(|error| ProcessError::Unsupported(error.to_string()))
 }
 
 fn decode_j_claim_proof(
@@ -1230,7 +1263,7 @@ fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
 }
 
 fn decode_swap_offer(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 12, "swapOffer")?;
+    let fields = exact(fields, 13, "swapOffer")?;
     Ok(AccountTx::SwapOffer {
         offer_id: text(&fields[1])?.into(),
         give_token_id: bounded_u32(&fields[2], "giveTokenId")?,
@@ -1249,6 +1282,10 @@ fn decode_swap_offer(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
             ),
         },
         price_ticks: optional_bigint(&fields[11], "priceTicks")?,
+        cross_jurisdiction: match &fields[12] {
+            AbiValue::Nil => None,
+            value => Some(crate::canonical::canonical_value(value)?),
+        },
     })
 }
 

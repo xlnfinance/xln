@@ -10,6 +10,8 @@ import type { EnvSnapshot, RuntimeTx } from '@xln/core/runtime/types';
 import type { EntityInput } from '@xln/core/entity/types';
 import type { FrameLogEntry } from '@xln/core/types/logging';
 
+export type LogLevel = FrameLogEntry['level'];
+
 // Re-export commonly used backend types for convenience
 export type {
   EntityReplica,
@@ -31,7 +33,6 @@ export type {
   EnvSnapshot as Snapshot, // Frontend historically called this Snapshot
 } from '@xln/core/runtime/types';
 export type {
-  LogLevel,
   LogCategory,
   FrameLogEntry,
 } from '@xln/core/types/logging';

@@ -12,12 +12,12 @@ pub enum ProcessError {
     Htlc(#[from] xln_rscore_engine::HtlcBoundaryError),
     #[error("RSCORE_PROCESS_ENTITY:{0}")]
     Entity(#[from] xln_rscore_entity_kernel::EntityKernelError),
+    #[error("RSCORE_PROCESS_J_BATCH:{0}")]
+    JBatch(#[from] xln_rscore_entity_kernel::JBatchError),
     #[error("RSCORE_PROCESS_RESIDENT_ENTITY:{0}")]
     ResidentEntity(#[from] xln_rscore_entity_kernel::ResidentEntityError),
     #[error("RSCORE_PROCESS_IO:{0}")]
     Io(#[from] std::io::Error),
-    #[error("RSCORE_PROCESS_ENTROPY:{0}")]
-    Entropy(String),
     #[error("RSCORE_PROCESS_ENVELOPE:{0}")]
     Envelope(String),
     #[error("RSCORE_PROCESS_EXPECTED:{0}")]
@@ -71,8 +71,8 @@ pub enum ProcessError {
     EngineNotLoaded,
     #[error("RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID:revision={revision}:accounts={accounts}")]
     AuthorityBootstrapInvalid { revision: u64, accounts: usize },
-    #[error("RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN")]
-    AuthorityUpsertForbidden,
+    #[error("RSCORE_PROCESS_AUTHORITY_REQUIRED")]
+    AuthorityRequired,
     #[error("RSCORE_PROCESS_AUTHORITY_TWO_CALL_ONLY")]
     AuthorityTwoCallOnly,
     #[error("RSCORE_PROCESS_ENTITY_ALREADY_LOADED")]
@@ -83,14 +83,8 @@ pub enum ProcessError {
     EntityModeOnly,
     #[error("RSCORE_PROCESS_ENTITY_HEAD:{0}")]
     EntityHead(String),
-    #[error("RSCORE_PROCESS_PREPARE_PENDING")]
-    PreparePending,
     #[error("RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY:entities={entities}")]
     PrepareWaveNonempty { entities: usize },
-    #[error("RSCORE_PROCESS_PREPARE_NOT_PENDING")]
-    PrepareNotPending,
-    #[error("RSCORE_PROCESS_CANDIDATE_TOKEN_MISMATCH")]
-    CandidateTokenMismatch,
     #[error("RSCORE_PROCESS_CHECKPOINT_PENDING")]
     CheckpointPending,
     #[error("RSCORE_PROCESS_CHECKPOINT_NOT_PENDING")]
@@ -127,9 +121,9 @@ impl ProcessError {
             Self::State(_) => "RSCORE_PROCESS_STATE",
             Self::Htlc(_) => "RSCORE_PROCESS_HTLC",
             Self::Entity(_) => "RSCORE_PROCESS_ENTITY",
+            Self::JBatch(_) => "RSCORE_PROCESS_J_BATCH",
             Self::ResidentEntity(_) => "RSCORE_PROCESS_RESIDENT_ENTITY",
             Self::Io(_) => "RSCORE_PROCESS_IO",
-            Self::Entropy(_) => "RSCORE_PROCESS_ENTROPY",
             Self::Envelope(_) => "RSCORE_PROCESS_ENVELOPE",
             Self::Expected(_) => "RSCORE_PROCESS_EXPECTED",
             Self::Arity { .. } => "RSCORE_PROCESS_ARITY",
@@ -153,16 +147,13 @@ impl ProcessError {
             Self::EngineAlreadyLoaded => "RSCORE_PROCESS_ENGINE_ALREADY_LOADED",
             Self::EngineNotLoaded => "RSCORE_PROCESS_ENGINE_NOT_LOADED",
             Self::AuthorityBootstrapInvalid { .. } => "RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID",
-            Self::AuthorityUpsertForbidden => "RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN",
+            Self::AuthorityRequired => "RSCORE_PROCESS_AUTHORITY_REQUIRED",
             Self::AuthorityTwoCallOnly => "RSCORE_PROCESS_AUTHORITY_TWO_CALL_ONLY",
             Self::EntityAlreadyLoaded => "RSCORE_PROCESS_ENTITY_ALREADY_LOADED",
             Self::EntityNotLoaded => "RSCORE_PROCESS_ENTITY_NOT_LOADED",
             Self::EntityModeOnly => "RSCORE_PROCESS_ENTITY_MODE_ONLY",
             Self::EntityHead(_) => "RSCORE_PROCESS_ENTITY_HEAD",
-            Self::PreparePending => "RSCORE_PROCESS_PREPARE_PENDING",
             Self::PrepareWaveNonempty { .. } => "RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY",
-            Self::PrepareNotPending => "RSCORE_PROCESS_PREPARE_NOT_PENDING",
-            Self::CandidateTokenMismatch => "RSCORE_PROCESS_CANDIDATE_TOKEN_MISMATCH",
             Self::CheckpointPending => "RSCORE_PROCESS_CHECKPOINT_PENDING",
             Self::CheckpointNotPending => "RSCORE_PROCESS_CHECKPOINT_NOT_PENDING",
             Self::Stopped => "RSCORE_PROCESS_STOPPED",
@@ -196,28 +187,14 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         }
         BatchError::DuplicateAccount(_) => "RSCORE_BATCH_ACCOUNT_DUPLICATE",
         BatchError::EmptyBatch => "RSCORE_BATCH_EMPTY",
-        BatchError::BatchTooLarge { .. } => "RSCORE_BATCH_TOO_LARGE",
-        BatchError::InputIndex { .. } => "RSCORE_BATCH_INPUT_INDEX",
+        BatchError::FinancialView(_) => "RSCORE_BATCH_FINANCIAL_VIEW",
         BatchError::OperationIndex { .. } => "RSCORE_BATCH_OPERATION_INDEX",
         BatchError::BoardAuthorityUnresolved => "RSCORE_BATCH_BOARD_AUTHORITY_UNRESOLVED",
         BatchError::AccountNotFound { .. } => "RSCORE_BATCH_ACCOUNT_NOT_FOUND",
-        BatchError::UnsupportedTx { .. } => "RSCORE_BATCH_TX_UNSUPPORTED",
-        BatchError::ProposabilitySettlementUnrepresented => {
-            "PROPOSABILITY_SETTLEMENT_UNREPRESENTED"
-        }
         BatchError::Transition { .. } => "RSCORE_BATCH_TRANSITION",
-        BatchError::EnginePanic { .. } => "RSCORE_BATCH_ENGINE_PANIC",
-        BatchError::OutputIndexOverflow { .. } => "RSCORE_BATCH_OUTPUT_INDEX_OVERFLOW",
-        BatchError::AppliedWithoutCandidate(_) => "RSCORE_BATCH_APPLIED_WITHOUT_CANDIDATE",
-        BatchError::RejectedWithOutputs { .. } => "RSCORE_BATCH_REJECTED_WITH_OUTPUTS",
-        BatchError::EngineGenerationMismatch => "RSCORE_BATCH_ENGINE_GENERATION_MISMATCH",
         BatchError::CandidateAccountNotFound(_) => "RSCORE_BATCH_CANDIDATE_ACCOUNT_NOT_FOUND",
-        BatchError::CandidateBaseMismatch(_) => "RSCORE_BATCH_CANDIDATE_BASE_MISMATCH",
-        BatchError::CandidateFingerprint { .. } => "RSCORE_BATCH_CANDIDATE_FINGERPRINT",
-        BatchError::StaleCandidate { .. } => "RSCORE_BATCH_CANDIDATE_STALE",
         BatchError::RevisionOverflow => "RSCORE_BATCH_REVISION_OVERFLOW",
         BatchError::CandidateAttemptOverflow => "RSCORE_BATCH_CANDIDATE_ATTEMPT_OVERFLOW",
-        BatchError::InputSignatureInvalid { .. } => "RSCORE_BATCH_INPUT_SIGNATURE_INVALID",
         BatchError::WaveAccountOwner { .. } => "RSCORE_BATCH_WAVE_ACCOUNT_OWNER",
         BatchError::WaveCreateExisting(_) => "RSCORE_BATCH_WAVE_CREATE_EXISTING",
         BatchError::WaveCreateCounterparty { .. } => "RSCORE_BATCH_WAVE_CREATE_COUNTERPARTY",
@@ -230,10 +207,11 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::EntityRoundMissing => "RSCORE_BATCH_ENTITY_ROUND_MISSING",
         BatchError::EntityRoundOwner { .. } => "RSCORE_BATCH_ENTITY_ROUND_OWNER",
         BatchError::EntityInboundPostAccounts => "RSCORE_BATCH_ENTITY_INBOUND_POST_ACCOUNTS",
+        BatchError::HtlcFollowupUnmatched { .. } => "RSCORE_BATCH_HTLC_FOLLOWUP_UNMATCHED",
+        BatchError::HtlcFollowupTx { .. } => "RSCORE_BATCH_HTLC_FOLLOWUP_TX",
+        BatchError::HtlcFollowupCascade { .. } => "RSCORE_BATCH_HTLC_FOLLOWUP_CASCADE",
         BatchError::InboundGenesis { .. } => "RSCORE_BATCH_INBOUND_GENESIS",
         BatchError::EntityHeadRoot { .. } => "RSCORE_BATCH_ENTITY_HEAD_ROOT",
-        BatchError::FailedHtlcRouteDuplicate { .. } => "RSCORE_BATCH_FAILED_HTLC_ROUTE_DUPLICATE",
-        BatchError::FailedHtlcRouteMismatch { .. } => "RSCORE_BATCH_FAILED_HTLC_ROUTE_MISMATCH",
         BatchError::CheckpointRevision { .. } => "RSCORE_BATCH_CHECKPOINT_REVISION",
         BatchError::CheckpointAccountKey { .. } => "RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY",
         BatchError::CheckpointIncomplete { .. } => "RSCORE_BATCH_CHECKPOINT_INCOMPLETE",

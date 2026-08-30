@@ -7,9 +7,10 @@ import {
   requantizeSwapNetAuthorization,
 } from '../../../account/swap/swap-net-authorization';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { beginAccountStateDraft } from '../../../account/state/account-state-draft';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve';
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import { decodeAccountTx } from '../../../account/tx-validation';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { buildEntityTransactionProposalAction } from '../../../entity/auth/authorization';
@@ -57,12 +58,11 @@ const resolvableAccount = (): AccountReplica => {
   giveDelta.leftCreditLimit = giveDelta.rightCreditLimit = 10n ** 30n;
   wantDelta.leftCreditLimit = wantDelta.rightCreditLimit = 10n ** 30n;
   giveDelta.leftHold = amount;
-  account.state.deltas = new Map([
+  account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
     [offer.giveTokenId, giveDelta],
     [offer.wantTokenId, wantDelta],
   ]);
-  account.state.swapOffers = new Map([[offer.offerId, offer]]);
-  recordSwapOfferLifecycle(account, offer);
+  account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', [[offer.offerId, offer]]);
   return account;
 };
 
@@ -192,7 +192,7 @@ describe('swap net authorization', () => {
 
   test('validates and commits authorization into canonical Account offer state', async () => {
     const amount = 2n * SWAP_LOT_SCALE;
-    const account = makeAccount('alice', 'hub');
+    const account = beginAccountStateDraft(makeAccount('alice', 'hub')).draft;
     const accepted = await handleSwapOffer(account, {
       type: 'swap_offer',
       data: {
@@ -235,13 +235,18 @@ describe('swap net authorization', () => {
     const account = resolvableAccount();
     expect(() => validateAccountReplica(account)).not.toThrow();
     const offer = account.state.swapOffers.get('net-authorized-offer')!;
-    delete (offer as Partial<SwapOffer>).maxFee;
+    const invalidOffer: Partial<SwapOffer> = { ...offer };
+    delete invalidOffer.maxFee;
+    account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', [[
+      offer.offerId,
+      invalidOffer as SwapOffer,
+    ]]);
     expect(() => validateAccountReplica(account))
       .toThrow('AccountReplica.state.swapOffers.net-authorized-offer authorization is invalid');
   });
 
   test('rejects an over-cap Account fill and scales authorization on the committed remainder', async () => {
-    const overCap = resolvableAccount();
+    const overCap = beginAccountStateDraft(resolvableAccount()).draft;
     const amount = SWAP_LOT_SCALE;
     const fillRatio = exactFillRatioToUint16({ numerator: 1n, denominator: 2n });
     const rejected = await handleSwapResolve(overCap, {
@@ -264,7 +269,7 @@ describe('swap net authorization', () => {
     expect(overCap.state.swapOffers.get('net-authorized-offer')?.giveAmount)
       .toBe(2n * amount);
 
-    const accepted = resolvableAccount();
+    const accepted = beginAccountStateDraft(resolvableAccount()).draft;
     const result = await handleSwapResolve(accepted, {
       type: 'swap_resolve',
       data: {

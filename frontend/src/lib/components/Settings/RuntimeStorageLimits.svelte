@@ -7,10 +7,7 @@
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
 
   let loadedRuntimeId = '';
-  let commonGiB = '';
   let walEpochGiB = '';
-  let historyViewGiB = '';
-  let historyRetainFrames = '';
   let status = '';
   let error = '';
 
@@ -25,13 +22,6 @@
     loadedRuntimeId = runtimeId;
     const storage = env.runtimeConfig?.storage;
     walEpochGiB = formatGiB(storage?.epochMaxBytes);
-    historyViewGiB = formatGiB(storage?.historyViewMaxBytes);
-    historyRetainFrames =
-      storage?.historyViewRetainFrames === undefined ||
-      storage.historyViewRetainFrames === Number.MAX_SAFE_INTEGER
-        ? ''
-        : String(storage.historyViewRetainFrames);
-    commonGiB = '';
     status = '';
     error = '';
   };
@@ -47,16 +37,6 @@
     return bytes;
   };
 
-  const parseFrames = (raw: string): number | undefined => {
-    const value = raw.trim();
-    if (!value) return undefined;
-    const frames = Number(value);
-    if (!Number.isSafeInteger(frames) || frames < 1) {
-      throw new Error('Retained frames must be a positive integer');
-    }
-    return frames;
-  };
-
   const writeOptional = (
     target: Record<string, unknown>,
     key: string,
@@ -68,24 +48,17 @@
 
   function applyLimits(): void {
     try {
-      const common = parseGiB(commonGiB, 'Common limit');
-      const epochMaxBytes = parseGiB(walEpochGiB, 'WAL epoch limit') ?? common;
-      const historyViewMaxBytes = parseGiB(historyViewGiB, 'History view limit') ?? common;
-      const retainFrames = parseFrames(historyRetainFrames);
+      const epochMaxBytes = parseGiB(walEpochGiB, 'WAL epoch limit');
       runtimeFrameEnv.update(env => {
         if (!env) throw new Error('No Runtime is selected');
         env.runtimeConfig ??= {};
         const storage = { ...(env.runtimeConfig.storage ?? {}) } as Record<string, unknown> &
           NonNullable<NonNullable<RuntimeReplica['runtimeConfig']>['storage']>;
         writeOptional(storage, 'epochMaxBytes', epochMaxBytes);
-        writeOptional(storage, 'historyViewMaxBytes', historyViewMaxBytes);
-        writeOptional(storage, 'historyViewRetainFrames', retainFrames);
         env.runtimeConfig.storage = storage;
         return env;
       });
       walEpochGiB = formatGiB(epochMaxBytes);
-      historyViewGiB = formatGiB(historyViewMaxBytes);
-      commonGiB = '';
       error = '';
       status = 'Storage policy saved. It applies from the next Runtime frame.';
     } catch (cause) {
@@ -101,30 +74,15 @@
   <header>
     <div>
       <h4>Runtime storage policy</h4>
-      <p>Blank means unlimited. Limits are local operator policy, never consensus state.</p>
+      <p>Blank means unlimited. The WAL is the only retained Runtime history.</p>
     </div>
   </header>
 
   <div class="limit-grid">
     <label>
-      <span>Common limit per archival store</span>
-      <input bind:value={commonGiB} inputmode="decimal" placeholder="Unlimited" data-testid="storage-common-gib" />
-      <small>GiB · fills both blank limits below</small>
-    </label>
-    <label>
       <span>WAL epoch rollover</span>
       <input bind:value={walEpochGiB} inputmode="decimal" placeholder="Unlimited" data-testid="storage-wal-gib" />
       <small>GiB · closes the epoch at a durable checkpoint</small>
-    </label>
-    <label>
-      <span>Materialized history view</span>
-      <input bind:value={historyViewGiB} inputmode="decimal" placeholder="Unlimited" data-testid="storage-history-gib" />
-      <small>GiB · rebuildable from WAL</small>
-    </label>
-    <label>
-      <span>Runtime history frames</span>
-      <input bind:value={historyRetainFrames} inputmode="numeric" placeholder="Unlimited" data-testid="storage-history-frames" />
-      <small>1 = latest only · 2 = latest plus one previous</small>
     </label>
   </div>
 

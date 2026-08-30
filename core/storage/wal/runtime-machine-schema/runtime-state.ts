@@ -1,4 +1,3 @@
-import { decodeAccountFrame } from '../../../account/validation/frame-validation';
 import { validateJInputs } from './j';
 import {
   validateNumberedRecord,
@@ -6,7 +5,6 @@ import {
   validateRegistrationEvidence,
 } from '../../../runtime/decode/registrations';
 import {
-  requireArray,
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
@@ -16,34 +14,11 @@ import {
   validateStringMap,
 } from '../../../protocol/boundary/boundary-primitives';
 
-const assertAccountFrameRecord = (value: unknown, code: string): void => {
-  const record = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(
-    record,
-    ['kind', 'entityId', 'counterpartyId', 'accountHeight', 'source', 'frame'],
-    ['runtimeHeight', 'timestamp'],
-    `${code}_FIELDS`,
-  );
-  if (record['kind'] !== 'accountFrame') throw new Error(`${code}_KIND`);
-  requireString(record['entityId'], `${code}_ENTITY`);
-  requireString(record['counterpartyId'], `${code}_COUNTERPARTY`);
-  requireBoundaryInteger(record['accountHeight'], `${code}_ACCOUNT_HEIGHT`);
-  if (record['source'] !== 'ackCommit' && record['source'] !== 'peerCommit') throw new Error(`${code}_SOURCE`);
-  const frame = requireBoundaryRecord(record['frame'], `${code}_FRAME`);
-  requireExactBoundaryKeys(frame, [
-    'height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash',
-    'accountStateRoot', 'stateHash', 'deltas',
-  ], ['byLeft'], `${code}_FRAME_FIELDS`);
-  decodeAccountFrame(frame, code);
-  if (record['runtimeHeight'] !== undefined) requireBoundaryInteger(record['runtimeHeight'], `${code}_RUNTIME_HEIGHT`);
-  if (record['timestamp'] !== undefined) requireBoundaryInteger(record['timestamp'], `${code}_TIMESTAMP`);
-};
-
 export const validateDurableRuntimeState = (value: unknown, code: string): void => {
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
     'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents', 'pendingHistoryRecords',
+    'pendingAuditEvents',
     'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
     'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
     'entityEncryptionSeeds',
@@ -70,7 +45,6 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
       validateStorageSafeValue(event, `${code}_PENDING_AUDIT_EVENT`);
     }
   }
-  if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => assertAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
   if (state['runtimeAdapterCommandFrontiers'] !== undefined) validateStringMap(state['runtimeAdapterCommandFrontiers'], `${code}_COMMAND_FRONTIERS`, (entry, entryCode) => {
     const frontier = requireBoundaryRecord(entry, entryCode);
     requireExactBoundaryKeys(frontier, ['lastContiguousSequence', 'lastInputHash', 'lastCommandId', 'observedHeight', 'expiresAtMs'], [], `${entryCode}_FIELDS`);

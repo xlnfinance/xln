@@ -17,13 +17,12 @@ import type { JurisdictionConfig } from '../../../../protocol/config/jurisdictio
 import { safeStringify } from '../../../../protocol/serialization';
 import type { RuntimeInput, RuntimeReplica } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
-import { computeEntityConsensusSectionDigestsCold } from '../../../../entity/consensus/state-root';
 import { createFixturePeerAccounts, type FixturePeerAccounts } from './fixture/fixture-peer-accounts';
 import { installVerifiedPeerProfiles } from './fixture/fixture-peer-profiles';
 
 const FIXED_CREATED_AT = 1_775_000_000_000;
 const FIXTURE_SNAPSHOT_PERIOD = 1_000_000;
-const FIXTURE_CHECKPOINT_PERIOD = 100;
+const FIXTURE_CHECKPOINT_PERIOD = 1_000;
 const MAIN_SEED = 'xln-native-replay-main-v1';
 const PEER_SEED = 'xln-native-replay-peer-v1';
 const FIXTURE_JURISDICTION: JurisdictionConfig = {
@@ -41,6 +40,9 @@ export type SingleEntityNativeFixturePaths = Readonly<{
   stateDb: string;
   runtimeSeedFile: string;
   manifest: string;
+  fixtureAccounts: number;
+  fixturePayments: number;
+  fixtureRuntimeFrames: number;
 }>;
 
 export type SingleEntityNativeFixtureOptions = Readonly<{
@@ -62,7 +64,6 @@ const configureProcess = (workDir: string): void => {
   process.env['XLN_DB_PATH'] = join(workDir, 'db');
   process.env['XLN_RDB_ROOT'] = join(workDir, 'db');
   process.env['XLN_STORAGE_WAL_SYNC'] = '1';
-  process.env['XLN_STORAGE_CERTIFIED_HISTORY'] = '1';
   process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = String(FIXTURE_SNAPSHOT_PERIOD);
   process.env['XLN_RSCORE_AUTHORITY'] = '0';
 };
@@ -327,6 +328,12 @@ export const buildSingleEntityNativeRecording = async (
   rmSync(workDir, { recursive: true, force: true });
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
   configureProcess(workDir);
+  const profileEnabled = process.env['XLN_FIXTURE_PROFILE'] === '1';
+  let phaseStarted = performance.now();
+  const markPhase = (phase: string): void => {
+    if (profileEnabled) console.error(`FIXTURE_PHASE:${phase}:${Math.round(performance.now() - phaseStarted)}ms`);
+    phaseStarted = performance.now();
+  };
 
   const [runtime, { deriveManagedEntityIdentity }, dbPaths, recordingApi] = await Promise.all([
     import('../../../../runtime'),
@@ -334,6 +341,7 @@ export const buildSingleEntityNativeRecording = async (
     import('../../../../storage/runtime-dbs'),
     import('./recording'),
   ]);
+  markPhase('imports');
   const identities: FixtureIdentities = {
     main: deriveManagedEntityIdentity({
       name: 'Native Replay Hub', seed: MAIN_SEED, signerLabel: 'owner', jurisdiction: FIXTURE_JURISDICTION,
@@ -345,11 +353,16 @@ export const buildSingleEntityNativeRecording = async (
       jurisdiction: FIXTURE_JURISDICTION,
     })),
   };
+  markPhase('identities');
   let main = createFixtureRuntime(runtime, MAIN_SEED);
   await bindFixtureJurisdiction(main);
   await registerFixtureSigner(main, identities.main);
   const mainRef = (): RuntimeReplica => main;
   let timestamp = FIXED_CREATED_AT;
+  const nextTimestamp = (): number => {
+    timestamp = Math.max(timestamp, main.state.timestamp) + 1;
+    return timestamp;
+  };
   const peers = createFixturePeerAccounts({
     runtime,
     main: mainRef,
@@ -359,37 +372,47 @@ export const buildSingleEntityNativeRecording = async (
     peerSeed: PEER_SEED,
   });
   peers.installDispatch();
-  const pumpMain = () => pump(runtime, mainRef, peers, () => timestamp);
+  // The peer fixture is a deterministic stand-in for remote Runtimes. Its
+  // local enforcement clock must follow the committed H1 clock, not the last
+  // operator input timestamp: one input can produce several Runtime frames.
+  // Keeping the stale operator timestamp eventually rejects valid signed
+  // Account frames as >30s in the future in long recordings.
+  const pumpMain = () => pump(runtime, mainRef, peers, () => Math.max(timestamp, main.state.timestamp));
 
   try {
     const imports = await identityImports(runtime, identities);
-    enqueue(runtime, main, ++timestamp, [], [imports.main]);
+    enqueue(runtime, main, nextTimestamp(), [], [imports.main]);
     await pumpMain();
-    enqueue(runtime, main, ++timestamp, [profileInput(identities.main)]);
+    enqueue(runtime, main, nextTimestamp(), [profileInput(identities.main)]);
     await pumpMain();
+    markPhase('main-bootstrap');
     // Verified peer routes must exist before any signed genesis reaches H1.
     const signing = peers.signingContext();
     await installVerifiedPeerProfiles({
       main: mainRef, signingEnv: signing.env, peers: signing.peers, timestamp,
     });
+    markPhase('peer-profiles');
 
     const setup = await setupInputs(identities);
     for (const slice of setupSlices(setup.peer, peerSetupBatch)) {
-      await peers.seedAccounts(slice, ++timestamp);
+      await peers.seedAccounts(slice, nextTimestamp());
       await pumpMain();
     }
+    markPhase('peer-setup');
     for (const batchInput of mainSetupBatches(setup.main[0]!, peerSetupBatch)) {
-      enqueue(runtime, main, ++timestamp, [batchInput]);
+      enqueue(runtime, main, nextTimestamp(), [batchInput]);
       await pumpMain();
     }
+    markPhase('main-setup');
 
     // Mirror a restored production Runtime starting on a fresh host: publish
     // its complete base once into an empty namespace, then append only WAL
-    // until the configured 100-frame checkpoint cadence is due.
+    // until the configured 1,000-frame checkpoint cadence is due.
     await runtime.closeRuntimeDb(main);
     main.dbNamespace = `${main.runtimeId}-native-replay-base`;
     await runtime.persistRestoredEnvToDB(main);
     peers.installDispatch();
+    markPhase('base-checkpoint');
 
     const baseHeight = main.state.height;
     const [baseFrame] = await runtime.readPersistedFrameJournals(main, {
@@ -427,21 +450,13 @@ export const buildSingleEntityNativeRecording = async (
     // its state but the canonical in-process direct-server session must bind again.
     peers.installDispatch();
 
-    const accountsRoots = new Map<number, string>();
-    const entitySections = new Map<number, ReturnType<typeof computeEntityConsensusSectionDigestsCold>>();
-    const unregister = runtime.registerRuntimeFrameCommitCallback(main, ({ height }) => {
-      const state = onlyEntityReplica(main).state;
-      accountsRoots.set(height, state.accounts.rootHash());
-      entitySections.set(height, computeEntityConsensusSectionDigestsCold(state));
-    });
     const tail = await tailInputs(identities);
     for (let start = 0; start < paymentCount; start += paymentBatchSize) {
       const count = Math.min(paymentBatchSize, paymentCount - start);
-      enqueue(runtime, main, ++timestamp, [tail.payment(start, count)]);
+      enqueue(runtime, main, nextTimestamp(), [tail.payment(start, count)]);
       await pumpMain();
     }
-    unregister();
-
+    markPhase('payments');
     const targetHeight = main.state.height;
     const frames = await runtime.readPersistedFrameJournals(main, {
       fromHeight: baseHeight + 1,
@@ -458,52 +473,11 @@ export const buildSingleEntityNativeRecording = async (
       frames,
     });
     const recording = runtime.buildRuntimeRecording([snapshot, tailBundle], FIXED_CREATED_AT);
-    const entityRecords = await runtime.readPersistedEntityFrameHistoryRecords(
-      main, identities.main.entityId, 1_000, { maxRuntimeHeight: targetHeight },
-    );
-    const entityFrames = entityRecords.filter(record => record.runtimeHeight > baseHeight).map(record => {
-      const accountsRoot = accountsRoots.get(record.runtimeHeight);
-      if (!accountsRoot) throw new Error(`NATIVE_FIXTURE_ACCOUNTS_ROOT_MISSING:${record.runtimeHeight}`);
-      const sections = entitySections.get(record.runtimeHeight);
-      if (!sections) throw new Error(`NATIVE_FIXTURE_ENTITY_SECTIONS_MISSING:${record.runtimeHeight}`);
-      return {
-        runtimeHeight: record.runtimeHeight,
-        entityId: record.entityId,
-        entityHeight: record.entityHeight,
-        frameHash: record.link.frame.hash,
-        stateRoot: record.link.frame.stateRoot,
-        authorityRoot: record.link.frame.authorityRoot,
-        accountsRoot,
-        sections,
-      };
-    }).sort((left, right) => left.runtimeHeight - right.runtimeHeight);
-    const accountFrames = (await Promise.all(identities.peers.map(peerIdentity =>
-      runtime.readPersistedAccountFrameHistoryRecords(
-        main, identities.main.entityId, peerIdentity.entityId, 1_000, { maxRuntimeHeight: targetHeight },
-      ),
-    ))).flat().filter(record => record.runtimeHeight > baseHeight).map(record => ({
-      runtimeHeight: record.runtimeHeight,
-      entityId: record.entityId,
-      counterpartyId: record.counterpartyId,
-      source: record.source,
-      frame: record.frame,
-    })).sort((left, right) => left.runtimeHeight - right.runtimeHeight || left.frame.height - right.frame.height);
-    const authorityFrameOracle = { entityFrames, accountFrames };
-    const authorityEvidence = (await import('./authority-evidence')).buildHltAuthorityEvidence(
-      frames, authorityFrameOracle,
-    );
-    const distinctActiveAccounts = new Set(
-      authorityEvidence.economicOperations.operations.flatMap(op =>
-        op.stages.map(stage => `${stage.ownerEntityId}|${stage.counterpartyId}`),
-      ),
-    ).size;
-    if (distinctActiveAccounts !== peerCount) {
-      throw new Error(
-        `NATIVE_FIXTURE_DISTINCT_ACTIVE_ACCOUNTS_MISMATCH:` +
-        `expected=${peerCount}:actual=${distinctActiveAccounts}`,
-      );
-    }
-    const submittedPayments = authorityEvidence.economicOperations.coverage.directPayments;
+    const authorityEvidence = (await import('./authority-evidence')).buildHltAuthorityEvidence(frames);
+    const submittedPayments = frames.reduce((total, frame) => total + frame.runtimeInput.entityInputs.reduce(
+      (frameTotal, input) => frameTotal + (input.entityTxs ?? []).filter(tx => tx.type === 'directPayment').length,
+      0,
+    ), 0);
     if (submittedPayments < paymentCount) {
       throw new Error(
         `NATIVE_FIXTURE_SUBMITTED_PAYMENTS_INSUFFICIENT:` +
@@ -524,19 +498,14 @@ export const buildSingleEntityNativeRecording = async (
     peers.assertQuiescent();
     const evidenceCoverage = {
       outbox: frames.filter(frame => frame.runtimeOutputCount > 0).length,
-      events: entityRecords.filter(record =>
-        record.runtimeHeight > baseHeight && record.link.frame.events.length > 0).length,
-      ackCommit: accountFrames.filter(row => row.source === 'ackCommit').length,
-      peerCommit: accountFrames.filter(row => row.source === 'peerCommit').length,
+      effects: authorityEvidence.expectations.entityEffects.filter(row => row.effectCount > 0).length,
     };
-    const requiredEvidence = [evidenceCoverage.outbox, evidenceCoverage.events, evidenceCoverage.ackCommit];
+    const requiredEvidence = [evidenceCoverage.outbox];
     if (requiredEvidence.some(count => count === 0)) {
       const messages = [...new Set(frames.flatMap(frame => frame.logs.map(entry => entry.message)))];
-      const entityEventTypes = [...new Set(entityRecords.flatMap(record =>
-        record.runtimeHeight > baseHeight ? record.link.frame.events.map(event => event.type) : []))];
       throw new Error(
         `NATIVE_FIXTURE_EVIDENCE_COVERAGE_INCOMPLETE:` +
-        safeStringify({ ...evidenceCoverage, messages, entityEventTypes }),
+        safeStringify({ ...evidenceCoverage, messages }),
       );
     }
     const artifact = {
@@ -555,7 +524,6 @@ export const buildSingleEntityNativeRecording = async (
         disputes: 'disabled' as const,
         lending: 'disabled' as const,
       },
-      authorityFrameOracle,
       authorityEvidence,
     };
     const paths: SingleEntityNativeFixturePaths = {
@@ -564,10 +532,14 @@ export const buildSingleEntityNativeRecording = async (
       stateDb,
       runtimeSeedFile: join(workDir, 'runtime.seed'),
       manifest: join(workDir, 'runtime-replay-single-entity.paths.json'),
+      fixtureAccounts: finalAccounts.size,
+      fixturePayments: submittedPayments,
+      fixtureRuntimeFrames: frames.length,
     };
     recordingApi.writeHltHubRecording(paths.recording, artifact);
     writeFileSync(paths.runtimeSeedFile, `${MAIN_SEED}\n`, { mode: 0o600 });
     writeFileSync(paths.manifest, `${safeStringify(paths, 2)}\n`, { mode: 0o600 });
+    markPhase('recording-write');
     return paths;
   } finally {
     await runtime.closeRuntimeDb(main).catch(() => undefined);

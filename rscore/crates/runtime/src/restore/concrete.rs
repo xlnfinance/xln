@@ -15,7 +15,7 @@ use xln_rscore_entity_kernel::{
 };
 
 use crate::{
-    CertifiedBoardRegistry, RuntimeDurableEnvelope, RuntimeInput, RuntimeLimits,
+    CertifiedBoardRegistry, RuntimeDurableEnvelope, RuntimeEntityKey, RuntimeInput, RuntimeLimits,
     RuntimeMachineError, RuntimeReplica, RuntimeState, StoredRscoreCheckpoint, apply_runtime,
 };
 
@@ -24,6 +24,7 @@ use super::{AccountWireRestoreError, decode_account_rows};
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub struct DecodedRuntimeCheckpoint {
+    pub runtime_seed: String,
     pub runtime_height: u64,
     pub runtime_timestamp: u64,
     pub durable_envelope: RuntimeDurableEnvelope,
@@ -44,10 +45,9 @@ pub struct DecodedRuntimeCheckpoint {
     /// authenticated checkpoint graph. WAL replay combines it only with each
     /// frame's independently authenticated prepared-context rows.
     pub entity_context_policy: Value,
-    /// Exact HTLC infrastructure fields projected from the same authenticated
-    /// Entity core. The private key and liveness remain operator/network
-    /// infrastructure and are never persisted in consensus state.
-    pub entity_encryption_public_key: [u8; 32],
+    /// Exact public HTLC fee policy projected from authenticated Entity state.
+    /// The Entity encryption public key stays in `entity_snapshot`; the
+    /// private key and liveness remain operator/network infrastructure.
     pub htlc_routing_fee_ppm: u32,
     pub htlc_routing_base_fee: num_bigint::BigInt,
     /// Exact canonical 0x26 live EntityReplica envelope.
@@ -258,13 +258,21 @@ pub fn restore_decoded_runtime_checkpoint(
         checkpoint.expected_entity_root,
     )?;
     let finalized_j_height = entity.last_finalized_j_height;
+    let owner_entity_id = stored.owner_entity_id;
+    let key = crate::RuntimeEntityKey::new(owner_entity_id, &checkpoint.signer_id)?;
+    let e_replicas = std::collections::BTreeMap::from([(
+        key.clone(),
+        crate::RuntimeEntityState {
+            accounts_root: stored.accounts_root,
+            entity,
+        },
+    )]);
     let mut replica = RuntimeReplica::new(
         RuntimeState {
             height: checkpoint.runtime_height,
             timestamp: checkpoint.runtime_timestamp,
             finalized_j_height,
-            accounts_root: stored.accounts_root,
-            entity,
+            e_replicas,
         },
         checkpoint.durable_envelope,
         stored.owner_entity_id,
@@ -273,10 +281,15 @@ pub fn restore_decoded_runtime_checkpoint(
         entity_consensus,
         checkpoint.entity_signer,
         stored.protocol_fingerprint,
+        checkpoint.runtime_seed,
         checkpoint.limits,
     )?;
-    replica.install_certified_board_registry(checkpoint.certified_board_registry);
-    replica.install_replica_metadata(checkpoint.replica_metadata)?;
+    let live = replica
+        .e_replicas
+        .get_mut(&key)
+        .ok_or(ConcreteRestoreError::OwnerMismatch)?;
+    live.install_certified_board_registry(checkpoint.certified_board_registry);
+    live.install_replica_metadata(checkpoint.replica_metadata)?;
     Ok(RestoredRuntime { replica })
 }
 
@@ -313,13 +326,29 @@ pub fn replay_decoded_runtime_wal(
                 actual: applied.replica.state.height,
             });
         }
-        assert_accounts_root(
-            frame.height,
-            applied.replica.state.accounts_root,
-            frame.expected_accounts_root,
-        )?;
+        let entity_output = applied.outputs.entities.first();
+        let entity_key = entity_output.map(|output| RuntimeEntityKey {
+            entity_id: output.entity_id,
+            signer_id: output.signer_id.clone(),
+        });
+        let accounts_root = entity_output
+            .and(entity_key.as_ref())
+            .and_then(|key| applied.replica.state.e_replicas.get(key))
+            .map(|state| state.accounts_root)
+            .unwrap_or([0; 32]);
+        assert_accounts_root(frame.height, accounts_root, frame.expected_accounts_root)?;
         if let Some(expected) = frame.expected_entity_root {
-            assert_entity_root(&applied.replica.entity_consensus.state.sections, expected)?;
+            let _output = entity_output.ok_or(ConcreteRestoreError::OwnerMismatch)?;
+            let live = applied
+                .replica
+                .e_replicas
+                .get(
+                    entity_key
+                        .as_ref()
+                        .ok_or(ConcreteRestoreError::OwnerMismatch)?,
+                )
+                .ok_or(ConcreteRestoreError::OwnerMismatch)?;
+            assert_entity_root(&live.entity_consensus.state.sections, expected)?;
         }
         let mut replica = applied.replica;
         replica.durable.advance_frame_hash(

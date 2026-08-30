@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   hashRawHtlcPaymentTx,
   validatePreparedHtlcPayment,
-} from '../../../entity/htlc/payment-admission';
+} from '../../../entity/paybook/payment-admission';
 import { handleHtlcPayment } from '../../../entity/tx/handlers/htlc/payment';
 import type { EntityCandidateEffect } from '../../../entity/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
@@ -40,7 +40,7 @@ test('HTLC admission rejects atomically instead of committing a fail-soft no-op'
   const state = {
     entityId: source,
     timestamp: 100,
-    htlcRoutes: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     accounts: new Map([[nextHop, {
       status: 'active',
       state: {
@@ -64,7 +64,6 @@ test('HTLC admission rejects atomically instead of committing a fail-soft no-op'
     senderLockAmount: 1n,
     maxSenderDebit: 1n,
     totalFee: 0n,
-    lockId: id('4'),
     timelock: 1_000n,
     revealBeforeHeight: 10,
     nextHopEntityId: nextHop,
@@ -79,20 +78,22 @@ test('HTLC admission rejects atomically instead of committing a fail-soft no-op'
   delta.leftCreditLimit = 1n;
   expect(validatePreparedHtlcPayment(state, tx, context)).toBe(prepared);
 
-  const routeCountBeforeFreeze = state.htlcRoutes.size;
+  const paymentCountBeforeFreeze = state.paybook.entries.size;
   state.accounts.get(nextHop).status = 'disputed';
   expect(() => validatePreparedHtlcPayment(state, tx, context))
     .toThrow(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
   const effects: EntityCandidateEffect[] = [];
   await expect(handleHtlcPayment(state, tx, {} as EntityRuntimeContext, effects, false, context))
     .rejects.toThrow(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
-  expect(state.htlcRoutes.size).toBe(routeCountBeforeFreeze);
-  expect(state.lockBook?.size ?? 0).toBe(0);
+  expect(state.paybook.entries.size).toBe(paymentCountBeforeFreeze);
   expect(effects).toEqual([]);
   expect(delta).toMatchObject({ collateral: 0n, leftHold: 0n, rightHold: 0n });
   state.accounts.get(nextHop).status = 'active';
 
-  state.htlcRoutes.set(prepared.hashlock, { lockId: prepared.lockId });
+  state.paybook.entries.set(prepared.hashlock, {
+    hashlock: prepared.hashlock,
+    createdTimestamp: state.timestamp,
+  });
   expect(() => validatePreparedHtlcPayment(state, tx, context))
     .toThrow(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
 });

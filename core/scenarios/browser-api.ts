@@ -1,5 +1,5 @@
 import type { EnvSnapshot, RuntimeReplica } from '../runtime/types';
-import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/history-retention';
+import { startRuntimeTraceForTesting } from '../runtime/observability/runtime-trace';
 
 /**
  * Browser scenario registry.
@@ -73,7 +73,7 @@ export const recordRuntimeScenario = async (
   env: RuntimeReplica,
   run: (target: RuntimeReplica) => Promise<RuntimeReplica | void>,
 ): Promise<{ frames: EnvSnapshot[]; env: RuntimeReplica }> => {
-  const trace = startRuntimeHistoryTraceForTesting(env);
+  const trace = startRuntimeTraceForTesting(env);
   try {
     const result = await run(env);
     return { frames: [...trace.snapshots], env: result ?? env };
@@ -108,7 +108,7 @@ export const recordScenario = async (
   };
   if (env.infrastructure) env.infrastructure.persistencePaused = true;
 
-  const trace = startRuntimeHistoryTraceForTesting(env);
+  const trace = startRuntimeTraceForTesting(env);
   try {
     const result = await run(env);
     return { key, frames: [...trace.snapshots], env: result };

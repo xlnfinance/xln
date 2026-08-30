@@ -1,6 +1,6 @@
 import type { EntityTx } from '../../types/entity-tx';
-import { keccak256 } from 'ethers';
-import { encodeCanonicalConsensusValue } from '../serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../serialization/binary-codec';
+import { keccakBytesHash } from '../crypto/keccak-text';
 import { hashHtlcSecret } from './utils';
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
@@ -8,7 +8,7 @@ type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 const testSecretsByPayment = new Map<string, string>();
 
 const paymentKey = (tx: HtlcPaymentTx): string =>
-  keccak256(new TextEncoder().encode(encodeCanonicalConsensusValue(tx)));
+  keccakBytesHash(encodeCanonicalConsensusBytes(tx));
 
 const normalizeSecret = (value: unknown): string => {
   const secret = String(value ?? '').trim().toLowerCase();

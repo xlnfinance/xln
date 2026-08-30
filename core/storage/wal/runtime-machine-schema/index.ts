@@ -15,13 +15,13 @@ import {
 const validateStorageConfig = (value: unknown, code: string): void => {
   const storage = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(storage, [], [
-    'enabled', 'snapshotPeriodFrames', 'retainSnapshots', 'epochMaxBytes', 'historyViewMaxBytes',
-    'historyViewRetainFrames', 'materializePeriodFrames', 'canonicalHashPeriodFrames', 'accountMerkleRadix',
+    'enabled', 'snapshotPeriodFrames', 'retainSnapshots', 'epochMaxBytes',
+    'materializePeriodFrames', 'canonicalHashPeriodFrames', 'accountMerkleRadix',
   ], `${code}_FIELDS`);
   if (storage['enabled'] !== undefined) requireBoolean(storage['enabled'], `${code}_ENABLED`);
   for (const field of [
-    'snapshotPeriodFrames', 'retainSnapshots', 'epochMaxBytes', 'historyViewMaxBytes',
-    'historyViewRetainFrames', 'materializePeriodFrames', 'canonicalHashPeriodFrames',
+    'snapshotPeriodFrames', 'retainSnapshots', 'epochMaxBytes',
+    'materializePeriodFrames', 'canonicalHashPeriodFrames',
   ]) if (storage[field] !== undefined) requireBoundaryInteger(storage[field], `${code}_${field.toUpperCase()}`);
   if (storage['accountMerkleRadix'] !== undefined && storage['accountMerkleRadix'] !== 16 && storage['accountMerkleRadix'] !== 256) {
     throw new Error(`${code}_ACCOUNT_MERKLE_RADIX`);

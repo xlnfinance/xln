@@ -1,11 +1,12 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountOutput,
-    AccountRejection, AccountReplica, AccountSettledEvent, AccountState, AccountTx, AccountVerdict,
-    DepositoryAddress, EntityId, JEventClaimTx, JEventMetadata, JurisdictionEvent,
-    SequentialAccountEngine, Side, TokenId, ValidationRejection, WatchSeed, canonical_events_hash,
-    canonical_tx_digest, prepare_claim_tx,
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountExecutionContext,
+    AccountIdentity, AccountOutput, AccountRejection, AccountReplica, AccountSettledEvent,
+    AccountState, AccountTx, AccountVerdict, DepositoryAddress, EntityId, JEventClaimTx,
+    JEventMetadata, JurisdictionEvent, SequentialAccountEngine, Side, TokenId, ValidationRejection,
+    WatchSeed, canonical_events_hash, canonical_tx_digest, prepare_claim_tx,
 };
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 const EMPTY_PROOF_DIGEST: &str = "d877be0b440ed7bfda96495cefa57ed81331c1ac03b19b09eb27c4083cf01512";
 
@@ -170,7 +171,9 @@ fn exact_retry_is_idempotent_and_conflict_is_atomic() {
     assert_eq!(retry.state().carried().left_pending_j_claims.root, root);
 
     let mut changed = settled_event();
-    let JurisdictionEvent::AccountSettled(value) = &mut changed;
+    let JurisdictionEvent::AccountSettled(value) = &mut changed else {
+        panic!("settled_event must return AccountSettled");
+    };
     value.collateral = 126.into();
     let conflict = raw_claim(7, changed);
     let rejected = SequentialAccountEngine::apply(
@@ -224,7 +227,7 @@ fn exact_retry_is_idempotent_and_conflict_is_atomic() {
 }
 
 #[test]
-fn signed_workspace_is_rejected_before_financial_finality() {
+fn unsigned_workspace_is_cleared_by_financial_finality() {
     let base = replica();
     let raw = raw_claim(7, settled_event());
     let mut pending = SequentialAccountEngine::apply(
@@ -235,27 +238,52 @@ fn signed_workspace_is_rejected_before_financial_finality() {
     .expect("pending")
     .committed()
     .expect("pending candidate");
-    pending.set_settlement_workspace_present(true);
+    let workspace_tx = AccountTx::SettleTransition {
+        data: CanonicalValue::Object(vec![
+            ("kind".into(), CanonicalValue::String("upsert".into())),
+            (
+                "revision".into(),
+                CanonicalValue::Number(CanonicalNumber::from_u16(1)),
+            ),
+            (
+                "ops".into(),
+                CanonicalValue::Array(vec![CanonicalValue::Object(vec![
+                    ("type".into(), CanonicalValue::String("rawDiff".into())),
+                    (
+                        "tokenId".into(),
+                        CanonicalValue::Number(CanonicalNumber::from_u16(1)),
+                    ),
+                    ("leftDiff".into(), CanonicalValue::BigInt(0.into())),
+                    ("rightDiff".into(), CanonicalValue::BigInt(0.into())),
+                    ("collateralDiff".into(), CanonicalValue::BigInt(0.into())),
+                    ("ondeltaDiff".into(), CanonicalValue::BigInt(0.into())),
+                ])]),
+            ),
+            ("executorIsLeft".into(), CanonicalValue::Bool(true)),
+        ]),
+    };
+    pending = SequentialAccountEngine::apply_with_context(
+        &pending,
+        Side::Left,
+        &workspace_tx,
+        &AccountExecutionContext::new(1, 1, 7, 0, 7),
+    )
+    .expect("workspace transition")
+    .committed()
+    .expect("workspace candidate");
     let root = pending.state().carried().left_pending_j_claims.root;
-    let error = SequentialAccountEngine::apply(
+    let finalized = SequentialAccountEngine::apply(
         &pending,
         Side::Right,
         &AccountTx::JEventClaim(prepare(&pending, &raw)),
     )
-    .err()
-    .expect("workspace activation is intentionally unsupported");
-    assert!(
-        error
-            .to_string()
-            .contains("ACCOUNT_J_CLAIM_SETTLEMENT_WORKSPACE_UNSUPPORTED")
-    );
+    .expect("financial finality")
+    .committed()
+    .expect("finalized candidate");
     assert_eq!(pending.state().carried().left_pending_j_claims.root, root);
-    assert!(
-        pending
-            .state()
-            .delta(TokenId::new(1).expect("token"))
-            .is_none()
-    );
+    assert!(finalized.state().settlement_workspace().is_none());
+    assert_eq!(finalized.state().j_nonce(), 3);
+    assert_eq!(finalized.state().last_finalized_j_height(), 7);
 }
 
 #[test]

@@ -4,21 +4,17 @@ import type { RuntimeInput } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { LIMITS } from '../../../../config/constants';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
-import { deriveSwapNetAuthorization } from '../../../../account/swap/swap-net-authorization';
-import {
-  getStaticSwapTokenDimensions,
-  getSwapExactQuoteLotMultipleAtPriceForDimensions,
-  getSwapLotScale,
-  quoteAmountAtPrice,
-} from '../../../../orderbook';
 import type { LoadBookSnapshot } from '../boundary/worker-book-boundary';
 import type { LoadIdentity } from '../boundary/worker-boundary';
 import {
   HLT_FAUCET_AMOUNT,
   setupParallelLoadTraderPopulation,
+  type LoadReceiveWindow,
 } from '../lanes/worker-lanes';
 import {
   queueLaneRuntimeInputWave,
+  requireConnectedLaneRuntime,
+  waitForLaneFinancialReadiness,
   type LaneRuntime,
 } from '../lanes/lane-runtimes';
 import {
@@ -34,11 +30,7 @@ import {
 import { buildPacedOperationSchedule } from './operation-pacer';
 import { deriveSameOrderbookPriceBandBounds } from '../../../../entity/tx/handlers/account/orderbook/helpers';
 import { readLoadAccount, readLoadBook, type ConnectedRuntime } from '../worker-runtime';
-import { assertProductionSwapFullySettled } from '../settlement';
-import {
-  waitForFullySettledEvidence,
-  type SettlementAccountPair,
-} from '../settlement-reader';
+import type { SettlementAccountPair } from '../settlement-reader';
 
 export type ParallelLaneSubmission = Readonly<{
   runtimeInputBatches: number;
@@ -65,8 +57,14 @@ export type PreparedParallelSameLoad = Readonly<{
   distribution: RealisticExchangeDistribution;
 }>;
 
-const ceilDivide = (value: bigint, divisor: bigint): bigint =>
-  (value + divisor - 1n) / divisor;
+export type SameLoadNativeAuthority = Readonly<{
+  provisionPopulation: (
+    runtimes: readonly LaneRuntime[],
+    receiveWindows: readonly (readonly LoadReceiveWindow[])[],
+    faucetAmounts?: readonly bigint[],
+  ) => Promise<void>;
+  readTradeCheckpoint: () => Promise<Readonly<{ tradeCount: number; matchedSwaps: number }>>;
+}>;
 
 const requireIndex = <T>(values: readonly T[], index: number, code: string): T => {
   const value = values[index];
@@ -74,49 +72,6 @@ const requireIndex = <T>(values: readonly T[], index: number, code: string): T =
   return value;
 };
 
-const buildMakerInventorySeedOffer = (
-  hubEntityId: string,
-  makerIndex: number,
-  requiredBaseAmount: bigint,
-  priceTicks: bigint,
-): Extract<EntityTx, { type: 'placeSwapOffer' }> => {
-  const dimensions = getStaticSwapTokenDimensions(LOAD_QUOTE_TOKEN_ID, LOAD_BASE_TOKEN_ID);
-  const baseLot = getSwapLotScale(LOAD_BASE_TOKEN_ID);
-  const exactQuoteLots = getSwapExactQuoteLotMultipleAtPriceForDimensions(
-    dimensions.wantTokenDecimals,
-    dimensions.giveTokenDecimals,
-    priceTicks,
-  );
-  // H1 charges the seed taker 1 bps in the received token. Seed enough gross
-  // token-2 that the committed net inventory still covers every maker order.
-  const requiredGrossBaseAmount = ceilDivide(requiredBaseAmount * 10_000n, 9_999n);
-  const baseLots = ceilDivide(requiredGrossBaseAmount, baseLot);
-  const executableLots = ceilDivide(baseLots, exactQuoteLots) * exactQuoteLots;
-  const baseAmount = executableLots * baseLot;
-  const quoteAmount = quoteAmountAtPrice(
-    LOAD_BASE_TOKEN_ID,
-    LOAD_QUOTE_TOKEN_ID,
-    baseAmount,
-    priceTicks,
-  );
-  const authorization = deriveSwapNetAuthorization(baseAmount, 1);
-  if (authorization.minNetReceive < requiredBaseAmount || quoteAmount <= 0n) {
-    throw new Error(`HLT_MAKER_INVENTORY_SEED_AMOUNT_INVALID:${makerIndex}`);
-  }
-  return {
-    type: 'placeSwapOffer',
-    data: {
-      counterpartyEntityId: hubEntityId,
-      offerId: `hlt-maker-inventory-${makerIndex + 1}`,
-      giveTokenId: LOAD_QUOTE_TOKEN_ID,
-      giveAmount: quoteAmount,
-      wantTokenId: LOAD_BASE_TOKEN_ID,
-      wantAmount: baseAmount,
-      ...dimensions,
-      ...authorization,
-    },
-  };
-};
 
 export type ParallelLoadRoundExtraTxs = (args: {
   lane: LaneRuntime;
@@ -202,8 +157,7 @@ const settlementPairs = (
 export const prepareParallelSameLoad = async (options: {
   workDir: string;
   portBase: number;
-  hub: ConnectedRuntime;
-  marketMaker: ConnectedRuntime;
+  hub?: ConnectedRuntime;
   hubIdentity: LoadIdentity;
   initialBook: LoadBookSnapshot;
   minimumTradeSize: bigint;
@@ -212,6 +166,9 @@ export const prepareParallelSameLoad = async (options: {
   lanes: number;
   laneOffset: number;
   execution: 'peer' | 'realistic' | 'balanced';
+  compactSettlement?: boolean;
+  nativeAuthority?: SameLoadNativeAuthority;
+  additionalQuoteDebits?: readonly bigint[];
 }): Promise<PreparedParallelSameLoad> => {
   assertOpenLoopOfferBudget(options.rounds);
   const highestVisibleAsk = options.initialBook.executableAskPriceTicks.at(-1);
@@ -273,108 +230,97 @@ export const prepareParallelSameLoad = async (options: {
   if (
     traderPlans.length !== options.lanes * 2 ||
     traderPlans.some(plan => plan.offers.length !== options.rounds) ||
-    traderPlans.some(plan => plan.baseCredit <= 0n || plan.quoteCredit <= 0n)
+    traderPlans.some(plan => plan.baseCredit < 0n || plan.quoteCredit < 0n) ||
+    traderPlans.some(plan => plan.baseCredit === 0n && plan.quoteCredit === 0n)
   ) {
     throw new Error('PRODUCTION_SWAP_LOAD_LANE_PLAN_EMPTY');
   }
-  const seedOffers = traderPlans.map((plan, index) => buildMakerInventorySeedOffer(
-        options.hubIdentity.entityId,
-        index,
-        plan.baseCredit,
-        highestVisibleAsk,
-      ));
-  const baseLot = getSwapLotScale(LOAD_BASE_TOKEN_ID);
-  const requiredSeedBase = seedOffers.reduce((total, offer) => total + offer.data.wantAmount, 0n);
-  const executableSeedBase = options.initialBook.executableAsks
-    .filter(ask => ask.priceTicks <= highestVisibleAsk)
-    .reduce((total, ask) => total + ask.qtyLots * baseLot, 0n);
-  if (requiredSeedBase > executableSeedBase) {
-    throw new Error(
-      `HLT_TRADER_INVENTORY_DEPTH_INSUFFICIENT:required=${requiredSeedBase}:available=${executableSeedBase}`,
-    );
-  }
+  if (
+    options.additionalQuoteDebits !== undefined &&
+    (options.additionalQuoteDebits.length !== traderPlans.length ||
+      options.additionalQuoteDebits.some(value => value < 0n))
+  ) throw new Error('HLT_ADDITIONAL_QUOTE_DEBITS_INVALID');
+  // Swap bids and mixed-load payments spend the same token-1 Account balance.
+  // Fund their exact combined debit so completion never depends on opposite
+  // offers happening to refill a trader before its next local admission.
+  const faucetAmounts = traderPlans.map((plan, index) => {
+    const required = plan.quoteCredit + (options.additionalQuoteDebits?.[index] ?? 0n);
+    return required > HLT_FAUCET_AMOUNT ? required : HLT_FAUCET_AMOUNT;
+  });
   const traders = await setupParallelLoadTraderPopulation({
     workDir: options.workDir,
     portBase: options.portBase,
-    hub: options.hub,
+    ...(options.hub ? { hub: options.hub } : {}),
     hubIdentity: options.hubIdentity,
     traders: traderPlans.length,
     laneOffset: options.laneOffset,
-    receiveWindows: traderPlans.map((plan, index) => {
-      const seed = requireIndex(seedOffers, index, 'HLT_TRADER_INVENTORY_SEED_MISSING');
-      return [{
+    connectRuntimeAdapters: options.compactSettlement !== true,
+    ...(options.nativeAuthority
+      ? { provisionPopulation: options.nativeAuthority.provisionPopulation }
+      : {}),
+    faucetAmounts,
+    receiveWindows: traderPlans.map((plan, index) => [{
         tokenId: LOAD_BASE_TOKEN_ID,
         amount: requiredReceiveCreditForOffers(
-          seed.data.wantAmount,
+          plan.baseCredit,
           LOAD_BASE_TOKEN_ID,
           plan.offers,
         ),
+        ...(plan.baseCredit > 0n ? { initialAmount: plan.baseCredit } : {}),
       }, {
         tokenId: LOAD_QUOTE_TOKEN_ID,
         amount: requiredReceiveCreditForOffers(
-          HLT_FAUCET_AMOUNT,
+          faucetAmounts[index]!,
           LOAD_QUOTE_TOKEN_ID,
           plan.offers,
         ),
-      }];
-    }),
+      }]),
   });
-  let setupTradeCount = (await readLoadBook(options.hub, options.hubIdentity.entityId)).tradeCount;
-  {
-    const seedPairs: SettlementAccountPair[] = traders.runtimes.map((lane, index) => ({
-      hubEntityId: options.hubIdentity.entityId,
-      loadEntityId: lane.identity.entityId,
-      offerIds: [requireIndex(seedOffers, index, 'HLT_TRADER_INVENTORY_SEED_MISSING').data.offerId],
+  const setupCheckpoint = options.nativeAuthority
+    ? await options.nativeAuthority.readTradeCheckpoint()
+    : await (async () => {
+        if (!options.hub) throw new Error('HLT_TS_HUB_REQUIRED');
+        return {
+          tradeCount: (await readLoadBook(options.hub, options.hubIdentity.entityId)).tradeCount,
+          matchedSwaps: 0,
+        };
+      })();
+  const setupTradeCount = setupCheckpoint.tradeCount;
+  if (options.compactSettlement) {
+    await waitForLaneFinancialReadiness(traders.runtimes.map((lane, index) => {
+      const plan = requireIndex(traderPlans, index, 'HLT_TRADER_PLAN_MISSING');
+      return {
+        lane,
+        hubEntityId: options.hubIdentity.entityId,
+        windows: [
+          ...(plan.baseCredit > 0n ? [{ tokenId: LOAD_BASE_TOKEN_ID, minimum: plan.baseCredit }] : []),
+          ...(plan.quoteCredit > 0n ? [{ tokenId: LOAD_QUOTE_TOKEN_ID, minimum: plan.quoteCredit }] : []),
+        ],
+      };
+    }), 'user', true);
+  } else {
+    const traderReady = await Promise.all(traders.runtimes.map(async (lane, index) => {
+      const account = await readLoadAccount(
+        requireConnectedLaneRuntime(lane),
+        lane.identity.entityId,
+        options.hubIdentity.entityId,
+      );
+      const plan = requireIndex(traderPlans, index, 'HLT_TRADER_PLAN_MISSING');
+      const baseDelta = account?.state.deltas.get(LOAD_BASE_TOKEN_ID);
+      const quoteDelta = account?.state.deltas.get(LOAD_QUOTE_TOKEN_ID);
+      const isLeft = isLeftEntity(lane.identity.entityId, options.hubIdentity.entityId);
+      const baseReady = plan.baseCredit === 0n || Boolean(
+        baseDelta && deriveDelta(baseDelta, isLeft).outCapacity >= plan.baseCredit,
+      );
+      const quoteReady = plan.quoteCredit === 0n || Boolean(
+        quoteDelta && deriveDelta(quoteDelta, isLeft).outCapacity >= plan.quoteCredit,
+      );
+      return baseReady && quoteReady;
     }));
-    const seedStartedAt = performance.now();
-    await queueLaneRuntimeInputWave(0, traders.runtimes.map((lane, index) => ({
-      lane,
-      input: {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: lane.identity.entityId,
-          signerId: lane.identity.signerId,
-          entityTxs: [requireIndex(seedOffers, index, 'HLT_TRADER_INVENTORY_SEED_MISSING')],
-        }],
-      },
-    })));
-    const seedEvidence = await waitForFullySettledEvidence({
-      hub: options.hub,
-      load: traders.runtimes.map((lane, index) => ({
-        runtime: lane.runtime,
-        pairs: [requireIndex(seedPairs, index, 'HLT_TRADER_INVENTORY_PAIR_MISSING')],
-      })),
-      marketMaker: options.marketMaker,
-      hubBookEntityId: options.hubIdentity.entityId,
-      pairs: seedPairs,
-      tradeCountBefore: setupTradeCount,
-      expectedSubmittedOffers: seedOffers.length,
-      expectedMatchedTrades: seedOffers.length,
-      expectedFullySettledOffers: seedOffers.length,
-      cancelledOffers: 0,
-      startedAt: seedStartedAt,
-    });
-    assertProductionSwapFullySettled(seedEvidence);
-    setupTradeCount = seedEvidence.tradeCountAfter;
-  }
-  // Every trader acquires token-2 through a real MM setup fill and retains
-  // token-1 from the one canonical faucet, so either side is executable.
-  const traderReady = await Promise.all(traders.runtimes.map(async (lane, index) => {
-    const account = await readLoadAccount(lane.runtime, lane.identity.entityId, options.hubIdentity.entityId);
-    const plan = requireIndex(traderPlans, index, 'HLT_TRADER_PLAN_MISSING');
-    const baseDelta = account?.state.deltas.get(LOAD_BASE_TOKEN_ID);
-    const quoteDelta = account?.state.deltas.get(LOAD_QUOTE_TOKEN_ID);
-    return Boolean(baseDelta && quoteDelta && deriveDelta(
-      baseDelta,
-      isLeftEntity(lane.identity.entityId, options.hubIdentity.entityId),
-    ).outCapacity >= plan.baseCredit && deriveDelta(
-      quoteDelta,
-      isLeftEntity(lane.identity.entityId, options.hubIdentity.entityId),
-    ).outCapacity >= plan.quoteCredit);
-  }));
-  const unready = traders.runtimes.filter((_lane, index) => !traderReady[index]).map(lane => lane.laneKey);
-  if (unready.length > 0) {
-    throw new Error(`HLT_SWAP_POPULATION_NOT_READY:missing=${unready.length}:users=${unready.join(',')}`);
+    const unready = traders.runtimes.filter((_lane, index) => !traderReady[index]).map(lane => lane.laneKey);
+    if (unready.length > 0) {
+      throw new Error(`HLT_SWAP_POPULATION_NOT_READY:missing=${unready.length}:users=${unready.join(',')}`);
+    }
   }
   console.log(`[load] swap population ready users=${traders.runtimes.length}`);
   return {
@@ -414,9 +360,7 @@ const withRoundExtraTxs = (
 };
 
 export const submitPreparedParallelSameLoad = async (options: {
-  hub: ConnectedRuntime;
   hubIdentity: LoadIdentity;
-  initialBook: LoadBookSnapshot;
   swapsPerRound: number;
   rounds: number;
   cadenceMs: number;
@@ -451,7 +395,32 @@ export const submitPreparedParallelSameLoad = async (options: {
     rounds: options.rounds,
     cadenceMs: options.cadenceMs,
   });
+  // The control plane is not the workload. Keep four host admission waves per
+  // offered second instead of making every host parse twenty tiny HTTP bodies
+  // while it also advances 100 sovereign Runtime loops. Each Runtime remains
+  // one distinct entry and still submits exactly once in its cadence second.
+  const defaultSubmitWindowMs = Math.min(
+    options.cadenceMs,
+    Math.max(250, Math.ceil(options.prepared.traderRuntimes.length / 100)),
+  );
+  const submitWindowMs = Number(
+    process.env['XLN_HLT_SUBMIT_WINDOW_MS'] ?? String(defaultSubmitWindowMs),
+  );
+  if (!Number.isSafeInteger(submitWindowMs) || submitWindowMs < 1 || submitWindowMs > options.cadenceMs) {
+    throw new Error(`HLT_SUBMIT_WINDOW_INVALID:${submitWindowMs}:${options.cadenceMs}`);
+  }
+  const batches: Array<typeof schedule> = [];
   for (const operation of schedule) {
+    const open = batches.at(-1);
+    const first = open?.[0];
+    if (
+      open && first && first.round === operation.round &&
+      operation.dueOffsetMs - first.dueOffsetMs < submitWindowMs
+    ) open.push(operation);
+    else batches.push([operation]);
+  }
+  for (const batch of batches) {
+    const operation = batch.at(-1)!;
     const firstRound = operation.round;
     const batchRounds = 1;
     const dueAt = startedAt + operation.dueOffsetMs;
@@ -459,22 +428,24 @@ export const submitPreparedParallelSameLoad = async (options: {
     if (remainingMs > 0) await new Promise(resolve => setTimeout(resolve, remainingMs));
     if (streamFailure !== null) throw streamFailure;
     const lagMs = Math.max(0, Math.ceil(performance.now() - dueAt));
-    roundSubmissionLagMs.push(lagMs);
-    const index = operation.participantIndex;
-    const lane = requireIndex(options.prepared.traderRuntimes, index, 'HLT_TRADER_RUNTIME_MISSING');
-    const identity = requireIndex(options.prepared.traderIdentities, index, 'HLT_TRADER_IDENTITY_MISSING');
-    const traderInputs = [{
+    for (let index = 0; index < batch.length; index += 1) roundSubmissionLagMs.push(lagMs);
+    const traderInputs = batch.map(entry => {
+      const index = entry.participantIndex;
+      const lane = requireIndex(options.prepared.traderRuntimes, index, 'HLT_TRADER_RUNTIME_MISSING');
+      const identity = requireIndex(options.prepared.traderIdentities, index, 'HLT_TRADER_IDENTITY_MISSING');
+      return {
         lane,
         inputs: withRoundExtraTxs(
           buildLaneRoundOfferInputs(
             [identity],
             [requireIndex(options.prepared.traderPlans, index, 'HLT_TRADER_PLAN_MISSING')],
-            firstRound,
+            entry.round,
             batchRounds,
           ),
-          collectRoundExtraTxs(options.extraEntityTxs, lane, identity, firstRound, batchRounds),
+          collectRoundExtraTxs(options.extraEntityTxs, lane, identity, entry.round, batchRounds),
         ),
-      }];
+      };
+    });
     const waveStartedAt = performance.now();
     const queue = (laneInputs: typeof traderInputs): Promise<void> =>
       queueLaneRuntimeInputWave(waveIndex++, laneInputs.map(({ lane, inputs }) => ({
@@ -492,6 +463,7 @@ export const submitPreparedParallelSameLoad = async (options: {
       );
     }
   }
+  console.log(`[load] stream ingress actions=${schedule.length} waves=${batches.length} windowMs=${submitWindowMs}`);
   const sourceDispatchFinishedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
   const waveResults = await Promise.all(pendingWaves);
   const failedWave = waveResults.find(result => result.error !== null);
@@ -508,9 +480,6 @@ export const submitPreparedParallelSameLoad = async (options: {
     sourceDispatchFinishedElapsedMs,
     Math.ceil(performance.now() - startedAt),
   );
-  if (maxWaveAckMs >= options.cadenceMs) {
-    throw new Error(`HLT_SOURCE_QUEUE_ACK_MISSED:maxMs=${maxWaveAckMs}:cadenceMs=${options.cadenceMs}`);
-  }
   console.log(
     `[load] source asserted users=${options.prepared.traderRuntimes.length} rounds=${options.rounds} ` +
     `actions=${options.prepared.traderRuntimes.length * options.rounds} ` +

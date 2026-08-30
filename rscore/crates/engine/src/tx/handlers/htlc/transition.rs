@@ -18,6 +18,12 @@ pub(crate) fn apply_lock(
     context: &AccountExecutionContext,
 ) -> Result<MutationDecision, TransitionError> {
     super::boundary::validate_reveal_before_height(tx.reveal_before_height)?;
+    if tx.lock_id != tx.hashlock.as_str() {
+        return Ok(rejected(HtlcRejection::LockIdMismatch {
+            lock_id: tx.lock_id.clone(),
+            hashlock: tx.hashlock.clone(),
+        }));
+    }
     if replica.state().htlc_lock(&tx.lock_id).is_some() {
         return Ok(rejected(HtlcRejection::LockExists {
             lock_id: tx.lock_id.clone(),

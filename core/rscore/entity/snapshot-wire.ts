@@ -5,7 +5,6 @@ import type { EntityState } from '../../entity/types';
 import type { CrontabTaskState, ScheduledHook } from '../../entity/scheduler/types';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import type { BookPricePage, BookPricePageTree } from '../../orderbook/pages/page';
-import type { AccountReplica, SwapOffer } from '../../types/account';
 import type { RscoreWireValue } from '../client';
 import { canonicalValueWire, hexToWireBytes } from '../shadow-wire';
 import { compareStableText } from '../../protocol/serialization';
@@ -18,12 +17,27 @@ const OWNED_FIELDS = new Set([
   'timestamp',
   'lastFinalizedJHeight',
   'reserves',
-  'htlcRoutes',
-  'htlcFeesEarned',
-  'lockBook',
+  'outDebtsByToken',
+  'inDebtsByToken',
+  'externalWallet',
+  'deferredAccountProposals',
+  'settlementContinuations',
+  'entityEncryptionPublicKey',
+  'profile',
+  'jBatchState',
+  'entityProviderActionState',
+  'lending',
+  'crossJurisdictionSwaps',
+  'crossJurisdictionAuthorizations',
+  'pendingCrossJurisdictionFillAcks',
+  'crossJurisdictionBookAdmissions',
+  'paybook',
   'orderbookExt',
+  'swapTradingPairs',
   'crontabState',
   'entityCommandNonces',
+  'proposals',
+  'certifiedBoardState',
   'hubRebalanceConfig',
 ]);
 
@@ -73,76 +87,9 @@ const bookWire = (book: EntityState['orderbookExt'] extends infer Ext
   hexToWireBytes(computeBookCommitmentHash(book), 16, 'RSCORE_ENTITY_BOOK_COMMITMENT'),
 ];
 
-const offerResolving = (account: AccountReplica, offerId: string): boolean => {
-  const isResolve = (tx: AccountReplica['mempool'][number]): boolean =>
-    tx.type === 'swap_resolve' && tx.data.offerId === offerId;
-  return account.mempool.some(isResolve) || (account.pendingFrame?.accountTxs.some(isResolve) ?? false);
-};
-
-const offerWire = (
-  accountId: string,
-  account: AccountReplica,
-  offer: SwapOffer,
-): RscoreWireValue[] => {
-  if (offer.crossJurisdiction !== undefined) {
-    throw new Error(`RSCORE_ENTITY_CROSS_J_OFFER_UNSUPPORTED:${accountId}:${offer.offerId}`);
-  }
-  return [
-    bytes32(accountId, 'RSCORE_ENTITY_OFFER_ACCOUNT'),
-    offer.offerId,
-    bytes32(account.state.leftEntity, 'RSCORE_ENTITY_OFFER_LEFT'),
-    bytes32(account.state.rightEntity, 'RSCORE_ENTITY_OFFER_RIGHT'),
-    offer.giveTokenId,
-    offer.giveTokenDecimals,
-    offer.giveAmount.toString(),
-    offer.wantTokenId,
-    offer.wantTokenDecimals,
-    offer.wantAmount.toString(),
-    offer.maxFee.toString(),
-    offer.minNetReceive.toString(),
-    offer.priceTicks.toString(),
-    offer.timeInForce ?? null,
-    offer.makerIsLeft,
-    offer.createdHeight,
-    offer.quantizedGive.toString(),
-    offer.quantizedWant.toString(),
-  ];
-};
-
 const orderbookWire = (state: EntityState): RscoreWireValue[] | null => {
   const ext = state.orderbookExt;
   if (ext === undefined) return null;
-  const offers: RscoreWireValue[][] = [];
-  const resolving: RscoreWireValue[][] = [];
-  for (const [accountId, account] of state.accounts) {
-    for (const offer of account.state.swapOffers.values()) {
-      offers.push(offerWire(accountId, account, offer));
-      if (offerResolving(account, offer.offerId)) {
-        resolving.push([
-          bytes32(accountId, 'RSCORE_ENTITY_RESOLVING_ACCOUNT'),
-          offer.offerId,
-        ]);
-      }
-    }
-  }
-  offers.sort((left, right) => {
-    const a = `${Buffer.from(left[0] as Uint8Array).toString('hex')}:${String(left[1])}`;
-    const b = `${Buffer.from(right[0] as Uint8Array).toString('hex')}:${String(right[1])}`;
-    return a.localeCompare(b);
-  });
-  resolving.sort((left, right) => {
-    const a = `${Buffer.from(left[0] as Uint8Array).toString('hex')}:${String(left[1])}`;
-    const b = `${Buffer.from(right[0] as Uint8Array).toString('hex')}:${String(right[1])}`;
-    return a.localeCompare(b);
-  });
-  const pairs = [...ext.orderPairs.entries()].map(([orderId, pairIds]) => {
-    if (pairIds.length !== 1) {
-      throw new Error(`RSCORE_ENTITY_ORDER_PAIR_NOT_SAME_J:${orderId}:${pairIds.length}`);
-    }
-    const pairId = pairIds[0];
-    if (pairId === undefined) throw new Error(`RSCORE_ENTITY_ORDER_PAIR_MISSING:${orderId}`);
-    return [orderId, pairId] satisfies RscoreWireValue[];
-  }).sort((left, right) => String(left[0]).localeCompare(String(right[0])));
   return [
     [...ext.books.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
@@ -154,9 +101,6 @@ const orderbookWire = (state: EntityState): RscoreWireValue[] | null => {
         dimensions.baseTokenDecimals,
         dimensions.quoteTokenDecimals,
       ]),
-    offers,
-    resolving,
-    pairs,
     LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR,
   ];
 };
@@ -191,51 +135,41 @@ const metadataWire = (state: EntityState): RscoreWireValue[] | null => {
     ])];
 };
 
-const routesWire = (state: EntityState): RscoreWireValue[] =>
-  [...state.htlcRoutes.entries()]
+const paybookWire = (state: EntityState): RscoreWireValue[] => [
+  [...state.paybook.entries.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, route]) => {
-      if (key !== route.hashlock) throw new Error(`RSCORE_ENTITY_HTLC_ROUTE_KEY:${key}`);
+      if (key !== route.hashlock) throw new Error(`RSCORE_ENTITY_PAYBOOK_KEY:${key}`);
       if (route.secretAckedAt !== undefined || route.crossJurisdictionRelay !== undefined) {
-        throw new Error(`RSCORE_ENTITY_HTLC_ROUTE_OUTSIDE_PROFILE:${key}`);
+        throw new Error(`RSCORE_ENTITY_PAYBOOK_OUTSIDE_PROFILE:${key}`);
       }
       return [
-        bytes32(route.hashlock, 'RSCORE_ENTITY_ROUTE_HASHLOCK'),
+        bytes32(route.hashlock, 'RSCORE_ENTITY_PAYBOOK_HASHLOCK'),
         route.tokenId ?? null,
         route.amount?.toString() ?? null,
         route.startedAtMs ?? null,
         route.originated === true,
-        optionalBytes32(route.inboundEntity, 'RSCORE_ENTITY_ROUTE_INBOUND'),
-        optionalBytes32(route.inboundLockId, 'RSCORE_ENTITY_ROUTE_INBOUND_LOCK'),
-        optionalBytes32(route.outboundEntity, 'RSCORE_ENTITY_ROUTE_OUTBOUND'),
-        optionalBytes32(route.outboundLockId, 'RSCORE_ENTITY_ROUTE_OUTBOUND_LOCK'),
+        optionalBytes32(route.inboundEntity, 'RSCORE_ENTITY_PAYBOOK_INBOUND'),
+        optionalBytes32(route.outboundEntity, 'RSCORE_ENTITY_PAYBOOK_OUTBOUND'),
         route.inboundSettled === true,
         route.outboundSettled === true,
-        optionalBytes32(route.secret, 'RSCORE_ENTITY_ROUTE_SECRET'),
+        optionalBytes32(route.secret, 'RSCORE_ENTITY_PAYBOOK_SECRET'),
         route.secretAckPending === true,
         route.secretAckStartedAt ?? null,
         route.secretAckDeadlineAt ?? null,
         route.pendingFee?.toString() ?? null,
         route.createdTimestamp,
+        route.description ?? null,
       ];
-    });
+    }),
+  state.paybook.feesEarned.toString(),
+];
 
-const locksWire = (state: EntityState): RscoreWireValue[] =>
-  [...state.lockBook.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, lock]) => {
-      if (key !== lock.lockId) throw new Error(`RSCORE_ENTITY_LOCK_KEY:${key}`);
-      return [
-        bytes32(lock.lockId, 'RSCORE_ENTITY_LOCK_ID'),
-        bytes32(lock.accountId, 'RSCORE_ENTITY_LOCK_ACCOUNT'),
-        lock.tokenId,
-        lock.amount.toString(),
-        bytes32(lock.hashlock, 'RSCORE_ENTITY_LOCK_HASHLOCK'),
-        lock.timelock.toString(),
-        lock.direction === 'outgoing',
-        lock.createdAt.toString(),
-      ];
-    });
+const crossJurisdictionCollectionWire = (
+  collection: Map<string, unknown> | undefined,
+): RscoreWireValue[] | null => collection === undefined ? null : [...collection.entries()]
+  .sort(([left], [right]) => compareStableText(left, right))
+  .map(([key, value]) => [key, canonicalValueWire(value)]);
 
 const crontabParamWire = (
   name: string,
@@ -264,7 +198,7 @@ const hookKindWire = (hook: ScheduledHook): RscoreWireValue[] => {
     case 'htlc_timeout': return [0, hook.data.accountId, hook.data.lockId];
     case 'dispute_deadline': return [1, hook.data.accountId];
     case 'htlc_secret_ack_timeout': return [
-      2, hook.data.hashlock, hook.data.counterpartyEntityId, hook.data.inboundLockId,
+      2, hook.data.hashlock, hook.data.counterpartyEntityId,
     ];
     case 'settlement_window': return [3];
     case 'watchdog': return [4];
@@ -318,14 +252,43 @@ export const entitySnapshotWire = (state: EntityState): RscoreWireValue[] => {
       .map(([tokenId, amount]) => [tokenId, amount.toString()]),
     [...state.accounts.keys()].sort().map(accountId =>
       bytes32(accountId, 'RSCORE_ENTITY_KNOWN_ACCOUNT')),
-    routesWire(state),
-    state.htlcFeesEarned.toString(),
-    locksWire(state),
+    paybookWire(state),
     orderbookWire(state),
     metadataWire(state),
     sections,
     crontabWire(state),
     entityCommandNoncesWire(state.entityCommandNonces),
     state.hubRebalanceConfig === undefined ? null : canonicalValueWire(state.hubRebalanceConfig),
+    [
+      state.profile.name,
+      state.profile.isHub,
+      state.profile.entityKind ?? null,
+      [...(state.profile.sectors ?? [])],
+      state.profile.avatar,
+      state.profile.bio,
+      state.profile.website,
+    ],
+    state.jBatchState === undefined ? null : canonicalValueWire(state.jBatchState),
+    state.lending === undefined ? null : canonicalValueWire(state.lending),
+    crossJurisdictionCollectionWire(state.crossJurisdictionSwaps),
+    crossJurisdictionCollectionWire(state.crossJurisdictionAuthorizations),
+    crossJurisdictionCollectionWire(state.pendingCrossJurisdictionFillAcks),
+    crossJurisdictionCollectionWire(state.crossJurisdictionBookAdmissions),
+    canonicalValueWire(state.proposals),
+    state.entityProviderActionState === undefined
+      ? null
+      : canonicalValueWire(state.entityProviderActionState),
+    state.swapTradingPairs === undefined
+      ? null
+      : canonicalValueWire(state.swapTradingPairs),
+    state.certifiedBoardState === undefined
+      ? null
+      : canonicalValueWire(state.certifiedBoardState),
+    state.outDebtsByToken === undefined ? null : canonicalValueWire(state.outDebtsByToken),
+    state.inDebtsByToken === undefined ? null : canonicalValueWire(state.inDebtsByToken),
+    state.externalWallet === undefined ? null : canonicalValueWire(state.externalWallet),
+    crossJurisdictionCollectionWire(state.deferredAccountProposals),
+    crossJurisdictionCollectionWire(state.settlementContinuations),
+    bytes32(state.entityEncryptionPublicKey, 'RSCORE_ENTITY_ENCRYPTION_PUBLIC_KEY'),
   ];
 };

@@ -13,8 +13,8 @@ use xln_rscore_engine::{
 };
 use xln_rscore_entity_kernel::{
     ConsensusMode, DeterministicContext, EntityConsensusConfig, EntityConsensusState,
-    EntityFrameAuthority, EntityHtlcNoteIndex, EntityLeaderState, EntitySingleSigner,
-    EntityStateSlice, ResidentEntityConsensusReplica,
+    EntityFrameAuthority, EntityLeaderState, EntitySingleSigner, EntityStateSlice,
+    ResidentEntityConsensusReplica,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -23,8 +23,9 @@ use super::{
     ResidentRuntimeService, RuntimeDurableEnvelope, RuntimeSignerLabel,
 };
 use crate::machine::{
-    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeLiveInput,
-    RuntimeReplica, RuntimeState,
+    RuntimeEntityFrameContext, RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityState,
+    RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeLiveInput, RuntimeReplica,
+    RuntimeState,
 };
 use crate::storage::native::{
     CanonicalRuntimeFrameDraft, NativeRuntimeStore, NativeStorageConfig, build_runtime_frame_commit,
@@ -48,6 +49,22 @@ const ENTITY_KEY_LABEL: &str = "h1-hub";
 const SOURCE_SEED: &str = "rrs-durable-processor";
 const SOURCE_SIGNER: &str = "1";
 static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+/// Drain the pipelined committer and fold its outcome into the report of the
+/// call that produced the frame, so assertions observe the same post-fsync
+/// view the serial processor used to return.
+fn merge_synced(
+    report: &mut super::RuntimeProcessReport,
+    synced: Option<super::RuntimeProcessReport>,
+) {
+    let Some(synced) = synced else {
+        return;
+    };
+    report.durable_height = synced.durable_height.or(report.durable_height);
+    report.outputs_published += synced.outputs_published;
+    report.envelopes_published += synced.envelopes_published;
+    report.durable_bytes_published += synced.durable_bytes_published;
+}
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().fold(String::from("0x"), |mut value, byte| {
@@ -137,7 +154,6 @@ fn processor_replica() -> RuntimeReplica {
             authority,
         },
         certified_frame_head: None,
-        htlc_notes: EntityHtlcNoteIndex::default(),
     };
     let entity_signer = EntitySingleSigner::from_key(
         private_key,
@@ -154,8 +170,13 @@ fn processor_replica() -> RuntimeReplica {
             height: 0,
             timestamp: 100,
             finalized_j_height: 0,
-            accounts_root,
-            entity,
+            e_replicas: BTreeMap::from([(
+                RuntimeEntityKey::new(owner, &signer_id).expect("replica key"),
+                RuntimeEntityState {
+                    accounts_root,
+                    entity,
+                },
+            )]),
         },
         RuntimeDurableEnvelope::fixture_for_runtime(&runtime_id, [0; 32]),
         owner,
@@ -164,6 +185,7 @@ fn processor_replica() -> RuntimeReplica {
         entity_consensus,
         entity_signer,
         [0x44; 32],
+        SOURCE_SEED.to_string(),
         RuntimeLimits {
             checkpoint_period_frames: 100,
             ..RuntimeLimits::hlt()
@@ -172,13 +194,37 @@ fn processor_replica() -> RuntimeReplica {
     .expect("runtime replica")
 }
 
+fn entity_key(replica: &RuntimeReplica) -> RuntimeEntityKey {
+    assert_eq!(
+        replica.state.e_replicas.len(),
+        1,
+        "processor fixture Entity count"
+    );
+    replica
+        .state
+        .e_replicas
+        .keys()
+        .next()
+        .expect("processor fixture Entity key")
+        .clone()
+}
+
+fn entity_state(replica: &RuntimeReplica) -> &RuntimeEntityState {
+    replica
+        .state
+        .e_replicas
+        .get(&entity_key(replica))
+        .expect("processor fixture Entity state")
+}
+
 fn empty_entity_input(replica: &RuntimeReplica) -> RuntimeInput {
     empty_entity_input_at(replica, 1, 200)
 }
 
 fn empty_entity_input_at(replica: &RuntimeReplica, height: u64, timestamp: u64) -> RuntimeInput {
-    let entity_id = replica.state.entity.entity_id.clone();
-    let signer_id = replica.signer_id.clone();
+    let key = entity_key(replica);
+    let entity_id = entity_state(replica).entity.entity_id.clone();
+    let signer_id = key.signer_id.clone();
     let entity_input = RuntimeEntityInput::decode(json!({
         "entityId": entity_id,
         "signerId": signer_id,
@@ -193,11 +239,13 @@ fn empty_entity_input_at(replica: &RuntimeReplica, height: u64, timestamp: u64) 
 }
 
 fn frame_context(replica: &RuntimeReplica, height: u64, timestamp: u64) -> RuntimeFrameContext {
+    let key = entity_key(replica);
+    let entity_id = entity_state(replica).entity.entity_id.clone();
     let context = json!({
         "version": 1,
-        "proposerReplicaId": format!("{}:{}", replica.state.entity.entity_id, replica.signer_id),
-        "entityId": replica.state.entity.entity_id,
-        "proposerSignerId": replica.signer_id,
+        "proposerReplicaId": format!("{}:{}", entity_id, key.signer_id),
+        "entityId": entity_id,
+        "proposerSignerId": key.signer_id,
         "parentFrameHash": format!("0x{}", "00".repeat(32)),
         "height": height,
         "gossipProfiles": [],
@@ -208,18 +256,24 @@ fn frame_context(replica: &RuntimeReplica, height: u64, timestamp: u64) -> Runti
         timestamp,
         finalized_j_height: 0,
         hub_rebalance_has_pending_work: false,
-        entity_context: DeterministicContext::hlt_default(),
-        canonical_entity_context: canonical_value_from_tagged_json(&context)
-            .expect("canonical entity context"),
+        entity_contexts: BTreeMap::from([(
+            key,
+            std::collections::VecDeque::from([RuntimeEntityFrameContext {
+                execution: DeterministicContext::hlt_default(),
+                canonical: canonical_value_from_tagged_json(&context)
+                    .expect("canonical entity context"),
+            }]),
+        )]),
     }
 }
 
 fn direct_payment_input(replica: &RuntimeReplica) -> RuntimeInput {
-    let owner = replica.state.entity.entity_id.clone();
+    let key = entity_key(replica);
+    let owner = entity_state(replica).entity.entity_id.clone();
     let peer = format!("0x{}", "ff".repeat(32));
     let entity_input = RuntimeEntityInput::decode(json!({
         "entityId": owner,
-        "signerId": replica.signer_id,
+        "signerId": key.signer_id,
         "entityTxs": [{
             "type":"directPayment",
             "data":{
@@ -329,7 +383,11 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("durable processor");
-    let report = processor.process(input).expect("durable frame");
+    let mut report = processor.process(input).expect("durable frame");
+    merge_synced(
+        &mut report,
+        processor.sync_committed().expect("commit sync"),
+    );
     assert_eq!(report.durable_height, Some(1));
     assert_eq!(report.outputs_published, 0);
     let commitments = report.commitments.expect("post-fsync commitments");
@@ -339,16 +397,13 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
     assert_eq!(commitments.entity_effect_count, 0);
     assert_ne!(commitments.runtime_frame_hash, [0; 32]);
     assert_ne!(commitments.post_state_hash, [0; 32]);
-    assert_ne!(commitments.certified_entity_frame_hash, [0; 32]);
+    let entity_commitment = commitments.entities.first().expect("Entity commitment");
+    assert_ne!(entity_commitment.certified_frame_hash, [0; 32]);
     assert_ne!(commitments.events_parity_digest, [0; 32]);
     assert_ne!(commitments.entity_effects_parity_digest, [0; 32]);
     assert_eq!(
-        commitments.accounts_root,
-        processor
-            .replica()
-            .expect("live replica")
-            .state
-            .accounts_root
+        entity_commitment.accounts_root,
+        entity_state(processor.replica().expect("live replica")).accounts_root
     );
     assert_eq!(processor.replica().expect("live replica").state.height, 1);
     drop(processor);
@@ -380,8 +435,8 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         derive_local_runtime_id("rrs-ingress-remote", "1").expect("remote runtime id");
     let entity_input = RuntimeEntityInput::decode(json!({
         "runtimeId": local_runtime_id,
-        "entityId": replica.state.entity.entity_id,
-        "signerId": replica.signer_id,
+        "entityId": entity_state(&replica).entity.entity_id,
+        "signerId": entity_key(&replica).signer_id,
         "entityTxs": [],
         "from": remote_runtime_id,
         "sourceRuntimeFrame": {"height": 7, "timestamp": 150},
@@ -424,12 +479,20 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         "swapTakerFeeBps": 0,
         "jurisdictionId": null,
         "pairPolicies": []
-    }));
-    let report = processor
+    }))
+    .expect("valid materializer policy");
+    let mut report = processor
         .process_live(input, &mut materializer)
         .expect("selected context then fsynced Runtime frame");
+    merge_synced(
+        &mut report,
+        processor.sync_committed().expect("commit sync"),
+    );
     assert_eq!(report.durable_height, Some(1));
     assert_eq!(report.outputs_published, 0);
+    let commitments = report.commitments.as_ref().expect("post-fsync commitments");
+    assert_eq!(commitments.events_parity_digest, [0; 32]);
+    assert_eq!(commitments.entity_effects_parity_digest, [0; 32]);
     let recovered = processor
         .read_durable_frame(1)
         .expect("frame exists only after fsync");
@@ -447,8 +510,8 @@ fn two_authenticated_socket_messages_coalesce_into_one_durable_runtime_frame() {
 
     let replica = processor_replica();
     let target_runtime_id = replica.durable.runtime_id().to_owned();
-    let target_entity_id = replica.state.entity.entity_id.clone();
-    let target_signer_id = replica.signer_id.clone();
+    let target_entity_id = entity_state(&replica).entity.entity_id.clone();
+    let target_signer_id = entity_key(&replica).signer_id;
     let target_store = NativeRuntimeStore::open(&target_path, NativeStorageConfig::default())
         .expect("target store");
     let target_processor = DurableRuntimeProcessor::new(
@@ -468,12 +531,15 @@ fn two_authenticated_socket_messages_coalesce_into_one_durable_runtime_frame() {
     let mut service = ResidentRuntimeService::new(
         target_processor,
         ingress,
-        Box::new(CanonicalEntityInfraMaterializer::new(json!({
-            "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-            "swapTakerFeeBps": 0,
-            "jurisdictionId": null,
-            "pairPolicies": []
-        }))),
+        Box::new(
+            CanonicalEntityInfraMaterializer::new(json!({
+                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+                "swapTakerFeeBps": 0,
+                "jurisdictionId": null,
+                "pairPolicies": []
+            }))
+            .expect("valid materializer policy"),
+        ),
     )
     .expect("single live service");
     assert_eq!(service.runtime_id(), target_runtime_id);
@@ -566,10 +632,11 @@ fn two_authenticated_socket_messages_coalesce_into_one_durable_runtime_frame() {
     }
     assert_eq!(service.ingress_metrics().accepted_batches, 2);
 
-    let report = service
+    let mut report = service
         .process_next(std::time::Duration::from_secs(3))
         .expect("socket to durable reducer")
         .expect("one durable Runtime frame");
+    merge_synced(&mut report, service.sync_committed().expect("commit sync"));
     assert_eq!(report.durable_height, Some(1));
     assert_eq!(
         service
@@ -669,12 +736,15 @@ fn live_service_resends_the_durable_outbox_before_accepting_input() {
     let mut service = ResidentRuntimeService::new(
         processor,
         ingress,
-        Box::new(CanonicalEntityInfraMaterializer::new(json!({
-            "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-            "swapTakerFeeBps": 0,
-            "jurisdictionId": null,
-            "pairPolicies": []
-        }))),
+        Box::new(
+            CanonicalEntityInfraMaterializer::new(json!({
+                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+                "swapTakerFeeBps": 0,
+                "jurisdictionId": null,
+                "pairPolicies": []
+            }))
+            .expect("valid materializer policy"),
+        ),
     )
     .expect("startup resend before ready");
     server.wait_for_rows(1);
@@ -730,8 +800,8 @@ fn restart_stages_inbound_only_outbox_without_blocking_new_input() {
         .durable
         .advance_frame_hash([0; 32], frame_hash)
         .expect("inbound-only lineage");
-    let hub_entity_id = replica.state.entity.entity_id.clone();
-    let hub_signer_id = replica.signer_id.clone();
+    let hub_entity_id = entity_state(&replica).entity.entity_id.clone();
+    let hub_signer_id = entity_key(&replica).signer_id;
     let routes = EntityRouteTable::new([EntityRoute {
         target_entity_id,
         target_runtime_id: user_runtime_id.clone(),
@@ -756,12 +826,15 @@ fn restart_stages_inbound_only_outbox_without_blocking_new_input() {
     let mut service = ResidentRuntimeService::new(
         processor,
         ingress,
-        Box::new(CanonicalEntityInfraMaterializer::new(json!({
-            "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-            "swapTakerFeeBps": 0,
-            "jurisdictionId": null,
-            "pairPolicies": []
-        }))),
+        Box::new(
+            CanonicalEntityInfraMaterializer::new(json!({
+                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+                "swapTakerFeeBps": 0,
+                "jurisdictionId": null,
+                "pairPolicies": []
+            }))
+            .expect("valid materializer policy"),
+        ),
     )
     .expect("restart without dialing the user");
     assert!(!service.processor().has_pending_publication());
@@ -807,7 +880,12 @@ fn restart_stages_inbound_only_outbox_without_blocking_new_input() {
     .expect("user inbound batch");
     let report = service.process_next(std::time::Duration::from_secs(3));
     assert!(!service.processor().has_pending_publication());
-    report.expect("held batch processed or idle after publish");
+    assert!(
+        report
+            .expect("held batch processes after publish")
+            .is_some(),
+        "a pending target must not globally block the already-admitted inbound batch",
+    );
     let reply = user.recv_envelope().expect("hub reply after reconnect");
     assert_eq!(reply["sourceRuntimeHeight"], 1);
     user.close();
@@ -899,15 +977,16 @@ fn cadence_100_is_measured_from_the_first_materialized_runtime_frame() {
             height,
             100_u64.checked_add(height).expect("timestamp"),
         );
-        let report = processor.process(input).expect("durable frame");
+        let mut report = processor.process(input).expect("durable frame");
+        merge_synced(
+            &mut report,
+            processor.sync_committed().expect("commit sync"),
+        );
         assert_eq!(report.durable_height, Some(height));
     }
     assert_eq!(processor.replica().expect("live replica").state.height, 101);
-    let expected_accounts_root = processor
-        .replica()
-        .expect("live replica")
-        .state
-        .accounts_root;
+    let expected_accounts_root =
+        entity_state(processor.replica().expect("live replica")).accounts_root;
     drop(processor);
 
     let mut reopened = NativeRuntimeStore::open(
@@ -992,8 +1071,11 @@ fn an_uncertain_fsync_poison_stops_the_processor_before_publication() {
     // write outcome is now uncertain, so neither the replica nor any output
     // may be exposed and the process must be reopened from durable storage.
     std::fs::rename(&path, &displaced).expect("displace live database directory");
+    processor
+        .process(input)
+        .expect("apply may pipeline ahead of the commit result");
     assert!(matches!(
-        processor.process(input),
+        processor.sync_committed(),
         Err(DurableRuntimeProcessorError::Storage(_))
     ));
     assert!(matches!(
@@ -1103,7 +1185,11 @@ fn replay_validate_only_uses_the_same_durable_route_and_outbox_path() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("replay processor");
-    let report = processor.process(input).expect("durable replay frame");
+    let mut report = processor.process(input).expect("durable replay frame");
+    merge_synced(
+        &mut report,
+        processor.sync_committed().expect("commit sync"),
+    );
     assert_eq!(report.durable_height, Some(1));
     assert_eq!(report.outputs_published, 1);
     assert_eq!(report.envelopes_published, 1);
@@ -1142,7 +1228,8 @@ fn fsync_precedes_real_websocket_and_local_continuation_uses_the_next_context() 
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("processor");
-    let first = processor.process(input).expect("fsync then websocket");
+    let mut first = processor.process(input).expect("fsync then websocket");
+    merge_synced(&mut first, processor.sync_committed().expect("commit sync"));
     assert_eq!(first.durable_height, Some(1));
     assert_eq!(first.outputs_published, 1);
     assert_eq!(
@@ -1157,9 +1244,13 @@ fn fsync_precedes_real_websocket_and_local_continuation_uses_the_next_context() 
     assert_eq!(server.rows().expect("received rows")[0]["height"], 1);
 
     let next_input = no_external_input(processor.replica().expect("replica"), 2, 300);
-    let second = processor
+    let mut second = processor
         .process(next_input)
         .expect("local continuation under fresh context");
+    merge_synced(
+        &mut second,
+        processor.sync_committed().expect("commit sync"),
+    );
     assert_eq!(second.durable_height, Some(2));
     assert_eq!(second.outputs_published, 0);
     assert_eq!(processor.replica().expect("replica").state.height, 2);

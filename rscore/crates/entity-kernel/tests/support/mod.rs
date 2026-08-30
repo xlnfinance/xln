@@ -9,14 +9,47 @@ use xln_rscore_engine::{
     SequentialAccountEngine, Side, SwapMarketPolicy, SwapToken, TokenId, WatchSeed,
 };
 use xln_rscore_entity_kernel::{
-    CommittedAccountTransition, EntityReferral, HubProfile, JurisdictionScope,
-    OrderbookConsensusMetadata, OrderedAccountCommit, SpreadDistribution,
+    CommittedAccountTransition, EntityProfile, EntityReferral, EntityStateSlice, HubProfile,
+    JurisdictionScope, OrderbookConsensusMetadata, OrderedAccountCommit, SpreadDistribution,
 };
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 pub const HUB: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
 pub const MAKER: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 pub const TAKER: &str = "0x3333333333333333333333333333333333333333333333333333333333333333";
 pub const NEXT: &str = "0x4444444444444444444444444444444444444444444444444444444444444444";
+
+pub fn entity_state(timestamp: u64) -> EntityStateSlice {
+    let number = |value: u64| {
+        CanonicalValue::Number(CanonicalNumber::try_from_u64(value).expect("safe fixture number"))
+    };
+    let mut state = EntityStateSlice::empty(HUB, timestamp);
+    state.entity_encryption_public_key = [0x55; 32];
+    state.profile = EntityProfile {
+        name: "entity-kernel-fixture".to_string(),
+        is_hub: true,
+        entity_kind: None,
+        sectors: Vec::new(),
+        avatar: String::new(),
+        bio: String::new(),
+        website: String::new(),
+    };
+    state.hub_rebalance_config = Some(CanonicalValue::Object(vec![
+        (
+            "matchingStrategy".to_string(),
+            CanonicalValue::String("amount".to_string()),
+        ),
+        ("policyVersion".to_string(), number(1)),
+        ("routingFeePPM".to_string(), number(1)),
+        ("baseFee".to_string(), CanonicalValue::BigInt(0.into())),
+        ("swapTakerFeeBps".to_string(), number(1)),
+        (
+            "rebalanceLiquidityFeeBps".to_string(),
+            CanonicalValue::BigInt(1.into()),
+        ),
+    ]));
+    state
+}
 
 pub fn token(value: u32) -> TokenId {
     TokenId::new(value).expect("fixture token")

@@ -19,7 +19,6 @@ import type {
 import type { AssertNever, Covered } from '../../types/hash-coverage/coverage';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import {
   accountInputAck,
@@ -83,12 +82,10 @@ export const ENTITY_STATE_ROOT_FIELDS = [
   'entityProviderActionState',
   'entityEncryptionPublicKey',
   'profile',
-  'htlcRoutes',
-  'htlcFeesEarned',
+  'paybook',
   'outDebtsByToken',
   'inDebtsByToken',
   'orderbookExt',
-  'lockBook',
   'swapTradingPairs',
   'crossJurisdictionSwaps',
   'crossJurisdictionAuthorizations',
@@ -205,7 +202,7 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'currentHeight',
   'pendingFrame',
   'pendingAccountInput',
-  'lastOutboundFrameAck',
+  'lastOutboundAckFrame',
   'rollbackCount',
   'lastRollbackFrameHash',
   'proofHeader',
@@ -257,7 +254,7 @@ const ACCOUNT_LEAF_BODY_FIELDS = [
   'currentFrame',
   'pendingFrame',
   'pendingAccountInput',
-  'lastOutboundFrameAck',
+  'lastOutboundAckFrame',
   'pendingWithdrawals',
   'shadow',
 ] as const satisfies readonly (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number][];
@@ -295,7 +292,7 @@ const ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS = [
   'pendingWithdrawals',
   'shadow',
   'pendingAccountInput',
-  'lastOutboundFrameAck',
+  'lastOutboundAckFrame',
 ] as const;
 
 const ENTITY_ACCOUNT_LEAF_FIELDS = [
@@ -420,7 +417,7 @@ const compactAccountInputBindingMemo = (input: AccountPeerInput): Record<string,
   return binding;
 };
 
-type OutboundAck = NonNullable<AccountReplica['lastOutboundFrameAck']>;
+type OutboundAck = NonNullable<AccountReplica['lastOutboundAckFrame']>;
 const outboundAckMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
 const outboundAckBinding = (ack: OutboundAck): Record<string, unknown> => {
   const key = `${ack.height}|${ack.counterpartyEntityId}|${inputBindingKey(ack.response)}`;
@@ -476,14 +473,14 @@ const projectAccountConsensusState = (account: CoveredAccountReplica, cold = fal
       ? compactAccountInputBinding(account.pendingAccountInput)
       : compactAccountInputBindingMemo(account.pendingAccountInput);
   }
-  if (account.lastOutboundFrameAck) {
-    projected['lastOutboundFrameAck'] = cold
+  if (account.lastOutboundAckFrame) {
+    projected['lastOutboundAckFrame'] = cold
       ? {
-          height: account.lastOutboundFrameAck.height,
-          counterpartyEntityId: account.lastOutboundFrameAck.counterpartyEntityId.toLowerCase(),
-          response: compactAccountInputBinding(account.lastOutboundFrameAck.response),
+          height: account.lastOutboundAckFrame.height,
+          counterpartyEntityId: account.lastOutboundAckFrame.counterpartyEntityId.toLowerCase(),
+          response: compactAccountInputBinding(account.lastOutboundAckFrame.response),
         }
-      : outboundAckBinding(account.lastOutboundFrameAck);
+      : outboundAckBinding(account.lastOutboundAckFrame);
   }
   return projected;
 };
@@ -599,9 +596,10 @@ const projectEntityConsensusState = (
   const projected = Object.fromEntries(
     ENTITY_STATE_ROOT_FIELDS
       .filter((field) => ![
-        'htlcRoutes',
-        'lockBook',
+        'paybook',
         'crontabState',
+        'deferredAccountProposals',
+        'settlementContinuations',
         'crossJurisdictionSwaps',
         'crossJurisdictionAuthorizations',
         'pendingCrossJurisdictionFillAcks',
@@ -623,8 +621,13 @@ const projectEntityConsensusState = (
           ]),
         )
       : state.accounts,
-    htlcRoutes: timePerfPhase('entity.proj.htlcRoutes', () => entityCollectionCommitment(state.htlcRoutes, cold)),
-    lockBook: timePerfPhase('entity.proj.lockBook', () => entityCollectionCommitment(state.lockBook, cold)),
+    paybook: {
+      entries: timePerfPhase(
+        'entity.proj.paybook',
+        () => entityCollectionCommitment(state.paybook.entries, cold),
+      ),
+      feesEarned: state.paybook.feesEarned,
+    },
     ...(crontabState
       ? {
           crontabState: {
@@ -632,6 +635,12 @@ const projectEntityConsensusState = (
             hooks: timePerfPhase('entity.proj.hooks', () => entityCollectionCommitment(crontabState.hooks, cold)),
           },
         }
+      : {}),
+    ...(state.deferredAccountProposals
+      ? { deferredAccountProposals: entityCollectionCommitment(state.deferredAccountProposals, cold) }
+      : {}),
+    ...(state.settlementContinuations
+      ? { settlementContinuations: entityCollectionCommitment(state.settlementContinuations, cold) }
       : {}),
     ...(state.crossJurisdictionSwaps
       ? { crossJurisdictionSwaps: entityCollectionCommitment(state.crossJurisdictionSwaps, cold) }
@@ -649,8 +658,8 @@ const projectEntityConsensusState = (
   };
 };
 
-export const encodeCanonicalEntityConsensusState = (state: EntityState): string =>
-  encodeCanonicalConsensusValue({
+export const encodeCanonicalEntityConsensusState = (state: EntityState): Uint8Array =>
+  encodeCanonicalConsensusBytes({
     domain: 'xln.entity.consensus-state',
     state: projectEntityConsensusState(state),
   });
@@ -803,14 +812,14 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
   const topLevelBytes = Object.entries(profileProjected)
     .map(([field, value]) => ({
       field,
-      bytes: encodeCanonicalConsensusValue(value).length,
+      bytes: encodeCanonicalConsensusBytes(value).byteLength,
     }))
     .sort((left, right) => right.bytes - left.bytes)
     .slice(0, 8);
   const accountBytes = Array.from((profileProjected['accounts'] as Map<string, unknown>).entries())
     .map(([counterpartyId, value]) => ({
       counterparty: counterpartyId.slice(-8),
-      bytes: encodeCanonicalConsensusValue(value).length,
+      bytes: encodeCanonicalConsensusBytes(value).byteLength,
       value,
     }))
     .sort((left, right) => right.bytes - left.bytes);
@@ -820,7 +829,7 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
       ? Object.entries(largestAccount.value as Record<string, unknown>)
           .map(([field, value]) => ({
             field,
-            bytes: encodeCanonicalConsensusValue(value).length,
+            bytes: encodeCanonicalConsensusBytes(value).byteLength,
           }))
           .sort((left, right) => right.bytes - left.bytes)
           .slice(0, 10)

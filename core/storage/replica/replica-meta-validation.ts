@@ -15,7 +15,6 @@ const STORAGE_REPLICA_META_KEYS = new Set<string>([
   'entityId',
   'signerId',
   'isProposer',
-  'htlcNotes',
   'position',
   'certifiedFrameHead',
   'hankoWitness',

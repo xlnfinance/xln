@@ -153,6 +153,37 @@ test('a full gossip response rewinds the relay-session cursor before continuing 
   expect(incrementalRequests).toBe(1);
 });
 
+test('seed readiness refreshes again when a profile announces after the first cursor drain', async () => {
+  const p2p = new RuntimeP2P({
+    env: createEmptyEnv('gossip-late-profile'),
+    runtimeId: `0x${'12'.repeat(20)}`,
+    onEntityInputs: () => {},
+    onGossipProfiles: () => {},
+  });
+  let found = false;
+  let requests = 0;
+  let waits = 0;
+  const internals = p2p as unknown as {
+    getActiveClient: () => object;
+    hasProfileForEntity: () => boolean;
+    requestSeedGossip: (mode: 'incremental' | 'full') => void;
+    waitForActiveDelay: () => Promise<boolean>;
+  };
+  internals.getActiveClient = () => ({});
+  internals.hasProfileForEntity = () => found;
+  internals.requestSeedGossip = mode => {
+    if (mode === 'incremental') requests += 1;
+  };
+  internals.waitForActiveDelay = async () => {
+    waits += 1;
+    if (waits === 2) found = true;
+    return true;
+  };
+
+  await expect(p2p.refreshSeedProfilesAndWait([ALICE], 1_000)).resolves.toBe(true);
+  expect(requests).toBe(2);
+});
+
 test('explicit gossip lookup never advances the directory cursor', async () => {
   const { createRelayStore, getProfileBatchPage, storeVerifiedGossipProfile } = await import('../../../network/relay/store');
   const store = createRelayStore('0x' + '1'.repeat(40));

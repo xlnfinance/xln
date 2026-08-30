@@ -57,7 +57,7 @@ type PendingAccountSample = Readonly<{
   height: number;
   pendingFrameHash: string;
   pendingFrameTxCount: number;
-  pendingInputKind: 'frame' | 'frame_ack';
+  pendingInputKind: 'frame' | 'ack_frame';
   pendingAckHeight: number | null;
   pendingProposalHeight: number;
   lastOutboundAckHeight: number | null;
@@ -180,7 +180,7 @@ const pendingAccountFrameSnapshot = (
           pendingInputKind: pendingInput.kind,
           pendingAckHeight: pendingAck ? pendingAck.height : null,
           pendingProposalHeight: pendingProposal.frame.height,
-          lastOutboundAckHeight: account.lastOutboundFrameAck?.height ?? null,
+          lastOutboundAckHeight: account.lastOutboundAckFrame?.height ?? null,
           rollbackCount: account.rollbackCount,
           lastRollbackFrameHash: account.lastRollbackFrameHash ?? null,
           mempoolCount: account.mempool.length,
@@ -386,7 +386,7 @@ const decodePendingAccountSample = (value: unknown): SettlementEvidenceResponse[
       throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ROLLBACK_HASH_INVALID:${index}`);
     }
     const pendingInputKind = entry['pendingInputKind'];
-    if (pendingInputKind !== 'frame' && pendingInputKind !== 'frame_ack') {
+    if (pendingInputKind !== 'frame' && pendingInputKind !== 'ack_frame') {
       throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_INPUT_KIND_INVALID:${index}`);
     }
     if (typeof entry['localIsLeft'] !== 'boolean') {

@@ -11,7 +11,8 @@ use super::{SharedIngress, session_failed};
 // Admission is CPU-heavy (ECDSA verification/signing plus X25519), while the
 // socket reactors own already-authenticated peers. Keep enough bounded workers
 // to admit a 5k peer burst without changing authentication or session ordering.
-const HANDSHAKE_WORKERS: usize = 16;
+const MIN_HANDSHAKE_WORKERS: usize = 16;
+const MAX_HANDSHAKE_WORKERS: usize = 64;
 const SOCKET_REACTORS: usize = 8;
 const HANDSHAKE_QUEUE: usize = 8_192;
 
@@ -115,7 +116,11 @@ fn start_handshake_workers(
     receiver: Arc<Mutex<Receiver<HandshakeJob>>>,
     reactors: Vec<ReactorIngress>,
 ) -> Vec<JoinHandle<()>> {
-    (0..HANDSHAKE_WORKERS)
+    let worker_count = thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(MIN_HANDSHAKE_WORKERS)
+        .clamp(MIN_HANDSHAKE_WORKERS, MAX_HANDSHAKE_WORKERS);
+    (0..worker_count)
         .filter_map(|index| {
             let worker_shared = Arc::clone(&shared);
             let worker_receiver = Arc::clone(&receiver);

@@ -56,7 +56,7 @@ const hubCore = (routes: ReadonlyMap<string, unknown>) => ({
   entityId: entity('9'), entityEncryptionPublicKey: '0x01',
   height: 4, timestamp: 5, profile: {}, config: {}, nonces: new Map(),
   proposals: new Map(), reserves: new Map(), lastFinalizedJHeight: 0,
-  htlcRoutes: new Map(), htlcFeesEarned: 0n, lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   crossJurisdictionSwaps: routes,
 });
 
@@ -144,7 +144,7 @@ describe('production cross-j swap load boundaries', () => {
       hubWalBytesBefore: 10, hubWalBytesAfter: 20, loadWalBytesBefore: 30, loadWalBytesAfter: 40,
       hubDurableBefore: frame, hubDurableAfter: frame, loadDurableBefore: frame, loadDurableAfter: frame,
       environment: {
-        disputeHankos: 'always', certifiedHistory: true, hubWalSync: true, lanePersistence: true, laneWalSync: true,
+        disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
         laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
       },
     };

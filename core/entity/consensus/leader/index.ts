@@ -1,5 +1,8 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
-import { ethers } from 'ethers';
+import {
+  canonicalConsensusValuesEqual,
+  encodeCanonicalConsensusBytes,
+} from '../../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
 
 import type { ConsensusConfig, EntityLeaderState, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityLeaderTimeoutVoteBody, EntityReplica, EntityState, EntityFrame } from '../../types';
 import { isFrozenBaseJPrefixRollAuthorized } from '../../../jurisdiction/machine/history/j-prefix-consensus';
@@ -123,24 +126,18 @@ export const buildPreparedFrameEvidence = (frame: EntityFrame | undefined): Enti
 export const hashEntityLeaderVoteBody = (
   body: EntityLeaderTimeoutVoteBody & { preparedFrame?: EntityFrame },
 ): string =>
-  ethers.keccak256(
-    ethers.toUtf8Bytes(
-      encodeCanonicalConsensusValue({
-        domain: 'xln.entity.leader-timeout.v1',
-        ...leaderVoteFields(body),
-        preparedFrame: buildPreparedFrameEvidence(body.preparedFrame) ?? null,
-      }),
-    ),
-  );
+  keccakBytesHash(encodeCanonicalConsensusBytes({
+    domain: 'xln.entity.leader-timeout.v1',
+    ...leaderVoteFields(body),
+    preparedFrame: buildPreparedFrameEvidence(body.preparedFrame) ?? null,
+  }));
 
 export const assertEntityLeaderVoteMatchesState = (
   state: EntityLeaderStateView,
   vote: EntityLeaderTimeoutVoteBody,
 ): void => {
   const expected = buildEntityLeaderVoteBody(state);
-  const receivedBody = encodeCanonicalConsensusValue(leaderVoteFields(vote));
-  const expectedBody = encodeCanonicalConsensusValue(expected);
-  if (receivedBody !== expectedBody) {
+  if (!canonicalConsensusValuesEqual(leaderVoteFields(vote), expected)) {
     throw new Error(`ENTITY_LEADER_VOTE_STALE_OR_INVALID: expected=${serializeTaggedJson(expected)}`);
   }
 };

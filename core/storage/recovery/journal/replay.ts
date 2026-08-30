@@ -2,14 +2,7 @@ import { assertCertifiedRegistrationEvidenceStore } from '../../../jurisdiction/
 import { safeStringify } from '../../../protocol/serialization';
 import { writeRuntimeMetadata } from '../../../runtime/loop/loop-environment.ts';
 import type { RuntimeReplica } from '../../../runtime/types';
-import {
-  listStorageSnapshotHeights,
-  readHistoryViewRuntimeActivity,
-  readStorageFrameRecord,
-  reconcileHistoryViews,
-  resolveStorageRuntimeConfig,
-  type RuntimeFrame,
-} from '../..';
+import { type RuntimeFrame } from '../..';
 import { computeCanonicalEntityHashesFromEnv } from '../../canonical-hash';
 import type { PersistedStorageReadApi } from '../../read/persisted-read';
 import { buildRecoveryJournalFromStorageFrame } from '../../queries';
@@ -135,37 +128,14 @@ const assertReplayedFrameMatches = (
   );
 };
 
-const restoreActivityViews = async (
+const restoreReplayOverlay = async (
   reads: PersistedStorageReadApi,
   env: RuntimeReplica,
   targetHeight: number,
 ): Promise<void> => {
-  // Activity is a rebuildable read model. This restores only the committed
-  // storage overlay; callers query activity from the history-view database.
+  // The dirty overlay is derived from replayed Runtime inputs. There is no
+  // separately persisted activity or frame-history sidecar.
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
-};
-
-const reconcileMaterializedHistory = async (
-  deps: RuntimeStorageApiDeps,
-  env: RuntimeReplica,
-  latestHeight: number,
-): Promise<void> => {
-  if (!(await deps.tryOpenRuntimeWalDb(env))) {
-    throw new Error(`HISTORY_VIEW_WAL_DB_OPEN_FAILED:height=${latestHeight}`);
-  }
-  if (!(await deps.tryOpenHistoryViewDb(env))) {
-    throw new Error(`HISTORY_VIEW_DB_OPEN_FAILED:height=${latestHeight}`);
-  }
-  const walDb = deps.getRuntimeWalDb(env);
-  const snapshots = await listStorageSnapshotHeights(walDb);
-  await reconcileHistoryViews({
-    viewDb: deps.getHistoryViewDb(env),
-    firstWalHeight: snapshots[0] ?? 1,
-    latestWalHeight: latestHeight,
-    readWalFrame: height => readStorageFrameRecord(walDb, height),
-    readWalActivity: height => readHistoryViewRuntimeActivity(walDb, height),
-    config: resolveStorageRuntimeConfig(env),
-  });
 };
 
 const checkpointRefMatches = (
@@ -220,7 +190,7 @@ const finalizeReplay = async (
   frame: RuntimeFrame,
 ): Promise<void> => {
   assertReplayedFrameMatches(restored.env, frame);
-  await restoreActivityViews(
+  await restoreReplayOverlay(
     reads,
     restored.env,
     target.targetHeight,
@@ -318,9 +288,6 @@ export const createRuntimeReplayLoader = (
       target,
       targetFrame,
     );
-    if (target.targetHeight === target.latestHeight && !options.readOnly) {
-      await reconcileMaterializedHistory(deps, restored.env, target.latestHeight);
-    }
     restored.latestHeight = target.latestHeight;
     restored.checkpointHeight = target.selectedCheckpointHeight;
     restored.selectedSnapshotHeight = target.selectedSnapshotHeight;

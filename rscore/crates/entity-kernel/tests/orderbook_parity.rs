@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use num_bigint::BigInt;
 use support::{
     HUB, MAKER, NEXT, TAKER, account, apply_account, assert_owned_sections, commit, digest_bytes,
-    fixture, fixture_text, fixture_u64, orderbook_metadata, tx_digest,
+    entity_state, fixture, fixture_text, fixture_u64, orderbook_metadata, tx_digest,
 };
 use xln_rscore_engine::{AccountOutput, AccountReplica, AccountTx, Side};
 use xln_rscore_entity_kernel::{
@@ -151,6 +151,7 @@ fn offer_tx_at(offer_id: &str, ask: bool, units: u32, price_ticks: u64) -> Accou
         min_net_receive,
         time_in_force: Some(0),
         price_ticks: Some(BigInt::from(price_ticks)),
+        cross_jurisdiction: None,
     }
 }
 
@@ -190,8 +191,8 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
     let (maker_account, maker_outputs) = offered_account(MAKER, &ask, 1);
     let (taker_account, taker_outputs) = offered_account(TAKER, &bid, 2);
 
-    let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string(), TAKER.to_string()]);
+    let mut state = entity_state(2_000);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), TAKER.to_string()]).into();
     state.orderbook = Some(OrderbookState::empty(10_000));
     state.orderbook_metadata = Some(orderbook_metadata());
     let first = apply_entity_kernel(
@@ -348,7 +349,7 @@ fn same_j_partial_fill_rests_exact_remainder_after_committed_resolve() {
     let (taker_account, taker_outputs) = offered_account(TAKER, &bid, 2);
 
     let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string(), TAKER.to_string()]);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), TAKER.to_string()]).into();
     state.orderbook = Some(OrderbookState::empty(10_000));
     let matched = apply_entity_kernel(
         state,
@@ -462,7 +463,8 @@ fn same_j_hlt_sweep_matches_two_price_levels_with_weighted_taker_resolution() {
     let (taker_account, taker_outputs) = offered_account(TAKER, &bid, 3);
 
     let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string(), TAKER.to_string()]);
+    state.known_accounts =
+        BTreeSet::from([MAKER.to_string(), NEXT.to_string(), TAKER.to_string()]).into();
     state.orderbook = Some(OrderbookState::empty(10_000));
     let matched = apply_entity_kernel(
         state,
@@ -569,7 +571,7 @@ fn same_j_cancel_request_is_resolved_then_removed() {
     let ask = offer_tx("cancel-me", true);
     let (offered, offer_outputs) = offered_account(MAKER, &ask, 1);
     let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string()]);
+    state.known_accounts = BTreeSet::from([MAKER.to_string()]).into();
     state.orderbook = Some(OrderbookState::empty(10_000));
     let resting = apply_entity_kernel(
         state,

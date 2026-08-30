@@ -1,13 +1,21 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound::{Excluded, Unbounded};
 
 use num_bigint::BigInt;
 use xln_rscore_engine::AccountTx;
 
 use crate::types::TargetedAccountTx;
-use crate::{DeterministicContext, EntityKernelError};
+use crate::{DeterministicContext, EntityKernelError, LocalEntityOutput};
 
-use super::book::{AddOrder, BookEvent, MakerDisposition, apply_gtc, cancel_order, resume_crossed};
-use super::math::{canonical_pair, exact_quote_lot_multiple, lot_scale, pair_dimensions, side_for};
+use super::book::{
+    AddOrder, BookEvent, MakerDisposition, apply_gtc, apply_gtc_with_execution_price, cancel_order,
+    resume_crossed,
+};
+use super::math::{
+    base_amount_from_lots, canonical_pair, exact_quote_lot_multiple, lot_scale, pair_dimensions,
+    quote_amount_from_weighted_lots, side_for,
+};
 use super::resolve::{ResolvePlan, build_resolve_plans};
 use super::{
     BookOrder, BookState, OrderbookState, PairDimensions, PairPolicy, SameJOffer, Side,
@@ -30,16 +38,17 @@ pub(crate) enum SameJOutputDelta {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct OrderbookEffects {
     pub account_txs: Vec<TargetedAccountTx>,
+    pub routed_entity_outputs: Vec<LocalEntityOutput>,
+    pub cross_jurisdiction_fills: Vec<crate::cross_j::CrossJurisdictionBookFill>,
     pub matched_swaps: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MaterializedOffer {
     account_id: String,
-    offer: SameJOffer,
     pair_id: String,
     dimensions: PairDimensions,
     side: Side,
@@ -79,6 +88,31 @@ fn materialize(
     {
         return Err(EntityKernelError::UnsupportedTimeInForce { value: tif });
     }
+    if let Some(route) = &offer.cross_jurisdiction {
+        let market = crate::cross_j::cross_jurisdiction_market(route)?;
+        let scale = lot_scale(market.dimensions.base_token_decimals);
+        let qty_lots = &market.base_amount / &scale;
+        if qty_lots <= BigInt::from(0) {
+            return Err(EntityKernelError::SwapRejected {
+                code: "cross-dust-remainder",
+            });
+        }
+        let exact = exact_quote_lot_multiple(market.dimensions, &market.price_ticks)?;
+        if &qty_lots % exact != BigInt::from(0) {
+            return Err(EntityKernelError::SwapRejected {
+                code: "cross-quote-lot-misaligned",
+            });
+        }
+        return Ok(MaterializedOffer {
+            account_id: account_id.to_string(),
+            pair_id: market.pair_id,
+            dimensions: market.dimensions,
+            side: market.side,
+            qty_lots,
+            owner_id: market.maker_id,
+            order_id: order_id(account_id, &offer.offer_id)?,
+        });
+    }
     let (_, _, pair_id) = canonical_pair(offer.give_token_id, offer.want_token_id);
     let side = side_for(offer.give_token_id, offer.want_token_id);
     let dimensions = pair_dimensions(side, offer.give_token_decimals, offer.want_token_decimals);
@@ -111,7 +145,6 @@ fn materialize(
     }
     Ok(MaterializedOffer {
         account_id: account_id.to_string(),
-        offer: offer.clone(),
         pair_id,
         dimensions,
         side,
@@ -232,6 +265,19 @@ fn remove_committed(
     Ok(())
 }
 
+/// Remove one Account-owned resting row during dispute preparation through the
+/// same book/index mutation used by normal Account output reconciliation.
+pub(crate) fn remove_account_offer_for_dispute(
+    state: &mut OrderbookState,
+    account_id: &str,
+    offer_id: &str,
+) -> Result<bool, EntityKernelError> {
+    let key = order_id(account_id, offer_id)?;
+    let existed = state.pair_by_order.contains_key(&key);
+    remove_committed(state, account_id, offer_id)?;
+    Ok(existed)
+}
+
 fn is_local_maker(offer: &SameJOffer, entity_id: &str) -> bool {
     let maker = if offer.maker_is_left {
         &offer.left_entity
@@ -323,23 +369,40 @@ fn same_snapshot(state: &OrderbookState, account_id: &str, offer: &SameJOffer) -
         == Some(offer)
 }
 
-fn sorted_upserts(deltas: &[SameJOutputDelta], entity_id: &str) -> Vec<(String, SameJOffer)> {
-    let mut offers: Vec<_> = deltas
-        .iter()
-        .filter_map(|delta| match delta {
-            SameJOutputDelta::Upsert { account_id, offer } => (!is_local_maker(offer, entity_id))
-                .then(|| (account_id.clone(), offer.as_ref().clone())),
-            _ => None,
-        })
-        .collect();
+fn sorted_upserts<'a>(
+    deltas: &'a [SameJOutputDelta],
+    entity_id: &str,
+) -> Result<Vec<(&'a str, &'a SameJOffer)>, EntityKernelError> {
+    let mut offers = Vec::new();
+    for delta in deltas {
+        if let SameJOutputDelta::Upsert { account_id, offer } = delta {
+            let include = if let Some(route) = &offer.cross_jurisdiction {
+                crate::cross_j::cross_jurisdiction_market(route)?.book_owner == entity_id
+            } else {
+                !is_local_maker(offer, entity_id)
+            };
+            if include {
+                offers.push((account_id.as_str(), offer.as_ref()));
+            }
+        }
+    }
     offers.sort_by(|left, right| {
-        left.1
-            .created_height
-            .cmp(&right.1.created_height)
-            .then_with(|| left.0.cmp(&right.0))
-            .then_with(|| left.1.offer_id.cmp(&right.1.offer_id))
+        // TS processes admitted cross-j routes before same-J Account offers
+        // against the same shared book collection.
+        right
+            .1
+            .cross_jurisdiction
+            .is_some()
+            .cmp(&left.1.cross_jurisdiction.is_some())
+            .then_with(|| {
+                left.1
+                    .created_height
+                    .cmp(&right.1.created_height)
+                    .then_with(|| left.0.cmp(right.0))
+                    .then_with(|| left.1.offer_id.cmp(&right.1.offer_id))
+            })
     });
-    offers
+    Ok(offers)
 }
 
 fn classify_maker(
@@ -360,7 +423,7 @@ fn classify_maker(
     }
     let canonical = materialize(&account_id, offer, &BigInt::from(0))?;
     if canonical.side != order.side
-        || canonical.offer.price_ticks != order.price_ticks
+        || offer.price_ticks != order.price_ticks
         || canonical.owner_id != order.owner_id
         || canonical.qty_lots != order.qty_lots
     {
@@ -410,6 +473,31 @@ fn band_anchor(book: &BookState, policy: &PairPolicy, has_explicit_policy: bool)
     }
 }
 
+fn out_of_band_order_ids(book: &BookState, min: &BigInt, max: &BigInt) -> Vec<String> {
+    let mut ids = Vec::new();
+    ids.extend(
+        book.bids
+            .range(..(Reverse(max.clone()), 0))
+            .map(|(_, order_id)| order_id.clone()),
+    );
+    ids.extend(
+        book.bids
+            .range((Excluded((Reverse(min.clone()), u64::MAX)), Unbounded))
+            .map(|(_, order_id)| order_id.clone()),
+    );
+    ids.extend(
+        book.asks
+            .range(..(min.clone(), 0))
+            .map(|(_, order_id)| order_id.clone()),
+    );
+    ids.extend(
+        book.asks
+            .range((Excluded((max.clone(), u64::MAX)), Unbounded))
+            .map(|(_, order_id)| order_id.clone()),
+    );
+    ids
+}
+
 fn sweep_pair(
     state: &mut OrderbookState,
     pair_id: &str,
@@ -424,12 +512,18 @@ fn sweep_pair(
         return Ok(());
     };
     let (min, max) = band_bounds(&anchor);
-    let candidates: Vec<_> = book
-        .orders
-        .values()
-        .filter(|order| order.price_ticks < min || order.price_ticks > max)
-        .cloned()
-        .collect();
+    // `orders.values().filter(...)` was O(all open orders) once per pair per
+    // Entity frame. The price indices already contain the exact two disjoint
+    // ranges, so a no-op sweep is now O(log n), and work is O(outliers).
+    let candidates = out_of_band_order_ids(book, &min, &max)
+        .into_iter()
+        .map(|order_id| {
+            book.orders
+                .get(&order_id)
+                .cloned()
+                .ok_or_else(|| EntityKernelError::orderbook("BOOK_ORDER_INDEX_MISSING"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     for order in candidates {
         let disposition = classify_maker(&state.offers, &state.resolving_offers, &order)?;
         if disposition == MakerDisposition::Suspended {
@@ -469,6 +563,85 @@ fn queue_plans(
     Ok(())
 }
 
+fn process_cross_jurisdiction_events(
+    state: &mut OrderbookState,
+    effects: &mut OrderbookEffects,
+    events: &[BookEvent],
+) -> Result<(), EntityKernelError> {
+    let mut aggregates: BTreeMap<String, (BigInt, BigInt)> = BTreeMap::new();
+    for event in events {
+        let BookEvent::Trade {
+            price,
+            qty,
+            maker_order_id,
+            taker_order_id,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        for order_id in [maker_order_id, taker_order_id] {
+            let entry = aggregates
+                .entry(order_id.clone())
+                .or_insert_with(|| (BigInt::from(0), BigInt::from(0)));
+            entry.0 += qty;
+            entry.1 += price * qty;
+        }
+    }
+    let mut net_by_asset: BTreeMap<String, BigInt> = BTreeMap::new();
+    for (order_id, (filled_lots, weighted_cost)) in aggregates {
+        let (account_id, offer_id) = split_order_id(&order_id)?;
+        let key = (account_id.clone(), offer_id.clone());
+        let offer = state
+            .offers
+            .get(&key)
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_CROSS_J_FILL_META_MISSING"))?;
+        let route = offer
+            .cross_jurisdiction
+            .as_ref()
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_CROSS_J_FILL_META_MISSING"))?;
+        let market = crate::cross_j::cross_jurisdiction_market(route)?;
+        let execution_base =
+            base_amount_from_lots(market.dimensions.base_token_decimals, &filled_lots);
+        let execution_quote = quote_amount_from_weighted_lots(market.dimensions, &weighted_cost);
+        let (execution_source, execution_target) = if market.side == Side::Ask {
+            (execution_base, execution_quote)
+        } else {
+            (execution_quote, execution_base)
+        };
+        *net_by_asset
+            .entry(market.source_asset_key)
+            .or_insert_with(|| BigInt::from(0)) -= &execution_source;
+        *net_by_asset
+            .entry(market.target_asset_key)
+            .or_insert_with(|| BigInt::from(0)) += &execution_target;
+        effects
+            .cross_jurisdiction_fills
+            .push(crate::cross_j::build_cross_jurisdiction_book_fill(
+                account_id,
+                offer_id,
+                route.clone(),
+                execution_source,
+                execution_target,
+                market.price_ticks,
+                market.pair_id,
+            )?);
+        state.resolving_offers.insert(key);
+    }
+    let mismatches = net_by_asset
+        .into_iter()
+        .filter(|(_, value)| value != &BigInt::from(0))
+        .map(|(asset, value)| format!("{asset}={value}"))
+        .collect::<Vec<_>>();
+    if !mismatches.is_empty() {
+        return Err(EntityKernelError::orderbook(format!(
+            "CROSS_J_TRADE_CONSERVATION_FAILED:{}",
+            mismatches.join(",")
+        )));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_events(
     state: &mut OrderbookState,
@@ -477,7 +650,7 @@ fn process_events(
     current_order_id: &str,
     current_offer: &SameJOffer,
     events: &[BookEvent],
-    batch: &BTreeMap<String, SameJOffer>,
+    batch: &BTreeMap<String, &SameJOffer>,
     taker_fee_bps: u16,
 ) -> Result<(), EntityKernelError> {
     let trades = events
@@ -512,10 +685,19 @@ fn process_events(
             state,
             effects,
             &materialized.account_id,
-            &materialized.offer.offer_id,
+            &current_offer.offer_id,
             comment,
         );
         return Ok(());
+    }
+    if current_offer.cross_jurisdiction.is_some() {
+        let trades = u64::try_from(trades)
+            .map_err(|_| EntityKernelError::orderbook("ORDERBOOK_MATCH_COUNT_ENCODING"))?;
+        effects.matched_swaps = effects
+            .matched_swaps
+            .checked_add(trades)
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_MATCH_COUNT_OVERFLOW"))?;
+        return process_cross_jurisdiction_events(state, effects, events);
     }
     let book = state
         .books
@@ -540,42 +722,46 @@ fn process_events(
     queue_plans(state, effects, plans)
 }
 
-fn identical_order(book: &BookState, offer: &MaterializedOffer) -> Result<bool, EntityKernelError> {
-    let Some(existing) = book.orders.get(&offer.order_id) else {
+fn identical_order(
+    book: &BookState,
+    materialized: &MaterializedOffer,
+    offer: &SameJOffer,
+) -> Result<bool, EntityKernelError> {
+    let Some(existing) = book.orders.get(&materialized.order_id) else {
         return Ok(false);
     };
-    if existing.owner_id != offer.owner_id
-        || existing.side != offer.side
-        || existing.qty_lots != offer.qty_lots
-        || existing.price_ticks != offer.offer.price_ticks
+    if existing.owner_id != materialized.owner_id
+        || existing.side != materialized.side
+        || existing.qty_lots != materialized.qty_lots
+        || existing.price_ticks != offer.price_ticks
     {
         return Err(EntityKernelError::orderbook("ORDERBOOK_CACHE_MISMATCH"));
     }
     Ok(true)
 }
 
-fn process_one_offer(
+fn process_one_offer<'a>(
     state: &mut OrderbookState,
     effects: &mut OrderbookEffects,
-    account_id: String,
-    offer: SameJOffer,
+    account_id: &str,
+    offer: &'a SameJOffer,
     context: &DeterministicContext,
     swept: &mut BTreeSet<String>,
-    batch: &mut BTreeMap<String, SameJOffer>,
+    batch: &mut BTreeMap<String, &'a SameJOffer>,
 ) -> Result<(), EntityKernelError> {
     if state
         .resolving_offers
-        .contains(&(account_id.clone(), offer.offer_id.clone()))
+        .contains(&(account_id.to_string(), offer.offer_id.clone()))
     {
         return Ok(());
     }
-    let materialized = match materialize(&account_id, &offer, &context.minimum_trade_size) {
+    let materialized = match materialize(account_id, offer, &context.minimum_trade_size) {
         Ok(value) => value,
         Err(EntityKernelError::SwapRejected { code }) => {
             queue_cancel(
                 state,
                 effects,
-                &account_id,
+                account_id,
                 &offer.offer_id,
                 code.to_string(),
             );
@@ -599,7 +785,7 @@ fn process_one_offer(
         queue_cancel(
             state,
             effects,
-            &account_id,
+            account_id,
             &offer.offer_id,
             "pair-decimals-mismatch".to_string(),
         );
@@ -625,7 +811,7 @@ fn process_one_offer(
             queue_cancel(
                 state,
                 effects,
-                &account_id,
+                account_id,
                 &offer.offer_id,
                 format!("outside-anchor-band:{}", offer.price_ticks),
             );
@@ -645,31 +831,54 @@ fn process_one_offer(
             BookState::empty(state.max_orders_per_pair, policy.book_bucket_width_ticks),
         );
     }
-    batch.insert(materialized.order_id.clone(), offer.clone());
-    let is_identical = identical_order(require_book(state, &materialized.pair_id)?, &materialized)?;
+    batch.insert(materialized.order_id.clone(), offer);
+    let is_identical = identical_order(
+        require_book(state, &materialized.pair_id)?,
+        &materialized,
+        offer,
+    )?;
     let offers = &state.offers;
     let resolving = &state.resolving_offers;
     let book = state
         .books
         .get_mut(&materialized.pair_id)
         .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_INTERNAL_BOOK_MISSING"))?;
-    let events_and_taker = if is_identical {
+    let is_cross_jurisdiction = offer.cross_jurisdiction.is_some();
+    let events_and_taker = if is_identical && is_cross_jurisdiction {
+        None
+    } else if is_identical {
         resume_crossed(book, materialized.dimensions, |maker| {
             classify_maker(offers, resolving, maker)
         })?
     } else {
-        let events = apply_gtc(
-            book,
-            AddOrder {
-                order_id: materialized.order_id.clone(),
-                owner_id: materialized.owner_id.clone(),
-                side: materialized.side,
-                price_ticks: offer.price_ticks.clone(),
-                qty_lots: materialized.qty_lots.clone(),
-            },
-            materialized.dimensions,
-            |maker| classify_maker(offers, resolving, maker),
-        )?;
+        let input = AddOrder {
+            order_id: materialized.order_id.clone(),
+            owner_id: materialized.owner_id.clone(),
+            side: materialized.side,
+            price_ticks: offer.price_ticks.clone(),
+            qty_lots: materialized.qty_lots.clone(),
+        };
+        let events = if is_cross_jurisdiction {
+            apply_gtc_with_execution_price(
+                book,
+                input,
+                materialized.dimensions,
+                |maker| classify_maker(offers, resolving, maker),
+                |maker, taker| {
+                    // Source savings: execution is always at the ask, never
+                    // generic maker price when a bid rests first.
+                    if taker.side == Side::Ask {
+                        taker.price_ticks.clone()
+                    } else {
+                        maker.price_ticks.clone()
+                    }
+                },
+            )?
+        } else {
+            apply_gtc(book, input, materialized.dimensions, |maker| {
+                classify_maker(offers, resolving, maker)
+            })?
+        };
         Some((materialized.order_id.clone(), events))
     };
     if let Some((taker_order_id, events)) = events_and_taker {
@@ -708,8 +917,8 @@ pub(crate) fn apply_orderbook_outputs(
     apply_cancel_requests(state, deltas, &mut effects)?;
     let mut swept = BTreeSet::new();
     let mut batch = BTreeMap::new();
-    for (account_id, offer) in sorted_upserts(deltas, entity_id) {
-        if !same_snapshot(state, &account_id, &offer) {
+    for (account_id, offer) in sorted_upserts(deltas, entity_id)? {
+        if !same_snapshot(state, account_id, offer) {
             continue;
         }
         process_one_offer(
@@ -740,6 +949,40 @@ mod tests {
             page_sequence: 0,
             page_slot: 0,
         }
+    }
+
+    fn index_price(book: &mut BookState, side: Side, price: u32, seq: u64, id: &str) {
+        match side {
+            Side::Bid => {
+                book.bids
+                    .insert((Reverse(BigInt::from(price)), seq), id.to_string());
+            }
+            Side::Ask => {
+                book.asks.insert((BigInt::from(price), seq), id.to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn band_sweep_uses_only_strict_outlier_price_ranges() {
+        let mut book = BookState::empty(20_000, 100);
+        for side in [Side::Bid, Side::Ask] {
+            index_price(&mut book, side, 9, 1, &format!("{side:?}-low"));
+            index_price(&mut book, side, 10, 2, &format!("{side:?}-min"));
+            index_price(&mut book, side, 15, 3, &format!("{side:?}-mid"));
+            index_price(&mut book, side, 20, 4, &format!("{side:?}-max"));
+            index_price(&mut book, side, 21, 5, &format!("{side:?}-high"));
+        }
+        let actual = out_of_band_order_ids(&book, &BigInt::from(10), &BigInt::from(20))
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual,
+            ["Ask-high", "Ask-low", "Bid-high", "Bid-low"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        );
     }
 
     #[test]
@@ -821,6 +1064,7 @@ mod tests {
             created_height: 1,
             quantized_give: give,
             quantized_want: want,
+            cross_jurisdiction: None,
         };
         let mut state = OrderbookState::empty(20_000);
 

@@ -25,26 +25,21 @@ impl Encoder {
         let bytes = BASE64
             .decode(required_text(object, "value")?)
             .map_err(|_| RuntimeTransportError::MessagePack("typed-array".into()))?;
-        let mut payload = Vec::with_capacity(bytes.len() + 1);
-        payload.push(1);
-        payload.extend_from_slice(&bytes);
-        self.typed_array_extension(&payload)
-    }
-
-    fn typed_array_extension(&mut self, payload: &[u8]) -> Result<(), RuntimeTransportError> {
-        if let Ok(length) = u8::try_from(payload.len()) {
+        let payload_length = bytes.len().saturating_add(1);
+        if let Ok(length) = u8::try_from(payload_length) {
             self.bytes.extend_from_slice(&[0xc7, length]);
-        } else if let Ok(length) = u16::try_from(payload.len()) {
+        } else if let Ok(length) = u16::try_from(payload_length) {
             self.bytes.push(0xc8);
             self.bytes.extend_from_slice(&length.to_be_bytes());
         } else {
-            let length = u32::try_from(payload.len())
+            let length = u32::try_from(payload_length)
                 .map_err(|_| RuntimeTransportError::MessagePack("typed-array-length".into()))?;
             self.bytes.push(0xc9);
             self.bytes.extend_from_slice(&length.to_be_bytes());
         }
         self.bytes.push(0x74);
-        self.bytes.extend_from_slice(payload);
+        self.bytes.push(1);
+        self.bytes.extend_from_slice(&bytes);
         Ok(())
     }
 

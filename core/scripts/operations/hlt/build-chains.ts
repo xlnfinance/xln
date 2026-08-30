@@ -3,19 +3,15 @@
 /** HLT phase 1: run real sovereign nodes once, then seal H1 checkpoint + WAL tail. */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { deriveMeshChildSeed } from '../../../orchestrator/mesh/mesh-seeds';
-import { deriveManagedEntityIdentity } from '../../../orchestrator/daemon-control';
-import { safeStringify } from '../../../protocol/serialization';
-import { laneRuntimePort } from './lanes/lane-runtimes';
-import { deriveLoadLaneSeeds } from './lanes/worker-lanes';
 import {
+  assertRustLiveMixedCardinality,
+  assertRustLivePaymentCardinality,
   parseHltEngineSelection,
-  spawnRustH1,
-  deriveUserNodeRoute,
 } from './rust/rust-h1';
+import { hltLanePortsPerSlot } from './lanes/lane-port-capacity';
 
 const workDirRaw = String(process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || '').trim();
 if (!workDirRaw) throw new Error('HLT_BUILD_WORK_DIR_MISSING');
@@ -33,12 +29,51 @@ if (authorityEvidence && workload !== 'mixed') {
 if (authorityEvidence && process.env['XLN_MM_CROSS_J'] !== '0') {
   throw new Error('HLT_AUTHORITY_EVIDENCE_REQUIRES_MM_CROSS_J_DISABLED');
 }
+const selection = parseHltEngineSelection(process.env);
+if (selection.engine === 'rust' && workload !== 'payments' && workload !== 'mixed') {
+  throw new Error(`HLT_RUST_LIVE_WORKLOAD_UNSUPPORTED:${workload}`);
+}
+const rustRatePerUser = Number(process.env['XLN_HLT_RATE_PER_USER'] || '1');
+const rustDurationSeconds = Number(process.env['XLN_HLT_DURATION_S'] || '20');
+if (selection.engine === 'rust') {
+  const offeredPayments = users * rustRatePerUser;
+  const submittedPayments = offeredPayments * rustDurationSeconds;
+  if (!Number.isSafeInteger(rustRatePerUser) || rustRatePerUser < 1) throw new Error(`HLT_RATE_PER_USER_INVALID:${rustRatePerUser}`);
+  if (!Number.isSafeInteger(rustDurationSeconds) || rustDurationSeconds < 1) throw new Error(`HLT_DURATION_INVALID:${rustDurationSeconds}`);
+  if (workload === 'mixed') {
+    assertRustLiveMixedCardinality({ users, ratePerUser: rustRatePerUser, durationSeconds: rustDurationSeconds });
+  } else {
+    assertRustLivePaymentCardinality({
+      users,
+      payments: submittedPayments,
+      offeredPerSecond: offeredPayments,
+      durationSeconds: rustDurationSeconds,
+    });
+  }
+}
 
 const snapshotPath = join(workDir, 'hlt-h1-base-snapshot.json');
 const buildEnv = {
   ...process.env,
+  // Every sovereign Runtime owns one direct listener. The ordinary 4096-port
+  // lease is enough for normal HLT; expand only the isolated high-cardinality
+  // run, never by reducing the number of actual users.
+  XLN_HLT_LANE_PORTS_PER_SLOT: String(hltLanePortsPerSlot(users)),
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE: '1',
-  XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: snapshotPath,
+  ...(selection.engine === 'ts' ? { XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: snapshotPath } : {}),
+  ...(selection.engine === 'rust' ? {
+    // Pin the exact plan already validated above. The child must not derive a
+    // second default that could drift from the launcher's cardinality gate.
+    XLN_HLT_RATE_PER_USER: String(rustRatePerUser),
+    XLN_HLT_DURATION_S: String(rustDurationSeconds),
+    // H2/H3, market maker and custody own no stage of the single-H1 payment
+    // authority path. Keep production orchestrator/relay/H1, but do not spend
+    // the 30-second live gate booting unrelated products.
+    XLN_HLT_H1_ONLY: '1',
+    XLN_HUB_COUNT: '1',
+    XLN_MM_CROSS_J: '0',
+    XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
+  } : {}),
   // The RRS MVP owns one H1 Entity. Cross-J is separately disabled below;
   // booting a second local Entity would silently turn this into a multi-Entity gate.
   ...(authorityEvidence ? { XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1' } : {}),
@@ -47,94 +82,48 @@ const smoke = spawnSync(process.execPath, ['core/scripts/operations/production/l
   cwd: process.cwd(),
   env: buildEnv,
   stdio: 'inherit',
+  // A gated HLT is already owned by the launcher in two bounded phases:
+  // setup ends at `ready`, then the launcher writes `start` and owns the
+  // 20-second offer plus drain deadline. A wall clock here would include
+  // setup and kill a healthy live stack during its economic drain.
+  timeout: process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ? undefined : 30_000,
 });
 if (smoke.status !== 0) throw new Error(`HLT_BUILD_SMOKE_FAILED:${String(smoke.status)}`);
 
-const reportPath = workload === 'payments'
+const reportPath = selection.engine === 'rust' && workload === 'mixed'
+  ? join(workDir, 'hlt-rust-h1-live.json')
+  : workload === 'payments'
   ? join(workDir, 'hlt-payment-load-report.json')
   : workload === 'cross'
     ? join(workDir, 'production-cross-swap-load-report.json')
     : join(workDir, 'production-swap-load-report.json');
 if (!existsSync(reportPath)) throw new Error(`HLT_BUILD_WORKLOAD_REPORT_MISSING:${reportPath}`);
-if (!existsSync(snapshotPath)) throw new Error(`HLT_BUILD_BASE_SNAPSHOT_MISSING:${snapshotPath}`);
+if (selection.engine === 'ts' && !existsSync(snapshotPath)) {
+  throw new Error(`HLT_BUILD_BASE_SNAPSHOT_MISSING:${snapshotPath}`);
+}
 
 const output = resolve(
   String(process.env['XLN_HLT_RECORDING_OUTPUT'] || join(workDir, 'hlt-hub-recording.json')),
 );
-const builder = spawnSync(process.execPath, [
-  'core/scripts/operations/hlt/replay/build-hub-recording.ts',
-  '--work-dir', workDir,
-  '--output', output,
-  '--snapshot', snapshotPath,
-  '--users', String(users),
-  '--workload', workload,
-  ...(authorityEvidence ? ['--require-complete-authority-evidence'] : []),
-], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit' });
-if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
-
-const selection = parseHltEngineSelection(process.env);
 if (selection.engine === 'rust') {
-  // One-time offline TS DB import: seal the signed snapshot into the frozen
-  // path-keyed native base, then boot the real rscore-runtime as H1 from it.
-  const base = spawnSync(process.execPath, [
-    'core/scripts/operations/hlt/replay/commands/prepare-native-base.ts',
-    '--work-dir', workDir,
-    '--snapshot', snapshotPath,
-  ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit' });
-  if (base.status !== 0) throw new Error(`HLT_RUST_H1_NATIVE_BASE_FAILED:${String(base.status)}`);
-  const bindHost = String(process.env['XLN_HLT_RUST_H1_BIND_HOST'] || '127.0.0.1');
-  const bindPort = Number(process.env['XLN_HLT_RUST_H1_BIND_PORT'] || '0');
-  const meshRootSeed = readFileSync(join(workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
-  const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
-  // Canonical identity: identical derivation to prepare-native-base, so the
-  // transport encryption key and signer ids match the sealed native state.
-  const identity = deriveManagedEntityIdentity({
-    name: 'H1',
-    seed: runtimeSeed,
-    signerLabel: 'h1-hub',
-  });
-  // H1 outbound route table over the real HLT user topology: canonical load
-  // lane seeds/identities (`production-swap-load:lane:N`) and the lane port
-  // formula. User Runtimes dial H1 inbound; H1 pushes Account outputs/ACKs
-  // back to them over exactly these routes. No scaffolding: every row is
-  // derived from the mesh root seed and validated before H1 starts.
-  const lanePortBase = Number(process.env['XLN_HLT_RUST_H1_LANE_PORT_BASE'] || '20020');
-  const laneCount = Math.max(1, users);
-  const laneSeeds = deriveLoadLaneSeeds(meshRootSeed, laneCount, 'taker', 0);
-  const h1Routes = laneSeeds.map((seed, index) => deriveUserNodeRoute({
-    name: `Load Taker ${String(index + 1).padStart(4, '0')}`,
-    runtimeSeed: seed,
-    signerLabel: 'owner',
-    listenHost: bindHost,
-    listenPort: laneRuntimePort(lanePortBase, index),
-  }));
-  const handle = await spawnRustH1({
-    workDir,
-    runtimeSeed,
-    routes: h1Routes,
-    bindHost,
-    bindPort,
-    runtimeSignerLabel: 'h1-hub',
-    entitySignerLabel: 'h1-hub',
-    offlineTsImport: true,
-  });
-  const result = {
-    engine: selection.engine,
-    profile: selection.profile,
-    runtimeId: handle.ready.runtimeId,
-    listen: handle.ready.listen,
-    workers: handle.ready.workers,
-    pid: handle.pid,
-    entityId: identity.entityId,
-    signerId: identity.signerId,
-    routes: h1Routes,
-    // TS user nodes dial H1 with this URL through the same encrypted direct
-    // socket protocol they use for a TS H1.
-    dialUrl: `ws://${handle.ready.listen}`,
-  };
-  await handle.stop();
-  writeFileSync(join(workDir, 'hlt-rust-h1.json'), `${safeStringify(result)}\n`);
-  console.log(`HLT_BUILD_CHAINS_OK_RUST_H1 recording=${output} listen=${handle.ready.listen} runtimeId=${handle.ready.runtimeId}`);
+  const liveReport = join(workDir, 'hlt-rust-h1-live.json');
+  const nativeDb = join(workDir, 'prod-mesh', 'h1', 'rscore-native');
+  if (!existsSync(liveReport)) throw new Error(`HLT_RUST_H1_LIVE_REPORT_MISSING:${liveReport}`);
+  if (!existsSync(nativeDb)) throw new Error(`HLT_RUST_H1_NATIVE_DB_MISSING:${nativeDb}`);
+  // Rust owns every economic frame after cutover. Reading the retired TS H1
+  // database here produced a plausible but stale recording. The canonical
+  // replay source is the native checkpoint + ordered native WAL itself.
+  console.log(`HLT_BUILD_CHAINS_OK_RUST_H1 nativeDb=${nativeDb} live=${liveReport}`);
 } else {
+  const builder = spawnSync(process.execPath, [
+    'core/scripts/operations/hlt/replay/build-hub-recording.ts',
+    '--work-dir', workDir,
+    '--output', output,
+    '--snapshot', snapshotPath,
+    '--users', String(users),
+    '--workload', workload,
+    ...(authorityEvidence ? ['--require-complete-authority-evidence'] : []),
+  ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit', timeout: 20_000 });
+  if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
   console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
 }

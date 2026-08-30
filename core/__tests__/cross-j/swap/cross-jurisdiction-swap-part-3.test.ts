@@ -5,7 +5,7 @@ import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../../../entity/tx/apply';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -177,8 +177,11 @@ import {
   makeAccount,
   makeJurisdiction,
   makeState,
+  getTestAccountForWrite,
   openWritableEntityAccounts,
   partialBinary,
+  putTestAccountPull,
+  putTestAccountSwapOffer,
   registerTestSigner,
   secret,
   prepareJEventInput,
@@ -513,8 +516,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-cancel-after-accepted-fill', now: 1_000 },
     );
-    const account = state.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    const account = getTestAccountForWrite(state, sourceUser);
+    putTestAccountSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
@@ -567,7 +570,10 @@ describe('cross-jurisdiction hashledger swap', () => {
       filledTargetAmount: 225n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, committedRoute);
-    account.state.swapOffers.get(route.orderId)!.crossJurisdiction = committedRoute;
+    putTestAccountSwapOffer(account, {
+      ...account.state.swapOffers.get(route.orderId)!,
+      crossJurisdiction: committedRoute,
+    });
 
     const [cancelAck] = collectCommittedCrossJurisdictionCancelAcks(state);
     expect(cancelAck?.tx).toMatchObject({
@@ -627,8 +633,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
     );
-    const account = sourceHubState.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    const account = getTestAccountForWrite(sourceHubState, sourceUser);
+    putTestAccountSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
@@ -665,7 +671,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.outputs[0]).toMatchObject({
       entityId: targetHub,
       signerId: targetHubSigner,
-      localRuntimeProtocol: 'cross-j',
       entityTxs: [
         {
           type: 'removeCrossJurisdictionBookOrder',
@@ -683,7 +688,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(ownerRemoval.outputs).toHaveLength(1);
     expect(ownerRemoval.outputs[0]).toMatchObject({
       entityId: sourceHub,
-      localRuntimeProtocol: 'cross-j',
       entityTxs: [
         {
           type: 'crossJurisdictionBookOrderRemoved',
@@ -766,9 +770,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-cancel-no-orderbook-ext', now: env.state.timestamp },
     );
-    const account = state.accounts.get(sourceHub)!;
+    const account = getTestAccountForWrite(state, sourceHub);
     account.currentFrame.prevFrameHash = 'genesis';
-    account.state.swapOffers.set(route.orderId, {
+    putTestAccountSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
@@ -1169,9 +1173,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const targetAccount = state.accounts.get(targetUser)!;
-    targetAccount.state.pulls ??= new Map();
-    targetAccount.state.pulls.set(route.targetPull!.pullId, {
+    const targetAccount = getTestAccountForWrite(state, targetUser);
+    putTestAccountPull(targetAccount, route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
@@ -1201,15 +1204,16 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.accountTxs?.[0]?.accountId).toBe(targetUser);
     const progressTx = result.accountTxs?.[0]?.tx;
     if (progressTx?.type !== 'cross_pull_progress') throw new Error('TEST_CROSS_J_TARGET_PROGRESS_MISSING');
+    const writableTargetAccount = getTestAccountForWrite(result.newState, targetUser);
     const progress = await applyAccountTx(
-      targetAccount,
+      writableTargetAccount,
       progressTx,
-      targetAccount.state.leftEntity === targetHub,
+      writableTargetAccount.state.leftEntity === targetHub,
       env.state.timestamp,
       1,
     );
     expect(progress.ok).toBe(true);
-    expect(targetAccount.state.pulls?.get(route.targetPull!.pullId)?.crossJurisdiction).toMatchObject({
+    expect(writableTargetAccount.state.pulls?.get(route.targetPull!.pullId)?.crossJurisdiction).toMatchObject({
       fillSeq: 1,
       cumulativeFillRatio: 65_535,
       status: 'clear_requested',
@@ -1268,8 +1272,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     for (const state of [sourceUserState, sourceHubState]) {
       state.crossJurisdictionSwaps?.set(route.orderId, { ...route, status: 'resting' });
       const counterparty = state.entityId === sourceUser ? sourceHub : sourceUser;
-      const account = state.accounts.get(counterparty)!;
-      account.state.swapOffers.set(route.orderId, {
+      const account = getTestAccountForWrite(state, counterparty);
+      putTestAccountSwapOffer(account, {
         offerId: route.orderId,
         ...getStaticSwapTokenDimensions(1, 1),
         giveTokenId: 1,
@@ -1399,8 +1403,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     for (const state of [sourceUserState, sourceHubState]) {
       state.crossJurisdictionSwaps?.set(route.orderId, { ...route, status: 'resting' });
       const counterparty = state.entityId === sourceUser ? sourceHub : sourceUser;
-      const account = state.accounts.get(counterparty)!;
-      account.state.swapOffers.set(route.orderId, {
+      const account = getTestAccountForWrite(state, counterparty);
+      putTestAccountSwapOffer(account, {
         offerId: route.orderId,
         ...getStaticSwapTokenDimensions(1, 1),
         giveTokenId: 1,
@@ -1519,8 +1523,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const account = state.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    const account = getTestAccountForWrite(state, sourceUser);
+    putTestAccountSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
@@ -1535,7 +1539,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route },
     });
-    account.state.pulls = new Map([
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.sourcePull!.pullId,
         {
@@ -1568,7 +1572,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ]);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
 
-    const updatedAccount = result.newState.accounts.get(sourceUser)!;
+    const updatedAccount = getTestAccountForWrite(result.newState, sourceUser);
     const cancelAck = result.accountTxs![0]!.tx;
     expect(
       (
@@ -1647,8 +1651,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillDenominator: 2n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const account = state.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    const account = getTestAccountForWrite(state, sourceUser);
+    putTestAccountSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
@@ -1663,7 +1667,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route },
     });
-    account.state.pulls = new Map([
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.sourcePull!.pullId,
         {
@@ -1769,13 +1773,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(env, makeState(targetUser, targetSigner, eth, targetHub), targetSigner);
     const revealedSecret = secret('77');
     const hashlock = hashHtlcSecret(revealedSecret);
-    const targetLockId = secret('78');
-    state.htlcRoutes.set(hashlock, {
+    const targetLockId = hashlock;
+    state.paybook.entries.set(hashlock, {
       hashlock,
       tokenId: 1,
       amount: 100n,
       outboundEntity: hub,
-      outboundLockId: secret('79'),
       crossJurisdictionRelay: {
         routeId: 'relay-dispute',
         fillRatio: 65_535,
@@ -1883,13 +1886,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(sourceHub, sourceHubSigner, eth, sourceUser);
     state.timestamp = env.state.timestamp;
     addReplica(env, state, sourceHubSigner);
-    const account = state.accounts.get(sourceUser)!;
+    const account = getTestAccountForWrite(state, sourceUser);
     const sourceHubIsLeft = account.state.leftEntity.toLowerCase() === sourceHub.toLowerCase();
     account.state.disputeConfig = sourceHubIsLeft
       ? { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 }
       : { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 };
 
-    const initialProof = buildAccountProofBody(account, addr('99'));
     const route = buildPreparedCrossJurisdictionRouteCanonical({
       orderId: 'cross-counter-source-window',
       makerEntityId: sourceUser,
@@ -1918,8 +1920,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     }, { runtimeSeed: env.runtimeSeed, now: env.state.timestamp });
     applyExactTestFill(route, 0x2345);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(route.sourcePull!.pullId, {
+    putTestAccountPull(account, route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
@@ -1929,6 +1930,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
     });
+    const initialProof = buildAccountProofBody(account, addr('99'));
     const counterProof = buildAccountProofBody(account, addr('99'));
     const counterProposerIsLeft = account.state.leftEntity.toLowerCase() === sourceUser.toLowerCase();
     account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
@@ -2049,28 +2051,34 @@ describe('cross-jurisdiction hashledger swap', () => {
       [
         { entityId: sourceUser, signerId: sourceSigner, entityTxs: [{ type: 'j_event', data: range }] },
         { entityId: sourceUser, signerId: sourceSigner, entityTxs: [] },
-        { entityId: sourceUser, signerId: sourceSigner, entityTxs: [] },
       ],
       [],
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     );
-    // Exactly one port instruction, source-user lane → target-user lane. There
-    // is no source mirror anywhere in the port design: the on-chain registry
-    // record itself is the shared evidence.
-    expect(result.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([targetUser]);
-    expect(result.localCrossJurisdictionEventTrace.map(input => input.signerId)).toEqual([targetSigner]);
+    // The port and its validator-authenticated j_broadcast continuation drain
+    // in the same Runtime transition. There is no source mirror: the on-chain
+    // registry record itself is the shared evidence.
+    expect(result.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([
+      targetUser,
+      targetUser,
+    ]);
+    expect(result.localCrossJurisdictionEventTrace.map(input => input.signerId)).toEqual([
+      targetSigner,
+      targetSigner,
+    ]);
     const port = getEffectiveEntityInputTxs(result.localCrossJurisdictionEventTrace[0]!)[0];
     expect(port).toMatchObject({
       type: 'crossJurisdictionSalvage',
       data: { routeId: route.orderId, binary, fillRatio },
     });
-    // The target user flushed its own broadcast for the next frame.
-    expect(result.entityOutbox.map(output => getEffectiveEntityInputTxs(output)[0]?.type)).toEqual(['j_broadcast']);
+    expect(getEffectiveEntityInputTxs(result.localCrossJurisdictionEventTrace[1]!)[0]?.type).toBe('j_broadcast');
+    expect(result.entityOutbox).toEqual([]);
+    expect(result.jOutbox).toHaveLength(1);
     const committedSource = env.state.eReplicas.get(`${sourceUser}:${sourceSigner}`)!.state;
     const committedTarget = env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state;
     // The port never injects dispute arguments: it queues a registry write.
     expect(committedTarget.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    const queuedReveals = committedTarget.jBatchState?.batch.hashLadderRegistrations ?? [];
+    const queuedReveals = committedTarget.jBatchState?.sentBatch?.batch.hashLadderRegistrations ?? [];
     expect(queuedReveals).toHaveLength(1);
     expect(queuedReveals[0]).toMatchObject({
       targetRole: true,
@@ -2096,7 +2104,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           entityTxs: [{ type: 'j_event', data: replay.buildSourceRevealRange() }],
         },
         { entityId: replay.sourceUser, signerId: replay.sourceSigner, entityTxs: [] },
-        { entityId: replay.sourceUser, signerId: replay.sourceSigner, entityTxs: [] },
       ],
       [],
       { isReplay: true, routingDeps: makeLocalCrossJRoutingDeps() },
@@ -2109,29 +2116,29 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
   });
 
-  test('reveal port fails loud instead of rebinding to another local target signer', async () => {
+  test('reveal port preserves its pinned remote target signer instead of rebinding locally', async () => {
     const { env, sourceUser, targetUser, sourceSigner, targetSigner, alternateTargetSigner, buildSourceRevealRange } =
       makeBidirectionalSalvageRuntimeFixture('cross-salvage-pinned-target-signer');
     const alternateBefore = env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state;
     env.state.eReplicas.delete(`${targetUser}:${targetSigner}`);
 
-    await expect(
-      applyMergedEntityInputs(
-        env,
-        [
-          {
-            entityId: sourceUser,
-            signerId: sourceSigner,
-            entityTxs: [{ type: 'j_event', data: buildSourceRevealRange() }],
-          },
-          { entityId: sourceUser, signerId: sourceSigner, entityTxs: [] },
-          { entityId: sourceUser, signerId: sourceSigner, entityTxs: [] },
-        ],
-        [],
-        { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
-      ),
-    ).rejects.toThrow('RUNTIME_OUTPUT_TARGET_NOT_LOCAL');
+    const result = await applyMergedEntityInputs(
+      env,
+      [
+        {
+          entityId: sourceUser,
+          signerId: sourceSigner,
+          entityTxs: [{ type: 'j_event', data: buildSourceRevealRange() }],
+        },
+        { entityId: sourceUser, signerId: sourceSigner, entityTxs: [] },
+      ],
+      [],
+      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+    );
 
+    expect(result.entityOutbox).toEqual([
+      expect.objectContaining({ entityId: targetUser, signerId: targetSigner }),
+    ]);
     expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toBe(alternateBefore);
   });
 
@@ -2416,8 +2423,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         now: env.state.timestamp,
       },
     );
-    const account = state.accounts.get(sourceHub)!;
-    account.state.pulls = new Map([
+    const account = getTestAccountForWrite(state, sourceHub);
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.sourcePull!.pullId,
         {

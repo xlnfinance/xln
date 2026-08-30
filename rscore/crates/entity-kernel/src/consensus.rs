@@ -133,13 +133,13 @@ mod tests {
                 digest: repeated("11"),
             },
             EntityConsensusSection {
-                field: "htlcRoutes".into(),
+                field: "paybook".into(),
                 digest: repeated("22"),
             },
         ];
         assert_eq!(
             compute_entity_consensus_root(&sections).expect("entity root"),
-            "0x972fb942cbaf8e902682fe12a6f23334f65cea25dec704a788b87b079abde8b2"
+            "0x8f4a44cd18552457830aa9311dae7cb37051d2b26dabf36b99353f0e8fdb3916"
         );
     }
 
@@ -174,19 +174,19 @@ mod production;
 
 pub use production::{
     CanonicalEntityTx, CertifiedEntityFrameLink, CertifiedEntityProposal,
-    CertifiedEntityTransition, ConsensusMode, ENTITY_OWNED_CONSENSUS_FIELDS, EntityAuthorityError,
-    EntityCertificationError, EntityConsensusConfig, EntityConsensusState, EntityEncodingError,
-    EntityFrame, EntityFrameAuthority, EntityFrameBody, EntityFrameError, EntityFrameEvent,
-    EntityFrameLeader, EntityFrameWireMeasure, EntityFrameWireMeasureBody, EntityHankoWitness,
-    EntityHankoWitnessMap, EntityHtlcNoteIndex, EntityLeaderState, EntityLineageError,
-    EntityOutputError, EntitySingleSigner, EntityTransitionCertificationRequest,
-    EntityTransitionError, EntityTxCatalogError, EntityTxKind, EntityTxSupport, HashToSign,
-    HashType, LocalEntityOutput, LocalEntityOutputTx, MAX_ENTITY_FRAME_BYTES,
-    MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES, PendingNonMutatingWake,
-    PresignedManifest, PresignedManifestEntry, ResidentEntityConsensusReplica,
-    build_certified_entity_frame_link, build_entity_hash_manifest,
+    CertifiedEntityTransition, ConsensusMode, ENTITY_OWNED_CONSENSUS_FIELDS, ENTITY_TX_TYPES,
+    EntityAuthorityError, EntityCertificationError, EntityConsensusConfig, EntityConsensusState,
+    EntityEncodingError, EntityFrame, EntityFrameAuthority, EntityFrameBody, EntityFrameDraft,
+    EntityFrameError, EntityFrameEvent, EntityFrameLeader, EntityFrameWireMeasure,
+    EntityFrameWireMeasureBody, EntityHankoWitness, EntityHankoWitnessMap, EntityLeaderState,
+    EntityLineageError, EntityOutputError, EntitySingleSigner,
+    EntityTransitionCertificationRequest, EntityTransitionError, EntityTxCatalogError,
+    EntityTxKind, HashToSign, HashType, JPrefixRangeClaim, LocalEntityOutput, LocalEntityOutputTx,
+    MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
+    PendingNonMutatingWake, PresignedManifest, PresignedManifestEntry,
+    ResidentEntityConsensusReplica, build_certified_entity_frame_link, build_entity_hash_manifest,
     build_required_j_prefix_certificate, certify_entity_transition,
     certify_single_signer_entity_frame, compute_entity_events_parity_digest,
-    compute_entity_frame_hash, is_entity_owned_consensus_field, measure_entity_frame_wire,
-    project_entity_consensus_sections,
+    compute_entity_frame_hash, is_entity_owned_consensus_field, measure_entity_frame_tx_bytes,
+    measure_entity_frame_wire, project_entity_consensus_sections, sign_j_event_range,
 };

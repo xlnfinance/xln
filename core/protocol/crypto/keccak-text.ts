@@ -36,10 +36,6 @@ export const utf8Bytes = (text: string): Uint8Array => {
   return textEncoder.encode(text);
 };
 
-/** UTF-8 byte length of `text` without materialising the bytes where the host allows. */
-export const utf8ByteLength = (text: string): number =>
-  typeof Buffer !== 'undefined' ? Buffer.byteLength(text, 'utf8') : textEncoder.encode(text).byteLength;
-
 /** Lowercase `0x`-prefixed keccak256 of the UTF-8 encoding of `text`. */
 export const keccakTextHash = (text: string): string => {
   const bytes = utf8Bytes(text);

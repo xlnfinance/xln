@@ -1,8 +1,6 @@
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
-use xln_rscore_protocol::{
-    CanonicalValue, encode_canonical_consensus_bytes, encode_canonical_consensus_text,
-};
+use xln_rscore_protocol::{CanonicalValue, encode_canonical_consensus_bytes};
 
 use super::value::{number, object, object_value, string};
 use super::{
@@ -106,7 +104,7 @@ pub(super) fn hash_collective_action_txs(
         ("version", number(1)?),
         ("txs", CanonicalValue::Array(txs.to_vec())),
     ]);
-    let encoded = encode_canonical_consensus_text(&value)
+    let encoded = encode_canonical_consensus_bytes(&value)
         .map_err(|error| invalid(format!("ENTITY_PROPOSAL_ACTION_ENCODING:{error}")))?;
     if encoded.len() > MAX_ENTITY_COMMAND_BYTES {
         return Err(invalid(format!(
@@ -115,5 +113,5 @@ pub(super) fn hash_collective_action_txs(
             MAX_ENTITY_COMMAND_BYTES
         )));
     }
-    Ok(keccak(encoded.as_bytes()))
+    Ok(keccak(&encoded))
 }

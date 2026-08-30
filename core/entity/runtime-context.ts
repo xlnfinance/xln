@@ -2,20 +2,11 @@ import type { AccountJClaimNodeStore } from '../types/finance/account-j-claims';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { LogCategory } from '../types/logging';
-import type { EntityInput, EntityReplica, EntityState } from './types';
+import type { EntityReplica, EntityState } from './types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
-import type { EntityProposalReplayOracleEntry } from './consensus/proposal/replay-oracle';
 import type { AccountAuthorityExecutionScope } from '../account/consensus/context';
 import type { AccountPeerInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
-
-type AccountAuthorityFailedHtlcRoute = Readonly<{
-  hashlock: string;
-  outboundAccountId: string;
-  outboundLockId: string;
-  inboundAccountId: string;
-  inboundLockId: string;
-}>;
 
 export type AccountAuthorityFrameBeginRequest = Readonly<{
   ownerEntityId: string;
@@ -40,14 +31,12 @@ export type AccountAuthorityFrameOutboundRequest = Readonly<{
   accounts: ReadonlyMap<string, AccountReplica>;
   accountForWrite(accountId: string): AccountReplica | undefined;
   proposalAccountIds: readonly string[];
-  failedHtlcRoutes: readonly AccountAuthorityFailedHtlcRoute[];
   timestamp: number;
   jHeight: number;
 }>;
 
 /** Narrow child-machine capability; lifecycle ownership remains in Runtime. */
 export interface AccountAuthorityEntityStageCapability extends AccountAuthorityExecutionScope {
-  bindCanonicalInput(input: EntityInput): void;
   beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void>;
   prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
   finishEntityAccountFrame(): void;
@@ -91,8 +80,6 @@ export interface EntityRuntimeContext {
     observeOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
     /** Exact WAL-committed contexts installed only while replaying one Runtime frame. */
     replayEntityContexts?: Map<string, EntityInfraContext>;
-    /** HLT-only exact certified proposal boundaries; absent for production and old recordings. */
-    replayEntityProposalOracle?: Map<string, EntityProposalReplayOracleEntry>;
     accountJClaimNodes?: AccountJClaimNodeStore;
     pendingAccountJClaimNodes?: AccountJClaimNodeStore;
     pendingAccountJClaimNodeDeletes?: Set<string>;

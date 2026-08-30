@@ -297,9 +297,7 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'H1 1M Hub Bench', isHub: true, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
 });
 
@@ -372,7 +370,7 @@ const makeHead = (height: number): StorageHead => ({
   epochMaxBytes: 256 * 1024 * 1024,
   accountMerkleRadix: 16,
   epochReplayBytes: 0,
-  retainedHistoryBytes: 0,
+  retainedWalBytes: 0,
 });
 
 const projectBookDocs = (state: EntityState): StorageDoc[] =>
@@ -604,7 +602,7 @@ type RotationProbeResult = {
   seedLiveBytes: number;
   seedDocCount: number;
   currentLiveBytes: number;
-  historyBytes: number;
+  walBytes: number;
   nextLiveBytes: number;
   nextRetainedHistoryBytes: number;
   epochBytes: number;
@@ -643,7 +641,7 @@ const runSnapshotRotationProbe = async (
       retainSnapshots: cli.rotationRetainSnapshots,
       epochMaxBytes: cli.rotationEpochBytes,
       epochReplayBytes: cli.rotationEpochBytes + 1,
-      retainedHistoryBytes: cli.rotationEpochBytes + 1,
+      retainedWalBytes: cli.rotationEpochBytes + 1,
     };
     const historyBatch = historyDb.batch();
     historyBatch.put(KEY_HEAD, encodeBuffer(historyHead));
@@ -670,8 +668,8 @@ const runSnapshotRotationProbe = async (
         `ROTATION_PROBE_NEXT_HEAD_MISMATCH: snapshot=${nextHead.latestSnapshotHeight} materialized=${nextHead.latestMaterializedHeight} expected=${head.latestHeight}`,
       );
     }
-    if (nextHead.retainedHistoryBytes !== 0) {
-      throw new Error(`ROTATION_PROBE_NEXT_HISTORY_NOT_RESET: retained=${nextHead.retainedHistoryBytes}`);
+    if (nextHead.retainedWalBytes !== 0) {
+      throw new Error(`ROTATION_PROBE_NEXT_HISTORY_NOT_RESET: retained=${nextHead.retainedWalBytes}`);
     }
     const nextStats = await inspectStorage({
       env,
@@ -710,9 +708,9 @@ const runSnapshotRotationProbe = async (
       seedLiveBytes: seed.liveBytes,
       seedDocCount: seed.docCount,
       currentLiveBytes: currentStats.liveBytes,
-      historyBytes: historyStats?.historyBytes ?? 0,
+      walBytes: historyStats?.walBytes ?? 0,
       nextLiveBytes: nextStats.liveBytes,
-      nextRetainedHistoryBytes: nextHead.retainedHistoryBytes,
+      nextRetainedHistoryBytes: nextHead.retainedWalBytes,
       epochBytes: cli.rotationEpochBytes,
     };
     trace.mark('rotation.probe.done', {

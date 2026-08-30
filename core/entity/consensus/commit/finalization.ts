@@ -183,7 +183,7 @@ const attachCommitProofsAndOutputs = (
     ...materializeCommittedEntityOutputs(
       execution.outputs,
       execution.state.entityId,
-      env,
+      workingReplica.signerId,
       isEmitter,
     ),
   );

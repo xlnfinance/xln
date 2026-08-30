@@ -17,7 +17,7 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   // Tag 14 belonged to retired cross-token credit state. Never reuse persisted tags.
   currentHeight: 15, pendingFrame: 16,
   // Tag 17 belonged to retired pendingSignatures. Never reuse persisted tags.
-  pendingAccountInput: 18, lastOutboundFrameAck: 20,
+  pendingAccountInput: 18, lastOutboundAckFrame: 20,
   // Tag 21 belonged to retired payment-forward side-channel state.
   // Tag 22 belonged to a never-used generic Account Hanko cache.
   rollbackCount: 23, lastRollbackFrameHash: 24,

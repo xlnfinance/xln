@@ -105,6 +105,70 @@ pub fn canonical_value_from_tagged_json(value: &Value) -> Result<CanonicalValue,
     }
 }
 
+/// Convert an already-validated canonical value back to the repository's
+/// tagged JSON envelope. This is the inverse of
+/// [`canonical_value_from_tagged_json`]; Runtime uses it only at the existing
+/// persisted TS boundary, never as a second consensus codec.
+pub fn tagged_json_from_canonical_value(value: &CanonicalValue) -> Result<Value, TaggedJsonError> {
+    Ok(match value {
+        CanonicalValue::Null => Value::Null,
+        CanonicalValue::Bool(value) => Value::Bool(*value),
+        CanonicalValue::Number(value) => {
+            let text = value.as_str().to_owned();
+            Value::Number(
+                text.parse()
+                    .map_err(|_| TaggedJsonError::InvalidNumber(text))?,
+            )
+        }
+        CanonicalValue::BigInt(value) => Value::Object(Map::from_iter([
+            ("__xlnType".into(), Value::String("BigInt".into())),
+            ("value".into(), Value::String(value.to_string())),
+        ])),
+        CanonicalValue::String(value) => Value::String(value.clone()),
+        CanonicalValue::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(tagged_json_from_canonical_value)
+                .collect::<Result<_, _>>()?,
+        ),
+        CanonicalValue::Object(entries) => Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| Ok((key.clone(), tagged_json_from_canonical_value(value)?)))
+                .collect::<Result<_, TaggedJsonError>>()?,
+        ),
+        CanonicalValue::Map(entries) => Value::Object(Map::from_iter([
+            ("__xlnType".into(), Value::String("Map".into())),
+            (
+                "value".into(),
+                Value::Array(
+                    entries
+                        .iter()
+                        .map(|(key, value)| {
+                            Ok(Value::Array(vec![
+                                tagged_json_from_canonical_value(key)?,
+                                tagged_json_from_canonical_value(value)?,
+                            ]))
+                        })
+                        .collect::<Result<_, TaggedJsonError>>()?,
+                ),
+            ),
+        ])),
+        CanonicalValue::Set(values) => Value::Object(Map::from_iter([
+            ("__xlnType".into(), Value::String("Set".into())),
+            (
+                "value".into(),
+                Value::Array(
+                    values
+                        .iter()
+                        .map(tagged_json_from_canonical_value)
+                        .collect::<Result<_, _>>()?,
+                ),
+            ),
+        ])),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +184,25 @@ mod tests {
         assert_eq!(
             compute_runtime_component_digest(&canonical).expect("component digest"),
             "0x5fba87ae7a5408467f52d5ed9101e8bce47db5253e624c68cadac676208272bf",
+        );
+    }
+
+    #[test]
+    fn tagged_json_conversion_is_an_exact_inverse() {
+        let canonical = CanonicalValue::Object(vec![
+            ("big".into(), CanonicalValue::BigInt(BigInt::from(-7))),
+            (
+                "map".into(),
+                CanonicalValue::Map(vec![(
+                    CanonicalValue::String("a".into()),
+                    CanonicalValue::Set(vec![CanonicalValue::Bool(true)]),
+                )]),
+            ),
+        ]);
+        let tagged = tagged_json_from_canonical_value(&canonical).expect("tagged");
+        assert_eq!(
+            canonical_value_from_tagged_json(&tagged).expect("canonical"),
+            canonical
         );
     }
 }

@@ -1,5 +1,4 @@
 use serde_json::{Map, Value};
-use sha2::{Digest as _, Sha256};
 
 use crate::{RuntimeComponentDigest, RuntimePostStateCommitment, compute_storage_post_state_hash};
 
@@ -12,7 +11,7 @@ use super::types::{
     CanonicalRuntimeFrameDraft, Digest, EncodedRuntimeFrame, RuntimeFrameCodecError,
     ValidatedRuntimeFrame,
 };
-use super::value::{encode, encode_frame_record, format_hash, number, object, parse_hash, text};
+use super::value::{format_hash, number, object, parse_hash, text};
 use super::{FRAME_DOMAIN, MAX_SAFE_INTEGER};
 
 fn validate_runtime_input(
@@ -91,12 +90,12 @@ fn required_fields(
     draft: &mut CanonicalRuntimeFrameDraft,
     output_count: usize,
     outputs_digest: &Digest,
+    post_state_hash: &Digest,
 ) -> Result<Map<String, Value>, RuntimeFrameCodecError> {
     let count = u64::try_from(output_count).map_err(|_| RuntimeFrameCodecError::UnsafeNumber {
         field: "runtimeOutputCount",
         value: u64::MAX,
     })?;
-    let post_hash = post_state_hash(draft, output_count, outputs_digest)?;
     Ok(Map::from_iter([
         ("height".into(), number("height", draft.height)?),
         ("timestamp".into(), number("timestamp", draft.timestamp)?),
@@ -108,7 +107,7 @@ fn required_fields(
             "replicaMetaDigest".into(),
             text(format_hash(&draft.replica_meta_digest)),
         ),
-        ("postStateHash".into(), text(format_hash(&post_hash))),
+        ("postStateHash".into(), text(format_hash(post_state_hash))),
         (
             "materializedState".into(),
             Value::Bool(draft.materialized_state),
@@ -180,28 +179,6 @@ fn add_optional_fields(
     Ok(())
 }
 
-fn compute_frame_hash(fields: &mut Map<String, Value>) -> Result<Digest, RuntimeFrameCodecError> {
-    let mut committed = std::mem::take(fields);
-    committed.insert("kind".into(), text(FRAME_DOMAIN));
-    let inserted_empty_entity_hashes = if committed.contains_key("canonicalEntityHashes") {
-        false
-    } else {
-        committed.insert("canonicalEntityHashes".into(), Value::Array(vec![]));
-        true
-    };
-    let committed_value = Value::Object(committed);
-    let encoded = encode(&committed_value);
-    let Value::Object(mut committed) = committed_value else {
-        unreachable!("runtime frame hash preimage is always an object")
-    };
-    committed.remove("kind");
-    if inserted_empty_entity_hashes {
-        committed.remove("canonicalEntityHashes");
-    }
-    *fields = committed;
-    Ok(Sha256::digest(encoded?).into())
-}
-
 pub fn build_runtime_frame_commit(
     mut draft: CanonicalRuntimeFrameDraft,
     entity_contexts: EntityContextPayloadRows,
@@ -212,11 +189,11 @@ pub fn build_runtime_frame_commit(
     let digest = output_digest(&outputs)
         .map_err(|_| RuntimeFrameCodecError::Field("runtimeOutputsDigest"))?;
     let post_state_hash = post_state_hash(&draft, outputs.len(), &digest)?;
-    let mut fields = required_fields(&mut draft, outputs.len(), &digest)?;
+    let mut fields = required_fields(&mut draft, outputs.len(), &digest, &post_state_hash)?;
     add_optional_fields(&mut fields, &draft, &entity_contexts)?;
-    let frame_hash = compute_frame_hash(&mut fields)?;
-    fields.insert("frameHash".into(), text(format_hash(&frame_hash)));
-    let frame_bytes = encode_frame_record(&Value::Object(fields))?;
+    let (frame_hash, frame_bytes) =
+        crate::transport::msgpack::encode_and_hash_framed_runtime_frame(&fields, FRAME_DOMAIN)
+            .map_err(|error| RuntimeFrameCodecError::Encoding(error.to_string()))?;
     let validated = ValidatedRuntimeFrame {
         height: draft.height,
         timestamp: draft.timestamp,
@@ -236,12 +213,12 @@ pub fn build_runtime_frame_commit(
         post_state_hash,
         output_digest: digest,
         validated,
+        resident_output_values: None,
         commit: RuntimeFrameCommit {
             height: draft.height,
             frame_bytes,
             outputs,
             entity_contexts,
-            watcher_cursor_changes: Vec::new(),
             checkpoint,
         },
     })

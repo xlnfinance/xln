@@ -17,7 +17,7 @@ export const freshAuthorityEvidenceDir = (prefix: string): string => {
 
 export const authorityEvidenceBinary = (): string => {
   const path = resolve(String(
-    process.env['XLN_RSCORE_BINARY'] ?? 'rscore/target/release/xln-rscore',
+    process.env['XLN_RSCORE_BINARY'] ?? 'rscore/target/release/xlnrs',
   ));
   accessSync(path, constants.X_OK);
   return path;

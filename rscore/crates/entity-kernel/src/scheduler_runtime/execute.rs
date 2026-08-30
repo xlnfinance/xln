@@ -4,7 +4,9 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
-use crate::scheduler::{CrontabState, CrontabTaskMethod, ScheduledHook, ScheduledHookKind};
+use crate::scheduler::{
+    CrontabState, CrontabTaskMethod, ScheduledHook, ScheduledHookKind, cancel_hook,
+};
 use crate::{CanonicalEntityTx, EntityTxKind};
 
 pub const MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS: usize = 1_000;
@@ -85,6 +87,8 @@ pub enum SchedulerError {
     SecretAckDisputeUnsupported { hashlock: String },
     #[error("CRONTAB_HOOK_KEY_MISMATCH:key={key}:id={id}")]
     HookKeyMismatch { key: String, id: String },
+    #[error("CRONTAB_HOOK_COMMITMENT:{detail}")]
+    HookCommitment { detail: String },
 }
 
 fn task_due_at(last_run: u64, interval_ms: u64) -> Result<u64, SchedulerError> {
@@ -151,18 +155,9 @@ pub fn collect_due_scheduled_wake_jobs(
     now: u64,
     hub_rebalance_has_pending_work: bool,
 ) -> Result<Vec<ScheduledWakeJob>, SchedulerError> {
-    for (key, hook) in &state.hooks {
-        if key != &hook.id {
-            return Err(SchedulerError::HookKeyMismatch {
-                key: key.clone(),
-                id: hook.id.clone(),
-            });
-        }
-    }
     let mut jobs = state
         .hooks
-        .values()
-        .filter(|hook| hook.trigger_at <= now)
+        .due(now)
         .map(|hook| ScheduledWakeJob {
             kind: ScheduledWakeJobKind::Hook,
             id: hook.id.clone(),
@@ -256,12 +251,7 @@ pub fn execute_crontab(
 ) -> Result<SchedulerExecution, SchedulerError> {
     validate_scheduled_wake(wake, expected_proposer_signer_id, now)?;
     let mut next = state.clone();
-    let mut due_hooks = next
-        .hooks
-        .values()
-        .filter(|hook| hook.trigger_at <= now)
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut due_hooks = next.hooks.due(now).cloned().collect::<Vec<_>>();
     due_hooks.sort_by(|left, right| {
         left.trigger_at
             .cmp(&right.trigger_at)
@@ -317,7 +307,9 @@ pub fn execute_crontab(
     }
 
     for hook in &due_hooks {
-        next.hooks.remove(&hook.id);
+        cancel_hook(&mut next, &hook.id).map_err(|error| SchedulerError::HookCommitment {
+            detail: error.to_string(),
+        })?;
     }
     let mut commands = Vec::new();
     if !expired_locks.is_empty() {
@@ -366,8 +358,12 @@ mod tests {
                     params: BTreeMap::<String, CrontabTaskParam>::new(),
                 },
             )]),
-            hooks: BTreeMap::new(),
+            hooks: crate::ScheduledHookMap::empty(),
         }
+    }
+
+    fn add_hook(state: &mut CrontabState, hook: ScheduledHook) {
+        crate::schedule_hook(state, hook).expect("schedule test hook");
     }
 
     fn wake(jobs: Vec<ScheduledWakeJob>) -> ScheduledWake {
@@ -382,12 +378,12 @@ mod tests {
     #[test]
     fn recomputes_and_drains_all_due_hooks_not_only_diagnostic_prefix() {
         let mut state = state();
-        state.hooks.insert(
-            "htlc-timeout:b".to_string(),
+        add_hook(
+            &mut state,
             ScheduledHook::htlc_timeout("account-b".to_string(), "b".to_string(), 900),
         );
-        state.hooks.insert(
-            "htlc-timeout:a".to_string(),
+        add_hook(
+            &mut state,
             ScheduledHook::htlc_timeout("account-a".to_string(), "a".to_string(), 800),
         );
         let jobs = collect_due_scheduled_wake_jobs(&state, 1_000, false).expect("due jobs");
@@ -419,8 +415,8 @@ mod tests {
     #[test]
     fn unsupported_hook_does_not_consume_any_hook() {
         let mut state = state();
-        state.hooks.insert(
-            "dispute:x".to_string(),
+        add_hook(
+            &mut state,
             ScheduledHook {
                 id: "dispute:x".to_string(),
                 trigger_at: 10,
@@ -447,8 +443,8 @@ mod tests {
     #[test]
     fn hook_kick_runs_rebalance_in_the_same_pass() {
         let mut state = state();
-        state.hooks.insert(
-            "kick:x".to_string(),
+        add_hook(
+            &mut state,
             ScheduledHook {
                 id: "kick:x".to_string(),
                 trigger_at: 1_500,
@@ -483,8 +479,8 @@ mod tests {
     #[test]
     fn forged_wake_signer_is_rejected_without_consuming_crontab() {
         let mut state = state();
-        state.hooks.insert(
-            "htlc-timeout:a".to_string(),
+        add_hook(
+            &mut state,
             ScheduledHook::htlc_timeout("account-a".to_string(), "a".to_string(), 800),
         );
         let original = state.clone();
@@ -530,7 +526,10 @@ mod tests {
                 "type".to_string(),
                 CanonicalValue::String(tx.kind.as_str().to_string()),
             ),
-            ("data".to_string(), tx.data),
+            (
+                "data".to_string(),
+                tx.frame_data().expect("scheduled wake frame data").clone(),
+            ),
         ]);
         let mut bytes = vec![3_u8];
         bytes.extend(encode_canonical_consensus_bytes(&value).expect("canonical bytes"));

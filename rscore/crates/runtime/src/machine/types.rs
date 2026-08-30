@@ -1,14 +1,13 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use serde_json::Value;
 use thiserror::Error;
 use xln_rscore_batch::{AccountId, AccountInputRow, AccountsCheckpoint, ResidentConsensusEngine};
 use xln_rscore_entity_kernel::{
     CanonicalEntityTx, DeterministicContext, EntityFrame, EntityKernelError, EntityKernelOutput,
-    EntitySingleSigner, EntityStateSlice, EntityTransitionError, EntityTxKind,
-    LocalEntityFinancialTx, LocalEntityOutput, ResidentEntityConsensusReplica, ResidentEntityError,
-    ScheduledWake, SchedulerError, SignedEntityCommandV1, decode_local_entity_financial_tx,
-    decode_signed_entity_command,
+    EntitySingleSigner, EntityStateSlice, EntityTransitionError, EntityTxKind, LocalEntityOutput,
+    LocalEntityTx, ResidentEntityConsensusReplica, ResidentEntityError, ScheduledWake,
+    SchedulerError, SignedEntityCommandV1, decode_local_entity_tx, decode_signed_entity_command,
 };
 use xln_rscore_protocol::CanonicalValue;
 
@@ -19,14 +18,68 @@ use xln_rscore_protocol::CanonicalValue;
 /// name before any owned state is touched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeTx {
+    RecordRuntimeAdapterCommand(RuntimeAdapterCommandMarker),
+    ImportJ(crate::JurisdictionImportRequest),
+    CompleteImportJ(crate::JurisdictionImportResult),
+    ObserveJRange(crate::j_watcher::ObserveJRange),
     AdvanceJWatcherCursor {
         depository_address: String,
         chain_id: u64,
         block_number: u64,
     },
+    RewindJHistory(RewindJHistory),
+    RetryJSubmit(crate::j_submit::RetryJSubmitData),
+    RecordJSubmitResult(crate::j_submit::JSubmitResultData),
+    RetryEntityProviderAction(crate::j_submit::RetryEntityProviderActionData),
+    RecordEntityProviderActionSubmitResult(crate::j_submit::EntityProviderActionResultData),
+    RecordGovernanceJSubmitResult(crate::j_submit::GovernanceResultData),
     Unsupported {
         kind: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeAdapterCommandMarker {
+    pub lane_id: String,
+    pub sequence: u64,
+    pub command_id: String,
+    pub input_hash: String,
+    pub expires_at_ms: Option<u64>,
+}
+
+/// Exact Runtime-local replica identity. One Entity may have several local
+/// validator replicas; the signer is therefore part of every live/state slot
+/// key and can never be inferred from the Entity id alone.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RuntimeEntityKey {
+    pub entity_id: [u8; 32],
+    pub signer_id: String,
+}
+
+impl RuntimeEntityKey {
+    pub fn new(entity_id: [u8; 32], signer_id: &str) -> Result<Self, RuntimeMachineError> {
+        let signer_id = signer_id.trim().to_ascii_lowercase();
+        if signer_id.is_empty() {
+            return Err(RuntimeMachineError::SignerIdEmpty);
+        }
+        Ok(Self {
+            entity_id,
+            signer_id,
+        })
+    }
+
+    pub fn replica_id(&self) -> String {
+        format!("{}:{}", render_hex(&self.entity_id), self.signer_id)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewindJHistory {
+    pub entity_id: [u8; 32],
+    pub signer_id: String,
+    pub jurisdiction_ref: String,
+    pub conflicting_height: u64,
+    pub conflicting_block_hash: [u8; 32],
 }
 
 /// RAM-only Entity mempool unit. Every variant becomes exactly one canonical
@@ -36,15 +89,19 @@ pub enum RuntimeTx {
 pub(crate) enum EntityPendingWork {
     Account {
         projected: CanonicalEntityTx,
-        row: AccountInputRow,
+        row: Box<AccountInputRow>,
     },
     LocalBatch {
         projected: Vec<CanonicalEntityTx>,
-        native: Vec<LocalEntityFinancialTx>,
+        native: Vec<LocalEntityTx>,
     },
     Command {
         projected: CanonicalEntityTx,
         command: Box<SignedEntityCommandV1>,
+    },
+    ProposerMaterialized {
+        projected: CanonicalEntityTx,
+        native: Box<LocalEntityTx>,
     },
     Projected(CanonicalEntityTx),
 }
@@ -55,6 +112,13 @@ impl EntityPendingWork {
             Self::Projected(tx) if tx.kind == EntityTxKind::ScheduledWake => Some(&tx.wire_data),
             _ => None,
         }
+    }
+
+    pub(super) fn is_board_handover(&self) -> bool {
+        matches!(
+            self,
+            Self::Projected(tx) if tx.kind == EntityTxKind::BoardHandover
+        )
     }
 }
 
@@ -73,8 +137,15 @@ pub struct RuntimeEntityInput {
     /// AccountInput contains `canonicalAccountInputCommitment`, never the raw
     /// nested Account frame body. Admission computes this once.
     pending_work: Vec<EntityPendingWork>,
+    atomic_cross_jurisdiction_pair: Option<RuntimeAtomicCrossJurisdictionPair>,
     /// Exact width measured once by the strict tagged-storage admission codec.
     canonical_wire_bytes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeAtomicCrossJurisdictionPair {
+    pub phase: String,
+    pub pair_key: String,
 }
 
 impl RuntimeEntityInput {
@@ -88,7 +159,13 @@ impl RuntimeEntityInput {
         for field in object.keys() {
             if !matches!(
                 field.as_str(),
-                "entityId" | "signerId" | "entityTxs" | "from" | "runtimeId" | "sourceRuntimeFrame"
+                "entityId"
+                    | "signerId"
+                    | "entityTxs"
+                    | "from"
+                    | "runtimeId"
+                    | "sourceRuntimeFrame"
+                    | "atomicCrossJurisdictionPair"
             ) {
                 return Err(RuntimeMachineError::EntityInputFieldUnsupported(
                     field.clone(),
@@ -119,6 +196,41 @@ impl RuntimeEntityInput {
                 signer_id_text.into(),
             ));
         }
+        let atomic_cross_jurisdiction_pair = object
+            .get("atomicCrossJurisdictionPair")
+            .map(|value| {
+                let pair = value.as_object().ok_or_else(|| {
+                    RuntimeMachineError::EntityInputTransportInvalid("ATOMIC_PAIR_OBJECT".into())
+                })?;
+                if pair.len() != 2
+                    || pair
+                        .keys()
+                        .any(|key| !matches!(key.as_str(), "phase" | "pairKey"))
+                {
+                    return Err(RuntimeMachineError::EntityInputTransportInvalid(
+                        "ATOMIC_PAIR_FIELDS".into(),
+                    ));
+                }
+                let phase = pair
+                    .get("phase")
+                    .and_then(Value::as_str)
+                    .filter(|phase| matches!(*phase, "proposal" | "ack"))
+                    .ok_or_else(|| {
+                        RuntimeMachineError::EntityInputTransportInvalid("ATOMIC_PAIR_PHASE".into())
+                    })?;
+                let pair_key = pair
+                    .get("pairKey")
+                    .and_then(Value::as_str)
+                    .filter(|key| !key.is_empty())
+                    .ok_or_else(|| {
+                        RuntimeMachineError::EntityInputTransportInvalid("ATOMIC_PAIR_KEY".into())
+                    })?;
+                Ok(RuntimeAtomicCrossJurisdictionPair {
+                    phase: phase.to_string(),
+                    pair_key: pair_key.to_string(),
+                })
+            })
+            .transpose()?;
         let txs: &[Value] = match object.get("entityTxs") {
             Some(value) => value
                 .as_array()
@@ -126,28 +238,56 @@ impl RuntimeEntityInput {
                 .ok_or(RuntimeMachineError::EntityInputTxsArrayRequired)?,
             None => &[],
         };
+        let is_remote_output = object.contains_key("sourceRuntimeFrame");
         let mut pending_work = Vec::with_capacity(txs.len());
         let mut local_projected = Vec::new();
         let mut local_native = Vec::new();
-        let mut local_phase_started = false;
         for (index, tx) in txs.iter().enumerate() {
             let projection = crate::entity_frame::project_entity_tx(tx)?;
+            if is_remote_output
+                && xln_rscore_entity_kernel::is_cross_jurisdiction_entity_tx_kind(projection.kind)
+            {
+                return Err(RuntimeMachineError::RawRemoteCrossJurisdictionForbidden(
+                    projection.kind.as_str(),
+                ));
+            }
             if projection.kind == xln_rscore_entity_kernel::EntityTxKind::AccountInput {
-                if local_phase_started {
-                    return Err(RuntimeMachineError::EntityTxInterleavingUnsupported);
+                if !local_projected.is_empty() {
+                    pending_work.push(EntityPendingWork::LocalBatch {
+                        projected: std::mem::take(&mut local_projected),
+                        native: std::mem::take(&mut local_native),
+                    });
                 }
                 let operation_index =
                     u64::try_from(index).map_err(|_| RuntimeMachineError::InputCountOverflow)?;
                 pending_work.push(EntityPendingWork::Account {
-                    row: crate::decode_entity_account_input_row(
+                    row: Box::new(crate::decode_entity_account_input_row(
                         entity_id_text,
                         operation_index,
                         tx,
-                    )?,
+                    )?),
                     projected: projection,
                 });
             } else {
-                local_phase_started = true;
+                if matches!(
+                    projection.kind,
+                    xln_rscore_entity_kernel::EntityTxKind::ScheduledWake
+                        | xln_rscore_entity_kernel::EntityTxKind::BoardHandover
+                ) {
+                    if !local_projected.is_empty() {
+                        pending_work.push(EntityPendingWork::LocalBatch {
+                            projected: std::mem::take(&mut local_projected),
+                            native: std::mem::take(&mut local_native),
+                        });
+                    }
+                    // Runtime-generated wake inputs and the exact board
+                    // handover preimage are already protocol transactions.
+                    // Wrapping either in an EntityCommand would change the
+                    // certified bytes and authority. Handover is admitted only
+                    // into the atomic `[j_event, boardHandover]` frame below.
+                    pending_work.push(EntityPendingWork::Projected(projection));
+                    continue;
+                }
                 if projection.kind == xln_rscore_entity_kernel::EntityTxKind::EntityCommand {
                     if !local_projected.is_empty() {
                         pending_work.push(EntityPendingWork::LocalBatch {
@@ -157,13 +297,19 @@ impl RuntimeEntityInput {
                     }
                     pending_work.push(EntityPendingWork::Command {
                         command: Box::new(
-                            decode_signed_entity_command(&projection.data)
-                                .map_err(RuntimeMachineError::EntityCommand)?,
+                            decode_signed_entity_command(projection.frame_data().ok_or_else(
+                                || {
+                                    RuntimeMachineError::EntityTxExecutionUnsupported(
+                                        projection.kind.as_str(),
+                                    )
+                                },
+                            )?)
+                            .map_err(RuntimeMachineError::EntityCommand)?,
                         ),
                         projected: projection,
                     });
                 } else {
-                    let Some(local) = decode_local_entity_financial_tx(&projection)
+                    let Some(local) = decode_local_entity_tx(&projection)
                         .map_err(RuntimeMachineError::EntityFinancial)?
                     else {
                         return Err(RuntimeMachineError::EntityTxExecutionUnsupported(
@@ -192,6 +338,7 @@ impl RuntimeEntityInput {
             signer_id,
             canonical,
             pending_work,
+            atomic_cross_jurisdiction_pair,
             canonical_wire_bytes,
         })
     }
@@ -212,6 +359,10 @@ impl RuntimeEntityInput {
         &self.canonical
     }
 
+    pub(super) fn atomic_pair(&self) -> Option<&RuntimeAtomicCrossJurisdictionPair> {
+        self.atomic_cross_jurisdiction_pair.as_ref()
+    }
+
     pub fn account_input_count(&self) -> usize {
         self.pending_work
             .iter()
@@ -222,7 +373,7 @@ impl RuntimeEntityInput {
     /// Exact already-validated Entity-frame tx projections, in wire order.
     /// Used by the entity-height durability barrier to detect a
     /// `scheduledWake` tx.
-    pub(super) fn has_entity_txs(&self) -> bool {
+    pub fn has_entity_txs(&self) -> bool {
         !self.pending_work.is_empty()
     }
 
@@ -232,8 +383,22 @@ impl RuntimeEntityInput {
             .find_map(EntityPendingWork::scheduled_wake)
     }
 
-    pub(super) fn into_parts(self) -> (Value, Vec<EntityPendingWork>) {
-        (self.canonical, self.pending_work)
+    pub(super) fn is_board_handover_only(&self) -> bool {
+        self.pending_work.len() == 1 && self.pending_work[0].is_board_handover()
+    }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        Value,
+        Vec<EntityPendingWork>,
+        Option<RuntimeAtomicCrossJurisdictionPair>,
+    ) {
+        (
+            self.canonical,
+            self.pending_work,
+            self.atomic_cross_jurisdiction_pair,
+        )
     }
 
     /// Entity-frame projections without the full decode path, for barrier
@@ -245,12 +410,13 @@ impl RuntimeEntityInput {
     ) -> Self {
         Self {
             entity_id: super::tests::owner_bytes(),
-            signer_id: super::tests::SIGNER.to_string(),
+            signer_id: super::tests::entity_signer_id(),
             canonical,
             pending_work: canonical_entity_txs
                 .into_iter()
                 .map(EntityPendingWork::Projected)
                 .collect(),
+            atomic_cross_jurisdiction_pair: None,
             canonical_wire_bytes: 1,
         }
     }
@@ -259,9 +425,10 @@ impl RuntimeEntityInput {
     pub(super) fn fixture(canonical: Value, canonical_wire_bytes: usize) -> Self {
         Self {
             entity_id: super::tests::owner_bytes(),
-            signer_id: super::tests::SIGNER.to_string(),
+            signer_id: super::tests::entity_signer_id(),
             canonical,
             pending_work: Vec::new(),
+            atomic_cross_jurisdiction_pair: None,
             canonical_wire_bytes,
         }
     }
@@ -273,7 +440,7 @@ impl RuntimeEntityInput {
     ) -> Self {
         Self {
             entity_id: super::tests::owner_bytes(),
-            signer_id: super::tests::SIGNER.to_string(),
+            signer_id: super::tests::entity_signer_id(),
             canonical,
             pending_work: vec![EntityPendingWork::Account {
                 projected: CanonicalEntityTx::from_frame_projection(
@@ -281,8 +448,9 @@ impl RuntimeEntityInput {
                     CanonicalValue::Null,
                 )
                 .expect("fixture Account projection"),
-                row: account_input,
+                row: Box::new(account_input),
             }],
+            atomic_cross_jurisdiction_pair: None,
             canonical_wire_bytes: 1,
         }
     }
@@ -346,15 +514,21 @@ fn validate_entity_input_transport(
 /// A deferred envelope retains this value; later ingress cannot accidentally
 /// execute it under a newer timestamp, J height or prepared Entity context.
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeEntityFrameContext {
+    pub execution: DeterministicContext,
+    /// Exact canonical EntityInfraContext committed by this Entity frame.
+    pub canonical: CanonicalValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeFrameContext {
     pub timestamp: u64,
     pub finalized_j_height: u64,
     pub hub_rebalance_has_pending_work: bool,
-    pub entity_context: DeterministicContext,
-    /// Exact canonical EntityInfraContext committed by the Entity frame.
-    /// It is decoded beside `entity_context`; the reducer never reconstructs
-    /// signed bytes from the execution-only projection.
-    pub canonical_entity_context: CanonicalValue,
+    /// Exact Entity-frame contexts in certified height order for each replica.
+    /// One Runtime frame may advance the same Entity more than once; collapsing
+    /// this to one map value loses the earlier replay input.
+    pub entity_contexts: BTreeMap<RuntimeEntityKey, VecDeque<RuntimeEntityFrameContext>>,
 }
 
 /// New ingress plus the frame context assigned to that ingress.
@@ -389,8 +563,7 @@ impl RuntimeLiveInput {
                 timestamp: self.timestamp,
                 finalized_j_height: self.finalized_j_height,
                 hub_rebalance_has_pending_work: self.hub_rebalance_has_pending_work,
-                entity_context: DeterministicContext::hlt_default(),
-                canonical_entity_context: CanonicalValue::Object(Vec::new()),
+                entity_contexts: BTreeMap::new(),
             },
         }
     }
@@ -400,6 +573,8 @@ impl RuntimeInput {
     pub fn empty_frame(
         timestamp: u64,
         finalized_j_height: u64,
+        entity_id: [u8; 32],
+        signer_id: &str,
         entity_context: DeterministicContext,
         canonical_entity_context: CanonicalValue,
     ) -> Self {
@@ -410,8 +585,14 @@ impl RuntimeInput {
                 timestamp,
                 finalized_j_height,
                 hub_rebalance_has_pending_work: false,
-                entity_context,
-                canonical_entity_context,
+                entity_contexts: BTreeMap::from([(
+                    RuntimeEntityKey::new(entity_id, signer_id)
+                        .expect("RuntimeInput signer must be non-empty"),
+                    VecDeque::from([RuntimeEntityFrameContext {
+                        execution: entity_context,
+                        canonical: canonical_entity_context,
+                    }]),
+                )]),
             },
         }
     }
@@ -518,20 +699,29 @@ impl Default for RuntimeLimits {
     }
 }
 
+/// Deterministic state owned by one local Entity replica.
+///
+/// The Account forest itself is live machinery. Only its root is committed
+/// beside the canonical Entity state, exactly like TypeScript's keyed
+/// `RuntimeState.eReplicas` projection.
+#[derive(Clone)]
+pub struct RuntimeEntityState {
+    pub accounts_root: [u8; 32],
+    pub entity: EntityStateSlice,
+}
+
 /// Deterministic data fixed by one committed Runtime frame.
 pub struct RuntimeState {
     pub height: u64,
     pub timestamp: u64,
     pub finalized_j_height: u64,
-    pub accounts_root: [u8; 32],
-    pub entity: EntityStateSlice,
+    pub e_replicas: BTreeMap<RuntimeEntityKey, RuntimeEntityState>,
 }
 
-/// One live single-Entity Runtime. The Account forest is replica machinery;
-/// its root is the only Account authority committed by RuntimeState.
-pub struct RuntimeReplica {
-    pub state: RuntimeState,
-    pub durable: crate::processor::RuntimeDurableEnvelope,
+/// Live machinery for one Entity key. No field in this envelope is a second
+/// committed state: Entity state and the Account root live only in
+/// `RuntimeState.e_replicas`.
+pub struct RuntimeEntityReplica {
     pub entity_id: [u8; 32],
     pub signer_id: String,
     pub accounts: ResidentConsensusEngine,
@@ -550,16 +740,25 @@ pub struct RuntimeReplica {
     /// materialized Runtime checkpoint and WAL replay advances it only when a
     /// checkpoint-bearing frame is reproduced.
     pub(crate) last_materialized_height: u64,
-    pub mempool: RuntimeMempool,
     /// Admitted Entity work deferred only by the canonical Entity-frame byte
     /// budget. The admitting RuntimeInputs live in WAL; replay rebuilds this
     /// RAM-only FIFO, so it is never rooted or checkpointed.
     pub(crate) entity_mempool: VecDeque<EntityPendingWork>,
-    pub scheduled_wakes: super::ScheduledWakeIndex,
-    pub limits: RuntimeLimits,
 }
 
-impl RuntimeReplica {
+/// One live Runtime owning a path-keyed cohort of Entity replicas.
+pub struct RuntimeReplica {
+    pub state: RuntimeState,
+    pub durable: crate::processor::RuntimeDurableEnvelope,
+    pub e_replicas: BTreeMap<RuntimeEntityKey, RuntimeEntityReplica>,
+    pub mempool: RuntimeMempool,
+    pub limits: RuntimeLimits,
+    /// Operator secret used only to derive proposer-owned public commitments.
+    /// It is never projected into Runtime/Entity state or persisted beside it.
+    pub(crate) proposer_runtime_seed: String,
+}
+
+impl RuntimeEntityReplica {
     /// Exact live Entity-replica envelope committed by `replicaMetaDigest`.
     /// Read-only exposure keeps replay diagnostics on the canonical value;
     /// callers cannot maintain a second metadata model.
@@ -567,17 +766,16 @@ impl RuntimeReplica {
         &self.replica_metadata
     }
 
-    #[allow(clippy::too_many_arguments)] // Explicit trust-boundary parts beat an opaque options bag.
-    pub fn new(
-        state: RuntimeState,
-        durable: crate::processor::RuntimeDurableEnvelope,
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        state: &RuntimeEntityState,
         entity_id: [u8; 32],
         signer_id: String,
         accounts: ResidentConsensusEngine,
         entity_consensus: ResidentEntityConsensusReplica,
         entity_signer: EntitySingleSigner,
         protocol_fingerprint: [u8; 32],
-        limits: RuntimeLimits,
+        runtime_height: u64,
     ) -> Result<Self, RuntimeMachineError> {
         if signer_id.is_empty() {
             return Err(RuntimeMachineError::SignerIdEmpty);
@@ -612,16 +810,12 @@ impl RuntimeReplica {
             return Err(RuntimeMachineError::AccountEntitySignerMismatch);
         }
         entity_consensus.validate_restored(&state.entity.entity_id, state.entity.height)?;
-        let scheduled_wakes = super::ScheduledWakeIndex::from_entity_state(&state.entity)?;
         let replica_metadata = serde_json::json!({
             "entityId": state.entity.entity_id,
             "signerId": entity_signer.signer_id(),
             "isProposer": true,
         });
-        let last_materialized_height = state.height;
         Ok(Self {
-            state,
-            durable,
             entity_id,
             signer_id: entity_signer.signer_id().to_string(),
             accounts,
@@ -630,11 +824,8 @@ impl RuntimeReplica {
             protocol_fingerprint,
             replica_metadata,
             certified_board_registry: crate::CertifiedBoardRegistry::empty(),
-            last_materialized_height,
-            mempool: RuntimeMempool::empty(),
+            last_materialized_height: runtime_height,
             entity_mempool: VecDeque::new(),
-            scheduled_wakes,
-            limits,
         })
     }
 
@@ -653,7 +844,7 @@ impl RuntimeReplica {
             .as_object()
             .ok_or_else(|| RuntimeMachineError::ReplicaMetadata("OBJECT_REQUIRED".into()))?;
         let identity_matches = meta.get("entityId").and_then(Value::as_str)
-            == Some(self.state.entity.entity_id.as_str())
+            == Some(render_hex(&self.entity_id).as_str())
             && meta.get("signerId").and_then(Value::as_str) == Some(self.signer_id.as_str());
         if !identity_matches || meta.get("isProposer").and_then(Value::as_bool).is_none() {
             return Err(RuntimeMachineError::ReplicaMetadata(
@@ -662,6 +853,127 @@ impl RuntimeReplica {
         }
         self.replica_metadata = value;
         Ok(())
+    }
+}
+
+impl RuntimeReplica {
+    #[allow(clippy::too_many_arguments)] // Genesis/restore supplies one exact initial Entity slot.
+    pub fn new(
+        state: RuntimeState,
+        durable: crate::processor::RuntimeDurableEnvelope,
+        entity_id: [u8; 32],
+        signer_id: String,
+        accounts: ResidentConsensusEngine,
+        entity_consensus: ResidentEntityConsensusReplica,
+        entity_signer: EntitySingleSigner,
+        protocol_fingerprint: [u8; 32],
+        proposer_runtime_seed: String,
+        limits: RuntimeLimits,
+    ) -> Result<Self, RuntimeMachineError> {
+        if proposer_runtime_seed.trim().is_empty() {
+            return Err(RuntimeMachineError::RuntimeSeedEmpty);
+        }
+        let key = RuntimeEntityKey::new(entity_id, &signer_id)?;
+        let entity_state = state
+            .e_replicas
+            .get(&key)
+            .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+        let entity = RuntimeEntityReplica::new(
+            entity_state,
+            entity_id,
+            signer_id,
+            accounts,
+            entity_consensus,
+            entity_signer,
+            protocol_fingerprint,
+            state.height,
+        )?;
+        let mut e_replicas = BTreeMap::new();
+        e_replicas.insert(key, entity);
+        Ok(Self {
+            state,
+            durable,
+            e_replicas,
+            mempool: RuntimeMempool::empty(),
+            limits,
+            proposer_runtime_seed,
+        })
+    }
+
+    pub fn entity_slot(
+        &self,
+        entity_id: &[u8; 32],
+        signer_id: &str,
+    ) -> Option<(&RuntimeEntityState, &RuntimeEntityReplica)> {
+        let key = RuntimeEntityKey::new(*entity_id, signer_id).ok()?;
+        Some((self.state.e_replicas.get(&key)?, self.e_replicas.get(&key)?))
+    }
+
+    pub(crate) fn contains_entity_id(&self, entity_id: &[u8; 32]) -> bool {
+        let start = RuntimeEntityKey {
+            entity_id: *entity_id,
+            signer_id: String::new(),
+        };
+        self.state
+            .e_replicas
+            .range(start..)
+            .next()
+            .is_some_and(|(key, _)| &key.entity_id == entity_id)
+    }
+
+    pub(crate) fn take_entity_slot(
+        &mut self,
+        entity_id: &[u8; 32],
+        signer_id: &str,
+    ) -> Option<(RuntimeEntityState, RuntimeEntityReplica)> {
+        let key = RuntimeEntityKey::new(*entity_id, signer_id).ok()?;
+        self.state.e_replicas.get(&key)?;
+        self.e_replicas.get(&key)?;
+        Some({
+            let state = self
+                .state
+                .e_replicas
+                .remove(&key)
+                .expect("checked Entity state slot");
+            let replica = self.e_replicas.remove(&key).expect("checked Entity slot");
+            (state, replica)
+        })
+    }
+
+    pub(crate) fn install_entity_slot(
+        &mut self,
+        key: RuntimeEntityKey,
+        state: RuntimeEntityState,
+        replica: RuntimeEntityReplica,
+    ) -> Result<(), RuntimeMachineError> {
+        if replica.entity_id != key.entity_id || replica.signer_id != key.signer_id {
+            return Err(RuntimeMachineError::EntityStateMap(
+                "SLOT_IDENTITY_MISMATCH".into(),
+            ));
+        }
+        if self.state.e_replicas.insert(key.clone(), state).is_some() {
+            return Err(RuntimeMachineError::EntityStateMap(
+                "STATE_SLOT_ALREADY_PRESENT".into(),
+            ));
+        }
+        if self.e_replicas.insert(key, replica).is_some() {
+            return Err(RuntimeMachineError::EntityStateMap(
+                "LIVE_SLOT_ALREADY_PRESENT".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn entity_slot_mut(
+        &mut self,
+        entity_id: &[u8; 32],
+        signer_id: &str,
+    ) -> Option<(&mut RuntimeEntityState, &mut RuntimeEntityReplica)> {
+        let key = RuntimeEntityKey::new(*entity_id, signer_id).ok()?;
+        Some((
+            self.state.e_replicas.get_mut(&key)?,
+            self.e_replicas.get_mut(&key)?,
+        ))
     }
 }
 
@@ -675,7 +987,7 @@ pub struct AppliedRuntimeInput {
     /// authority while the tail is reconstructed by replay.
     pub entity_txs_selected: usize,
     pub entity_txs_pending: usize,
-    pub wake: Option<RuntimeWake>,
+    pub wakes: Vec<RuntimeEntityWake>,
 }
 
 /// Exact logical body selected for one durable Runtime frame. The deterministic
@@ -687,7 +999,7 @@ pub struct AppliedRuntimeFrame {
     pub frame: RuntimeFrameContext,
     /// Runtime-only frames (for example a watcher cursor advance) retain the
     /// previous certified Entity head and carry no Entity context or events.
-    pub entity_frame_committed: bool,
+    pub entity_frame_count: usize,
 }
 
 /// Runtime-generated Entity work. This is an internal EntityInput reason, not
@@ -699,15 +1011,43 @@ pub struct RuntimeWake {
     pub scheduled: Option<ScheduledWake>,
 }
 
-/// Outputs remain internal until the Runtime WAL writer fsyncs the frame.
-pub struct RuntimeOutputs {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeEntityWake {
+    pub entity_id: [u8; 32],
+    pub signer_id: String,
+    pub wake: RuntimeWake,
+}
+
+/// One Entity transition certified inside this Runtime frame. Vector order is
+/// first-seen input order; it is never reconstructed by iterating the keyed
+/// replica map.
+pub struct RuntimeEntityOutputs {
+    pub entity_id: [u8; 32],
+    pub signer_id: String,
+    /// Exact certified Entity frame identity produced by this transition.
+    /// A Runtime frame may advance one Entity more than once, so an earlier
+    /// transition cannot be reconstructed from the final replica head.
+    pub entity_frame_height: u64,
+    pub entity_frame_timestamp: u64,
+    pub entity_frame_hash: String,
+    pub entity_frame_events: Vec<xln_rscore_entity_kernel::EntityFrameEvent>,
+    /// Exact canonical context consumed by this certified Entity frame. It is
+    /// moved to Runtime projection; projection must never reconstruct it from
+    /// the final replica head when one Runtime frame contains multiple heights.
+    pub entity_context: CanonicalValue,
+    pub accounts_root: [u8; 32],
     pub entity_events: Vec<EntityKernelOutput>,
     /// Exact Entity-local outputs. Runtime routing may add transport metadata,
     /// but must not reconstruct Account or consensus-authorized payloads.
     pub local_entity_outputs: Vec<LocalEntityOutput>,
-    pub entity_state_root: Option<String>,
-    pub entity_authority_root: Option<String>,
+    pub entity_state_root: String,
+    pub entity_authority_root: String,
     pub checkpoint: Option<AccountsCheckpoint>,
+}
+
+/// Outputs remain internal until the Runtime WAL writer fsyncs the frame.
+pub struct RuntimeOutputs {
+    pub entities: Vec<RuntimeEntityOutputs>,
     /// Exact logical rows dirtied by this certified frame. Storage uses these
     /// only for history/materialization indexes; no root is reconstructed from
     /// them. Account ids preserve canonical first-touch order and are
@@ -718,8 +1058,14 @@ pub struct RuntimeOutputs {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuntimeFrameTouches {
     pub entity_ids: Vec<String>,
-    pub account_ids: Vec<String>,
+    pub accounts: Vec<RuntimeTouchedAccount>,
     pub book_entity_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeTouchedAccount {
+    pub entity_id: String,
+    pub counterparty_id: String,
 }
 
 /// Provenance of one Account frame committed while applying a Runtime frame.
@@ -734,11 +1080,12 @@ pub enum AccountCommitSource {
 
 /// Exact compact evidence for one Account frame that became committed.
 ///
-/// A combined `frame_ack` contributes two rows in canonical TS order: the ACK
+/// A combined `ack_frame` contributes two rows in canonical TS order: the ACK
 /// commit first, then the accepted peer frame. Retaining both rows is required
 /// because the final Account leaf alone cannot prove that intermediate order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountCommitEvidence {
+    pub entity_id: [u8; 32],
     pub account_id: AccountId,
     pub source: AccountCommitSource,
     pub frame_height: u64,
@@ -755,18 +1102,25 @@ pub struct RuntimeApplyResult {
     /// Outbound proposals are intentionally absent: they remain pending until
     /// a later peer ACK commits them.
     pub account_commits: Vec<AccountCommitEvidence>,
+    /// Validator-local external writes released only after this frame's WAL
+    /// fsync. The same attempts are committed in Runtime infrastructure, so a
+    /// crash reconstructs them without a second queue.
+    pub post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
 }
 
 impl RuntimeApplyResult {
-    /// Borrow the exact certified frame now owned by the returned replica.
-    /// Durable processing encodes this reference once; no frame-sized clone or
-    /// alternate publication schema is needed.
-    pub fn certified_entity_frame(&self) -> Option<&EntityFrame> {
-        self.replica
-            .entity_consensus
-            .certified_frame_head
-            .as_ref()
-            .map(|head| &head.frame)
+    /// Borrow exact certified frames in the same first-seen order as the
+    /// per-Entity transition outputs. The keyed maps are lookup-only here;
+    /// their sorted implementation order is never protocol output order.
+    pub fn certified_entity_frames(&self) -> impl Iterator<Item = ([u8; 32], &EntityFrame)> {
+        self.outputs.entities.iter().filter_map(|output| {
+            let key = RuntimeEntityKey::new(output.entity_id, &output.signer_id).ok()?;
+            self.replica
+                .e_replicas
+                .get(&key)
+                .and_then(|replica| replica.entity_consensus.certified_frame_head.as_ref())
+                .map(|head| (output.entity_id, &head.frame))
+        })
     }
 }
 
@@ -783,6 +1137,8 @@ fn render_hex(bytes: &[u8; 32]) -> String {
 
 #[derive(Debug, Error)]
 pub enum RuntimeMachineError {
+    #[error("RUNTIME_SEED_EMPTY")]
+    RuntimeSeedEmpty,
     #[error("RUNTIME_SIGNER_ID_EMPTY")]
     SignerIdEmpty,
     #[error("RUNTIME_TIMESTAMP_REGRESSION:previous={previous}:next={next}")]
@@ -801,6 +1157,8 @@ pub enum RuntimeMachineError {
     },
     #[error("RUNTIME_ENTITY_OWNER_MISMATCH")]
     EntityOwnerMismatch,
+    #[error("RUNTIME_ENTITY_STATE_MAP:{0}")]
+    EntityStateMap(String),
     #[error("RUNTIME_ENTITY_SIGNER_MISMATCH")]
     EntitySignerMismatch,
     #[error("RUNTIME_ENTITY_STATE_OWNER_MISMATCH:runtime={runtime}:entity={entity}")]
@@ -821,6 +1179,8 @@ pub enum RuntimeMachineError {
     EntityInputFieldUnsupported(String),
     #[error("RUNTIME_ENTITY_INPUT_TRANSPORT_INVALID:{0}")]
     EntityInputTransportInvalid(String),
+    #[error("RUNTIME_CROSS_J_ATOMIC_PAIR_INVALID:{0}")]
+    AtomicCrossJurisdictionPairInvalid(String),
     #[error("RUNTIME_ENTITY_INPUT_ENTITY_ID_MISSING")]
     EntityInputEntityIdMissing,
     #[error("RUNTIME_ENTITY_INPUT_ENTITY_ID_INVALID:{0}")]
@@ -831,6 +1191,8 @@ pub enum RuntimeMachineError {
     EntityInputTxsArrayRequired,
     #[error("RUNTIME_ENTITY_TX_EXECUTION_UNSUPPORTED:{0}")]
     EntityTxExecutionUnsupported(&'static str),
+    #[error("RUNTIME_OUTPUT_RAW_CROSS_J_FORBIDDEN:{0}")]
+    RawRemoteCrossJurisdictionForbidden(&'static str),
     #[error("RUNTIME_ENTITY_FINANCIAL:{0}")]
     EntityFinancial(#[source] EntityKernelError),
     #[error(transparent)]
@@ -857,6 +1219,8 @@ pub enum RuntimeMachineError {
     SyntheticEntityInputEncoding(String),
     #[error("RUNTIME_TX_UNSUPPORTED:{kind}")]
     UnsupportedRuntimeTx { kind: String },
+    #[error("RUNTIME_J_SUBMIT:{0}")]
+    JSubmit(String),
     #[error(transparent)]
     DurableEnvelope(#[from] crate::RuntimeDurableEnvelopeError),
     #[error("RUNTIME_ACCOUNTS_ROOT_MISMATCH:committed={committed:?}:resident={resident:?}")]

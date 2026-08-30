@@ -5,6 +5,7 @@ import type { AccountReplica } from '../../types/account';
 import {
   PersistentRadixValueMap,
   type PersistentRadixNodeRecord,
+  type PersistentRadixNodeCommitment,
   type RadixFoldMutation,
 } from '../../protocol/state/persistent-radix-value-map';
 import { createStructuredLogger } from '../../support/logger';
@@ -272,6 +273,10 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
 
   rootHash(): string {
     return this.#values.rootHash();
+  }
+
+  nodeCommitmentAtPath(prefix: readonly number[]): PersistentRadixNodeCommitment | null {
+    return this.#values.nodeCommitmentAtPath(prefix);
   }
 
   /**

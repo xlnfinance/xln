@@ -1,14 +1,8 @@
 import type { EntityTx } from '../../../types/entity-tx';
 import { haltRuntimeFailure } from '../../../protocol/errors/failure-taxonomy';
-import type { EntityInput, EntityOutput } from '../../types';
-import type { EntityRuntimeContext } from '../../runtime-context';
+import type { EntityOutput } from '../../types';
 import { cloneIsolatedEntityTxs } from '../../state/input-clone';
 import { getAccountOnlyEntityTx } from './envelope';
-
-const isLocalRuntimeProtocolOutput = (
-  output: EntityOutput,
-): output is EntityInput & { localRuntimeProtocol: 'cross-j' } =>
-  output.localRuntimeProtocol === 'cross-j';
 
 const isNonMutatingWake = (output: EntityOutput): boolean =>
   Array.isArray(output.entityTxs) &&
@@ -29,8 +23,7 @@ const requireRawAccountOutput = (
     output.proposedFrame ||
     output.hashPrecommits ||
     output.hashPrecommitFrame ||
-    output.leaderTimeoutVote ||
-    output.localRuntimeProtocol
+    output.leaderTimeoutVote
   ) {
     throw new Error(`ACCOUNT_OUTPUT_PROTOCOL_FIELDS_FORBIDDEN:index=${outputIndex}`);
   }
@@ -55,47 +48,45 @@ const requireRawAccountOutput = (
 
 /**
  * Publish only outputs whose authority already exists at their native layer.
- * AccountInput carries Account Hankos; sibling Runtime output stays local.
- * Generic cross-Entity effects are outside the current RRS protocol and fail
- * loudly until a source-Entity-frame inclusion proof is specified.
+ * AccountInput carries Account Hankos. Every other mutating Entity output is
+ * one canonical Runtime output: local targets are applied in this Runtime
+ * transition; remote targets enter the committed flat Runtime outbox.
  */
 export const materializeCommittedEntityOutputs = (
   outputs: EntityOutput[],
   sourceEntityId: string,
-  env: EntityRuntimeContext,
-  emitLocalRuntimeOutputs: boolean,
+  sourceSignerId: string,
+  emitRuntimeOutputs: boolean,
 ): EntityOutput[] => outputs.flatMap((output, outputIndex): EntityOutput[] => {
   if (isNonMutatingWake(output)) return [structuredClone(output)];
-  if (isLocalRuntimeProtocolOutput(output)) {
-    if (!emitLocalRuntimeOutputs) return [];
-    const targetEntityId = output.entityId.trim().toLowerCase();
-    const localTarget = Array.from(env.state.eReplicas.values()).some(
-      replica =>
-        replica.entityId.toLowerCase() === targetEntityId &&
-        replica.signerId.toLowerCase() === output.signerId.toLowerCase(),
-    );
-    if (!localTarget) {
-      throw new Error(`RUNTIME_OUTPUT_TARGET_NOT_LOCAL:${targetEntityId}:${output.signerId}`);
-    }
-    if (!output.entityTxs?.length) throw new Error(`RUNTIME_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
-    return [{
-      entityId: targetEntityId,
-      signerId: output.signerId.toLowerCase(),
-      entityTxs: [{
-        type: 'runtimeOutput',
-        data: {
-          protocol: 'cross-j',
-          sourceEntityId: sourceEntityId.toLowerCase(),
-          targetEntityId,
-          entityTxs: cloneIsolatedEntityTxs(output.entityTxs),
-        },
-      }],
-    }];
-  }
   if (requireRawAccountOutput(sourceEntityId, output, outputIndex)) {
     const entityTxs = output.entityTxs;
     if (!entityTxs) throw new Error(`ACCOUNT_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
     return [{ ...output, entityId: output.entityId.trim().toLowerCase(), entityTxs: cloneIsolatedEntityTxs(entityTxs) }];
   }
-  throw new Error(`GENERIC_ENTITY_OUTPUT_UNSUPPORTED:index=${outputIndex}`);
+  if (!emitRuntimeOutputs) return [];
+  const targetEntityId = output.entityId.trim().toLowerCase();
+  const targetSignerId = output.signerId?.trim().toLowerCase() ?? '';
+  const source = sourceEntityId.trim().toLowerCase();
+  const sourceSigner = sourceSignerId.trim().toLowerCase();
+  if (!targetEntityId || !targetSignerId || !source || !sourceSigner) {
+    throw new Error(`RUNTIME_OUTPUT_ROUTE_MISSING:index=${outputIndex}`);
+  }
+  if (!output.entityTxs?.length) {
+    throw new Error(`RUNTIME_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
+  }
+  return [{
+    entityId: targetEntityId,
+    signerId: targetSignerId,
+    entityTxs: [{
+      type: 'runtimeOutput',
+      data: {
+        protocol: 'cross-j',
+        sourceEntityId: source,
+        sourceSignerId: sourceSigner,
+        targetEntityId,
+        entityTxs: cloneIsolatedEntityTxs(output.entityTxs),
+      },
+    }],
+  }];
 });

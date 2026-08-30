@@ -17,8 +17,8 @@ use xln_rscore_engine::{
 use super::authority::{EntityAuthorityError, EntityFrameAuthority};
 use super::encoding::parse_digest;
 use super::frame::{
-    EntityFrame, EntityFrameBody, EntityFrameError, EntityFrameLeader, HashToSign, HashType,
-    compute_entity_frame_hash,
+    EntityFrame, EntityFrameDraft, EntityFrameError, EntityFrameLeader, HashToSign, HashType,
+    compute_entity_frame_hash_with_measure,
 };
 
 type SignedManifest = (Vec<Vec<u8>>, Vec<Vec<u8>>);
@@ -183,6 +183,24 @@ impl EntitySingleSigner {
         super::encoding::hex_digest(&self.entity_id)
     }
 
+    /// Sign a public Entity projection and bind its authority digest with the
+    /// same single-member Hanko used by Entity manifests. The caller owns the
+    /// projection domains; this method only guarantees both signatures come
+    /// from the exact key/board already installed in the live replica.
+    pub fn sign_public_projection(
+        &self,
+        authority_digest: &[u8; 32],
+        route_digest: &[u8; 32],
+    ) -> Result<(Vec<u8>, [u8; 65]), EntityCertificationError> {
+        let identity = self.signing_identity();
+        let hanko = identity
+            .sign_frame(authority_digest)
+            .map_err(|error| EntityCertificationError::SigningFailed(error.to_string()))?;
+        let route_signature = sign_digest(&self.private_key, route_digest)
+            .ok_or_else(|| EntityCertificationError::SigningFailed("profile-route".into()))?;
+        Ok((hanko, route_signature))
+    }
+
     pub(crate) fn sign_raw_digest(&self, digest: &[u8; 32]) -> Option<[u8; 65]> {
         sign_digest(&self.private_key, digest)
     }
@@ -293,7 +311,7 @@ pub fn build_entity_hash_manifest(
 pub fn certify_single_signer_entity_frame(
     signer: &EntitySingleSigner,
     authority: &EntityFrameAuthority,
-    body: EntityFrameBody<'_>,
+    draft: EntityFrameDraft,
     secondary_hashes: Vec<HashToSign>,
     presigned_manifest: PresignedManifest,
 ) -> Result<CertifiedEntityProposal, EntityCertificationError> {
@@ -314,17 +332,21 @@ pub fn certify_single_signer_entity_frame(
         });
     }
     let authority_root = authority.root()?;
-    if authority_root != body.authority_root {
+    if authority_root != draft.authority_root {
         return Err(EntityCertificationError::AuthorityRootMismatch {
             expected: authority_root,
-            received: body.authority_root.to_string(),
+            received: draft.authority_root.clone(),
         });
     }
     let authority_done = total_started.elapsed();
-    let frame_hash = compute_entity_frame_hash(&body)?;
+    let (frame_hash, frame_measure) = compute_entity_frame_hash_with_measure(&draft.body())?;
     let hash_done = total_started.elapsed();
-    let manifest =
-        build_entity_hash_manifest(body.entity_id, body.height, &frame_hash, secondary_hashes)?;
+    let manifest = build_entity_hash_manifest(
+        &draft.entity_id,
+        draft.height,
+        &frame_hash,
+        secondary_hashes,
+    )?;
     let manifest_done = total_started.elapsed();
     let (signatures, hankos) = signer.sign_manifest(&manifest, presigned_manifest)?;
     let sign_done = total_started.elapsed();
@@ -333,14 +355,14 @@ pub fn certify_single_signer_entity_frame(
         .cloned()
         .ok_or_else(|| EntityCertificationError::SigningFailed(frame_hash.clone()))?;
     let frame = EntityFrame {
-        height: body.height,
-        parent_frame_hash: body.parent_frame_hash.to_string(),
-        state_root: body.state_root.to_string(),
-        authority_root: body.authority_root.to_string(),
-        timestamp: body.timestamp,
-        entity_context: body.entity_context.clone(),
-        txs: body.txs.to_vec(),
-        events: body.events.to_vec(),
+        height: draft.height,
+        parent_frame_hash: draft.parent_frame_hash,
+        state_root: draft.state_root,
+        authority_root: draft.authority_root,
+        timestamp: draft.timestamp,
+        entity_context: draft.entity_context,
+        txs: draft.txs,
+        events: draft.events,
         hash: frame_hash,
         leader: EntityFrameLeader {
             proposer_signer_id: signer.signer_id().to_string(),
@@ -348,7 +370,7 @@ pub fn certify_single_signer_entity_frame(
             certificate: None,
             relay_certificate: None,
         },
-        j_prefix_certificate: body.j_prefix_certificate.cloned(),
+        j_prefix_certificate: draft.j_prefix_certificate,
         hashes_to_sign: manifest,
         collected_sigs: BTreeMap::from([(signer.signer_id().to_string(), signatures)]),
         hankos: vec![entity_hanko],
@@ -358,7 +380,7 @@ pub fn certify_single_signer_entity_frame(
     if profile_entity_certification() {
         let total = total_started.elapsed();
         eprintln!(
-            "RSCORE_ENTITY_FRAME_PHASE authority={} hash={} manifest={} sign={} clone={} proof={} total={} txs={} events={} hashes={}",
+            "RSCORE_ENTITY_FRAME_PHASE authority={} hash={} manifest={} sign={} assemble={} proof={} total={} txs={} events={} hashes={} totalBytes={} txBytes={} contextBytes={} eventBytes={} headerBytes={}",
             authority_done.as_micros(),
             hash_done.saturating_sub(authority_done).as_micros(),
             manifest_done.saturating_sub(hash_done).as_micros(),
@@ -369,6 +391,11 @@ pub fn certify_single_signer_entity_frame(
             frame.txs.len(),
             frame.events.len(),
             frame.hashes_to_sign.len(),
+            frame_measure.total_bytes,
+            frame_measure.tx_bytes,
+            frame_measure.context_bytes,
+            frame_measure.event_bytes,
+            frame_measure.header_bytes,
         );
     }
     Ok(CertifiedEntityProposal {
@@ -446,16 +473,16 @@ mod tests {
         let result = certify_single_signer_entity_frame(
             &signer,
             &authority,
-            EntityFrameBody {
-                parent_frame_hash: "genesis",
+            EntityFrameDraft {
+                parent_frame_hash: "genesis".into(),
                 height: 1,
                 timestamp: 1_000,
-                txs: &txs,
-                events: &events,
-                entity_id: entity,
-                state_root: &format!("0x{}", "11".repeat(32)),
-                authority_root: &authority_root,
-                entity_context: &context,
+                txs,
+                events,
+                entity_id: entity.into(),
+                state_root: format!("0x{}", "11".repeat(32)),
+                authority_root: authority_root.clone(),
+                entity_context: context,
                 j_prefix_certificate: None,
             },
             vec![],
@@ -503,16 +530,16 @@ mod tests {
                 context: "account:fixture:dispute".into(),
             },
         ];
-        let body = || EntityFrameBody {
-            parent_frame_hash: "genesis",
+        let body = || EntityFrameDraft {
+            parent_frame_hash: "genesis".into(),
             height: 1,
             timestamp: 1_000,
-            txs: &txs,
-            events: &events,
-            entity_id: entity,
-            state_root: &state_root,
-            authority_root: &authority_root,
-            entity_context: &context,
+            txs: txs.clone(),
+            events: events.clone(),
+            entity_id: entity.into(),
+            state_root: state_root.clone(),
+            authority_root: authority_root.clone(),
+            entity_context: context.clone(),
             j_prefix_certificate: None,
         };
 
@@ -524,6 +551,17 @@ mod tests {
             PresignedManifest::new(),
         )
         .expect("baseline");
+        let mut lineage = baseline.frame.clone();
+        let certified_hash = lineage.hash.clone();
+        lineage
+            .compact_lineage_proof()
+            .expect("compact lineage proof");
+        assert_eq!(lineage.hash, certified_hash);
+        assert_eq!(lineage.hashes_to_sign.len(), 1);
+        assert_eq!(lineage.collected_sigs["h1-hub"].len(), 1);
+        lineage
+            .require_certified_proof_shape()
+            .expect("compact proof shape");
         let digest = parse_digest(&account_hash).expect("account hash");
         let (signature, hanko) = signer
             .signing_identity()

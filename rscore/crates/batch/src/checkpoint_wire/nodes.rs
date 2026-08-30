@@ -1,6 +1,7 @@
 use xln_rscore_abi::AbiValue;
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
+use super::encode_canonical_value;
 use super::state_value::{encode_lending_kind, encode_lock, encode_policy, encode_swap_offer};
 use super::{AccountWireEncodeError, encode_delta, encode_j_claim_node, integer, tuple};
 use crate::AccountCheckpointRows;
@@ -13,6 +14,7 @@ pub enum AccountCheckpointNamespace {
     LendingIntents = 3,
     SwapOffers = 4,
     RebalanceFeePolicies = 5,
+    Pulls = 6,
 }
 
 impl AccountCheckpointNamespace {
@@ -56,7 +58,7 @@ pub struct EncodedAccountJClaimChanges {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodedAccountCheckpointNodes {
-    pub trees: [EncodedAccountCheckpointTreeChanges; 5],
+    pub trees: [EncodedAccountCheckpointTreeChanges; 6],
     pub j_claims: EncodedAccountJClaimChanges,
 }
 
@@ -88,6 +90,11 @@ pub fn encode_account_checkpoint_nodes(
                 AccountCheckpointNamespace::RebalanceFeePolicies,
                 &rows.rebalance_fee_policies,
                 encode_policy,
+            )?,
+            tree_changes(
+                AccountCheckpointNamespace::Pulls,
+                &rows.pulls,
+                encode_canonical_value,
             )?,
         ],
         j_claims: EncodedAccountJClaimChanges {

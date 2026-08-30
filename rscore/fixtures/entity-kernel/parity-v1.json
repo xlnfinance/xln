@@ -54,43 +54,39 @@
   },
   "canonicalSource": "TypeScript Entity paybook follow-ups + processOrderbookSwaps/processOrderbookCancels",
   "paybookFinalResolve": {
-    "orderedOutboxDigest": "0x927c3bad6560779a4296162ac75c71bf3b1b7e47836d7625a16d86644e981677",
-    "paybookRoot": "0x61b67dab71810cb8f0f4d3ccf3e7d783fe9b8c6ef54bee8a9cc782f73b0d2fec",
-    "resolveDigest": "0x3eacd7c1c1909ea83ddc6f852c0332b3c55bf799176b55ee33a9cb8f8b401fdc"
+    "orderedOutboxDigest": "0x66dd5ec688a3a4f0c2cef40861c9aa1c2eefcd7fcd2f4eddc7b34d79dcc1ac86",
+    "paybookRoot": "0x1ae68a15fa647739007f8495081e9bbc59eee5046094d92c866c1b5cf4d53814",
+    "resolveDigest": "0xbdc71295bba0ca86550e3c7efc05f938a14c454b3981eff3f9f62675ed96fa80"
   },
   "paybookForward": {
     "canonicalEntity": {
       "accountCount": 2,
       "accountsRoot": "0xa5376bab253cc07ae0eb4afdca837595f146d92e26c6596bbdfde44a0ad1736a",
-      "root": "0xf8a2933313db2e31db4f1620f728c40678c33a4c10da7008defd96e75b5aeb4b",
+      "root": "0x464f5917bacdfd623634e0564a59b9147b0814a2d88e39bf39cf1eaf0172c1af",
       "sections": [
         {
-          "digest": "0xf1b9ffcf5fb94f88efc91f8f223fbc7c8efc287e011a2d1ed724cc70a3801d02",
+          "digest": "0xbdb11f2fea1e3caf3ef8bf23e8f0b7161471141cede9bbec698f90a04027d4fb",
           "field": "accounts"
         },
         {
-          "digest": "0x50d8f4dd037da7e5c3e0b7e3609ed64113cc29a3c6277edd4eadcd2fad337812",
+          "digest": "0x236302681cfd161c32f32af65b9d07da5178184f5783a9e83dfcba8b526821a2",
           "field": "config"
         },
         {
-          "digest": "0xedb1af86c20efd885606fbef11c5234984d94dd8caf330f11ddc748cb910fe34",
+          "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+          "field": "crontabState"
+        },
+        {
+          "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
           "field": "entityEncryptionPublicKey"
         },
         {
-          "digest": "0xddb1b6e30e0805cea747207960ba74793b69cb007d2ed6189da12ac9d819538a",
+          "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
           "field": "entityId"
         },
         {
           "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
           "field": "height"
-        },
-        {
-          "digest": "0xfdcda6573c19394f42067c82d52d40b6dfd78638b4f73ebd272ccd207c1dca01",
-          "field": "htlcFeesEarned"
-        },
-        {
-          "digest": "0xa153e3d0b858bbfee9970ea570dcd64030f04ee8add51760ee8653224a520298",
-          "field": "htlcRoutes"
         },
         {
           "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
@@ -101,12 +97,12 @@
           "field": "lastFinalizedJHeight"
         },
         {
-          "digest": "0x99adeb972218f574fdb960b8a5f420903db6cac514110eca1094b86ec416ba29",
-          "field": "lockBook"
-        },
-        {
           "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
           "field": "nonces"
+        },
+        {
+          "digest": "0xc13ca1ccede292b183a3c89b544cc4fe3db27155b1700e1e955037a236624f00",
+          "field": "paybook"
         },
         {
           "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
@@ -126,13 +122,12 @@
         }
       ]
     },
-    "forwardLockId": "0xf7536a8312f1c1fcc3b02f44e575b1c9a50b594b6f2d74dc5f4ddd747240d691",
     "orderbookRoot": "0x0ee44d1670f4f967accda605ad0e3e6dc665640d9c8085c0ff1e5ecfc4b9b2aa",
-    "orderedOutboxDigest": "0xecd2958795056f325b4f1bf7862930415274c8466e623a4c8e4047d110a9c31b",
+    "orderedOutboxDigest": "0x28c5fbba932223df567151ff73c030ccdc4d375857c3926f9745607c717a147b",
     "outerEnvelopeHash": "0x0c593247b03c65eec39dc891901cc1eaeb766e9f94b816e7a60523742c362aaf",
-    "paybookRoot": "0xcde35febd5aa3744a9c111257af9f4fa9f0bfcb80a9ab19bcd057fa2dac376ca",
+    "paybookRoot": "0x1223c23283b010fc23d7a86caae1813287b9f661eb0f31e8768f8d30d6b61823",
     "txDigests": [
-      "0xc2bc918c68a7f7a9a9240c3a5bd30314e023d69abb19c22c87ca36f7ff3c263a",
+      "0x6bf2835ff2faf8b9c7e745489a94648ab2ca83890fac176e462cd5db5bf14760",
       "0xe90299c2ddd6cae0c4de4ad30d5ca6166e974bbfe9e58c54d91bb3c7d81f555a"
     ]
   },
@@ -146,35 +141,31 @@
     "canonicalEntity": {
       "accountCount": 2,
       "accountsRoot": "0x5be8ec778f227f1c0407bc86aac54280299bce44e91d3d035b81b56b0acb6118",
-      "root": "0x2f3c53700a546606e4aee3161f5cffbc42ff17906e242c46ad6455708cbd0cb7",
+      "root": "0xbe8f9fd41234ed2610581f369d3460eb58af82a23559dcaa7ddd9165bcbb1d6c",
       "sections": [
         {
-          "digest": "0x584d6e5cea558189f43d3d503bdee9f5bbe6816653bfd8b3ab2644b6526556e2",
+          "digest": "0x09f02084693c26073546d39b891d1c7874be7831b19961eaa9d81c3df3d7a71a",
           "field": "accounts"
         },
         {
-          "digest": "0x50d8f4dd037da7e5c3e0b7e3609ed64113cc29a3c6277edd4eadcd2fad337812",
+          "digest": "0x236302681cfd161c32f32af65b9d07da5178184f5783a9e83dfcba8b526821a2",
           "field": "config"
         },
         {
-          "digest": "0xedb1af86c20efd885606fbef11c5234984d94dd8caf330f11ddc748cb910fe34",
+          "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+          "field": "crontabState"
+        },
+        {
+          "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
           "field": "entityEncryptionPublicKey"
         },
         {
-          "digest": "0xddb1b6e30e0805cea747207960ba74793b69cb007d2ed6189da12ac9d819538a",
+          "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
           "field": "entityId"
         },
         {
           "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
           "field": "height"
-        },
-        {
-          "digest": "0xfdcda6573c19394f42067c82d52d40b6dfd78638b4f73ebd272ccd207c1dca01",
-          "field": "htlcFeesEarned"
-        },
-        {
-          "digest": "0x99adeb972218f574fdb960b8a5f420903db6cac514110eca1094b86ec416ba29",
-          "field": "htlcRoutes"
         },
         {
           "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
@@ -185,16 +176,16 @@
           "field": "lastFinalizedJHeight"
         },
         {
-          "digest": "0x99adeb972218f574fdb960b8a5f420903db6cac514110eca1094b86ec416ba29",
-          "field": "lockBook"
-        },
-        {
           "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
           "field": "nonces"
         },
         {
-          "digest": "0xb5b96769d917b8b054c33c5e0dea9e00b76f4d1f45200b1ce288749e022c25df",
+          "digest": "0x1e1084d48c0d7f9207a8c300a92fe8b97fd402dcb6c8d367bce938ea254a1c6c",
           "field": "orderbookExt"
+        },
+        {
+          "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+          "field": "paybook"
         },
         {
           "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
@@ -218,7 +209,7 @@
     "makerResolveDigest": "0xf1407646344f6f7fbb0d3b800a0f13ae0a39064ee19bc6e89092f3ecbebad5a3",
     "orderbookRoot": "0x756aa6d35a9ddf7d8b8ca95c118ade2aef817f58e5d933fc36d34b3bd775073b",
     "orderedOutboxDigest": "0x0838a228bed0505969c120a766ff63e6f04ca3b9b05fb2628e387825abc278d6",
-    "paybookRoot": "0x490f5fad7d0d7ba6f8589fcde382f63719730cdb8530423c3adbce7185862801",
+    "paybookRoot": "0x1ae68a15fa647739007f8495081e9bbc59eee5046094d92c866c1b5cf4d53814",
     "takerResolveDigest": "0x2de4da2c8cb0cdb18f8cda91e71bb6be3bd4a16f7ab2681f6eb5d0806c7ea8f1",
     "tradeCount": 1,
     "tradeQtyLots": "1000000"

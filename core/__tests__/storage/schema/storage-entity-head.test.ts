@@ -74,9 +74,7 @@ const makeGenesis = (signerId: string): EntityState => {
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
     profile: { name: 'head', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     pendingCrossJurisdictionFillAcks: new Map(),
     crossJurisdictionBookAdmissions: new Map(),
@@ -200,7 +198,7 @@ describe('certified Entity current head', () => {
     expect(() => buildCertifiedEntityHeadPlan(env)).not.toThrow();
   });
 
-  test('Runtime replica-meta digest binds every byte of the full current head', async () => {
+  test('Runtime replica-meta digest binds the compact current certificate, not repeated frame bodies', async () => {
     const { env, signerId, genesis } = makeRuntime('storage-full-head-digest');
     const h1 = await certifyNextFrame(env, signerId, genesis);
     const replica = installReplica(env, signerId, h1.state, h1.link);
@@ -215,6 +213,16 @@ describe('certified Entity current head', () => {
     };
 
     expect(buildStorageLiveReplicaMetaCommitment(env).digest).not.toBe(before);
+
+    const afterSignature = buildStorageLiveReplicaMetaCommitment(env).digest;
+    replica.certifiedFrameHead = {
+      ...replica.certifiedFrameHead,
+      frame: {
+        ...replica.certifiedFrameHead.frame,
+        txs: [{ type: 'chatMessage', data: { message: 'already bound by frameHash' } }],
+      },
+    };
+    expect(buildStorageLiveReplicaMetaCommitment(env).digest).toBe(afterSignature);
   });
 
   test('durable replica metadata excludes every speculative Entity overlay', async () => {

@@ -6,36 +6,31 @@
 //! only verdicts, effects, proposal envelopes, and compact shard commitments
 //! cross back to the coordinator.
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountTx, CanonicalValue, HtlcResolveOutcome, HtlcResolveTx,
-    SigningIdentity, SwapMarketPolicy, TokenId, address_of_private_key, propose_account_frame,
+    AccountConsensus, AccountTx, CanonicalValue, SigningIdentity, SwapMarketPolicy,
+    SwapOfferSnapshot, TokenId, address_of_private_key, propose_account_frame,
 };
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
-    FailedHtlcLockRow, ProposalRow, UpstreamHtlcResolutionRow, account_response_directive,
-    apply_one, build_signing_identity, inbound_genesis_account, leaf_root, proposable,
-    proposal_row, restore_checkpoint_account, restore_seed_account, state_error,
-    validate_genesis_seed, verdict_commits_genesis,
+    ProposalRow, UpstreamHtlcResolutionRow, account_response_directive, active, apply_one,
+    build_signing_identity, inbound_genesis_account, leaf_root, proposable, proposal_row,
+    restore_checkpoint_account, restore_seed_account, state_error, validate_genesis_seed,
+    verdict_commits_genesis,
 };
 use crate::parallel::{ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
-    EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute,
+    EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcFollowup,
 };
 use crate::{
     AccountId, AccountRestore, AccountSeed, BatchError, CheckpointToken, EngineGeneration,
     MAX_BATCH_WORKERS,
 };
-
-thread_local! {
-    static HTLC_FRONTIER_BARRIERS: Cell<usize> = const { Cell::new(0) };
-}
 
 #[derive(Clone)]
 struct InboundWork {
@@ -52,6 +47,7 @@ struct InboundOutcome {
 #[derive(Clone)]
 struct OutboundWork {
     create: Option<AccountSeed>,
+    envelope_updates: Vec<crate::AccountEnvelopeUpdate>,
     txs: Option<Vec<AccountTx>>,
     propose: bool,
 }
@@ -66,14 +62,171 @@ struct MaterializedAccount {
     checkpoint: Option<AccountCheckpointRows>,
 }
 
+/// First outbound Account wave retained only until the parent Entity resolves
+/// actual failed hashlocks by point lookup. It never crosses process or WAL
+/// boundaries and owns no copy of Account state.
+pub struct PreparedEntityOutbound {
+    owner: [u8; 32],
+    identity: Arc<SigningIdentity>,
+    identity_is_new: bool,
+    timestamp: u64,
+    j_height: u64,
+    local_board_authority: Option<xln_rscore_engine::CertifiedBoardAuthority>,
+    checkpoint_due: bool,
+    post_accounts: bool,
+    admissions: Vec<AccountAdmissionResult>,
+    proposals: Vec<ProposalRow>,
+    named: BTreeSet<AccountId>,
+    round_leafs: BTreeMap<AccountId, [u8; 32]>,
+}
+
+/// One bootstrap-only projection of Account-owned orderbook authorization.
+/// It is rebuilt from the resident Account head and is never persisted in the
+/// Entity snapshot or committed as a second financial state.
+pub struct ResidentOrderbookAccountSnapshot {
+    pub account_id: AccountId,
+    pub offers: Vec<SwapOfferSnapshot>,
+    pub resolving_offer_ids: BTreeSet<String>,
+}
+
+impl PreparedEntityOutbound {
+    pub fn proposals(&self) -> &[ProposalRow] {
+        &self.proposals
+    }
+}
+
 /// The only Account-state projection local Entity financial admission needs.
 /// Account replicas and radix nodes remain resident on their owner workers;
 /// the coordinator receives one status bit and requested owner capacities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountFinancialView {
     pub active: bool,
+    pub owner_side: xln_rscore_engine::Side,
     pub owner_in_capacity: BTreeMap<TokenId, BigInt>,
     pub owner_out_capacity: BTreeMap<TokenId, BigInt>,
+    pub owner_own_credit_limit: BTreeMap<TokenId, BigInt>,
+    pub owner_peer_credit_limit: BTreeMap<TokenId, BigInt>,
+    pub settlement_workspace: Option<CanonicalValue>,
+    pub settlement_transition_pending: bool,
+    pub settlement_execution: Result<xln_rscore_engine::PreparedSettlementExecution, String>,
+    pub rebalance_active_quote: Option<CanonicalValue>,
+    pub htlc_locks: BTreeMap<String, xln_rscore_engine::HtlcLock>,
+    pub pulls: BTreeMap<String, CanonicalValue>,
+    pub swap_offers: BTreeMap<String, SwapOfferSnapshot>,
+    pub pending_cross_pull_close_ids: std::collections::BTreeSet<String>,
+    pub pending_cross_swap_ack_ids: std::collections::BTreeSet<String>,
+    pub dispute: Option<ResidentAccountDisputeView>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResidentAccountFinancialViewRequest {
+    pub token_ids: Vec<TokenId>,
+    pub htlc_lock_ids: Vec<String>,
+    pub pull_ids: Vec<String>,
+    pub swap_offer_ids: Vec<String>,
+    pub dispute: bool,
+}
+
+/// Exact pre-round Account facts needed by default-proposer cross-J
+/// materialization. Values are point-read from the current resident head;
+/// this is not a cache, index, replica copy, or committed state section.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentCrossJMaterializationView {
+    pub pull_ids: BTreeSet<String>,
+    pub swap_offer_ids: BTreeSet<String>,
+    pub pending_cross_pull_close_ids: BTreeSet<String>,
+}
+
+fn pending_cross_j_ids(account: &AccountConsensus) -> (BTreeSet<String>, BTreeSet<String>) {
+    let canonical_text = |value: &CanonicalValue, name: &str| match value {
+        CanonicalValue::Object(fields) => fields.iter().find_map(|(key, value)| {
+            (key == name)
+                .then_some(value)
+                .and_then(|value| match value {
+                    CanonicalValue::String(value) => Some(value.clone()),
+                    _ => None,
+                })
+        }),
+        _ => None,
+    };
+    let mut pending_cross_pull_close_ids = BTreeSet::new();
+    let mut pending_cross_swap_ack_ids = BTreeSet::new();
+    let mut collect = |txs: &[AccountTx]| {
+        for tx in txs {
+            match tx {
+                AccountTx::CrossPullClose { data } => {
+                    if let Some(pull_id) = canonical_text(data, "pullId") {
+                        pending_cross_pull_close_ids.insert(pull_id);
+                    }
+                }
+                AccountTx::CrossSwapFillAck { data } => {
+                    if let Some(offer_id) = canonical_text(data, "offerId") {
+                        pending_cross_swap_ack_ids.insert(offer_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
+    if let Some(pending) = account.pending() {
+        collect(&pending.frame.txs);
+    }
+    collect(account.mempool());
+    (pending_cross_pull_close_ids, pending_cross_swap_ack_ids)
+}
+
+/// Point projection for one explicitly disputed Account.  The worker remains
+/// the sole owner of Account state; Entity receives only the exact evidence it
+/// must place in JBatch and the bounded order/argument plan derived from that
+/// same frozen head.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentAccountDisputeView {
+    pub status: String,
+    pub dispute_prepare: Option<CanonicalValue>,
+    pub active_dispute: Option<CanonicalValue>,
+    pub local_dispute: Option<xln_rscore_engine::DisputeDraft>,
+    pub counterparty_dispute: Option<xln_rscore_engine::CounterpartyDispute>,
+    pub proof_body: Result<xln_rscore_engine::DisputeProofBody, String>,
+    pub j_nonce: u64,
+    pub owner_is_left: bool,
+    pub delta_transformer: Option<[u8; 20]>,
+    pub payment_hashlocks: Vec<String>,
+    pub pull_ids: Vec<String>,
+    pub pull_count: usize,
+    pub swap_offers: Vec<SwapOfferSnapshot>,
+    pub pending_swap_fill_ratios: BTreeMap<String, u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSettlementHankoDraft {
+    pub account_id: AccountId,
+    pub draft: xln_rscore_engine::SettlementHankoDraft,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeferredSettlementApproval {
+    Wait { account_id: AccountId },
+    Invalid { account_id: AccountId },
+    Ready(Box<PendingSettlementHankoDraft>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CertifiedSettlementHankoDraft {
+    pub pending: PendingSettlementHankoDraft,
+    pub settlement_hanko: Option<Vec<u8>>,
+    pub dispute_hanko: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentAccountStatusView {
+    pub active: bool,
+    pub current_height: u64,
+    pub pending_frame_height: Option<u64>,
+    pub mempool_len: usize,
+    pub tokens: BTreeMap<TokenId, Option<xln_rscore_engine::Delta>>,
+    pub owner_out_capacity: BTreeMap<TokenId, BigInt>,
+    pub owner_own_credit_limit: BTreeMap<TokenId, BigInt>,
+    pub owner_peer_credit_limit: BTreeMap<TokenId, BigInt>,
 }
 
 /// The production Account authority: one value-owning forest, not an adapter
@@ -117,8 +270,7 @@ impl ResidentConsensusEngine {
     }
 
     /// Restore every Account exactly once and move it into its permanent
-    /// worker-owned shard. The reconstructed forest root is the same leaf/root
-    /// commitment used by `StatefulConsensusEngine`.
+    /// worker-owned shard and reconstruct the canonical Account forest root.
     pub fn restore(
         engine_generation: EngineGeneration,
         worker_count: usize,
@@ -350,12 +502,17 @@ impl ResidentConsensusEngine {
         self.forest.map_stateless_ordered(items, apply)
     }
 
-    /// Integration tests compile this crate without `cfg(test)`, so the
-    /// barrier counter cannot live on the production struct. The thread-local
-    /// is RAM-only and is not part of any Account/Entity root.
-    #[doc(hidden)]
-    pub fn last_htlc_frontier_barriers() -> usize {
-        HTLC_FRONTIER_BARRIERS.with(Cell::get)
+    pub fn map_entity_stage_ordered<T, R, F>(
+        &mut self,
+        items: Vec<T>,
+        apply: F,
+    ) -> Result<Vec<R>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: Fn(T) -> R + Send + Sync + 'static,
+    {
+        self.forest.map_entity_stage_ordered(items, apply)
     }
 
     pub fn revision(&self) -> u64 {
@@ -370,97 +527,43 @@ impl ResidentConsensusEngine {
         self.forest.len()
     }
 
-    /// Attach freshly certified local dispute witnesses to the worker-owned
-    /// Account replicas. Hanko bytes are envelope evidence, so every leaf and
-    /// the aggregate Account root must remain byte-identical.
-    pub fn attach_local_dispute_hankos(
+    /// Rebuild the RAM-only matcher authorization index from the canonical
+    /// Account heads. This single bounded scan is used only at Entity
+    /// bootstrap/recovery; live frames update the index from committed Account
+    /// outputs and never rescan the forest.
+    pub fn orderbook_account_snapshots(
         &mut self,
-        account_ids: &[AccountId],
-        witnesses: BTreeMap<[u8; 32], Vec<u8>>,
-    ) -> Result<(), BatchError> {
-        if witnesses.is_empty() {
-            return Ok(());
-        }
-        let before_root = self.forest.accounts_root();
-        let expected = witnesses.keys().copied().collect::<BTreeSet<_>>();
-        let witnesses = Arc::new(witnesses);
-        let rows = self.forest.apply_outbound_continue(
-            account_ids.iter().copied().map(|account_id| (account_id, ())).collect(),
-            move |account_id, account, ()| {
-                let mut account = account.ok_or(BatchError::CandidateAccountNotFound(account_id))?;
-                let hashes = account.unsigned_local_dispute_hashes();
-                if hashes.is_empty() {
-                    return Ok(ResidentAccountAction::Keep(None));
-                }
-                let before_leaf = leaf_root(account_id, &account)?;
-                for hash in &hashes {
-                    let hanko = match witnesses.get(hash).cloned() {
-                        Some(hanko) => hanko,
-                        None => {
-                            let snapshot = account.consensus_snapshot();
-                            let current = snapshot.dispute.as_ref().is_some_and(|draft| draft.hash == *hash);
-                            let last_ack = snapshot
-                                .last_outbound_ack
-                                .as_ref()
-                                .and_then(|ack| ack.dispute.as_ref())
-                                .is_some_and(|draft| draft.hash == *hash);
-                            let proposal = snapshot
-                                .pending
-                                .as_ref()
-                                .and_then(|pending| pending.proposal_dispute.as_ref())
-                                .is_some_and(|draft| draft.hash == *hash);
-                            let bundled_ack = snapshot
-                                .pending
-                                .as_ref()
-                                .and_then(|pending| pending.bundled_ack.as_ref())
-                                .and_then(|ack| ack.dispute.as_ref())
-                                .is_some_and(|draft| draft.hash == *hash);
-                            return Err(BatchError::Signing(format!(
-                                "LOCAL_DISPUTE_HANKO_MISSING:account={}:hash={}:available={}:current={current}:lastAck={last_ack}:proposal={proposal}:bundledAck={bundled_ack}",
-                                root_hex(*account_id.as_bytes()),
-                                root_hex(*hash),
-                                witnesses.len(),
-                            )));
+    ) -> Result<Vec<ResidentOrderbookAccountSnapshot>, BatchError> {
+        self.forest
+            .read_all(|account_id, account| {
+                let identity = account.replica().state().identity();
+                let offers = account
+                    .replica()
+                    .state()
+                    .swap_offers()
+                    .map(|offer| {
+                        offer.snapshot(identity.left().to_string(), identity.right().to_string())
+                    })
+                    .collect();
+                let mut resolving_offer_ids = BTreeSet::new();
+                let mut collect = |txs: &[AccountTx]| {
+                    for tx in txs {
+                        if let AccountTx::SwapResolve { offer_id, .. } = tx {
+                            resolving_offer_ids.insert(offer_id.clone());
                         }
-                    };
-                    account
-                        .attach_local_dispute_hanko(*hash, hanko)
-                        .map_err(|error| state_error(account_id, &error))?;
+                    }
+                };
+                if let Some(pending) = account.pending() {
+                    collect(&pending.frame.txs);
                 }
-                let after_leaf = leaf_root(account_id, &account)?;
-                if after_leaf != before_leaf {
-                    return Err(BatchError::CheckpointAccountLeaf {
-                        account_id,
-                        actual: root_hex(after_leaf),
-                        expected: root_hex(before_leaf),
-                    });
-                }
-                Ok(ResidentAccountAction::ReplaceEnvelope {
-                    value: account,
-                    expected_digest: after_leaf,
-                    result: Some(hashes),
+                collect(account.mempool());
+                Ok(ResidentOrderbookAccountSnapshot {
+                    account_id,
+                    offers,
+                    resolving_offer_ids,
                 })
-            },
-        )?;
-        let attached = rows
-            .rows
-            .into_iter()
-            .filter_map(|(_, _, hashes)| hashes)
-            .flatten()
-            .collect::<BTreeSet<_>>();
-        if attached != expected {
-            return Err(BatchError::Signing(
-                "LOCAL_DISPUTE_HANKO_UNUSED".to_string(),
-            ));
-        }
-        let after_root = self.forest.accounts_root();
-        if after_root != before_root {
-            return Err(BatchError::CheckpointRoot {
-                actual: root_hex(after_root),
-                expected: root_hex(before_root),
-            });
-        }
-        Ok(())
+            })
+            .map(|rows| rows.into_iter().map(|(_, row)| row).collect())
     }
 
     /// Export the exact dirty Account rows only after the parent Entity has
@@ -503,6 +606,10 @@ impl ResidentConsensusEngine {
         self.forest.phase_metrics()
     }
 
+    pub fn entity_worker_metrics(&self) -> (&[u64], &[u64]) {
+        self.forest.entity_worker_metrics()
+    }
+
     /// Exact resident worklist before Entity adds same-round transactions.
     /// Values stay inside their owner workers; only matching Account ids cross
     /// back to the coordinator.
@@ -512,6 +619,26 @@ impl ResidentConsensusEngine {
 
     pub fn has_proposable_accounts(&self) -> Result<bool, BatchError> {
         Ok(!self.active_proposable()?.is_empty())
+    }
+
+    /// Read the committed active/inactive bit only for Accounts named by one
+    /// authenticated J-event range. This stays shard-parallel and never scans
+    /// the forest or materializes Account replicas at the coordinator.
+    pub fn active_account_ids(
+        &mut self,
+        account_ids: Vec<AccountId>,
+    ) -> Result<BTreeSet<AccountId>, BatchError> {
+        let rows = self.forest.read_outbound(
+            account_ids
+                .into_iter()
+                .map(|account_id| (account_id, ()))
+                .collect(),
+            |_, account, _, ()| active(account),
+        )?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(account_id, active)| active.then_some(account_id))
+            .collect())
     }
 
     /// Check due HTLC lock ids on their owner workers without materializing
@@ -540,16 +667,50 @@ impl ResidentConsensusEngine {
             .collect())
     }
 
+    /// Point-read only the pre-round Account facts used to materialize a
+    /// cross-J setup/clear command. The Runtime seed never enters workers;
+    /// workers return only membership in the explicitly requested ids.
+    pub fn cross_j_materialization_views(
+        &mut self,
+        requests: Vec<(AccountId, ResidentAccountFinancialViewRequest)>,
+    ) -> Result<Vec<(AccountId, ResidentCrossJMaterializationView)>, BatchError> {
+        self.forest.read_head(requests, |_, account, request| {
+            let pulls = request
+                .pull_ids
+                .into_iter()
+                .filter(|pull_id| account.replica().state().pull(pull_id).is_some())
+                .collect();
+            let swap_offers = request
+                .swap_offer_ids
+                .into_iter()
+                .filter(|offer_id| account.replica().state().swap_offer(offer_id).is_some())
+                .collect();
+            let (pending_cross_pull_close_ids, _) = pending_cross_j_ids(account);
+            Ok(ResidentCrossJMaterializationView {
+                pull_ids: pulls,
+                swap_offer_ids: swap_offers,
+                pending_cross_pull_close_ids,
+            })
+        })
+    }
+
     /// Read canonical Account availability and owner-perspective capacities
     /// after the inbound visit. This mirrors the narrow fields consulted by
     /// TypeScript's `validatePreparedHtlcPayment`; it never materializes or
     /// copies an Account replica at the Entity coordinator.
     pub fn local_financial_views(
         &mut self,
-        requests: Vec<(AccountId, Vec<TokenId>)>,
+        requests: Vec<(AccountId, ResidentAccountFinancialViewRequest)>,
     ) -> Result<Vec<(AccountId, ResidentAccountFinancialView)>, BatchError> {
         self.forest
-            .read_outbound(requests, |_, account, _, token_ids| {
+            .read_outbound(requests, |account_id, account, _, request| {
+                let ResidentAccountFinancialViewRequest {
+                    token_ids,
+                    htlc_lock_ids,
+                    pull_ids,
+                    swap_offer_ids,
+                    dispute,
+                } = request;
                 let active = match account
                     .replica()
                     .envelope()
@@ -563,8 +724,31 @@ impl ResidentConsensusEngine {
                     Some(_) => false,
                 };
                 let owner_side = account.replica().owner_side();
+                let htlc_locks = htlc_lock_ids
+                    .into_iter()
+                    .filter_map(|lock_id| {
+                        account
+                            .replica()
+                            .state()
+                            .htlc_lock(&lock_id)
+                            .cloned()
+                            .map(|lock| (lock_id, lock))
+                    })
+                    .collect();
+                let settlement_transition_pending = account.pending().is_some_and(|pending| {
+                    pending
+                        .frame
+                        .txs
+                        .iter()
+                        .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }))
+                }) || account
+                    .mempool()
+                    .iter()
+                    .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }));
                 let mut owner_in_capacity = BTreeMap::new();
                 let mut owner_out_capacity = BTreeMap::new();
+                let mut owner_own_credit_limit = BTreeMap::new();
+                let mut owner_peer_credit_limit = BTreeMap::new();
                 for token_id in token_ids {
                     let Some(delta) = account.replica().state().delta(token_id) else {
                         continue;
@@ -572,13 +756,318 @@ impl ResidentConsensusEngine {
                     let perspective = delta.perspective(owner_side);
                     owner_in_capacity.insert(token_id, perspective.in_capacity);
                     owner_out_capacity.insert(token_id, perspective.out_capacity);
+                    owner_own_credit_limit.insert(token_id, perspective.own_credit_limit);
+                    let mut projected = perspective.peer_credit_limit;
+                    let project = |txs: &[AccountTx], projected: &mut BigInt| {
+                        for tx in txs {
+                            match tx {
+                                AccountTx::SetCreditLimit {
+                                    token_id: tx_token,
+                                    amount,
+                                } if tx_token == &token_id => *projected = amount.clone(),
+                                AccountTx::LendingCredit {
+                                    token_id: tx_token,
+                                    credit_limit,
+                                    ..
+                                } if tx_token == &token_id => *projected = credit_limit.clone(),
+                                _ => {}
+                            }
+                        }
+                    };
+                    if let Some(pending) = account.pending() {
+                        project(&pending.frame.txs, &mut projected);
+                    }
+                    project(account.mempool(), &mut projected);
+                    owner_peer_credit_limit.insert(token_id, projected);
                 }
+                let state = account.replica().state();
+                let pulls = pull_ids
+                    .into_iter()
+                    .filter_map(|pull_id| state.pull(&pull_id).cloned().map(|pull| (pull_id, pull)))
+                    .collect();
+                let left = state.identity().left().as_hex();
+                let right = state.identity().right().as_hex();
+                let swap_offers = swap_offer_ids
+                    .into_iter()
+                    .filter_map(|offer_id| {
+                        state
+                            .swap_offer(&offer_id)
+                            .map(|offer| (offer_id, offer.snapshot(left.clone(), right.clone())))
+                    })
+                    .collect();
+                let (pending_cross_pull_close_ids, pending_cross_swap_ack_ids) =
+                    pending_cross_j_ids(account);
+                let dispute = dispute
+                    .then(|| -> Result<ResidentAccountDisputeView, BatchError> {
+                        let replica = account.replica();
+                        let state = replica.state();
+                        let left = state.identity().left().as_hex();
+                        let right = state.identity().right().as_hex();
+                        let swap_offers = state
+                            .swap_offers()
+                            .map(|offer| offer.snapshot(left.clone(), right.clone()))
+                            .collect();
+                        let payment_hashlocks = state
+                            .htlc_locks()
+                            .map(|lock| lock.hashlock().as_str().to_string())
+                            .collect();
+                        let mut pending_swap_fill_ratios = BTreeMap::new();
+                        let mut collect = |txs: &[AccountTx]| {
+                            for tx in txs {
+                                let AccountTx::SwapResolve {
+                                    offer_id,
+                                    fill_ratio,
+                                    ..
+                                } = tx
+                                else {
+                                    continue;
+                                };
+                                if *fill_ratio > 0 {
+                                    pending_swap_fill_ratios
+                                        .entry(offer_id.clone())
+                                        .or_insert(*fill_ratio);
+                                }
+                            }
+                        };
+                        if let Some(pending) = account.pending() {
+                            collect(&pending.frame.txs);
+                        }
+                        collect(account.mempool());
+                        let delta_transformer = replica.delta_transformer().copied();
+                        Ok(ResidentAccountDisputeView {
+                            status: replica
+                                .envelope()
+                                .field("status")
+                                .and_then(|value| match value {
+                                    CanonicalValue::String(value) => Some(value.clone()),
+                                    _ => None,
+                                })
+                                .unwrap_or_else(|| "active".into()),
+                            dispute_prepare: replica.envelope().field("disputePrepare").cloned(),
+                            active_dispute: replica.envelope().field("activeDispute").cloned(),
+                            local_dispute: account.dispute().cloned(),
+                            counterparty_dispute: account.counterparty_dispute().cloned(),
+                            proof_body: delta_transformer
+                                .ok_or_else(|| "DELTA_TRANSFORMER_MISSING".to_string())
+                                .and_then(|address| {
+                                    xln_rscore_engine::build_dispute_proof_body(replica, &address)
+                                        .map_err(|error| error.to_string())
+                                }),
+                            j_nonce: state.j_nonce(),
+                            owner_is_left: replica.owner_side() == xln_rscore_engine::Side::Left,
+                            delta_transformer,
+                            payment_hashlocks,
+                            pull_ids: state
+                                .pull_ids()
+                                .map_err(|error| BatchError::FinancialView(error.to_string()))?,
+                            pull_count: state.pull_count(),
+                            swap_offers,
+                            pending_swap_fill_ratios,
+                        })
+                    })
+                    .transpose()?;
                 Ok(ResidentAccountFinancialView {
                     active,
+                    owner_side,
                     owner_in_capacity,
                     owner_out_capacity,
+                    owner_own_credit_limit,
+                    owner_peer_credit_limit,
+                    settlement_workspace: account.replica().state().settlement_workspace().cloned(),
+                    settlement_transition_pending,
+                    settlement_execution: xln_rscore_engine::prepare_settlement_execution(
+                        account.replica(),
+                    ),
+                    rebalance_active_quote: account
+                        .replica()
+                        .envelope()
+                        .rebalance_active_quote()
+                        .map_err(|error| BatchError::AccountsTree {
+                        account_id,
+                        detail: error.to_string(),
+                    })?,
+                    htlc_locks,
+                    pulls,
+                    swap_offers,
+                    pending_cross_pull_close_ids,
+                    pending_cross_swap_ack_ids,
+                    dispute,
                 })
             })
+    }
+
+    pub fn deferred_settlement_approvals(
+        &mut self,
+        requests: Vec<(AccountId, String)>,
+    ) -> Result<Vec<DeferredSettlementApproval>, BatchError> {
+        Ok(self
+            .forest
+            .read_outbound(requests, |account_id, account, _, approved_hash| {
+                let pending_transition = account.pending().is_some_and(|pending| {
+                    pending
+                        .frame
+                        .txs
+                        .iter()
+                        .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }))
+                }) || account
+                    .mempool()
+                    .iter()
+                    .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }));
+                if pending_transition {
+                    return Ok(DeferredSettlementApproval::Wait { account_id });
+                }
+                let Some(CanonicalValue::Object(workspace)) =
+                    account.replica().state().settlement_workspace()
+                else {
+                    return Ok(DeferredSettlementApproval::Invalid { account_id });
+                };
+                let get = |name: &str| {
+                    workspace
+                        .iter()
+                        .find_map(|(key, value)| (key == name).then_some(value))
+                };
+                let Some(CanonicalValue::String(current_hash)) = get("workspaceHash") else {
+                    return Err(BatchError::AccountsTree {
+                        account_id,
+                        detail: "SETTLEMENT_WORKSPACE_HASH_INVALID".into(),
+                    });
+                };
+                let Some(CanonicalValue::String(status)) = get("status") else {
+                    return Err(BatchError::AccountsTree {
+                        account_id,
+                        detail: "SETTLEMENT_WORKSPACE_STATUS_INVALID".into(),
+                    });
+                };
+                if current_hash != &approved_hash || status == "submitted" {
+                    return Ok(DeferredSettlementApproval::Invalid { account_id });
+                }
+                let proof_pinned = [
+                    "settlementHash",
+                    "leftHanko",
+                    "rightHanko",
+                    "postSettlementDisputeProof",
+                ]
+                .iter()
+                .any(|name| get(name).is_some());
+                if !account.mempool().is_empty() && !proof_pinned {
+                    return Ok(DeferredSettlementApproval::Wait { account_id });
+                }
+                let draft = account
+                    .settlement_hanko_draft()
+                    .map_err(|error| state_error(account_id, &error))?;
+                Ok(DeferredSettlementApproval::Ready(Box::new(
+                    PendingSettlementHankoDraft { account_id, draft },
+                )))
+            })?
+            .into_iter()
+            .map(|(_, disposition)| disposition)
+            .collect())
+    }
+
+    /// Attach witnesses produced by the just-certified Entity frame and admit
+    /// the now-complete Hanko transitions to the existing outbound candidate.
+    /// Account tx hashing excludes these post-commit witnesses, so every leaf
+    /// and the already-certified accounts root remain byte-identical.
+    pub fn admit_certified_settlement_hankos(
+        &mut self,
+        drafts: Vec<CertifiedSettlementHankoDraft>,
+    ) -> Result<(), BatchError> {
+        if drafts.is_empty() {
+            return Ok(());
+        }
+        let account_ids = drafts
+            .iter()
+            .map(|draft| draft.pending.account_id)
+            .collect::<Vec<_>>();
+        self.forest.apply_outbound_continue(
+            drafts
+                .into_iter()
+                .map(|draft| (draft.pending.account_id, draft))
+                .collect(),
+            |account_id, current, certified| {
+                let mut account =
+                    current.ok_or(BatchError::CandidateAccountNotFound(account_id))?;
+                let before = leaf_root(account_id, &account)?;
+                account
+                    .admit_certified_settlement_hanko(
+                        certified.pending.draft,
+                        certified.settlement_hanko.as_deref(),
+                        &certified.dispute_hanko,
+                    )
+                    .map_err(|error| state_error(account_id, &error))?;
+                let after = leaf_root(account_id, &account)?;
+                if before != after {
+                    return Err(BatchError::AccountsTree {
+                        account_id,
+                        detail: "SETTLEMENT_POST_COMMIT_WITNESS_MOVED_ACCOUNT_LEAF".into(),
+                    });
+                }
+                Ok(ResidentAccountAction::Put {
+                    value: account,
+                    value_digest: after,
+                    result: (),
+                })
+            },
+        )?;
+        if let Some(proposable) = &mut self.candidate_proposable {
+            proposable.extend(account_ids);
+        }
+        Ok(())
+    }
+
+    /// Canonical on-demand operator projection for one Account. The Account
+    /// stays resident on its shard worker and only the requested token rows
+    /// cross the boundary; no full forest scan or durable read model exists.
+    pub fn account_status(
+        &mut self,
+        account_id: AccountId,
+        token_ids: Vec<TokenId>,
+    ) -> Result<Option<ResidentAccountStatusView>, BatchError> {
+        if !self.signer_owners.contains_key(&account_id) {
+            return Ok(None);
+        }
+        let mut rows =
+            self.forest
+                .read_head(vec![(account_id, token_ids)], |_, account, token_ids| {
+                    let active = match account
+                        .replica()
+                        .envelope()
+                        .fields()
+                        .iter()
+                        .find(|(name, _)| name == "status")
+                        .map(|(_, value)| value)
+                    {
+                        None => true,
+                        Some(CanonicalValue::String(value)) => value == "active",
+                        Some(_) => false,
+                    };
+                    let owner_side = account.replica().owner_side();
+                    let mut tokens = BTreeMap::new();
+                    let mut owner_out_capacity = BTreeMap::new();
+                    let mut owner_own_credit_limit = BTreeMap::new();
+                    let mut owner_peer_credit_limit = BTreeMap::new();
+                    for token_id in token_ids {
+                        let delta = account.replica().state().delta(token_id).cloned();
+                        if let Some(delta) = delta.as_ref() {
+                            let perspective = delta.perspective(owner_side);
+                            owner_out_capacity.insert(token_id, perspective.out_capacity);
+                            owner_own_credit_limit.insert(token_id, perspective.own_credit_limit);
+                            owner_peer_credit_limit.insert(token_id, perspective.peer_credit_limit);
+                        }
+                        tokens.insert(token_id, delta);
+                    }
+                    Ok(ResidentAccountStatusView {
+                        active,
+                        current_height: account.current_height(),
+                        pending_frame_height: account.pending().map(|pending| pending.frame.height),
+                        mempool_len: account.mempool().len(),
+                        tokens,
+                        owner_out_capacity,
+                        owner_own_credit_limit,
+                        owner_peer_credit_limit,
+                    })
+                })?;
+        Ok(rows.pop().map(|(_, status)| status))
     }
 
     fn active_proposable(&self) -> Result<&BTreeSet<AccountId>, BatchError> {
@@ -604,6 +1093,7 @@ impl ResidentConsensusEngine {
             return Err(BatchError::EntityRoundMissing);
         }
         validate_operation_indices(&request.rows)?;
+        let applied_count = request.rows.len();
         let mut grouped = BTreeMap::<AccountId, Vec<AccountInputRow>>::new();
         for row in request.rows {
             grouped.entry(row.account_id).or_default().push(row);
@@ -693,7 +1183,8 @@ impl ResidentConsensusEngine {
                         );
                     }
                     changed |= row_changed;
-                    let response = account_response_directive(&account, pure_ack, &verdict);
+                    let response =
+                        account_response_directive(account_id, &account, pure_ack, &verdict)?;
                     applied.push(AccountInputResult {
                         operation_index: row.operation_index,
                         account_id,
@@ -742,9 +1233,32 @@ impl ResidentConsensusEngine {
             ..EntityRoundResult::default()
         };
         let mut created_any = false;
+        let mut applied_by_position = std::iter::repeat_with(|| None)
+            .take(applied_count)
+            .collect::<Vec<Option<AccountInputResult>>>();
         for (account_id, _leaf, outcome) in batch.rows {
             set_proposable(&mut inbound_proposable, account_id, outcome.proposable);
-            result.applied.extend(outcome.applied);
+            for applied in outcome.applied {
+                let index = usize::try_from(applied.operation_index).map_err(|_| {
+                    BatchError::OperationIndex {
+                        actual: applied.operation_index,
+                        after: None,
+                    }
+                })?;
+                let slot =
+                    applied_by_position
+                        .get_mut(index)
+                        .ok_or(BatchError::OperationIndex {
+                            actual: applied.operation_index,
+                            after: None,
+                        })?;
+                if slot.replace(applied).is_some() {
+                    return Err(BatchError::OperationIndex {
+                        actual: index as u64,
+                        after: None,
+                    });
+                }
+            }
             result.touched.push((account_id, outcome.leaf));
             if let Some(created) = outcome.created_checkpoint {
                 created_any = true;
@@ -752,7 +1266,13 @@ impl ResidentConsensusEngine {
                 result.created_accounts.push(created);
             }
         }
-        result.applied.sort_by_key(|row| row.operation_index);
+        result.applied = applied_by_position
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or(BatchError::OperationIndex {
+                actual: u64::try_from(applied_count).unwrap_or(u64::MAX),
+                after: None,
+            })?;
         // An exact empty checkpoint still belongs to one Entity authority.
         // Its empty inbound half has no Account row from which to retain the
         // derived signer, but the matching checkpoint-only outbound half must
@@ -767,25 +1287,37 @@ impl ResidentConsensusEngine {
         Ok(result)
     }
 
-    /// Second and only outward visit. Failed forwarded HTLCs run their rare
-    /// cross-account fixed point inside this call; the parent never performs a
-    /// third Account IPC round.
+    /// Ordinary outward visit. The resident Entity path uses the explicit
+    /// prepare/finish pair below so only actual failed hashlocks trigger one
+    /// batched continuation; direct process callers finish with none.
     pub fn entity_outbound(
         &mut self,
         request: EntityOutboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
-        let outcome = self.entity_outbound_attempt(request);
+        let prepared = self.prepare_entity_outbound(request)?;
+        self.finish_entity_outbound(prepared, Vec::new())
+    }
+
+    pub fn prepare_entity_outbound(
+        &mut self,
+        request: EntityOutboundRequest,
+    ) -> Result<PreparedEntityOutbound, BatchError> {
+        let outcome = self.prepare_entity_outbound_attempt(request);
         if outcome.is_err() {
             self.reset_outbound_candidate()?;
         }
         outcome
     }
 
-    fn entity_outbound_attempt(
+    fn prepare_entity_outbound_attempt(
         &mut self,
-        request: EntityOutboundRequest,
-    ) -> Result<EntityRoundResult, BatchError> {
+        mut request: EntityOutboundRequest,
+    ) -> Result<PreparedEntityOutbound, BatchError> {
         let owner = request.owner_entity_id;
+        let local_board_authority = request
+            .local_certified_board_authority
+            .certified()?
+            .copied();
         let expected_owner = self.round_owner.ok_or(BatchError::EntityRoundMissing)?;
         if owner != expected_owner {
             return Err(BatchError::EntityRoundOwner {
@@ -793,13 +1325,11 @@ impl ResidentConsensusEngine {
                 expected: root_hex(expected_owner),
             });
         }
-        reset_htlc_frontier_barriers();
         let (identity, identity_is_new) =
             self.identity_candidate(owner, !request.creates.is_empty())?;
         let original_admissions = admission_results(&request.admits);
         let create_entries = create_work(&request.creates)?;
-        let (fast_entries, mut named) = outbound_work(&request)?;
-        validate_routes(&request.failed_htlc_routes)?;
+        let (fast_entries, named) = outbound_work(&mut request)?;
 
         let mut round_leafs = BTreeMap::new();
         if !create_entries.is_empty() {
@@ -810,45 +1340,167 @@ impl ResidentConsensusEngine {
                 Arc::clone(&identity),
                 0,
                 0,
+                local_board_authority,
                 &mut round_leafs,
             )?;
         }
-        let fast = self.run_outbound(
+        let mut fast = self.run_outbound(
             !request.creates.is_empty(),
             fast_entries,
             owner,
             Arc::clone(&identity),
             request.timestamp,
             request.j_height,
+            local_board_authority,
             &mut round_leafs,
         )?;
-        let mut proposals = proposals_from(&fast.rows, &request.propose)?;
-        let needs_fixed_point =
-            proposals_need_htlc_followup(&proposals, &request.failed_htlc_routes);
-        let mut admissions = original_admissions;
-        if needs_fixed_point {
-            let fixed = self.run_htlc_fixed_point(
-                owner,
-                Arc::clone(&identity),
-                &request,
-                &mut named,
-                admissions,
-                &mut round_leafs,
+        let proposals = proposals_from(&mut fast.rows, &request.propose)?;
+        Ok(PreparedEntityOutbound {
+            owner,
+            identity,
+            identity_is_new,
+            timestamp: request.timestamp,
+            j_height: request.j_height,
+            local_board_authority,
+            checkpoint_due: request.checkpoint_due,
+            post_accounts: request.post_accounts,
+            admissions: original_admissions,
+            proposals,
+            named,
+            round_leafs,
+        })
+    }
+
+    pub fn finish_entity_outbound(
+        &mut self,
+        prepared: PreparedEntityOutbound,
+        followups: Vec<FailedHtlcFollowup>,
+    ) -> Result<EntityRoundResult, BatchError> {
+        let outcome = self.finish_entity_outbound_attempt(prepared, followups);
+        if outcome.is_err() {
+            self.reset_outbound_candidate()?;
+        }
+        outcome
+    }
+
+    fn finish_entity_outbound_attempt(
+        &mut self,
+        mut prepared: PreparedEntityOutbound,
+        followups: Vec<FailedHtlcFollowup>,
+    ) -> Result<EntityRoundResult, BatchError> {
+        let mut grouped = BTreeMap::<AccountId, Vec<AccountTx>>::new();
+        let mut follow_order = Vec::new();
+        let mut seen = BTreeSet::new();
+        for followup in followups {
+            let hashlock = format!("0x{}", root_hex(followup.hashlock));
+            let valid_tx = matches!(
+                &followup.tx,
+                AccountTx::HtlcResolve(resolve)
+                    if resolve.lock_id == hashlock
+                        && matches!(
+                            &resolve.outcome,
+                            xln_rscore_engine::HtlcResolveOutcome::Error { reason: Some(reason) }
+                                if reason == &followup.reason
+                        )
+            );
+            if !valid_tx {
+                return Err(BatchError::HtlcFollowupTx {
+                    account_id: followup.upstream_account_id,
+                    hashlock,
+                });
+            }
+            if !seen.insert((followup.failed_account_id, followup.hashlock)) {
+                return Err(BatchError::HtlcFollowupUnmatched {
+                    account_id: followup.failed_account_id,
+                    hashlock,
+                });
+            }
+            let failed = prepared
+                .proposals
+                .iter_mut()
+                .find(|proposal| proposal.account_id == followup.failed_account_id)
+                .and_then(|proposal| {
+                    proposal
+                        .failed_htlc_locks
+                        .iter_mut()
+                        .find(|failed| failed.hashlock == followup.hashlock)
+                })
+                .filter(|failed| failed.upstream_resolution.is_none())
+                .ok_or_else(|| BatchError::HtlcFollowupUnmatched {
+                    account_id: followup.failed_account_id,
+                    hashlock: hashlock.clone(),
+                })?;
+            failed.upstream_resolution = Some(UpstreamHtlcResolutionRow {
+                account_id: followup.upstream_account_id,
+                lock_id: hashlock,
+                reason: followup.reason,
+            });
+            prepared.admissions.push(AccountAdmissionResult {
+                operation_index: prepared.admissions.len() as u64,
+                account_id: followup.upstream_account_id,
+                verdict: AccountAdmissionVerdict::Admitted { count: 1 },
+            });
+            if !grouped.contains_key(&followup.upstream_account_id) {
+                follow_order.push(followup.upstream_account_id);
+            }
+            grouped
+                .entry(followup.upstream_account_id)
+                .or_default()
+                .push(followup.tx);
+            prepared.named.insert(followup.upstream_account_id);
+        }
+        if !grouped.is_empty() {
+            let entries = follow_order
+                .iter()
+                .map(|account_id| {
+                    (
+                        *account_id,
+                        OutboundWork {
+                            create: None,
+                            envelope_updates: Vec::new(),
+                            txs: grouped.remove(account_id),
+                            propose: true,
+                        },
+                    )
+                })
+                .collect();
+            let mut batch = self.run_outbound(
+                true,
+                entries,
+                prepared.owner,
+                Arc::clone(&prepared.identity),
+                prepared.timestamp,
+                prepared.j_height,
+                prepared.local_board_authority,
+                &mut prepared.round_leafs,
             )?;
-            admissions = fixed.0;
-            proposals = fixed.1;
+            let continued = proposals_from(&mut batch.rows, &follow_order)?;
+            if let Some((proposal, failed)) = continued.iter().find_map(|proposal| {
+                proposal
+                    .failed_htlc_locks
+                    .first()
+                    .map(|failed| (proposal, failed))
+            }) {
+                return Err(BatchError::HtlcFollowupCascade {
+                    account_id: proposal.account_id,
+                    hashlock: root_hex(failed.hashlock),
+                });
+            }
+            prepared.proposals.extend(continued);
         }
         // Every named Account was applied by an outbound phase this round, so
         // its exact post-round leaf is already in the worker replies. Reading
         // the values again would repeat the same visit and the same hash;
         // only `post_accounts` still needs full checkpoint-row encoding.
-        let materialized = if request.post_accounts {
-            self.materialize(named, true)?
+        let materialized = if prepared.post_accounts {
+            self.materialize(prepared.named, true)?
         } else {
-            named
+            prepared
+                .named
                 .iter()
                 .map(|account_id| {
-                    round_leafs
+                    prepared
+                        .round_leafs
                         .get(account_id)
                         .copied()
                         .map(|leaf| {
@@ -864,7 +1516,7 @@ impl ResidentConsensusEngine {
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
-        let checkpoint = if request.checkpoint_due {
+        let checkpoint = if prepared.checkpoint_due {
             Some(self.export_checkpoint()?)
         } else {
             None
@@ -877,8 +1529,8 @@ impl ResidentConsensusEngine {
                 || self.forest.accounts_root(),
                 AccountsCheckpoint::accounts_root,
             ),
-            admissions,
-            proposals,
+            admissions: prepared.admissions,
+            proposals: prepared.proposals,
             checkpoint,
             ..EntityRoundResult::default()
         };
@@ -888,8 +1540,8 @@ impl ResidentConsensusEngine {
                 result.post_accounts.push(checkpoint);
             }
         }
-        if identity_is_new {
-            self.identities.insert(owner, identity);
+        if prepared.identity_is_new {
+            self.identities.insert(prepared.owner, prepared.identity);
         }
         Ok(result)
     }
@@ -919,6 +1571,7 @@ impl ResidentConsensusEngine {
         identity: Arc<SigningIdentity>,
         timestamp: u64,
         j_height: u64,
+        local_board_authority: Option<xln_rscore_engine::CertifiedBoardAuthority>,
         round_leafs: &mut BTreeMap<AccountId, [u8; 32]>,
     ) -> Result<crate::parallel::ResidentAccountBatch<OutboundOutcome>, BatchError> {
         let context = OutboundApplyContext {
@@ -926,6 +1579,7 @@ impl ResidentConsensusEngine {
             identity,
             timestamp,
             j_height,
+            local_board_authority,
             swap_market: Arc::clone(&self.swap_market),
         };
         let apply = move |account_id, current, work: OutboundWork| {
@@ -970,100 +1624,6 @@ impl ResidentConsensusEngine {
         }
         self.candidate_proposable = Some(next_proposable);
         Ok(batch)
-    }
-
-    fn run_htlc_fixed_point(
-        &mut self,
-        owner: [u8; 32],
-        identity: Arc<SigningIdentity>,
-        request: &EntityOutboundRequest,
-        named: &mut BTreeSet<AccountId>,
-        mut admissions: Vec<AccountAdmissionResult>,
-        round_leafs: &mut BTreeMap<AccountId, [u8; 32]>,
-    ) -> Result<(Vec<AccountAdmissionResult>, Vec<ProposalRow>), BatchError> {
-        let creates = create_work(&request.creates)?;
-        self.run_outbound(
-            false,
-            creates,
-            owner,
-            Arc::clone(&identity),
-            0,
-            0,
-            round_leafs,
-        )?;
-
-        let admitted = admission_work(&request.admits);
-        if !admitted.is_empty() {
-            self.run_outbound(
-                true,
-                admitted,
-                owner,
-                Arc::clone(&identity),
-                0,
-                0,
-                round_leafs,
-            )?;
-        }
-        let routes = request
-            .failed_htlc_routes
-            .iter()
-            .map(|route| (route.hashlock, route))
-            .collect::<BTreeMap<_, _>>();
-        let (mut scheduled, mut order) = initial_htlc_worklist(&request.propose)?;
-        let mut remaining = scheduled.clone();
-        let mut proposals = Vec::new();
-        reset_htlc_frontier_barriers();
-        while !remaining.is_empty() {
-            let frontier_ids = htlc_ready_frontier(&order, &remaining, &request.failed_htlc_routes);
-            let frontier_ids = if frontier_ids.is_empty() {
-                // TS does not reject cycles. It drains the earliest remaining
-                // worklist position, then continues. Match that break.
-                let Some(first) = order.iter().copied().find(|id| remaining.contains(id)) else {
-                    break;
-                };
-                vec![first]
-            } else {
-                frontier_ids
-            };
-            for account_id in &frontier_ids {
-                remaining.remove(account_id);
-            }
-            record_htlc_frontier_barrier();
-            let batch = self.run_outbound(
-                true,
-                htlc_propose_work(&frontier_ids),
-                owner,
-                Arc::clone(&identity),
-                request.timestamp,
-                request.j_height,
-                round_leafs,
-            )?;
-            let followup = htlc_followup_from_proposals(
-                batch.rows,
-                &routes,
-                &mut scheduled,
-                named,
-                &mut admissions,
-                &mut proposals,
-            )?;
-            if !followup.admit.is_empty() {
-                record_htlc_frontier_barrier();
-                self.run_outbound(
-                    true,
-                    followup.admit,
-                    owner,
-                    Arc::clone(&identity),
-                    0,
-                    0,
-                    round_leafs,
-                )?;
-            }
-            for account_id in followup.newly_scheduled {
-                order.push(account_id);
-                remaining.insert(account_id);
-            }
-        }
-        Ok((admissions, proposals))
     }
 
     fn materialize(
@@ -1172,6 +1732,7 @@ struct OutboundApplyContext {
     identity: Arc<SigningIdentity>,
     timestamp: u64,
     j_height: u64,
+    local_board_authority: Option<xln_rscore_engine::CertifiedBoardAuthority>,
     swap_market: Arc<SwapMarketPolicy>,
 }
 
@@ -1197,11 +1758,61 @@ fn apply_outbound_work(
         }
     };
     assert_account_owner(account_id, &account, context.owner)?;
+    account.set_local_board_authority(context.local_board_authority);
     if let Some(txs) = work.txs {
         account
             .admit_txs(txs, "rscoreConsensus:admit")
             .map_err(|error| state_error(account_id, &error))?;
         changed = true;
+    }
+    for update in work.envelope_updates {
+        match update {
+            crate::AccountEnvelopeUpdate::ClearRebalanceActiveQuote => {
+                account
+                    .clear_rebalance_active_quote()
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
+            crate::AccountEnvelopeUpdate::SetRebalancePolicy { token_id, policy } => {
+                let token_id =
+                    TokenId::new(token_id).map_err(|error| BatchError::AccountsTree {
+                        account_id,
+                        detail: error.to_string(),
+                    })?;
+                account
+                    .set_rebalance_shadow_policy(token_id, policy)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
+            crate::AccountEnvelopeUpdate::ReplaceDisputeLifecycle {
+                status,
+                dispute_prepare,
+                active_dispute,
+            } => {
+                account
+                    .replace_entity_dispute_lifecycle(&status, dispute_prepare, active_dispute)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
+            crate::AccountEnvelopeUpdate::ApplyDisputeStarted(finality) => {
+                account
+                    .apply_entity_dispute_started(finality)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
+            crate::AccountEnvelopeUpdate::ApplyDisputeFinality(finality) => {
+                account
+                    .apply_entity_dispute_finality(finality)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
+            crate::AccountEnvelopeUpdate::ConfirmDisputeBookRemoval { order_id } => {
+                account
+                    .confirm_dispute_book_removal(&order_id)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
+        }
     }
     let proposal = if work.propose {
         if proposable(&account)? {
@@ -1286,6 +1897,7 @@ fn create_work(creates: &[AccountSeed]) -> Result<Vec<(AccountId, OutboundWork)>
             seed.account_id,
             OutboundWork {
                 create: Some(seed.clone()),
+                envelope_updates: Vec::new(),
                 txs: None,
                 propose: false,
             },
@@ -1294,47 +1906,41 @@ fn create_work(creates: &[AccountSeed]) -> Result<Vec<(AccountId, OutboundWork)>
     Ok(work)
 }
 
-fn admission_work(admits: &[(AccountId, Vec<AccountTx>)]) -> Vec<(AccountId, OutboundWork)> {
-    let mut grouped = BTreeMap::<AccountId, Vec<AccountTx>>::new();
-    for (account_id, txs) in admits {
-        grouped.entry(*account_id).or_default().extend(txs.clone());
-    }
-    grouped
-        .into_iter()
-        .map(|(account_id, txs)| {
-            (
-                account_id,
-                OutboundWork {
-                    create: None,
-                    txs: Some(txs),
-                    propose: false,
-                },
-            )
-        })
-        .collect()
-}
-
 type OutboundWorkSet = (Vec<(AccountId, OutboundWork)>, BTreeSet<AccountId>);
 
-fn outbound_work(request: &EntityOutboundRequest) -> Result<OutboundWorkSet, BatchError> {
+fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet, BatchError> {
     let mut grouped = BTreeMap::<AccountId, OutboundWork>::new();
     for seed in &request.creates {
         grouped.insert(
             seed.account_id,
             OutboundWork {
                 create: None,
+                envelope_updates: Vec::new(),
                 txs: None,
                 propose: false,
             },
         );
     }
-    for (account_id, txs) in &request.admits {
-        let work = grouped.entry(*account_id).or_insert(OutboundWork {
+    for (account_id, txs) in std::mem::take(&mut request.admits) {
+        let work = grouped.entry(account_id).or_insert(OutboundWork {
             create: None,
+            envelope_updates: Vec::new(),
             txs: Some(Vec::new()),
             propose: false,
         });
-        work.txs.get_or_insert_with(Vec::new).extend(txs.clone());
+        work.txs.get_or_insert_with(Vec::new).extend(txs);
+    }
+    for (account_id, updates) in std::mem::take(&mut request.envelope_updates) {
+        grouped
+            .entry(account_id)
+            .or_insert(OutboundWork {
+                create: None,
+                envelope_updates: Vec::new(),
+                txs: None,
+                propose: false,
+            })
+            .envelope_updates
+            .extend(updates);
     }
     let mut selected = BTreeSet::new();
     for account_id in &request.propose {
@@ -1345,6 +1951,7 @@ fn outbound_work(request: &EntityOutboundRequest) -> Result<OutboundWorkSet, Bat
             .entry(*account_id)
             .or_insert(OutboundWork {
                 create: None,
+                envelope_updates: Vec::new(),
                 txs: None,
                 propose: false,
             })
@@ -1353,36 +1960,24 @@ fn outbound_work(request: &EntityOutboundRequest) -> Result<OutboundWorkSet, Bat
     for account_id in &request.materialize {
         grouped.entry(*account_id).or_insert(OutboundWork {
             create: None,
+            envelope_updates: Vec::new(),
             txs: None,
             propose: false,
         });
     }
-    for route in &request.failed_htlc_routes {
-        for account_id in [route.outbound_account_id, route.inbound_account_id] {
-            grouped.entry(account_id).or_insert(OutboundWork {
-                create: None,
-                txs: None,
-                propose: false,
-            });
-        }
-    }
     let mut named = grouped.keys().copied().collect::<BTreeSet<_>>();
     named.extend(request.materialize.iter().copied());
-    for route in &request.failed_htlc_routes {
-        named.insert(route.outbound_account_id);
-        named.insert(route.inbound_account_id);
-    }
     Ok((grouped.into_iter().collect(), named))
 }
 
 fn proposals_from(
-    rows: &[(AccountId, [u8; 32], OutboundOutcome)],
+    rows: &mut [(AccountId, [u8; 32], OutboundOutcome)],
     order: &[AccountId],
 ) -> Result<Vec<ProposalRow>, BatchError> {
     let mut by_account = rows
-        .iter()
+        .iter_mut()
         .filter_map(|(account_id, _, outcome)| {
-            outcome.proposal.clone().map(|row| (*account_id, row))
+            outcome.proposal.take().map(|row| (*account_id, row))
         })
         .collect::<BTreeMap<_, _>>();
     order
@@ -1398,190 +1993,16 @@ fn proposals_from(
         .collect()
 }
 
-fn proposals_need_htlc_followup(proposals: &[ProposalRow], routes: &[FailedHtlcRoute]) -> bool {
-    let hashlocks = routes
-        .iter()
-        .map(|route| route.hashlock)
-        .collect::<BTreeSet<_>>();
-    proposals.iter().any(|proposal| {
-        proposal
-            .failed_htlc_locks
-            .iter()
-            .any(|failed| hashlocks.contains(&failed.hashlock))
-    })
-}
-
-fn validate_routes(routes: &[FailedHtlcRoute]) -> Result<(), BatchError> {
-    let mut seen = BTreeSet::new();
-    for route in routes {
-        if !seen.insert(route.hashlock) {
-            return Err(BatchError::FailedHtlcRouteDuplicate {
-                hashlock: root_hex(route.hashlock),
-            });
-        }
-    }
-    Ok(())
-}
-
-struct HtlcFollowup {
-    admit: Vec<(AccountId, OutboundWork)>,
-    newly_scheduled: Vec<AccountId>,
-}
-
-fn reset_htlc_frontier_barriers() {
-    HTLC_FRONTIER_BARRIERS.with(|count| count.set(0));
-}
-
-fn record_htlc_frontier_barrier() {
-    HTLC_FRONTIER_BARRIERS.with(|count| count.set(count.get() + 1));
-}
-
-fn initial_htlc_worklist(
-    propose: &[AccountId],
-) -> Result<(BTreeSet<AccountId>, Vec<AccountId>), BatchError> {
-    let mut scheduled = BTreeSet::new();
-    let mut order = Vec::with_capacity(propose.len());
-    for account_id in propose {
-        if !scheduled.insert(*account_id) {
-            return Err(BatchError::DuplicateAccount(*account_id));
-        }
-        order.push(*account_id);
-    }
-    Ok((scheduled, order))
-}
-
-fn htlc_propose_work(account_ids: &[AccountId]) -> Vec<(AccountId, OutboundWork)> {
-    account_ids
-        .iter()
-        .map(|account_id| {
-            (
-                *account_id,
-                OutboundWork {
-                    create: None,
-                    txs: None,
-                    propose: true,
-                },
-            )
-        })
-        .collect()
-}
-
-fn htlc_ready_frontier(
-    order: &[AccountId],
-    remaining: &BTreeSet<AccountId>,
-    routes: &[FailedHtlcRoute],
-) -> Vec<AccountId> {
-    let mut blocked = BTreeSet::new();
-    for route in routes {
-        if route.outbound_account_id == route.inbound_account_id {
-            continue;
-        }
-        if remaining.contains(&route.outbound_account_id)
-            && remaining.contains(&route.inbound_account_id)
-        {
-            blocked.insert(route.inbound_account_id);
-        }
-    }
-    order
-        .iter()
-        .copied()
-        .filter(|account_id| remaining.contains(account_id) && !blocked.contains(account_id))
-        .collect()
-}
-
-fn htlc_followup_from_proposals(
-    rows: Vec<(AccountId, [u8; 32], OutboundOutcome)>,
-    routes: &BTreeMap<[u8; 32], &FailedHtlcRoute>,
-    scheduled: &mut BTreeSet<AccountId>,
-    named: &mut BTreeSet<AccountId>,
-    admissions: &mut Vec<AccountAdmissionResult>,
-    proposals: &mut Vec<ProposalRow>,
-) -> Result<HtlcFollowup, BatchError> {
-    let mut pending_order = Vec::new();
-    let mut pending_txs = BTreeMap::<AccountId, Vec<AccountTx>>::new();
-    let mut newly_scheduled = Vec::new();
-    for (account_id, _leaf, outcome) in rows {
-        let mut proposal = outcome.proposal.ok_or(BatchError::AccountNotFound {
-            input_index: 0,
-            account_id,
-        })?;
-        for failed in &mut proposal.failed_htlc_locks {
-            let Some(route) = matched_failed_htlc_route(account_id, failed, routes)? else {
-                continue;
-            };
-            let reason = format!("forward_failed:{}", failed.reason);
-            let inbound = route.inbound_account_id;
-            if !pending_txs.contains_key(&inbound) {
-                pending_order.push(inbound);
-            }
-            pending_txs
-                .entry(inbound)
-                .or_default()
-                .push(AccountTx::HtlcResolve(HtlcResolveTx {
-                    lock_id: route.inbound_lock_id.clone(),
-                    outcome: HtlcResolveOutcome::Error {
-                        reason: Some(reason.clone()),
-                    },
-                }));
-            admissions.push(AccountAdmissionResult {
-                operation_index: admissions.len() as u64,
-                account_id: inbound,
-                verdict: AccountAdmissionVerdict::Admitted { count: 1 },
-            });
-            failed.upstream_resolution = Some(UpstreamHtlcResolutionRow {
-                account_id: inbound,
-                lock_id: route.inbound_lock_id.clone(),
-                reason,
-            });
-            named.insert(inbound);
-            if scheduled.insert(inbound) {
-                newly_scheduled.push(inbound);
-            }
-        }
-        proposals.push(proposal);
-    }
-    Ok(HtlcFollowup {
-        admit: pending_order
-            .into_iter()
-            .map(|account_id| {
-                (
-                    account_id,
-                    OutboundWork {
-                        create: None,
-                        txs: pending_txs.remove(&account_id),
-                        propose: false,
-                    },
-                )
-            })
-            .collect(),
-        newly_scheduled,
-    })
-}
-
-fn matched_failed_htlc_route<'a>(
-    account_id: AccountId,
-    failed: &FailedHtlcLockRow,
-    routes: &BTreeMap<[u8; 32], &'a FailedHtlcRoute>,
-) -> Result<Option<&'a FailedHtlcRoute>, BatchError> {
-    let Some(route) = routes.get(&failed.hashlock) else {
-        return Ok(None);
-    };
-    if route.outbound_account_id != account_id || route.outbound_lock_id != failed.lock_id {
-        return Err(BatchError::FailedHtlcRouteMismatch {
-            hashlock: root_hex(failed.hashlock),
-            account: root_hex(*account_id.as_bytes()),
-            lock_id: failed.lock_id.clone(),
-        });
-    }
-    Ok(Some(*route))
-}
-
 fn validate_operation_indices(rows: &[AccountInputRow]) -> Result<(), BatchError> {
-    for pair in rows.windows(2) {
-        if pair[0].operation_index >= pair[1].operation_index {
+    for (expected, row) in rows.iter().enumerate() {
+        let expected = u64::try_from(expected).map_err(|_| BatchError::OperationIndex {
+            actual: row.operation_index,
+            after: None,
+        })?;
+        if row.operation_index != expected {
             return Err(BatchError::OperationIndex {
-                actual: pair[1].operation_index,
-                after: Some(pair[0].operation_index),
+                actual: row.operation_index,
+                after: expected.checked_sub(1),
             });
         }
     }

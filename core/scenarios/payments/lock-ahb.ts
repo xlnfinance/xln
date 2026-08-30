@@ -742,16 +742,16 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const [, hubRepHtlc] = findReplica(env, hub.id);
     const [, bobRepHtlc] = findReplica(env, bob.id);
 
-    console.log(`   📖 Alice lockBook size: ${aliceRepHtlc.state.lockBook.size} (cleared after reveal)`);
-    console.log(`   📖 Hub lockBook size: ${hubRepHtlc.state.lockBook.size} (cleared after reveal)`);
-    console.log(`   📖 Bob lockBook size: ${bobRepHtlc.state.lockBook.size} (cleared after reveal)`);
+    console.log(`   📖 Alice Paybook size: ${aliceRepHtlc.state.paybook.entries.size} (cleared after reveal)`);
+    console.log(`   📖 Hub Paybook size: ${hubRepHtlc.state.paybook.entries.size} (cleared after reveal)`);
+    console.log(`   📖 Bob Paybook size: ${bobRepHtlc.state.paybook.entries.size} (cleared after reveal)`);
 
     // Locks should be cleared (HTLC auto-revealed by Bob as final recipient)
     // Note: With Codex fixes, some assertions may need more processing cycles
-    if (aliceRepHtlc.state.lockBook.size === 0 && hubRepHtlc.state.lockBook.size === 0) {
+    if (aliceRepHtlc.state.paybook.entries.size === 0 && hubRepHtlc.state.paybook.entries.size === 0) {
       console.log('   ✅ HTLC auto-reveal and settlement complete');
     } else {
-      console.log(`   ⚠️  HTLC still settling (Alice lockBook: ${aliceRepHtlc.state.lockBook.size}, Hub: ${hubRepHtlc.state.lockBook.size})`);
+      console.log(`   ⚠️  HTLC still settling (Alice Paybook: ${aliceRepHtlc.state.paybook.entries.size}, Hub: ${hubRepHtlc.state.paybook.entries.size})`);
       console.log('      Codex safety fixes may require more bilateral consensus rounds');
     }
 
@@ -771,7 +771,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // Verify deltas (may be in progress with Codex fixes)
     if (ahDelta1 === -payment1SenderGross && Math.abs(Number(hbDelta1 + payment1)) < 1e10) {
       console.log(`   ✅ Deltas correct - payment settled`);
-      console.log(`   Hub HTLC fees: ${hubRepHtlc.state.htlcFeesEarned}`);
+      console.log(`   Hub HTLC fees: ${hubRepHtlc.state.paybook.feesEarned}`);
       console.log('   ✅ Onion routing + fees verified\n');
     } else {
       console.log(`   ⚠️  HTLC settlement in progress or delayed by Codex safety checks`);
@@ -1467,8 +1467,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // Check fees (Hub and Hub2 should have earned)
     const [, hubRep4Hop] = findReplica(env, hub.id);
-    console.log(`   Hub total fees: ${hubRep4Hop.state.htlcFeesEarned || 0n}`);
-    console.log(`   Hub2 fees: ${hub2Rep.state.htlcFeesEarned || 0n}\n`);
+    console.log(`   Hub total fees: ${hubRep4Hop.state.paybook.feesEarned}`);
+    console.log(`   Hub2 fees: ${hub2Rep.state.paybook.feesEarned}\n`);
 
     console.log('✅ 4-HOP HTLC VERIFIED - Privacy-preserving multi-hop routing works!\n');
 

@@ -14,7 +14,7 @@ import { join, sep } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../../../..');
 const MANIFEST = join(ROOT, 'rscore/Cargo.toml');
-const BINARY = join(ROOT, 'rscore/target/release/xln-rscore');
+const BINARY = join(ROOT, 'rscore/target/release/xlnrs');
 const ENTITY_FIXTURE_GENERATOR = join(ROOT, 'rscore/fixtures/entity-kernel/generate.ts');
 const ENTITY_FIXTURE = join(ROOT, 'rscore/fixtures/entity-kernel/parity-v1.json');
 const testFilesUnder = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })

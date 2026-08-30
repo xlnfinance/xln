@@ -22,14 +22,16 @@ pub enum EntityOutputEncodingError {
     SafeInteger { field: &'static str, value: u64 },
     #[error("RRS_ENTITY_OUTPUT_CANONICAL_NUMBER:{0}")]
     CanonicalNumber(String),
-    #[error("RRS_ENTITY_OUTPUT_ACCOUNT_STATE_HASH_MISMATCH")]
-    AccountStateHashMismatch,
     #[error("RRS_ENTITY_OUTPUT_TARGET_MISMATCH:{index}:{outer}:{inner}")]
     TargetMismatch {
         index: usize,
         outer: String,
         inner: String,
     },
+    #[error("RRS_ENTITY_OUTPUT_RUNTIME_ROUTE_MISSING:{0}")]
+    RuntimeRouteMissing(&'static str),
+    #[error("RRS_ENTITY_OUTPUT_MIXED_PROTOCOL_PAYLOAD:{0}")]
+    MixedProtocolPayload(usize),
     #[error(transparent)]
     Account(#[from] StateError),
     #[error(transparent)]
@@ -43,23 +45,29 @@ pub enum EntityOutputEncodingError {
 /// into the fsynced flat outbox row.
 pub fn encode_local_entity_outputs(
     outputs: Vec<LocalEntityOutput>,
+    source_entity_id: &str,
+    source_signer_id: &str,
 ) -> Result<Vec<Value>, EntityOutputEncodingError> {
     outputs
         .into_iter()
         .enumerate()
-        .map(|(index, output)| encode_local_entity_output(index, output))
+        .map(|(index, output)| {
+            encode_local_entity_output(index, output, source_entity_id, source_signer_id)
+        })
         .collect()
 }
 
-fn encode_local_entity_output(
+pub(crate) fn encode_local_entity_output(
     index: usize,
     output: LocalEntityOutput,
+    source_entity_id: &str,
+    source_signer_id: &str,
 ) -> Result<Value, EntityOutputEncodingError> {
     let entity_id = output.entity_id.to_ascii_lowercase();
-    let entity_txs = output
-        .entity_txs
-        .into_iter()
-        .map(|tx| match tx {
+    let mut account_txs = Vec::new();
+    let mut projected_txs = Vec::new();
+    for tx in output.entity_txs {
+        match tx {
             LocalEntityOutputTx::AccountInput(input) => {
                 let inner = hex(&input.envelope.to_entity_id);
                 if inner != entity_id {
@@ -69,13 +77,58 @@ fn encode_local_entity_output(
                         inner,
                     });
                 }
-                Ok(object([
+                account_txs.push(object([
                     ("type", Value::String("accountInput".into())),
                     ("data", encode_account_input(&input)?),
-                ]))
+                ]));
             }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            LocalEntityOutputTx::Projected(projected) => {
+                projected_txs.push(object([
+                    ("type", Value::String(projected.kind.as_str().into())),
+                    (
+                        "data",
+                        canonical_json_ref(projected.frame_data().ok_or_else(|| {
+                            EntityOutputEncodingError::Entity(
+                                EntityOutputError::ProjectedDataMissing(projected.kind.as_str()),
+                            )
+                        })?)?,
+                    ),
+                ]));
+            }
+        }
+    }
+    if !account_txs.is_empty() && !projected_txs.is_empty() {
+        return Err(EntityOutputEncodingError::MixedProtocolPayload(index));
+    }
+    let entity_txs = if projected_txs.is_empty() {
+        account_txs
+    } else {
+        let source_entity_id = source_entity_id.trim().to_ascii_lowercase();
+        let source_signer_id = source_signer_id.trim().to_ascii_lowercase();
+        if source_entity_id.is_empty() {
+            return Err(EntityOutputEncodingError::RuntimeRouteMissing(
+                "sourceEntityId",
+            ));
+        }
+        if source_signer_id.is_empty() {
+            return Err(EntityOutputEncodingError::RuntimeRouteMissing(
+                "sourceSignerId",
+            ));
+        }
+        vec![object([
+            ("type", Value::String("runtimeOutput".into())),
+            (
+                "data",
+                object([
+                    ("protocol", Value::String("cross-j".into())),
+                    ("sourceEntityId", Value::String(source_entity_id)),
+                    ("sourceSignerId", Value::String(source_signer_id)),
+                    ("targetEntityId", Value::String(entity_id.clone())),
+                    ("entityTxs", Value::Array(projected_txs)),
+                ]),
+            ),
+        ])]
+    };
     Ok(object([
         ("entityId", Value::String(entity_id)),
         ("entityTxs", Value::Array(entity_txs)),
@@ -136,8 +189,8 @@ fn encode_account_input(input: &AccountPeerInput) -> Result<Value, EntityOutputE
             fields.insert("kind".into(), Value::String("ack".into()));
             fields.insert("ack".into(), encode_ack(ack)?);
         }
-        AccountInputKind::FrameAck { ack, frame } => {
-            fields.insert("kind".into(), Value::String("frame_ack".into()));
+        AccountInputKind::AckFrame { ack, frame } => {
+            fields.insert("kind".into(), Value::String("ack_frame".into()));
             fields.insert("ack".into(), encode_ack(ack)?);
             fields.insert("proposal".into(), encode_proposal(frame)?);
         }
@@ -228,9 +281,6 @@ fn encode_dispute(dispute: &CounterpartyDispute) -> Result<Value, EntityOutputEn
 }
 
 fn encode_frame(frame: &IncomingFrame) -> Result<Value, EntityOutputEncodingError> {
-    if frame.frame.hash()? != frame.state_hash {
-        return Err(EntityOutputEncodingError::AccountStateHashMismatch);
-    }
     let AccountFrame {
         height,
         timestamp,
@@ -438,7 +488,8 @@ mod tests {
         let witnesses = std::collections::BTreeMap::new();
         let output = LocalEntityOutput::account_input(ack_input(), &witnesses)
             .expect("authorized account output");
-        let encoded = encode_local_entity_outputs(vec![output]).expect("encode");
+        let encoded = encode_local_entity_outputs(vec![output], &entity(0x11), "source-signer")
+            .expect("encode");
         assert_eq!(encoded[0]["entityId"], entity(0x22));
         let entity_tx = &encoded[0]["entityTxs"][0];
         let decoded = crate::decode_entity_account_input_row(&entity(0x22), 9, entity_tx)
@@ -459,9 +510,50 @@ mod tests {
     #[test]
     fn non_mutating_self_wake_preserves_the_exact_empty_entity_input() {
         let target = entity(0x22);
-        let encoded =
-            encode_local_entity_outputs(vec![LocalEntityOutput::non_mutating_wake(target.clone())])
-                .expect("encode wake");
+        let encoded = encode_local_entity_outputs(
+            vec![LocalEntityOutput::non_mutating_wake(target.clone())],
+            &entity(0x11),
+            "source-signer",
+        )
+        .expect("encode wake");
         assert_eq!(encoded, vec![json!({"entityId": target, "entityTxs": []})],);
+    }
+
+    #[test]
+    fn cross_j_output_is_wrapped_once_with_committed_source_authority() {
+        let source = entity(0x11);
+        let target = entity(0x22);
+        let projected = xln_rscore_entity_kernel::CanonicalEntityTx::from_frame_projection(
+            xln_rscore_entity_kernel::EntityTxKind::PrepareCrossJurisdictionSwap,
+            CanonicalValue::Object(vec![(
+                "route".into(),
+                CanonicalValue::Object(vec![(
+                    "orderId".into(),
+                    CanonicalValue::String("order-1".into()),
+                )]),
+            )]),
+        )
+        .expect("projected cross-j tx");
+        let encoded = encode_local_entity_outputs(
+            vec![LocalEntityOutput {
+                entity_id: target.clone(),
+                entity_txs: vec![LocalEntityOutputTx::Projected(projected)],
+            }],
+            &source,
+            "source-signer",
+        )
+        .expect("encode runtime output");
+        assert_eq!(encoded[0]["entityId"], target);
+        assert_eq!(encoded[0]["entityTxs"].as_array().unwrap().len(), 1);
+        let wrapper = &encoded[0]["entityTxs"][0];
+        assert_eq!(wrapper["type"], "runtimeOutput");
+        assert_eq!(wrapper["data"]["protocol"], "cross-j");
+        assert_eq!(wrapper["data"]["sourceEntityId"], source);
+        assert_eq!(wrapper["data"]["sourceSignerId"], "source-signer");
+        assert_eq!(wrapper["data"]["targetEntityId"], target);
+        assert_eq!(
+            wrapper["data"]["entityTxs"][0]["type"],
+            "prepareCrossJurisdictionSwap"
+        );
     }
 }

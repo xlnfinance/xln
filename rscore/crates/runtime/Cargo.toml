@@ -1,5 +1,6 @@
 [package]
 name = "xln-rscore-runtime"
+autobins = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +9,9 @@ rust-version.workspace = true
 [dependencies]
 aes-gcm = "0.10"
 base64.workspace = true
+ethabi = "18.0.0"
 getrandom.workspace = true
+hex.workspace = true
 hkdf = "0.12"
 hmac = "0.12"
 keccak-hasher = "0.15.3"
@@ -25,6 +28,7 @@ thiserror.workspace = true
 tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 triehash = "0.8.4"
 ureq = { version = "3.4.0", features = ["json"] }
+url = "2"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 xln-rscore-protocol = { path = "../protocol" }
 xln-rscore-abi = { path = "../abi" }
@@ -32,6 +36,7 @@ xln-rscore-batch = { path = "../batch" }
 xln-rscore-engine = { path = "../engine" }
 xln-rscore-entity-kernel = { path = "../entity-kernel" }
 xln-rscore-crypto = { path = "../crypto" }
+xln-rscore-hanko = { path = "../hanko" }
 
 [dev-dependencies]
 hex.workspace = true

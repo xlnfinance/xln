@@ -90,8 +90,12 @@ fn decode(value: &AbiValue, depth: usize) -> Result<CanonicalValue, AccountWireR
     }
 }
 
+pub(crate) fn value(value: &AbiValue) -> Result<CanonicalValue, AccountWireRestoreError> {
+    decode(value, 0)
+}
+
 pub fn envelope(value: &AbiValue) -> Result<AccountEnvelope, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 2, "envelope")?;
+    let fields = exact(tuple(value)?, 4, "envelope")?;
     let projected = match decode(&fields[0], 0)? {
         CanonicalValue::Object(entries) => entries,
         _ => return Err(invalid("ENVELOPE_FIELDS")),
@@ -100,5 +104,26 @@ pub fn envelope(value: &AbiValue) -> Result<AccountEnvelope, AccountWireRestoreE
         .iter()
         .map(|value| decode(value, 0))
         .collect::<Result<Vec<_>, _>>()?;
-    AccountEnvelope::new(projected, mempool).map_err(|error| invalid(format!("ENVELOPE:{error}")))
+    let policy = tuple(&fields[2])?
+        .iter()
+        .map(|row| {
+            let row = exact(tuple(row)?, 2, "rebalanceShadowPolicyRow")?;
+            let token_id = u32::try_from(integer(&row[0])?)
+                .map_err(|_| invalid("REBALANCE_SHADOW_POLICY_TOKEN"))?;
+            Ok((token_id, decode(&row[1], 0)?))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let submitted = tuple(&fields[3])?
+        .iter()
+        .map(|row| {
+            let row = exact(tuple(row)?, 2, "rebalanceShadowSubmittedRow")?;
+            let token_id = u32::try_from(integer(&row[0])?)
+                .map_err(|_| invalid("REBALANCE_SHADOW_SUBMITTED_TOKEN"))?;
+            let timestamp = u64::try_from(integer(&row[1])?)
+                .map_err(|_| invalid("REBALANCE_SHADOW_SUBMITTED_TIMESTAMP"))?;
+            Ok((token_id, timestamp))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    AccountEnvelope::new_with_rebalance_shadow_rows(projected, mempool, policy, submitted)
+        .map_err(|error| invalid(format!("ENVELOPE:{error}")))
 }

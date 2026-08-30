@@ -34,6 +34,7 @@ pub(super) fn apply_place_swap_offer(
             min_net_receive: tx.min_net_receive,
             time_in_force: tx.time_in_force,
             price_ticks: tx.price_ticks,
+            cross_jurisdiction: None,
         },
     ));
     wake_targets.push(state.entity_id.clone());

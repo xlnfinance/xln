@@ -3,7 +3,7 @@ import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from 
 import type { DebtEntry } from '../types/finance/debt';
 import type { JHistoryFinality, JPrefixAttestation, JPrefixCertificate, JPrefixRound, ValidatorJHistory } from '../types/jurisdiction-events';
 import type { HankoString } from '../types/hanko';
-import type { AccountFrame, AccountOutput, AccountTx, AccountHistoryRecord, HtlcNoteKey, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
+import type { AccountOutput, AccountTx, RuntimeOverlayRecord } from '../types/account';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { LendingState } from '../types/finance/lending';
 import type {
@@ -38,6 +38,48 @@ export interface EntityLeaderState {
   activeValidatorId: string;
   view: number;
   changedAtHeight: number;
+}
+
+interface CrossJurisdictionSecretRelay {
+  routeId: string;
+  fillRatio: number;
+  sourceAmount: bigint;
+  targetAmount: bigint;
+  targetEntityId: string;
+  targetSignerId?: string;
+  targetCounterpartyEntityId: string;
+  targetLockId: string;
+}
+
+export interface PaybookEntry {
+  hashlock: string;
+  /** Private invoice note, retained only by the payment owner/final recipient. */
+  description?: string;
+  tokenId?: number;
+  amount?: bigint;
+  startedAtMs?: number;
+  /** True when this Entity created the payment; remains true for a self-cycle's returning hop. */
+  originated?: true;
+  /** Accounts holding the same canonical hashlock; there are no per-hop Entity lock identifiers. */
+  inboundEntity?: string;
+  outboundEntity?: string;
+  /** Self-cycle legs may commit in either order and are retained until both are terminal. */
+  inboundSettled?: true;
+  outboundSettled?: true;
+  secret?: string;
+  secretAckPending?: boolean;
+  secretAckStartedAt?: number;
+  secretAckDeadlineAt?: number;
+  secretAckedAt?: number;
+  pendingFee?: bigint;
+  crossJurisdictionRelay?: CrossJurisdictionSecretRelay;
+  createdTimestamp: number;
+}
+
+/** One Entity-owned payment machine. Each live payment has exactly one hashlock-keyed entry. */
+interface PaybookState {
+  entries: Map<string, PaybookEntry>;
+  feesEarned: bigint;
 }
 
 
@@ -85,8 +127,6 @@ export interface EntityInput {
   signerId: string;
   runtimeId?: string;
   from?: string;
-  /** Transient pre-commit marker; removed when wrapped as siblingOutput. */
-  localRuntimeProtocol?: 'cross-j';
   entityTxs?: EntityTx[];
   proposedFrame?: EntityFrame;
 
@@ -239,7 +279,7 @@ export interface EntityState {
   settlementContinuations?: Map<string, PendingSettlementContinuation>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
-  // Finalized J-event bodies are durable history records, never live Entity
+  // Finalized J-event bodies are durable J-consensus records, never live Entity
   // state. Consensus retains only the current linked-list finality anchor.
   jHistoryFinality?: JHistoryFinality;
   /** Entity-finalized active board authority for this exact jurisdiction stack. */
@@ -267,9 +307,8 @@ export interface EntityState {
     website: string;
   };
 
-  // 🔒 HTLC Routing - Multi-hop payment tracking (like 2024 hashlockMap)
-  htlcRoutes: Map<string, HtlcRoute>; // hashlock → routing context
-  htlcFeesEarned: bigint; // Running total of HTLC routing fees collected
+  // 🔒 One payment machine. Account locks, forwarding, secret propagation and fees share one entry.
+  paybook: PaybookState;
 
   // 💳 Debt ledger — mirrored on both debtor and creditor sides from canonical j-events.
   outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
@@ -277,8 +316,6 @@ export interface EntityState {
 
   // 📊 Orderbook Extension - Hub matching engine (typed in orderbook/types.ts)
   orderbookExt?: OrderbookExtState;
-
-  lockBook: Map<string, LockBookEntry>;  // lockId → entry
 
   // 💱 Swap market config
   // Kept in entity state so UI and runtime use one source of truth.
@@ -324,19 +361,6 @@ export interface SwapBookEntry {
 }
 
 
-/** Aggregated HTLC lock entry at E-Machine level */
-export interface LockBookEntry {
-  lockId: string;
-  accountId: string;        // counterparty entity ID where lock lives
-  tokenId: number;
-  amount: bigint;
-  hashlock: string;
-  timelock: bigint;
-  direction: 'outgoing' | 'incoming';
-  createdAt: bigint;
-}
-
-
 /** Hash type for entity-level signing */
 export type HashType =
   | 'entityFrame'
@@ -373,7 +397,7 @@ export interface EntityFrame {
   /**
    * Deterministic activity produced while replaying `txs`.
    *
-   * Events belong to the signed frame and durable history, never to the
+   * Events belong to the signed frame carried by the bounded Runtime WAL, never to the
    * ever-growing EntityState. This keeps replay auditable without making every
    * future state transition carry all past presentation data.
    */
@@ -442,18 +466,15 @@ export interface CertifiedEntityFrameLink {
 export type EntityCandidateEffect =
   | Extract<AccountOutput, { kind: 'runtimeEvent' | 'debug' }>
   | {
-      kind: 'entityFrameHistory';
+      kind: 'entityFrameCommitted';
       entityId: string;
       signerId: string;
       link: CertifiedEntityFrameLink;
     }
   | {
-      kind: 'accountFrameHistory';
+      kind: 'accountFrameCommitted';
       entityId: string;
       counterpartyId: string;
-      accountHeight: number;
-      source: Extract<AccountHistoryRecord, { kind: 'accountFrame' }>['source'];
-      frame: AccountFrame;
     }
   | {
       kind: 'securityIncidentRecord';
@@ -502,7 +523,7 @@ export interface EntityReplica {
   lockedFrame?: EntityFrame; // Frame this validator is locked/precommitted to
   /** One validator-local speculative frame; commits never trust proposer-supplied post-state. */
   candidate?: EntityCandidate;
-  /** Current finalized certificate only; historical certificates live in the Entity-frame history store. */
+  /** Current finalized certificate only; older frames are available only while retained in the Runtime WAL. */
   certifiedFrameHead?: CertifiedEntityFrameLink;
   isProposer: boolean;
   leaderVotes?: Map<string, EntityLeaderTimeoutVote>;
@@ -545,11 +566,6 @@ export interface EntityReplica {
   };
   /** Validator-local EntityProvider submit receipt; never part of Entity consensus. */
   entityProviderActionSubmitState?: EntityProviderActionSubmitState;
-  /**
-   * Bounded presentation index rebuilt from certified Entity frames.
-   * Descriptions never enter EntityState or an Account frame.
-   */
-  htlcNotes?: Map<HtlcNoteKey, string>;
   // Position is RELATIVE to j-machine (jurisdiction)
   // Frontend calculates: worldPos = jMachine.position + relativePosition
   position?: {

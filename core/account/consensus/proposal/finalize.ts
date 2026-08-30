@@ -21,7 +21,7 @@ import type {
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 
 type DisputeHanko = NonNullable<
-  Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeHanko']
+  Extract<AccountInput, { kind: 'frame' | 'ack_frame' }>['proposal']['disputeHanko']
 >;
 
 const resolveDisputeHanko = (
@@ -60,8 +60,8 @@ const buildOutboundAccountInput = (
   candidate: AccountReplica,
   frame: AccountFrame,
   proof: PreparedProposalProof,
-): Extract<AccountInput, { kind: 'frame' | 'frame_ack' }> => {
-  const reusableAck = account.lastOutboundFrameAck;
+): Extract<AccountInput, { kind: 'frame' | 'ack_frame' }> => {
+  const reusableAck = account.lastOutboundAckFrame;
   const bundleAck =
     Boolean(reusableAck) &&
     reusableAck!.counterpartyEntityId.toLowerCase() === account.proofHeader.toEntity.toLowerCase() &&
@@ -82,13 +82,13 @@ const buildOutboundAccountInput = (
   };
   if (bundleAck) {
     return {
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       ...shared,
       ack: structuredClone(reusableAck!.response.ack),
     };
   }
   if (reusableAck && Number(reusableAck.height) < Number(account.currentHeight)) {
-    delete account.lastOutboundFrameAck;
+    delete account.lastOutboundAckFrame;
   }
   return { kind: 'frame', ...shared };
 };

@@ -4,7 +4,7 @@ import { assertAccountFrameHash, computeFrameHash } from '../../../account/conse
 import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
 import { canonicalAccountInputCommitment } from '../../../entity/consensus/frame/account-input-commitment';
 import { materializeCommittedEntityOutputs } from '../../../entity/consensus/output/publication';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import type { AccountFrame } from '../../../types/account';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
@@ -91,13 +91,13 @@ const entityHash = (txs: EntityTx[]): string =>
     entityContext(),
   );
 
-test('Entity frame hash binds Account stateHash not nested offer bodies', async () => {
+test('Entity frame hash binds the exact AccountInput bytes', async () => {
   const left = await makeFrame('offer-a');
   const right = structuredClone(left);
   right.accountTxs = [fatOffer('offer-b') as AccountFrame['accountTxs'][number]];
   expect(left.stateHash).not.toBe(computeFrameHash(right));
   expect(() => assertAccountFrameHash(right, 'TAMPERED_BODY')).toThrow('TAMPERED_BODY');
-  expect(entityHash([frameInput(left)])).toBe(entityHash([frameInput(right)]));
+  expect(entityHash([frameInput(left)])).not.toBe(entityHash([frameInput(right)]));
 });
 
 test('Entity frame hash changes when claimed stateHash changes', async () => {
@@ -107,7 +107,7 @@ test('Entity frame hash changes when claimed stateHash changes', async () => {
   expect(entityHash([frameInput(frame)])).not.toBe(entityHash([frameInput(tampered)]));
 });
 
-test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle omits', async () => {
+test('Entity frame hash binds inbound settlement Hanko bytes', async () => {
   const frame = await makeFrame('offer-a');
   frame.accountTxs.push({
     type: 'settle_transition',
@@ -138,19 +138,20 @@ test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle 
   expect(entityHash([frameInput(changed)])).not.toBe(entityHash([frameInput(frame)]));
 });
 
-test('commitment encoding of 100 fat frames stays off the nested offer bytes', async () => {
+test('commitment encoding of 100 fat frames is digest-only', async () => {
   const frames = await Promise.all(Array.from({ length: 100 }, (_, i) => makeFrame(`offer-${i}`)));
   const txs = frames.map(frame => frameInput(frame));
   const started = performance.now();
   const hash = entityHash(txs);
   const elapsedMs = performance.now() - started;
   expect(hash.startsWith('0x')).toBe(true);
-  const encoded = encodeCanonicalConsensusValue(
+  const encoded = Buffer.from(encodeCanonicalConsensusBytes(
     txs.map(tx => canonicalAccountInputCommitment(tx.data)),
-  );
-  expect(encoded.includes('offer-0')).toBe(false);
-  expect(encoded.includes('x'.repeat(64))).toBe(false);
-  expect(encoded.includes('0xframe')).toBe(true);
+  ));
+  expect(encoded.includes(Buffer.from('offer-0'))).toBe(false);
+  expect(encoded.includes(Buffer.from('x'.repeat(64)))).toBe(false);
+  expect(encoded.includes(Buffer.from('0xframe'))).toBe(false);
+  expect(encoded.byteLength).toBeLessThan(16_000);
   expect(elapsedMs).toBeLessThan(50);
 });
 

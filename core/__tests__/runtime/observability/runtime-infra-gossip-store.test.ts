@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { loadGossipProfilesFromInfraDb } from '../../../runtime/envelope/gossip-store';
 import {
@@ -9,8 +9,8 @@ import {
   tryOpenRuntimeInfraDb,
 } from '../../../runtime/loop/loop-envelope.ts';
 import { serializeTaggedJson } from '../../../protocol/serialization';
-import { clearGossip, closeInfraDb, createEmptyEnv } from '../../../runtime';
-import { resolveDbPath } from '../../../storage/runtime-dbs';
+import { clearGossip, closeInfraDb, createEmptyEnv, saveEnvToDB } from '../../../runtime';
+import { resolveDbPath, resolveStorageWriterLockPath } from '../../../storage/runtime-dbs';
 import type { RuntimeReplica } from '../../../runtime/types';
 import {
   buildCryptographicProfileFixture,
@@ -91,6 +91,43 @@ test('runtime infra gossip restore diagnostics use structured logging', () => {
   expect(source).toContain("infraGossipLog.warn('profile.restore_failed'");
   expect(source).not.toContain('console.');
   expect(source).not.toContain('[infra-db]');
+});
+
+test('ephemeral Runtime never opens an infra gossip database', async () => {
+  const seed = `infra-gossip-ephemeral-${process.pid}-${Date.now()}`;
+  const env = createEmptyEnv(seed);
+  env.dbNamespace = `${String(env.runtimeId)}-ephemeral`;
+  env.runtimeConfig = {
+    ...env.runtimeConfig,
+    storage: { ...env.runtimeConfig?.storage, enabled: false },
+  };
+  const infraPath = resolveDbPath(env, 'infra');
+
+  expect(existsSync(infraPath)).toBe(false);
+  expect(await tryOpenRuntimeInfraDb(env)).toBe(false);
+  expect(env.infrastructure?.infraDb).toBeUndefined();
+  expect(existsSync(infraPath)).toBe(false);
+});
+
+test('ephemeral Runtime commit never acquires a durable writer lock', async () => {
+  const seed = `runtime-storage-ephemeral-${process.pid}-${Date.now()}`;
+  const env = createEmptyEnv(seed, 1);
+  env.dbNamespace = `${String(env.runtimeId)}-ephemeral-commit`;
+  env.runtimeConfig = {
+    ...env.runtimeConfig,
+    storage: { ...env.runtimeConfig?.storage, enabled: false },
+  };
+  const lockPath = resolveStorageWriterLockPath(env);
+  const lockDirectory = dirname(lockPath);
+  const lockName = basename(lockPath);
+  const lockArtifacts = (): string[] => existsSync(lockDirectory)
+    ? readdirSync(lockDirectory).filter(name => name === lockName || name.startsWith(`${lockName}.`))
+    : [];
+
+  expect(lockArtifacts()).toEqual([]);
+  expect(await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map()))
+    .toEqual({ staleWriterStopped: false });
+  expect(lockArtifacts()).toEqual([]);
 });
 
 test('loadGossipProfilesFromInfraDb prunes malformed persisted profile', async () => {

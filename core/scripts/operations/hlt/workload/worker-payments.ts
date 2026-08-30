@@ -9,10 +9,9 @@
  * key stores and relay sessions, so every hop crosses the real P2P path.
  */
 
-import { forEachLimited } from '../../../../support/collections/for-each-limited';
 import { collectHltEnvironmentManifest, isProductionEquivalentHltEnvironment } from '../boundary/environment-manifest';
-import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { decodeSettlementEvidenceResponse } from '../../../../api/runtime-adapter/control/settlement-evidence';
 import { safeStringify } from '../../../../protocol/serialization';
 import type { RuntimeInput } from '../../../../runtime/types';
@@ -28,10 +27,17 @@ import {
 } from '../boundary/worker-boundary';
 import { decodeLoadPaymentReport, type PaymentSettlementSample } from '../boundary/worker-payment-boundary';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
-import { HLT_FAUCET_AMOUNT, setupParallelLoadLanes } from '../lanes/worker-lanes';
+import {
+  HLT_FAUCET_AMOUNT,
+  provisionParallelLoadLaneAccounts,
+  setupParallelLoadLanes,
+  spawnParallelLoadLanes,
+} from '../lanes/worker-lanes';
 import {
   queueLaneRuntimeInputWave,
   assertLaneHostSocketCounterCoverage,
+  readLaneHostPaymentOperationLedgers,
+  readLaneRouteReadiness,
   resetLaneHostOpCounters,
   stopLaneRuntimes,
   type LaneRuntime,
@@ -57,6 +63,18 @@ import {
   paymentTotalForSender,
 } from './worker-payments-plan';
 import { buildPacedOperationSchedule } from './operation-pacer';
+import {
+  attachRustH1,
+  assertRustLivePaymentCardinality,
+  parseHltEngineSelection,
+  type RustH1Handle,
+  type RustH1Metrics,
+} from '../rust/rust-h1';
+import { connectRustH1, waitForRustPaymentSettlement } from '../rust/rust-h1-settlement';
+import type {
+  AccountDeliveryHop,
+  HltPaymentOperationLedgerSnapshot,
+} from '../../../../support/performance/account-delivery-trace';
 
 /** Payments move the quote token; the swap workload owns the base token. */
 export const PAYMENT_TOKEN_ID = 1;
@@ -69,7 +87,92 @@ const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 /** Credit headroom over the exact total, so a fee cannot starve the last round. */
 export const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
-const DELIVERY_TIMEOUT_MS = 600_000;
+const DELIVERY_TIMEOUT_MS = 20_000;
+
+type MergedPaymentLedgerStage = Readonly<{
+  firstAtUnixMs: number;
+  lastAtUnixMs: number;
+  frameAppearances: number;
+  repeatedFrames: number;
+  operationAppearances: number;
+  repeatedOperationEvents: number;
+  lockIds: ReadonlySet<string>;
+  lockLegs: ReadonlySet<string>;
+  resolveIds: ReadonlySet<string>;
+  resolveLegs: ReadonlySet<string>;
+  hashlocks: ReadonlySet<string>;
+}>;
+
+const mergePaymentLedgerStage = (
+  snapshots: readonly HltPaymentOperationLedgerSnapshot[],
+  hop: AccountDeliveryHop,
+): MergedPaymentLedgerStage => {
+  const stages = snapshots.flatMap(snapshot => snapshot.stages[hop] ? [snapshot.stages[hop]] : []);
+  const union = (field: 'lockIds' | 'lockLegs' | 'resolveIds' | 'resolveLegs' | 'hashlocks') =>
+    new Set(stages.flatMap(stage => [...stage[field]]));
+  return {
+    firstAtUnixMs: stages.length > 0 ? Math.min(...stages.map(stage => stage.firstAtUnixMs)) : 0,
+    lastAtUnixMs: stages.length > 0 ? Math.max(...stages.map(stage => stage.lastAtUnixMs)) : 0,
+    frameAppearances: stages.reduce((sum, stage) => sum + stage.frameAppearances, 0),
+    repeatedFrames: stages.reduce((sum, stage) => sum + stage.repeatedFrames, 0),
+    operationAppearances: stages.reduce((sum, stage) => sum + stage.operationAppearances, 0),
+    repeatedOperationEvents: stages.reduce((sum, stage) => sum + stage.repeatedOperationEvents, 0),
+    lockIds: union('lockIds'),
+    lockLegs: union('lockLegs'),
+    resolveIds: union('resolveIds'),
+    resolveLegs: union('resolveLegs'),
+    hashlocks: union('hashlocks'),
+  };
+};
+
+const sameSet = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
+  left.size === right.size && [...left].every(value => right.has(value));
+
+export const assertCompleteUserPaymentLedger = (
+  ledgers: Readonly<Record<string, HltPaymentOperationLedgerSnapshot>>,
+  expectedPayments: number,
+  economicStartedAtUnixMs: number,
+): Readonly<Record<string, Readonly<Record<string, number>>>> => {
+  const snapshots = Object.values(ledgers);
+  const hops = ['committed-output', 'direct-admitted', 'account-apply-done'] as const;
+  const stages = Object.fromEntries(hops.map(hop => [hop, mergePaymentLedgerStage(snapshots, hop)])) as
+    Record<typeof hops[number], MergedPaymentLedgerStage>;
+  const source = stages['committed-output'];
+  for (const hop of hops) {
+    const stage = stages[hop];
+    if (
+      stage.lockIds.size !== expectedPayments || stage.resolveIds.size !== expectedPayments ||
+      stage.hashlocks.size !== expectedPayments
+    ) throw new Error(`HLT_PAYMENT_OPERATION_LEDGER_INCOMPLETE:${hop}:${safeStringify({
+      expectedPayments, locks: stage.lockIds.size, resolves: stage.resolveIds.size,
+      hashlocks: stage.hashlocks.size,
+      outcomes: snapshots.map(snapshot => snapshot.stages[hop]?.outcomes ?? {}),
+    })}`);
+  }
+  const admitted = stages['direct-admitted'];
+  const applied = stages['account-apply-done'];
+  if (
+    !sameSet(source.lockIds, admitted.lockIds) ||
+    !sameSet(source.resolveIds, admitted.resolveIds) ||
+    !sameSet(admitted.lockIds, applied.lockIds) ||
+    !sameSet(admitted.resolveIds, applied.resolveIds) ||
+    !sameSet(source.hashlocks, admitted.hashlocks) ||
+    !sameSet(admitted.hashlocks, applied.hashlocks)
+  ) throw new Error('HLT_PAYMENT_OPERATION_LEDGER_CROSS_STAGE_MISMATCH');
+  return Object.fromEntries(hops.map(hop => [hop, {
+    firstOffsetMs: stages[hop].firstAtUnixMs - economicStartedAtUnixMs,
+    lastOffsetMs: stages[hop].lastAtUnixMs - economicStartedAtUnixMs,
+    frameAppearances: stages[hop].frameAppearances,
+    repeatedFrames: stages[hop].repeatedFrames,
+    operationAppearances: stages[hop].operationAppearances,
+    repeatedOperationEvents: stages[hop].repeatedOperationEvents,
+    uniqueLockIds: stages[hop].lockIds.size,
+    uniqueLockLegs: stages[hop].lockLegs.size,
+    uniqueResolveIds: stages[hop].resolveIds.size,
+    uniqueResolveLegs: stages[hop].resolveLegs.size,
+    uniqueHashlocks: stages[hop].hashlocks.size,
+  }]));
+};
 /**
  * Fail fast on a stuck delivery instead of burning the full 10-minute
  * deadline: unset by default (the release gate wants the long deadline so a
@@ -80,8 +183,40 @@ const DELIVERY_MAX_STALL_MS = Number(process.env['XLN_HLT_MAX_STALL_MS'] || 0) |
 /** How often the delivery curve is printed while a run is in flight. */
 const DELIVERY_REPORT_MS = 2_000;
 const ROUTE_BARRIER_POLL_MS = 500;
-const ROUTE_BARRIER_TIMEOUT_MS = 300_000;
+const ROUTE_BARRIER_TIMEOUT_MS = 20_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Keep the real sovereign users, authenticated sockets and Rust H1 alive while
+ * the benchmark launcher ends its setup command. The next short command opens
+ * the economic window. This gate owns no protocol state and never changes an
+ * input: it only chooses when the already prepared load starts.
+ */
+export const waitForHltEconomicStartGate = async (): Promise<void> => {
+  const raw = String(process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ?? '').trim();
+  if (!raw) return;
+  const gateDir = resolve(raw);
+  const readyPath = join(gateDir, 'ready');
+  const startPath = join(gateDir, 'start');
+  const abortPath = join(gateDir, 'abort');
+  const startedPath = join(gateDir, 'started');
+  mkdirSync(gateDir, { recursive: true });
+  if (existsSync(startPath) || existsSync(readyPath) || existsSync(startedPath)) {
+    throw new Error(`HLT_ECONOMIC_GATE_STALE:${gateDir}`);
+  }
+  const temporary = `${readyPath}.tmp-${process.pid}`;
+  writeFileSync(temporary, `${process.pid}\n`, { mode: 0o600 });
+  renameSync(temporary, readyPath);
+  console.log(`[load] economic gate ready path=${gateDir}`);
+  while (!existsSync(startPath)) {
+    if (existsSync(abortPath)) throw new Error('HLT_ECONOMIC_GATE_ABORTED');
+    await sleep(20);
+  }
+  if (readFileSync(startPath, 'utf8').trim() !== 'start') {
+    throw new Error('HLT_ECONOMIC_GATE_START_INVALID');
+  }
+  writeFileSync(startedPath, `${Date.now()}\n`, { mode: 0o600 });
+};
 
 /**
  * A single settlement-poll read against a CPU-starved Hub can itself hang for
@@ -111,21 +246,6 @@ const withReadTimeout = <T>(promise: Promise<T>, timeoutMs: number, label: strin
  * HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING instead of measuring anything. This
  * barrier waits for the exact view the payment will be judged against.
  */
-// Bounded fan-out for the polling readers: 250 concurrent reads at three
-// daemons overflow a daemon's accept queue while it is inside a long frame.
-// Cap is process-global, not per daemon: 1000 users at 2/runtime is 500
-// daemons × 16 = 8000 sockets and FailedToOpenSocket on localhost.
-const READ_CONCURRENCY = 16;
-
-const isTransientGossipSocketError = (error: unknown): boolean => {
-  const text = error instanceof Error ? error.message : String(error);
-  return text.includes('FailedToOpenSocket')
-    || text.includes('typo in the url')
-    || text.includes('ECONNRESET')
-    || text.includes('ECONNREFUSED')
-    || text.includes('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
-};
-
 export const waitForRoutableReceivers = async (
   senders: readonly LaneRuntime[],
   hubEntityId: string,
@@ -141,36 +261,16 @@ export const waitForRoutableReceivers = async (
   // resolves only the receivers it will actually pay; checking every user from
   // every user creates an artificial O(N²) directory workload.
   const required = receiverIdsBySender.map(ids => [...new Set(ids.map(id => id.toLowerCase()))]);
-  const confirmed = senders.map(() => new Set<string>());
   let lastPending = -1;
   for (;;) {
-    const pendingReads = confirmed.flatMap((settled, daemonIndex) =>
-      settled.size === required[daemonIndex]!.length ? [] : [daemonIndex]);
-    let socketErrors = 0;
-    await forEachLimited(pendingReads, READ_CONCURRENCY, async daemonIndex => {
-      try {
-        const unsettled = required[daemonIndex]!.filter(receiverId => !confirmed[daemonIndex]!.has(receiverId));
-        const profiles = await senders[daemonIndex]!.runtime.control.gossipProfilesCounterparties(unsettled);
-        for (const receiverId of unsettled) {
-          if (profiles.get(receiverId.toLowerCase())?.includes(hubId)) {
-            confirmed[daemonIndex]!.add(receiverId);
-          }
-        }
-      } catch (error) {
-        if (!isTransientGossipSocketError(error)) throw error;
-        socketErrors += 1;
-      }
-    });
-    const pending = confirmed.reduce(
-      (total, settled, index) => total + (required[index]!.length - settled.size),
-      0,
-    );
+    const missing = await readLaneRouteReadiness(senders, hubId, required);
+    const pending = missing.length;
     if (pending === 0) {
       console.log(`[load] payment routes ready senders=${senders.length} elapsedMs=${Date.now() - startedAt}`);
       return;
     }
-    if (pending !== lastPending || socketErrors > 0) {
-      console.log(`[load] payment routes pending=${pending} sockets=${socketErrors} elapsedMs=${Date.now() - startedAt}`);
+    if (pending !== lastPending) {
+      console.log(`[load] payment routes pending=${pending} elapsedMs=${Date.now() - startedAt}`);
       lastPending = pending;
     }
     if (Date.now() >= deadline) {
@@ -239,7 +339,7 @@ export const waitForHubSettlement = async (
   const deadline = startedAt + DELIVERY_TIMEOUT_MS;
   let reportedAtMs = 0;
   let lastCompleted = -1;
-  let lastLockBook = -1;
+  let lastPaybook = -1;
   let stalledSinceMs = startedAt;
   let deliveredElapsedMs: number | null = null;
   let hubIngressElapsedMs: number | null = null;
@@ -270,12 +370,12 @@ export const waitForHubSettlement = async (
       runtimeHeight: core.height,
       acceptedPayments: accepted,
       completedPayments: completed,
-      lockBookOpen: core.lockBookOpen,
+      paybookOpen: core.paybookOpen,
     });
     if (accepted === expectedPayments) {
       hubIngressElapsedMs ??= sampleElapsedMs;
     }
-    if (core.lockBookOpen === 0 && completed === expectedPayments) {
+    if (core.paybookOpen === 0 && completed === expectedPayments) {
       if (accepted !== expectedPayments) {
         throw new Error(`HLT_PAYMENT_HUB_INGRESS_INCOMPLETE:${accepted}:${expectedPayments}`);
       }
@@ -299,17 +399,17 @@ export const waitForHubSettlement = async (
     if (completed !== lastCompleted) {
       lastCompleted = completed;
       stalledSinceMs = Date.now();
-    } else if (core.lockBookOpen !== lastLockBook) {
-      lastLockBook = core.lockBookOpen;
+    } else if (core.paybookOpen !== lastPaybook) {
+      lastPaybook = core.paybookOpen;
       stalledSinceMs = Date.now();
     }
     const stalledMs = Date.now() - stalledSinceMs;
     if (elapsedMs - reportedAtMs >= DELIVERY_REPORT_MS) {
       reportedAtMs = elapsedMs;
       console.log(
-        `[load] hub elapsedMs=${elapsedMs} lockBookOpen=${core.lockBookOpen} ` +
+        `[load] hub elapsedMs=${elapsedMs} paybookOpen=${core.paybookOpen} ` +
         `accepted=${accepted}/${expectedPayments} completed=${completed}/${expectedPayments} ` +
-        `fees=${core.htlcFeesEarned} height=${core.height} ` +
+        `fees=${core.paybookFeesEarned} height=${core.height} ` +
         `rate=${(completed / Math.max(1, elapsedMs) * 1_000).toFixed(1)}/s ` +
         `stalledMs=${stalledMs}`,
       );
@@ -332,7 +432,7 @@ export const waitForHubSettlement = async (
  */
 type PaymentShard = Readonly<{
   label: string;
-  hub: ConnectedRuntime;
+  hub: ConnectedRuntime | null;
   hubIdentity: LoadIdentity;
   users: LaneRuntime[];
   walPath: string;
@@ -377,25 +477,42 @@ const mergeSettlementSamples = (
       runtimeHeight: sum(sample => sample.runtimeHeight),
       acceptedPayments: sum(sample => sample.acceptedPayments),
       completedPayments: sum(sample => sample.completedPayments),
-      lockBookOpen: sum(sample => sample.lockBookOpen),
+      paybookOpen: sum(sample => sample.paybookOpen),
     };
   });
 };
 
 export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> => {
+  const selection = parseHltEngineSelection(process.env);
   const manifestPath = join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json');
-  const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown);
+  const entries = selection.engine === 'ts'
+    ? decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown)
+    : [];
   const hubLabels = args.plan?.economy.hubLabels ?? ['H1'];
   const hubLabel = hubLabels[0] ?? 'H1';
-  const hub = await connectRuntime(entryByLabel(entries, hubLabel));
+  const hub = selection.engine === 'ts' ? await connectRuntime(entryByLabel(entries, hubLabel)) : null;
   const shards: PaymentShard[] = [];
   let users: LaneRuntime[] = [];
+  let rustH1: RustH1Handle | null = null;
+  const requireHub = (): ConnectedRuntime => {
+    if (hub === null) throw new Error('HLT_TS_HUB_REQUIRED');
+    return hub;
+  };
+  const requireShardHub = (shard: PaymentShard): ConnectedRuntime => {
+    if (shard.hub === null) throw new Error(`HLT_TS_SHARD_HUB_REQUIRED:${shard.label}`);
+    return shard.hub;
+  };
   try {
-    const hubIdentity = selectLocalHubIdentity(
-      decodeEntitySummaries(await readWithRateLimitRetry<unknown>(hub, 'entities')),
-      hub.adapter.runtimeId,
-      31_337,
-    );
+    if (selection.engine === 'rust') {
+      rustH1 = await attachRustH1(`http://127.0.0.1:${String(args.portBase + 10)}`);
+    }
+    const hubIdentity = rustH1
+      ? { entityId: rustH1.ready.entityId, signerId: rustH1.ready.signerId }
+      : selectLocalHubIdentity(
+          decodeEntitySummaries(await readWithRateLimitRetry<unknown>(requireHub(), 'entities')),
+          requireHub().adapter.runtimeId,
+          31_337,
+        );
     const lanes = args.lanes;
     const laneCounts = shardLaneCounts(lanes, hubLabels.length);
     const amountRange = args.plan?.economy.paymentAmountRange ?? HLT_DEFAULT_PAYMENT_AMOUNT_RANGE;
@@ -410,6 +527,17 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         `HLT_PAYMENT_FAUCET_INSUFFICIENT:required=${requiredFaucet}:available=${HLT_FAUCET_AMOUNT}`,
       );
     }
+    const submittedPayments = lanes * args.rounds;
+    const offeredPaymentRate = Math.round(lanes * 1_000 / args.cadenceMs);
+    if (selection.engine === 'rust') {
+      if (hubLabels.length !== 1 || hubLabel !== 'H1') throw new Error('HLT_RUST_LIVE_REQUIRES_SINGLE_H1');
+      assertRustLivePaymentCardinality({
+        users: lanes,
+        payments: submittedPayments,
+        offeredPerSecond: offeredPaymentRate,
+        durationSeconds: args.plan?.economy.durationSeconds ?? 0,
+      });
+    }
     // One population per hub, offset so lane identities and ports never
     // overlap. Built together: a shard provisioned first would otherwise sit
     // idle for as long as the last one takes, and its host connections with it.
@@ -418,37 +546,109 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       [args.laneOffset],
     );
     const built = await Promise.all(hubLabels.map(async (label, shardIndex) => {
-      const shardHub = shardIndex === 0 ? hub : await connectRuntime(entryByLabel(entries, label));
-      const shardIdentity = shardIndex === 0
+      const shardHub = selection.engine === 'rust'
+        ? null
+        : shardIndex === 0 ? requireHub() : await connectRuntime(entryByLabel(entries, label));
+      const shardIdentity = selection.engine === 'rust' || shardIndex === 0
         ? hubIdentity
         : selectLocalHubIdentity(
-          decodeEntitySummaries(await readWithRateLimitRetry<unknown>(shardHub, 'entities')),
-          shardHub.adapter.runtimeId,
+          decodeEntitySummaries(await readWithRateLimitRetry<unknown>(shardHub!, 'entities')),
+          shardHub!.adapter.runtimeId,
           31_337,
         );
-      const setup = await setupParallelLoadLanes({
+      const laneOptions = {
         workDir: args.workDir,
         portBase: args.portBase,
-        hub: shardHub,
         hubIdentity: shardIdentity,
         lanes: laneCounts[shardIndex]!,
         laneOffset: laneOffsets[shardIndex]!,
         role: 'taker',
-      });
+      } as const;
+      const setup = selection.engine === 'rust'
+        ? await spawnParallelLoadLanes(laneOptions)
+        : await setupParallelLoadLanes({ ...laneOptions, hub: shardHub! });
       return {
         label,
         hub: shardHub,
         hubIdentity: shardIdentity,
         users: setup.runtimes,
-        walPath: resolveWalPath(join(args.workDir, 'prod-mesh', label.toLowerCase())),
+        walPath: selection.engine === 'rust'
+          ? join(args.workDir, 'prod-mesh', label.toLowerCase(), 'rscore-native')
+          : resolveWalPath(join(args.workDir, 'prod-mesh', label.toLowerCase())),
       } satisfies PaymentShard;
     }));
     shards.push(...built);
     users = built.flatMap(shard => shard.users);
 
-    // One shard at a time: READ_CONCURRENCY caps gossip reads per process, and
-    // running the barriers together multiplies that cap by the shard count,
-    // which is what overflows a daemon's accept queue.
+    if (selection.engine === 'ts') await stopHltHubBackgroundIo(args, hubLabels);
+    const initialRustMetrics = rustH1?.metrics() ?? null;
+    if (selection.engine === 'rust' && initialRustMetrics === null) {
+      throw new Error('HLT_RUST_INITIAL_METRICS_MISSING');
+    }
+    const hubDurableBefore = initialRustMetrics
+      ? { height: initialRustMetrics.height, canonicalStateHash: initialRustMetrics.postStateHash }
+      : decodeLoadFrame(await readWithRateLimitRetry<unknown>(requireHub(), 'frame/latest'));
+    let rustSetupHeight: number | null = null;
+    if (selection.engine === 'rust') {
+      const expectedRuntimeId = rustH1!.ready.runtimeId;
+      await rustH1!.stop();
+      rustH1 = await connectRustH1({
+        portBase: args.portBase,
+        lanes: users,
+        expectedRuntimeId,
+        expectedEntityId: hubIdentity.entityId,
+      });
+      let setupFingerprint = '';
+      let setupTelemetryError: Error | null = null;
+      const setupTelemetry = setInterval(() => {
+        let metrics: RustH1Metrics | undefined;
+        try {
+          metrics = rustH1?.metrics() ?? undefined;
+        } catch (cause) {
+          setupTelemetryError = cause instanceof Error ? cause : new Error(String(cause));
+          clearInterval(setupTelemetry);
+          console.error(`[load] rust-setup-telemetry-failed ${setupTelemetryError.message}`);
+          return;
+        }
+        if (!metrics) return;
+        const fingerprint = `${metrics.height}:${metrics.totalFrames}:${metrics.outboxRowsPending}`;
+        if (fingerprint === setupFingerprint) return;
+        setupFingerprint = fingerprint;
+        console.log(`[load] rust-setup ${safeStringify({
+          height: metrics.height,
+          frames: metrics.totalFrames,
+          inputs: metrics.totalRuntimeEntityInputs,
+          accountInputs: metrics.totalAccountInputs,
+          applyMicros: metrics.totalApplyMicros,
+          projectionMicros: metrics.totalProjectionMicros,
+          storageMicros: metrics.totalStorageMicros,
+          publicationMicros: metrics.totalPublicationMicros,
+          outputs: metrics.totalOutputsPublished,
+          outboxRows: metrics.outboxRowsPending,
+          sessions: metrics.openSessions,
+        })}`);
+      }, 500);
+      setupTelemetry.unref();
+      try {
+        await provisionParallelLoadLaneAccounts({
+          hubIdentity,
+          runtimes: users,
+          commitHubInput: async (commandId, input) => {
+            if (input.runtimeTxs.length !== 0 || input.entityInputs.length < 1) {
+              throw new Error(`HLT_RUST_LOCAL_INPUT_INVALID:${commandId}`);
+            }
+            rustSetupHeight = await rustH1!.submitLocalEntityInputs(commandId, input.entityInputs);
+          },
+        });
+      } finally {
+        clearInterval(setupTelemetry);
+      }
+      if (setupTelemetryError !== null) throw setupTelemetryError;
+    } else {
+      await exportReplayBaseSnapshotIfConfigured(requireHub());
+    }
+
+    // One shard at a time so route discovery cannot multiply H1 lookup demand.
     for (const shard of shards) {
       await waitForRoutableReceivers(
         shard.users,
@@ -461,19 +661,45 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         )),
       );
     }
-
-    await stopHltHubBackgroundIo(args);
-    await Promise.all([
-      resetLaneHostOpCounters(users),
-      resetHltProcessOpCounters(args, [hub]),
-    ]);
-
-    await exportReplayBaseSnapshotIfConfigured(hub);
-    const walBytesBefore = shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
-    const hubDurableBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
-    const countersBefore = await Promise.all(shards.map(async shard => decodeHubSettlementCounters(
-      await readWithRateLimitRetry<unknown>(shard.hub, `entity/${shard.hubIdentity.entityId}/settlement-counters`),
-    )));
+    await resetLaneHostOpCounters(users);
+    if (selection.engine === 'ts') {
+      await resetHltProcessOpCounters(args, shards.map(requireShardHub));
+    }
+    const tsCountersBefore = selection.engine === 'ts'
+      ? await Promise.all(shards.map(async shard => decodeHubSettlementCounters(
+          await readWithRateLimitRetry<unknown>(requireShardHub(shard), `entity/${shard.hubIdentity.entityId}/settlement-counters`),
+        )))
+      : [];
+    const rustDbPath = join(args.workDir, 'prod-mesh', 'h1', 'rscore-native');
+    const walBytesBefore = selection.engine === 'rust'
+      ? directoryBytes(rustDbPath)
+      : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
+    let rustMetricsBefore: RustH1Metrics | null = rustH1?.metrics() ?? null;
+    if (rustH1) {
+      if (rustSetupHeight === null) throw new Error('HLT_RUST_FINANCIAL_SETUP_HEIGHT_MISSING');
+      const baselineDeadline = Date.now() + 1_000;
+      while (
+        (rustMetricsBefore === null || rustMetricsBefore.height < rustSetupHeight) &&
+        Date.now() < baselineDeadline
+      ) {
+        await sleep(20);
+        rustMetricsBefore = rustH1.metrics();
+      }
+      if (rustMetricsBefore === null || rustMetricsBefore.height < rustSetupHeight) {
+        throw new Error(`HLT_RUST_ECONOMIC_METRICS_BASELINE_MISSING:${String(rustSetupHeight)}`);
+      }
+    }
+    const countersBefore = selection.engine === 'rust'
+      ? [{
+          height: rustMetricsBefore!.height,
+          paybookOpen: rustMetricsBefore!.paybookOpen,
+          paybookFeesEarned: BigInt(rustMetricsBefore!.paybookFeesEarned),
+          acceptedPayments: rustMetricsBefore!.acceptedPayments,
+          completedPayments: rustMetricsBefore!.completedPayments,
+          matchedSwaps: 0,
+          metricsRuntimeHeight: rustMetricsBefore!.height,
+        }]
+      : tsCountersBefore;
     const hubCountersBefore = {
       completedPayments: countersBefore.reduce((sum, row) => sum + row.completedPayments, 0),
       acceptedPayments: countersBefore.reduce((sum, row) => sum + row.acceptedPayments, 0),
@@ -482,7 +708,9 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     const laneShard = shards.flatMap((shard, shardIndex) =>
       shard.users.map((_lane, localIndex) => ({ shard, shardIndex, localIndex })));
 
+    await waitForHltEconomicStartGate();
     const startedAt = performance.now();
+    const economicStartedAtUnixMs = Date.now();
     let enqueueAckElapsedMs = 0;
     const roundSubmissionLagMs: number[] = [];
     const pendingSubmissions: Array<Promise<Readonly<{ ackMs: number; error: unknown | null }>>> = [];
@@ -495,50 +723,92 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     // Operations due within the same window travel in one wave. The pacer
     // gives every user its own instant, which at high offered rates means one
     // HTTP request per payment; the load host's accept queue, not the mesh,
-    // was what gave out first. Payments themselves are unchanged.
-    const submitWindowMs = Number(process.env['XLN_HLT_SUBMIT_WINDOW_MS'] ?? '0');
+    // was what gave out first. A Runtime may own several operations in one
+    // window: they remain distinct ordered EntityTxs inside one canonical
+    // RuntimeInput instead of manufacturing extra Runtime/Entity envelopes.
+    const submitWindowMs = Number(process.env['XLN_HLT_SUBMIT_WINDOW_MS'] ?? String(args.cadenceMs));
     const batches: Array<typeof schedule> = [];
-    let batchParticipants = new Set<number>();
     for (const operation of schedule) {
       const open = batches.at(-1);
       const first = open?.[0];
-      // A wave carries one input per Runtime, so a user that already appears
-      // closes the batch even inside the window.
       const fits = open !== undefined && first !== undefined
-        && operation.dueOffsetMs - first.dueOffsetMs <= submitWindowMs
-        && !batchParticipants.has(operation.participantIndex);
+        && operation.dueOffsetMs - first.dueOffsetMs < submitWindowMs;
       if (fits && open) open.push(operation);
-      else {
-        batches.push([operation]);
-        batchParticipants = new Set<number>();
-      }
-      batchParticipants.add(operation.participantIndex);
+      else batches.push([operation]);
     }
+    console.log(
+      `[load] payment ingress payments=${submittedPayments} batches=${batches.length} ` +
+      `windowMs=${submitWindowMs}`,
+    );
+    let economicFingerprint = '';
+    const economicTelemetry = rustH1 ? setInterval(() => {
+      const metrics = rustH1?.metrics();
+      if (!metrics) return;
+      const fingerprint = `${metrics.height}:${metrics.acceptedPayments}:${metrics.completedPayments}:` +
+        `${metrics.paybookOpen}:${metrics.outboxRowsPending}`;
+      if (fingerprint === economicFingerprint) return;
+      economicFingerprint = fingerprint;
+      console.log(`[load] rust-economic ${safeStringify({
+        height: metrics.height,
+        accepted: metrics.acceptedPayments,
+        completed: metrics.completedPayments,
+        locks: metrics.paybookOpen,
+        accountInputs: metrics.totalAccountInputs - rustMetricsBefore!.totalAccountInputs,
+        applyMicros: metrics.totalApplyMicros - rustMetricsBefore!.totalApplyMicros,
+        projectionMicros: metrics.totalProjectionMicros - rustMetricsBefore!.totalProjectionMicros,
+        storageMicros: metrics.totalStorageMicros - rustMetricsBefore!.totalStorageMicros,
+        publicationMicros: metrics.totalPublicationMicros - rustMetricsBefore!.totalPublicationMicros,
+        outboxRows: metrics.outboxRowsPending,
+      })}`);
+    }, 250) : null;
+    economicTelemetry?.unref();
     for (const [batchIndex, batch] of batches.entries()) {
-      const operation = batch[0]!;
+      const operation = batch[batch.length - 1]!;
+      // A transport wave is released only when its last operation is due; no
+      // payment is advanced merely because it shares an HTTP batch.
       const scheduledAt = startedAt + operation.dueOffsetMs;
       const waitMs = scheduledAt - performance.now();
       if (waitMs > 0) await sleep(waitMs);
       if (submissionFailure !== null) throw submissionFailure;
       const waveStartedAt = performance.now();
-      const submissions = batch.map(entry => {
-        const placement = laneShard[entry.participantIndex]!;
+      const byParticipant = new Map<number, typeof batch>();
+      for (const entry of batch) {
+        const entries = byParticipant.get(entry.participantIndex) ?? [];
+        entries.push(entry);
+        byParticipant.set(entry.participantIndex, entries);
+      }
+      const submissions = [...byParticipant].map(([participantIndex, entries]) => {
+        const placement = laneShard[participantIndex]!;
         const lane = placement.shard.users[placement.localIndex]!;
-        const receiver = placement.shard.users[paymentReceiverIndexSamePopulation(
-          placement.localIndex,
-          entry.round,
-          placement.shard.users.length,
-        )]!;
-        const entityInput = buildRoundPayment(
-          lane.identity,
-          placement.shard.hubIdentity.entityId,
-          receiver.identity,
-          entry.participantIndex,
-          entry.round,
-          amountRange,
-        );
-        if (entityInput.entityTxs?.length !== 1) throw new Error('HLT_PAYMENT_TX_MISSING');
-        return { lane, input: { runtimeTxs: [], entityInputs: [entityInput] } };
+        const entityTxs = entries.map(entry => {
+          const receiver = placement.shard.users[paymentReceiverIndexSamePopulation(
+            placement.localIndex,
+            entry.round,
+            placement.shard.users.length,
+          )]!;
+          const entityInput = buildRoundPayment(
+            lane.identity,
+            placement.shard.hubIdentity.entityId,
+            receiver.identity,
+            participantIndex,
+            entry.round,
+            amountRange,
+          );
+          const entityTx = entityInput.entityTxs?.[0];
+          if (!entityTx || entityInput.entityTxs?.length !== 1) throw new Error('HLT_PAYMENT_TX_MISSING');
+          return entityTx;
+        });
+        return {
+          lane,
+          input: {
+            runtimeTxs: [],
+            entityInputs: [{
+              entityId: lane.identity.entityId,
+              signerId: lane.identity.signerId,
+              entityTxs,
+            }],
+          },
+        };
       });
       const pending = queueLaneRuntimeInputWave(batchIndex, submissions).then(
         () => ({ ackMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error: null }),
@@ -557,35 +827,81 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     const failedSubmission = submissionResults.find(result => result.error !== null);
     if (failedSubmission) throw failedSubmission.error;
     enqueueAckElapsedMs = Math.max(0, ...submissionResults.map(result => result.ackMs));
-    const sourceAllAckedElapsedMs = Math.max(
+    const hostAcceptedElapsedMs = Math.max(
       sourceDispatchFinishedElapsedMs,
       Math.ceil(performance.now() - startedAt),
     );
-    const submittedPayments = lanes * args.rounds;
     // Each shard settles against its own hub; the run is done when the
     // slowest one is, and the rates below are the sum over shards.
-    const settlements = await Promise.all(shards.map((shard, shardIndex) => waitForHubSettlement(
-      shard.hub,
-      shard.hubIdentity.entityId,
-      countersBefore[shardIndex]!.completedPayments,
-      countersBefore[shardIndex]!.acceptedPayments,
-      shard.users.length * args.rounds,
-      startedAt,
-    )));
+    const rustSettlement = rustH1
+      ? await waitForRustPaymentSettlement({
+          rust: rustH1,
+          lanes: users,
+          expectedPayments: submittedPayments,
+          economicStartedAt: startedAt,
+          metricsBefore: rustMetricsBefore!,
+        })
+      : null;
+    if (economicTelemetry) clearInterval(economicTelemetry);
+    const settlements = rustSettlement
+      ? [rustSettlement]
+      : await Promise.all(shards.map((shard, shardIndex) => waitForHubSettlement(
+          requireShardHub(shard),
+          shard.hubIdentity.entityId,
+          countersBefore[shardIndex]!.completedPayments,
+          countersBefore[shardIndex]!.acceptedPayments,
+          shard.users.length * args.rounds,
+          startedAt,
+        )));
     const hubCountersAfter = {
       completedPayments: settlements.reduce((sum, row) => sum + row.counters.completedPayments, 0),
       acceptedPayments: settlements.reduce((sum, row) => sum + row.counters.acceptedPayments, 0),
     };
     const hubIngressElapsedMs = Math.max(...settlements.map(row => row.hubIngressElapsedMs));
-    const deliveredElapsedMs = Math.max(...settlements.map(row => row.deliveredElapsedMs));
+    let deliveredElapsedMs = Math.max(...settlements.map(row => row.deliveredElapsedMs));
     const paymentSettlement = {
       settlementSamples: mergeSettlementSamples(settlements.map(row => row.settlementSamples)),
     };
-    const [hubIo, laneIo] = await Promise.all([
-      assertHltHubProcessIsolation(args, hubLabels),
+    const [tsHubIo, laneIo, lanePaymentLedgers] = await Promise.all([
+      assertHltHubProcessIsolation(args, hubLabels, selection.engine === 'rust' ? hubLabels : []),
       assertLaneHostSocketCounterCoverage(users),
+      readLaneHostPaymentOperationLedgers(users),
     ]);
-    console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo })}`);
+    const paymentOperationLedger = assertCompleteUserPaymentLedger(
+      lanePaymentLedgers,
+      submittedPayments,
+      economicStartedAtUnixMs,
+    );
+    const deliveredPayments = paymentOperationLedger['account-apply-done']?.['uniqueHashlocks'];
+    if (deliveredPayments !== submittedPayments) {
+      throw new Error(`HLT_PAYMENT_DELIVERED_LEDGER_MISMATCH:${String(deliveredPayments)}:${submittedPayments}`);
+    }
+    deliveredElapsedMs = Math.max(deliveredElapsedMs, Math.ceil(performance.now() - startedAt));
+    const terminalSettlementSample = paymentSettlement.settlementSamples.at(-1);
+    if (!terminalSettlementSample) throw new Error('HLT_PAYMENT_SETTLEMENT_SAMPLE_MISSING');
+    if (terminalSettlementSample.elapsedMs < deliveredElapsedMs) {
+      paymentSettlement.settlementSamples = [
+        ...paymentSettlement.settlementSamples,
+        { ...terminalSettlementSample, elapsedMs: deliveredElapsedMs },
+      ];
+    }
+    const phaseTimeline = rustSettlement ? {
+      hostAcceptedElapsedMs,
+      hubLastAcceptedOffsetMs: Math.max(
+        0,
+        Math.round(rustSettlement.metrics.lastAcceptedAtUnixMicros / 1_000 - economicStartedAtUnixMs),
+      ),
+      hubLastCompletedOffsetMs: Math.max(
+        0,
+        Math.round(rustSettlement.metrics.lastCompletedAtUnixMicros / 1_000 - economicStartedAtUnixMs),
+      ),
+      userStages: paymentOperationLedger,
+      drainCompleteOffsetMs: deliveredElapsedMs,
+    } : { hostAcceptedElapsedMs, userStages: paymentOperationLedger, drainCompleteOffsetMs: deliveredElapsedMs };
+    const hubIo = rustSettlement
+      ? { ...tsHubIo, H1: { native: rustSettlement.metrics } }
+      : tsHubIo;
+    console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo, phaseTimeline })}`);
     const report = decodeLoadPaymentReport({
       schema: 'xln-hlt-payment-load-v1',
       mode: 'payments',
@@ -601,15 +917,15 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       // `amount` field predates randomization and is kept as the floor so it
       // stays a valid, meaningful decimal without widening the report schema.
       amount: amountRange.min.toString(),
-      offeredPaymentRate: Math.round(lanes * 1_000 / args.cadenceMs),
+      offeredPaymentRate,
       submittedPayments,
-      deliveredPayments: submittedPayments,
+      deliveredPayments,
       enqueueAckElapsedMs,
       sourceDispatchFinishedElapsedMs,
-      sourceAllAckedElapsedMs,
-      commandObservedElapsedMs: sourceAllAckedElapsedMs,
+      sourceAllAckedElapsedMs: hostAcceptedElapsedMs,
+      commandObservedElapsedMs: hostAcceptedElapsedMs,
       deliveredElapsedMs,
-      deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
+      deliveredTps: deliveredPayments * 1_000 / deliveredElapsedMs,
       hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
       hubCompletedPaymentsAfter: hubCountersAfter.completedPayments,
       hubAcceptedPaymentsBefore: hubCountersBefore.acceptedPayments,
@@ -618,24 +934,80 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs,
       walBytesBefore,
-      walBytesAfter: shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0),
+      walBytesAfter: rustH1
+        ? directoryBytes(rustDbPath)
+        : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0),
       hubDurableBefore,
-      hubDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest')),
+      hubDurableAfter: rustSettlement
+        ? {
+            height: rustSettlement.metrics.height,
+            canonicalStateHash: rustSettlement.metrics.postStateHash,
+          }
+        : decodeLoadFrame(await readWithRateLimitRetry<unknown>(requireHub(), 'frame/latest')),
       environment: collectHltEnvironmentManifest(),
     });
     persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
-    publishHltDashboardReport('payment', report);
-    publishHltDashboardPerfFromWorkDir(args.workDir);
+    if (rustH1 && rustSettlement) {
+      writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify({
+        engine: 'rust',
+        users: lanes,
+        submittedPayments,
+        deliveredPayments: report.deliveredPayments,
+        offeredPaymentRate,
+        deliveredElapsedMs: report.deliveredElapsedMs,
+        deliveredTps: report.deliveredTps,
+        hostAcceptedElapsedMs,
+        workers: rustH1.ready.workers,
+        metrics: rustSettlement.metrics,
+        economicPhaseMetrics: rustSettlement.economicPhaseMetrics,
+        laneQuiescence: rustSettlement.laneQuiescence,
+        paymentOperationLedger,
+        phaseTimeline,
+      }, 2)}\n`);
+      if (process.env['XLN_RSCORE_PROFILE_ENTITY'] === '1') {
+        writeFileSync(join(args.workDir, 'rscore-entity-profile.log'), rustH1.errorTail());
+      }
+    }
+    const authoritativeCardinality = lanes >= 1_000 && submittedPayments >= 1_000 && offeredPaymentRate >= 1_000;
+    if (authoritativeCardinality) {
+      publishHltDashboardReport('payment', report);
+      publishHltDashboardPerfFromWorkDir(args.workDir);
+    }
     console.log(safeStringify(report));
-    console.log(
-      `[load] verdict deliveredTps=${report.deliveredTps.toFixed(1)} ` +
-      `${isProductionEquivalentHltEnvironment(report.environment) ? 'production-equivalent' : 'DIAGNOSTIC (isolated/fast environment)'} ` +
-      `lanePersistence=${report.environment.lanePersistence} laneNice=${report.environment.laneNice} ` +
-      `certifiedHistory=${report.environment.certifiedHistory} hubWalSync=${report.environment.hubWalSync}`,
-    );
+    if (authoritativeCardinality) {
+      console.log(
+        `[load] verdict deliveredTps=${report.deliveredTps.toFixed(1)} ` +
+        `${isProductionEquivalentHltEnvironment(report.environment) ? 'production-equivalent' : 'DIAGNOSTIC (isolated/fast environment)'} ` +
+        `lanePersistence=${report.environment.lanePersistence} laneNice=${report.environment.laneNice} ` +
+        `hubWalSync=${report.environment.hubWalSync}`,
+      );
+    } else {
+      console.log(
+        `[load] SMOKE_ONLY_NOT_TPS_EVIDENCE users=${lanes} payments=${submittedPayments} ` +
+        `offeredPerSecond=${offeredPaymentRate} diagnosticDeliveredPerSecond=${report.deliveredTps.toFixed(1)}`,
+      );
+    }
+  } catch (error) {
+    if (rustH1) {
+      let metrics: RustH1Metrics | null = null;
+      let metricsError: string | null = null;
+      try {
+        metrics = rustH1.metrics();
+      } catch (cause) {
+        metricsError = cause instanceof Error ? cause.message : String(cause);
+      }
+      console.error(`[load] rust-failure ${safeStringify({
+        error: error instanceof Error ? error.message : String(error),
+        metrics,
+        metricsError,
+        stderr: rustH1.errorTail(),
+      })}`);
+    }
+    throw error;
   } finally {
+    await rustH1?.stop();
     await stopLaneRuntimes(users);
-    for (const shard of shards) shard.hub.adapter.disconnect();
-    if (shards.length === 0) hub.adapter.disconnect();
+    for (const shard of shards) shard.hub?.adapter.disconnect();
+    if (shards.length === 0) hub?.adapter.disconnect();
   }
 };

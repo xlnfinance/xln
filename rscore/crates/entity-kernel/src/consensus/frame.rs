@@ -6,6 +6,7 @@
 //! the header (which commits the Entity context by digest) is Keccak-256.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
@@ -31,11 +32,16 @@ pub struct CanonicalEntityTx {
     /// Exact TS `canonicalEntityTxForFrameHash(tx).data` projection.
     /// AccountInput and J-event wire decoders must perform their specialized
     /// projection before constructing this trusted type.
-    pub data: CanonicalValue,
+    data: Option<CanonicalValue>,
     /// Exact transaction data retained in the certified Entity frame. TS
     /// hashes a smaller projection for AccountInput, but persists the complete
     /// child frame so either engine can resume from the same path-keyed DB.
     pub wire_data: CanonicalValue,
+    /// Exact canonical `{type,data}` bytes. Computing them at admission makes
+    /// wire fitting and the certified frame hash share one encoder result.
+    /// AccountInput drops the redundant parsed projection after this byte
+    /// string is born; typed execution uses `wire_data`/AccountInputRow.
+    frame_payload: Arc<[u8]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -151,26 +157,34 @@ impl CanonicalEntityTx {
         wire_data: CanonicalValue,
         data: CanonicalValue,
     ) -> Result<Self, EntityFrameError> {
-        kind.require_native_mvp()?;
         if kind == EntityTxKind::HtlcPayment && contains_secret_field(&data) {
             return Err(EntityFrameError::HtlcSecretForbidden);
         }
+        let canonical = object(vec![("type", text(kind.as_str())), ("data", data.clone())]);
+        let frame_payload = Arc::<[u8]>::from(binary_payload(&canonical)?);
         Ok(Self {
             kind,
-            data,
+            data: (kind != EntityTxKind::AccountInput).then_some(data),
             wire_data,
+            frame_payload,
         })
     }
 
-    pub(crate) fn canonical_value(&self) -> CanonicalValue {
-        object(vec![
-            ("type", text(self.kind.as_str())),
-            ("data", self.data.clone()),
-        ])
+    pub fn frame_data(&self) -> Option<&CanonicalValue> {
+        self.data.as_ref()
     }
 
-    fn binary_payload(&self) -> Result<Vec<u8>, EntityFrameError> {
-        Ok(binary_payload(&self.canonical_value())?)
+    pub(crate) fn canonical_value(&self) -> Option<CanonicalValue> {
+        self.data.as_ref().map(|data| {
+            object(vec![
+                ("type", text(self.kind.as_str())),
+                ("data", data.clone()),
+            ])
+        })
+    }
+
+    pub(crate) fn frame_payload(&self) -> &[u8] {
+        &self.frame_payload
     }
 }
 
@@ -223,7 +237,7 @@ fn txs_commitment<'a>(
     digest.update(ENTITY_FRAME_TXS_DOMAIN);
     let mut total_bytes = 0_usize;
     for tx in txs {
-        let encoded = tx.binary_payload()?;
+        let encoded = tx.frame_payload();
         let length = u32::try_from(encoded.len())
             .map_err(|_| EntityFrameError::TxTooLarge(encoded.len()))?;
         total_bytes = total_bytes
@@ -234,6 +248,18 @@ fn txs_commitment<'a>(
         digest.update(encoded);
     }
     Ok((hex_digest(&digest.finalize()), total_bytes))
+}
+
+/// Exact bytes contributed by one transaction to the canonical ordered
+/// transaction preimage: the u32 length plus the canonical binary payload.
+/// Live FIFO selection calls this only until the frame budget is full.
+pub fn measure_entity_frame_tx_bytes(tx: &CanonicalEntityTx) -> Result<usize, EntityFrameError> {
+    let encoded = tx.frame_payload();
+    u32::try_from(encoded.len()).map_err(|_| EntityFrameError::TxTooLarge(encoded.len()))?;
+    encoded
+        .len()
+        .checked_add(4)
+        .ok_or(EntityFrameError::TxPreimageTooLarge)
 }
 
 fn events_value(events: &[EntityFrameEvent]) -> CanonicalValue {
@@ -273,6 +299,40 @@ pub struct EntityFrameBody<'a> {
     pub j_prefix_certificate: Option<&'a CanonicalValue>,
 }
 
+/// Owned production draft. Certification hashes a borrowed view and then
+/// moves the same tx/event/context buffers into the certified frame; the hot
+/// path never clones a multi-megabyte Entity body after proving it.
+#[derive(Clone, Debug)]
+pub struct EntityFrameDraft {
+    pub parent_frame_hash: String,
+    pub height: u64,
+    pub timestamp: u64,
+    pub txs: Vec<CanonicalEntityTx>,
+    pub events: Vec<EntityFrameEvent>,
+    pub entity_id: String,
+    pub state_root: String,
+    pub authority_root: String,
+    pub entity_context: CanonicalValue,
+    pub j_prefix_certificate: Option<CanonicalValue>,
+}
+
+impl EntityFrameDraft {
+    pub fn body(&self) -> EntityFrameBody<'_> {
+        EntityFrameBody {
+            parent_frame_hash: &self.parent_frame_hash,
+            height: self.height,
+            timestamp: self.timestamp,
+            txs: &self.txs,
+            events: &self.events,
+            entity_id: &self.entity_id,
+            state_root: &self.state_root,
+            authority_root: &self.authority_root,
+            entity_context: &self.entity_context,
+            j_prefix_certificate: self.j_prefix_certificate.as_ref(),
+        }
+    }
+}
+
 /// Borrowed pre-apply view over the exact canonical Entity-frame encoder.
 /// Live prefix fitting uses this instead of maintaining a second size oracle.
 pub struct EntityFrameWireMeasureBody<'a> {
@@ -292,6 +352,9 @@ pub struct EntityFrameWireMeasureBody<'a> {
 pub struct EntityFrameWireMeasure {
     pub total_bytes: usize,
     pub tx_bytes: usize,
+    pub context_bytes: usize,
+    pub event_bytes: usize,
+    pub header_bytes: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -345,9 +408,10 @@ fn encode_entity_frame_wire<'a>(
         ),
     ]);
     let encoded_header = binary_payload(&header)?;
-    let total_bytes = encoded_header
-        .len()
-        .checked_add(context.len())
+    let header_bytes = encoded_header.len();
+    let context_bytes = context.len();
+    let total_bytes = header_bytes
+        .checked_add(context_bytes)
         .and_then(|value| value.checked_add(tx_bytes))
         .ok_or(EntityFrameError::TxPreimageTooLarge)?;
     Ok((
@@ -355,6 +419,9 @@ fn encode_entity_frame_wire<'a>(
         EntityFrameWireMeasure {
             total_bytes,
             tx_bytes,
+            context_bytes,
+            event_bytes,
+            header_bytes,
         },
     ))
 }
@@ -362,22 +429,72 @@ fn encode_entity_frame_wire<'a>(
 pub fn measure_entity_frame_wire(
     body: &EntityFrameWireMeasureBody<'_>,
 ) -> Result<EntityFrameWireMeasure, EntityFrameError> {
-    encode_entity_frame_wire(
-        body.parent_frame_hash,
-        body.height,
-        body.timestamp,
-        body.txs.iter().copied(),
-        body.events,
-        body.entity_id,
-        body.state_root,
-        body.authority_root,
-        body.entity_context,
-        body.j_prefix_certificate,
-    )
-    .map(|(_, measure)| measure)
+    const DUMMY_DIGEST: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    let state_root = canonical_root("stateRoot", body.state_root)?;
+    let authority_root = canonical_root("authorityRoot", body.authority_root)?;
+    let tx_count =
+        u64::try_from(body.txs.len()).map_err(|_| EntityFrameError::TxPreimageTooLarge)?;
+    let context_bytes = binary_payload(body.entity_context)?;
+    let events = events_value(body.events);
+    let event_bytes = if events == CanonicalValue::Array(Vec::new()) {
+        0
+    } else {
+        binary_payload(&events)?.len()
+    };
+    if event_bytes > MAX_ENTITY_FRAME_BYTES {
+        return Err(EntityFrameError::EventByteLimitExceeded {
+            actual: event_bytes,
+            limit: MAX_ENTITY_FRAME_BYTES,
+        });
+    }
+    let tx_bytes = body.txs.iter().try_fold(0_usize, |total, tx| {
+        total
+            .checked_add(measure_entity_frame_tx_bytes(tx)?)
+            .ok_or(EntityFrameError::TxPreimageTooLarge)
+    })?;
+    // Wire fitting needs only the exact encoded length. Both digests below
+    // are fixed-width hex strings, so hashing the complete context and every
+    // already-encoded transaction here was a pure duplicate of certification.
+    let header = object(vec![
+        ("domain", text(ENTITY_FRAME_DOMAIN)),
+        ("prevFrameHash", text(body.parent_frame_hash)),
+        ("height", number("frame.height", body.height)?),
+        ("timestamp", number("frame.timestamp", body.timestamp)?),
+        ("txCount", number("frame.txCount", tx_count)?),
+        ("txsDigest", text(DUMMY_DIGEST)),
+        ("events", events),
+        ("entityId", text(body.entity_id)),
+        ("stateRoot", text(state_root)),
+        ("authorityRoot", text(authority_root)),
+        ("entityContextDigest", text(DUMMY_DIGEST)),
+        (
+            "jPrefixCertificate",
+            body.j_prefix_certificate
+                .cloned()
+                .unwrap_or(CanonicalValue::Null),
+        ),
+    ]);
+    let header_bytes = binary_payload(&header)?.len();
+    let total_bytes = header_bytes
+        .checked_add(context_bytes.len())
+        .and_then(|value| value.checked_add(tx_bytes))
+        .ok_or(EntityFrameError::TxPreimageTooLarge)?;
+    Ok(EntityFrameWireMeasure {
+        total_bytes,
+        tx_bytes,
+        context_bytes: context_bytes.len(),
+        event_bytes,
+        header_bytes,
+    })
 }
 
 pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, EntityFrameError> {
+    compute_entity_frame_hash_with_measure(body).map(|(hash, _)| hash)
+}
+
+pub fn compute_entity_frame_hash_with_measure(
+    body: &EntityFrameBody<'_>,
+) -> Result<(String, EntityFrameWireMeasure), EntityFrameError> {
     let (encoded_header, measure) = encode_entity_frame_wire(
         body.parent_frame_hash,
         body.height,
@@ -396,7 +513,7 @@ pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, E
             limit: MAX_ENTITY_FRAME_BYTES,
         });
     }
-    Ok(keccak_bytes(&encoded_header))
+    Ok((keccak_bytes(&encoded_header), measure))
 }
 
 impl EntityFrame {
@@ -416,6 +533,20 @@ impl EntityFrame {
             ));
         }
         Ok(())
+    }
+
+    /// Secondary manifest rows are transient commit material. Their Hankos
+    /// have already been attached to the exact Account/output payloads before
+    /// a frame enters durable lineage; retaining the same hashes and raw
+    /// signatures in the certified head is a second authority copy.
+    pub fn compact_lineage_proof(&mut self) -> Result<(), EntityFrameError> {
+        self.require_certified_proof_shape()?;
+        self.hashes_to_sign.truncate(1);
+        for signatures in self.collected_sigs.values_mut() {
+            signatures.truncate(1);
+        }
+        self.hankos.truncate(1);
+        self.require_certified_proof_shape()
     }
 }
 
@@ -463,7 +594,7 @@ mod tests {
         .expect("frame hash");
         assert_eq!(
             hash,
-            "0x973a1c2680c1e8ae6a7d843b7faa86eb9e87730df467d4627c1ce1317411468e",
+            "0xa858bd0cd66a4d80711d9bc7a554f70a38baa0d6aadbae854178c11252ae8909",
         );
     }
 
@@ -477,5 +608,74 @@ mod tests {
             ]),
         );
         assert_eq!(result, Err(EntityFrameError::HtlcSecretForbidden));
+    }
+
+    #[test]
+    fn tx_bytes_match_the_canonical_wire_measure() {
+        let first =
+            CanonicalEntityTx::from_frame_projection(EntityTxKind::DirectPayment, text("first"))
+                .expect("first tx");
+        let second =
+            CanonicalEntityTx::from_frame_projection(EntityTxKind::DirectPayment, text("second"))
+                .expect("second tx");
+        let txs = [&first, &second];
+        let first_bytes = measure_entity_frame_tx_bytes(&first).expect("first bytes");
+        let second_bytes = measure_entity_frame_tx_bytes(&second).expect("second bytes");
+        let measured = measure_entity_frame_wire(&EntityFrameWireMeasureBody {
+            parent_frame_hash: "genesis",
+            height: 1,
+            timestamp: 1,
+            txs: &txs,
+            events: &[],
+            entity_id: &format!("0x{}", "22".repeat(32)),
+            state_root: &format!("0x{}", "11".repeat(32)),
+            authority_root: &format!("0x{}", "33".repeat(32)),
+            entity_context: &CanonicalValue::Object(Vec::new()),
+            j_prefix_certificate: None,
+        })
+        .expect("wire measure");
+        assert_eq!(first_bytes + second_bytes, measured.tx_bytes);
+        assert!(first_bytes > 4 && second_bytes > 4);
+    }
+
+    #[test]
+    fn size_only_wire_measure_matches_the_hashing_encoder() {
+        let first =
+            CanonicalEntityTx::from_frame_projection(EntityTxKind::DirectPayment, text("first"))
+                .expect("first tx");
+        let second =
+            CanonicalEntityTx::from_frame_projection(EntityTxKind::DirectPayment, text("second"))
+                .expect("second tx");
+        let txs = [&first, &second];
+        let context = object(vec![("peerAssertions", CanonicalValue::Array(Vec::new()))]);
+        let body = EntityFrameWireMeasureBody {
+            parent_frame_hash: "genesis",
+            height: 1,
+            timestamp: 1,
+            txs: &txs,
+            events: &[EntityFrameEvent::Status {
+                message: "accepted".into(),
+            }],
+            entity_id: &format!("0x{}", "22".repeat(32)),
+            state_root: &format!("0x{}", "11".repeat(32)),
+            authority_root: &format!("0x{}", "33".repeat(32)),
+            entity_context: &context,
+            j_prefix_certificate: None,
+        };
+        let measured = measure_entity_frame_wire(&body).expect("size-only measure");
+        let (_, encoded) = encode_entity_frame_wire(
+            body.parent_frame_hash,
+            body.height,
+            body.timestamp,
+            body.txs.iter().copied(),
+            body.events,
+            body.entity_id,
+            body.state_root,
+            body.authority_root,
+            body.entity_context,
+            body.j_prefix_certificate,
+        )
+        .expect("hashing encoder");
+        assert_eq!(measured, encoded);
     }
 }

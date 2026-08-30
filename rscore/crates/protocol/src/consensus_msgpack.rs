@@ -6,11 +6,34 @@
 //! MessagePack here would create a second validation path.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use num_bigint::{BigInt, Sign};
 use thiserror::Error;
 
 use crate::{CanonicalNumber, CanonicalValue};
+
+const HEX_BYTES_EXTENSION: u8 = 0x48;
+const HEX_BYTES_MIN_LENGTH: usize = 16;
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn canonical_hex_bytes(value: &str) -> Option<Vec<u8>> {
+    let payload = value.as_bytes().strip_prefix(b"0x")?;
+    if payload.len() < HEX_BYTES_MIN_LENGTH * 2 || payload.len() % 2 != 0 {
+        return None;
+    }
+    payload
+        .chunks_exact(2)
+        .map(|pair| Some(hex_nibble(pair[0])? << 4 | hex_nibble(pair[1])?))
+        .collect()
+}
 
 const RECORD_BASE: u8 = 0x40;
 const RECORD_LIMIT: usize = 64;
@@ -31,14 +54,14 @@ pub enum ConsensusMessagePackError {
 
 struct Encoder {
     bytes: Vec<u8>,
-    record_shapes: Vec<Vec<String>>,
+    record_shapes: HashMap<Vec<String>, usize>,
 }
 
 impl Encoder {
     fn new() -> Self {
         Self {
             bytes: Vec::new(),
-            record_shapes: Vec::new(),
+            record_shapes: HashMap::new(),
         }
     }
 
@@ -90,7 +113,7 @@ impl Encoder {
         Ok(())
     }
 
-    fn write_string(&mut self, value: &str) -> Result<(), ConsensusMessagePackError> {
+    fn write_plain_string(&mut self, value: &str) -> Result<(), ConsensusMessagePackError> {
         let bytes = value.as_bytes();
         match bytes.len() {
             length @ 0..=31 => {
@@ -117,6 +140,41 @@ impl Encoder {
             }
         }
         self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn write_string(&mut self, value: &str) -> Result<(), ConsensusMessagePackError> {
+        if let Some(payload) = canonical_hex_bytes(value) {
+            return self.write_extension(HEX_BYTES_EXTENSION, &payload);
+        }
+        self.write_plain_string(value)
+    }
+
+    fn write_extension(
+        &mut self,
+        kind: u8,
+        payload: &[u8],
+    ) -> Result<(), ConsensusMessagePackError> {
+        match payload.len() {
+            1 => self.bytes.push(0xd4),
+            2 => self.bytes.push(0xd5),
+            4 => self.bytes.push(0xd6),
+            8 => self.bytes.push(0xd7),
+            16 => self.bytes.push(0xd8),
+            length @ 0..=255 => self.bytes.extend_from_slice(&[0xc7, length as u8]),
+            length @ 256..=65_535 => {
+                self.bytes.push(0xc8);
+                self.write_u16(length as u16);
+            }
+            length => {
+                let length = u32::try_from(length)
+                    .map_err(|_| ConsensusMessagePackError::LengthOutOfRange(length))?;
+                self.bytes.push(0xc9);
+                self.write_u32(length);
+            }
+        }
+        self.bytes.push(kind);
+        self.bytes.extend_from_slice(payload);
         Ok(())
     }
 
@@ -256,20 +314,24 @@ impl Encoder {
             .iter()
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
-        if let Some(index) = self.record_shapes.iter().position(|shape| shape == &keys) {
-            self.bytes.push(RECORD_BASE + index as u8);
+        if let Some(index) = self.record_shapes.get(&keys) {
+            self.bytes.push(RECORD_BASE + *index as u8);
         } else {
             if self.record_shapes.len() >= RECORD_LIMIT {
                 return Err(ConsensusMessagePackError::RecordShapeLimit(
                     self.record_shapes.len() + 1,
                 ));
             }
-            let record_id = RECORD_BASE + self.record_shapes.len() as u8;
-            self.record_shapes.push(keys.clone());
+            let index = self.record_shapes.len();
+            let record_id = RECORD_BASE + index as u8;
+            self.record_shapes.insert(keys.clone(), index);
             self.bytes.extend_from_slice(&[0xd4, 0x72, record_id]);
             self.write_array_len(keys.len())?;
             for key in &keys {
-                self.write_string(key)?;
+                // JavaScript object property names remain strings. The hex
+                // extension applies to values (and real Map keys), never to
+                // msgpackr record-shape field names.
+                self.write_plain_string(key)?;
             }
         }
         for (_, value) in ordered {
@@ -382,6 +444,14 @@ mod tests {
         assert_eq!(
             hex(CanonicalValue::Array(vec![row(1), row(2)])),
             "92d4724091a178014002"
+        );
+    }
+
+    #[test]
+    fn canonical_long_hex_matches_the_typescript_bytes_extension() {
+        assert_eq!(
+            hex(text(&format!("0x{}", "ab".repeat(32)))),
+            format!("c72048{}", "ab".repeat(32))
         );
     }
 }

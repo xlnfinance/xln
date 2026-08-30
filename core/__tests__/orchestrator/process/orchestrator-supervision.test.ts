@@ -80,6 +80,24 @@ test('malformed persisted runtime lease fails closed instead of being ignored', 
   }
 });
 
+test('managed lease accepts the canonical native H1 executable identity', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-managed-rust-h1-'));
+  const spec: ManagedRuntimeSpec = {
+    role: 'hub', name: 'H1', script: 'rscore/target/release/xlnrs',
+    apiPort: 21001, dbPath: '/tmp/h1',
+  };
+  try {
+    const manager = createManagedRuntimeLeaseManager({ controlPlaneDir: directory, ownerId: 'owner' });
+    writeFileSync(manager.leasePathFor(spec), safeStringify({
+      ...spec, ownerId: 'owner', orchestratorPid: 1, pid: 2, cwd: '/tmp',
+      startedAt: 1, processStartedAt: 1, updatedAt: 1,
+    }));
+    expect(manager.readLease(spec)?.script).toBe('rscore/target/release/xlnrs');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('managed stale process termination verifies the PID after SIGKILL', async () => {
   let alive = true;
   const signals: Array<NodeJS.Signals | 0> = [];

@@ -51,6 +51,19 @@ pub fn decode_entity_deterministic_context(
     policy: &Value,
     context: &Value,
 ) -> Result<DeterministicContext, EntityContextJsonError> {
+    let mut decoded = decode_entity_deterministic_policy(policy)?;
+    let (prepared_htlcs, originated_htlcs) = prepared_context(context)?;
+    decoded.prepared_htlcs = prepared_htlcs;
+    decoded.originated_htlcs = originated_htlcs;
+    Ok(decoded)
+}
+
+/// Decode the immutable policy once when the live materializer is created.
+/// Per-frame HTLC preparation fills only the two context maps below; parsing
+/// the same policy JSON for every Runtime frame is duplicate boundary work.
+pub fn decode_entity_deterministic_policy(
+    policy: &Value,
+) -> Result<DeterministicContext, EntityContextJsonError> {
     let policy = object(policy, "policy")?;
     exact_keys(
         policy,
@@ -77,14 +90,13 @@ pub fn decode_entity_deterministic_context(
         "policy.jurisdictionId",
     )?;
     let pair_policies = pair_policies(required(policy, "pairPolicies", "policy")?)?;
-    let (prepared_htlcs, originated_htlcs) = prepared_context(context)?;
     Ok(DeterministicContext {
         minimum_trade_size,
         swap_taker_fee_bps,
         jurisdiction_id,
         pair_policies,
-        prepared_htlcs,
-        originated_htlcs,
+        prepared_htlcs: BTreeMap::new(),
+        originated_htlcs: BTreeMap::new(),
     })
 }
 
@@ -221,7 +233,7 @@ fn prepared_entries(
             prepared_binding(required(row, "binding", &path)?, &format!("{path}.binding"))?;
         let outcome =
             prepared_outcome(required(row, "outcome", &path)?, &format!("{path}.outcome"))?;
-        let key = (binding.account_frame_hash.clone(), binding.lock_id.clone());
+        let key = (binding.account_frame_hash.clone(), binding.hashlock.clone());
         if entries
             .insert(key.clone(), PreparedHtlcEntry { binding, outcome })
             .is_some()
@@ -282,7 +294,6 @@ fn prepared_originated_payment(
             "senderLockAmount",
             "maxSenderDebit",
             "totalFee",
-            "lockId",
             "timelock",
             "revealBeforeHeight",
             "nextHopEntityId",
@@ -400,11 +411,6 @@ fn prepared_originated_payment(
         sender_lock_amount,
         max_sender_debit,
         total_fee,
-        lock_id: fixed_hex(
-            required(row, "lockId", path)?,
-            32,
-            &format!("{path}.lockId"),
-        )?,
         timelock: positive_bigint(
             required(row, "timelock", path)?,
             &format!("{path}.timelock"),
@@ -461,7 +467,6 @@ fn prepared_binding(
             "domain",
             "accountFrameHash",
             "accountHeight",
-            "lockId",
             "envelopeHash",
             "hashlock",
             "tokenId",
@@ -492,11 +497,6 @@ fn prepared_binding(
         account_height: safe_u64(
             required(row, "accountHeight", path)?,
             &format!("{path}.accountHeight"),
-        )?,
-        lock_id: fixed_hex(
-            required(row, "lockId", path)?,
-            32,
-            &format!("{path}.lockId"),
         )?,
         envelope_hash: fixed_hex(
             required(row, "envelopeHash", path)?,
@@ -914,7 +914,6 @@ mod tests {
     const PEER: &str = "0x5d364af08764f6cfc396de3370245fd2c9e127a340fef4af39feba27e114a957";
     const SIGNER: &str = "0x4ebbed8e45556b03d25a8bf0242be9f6d1e70092";
     const HASH: &str = "0x540b75f0beeeb2f9ee37fe1ea52c61259294f9d997cd7e3884f311d6a0ec012e";
-    const LOCK: &str = "0xb24ed3794f6d4e9c1c0258a195af4bdf937ee9f45b3216af89f8c2e109690e0e";
     const CIPHERTEXT: &str = "suvroyPQHQTEmrN0ZCHdlqXMuBdJ/UnT1ko77xe8IwYNt4NrMNXLZlrx1eKYDGyXCF+LMkacuaIuJhqqzy9POeWNnVaWdkU2JvbW4o4AoUt7Lr6oJlTxrOKMXj3qgi86X3Do1kmgCJ9HNqGdTRwP2SNb0fQ=";
 
     fn policy() -> Value {
@@ -931,7 +930,7 @@ mod tests {
             "binding": {
                 "fromEntityId": PEER, "toEntityId": ENTITY,
                 "domain": {"chainId":31337, "depositoryAddress":"0xa513e6e4b8f2a923d98304ec87f64353c4d5c853"},
-                "accountFrameHash": HASH, "accountHeight":4, "lockId":LOCK,
+                "accountFrameHash": HASH, "accountHeight":4,
                 "envelopeHash":HASH, "hashlock":HASH, "tokenId":1,
                 "amount":{"__xlnType":"BigInt", "value":"1000"},
                 "timelock":{"__xlnType":"BigInt", "value":"1787666194697"},
@@ -970,7 +969,6 @@ mod tests {
             "senderLockAmount":{"__xlnType":"BigInt", "value":"1010"},
             "maxSenderDebit":{"__xlnType":"BigInt", "value":"1100"},
             "totalFee":{"__xlnType":"BigInt", "value":"10"},
-            "lockId":LOCK,
             "timelock":{"__xlnType":"BigInt", "value":"1700000100000"},
             "revealBeforeHeight":123,
             "nextHopEntityId":PEER,
@@ -1030,7 +1028,7 @@ mod tests {
         assert!(
             decoded
                 .prepared_htlcs
-                .contains_key(&(HASH.into(), LOCK.into()))
+                .contains_key(&(HASH.into(), HASH.into()))
         );
     }
 
@@ -1040,7 +1038,7 @@ mod tests {
             .expect("valid final context");
         let outcome = &decoded
             .prepared_htlcs
-            .get(&(HASH.into(), LOCK.into()))
+            .get(&(HASH.into(), HASH.into()))
             .expect("prepared row")
             .outcome;
         assert!(matches!(
@@ -1077,7 +1075,7 @@ mod tests {
         .trim_end();
         assert_eq!(
             hex::encode(Sha256::digest(raw.as_bytes())),
-            "ad43ce29b8bdca2dcad3597ca89e62f5362b18e94187b5eb868091942c52c137"
+            "f5ccf77b1d0ec7c312dfe49f38cb4c5aea65ae5eb0f7801f9abea13b052e34a7"
         );
         let mut value = context(vec![]);
         value["htlc"] = serde_json::from_str(raw).expect("TS golden JSON");

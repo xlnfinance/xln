@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::{Map, Number, Value};
 use thiserror::Error;
 
+use crate::transport::InboundSessionTable;
 use crate::transport::{DirectRoute, DirectRouteTable, RuntimeTransportError};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -21,11 +23,22 @@ pub struct EntityRoute {
 struct BoundEntityRoute {
     runtime_id: String,
     signer_id: String,
+    /// `None` is an operator-installed route and cannot be displaced by
+    /// gossip. Dynamic routes use the signed Profile clock.
+    last_updated: Option<u64>,
 }
 
 pub(crate) struct BoundEntityOutputs {
     pub rows: Vec<Vec<u8>>,
+    /// Exact in-memory values used to build `rows`, retained only until the
+    /// synced WAL token is published. Recovery deliberately has no copy.
+    pub resident_rows: Vec<Value>,
     pub local_continuations: Vec<crate::RuntimeEntityInput>,
+}
+
+pub(crate) enum BoundEntityOutput {
+    Remote { row: Vec<u8>, value: Value },
+    Local(crate::RuntimeEntityInput),
 }
 
 /// Deterministic Entity-to-Runtime routing installed outside consensus.
@@ -37,7 +50,7 @@ pub(crate) struct BoundEntityOutputs {
 /// on whichever process happened to answer first.
 #[derive(Clone, Debug)]
 pub struct EntityRouteTable {
-    by_entity: BTreeMap<String, BoundEntityRoute>,
+    by_entity: Arc<BTreeMap<String, BoundEntityRoute>>,
     direct_routes: DirectRouteTable,
 }
 
@@ -87,6 +100,7 @@ impl EntityRouteTable {
                     BoundEntityRoute {
                         runtime_id: runtime_id.clone(),
                         signer_id: route.target_signer_id,
+                        last_updated: None,
                     },
                 )
                 .is_some()
@@ -110,19 +124,13 @@ impl EntityRouteTable {
                 url,
             });
         Ok(Self {
-            by_entity,
+            by_entity: Arc::new(by_entity),
             direct_routes: DirectRouteTable::new(direct)?,
         })
     }
 
     pub fn direct_routes(&self) -> DirectRouteTable {
         self.direct_routes.clone()
-    }
-
-    pub(crate) fn runtime_ids(&self) -> impl Iterator<Item = &str> {
-        self.by_entity
-            .values()
-            .map(|route| route.runtime_id.as_str())
     }
 
     /// Entity profiles explicitly installed by the operator. The resident
@@ -132,6 +140,80 @@ impl EntityRouteTable {
         self.by_entity.keys().map(String::as_str)
     }
 
+    /// Paybook liveness is a transient Entity-preprocessing fact. Operator
+    /// routes are explicit live routes; authenticated Profile routes are live
+    /// only while their exact Runtime socket remains open.
+    pub(crate) fn is_paybook_peer_online(
+        &self,
+        entity_id: &str,
+        sessions: &InboundSessionTable,
+    ) -> Result<bool, RuntimeTransportError> {
+        let Ok(entity_id) = normalized_entity_id(entity_id) else {
+            return Ok(false);
+        };
+        let Some(route) = self.by_entity.get(&entity_id) else {
+            return Ok(false);
+        };
+        if route.last_updated.is_none() {
+            return Ok(true);
+        }
+        sessions.has_open(&route.runtime_id)
+    }
+
+    pub(super) fn with_verified_profile(
+        &self,
+        profile: super::profile_route::VerifiedProfileRoute,
+    ) -> Result<Self, EntityRouteError> {
+        let mut updated = self.clone();
+        let routes = Arc::make_mut(&mut updated.by_entity);
+        match routes.get(&profile.entity_id) {
+            Some(existing)
+                if existing.runtime_id == profile.runtime_id
+                    && existing.signer_id == profile.signer_id =>
+            {
+                if existing
+                    .last_updated
+                    .is_some_and(|current| current < profile.last_updated)
+                {
+                    routes.insert(
+                        profile.entity_id,
+                        BoundEntityRoute {
+                            runtime_id: profile.runtime_id,
+                            signer_id: profile.signer_id,
+                            last_updated: Some(profile.last_updated),
+                        },
+                    );
+                }
+                Ok(updated)
+            }
+            Some(existing) if existing.last_updated.is_none() => {
+                Err(EntityRouteError::RuntimeConflict(profile.entity_id))
+            }
+            Some(existing)
+                if existing
+                    .last_updated
+                    .is_some_and(|current| current > profile.last_updated) =>
+            {
+                Ok(updated)
+            }
+            Some(existing) if existing.last_updated == Some(profile.last_updated) => {
+                Err(EntityRouteError::RuntimeConflict(profile.entity_id))
+            }
+            Some(_) | None => {
+                routes.insert(
+                    profile.entity_id,
+                    BoundEntityRoute {
+                        runtime_id: profile.runtime_id,
+                        signer_id: profile.signer_id,
+                        last_updated: Some(profile.last_updated),
+                    },
+                );
+                Ok(updated)
+            }
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn bind_and_encode(
         &self,
         outputs: Vec<Value>,
@@ -140,72 +222,107 @@ impl EntityRouteTable {
         local_entity_id: &str,
         local_signer_id: &str,
     ) -> Result<BoundEntityOutputs, EntityRouteError> {
-        let height = safe_number("height", source_height)?;
-        let timestamp = safe_number("timestamp", source_timestamp)?;
         let local_entity_id = normalized_entity_id(local_entity_id)?;
         if local_signer_id.trim().is_empty() {
             return Err(EntityRouteError::SignerId(local_entity_id));
         }
-        let mut rows = Vec::with_capacity(outputs.len());
-        let mut local_continuations = Vec::new();
-        for (index, output) in outputs.into_iter().enumerate() {
-            let mut object = output
-                .as_object()
-                .cloned()
-                .ok_or(EntityRouteError::OutputObject(index))?;
-            validate_local_output(&object, index)?;
-            let raw_entity = object.get("entityId").and_then(Value::as_str).ok_or(
-                EntityRouteError::OutputField {
+        let bound = outputs
+            .into_iter()
+            .enumerate()
+            .map(|(index, output)| {
+                self.bind_and_encode_one(
+                    output,
                     index,
-                    field: "entityId",
-                },
-            )?;
-            let entity_id = normalized_entity_id(raw_entity)?;
-            object.insert("entityId".into(), Value::String(entity_id.clone()));
-            if entity_id == local_entity_id {
-                if !is_trigger_only(&object) {
-                    return Err(EntityRouteError::LocalPayload(index));
-                }
-                // TypeScript output routing merges identical trigger-only
-                // self-wakes by Entity+signer before they enter the Runtime
-                // FIFO. Ten local financial txs therefore schedule one next
-                // Entity visit, not ten empty Runtime inputs.
-                if !local_continuations.is_empty() {
-                    continue;
-                }
-                object.insert(
-                    "signerId".into(),
-                    Value::String(local_signer_id.to_ascii_lowercase()),
-                );
-                local_continuations.push(
-                    crate::RuntimeEntityInput::decode(Value::Object(object))
-                        .map_err(|error| EntityRouteError::LocalInput(error.to_string()))?,
-                );
-                continue;
-            } else {
-                let route = self
-                    .by_entity
-                    .get(&entity_id)
-                    .ok_or_else(|| EntityRouteError::Missing(entity_id.clone()))?;
-                object.insert("signerId".into(), Value::String(route.signer_id.clone()));
-                object.insert("runtimeId".into(), Value::String(route.runtime_id.clone()));
+                    source_height,
+                    source_timestamp,
+                    &local_entity_id,
+                    local_signer_id,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::collect_bound(bound))
+    }
+
+    pub(crate) fn bind_and_encode_one(
+        &self,
+        output: Value,
+        index: usize,
+        source_height: u64,
+        source_timestamp: u64,
+        local_entity_id: &str,
+        local_signer_id: &str,
+    ) -> Result<BoundEntityOutput, EntityRouteError> {
+        let Value::Object(mut object) = output else {
+            return Err(EntityRouteError::OutputObject(index));
+        };
+        validate_local_output(&object, index)?;
+        let raw_entity = object.get("entityId").and_then(Value::as_str).ok_or(
+            EntityRouteError::OutputField {
+                index,
+                field: "entityId",
+            },
+        )?;
+        let entity_id = normalized_entity_id(raw_entity)?;
+        object.insert("entityId".into(), Value::String(entity_id.clone()));
+        if entity_id == local_entity_id {
+            if !is_trigger_only(&object)
+                && !is_local_runtime_output(&object, &entity_id, local_entity_id, local_signer_id)
+            {
+                return Err(EntityRouteError::LocalPayload(index));
             }
             object.insert(
-                "sourceRuntimeFrame".into(),
-                Value::Object(Map::from_iter([
-                    ("height".into(), height.clone()),
-                    ("timestamp".into(), timestamp.clone()),
-                ])),
+                "signerId".into(),
+                Value::String(local_signer_id.to_ascii_lowercase()),
             );
-            rows.push(
-                crate::transport::msgpack::encode_framed(&Value::Object(object))
-                    .map_err(EntityRouteError::from)?,
-            );
+            return crate::RuntimeEntityInput::decode(Value::Object(object))
+                .map(BoundEntityOutput::Local)
+                .map_err(|error| EntityRouteError::LocalInput(error.to_string()));
         }
-        Ok(BoundEntityOutputs {
+        let route = self
+            .by_entity
+            .get(&entity_id)
+            .ok_or_else(|| EntityRouteError::Missing(entity_id.clone()))?;
+        object.insert("signerId".into(), Value::String(route.signer_id.clone()));
+        object.insert("runtimeId".into(), Value::String(route.runtime_id.clone()));
+        object.insert(
+            "sourceRuntimeFrame".into(),
+            Value::Object(Map::from_iter([
+                ("height".into(), safe_number("height", source_height)?),
+                (
+                    "timestamp".into(),
+                    safe_number("timestamp", source_timestamp)?,
+                ),
+            ])),
+        );
+        let value = Value::Object(object);
+        let row = crate::transport::msgpack::encode_framed(&value)?;
+        Ok(BoundEntityOutput::Remote { row, value })
+    }
+
+    pub(crate) fn collect_bound(outputs: Vec<BoundEntityOutput>) -> BoundEntityOutputs {
+        let mut rows = Vec::with_capacity(outputs.len());
+        let mut resident_rows = Vec::with_capacity(outputs.len());
+        let mut local_continuations = Vec::new();
+        for output in outputs {
+            match output {
+                BoundEntityOutput::Remote { row, value } => {
+                    rows.push(row);
+                    resident_rows.push(value);
+                }
+                // Match the TypeScript self-wake merge: the first trigger in
+                // canonical output order wins, later identical triggers add
+                // neither durable bytes nor another Runtime FIFO item.
+                BoundEntityOutput::Local(input) if local_continuations.is_empty() => {
+                    local_continuations.push(input);
+                }
+                BoundEntityOutput::Local(_) => {}
+            }
+        }
+        BoundEntityOutputs {
             rows,
+            resident_rows,
             local_continuations,
-        })
+        }
     }
 }
 
@@ -222,6 +339,39 @@ fn is_trigger_only(object: &Map<String, Value>) -> bool {
         ]
         .iter()
         .all(|field| !object.contains_key(*field))
+}
+
+fn is_local_runtime_output(
+    object: &Map<String, Value>,
+    target_entity_id: &str,
+    source_entity_id: &str,
+    source_signer_id: &str,
+) -> bool {
+    let Some([tx]) = object
+        .get("entityTxs")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+    else {
+        return false;
+    };
+    let Some(tx) = tx.as_object() else {
+        return false;
+    };
+    if tx.get("type").and_then(Value::as_str) != Some("runtimeOutput") {
+        return false;
+    }
+    let Some(data) = tx.get("data").and_then(Value::as_object) else {
+        return false;
+    };
+    data.get("protocol").and_then(Value::as_str) == Some("cross-j")
+        && data.get("targetEntityId").and_then(Value::as_str) == Some(target_entity_id)
+        && data.get("sourceEntityId").and_then(Value::as_str) == Some(source_entity_id)
+        && data.get("sourceSignerId").and_then(Value::as_str)
+            == Some(source_signer_id.trim().to_ascii_lowercase().as_str())
+        && data
+            .get("entityTxs")
+            .and_then(Value::as_array)
+            .is_some_and(|txs| !txs.is_empty())
 }
 
 fn validate_local_output(
@@ -302,6 +452,36 @@ mod tests {
             websocket_url: Some("ws://127.0.0.1:9000/ws".into()),
         }])
         .expect("routes")
+    }
+
+    #[test]
+    fn paybook_liveness_uses_current_authenticated_route_kind() {
+        let operator_entity = entity("11");
+        let dynamic_entity = entity("33");
+        let routes = routes()
+            .with_verified_profile(super::super::profile_route::VerifiedProfileRoute {
+                entity_id: dynamic_entity.clone(),
+                runtime_id: runtime("44"),
+                signer_id: "dynamic-peer".into(),
+                last_updated: 1,
+            })
+            .expect("dynamic route");
+        let sessions = InboundSessionTable::default();
+        assert!(
+            routes
+                .is_paybook_peer_online(&operator_entity, &sessions)
+                .expect("operator route")
+        );
+        assert!(
+            !routes
+                .is_paybook_peer_online(&dynamic_entity, &sessions)
+                .expect("closed dynamic route")
+        );
+        assert!(
+            !routes
+                .is_paybook_peer_online(&entity("55"), &sessions)
+                .expect("missing route")
+        );
     }
 
     #[test]
@@ -395,6 +575,37 @@ mod tests {
             .expect("local triggers");
         assert_eq!(encoded.local_continuations.len(), 1);
         assert!(encoded.rows.is_empty());
+    }
+
+    #[test]
+    fn authenticated_local_runtime_output_is_requeued_without_outbox_copy() {
+        let local = entity("44");
+        let input = json!({
+            "entityId": local,
+            "entityTxs": [{
+                "type": "runtimeOutput",
+                "data": {
+                    "protocol": "cross-j",
+                    "sourceEntityId": local,
+                    "sourceSignerId": "local-signer",
+                    "targetEntityId": local,
+                    "entityTxs": [{
+                        "type": "registerCrossJurisdictionSwap",
+                        "data": {"route": {"orderId": "order-1"}}
+                    }]
+                }
+            }]
+        });
+        let encoded = EntityRouteTable::new([])
+            .expect("routes")
+            .bind_and_encode(vec![input], 3, 77, &local, "local-signer")
+            .expect("local runtime output");
+        assert_eq!(encoded.local_continuations.len(), 1);
+        assert!(encoded.rows.is_empty());
+        assert_eq!(
+            encoded.local_continuations[0].canonical()["entityTxs"][0]["type"],
+            "runtimeOutput"
+        );
     }
 
     #[test]

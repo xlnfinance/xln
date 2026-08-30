@@ -37,7 +37,9 @@ const decodeManagedRuntimeLease = (value: unknown): ManagedRuntimeLease => {
     'MANAGED_RUNTIME_LEASE_FIELDS_INVALID',
   );
   if ((lease['role'] !== 'hub' && lease['role'] !== 'market-maker') ||
-      (lease['script'] !== 'core/orchestrator/hub-node.ts' && lease['script'] !== 'core/orchestrator/mm-node.ts') ||
+      (lease['script'] !== 'core/orchestrator/hub-node.ts' &&
+        lease['script'] !== 'core/orchestrator/mm-node.ts' &&
+        lease['script'] !== 'rscore/target/release/xlnrs') ||
       typeof lease['name'] !== 'string' || !lease['name'] ||
       typeof lease['dbPath'] !== 'string' || !lease['dbPath'] ||
       typeof lease['ownerId'] !== 'string' || !lease['ownerId'] ||

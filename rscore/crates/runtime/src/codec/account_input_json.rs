@@ -15,8 +15,11 @@ use xln_rscore_engine::{
     AccountTx, BoardHankoRefreshInput, CounterpartyDispute, DeliveryMode, DepositoryAddress,
     EntityId, HtlcDeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
     IncomingAck, IncomingFrame, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
-    JEventMetadata, JurisdictionEvent, OpaqueHtlcCiphertext, TokenId, WatchSeed,
+    JEventMetadata, JurisdictionEvent, LendingAction, LendingTermId, OpaqueHtlcCiphertext,
+    RebalanceRefundReason, ReserveSide, TokenId, WatchSeed,
 };
+
+use super::tagged_json::canonical_value_from_tagged_json;
 
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -122,6 +125,29 @@ fn unsigned(value: &Value, operation_index: u64, path: &str) -> Result<u64, Acco
         return Err(invalid(operation_index, path, "SAFE_INTEGER_EXCEEDED"));
     }
     Ok(value)
+}
+
+fn signed(value: &Value, operation_index: u64, path: &str) -> Result<i64, AccountInputJsonError> {
+    let value = value
+        .as_i64()
+        .ok_or_else(|| invalid(operation_index, path, "SAFE_INTEGER_REQUIRED"))?;
+    if value.unsigned_abs() > JS_MAX_SAFE_INTEGER {
+        return Err(invalid(operation_index, path, "SAFE_INTEGER_EXCEEDED"));
+    }
+    Ok(value)
+}
+
+fn canonical_object(
+    value: &Value,
+    operation_index: u64,
+    path: &str,
+) -> Result<xln_rscore_engine::CanonicalValue, AccountInputJsonError> {
+    let canonical = canonical_value_from_tagged_json(value)
+        .map_err(|error| invalid(operation_index, path, error.to_string()))?;
+    if !matches!(canonical, xln_rscore_engine::CanonicalValue::Object(_)) {
+        return Err(invalid(operation_index, path, "OBJECT_REQUIRED"));
+    }
+    Ok(canonical)
 }
 
 fn u32_value(
@@ -550,13 +576,6 @@ fn decode_swap_offer(
         operation_index,
         path,
     )?;
-    if value.contains_key("crossJurisdiction") {
-        return Err(invalid(
-            operation_index,
-            format!("{path}.crossJurisdiction"),
-            "TX_PROFILE_UNSUPPORTED",
-        ));
-    }
     let time_in_force = match value.get("timeInForce") {
         None => None,
         Some(value) => {
@@ -619,6 +638,12 @@ fn decode_swap_offer(
         )?,
         time_in_force,
         price_ticks: optional_bigint(value, "priceTicks", operation_index, path)?,
+        cross_jurisdiction: value
+            .get("crossJurisdiction")
+            .map(|route| {
+                canonical_object(route, operation_index, &format!("{path}.crossJurisdiction"))
+            })
+            .transpose()?,
     })
 }
 
@@ -699,6 +724,485 @@ fn decode_swap_resolve(
             operation_index,
             path,
         )?,
+    })
+}
+
+fn lending_term(
+    value: &Value,
+    operation_index: u64,
+    path: &str,
+) -> Result<LendingTermId, AccountInputJsonError> {
+    match text(value, operation_index, path)?.as_str() {
+        "1h" => Ok(LendingTermId::OneHour),
+        "1d" => Ok(LendingTermId::OneDay),
+        "1m" => Ok(LendingTermId::OneMonth),
+        _ => Err(invalid(operation_index, path, "VALUE_INVALID")),
+    }
+}
+
+fn decode_lending_fund(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "positionId",
+            "hubEntityId",
+            "lenderEntityId",
+            "tokenId",
+            "amount",
+            "termId",
+            "interestBps",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::LendingFund {
+        position_id: text(
+            field(value, "positionId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.positionId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        lender_entity_id: text(
+            field(value, "lenderEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.lenderEntityId"),
+        )?,
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+        term_id: lending_term(
+            field(value, "termId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.termId"),
+        )?,
+        interest_bps: signed(
+            field(value, "interestBps", operation_index, path)?,
+            operation_index,
+            &format!("{path}.interestBps"),
+        )?,
+    })
+}
+
+fn decode_lending_borrow_request(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "requestId",
+            "hubEntityId",
+            "borrowerEntityId",
+            "tokenId",
+            "amount",
+            "termId",
+            "maxInterestBps",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::LendingBorrowRequest {
+        request_id: text(
+            field(value, "requestId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.requestId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        borrower_entity_id: text(
+            field(value, "borrowerEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.borrowerEntityId"),
+        )?,
+        token_id: unsigned(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+        term_id: lending_term(
+            field(value, "termId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.termId"),
+        )?,
+        max_interest_bps: signed(
+            field(value, "maxInterestBps", operation_index, path)?,
+            operation_index,
+            &format!("{path}.maxInterestBps"),
+        )?,
+    })
+}
+
+fn decode_lending_repay(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "loanId",
+            "hubEntityId",
+            "borrowerEntityId",
+            "tokenId",
+            "amount",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::LendingRepay {
+        loan_id: text(
+            field(value, "loanId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.loanId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        borrower_entity_id: text(
+            field(value, "borrowerEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.borrowerEntityId"),
+        )?,
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+    })
+}
+
+fn decode_lending_credit(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "action",
+            "loanId",
+            "hubEntityId",
+            "borrowerEntityId",
+            "tokenId",
+            "creditLimit",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    let action = match text(
+        field(value, "action", operation_index, path)?,
+        operation_index,
+        &format!("{path}.action"),
+    )?
+    .as_str()
+    {
+        "grant" => LendingAction::Grant,
+        "revoke" => LendingAction::Revoke,
+        _ => {
+            return Err(invalid(
+                operation_index,
+                format!("{path}.action"),
+                "VALUE_INVALID",
+            ));
+        }
+    };
+    Ok(AccountTx::LendingCredit {
+        action,
+        loan_id: text(
+            field(value, "loanId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.loanId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        borrower_entity_id: text(
+            field(value, "borrowerEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.borrowerEntityId"),
+        )?,
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        credit_limit: tagged_bigint(
+            field(value, "creditLimit", operation_index, path)?,
+            operation_index,
+            &format!("{path}.creditLimit"),
+        )?,
+    })
+}
+
+fn decode_lending_close_request(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &["positionId", "hubEntityId", "lenderEntityId"],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::LendingCloseRequest {
+        position_id: text(
+            field(value, "positionId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.positionId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        lender_entity_id: text(
+            field(value, "lenderEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.lenderEntityId"),
+        )?,
+    })
+}
+
+fn decode_lending_close_payout(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "positionId",
+            "hubEntityId",
+            "lenderEntityId",
+            "tokenId",
+            "amount",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::LendingClosePayout {
+        position_id: text(
+            field(value, "positionId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.positionId"),
+        )?,
+        hub_entity_id: text(
+            field(value, "hubEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.hubEntityId"),
+        )?,
+        lender_entity_id: text(
+            field(value, "lenderEntityId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.lenderEntityId"),
+        )?,
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+    })
+}
+
+fn decode_reserve_to_collateral(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &[
+            "tokenId",
+            "collateral",
+            "ondelta",
+            "side",
+            "blockNumber",
+            "transactionHash",
+        ],
+        &[],
+        operation_index,
+        path,
+    )?;
+    let side = match text(
+        field(value, "side", operation_index, path)?,
+        operation_index,
+        &format!("{path}.side"),
+    )?
+    .as_str()
+    {
+        "receiving" => ReserveSide::Receiving,
+        "counterparty" => ReserveSide::Counterparty,
+        _ => {
+            return Err(invalid(
+                operation_index,
+                format!("{path}.side"),
+                "VALUE_INVALID",
+            ));
+        }
+    };
+    Ok(AccountTx::ReserveToCollateral {
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        collateral: text(
+            field(value, "collateral", operation_index, path)?,
+            operation_index,
+            &format!("{path}.collateral"),
+        )?,
+        ondelta: text(
+            field(value, "ondelta", operation_index, path)?,
+            operation_index,
+            &format!("{path}.ondelta"),
+        )?,
+        side,
+        block_number: signed(
+            field(value, "blockNumber", operation_index, path)?,
+            operation_index,
+            &format!("{path}.blockNumber"),
+        )?,
+        transaction_hash: text(
+            field(value, "transactionHash", operation_index, path)?,
+            operation_index,
+            &format!("{path}.transactionHash"),
+        )?,
+    })
+}
+
+fn decode_request_collateral(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &["tokenId", "amount", "feeAmount", "policyVersion"],
+        &["feeTokenId"],
+        operation_index,
+        path,
+    )?;
+    Ok(AccountTx::RequestCollateral {
+        token_id: token_id(
+            field(value, "tokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.tokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+        fee_token_id: value
+            .get("feeTokenId")
+            .map(|value| token_id(value, operation_index, &format!("{path}.feeTokenId")))
+            .transpose()?,
+        fee_amount: tagged_bigint(
+            field(value, "feeAmount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.feeAmount"),
+        )?,
+        policy_version: unsigned(
+            field(value, "policyVersion", operation_index, path)?,
+            operation_index,
+            &format!("{path}.policyVersion"),
+        )?,
+    })
+}
+
+fn decode_rebalance_refund(
+    value: &Map<String, Value>,
+    operation_index: u64,
+    path: &str,
+) -> Result<AccountTx, AccountInputJsonError> {
+    exact_fields(
+        value,
+        &["requestId", "requestTokenId", "amount", "reason"],
+        &[],
+        operation_index,
+        path,
+    )?;
+    let reason = match text(
+        field(value, "reason", operation_index, path)?,
+        operation_index,
+        &format!("{path}.reason"),
+    )?
+    .as_str()
+    {
+        "policy_mismatch" => RebalanceRefundReason::PolicyMismatch,
+        "timeout" => RebalanceRefundReason::Timeout,
+        "fee_too_low" => RebalanceRefundReason::FeeTooLow,
+        "manual" => RebalanceRefundReason::Manual,
+        _ => {
+            return Err(invalid(
+                operation_index,
+                format!("{path}.reason"),
+                "VALUE_INVALID",
+            ));
+        }
+    };
+    Ok(AccountTx::RebalanceRefund {
+        request_id: text(
+            field(value, "requestId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.requestId"),
+        )?,
+        request_token_id: token_id(
+            field(value, "requestTokenId", operation_index, path)?,
+            operation_index,
+            &format!("{path}.requestTokenId"),
+        )?,
+        amount: tagged_bigint(
+            field(value, "amount", operation_index, path)?,
+            operation_index,
+            &format!("{path}.amount"),
+        )?,
+        reason,
     })
 }
 
@@ -1132,6 +1636,14 @@ fn decode_account_tx_at(
     )?;
     match kind.as_str() {
         "direct_payment" => decode_direct_payment(data, operation_index, &data_path),
+        "lending_fund" => decode_lending_fund(data, operation_index, &data_path),
+        "lending_borrow_request" => {
+            decode_lending_borrow_request(data, operation_index, &data_path)
+        }
+        "lending_repay" => decode_lending_repay(data, operation_index, &data_path),
+        "lending_credit" => decode_lending_credit(data, operation_index, &data_path),
+        "lending_close_request" => decode_lending_close_request(data, operation_index, &data_path),
+        "lending_close_payout" => decode_lending_close_payout(data, operation_index, &data_path),
         "add_delta" => {
             exact_fields(data, &["tokenId"], &[], operation_index, &data_path)?;
             Ok(AccountTx::AddDelta {
@@ -1165,6 +1677,9 @@ fn decode_account_tx_at(
         }
         "htlc_lock" => decode_htlc_lock(data, operation_index, &data_path),
         "htlc_resolve" => decode_htlc_resolve(data, operation_index, &data_path),
+        "reserve_to_collateral" => decode_reserve_to_collateral(data, operation_index, &data_path),
+        "request_collateral" => decode_request_collateral(data, operation_index, &data_path),
+        "rebalance_refund" => decode_rebalance_refund(data, operation_index, &data_path),
         "rebalance_policy" => {
             exact_fields(
                 data,
@@ -1219,6 +1734,41 @@ fn decode_account_tx_at(
             })
         }
         "swap_resolve" => decode_swap_resolve(data, operation_index, &data_path),
+        "cross_pull_lock" => Ok(AccountTx::CrossPullLock {
+            data: canonical_object(
+                field(tx, "data", operation_index, path)?,
+                operation_index,
+                &data_path,
+            )?,
+        }),
+        "cross_pull_close" => Ok(AccountTx::CrossPullClose {
+            data: canonical_object(
+                field(tx, "data", operation_index, path)?,
+                operation_index,
+                &data_path,
+            )?,
+        }),
+        "cross_pull_progress" => Ok(AccountTx::CrossPullProgress {
+            data: canonical_object(
+                field(tx, "data", operation_index, path)?,
+                operation_index,
+                &data_path,
+            )?,
+        }),
+        "cross_swap_fill_ack" => Ok(AccountTx::CrossSwapFillAck {
+            data: canonical_object(
+                field(tx, "data", operation_index, path)?,
+                operation_index,
+                &data_path,
+            )?,
+        }),
+        "settle_transition" => Ok(AccountTx::SettleTransition {
+            data: canonical_object(
+                field(tx, "data", operation_index, path)?,
+                operation_index,
+                &data_path,
+            )?,
+        }),
         "j_event_claim" => decode_j_event_claim(data, operation_index, &data_path),
         _ => Err(invalid(
             operation_index,
@@ -1601,7 +2151,7 @@ pub fn decode_account_input_row(
             ],
             &["watchSeed"],
         ),
-        "frame_ack" => (
+        "ack_frame" => (
             &[
                 "fromEntityId",
                 "toEntityId",
@@ -1719,7 +2269,7 @@ pub fn decode_account_input_row(
             operation_index,
             "accountInput.ack",
         )?),
-        "frame_ack" => AccountInputKind::FrameAck {
+        "ack_frame" => AccountInputKind::AckFrame {
             ack: decode_ack(
                 field(input, "ack", operation_index, path)?,
                 operation_index,
@@ -1885,10 +2435,10 @@ mod tests {
             "kind": kind
         });
         if let Some(row) = value.as_object_mut() {
-            if kind == "ack" || kind == "frame_ack" {
+            if kind == "ack" || kind == "ack_frame" {
                 row.insert("ack".to_string(), ack());
             }
-            if kind == "frame" || kind == "frame_ack" {
+            if kind == "frame" || kind == "ack_frame" {
                 row.insert("proposal".to_string(), proposal());
             }
         }
@@ -1900,13 +2450,13 @@ mod tests {
     }
 
     #[test]
-    fn frame_ack_decodes_to_one_atomic_row() {
+    fn ack_frame_decodes_to_one_atomic_row() {
         let owner = id("11");
         let counterparty = id("22");
         let decoded = decode_entity_account_input_row(
             &owner,
             7,
-            &entity_tx(&owner, &counterparty, "frame_ack"),
+            &entity_tx(&owner, &counterparty, "ack_frame"),
         );
         let row = match decoded {
             Ok(row) => row,
@@ -1919,7 +2469,7 @@ mod tests {
         };
         assert_eq!(row.account_id.as_bytes(), &expected_account_id);
         match row.input.kind {
-            AccountInputKind::FrameAck { ack, frame } => {
+            AccountInputKind::AckFrame { ack, frame } => {
                 assert_eq!(ack.height, 1);
                 assert_eq!(frame.frame.txs.len(), 1);
                 assert!(matches!(frame.frame.txs[0], AccountTx::HtlcLock(_)));
@@ -2050,7 +2600,7 @@ mod tests {
     }
 
     #[test]
-    fn noncanonical_bigint_and_cross_j_offer_are_loud_errors() {
+    fn noncanonical_bigint_is_loud_and_cross_j_offer_decodes() {
         let payment = json!({
             "type": "direct_payment",
             "data": {
@@ -2079,7 +2629,13 @@ mod tests {
                 "crossJurisdiction": {}
             }
         });
-        assert!(decode_account_tx_json(&offer, 5).is_err());
+        assert!(matches!(
+            decode_account_tx_json(&offer, 5),
+            Ok(AccountTx::SwapOffer {
+                cross_jurisdiction: Some(_),
+                ..
+            })
+        ));
     }
 
     #[test]

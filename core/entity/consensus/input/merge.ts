@@ -126,10 +126,7 @@ export const prioritizeEntityConsensusInputs = <T extends EntityConsensusInput>(
 };
 
 export const entityInputMergeKey = (input: EntityConsensusInput): string => {
-  const deliveryLane = input.localRuntimeProtocol
-    ? `:local-protocol:${input.localRuntimeProtocol}`
-    : '';
-  const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}${deliveryLane}`;
+  const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
   const atomicCrossJ = input.atomicCrossJurisdictionPair;
   if (atomicCrossJ) {
     const sourceFrame = input.sourceRuntimeFrame;

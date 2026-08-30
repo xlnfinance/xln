@@ -139,12 +139,21 @@ describe('e2e baseline readiness', () => {
 
   test('orchestrator health exposes pending reset capabilities while imports require successful activation', () => {
     const orchestrator = readFileSync('core/orchestrator/orchestrator.ts', 'utf8');
-    expect(orchestrator).toContain('const resetOptions = resolveHealthResetOptions(');
-    expect(orchestrator).toContain('resolveResetCapabilityHealth(resetOptions');
+    const healthSupport = readFileSync(
+      'core/orchestrator/health/orchestrator-health-support.ts',
+      'utf8',
+    );
+    const runtimeImportController = readFileSync(
+      'core/orchestrator/replica-import/runtime-import-controller.ts',
+      'utf8',
+    );
+    expect(orchestrator).toContain('const capabilityHealth = resolveCurrentCapabilityHealthForMesh();');
+    expect(healthSupport).toContain('const resetOptions = resolveHealthResetOptions(');
+    expect(healthSupport).toContain('return resolveResetCapabilityHealth(resetOptions');
     expect(orchestrator).toContain('mmEnabled: capabilityHealth.marketMakerEnabled');
     expect(orchestrator).toContain('capabilityHealth.custodyEnabled,');
     expect(orchestrator).toContain('activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options)');
-    expect(orchestrator).toContain('if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId)');
-    expect(orchestrator).toContain('if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed');
+    expect(runtimeImportController).toContain('if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId)');
+    expect(runtimeImportController).toContain('if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed');
   });
 });

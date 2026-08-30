@@ -16,6 +16,7 @@ import {
 } from './checkpoint-restore-read';
 
 export type RscoreDisputeDraft = Readonly<{
+  hanko?: string;
   hash: string;
   proofBodyHash: string;
   nonce: number;
@@ -97,14 +98,15 @@ const decodeFrame = (
 };
 
 const decodeDispute = (value: unknown, field: string): RscoreDisputeDraft | undefined => {
-  const row = checkpointOptionalTuple(value, 4, field);
+  const row = checkpointOptionalTuple(value, 5, field);
   return row === undefined
     ? undefined
     : {
-        hash: checkpointHex(row[0], 32, `${field}_HASH`),
-        proofBodyHash: checkpointHex(row[1], 32, `${field}_PROOF_BODY_HASH`),
-        nonce: checkpointSafeInt(row[2], `${field}_NONCE`),
-        proposerIsLeft: checkpointBool(row[3], `${field}_PROPOSER`),
+        ...(row[0] === null ? {} : { hanko: checkpointHanko(row[0], `${field}_HANKO`) }),
+        hash: checkpointHex(row[1], 32, `${field}_HASH`),
+        proofBodyHash: checkpointHex(row[2], 32, `${field}_PROOF_BODY_HASH`),
+        nonce: checkpointSafeInt(row[3], `${field}_NONCE`),
+        proposerIsLeft: checkpointBool(row[4], `${field}_PROPOSER`),
       };
 };
 

@@ -33,6 +33,7 @@ import {
   type MeshHealthPayload,
 } from '../../../scenarios/cross-j/mm-mesh-adversary';
 import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
+import { hltLanePortsPerSlot } from '../hlt/lanes/lane-port-capacity';
 import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
 import {
@@ -167,7 +168,7 @@ const PROFILING_ENV_KEYS = [
   'XLN_RUNTIME_SAMPLING_PROFILE', 'XLN_RUNTIME_SAMPLING_PROFILE_DIR',
   'XLN_LOG_LEVEL', 'XLN_LOG_SCOPES',
   'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE', 'XLN_HEAVY_LOGS',
-  'XLN_STORAGE_CERTIFIED_HISTORY', 'XLN_STORAGE_FRAME_ENCODE_PROFILE',
+  'XLN_STORAGE_FRAME_ENCODE_PROFILE',
   'XLN_CRYPTO_POOL_WORKERS', 'XLN_CRYPTO_SIGN_WORKERS',
   // Rust account-engine shadow mirror (diagnostic; off unless explicitly set).
   'XLN_RSCORE_SHADOW', 'XLN_RSCORE_SHADOW_ENTITY', 'XLN_RSCORE_SHADOW_WORKERS',
@@ -177,7 +178,8 @@ const PROFILING_ENV_KEYS = [
   // process-wide switch: an Entity the engine cannot sign for must not be
   // handed to it by inheritance.
   'XLN_RSCORE_AUTHORITY_WORKERS', 'XLN_RSCORE_AUTHORITY_RECORD',
-  'XLN_RSCORE_AUTHORITY_CUTOVER',
+  'XLN_RSCORE_AUTHORITY_CUTOVER', 'XLN_RSCORE_PROFILE_ENTITY',
+  'XLN_RSCORE_PROFILE_PROJECTION',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -195,6 +197,13 @@ if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
     process.env['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] || String(Math.max(64, hltUsers));
   inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] =
     process.env['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || String(Math.max(1_000, hltUsers * 4));
+  inheritedProcessEnv['XLN_HLT_LANE_PORTS_PER_SLOT'] = String(hltLanePortsPerSlot(hltUsers));
+  if (process.env['XLN_HLT_ENGINE'] === 'rust') {
+    // The native Runtime owns H1 from genesis. Keep the authority workload on
+    // its one configured Entity; HLT must never stage H1 through the retired
+    // TypeScript authority/cutover path before measuring Rust.
+    inheritedProcessEnv['XLN_MESH_PRIMARY_JURISDICTION_ONLY'] = '1';
+  }
 }
 const portBase = localTestLease.basePort;
 
@@ -210,6 +219,14 @@ const marketMakerApiPort = nodePortBase + HUB_COUNT;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
 const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
 const useSnapshotTemplate = templateDir.length > 0;
+const hltH1Only = readBooleanEnv('XLN_HLT_H1_ONLY', false);
+const hltWorkloadMode = String(process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || '');
+if (hltH1Only && HUB_COUNT !== 1) {
+  throw new Error(`LOCAL_PROD_SMOKE_H1_ONLY_REQUIRES_ONE_HUB:${HUB_COUNT}`);
+}
+if (readBooleanEnv('XLN_HLT_WARM_TOPOLOGY', false) || readBooleanEnv('XLN_HLT_LANE_PERSISTENCE', false)) {
+  throw new Error('LOCAL_PROD_SMOKE_LOAD_USERS_MUST_BE_EPHEMERAL');
+}
 const children: ManagedProcess[] = [];
 const marketMakerInfoLatencyMaxMs = Math.max(
   250,
@@ -916,7 +933,7 @@ const marketMakerSameChainReady = (health: HealthPayload): boolean => {
   const expectedOffersPerHub = Number(health.marketMaker?.expectedOffersPerHub || 0);
   return health.marketMaker?.startupPhase === 'offers-ready' &&
     expectedOffersPerHub > 0 &&
-    hubs.length >= 3 &&
+    hubs.length >= (hltH1Only ? 1 : 3) &&
     hubs.every(hub =>
       hub.ready === true &&
       hub.depthReady === true &&
@@ -969,6 +986,17 @@ const marketMakerDepthReadyForSmoke = (health: HealthPayload): boolean =>
   marketMakerFullDepthReady(health);
 
 const healthReady = (health: HealthPayload): boolean => {
+  if (hltH1Only) {
+    const h1Ready = health.coreOk === true &&
+      health.systemOk === true &&
+      Number(health.hubs?.length || 0) === 1 &&
+      health.system?.relay === true &&
+      health.hubMesh?.ok === true &&
+      health.bootstrapReserves?.ok === true;
+    return h1Ready && (hltWorkloadMode !== 'mixed' || (
+      marketMakerDepthReadyForSmoke(health) && Boolean(health.marketMaker?.entityId)
+    ));
+  }
   return health.coreOk === true &&
     health.systemOk === true &&
     Number(health.hubs?.length || 0) >= 3 &&
@@ -1247,7 +1275,7 @@ const main = async (): Promise<void> => {
     ),
     // Per-hub Rust account authority (XLN_HUB_RSCORE_AUTHORITY_H1=1).
     ...Object.fromEntries(
-      Object.entries(process.env)
+      Object.entries(inheritedProcessEnv)
         .filter(([name]) => name.startsWith('XLN_HUB_RSCORE_AUTHORITY_'))
         .map(([name, value]) => [name, String(value)]),
     ),
@@ -1317,6 +1345,14 @@ const main = async (): Promise<void> => {
   recordStage('server:started', { apiPort, marketMakerApiPort });
 
   const readyHealth = await waitForHealth();
+  if (hltH1Only) {
+    if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') {
+      throw new Error('LOCAL_PROD_SMOKE_H1_ONLY_REQUIRES_LIVE_WORKLOAD');
+    }
+    await runProductionSwapLoadSmoke();
+    console.log('[local-prod-smoke] green h1-live-authority');
+    return;
+  }
   const marketMakerInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
     ? await assertMarketMakerInfoResponsive()
     : null;

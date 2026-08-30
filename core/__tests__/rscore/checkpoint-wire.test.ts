@@ -157,7 +157,7 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
       rollbackCount: 0,
       currentFrameHash: frame.stateHash,
       proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 7 },
-      lastOutboundFrameAck: ackBinding,
+      lastOutboundAckFrame: ackBinding,
       counterpartyFrameHanko: computeIntegrityDigest(new TextEncoder().encode(peerHanko)),
       accountStateRoot: stateRoot,
       mempoolRoot: `0x${'00'.repeat(32)}`,
@@ -187,7 +187,8 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
       [bytes(claim.root), claim.count],
       [bytes(claim.root), claim.count],
     ],
-    [canonicalWire({ status: 'active', publicPinned: true }), []],
+    [canonicalWire({ status: 'active', publicPinned: true }), [], [], []],
+    null,
     null,
   ];
   const row = [
@@ -227,9 +228,13 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
         offer.createdHeight,
         offer.quantizedGive.toString(),
         offer.quantizedWant.toString(),
+        offer.crossJurisdiction === undefined
+          ? null
+          : canonicalWire(offer.crossJurisdiction),
       ],
     ],
     [[1, [[1, '2', '50', '3', 88], null]]],
+    [],
     [],
     [
       [],
@@ -273,7 +278,6 @@ describe('rscore checkpoint wire', () => {
     expect(decoded.stateSeed.swapOffers.get(offer.offerId)).toEqual(offer);
     expect(decoded.stateSeed.rebalanceFeePolicies.get(1)).toEqual(policy);
     expect(decoded.rootOnlyCarriedSections).toEqual([
-      'pulls',
       'subcontracts',
       'requestedRebalance',
       'requestedRebalanceFeeState',
@@ -284,7 +288,7 @@ describe('rscore checkpoint wire', () => {
     const first = restoreFixture();
     const firstDecoded = decodeRscoreAccountRestoreRow(first.row);
     const second = restoreFixture();
-    const consensus = second.row[9] as unknown[];
+    const consensus = second.row[10] as unknown[];
     const ack = consensus[7] as unknown[];
     ack[2] = Buffer.from([0x09, 0x08, 0x07, 0x06]);
     const secondDecoded = decodeRscoreAccountRestoreRow(second.row);
@@ -294,7 +298,7 @@ describe('rscore checkpoint wire', () => {
     expect(secondDecoded.consensus.lastOutboundAck?.frameHanko).toBe('0x09080706');
 
     const oldShape = restoreFixture().row;
-    const oldConsensus = oldShape[9] as unknown[];
+    const oldConsensus = oldShape[10] as unknown[];
     const oldAck = oldConsensus[7] as unknown[];
     oldConsensus[7] = [oldAck[0], oldAck[1], oldAck[3]];
     expect(() => decodeRscoreAccountRestoreRow(oldShape)).toThrow(
@@ -304,12 +308,12 @@ describe('rscore checkpoint wire', () => {
 
   test('rejects corrupt frame, state-root and Entity-leaf commitments', () => {
     const badFrame = restoreFixture().row;
-    ((badFrame[9] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);
+    ((badFrame[10] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);
     expect(() => decodeRscoreAccountRestoreRow(badFrame)).toThrow('CURRENT_FRAME_HASH_MISMATCH');
 
     const badRoot = restoreFixture().row;
     ((badRoot[2] as unknown[])[6] as unknown[])[0] = Buffer.alloc(32, 0xee);
-    expect(() => decodeRscoreAccountRestoreRow(badRoot)).toThrow('CURRENT_ACCOUNT_STATE_ROOT_MISMATCH');
+    expect(() => decodeRscoreAccountRestoreRow(badRoot)).toThrow('PULL_BODY_ROOT_MISMATCH');
 
     const badLeaf = restoreFixture().row;
     badLeaf[1] = Buffer.alloc(32, 0xdd);

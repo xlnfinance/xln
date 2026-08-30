@@ -16,7 +16,7 @@ import { decodeWaveOutputForTests, waveOutputRow, waveOutputWireForTests } from 
 
 const OFFER: RscoreWireValue[] = [
   3, 'offer-1', `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`,
-  1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', 1, 0, 7, '5', '6',
+  1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', 1, 0, 7, '5', '6', null,
 ];
 
 const CASES: { name: string; wire: RscoreWireValue[]; row: unknown[] }[] = [
@@ -50,7 +50,7 @@ const CASES: { name: string; wire: RscoreWireValue[]; row: unknown[] }[] = [
     wire: OFFER,
     row: [
       'offerUpsert', 'offer-1', `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`,
-      1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', 1, 0, 7, '5', '6',
+      1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', 1, 0, 7, '5', '6', null,
     ],
   },
   {
@@ -58,7 +58,7 @@ const CASES: { name: string; wire: RscoreWireValue[]; row: unknown[] }[] = [
     wire: [...OFFER.slice(0, 13), null, ...OFFER.slice(14)],
     row: [
       'offerUpsert', 'offer-1', `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`,
-      1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', null, 0, 7, '5', '6',
+      1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', null, 0, 7, '5', '6', null,
     ],
   },
   { name: 'swapOfferRemove/left maker', wire: [4, 'offer-1', 0], row: ['offerRemove', 'offer-1'] },

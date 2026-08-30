@@ -28,6 +28,7 @@ use xln_rscore_runtime::storage::native::{
 };
 use xln_rscore_runtime::{
     CanonicalRuntimeEntityHash, DurableRuntimeProcessor, RuntimeDurableCommitments,
+    RuntimeDurableEntityCommitment, RuntimeEntityReplica, RuntimeEntityState, RuntimeReplica,
     RuntimeSignerLabel, RuntimeWalReader, canonical_swap_market_policy,
     compute_canonical_runtime_state_hash, decode_storage_payload,
 };
@@ -35,6 +36,43 @@ use xln_rscore_runtime::{
 use crate::PAYMENT_PROFILE_BINDING;
 use diff::{RuntimeReplayDiffInput, write_runtime_replay_diff};
 use expectations::ReplayExpectations;
+
+/// This replay fixture is single-entity by construction. Every commitment,
+/// state and diagnostic read below names that sole Entity explicitly, and a
+/// second Entity appearing is a loud failure instead of a silent pick.
+fn sole_entity_state(replica: &RuntimeReplica) -> Result<&RuntimeEntityState, String> {
+    let mut entities = replica.state.e_replicas.values();
+    let (Some(state), None) = (entities.next(), entities.next()) else {
+        return Err(format!(
+            "RUNTIME_REPLAY_SOLE_ENTITY_STATE:{}",
+            replica.state.e_replicas.len()
+        ));
+    };
+    Ok(state)
+}
+
+fn sole_entity_replica(replica: &RuntimeReplica) -> Result<&RuntimeEntityReplica, String> {
+    let mut entities = replica.e_replicas.values();
+    let (Some(entity), None) = (entities.next(), entities.next()) else {
+        return Err(format!(
+            "RUNTIME_REPLAY_SOLE_ENTITY_REPLICA:{}",
+            replica.e_replicas.len()
+        ));
+    };
+    Ok(entity)
+}
+
+fn sole_entity_commitment(
+    commitments: &RuntimeDurableCommitments,
+) -> Result<&RuntimeDurableEntityCommitment, String> {
+    let [entity] = commitments.entities.as_slice() else {
+        return Err(format!(
+            "RUNTIME_REPLAY_SOLE_ENTITY_COMMITMENT:{}",
+            commitments.entities.len()
+        ));
+    };
+    Ok(entity)
+}
 
 pub struct RuntimeReplayMetrics {
     pub frames: u64,
@@ -141,10 +179,14 @@ fn routes_from_wal(
 ) -> Result<EntityRouteTable, String> {
     let mut routes = BTreeMap::<String, (String, String)>::new();
     for height in from..=to {
+        // Raw rows only: route discovery reads three configuration fields per
+        // outbox row. Frame verification is not skipped anywhere it matters —
+        // the replay loop re-reads and fully verifies every one of these
+        // frames before applying it.
         let source = reader
-            .concrete_wal_source(height)
+            .raw_concrete_wal_rows(height)
             .map_err(|error| format!("RUNTIME_REPLAY_SOURCE:{height}:{error}"))?;
-        for (index, bytes) in source.outputs().iter().enumerate() {
+        for (index, bytes) in source.output_rows().iter().enumerate() {
             let value = decode_storage_payload(bytes)
                 .map_err(|error| format!("RUNTIME_REPLAY_ROUTE_ROW:{height}:{index}:{error}"))?;
             let value = object(&value, "outboxRow")?;
@@ -340,6 +382,26 @@ pub fn replay_runtime_wal(
             .durable
             .adopt_offline_import_lineage(origin, source_frame_hash);
     }
+    // Validate-only replay reproduces the recorded frames bit-for-bit, so it
+    // must run under the operator cadence the recording was produced with,
+    // even on the offline-import binding where a live takeover would keep its
+    // own limits instead.
+    if let Some(period) = restored
+        .replica
+        .durable
+        .runtime_config()
+        .materialize_period_frames()
+    {
+        restored.replica.limits.checkpoint_period_frames = period;
+    }
+    if let Some(period) = restored
+        .replica
+        .durable
+        .runtime_config()
+        .canonical_hash_period_frames()
+    {
+        restored.replica.limits.canonical_hash_period_frames = period;
+    }
     let checkpoint_period_frames = restored.replica.limits.checkpoint_period_frames;
 
     let routes = routes_from_wal(reader, &owner, from, to)?;
@@ -374,11 +436,12 @@ pub fn replay_runtime_wal(
     )
     .map_err(|error| format!("RUNTIME_REPLAY_PROCESSOR:{error}"))?;
 
-    let initial_accounts_root = processor
-        .replica()
-        .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{error}"))?
-        .state
-        .accounts_root;
+    let initial_accounts_root = sole_entity_state(
+        processor
+            .replica()
+            .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{error}"))?,
+    )?
+    .accounts_root;
     let mut metrics = RuntimeReplayMetrics {
         frames: 0,
         ingress: 0,
@@ -402,6 +465,7 @@ pub fn replay_runtime_wal(
     };
 
     let replay_started = Instant::now();
+    let mut committed_next = from;
     // Frame N+1..N+DEPTH raw rows are read ahead on this thread (cheap
     // LevelDB gets) while a decode thread runs the exact parse, hash and
     // digest verification `concrete_wal_source` always ran. Nothing about
@@ -502,11 +566,19 @@ pub fn replay_runtime_wal(
             metrics.projection_elapsed += report.timings.projection;
             metrics.storage_elapsed += report.timings.storage;
             metrics.publication_elapsed += report.timings.publication;
-            if report.durable_height != Some(height) {
-                return Err(format!(
-                    "RUNTIME_REPLAY_DURABLE_HEIGHT:{height}:{:?}",
-                    report.durable_height,
-                ));
+            // The committer pipelines exactly one frame: this call reports
+            // the previous frame's completed commit. Every replayed height
+            // must still commit exactly once, in order; the terminal
+            // `sync_committed` below closes the final gap.
+            if let Some(committed) = report.durable_height {
+                if committed != committed_next {
+                    return Err(format!(
+                        "RUNTIME_REPLAY_DURABLE_HEIGHT:{height}:committed={committed}:expected={committed_next}",
+                    ));
+                }
+                committed_next = committed
+                    .checked_add(1)
+                    .ok_or_else(|| "RUNTIME_REPLAY_DURABLE_HEIGHT_OVERFLOW".to_string())?;
             }
             let commitments = report
                 .commitments
@@ -516,7 +588,13 @@ pub fn replay_runtime_wal(
                 let replica = processor
                     .replica()
                     .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_REPLICA:{error}"))?;
-                let actual_sections = replica
+                let entity_replica =
+                    sole_entity_replica(replica).map_err(|error| format!("{summary}:{error}"))?;
+                let entity_state =
+                    sole_entity_state(replica).map_err(|error| format!("{summary}:{error}"))?;
+                let entity_commitment = sole_entity_commitment(commitments)
+                    .map_err(|error| format!("{summary}:{error}"))?;
+                let actual_sections = entity_replica
                     .entity_consensus
                     .state
                     .sections
@@ -527,16 +605,16 @@ pub fn replay_runtime_wal(
                 eprintln!("RUNTIME_REPLAY_ACTUAL_ENTITY_SECTIONS:{height}:{actual_sections}");
                 eprintln!(
                     "RUNTIME_REPLAY_ACTUAL_ENTITY_COMMAND_NONCES:{height}:{:?}",
-                    replica.state.entity.entity_command_nonces,
+                    entity_state.entity.entity_command_nonces,
                 );
                 eprintln!(
                     "RUNTIME_REPLAY_ACTUAL_ENTITY_FRAME:{height}:hash={}:root={}",
-                    hex(&commitments.certified_entity_frame_hash),
-                    hex(&commitments.entity_state_root),
+                    hex(&entity_commitment.certified_frame_hash),
+                    hex(&entity_commitment.state_root),
                 );
-                let actual_replica_meta = replica.replica_metadata().clone();
+                let actual_replica_meta = entity_replica.replica_metadata().clone();
                 let actual_entity_sections = Value::Object(Map::from_iter(
-                    replica
+                    entity_replica
                         .entity_consensus
                         .state
                         .sections
@@ -579,17 +657,52 @@ pub fn replay_runtime_wal(
             add(&mut metrics.effect_digests_compared, 1, "effects")?;
             add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
             add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
-            metrics.accounts_root = hex(&commitments.accounts_root);
+            metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
         }
         Ok(())
     });
     loop_result?;
+    // Close the one-frame committer pipeline inside the timed window: the
+    // final frame is only counted replayed once its commit outcome landed.
+    let final_commit = processor
+        .sync_committed()
+        .map_err(|error| format!("RUNTIME_REPLAY_FINAL_COMMIT:{error}"))?;
+    if let Some(final_commit) = final_commit {
+        let committed = final_commit
+            .durable_height
+            .ok_or_else(|| "RUNTIME_REPLAY_FINAL_COMMIT_HEIGHT".to_string())?;
+        if committed != committed_next {
+            return Err(format!(
+                "RUNTIME_REPLAY_FINAL_COMMIT_HEIGHT:committed={committed}:expected={committed_next}",
+            ));
+        }
+        committed_next = committed
+            .checked_add(1)
+            .ok_or_else(|| "RUNTIME_REPLAY_DURABLE_HEIGHT_OVERFLOW".to_string())?;
+        metrics.egress = metrics
+            .egress
+            .checked_add(
+                u64::try_from(final_commit.outputs_published)
+                    .map_err(|_| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?,
+            )
+            .ok_or_else(|| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?;
+        metrics.storage_elapsed += final_commit.timings.storage;
+        metrics.publication_elapsed += final_commit.timings.publication;
+    }
+    if committed_next != to + 1 {
+        return Err(format!(
+            "RUNTIME_REPLAY_COMMIT_GAP:committed_through={}:expected={to}",
+            committed_next.saturating_sub(1),
+        ));
+    }
     metrics.elapsed = replay_started.elapsed();
-    metrics.account_phase_metrics = processor
-        .replica()
-        .map_err(|error| format!("RUNTIME_REPLAY_PHASE_METRICS:{error}"))?
-        .accounts
-        .account_phase_metrics();
+    metrics.account_phase_metrics = sole_entity_replica(
+        processor
+            .replica()
+            .map_err(|error| format!("RUNTIME_REPLAY_PHASE_METRICS:{error}"))?,
+    )?
+    .accounts
+    .account_phase_metrics();
 
     let expected_frames = to - from + 1;
     if metrics.frames != expected_frames
@@ -613,11 +726,12 @@ pub fn replay_runtime_wal(
         .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?
         .state
         .height;
-    let expected_accounts_root = processor
-        .replica()
-        .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?
-        .state
-        .accounts_root;
+    let expected_accounts_root = sole_entity_state(
+        processor
+            .replica()
+            .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?,
+    )?
+    .accounts_root;
     let expected_lineage = processor
         .replica()
         .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?
@@ -637,15 +751,16 @@ pub fn replay_runtime_wal(
         .processor
         .replica()
         .map_err(|error| format!("RUNTIME_REPLAY_RESTART_REPLICA:{error}"))?;
+    let actual_accounts_root = sole_entity_state(actual)?.accounts_root;
     if actual.state.height != expected_height
-        || actual.state.accounts_root != expected_accounts_root
+        || actual_accounts_root != expected_accounts_root
         || actual.durable.prev_frame_hash() != expected_lineage
     {
         return Err(format!(
             "RUNTIME_REPLAY_RESTART_MISMATCH:height={}/{}:accounts={}/{}:lineage={}/{}",
             actual.state.height,
             expected_height,
-            hex(&actual.state.accounts_root),
+            hex(&actual_accounts_root),
             hex(&expected_accounts_root),
             hex(&actual.durable.prev_frame_hash()),
             hex(&expected_lineage),

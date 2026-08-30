@@ -1,7 +1,8 @@
 use xln_rscore_protocol::CanonicalValue;
 
 use crate::{
-    CanonicalEntityTx, EntityTxKind, LocalEntityFinancialTx, decode_local_entity_financial_tx,
+    CanonicalEntityTx, EntityPropose, EntityTxKind, EntityVote, EntityVoteChoice,
+    LocalEntityControlTx, LocalEntityTx, decode_local_entity_tx,
 };
 
 use super::hash::{
@@ -30,7 +31,7 @@ fn assert_canonical_signature(signature: &[u8; 65]) -> Result<(), EntityCommandE
 
 fn decode_native_action_txs(
     value: &CanonicalValue,
-) -> Result<Vec<LocalEntityFinancialTx>, EntityCommandError> {
+) -> Result<Vec<LocalEntityTx>, EntityCommandError> {
     let CanonicalValue::Array(txs) = value else {
         return Err(invalid(
             "ENTITY_COLLECTIVE_ACTION_TX_COUNT_INVALID:not-array",
@@ -65,7 +66,7 @@ fn decode_native_action_txs(
         )
         .map_err(|error| invalid(error.to_string()))?;
         output.push(
-            decode_local_entity_financial_tx(&tx)
+            decode_local_entity_tx(&tx)
                 .map_err(|error| invalid(error.to_string()))?
                 .ok_or_else(|| invalid(format!("ENTITY_TX_NATIVE_UNSUPPORTED:{kind_text}")))?,
         );
@@ -73,37 +74,34 @@ fn decode_native_action_txs(
     Ok(output)
 }
 
-fn decode_proposal(
-    tx: &CanonicalValue,
-    author: &str,
-) -> Result<Vec<LocalEntityFinancialTx>, EntityCommandError> {
-    let tx = object(tx, "command.tx")?;
-    exact_fields(tx, &["type", "data"], "command.tx")?;
-    let kind = string(
-        field(tx, "type", "command.tx")?,
-        "ENTITY_COMMAND_TX_INVALID",
-    )?;
-    if kind != "propose" {
-        return Err(invalid(format!(
-            "ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:{kind}"
-        )));
-    }
-    let data = object(field(tx, "data", "command.tx")?, "command.propose")?;
-    exact_fields(data, &["proposer", "action"], "command.propose")?;
-    let proposer = signer(field(data, "proposer", "command.propose")?)?;
-    if proposer != author {
-        return Err(invalid(format!(
-            "ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:propose.proposer:{proposer}:{author}"
-        )));
-    }
-    let action = object(field(data, "action", "command.propose")?, "proposal.action")?;
+/// Decode the action body retained in committed proposal state. This is the
+/// single nested EntityTx decoder used both at proposal admission and when a
+/// later vote reaches quorum.
+pub(crate) fn decode_collective_action_txs(
+    action: &CanonicalValue,
+) -> Result<Vec<LocalEntityTx>, EntityCommandError> {
+    let action = object(action, "proposal.action")?;
     exact_fields(action, &["type", "data"], "proposal.action")?;
-    if string(
+    let kind = string(
         field(action, "type", "proposal.action")?,
         "ENTITY_PROPOSAL_ACTION_TYPE_INVALID",
-    )? != "entity_transaction"
-    {
-        return Err(invalid("ENTITY_PROPOSAL_ACTION_TYPE_INVALID"));
+    )?;
+    if kind == "collective_message" {
+        let data = object(
+            field(action, "data", "proposal.action")?,
+            "proposal.action.data",
+        )?;
+        exact_fields(data, &["message"], "proposal.action.data")?;
+        let _ = string(
+            field(data, "message", "proposal.action.data")?,
+            "ENTITY_PROPOSAL_MESSAGE_DATA_INVALID",
+        )?;
+        return Ok(Vec::new());
+    }
+    if kind != "entity_transaction" {
+        return Err(invalid(format!(
+            "ENTITY_PROPOSAL_ACTION_TYPE_INVALID:{kind}"
+        )));
     }
     let data = object(
         field(action, "data", "proposal.action")?,
@@ -138,6 +136,105 @@ fn decode_proposal(
         )));
     }
     decode_native_action_txs(&CanonicalValue::Array(txs.clone()))
+}
+
+fn decode_proposal(
+    tx: &CanonicalValue,
+    author: &str,
+    board_hash: &str,
+    board_epoch: u64,
+    command_nonce: &num_bigint::BigInt,
+) -> Result<LocalEntityTx, EntityCommandError> {
+    let tx = object(tx, "command.tx")?;
+    exact_fields(tx, &["type", "data"], "command.tx")?;
+    let kind = string(
+        field(tx, "type", "command.tx")?,
+        "ENTITY_COMMAND_TX_INVALID",
+    )?;
+    if kind != "propose" {
+        return Err(invalid(format!(
+            "ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:{kind}"
+        )));
+    }
+    let data = object(field(tx, "data", "command.tx")?, "command.propose")?;
+    exact_fields(data, &["proposer", "action"], "command.propose")?;
+    let proposer = signer(field(data, "proposer", "command.propose")?)?;
+    if proposer != author {
+        return Err(invalid(format!(
+            "ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:propose.proposer:{proposer}:{author}"
+        )));
+    }
+    let action = field(data, "action", "command.propose")?.clone();
+    let _ = decode_collective_action_txs(&action)?;
+    Ok(LocalEntityTx::Control(LocalEntityControlTx::Propose(
+        EntityPropose {
+            proposer,
+            action,
+            board_hash: board_hash.to_string(),
+            board_epoch,
+            command_nonce: command_nonce.clone(),
+        },
+    )))
+}
+
+fn decode_vote(
+    tx: &CanonicalValue,
+    author: &str,
+    board_hash: &str,
+    board_epoch: u64,
+) -> Result<LocalEntityTx, EntityCommandError> {
+    let tx = object(tx, "command.tx")?;
+    exact_fields(tx, &["type", "data"], "command.tx")?;
+    let kind = string(
+        field(tx, "type", "command.tx")?,
+        "ENTITY_COMMAND_TX_INVALID",
+    )?;
+    if kind != "vote" {
+        return Err(invalid(format!(
+            "ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:{kind}"
+        )));
+    }
+    let data = object(field(tx, "data", "command.tx")?, "command.vote")?;
+    if data.len() != 3 && data.len() != 4 {
+        return Err(invalid("ENTITY_PROPOSAL_VOTE_FIELDS_INVALID"));
+    }
+    for required in ["proposalId", "voter", "choice"] {
+        let _ = field(data, required, "command.vote")?;
+    }
+    let voter = signer(field(data, "voter", "command.vote")?)?;
+    if voter != author {
+        return Err(invalid(format!(
+            "ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:vote.voter:{voter}:{author}"
+        )));
+    }
+    let choice = match string(
+        field(data, "choice", "command.vote")?,
+        "ENTITY_PROPOSAL_VOTE_CHOICE_INVALID",
+    )?
+    .as_str()
+    {
+        "yes" => EntityVoteChoice::Yes,
+        "no" => EntityVoteChoice::No,
+        _ => return Err(invalid("ENTITY_PROPOSAL_VOTE_CHOICE_INVALID")),
+    };
+    let comment = data
+        .iter()
+        .find_map(|(key, value)| (key == "comment").then_some(value))
+        .map(|value| string(value, "ENTITY_PROPOSAL_VOTE_COMMENT_INVALID"))
+        .transpose()?;
+    Ok(LocalEntityTx::Control(LocalEntityControlTx::Vote(
+        EntityVote {
+            proposal_id: string(
+                field(data, "proposalId", "command.vote")?,
+                "ENTITY_PROPOSAL_VOTE_TARGET_INVALID",
+            )?,
+            voter,
+            choice,
+            comment,
+            board_hash: board_hash.to_string(),
+            board_epoch,
+        },
+    )))
 }
 
 pub fn decode_signed_entity_command(
@@ -207,7 +304,20 @@ pub fn decode_signed_entity_command(
     }
     let mut native_txs = Vec::new();
     for tx in &txs {
-        native_txs.extend(decode_proposal(tx, &author_signer_id)?);
+        let fields = object(tx, "command.tx")?;
+        let kind = string(
+            field(fields, "type", "command.tx")?,
+            "ENTITY_COMMAND_TX_INVALID",
+        )?;
+        native_txs.push(match kind.as_str() {
+            "propose" => decode_proposal(tx, &author_signer_id, &board_hash, board_epoch, &nonce)?,
+            "vote" => decode_vote(tx, &author_signer_id, &board_hash, board_epoch)?,
+            _ => {
+                return Err(invalid(format!(
+                    "ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:{kind}"
+                )));
+            }
+        });
     }
     let signature_text = canonical_hex::<65>(
         field(command, "signature", "command")?,

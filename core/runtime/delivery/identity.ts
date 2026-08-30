@@ -116,7 +116,7 @@ const senderAccountForProposal = (
  * Asking whether the sender still holds the frame covers both terminals
  * (commit and rollback) with one question and cannot leave a duplicate behind.
  *
- * A `frame_ack` also carries the ACK for the previous height. That ACK is still
+ * A `ack_frame` also carries the ACK for the previous height. That ACK is still
  * owed after the successor proposal leaves `pendingFrame`. Pruning the whole
  * envelope then strands the peer as proposer: receiver idle, proposer pending.
  */

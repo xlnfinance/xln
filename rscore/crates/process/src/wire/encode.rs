@@ -1,7 +1,6 @@
 //! Reply and Account transition encoder for the process ABI.
 
 use xln_rscore_abi::{AbiValue, BodyTuple};
-use xln_rscore_batch::{BatchResponse, BatchVerdict, IndexedOutput, IndexedResult, PreparedBatch};
 use xln_rscore_engine::{AccountOutput, DeliveryMode};
 
 pub fn hello(
@@ -30,194 +29,26 @@ pub fn hello(
     ])
 }
 
-pub fn loaded(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        AbiValue::Bytes(accounts_root.to_vec()),
-    ])
-}
-
-pub fn prepared(
-    candidate: &PreparedBatch,
-    engine_micros: u64,
-    candidate_token: &[u8; 32],
+pub fn loaded(
+    revision: u64,
+    accounts_root: [u8; 32],
+    checkpoint: Option<&xln_rscore_batch::AccountsCheckpoint>,
 ) -> Result<BodyTuple, crate::ProcessError> {
-    let roots = candidate.payment_profile_roots()?;
     Ok(body(vec![
-        integer(candidate.base_revision()),
-        integer(candidate.next_revision()),
-        tuple(candidate.results().iter().map(result).collect()),
-        tuple(candidate.outputs().iter().map(output).collect()),
-        tuple(
-            roots
-                .into_iter()
-                .map(|root| {
-                    tuple(vec![
-                        AbiValue::Bytes(root.account_id.as_bytes().to_vec()),
-                        AbiValue::Bytes(root.payment_profile_root.to_vec()),
-                    ])
-                })
-                .collect(),
-        ),
-        integer(engine_micros),
-        // Ephemeral process capability. It is outside every financial digest
-        // and is stripped by the client before exposing the prepared result.
-        AbiValue::Bytes(candidate_token.to_vec()),
-    ]))
-}
-
-pub fn committed(response: &BatchResponse) -> BodyTuple {
-    body(vec![
-        integer(response.committed_revision),
-        AbiValue::Bytes(response.accounts_root.to_vec()),
-    ])
-}
-
-pub fn upserted(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
-    body(vec![
         integer(revision),
         AbiValue::Bytes(accounts_root.to_vec()),
-    ])
-}
-
-pub fn aborted(revision: u64) -> BodyTuple {
-    body(vec![integer(revision)])
+        crate::checkpoint_wire::changes(checkpoint)?,
+    ]))
 }
 
 pub fn shutdown() -> BodyTuple {
     body(Vec::new())
 }
 
-pub fn capacity_rows(
-    revision: u64,
-    rows: &[Option<xln_rscore_engine::DeltaPerspective>],
-) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        tuple(
-            rows.iter()
-                .map(|row| match row {
-                    None => AbiValue::Nil,
-                    Some(view) => tuple(vec![
-                        AbiValue::Text(view.in_capacity.to_string()),
-                        AbiValue::Text(view.out_capacity.to_string()),
-                        AbiValue::Text(view.own_credit_limit.to_string()),
-                        AbiValue::Text(view.peer_credit_limit.to_string()),
-                    ]),
-                })
-                .collect(),
-        ),
-    ])
-}
-
-/// Exact committed replica fields used by the TypeScript shadow diagnostic.
-/// Tag 18 has owned this reply shape since wire=13. Preserve it so enabling
-/// diagnostics cannot change the process transcript or persisted fingerprint.
-pub fn account_envelope(revision: u64, envelope: &xln_rscore_engine::AccountEnvelope) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        tuple(
-            envelope
-                .fields()
-                .iter()
-                .map(|(name, value)| {
-                    tuple(vec![
-                        AbiValue::Text(name.clone()),
-                        xln_rscore_batch::encode_canonical_value(value),
-                    ])
-                })
-                .collect(),
-        ),
-    ])
-}
-
-pub fn summary_page(
-    revision: u64,
-    rows: &[xln_rscore_batch::AccountSummaryRow],
-    next_cursor: Option<xln_rscore_batch::AccountId>,
-    totals: &xln_rscore_batch::EngineTotals,
-) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        tuple(
-            rows.iter()
-                .map(|row| {
-                    tuple(vec![
-                        AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
-                        AbiValue::Integer(match row.owner_side {
-                            xln_rscore_engine::Side::Left => 0,
-                            xln_rscore_engine::Side::Right => 1,
-                        }),
-                        integer(row.delta_rows),
-                        integer(row.htlc_locks),
-                        AbiValue::Bytes(row.deltas_root.to_vec()),
-                        AbiValue::Bytes(row.htlc_locks_root.to_vec()),
-                        AbiValue::Bytes(row.account_state_root.to_vec()),
-                        AbiValue::Bytes(row.swap_offers_root.to_vec()),
-                        AbiValue::Bytes(row.rebalance_fee_policies_root.to_vec()),
-                        AbiValue::Bytes(row.entity_account_leaf.to_vec()),
-                        AbiValue::Bytes(row.mempool_root.to_vec()),
-                        integer(row.mempool_len),
-                    ])
-                })
-                .collect(),
-        ),
-        match next_cursor {
-            None => AbiValue::Nil,
-            Some(cursor) => AbiValue::Bytes(cursor.as_bytes().to_vec()),
-        },
-        tuple(vec![
-            integer(totals.accounts),
-            integer(totals.htlc_locks),
-            tuple(
-                totals
-                    .tokens
-                    .iter()
-                    .map(|token| {
-                        tuple(vec![
-                            AbiValue::Integer(i128::from(token.token_id.get())),
-                            integer(token.rows),
-                            AbiValue::Text(token.collateral.to_string()),
-                            AbiValue::Text(token.owner_in_capacity.to_string()),
-                            AbiValue::Text(token.owner_out_capacity.to_string()),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ]),
-    ])
-}
-
 pub fn error(error: &crate::ProcessError) -> BodyTuple {
     body(vec![
         AbiValue::Text(error.code().into()),
         AbiValue::Text(error.to_string()),
-    ])
-}
-
-fn result(value: &IndexedResult) -> AbiValue {
-    let verdict = match &value.verdict {
-        BatchVerdict::Applied => tuple(vec![AbiValue::Integer(0)]),
-        BatchVerdict::Rejected(rejection) => tuple(vec![
-            AbiValue::Integer(1),
-            AbiValue::Text(rejection.code().into()),
-            AbiValue::Text(rejection.message()),
-        ]),
-    };
-    tuple(vec![
-        AbiValue::Integer(i128::from(value.input_index)),
-        AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
-        verdict,
-        tuple(value.events.iter().cloned().map(AbiValue::Text).collect()),
-    ])
-}
-
-fn output(value: &IndexedOutput) -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(i128::from(value.input_index)),
-        AbiValue::Integer(i128::from(value.output_index)),
-        AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
-        account_output(&value.output),
     ])
 }
 
@@ -244,7 +75,7 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             trusted_gateway_entity_id,
         } => tuple(vec![
             AbiValue::Integer(0),
-            AbiValue::Integer(i128::from(token_id.get())),
+            integer(token_id.get()),
             AbiValue::Text(amount.to_string()),
             tuple(route.iter().cloned().map(AbiValue::Text).collect()),
             optional_text(description),
@@ -265,7 +96,7 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             AbiValue::Text(lock_id.clone()),
             AbiValue::Text(hashlock.clone()),
             AbiValue::Text(secret.clone()),
-            AbiValue::Integer(i128::from(token_id.get())),
+            integer(token_id.get()),
             AbiValue::Text(amount.to_string()),
         ]),
         AccountOutput::SwapOfferUpsert { offer } => tuple(vec![
@@ -287,6 +118,10 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             integer(offer.created_height),
             AbiValue::Text(offer.quantized_give.to_string()),
             AbiValue::Text(offer.quantized_want.to_string()),
+            offer
+                .cross_jurisdiction
+                .as_ref()
+                .map_or(AbiValue::Nil, xln_rscore_batch::encode_canonical_value),
         ]),
         AccountOutput::SwapOfferRemove {
             offer_id,
@@ -309,7 +144,7 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             AbiValue::Integer(2),
             AbiValue::Text(lock_id.clone()),
             AbiValue::Text(hashlock.clone()),
-            AbiValue::Integer(i128::from(token_id.get())),
+            integer(token_id.get()),
             AbiValue::Text(amount.to_string()),
             optional_text(reason),
         ]),
@@ -513,7 +348,10 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
     let proposed = match row.proposed.as_ref() {
         None => AbiValue::Nil,
         Some(proposed) => {
-            let mut fields = frame_fields(&proposed.frame, proposed.state_hash)?;
+            let frame = row
+                .incoming_ref()
+                .ok_or(crate::ProcessError::Expected("proposal.outboundInput"))?;
+            let mut fields = frame_fields(&frame.frame, proposed.state_hash)?;
             fields.push(AbiValue::Bytes(proposed.hanko.clone()));
             tuple(fields)
         }
@@ -546,7 +384,12 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
         }),
         tuple(match row.proposed.as_ref() {
             None => Vec::new(),
-            Some(proposed) => proposed.outputs.iter().map(account_output).collect(),
+            Some(proposed) => proposed
+                .outputs_by_tx
+                .iter()
+                .flatten()
+                .map(account_output)
+                .collect(),
         }),
         tuple(
             row.failed_htlc_locks
@@ -692,7 +535,6 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             ack_hanko,
             ack_dispute_signature: _,
             ack_dispute_hanko: _,
-            outputs,
             events,
             rolled_back,
             committed_frame: evidence,
@@ -702,7 +544,14 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
             AbiValue::Bytes(ack_hanko.clone()),
-            tuple(outputs.iter().map(account_output).collect()),
+            tuple(
+                evidence
+                    .outputs_by_tx
+                    .iter()
+                    .flatten()
+                    .map(account_output)
+                    .collect(),
+            ),
             match rolled_back {
                 None => AbiValue::Nil,
                 Some(rolled_back) => tuple(vec![
@@ -764,14 +613,20 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
         AccountInputVerdict::AckCommitted {
             height,
             state_hash,
-            outputs,
             events,
             committed_frame: evidence,
         } => tuple(vec![
             integer(5),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
-            tuple(outputs.iter().map(account_output).collect()),
+            tuple(
+                evidence
+                    .outputs_by_tx
+                    .iter()
+                    .flatten()
+                    .map(account_output)
+                    .collect(),
+            ),
             committed_frame(evidence, *state_hash)?,
             frame_events(events),
         ]),
@@ -782,20 +637,20 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
         AccountInputVerdict::Failed(message) => {
             tuple(vec![integer(8), AbiValue::Text(message.clone())])
         }
-        AccountInputVerdict::FrameAckApplied { ack, frame } => {
+        AccountInputVerdict::AckFrameApplied { ack, frame } => {
             if !is_ack_verdict(ack) {
-                return Err(crate::ProcessError::Expected("frameAckAckVerdict"));
+                return Err(crate::ProcessError::Expected("ackFrameAckVerdict"));
             }
             if !is_frame_verdict(frame) {
-                return Err(crate::ProcessError::Expected("frameAckFrameVerdict"));
+                return Err(crate::ProcessError::Expected("ackFrameFrameVerdict"));
             }
             tuple(vec![integer(9), verdict(ack)?, verdict(frame)?])
         }
-        AccountInputVerdict::FrameAckRejected { phase, reason } => tuple(vec![
+        AccountInputVerdict::AckFrameRejected { phase, reason } => tuple(vec![
             integer(10),
             integer(match phase {
-                xln_rscore_engine::FrameAckPhase::Ack => 0,
-                xln_rscore_engine::FrameAckPhase::Frame => 1,
+                xln_rscore_engine::AckFramePhase::Ack => 0,
+                xln_rscore_engine::AckFramePhase::Frame => 1,
             }),
             AbiValue::Text(reason.clone()),
         ]),

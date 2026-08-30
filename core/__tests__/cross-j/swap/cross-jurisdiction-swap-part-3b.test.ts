@@ -5,7 +5,7 @@ import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../../../entity/tx/apply';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 

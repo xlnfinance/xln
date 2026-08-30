@@ -100,6 +100,13 @@ const readText = (path: string): string => {
       'core/orchestrator/bootstrap/bootstrap-timeline.ts',
       'core/orchestrator/bootstrap/bootstrap-timeline-stages.ts',
     ],
+    'core/orchestrator/orchestrator.ts': [
+      'core/orchestrator/orchestrator.ts',
+      'core/orchestrator/process/spawn/hub.ts',
+      'core/orchestrator/process/spawn/market-maker.ts',
+      'core/orchestrator/replica-import/runtime-import-controller.ts',
+      'core/orchestrator/support/runtime-support.ts',
+    ],
     'core/__tests__/audit-failfast-regressions.test.ts': [
       'core/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts',
       'core/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts',

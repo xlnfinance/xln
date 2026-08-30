@@ -19,7 +19,6 @@ export type CanonicalFrameEntityHash = {
 
 const VOLATILE_FIELDS = new Set([
   'ethersProvider',
-  'frameHistory',
   'provider',
 ]);
 

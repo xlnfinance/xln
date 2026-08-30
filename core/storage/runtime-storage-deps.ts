@@ -20,7 +20,6 @@ export type RuntimeStorageApiDeps =
     ): NonNullable<RuntimeReplica['infrastructure']>;
     getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
     getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
-    getHistoryViewDb(env: RuntimeReplica): Level<Buffer, Buffer>;
     tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
     rotateStorageEpochDb(
       env: RuntimeReplica,
@@ -28,7 +27,6 @@ export type RuntimeStorageApiDeps =
       timestamp?: number,
     ): Promise<boolean>;
     tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
-    tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
     waitForPromiseBeforeTimeout<T>(
       promise: Promise<T>,
       timeoutMs: number,

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
@@ -14,7 +15,7 @@ pub struct DirectRoute {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct DirectRouteTable(BTreeMap<String, String>);
+pub struct DirectRouteTable(Arc<BTreeMap<String, String>>);
 
 impl DirectRouteTable {
     pub fn new(
@@ -30,7 +31,7 @@ impl DirectRouteTable {
                 return Err(RuntimeTransportError::Route(format!("duplicate:{target}")));
             }
         }
-        Ok(Self(output))
+        Ok(Self(Arc::new(output)))
     }
 
     pub(super) fn url(&self, target: &str) -> Result<&str, RuntimeTransportError> {
@@ -43,10 +44,6 @@ impl DirectRouteTable {
     #[cfg(test)]
     pub(crate) fn contains(&self, target: &str) -> bool {
         self.0.contains_key(target)
-    }
-
-    pub(crate) fn targets(&self) -> impl Iterator<Item = &str> {
-        self.0.keys().map(String::as_str)
     }
 }
 
@@ -77,24 +74,58 @@ pub(super) fn prepare_envelopes(
     max_rows: usize,
     max_plaintext_bytes: usize,
 ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
+    let values = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            crate::decode_storage_payload(row)
+                .map_err(|error| RuntimeTransportError::Outbox(format!("row={index}:{error}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    prepare_envelopes_from_values(
+        source_runtime_id,
+        rows,
+        values,
+        local_entity_signers,
+        max_rows,
+        max_plaintext_bytes,
+    )
+}
+
+/// Prepare immediate publication from the exact values that produced the
+/// synced outbox rows. `rows` remain the sole authority for byte counts and
+/// recovery; this transient path only deletes an encode-then-decode roundtrip.
+pub(super) fn prepare_envelopes_from_values(
+    source_runtime_id: &str,
+    rows: &[Vec<u8>],
+    values: Vec<Value>,
+    local_entity_signers: &BTreeMap<String, String>,
+    max_rows: usize,
+    max_plaintext_bytes: usize,
+) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
+    if values.len() != rows.len() {
+        return Err(RuntimeTransportError::Outbox(format!(
+            "resident-row-count:{}:{}",
+            values.len(),
+            rows.len()
+        )));
+    }
     let source = normalize_runtime_id(source_runtime_id)?;
     let mut groups = Vec::<(GroupKey, Vec<(usize, Value)>)>::new();
     let mut remote_rows = 0_usize;
     let mut remote_bytes = 0_usize;
-    for (index, row) in rows.iter().enumerate() {
-        let value = crate::decode_storage_payload(row)
-            .map_err(|error| RuntimeTransportError::Outbox(format!("row={index}:{error}")))?;
-        let object = value
-            .as_object()
-            .ok_or_else(|| RuntimeTransportError::Outbox(format!("row={index}:object")))?;
-        validate_output(object, index)?;
+    for (index, (value, row)) in values.into_iter().zip(rows).enumerate() {
+        let Value::Object(mut object) = value else {
+            return Err(RuntimeTransportError::Outbox(format!("row={index}:object")));
+        };
+        validate_output(&object, index)?;
         if object.contains_key("atomicCrossJurisdictionPair") {
             return Err(RuntimeTransportError::Outbox(format!(
                 "row={index}:cross-j-disabled"
             )));
         }
-        let entity_id = normalize_entity_id(required_text(object, "entityId", index)?)?;
-        let signer_id = required_text(object, "signerId", index)?.to_ascii_lowercase();
+        let entity_id = normalize_entity_id(required_text(&object, "entityId", index)?)?;
+        let signer_id = required_text(&object, "signerId", index)?.to_ascii_lowercase();
         let Some(target) = object.get("runtimeId") else {
             if local_entity_signers.get(&entity_id) != Some(&signer_id) {
                 return Err(RuntimeTransportError::Outbox(format!(
@@ -113,12 +144,11 @@ pub(super) fn prepare_envelopes(
                 "row={index}:self-route"
             )));
         }
-        let frame = required_object(object, "sourceRuntimeFrame", index)?;
+        let frame = required_object(&object, "sourceRuntimeFrame", index)?;
         let height = safe_u64(frame.get("height"), "height", index)?;
         let timestamp = safe_u64(frame.get("timestamp"), "timestamp", index)?;
-        let mut deliverable = object.clone();
-        deliverable.remove("sourceRuntimeFrame");
-        deliverable.remove("atomicCrossJurisdictionPair");
+        object.remove("sourceRuntimeFrame");
+        object.remove("atomicCrossJurisdictionPair");
         let key = (target, height, timestamp);
         if groups.last().is_none_or(|(current, _)| current != &key) {
             groups.push((key, Vec::new()));
@@ -127,7 +157,7 @@ pub(super) fn prepare_envelopes(
             .last_mut()
             .expect("group inserted above")
             .1
-            .push((index, Value::Object(deliverable)));
+            .push((index, Value::Object(object)));
         remote_rows = remote_rows
             .checked_add(1)
             .ok_or_else(|| RuntimeTransportError::Outbox("row-count-overflow".into()))?;

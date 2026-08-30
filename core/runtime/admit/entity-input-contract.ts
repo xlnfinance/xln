@@ -147,6 +147,7 @@ export type CrossJCommand =
   | {
       kind: 'entity-txs';
       sourceEntityId: string;
+      sourceSignerId: string;
       targetEntityId: string;
       targetSignerId: string;
       entityTxs: EntityTx[];

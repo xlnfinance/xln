@@ -31,7 +31,7 @@ import { commitRuntimeInput, processJEvents, waitScenario } from '../harness/hel
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { canonicalEntitySeed } from '../../runtime/registration/entity-creation';
-import { updateLatestRuntimeHistoryTraceForTesting } from '../../runtime/observability/history-retention';
+import { updateLatestRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
 
 let payRandomCounter = 0;
 const scenarioBoardSigner = (env: RuntimeReplica, alias: string): string => {
@@ -206,7 +206,7 @@ async function executeEvent(
   }
 
   // Narrative belongs only to an explicit scenario/browser trace collector.
-  updateLatestRuntimeHistoryTraceForTesting(env, latestSnapshot => {
+  updateLatestRuntimeTraceForTesting(env, latestSnapshot => {
     if (event.title) {
       latestSnapshot.meta = {
         ...(latestSnapshot.meta ?? {}),
@@ -996,7 +996,7 @@ function applyViewState(
   // Store in context for later application to an external frame trace.
   context.viewStateHistory.set(context.currentFrameIndex, viewState);
 
-  updateLatestRuntimeHistoryTraceForTesting(env, latestSnapshot => {
+  updateLatestRuntimeTraceForTesting(env, latestSnapshot => {
       // Map scenario entity IDs to actual addresses in viewState
       const mappedViewState: typeof viewState = { ...viewState };
       if (viewState.focus && context.entityMapping.has(viewState.focus)) {

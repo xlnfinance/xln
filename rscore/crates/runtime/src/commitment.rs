@@ -357,7 +357,7 @@ mod tests {
         };
         assert_eq!(
             compute_storage_post_state_hash(&input).expect("post-state hash"),
-            "0x8ca3f46f31430a9a3483a2a4ec92d42ca943051fbdf69e25a64ebedcb1065273",
+            "0x2f7c9a1d9756b3b107cb93b82f2e013f34566a817a48c1d5f177bc0307ba700a",
         );
     }
 
@@ -396,7 +396,7 @@ mod tests {
         };
         assert_eq!(
             compute_storage_post_state_hash(&input).expect("frame 55 post-state hash"),
-            "0xabf44991ae6430f31c4fba1cac6a216243120e4cd39b7c37581f2e6b0bb3e55e",
+            "0x75a32bf23c92c9e70bd34a39a38f3f7def1dead75e09418ced484995c73b6ca1",
         );
     }
 }

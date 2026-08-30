@@ -2,10 +2,10 @@ use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{
     AccountTx, DeliveryMode, Delta, HtlcDeliveryMode, HtlcResolveOutcome, JClaimNode, JClaimProof,
-    JurisdictionEvent, Side,
+    JurisdictionEvent, LendingAction, LendingTermId, ReserveSide, Side,
 };
 
-use super::{AccountWireEncodeError, integer, tuple};
+use super::{AccountWireEncodeError, encode_canonical_value, integer, tuple};
 
 pub fn encode_delta(value: &Delta) -> AbiValue {
     tuple(vec![
@@ -106,6 +106,7 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             min_net_receive,
             time_in_force,
             price_ticks,
+            cross_jurisdiction,
         } => vec![
             integer(6),
             AbiValue::Text(offer_id.clone()),
@@ -119,6 +120,9 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             encode_bigint(min_net_receive),
             time_in_force.map_or(AbiValue::Nil, integer),
             optional_bigint(price_ticks),
+            cross_jurisdiction
+                .as_ref()
+                .map_or(AbiValue::Nil, encode_canonical_value),
         ],
         AccountTx::SwapCancelRequest { offer_id } => {
             vec![integer(7), AbiValue::Text(offer_id.clone())]
@@ -176,45 +180,164 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             j_claim_proof(claim.left_proof.as_ref())?,
             j_claim_proof(claim.right_proof.as_ref())?,
         ],
-        other => {
-            return Err(AccountWireEncodeError::Unsupported(
-                xln_rscore_engine::StateError::UnsupportedFrameTx(
-                    xln_rscore_engine::unsupported_frame_tx_kind(other),
-                )
-                .to_string(),
-            ));
-        }
+        AccountTx::LendingFund {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+            token_id,
+            amount,
+            term_id,
+            interest_bps,
+        } => vec![
+            integer(10),
+            AbiValue::Text(position_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(lender_entity_id.clone()),
+            integer(token_id.get()),
+            encode_bigint(amount),
+            integer(lending_term(*term_id)),
+            integer(*interest_bps),
+        ],
+        AccountTx::LendingBorrowRequest {
+            request_id,
+            hub_entity_id,
+            borrower_entity_id,
+            token_id,
+            amount,
+            term_id,
+            max_interest_bps,
+        } => vec![
+            integer(11),
+            AbiValue::Text(request_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(borrower_entity_id.clone()),
+            integer(*token_id),
+            encode_bigint(amount),
+            integer(lending_term(*term_id)),
+            integer(*max_interest_bps),
+        ],
+        AccountTx::LendingRepay {
+            loan_id,
+            hub_entity_id,
+            borrower_entity_id,
+            token_id,
+            amount,
+        } => vec![
+            integer(12),
+            AbiValue::Text(loan_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(borrower_entity_id.clone()),
+            integer(token_id.get()),
+            encode_bigint(amount),
+        ],
+        AccountTx::LendingCredit {
+            action,
+            loan_id,
+            hub_entity_id,
+            borrower_entity_id,
+            token_id,
+            credit_limit,
+        } => vec![
+            integer(13),
+            integer(match action {
+                LendingAction::Grant => 0,
+                LendingAction::Revoke => 1,
+            }),
+            AbiValue::Text(loan_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(borrower_entity_id.clone()),
+            integer(token_id.get()),
+            encode_bigint(credit_limit),
+        ],
+        AccountTx::LendingCloseRequest {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+        } => vec![
+            integer(14),
+            AbiValue::Text(position_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(lender_entity_id.clone()),
+        ],
+        AccountTx::LendingClosePayout {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+            token_id,
+            amount,
+        } => vec![
+            integer(15),
+            AbiValue::Text(position_id.clone()),
+            AbiValue::Text(hub_entity_id.clone()),
+            AbiValue::Text(lender_entity_id.clone()),
+            integer(token_id.get()),
+            encode_bigint(amount),
+        ],
+        AccountTx::ReserveToCollateral {
+            token_id,
+            collateral,
+            ondelta,
+            side,
+            block_number,
+            transaction_hash,
+        } => vec![
+            integer(16),
+            integer(token_id.get()),
+            AbiValue::Text(collateral.clone()),
+            AbiValue::Text(ondelta.clone()),
+            integer(match side {
+                ReserveSide::Receiving => 0,
+                ReserveSide::Counterparty => 1,
+            }),
+            integer(*block_number),
+            AbiValue::Text(transaction_hash.clone()),
+        ],
+        AccountTx::RequestCollateral {
+            token_id,
+            amount,
+            fee_token_id,
+            fee_amount,
+            policy_version,
+        } => vec![
+            integer(17),
+            integer(token_id.get()),
+            encode_bigint(amount),
+            fee_token_id.map_or(AbiValue::Nil, |value| integer(value.get())),
+            encode_bigint(fee_amount),
+            integer(*policy_version),
+        ],
+        AccountTx::RebalanceRefund {
+            request_id,
+            request_token_id,
+            amount,
+            reason,
+        } => vec![
+            integer(18),
+            AbiValue::Text(request_id.clone()),
+            integer(request_token_id.get()),
+            encode_bigint(amount),
+            AbiValue::Text(reason.wire_name().to_owned()),
+        ],
+        AccountTx::CrossPullLock { data } => vec![integer(19), encode_canonical_value(data)],
+        AccountTx::CrossPullClose { data } => vec![integer(20), encode_canonical_value(data)],
+        AccountTx::CrossPullProgress { data } => vec![integer(21), encode_canonical_value(data)],
+        AccountTx::CrossSwapFillAck { data } => vec![integer(22), encode_canonical_value(data)],
+        AccountTx::SettleTransition { data } => vec![integer(23), encode_canonical_value(data)],
     };
     Ok(tuple(fields))
 }
 
-fn jurisdiction_event(value: &JurisdictionEvent) -> Result<AbiValue, AccountWireEncodeError> {
+const fn lending_term(value: LendingTermId) -> u8 {
     match value {
-        JurisdictionEvent::AccountSettled(event) => Ok(tuple(vec![
-            integer(0),
-            tuple(vec![
-                event.metadata.block_number.map_or(AbiValue::Nil, integer),
-                event
-                    .metadata
-                    .block_hash
-                    .map_or(AbiValue::Nil, |hash| AbiValue::Bytes(hash.to_vec())),
-                event
-                    .metadata
-                    .transaction_hash
-                    .map_or(AbiValue::Nil, |hash| AbiValue::Bytes(hash.to_vec())),
-                event.metadata.log_index.map_or(AbiValue::Nil, integer),
-                event.metadata.event_index.map_or(AbiValue::Nil, integer),
-            ]),
-            AbiValue::Bytes(event.left_entity.as_bytes().to_vec()),
-            AbiValue::Bytes(event.right_entity.as_bytes().to_vec()),
-            integer(event.token_id.get()),
-            encode_bigint(&event.left_reserve),
-            encode_bigint(&event.right_reserve),
-            encode_bigint(&event.collateral),
-            encode_bigint(&event.ondelta),
-            integer(event.nonce),
-        ])),
+        LendingTermId::OneHour => 0,
+        LendingTermId::OneDay => 1,
+        LendingTermId::OneMonth => 2,
     }
+}
+
+fn jurisdiction_event(value: &JurisdictionEvent) -> Result<AbiValue, AccountWireEncodeError> {
+    super::j_event::encode_jurisdiction_event(value)
+        .map_err(|error| AccountWireEncodeError::Unsupported(error.to_string()))
 }
 
 fn j_claim_proof(value: Option<&JClaimProof>) -> Result<AbiValue, AccountWireEncodeError> {

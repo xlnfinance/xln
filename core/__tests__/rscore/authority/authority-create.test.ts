@@ -49,9 +49,7 @@ const makeState = (): EntityState => ({
   accounts: PersistentEntityAccountMap.empty(OWNER, computeEntityAccountValueHash),
   lastFinalizedJHeight: 0,
   profile: { name: 'authority-create', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const makeContext = () => {

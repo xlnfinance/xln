@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import type { EntityTx } from '../../types/entity-tx';
 import type { JurisdictionEventData } from '../../types/jurisdiction-events';
 
@@ -6,7 +6,6 @@ export const MAX_ENTITY_FRAME_J_RANGE_BYTES = 10 * 1024 * 1024;
 
 const J_RANGE_FRAME_PAYLOAD_DOMAIN = 'xln.entity-frame.j-range-payload.v1';
 const ZERO_ACCOUNT_SIGNATURE = `0x${'00'.repeat(65)}`;
-const utf8Encoder = new TextEncoder();
 
 export type JRangeBody = Pick<
   JurisdictionEventData,
@@ -34,22 +33,18 @@ const jRangeTxs = (txs: readonly EntityTx[]): Array<Extract<EntityTx, { type: 'j
 
 /** Body-only measurement is exposed for boundary tests and pre-sign analysis. */
 export const canonicalJRangeBodiesByteLength = (ranges: readonly JRangeBody[]): number =>
-  utf8Encoder.encode(
-    encodeCanonicalConsensusValue({
+  encodeCanonicalConsensusBytes({
       domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
       version: 1,
       ranges: ranges.map(jRangeBody),
-    }),
-  ).byteLength;
+    }).byteLength;
 
 const canonicalJEventDataPayloadByteLength = (ranges: readonly JurisdictionEventData[]): number =>
-  utf8Encoder.encode(
-    encodeCanonicalConsensusValue({
+  encodeCanonicalConsensusBytes({
       domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
       version: 1,
       ranges,
-    }),
-  ).byteLength;
+    }).byteLength;
 
 export const canonicalEntityFrameJRangePayloadByteLength = (txs: readonly EntityTx[]): number =>
   canonicalJEventDataPayloadByteLength(jRangeTxs(txs).map(tx => tx.data));
@@ -101,7 +96,7 @@ export const getJRangeClaimsProposableBudgetError = (
   // Only `from` varies by proposer. Select its largest exact canonical string
   // once; re-encoding a near-10-MiB body for every validator is avoidable DoS.
   const signerByteLength = (signerId: string): number =>
-    utf8Encoder.encode(encodeCanonicalConsensusValue(signerId.trim().toLowerCase())).byteLength;
+    encodeCanonicalConsensusBytes(signerId.trim().toLowerCase()).byteLength;
   const longestSigner = proposerSignerIds.reduce((selected, candidate) =>
     signerByteLength(candidate) > signerByteLength(selected) ? candidate : selected,
   );

@@ -14,6 +14,21 @@ const RECORD_BASE: u8 = 0x40;
 const MAX_DEPTH: usize = 256;
 const MAX_CONTAINER_ENTRIES: usize = 2_000_000;
 const JS_MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+const HEX_BYTES_MIN_LENGTH: usize = 16;
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
+fn hex_text(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < HEX_BYTES_MIN_LENGTH {
+        return None;
+    }
+    let mut output = String::with_capacity(2 + bytes.len() * 2);
+    output.push_str("0x");
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    Some(output)
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum StorageMessagePackError {
@@ -198,6 +213,14 @@ impl<'a> Decoder<'a> {
         let payload = self.take(length)?.to_vec();
         match extension_type {
             0x72 => self.record_definition(&payload, depth),
+            0x48 => {
+                hex_text(&payload)
+                    .map(Value::String)
+                    .ok_or(StorageMessagePackError::Extension {
+                        extension_type,
+                        length,
+                    })
+            }
             0x73 if payload == [0] => match self.value(depth + 1)? {
                 Value::Array(values) => Ok(tagged("Set", Value::Array(values))),
                 _ => Err(StorageMessagePackError::RecordKeys),
@@ -488,6 +511,16 @@ mod tests {
         let value = decode_storage_payload(&payload).expect("decode records");
         assert_eq!(value[0]["x"], 1);
         assert_eq!(value[1]["x"], 2);
+    }
+
+    #[test]
+    fn decodes_canonical_hex_bytes_extension_back_to_string() {
+        let mut payload = vec![STORAGE_MAGIC];
+        payload.extend(bytes(&format!("c72048{}", "ab".repeat(32))));
+        assert_eq!(
+            decode_storage_payload(&payload).expect("decode canonical hex"),
+            Value::String(format!("0x{}", "ab".repeat(32))),
+        );
     }
 
     #[test]

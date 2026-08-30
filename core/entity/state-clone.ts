@@ -108,12 +108,12 @@ const cloneCrossJurisdictionState = (
   }
 };
 
-const forkHtlcRoute = (
-  route: EntityState['htlcRoutes'] extends Map<string, infer Value> ? Value : never,
+const forkPaybookEntry = (
+  entry: EntityState['paybook']['entries'] extends Map<string, infer Value> ? Value : never,
 ) => ({
-  ...route,
-  ...(route.crossJurisdictionRelay
-    ? { crossJurisdictionRelay: { ...route.crossJurisdictionRelay } }
+  ...entry,
+  ...(entry.crossJurisdictionRelay
+    ? { crossJurisdictionRelay: { ...entry.crossJurisdictionRelay } }
     : {}),
 });
 
@@ -126,8 +126,10 @@ const installGrowingEntityCollections = (
   target: EntityState,
   source: EntityState,
 ): void => {
-  target.htlcRoutes = new EntityCollectionCandidateMap(source.htlcRoutes, forkHtlcRoute);
-  target.lockBook = new EntityCollectionCandidateMap(source.lockBook, value => ({ ...value }));
+  target.paybook = {
+    entries: new EntityCollectionCandidateMap(source.paybook.entries, forkPaybookEntry),
+    feesEarned: source.paybook.feesEarned,
+  };
   if (source.crontabState) {
     target.crontabState = {
       tasks: new Map([...source.crontabState.tasks].map(([method, task]) => [
@@ -139,6 +141,21 @@ const installGrowingEntityCollections = (
         forkScheduledHook,
       ),
     };
+  }
+  if (source.deferredAccountProposals) {
+    target.deferredAccountProposals = new EntityCollectionCandidateMap(
+      source.deferredAccountProposals,
+      value => value,
+    );
+  }
+  if (source.settlementContinuations) {
+    target.settlementContinuations = new EntityCollectionCandidateMap(
+      source.settlementContinuations,
+      continuation => ({
+        ...continuation,
+        actions: continuation.actions.map(action => ({ ...action })),
+      }),
+    );
   }
   cloneCrossJurisdictionState(target, source);
 };
@@ -158,8 +175,7 @@ const isolateEntityFrameShell = (
   const {
     accounts: _accounts,
     orderbookExt: _orderbookExt,
-    htlcRoutes: _htlcRoutes,
-    lockBook: _lockBook,
+    paybook: _paybook,
     crontabState: _crontabState,
     jBatchState: _jBatchState,
     lending: _lending,
@@ -167,6 +183,8 @@ const isolateEntityFrameShell = (
     crossJurisdictionAuthorizations: _crossJurisdictionAuthorizations,
     pendingCrossJurisdictionFillAcks: _pendingCrossJurisdictionFillAcks,
     crossJurisdictionBookAdmissions: _crossJurisdictionBookAdmissions,
+    deferredAccountProposals: _deferredAccountProposals,
+    settlementContinuations: _settlementContinuations,
     ...boundedShell
   } = source;
   const isolatedShell = structuredCloneOrThrow(
@@ -178,8 +196,7 @@ const isolateEntityFrameShell = (
     // These shared roots are replaced by frame-owned candidates before the
     // shell escapes. Keeping their exact types here makes the boundary honest.
     accounts: source.accounts,
-    htlcRoutes: source.htlcRoutes,
-    lockBook: source.lockBook,
+    paybook: source.paybook,
   };
   if (isolated.entityId !== source.entityId) {
     throw new Error('ENTITY_FRAME_SHELL_ID_MISMATCH');
@@ -236,14 +253,17 @@ export const commitEntityFrameCandidateState = (
   if (state.orderbookExt) {
     state.orderbookExt = commitEntityOrderbookCandidate(state.orderbookExt);
   }
-  if (state.htlcRoutes instanceof EntityCollectionCandidateMap) {
-    state.htlcRoutes = state.htlcRoutes.sealCandidate();
-  }
-  if (state.lockBook instanceof EntityCollectionCandidateMap) {
-    state.lockBook = state.lockBook.sealCandidate();
+  if (state.paybook.entries instanceof EntityCollectionCandidateMap) {
+    state.paybook.entries = state.paybook.entries.sealCandidate();
   }
   if (state.crontabState?.hooks instanceof EntityCollectionCandidateMap) {
     state.crontabState.hooks = state.crontabState.hooks.sealCandidate();
+  }
+  if (state.deferredAccountProposals instanceof EntityCollectionCandidateMap) {
+    state.deferredAccountProposals = state.deferredAccountProposals.sealCandidate();
+  }
+  if (state.settlementContinuations instanceof EntityCollectionCandidateMap) {
+    state.settlementContinuations = state.settlementContinuations.sealCandidate();
   }
   if (state.crossJurisdictionSwaps instanceof EntityCollectionCandidateMap) {
     state.crossJurisdictionSwaps = state.crossJurisdictionSwaps.sealCandidate();

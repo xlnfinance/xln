@@ -1,11 +1,11 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use serde_json::Value;
 use xln_rscore_protocol::CanonicalValue;
 
 use super::{
-    AppliedRuntimeInput, RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits,
-    RuntimeMachineError, RuntimeMempool, RuntimeTx,
+    AppliedRuntimeInput, RuntimeEntityInput, RuntimeEntityKey, RuntimeFrameContext, RuntimeInput,
+    RuntimeLimits, RuntimeMachineError, RuntimeMempool, RuntimeTx,
 };
 
 pub struct SelectedRuntimeFrame {
@@ -89,7 +89,7 @@ fn cap_reached(current: usize, added: usize, cap: usize) -> Result<bool, Runtime
 pub fn select_runtime_frame(
     mempool: &mut RuntimeMempool,
     limits: RuntimeLimits,
-    entity_height: u64,
+    entity_heights: &BTreeMap<RuntimeEntityKey, u64>,
     mut frame: RuntimeFrameContext,
 ) -> Result<Option<SelectedRuntimeFrame>, RuntimeMachineError> {
     if mempool.is_empty() {
@@ -98,7 +98,7 @@ pub fn select_runtime_frame(
     frame.timestamp = mempool.queued_at.unwrap_or(frame.timestamp);
     let runtime_txs = mempool.runtime_txs.drain(..).collect::<Vec<_>>();
     let height_deferred =
-        apply_entity_height_durability_barrier(&mut mempool.entity_inputs, entity_height);
+        apply_entity_height_durability_barrier(&mut mempool.entity_inputs, entity_heights)?;
     let mut selected = Vec::new();
     let mut account_inputs = 0_usize;
     let mut wire_bytes = 0_usize;
@@ -165,7 +165,7 @@ pub fn select_runtime_frame(
             canonical_wire_bytes: wire_bytes,
             entity_txs_selected: 0,
             entity_txs_pending: 0,
-            wake: None,
+            wakes: Vec::new(),
         },
         entity_inputs: selected,
         frame,
@@ -213,45 +213,58 @@ fn scheduled_wake(input: &RuntimeEntityInput) -> Option<&CanonicalValue> {
 /// wake: two different `scheduledWake` bodies inside one merge group were
 /// computed from two different Entity frame starts, which closes the lane and
 /// defers the whole remaining tail in arrival order.
+struct LaneBarrier {
+    accepted_group: Option<Option<String>>,
+    accepted_wake: Option<CanonicalValue>,
+    closed: bool,
+}
+
 fn apply_entity_height_durability_barrier(
     inputs: &mut VecDeque<RuntimeEntityInput>,
-    entity_height: u64,
-) -> VecDeque<RuntimeEntityInput> {
+    entity_heights: &BTreeMap<RuntimeEntityKey, u64>,
+) -> Result<VecDeque<RuntimeEntityInput>, RuntimeMachineError> {
     let mut deferred = VecDeque::new();
-    if entity_height.checked_add(1).is_none() {
-        return deferred;
-    }
     let mut selected = VecDeque::with_capacity(inputs.len());
-    let mut accepted_group: Option<Option<String>> = None;
-    let mut accepted_wake: Option<CanonicalValue> = None;
-    let mut closed = false;
+    let mut lanes = BTreeMap::<RuntimeEntityKey, LaneBarrier>::new();
     while let Some(input) = inputs.pop_front() {
-        if closed {
+        let key = RuntimeEntityKey::new(*input.entity_id(), input.signer_id())?;
+        let height = entity_heights
+            .get(&key)
+            .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+        if height.checked_add(1).is_none() {
+            return Err(RuntimeMachineError::EntityHeightOverflow);
+        }
+        let lane = lanes.entry(key).or_insert(LaneBarrier {
+            accepted_group: None,
+            accepted_wake: None,
+            closed: false,
+        });
+        if lane.closed {
             deferred.push_back(input);
             continue;
         }
         let group = merge_group(&input);
         let wake = scheduled_wake(&input);
-        match accepted_group.as_ref() {
+        match lane.accepted_group.as_ref() {
             None => {
-                accepted_wake = wake.cloned();
-                accepted_group = Some(group);
+                lane.accepted_wake = wake.cloned();
+                lane.accepted_group = Some(group);
             }
             // A distinct merge group on a lane that carries no height
             // certificate still collapses into this Entity frame.
             Some(accepted) if *accepted != group => {}
-            Some(_) => match (wake, accepted_wake.as_ref()) {
+            Some(_) => match (wake, lane.accepted_wake.as_ref()) {
                 (Some(wake), Some(accepted)) if wake != accepted => {
-                    closed = true;
+                    lane.closed = true;
                     deferred.push_back(input);
                     continue;
                 }
-                (Some(wake), None) => accepted_wake = Some(wake.clone()),
+                (Some(wake), None) => lane.accepted_wake = Some(wake.clone()),
                 _ => {}
             },
         }
         selected.push_back(input);
     }
     *inputs = selected;
-    deferred
+    Ok(deferred)
 }

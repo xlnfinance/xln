@@ -204,6 +204,18 @@ impl Delta {
         Ok(())
     }
 
+    pub(crate) fn apply_dispute_finality(&mut self, token_was_finalized: bool) {
+        if token_was_finalized {
+            self.collateral = BigInt::from(0);
+            self.ondelta = BigInt::from(0);
+        }
+        self.offdelta = BigInt::from(0);
+        self.left_allowance = BigInt::from(0);
+        self.right_allowance = BigInt::from(0);
+        self.left_hold = BigInt::from(0);
+        self.right_hold = BigInt::from(0);
+    }
+
     pub fn perspective(&self, side: Side) -> DeltaPerspective {
         let left = self.left_perspective();
         if side == Side::Left {

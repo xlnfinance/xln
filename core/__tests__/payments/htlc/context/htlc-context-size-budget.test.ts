@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { LIMITS } from '../../../../config/constants';
-import { encodeCanonicalConsensusValue } from '../../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../../protocol/serialization/binary-codec';
 import { resolveRuntimeWsMaxMessageBytes, serializeWsMessage } from '../../../../network/p2p/ws-protocol';
 import { deriveEncryptionKeyPair, encryptPayload } from '../../../../protocol/crypto/p2p-crypto';
 import { parseProfile } from '../../../../entity/profile';
@@ -31,7 +31,7 @@ test('100-hop minimal full-profile context fits protocol but transport remains t
     gossipProfiles: Array.from({ length: 101 }, (_, index) => routeProfile(index)),
     peerAssertions: [], htlc: { version: 1, entries: [], originated: [] },
   };
-  const contextBytes = new TextEncoder().encode(encodeCanonicalConsensusValue(context)).byteLength;
+  const contextBytes = encodeCanonicalConsensusBytes(context).byteLength;
   expect(contextBytes).toBeLessThan(LIMITS.MAX_FRAME_SIZE_BYTES);
 
   const encryptedPayload = encryptPayload({ entityInputs: [{ entityId: id(1), signerId: address, entityTxs: [{ type: 'fixture', data: context }] }] }, deriveEncryptionKeyPair('context-size-target').publicKey);

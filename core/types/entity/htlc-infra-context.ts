@@ -7,7 +7,6 @@ export type PreparedHtlcInboundBinding = Readonly<{
   domain: AccountStateDomain;
   accountFrameHash: string;
   accountHeight: number;
-  lockId: string;
   envelopeHash: string;
   hashlock: string;
   tokenId: number;
@@ -60,7 +59,6 @@ export type PreparedOriginatedHtlcPayment = Readonly<{
   senderLockAmount: bigint;
   maxSenderDebit: bigint;
   totalFee: bigint;
-  lockId: string;
   timelock: bigint;
   revealBeforeHeight: number;
   nextHopEntityId: string;
@@ -74,4 +72,4 @@ export type HtlcPreparedInfraContext = Readonly<{
 }>;
 
 export const preparedHtlcBindingKey = (binding: PreparedHtlcInboundBinding): string =>
-  `${binding.accountFrameHash}:${binding.lockId}`;
+  `${binding.accountFrameHash}:${binding.hashlock}`;

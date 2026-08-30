@@ -13,7 +13,7 @@ import {
   entityId,
   jurisdictionName,
   signerId,
-} from '../../fixtures/j-submit/j-submit-durability-fixture';
+} from '../../fixtures/jurisdiction/j-submit-durability-fixture';
 
 const secondEntityId = `0x${'32'.repeat(32)}`;
 

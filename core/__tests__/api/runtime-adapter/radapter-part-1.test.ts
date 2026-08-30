@@ -198,8 +198,6 @@ const makeEnv = (): RuntimeReplica =>
                     rollbackCount: 0,
                     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
                     pendingWithdrawals: new Map(),
-                    swapOrderHistory: new Map(),
-                    swapClosedOrders: new Map(),
                     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
                   },
                 ],
@@ -207,9 +205,7 @@ const makeEnv = (): RuntimeReplica =>
               deferredAccountProposals: new Map(),
               lastFinalizedJHeight: 0,
               profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
-              htlcRoutes: new Map(),
-              htlcFeesEarned: 0n,
-              lockBook: new Map(),
+              paybook: { entries: new Map(), feesEarned: 0n },
               swapTradingPairs: [],
             },
           } as EntityReplica,
@@ -675,8 +671,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     })),
   };
   account.state.settlementWorkspace = { notes: 'w'.repeat(100_000) };
-  account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
-  account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
   account.state.swapOffers = new Map(
     Array.from({ length: 101 }, (_, index) => [
       `offer-${index}`,
@@ -729,8 +723,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     currentFrame: { accountTxs: unknown[]; deltas: unknown[] };
     settlementWorkspace?: unknown;
     swapOffers: Map<string, { offerId: string }>;
-    swapOrderHistory?: unknown;
-    swapClosedOrders?: unknown;
   }>({ env }, `entity/${entityId}/account/${counterpartyId}`);
   const historicalEntity = await resolveRuntimeAdapterRead<typeof liveEntity>(
     {
@@ -781,10 +773,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     expect(doc.state.swapOffers.size).toBe(100);
     expect(doc.state.swapOffers.has('offer-0')).toBe(false);
     expect(doc.state.swapOffers.get('offer-100')?.offerId).toBe('offer-100');
-    expect(doc.swapOrderHistory).toBeInstanceOf(Map);
-    expect(doc.swapOrderHistory?.size).toBe(1);
-    expect(doc.swapClosedOrders).toBeInstanceOf(Map);
-    expect(doc.swapClosedOrders?.size).toBe(1);
   }
   expect(encodedLiveEntity.byteLength).toBeLessThan(1_048_576);
   expect(encodedLiveAccount.byteLength).toBeLessThan(1_048_576);
@@ -849,7 +837,7 @@ test('current stored view frame overlays local identity without mixing a later l
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       loadEntityViewPage: async () => {
         await Promise.resolve();
@@ -1021,7 +1009,7 @@ test('runtime adapter live graph-frame never reads a prunable storage generation
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       loadEntityViewPage: async () => {
         storagePageReads += 1;
@@ -1063,7 +1051,7 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   };
 
   const frame = await resolveRuntimeAdapterRead<RuntimeAdapterGraphFrame>(
@@ -1184,7 +1172,7 @@ test('runtime adapter graph-frame wire DTO stays below budget near topology limi
       epochMaxBytes: 1_073_741_824,
       accountMerkleRadix: 16,
       epochReplayBytes: 0,
-      retainedHistoryBytes: 262_144,
+      retainedWalBytes: 262_144,
     },
     runtimeId: 'runtime:scale-test',
     height: 42,
@@ -1469,7 +1457,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       listEntityIdsAtHeight: async () => [staleEntityId, emptyEntityId, entityId],
       loadEntityViewPage: async requestedEntityId => {
@@ -1595,7 +1583,7 @@ test('runtime adapter timeline-index returns a bounded compact timestamp page', 
         epochMaxBytes: 1_000,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 1_000,
+        retainedWalBytes: 1_000,
       }),
       readFrame: async height => frames.get(height) ?? null,
     },
@@ -1659,7 +1647,7 @@ test('runtime adapter timeline-index reports an empty timeline before the first 
         epochMaxBytes: 1_000,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       readFrame: async () => null,
     },
@@ -1673,7 +1661,7 @@ test('runtime adapter timeline-index reports an empty timeline before the first 
 
   // An explicit out-of-range cursor is still a client error.
   await expect(resolveRuntimeAdapterRead(
-    { env, readHead: async () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, latestHeight: 0, latestSnapshotHeight: 0, snapshotPeriodFrames: 2, retainSnapshots: 3, epochMaxBytes: 1_000, accountMerkleRadix: 16, epochReplayBytes: 0, retainedHistoryBytes: 0 }), readFrame: async () => null },
+    { env, readHead: async () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, latestHeight: 0, latestSnapshotHeight: 0, snapshotPeriodFrames: 2, retainSnapshots: 3, epochMaxBytes: 1_000, accountMerkleRadix: 16, epochReplayBytes: 0, retainedWalBytes: 0 }), readFrame: async () => null },
     'timeline-index',
     { beforeHeight: 1 },
   )).rejects.toThrow('beforeHeight must be an integer greater than 1');
@@ -1808,7 +1796,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       listEntityIdsAtHeight: async () => [entityId],
       loadEntityState: async () => {
@@ -1856,7 +1844,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       listEntityIdsAtHeight: async () => [missingEntityId, entityId],
       loadEntityState: async () => null,
@@ -1891,7 +1879,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
           epochMaxBytes: 1,
           accountMerkleRadix: 16,
           epochReplayBytes: 0,
-          retainedHistoryBytes: 0,
+          retainedWalBytes: 0,
         }),
         listEntityIdsAtHeight: async () => [missingEntityId, entityId],
         loadEntityState: async () => null,
@@ -1930,7 +1918,7 @@ test('runtime adapter live view-frame stays live if env height advances during p
           epochMaxBytes: 1,
           accountMerkleRadix: 16,
           epochReplayBytes: 0,
-          retainedHistoryBytes: 0,
+          retainedWalBytes: 0,
         };
       },
       listEntityIdsAtHeight: async () => {
@@ -1979,7 +1967,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       listEntityIdsAtHeight: async () => [entityId],
       loadEntityViewPage: async (_entityId, height) => {
@@ -2031,7 +2019,7 @@ test('runtime adapter history-frame-batch marks missing storage diffs unavailabl
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       listEntityIdsAtHeight: async () => [entityId],
       loadEntityViewPage: async (_entityId, height) => {
@@ -2293,7 +2281,7 @@ test('runtime adapter historical head reads persisted storage head', async () =>
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 123,
+        retainedWalBytes: 123,
       }),
     },
     'head',
@@ -2317,7 +2305,7 @@ test('runtime adapter current head exposes persisted snapshot cadence when stora
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 1234,
+    retainedWalBytes: 1234,
   };
 
   const head = await resolveRuntimeAdapterRead<StorageHead>(
@@ -2340,7 +2328,7 @@ test('runtime adapter current head exposes persisted snapshot cadence when stora
   expect(head.latestHeight).toBe(45);
   expect(head.latestSnapshotHeight).toBe(40);
   expect(head.snapshotPeriodFrames).toBe(5);
-  expect(head.retainedHistoryBytes).toBe(1234);
+  expect(head.retainedWalBytes).toBe(1234);
   expect(frame.head.latestSnapshotHeight).toBe(40);
   expect(frame.head.snapshotPeriodFrames).toBe(5);
 });
@@ -2358,7 +2346,7 @@ test('runtime adapter current head preserves persisted snapshot cadence when sto
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 4321,
+    retainedWalBytes: 4321,
   };
 
   const head = await resolveRuntimeAdapterRead<StorageHead>(
@@ -2372,7 +2360,7 @@ test('runtime adapter current head preserves persisted snapshot cadence when sto
   expect(head.latestHeight).toBe(19);
   expect(head.latestSnapshotHeight).toBe(16);
   expect(head.snapshotPeriodFrames).toBe(256);
-  expect(head.retainedHistoryBytes).toBe(4321);
+  expect(head.retainedWalBytes).toBe(4321);
 });
 
 test('runtime adapter rejects historical reads beyond the persisted storage head', async () => {
@@ -2388,7 +2376,7 @@ test('runtime adapter rejects historical reads beyond the persisted storage head
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   };
   let listedEntities = false;
 
@@ -2499,7 +2487,7 @@ test('runtime adapter current view frame projects live state without replaying p
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       loadEntityViewPage: async () => {
         pagedLoadCalled = true;
@@ -2572,7 +2560,7 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
         epochReplayBytes: 0,
-        retainedHistoryBytes: 0,
+        retainedWalBytes: 0,
       }),
       listEntityIdsAtHeight: async () => [entityId],
       loadEntityViewPage: async () => {

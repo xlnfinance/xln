@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
 use support::{
-    HUB, MAKER, NEXT, account, apply_account, assert_owned_sections, commit, digest_bytes, fixture,
-    fixture_text, fixture_u64, hex, token, tx_digest,
+    HUB, MAKER, NEXT, account, apply_account, assert_owned_sections, commit, digest_bytes,
+    entity_state, fixture, fixture_text, fixture_u64, hex, token, tx_digest,
 };
 use xln_rscore_engine::{
     AccountOutput, AccountTx, DeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
@@ -14,7 +14,7 @@ use xln_rscore_engine::{
 };
 use xln_rscore_entity_kernel::{
     CrontabState, DeterministicContext, EntityKernelOutput, EntityStateSlice, HtlcPreparedBinding,
-    HtlcPreparedOutcome, HtlcRoute, PreparedHtlcEntry, apply_entity_kernel,
+    HtlcPreparedOutcome, PaybookEntry, PaybookState, PreparedHtlcEntry, apply_entity_kernel,
     compute_entity_owned_sections,
 };
 
@@ -35,9 +35,10 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
 
     let envelope = OpaqueHtlcCiphertext::from_packed(vec![0x51; 48]).expect("outer envelope");
     let inner = OpaqueHtlcCiphertext::from_packed(vec![0x61; 48]).expect("inner envelope");
+    let hashlock = format!("0x{}", "bb".repeat(32));
     let lock = AccountTx::HtlcLock(HtlcLockTx {
-        lock_id: format!("0x{}", "aa".repeat(32)),
-        hashlock: HtlcHashlock::parse(&format!("0x{}", "bb".repeat(32))).expect("hashlock"),
+        lock_id: hashlock.clone(),
+        hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
         timelock: BigInt::from(200_000),
         reveal_before_height: 1_000,
         amount: BigInt::from(90),
@@ -48,8 +49,8 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
     let (_, lock_outputs) = apply_account(&after_direct, Side::Right, &lock, 1, 2);
     assert!(lock_outputs.is_empty());
 
-    let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]);
+    let mut state = entity_state(2_000);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]).into();
     let mut context = DeterministicContext::hlt_default();
     let frame_state_hash = format!("0x{}", "31".repeat(32));
     let AccountTx::HtlcLock(lock_data) = &lock else {
@@ -64,7 +65,6 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
                 domain: support::domain(),
                 account_frame_hash: frame_state_hash.clone(),
                 account_height: 1,
-                lock_id: lock_data.lock_id.clone(),
                 envelope_hash: hex(&envelope.integrity_hash()),
                 hashlock: lock_data.hashlock.as_str().to_string(),
                 token_id: 1,
@@ -95,10 +95,7 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
     let AccountTx::HtlcLock(forwarded) = &result.proposal_work[0].txs[0] else {
         panic!("canonical frame-owned HTLC follow-up must precede parent direct follow-ups")
     };
-    assert_eq!(
-        forwarded.lock_id,
-        fixture_text(&oracle, &["paybookForward", "forwardLockId"])
-    );
+    assert_eq!(forwarded.lock_id, hashlock);
     assert_eq!(forwarded.amount, BigInt::from(87));
     assert_eq!(forwarded.timelock, BigInt::from(190_000));
     assert_eq!(forwarded.reveal_before_height, 997);
@@ -120,10 +117,18 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
     );
     let route = result
         .state
-        .htlc_routes
-        .get(&format!("0x{}", "bb".repeat(32)))
+        .paybook
+        .entry(&format!("0x{}", "bb".repeat(32)))
+        .expect("paybook lookup")
         .expect("forward route");
     assert_eq!(route.pending_fee, Some(BigInt::from(3)));
+    let rebuilt = PaybookState::from_entries([route.clone()], BigInt::from(0))
+        .expect("sequential paybook rebuild");
+    assert_eq!(
+        result.state.paybook.entries.root_hash(),
+        rebuilt.entries.root_hash(),
+        "frame-batched and sequential paybook roots must match",
+    );
     assert_eq!(
         hex(&envelope.integrity_hash()),
         fixture_text(&oracle, &["paybookForward", "outerEnvelopeHash"])
@@ -176,7 +181,7 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
     let hashlock = hex(&hashlock_bytes);
     let envelope = OpaqueHtlcCiphertext::from_packed(vec![0x71; 48]).expect("final envelope");
     let lock = AccountTx::HtlcLock(HtlcLockTx {
-        lock_id: format!("0x{}", "cc".repeat(32)),
+        lock_id: hashlock.clone(),
         hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
         timelock: BigInt::from(200_000),
         reveal_before_height: 1_000,
@@ -190,7 +195,7 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
     assert!(lock_outputs.is_empty());
 
     let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string()]);
+    state.known_accounts = BTreeSet::from([MAKER.to_string()]).into();
     let mut context = DeterministicContext::hlt_default();
     context.jurisdiction_id = Some("fixture".to_string());
     let frame_state_hash = format!("0x{}", "71".repeat(32));
@@ -207,7 +212,6 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
                 domain: support::domain(),
                 account_frame_hash: frame_state_hash,
                 account_height: 1,
-                lock_id: lock_data.lock_id.clone(),
                 envelope_hash: hex(&envelope.integrity_hash()),
                 hashlock: hashlock.clone(),
                 token_id: 1,
@@ -246,7 +250,12 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
         &resolve_data.outcome,
         xln_rscore_engine::HtlcResolveOutcome::Secret { secret: value } if value == &secret
     ));
-    let route = first.state.htlc_routes.get(&hashlock).expect("final route");
+    let route = first
+        .state
+        .paybook
+        .entry(&hashlock)
+        .expect("paybook lookup")
+        .expect("final route");
     assert_eq!(route.inbound_entity.as_deref(), Some(MAKER));
     assert_eq!(route.started_at_ms, Some(1_500));
 
@@ -267,15 +276,23 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
             from_entity: MAKER.to_string(),
             to_entity: HUB.to_string(),
             hashlock: hashlock.clone(),
-            lock_id: format!("0x{}", "cc".repeat(32)),
+            lock_id: hashlock.clone(),
             token_id: Some(1),
             amount: Some(BigInt::from(90)),
+            description: Some("prepared final".to_string()),
             started_at_ms: Some(1_500),
             jurisdiction_id: Some("fixture".to_string()),
             received_at_ms: 2_000,
         }]
     );
-    assert!(!settled.state.htlc_routes.contains_key(&hashlock));
+    assert!(
+        settled
+            .state
+            .paybook
+            .entry(&hashlock)
+            .expect("paybook lookup")
+            .is_none()
+    );
     assert_eq!(
         settled.commitments.paybook_root,
         fixture_text(&oracle, &["paybookFinalResolve", "paybookRoot"])
@@ -291,26 +308,23 @@ fn zero_forwarding_fee_remains_present_after_secret_reveal() {
     let secret = format!("0x{}", "44".repeat(32));
     let hashlock_bytes: [u8; 32] = Keccak256::digest([0x44_u8; 32]).into();
     let hashlock = hex(&hashlock_bytes);
-    let inbound_lock_id = format!("0x{}", "55".repeat(32));
-    let outbound_lock_id = format!("0x{}", "66".repeat(32));
+    let outbound_lock_id = hashlock.clone();
     let mut state = EntityStateSlice::empty(HUB, 2_000);
-    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]).into();
     state.crontab = Some(CrontabState {
         tasks: BTreeMap::new(),
-        hooks: BTreeMap::new(),
+        hooks: xln_rscore_entity_kernel::ScheduledHookMap::empty(),
     });
-    state.htlc_routes.insert(
-        hashlock.clone(),
-        HtlcRoute {
+    state.paybook = PaybookState::from_entries(
+        [PaybookEntry {
             hashlock: hashlock.clone(),
+            description: None,
             token_id: Some(1),
             amount: Some(BigInt::from(1_000)),
             started_at_ms: None,
             originated: false,
             inbound_entity: Some(MAKER.to_string()),
-            inbound_lock_id: Some(inbound_lock_id.clone()),
             outbound_entity: Some(NEXT.to_string()),
-            outbound_lock_id: Some(outbound_lock_id.clone()),
             inbound_settled: false,
             outbound_settled: false,
             secret: None,
@@ -319,8 +333,10 @@ fn zero_forwarding_fee_remains_present_after_secret_reveal() {
             secret_ack_deadline_at: None,
             pending_fee: Some(BigInt::from(0)),
             created_timestamp: 1_000,
-        },
-    );
+        }],
+        BigInt::from(0),
+    )
+    .expect("paybook");
     let resolve = AccountTx::HtlcResolve(HtlcResolveTx {
         lock_id: outbound_lock_id.clone(),
         outcome: HtlcResolveOutcome::Secret {
@@ -342,8 +358,9 @@ fn zero_forwarding_fee_remains_present_after_secret_reveal() {
     .expect("forward secret");
     let route = result
         .state
-        .htlc_routes
-        .get(&hashlock)
+        .paybook
+        .entry(&hashlock)
+        .expect("paybook lookup")
         .expect("forward route remains");
     assert_eq!(route.secret.as_deref(), Some(secret.as_str()));
     assert_eq!(route.pending_fee, Some(BigInt::from(0)));

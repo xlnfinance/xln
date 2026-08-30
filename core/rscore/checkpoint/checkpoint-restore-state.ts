@@ -3,9 +3,9 @@ import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-cl
 import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { validateDelta } from '../../account/validation/delta-validation';
 import { LIMITS } from '../../config/constants';
-import type { AccountLendingIntentKind, AccountStateDomain, Delta, HtlcLock, SwapOffer } from '../../types/account';
+import type { AccountLendingIntentKind, AccountStateDomain, Delta, HtlcLock, PullCommitment, SettlementWorkspace, SwapOffer } from '../../types/account';
 import type { AccountJClaimAccumulatorState } from '../../types/finance/account-j-claims';
-import type { BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot } from '../../types/finance/rebalance';
+import type { BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot, RebalancePolicy } from '../../types/finance/rebalance';
 import { decodeRscoreCanonicalValue } from '../canonical-wire';
 import { rscoreCheckpointList, rscoreCheckpointTuple } from './checkpoint-wire';
 import {
@@ -32,6 +32,8 @@ type RscoreCarriedAccountRoots = Readonly<{
 type RscoreAccountEnvelope = Readonly<{
   fields: Readonly<Record<string, unknown>>;
   canonicalMempool: readonly unknown[];
+  rebalanceShadowPolicy: readonly (readonly [number, RebalancePolicy])[];
+  rebalanceShadowSubmitted: readonly (readonly [number, number])[];
 }>;
 
 export type RscoreAccountStateSeed = Readonly<{
@@ -53,11 +55,13 @@ export type RscoreAccountStateSeed = Readonly<{
    */
   envelope: RscoreAccountEnvelope | null;
   deltaTransformer?: string;
+  settlementWorkspace?: SettlementWorkspace;
   deltas: PersistentAccountStateMap<number, Delta>;
   locks: PersistentAccountStateMap<string, HtlcLock>;
   lendingIntents: PersistentAccountStateMap<string, AccountLendingIntentKind>;
   swapOffers: PersistentAccountStateMap<string, SwapOffer>;
   rebalanceFeePolicies: PersistentAccountStateMap<number, BilateralRebalanceFeePolicy>;
+  pulls: PersistentAccountStateMap<string, PullCommitment>;
 }>;
 
 const duplicateKeys = <K>(entries: readonly (readonly [K, unknown])[], field: string): void => {
@@ -74,7 +78,7 @@ const decodeAccumulator = (value: unknown, field: string): AccountJClaimAccumula
 };
 
 const decodeEnvelope = (value: unknown): RscoreAccountEnvelope => {
-  const row = rscoreCheckpointTuple(value, 2, 'RESTORE_ENVELOPE');
+  const row = rscoreCheckpointTuple(value, 4, 'RESTORE_ENVELOPE');
   const decoded = decodeRscoreCanonicalValue(row[0], 'RESTORE_ENVELOPE_FIELDS');
   if (
     typeof decoded !== 'object' ||
@@ -95,6 +99,28 @@ const decodeEnvelope = (value: unknown): RscoreAccountEnvelope => {
       rscoreCheckpointList(row[1], 'RESTORE_ENVELOPE_MEMPOOL').map((entry, index) =>
         decodeRscoreCanonicalValue(entry, `RESTORE_ENVELOPE_MEMPOOL_${index}`),
       ),
+    ),
+    rebalanceShadowPolicy: Object.freeze(
+      rscoreCheckpointList(row[2], 'RESTORE_ENVELOPE_SHADOW_POLICY').map((entry, index) => {
+        const pair = rscoreCheckpointTuple(entry, 2, `RESTORE_ENVELOPE_SHADOW_POLICY_${index}`);
+        const policy = decodeRscoreCanonicalValue(pair[1], `RESTORE_ENVELOPE_SHADOW_POLICY_${index}_VALUE`);
+        if (typeof policy !== 'object' || policy === null || Array.isArray(policy)) {
+          return checkpointRestoreFail(`ENVELOPE_SHADOW_POLICY_${index}_VALUE_OBJECT`);
+        }
+        return Object.freeze([
+          checkpointTokenId(pair[0], `ENVELOPE_SHADOW_POLICY_${index}_TOKEN`),
+          Object.freeze({ ...(policy as RebalancePolicy) }),
+        ] as const);
+      }),
+    ),
+    rebalanceShadowSubmitted: Object.freeze(
+      rscoreCheckpointList(row[3], 'RESTORE_ENVELOPE_SHADOW_SUBMITTED').map((entry, index) => {
+        const pair = rscoreCheckpointTuple(entry, 2, `RESTORE_ENVELOPE_SHADOW_SUBMITTED_${index}`);
+        return Object.freeze([
+          checkpointTokenId(pair[0], `ENVELOPE_SHADOW_SUBMITTED_${index}_TOKEN`),
+          checkpointSafeInt(pair[1], `ENVELOPE_SHADOW_SUBMITTED_${index}_TIMESTAMP`),
+        ] as const);
+      }),
     ),
   };
 };
@@ -161,7 +187,7 @@ const decodeLendingKind = (value: unknown, index: number): AccountLendingIntentK
 };
 
 const decodeOffer = (value: unknown, index: number): SwapOffer => {
-  const row = rscoreCheckpointTuple(value, 15, `RESTORE_OFFER_${index}`);
+  const row = rscoreCheckpointTuple(value, 16, `RESTORE_OFFER_${index}`);
   const timeInForce = row[10] === null ? undefined : checkpointSafeInt(row[10], `OFFER_${index}_TIME_IN_FORCE`);
   if (timeInForce !== undefined && timeInForce !== 0 && timeInForce !== 1 && timeInForce !== 2) {
     return checkpointRestoreFail(`OFFER_${index}_TIME_IN_FORCE`);
@@ -182,6 +208,14 @@ const decodeOffer = (value: unknown, index: number): SwapOffer => {
     createdHeight: checkpointSafeInt(row[12], `OFFER_${index}_CREATED_HEIGHT`),
     quantizedGive: checkpointBigInt(row[13], `OFFER_${index}_QUANTIZED_GIVE`),
     quantizedWant: checkpointBigInt(row[14], `OFFER_${index}_QUANTIZED_WANT`),
+    ...(row[15] === null
+      ? {}
+      : {
+          crossJurisdiction: decodeRscoreCanonicalValue(
+            row[15],
+            `OFFER_${index}_CROSS_JURISDICTION`,
+          ) as NonNullable<SwapOffer['crossJurisdiction']>,
+        }),
   };
   if (
     offer.quantizedGive <= 0n ||
@@ -235,7 +269,8 @@ export type RscoreCheckpointSectionName =
   | 'locks'
   | 'lendingIntents'
   | 'swapOffers'
-  | 'rebalanceFeePolicies';
+  | 'rebalanceFeePolicies'
+  | 'pulls';
 
 const checkpointTextKey = (keyBytes: Uint8Array, field: string): string => {
   const bytes = Buffer.from(keyBytes);
@@ -291,11 +326,19 @@ export const decodeRscoreCheckpointSectionEntry = (
     }
     case 'rebalanceFeePolicies':
       return [checkpointTokenKey(keyBytes, `POLICY_${index}`), decodePolicyValue(value, index)];
+    case 'pulls': {
+      const pullId = checkpointTextKey(keyBytes, `PULL_${index}`);
+      const pull = decodeRscoreCanonicalValue(value, `PULL_${index}`) as PullCommitment;
+      if (!pull || typeof pull !== 'object' || pull.pullId !== pullId) {
+        return checkpointRestoreFail(`PULL_${index}_ID`);
+      }
+      return [pullId, pull];
+    }
   }
 };
 
 /**
- * The five Rust-owned account namespaces, built from complete section lists.
+ * The six Rust-owned account namespaces, built from complete section lists.
  *
  * A wave hands over changes rather than whole trees, so it builds these by
  * applying them to the account it already holds; a restore has no such
@@ -307,6 +350,7 @@ export type RscoreAccountStateTrees = Readonly<{
   lendingIntents: PersistentAccountStateMap<string, AccountLendingIntentKind>;
   swapOffers: PersistentAccountStateMap<string, SwapOffer>;
   rebalanceFeePolicies: PersistentAccountStateMap<number, BilateralRebalanceFeePolicy>;
+  pulls: PersistentAccountStateMap<string, PullCommitment>;
 }>;
 
 export const decodeRscoreAccountStateTrees = (
@@ -317,6 +361,13 @@ export const decodeRscoreAccountStateTrees = (
   const lending = rscoreCheckpointList(sectionValues[2], 'RESTORE_LENDING').map(decodeLending);
   const offers = rscoreCheckpointList(sectionValues[3], 'RESTORE_OFFERS').map(decodeOffer);
   const policies = rscoreCheckpointList(sectionValues[4], 'RESTORE_POLICIES').map(decodePolicy);
+  const pulls = rscoreCheckpointList(sectionValues[5], 'RESTORE_PULLS').map((value, index) => {
+    const pull = decodeRscoreCanonicalValue(value, `RESTORE_PULL_${index}`) as PullCommitment;
+    if (!pull || typeof pull !== 'object' || typeof pull.pullId !== 'string') {
+      return checkpointRestoreFail(`PULL_${index}`);
+    }
+    return [pull.pullId, pull] as const;
+  });
   if (
     deltas.length > LIMITS.MAX_ACCOUNT_TOKEN_ROWS ||
     locks.length > LIMITS.MAX_ACCOUNT_HTLC_LOCKS ||
@@ -338,6 +389,7 @@ export const decodeRscoreAccountStateTrees = (
     'OFFER',
   );
   duplicateKeys(policies, 'POLICY');
+  duplicateKeys(pulls, 'PULL');
   return {
     deltas: PersistentAccountStateMap.fromEntries(
       'deltas',
@@ -353,6 +405,7 @@ export const decodeRscoreAccountStateTrees = (
       offers.map(value => [value.offerId, value]),
     ),
     rebalanceFeePolicies: PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', policies),
+    pulls: PersistentAccountStateMap.fromEntries('pulls', pulls),
   };
 };
 
@@ -361,7 +414,7 @@ export const decodeRscoreAccountStateSeed = (
   headerValue: unknown,
   trees: RscoreAccountStateTrees,
 ): RscoreAccountStateSeed => {
-  const header = rscoreCheckpointTuple(headerValue, 9, 'RESTORE_HEADER');
+  const header = rscoreCheckpointTuple(headerValue, 10, 'RESTORE_HEADER');
   const identity = rscoreCheckpointTuple(header[2], 5, 'RESTORE_IDENTITY');
   const ownerEntityId = checkpointHex(header[0], 32, 'OWNER');
   const leftEntity = checkpointHex(identity[2], 32, 'LEFT_ENTITY');
@@ -401,6 +454,14 @@ export const decodeRscoreAccountStateSeed = (
     },
     envelope: header[7] === null ? null : decodeEnvelope(header[7]),
     ...(header[8] === null ? {} : { deltaTransformer: checkpointHex(header[8], 20, 'DELTA_TRANSFORMER') }),
+    ...(header[9] === null
+      ? {}
+      : {
+          settlementWorkspace: decodeRscoreCanonicalValue(
+            header[9],
+            'RESTORE_SETTLEMENT_WORKSPACE',
+          ) as SettlementWorkspace,
+        }),
     ...trees,
   };
 };

@@ -47,10 +47,7 @@ export const verifyPersistedFrameState = (
     timestamp: frame.timestamp,
     replicaMetaDigest,
     runtimeComponentDigests: computeRuntimePostStateComponentDigests(
-      buildReplayVerifiableRuntimePostStateView(env, {
-        pendingNetworkOutputs: [],
-        excludePersistedHistoryRecords: true,
-      }),
+      buildReplayVerifiableRuntimePostStateView(env),
     ),
     runtimeOutputCount: frame.runtimeOutputCount,
     runtimeOutputsDigest: frame.runtimeOutputsDigest,

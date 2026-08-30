@@ -1,13 +1,15 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
-use sha3::{Digest as _, Keccak256};
 use xln_rscore_engine::{
     AccountOutput, AccountTx, DeliveryMode, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
 };
+use xln_rscore_protocol::{PersistentRadixMutation, SlotWork};
 
+use crate::commitment::{canonical_paybook_entry, consensus_digest_bytes, raw_text_key};
 use crate::types::{
-    EntityKernelOutput, EntityStateSlice, HtlcPreparedOutcome, HtlcRoute, TargetedAccountTx,
+    EntityKernelOutput, EntityStateSlice, HtlcPreparedOutcome, PaybookEntry, PaybookState,
+    TargetedAccountTx,
 };
 use crate::{
     DeterministicContext, EntityKernelError, OrderedAccountCommit, ScheduledHook, cancel_hook,
@@ -21,6 +23,139 @@ const SECRET_ACK_TIMEOUT_MS: u64 = 120_000;
 pub(crate) struct PaybookEffects<'a> {
     pub account_txs: &'a mut Vec<TargetedAccountTx>,
     pub outputs: &'a mut Vec<EntityKernelOutput>,
+}
+
+/// Transient, frame-local overlay over the canonical Paybook radix map.
+/// Reads observe prior writes in transaction order; only the final value of
+/// each hashlock is encoded and committed once after Entity execution.
+#[derive(Default)]
+pub(crate) struct PaybookChanges {
+    pending: BTreeMap<Vec<u8>, Option<PaybookEntry>>,
+}
+
+impl PaybookChanges {
+    pub(crate) fn mutation_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub(crate) fn entry<'a>(
+        &'a self,
+        state: &'a EntityStateSlice,
+        hashlock: &str,
+    ) -> Result<Option<&'a PaybookEntry>, EntityKernelError> {
+        let key = raw_text_key(hashlock)?;
+        Ok(match self.pending.get(&key) {
+            Some(entry) => entry.as_ref(),
+            None => state.paybook.entries.get(&key),
+        })
+    }
+
+    pub(crate) fn put(&mut self, entry: PaybookEntry) -> Result<(), EntityKernelError> {
+        self.pending
+            .insert(raw_text_key(&entry.hashlock)?, Some(entry));
+        Ok(())
+    }
+
+    pub(crate) fn remove(
+        &mut self,
+        state: &EntityStateSlice,
+        hashlock: &str,
+    ) -> Result<Option<PaybookEntry>, EntityKernelError> {
+        let key = raw_text_key(hashlock)?;
+        let entry = match self.pending.get(&key) {
+            Some(entry) => entry.clone(),
+            None => state.paybook.entries.get(&key).cloned(),
+        };
+        if entry.is_some() {
+            self.pending.insert(key, None);
+        }
+        Ok(entry)
+    }
+
+    pub(crate) fn into_mutations(
+        self,
+    ) -> Result<Vec<PersistentRadixMutation<PaybookEntry>>, EntityKernelError> {
+        self.pending
+            .into_iter()
+            .map(|(key, entry)| match entry {
+                Some(entry) => {
+                    let value = canonical_paybook_entry(&entry)?;
+                    Ok(PersistentRadixMutation::Put {
+                        key,
+                        value_digest: consensus_digest_bytes(&value)?,
+                        value: entry,
+                    })
+                }
+                None => Ok(PersistentRadixMutation::Remove { key }),
+            })
+            .collect()
+    }
+
+    pub(crate) fn commit_sequential(
+        self,
+        state: &mut EntityStateSlice,
+    ) -> Result<(), EntityKernelError> {
+        let mutations = self.into_mutations()?;
+        state.paybook.entries = state
+            .paybook
+            .entries
+            .mutated_batch_two_levels(mutations, |slots| slots.map(SlotWork::apply))
+            .map_err(paybook_error)?;
+        Ok(())
+    }
+}
+
+impl PaybookState {
+    pub fn entry(&self, hashlock: &str) -> Result<Option<&PaybookEntry>, EntityKernelError> {
+        Ok(self.entries.get(&raw_text_key(hashlock)?))
+    }
+
+    pub fn from_entries(
+        entries: impl IntoIterator<Item = PaybookEntry>,
+        fees_earned: BigInt,
+    ) -> Result<Self, EntityKernelError> {
+        let mut output = Self {
+            entries: xln_rscore_protocol::PersistentRadixMap::empty(),
+            fees_earned,
+        };
+        for entry in entries {
+            let key = raw_text_key(&entry.hashlock)?;
+            if output.entries.get(&key).is_some() {
+                return Err(EntityKernelError::htlc("PAYBOOK_ENTRY_DUPLICATE"));
+            }
+            let value = canonical_paybook_entry(&entry)?;
+            output.entries = output
+                .entries
+                .updated(key, entry, consensus_digest_bytes(&value)?)
+                .map_err(paybook_error)?;
+        }
+        Ok(output)
+    }
+}
+
+fn paybook_error(error: impl std::fmt::Display) -> EntityKernelError {
+    EntityKernelError::CommitmentEncoding {
+        detail: error.to_string(),
+    }
+}
+
+pub(crate) fn paybook_entry<'a>(
+    state: &'a EntityStateSlice,
+    hashlock: &str,
+) -> Result<Option<&'a PaybookEntry>, EntityKernelError> {
+    state.paybook.entry(hashlock)
+}
+
+pub(crate) fn remove_paybook_entry(
+    state: &mut EntityStateSlice,
+    hashlock: &str,
+) -> Result<Option<PaybookEntry>, EntityKernelError> {
+    let key = raw_text_key(hashlock)?;
+    let entry = state.paybook.entries.get(&key).cloned();
+    if entry.is_some() {
+        state.paybook.entries = state.paybook.entries.removed(&key).map_err(paybook_error)?;
+    }
+    Ok(entry)
 }
 
 pub(crate) fn direct_payment_forward(
@@ -99,7 +234,6 @@ fn validate_binding<'a>(
         && binding.domain == commit.domain
         && binding.account_frame_hash == commit.frame_state_hash
         && binding.account_height == commit.frame_height
-        && binding.lock_id == tx.lock_id
         && Some(binding.envelope_hash.as_str()) == envelope_hash.as_deref()
         && binding.hashlock == tx.hashlock.as_str()
         && binding.token_id == tx.token_id.get()
@@ -123,17 +257,6 @@ fn hex_digest(bytes: &[u8]) -> String {
         output.push(char::from(HEX[(byte & 0x0f) as usize]));
     }
     output
-}
-
-fn forward_lock_id(lock_id: &str) -> Result<String, EntityKernelError> {
-    let Some(payload) = lock_id.strip_prefix("0x") else {
-        return Err(EntityKernelError::htlc("HTLC_FORWARD_LOCK_ID_INVALID"));
-    };
-    if payload.len() != 64 || !payload.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(EntityKernelError::htlc("HTLC_FORWARD_LOCK_ID_INVALID"));
-    }
-    let text = format!("xln:htlc-forward-lock:v1:{}", lock_id.to_lowercase());
-    Ok(hex_digest(&Keccak256::digest(text.as_bytes())))
 }
 
 fn queue_error(effects: &mut PaybookEffects<'_>, account_id: &str, lock_id: &str, reason: String) {
@@ -160,47 +283,55 @@ fn queue_secret(effects: &mut PaybookEffects<'_>, account_id: &str, lock_id: &st
     ));
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the paybook transition keeps the Account commit and every output sink explicit"
+)]
 fn apply_final_prepared(
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     commit: &OrderedAccountCommit,
     tx: &HtlcLockTx,
     secret: &str,
+    description: Option<&String>,
     started_at_ms: Option<u64>,
     effects: &mut PaybookEffects<'_>,
-) {
-    let existing = state.htlc_routes.get_mut(tx.hashlock.as_str());
-    if let Some(route) = existing {
-        route.inbound_entity = Some(commit.account_id.clone());
-        route.inbound_lock_id = Some(tx.lock_id.clone());
+) -> Result<(), EntityKernelError> {
+    let existing = paybook.entry(state, tx.hashlock.as_str())?.cloned();
+    if let Some(mut entry) = existing {
+        entry.inbound_entity = Some(commit.account_id.clone());
+        paybook.put(entry)?;
     } else {
-        state.htlc_routes.insert(
-            tx.hashlock.as_str().to_string(),
-            HtlcRoute {
-                hashlock: tx.hashlock.as_str().to_string(),
-                token_id: Some(tx.token_id.get()),
-                amount: Some(tx.amount.clone()),
-                started_at_ms,
-                originated: false,
-                inbound_entity: Some(commit.account_id.clone()),
-                inbound_lock_id: Some(tx.lock_id.clone()),
-                outbound_entity: None,
-                outbound_lock_id: None,
-                inbound_settled: false,
-                outbound_settled: false,
-                secret: None,
-                secret_ack_pending: false,
-                secret_ack_started_at: None,
-                secret_ack_deadline_at: None,
-                pending_fee: None,
-                created_timestamp: state.timestamp,
-            },
-        );
+        paybook.put(PaybookEntry {
+            hashlock: tx.hashlock.as_str().to_string(),
+            description: description.cloned().filter(|value| !value.is_empty()),
+            token_id: Some(tx.token_id.get()),
+            amount: Some(tx.amount.clone()),
+            started_at_ms,
+            originated: false,
+            inbound_entity: Some(commit.account_id.clone()),
+            outbound_entity: None,
+            inbound_settled: false,
+            outbound_settled: false,
+            secret: None,
+            secret_ack_pending: false,
+            secret_ack_started_at: None,
+            secret_ack_deadline_at: None,
+            pending_fee: None,
+            created_timestamp: state.timestamp,
+        })?;
     }
     queue_secret(effects, &commit.account_id, &tx.lock_id, secret);
+    Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the paybook transition keeps the Account commit and every output sink explicit"
+)]
 fn apply_forward_prepared(
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     commit: &OrderedAccountCommit,
     tx: &HtlcLockTx,
     next_hop: &str,
@@ -226,29 +357,25 @@ fn apply_forward_prepared(
             "HTLC_FORWARD_AMOUNT_OR_TIME_INVALID",
         ));
     }
-    let outbound_lock_id = forward_lock_id(&tx.lock_id)?;
-    state.htlc_routes.insert(
-        tx.hashlock.as_str().to_string(),
-        HtlcRoute {
-            hashlock: tx.hashlock.as_str().to_string(),
-            token_id: Some(tx.token_id.get()),
-            amount: Some(tx.amount.clone()),
-            started_at_ms: None,
-            originated: false,
-            inbound_entity: Some(commit.account_id.clone()),
-            inbound_lock_id: Some(tx.lock_id.clone()),
-            outbound_entity: Some(next_hop.to_string()),
-            outbound_lock_id: Some(outbound_lock_id.clone()),
-            inbound_settled: false,
-            outbound_settled: false,
-            secret: None,
-            secret_ack_pending: false,
-            secret_ack_started_at: None,
-            secret_ack_deadline_at: None,
-            pending_fee: Some(&tx.amount - forward_amount),
-            created_timestamp: state.timestamp,
-        },
-    );
+    let lock_id = tx.hashlock.as_str().to_string();
+    paybook.put(PaybookEntry {
+        hashlock: tx.hashlock.as_str().to_string(),
+        description: None,
+        token_id: Some(tx.token_id.get()),
+        amount: Some(tx.amount.clone()),
+        started_at_ms: None,
+        originated: false,
+        inbound_entity: Some(commit.account_id.clone()),
+        outbound_entity: Some(next_hop.to_string()),
+        inbound_settled: false,
+        outbound_settled: false,
+        secret: None,
+        secret_ack_pending: false,
+        secret_ack_started_at: None,
+        secret_ack_deadline_at: None,
+        pending_fee: Some(&tx.amount - forward_amount),
+        created_timestamp: state.timestamp,
+    })?;
     effects
         .outputs
         .push(EntityKernelOutput::HtlcForwardAccepted {
@@ -258,7 +385,7 @@ fn apply_forward_prepared(
     effects.account_txs.push((
         next_hop.to_string(),
         AccountTx::HtlcLock(HtlcLockTx {
-            lock_id: outbound_lock_id,
+            lock_id,
             hashlock: tx.hashlock.clone(),
             timelock,
             reveal_before_height: reveal,
@@ -273,6 +400,7 @@ fn apply_forward_prepared(
 
 pub(crate) fn committed_htlc_lock(
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     commit: &OrderedAccountCommit,
     tx: &HtlcLockTx,
     context: &DeterministicContext,
@@ -282,6 +410,11 @@ pub(crate) fn committed_htlc_lock(
     if !commit.committed_via_new_frame || tx.envelope.is_none() {
         return Ok(());
     }
+    if tx.lock_id != tx.hashlock.as_str() {
+        return Err(EntityKernelError::htlc(
+            "PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK",
+        ));
+    }
     let key = prepared_key(commit, &tx.lock_id);
     if !consumed.insert(key.clone()) {
         return Err(EntityKernelError::PreparedHtlcMismatch {
@@ -290,11 +423,10 @@ pub(crate) fn committed_htlc_lock(
     }
     let prepared = validate_binding(commit, tx, &state.entity_id, context)?;
     let closes_self_cycle = matches!(prepared.outcome, HtlcPreparedOutcome::Final { .. })
-        && state
-            .htlc_routes
-            .get(tx.hashlock.as_str())
+        && paybook
+            .entry(state, tx.hashlock.as_str())?
             .is_some_and(|route| route.originated && route.inbound_entity.is_none());
-    if state.htlc_routes.contains_key(tx.hashlock.as_str()) && !closes_self_cycle {
+    if paybook.entry(state, tx.hashlock.as_str())?.is_some() && !closes_self_cycle {
         queue_error(
             effects,
             &commit.account_id,
@@ -310,18 +442,25 @@ pub(crate) fn committed_htlc_lock(
         }
         HtlcPreparedOutcome::Final {
             secret,
+            description,
             started_at_ms,
-            ..
-        } => {
-            apply_final_prepared(state, commit, tx, secret, *started_at_ms, effects);
-            Ok(())
-        }
+        } => apply_final_prepared(
+            state,
+            paybook,
+            commit,
+            tx,
+            secret,
+            description.as_ref(),
+            *started_at_ms,
+            effects,
+        ),
         HtlcPreparedOutcome::Forward {
             next_hop_entity_id,
             forward_amount,
             inner_envelope,
         } => apply_forward_prepared(
             state,
+            paybook,
             commit,
             tx,
             next_hop_entity_id,
@@ -332,22 +471,32 @@ pub(crate) fn committed_htlc_lock(
     }
 }
 
-fn matching_route<'a>(
-    state: &'a mut EntityStateSlice,
+pub(crate) fn terminate_route(
+    state: &mut EntityStateSlice,
     hashlock: &str,
-) -> Option<&'a mut HtlcRoute> {
-    state.htlc_routes.get_mut(hashlock)
+) -> Result<Option<PaybookEntry>, EntityKernelError> {
+    if let Some(crontab) = state.crontab.as_mut() {
+        cancel_hook(crontab, &format!("htlc-secret-ack:{hashlock}"))?;
+        cancel_hook(crontab, &format!("htlc-timeout:{hashlock}"))?;
+    }
+    remove_paybook_entry(state, hashlock)
 }
 
-pub(crate) fn terminate_route(state: &mut EntityStateSlice, hashlock: &str) -> Option<HtlcRoute> {
+fn terminate_route_in_frame(
+    state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
+    hashlock: &str,
+) -> Result<Option<PaybookEntry>, EntityKernelError> {
     if let Some(crontab) = state.crontab.as_mut() {
-        cancel_hook(crontab, &format!("htlc-secret-ack:{hashlock}"));
+        cancel_hook(crontab, &format!("htlc-secret-ack:{hashlock}"))?;
+        cancel_hook(crontab, &format!("htlc-timeout:{hashlock}"))?;
     }
-    state.htlc_routes.remove(hashlock)
+    paybook.remove(state, hashlock)
 }
 
 pub(crate) fn committed_htlc_resolve(
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     account_id: &str,
     output: &AccountOutput,
     jurisdiction_id: Option<&str>,
@@ -365,19 +514,24 @@ pub(crate) fn committed_htlc_resolve(
         } => (lock_id, hashlock, None),
         _ => return Err(EntityKernelError::output("HTLC_RESOLVE_OUTPUT_KIND")),
     };
-    state.lock_book.remove(lock_id);
+    if lock_id != hashlock {
+        return Err(EntityKernelError::htlc("PAYBOOK_RESOLVE_ID_MISMATCH"));
+    }
     let entity_id = state.entity_id.clone();
     let timestamp = state.timestamp;
-    let Some(route) = matching_route(state, hashlock) else {
+    let Some(mut route) = paybook.entry(state, hashlock)?.cloned() else {
         return Ok(());
     };
-    let resolves_inbound = route.inbound_lock_id.as_deref() == Some(lock_id);
-    let resolves_originated_outbound = route.outbound_lock_id.as_deref() == Some(lock_id)
+    let resolves_inbound = route.inbound_entity.as_deref() == Some(account_id);
+    let resolves_originated_outbound = route.outbound_entity.as_deref() == Some(account_id)
         && (route.originated || route.inbound_entity.is_none());
-    let resolves_forwarded_outbound = route.outbound_lock_id.as_deref() == Some(lock_id)
+    let resolves_forwarded_outbound = route.outbound_entity.as_deref() == Some(account_id)
         && route.inbound_entity.is_some()
         && route.outbound_entity.is_some()
         && !route.originated;
+    if !resolves_inbound && !resolves_originated_outbound && !resolves_forwarded_outbound {
+        return Ok(());
+    }
     if let Some(secret) = secret {
         if resolves_inbound {
             effects.outputs.push(EntityKernelOutput::HtlcReceived {
@@ -388,6 +542,7 @@ pub(crate) fn committed_htlc_resolve(
                 lock_id: lock_id.to_string(),
                 token_id: route.token_id,
                 amount: route.amount.clone(),
+                description: route.description.clone(),
                 started_at_ms: route.started_at_ms,
                 jurisdiction_id: jurisdiction_id.map(str::to_string),
                 received_at_ms: timestamp,
@@ -406,6 +561,7 @@ pub(crate) fn committed_htlc_resolve(
                 lock_id: Some(lock_id.to_string()),
                 token_id: route.token_id,
                 amount: route.amount.clone(),
+                description: route.description.clone(),
                 started_at_ms: route.started_at_ms,
                 jurisdiction_id: jurisdiction_id.map(str::to_string),
                 finalized_at_ms: timestamp,
@@ -419,16 +575,17 @@ pub(crate) fn committed_htlc_resolve(
                 route.outbound_settled = true;
             }
             if !route.inbound_settled || !route.outbound_settled {
-                return Ok(());
+                return paybook.put(route);
             }
         }
-        terminate_route(state, hashlock);
+        terminate_route_in_frame(state, paybook, hashlock)?;
     }
     Ok(())
 }
 
 pub(crate) fn revealed_secret_followup(
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     output: &AccountOutput,
     jurisdiction_id: Option<&str>,
     effects: &mut PaybookEffects<'_>,
@@ -441,7 +598,7 @@ pub(crate) fn revealed_secret_followup(
     };
     let entity_id = state.entity_id.clone();
     let timestamp = state.timestamp;
-    let Some(route) = state.htlc_routes.get_mut(hashlock) else {
+    let Some(mut route) = paybook.entry(state, hashlock)?.cloned() else {
         return Ok(());
     };
     if route.secret.is_some() {
@@ -457,16 +614,10 @@ pub(crate) fn revealed_secret_followup(
             .pending_fee
             .take()
             .ok_or_else(|| EntityKernelError::htlc("HTLC_PENDING_FEE_MISSING"))?;
-        state.htlc_fees_earned += fee;
+        state.paybook.fees_earned += fee;
     }
-    if let Some(lock_id) = &route.outbound_lock_id {
-        state.lock_book.remove(lock_id);
-    }
-    if let Some(lock_id) = &route.inbound_lock_id {
-        state.lock_book.remove(lock_id);
-    }
-    if let (Some(account), Some(lock_id)) = (&route.inbound_entity, &route.inbound_lock_id) {
-        queue_secret(effects, account, lock_id, secret);
+    if let Some(account) = route.inbound_entity.clone() {
+        queue_secret(effects, &account, hashlock, secret);
         route.secret_ack_pending = true;
         route.secret_ack_started_at = Some(timestamp);
         let deadline = timestamp
@@ -475,16 +626,16 @@ pub(crate) fn revealed_secret_followup(
         route.secret_ack_deadline_at = Some(deadline);
         let hook = ScheduledHook::htlc_secret_ack_timeout(
             hashlock.clone(),
-            account.clone(),
-            lock_id.clone(),
+            account,
+            hashlock.clone(),
             deadline,
         );
         let crontab = state
             .crontab
             .as_mut()
             .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_CRONTAB_MISSING"))?;
-        schedule_hook(crontab, hook);
-        return Ok(());
+        schedule_hook(crontab, hook)?;
+        return paybook.put(route);
     }
     effects.outputs.push(EntityKernelOutput::HtlcFinalized {
         entity_id: entity_id.clone(),
@@ -492,40 +643,40 @@ pub(crate) fn revealed_secret_followup(
         to_entity: route.outbound_entity.clone(),
         hashlock: hashlock.clone(),
         secret: secret.clone(),
-        lock_id: route.outbound_lock_id.clone(),
+        lock_id: Some(hashlock.clone()),
         token_id: route.token_id,
         amount: route.amount.clone(),
+        description: route.description.clone(),
         started_at_ms: route.started_at_ms,
         jurisdiction_id: jurisdiction_id.map(str::to_string),
         finalized_at_ms: timestamp,
     });
-    terminate_route(state, hashlock);
+    terminate_route_in_frame(state, paybook, hashlock)?;
     Ok(())
 }
 
 pub(crate) fn timed_out_followup(
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     output: &AccountOutput,
     effects: &mut PaybookEffects<'_>,
 ) -> Result<(), EntityKernelError> {
     let AccountOutput::HtlcError { hashlock, .. } = output else {
         return Err(EntityKernelError::output("HTLC_ERROR_OUTPUT_KIND"));
     };
-    let Some(route) = terminate_route(state, hashlock) else {
+    let Some(route) = terminate_route_in_frame(state, paybook, hashlock)? else {
         return Ok(());
     };
-    if let (Some(account), Some(lock_id)) = (&route.inbound_entity, &route.inbound_lock_id) {
-        queue_error(effects, account, lock_id, "downstream_error".to_string());
+    if let Some(account) = &route.inbound_entity {
+        queue_error(effects, account, hashlock, "downstream_error".to_string());
     } else {
         effects.outputs.push(EntityKernelOutput::HtlcFailed {
             entity_id: state.entity_id.clone(),
             hashlock: hashlock.clone(),
-            lock_id: route.outbound_lock_id.clone(),
+            lock_id: Some(hashlock.clone()),
             reason: "timeout".to_string(),
+            description: route.description,
         });
-    }
-    if let Some(lock_id) = route.outbound_lock_id {
-        state.lock_book.remove(&lock_id);
     }
     Ok(())
 }

@@ -54,7 +54,6 @@ import type { PersistedFrameJournal } from '../../../../storage/types';
 import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profile';
 import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
-import { buildEntityProposalReplayOracleMap } from '../../../../entity/consensus/proposal/replay-oracle';
 import { assertCompleteHltAuthorityEvidence } from './authority-evidence';
 
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
@@ -273,7 +272,6 @@ const rates = parseRates(mode);
 const frameProfileEnabled = process.argv.includes('--frame-profile');
 // Hash-format changes (leaf/preimage encoding) legitimately diverge from the
 // recorded frame hashes; terminal equivalence (height, outbox, payments) still holds.
-const proposalOracleEnabled = !process.argv.includes('--no-oracle');
 // Pure Hub apply cost: skips per-frame recovery equivalence checks (outbox,
 // journal, post-state). The report records verified=false.
 const recoveryVerifyEnabled = !process.argv.includes('--no-verify');
@@ -400,12 +398,6 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
   // Runtime logs are an envelope-side external effect and are intentionally
   // excluded alongside sockets and durable writes.
   env.quietRuntimeLogs = true;
-  if (artifact.entityProposalOracle && proposalOracleEnabled) {
-    if (!env.infrastructure) throw new Error('HLT_REPLAY_INFRASTRUCTURE_MISSING');
-    env.infrastructure.replayEntityProposalOracle = buildEntityProposalReplayOracleMap(
-      artifact.entityProposalOracle,
-    );
-  }
   prewarmRecordedHubSigners(env);
   if (shadowStrictEnabled()) await primeShadowFromRuntimeState(env.state);
   const economicBaseline = readEconomicCounters(env);
@@ -562,7 +554,6 @@ const report = {
   recordingPath,
   recordingManifestHash: artifact.recording.manifestHash,
   authorityExpectations: artifact.authorityEvidence.expectations,
-  economicOperationLedger: artifact.authorityEvidence.economicOperations,
   mode,
   ...(artifact.source.workload === 'payments'
     ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }

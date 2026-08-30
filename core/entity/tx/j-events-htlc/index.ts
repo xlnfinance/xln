@@ -32,7 +32,7 @@ import type { JEventAccountTx } from '../j-events-types';
 import { compareStableText } from '../../../protocol/serialization';
 import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/Depository.sol/Depository';
 import { findExactSignedProofBodyPull } from '../../../account/pull-registry-settlement';
-import { hasInboundHtlcRoute } from '../../htlc/route-views';
+import { hasInboundPayment } from '../../paybook/views';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
 import { buildCurrentDisputeArgumentPlan } from '../../../protocol/dispute/arguments';
@@ -776,12 +776,9 @@ const routeTouchesDisputedAccount = (
  * a signer binder — that left one leg's dispute unstarted while the other
  * finalized (economic residual). Missing binder → throw SIGNER_MISSING.
  *
- * This is not a network best-effort fanout. `localRuntimeProtocol:'cross-j'`
- * is accepted only for an exact local target, drained as a continuation of
- * the same Runtime candidate, and covered by that candidate's single WAL
- * commit. A crash before WAL publishes neither leg; recovery after WAL sees
- * both. Never move this output into the transport outbox: doing so would
- * create the one-leg durability gap that the must-close invariant forbids.
+ * This must-close fanout targets a route sibling on the same Runtime cohort.
+ * Runtime drains it inside the same candidate and one WAL commit. Topology
+ * validation rejects a split sibling cohort before either leg can settle.
  */
 export function queueCrossJurisdictionSiblingDisputeFanout(
   state: EntityState,
@@ -918,12 +915,7 @@ export function applyKnownHtlcSecret(
   const hashlock = String(hashlockRaw).toLowerCase();
   const secret = String(secretRaw).toLowerCase();
 
-  const directRoute = newState.htlcRoutes.get(hashlock);
-  const matchedEntry = directRoute
-    ? [hashlock, directRoute] as const
-    : Array.from(newState.htlcRoutes.entries())
-        .find(([candidateKey]) => candidateKey.toLowerCase() === hashlock);
-  const route = matchedEntry?.[1];
+  const route = newState.paybook.entries.get(hashlock);
 
   if (!route) {
     const recovered = queueInboundResolvesByHashlock(newState, accountTxs, hashlock, secret);
@@ -940,32 +932,22 @@ export function applyKnownHtlcSecret(
     return true;
   }
 
-  const writableRoute = getEntityCollectionValueForWrite(
-    newState.htlcRoutes,
-    matchedEntry[0],
-  );
-  if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${matchedEntry[0]}`);
+  const writableRoute = getEntityCollectionValueForWrite(newState.paybook.entries, hashlock);
+  if (!writableRoute) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${hashlock}`);
   writableRoute.secret = secret;
 
   if (writableRoute.pendingFee) {
-    newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + writableRoute.pendingFee;
+    newState.paybook.feesEarned += writableRoute.pendingFee;
     delete writableRoute.pendingFee;
   }
 
-  if (writableRoute.outboundLockId) {
-    newState.lockBook.delete(writableRoute.outboundLockId);
-  }
-  if (writableRoute.inboundLockId) {
-    newState.lockBook.delete(writableRoute.inboundLockId);
-  }
-
-  if (hasInboundHtlcRoute(writableRoute)) {
+  if (hasInboundPayment(writableRoute)) {
     accountTxs.push({
       accountId: writableRoute.inboundEntity,
       tx: {
         type: 'htlc_resolve',
         data: {
-          lockId: writableRoute.inboundLockId,
+          lockId: hashlock,
           outcome: 'secret' as const,
           secret,
         },

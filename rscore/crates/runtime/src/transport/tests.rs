@@ -59,14 +59,14 @@ fn websocket_codec_and_auth_match_typescript_goldens() {
     let audience = "xln-runtime:0x1111111111111111111111111111111111111111";
     assert_eq!(
         frame_mac(&key, &message, audience, "0xchallenge", 1).expect("mac"),
-        "b9652395deaf7dda89a2409424de32cde5edbcd4c9a20806351afe94812573e3",
+        "c105fe59e487a255a0929a0f4bdfc033525df0f11292c3048e5cfcfddc624f5f",
     );
     assert_eq!(
         format!(
             "0x{}",
             hex(&frame_digest(&message, audience, "0xchallenge", 1).expect("hash"))
         ),
-        "0xb59264025a5bb1459480185f3a9c564a2296d3c412e24a020af92277c0e576a0",
+        "0x2cb267e75c6ee9ab4ca6418c38f26d9e3df9953767c798e90f7e45751dd027d2",
     );
     assert_eq!(
         format!(

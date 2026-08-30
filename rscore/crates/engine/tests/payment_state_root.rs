@@ -8,16 +8,16 @@ use xln_rscore_engine::{
 const TS_EMPTY_PAYMENT_PROFILE_ROOT: &str =
     "de8913dcaf8dd6909741a8e92ecb9fe4abc141ca2848ab27e3944be209f9c7c9";
 const TS_LOCKED_PAYMENT_PROFILE_ROOT: &str =
-    "489deb94f1c63973379acadc6ec3d1dcbaf85fc698d9a137aad083d2234f5770";
+    "1c6d0e190477b527aca701a7dea4eb3f36d942d45eefdd0642eef4f927503842";
 const TS_DELTA_ROOT: &str = "3f4b15cebab6c1e8df774ffa2aad3c47ade3f7bd0e61a99f19a8b413720649af";
 const TS_HELD_DELTA_ROOT: &str = "74061e9b344976c34dada6fe39151673651d6e8f35cf57369a4b0363c3030ea2";
-const TS_LOCK_ROOT: &str = "c87f54349f8b45ee5ff828f1d59304676ec25a28815a1b99ab73cf18e4e079d5";
+const TS_LOCK_ROOT: &str = "e491bc7b971fb8ca5c48edd5f0a0aff3dcab195c7a9e57861d85b0d68723b792";
 const TS_OVERSIZED_DELTA_ROOT: &str =
     "47022f06006fe5cee3c1fda11e8461b4f7efca67f63826b1875293dd37117e1b";
 const TS_OVERSIZED_LOCK_ROOT: &str =
-    "212475fa8fe9fc483eefcbb22ab471f8082af76d9ec20c7efc78d3be6e0dc8c7";
+    "7105b91672ee4d78dc4898f9f4933be4181e06157b1c320fc3c9512c23b7df91";
 const TS_OVERSIZED_PAYMENT_PROFILE_ROOT: &str =
-    "eee654eea35a97668c455967625fb4b0b417e7a690c26cda7ae9a07c951d60e6";
+    "390d6a4c25f98dc877c753a6d6c5c2999a01aa1fad8976dd9900b269e800e90d";
 
 fn entity(byte: u8) -> EntityId {
     EntityId::parse(&format!("0x{}", format!("{byte:02x}").repeat(32))).expect("literal entity")
@@ -68,7 +68,7 @@ fn lock() -> HtlcLock {
 
 fn lock_with_amount(amount: BigInt) -> HtlcLock {
     HtlcLock::restore(
-        format!("0x{}", "66".repeat(32)),
+        format!("0x{}", "77".repeat(32)),
         HtlcHashlock::parse(&format!("0x{}", "77".repeat(32))).expect("literal hashlock"),
         60_000.into(),
         10,
@@ -113,7 +113,7 @@ fn exact_payment_profile_root_matches_typescript_with_committed_htlc() {
     )
     .expect("literal replica");
     let tx = AccountTx::HtlcLock(HtlcLockTx {
-        lock_id: format!("0x{}", "66".repeat(32)),
+        lock_id: format!("0x{}", "77".repeat(32)),
         hashlock: HtlcHashlock::parse(&format!("0x{}", "77".repeat(32))).expect("literal hashlock"),
         timelock: 60_000.into(),
         reveal_before_height: 10,
@@ -211,6 +211,23 @@ fn restore_rejects_noncanonical_or_duplicate_htlcs() {
             field: "lockId",
             ..
         })
+    ));
+
+    let mismatched = HtlcLock::restore(
+        format!("0x{}", "66".repeat(32)),
+        HtlcHashlock::parse(&format!("0x{}", "77".repeat(32))).expect("literal hashlock"),
+        60_000.into(),
+        10,
+        7.into(),
+        token(1),
+        Side::Left,
+        0,
+        1_000,
+        None,
+    );
+    assert!(matches!(
+        mismatched,
+        Err(StateError::InvalidHtlcRestore { .. })
     ));
 
     let duplicate = AccountState::restore(

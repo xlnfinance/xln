@@ -6,7 +6,7 @@
  * fields the Entity already knows — never by reading a copy of the account
  * back across the process boundary.
  *
- * Parity target: `buildIncomingFrameAckMaterial` and `finalizeAccountProposal`
+ * Parity target: `buildIncomingAckFrameMaterial` and `finalizeAccountProposal`
  * in core/account/consensus, which build the same two shapes in TypeScript.
  */
 import { copyAccountDisputeConfig, copyAccountStateDomain } from '../../protocol/state/account-input-clone';
@@ -37,6 +37,7 @@ export const cutoverEnvelope = (account: AccountReplica): CutoverEnvelope => ({
  * transition leaves it.
  */
 const disputeDraft = (draft: WaveDisputeDraft): AccountDisputeHanko => ({
+  ...(draft.hanko === undefined ? {} : { hanko: draft.hanko }),
   hash: draft.hash,
   proofBodyHash: draft.proofBodyHash,
   proofNonce: draft.nonce,

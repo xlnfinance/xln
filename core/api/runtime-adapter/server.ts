@@ -276,7 +276,7 @@ const compactReadQueryForLog = (query: RuntimeAdapterReadQuery | undefined): Rec
 
 const encodedByteLengthForLog = (value: unknown): number | null => {
   try {
-    return encodeBinaryPayload(value, 'msgpack').byteLength;
+    return encodeBinaryPayload(value).byteLength;
   } catch (error) {
     runtimeAdapterLog.debug('response_size_field_encode_failed', { reason: errorMessage(error) });
     return null;

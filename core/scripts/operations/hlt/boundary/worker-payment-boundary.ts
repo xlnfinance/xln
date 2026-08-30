@@ -47,7 +47,7 @@ export type PaymentSettlementSample = Readonly<{
   runtimeHeight: number;
   acceptedPayments: number;
   completedPayments: number;
-  lockBookOpen: number;
+  paybookOpen: number;
 }>;
 
 const HASH_32 = /^0x[0-9a-f]{64}$/;
@@ -65,14 +65,14 @@ const decodeSettlementSamples = (
   const samples = value.map((sample, index): PaymentSettlementSample => {
     const record = requireBoundaryRecord(sample, `HLT_PAYMENT_REPORT_SAMPLE_INVALID:${index}`);
     requireExactBoundaryKeys(record, [
-      'elapsedMs', 'runtimeHeight', 'acceptedPayments', 'completedPayments', 'lockBookOpen',
+      'elapsedMs', 'runtimeHeight', 'acceptedPayments', 'completedPayments', 'paybookOpen',
     ], [], `HLT_PAYMENT_REPORT_SAMPLE_FIELDS_INVALID:${index}`);
     const decoded = {
       elapsedMs: requireBoundaryInteger(record['elapsedMs'], `HLT_PAYMENT_REPORT_SAMPLE_ELAPSED_INVALID:${index}`, 1),
       runtimeHeight: requireBoundaryInteger(record['runtimeHeight'], `HLT_PAYMENT_REPORT_SAMPLE_HEIGHT_INVALID:${index}`, 0),
       acceptedPayments: requireBoundaryInteger(record['acceptedPayments'], `HLT_PAYMENT_REPORT_SAMPLE_ACCEPTED_INVALID:${index}`, 0),
       completedPayments: requireBoundaryInteger(record['completedPayments'], `HLT_PAYMENT_REPORT_SAMPLE_COMPLETED_INVALID:${index}`, 0),
-      lockBookOpen: requireBoundaryInteger(record['lockBookOpen'], `HLT_PAYMENT_REPORT_SAMPLE_OPEN_INVALID:${index}`, 0),
+      paybookOpen: requireBoundaryInteger(record['paybookOpen'], `HLT_PAYMENT_REPORT_SAMPLE_OPEN_INVALID:${index}`, 0),
     };
     if (
       decoded.acceptedPayments > submitted ||
@@ -87,11 +87,12 @@ const decodeSettlementSamples = (
     return decoded;
   });
   const ingress = samples.find(sample => sample.acceptedPayments === submitted);
-  const delivered = samples.find(sample => sample.completedPayments === submitted && sample.lockBookOpen === 0);
+  const delivered = samples.find(sample => sample.completedPayments === submitted && sample.paybookOpen === 0);
   const final = samples.at(-1)!;
   if (
-    ingress?.elapsedMs !== hubIngressElapsedMs || delivered?.elapsedMs !== deliveredElapsedMs ||
-    final.acceptedPayments !== submitted || final.completedPayments !== submitted || final.lockBookOpen !== 0
+    ingress?.elapsedMs !== hubIngressElapsedMs || !delivered || delivered.elapsedMs > deliveredElapsedMs ||
+    final.elapsedMs !== deliveredElapsedMs ||
+    final.acceptedPayments !== submitted || final.completedPayments !== submitted || final.paybookOpen !== 0
   ) throw new Error('HLT_PAYMENT_REPORT_SAMPLE_TERMINAL_INVALID');
   return samples;
 };

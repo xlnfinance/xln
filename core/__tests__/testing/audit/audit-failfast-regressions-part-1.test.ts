@@ -190,7 +190,6 @@ import { MalformedEntityFrameInputError } from '../../../entity/tx/processing/in
 import { applyStorageChanges } from '../../../runtime/observability/env-events';
 import {
   resolveDbPath,
-  resolveHistoryViewDbPath,
   resolveRuntimeWalDbPath,
   resolveStorageDbPath,
 } from '../../../storage/runtime-dbs';
@@ -230,7 +229,7 @@ import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 
 import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
 
-import { buildHtlcOnionAdvanceTx } from '../../../entity/htlc/onion-advance';
+import { buildHtlcOnionAdvanceTx } from '../../../entity/paybook/onion-advance';
 import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
@@ -367,8 +366,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -582,9 +579,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
       bio: '',
       website: '',
     },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     crontabState: initCrontab(),
   },
@@ -609,9 +604,7 @@ const makeEntityState = (entityId: string): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
@@ -758,7 +751,7 @@ describe('audit fail-fast regressions', () => {
     expect(getRuntimeJurisdictionHeight(env, 0)).toBe(5794);
   });
 
-  test('cross-j system entity txs reject every raw ingress outside certified runtimeOutput', async () => {
+  test('cross-j system entity txs reject every raw ingress outside committed runtimeOutput', async () => {
     const env = createEmptyEnv('cross-j-intra-runtime-boundary');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -797,7 +790,6 @@ describe('audit fail-fast regressions', () => {
       from: remoteRuntime,
       entityId: crossJEntityId,
       signerId: crossJSignerId,
-      localRuntimeProtocol: 'cross-j',
       entityTxs: [{
         type: 'prepareCrossJurisdictionSwap',
         data: { route: {} },
@@ -1067,7 +1059,6 @@ describe('audit fail-fast regressions', () => {
         resolveStorageDbPath(env, 'current'),
         resolveStorageDbPath(env, 'previous'),
         resolveRuntimeWalDbPath(env),
-        resolveHistoryViewDbPath(env),
       ]) rmSync(path, { recursive: true, force: true });
       env.scenarioMode = false;
       env.quietRuntimeLogs = true;

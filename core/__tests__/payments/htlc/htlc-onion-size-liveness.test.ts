@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { HTLC, LIMITS } from '../../../config/constants';
-import { computeHtlcEnvelopeContextHash, createOnionEnvelopes, deriveHtlcLockIdAtHop } from '../../../protocol/htlc/codec/envelope';
+import { computeHtlcEnvelopeContextHash, createOnionEnvelopes } from '../../../protocol/htlc/codec/envelope';
 import { decodeOnionLayer } from '../../../protocol/htlc/codec/onion';
 import { decryptOpaqueHtlcBytes } from '../../../protocol/htlc/multi-recipient';
 
@@ -23,12 +23,11 @@ test('MAX_HOPS opaque onion stays bounded and every Entity decrypts one layer', 
   const forwards = new Map(route.slice(1, -1).map(entityId => [entityId, 1n]));
   const timelock = BigInt(HTLC.MIN_TIMELOCK_DELTA_MS * (HTLC.MAX_HOPS + 2));
   const revealBeforeHeight = HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS * (HTLC.MAX_HOPS + 2);
-  const rootLockId = bytes32(0x7_001);
   const hashlock = bytes32(0x7_002);
   const envelope = await createOnionEnvelopes(
     route, bytes32(0x7_003), publicKeys, domains, forwards,
     undefined, 1,
-    { rootLockId, hashlock, tokenId: 1, senderLockAmount: 1n, timelock, revealBeforeHeight },
+    { hashlock, tokenId: 1, senderLockAmount: 1n, timelock, revealBeforeHeight },
     hopIndex => privateKeyAt(route.length + hopIndex),
   );
   expect(new TextEncoder().encode(JSON.stringify(envelope)).byteLength).toBeLessThan(LIMITS.MAX_FRAME_SIZE_BYTES);
@@ -41,7 +40,7 @@ test('MAX_HOPS opaque onion stays bounded and every Entity decrypts one layer', 
       encrypted, publicKeys.get(hop)!, privateKeys.get(hop)!,
       computeHtlcEnvelopeContextHash({
         fromEntityId: route[hopIndex - 1]!, toEntityId: hop, domain,
-        lockId: deriveHtlcLockIdAtHop(rootLockId, hopIndex), hashlock, tokenId: 1, amount,
+        hashlock, tokenId: 1, amount,
         timelock: timelock - BigInt(hopIndex - 1) * BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
         revealBeforeHeight: revealBeforeHeight - (hopIndex - 1) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
       }),

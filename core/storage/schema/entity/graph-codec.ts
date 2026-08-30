@@ -23,8 +23,9 @@ import {
 import type { RuntimeDbLike } from '../../types';
 
 export const ENTITY_COLLECTION_NAMESPACES = [
-  'htlcRoutes',
-  'lockBook',
+  'paybookEntries',
+  'deferredAccountProposals',
+  'settlementContinuations',
   'crossJurisdictionSwaps',
   'crossJurisdictionAuthorizations',
   'pendingCrossJurisdictionFillAcks',
@@ -36,8 +37,9 @@ export type EntityCollectionNamespace = (typeof ENTITY_COLLECTION_NAMESPACES)[nu
 
 /** Permanent physical graph keys. Never derive these from array order. */
 export const ENTITY_COLLECTION_NAMESPACE_TAG = Object.freeze({
-  htlcRoutes: 1,
-  lockBook: 2,
+  paybookEntries: 1,
+  deferredAccountProposals: 8,
+  settlementContinuations: 9,
   crossJurisdictionSwaps: 3,
   crossJurisdictionAuthorizations: 4,
   pendingCrossJurisdictionFillAcks: 5,
@@ -75,7 +77,9 @@ const entityTreeFromState = (
 ): EntityTree | undefined => {
   const value = namespace === 'crontabHooks'
     ? state.crontabState?.hooks
-    : state[namespace];
+    : namespace === 'paybookEntries'
+      ? state.paybook.entries
+      : state[namespace];
   return value === undefined ? undefined : entityTree(value, namespace);
 };
 

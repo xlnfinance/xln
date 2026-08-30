@@ -25,8 +25,8 @@ const projectCrossJurisdictionRoutes = (
   new Map([...source].map(([orderId, route]) => [orderId, cloneCrossJurisdictionRoute(route)]));
 
 export type EntityStorageTreeField =
-  | 'htlcRoutes'
-  | 'lockBook'
+  | 'deferredAccountProposals'
+  | 'settlementContinuations'
   | 'crossJurisdictionSwaps'
   | 'crossJurisdictionAuthorizations'
   | 'pendingCrossJurisdictionFillAcks'
@@ -36,9 +36,10 @@ type StorageCrontabScalarState = Pick<CrontabState, 'tasks'>;
 
 export type StorageEntityScalarDoc = Omit<
   StorageEntityCoreDoc,
-  EntityStorageTreeField | 'crontabState'
+  EntityStorageTreeField | 'crontabState' | 'paybook'
 > & {
   crontabState?: StorageCrontabScalarState;
+  paybook: Pick<EntityState['paybook'], 'feesEarned'>;
 };
 
 /**
@@ -60,11 +61,9 @@ export const projectEntityScalarDoc = (state: EntityState): StorageEntityScalarD
   ...withDefinedProperty('jHistoryFinality', state.jHistoryFinality),
   ...withDefinedProperty('certifiedBoardState', state.certifiedBoardState),
   profile: state.profile,
-  htlcFeesEarned: state.htlcFeesEarned,
+  paybook: { feesEarned: state.paybook.feesEarned },
   ...withDefinedProperty('prevFrameHash', state.prevFrameHash),
   ...withDefinedProperty('leaderState', state.leaderState),
-  ...withDefinedProperty('deferredAccountProposals', state.deferredAccountProposals),
-  ...withDefinedProperty('settlementContinuations', state.settlementContinuations),
   ...withDefinedProperty(
     'crontabState',
     state.crontabState ? { tasks: state.crontabState.tasks } : undefined,
@@ -102,8 +101,18 @@ export const projectEntityCoreDoc = (
         hooks: projectStorageMap(state.crontabState.hooks),
       },
     ),
-    htlcRoutes: projectStorageMap(state.htlcRoutes),
-    lockBook: projectStorageMap(state.lockBook),
+    paybook: {
+      entries: projectStorageMap(state.paybook.entries),
+      feesEarned: state.paybook.feesEarned,
+    },
+    ...withDefinedProperty(
+      'deferredAccountProposals',
+      state.deferredAccountProposals && projectStorageMap(state.deferredAccountProposals),
+    ),
+    ...withDefinedProperty(
+      'settlementContinuations',
+      state.settlementContinuations && projectStorageMap(state.settlementContinuations),
+    ),
     ...withDefinedProperty(
       'crossJurisdictionSwaps',
       state.crossJurisdictionSwaps && projectCrossJurisdictionRoutes(state.crossJurisdictionSwaps),
@@ -126,7 +135,6 @@ export const projectEntityCoreDoc = (
 export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
   signerId: string;
   isProposer: boolean;
-  htlcNotes?: EntityReplica['htlcNotes'];
 };
 
 /**
@@ -136,12 +144,11 @@ export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
  */
 export const projectEntityReplicaCoreView = (
   state: EntityState,
-  replica: Pick<EntityReplica, 'signerId' | 'isProposer' | 'htlcNotes'>,
+  replica: Pick<EntityReplica, 'signerId' | 'isProposer'>,
 ): EntityReplicaCoreViewDoc => ({
   ...projectEntityCoreDoc(state),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
-  ...withDefinedProperty('htlcNotes', replica.htlcNotes),
 });
 
 type ReplicaMetaProjectionOptions = {
@@ -156,7 +163,6 @@ const buildReplicaMetaProjection = (
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
-  ...withDefinedProperty('htlcNotes', replica.htlcNotes),
   ...withDefinedProperty('position', replica.position),
   ...withDefinedProperty(
     'certifiedFrameHead',

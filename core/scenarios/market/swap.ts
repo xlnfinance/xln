@@ -602,7 +602,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     .flatMap(input => input.accountEnvelopes)
     .find(envelope => envelope.proposalTxs.some(tx =>
       tx.type === 'swap_resolve' && tx.offerId === 'bob-buy-001'));
-  assert(bobResolveEnvelope?.kind === 'frame_ack', 'Hub coalesces offer ACK and resolve proposal into one frame_ack');
+  assert(bobResolveEnvelope?.kind === 'ack_frame', 'Hub coalesces offer ACK and resolve proposal into one ack_frame');
   assert(bobResolveEnvelope?.ackHeight !== undefined, 'Coalesced Hub response contains the offer ACK');
   console.log(
     `[SWAP-CAUSAL-BENCH] offer=bob-buy-001 runtimeFrames=${bobTrace.length} ` +

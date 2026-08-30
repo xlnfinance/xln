@@ -49,6 +49,9 @@ const snapshot = (
   createdHeight: offer.createdHeight,
   quantizedGive: BigInt(offer.quantizedGive),
   quantizedWant: BigInt(offer.quantizedWant),
+  ...(offer.crossJurisdiction === null
+    ? {}
+    : { crossJurisdiction: offer.crossJurisdiction }),
   accountOutputVerified: true,
 });
 
@@ -68,6 +71,9 @@ const offerCreated = (row: AccountSwapOfferSnapshot): SwapOfferEvent => ({
   minNetReceive: row.minNetReceive,
   priceTicks: row.priceTicks,
   ...(row.timeInForce === undefined ? {} : { timeInForce: row.timeInForce }),
+  ...(row.crossJurisdiction === undefined
+    ? {}
+    : { crossJurisdiction: row.crossJurisdiction }),
   accountOutputVerified: true,
 });
 

@@ -2,19 +2,19 @@ import type {
   AccountState,
   Delta,
   HtlcLock,
-  HtlcRoute,
   PullCommitment,
   SettlementDiff,
   SettlementOp,
   SettlementWorkspace,
   SwapOffer,
 } from '../account';
+import type { PaybookEntry } from '../../entity/types';
 import type { AssertNever, FieldGap } from './coverage';
 
 type AccountSubcontract = NonNullable<AccountState['subcontracts']> extends ReadonlyMap<string, infer Value>
   ? Value
   : never;
-type CrossJurisdictionSecretRelay = NonNullable<HtlcRoute['crossJurisdictionRelay']>;
+type CrossJurisdictionSecretRelay = NonNullable<PaybookEntry['crossJurisdictionRelay']>;
 type PostSettlementDisputeProof = NonNullable<SettlementWorkspace['postSettlementDisputeProof']>;
 
 export const HASHABLE_DELTA_FIELDS = [
@@ -121,16 +121,15 @@ const HASHABLE_POST_SETTLEMENT_DISPUTE_PROOF_FIELDS = [
   'proposerIsLeft',
 ] as const satisfies readonly (keyof PostSettlementDisputeProof)[];
 
-export const HASHABLE_HTLC_ROUTE_FIELDS = [
+export const HASHABLE_PAYBOOK_ENTRY_FIELDS = [
   'hashlock',
+  'description',
   'tokenId',
   'amount',
   'startedAtMs',
   'originated',
   'inboundEntity',
-  'inboundLockId',
   'outboundEntity',
-  'outboundLockId',
   'inboundSettled',
   'outboundSettled',
   'secret',
@@ -141,7 +140,7 @@ export const HASHABLE_HTLC_ROUTE_FIELDS = [
   'pendingFee',
   'crossJurisdictionRelay',
   'createdTimestamp',
-] as const satisfies readonly (keyof HtlcRoute)[];
+] as const satisfies readonly (keyof PaybookEntry)[];
 
 export const HASHABLE_CROSS_J_SECRET_RELAY_FIELDS = [
   'routeId',
@@ -176,7 +175,7 @@ export type AccountNestedFieldCoverage = [
   AssertNever<FieldGap<SettlementDiff, typeof HASHABLE_SETTLEMENT_DIFF_FIELDS>>,
   AssertNever<FieldGap<SettlementWorkspace, typeof HASHABLE_SETTLEMENT_WORKSPACE_FIELDS>>,
   AssertNever<FieldGap<PostSettlementDisputeProof, typeof HASHABLE_POST_SETTLEMENT_DISPUTE_PROOF_FIELDS>>,
-  AssertNever<FieldGap<HtlcRoute, typeof HASHABLE_HTLC_ROUTE_FIELDS>>,
+  AssertNever<FieldGap<PaybookEntry, typeof HASHABLE_PAYBOOK_ENTRY_FIELDS>>,
   AssertNever<FieldGap<CrossJurisdictionSecretRelay, typeof HASHABLE_CROSS_J_SECRET_RELAY_FIELDS>>,
   AssertNever<FieldGap<AccountSubcontract, typeof HASHABLE_ACCOUNT_SUBCONTRACT_FIELDS>>,
   AssertNever<FieldGap<

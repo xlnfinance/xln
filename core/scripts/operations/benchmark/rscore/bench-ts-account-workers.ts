@@ -11,55 +11,41 @@ import { computeIntegrityDigest } from '../../../../support/bytes/integrity-chec
 
 const RESULT_PREFIX = 'TS_ACCOUNT_WORKER_BENCH_RESULT=';
 const OWNER = `0x${'ff'.repeat(32)}`;
+const DEFAULT_ACCOUNTS = 10_000;
+const DEFAULT_RUNTIME_FRAMES = 1_000;
+const DEFAULT_TXS_PER_ACCOUNT = 12;
+const MIN_ACCOUNT_ROWS_PER_ACTIVE_FRAME = 128;
+const CHILD_TIMEOUT_MS = 10_000;
+
 const BENCH_JURISDICTION: JReplica = {
-  name: 'ts-worker-bench',
-  blockNumber: 0n,
-  stateRoot: null,
-  mempool: [],
-  blockDelayMs: 0,
-  lastBlockTimestamp: 0,
-  position: { x: 0, y: 0, z: 0 },
-  chainId: 31_337,
+  name: 'ts-worker-bench', blockNumber: 0n, stateRoot: null, mempool: [], blockDelayMs: 0,
+  lastBlockTimestamp: 0, position: { x: 0, y: 0, z: 0 }, chainId: 31_337,
   contracts: {
-    depository: `0x${'dd'.repeat(20)}`,
-    entityProvider: `0x${'ee'.repeat(20)}`,
-    account: `0x${'98'.repeat(20)}`,
-    deltaTransformer: `0x${'99'.repeat(20)}`,
+    depository: `0x${'dd'.repeat(20)}`, entityProvider: `0x${'ee'.repeat(20)}`,
+    account: `0x${'98'.repeat(20)}`, deltaTransformer: `0x${'99'.repeat(20)}`,
   },
 };
-const DEFAULT_ACCOUNTS = 1_024;
-const CHILD_TIMEOUT_MS = 6_000;
+
+type WorkerAggregate = {
+  workerIndex: number; items: number; workMs: number; transitionMs: number; proposalMs: number;
+  rootMs: number; packMs: number; threadCpuMs: number; requestBytes: number; responseBytes: number;
+};
 
 type BenchResult = Readonly<{
-  workers: number;
-  accounts: number;
-  elapsedMs: number;
-  workerCriticalMs: number;
-  coordinatorOverheadMs: number;
-  paymentProposalsPerSecond: number;
-  shadowRoot: string;
-  effectsDigest: string;
-  rssBytes: number;
-  maxRssBytes: number;
-  workerHeapBytes: number;
-  cpuUserMs: number;
-  cpuSystemMs: number;
-  cpuCores: number;
-  cpuBusyRatio: number;
-  initRequestBytes: number;
-  normalRequestBytes: number;
-  normalResponseBytes: number;
-  checkpointResponseBytes: number;
-  coordinatorTimings: Readonly<{ encodeMs: number; decodeMs: number; foldMs: number; dispatchMs: number }>;
-  perWorker: readonly Readonly<{
-    workerIndex: number;
-    operations: number;
-    workMs: number;
-    waitMs: number;
-    roundTripMs: number;
-    requestBytes: number;
-    responseBytes: number;
-  }>[];
+  workers: number; accounts: number; runtimeFrames: number; activeRuntimeFrames: number;
+  accountTxs: number; accountInputs: number;
+  accountInputKinds: Readonly<{ frame: number; ack: number; ackPropose: number }>;
+  initMs: number; wallMs: number; accountsRoot: string; outputsDigest: string; cpuCores: number;
+  accountInputsPerSecond: number; endToEndAccountInputsPerSecond: number;
+  accountInputKindsPerSecond: Readonly<{ frame: number; ack: number; ackPropose: number }>;
+  waves: Readonly<{ inboundMs: number; entityMs: number; proposalMs: number }>;
+  coordinator: Readonly<{
+    dispatchMs: number; joinMs: number; foldMs: number; encodeMs: number; decodeMs: number;
+    outputDigestMs: number; requestBytes: number; responseBytes: number;
+  }>;
+  workerCriticalMs: number; workerComputeMs: number; rssBytes: number;
+  shards: Readonly<{ touched: number; minRows: number; avgRows: number; maxRows: number }>;
+  perWorker: readonly Readonly<WorkerAggregate & { utilization: number }>[];
 }>;
 
 const argument = (name: string): string | undefined => {
@@ -67,18 +53,15 @@ const argument = (name: string): string | undefined => {
   return index < 0 ? undefined : process.argv[index + 1];
 };
 
-const positiveInteger = (value: string | undefined, defaultValue: number, label: string): number => {
+const positiveInteger = (value: string | undefined, defaultValue: number, code: string): number => {
   const parsed = value === undefined ? defaultValue : Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${label}:${String(value)}`);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${code}:${String(value)}`);
   return parsed;
 };
 
-/** One deterministic Account in each selected three-nibble shard. */
 const accountIdAt = (index: number): string => {
   const shard = index % 4_096;
-  const prefix = shard.toString(16).padStart(3, '0');
-  const suffix = index.toString(16).padStart(61, '0');
-  return `0x${prefix}${suffix}`;
+  return `0x${shard.toString(16).padStart(3, '0')}${index.toString(16).padStart(61, '0')}`;
 };
 
 const benchmarkAccount = (accountId: string): AccountReplica => {
@@ -91,195 +74,165 @@ const benchmarkAccount = (accountId: string): AccountReplica => {
 const payment = (accountId: string): AccountTx => ({
   type: 'direct_payment',
   data: {
-    tokenId: 1,
-    amount: 1n,
-    route: [accountId],
-    fromEntityId: OWNER,
-    toEntityId: accountId,
-    deliveryMode: 'direct',
+    tokenId: 1, amount: 1n, route: [accountId], fromEntityId: OWNER,
+    toEntityId: accountId, deliveryMode: 'direct',
   },
 });
 
-const assertCanonicalResults = (
+const assertFrame = (
   effects: Awaited<ReturnType<TsAccountWorkerCoordinator['proposeAccountFrames']>>['effects'],
-  accounts: number,
+  rows: number,
+  txsPerAccount: number,
 ): void => {
-  if (effects.length !== accounts * 2) {
-    throw new Error(`TS_ACCOUNT_WORKER_BENCH_EFFECTS:${effects.length}:${accounts * 2}`);
-  }
-  for (let index = 0; index < accounts; index += 1) {
+  if (effects.length !== rows * 2) throw new Error(`TS_ACCOUNT_WORKER_BENCH_EFFECTS:${effects.length}:${rows * 2}`);
+  for (let index = 0; index < rows; index += 1) {
     const enqueue = effects[index];
-    if (
-      enqueue?.phase !== 'outbound-enqueue'
-      || !enqueue.result.ok
-      || enqueue.result.admittedAccountTxCount !== 1
-    ) {
+    const proposal = effects[rows + index];
+    if (enqueue?.phase !== 'outbound-enqueue' || !enqueue.result.ok
+      || enqueue.result.admittedAccountTxCount !== txsPerAccount) {
       throw new Error(`TS_ACCOUNT_WORKER_BENCH_ENQUEUE:${index}:${safeStringify(enqueue)}`);
     }
-    const proposal = effects[accounts + index];
-    if (
-      proposal?.phase !== 'outbound-proposal'
-      || !proposal.result.ok
-      || proposal.result.outcome !== 'proposed'
-    ) {
+    if (proposal?.phase !== 'outbound-proposal' || !proposal.result.ok
+      || proposal.result.outcome !== 'proposed') {
       throw new Error(`TS_ACCOUNT_WORKER_BENCH_PROPOSAL:${index}:${safeStringify(proposal)}`);
     }
   }
 };
 
-const assertSparseDispatch = async (
-  coordinator: TsAccountWorkerCoordinator,
-  accountId: string,
-): Promise<void> => {
-  const inbound = await coordinator.applyAccountInputs({
-    frameId: 'bench-frame-3',
-    entityTimestamp: 3_000,
-    finalizedJHeight: 0,
-    inputs: [],
-  });
-  if (inbound.workers.length !== 0) throw new Error('TS_ACCOUNT_WORKER_BENCH_SPARSE_INBOUND');
-  const outbound = await coordinator.proposeAccountFrames({
-    frameId: 'bench-frame-3',
-    timestamp: 3_000,
-    jHeight: 0,
-    txs: [{ accountId, txs: [payment(accountId)] }],
-    proposalAccountIds: [],
-    checkpointDue: false,
-  });
-  if (outbound.workers.length !== 1 || outbound.effects.length !== 1) {
-    throw new Error(`TS_ACCOUNT_WORKER_BENCH_SPARSE_OUTBOUND:${safeStringify(outbound.workers)}`);
-  }
-  await coordinator.applyAccountInputs({
-    frameId: 'bench-frame-4',
-    entityTimestamp: 4_000,
-    finalizedJHeight: 0,
-    inputs: [],
-  });
-  const checkpoint = await coordinator.proposeAccountFrames({
-    frameId: 'bench-frame-4',
-    timestamp: 4_000,
-    jHeight: 0,
-    txs: [],
-    proposalAccountIds: [],
-    checkpointDue: true,
-  });
-  if (checkpoint.workers.length !== 1 || checkpoint.checkpointChanges?.accounts.length !== 1) {
-    throw new Error(`TS_ACCOUNT_WORKER_BENCH_SPARSE_CHECKPOINT:${safeStringify(checkpoint.workers)}`);
+const addWorkerMetrics = (
+  totals: Map<number, WorkerAggregate>,
+  metrics: Awaited<ReturnType<TsAccountWorkerCoordinator['proposeAccountFrames']>>['workers'],
+): void => {
+  for (const metric of metrics) {
+    const total = totals.get(metric.workerIndex) ?? {
+      workerIndex: metric.workerIndex, items: 0, workMs: 0, transitionMs: 0, proposalMs: 0,
+      rootMs: 0, packMs: 0, threadCpuMs: 0, requestBytes: 0, responseBytes: 0,
+    };
+    total.items += metric.operations;
+    total.workMs += metric.workMs;
+    total.transitionMs += metric.transitionMs;
+    total.proposalMs += metric.proposalMs;
+    total.rootMs += metric.rootMs;
+    total.packMs += metric.workerEncodeMs;
+    total.threadCpuMs += metric.threadCpuUserMs + metric.threadCpuSystemMs;
+    total.requestBytes += metric.requestBytes;
+    total.responseBytes += metric.responseBytes;
+    totals.set(metric.workerIndex, total);
   }
 };
 
+const rounded = (value: number): number => Math.round(value * 100) / 100;
+
+const perSecond = (items: number, elapsedMs: number): number =>
+  rounded(elapsedMs === 0 ? 0 : items * 1_000 / elapsedMs);
+
 const runChild = async (): Promise<void> => {
   const workers = positiveInteger(argument('--workers'), 1, 'TS_ACCOUNT_WORKER_BENCH_WORKERS');
-  const accountCount = positiveInteger(
-    argument('--accounts') ?? process.env['XLN_TS_WORKER_BENCH_ACCOUNTS'],
-    DEFAULT_ACCOUNTS,
-    'TS_ACCOUNT_WORKER_BENCH_ACCOUNTS',
-  );
-  if (accountCount > 4_096) throw new Error(`TS_ACCOUNT_WORKER_BENCH_ACCOUNT_LIMIT:${accountCount}`);
-  const accountIds = Array.from({ length: accountCount }, (_, index) => accountIdAt(index));
-  const accounts = new Map(accountIds.map(accountId => [accountId, benchmarkAccount(accountId)]));
+  const accounts = positiveInteger(argument('--accounts'), DEFAULT_ACCOUNTS, 'TS_ACCOUNT_WORKER_BENCH_ACCOUNTS');
+  const runtimeFrames = positiveInteger(argument('--frames'), DEFAULT_RUNTIME_FRAMES, 'TS_ACCOUNT_WORKER_BENCH_FRAMES');
+  const txsPerAccount = positiveInteger(argument('--txs'), DEFAULT_TXS_PER_ACCOUNT, 'TS_ACCOUNT_WORKER_BENCH_TXS');
+  if (accounts < 10_000 || runtimeFrames < 1_000 || runtimeFrames > accounts) {
+    throw new Error(`TS_ACCOUNT_WORKER_BENCH_CARDINALITY:${accounts}:${runtimeFrames}`);
+  }
+  const accountIds = Array.from({ length: accounts }, (_, index) => accountIdAt(index));
+  const initStartedAt = performance.now();
   const coordinator = await TsAccountWorkerCoordinator.create({
-    ownerEntityId: OWNER,
-    workerCount: workers,
+    ownerEntityId: OWNER, workerCount: workers,
     logicalShardToWorker: Array.from({ length: 4_096 }, (_, shardId) => shardId % workers),
-    accounts,
+    accounts: new Map(accountIds.map(accountId => [accountId, benchmarkAccount(accountId)])),
     jReplicas: new Map([[BENCH_JURISDICTION.name, BENCH_JURISDICTION]]),
   });
-  const emptyInbound = await coordinator.applyAccountInputs({
-      frameId: 'bench-frame-1',
-      entityTimestamp: 1_000,
-      finalizedJHeight: 0,
-      inputs: [],
-    });
-    if (emptyInbound.workers.length !== 0 || emptyInbound.ipc.requestBytes !== 0) {
-      throw new Error(`TS_ACCOUNT_WORKER_BENCH_EMPTY_INBOUND_DISPATCH:${safeStringify(emptyInbound.workers)}`);
-    }
-    const cpuStart = process.cpuUsage();
-    const startedAt = performance.now();
-    const outbound = await coordinator.proposeAccountFrames({
-      frameId: 'bench-frame-1',
-      timestamp: 1_000,
-      jHeight: 0,
-      txs: accountIds.map(accountId => ({ accountId, txs: [payment(accountId)] })),
-      proposalAccountIds: accountIds,
-      checkpointDue: false,
-    });
-    const elapsedMs = performance.now() - startedAt;
-    const cpu = process.cpuUsage(cpuStart);
-    assertCanonicalResults(outbound.effects, accountCount);
-    const effectsDigest = computeIntegrityDigest(encodeCanonicalConsensusBytes(outbound.effects));
-
+  const initMs = performance.now() - initStartedAt;
+  const workerTotals = new Map<number, WorkerAggregate>();
+  const frameDigests: string[] = [];
+  let inboundMs = 0; let entityMs = 0; let proposalMs = 0; let outputDigestMs = 0;
+  let dispatchMs = 0; let joinMs = 0; let foldMs = 0; let encodeMs = 0; let decodeMs = 0;
+  let requestBytes = 0; let responseBytes = 0; let workerCriticalMs = 0;
+  const accountInputKinds = { frame: 0, ack: 0, ackPropose: 0 };
+  const activeRuntimeFrames = Math.min(
+    runtimeFrames,
+    Math.ceil(accounts / MIN_ACCOUNT_ROWS_PER_ACTIVE_FRAME),
+  );
+  const wallStartedAt = performance.now();
+  for (let frame = 0; frame < runtimeFrames; frame += 1) {
+    const start = frame < activeRuntimeFrames
+      ? Math.floor(frame * accounts / activeRuntimeFrames)
+      : accounts;
+    const end = frame < activeRuntimeFrames
+      ? Math.floor((frame + 1) * accounts / activeRuntimeFrames)
+      : accounts;
+    const ids = accountIds.slice(start, end);
+    const inboundStartedAt = performance.now();
     await coordinator.applyAccountInputs({
-      frameId: 'bench-frame-2',
-      entityTimestamp: 2_000,
-      finalizedJHeight: 0,
-      inputs: [],
+      frameId: `bench-frame-${frame}`, entityTimestamp: frame + 1, finalizedJHeight: 0, inputs: [],
     });
-    const checkpoint = await coordinator.proposeAccountFrames({
-      frameId: 'bench-frame-2',
-      timestamp: 2_000,
-      jHeight: 0,
-      txs: [],
-      proposalAccountIds: [],
-      checkpointDue: true,
+    inboundMs += performance.now() - inboundStartedAt;
+    const entityStartedAt = performance.now();
+    const txs = ids.map(accountId => ({
+      accountId, txs: Array.from({ length: txsPerAccount }, () => payment(accountId)),
+    }));
+    entityMs += performance.now() - entityStartedAt;
+    const proposalStartedAt = performance.now();
+    const result = await coordinator.proposeAccountFrames({
+      frameId: `bench-frame-${frame}`, timestamp: frame + 1, jHeight: 0,
+      txs, proposalAccountIds: ids, checkpointDue: false,
     });
-    if (checkpoint.shadowAccountsRoot !== outbound.shadowAccountsRoot) {
-      throw new Error(
-        `TS_ACCOUNT_WORKER_BENCH_CHECKPOINT_ROOT:`
-        + `${checkpoint.shadowAccountsRoot}:${outbound.shadowAccountsRoot}`,
-      );
+    proposalMs += performance.now() - proposalStartedAt;
+    assertFrame(result.effects, ids.length, txsPerAccount);
+    for (const effect of result.effects) {
+      if (effect.phase !== 'outbound-proposal' || !effect.result.ok
+        || effect.result.outcome !== 'proposed') continue;
+      switch (effect.result.accountInput.kind) {
+        case 'frame': accountInputKinds.frame += 1; break;
+        case 'ack': accountInputKinds.ack += 1; break;
+        case 'ack_frame': accountInputKinds.ackPropose += 1; break;
+        default: throw new Error(`TS_ACCOUNT_WORKER_BENCH_INPUT_KIND:${effect.result.accountInput.kind}`);
+      }
     }
-    if (checkpoint.checkpointChanges?.accounts.length !== accountCount) {
-      throw new Error(
-        `TS_ACCOUNT_WORKER_BENCH_CHECKPOINT_ACCOUNTS:`
-        + `${checkpoint.checkpointChanges?.accounts.length ?? -1}:${accountCount}`,
-      );
-    }
-    if (checkpoint.workers.length !== workers) {
-      throw new Error(`TS_ACCOUNT_WORKER_BENCH_CHECKPOINT_WORKERS:${checkpoint.workers.length}:${workers}`);
-    }
-    const firstAccountId = accountIds[0];
-    if (firstAccountId === undefined) throw new Error('TS_ACCOUNT_WORKER_BENCH_ACCOUNT_MISSING');
-    await assertSparseDispatch(coordinator, firstAccountId);
-    const usage = process.memoryUsage();
-    const maxRss = process.resourceUsage().maxRSS;
-    const workerCriticalMs = Math.max(...outbound.workers.map(worker => worker.elapsedUs)) / 1_000;
-    const result: BenchResult = {
-      workers,
-      accounts: accountCount,
-      elapsedMs: Math.round(elapsedMs * 100) / 100,
-      workerCriticalMs: Math.round(workerCriticalMs * 100) / 100,
-      coordinatorOverheadMs: Math.round((elapsedMs - workerCriticalMs) * 100) / 100,
-      paymentProposalsPerSecond: Math.round(accountCount * 100_000 / elapsedMs) / 100,
-      shadowRoot: outbound.shadowAccountsRoot,
-      effectsDigest,
-      rssBytes: usage.rss,
-      maxRssBytes: process.platform === 'darwin' ? maxRss : maxRss * 1_024,
-      workerHeapBytes: Math.max(...outbound.workers.map(worker => worker.heapUsedBytes)),
-      cpuUserMs: Math.round(cpu.user / 1000),
-      cpuSystemMs: Math.round(cpu.system / 1000),
-      cpuCores: availableParallelism(),
-      cpuBusyRatio: Math.round(((cpu.user + cpu.system) / 1000 / elapsedMs) * 100) / 100,
-      initRequestBytes: coordinator.initialization.requestBytes,
-      normalRequestBytes: outbound.ipc.requestBytes,
-      normalResponseBytes: outbound.ipc.responseBytes,
-      checkpointResponseBytes: checkpoint.ipc.responseBytes,
-      coordinatorTimings: {
-        encodeMs: Math.round(outbound.timings.encodeMs * 100) / 100,
-        decodeMs: Math.round(outbound.timings.decodeMs * 100) / 100,
-        foldMs: Math.round(outbound.timings.foldMs * 100) / 100,
-        dispatchMs: Math.round(outbound.timings.dispatchMs * 100) / 100,
-      },
-      perWorker: outbound.workers.map(worker => ({
-        workerIndex: worker.workerIndex,
-        operations: worker.operations,
-        workMs: Math.round(worker.workMs * 100) / 100,
-        waitMs: Math.round(worker.waitMs * 100) / 100,
-        roundTripMs: Math.round(worker.roundTripMs * 100) / 100,
-        requestBytes: worker.requestBytes,
-        responseBytes: worker.responseBytes,
-      })),
-    };
+    addWorkerMetrics(workerTotals, result.workers);
+    workerCriticalMs += Math.max(0, ...result.workers.map(metric => metric.workMs));
+    dispatchMs += result.timings.dispatchMs; joinMs += result.timings.joinMs;
+    foldMs += result.timings.foldMs; encodeMs += result.timings.encodeMs; decodeMs += result.timings.decodeMs;
+    requestBytes += result.ipc.requestBytes; responseBytes += result.ipc.responseBytes;
+    const digestStartedAt = performance.now();
+    frameDigests.push(computeIntegrityDigest(encodeCanonicalConsensusBytes(result.effects)));
+    outputDigestMs += performance.now() - digestStartedAt;
+  }
+  const wallMs = performance.now() - wallStartedAt;
+  const accountsRoot = coordinator.accountsRoot;
+  coordinator.close();
+  const outputsDigest = computeIntegrityDigest(encodeCanonicalConsensusBytes(frameDigests));
+  const workerComputeMs = [...workerTotals.values()].reduce((sum, worker) => sum + worker.workMs, 0);
+  const accountInputs = accountInputKinds.frame + accountInputKinds.ack + accountInputKinds.ackPropose;
+  const rows = Array.from({ length: 4_096 }, (_, shard) => Math.floor((accounts + 4_095 - shard) / 4_096))
+    .filter(count => count > 0);
+  const perWorker = [...workerTotals.values()].sort((left, right) => left.workerIndex - right.workerIndex)
+    .map(worker => ({ ...worker, utilization: proposalMs === 0 ? 0 : worker.threadCpuMs / proposalMs }));
+  const result: BenchResult = {
+    workers, accounts, runtimeFrames, activeRuntimeFrames,
+    accountTxs: accounts * txsPerAccount, accountInputs, accountInputKinds,
+    initMs: rounded(initMs), wallMs: rounded(wallMs), accountsRoot, outputsDigest,
+    cpuCores: availableParallelism(),
+    accountInputsPerSecond: perSecond(accountInputs, proposalMs),
+    endToEndAccountInputsPerSecond: perSecond(accountInputs, wallMs),
+    accountInputKindsPerSecond: {
+      frame: perSecond(accountInputKinds.frame, proposalMs),
+      ack: perSecond(accountInputKinds.ack, proposalMs),
+      ackPropose: perSecond(accountInputKinds.ackPropose, proposalMs),
+    },
+    waves: { inboundMs: rounded(inboundMs), entityMs: rounded(entityMs), proposalMs: rounded(proposalMs) },
+    coordinator: {
+      dispatchMs: rounded(dispatchMs), joinMs: rounded(joinMs), foldMs: rounded(foldMs),
+      encodeMs: rounded(encodeMs), decodeMs: rounded(decodeMs), outputDigestMs: rounded(outputDigestMs),
+      requestBytes, responseBytes,
+    },
+    workerCriticalMs: rounded(workerCriticalMs), workerComputeMs: rounded(workerComputeMs),
+    rssBytes: process.memoryUsage().rss,
+    shards: {
+      touched: rows.length, minRows: Math.min(...rows), avgRows: rounded(accounts / rows.length), maxRows: Math.max(...rows),
+    },
+    perWorker: perWorker.map(worker => ({ ...worker, utilization: rounded(worker.utilization) })),
+  };
   console.log(`${RESULT_PREFIX}${safeStringify(result)}`);
 };
 
@@ -289,107 +242,65 @@ const parseChildResult = (stdout: string): BenchResult => {
   return JSON.parse(line.slice(RESULT_PREFIX.length)) as BenchResult;
 };
 
-const runIsolated = async (workers: number, accounts: number): Promise<BenchResult> => {
-  const script = fileURLToPath(import.meta.url);
+const runIsolated = async (workers: number, accounts: number, frames: number, txs: number): Promise<BenchResult> => {
   const child = Bun.spawn([
-    process.execPath,
-    script,
-    '--child',
-    '--workers',
-    String(workers),
-    '--accounts',
-    String(accounts),
-  ], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: {
-      ...process.env,
-      XLN_CRYPTO_POOL_WORKERS: '0',
-      XLN_CRYPTO_SIGN_WORKERS: '0',
-    },
-  });
+    process.execPath, fileURLToPath(import.meta.url), '--child', '--workers', String(workers),
+    '--accounts', String(accounts), '--frames', String(frames), '--txs', String(txs),
+  ], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, XLN_CRYPTO_POOL_WORKERS: '0', XLN_CRYPTO_SIGN_WORKERS: '0' } });
   const stdoutPromise = new Response(child.stdout).text();
   const stderrPromise = new Response(child.stderr).text();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<{ kind: 'timeout'; exitCode: -1 }>(resolve => {
-    timeoutId = setTimeout(() => resolve({ kind: 'timeout', exitCode: -1 }), CHILD_TIMEOUT_MS);
-  });
-  const outcome = await Promise.race([
-    child.exited.then(exitCode => ({ kind: 'exit' as const, exitCode })),
-    timeout,
-  ]);
+  const timeout = new Promise<'timeout'>(resolve => { timeoutId = setTimeout(() => resolve('timeout'), CHILD_TIMEOUT_MS); });
+  const outcome = await Promise.race([child.exited, timeout]);
   clearTimeout(timeoutId);
-  if (outcome.kind === 'timeout') child.kill();
+  if (outcome === 'timeout') child.kill();
   const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-  if (outcome.kind === 'timeout') {
-    throw new Error(`TS_ACCOUNT_WORKER_BENCH_TIMEOUT:${workers}:${CHILD_TIMEOUT_MS}`);
-  }
-  if (outcome.exitCode !== 0) {
-    throw new Error(`TS_ACCOUNT_WORKER_BENCH_CHILD:${workers}:${outcome.exitCode}:${stderr.slice(-2_000)}`);
-  }
+  if (outcome === 'timeout') throw new Error(`TS_ACCOUNT_WORKER_BENCH_TIMEOUT:${workers}:${CHILD_TIMEOUT_MS}`);
+  if (outcome !== 0) throw new Error(`TS_ACCOUNT_WORKER_BENCH_CHILD:${workers}:${outcome}:${stderr.slice(-2_000)}`);
   return parseChildResult(stdout);
 };
 
-const mib = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1);
+const mib = (bytes: number): string => (bytes / 1_048_576).toFixed(1);
 
 const runCoordinator = async (): Promise<void> => {
-  const accounts = positiveInteger(
-    process.env['XLN_TS_WORKER_BENCH_ACCOUNTS'],
-    DEFAULT_ACCOUNTS,
-    'TS_ACCOUNT_WORKER_BENCH_ACCOUNTS',
-  );
-  const startedAt = performance.now();
-  const workersList = (process.env['XLN_TS_WORKER_BENCH_WORKERS'] ?? '1,2,4')
-    .split(',')
+  const accounts = positiveInteger(process.env['XLN_TS_WORKER_BENCH_ACCOUNTS'], DEFAULT_ACCOUNTS, 'TS_ACCOUNT_WORKER_BENCH_ACCOUNTS');
+  const frames = positiveInteger(process.env['XLN_TS_WORKER_BENCH_FRAMES'], DEFAULT_RUNTIME_FRAMES, 'TS_ACCOUNT_WORKER_BENCH_FRAMES');
+  const txs = positiveInteger(process.env['XLN_TS_WORKER_BENCH_TXS'], DEFAULT_TXS_PER_ACCOUNT, 'TS_ACCOUNT_WORKER_BENCH_TXS');
+  const workersList = (process.env['XLN_TS_WORKER_BENCH_WORKERS'] ?? '1,2,4,8').split(',')
     .map(value => positiveInteger(value, 1, 'TS_ACCOUNT_WORKER_BENCH_WORKERS'));
+  const startedAt = performance.now();
   const results: BenchResult[] = [];
-  for (const workers of workersList) results.push(await runIsolated(workers, accounts));
+  for (const workers of workersList) results.push(await runIsolated(workers, accounts, frames, txs));
   const baseline = results[0];
-  if (baseline === undefined) throw new Error('TS_ACCOUNT_WORKER_BENCH_BASELINE_MISSING');
-  if (results.some(result => (
-    result.shadowRoot !== baseline.shadowRoot || result.effectsDigest !== baseline.effectsDigest
-  ))) {
+  if (!baseline) throw new Error('TS_ACCOUNT_WORKER_BENCH_BASELINE_MISSING');
+  if (results.some(result => result.accountsRoot !== baseline.accountsRoot || result.outputsDigest !== baseline.outputsDigest)) {
     throw new Error(`TS_ACCOUNT_WORKER_BENCH_PARITY_DIVERGENCE:${safeStringify(results)}`);
   }
-  console.log('workers  payment proposals/s  speedup  worker  coord  RSS MiB  normal IPC MB  checkpoint MB  cpu_busy  encode  decode   fold  dispatch');
+  console.log('workers  AccountInputs/s  worker speedup  e2e speedup  wall  inbound  entity  proposal  dispatch  join  fold  IPC MiB');
   for (const result of results) {
-    const speedup = result.paymentProposalsPerSecond / baseline.paymentProposalsPerSecond;
-    const normalIpc = result.normalRequestBytes + result.normalResponseBytes;
     console.log(
-      `${String(result.workers).padStart(7)}  `
-      + `${result.paymentProposalsPerSecond.toFixed(2).padStart(19)}  `
-      + `${speedup.toFixed(2).padStart(7)}x  `
-      + `${result.workerCriticalMs.toFixed(2).padStart(6)}ms  `
-      + `${result.coordinatorOverheadMs.toFixed(2).padStart(5)}ms  `
-      + `${mib(result.rssBytes).padStart(7)}  `
-      + `${mib(normalIpc).padStart(13)}  `
-      + `${mib(result.checkpointResponseBytes).padStart(13)}  `
-      + `${String(result.cpuBusyRatio).padStart(8)}  `
-      + `${result.coordinatorTimings.encodeMs.toFixed(2).padStart(6)}ms  `
-      + `${result.coordinatorTimings.decodeMs.toFixed(2).padStart(6)}ms  `
-      + `${result.coordinatorTimings.foldMs.toFixed(2).padStart(6)}ms  `
-      + `${result.coordinatorTimings.dispatchMs.toFixed(2).padStart(7)}ms`,
+      `${String(result.workers).padStart(7)}  ${result.accountInputsPerSecond.toFixed(2).padStart(15)}  `
+      + `${(baseline.workerCriticalMs / result.workerCriticalMs).toFixed(2).padStart(13)}x  `
+      + `${(baseline.wallMs / result.wallMs).toFixed(2).padStart(10)}x  ${result.wallMs.toFixed(2).padStart(7)}ms  `
+      + `${result.waves.inboundMs.toFixed(2).padStart(7)}  ${result.waves.entityMs.toFixed(2).padStart(7)}  `
+      + `${result.waves.proposalMs.toFixed(2).padStart(8)}  ${result.coordinator.dispatchMs.toFixed(2).padStart(8)}  `
+      + `${result.coordinator.joinMs.toFixed(2).padStart(8)}  ${result.coordinator.foldMs.toFixed(2).padStart(6)}  `
+      + `${mib(result.coordinator.requestBytes + result.coordinator.responseBytes).padStart(8)}`,
+    );
+    console.log(
+      `  AccountInputs frame=${result.accountInputKinds.frame} (${result.accountInputKindsPerSecond.frame.toFixed(2)}/s)`
+      + ` ack=${result.accountInputKinds.ack} (${result.accountInputKindsPerSecond.ack.toFixed(2)}/s)`
+      + ` ackPropose=${result.accountInputKinds.ackPropose} (${result.accountInputKindsPerSecond.ackPropose.toFixed(2)}/s, protocol=ack_frame)`,
     );
     for (const worker of result.perWorker) {
-      console.log(
-        `  w${String(worker.workerIndex).padStart(2)}  ops=${String(worker.operations).padStart(4)}  `
-        + `work=${worker.workMs.toFixed(2).padStart(7)}ms  wait=${worker.waitMs.toFixed(2).padStart(7)}ms  `
-        + `rt=${worker.roundTripMs.toFixed(2).padStart(7)}ms  `
-        + `tx=${mib(worker.requestBytes + worker.responseBytes).padStart(6)}MB`,
-      );
+      console.log(`  w${worker.workerIndex} items=${worker.items} cpu=${worker.threadCpuMs.toFixed(2)}ms util=${worker.utilization.toFixed(2)} transition=${worker.transitionMs.toFixed(2)}ms proposal=${worker.proposalMs.toFixed(2)}ms root=${worker.rootMs.toFixed(2)}ms pack=${worker.packMs.toFixed(2)}ms`);
     }
   }
   const totalMs = performance.now() - startedAt;
-  if (totalMs > 20_000) throw new Error(`TS_ACCOUNT_WORKER_BENCH_TOTAL_TIMEOUT:${Math.round(totalMs)}`);
-  console.log(
-    `shadowRoot=${baseline.shadowRoot} effects=${baseline.effectsDigest} `
-    + `accounts=${accounts} totalMs=${totalMs.toFixed(2)} cpuCores=${String(baseline.cpuCores)}`,
-  );
+  if (totalMs > 30_000) throw new Error(`TS_ACCOUNT_WORKER_BENCH_TOTAL_TIMEOUT:${Math.round(totalMs)}`);
+  console.log(`accounts=${accounts} runtimeFrames=${frames} activeRuntimeFrames=${baseline.activeRuntimeFrames} txsPerAccount=${txs} touchedShards=${baseline.shards.touched} rowsPerShard=${baseline.shards.minRows}/${baseline.shards.avgRows}/${baseline.shards.maxRows} totalMs=${totalMs.toFixed(2)} cpuCores=${baseline.cpuCores}`);
   console.log(`${RESULT_PREFIX}${safeStringify(results)}`);
 };
 
-if (process.argv.includes('--child')) {
-  await runChild();
-} else {
-  await runCoordinator();
-}
+if (process.argv.includes('--child')) await runChild();
+else await runCoordinator();

@@ -54,7 +54,7 @@ const generate = (tier: Tier): { ok: boolean; dir: string; ms: number; error?: s
     '--no-swap',
   ];
 
-  const timeout = tier.label === 'heavy' ? 900_000 : 600_000;
+  const timeout = 20_000;
   const started = performance.now();
   try {
     console.error(`\nBENCH_GEN ${tier.label} a=${tier.accounts} p=${tier.payments} timeout=${timeout / 1000}s`);

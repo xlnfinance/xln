@@ -48,9 +48,7 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
     bio: '',
     website: '',
   },
-  htlcRoutes: PersistentEntityCollectionMap.empty(),
-  htlcFeesEarned: 0n,
-  lockBook: PersistentEntityCollectionMap.empty(),
+  paybook: { entries: PersistentEntityCollectionMap.empty(), feesEarned: 0n },
   swapTradingPairs: [],
 });
 

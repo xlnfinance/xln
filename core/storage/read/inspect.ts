@@ -26,12 +26,6 @@ import {
   KEY_SNAPSHOT_MANIFEST,
   KEY_SNAPSHOT_REPLICA_META,
   KEY_SNAPSHOT_GRAPH,
-  HISTORY_VIEW_ACCOUNT_FRAME,
-  HISTORY_VIEW_RUNTIME_ACTIVITY,
-  HISTORY_VIEW_ENTITY_FRAME,
-  HISTORY_VIEW_ACCOUNT_SWAP_EVENT,
-  HISTORY_VIEW_ACCOUNT_SWAP_RECENCY,
-  parseBoundedValueChunkKey,
 } from '../keys';
 import { iterateKeys, measurePrefixBytes } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
@@ -39,27 +33,15 @@ import { readStorageHead } from './read';
 import type { RuntimeDbLike, StorageDebugStats } from '../types';
 import { requireStorageDbOpen } from '../commit/availability';
 
-const isRebuildableHistoryOwner = (ownerKey: Buffer): boolean => {
-  const tag = ownerKey[0];
-  return tag !== undefined && tag >= HISTORY_VIEW_ACCOUNT_FRAME && tag <= HISTORY_VIEW_ACCOUNT_SWAP_RECENCY;
-};
-
 const measureBoundedValueChunks = async (db: RuntimeDbLike) => {
   const total = { count: 0, bytes: 0, maxValueBytes: 0 };
-  const authoritative = { count: 0, bytes: 0, maxValueBytes: 0 };
-  const rebuildable = { count: 0, bytes: 0, maxValueBytes: 0 };
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_BOUNDED_VALUE_CHUNK]) })) {
     const value = await db.get(key);
-    const bucket = isRebuildableHistoryOwner(parseBoundedValueChunkKey(key).ownerKey)
-      ? rebuildable
-      : authoritative;
-    for (const stats of [total, bucket]) {
-      stats.count += 1;
-      stats.bytes += key.byteLength + value.byteLength;
-      stats.maxValueBytes = Math.max(stats.maxValueBytes, value.byteLength);
-    }
+    total.count += 1;
+    total.bytes += key.byteLength + value.byteLength;
+    total.maxValueBytes = Math.max(total.maxValueBytes, value.byteLength);
   }
-  return { total, authoritative, rebuildable } as const;
+  return total;
 };
 
 const maxNamespaceValueBytes = (
@@ -69,11 +51,6 @@ const maxNamespaceValueBytes = (
 const measureStorageNamespaces = (db: RuntimeDbLike) => Promise.all([
   measurePrefixBytes(db, Buffer.from([KEY_FRAME])),
   measureBoundedValueChunks(db),
-  measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME])),
-  measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY])),
-  measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ENTITY_FRAME])),
-  measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_EVENT])),
-  measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_RECENCY])),
   measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_OUTPUT_ROW])),
   measurePrefixBytes(db, Buffer.from([KEY_ENTITY_CONTEXT_PAYLOAD])),
   measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_MACHINE_BRANCH])),
@@ -116,11 +93,6 @@ export const inspectStorage = async (options: {
   const [
     frameStats,
     boundedValueChunks,
-    accountFrameHistoryStats,
-    runtimeActivityHistoryStats,
-    entityFrameHistoryStats,
-    accountSwapEventHistoryStats,
-    accountSwapRecencyHistoryStats,
     runtimeOutputPayloadStats,
     entityContextPayloadStats,
     runtimeMachineBranchStats,
@@ -175,16 +147,9 @@ export const inspectStorage = async (options: {
     runtimeMachineLeafStats.bytes +
     certifiedBoardNodeStats.bytes +
     accountJClaimNodeStats.bytes;
-  const historyViewBytes =
-    accountFrameHistoryStats.bytes +
-    runtimeActivityHistoryStats.bytes +
-    entityFrameHistoryStats.bytes +
-    accountSwapEventHistoryStats.bytes +
-    accountSwapRecencyHistoryStats.bytes +
-    boundedValueChunks.rebuildable.bytes;
-  const historyBytes =
-    frameStats.bytes + boundedValueChunks.authoritative.bytes + snapshotBytes + immutableBytes;
-  const totalBytes = historyBytes + historyViewBytes + liveBytes;
+  const walBytes =
+    frameStats.bytes + boundedValueChunks.bytes + snapshotBytes + immutableBytes;
+  const totalBytes = walBytes + liveBytes;
 
   return {
     head,
@@ -208,18 +173,15 @@ export const inspectStorage = async (options: {
     certifiedBoardNodeBytes: certifiedBoardNodeStats.bytes,
     accountJClaimNodeBytes: accountJClaimNodeStats.bytes,
     frameBytes: frameStats.bytes,
-    boundedValueCount: boundedValueChunks.total.count,
-    boundedValueBytes: boundedValueChunks.total.bytes,
-    historyViewBytes,
+    boundedValueCount: boundedValueChunks.count,
+    boundedValueBytes: boundedValueChunks.bytes,
     snapshotBytes,
     liveBytes,
-    historyBytes,
+    walBytes,
     totalBytes,
     maxFrameBytes: frameStats.maxValueBytes,
     maxPhysicalValueBytes: maxNamespaceValueBytes(
-      frameStats, boundedValueChunks.total, accountFrameHistoryStats,
-      runtimeActivityHistoryStats, entityFrameHistoryStats, accountSwapEventHistoryStats,
-      accountSwapRecencyHistoryStats, snapshotManifestStats, snapshotEntityStats,
+      frameStats, boundedValueChunks, snapshotManifestStats, snapshotEntityStats,
       snapshotAccountStats, snapshotBookStats, snapshotReplicaMetaStats, snapshotGraphStats,
       liveEntityStats, liveEntityFieldStats, liveAccountStats, liveAccountFieldStats,
       liveBookStats, liveReplicaMetaStats, accountGraphBranchStats, accountGraphLeafStats,

@@ -5,6 +5,7 @@ pub(crate) mod delta;
 /// No TypeScript twin file: the account's parties, chain and depository live
 /// in `core/types/account.ts`, and this module keeps them validated.
 pub(crate) mod identity;
+pub(crate) mod settlement;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -19,6 +20,24 @@ use crate::state::delta::MAX_ACCOUNT_TOKEN_ROWS;
 use crate::swap::SwapOffer;
 use crate::tx::handlers::rebalance::BilateralRebalanceFeePolicy;
 use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenId};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RebalanceRefundState {
+    pub reason: crate::RebalanceRefundReason,
+    pub refunded_amount: num_bigint::BigInt,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RebalanceRequestFeeState {
+    pub request_id: String,
+    pub fee_token_id: TokenId,
+    pub fee_paid_upfront: num_bigint::BigInt,
+    pub requested_amount: num_bigint::BigInt,
+    pub policy_version: u64,
+    pub requested_at: u64,
+    pub requested_by_left: bool,
+    pub refund: Option<RebalanceRefundState>,
+}
 
 const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;
 const MAX_ACCOUNT_HTLC_LOCKS: usize = 32;
@@ -91,8 +110,17 @@ pub struct AccountState {
     /// Per-token bilateral fee registers. Owned and interpreted here, unlike
     /// the carried sections below.
     rebalance_fee_policies: PersistentRadixMap<BilateralRebalanceFeePolicy>,
+    requested_rebalance: Option<PersistentRadixMap<num_bigint::BigInt>>,
+    requested_rebalance_fee_state: Option<PersistentRadixMap<RebalanceRequestFeeState>>,
+    /// Cross-j pull commitments, keyed by canonical pullId.
+    pulls: PersistentRadixMap<CanonicalValue>,
     /// Resting same-jurisdiction offers, keyed by offer id.
     swap_offers: PersistentRadixMap<SwapOffer>,
+    /// Exact shared settlement workspace, including witness Hankos. Account
+    /// state commitment projects the same body without Hankos as TypeScript;
+    /// the witnesses remain here because submit and crash recovery need the
+    /// exact bytes selected by bilateral consensus.
+    settlement_workspace: Option<CanonicalValue>,
     j_nonce: u64,
     last_finalized_j_height: u64,
     /// Opaque section roots plus the J-claim accumulators now owned by the
@@ -124,6 +152,8 @@ pub struct AccountStateSeed {
     /// Open lending intents, keyed the way the handlers key them. Empty for a
     /// fresh account; a checkpoint restore hands back exactly what it saved.
     pub lending_intents: Vec<(String, LendingIntentKind)>,
+    pub pulls: Vec<(String, CanonicalValue)>,
+    pub settlement_workspace: Option<CanonicalValue>,
 }
 
 impl AccountState {
@@ -166,6 +196,8 @@ impl AccountState {
             rebalance_fee_policies: Vec::new(),
             swap_offers: Vec::new(),
             lending_intents: Vec::new(),
+            pulls: Vec::new(),
+            settlement_workspace: None,
         })
     }
 
@@ -181,6 +213,8 @@ impl AccountState {
             rebalance_fee_policies,
             swap_offers,
             lending_intents,
+            pulls,
+            settlement_workspace,
         } = seed;
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
@@ -238,6 +272,25 @@ impl AccountState {
                     .map_err(|error| StateError::PersistentMap(error.to_string()))?,
             );
         }
+        let mut pull_map = PersistentRadixMap::empty();
+        let mut seen_pulls = BTreeSet::new();
+        for (pull_id, pull) in pulls {
+            if !seen_pulls.insert(pull_id.clone()) {
+                return Err(StateError::AccountStateRoot(format!(
+                    "DUPLICATE_PULL:{pull_id}"
+                )));
+            }
+            pull_map = put_canonical_map(&pull_map, &pull_id, pull)?;
+        }
+        if carried.pulls_root != [0; 32] && pull_map.root_hash() != carried.pulls_root {
+            return Err(StateError::AccountStateRoot(
+                "PULL_BODY_ROOT_MISMATCH".into(),
+            ));
+        }
+        let requested_rebalance =
+            (carried.requested_rebalance_root == [0; 32]).then(PersistentRadixMap::empty);
+        let requested_rebalance_fee_state =
+            (carried.requested_rebalance_fee_state_root == [0; 32]).then(PersistentRadixMap::empty);
         Ok(Self {
             identity,
             dispute_config,
@@ -245,7 +298,11 @@ impl AccountState {
             locks: lock_map,
             lending_intents: intent_map,
             rebalance_fee_policies: policy_map,
+            requested_rebalance,
+            requested_rebalance_fee_state,
+            pulls: pull_map,
             swap_offers: offer_map,
+            settlement_workspace,
             j_nonce,
             last_finalized_j_height,
             carried,
@@ -279,6 +336,15 @@ impl AccountState {
                 .map_or([0; 32], PersistentRadixMap::root_hash),
             rebalance_fee_policies: self.rebalance_fee_policies.root_hash(),
             swap_offers: self.swap_offers.root_hash(),
+            requested_rebalance: self.requested_rebalance.as_ref().map_or(
+                self.carried.requested_rebalance_root,
+                PersistentRadixMap::root_hash,
+            ),
+            requested_rebalance_fee_state: self.requested_rebalance_fee_state.as_ref().map_or(
+                self.carried.requested_rebalance_fee_state_root,
+                PersistentRadixMap::root_hash,
+            ),
+            pulls: self.pulls.root_hash(),
         }
     }
 
@@ -304,6 +370,7 @@ impl AccountState {
             &roots,
             &journal,
             &self.carried,
+            self.settlement_workspace.as_ref(),
         )
     }
 
@@ -314,6 +381,7 @@ impl AccountState {
             &self.payment_roots(),
             &self.journal(),
             &self.carried,
+            self.settlement_workspace.as_ref(),
         ) {
             return Ok(root);
         }
@@ -323,6 +391,7 @@ impl AccountState {
             self.payment_roots(),
             self.journal(),
             &self.carried,
+            self.settlement_workspace.as_ref(),
         )
     }
 
@@ -367,9 +436,85 @@ impl AccountState {
         self.rebalance_fee_policies.len()
     }
 
+    pub fn requested_rebalance(&self, token_id: TokenId) -> Option<&num_bigint::BigInt> {
+        self.requested_rebalance
+            .as_ref()?
+            .get(&token_id.radix_key())
+    }
+
+    pub fn requested_rebalance_fee_state(
+        &self,
+        token_id: TokenId,
+    ) -> Option<&RebalanceRequestFeeState> {
+        self.requested_rebalance_fee_state
+            .as_ref()?
+            .get(&token_id.radix_key())
+    }
+
+    pub fn install_requested_rebalance(
+        &mut self,
+        amounts: Vec<(TokenId, num_bigint::BigInt)>,
+        fees: Vec<(TokenId, RebalanceRequestFeeState)>,
+    ) -> Result<(), StateError> {
+        let mut amount_map = PersistentRadixMap::empty();
+        for (token_id, amount) in amounts {
+            amount_map = put_requested_rebalance_map(&amount_map, token_id, amount)?;
+        }
+        let mut fee_map = PersistentRadixMap::empty();
+        for (token_id, fee) in fees {
+            fee_map = put_requested_rebalance_fee_map(&fee_map, token_id, fee)?;
+        }
+        if amount_map.root_hash() != self.carried.requested_rebalance_root
+            || fee_map.root_hash() != self.carried.requested_rebalance_fee_state_root
+        {
+            return Err(StateError::AccountStateRoot(
+                "REQUESTED_REBALANCE_BODY_ROOT_MISMATCH".into(),
+            ));
+        }
+        self.requested_rebalance = Some(amount_map);
+        self.requested_rebalance_fee_state = Some(fee_map);
+        Ok(())
+    }
+
     pub fn swap_offer(&self, offer_id: &str) -> Option<&SwapOffer> {
         let raw_key = encode_raw_text_key(offer_id).ok()?;
         self.swap_offers.get(&raw_key)
+    }
+
+    pub fn pull(&self, pull_id: &str) -> Option<&CanonicalValue> {
+        let raw_key = encode_raw_text_key(pull_id).ok()?;
+        self.pulls.get(&raw_key)
+    }
+
+    pub fn pulls(&self) -> impl Iterator<Item = (&[u8], &CanonicalValue)> {
+        self.pulls.iter()
+    }
+
+    pub fn pull_ids(&self) -> Result<Vec<String>, StateError> {
+        self.pulls
+            .iter()
+            .map(|(key, _)| decode_raw_text_key(key))
+            .collect()
+    }
+
+    pub fn pull_count(&self) -> usize {
+        self.pulls.len()
+    }
+
+    pub fn pulls_root(&self) -> [u8; 32] {
+        self.pulls.root_hash()
+    }
+
+    pub const fn settlement_workspace(&self) -> Option<&CanonicalValue> {
+        self.settlement_workspace.as_ref()
+    }
+
+    pub(crate) fn set_settlement_workspace(&mut self, workspace: CanonicalValue) {
+        self.settlement_workspace = Some(workspace);
+    }
+
+    pub(crate) fn clear_settlement_workspace(&mut self) {
+        self.settlement_workspace = None;
     }
 
     pub fn swap_offers(&self) -> impl Iterator<Item = &SwapOffer> {
@@ -435,6 +580,13 @@ impl AccountState {
         self.swap_offers.node_changes_since(&previous.swap_offers)
     }
 
+    pub fn pull_node_changes_since(
+        &self,
+        previous: &Self,
+    ) -> PersistentNodeChanges<CanonicalValue> {
+        self.pulls.node_changes_since(&previous.pulls)
+    }
+
     pub fn rebalance_policy_node_changes_since(
         &self,
         previous: &Self,
@@ -463,6 +615,10 @@ impl AccountState {
 
     pub fn swap_offer_node_records(&self) -> Vec<PersistentNodeRecord<SwapOffer>> {
         self.swap_offers.node_records()
+    }
+
+    pub fn pull_node_records(&self) -> Vec<PersistentNodeRecord<CanonicalValue>> {
+        self.pulls.node_records()
     }
 
     pub fn rebalance_policy_node_records(
@@ -583,6 +739,26 @@ impl AccountState {
         self.j_nonce = nonce;
     }
 
+    pub(crate) fn apply_dispute_finality(
+        &mut self,
+        finalized_token_ids: &BTreeSet<TokenId>,
+    ) -> Result<(), StateError> {
+        let mut deltas = self.deltas.clone();
+        for (_, current) in self.deltas.iter() {
+            let mut next = current.clone();
+            next.apply_dispute_finality(finalized_token_ids.contains(&next.token_id()));
+            if &next != current {
+                deltas = put_delta_map(&deltas, next)?;
+            }
+        }
+        self.deltas = deltas;
+        self.settlement_workspace = None;
+        self.swap_offers = PersistentRadixMap::empty();
+        self.locks = PersistentRadixMap::empty();
+        self.pulls = PersistentRadixMap::empty();
+        Ok(())
+    }
+
     pub(crate) fn set_last_finalized_j_height(&mut self, height: u64) {
         self.last_finalized_j_height = height;
     }
@@ -616,8 +792,74 @@ impl AccountState {
         Ok(())
     }
 
+    pub(crate) fn put_requested_rebalance(
+        &mut self,
+        token_id: TokenId,
+        amount: num_bigint::BigInt,
+    ) -> Result<(), StateError> {
+        let map = self.requested_rebalance.take().ok_or_else(|| {
+            StateError::AccountStateRoot("REQUESTED_REBALANCE_BODY_REQUIRED".into())
+        })?;
+        self.requested_rebalance = Some(put_requested_rebalance_map(&map, token_id, amount)?);
+        Ok(())
+    }
+
+    pub(crate) fn put_requested_rebalance_fee_state(
+        &mut self,
+        token_id: TokenId,
+        value: RebalanceRequestFeeState,
+    ) -> Result<(), StateError> {
+        let map = self.requested_rebalance_fee_state.take().ok_or_else(|| {
+            StateError::AccountStateRoot("REQUESTED_REBALANCE_FEE_BODY_REQUIRED".into())
+        })?;
+        self.requested_rebalance_fee_state =
+            Some(put_requested_rebalance_fee_map(&map, token_id, value)?);
+        Ok(())
+    }
+
+    pub(crate) fn remove_requested_rebalance(
+        &mut self,
+        token_id: TokenId,
+    ) -> Result<(), StateError> {
+        let amount_map = self.requested_rebalance.take().ok_or_else(|| {
+            StateError::AccountStateRoot("REQUESTED_REBALANCE_BODY_REQUIRED".into())
+        })?;
+        let fee_map = self.requested_rebalance_fee_state.take().ok_or_else(|| {
+            StateError::AccountStateRoot("REQUESTED_REBALANCE_FEE_BODY_REQUIRED".into())
+        })?;
+        self.requested_rebalance = Some(
+            amount_map
+                .removed(&token_id.radix_key())
+                .map_err(|error| StateError::PersistentMap(error.to_string()))?,
+        );
+        self.requested_rebalance_fee_state = Some(
+            fee_map
+                .removed(&token_id.radix_key())
+                .map_err(|error| StateError::PersistentMap(error.to_string()))?,
+        );
+        Ok(())
+    }
+
     pub(crate) fn put_swap_offer(&mut self, offer: SwapOffer) -> Result<(), StateError> {
         self.swap_offers = put_swap_offer_map(&self.swap_offers, offer)?;
+        Ok(())
+    }
+
+    pub(crate) fn put_pull(
+        &mut self,
+        pull_id: &str,
+        pull: CanonicalValue,
+    ) -> Result<(), StateError> {
+        self.pulls = put_canonical_map(&self.pulls, pull_id, pull)?;
+        Ok(())
+    }
+
+    pub(crate) fn remove_pull(&mut self, pull_id: &str) -> Result<(), StateError> {
+        let key = text_key(pull_id)?;
+        self.pulls = self
+            .pulls
+            .removed(&key)
+            .map_err(|error| StateError::PersistentMap(error.to_string()))?;
         Ok(())
     }
 
@@ -680,14 +922,14 @@ pub struct AccountReplica {
     state: AccountState,
     /// The replica shell the Entity commits around this state: mempool, frame
     /// bindings, hankos, acks. Carried verbatim until the engine derives it.
-    envelope: crate::AccountEnvelope,
+    /// Parent-owned shell is immutable during every Account transaction.
+    /// `execute_window` snapshots the replica before each fallible tx so a
+    /// rejection cannot leak partial state; sharing this shell keeps that
+    /// transactional snapshot O(1). Consensus metadata writes use COW below.
+    envelope: Arc<crate::AccountEnvelope>,
     /// The jurisdiction's `DeltaTransformer`, when this session builds its own
     /// recovery proofs.
     delta_transformer: Option<[u8; 20]>,
-    /// This workspace is not interpreted by the native J-finality path yet.
-    /// The checkpoint decoder must mark its presence so finality rejects it
-    /// instead of silently skipping post-settlement proof activation.
-    settlement_workspace_present: bool,
 }
 
 impl AccountReplica {
@@ -700,22 +942,21 @@ impl AccountReplica {
             owner,
             owner_side,
             state,
-            envelope: crate::AccountEnvelope::default(),
+            envelope: Arc::new(crate::AccountEnvelope::default()),
             delta_transformer: None,
-            settlement_workspace_present: false,
         })
     }
 
     /// Replace the replica shell. The authority hands it over with the last
     /// transition of the frame that produced it.
     pub fn set_envelope(&mut self, envelope: crate::AccountEnvelope) {
-        self.envelope = envelope;
+        self.envelope = Arc::new(envelope);
     }
 
     /// Stop carrying one shell field, because the engine now owns what it
     /// said.
     pub fn forget_envelope_field(&mut self, name: &str) {
-        self.envelope.forget_field(name);
+        Arc::make_mut(&mut self.envelope).forget_field(name);
     }
 
     pub(crate) fn set_envelope_field(
@@ -723,28 +964,45 @@ impl AccountReplica {
         name: &str,
         value: xln_rscore_protocol::CanonicalValue,
     ) -> Result<(), StateError> {
-        self.envelope
+        Arc::make_mut(&mut self.envelope)
             .set_field(name.to_string(), value)
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
+    pub(crate) fn clear_rebalance_shadow_submitted(
+        &mut self,
+        token_id: TokenId,
+    ) -> Result<(), StateError> {
+        Arc::make_mut(&mut self.envelope)
+            .clear_rebalance_shadow_submitted(token_id)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
+    pub fn set_rebalance_shadow_policy(
+        &mut self,
+        token_id: TokenId,
+        policy: xln_rscore_protocol::CanonicalValue,
+    ) -> Result<(), StateError> {
+        Arc::make_mut(&mut self.envelope)
+            .set_rebalance_shadow_policy(token_id, policy)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
+    pub fn clear_rebalance_active_quote(&mut self) -> Result<(), StateError> {
+        Arc::make_mut(&mut self.envelope)
+            .clear_rebalance_active_quote()
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
     /// The `DeltaTransformer` this account's jurisdiction runs, which the
-    /// recovery proof names. Absent for a mirror session, which is told what
-    /// each frame was and never builds a proof of its own.
+    /// recovery proof names. Absent only when the Account's jurisdiction
+    /// defines no transformer.
     pub const fn delta_transformer(&self) -> Option<&[u8; 20]> {
         self.delta_transformer.as_ref()
     }
 
     pub const fn set_delta_transformer(&mut self, address: [u8; 20]) {
         self.delta_transformer = Some(address);
-    }
-
-    pub const fn set_settlement_workspace_present(&mut self, present: bool) {
-        self.settlement_workspace_present = present;
-    }
-
-    pub const fn settlement_workspace_present(&self) -> bool {
-        self.settlement_workspace_present
     }
 
     pub fn restore_j_claim_nodes(
@@ -754,8 +1012,8 @@ impl AccountReplica {
         self.state.restore_j_claim_nodes(entries)
     }
 
-    pub const fn envelope(&self) -> &crate::AccountEnvelope {
-        &self.envelope
+    pub fn envelope(&self) -> &crate::AccountEnvelope {
+        self.envelope.as_ref()
     }
 
     /// The leaf this replica occupies in the Entity's accounts tree: the whole
@@ -829,6 +1087,17 @@ fn put_swap_offer_map(
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
 
+fn put_canonical_map(
+    map: &PersistentRadixMap<CanonicalValue>,
+    key_text: &str,
+    value: CanonicalValue,
+) -> Result<PersistentRadixMap<CanonicalValue>, StateError> {
+    let key = text_key(key_text)?;
+    let digest = canonical_digest(value.clone())?;
+    map.updated(key, value, digest)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
 fn put_policy_map(
     map: &PersistentRadixMap<BilateralRebalanceFeePolicy>,
     token_id: TokenId,
@@ -836,6 +1105,77 @@ fn put_policy_map(
 ) -> Result<PersistentRadixMap<BilateralRebalanceFeePolicy>, StateError> {
     let digest = canonical_digest(policy.canonical()?)?;
     map.updated(token_id.radix_key(), policy, digest)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
+fn put_requested_rebalance_map(
+    map: &PersistentRadixMap<num_bigint::BigInt>,
+    token_id: TokenId,
+    amount: num_bigint::BigInt,
+) -> Result<PersistentRadixMap<num_bigint::BigInt>, StateError> {
+    let digest = canonical_digest(CanonicalValue::BigInt(amount.clone()))?;
+    map.updated(token_id.radix_key(), amount, digest)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
+fn put_requested_rebalance_fee_map(
+    map: &PersistentRadixMap<RebalanceRequestFeeState>,
+    token_id: TokenId,
+    value: RebalanceRequestFeeState,
+) -> Result<PersistentRadixMap<RebalanceRequestFeeState>, StateError> {
+    let mut fields = vec![
+        (
+            "requestId".into(),
+            CanonicalValue::String(value.request_id.clone()),
+        ),
+        (
+            "feeTokenId".into(),
+            CanonicalValue::Number(CanonicalNumber::from_u16(value.fee_token_id.get())),
+        ),
+        (
+            "feePaidUpfront".into(),
+            CanonicalValue::BigInt(value.fee_paid_upfront.clone()),
+        ),
+        (
+            "requestedAmount".into(),
+            CanonicalValue::BigInt(value.requested_amount.clone()),
+        ),
+        (
+            "policyVersion".into(),
+            CanonicalValue::Number(
+                CanonicalNumber::try_from_u64(value.policy_version)
+                    .map_err(|error| StateError::AccountStateRoot(error.to_string()))?,
+            ),
+        ),
+        (
+            "requestedAt".into(),
+            CanonicalValue::Number(
+                CanonicalNumber::try_from_u64(value.requested_at)
+                    .map_err(|error| StateError::AccountStateRoot(error.to_string()))?,
+            ),
+        ),
+        (
+            "requestedByLeft".into(),
+            CanonicalValue::Bool(value.requested_by_left),
+        ),
+    ];
+    if let Some(refund) = &value.refund {
+        fields.push((
+            "refund".into(),
+            CanonicalValue::Object(vec![
+                (
+                    "reason".into(),
+                    CanonicalValue::String(refund.reason.wire_name().into()),
+                ),
+                (
+                    "refundedAmount".into(),
+                    CanonicalValue::BigInt(refund.refunded_amount.clone()),
+                ),
+            ]),
+        ));
+    }
+    let digest = canonical_digest(CanonicalValue::Object(fields))?;
+    map.updated(token_id.radix_key(), value, digest)
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
 

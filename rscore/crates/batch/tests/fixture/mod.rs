@@ -163,6 +163,7 @@ pub fn swap_offer(pair: &Pair) -> (AccountId, Vec<AccountTx>) {
             min_net_receive: BigInt::from(1_900_000),
             time_in_force: None,
             price_ticks: None,
+            cross_jurisdiction: None,
         }],
     )
 }

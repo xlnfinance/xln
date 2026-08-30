@@ -101,6 +101,7 @@ describe('path-keyed Runtime outbox rows', () => {
         data: {
           protocol: 'cross-j',
           sourceEntityId: ENTITY_ID,
+          sourceSignerId: SIGNER_ID,
           targetEntityId: ENTITY_ID,
           entityTxs: Array.from({ length: 32 }, (_, index) => ({
             type: 'chat' as const,

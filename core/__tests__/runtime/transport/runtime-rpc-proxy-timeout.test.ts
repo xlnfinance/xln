@@ -4,12 +4,15 @@ import { handleRuntimeRpcProxy } from '../../../api/server/rpc/proxy';
 import { safeStringify } from '../../../protocol/serialization';
 
 describe('runtime RPC proxy timeouts', () => {
-  test('fails fast when configured upstream never responds', async () => {
+  test('fails fast when configured upstream exceeds the proxy deadline', async () => {
     const previousTimeout = process.env['XLN_RPC_PROXY_TIMEOUT_MS'];
     const previousUpstream = process.env['RPC_UPSTREAM_URL'];
     const server = Bun.serve({
       port: 0,
-      fetch: () => new Promise<Response>(() => {}),
+      fetch: async () => {
+        await Bun.sleep(250);
+        return new Response('{}');
+      },
     });
     process.env['XLN_RPC_PROXY_TIMEOUT_MS'] = '25';
     process.env['RPC_UPSTREAM_URL'] = `http://127.0.0.1:${server.port}`;

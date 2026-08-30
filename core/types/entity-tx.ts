@@ -91,14 +91,15 @@ type EntityTxPayload =
     }
   | {
       /**
-       * Runtime-local cross-j effect between jurisdiction siblings controlled
-       * by the same proposer runtime. It is never accepted from P2P and needs
-       * no source-board Hanko or cross-entity sequence.
+       * Cross-j effect emitted by a committed source Entity frame. Runtime
+       * applies a local sibling immediately or publishes the same wrapper in
+       * its authenticated, committed flat outbox for a remote Runtime.
        */
       type: 'runtimeOutput';
       data: {
         protocol: 'cross-j';
         sourceEntityId: string;
+        sourceSignerId: string;
         targetEntityId: string;
         entityTxs: EntityTx[];
       };

@@ -61,8 +61,8 @@ export const assertEntityProposalCapacity = (state: EntityState, rawProposer: st
 /**
  * A board rotation is a new governance authority namespace. Pending work from
  * the old board is deleted: presence means live, while the certified Entity
- * frame history is the terminal audit record. Retaining executed/rejected
- * proposal bodies in every future root would turn history into unbounded live
+ * signed frame in the bounded Runtime WAL is the terminal audit record. Retaining executed/rejected
+ * proposal bodies in every future root would turn the live state into an unbounded
  * consensus state and duplicate the Runtime WAL.
  */
 export const normalizeEntityProposalBoard = (env: EntityRuntimeContext, state: EntityState): EntityState => {

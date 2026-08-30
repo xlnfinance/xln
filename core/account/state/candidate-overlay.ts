@@ -106,7 +106,7 @@ export const ACCOUNT_LIVE_ENVELOPE: ReadonlySet<keyof AccountReplica> = new Set<
   'currentHeight',
   'pendingFrame',
   'pendingAccountInput',
-  'lastOutboundFrameAck',
+  'lastOutboundAckFrame',
   'currentFrameHanko',
   'counterpartyFrameHanko',
   'rollbackCount',

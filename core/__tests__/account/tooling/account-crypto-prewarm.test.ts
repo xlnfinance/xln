@@ -30,6 +30,22 @@ describe('signer cache prewarm', () => {
     }
   });
 
+  test('allows an ephemeral Runtime to prewarm only its active numeric signer', () => {
+    const seed = 'runtime-creation-single-signer';
+    clearSignerKeys(seed);
+    try {
+      const env = createEmptyEnv(seed, 1);
+      const first = deriveSignerAddressSync(seed, '1').toLowerCase();
+      const second = deriveSignerAddressSync(seed, '2').toLowerCase();
+      expect(env.runtimeId).toBe(first);
+      expect(getCachedSignerPrivateKey(seed, first)).toEqual(deriveSignerKeySync(seed, '1'));
+      expect(getCachedSignerPrivateKey(seed, second)).toBeNull();
+      expect(getSignerPrivateKey(env, '2')).toEqual(deriveSignerKeySync(seed, '2'));
+    } finally {
+      clearSignerKeys(seed);
+    }
+  });
+
   test('registers deterministic label-derived EOA signers for restored runtime signing', () => {
     const seed = 'signer-prewarm-restore-seed';
     const labels = ['hub-1', 'hub-1', 'hub-1:Tron (local anvil)'];

@@ -55,16 +55,16 @@
     ? Math.max(0, Math.ceil((disputeTimeoutSeconds * 1000 - nowMs) / 1000))
     : 0;
   $: pendingSecretAckInfo = (() => {
-    const routes = replica?.state?.htlcRoutes;
-    if (!(routes instanceof Map)) return null;
+    const entries = replica?.state?.paybook?.entries;
+    if (!(entries instanceof Map)) return null;
     const counterpartyNorm = String(counterpartyId || '').toLowerCase();
     let count = 0;
     let deadline = Number.POSITIVE_INFINITY;
-    for (const route of routes.values()) {
-      if (!route?.secretAckPending) continue;
-      const inboundEntity = String(route.inboundEntity || '').toLowerCase();
+    for (const payment of entries.values()) {
+      if (!payment?.secretAckPending) continue;
+      const inboundEntity = String(payment.inboundEntity || '').toLowerCase();
       if (!inboundEntity || inboundEntity !== counterpartyNorm) continue;
-      const routeDeadline = Number(route.secretAckDeadlineAt || 0);
+      const routeDeadline = Number(payment.secretAckDeadlineAt || 0);
       if (!Number.isFinite(routeDeadline) || routeDeadline <= 0) continue;
       count += 1;
       if (routeDeadline < deadline) deadline = routeDeadline;
@@ -342,14 +342,10 @@
   }
 
   function getHtlcNote(data: Record<string, unknown>): string | null {
-    const notes = replica?.htlcNotes;
-    if (!(notes instanceof Map)) return null;
     const hashlock = typeof data['hashlock'] === 'string' ? data['hashlock'] : '';
-    if (hashlock) {
-      const hashNote = notes.get(`hashlock:${hashlock}`);
-      if (typeof hashNote === 'string' && hashNote.trim()) return hashNote.trim();
-    }
-    return null;
+    if (!hashlock) return null;
+    const description = replica?.state?.paybook?.entries.get(hashlock)?.description;
+    return typeof description === 'string' && description.trim() ? description.trim() : null;
   }
 
   function buildActionParams(tx: AccountTx): ActionParam[] {

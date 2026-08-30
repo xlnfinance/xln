@@ -135,18 +135,33 @@ fi
 unset XLN_LOCAL_TEST_LEASE_MODE XLN_LOCAL_TEST_LEASE_POOL XLN_LOCAL_TEST_LEASE_BASE
 unset XLN_LOCAL_TEST_LEASE_GUARD XLN_LOCAL_TEST_LEASE_OWNER_PID XLN_LOCAL_TEST_LEASE_REPO_ROOT
 
-exec "${HOME}/.bun/bin/bun" core/orchestrator/orchestrator.ts \
-  --host 127.0.0.1 \
-  --port "$API_PORT" \
-  --public-ws-base-url "$PUBLIC_WS_BASE_URL" \
-  --node-api-port-base "$XLN_MESH_API_PORT_BASE" \
-  --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE" \
-  --relay-url "$RELAY_URL" \
-  --rpc-url "$ANVIL_RPC" \
-  --rpc2-url "$ANVIL_RPC2" \
-  --db-root "$XLN_MESH_DB_ROOT" \
-  --mm \
-  --custody \
-  --custody-port "$XLN_MESH_CUSTODY_PORT" \
-  --custody-daemon-port "$XLN_MESH_CUSTODY_DAEMON_PORT" \
+ORCHESTRATOR_ARGS=(
+  core/orchestrator/orchestrator.ts
+  --host 127.0.0.1
+  --port "$API_PORT"
+  --public-ws-base-url "$PUBLIC_WS_BASE_URL"
+  --node-api-port-base "$XLN_MESH_API_PORT_BASE"
+  --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE"
+  --relay-url "$RELAY_URL"
+  --rpc-url "$ANVIL_RPC"
+  --rpc2-url "$ANVIL_RPC2"
+  --db-root "$XLN_MESH_DB_ROOT"
+  --custody-port "$XLN_MESH_CUSTODY_PORT"
+  --custody-daemon-port "$XLN_MESH_CUSTODY_DAEMON_PORT"
   --wallet-url "https://xln.finance/app"
+)
+if [[ "${XLN_HLT_H1_ONLY:-0}" == "1" ]]; then
+  if [[ "${XLN_HUB_COUNT:-}" != "1" ]]; then
+    echo "XLN_HLT_H1_ONLY_REQUIRES_XLN_HUB_COUNT_1" >&2
+    exit 1
+  fi
+  # Mixed HLT needs MM only to seed the users before TS H1 hands authority to
+  # Rust. The measured balanced user/user window has no MM economic leg.
+  if [[ "${XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE:-}" == "mixed" ]]; then
+    ORCHESTRATOR_ARGS+=(--mm)
+  fi
+else
+  ORCHESTRATOR_ARGS+=(--mm --custody)
+fi
+
+exec "${HOME}/.bun/bin/bun" "${ORCHESTRATOR_ARGS[@]}"

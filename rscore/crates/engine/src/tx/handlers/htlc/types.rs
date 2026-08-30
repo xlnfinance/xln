@@ -106,6 +106,12 @@ impl HtlcLock {
 
     pub(crate) fn validate_for_restore(&self) -> Result<(), StateError> {
         require_bytes32("lockId", &self.lock_id)?;
+        if self.lock_id != self.hashlock.as_str() {
+            return Err(invalid_restore(
+                "lockIdHashlock",
+                format!("{}:{}", self.lock_id, self.hashlock.as_str()),
+            ));
+        }
         require_positive("timelock", &self.timelock)?;
         require_positive("amount", &self.amount)?;
         if self.token_id.get() == 0 {
@@ -189,6 +195,10 @@ fn is_lower_hex(value: u8) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HtlcRejection {
+    LockIdMismatch {
+        lock_id: String,
+        hashlock: HtlcHashlock,
+    },
     LockExists {
         lock_id: String,
     },
@@ -239,6 +249,12 @@ pub enum HtlcRejection {
 impl HtlcRejection {
     pub fn message(&self) -> String {
         match self {
+            Self::LockIdMismatch { lock_id, hashlock } => {
+                format!(
+                    "Lock ID must equal hashlock ({lock_id} != {})",
+                    hashlock.as_str()
+                )
+            }
             Self::LockExists { lock_id } => format!("Lock {lock_id} already exists"),
             Self::TimelockExpired { timelock } => {
                 format!("Timelock {timelock} already expired (timestamp)")

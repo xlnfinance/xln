@@ -20,7 +20,7 @@ import {
   jurisdictionName,
   makeJSubmitDurabilityFixture,
   signerId,
-} from '../../fixtures/j-submit/j-submit-durability-fixture';
+} from '../../fixtures/jurisdiction/j-submit-durability-fixture';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';

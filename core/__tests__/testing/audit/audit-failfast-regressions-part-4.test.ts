@@ -567,9 +567,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
       bio: '',
       website: '',
     },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     crontabState: initCrontab(),
   },
@@ -594,9 +592,7 @@ const makeEntityState = (entityId: string): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
@@ -1087,7 +1083,7 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ab'.repeat(32)}`,
     };
-    accountMachine.lastOutboundFrameAck = {
+    accountMachine.lastOutboundAckFrame = {
       height: 10,
       counterpartyEntityId: right.entityId,
       response: {
@@ -1108,13 +1104,13 @@ describe('audit fail-fast regressions', () => {
     const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.state.timestamp);
 
     expect(isProposedAccountFrame(result)).toBe(true);
-    expect(result.accountInput?.kind).toBe('frame_ack');
-    expect(result.accountInput?.kind === 'frame_ack' ? result.accountInput.ack.height : undefined).toBe(10);
-    expect(result.accountInput?.kind === 'frame_ack' ? result.accountInput.ack.frameHanko : undefined).toBe(
-      accountMachine.lastOutboundFrameAck?.response.ack.frameHanko,
+    expect(result.accountInput?.kind).toBe('ack_frame');
+    expect(result.accountInput?.kind === 'ack_frame' ? result.accountInput.ack.height : undefined).toBe(10);
+    expect(result.accountInput?.kind === 'ack_frame' ? result.accountInput.ack.frameHanko : undefined).toBe(
+      accountMachine.lastOutboundAckFrame?.response.ack.frameHanko,
     );
     expect(result.accountInput?.proposal.frame.height).toBe(11);
-    expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
+    expect(accountMachine.pendingAccountInput?.kind).toBe('ack_frame');
   });
 
   test('credit-limit-only frame reuses unchanged on-chain dispute proof', async () => {
@@ -1307,7 +1303,7 @@ describe('audit fail-fast regressions', () => {
       );
       if (accountHeight === 1 && finalizedJHeight === 3 && revealMargin === 1) {
         const tamperedResponse = structuredClone(hankoAttachedResponse);
-        if (tamperedResponse.kind !== 'ack' && tamperedResponse.kind !== 'frame_ack') {
+        if (tamperedResponse.kind !== 'ack' && tamperedResponse.kind !== 'ack_frame') {
           throw new Error('ZERO_JHEIGHT_ACK_KIND_INVALID');
         }
         tamperedResponse.ack.frameHash = `0x${'ff'.repeat(32)}`;
@@ -1326,7 +1322,7 @@ describe('audit fail-fast regressions', () => {
 
   test('account storage keeps last outbound ACK so restored runtimes can bundle the next frame', () => {
     const accountMachine = makeProposalAccount([], hex20('11'), hex20('22'));
-    accountMachine.lastOutboundFrameAck = {
+    accountMachine.lastOutboundAckFrame = {
       height: 8,
       counterpartyEntityId: hex20('22'),
       response: {
@@ -1338,7 +1334,7 @@ describe('audit fail-fast regressions', () => {
     };
     const doc = projectAccountDoc(accountMachine);
 
-    expect(doc.lastOutboundFrameAck).toEqual(accountMachine.lastOutboundFrameAck);
+    expect(doc.lastOutboundAckFrame).toEqual(accountMachine.lastOutboundAckFrame);
   });
 
   test('expired HTLC never rolls back its signed pending Account frame', async () => {
@@ -1516,7 +1512,7 @@ describe('audit fail-fast regressions', () => {
       [accountMachine.currentFrame.stateHash],
     );
     accountMachine.currentFrameHanko = ackHanko;
-    accountMachine.lastOutboundFrameAck = {
+    accountMachine.lastOutboundAckFrame = {
       height: 10,
       counterpartyEntityId: right.entityId,
       response: {
@@ -1556,7 +1552,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.ok).toBe(true);
     expect(result.response?.kind).toBe('ack');
     expect(result.response?.kind === 'ack' ? result.response.ack.height : undefined).toBe(10);
-    expect(result.response).toEqual(accountMachine.lastOutboundFrameAck.response);
+    expect(result.response).toEqual(accountMachine.lastOutboundAckFrame.response);
   });
 
   test('Entity flush batches ACK and successor without mutating live Entity replicas', async () => {
@@ -1598,10 +1594,10 @@ describe('audit fail-fast regressions', () => {
     expect(accepted.response?.kind).toBe('ack');
     expect(receiver.currentHeight).toBe(1);
     expect(receiver.pendingFrame).toBeUndefined();
-    expect(receiver.lastOutboundFrameAck?.height).toBe(1);
+    expect(receiver.lastOutboundAckFrame?.height).toBe(1);
     expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
     const flushed = await proposeAccountFrame(createAccountConsensusContext(env), receiver, env.state.timestamp);
-    if (!isProposedAccountFrame(flushed) || flushed.accountInput.kind !== 'frame_ack') {
+    if (!isProposedAccountFrame(flushed) || flushed.accountInput.kind !== 'ack_frame') {
       throw new Error('ENTITY_FLUSHED_ACK_RESPONSE_MISSING');
     }
     const hankoAttachedFlushed = await attachAccountDraftHankosAsEntity(
@@ -1613,7 +1609,7 @@ describe('audit fail-fast regressions', () => {
         hashesToSign: [...(accepted.hashesToSign ?? []), ...(flushed.hashesToSign ?? [])],
       },
     );
-    if (hankoAttachedFlushed.kind !== 'frame_ack') throw new Error('ENTITY_FLUSHED_ACK_FRAME_REQUIRED');
+    if (hankoAttachedFlushed.kind !== 'ack_frame') throw new Error('ENTITY_FLUSHED_ACK_FRAME_REQUIRED');
     const proposalHanko = hankoAttachedFlushed.proposal.disputeHanko;
     const ackHanko = hankoAttachedFlushed.ack.disputeHanko;
     expect(ackHanko).toBeDefined();
@@ -1651,7 +1647,7 @@ describe('audit fail-fast regressions', () => {
     expect(proposer.currentHeight).toBe(2);
     expect(proposer.counterpartyDisputeProofBodyHash).toBe(proposalHanko?.proofBodyHash);
     expect(proposer.counterpartyDisputeProofHanko).toBe(proposalHanko?.hanko);
-    const retainedAck = structuredClone(receiver.lastOutboundFrameAck?.response);
+    const retainedAck = structuredClone(receiver.lastOutboundAckFrame?.response);
 
     // The new proposal can be discarded independently (for example by the
     // simultaneous-frame tiebreaker). The ACK for committed height 1 remains.
@@ -1693,7 +1689,7 @@ describe('audit fail-fast regressions', () => {
     };
     accountMachine.pendingFrame = pendingFrame;
     accountMachine.pendingAccountInput = {
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: { ...accountMachine.state.domain },
@@ -1705,7 +1701,7 @@ describe('audit fail-fast regressions', () => {
       },
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
-    delete accountMachine.lastOutboundFrameAck;
+    delete accountMachine.lastOutboundAckFrame;
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'frame',
@@ -1754,7 +1750,7 @@ describe('audit fail-fast regressions', () => {
       [accountMachine.currentFrame.stateHash],
     );
     accountMachine.currentFrameHanko = ackHanko;
-    delete accountMachine.lastOutboundFrameAck;
+    delete accountMachine.lastOutboundAckFrame;
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'frame',
@@ -1780,7 +1776,7 @@ describe('audit fail-fast regressions', () => {
       .toBe(accountMachine.currentFrame.stateHash);
     expect(result.response?.kind === 'ack' ? result.response.ack.frameHanko : undefined).toBe(ackHanko);
     expect(result.hashesToSign).toBeUndefined();
-    expect(accountMachine.lastOutboundFrameAck?.height).toBe(10);
+    expect(accountMachine.lastOutboundAckFrame?.height).toBe(10);
     expect(accountMachine.currentHeight).toBe(10);
   });
 

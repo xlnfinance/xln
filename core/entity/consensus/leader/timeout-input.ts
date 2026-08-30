@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
 import { signAccountFrame, verifyAccountSignature } from '../../../account/crypto';
 import { shortId } from '../../../support/logger';
 import {
@@ -171,7 +171,7 @@ export const handleLeaderTimeoutVote = async (
   if (!workingReplica.leaderVotes) workingReplica.leaderVotes = new Map();
   const previousVote = workingReplica.leaderVotes.get(voterId);
   if (previousVote) {
-    if (encodeCanonicalConsensusValue(previousVote) !== encodeCanonicalConsensusValue(vote)) {
+    if (!canonicalConsensusValuesEqual(previousVote, vote)) {
       entityLog.error('leader.vote_equivocation', { voter: shortId(voterId) });
       return rejectEntityConsensusInput(context, 'ENTITY_LEADER_VOTE_EQUIVOCATION');
     }

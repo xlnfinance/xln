@@ -94,6 +94,14 @@ export const reportDirectClientError = (
   targetRuntimeId: string,
   error: Error,
 ): 'transport-error' => {
+  if (env.infrastructure?.persistenceQuiescing === true) {
+    env.warn?.('network', 'WS_DIRECT_QUIESCE_CLOSE', {
+      endpoint,
+      targetRuntimeId,
+      error: error.message,
+    });
+    return 'transport-error';
+  }
   env.error?.('network', 'WS_DIRECT_FATAL', {
     endpoint,
     targetRuntimeId,
@@ -1189,17 +1197,23 @@ export class RuntimeP2P {
     return required.every(entityId => this.hasProfileForEntity(entityId));
   }
 
-  /** One incremental seed-directory refresh, followed only by local waiting. */
+  /**
+   * Drain the incremental seed directory until every required profile arrives.
+   * Direct-session readiness does not prove that the peer's separately signed
+   * profile announcement has reached the relay yet, so one cursor request can
+   * legitimately race the last onboarding wave. Requests stay bounded by the
+   * deadline; each response continues its own sequence pagination via hasMore.
+   */
   async refreshSeedProfilesAndWait(entityIds: readonly string[], timeoutMs: number): Promise<boolean> {
     const required = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     if (required.length === 0) return true;
     const deadline = Date.now() + timeoutMs;
-    while (!this.getActiveClient() && Date.now() < deadline) {
-      if (!(await this.waitForActiveDelay(Math.min(20, Math.max(1, deadline - Date.now()))))) return false;
+    while (Date.now() < deadline) {
+      if (required.every(entityId => this.hasProfileForEntity(entityId))) return true;
+      if (this.getActiveClient()) this.requestSeedGossip('incremental');
+      if (!(await this.waitForActiveDelay(Math.min(250, Math.max(1, deadline - Date.now()))))) return false;
     }
-    if (!this.getActiveClient()) return false;
-    this.requestSeedGossip('incremental');
-    return this.waitForSeedProfiles(required, Math.max(1, deadline - Date.now()));
+    return required.every(entityId => this.hasProfileForEntity(entityId));
   }
 
   /** Seed profile + one direct handshake; all waiting after bootstrap is local. */
@@ -1234,6 +1248,27 @@ export class RuntimeP2P {
     } finally {
       if (this.profileFetches.get(key) === fetch) this.profileFetches.delete(key);
     }
+  }
+
+  /**
+   * Admit profiles fetched by another Runtime in the same process. This only
+   * shares public transport bytes: every receiving Runtime still runs the
+   * canonical sanitizer, Entity Hanko verification and Runtime-route
+   * signature verification before installing anything in its own RAM cache.
+   */
+  async admitSharedProfiles(profiles: readonly Profile[]): Promise<void> {
+    await this.applyIncomingProfiles('process-local-profile-batch', profiles);
+  }
+
+  /**
+   * Admit one canonical gossip payload received on an authenticated direct
+   * Runtime session. Profile Hankos and Runtime-route signatures remain the
+   * authority; the socket only proves which live Runtime forwarded the bytes.
+   */
+  async admitGossipAnnouncement(from: string, payload: unknown): Promise<void> {
+    const decoded = decodeGossipPayload(payload);
+    this.applyIncomingJurisdictions(from, decoded.jurisdictions);
+    await this.applyIncomingProfiles(from, decoded.profiles);
   }
 
   private async ensureProfilesUncoalesced(requestedEntityIds: string[], depth: number = 1): Promise<boolean> {
@@ -1406,6 +1441,37 @@ export class RuntimeP2P {
     // Also send to specific seeds if configured (for direct peer notification)
     for (const seedId of this.seedRuntimeIds) {
       this.announceProfilesTo(seedId, profiles);
+    }
+  }
+
+  /**
+   * A direct peer is an independent authenticated transport, not a relay
+   * route.  Its first profile snapshot must therefore be written to that
+   * exact socket after hello authentication.  Sending through
+   * `announceProfilesTo` here would silently do nothing in direct-only
+   * deployments because that method intentionally owns relay gossip.
+   */
+  private async announceLocalProfilesToDirectRuntime(
+    targetRuntimeId: string,
+    client: RuntimeWsClient,
+  ): Promise<void> {
+    if (this.closing || this.closed || this.backgroundIoPaused) return;
+    const profiles = await this.getLocalProfilesForEntities();
+    if (
+      this.closing || this.closed || this.backgroundIoPaused ||
+      this.directClients.get(targetRuntimeId) !== client ||
+      !client.isOpen()
+    ) return;
+    if (profiles.length === 0) return;
+    for (const profile of profiles) {
+      this.env.gossip?.announce?.(profile);
+      this.rememberAnnouncedProfile(profile);
+    }
+    if (!client.sendGossipAnnounce(targetRuntimeId, {
+      profiles,
+      jurisdictions: [],
+    } satisfies GossipResponsePayload)) {
+      throw new Error(`P2P_DIRECT_PROFILE_ANNOUNCE_NOT_SENT:${targetRuntimeId}`);
     }
   }
 
@@ -1641,9 +1707,7 @@ export class RuntimeP2P {
   }
 
   private handleGossipAnnounce(from: string, payload: unknown) {
-    const decoded = decodeGossipPayload(payload);
-    this.applyIncomingJurisdictions(from, decoded.jurisdictions);
-    this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
+    this.admitGossipAnnouncement(from, payload).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
   }
@@ -1892,8 +1956,10 @@ export class RuntimeP2P {
       return;
     }
     if (existing && existingUrl === endpoint) {
-      // Initial creation below owns the only connect attempt. Re-entering route
-      // resolution must never turn a dead socket into an implicit retry.
+      // A never-authenticated socket may have lost the initial TCP backlog
+      // race; retrying that admission cannot duplicate financial bytes.
+      // Authenticated sockets remain terminal on unexpected close.
+      existing.retryInitialConnect();
       return;
     }
     if (existing) {
@@ -1918,6 +1984,18 @@ export class RuntimeP2P {
           this.directClients.get(normalizedTargetRuntimeId) !== client
         ) return;
         this.directClientErrors.delete(normalizedTargetRuntimeId);
+        void this.announceLocalProfilesToDirectRuntime(normalizedTargetRuntimeId, client).catch(error => {
+          if (
+            this.closing || this.closed ||
+            this.directClients.get(normalizedTargetRuntimeId) !== client
+          ) return;
+          const cause = error instanceof Error ? error : new Error(String(error));
+          reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, cause);
+          this.directClientErrors.set(normalizedTargetRuntimeId, {
+            at: Date.now(),
+            error: cause.message,
+          });
+        });
       },
       signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(this.env, to, envelope),
       onEntityInputs: async (from, envelope, timestamp, sessionAuthenticated) => {

@@ -1,6 +1,6 @@
 /**
- * Storage composition root for authoritative WAL/history and disposable live views.
- * Key entrypoint: saveEnvToDB enforces durable history before cache publication.
+ * Storage composition root for the bounded authoritative WAL and disposable live views.
+ * Key entrypoint: saveEnvToDB commits the Runtime WAL before cache publication.
  * Human-audit importance: 100/100 — this is the crash-consistency boundary.
  */
 import { getPerfMs } from '../support/time';
@@ -10,21 +10,12 @@ import { canonicalizeBinaryPayload } from '../protocol/serialization/binary-code
 import {
   boundedStorageRowsBytes,
   prepareBoundedStorageValueRows,
-  readBoundedEncodedValue,
 } from './codec/bounded-value';
 import {
   deleteKeyRange,
   iterateKeys,
   readRawOrNull,
 } from './database/level';
-import {
-  buildCertifiedFramePuts,
-  buildHistoryViewPuts,
-  pruneHistoryViewRetention,
-  readHistoryViewRuntimeActivity,
-  readHistoryViewHead,
-  reconcileHistoryViews,
-} from './history/history-view';
 import {
   computeStorageFrameHash,
   computeStoragePostStateHash,
@@ -35,7 +26,7 @@ import {
   createSnapshot,
   listSnapshotHeights,
   maybeRotateSnapshots,
-  pruneHistoryBeforeHeight,
+  pruneWalBeforeHeight,
 } from './database/lifecycle';
 import {
   buildBookDeletionsFromOverlay,
@@ -55,8 +46,6 @@ import {
 } from './read/read';
 import {
   KEY_HEAD,
-  HISTORY_VIEW_ACCOUNT_FRAME,
-  HISTORY_VIEW_ENTITY_FRAME,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -76,12 +65,6 @@ import {
   keyLiveReplicaMetaPrefix,
   keyCertifiedBoardNodePrefix,
   keyAccountJClaimNodePrefix,
-  parseHistoryViewAccountFrameKey,
-  parseHistoryViewAccountSwapRecencyKey,
-  parseHistoryViewEntityFrameKey,
-  HISTORY_VIEW_ACCOUNT_SWAP_EVENT,
-  HISTORY_VIEW_ACCOUNT_SWAP_RECENCY,
-  decodeHeight,
 } from './keys';
 import {
   areStorageCheckpointReplicasQuiescent,
@@ -93,7 +76,7 @@ import {
 import { createStructuredLogger } from '../support/logger';
 import { cumulativeMarksToDurations } from '../support/performance/profile';
 import type { FrameLogEntry } from '../types/logging';
-import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import type { EntityContextPayloadHash } from '../protocol/hashes';
 import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
 import { getCertifiedBoardNodeStore, hashCertifiedBoardNode } from '../jurisdiction/machine/board-registry';
@@ -118,16 +101,8 @@ import {
   validatePersistedAccountJClaimPathNode,
   validatePersistedCertifiedBoardPathNode,
 } from './schema/authoritative-schema';
-import {
-  validateStoredAccountFrameValue,
-  validateStoredAccountSwapEventValue,
-  validateStoredEntityFrameValue,
-} from './history/history-view-schema';
-import { encodeCanonicalConsensusValue } from '../protocol/serialization/canonical-consensus-value';
-import { buffersEqual } from '../protocol/serialization';
 import type {
   PerfDeps,
-  HistoryViewPut,
   RuntimeDbLike,
   StorageDoc,
   StorageDocRef,
@@ -159,15 +134,6 @@ import {
 } from './schema/nodes/path-keyed-auxiliary-nodes';
 import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
 export { resolveStorageRuntimeConfig } from './database/config';
-export {
-  readHistoryViewAccountFrames,
-  readHistoryViewAccountSwapEvents,
-  readHistoryViewAccountSwapRecency,
-  readHistoryViewEntityFrames,
-  readHistoryViewRuntimeActivity,
-  readHistoryViewHead,
-  reconcileHistoryViews,
-} from './history/history-view';
 export {
   inspectStorage,
 } from './read/inspect';
@@ -229,7 +195,7 @@ const defaultStorageHead = (config: Required<StorageRuntimeConfig>): StorageHead
     epochMaxBytes: config.epochMaxBytes,
     accountMerkleRadix: config.accountMerkleRadix,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   });
 
 const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig>): Promise<StorageHead> => {
@@ -321,7 +287,7 @@ const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
   left.epochMaxBytes === right.epochMaxBytes &&
   left.accountMerkleRadix === right.accountMerkleRadix &&
   left.epochReplayBytes === right.epochReplayBytes &&
-  left.retainedHistoryBytes === right.retainedHistoryBytes;
+  left.retainedWalBytes === right.retainedWalBytes;
 
 type AuxiliaryPathFamily = Readonly<{
   prefix: Buffer;
@@ -447,7 +413,7 @@ const EMPTY_STORAGE_RECOVERY: { recovered: boolean; diagnostics: StorageRecovery
   diagnostics: { headsMatch: true, headChanged: false, verifiedCurrent: false, stages: {} },
 };
 
-export const recoverStorageDbFromHistory = async (options: {
+export const recoverStorageDbFromWal = async (options: {
   db: RuntimeDbLike;
   walDb: RuntimeDbLike;
   config: Required<StorageRuntimeConfig>;
@@ -474,26 +440,26 @@ export const recoverStorageDbFromHistory = async (options: {
   const walHead = await readHead(options.walDb, options.config);
   const rawCurrentHead = await readRawOrNull(options.db, KEY_HEAD);
   const currentHead = rawCurrentHead ? await readHead(options.db, options.config) : defaultStorageHead(options.config);
-  const historyLatestHeight = Math.max(0, Math.floor(Number(walHead.latestHeight ?? 0)));
+  const walLatestHeight = Math.max(0, Math.floor(Number(walHead.latestHeight ?? 0)));
   const currentLatestHeight = Math.max(0, Math.floor(Number(currentHead.latestHeight ?? 0)));
-  const historyMaterializedHeight = materializedHeightOf(walHead);
+  const walMaterializedHeight = materializedHeightOf(walHead);
   const currentMaterializedHeight = materializedHeightOf(currentHead);
-  const historySnapshotHeight = Math.max(0, Math.floor(Number(walHead.latestSnapshotHeight ?? 0)));
+  const walSnapshotHeight = Math.max(0, Math.floor(Number(walHead.latestSnapshotHeight ?? 0)));
   options.onPersistenceProgress?.('recovery-heads-read');
   markRecoveryStage('headsRead');
 
   if (
-    currentLatestHeight > historyLatestHeight ||
-    currentMaterializedHeight > historyMaterializedHeight ||
-    currentHead.latestSnapshotHeight > historySnapshotHeight
+    currentLatestHeight > walLatestHeight ||
+    currentMaterializedHeight > walMaterializedHeight ||
+    currentHead.latestSnapshotHeight > walSnapshotHeight
   ) {
     throw new Error(
-      `STORAGE_CURRENT_AHEAD_OF_HISTORY: ` +
+      `STORAGE_CURRENT_AHEAD_OF_WAL: ` +
         `current=${currentLatestHeight}/${currentMaterializedHeight}/${currentHead.latestSnapshotHeight} ` +
-        `history=${historyLatestHeight}/${historyMaterializedHeight}/${historySnapshotHeight}`,
+        `wal=${walLatestHeight}/${walMaterializedHeight}/${walSnapshotHeight}`,
     );
   }
-  if (historyLatestHeight === 0) {
+  if (walLatestHeight === 0) {
     return { recovered: false, diagnostics: diagnosticsOf(false, false, false) };
   }
 
@@ -519,19 +485,19 @@ export const recoverStorageDbFromHistory = async (options: {
     }
     markRecoveryStage('verifyCurrent');
   }
-  const resetFromHistory =
+  const resetFromWal =
     !rawCurrentHead ||
-    currentMaterializedHeight < historySnapshotHeight ||
+    currentMaterializedHeight < walSnapshotHeight ||
     currentProjectionInvalid;
   let recovered = false;
-  if (resetFromHistory) {
-    if (historySnapshotHeight > 0) {
+  if (resetFromWal) {
+    if (walSnapshotHeight > 0) {
       await verifyStorageSnapshotIntegrity(options.walDb, walHead);
       options.onPersistenceProgress?.('recovery-snapshot-verified');
     }
     await clearCurrentRecoveryState(options.db);
     options.onPersistenceProgress?.('recovery-current-cleared');
-    markRecoveryStage('resetFromHistory');
+    markRecoveryStage('resetFromWal');
     recovered = true;
   }
 
@@ -542,7 +508,7 @@ export const recoverStorageDbFromHistory = async (options: {
     : false;
   options.onPersistenceProgress?.('recovery-live-state-synchronized');
   if (headChanged) markRecoveryStage('syncLiveState');
-  // History commits before the rebuildable current projection cache. The
+  // The Runtime WAL commits before the rebuildable current projection cache. The
   // normal append path writes both DBs; only lagging-cache recovery scans and
   // reconciles the live owner/path rows.
   const boardNodesChanged = headChanged
@@ -574,7 +540,7 @@ export const recoverStorageDbFromHistory = async (options: {
     markRecoveryStage('publishHead');
     recovered = true;
   }
-  const reverified = shouldVerifyCurrent || resetFromHistory || headChanged;
+  const reverified = shouldVerifyCurrent || resetFromWal || headChanged;
   if (reverified) {
     await assertCurrentProjectionIntegrity(
       options.db,
@@ -593,17 +559,14 @@ export const recoverStorageDbFromHistory = async (options: {
 export type StorageFrameSaveResult = {
   materialized: boolean;
   materializedOverlayKeys: readonly string[];
-  historyViewsMaterialized: boolean;
   staleWriterStopped?: boolean;
   latestSnapshotHeight?: number;
-  retainedHistoryBytes?: number;
+  retainedWalBytes?: number;
   snapshotCreated?: boolean;
   snapshotBytes?: number;
-  historyPrunedBytes?: number;
+  walPrunedBytes?: number;
   epochRotated?: boolean;
   epochDbRotated?: boolean;
-  historyViewRetainedBytes?: number;
-  historyViewPrunedBytes?: number;
   persistencePerfMs?: StoragePersistencePerf;
 };
 
@@ -611,7 +574,7 @@ type StoragePersistencePerf = {
   /**
    * Time owned by the Runtime storage wrapper rather than the canonical
    * LevelDB commit itself. Keeping this split explicit prevents a slow lock,
-   * history projection, or post-commit cleanup from being blamed on LevelDB.
+   * projection, or post-commit cleanup from being blamed on LevelDB.
    */
   outerStages?: Record<string, number>;
   /**
@@ -634,7 +597,6 @@ type StoragePersistencePerf = {
   prepare: number;
   prepareStages: Record<string, number>;
   authoritativeWrite: number;
-  historyView: number;
   currentCacheWrite: number;
   postCommit: number;
   snapshot: number;
@@ -646,7 +608,6 @@ export type StorageFrameSaveOptions = {
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
-  historyRecords?: RuntimeHistoryRecord[];
   entityContexts: Map<string, import('../types/entity/infra-context').EntityInfraContext>;
   /**
    * True only for the live Runtime commit that just applied these objects.
@@ -657,8 +618,6 @@ export type StorageFrameSaveOptions = {
   getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   tryOpenRuntimeWalDb: (env: RuntimeReplica) => Promise<boolean>;
   getRuntimeWalDb: (env: RuntimeReplica) => RuntimeDbLike;
-  tryOpenHistoryViewDb: (env: RuntimeReplica) => Promise<boolean>;
-  getHistoryViewDb: (env: RuntimeReplica) => RuntimeDbLike;
   rotateEpochDb?: (env: RuntimeReplica, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
@@ -697,7 +656,7 @@ type StorageSnapshotLifecycleResult = {
   prunedBytes: number;
   epochRotated: boolean;
   epochDbRotated: boolean;
-  retainedHistoryBytes: number;
+  retainedWalBytes: number;
   latestSnapshotHeight: number;
 };
 
@@ -722,13 +681,13 @@ const runStorageSnapshotLifecycle = async (
   let prunedBytes = 0;
   const epochRotated = snapshotRequiredByBytes;
   let epochDbRotated = false;
-  let retainedHistoryBytes = nextHead.retainedHistoryBytes;
+  let retainedWalBytes = nextHead.retainedWalBytes;
   let latestSnapshotHeight = head.latestSnapshotHeight;
 
   if (snapshotDue || snapshotRequiredByBytes) {
     options.onPersistenceProgress?.('snapshot-start');
     const startedAt = options.getPerfMs();
-    await recoverStorageDbFromHistory({
+    await recoverStorageDbFromWal({
       db,
       walDb,
       config,
@@ -746,37 +705,23 @@ const runStorageSnapshotLifecycle = async (
     );
     snapshotDocs = snapshot.docCount;
     snapshotBytes = snapshot.bytes;
-    retainedHistoryBytes += snapshotBytes;
+    retainedWalBytes += snapshotBytes;
     latestSnapshotHeight = options.env.state.height;
     const publishedHead = {
       ...(await readHead(walDb, config)),
       latestSnapshotHeight,
-      retainedHistoryBytes,
+      retainedWalBytes,
     } satisfies StorageHead;
     await verifyStorageSnapshotIntegrity(walDb, publishedHead);
     const publishBatch = walDb.batch();
     publishBatch.put(KEY_HEAD, encodeBuffer(publishedHead));
     await writeBatch(publishBatch);
-    await options.onPersistenceBoundary?.('after-snapshot-history-publish');
+    await options.onPersistenceBoundary?.('after-snapshot-wal-publish');
     prunedBytes += await maybeRotateSnapshots(
       walDb,
       config.retainSnapshots,
       options.onPersistenceBoundary,
     );
-    const firstWalHeight = (await listSnapshotHeights(walDb))[0] ?? latestSnapshotHeight;
-    if (!(await options.tryOpenHistoryViewDb(options.env))) {
-      throw new Error(`HISTORY_VIEW_DB_OPEN_FAILED:wal-floor=${firstWalHeight}`);
-    }
-    await pruneHistoryViewRetention({
-      db: options.getHistoryViewDb(options.env),
-      height: options.env.state.height,
-      head: await readHistoryViewHead(options.getHistoryViewDb(options.env), config),
-      config,
-      firstWalHeight,
-      ...(options.onPersistenceBoundary
-        ? { onPersistenceBoundary: options.onPersistenceBoundary }
-        : {}),
-    });
     snapshotMs = options.getPerfMs() - startedAt;
     options.onPersistenceProgress?.('snapshot-done');
   }
@@ -784,25 +729,25 @@ const runStorageSnapshotLifecycle = async (
   if (snapshotDocs > 0) {
     const retainedSnapshots = await listSnapshotHeights(walDb);
     const oldestRetained = retainedSnapshots[0] ?? latestSnapshotHeight;
-    prunedBytes += await pruneHistoryBeforeHeight(
+    prunedBytes += await pruneWalBeforeHeight(
       walDb,
       oldestRetained,
       options.onPersistenceBoundary,
     );
   }
 
-  retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
+  retainedWalBytes = Math.max(0, retainedWalBytes - prunedBytes);
   if (snapshotDocs > 0 || prunedBytes > 0) {
     const latest = await readHead(walDb, config);
     const updatedHead = {
       ...latest,
       latestSnapshotHeight,
-      retainedHistoryBytes,
+      retainedWalBytes,
     } satisfies StorageHead;
     const walUpdate = walDb.batch();
     walUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
     await writeBatch(walUpdate);
-    await options.onPersistenceBoundary?.('after-snapshot-history-head');
+    await options.onPersistenceBoundary?.('after-snapshot-wal-head');
     const stateUpdate = db.batch();
     stateUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
     await writeBatch(stateUpdate);
@@ -824,7 +769,7 @@ const runStorageSnapshotLifecycle = async (
       const batch = walDb.batch();
       batch.put(KEY_HEAD, encodeBuffer(rotatedHead));
       await writeBatch(batch, { sync: true });
-      await options.onPersistenceBoundary?.('after-epoch-history-head-reset');
+      await options.onPersistenceBoundary?.('after-epoch-wal-head-reset');
     }
     options.onPersistenceProgress?.('snapshot-epoch-rotation-done');
   }
@@ -836,7 +781,7 @@ const runStorageSnapshotLifecycle = async (
     prunedBytes,
     epochRotated,
     epochDbRotated,
-    retainedHistoryBytes,
+    retainedWalBytes,
     latestSnapshotHeight,
   };
 };
@@ -883,7 +828,6 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
       skipped: {
         materialized: false,
         materializedOverlayKeys: [],
-        historyViewsMaterialized: true,
       } satisfies StorageFrameSaveResult,
     };
   }
@@ -907,9 +851,9 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
    * wrote is pure per-frame tax. Any divergence after that point is a defect
    * in this process, and a silent re-sync would hide it rather than fix it.
    */
-  const recovery = state.storageHistoryRecovered === true
+  const recovery = state.storageWalRecovered === true
     ? EMPTY_STORAGE_RECOVERY
-    : await recoverStorageDbFromHistory({
+    : await recoverStorageDbFromWal({
       db,
       walDb,
       config,
@@ -919,7 +863,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
         : {}),
     });
   state.storageCurrentProjectionVerified = true;
-  state.storageHistoryRecovered = true;
+  state.storageWalRecovered = true;
   options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
   // The `open` window covers two cached db handles and one recovery decision.
@@ -1271,15 +1215,10 @@ const prepareStorageStateCommitments = async (
       options.env.state.height % config.canonicalHashPeriodFrames === 0)
   );
   const runtimeComponentDigests = computeRuntimePostStateComponentDigests(
-    buildReplayVerifiableRuntimePostStateView(options.env, {
-      // Output bodies are immutable rows. Per-frame replay authority commits
-      // their ordered refs below instead of serializing the same envelopes.
-      pendingNetworkOutputs: [],
-      excludePersistedHistoryRecords: true,
-    }),
+    buildReplayVerifiableRuntimePostStateView(options.env),
   );
   const runtimeMachine = shouldMaterialize || canonicalHashDue
-    ? buildStorageRuntimeMachineSnapshot(options.env, { excludePersistedHistoryRecords: true })
+    ? buildStorageRuntimeMachineSnapshot(options.env)
     : undefined;
   checkpoint('runtimeMachine');
   const runtimeStateHashes = canonicalHashDue
@@ -1336,7 +1275,7 @@ const prepareStorageStateCommitments = async (
       }
     }
   }
-  checkpoint('replicaHistoryScan');
+  checkpoint('replicaMetaScan');
   options.onPersistenceProgress?.('replica-metadata-read');
   return {
     liveStateGraph,
@@ -1556,31 +1495,6 @@ const buildStorageFrameRecordPlan = (
     touchedEntities: touches.touchedEntities,
     touchedAccounts: touches.touchedAccounts,
     touchedBookEntities: touches.touchedBookEntities,
-    certifiedHistoryPuts: (() => {
-      // Certified-frame history serves API pages (account frame / swap history);
-      // it re-encodes every Entity and Account frame per Runtime frame. Load
-      // runs switch it off with XLN_STORAGE_CERTIFIED_HISTORY=0.
-      if (process.env['XLN_STORAGE_CERTIFIED_HISTORY'] === '0') return [];
-      const puts = buildCertifiedFramePuts({
-        height: options.env.state.height,
-        timestamp: options.env.state.timestamp,
-        historyRecords: options.historyRecords ?? [],
-        // These records are outputs of the canonical Entity/Account transitions
-        // applied above. Foreign and recovered bytes still pass the full schema
-        // validators on every read and conflict comparison.
-        validatedInProcess: true,
-      });
-      mark('frameEncode.certifiedPuts');
-      return puts;
-    })(),
-    historyViewPuts: buildHistoryViewPuts({
-      height: options.env.state.height,
-      timestamp: options.env.state.timestamp,
-      logs: touches.frameLogs,
-      touchedEntities: touches.touchedEntities,
-      touchedAccounts: touches.touchedAccounts,
-      touchedBookEntities: touches.touchedBookEntities,
-    }),
     highSignalEvents: touches.frameLogs
       .map(entry => typeof entry?.message === 'string' ? entry.message : '')
       .filter(message => [
@@ -1596,86 +1510,15 @@ const buildStorageFrameRecordPlan = (
 
 type RuntimeFramePlan = ReturnType<typeof buildStorageFrameRecordPlan>;
 
-const certifiedFrameValuesMatch = (
-  key: Buffer,
-  existing: Buffer,
-  candidate: Buffer,
-): boolean => {
-  if (buffersEqual(existing, candidate)) return true;
-  if (key[0] === HISTORY_VIEW_ACCOUNT_FRAME) {
-    const { accountHeight } = parseHistoryViewAccountFrameKey(key);
-    const left = decodeValidatedBuffer(existing, value =>
-      validateStoredAccountFrameValue(value, accountHeight));
-    const right = decodeValidatedBuffer(candidate, value =>
-      validateStoredAccountFrameValue(value, accountHeight));
-    return encodeCanonicalConsensusValue(left.frame) === encodeCanonicalConsensusValue(right.frame);
-  }
-  if (key[0] === HISTORY_VIEW_ENTITY_FRAME) {
-    const { entityHeight } = parseHistoryViewEntityFrameKey(key);
-    const left = decodeValidatedBuffer(existing, value =>
-      validateStoredEntityFrameValue(value, entityHeight));
-    const right = decodeValidatedBuffer(candidate, value =>
-      validateStoredEntityFrameValue(value, entityHeight));
-    // Validators of one Entity hold different, individually valid certificate
-    // variants of the same committed frame, and they reach this key on
-    // different Runtime frames. `recordEntityFrameHistory` already collapses
-    // the variants it sees inside a single Runtime frame; across frames the
-    // stored variant is simply the first durable one. The frame hash is the
-    // identity of the immutable body, so a differing hash is a real fork and
-    // still conflicts.
-    return left.link.frame.hash === right.link.frame.hash;
-  }
-  if (key[0] === HISTORY_VIEW_ACCOUNT_SWAP_EVENT || key[0] === HISTORY_VIEW_ACCOUNT_SWAP_RECENCY) {
-    const accountHeight = key[0] === HISTORY_VIEW_ACCOUNT_SWAP_RECENCY
-      ? parseHistoryViewAccountSwapRecencyKey(key).accountHeight
-      : decodeHeight(key, key.byteLength - 8);
-    const left = decodeValidatedBuffer(existing, value =>
-      validateStoredAccountSwapEventValue(value, accountHeight));
-    const right = decodeValidatedBuffer(candidate, value =>
-      validateStoredAccountSwapEventValue(value, accountHeight));
-    return encodeCanonicalConsensusValue(left.tx) === encodeCanonicalConsensusValue(right.tx);
-  }
-  throw new Error(`STORAGE_CERTIFIED_FRAME_KEY_INVALID:${key.toString('hex')}`);
-};
-
-const prepareCertifiedHistoryPuts = async (
-  walDb: RuntimeDbLike,
-  planned: HistoryViewPut[],
-): Promise<HistoryViewPut[]> => {
-  const accepted: HistoryViewPut[] = [];
-  const seen = new Map<string, Buffer>();
-  // Existence probes are independent point reads; issue them together instead
-  // of one awaited round trip per certified frame.
-  const persisted = await Promise.all(planned.map(put => readBoundedEncodedValue(walDb, put.key)));
-  for (const [index, put] of planned.entries()) {
-    const keyHex = put.key.toString('hex');
-    const existing = seen.get(keyHex) ?? persisted[index];
-    if (existing) {
-      if (!certifiedFrameValuesMatch(put.key, existing, put.value)) {
-        throw new Error(`STORAGE_CERTIFIED_FRAME_CONFLICT:${keyHex}`);
-      }
-      continue;
-    }
-    seen.set(keyHex, put.value);
-    accepted.push(put);
-  }
-  return accepted;
-};
-
 const buildStorageCommitBatches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
   pendingNodes: Awaited<ReturnType<typeof preparePathKeyedAuxiliaryPlan>>,
   frame: RuntimeFramePlan,
-  certifiedHistoryPuts: HistoryViewPut[],
   accountAuthorityCheckpoint: PreparedRscoreCheckpointStorage,
 ) => {
   const walBatch = prepared.walDb.batch();
-  const certifiedHistoryRows = certifiedHistoryPuts.flatMap(put =>
-    prepareBoundedStorageValueRows(put.key, put.value));
-  const activityHistoryRows = frame.historyViewPuts.flatMap(put =>
-    prepareBoundedStorageValueRows(put.key, put.value));
   for (const key of commitments.staleReplicaMetaKeys) walBatch.del(key);
   for (const key of pendingNodes.dels) walBatch.del(key);
   for (const entry of pendingNodes.puts) walBatch.put(entry.key, entry.value);
@@ -1705,8 +1548,6 @@ const buildStorageCommitBatches = (
       walBatch.put(row.key, row.value);
     }
   }
-  for (const row of certifiedHistoryRows) walBatch.put(row.key, row.value);
-  for (const row of activityHistoryRows) walBatch.put(row.key, row.value);
   for (const entry of commitments.replicaMetaEntries) {
     // Recovery metadata shares the authoritative batch with frame and HEAD.
     walBatch.put(entry.key, entry.value);
@@ -1725,10 +1566,7 @@ const buildStorageCommitBatches = (
   for (const key of commitments.bookGraphWrites.dels) currentBatch.del(key);
   for (const row of commitments.bookGraphWrites.puts) currentBatch.put(row.key, row.value);
 
-  // Certified/activity rows are rebuildable indexes with their own retention
-  // budget. Only the chained frame, immutable payloads and checkpoint graph
-  // count toward the authoritative WAL epoch budget.
-  const committedHistoryBytes = frame.authoritativeBaseBytes;
+  const committedFrameBytes = frame.authoritativeBaseBytes;
   const nextHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: options.env.state.height,
@@ -1743,13 +1581,13 @@ const buildStorageCommitBatches = (
     retainSnapshots: prepared.config.retainSnapshots,
     epochMaxBytes: prepared.config.epochMaxBytes,
     accountMerkleRadix: prepared.config.accountMerkleRadix,
-    epochReplayBytes: prepared.head.epochReplayBytes + committedHistoryBytes,
-    retainedHistoryBytes: prepared.head.retainedHistoryBytes + committedHistoryBytes,
+    epochReplayBytes: prepared.head.epochReplayBytes + committedFrameBytes,
+    retainedWalBytes: prepared.head.retainedWalBytes + committedFrameBytes,
   };
   const encodedHead = encodeBuffer(nextHead);
   walBatch.put(KEY_HEAD, encodedHead);
   currentBatch.put(KEY_HEAD, encodedHead);
-  options.onPersistenceProgress?.('history-view-plan-built');
+  options.onPersistenceProgress?.('commit-plan-built');
   return {
     walBatch,
     currentBatch,
@@ -1765,25 +1603,10 @@ type StorageCommitBatches = ReturnType<typeof buildStorageCommitBatches>;
 const writeAuthoritativeWalBatch = (batches: StorageCommitBatches): Promise<void> =>
   writeBatch(batches.walBatch, { sync: WAL_SYNC_ENABLED });
 
-const buildHistoryViewReconciliationPlan = (
-  options: StorageFrameSaveOptions,
-  prepared: PreparedStorageFrameSave,
-  frame: RuntimeFramePlan,
-): Parameters<typeof reconcileHistoryViews>[0] => ({
-  viewDb: options.getHistoryViewDb(options.env),
-  firstWalHeight: async () => (await listSnapshotHeights(prepared.walDb))[0] ?? 1,
-  latestWalHeight: options.env.state.height,
-  latestWalPuts: frame.historyViewPuts,
-  readWalFrame: height => readStorageFrameRecord(prepared.walDb, height),
-  readWalActivity: height => readHistoryViewRuntimeActivity(prepared.walDb, height),
-  config: prepared.config,
-});
-
 const commitStorageFrame = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
-  frame: RuntimeFramePlan,
   batches: StorageCommitBatches,
   writeStartedAt: number,
   prepareMarks: Record<string, number>,
@@ -1803,43 +1626,14 @@ const commitStorageFrame = async (
     throw new AccountAuthorityWalCommitError(error);
   }
   options.onPersistenceProgress?.('account-authority-committed');
-  await options.onPersistenceBoundary?.('after-authoritative-history-commit');
+  await options.onPersistenceBoundary?.('after-authoritative-commit');
 
-  let historyViewBytes = 0;
-  let historyViewsMaterialized = frame.historyViewPuts.length === 0;
-  let viewMaterializedThrough = 0;
-  // Only the WAL above is durability-critical. The history view and the
-  // current-state cache are both rebuildable projections of it, so they are
-  // written without fsync and concurrently with each other; the frame still
-  // does not complete until both writes returned.
-  const historyViewStartedAt = options.getPerfMs();
-  const historyViewWrite = frame.historyViewPuts.length > 0
-    ? (async () => {
-        if (!(await options.tryOpenHistoryViewDb(options.env))) {
-          throw new Error(
-            `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.state.height}`,
-          );
-        }
-        return reconcileHistoryViews(
-          buildHistoryViewReconciliationPlan(options, prepared, frame),
-        );
-      })()
-    : Promise.resolve(null);
   const currentWriteStartedAt = options.getPerfMs();
   options.onPersistenceProgress?.('current-cache-write-start');
   let currentCacheWriteMs = 0;
-  const currentWrite = writeBatch(batches.currentBatch, { sync: false }).then(() => {
+  await writeBatch(batches.currentBatch, { sync: false }).then(() => {
     currentCacheWriteMs = options.getPerfMs() - currentWriteStartedAt;
   });
-  const [reconciled] = await Promise.all([historyViewWrite, currentWrite]);
-  if (reconciled) {
-    historyViewBytes = reconciled.writtenBytes;
-    viewMaterializedThrough =
-      reconciled.materializedThroughRuntimeHeight;
-    historyViewsMaterialized = true;
-    await options.onPersistenceBoundary?.('after-history-view-commit');
-  }
-  const historyViewMs = options.getPerfMs() - historyViewStartedAt;
   if (prepared.shouldMaterialize) {
     options.env.infrastructure ??= {};
     const bookCache = options.env.infrastructure.storagePersistedBooks instanceof Map
@@ -1883,43 +1677,15 @@ const commitStorageFrame = async (
     options.env,
     batches.safeAccountJClaimDeletes,
   );
-  let historyViewPrunedBytes = 0;
-  let historyViewRetainedBytes = 0;
-  let historyViewPrunedKeys = 0;
-  let historyViewLatestPrunedHeight = 0;
-  if (viewMaterializedThrough > 0) {
-    const viewDb = options.getHistoryViewDb(options.env);
-    const result = await pruneHistoryViewRetention({
-      db: viewDb,
-      height: options.env.state.height,
-      head: await readHistoryViewHead(viewDb, prepared.config),
-      config: prepared.config,
-      ...(options.onPersistenceBoundary
-        ? { onPersistenceBoundary: options.onPersistenceBoundary }
-        : {}),
-    });
-    historyViewPrunedBytes = result.prunedBytes;
-    historyViewRetainedBytes = result.retainedBytes;
-    historyViewPrunedKeys = result.prunedKeys;
-    historyViewLatestPrunedHeight = result.latestPrunedRuntimeHeight;
-    historyViewsMaterialized = true;
-  }
   const postCommitMs =
     options.getPerfMs() - currentWriteStartedAt - currentCacheWriteMs;
   return {
     prepareMs,
     prepareStages,
     authoritativeWriteMs,
-    historyViewMs,
     currentCacheWriteMs,
     postCommitMs,
     writeMs: options.getPerfMs() - writeStartedAt,
-    historyViewBytes,
-    historyViewsMaterialized,
-    historyViewPrunedBytes,
-    historyViewRetainedBytes,
-    historyViewPrunedKeys,
-    historyViewLatestPrunedHeight,
   };
 };
 
@@ -1942,7 +1708,6 @@ const finishStorageFrameSave = (
     prepare: committed.prepareMs,
     prepareStages: committed.prepareStages,
     authoritativeWrite: committed.authoritativeWriteMs,
-    historyView: committed.historyViewMs,
     currentCacheWrite: committed.currentCacheWriteMs,
     postCommit: committed.postCommitMs,
     snapshot: snapshot.snapshotMs,
@@ -1961,14 +1726,8 @@ const finishStorageFrameSave = (
         record => record.family === 'book' && record.deleted === true,
       ).length,
       frameBytes: frame.frameBuffer.byteLength,
-      historyViewBytes: committed.historyViewBytes,
-      historyViewRetainedBytes: committed.historyViewRetainedBytes,
-      historyViewPrunedBytes: committed.historyViewPrunedBytes,
-      historyViewPrunedKeys: committed.historyViewPrunedKeys,
-      historyViewLatestPrunedHeight:
-        committed.historyViewLatestPrunedHeight,
       snapshotBytes: snapshot.snapshotBytes,
-      retainedHistoryBytes: snapshot.retainedHistoryBytes,
+      retainedWalBytes: snapshot.retainedWalBytes,
       entities: prepared.frameTouched.touchedEntities.size,
       accounts: prepared.frameTouched.touchedAccounts.size,
       books: prepared.frameTouched.touchedBookEntities.size,
@@ -2017,16 +1776,13 @@ const finishStorageFrameSave = (
     materializedOverlayKeys: prepared.shouldMaterialize
       ? prepared.overlayRecords.map(storageOverlayRecordKey)
       : [],
-    historyViewsMaterialized: committed.historyViewsMaterialized,
     latestSnapshotHeight: snapshot.latestSnapshotHeight,
-    retainedHistoryBytes: snapshot.retainedHistoryBytes,
+    retainedWalBytes: snapshot.retainedWalBytes,
     snapshotCreated: snapshot.snapshotDocs > 0,
     snapshotBytes: snapshot.snapshotBytes,
-    historyPrunedBytes: snapshot.prunedBytes,
+    walPrunedBytes: snapshot.prunedBytes,
     epochRotated: snapshot.epochRotated,
     epochDbRotated: snapshot.epochDbRotated,
-    historyViewRetainedBytes: committed.historyViewRetainedBytes,
-    historyViewPrunedBytes: committed.historyViewPrunedBytes,
     persistencePerfMs,
   };
 };
@@ -2062,13 +1818,12 @@ export const saveRuntimeFrameToStorage = async (
     return {
       materialized: false,
       materializedOverlayKeys: [],
-      historyViewsMaterialized: false,
       staleWriterStopped: true,
     };
   }
   const { previousFrame, prevFrameHash } = appendPosition;
-  options.onPersistenceProgress?.('history-read');
-  checkpointPrepare('historyRead');
+  options.onPersistenceProgress?.('wal-head-read');
+  checkpointPrepare('walHeadRead');
   const pendingNodes = await preparePathKeyedAuxiliaryPlan(
     options.env,
     walDb,
@@ -2116,18 +1871,12 @@ export const saveRuntimeFrameToStorage = async (
   options.onAuthoritativeFramePrepared?.(framePlan.authoritativeIdentity);
   options.onPersistenceProgress?.('frame-encoded');
   checkpointPrepare('frameEncode');
-  const certifiedHistoryPuts = await prepareCertifiedHistoryPuts(
-    walDb,
-    framePlan.certifiedHistoryPuts,
-  );
-  checkpointPrepare('certifiedHistory');
   const batches = buildStorageCommitBatches(
     options,
     prepared,
     commitments,
     pendingNodes,
     framePlan,
-    certifiedHistoryPuts,
     accountAuthorityCheckpoint,
   );
   checkpointPrepare('batchPlan');
@@ -2135,7 +1884,6 @@ export const saveRuntimeFrameToStorage = async (
     options,
     prepared,
     commitments,
-    framePlan,
     batches,
     writeStartedAt,
     prepareMarks,

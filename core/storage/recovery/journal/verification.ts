@@ -138,10 +138,7 @@ export const verifyRecoveryJournalFrame = (
       timestamp: env.state.timestamp,
       replicaMetaDigest: commitment.digest,
       runtimeComponentDigests: computeRuntimePostStateComponentDigests(
-        buildReplayVerifiableRuntimePostStateView(env, {
-          pendingNetworkOutputs: [],
-          excludePersistedHistoryRecords: true,
-        }),
+        buildReplayVerifiableRuntimePostStateView(env),
       ),
       runtimeOutputCount: frame.runtimeOutputCount,
       runtimeOutputsDigest: frame.runtimeOutputsDigest,

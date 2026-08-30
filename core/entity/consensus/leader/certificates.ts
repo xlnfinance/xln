@@ -8,7 +8,7 @@
  */
 import { verifyAccountSignature } from '../../../account/crypto';
 import { log } from '../../../support/diagnostics';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
 import { compareStableText } from '../../../protocol/serialization';
 import type { ConsensusConfig, EntityCandidate, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, EntityFrame } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
@@ -262,10 +262,9 @@ const mergePreparedFrameEvidence = (
     frame: structuredClone(evidence),
     signatures: new Map<string, string[]>(),
   };
-  if (
-    encodeCanonicalConsensusValue({ ...group.frame, collectedSigs: undefined }) !==
-    encodeCanonicalConsensusValue({ ...evidence, collectedSigs: undefined })
-  ) {
+  const { collectedSigs: _groupSignatures, ...groupBody } = group.frame;
+  const { collectedSigs: _evidenceSignatures, ...evidenceBody } = evidence;
+  if (!canonicalConsensusValuesEqual(groupBody, evidenceBody)) {
     throw new Error(`ENTITY_PREPARED_BODY_CONFLICT:${evidence.hash}`);
   }
   for (const [signerId, signerSignatures] of signatures) {

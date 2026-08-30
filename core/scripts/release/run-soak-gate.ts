@@ -380,7 +380,7 @@ const extractResultEvidence = (stdoutTail: string): SoakResultEvidence | undefin
   setNumber('dbBytes', numberOf(parsed, 'dbBytes'));
   if (storageStats) {
     setNumber('storageTotalBytes', numberOf(storageStats, 'totalBytes'));
-    setNumber('storageHistoryBytes', numberOf(storageStats, 'historyBytes'));
+    setNumber('storageHistoryBytes', numberOf(storageStats, 'walBytes'));
     setNumber('storageSnapshotBytes', numberOf(storageStats, 'snapshotBytes'));
     evidence.storageSnapshotCount = snapshotHeights.length;
     evidence.storageEpochCount = epochDbs.length;

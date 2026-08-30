@@ -51,7 +51,7 @@ fn command_fixture() -> CanonicalValue {
                 ("type", CanonicalValue::String("entity_transaction".into())),
                 ("data", object(vec![
                     ("version", number(1)),
-                    ("actionHash", CanonicalValue::String("0x7ca0ea9185fd57834be814ca4298d0f823d38d679ce431c4e24ff2aa85aca82c".into())),
+                    ("actionHash", CanonicalValue::String("0xd3e4196bae8f3acd6cdce108c0f6e94f51daa196d510db52ddd503e0cd3d61f1".into())),
                     ("txs", CanonicalValue::Array(vec![inner])),
                 ])),
             ])),
@@ -66,9 +66,9 @@ fn command_fixture() -> CanonicalValue {
         ("authorSignerId", CanonicalValue::String(signer.into())),
         ("authorSigner", CanonicalValue::String(signer.into())),
         ("nonce", CanonicalValue::BigInt(1.into())),
-        ("txsHash", CanonicalValue::String("0xc72efd1014a417642268a02845a60326d1ed9fe49933e544e1c919f96acc730d".into())),
+        ("txsHash", CanonicalValue::String("0x8823ed776f0edfacf6a69f73c7e97b9147a536c9b8cee9f1b7a818a372f51868".into())),
         ("txs", CanonicalValue::Array(vec![proposal])),
-        ("signature", CanonicalValue::String("0xa7ad68af0d76f62efc300c8b58c54e95b23730a3d84dd63196c51360fa261d6d55d704eeadda557ea2359c4eb249956160f3b9783d118a0625b6c89b3a5815c400".into())),
+        ("signature", CanonicalValue::String("0x51613383daa0779d5ee8b2891b47dccda7d812f966086f932168aea8fa1cf2085a155d81add14ae03cc9678e554f19d75a5e9eef77ad2922d52f135bab27362f01".into())),
     ])
 }
 
@@ -95,7 +95,7 @@ fn matches_typescript_signed_command_vector_and_nonce_rules() {
     let command = decode_signed_entity_command(&command_fixture()).expect("command");
     assert_eq!(
         command.command_hash,
-        "0x82dfb7f3999b4b734105311ff1f71a5f26f87923062dede8087791eb2e66850b"
+        "0xd8f022e3d1ff494cf10ccb1faaab11386ef034d55ae3e76cb65f5b4f6ac1419e"
     );
     assert_eq!(command.native_txs.len(), 1);
     assert_eq!(
@@ -118,6 +118,30 @@ fn matches_typescript_signed_command_vector_and_nonce_rules() {
     assert_eq!(
         get_entity_command_disposition(state.as_ref(), &command).expect("retry"),
         EntityCommandDisposition::Retry
+    );
+}
+
+#[test]
+fn weighted_board_hash_matches_typescript() {
+    let left = format!("0x{}", "11".repeat(20));
+    let right = format!("0x{}", "22".repeat(20));
+    let authority = EntityFrameAuthority {
+        config: EntityConsensusConfig {
+            mode: ConsensusMode::ProposerBased,
+            threshold: 2,
+            validators: vec![left.clone(), right.clone()],
+            shares: BTreeMap::from([(left.clone(), 1), (right.clone(), 2)]),
+            jurisdiction: None,
+        },
+        leader_state: EntityLeaderState {
+            active_validator_id: left.clone(),
+            view: 0,
+            changed_at_height: 0,
+        },
+    };
+    assert_eq!(
+        current_entity_command_board_hash(&authority, &left).expect("board hash"),
+        "0xb2833a6c8de583ecbe7708c5cd0ba6f96ccaf503c6a1fd3d34167d71667cd25e"
     );
 }
 

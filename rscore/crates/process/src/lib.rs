@@ -2,16 +2,18 @@
 
 //! Long-lived, framed binary host for the deterministic Account batch engine.
 
-mod candidate;
 mod canonical;
 mod checkpoint_wire;
 #[path = "wire/entity.rs"]
 mod entity_wire;
 mod error;
+pub mod native_genesis;
 #[path = "runtime_replay/native_restart.rs"]
 pub mod native_runtime;
 #[cfg(feature = "bench")]
+#[path = "runtime_replay/replay_support.rs"]
 pub mod replay_support;
+pub mod runtime_http;
 #[cfg(feature = "bench")]
 pub mod runtime_replay;
 mod session;
@@ -104,8 +106,8 @@ pub fn encode_resident_entity_round(
 // 13: every parent Entity input owns an idempotent savepoint inside the held
 // Runtime candidate. Apply/Propose are bound to that exact stage key; rejected
 // Entity inputs roll back their Account mutations and operation indices.
-// 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
-// shapes. FrameAck is one ACK-first operation with one ordered composite
+// 14: peer inputs carry the exact canonical envelope and Frame/Ack/AckFrame
+// shapes. AckFrame is one ACK-first operation with one ordered composite
 // result: a valid ACK remains committed if its bundled frame is rejected.
 // 21: an inbound row may carry trusted Entity genesis policy; the round reply
 // has a separate exact H=1 materialization list for authenticated new Accounts.
@@ -132,7 +134,9 @@ pub fn encode_resident_entity_round(
 // 35: Account input rows carry separate full certified-board records for the
 // peer and local owner, including previous-board expiry for historical ACKs.
 // 36: Entity snapshots carry the bounded Entity-command nonce fence.
-pub const PROCESS_ABI_VERSION: u64 = 37;
+// 38: fresh Account bootstrap returns its exact empty checkpoint with the
+// loaded root, so an idle Runtime persists one canonical restore base.
+pub const PROCESS_ABI_VERSION: u64 = 38;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
@@ -175,7 +179,7 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // bodies are returned only after all Entity-derived work has run.
         // wire=20: Account peer inputs carry from/to/domain/dispute/watch-seed
         // exactly, received frames retain optional Hankos, disputes
-        // retain their claimed hash, and FrameAck is one ACK-first result row.
+        // retain their claimed hash, and AckFrame is one ACK-first result row.
         // wire=19: BeginEntity/FinalizeEntity/DiscardEntity delimit one
         // abortable parent Entity input, and Apply/Propose carry its stage key.
         // wire=18: commit verdicts carry the exact committed frame and
@@ -225,7 +229,11 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     };
 
 #[cfg(test)]
+#[path = "tests/peer_wire.rs"]
+mod peer_wire_tests;
+#[cfg(test)]
+#[path = "tests/session_authority.rs"]
+mod session_authority_tests;
+#[cfg(test)]
 #[path = "tests/fixture.rs"]
 mod test_fixture;
-#[cfg(test)]
-mod tests;

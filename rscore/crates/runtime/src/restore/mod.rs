@@ -58,7 +58,8 @@ mod tests;
 pub use account_checkpoint::decode_account_rows;
 pub use account_value::AccountWireRestoreError;
 pub use certified_board_registry::{
-    CertifiedBoardRegistryRestoreError, hydrate_certified_board_registry,
+    CertifiedBoardRegistryRestoreError, HydratedCertifiedBoardRegistry,
+    hydrate_certified_board_registry, hydrate_certified_board_state,
 };
 pub use concrete::{
     ConcreteRestoreError, DecodedRuntimeCheckpoint, DecodedRuntimeWalFrame, RestoredRuntime,

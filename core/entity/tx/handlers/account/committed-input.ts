@@ -183,16 +183,11 @@ const recordCommittedFrames = (
   context: SuccessfulAccountInputContext,
 ): void => {
   const { account, input, result, effects } = context;
-  for (const { frame, committedViaNewFrame } of result.committedFrames ?? []) {
+  if ((result.committedFrames?.length ?? 0) > 0) {
     effects.candidateEffects.push({
-      kind: 'accountFrameHistory',
+      kind: 'accountFrameCommitted',
       entityId: account.proofHeader.fromEntity,
       counterpartyId: input.fromEntityId,
-      accountHeight: frame.height,
-      source: committedViaNewFrame ? 'peerCommit' : 'ackCommit',
-      // The committed frame is sealed (deep-frozen) with the Account on
-      // commit; history keeps the same immutable value instead of a copy.
-      frame,
     });
   }
 };

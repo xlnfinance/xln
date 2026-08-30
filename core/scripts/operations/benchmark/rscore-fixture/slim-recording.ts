@@ -1,5 +1,5 @@
 /**
- * Slim a native replay recording down to what rscore-runtime-replay actually
+ * Slim a native replay recording down to what `xlnrs replay` actually
  * reads: featurePolicy, the recording height range, and the journal_tail
  * frame expectations. Same JSON shape as the full recording, so the Rust
  * side needs no changes; the multi-hundred-MB input/state bundles that the

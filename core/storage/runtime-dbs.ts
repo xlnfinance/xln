@@ -21,7 +21,7 @@ import {
 } from './fs-durability';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
-type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'runtime-wal' | 'history-views' | 'infra';
+type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'runtime-wal' | 'infra';
 
 const storageLog = createStructuredLogger('runtime.storage');
 const closingRuntimeDbHandles = new Set<string>();
@@ -30,7 +30,6 @@ const runtimeDbHandleKey = (env: RuntimeReplica, role: RuntimeDbHandleRole): str
   if (role === 'storage-current') return resolveStorageDbPath(env, 'current');
   if (role === 'storage-previous') return resolveStorageDbPath(env, 'previous');
   if (role === 'runtime-wal') return resolveRuntimeWalDbPath(env);
-  if (role === 'history-views') return resolveHistoryViewDbPath(env);
   return resolveDbPath(env, 'infra');
 };
 
@@ -130,11 +129,6 @@ export const resolveStorageDbPath = (env: RuntimeReplica, role: StorageDbRole = 
 export const resolveRuntimeWalDbPath = (env: RuntimeReplica): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-wal`;
-};
-
-export const resolveHistoryViewDbPath = (env: RuntimeReplica): string => {
-  const base = resolveDbPath(env, 'core');
-  return `${base}-history-views`;
 };
 
 export const STORAGE_WRITER_LOCK_TTL_MS = 30_000;
@@ -621,7 +615,7 @@ export const releaseRetainedStorageWriterLock = async (
  * Pin a multi-read recovery view against snapshot publication and replay
  * pruning. Browser runtimes share the same Web Lock with frame writers; node
  * readers use the durable writer lock and fail loudly on an external live
- * contender instead of observing a torn history window.
+ * contender instead of observing a torn WAL window.
  */
 export const withStorageConsistentRead = async <T>(
   env: RuntimeReplica,
@@ -1048,35 +1042,6 @@ export const borrowOpenRuntimeWalDb = async (
   }
 };
 
-export const getHistoryViewDb = (
-  env: RuntimeReplica,
-  deps: RuntimeStorageDbDeps,
-): Level<Buffer, Buffer> => {
-  assertRuntimeDbNotClosing(env, 'history-views');
-  const state = deps.ensureRuntimeInfrastructure(env);
-  if (!state.historyViewDb) {
-    state.historyViewDb = createRuntimeLevel(resolveHistoryViewDbPath(env));
-  }
-  return state.historyViewDb;
-};
-
-export const closeHistoryViewDb = async (env: RuntimeReplica): Promise<void> => {
-  const state = env.infrastructure;
-  const db = state?.historyViewDb;
-  if (!db) return;
-  beginRuntimeDbClose(env, 'history-views');
-  state.historyViewDb = null;
-  state.historyViewDbOpenPromise = null;
-  try {
-    await db.close();
-  } catch (error) {
-    storageLog.warn('history_view_db.close_failed', { error: formatStorageError(error) });
-    throw error;
-  } finally {
-    endRuntimeDbClose(env, 'history-views');
-  }
-};
-
 export const closeInfraDb = async (env: RuntimeReplica): Promise<void> => {
   const state = env.infrastructure;
   if (!state?.infraDb) return;
@@ -1127,38 +1092,6 @@ export async function tryOpenRuntimeWalDb(
     return await state.runtimeWalDbOpenPromise;
   } catch (error) {
     storageLog.error('runtime_wal.open_failed', { error: formatStorageError(error) });
-    throw error;
-  }
-}
-
-export async function tryOpenHistoryViewDb(
-  env: RuntimeReplica,
-  deps: RuntimeStorageDbDeps,
-): Promise<boolean> {
-  const state = deps.ensureRuntimeInfrastructure(env);
-  if (!state.historyViewDbOpenPromise) {
-    const db = getHistoryViewDb(env, deps);
-    state.historyViewDbOpenPromise = (async () => {
-      try {
-        await db.open();
-        return true;
-      } catch (error) {
-        const isBlocked =
-          error instanceof Error &&
-          (error.name === 'SecurityError' || error.name === 'InvalidStateError');
-        if (isBlocked) {
-          storageLog.warn('history_view_db.blocked', { error: formatStorageError(error) });
-          return false;
-        }
-        state.historyViewDbOpenPromise = null;
-        throw error;
-      }
-    })();
-  }
-  try {
-    return await state.historyViewDbOpenPromise;
-  } catch (error) {
-    storageLog.error('history_view_db.open_failed', { error: formatStorageError(error) });
     throw error;
   }
 }

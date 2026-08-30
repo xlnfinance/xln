@@ -61,9 +61,7 @@ const replica = (payment: EntityTx): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     profile: { name: 'Payment board', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
   },
 }) as EntityReplica;

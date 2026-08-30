@@ -16,7 +16,11 @@ import {
   assertProductionSwapFullySettled,
 } from '../settlement';
 import { waitForFullySettledEvidence } from '../settlement-reader';
-import { resetLaneHostOpCounters, stopLaneRuntimes } from '../lanes/lane-runtimes';
+import {
+  requireConnectedLaneRuntime,
+  resetLaneHostOpCounters,
+  stopLaneRuntimes,
+} from '../lanes/lane-runtimes';
 import {
   prepareParallelSameLoad,
   submitPreparedParallelSameLoad,
@@ -60,7 +64,6 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       workDir: args.workDir,
       portBase: args.portBase,
       hub,
-      marketMaker,
       hubIdentity,
       initialBook: setupBook,
       minimumTradeSize,
@@ -79,7 +82,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
     }
     const laneRuntimes = [...preparedParallel.traderRuntimes];
     const readLaneFrames = async () => Promise.all(laneRuntimes.map(async lane =>
-      decodeLoadFrame(await lane.runtime.adapter.read<unknown>('frame/latest'))));
+      decodeLoadFrame(await requireConnectedLaneRuntime(lane).adapter.read<unknown>('frame/latest'))));
     await Promise.all([
       resetLaneHostOpCounters(laneRuntimes),
       resetHltProcessOpCounters(args, [hub]),
@@ -90,17 +93,17 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const driverRssBefore = process.memoryUsage().rss;
-    for (const lane of laneRuntimes) disconnectRuntimeControl(lane.runtime);
+    for (const lane of laneRuntimes) disconnectRuntimeControl(requireConnectedLaneRuntime(lane));
     const startedAt = performance.now();
     const submitted = await submitPreparedParallelSameLoad({
-      hub, hubIdentity, initialBook,
+      hubIdentity,
       swapsPerRound: args.swaps, rounds: args.rounds, cadenceMs: args.cadenceMs,
       prepared: preparedParallel,
     });
     const settlementEvidence = await waitForFullySettledEvidence({
       hub,
       load: laneRuntimes.map(lane => ({
-        runtime: lane.runtime,
+        runtime: requireConnectedLaneRuntime(lane),
         pairs: submitted.settlementPairs.filter(pair => pair.loadEntityId === lane.identity.entityId),
       })),
       marketMaker,

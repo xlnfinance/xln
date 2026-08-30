@@ -11,7 +11,6 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getRuntimeWalDb,
-  getHistoryViewDb,
   getRuntimeStorageDb,
   getPersistedLatestHeight,
   listPersistedEntityIdsAtHeight,
@@ -30,7 +29,6 @@ import { replaceRuntimeFrameEvents } from '../../../runtime/observability/env-ev
 import {
   computeStorageFrameHash,
   inspectStorage,
-  readHistoryViewRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
   listStorageSnapshotReplicaMetas,
@@ -204,7 +202,7 @@ describe('storage frame journal retention', () => {
       getRuntimeDb: () => db,
     });
     expect(stats).toBeTruthy();
-    expect(head.retainedHistoryBytes).toBe(stats!.historyBytes);
+    expect(head.retainedWalBytes).toBe(stats!.walBytes);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -708,7 +706,7 @@ describe('storage frame journal retention', () => {
     expect(persistence).toBeTruthy();
     expect(Object.keys(persistence?.planningStages ?? {})).toEqual(['overlay', 'lineage', 'remainder']);
     expect(Object.keys(persistence?.prepareStages ?? {})).toEqual([
-      'historyRead',
+      'walHeadRead',
       'pendingNodes',
       'accountAuthorityCheckpoint',
       'materializedGraph',
@@ -716,9 +714,8 @@ describe('storage frame journal retention', () => {
       'runtimeMachine',
       'canonicalHashes',
       'replicaCommitment',
-      'replicaHistoryScan',
+      'replicaMetaScan',
       'frameEncode',
-      'certifiedHistory',
       'batchPlan',
       'remainder',
     ]);
@@ -729,7 +726,7 @@ describe('storage frame journal retention', () => {
       .reduce((sum, durationMs) => sum + durationMs, 0);
     expect(planningStageTotal).toBeLessThanOrEqual((persistence?.planning ?? 0) + 0.01);
     expect(Object.keys(persistence?.outerStages ?? {})).toEqual([
-      'historyPrepare',
+      'prepare',
       'deadlineSetup',
       'writerLockAcquire',
       'storageCore',
@@ -777,18 +774,12 @@ describe('storage frame journal retention', () => {
         return true;
       },
       getRuntimeWalDb,
-      tryOpenHistoryViewDb: async (targetEnv) => {
-        await getHistoryViewDb(targetEnv).open();
-        return true;
-      },
-      getHistoryViewDb,
       getPerfMs,
       formatPerfMs: (value) => value.toFixed(2),
       stopStaleWriterOnHeadAhead: true,
     });
 
     expect(result.staleWriterStopped).toBe(true);
-    expect(result.historyViewsMaterialized).toBe(false);
     const head = await readStorageHead(getRuntimeWalDb(env));
     const afterFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
     expect(head?.latestHeight).toBe(1);
@@ -831,18 +822,12 @@ describe('storage frame journal retention', () => {
         return true;
       },
       getRuntimeWalDb,
-      tryOpenHistoryViewDb: async (targetEnv) => {
-        await getHistoryViewDb(targetEnv).open();
-        return true;
-      },
-      getHistoryViewDb,
       getPerfMs,
       formatPerfMs: (value) => value.toFixed(2),
       stopStaleWriterOnHeadAhead: true,
     });
 
     expect(result.staleWriterStopped).toBe(true);
-    expect(result.historyViewsMaterialized).toBe(false);
     const head = await readStorageHead(getRuntimeWalDb(env));
     expect(head?.latestHeight).toBe(2);
 
@@ -1366,8 +1351,8 @@ describe('storage frame journal retention', () => {
     expect(currentHead?.latestSnapshotHeight).toBe(snapshotHeight);
     expect(currentHead?.epochReplayBytes).toBe(0);
     expect(historyHead?.epochReplayBytes).toBe(0);
-    expect(currentHead?.retainedHistoryBytes).toBe(0);
-    expect(historyHead?.retainedHistoryBytes ?? 0).toBeGreaterThan(0);
+    expect(currentHead?.retainedWalBytes).toBe(0);
+    expect(historyHead?.retainedWalBytes ?? 0).toBeGreaterThan(0);
     expect(await readRawOrNull(getRuntimeWalDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
     expect(await readRawOrNull(getRuntimeWalDb(env), keyFrame(snapshotHeight))).toBeTruthy();
     expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
@@ -1416,7 +1401,7 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('prunes finalized frame journals while compact account activity remains readable', async () => {
+  test('prunes finalized Runtime WAL frames without retaining Account history copies', async () => {
     const seed = `frame-retention ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -1576,7 +1561,7 @@ describe('storage frame journal retention', () => {
         );
       }
     }
-    expect(restoredHistoryFrames).toBeGreaterThan(0);
+    expect(restoredHistoryFrames).toBe(0);
     if (restored) {
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
@@ -2091,86 +2076,4 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('prunes old history-view activity without pruning replay frames', async () => {
-	  const seed = `history-view-prune ${Date.now()} alpha beta gamma`;
-	  const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
-	  const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
-	  const namespacePath = join(dbRoot, runtimeId);
-
-	  rmSync(namespacePath, { recursive: true, force: true });
-	  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
-	  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-	  rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
-	  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
-	  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
-	  mkdirSync(dbRoot, { recursive: true });
-
-	  const env = createEmptyEnv(seed);
-	  env.runtimeId = runtimeId;
-	  env.dbNamespace = runtimeId;
-	  env.quietRuntimeLogs = true;
-	  env.runtimeConfig = {
-	    ...(env.runtimeConfig || {}),
-	    storage: {
-	      ...(env.runtimeConfig?.storage || {}),
-	      historyViewMaxBytes: 1,
-	      historyViewRetainFrames: 1,
-	    },
-	  };
-
-	  for (let height = 1; height <= 4; height += 1) {
-	    env.state.height = height;
-	    env.state.timestamp = 2_000 + height;
-	    replaceRuntimeFrameEvents(env, [{
-	      id: height,
-	      timestamp: env.state.timestamp,
-	      level: 'info',
-	      category: 'system',
-	      message: `history-view-prune-${height}`,
-	    }]);
-	    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
-	  }
-
-	  expect(await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 1)).toBeNull();
-	  const latestActivity = await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 4);
-	  expect(latestActivity?.logs?.[0]?.message).toBe('history-view-prune-4');
-	  const replayFrame = await readPersistedFrameJournal(env, 1);
-	  expect(replayFrame?.height).toBe(1);
-
-	  await closeRuntimeDb(env);
-	  await closeInfraDb(env);
-	});
-
-  test('rebuilds a deleted history-view DB from authoritative Runtime WAL', async () => {
-    const seed = `history-view-rebuild ${Date.now()} alpha beta gamma`;
-    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
-    cleanupRuntimeStorage(dbRoot, runtimeId);
-    const env = createEmptyEnv(seed);
-    env.runtimeId = runtimeId;
-    env.dbNamespace = runtimeId;
-    env.state.height = 1;
-    env.state.timestamp = 4_001;
-    env.quietRuntimeLogs = true;
-    replaceRuntimeFrameEvents(env, [{
-      id: 1,
-      timestamp: env.state.timestamp,
-      level: 'info',
-      category: 'system',
-      message: 'durable-wal-activity',
-    }]);
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
-    expect((await readHistoryViewRuntimeActivity(getRuntimeWalDb(env), 1))?.logs[0]?.message)
-      .toBe('durable-wal-activity');
-    await closeRuntimeDb(env);
-    await closeInfraDb(env);
-
-    rmSync(join(dbRoot, `${runtimeId}-history-views`), { recursive: true, force: true });
-    const restored = await loadEnvFromDB(runtimeId, seed);
-    if (!restored) throw new Error('history-view rebuild restore failed');
-    const rebuilt = await readHistoryViewRuntimeActivity(getHistoryViewDb(restored), 1);
-    expect(rebuilt?.logs[0]?.message).toBe('durable-wal-activity');
-    await closeRuntimeDb(restored);
-    await closeInfraDb(restored);
-  });
 });

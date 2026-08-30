@@ -5,11 +5,14 @@
 //! is dropped from the frame rather than failing the proposal, and the frame
 //! commits the candidate state the surviving transactions produced.
 
+use std::sync::Arc;
+
 use crate::consensus::frame::hash::AccountFrame;
 use crate::consensus::replica::{AccountConsensus, PendingFrame};
 use crate::consensus::signing::SigningIdentity;
 use crate::error::StateError;
-use crate::tx::apply::{AccountVerdict, SequentialAccountEngine};
+use crate::tx::apply::apply_to_candidate;
+use crate::tx::apply_types::{AccountConsensusEffect, MutationDecision};
 use crate::{
     AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, Side,
 };
@@ -62,10 +65,9 @@ fn critical_kind(tx: &AccountTx) -> Option<&'static str> {
 
 /// A frame this side built, signed, and is waiting to have acknowledged.
 ///
-/// The frame's own effects stay with the pending frame until the peer acks
-/// it. What travels here instead is what the proposer publishes the moment it
-/// signs: the transactions' events, and the outputs its Entity acts on before
-/// any acknowledgement exists — a revealed secret, a resting order.
+/// The frame's own effects stay with the pending frame until the peer acks it.
+/// The shared per-tx rows below exist for the TS Account-cutover wire response;
+/// resident Entity execution does not release them before acknowledgement.
 #[derive(Debug)]
 pub struct ProposedFrame {
     pub frame: AccountFrame,
@@ -83,14 +85,11 @@ pub struct ProposedFrame {
     /// The recovery proof this proposal travels with, when it carries one.
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
     pub events: Vec<String>,
-    pub outputs: Vec<AccountOutput>,
-    /// Exact outputs of each applied transaction in `frame.txs` order.
-    /// Entity follow-ups are transaction-scoped; the flattened `outputs`
-    /// field cannot recover that binding when a frame contains repeated tx
-    /// kinds or optional outputs.
-    pub outputs_by_tx: Vec<Vec<AccountOutput>>,
+    /// Sole exact effect representation in `frame.txs` order. The old flat
+    /// mirror is derived only while encoding the TS process boundary.
+    pub outputs_by_tx: Arc<Vec<Vec<AccountOutput>>>,
     /// The acknowledgement this proposal carries, when it carries one. The
-    /// publisher sends `frame_ack` rather than `frame` in that case, and must
+    /// publisher sends `ack_frame` rather than `frame` in that case, and must
     /// be told so by the verdict.
     pub bundled_ack: Option<crate::consensus::replica::OutboundAck>,
 }
@@ -109,12 +108,12 @@ pub enum ProposalOutcome {
 pub(crate) struct WindowExecution {
     pub candidate: AccountReplica,
     pub applied: Vec<AccountTx>,
-    pub outputs: Vec<AccountOutput>,
     pub outputs_by_tx: Vec<Vec<AccountOutput>>,
     /// What each applied transaction said it did, in transaction order. The
     /// Entity frame commits these strings, so they are part of the transition,
     /// not a log: a cutover that dropped them would sign a different frame.
     pub events: Vec<String>,
+    pub consensus_effects: Vec<AccountConsensusEffect>,
     pub dropped: Vec<DroppedTx>,
 }
 
@@ -127,32 +126,38 @@ pub(crate) fn execute_window(
 ) -> Result<WindowExecution, StateError> {
     let mut candidate = base.clone();
     let mut applied = Vec::with_capacity(window.len());
-    let mut outputs = Vec::new();
     let mut outputs_by_tx = Vec::with_capacity(window.len());
     let mut events = Vec::new();
+    let mut consensus_effects = Vec::new();
     let mut dropped = Vec::new();
     for (index, admitted_tx) in window.into_iter().enumerate() {
         let tx = prepare_transaction(&candidate, admitted_tx)?;
-        let transition =
-            SequentialAccountEngine::apply_with_context(&candidate, proposer, &tx, context)
-                .map_err(|error| StateError::TransitionFailed(error.to_string()))?;
-        match transition.verdict() {
-            AccountVerdict::Applied => {
-                let tx_outputs = transition.outputs().to_vec();
-                let tx_events = transition.events().to_vec();
-                let committed = transition.committed().ok_or_else(|| {
-                    StateError::TransitionFailed(
-                        "ACCOUNT_APPLIED_TRANSITION_WITHOUT_CANDIDATE".to_string(),
-                    )
-                })?;
-                outputs.extend_from_slice(&tx_outputs);
+        // Incoming signed frames are atomic: one rejected tx rejects the whole
+        // frame, so no per-tx rollback copy is observable or useful. Locally
+        // authored windows still need a trial copy because one rejected tx is
+        // removed/deferred while later txs continue against the prior state.
+        let mut trial = (!stop_on_rejection).then(|| candidate.clone());
+        let target = trial.as_mut().unwrap_or(&mut candidate);
+        let decision = apply_to_candidate(target, proposer, &tx, Some(context))
+            .map_err(|error| StateError::TransitionFailed(error.to_string()))?;
+        match decision {
+            MutationDecision::Applied {
+                events: tx_events,
+                outputs: tx_outputs,
+                consensus_effects: tx_effects,
+            } => {
+                if let Some(committed) = trial {
+                    candidate = committed;
+                }
                 outputs_by_tx.push(tx_outputs);
                 events.extend(tx_events);
-                candidate = committed;
+                consensus_effects.extend(tx_effects);
                 applied.push(tx);
             }
-            AccountVerdict::Rejected(rejection) => {
-                let rejection = rejection.clone();
+            MutationDecision::Rejected {
+                rejection,
+                events: _,
+            } => {
                 let disposition = if is_retryable(&rejection) {
                     Disposition::Deferred
                 } else {
@@ -168,9 +173,9 @@ pub(crate) fn execute_window(
                     return Ok(WindowExecution {
                         candidate,
                         applied,
-                        outputs,
                         outputs_by_tx,
                         events,
+                        consensus_effects,
                         dropped,
                     });
                 }
@@ -180,9 +185,9 @@ pub(crate) fn execute_window(
     Ok(WindowExecution {
         candidate,
         applied,
-        outputs,
         outputs_by_tx,
         events,
+        consensus_effects,
         dropped,
     })
 }
@@ -242,15 +247,16 @@ pub fn propose_account_frame(
         account.current_height(),
         j_height,
         std::sync::Arc::clone(swap_market),
-    );
+    )
+    .with_settlement(account.settlement_execution_context(account.local_board_authority()));
     let proposer = account.replica().owner_side();
     let execution = execute_window(account.replica(), proposer, window, &context, false)?;
     let WindowExecution {
         mut candidate,
         applied,
-        outputs,
         outputs_by_tx,
         events: _,
+        consensus_effects,
         dropped,
     } = execution;
     // A rejection the machine itself caused is not a dropped transaction.
@@ -277,14 +283,14 @@ pub fn propose_account_frame(
     if applied.is_empty() {
         return Ok(ProposalOutcome::Idle { dropped });
     }
+    account.apply_consensus_effects(&consensus_effects)?;
     let account_state_root = candidate.refresh_account_state_root()?;
     // The recovery proof for the state this frame commits to. Not part of the
     // frame — the counterparty checks the state root, not our proof — but the
     // Entity commits it in the account leaf, so a frame that moved the state
     // and left last frame's proof standing is a leaf nobody else computes.
     //
-    // A mirror session carries no transformer address and builds no proof: it
-    // is handed each frame and told what it was.
+    // A jurisdiction without a transformer requires no dispute proof.
     let proposal_dispute = match candidate.delta_transformer().copied() {
         None => None,
         Some(transformer) => account.refresh_dispute_draft(&candidate, &transformer)?,
@@ -313,8 +319,10 @@ pub fn propose_account_frame(
         "🚀 Proposed frame {height} with {} transactions",
         transaction_count,
     )];
-    let published_outputs = outputs.clone();
-    let published_outputs_by_tx = outputs_by_tx.clone();
+    // Pending consensus and this transient proposal view need the same exact
+    // effects. Share the immutable vectors until the proposal view is dropped;
+    // the later ACK then recovers sole ownership without copying their bodies.
+    let outputs_by_tx = Arc::new(outputs_by_tx);
     account.set_pending(PendingFrame {
         // `set_pending` decides whether this proposal carries the ack we owe.
         bundled_ack: None,
@@ -323,9 +331,16 @@ pub fn propose_account_frame(
         state_hash,
         hanko: hanko.clone(),
         candidate,
-        outputs,
-        outputs_by_tx,
+        outputs_by_tx: Arc::clone(&outputs_by_tx),
     });
+    // The worker that created this witness already owns the Account envelope.
+    // Retain it here instead of launching another sharded round after Entity
+    // certification merely to copy the same bytes back into this Account.
+    // The returned dispute below remains the pre-attach clone, so Entity keeps
+    // the exact same secondary manifest entry and presigned witness.
+    if let (Some(dispute), Some(hanko)) = (&proposal_dispute, &dispute_hanko) {
+        account.attach_local_dispute_hanko(dispute.hash, hanko.clone())?;
+    }
     let bundled_ack = account
         .pending()
         .and_then(|pending| pending.bundled_ack.clone());
@@ -339,8 +354,7 @@ pub fn propose_account_frame(
         dropped,
         dispute: proposal_dispute,
         events: published_events,
-        outputs: published_outputs,
-        outputs_by_tx: published_outputs_by_tx,
+        outputs_by_tx,
         bundled_ack,
     })))
 }

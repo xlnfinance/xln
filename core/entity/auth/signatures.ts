@@ -22,9 +22,6 @@ export const normalizeSignatureMap = (value: unknown): Map<string, string[]> | u
   return entries.length > 0 ? new Map(entries) : undefined;
 };
 
-export const signatureMapSize = (value: unknown): number =>
-  normalizeSignatureMap(value)?.size ?? 0;
-
 /**
  * Honest multi-validator commit notifications attach at least the Entity-frame
  * quorum Hanko. This classifies transport envelopes only; consensus still

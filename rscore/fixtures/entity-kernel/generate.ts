@@ -37,10 +37,7 @@ import {
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,
 } from '../../../core/orderbook/swap-execution';
-import {
-  deriveForwardHtlcLockId,
-  hashHtlcSecret,
-} from '../../../core/protocol/htlc/utils';
+import { hashHtlcSecret } from '../../../core/protocol/htlc/utils';
 import {
   HTLC_OPAQUE_CIPHERTEXT_VERSION,
   hashOpaqueHtlcCiphertext,
@@ -64,20 +61,20 @@ import type { EntityRuntimeContext } from '../../../core/entity/runtime-context'
 import type { EntityInfraContext } from '../../../core/types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../../core/types/entity/htlc-infra-context';
 import { PersistentEntityAccountMap } from '../../../core/entity/state/persistent-account-map';
+import { entityCollectionCommitment } from '../../../core/entity/state/persistent-collection-map';
 import {
   computeCanonicalEntityConsensusStateHashCold,
   computeEntityAccountValueHash,
   computeEntityConsensusSectionDigestsCold,
 } from '../../../core/entity/consensus/state-root';
 import { createEntityFrameCandidateState } from '../../../core/entity/state-clone';
+import { initCrontab } from '../../../core/entity/scheduler';
 
 const HUB = `0x${'11'.repeat(32)}`;
 const MAKER = `0x${'22'.repeat(32)}`;
 const TAKER = `0x${'33'.repeat(32)}`;
 const NEXT = `0x${'44'.repeat(32)}`;
-const LOCK_ID = `0x${'aa'.repeat(32)}`;
 const HASHLOCK = `0x${'bb'.repeat(32)}`;
-const FINAL_LOCK_ID = `0x${'cc'.repeat(32)}`;
 const FINAL_SECRET = `0x${'77'.repeat(32)}`;
 const FINAL_HASHLOCK = hashHtlcSecret(FINAL_SECRET);
 const PRICE = 25_000_000n;
@@ -108,6 +105,12 @@ const canonicalEntityEvidence = (state: EntityState) => ({
   accountsRoot: state.accounts.rootHash(),
   accountCount: state.accounts.size,
 });
+
+const paybookDigest = (state: EntityState): string =>
+  digest({
+    entries: entityCollectionCommitment(state.paybook.entries, true),
+    feesEarned: state.paybook.feesEarned,
+  });
 
 const txDigest = (tx: AccountTx): string => digest(canonicalAccountTxForFrameHash(tx));
 
@@ -261,9 +264,8 @@ const entityState = (
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
+  crontabState: initCrontab(),
   hubRebalanceConfig: {
     matchingStrategy: 'amount',
     policyVersion: 1,
@@ -370,16 +372,6 @@ hydrationBook = applyCommand(hydrationBook, {
   ownerId: TAKER,
   orderId: 'hydrate-b',
 }).state;
-
-const emptyPaybook = (knownAccounts: readonly string[]) => ({
-  domain: 'xln.entity-kernel.paybook.v1',
-  entityId: HUB,
-  timestamp: 2_000,
-  knownAccounts: new Set(knownAccounts),
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
-});
 
 const maker = offer(MAKER, 'maker-ask', 1, true);
 const taker = offer(TAKER, 'taker-bid', 2, false);
@@ -557,11 +549,11 @@ const outerEnvelope = {
   version: HTLC_OPAQUE_CIPHERTEXT_VERSION,
   ciphertext: encodeBase64Bytes(Uint8Array.from({ length: 48 }, () => 0x51)),
 };
-const forwardedLockId = deriveForwardHtlcLockId(LOCK_ID);
+const forwardedLockId = HASHLOCK;
 const inboundHtlc: Extract<AccountTx, { type: 'htlc_lock' }> = {
   type: 'htlc_lock',
   data: {
-    lockId: LOCK_ID,
+    lockId: HASHLOCK,
     hashlock: HASHLOCK,
     timelock: 200_000n,
     revealBeforeHeight: 1_000,
@@ -613,7 +605,6 @@ const preparedHtlc: PreparedHtlcEntry = {
     domain: paybookInput.domain,
     accountFrameHash: committedHtlcFrame.stateHash,
     accountHeight: committedHtlcFrame.height,
-    lockId: LOCK_ID,
     envelopeHash: hashOpaqueHtlcCiphertext(outerEnvelope),
     hashlock: HASHLOCK,
     tokenId: 1,
@@ -664,7 +655,7 @@ const paybookFollowupContext = {
   candidateEffects: paybookCandidateEffects,
   infraContext: paybookInfraContext,
   preparedHtlcEntriesByBinding: new Map([
-    [`${committedHtlcFrame.stateHash}:${LOCK_ID}`, preparedHtlc],
+    [`${committedHtlcFrame.stateHash}:${HASHLOCK}`, preparedHtlc],
   ]),
   consumedPreparedHtlcBindings: new Set<string>(),
 };
@@ -702,35 +693,8 @@ if (
 ) {
   throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_EVENT');
 }
-const canonicalRoute = paybookWorkingState.htlcRoutes.get(HASHLOCK);
+const canonicalRoute = paybookWorkingState.paybook.entries.get(HASHLOCK);
 if (!canonicalRoute) throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_ROUTE');
-const paybookProjection = {
-  domain: 'xln.entity-kernel.paybook.v1',
-  entityId: paybookWorkingState.entityId,
-  timestamp: paybookWorkingState.timestamp,
-  knownAccounts: new Set(paybookWorkingState.accounts.keys()),
-  htlcRoutes: new Map([[HASHLOCK, {
-    hashlock: canonicalRoute.hashlock,
-    tokenId: canonicalRoute.tokenId ?? null,
-    amount: canonicalRoute.amount ?? null,
-    startedAtMs: canonicalRoute.startedAtMs ?? null,
-    originated: canonicalRoute.originated === true,
-    inboundEntity: canonicalRoute.inboundEntity ?? null,
-    inboundLockId: canonicalRoute.inboundLockId ?? null,
-    outboundEntity: canonicalRoute.outboundEntity ?? null,
-    outboundLockId: canonicalRoute.outboundLockId ?? null,
-    inboundSettled: canonicalRoute.inboundSettled === true,
-    outboundSettled: canonicalRoute.outboundSettled === true,
-    secret: canonicalRoute.secret ?? null,
-    secretAckPending: canonicalRoute.secretAckPending === true,
-    secretAckStartedAt: canonicalRoute.secretAckStartedAt ?? null,
-    secretAckDeadlineAt: canonicalRoute.secretAckDeadlineAt ?? null,
-    pendingFee: canonicalRoute.pendingFee ?? null,
-    createdTimestamp: canonicalRoute.createdTimestamp,
-  }]]),
-  htlcFeesEarned: paybookWorkingState.htlcFeesEarned,
-  lockBook: new Map(paybookWorkingState.lockBook),
-};
 const paybookProposal = [{
   accountId: NEXT,
   txDigests: paybookAccountTxs.map(row => txDigest(row.tx)),
@@ -749,7 +713,7 @@ const finalEnvelope = {
 const finalInboundHtlc: Extract<AccountTx, { type: 'htlc_lock' }> = {
   type: 'htlc_lock',
   data: {
-    lockId: FINAL_LOCK_ID,
+    lockId: FINAL_HASHLOCK,
     hashlock: FINAL_HASHLOCK,
     timelock: 200_000n,
     revealBeforeHeight: 1_000,
@@ -774,7 +738,6 @@ const finalPrepared: PreparedHtlcEntry = {
     domain: finalInput.domain,
     accountFrameHash: finalFrame.stateHash,
     accountHeight: finalFrame.height,
-    lockId: FINAL_LOCK_ID,
     envelopeHash: hashOpaqueHtlcCiphertext(finalEnvelope),
     hashlock: FINAL_HASHLOCK,
     tokenId: 1,
@@ -785,6 +748,7 @@ const finalPrepared: PreparedHtlcEntry = {
   outcome: {
     kind: 'final',
     secret: FINAL_SECRET,
+    description: 'prepared final',
     startedAtMs: 1_500,
   },
 };
@@ -808,7 +772,7 @@ await applyCommittedHtlcLockFollowup(
       htlc: { version: 1, entries: [finalPrepared], originated: [] },
     },
     preparedHtlcEntriesByBinding: new Map([
-      [`${finalFrame.stateHash}:${FINAL_LOCK_ID}`, finalPrepared],
+      [`${finalFrame.stateHash}:${FINAL_HASHLOCK}`, finalPrepared],
     ]),
     consumedPreparedHtlcBindings: new Set<string>(),
   },
@@ -859,7 +823,7 @@ if (
   || finalReceivedEffect.eventName !== 'HtlcReceived'
   || finalCandidateEffects.length !== 1
   || finalPostAccountTxs.length !== 0
-  || finalWorkingState.htlcRoutes.size !== 0
+  || finalWorkingState.paybook.entries.size !== 0
 ) throw new Error('ENTITY_KERNEL_FIXTURE_FINAL_COMMIT');
 const finalOutputs = [{ kind: 'htlcReceived', ...finalReceivedEffect.data }];
 
@@ -867,9 +831,8 @@ const fixture = {
   version: 1,
   canonicalSource: 'TypeScript Entity paybook follow-ups + processOrderbookSwaps/processOrderbookCancels',
   paybookForward: {
-    forwardLockId: forwardedLockId,
     outerEnvelopeHash: hashOpaqueHtlcCiphertext(outerEnvelope),
-    paybookRoot: digest(paybookProjection),
+    paybookRoot: paybookDigest(paybookWorkingState),
     orderbookRoot: digest({ domain: 'xln.entity-kernel.orderbook.v1', state: null }),
     orderedOutboxDigest: digest({
       domain: 'xln.entity-kernel.ordered-outbox.v1',
@@ -880,7 +843,7 @@ const fixture = {
     canonicalEntity: paybookForwardCanonicalEntity,
   },
   paybookFinalResolve: {
-    paybookRoot: digest(emptyPaybook([MAKER])),
+    paybookRoot: paybookDigest(finalWorkingState),
     orderedOutboxDigest: digest({
       domain: 'xln.entity-kernel.ordered-outbox.v1',
       proposalWork: [],
@@ -889,7 +852,7 @@ const fixture = {
     resolveDigest: txDigest(finalResolve),
   },
   sameJFullMatch: {
-    paybookRoot: digest(emptyPaybook([MAKER, TAKER])),
+    paybookRoot: paybookDigest(hubState),
     orderbookRoot: digest(orderbookProjection),
     orderedOutboxDigest: digest(outboxProjection),
     makerResolveDigest: proposalWork.find((row) => row.accountId === MAKER)?.txDigests[0],

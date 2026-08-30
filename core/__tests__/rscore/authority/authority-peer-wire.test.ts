@@ -83,10 +83,10 @@ describe('authority canonical peer wire', () => {
     resetAuthorityRecordForTests();
   });
 
-  test('FrameAck golden keeps every sentinel in one ACK-before-proposal operation', () => {
+  test('AckFrame golden keeps every sentinel in one ACK-before-proposal operation', () => {
     const input: AccountPeerInput = {
       ...peerBase(),
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       watchSeed: WATCH_SEED,
       ack: {
         height: 6,
@@ -118,7 +118,7 @@ describe('authority canonical peer wire', () => {
       arrivalIndex: 0,
       ownerEntityId: OWNER,
       accountId: PEER,
-      kind: 'frame_ack',
+      kind: 'ack_frame',
     }]);
     expect(wave.entities[0]?.operations).toEqual([{
       operationIndex: 0,

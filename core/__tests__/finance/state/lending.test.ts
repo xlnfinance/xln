@@ -45,9 +45,7 @@ const makeState = (): EntityState => ({
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
 });
 

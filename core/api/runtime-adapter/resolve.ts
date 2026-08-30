@@ -53,9 +53,8 @@ import type {
 type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   signerId?: string;
   isProposer?: boolean;
-  htlcNotes?: EntityReplica['htlcNotes'];
-  /** View-only: full lockBook size. The compact map is a tail sample. */
-  lockBookOpen?: number;
+  /** View-only: full active Paybook size. The compact map is a tail sample. */
+  paybookOpen?: number;
   /** View-only counters derived after WAL commit; never part of EntityState. */
   metrics?: RuntimeEntityMetricStats;
 };
@@ -646,7 +645,7 @@ const headFromEnv = (env: RuntimeReplica): StorageHead => {
     epochMaxBytes: Math.max(1, Number(storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
     accountMerkleRadix: storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   };
 };
 
@@ -663,9 +662,9 @@ const readBestHead = async (ctx: RuntimeAdapterResolveContext): Promise<StorageH
     latestHeight,
     latestMaterializedHeight: Math.min(latestHeight, Math.max(headMaterializedHeight(stored), headMaterializedHeight(inMemoryHead))),
     latestSnapshotHeight: Math.min(latestHeight, Math.max(headSnapshotHeight(stored), headSnapshotHeight(inMemoryHead))),
-    retainedHistoryBytes: Math.max(
+    retainedWalBytes: Math.max(
       0,
-      Math.floor(Number(stored.retainedHistoryBytes ?? inMemoryHead.retainedHistoryBytes ?? 0)),
+      Math.floor(Number(stored.retainedWalBytes ?? inMemoryHead.retainedWalBytes ?? 0)),
     ),
   };
 };
@@ -999,7 +998,7 @@ const compactAccountDocForView = (
   // the required canonical fields as empty maps instead of multiplying their
   // payload by the page width.
   if (doc.pendingFrame) compact.pendingFrame = compactAccountFrameForView(doc.pendingFrame);
-  if (doc.lastOutboundFrameAck) compact.lastOutboundFrameAck = doc.lastOutboundFrameAck;
+  if (doc.lastOutboundAckFrame) compact.lastOutboundAckFrame = doc.lastOutboundAckFrame;
   if (doc.lastRollbackFrameHash) compact.lastRollbackFrameHash = doc.lastRollbackFrameHash;
   if (doc.currentFrameHanko) compact.currentFrameHanko = doc.currentFrameHanko;
   if (doc.counterpartyFrameHanko) compact.counterpartyFrameHanko = doc.counterpartyFrameHanko;
@@ -1172,10 +1171,11 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
     proposals: new Map(Array.from(core.proposals.entries()).slice(-20)),
     reserves: compactMapHead(core.reserves, 100) ?? new Map(),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
-    htlcRoutes: compactMapTail(core.htlcRoutes, 20) ?? new Map(),
-    htlcFeesEarned: core.htlcFeesEarned,
-    lockBook: new Map(Array.from(core.lockBook.entries()).slice(-20)),
-    lockBookOpen: core.lockBook.size,
+    paybook: {
+      entries: compactMapTail(core.paybook.entries, 20) ?? new Map(),
+      feesEarned: core.paybook.feesEarned,
+    },
+    paybookOpen: core.paybook.entries.size,
     ...withDefinedProp('metrics', core.metrics),
   };
 
@@ -1186,8 +1186,6 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
   if (deferredAccountProposals) compact.deferredAccountProposals = deferredAccountProposals;
   const jBatchState = compactJBatchStateForView(core.jBatchState);
   if (jBatchState) compact.jBatchState = jBatchState;
-  const htlcNotes = compactMapTail(core.htlcNotes, 20);
-  if (htlcNotes) compact.htlcNotes = htlcNotes;
   const outDebtsByToken = compactDebtLedgerForView(core.outDebtsByToken);
   if (outDebtsByToken) compact.outDebtsByToken = outDebtsByToken;
   const inDebtsByToken = compactDebtLedgerForView(core.inDebtsByToken);
@@ -1939,8 +1937,8 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
       return {
         height: replica.state.height,
-        lockBookOpen: replica.state.lockBook.size,
-        htlcFeesEarned: replica.state.htlcFeesEarned,
+        paybookOpen: replica.state.paybook.entries.size,
+        paymentFeesEarned: replica.state.paybook.feesEarned,
         metrics: readRuntimeEntityMetricStats(ctx.env, entityId),
       } as T;
     }

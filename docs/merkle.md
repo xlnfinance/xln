@@ -229,7 +229,7 @@ bun run bench:radapter:hub10k:rotation
 bun run bench:radapter:hub1m:rotation
 ```
 
-The rotation probe keeps the normal read/write/cold-restart assertions and then copies a full live snapshot into the history DB and seeds a fresh current DB from live rows plus Merkle rows. It asserts `snapshotDocs == liveDocs`, fresh-epoch live/Merkle row counts match the source, and the fresh current head resets `retainedHistoryBytes` to `0`. On 2026-05-12, the 1M rotation run completed with 1,000,101 live docs, read p99 about 1.9 ms, durable write p99 about 648 ms, cold first-page read about 2.5 ms, full snapshot bytes about 1.014 GB in 12.9 s, fresh epoch seed in 27.5 s, and peak RSS about 17.1 GiB under the 24 GiB cap.
+The rotation probe keeps the normal read/write/cold-restart assertions and then copies a full live snapshot into the history DB and seeds a fresh current DB from live rows plus Merkle rows. It asserts `snapshotDocs == liveDocs`, fresh-epoch live/Merkle row counts match the source, and the fresh current head resets `retainedWalBytes` to `0`. On 2026-05-12, the 1M rotation run completed with 1,000,101 live docs, read p99 about 1.9 ms, durable write p99 about 648 ms, cold first-page read about 2.5 ms, full snapshot bytes about 1.014 GB in 12.9 s, fresh epoch seed in 27.5 s, and peak RSS about 17.1 GiB under the 24 GiB cap.
 
 Use the all-memory variant when the goal is to measure runtime heap/GC behavior rather than the hot-set production profile:
 

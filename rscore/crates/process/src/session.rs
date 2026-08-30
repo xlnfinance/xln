@@ -1,9 +1,6 @@
 use xln_rscore_abi::{EngineIdentity, Envelope, MessageKind, ProtocolBinding};
-use xln_rscore_batch::{
-    CandidateId, EngineGeneration, PreparedBatch, ResidentConsensusEngine, StatefulBatchEngine,
-};
+use xln_rscore_batch::{EngineGeneration, ResidentConsensusEngine};
 
-use crate::candidate::{CandidateToken, ProcessIncarnation};
 use crate::wire_decode::{AuthorityConfig, Command, decode_command};
 use crate::{ProcessError, wire_encode};
 
@@ -13,20 +10,15 @@ pub struct ProcessReply {
 }
 
 pub struct ProcessSession {
-    incarnation: ProcessIncarnation,
     binding: Option<SessionBinding>,
     worker_count: usize,
     swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     last_request_id: Option<u64>,
-    engine: Option<StatefulBatchEngine>,
-    /// The authoritative engine, when the runtime asked for one at Hello. A
-    /// session is one or the other for its whole life: mirroring and owning
-    /// the accounts are different jobs, and a process that could switch would
-    /// have two answers to "what is the account".
+    /// The sole production Account engine. The retired mirror engine was a
+    /// cutover oracle and is deliberately not retained beside authority.
     authority: Option<Box<ResidentConsensusEngine>>,
     entity_state: Option<ResidentEntityHead>,
     authority_config: Option<AuthorityConfig>,
-    pending: Option<PendingBatch>,
     stopped: bool,
 }
 
@@ -35,11 +27,6 @@ struct SessionBinding {
     engine_generation: [u8; 8],
     runtime_id: [u8; 20],
     session_id: [u8; 16],
-}
-
-struct PendingBatch {
-    token: CandidateToken,
-    candidate: PreparedBatch,
 }
 
 struct ResidentEntityCandidate {
@@ -97,32 +84,20 @@ impl ResidentEntityHead {
 
 impl ProcessSession {
     pub fn new() -> Self {
-        Self::try_new().expect("operating-system entropy is required for rscore candidate tokens")
+        Self::try_new().expect("rscore process session construction is infallible")
     }
 
     pub fn try_new() -> Result<Self, ProcessError> {
-        Ok(Self::with_incarnation(ProcessIncarnation::fresh()?))
-    }
-
-    fn with_incarnation(incarnation: ProcessIncarnation) -> Self {
-        Self {
-            incarnation,
+        Ok(Self {
             binding: None,
             worker_count: 0,
             swap_market: std::sync::Arc::default(),
             last_request_id: None,
-            engine: None,
             authority: None,
             entity_state: None,
             authority_config: None,
-            pending: None,
             stopped: false,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_test_incarnation(bytes: [u8; 32]) -> Self {
-        Self::with_incarnation(ProcessIncarnation::from_bytes(bytes))
+        })
     }
 
     pub fn handle(&mut self, request: Envelope) -> ProcessReply {
@@ -188,7 +163,7 @@ impl ProcessSession {
         // inspected or mutated request-scoped state.
         let command = decode_command(request)?;
         self.last_request_id = Some(request_id(&request.identity));
-        self.dispatch(request.identity.request_id, command)
+        self.dispatch(command)
     }
 
     fn start(
@@ -219,18 +194,19 @@ impl ProcessSession {
         // every fallible value beside the live session first: if authority key
         // validation failed after installing the binding, the same session
         // could continue at request 1 with `authority_config = None` and load a
-        // mirror engine even though request 0 explicitly asked for authority.
+        // an authority-less role even though request 0 asked for authority.
         let binding = SessionBinding::from_request(request);
         let digest = swap_market.digest();
         let swap_market = std::sync::Arc::new(swap_market);
-        let identity = authority.as_ref().map(authority_identity).transpose()?;
-        let response = wire_encode::hello(worker_count, digest, identity);
+        let authority = authority.ok_or(ProcessError::AuthorityRequired)?;
+        let identity = authority_identity(&authority)?;
+        let response = wire_encode::hello(worker_count, digest, Some(identity));
 
         self.binding = Some(binding);
         self.worker_count = worker_count;
         self.last_request_id = Some(0);
         self.swap_market = swap_market;
-        self.authority_config = authority;
+        self.authority_config = Some(authority);
         Ok((response, false))
     }
 
@@ -251,7 +227,6 @@ impl ProcessSession {
 
     fn dispatch(
         &mut self,
-        request_id: [u8; 8],
         command: Command,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         match command {
@@ -267,100 +242,8 @@ impl ProcessSession {
             Command::AccountOutbound { request } => self.account_outbound(*request),
             Command::BootstrapEntity { snapshot } => self.bootstrap_entity(*snapshot),
             Command::EntityRound { request, context } => self.entity_round(*request, *context),
-            Command::Prepare { jobs } => self.prepare(request_id, &jobs),
-            Command::Commit { candidate_token } => {
-                if self.authority.is_some() {
-                    Err(ProcessError::AuthorityTwoCallOnly)
-                } else {
-                    self.commit(candidate_token)
-                }
-            }
-            Command::Abort { candidate_token } => {
-                if self.authority.is_some() {
-                    Err(ProcessError::AuthorityTwoCallOnly)
-                } else {
-                    self.abort(candidate_token)
-                }
-            }
             Command::Shutdown => self.shutdown(),
-            Command::UpsertAccounts { accounts } => self.upsert_accounts(accounts),
-            Command::UpdateAccountShells { shells } => self.update_account_shells(shells),
-            Command::RemoveAccounts { account_ids } => self.remove_accounts(&account_ids),
-            Command::ReadCapacityBatch { requests } => self.capacity_batch(&requests),
-            Command::ReadAccountSummaryPage {
-                cursor,
-                limit,
-                token_ids,
-            } => self.summary_page(cursor, limit, &token_ids),
-            Command::ReadAccountEnvelope { account_id } => self.account_envelope(account_id),
         }
-    }
-
-    /// Read-only: serves the committed map even while a Prepare is pending.
-    fn capacity_batch(
-        &self,
-        requests: &[xln_rscore_batch::CapacityRequest],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
-        Ok((
-            wire_encode::capacity_rows(engine.revision(), &engine.capacity_batch(requests)),
-            false,
-        ))
-    }
-
-    /// Read-only page plus whole-engine reducers computed inside the engine.
-    fn summary_page(
-        &self,
-        cursor: Option<xln_rscore_batch::AccountId>,
-        limit: usize,
-        token_ids: &[xln_rscore_engine::TokenId],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
-        let (rows, next_cursor) = engine.summary_page(cursor, limit)?;
-        let totals = engine.totals(token_ids);
-        Ok((
-            wire_encode::summary_page(engine.revision(), &rows, next_cursor, &totals),
-            false,
-        ))
-    }
-
-    /// Read-only: the committed leaf projection of one account, so a runtime
-    /// whose leaf disagrees can name the field instead of the hash.
-    fn account_envelope(
-        &self,
-        account_id: xln_rscore_batch::AccountId,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
-        let account =
-            engine
-                .account(&account_id)
-                .ok_or(xln_rscore_batch::BatchError::AccountNotFound {
-                    input_index: 0,
-                    account_id,
-                })?;
-        Ok((
-            wire_encode::account_envelope(engine.revision(), account.envelope()),
-            false,
-        ))
-    }
-
-    /// One runtime frame, against a candidate this process keeps until the
-    /// runtime has made its own record of it durable.
-    fn issue_candidate_token(
-        &self,
-        prepare_request_id: [u8; 8],
-        candidate_id: CandidateId,
-    ) -> Result<CandidateToken, ProcessError> {
-        let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
-        Ok(CandidateToken::issue(
-            self.incarnation,
-            binding.protocol.protocol_fingerprint,
-            binding.engine_generation,
-            binding.runtime_id,
-            binding.session_id,
-            prepare_request_id,
-            candidate_id,
-        ))
     }
 
     /// One Entity input's inbound half. Nothing is staged: the accounts move
@@ -404,15 +287,16 @@ impl ProcessSession {
 
     fn bootstrap_entity(
         &mut self,
-        snapshot: xln_rscore_entity_kernel::EntityStateSnapshot,
+        mut snapshot: xln_rscore_entity_kernel::EntityStateSnapshot,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         if self.entity_state.is_some() {
             return Err(ProcessError::EntityAlreadyLoaded);
         }
         let engine = self
             .authority
-            .as_ref()
+            .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
+        snapshot.hydrate_orderbook_accounts(engine.orderbook_account_snapshots()?)?;
         let state = xln_rscore_entity_kernel::restore_entity_state(
             snapshot,
             engine.accounts_root(),
@@ -520,57 +404,57 @@ impl ProcessSession {
         accounts: Vec<xln_rscore_batch::AccountSeed>,
         import_existing: bool,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.engine.is_some() || self.authority.is_some() {
+        if self.authority.is_some() {
             return Err(ProcessError::EngineAlreadyLoaded);
         }
         let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
-        if let Some(config) = self.authority_config.as_ref() {
-            // Bootstrap creates only a brand-new empty authority. Any account
-            // or nonzero revision is durable history and must arrive through
-            // RestoreExact, whose token binds every leaf, signer and revision.
-            // A declared import is the caller taking responsibility for the
-            // starting state: a read-only replay of a recording made before
-            // the authority existed has no checkpoint to restore from. It
-            // still may not invent history — the revision must be zero.
-            if revision != 0 || (!accounts.is_empty() && !import_existing) {
-                return Err(ProcessError::AuthorityBootstrapInvalid {
-                    revision,
-                    accounts: accounts.len(),
-                });
-            }
-            let engine = if import_existing {
-                ResidentConsensusEngine::import_existing(
-                    EngineGeneration::from_bytes(binding.engine_generation),
-                    self.worker_count,
-                    config.private_key,
-                    config.signer_id.clone(),
-                    std::sync::Arc::clone(&self.swap_market),
-                    accounts,
-                )?
-            } else {
-                ResidentConsensusEngine::restore(
-                    EngineGeneration::from_bytes(binding.engine_generation),
-                    self.worker_count,
-                    revision,
-                    config.private_key,
-                    config.signer_id.clone(),
-                    std::sync::Arc::clone(&self.swap_market),
-                    accounts,
-                )?
-            };
-            let accounts_root = engine.accounts_root();
-            self.authority = Some(Box::new(engine));
-            return Ok((wire_encode::loaded(revision, accounts_root), false));
+        let config = self
+            .authority_config
+            .as_ref()
+            .ok_or(ProcessError::AuthorityRequired)?;
+        // Bootstrap creates only a brand-new empty authority. Any account or
+        // nonzero revision is durable history and must use RestoreExact.
+        if revision != 0 || (!accounts.is_empty() && !import_existing) {
+            return Err(ProcessError::AuthorityBootstrapInvalid {
+                revision,
+                accounts: accounts.len(),
+            });
         }
-        let engine = StatefulBatchEngine::restore(
-            EngineGeneration::from_bytes(binding.engine_generation),
-            self.worker_count,
-            revision,
-            accounts,
-        )?;
+        let mut engine = if import_existing {
+            ResidentConsensusEngine::import_existing(
+                EngineGeneration::from_bytes(binding.engine_generation),
+                self.worker_count,
+                config.private_key,
+                config.signer_id.clone(),
+                std::sync::Arc::clone(&self.swap_market),
+                accounts,
+            )?
+        } else {
+            ResidentConsensusEngine::restore(
+                EngineGeneration::from_bytes(binding.engine_generation),
+                self.worker_count,
+                revision,
+                config.private_key,
+                config.signer_id.clone(),
+                std::sync::Arc::clone(&self.swap_market),
+                accounts,
+            )?
+        };
         let accounts_root = engine.accounts_root();
-        self.engine = Some(engine);
-        Ok((wire_encode::loaded(revision, accounts_root), false))
+        // A fresh empty authority is already a complete canonical Account
+        // checkpoint. Return it with bootstrap so an idle Runtime can durably
+        // record the zero-Account base without inventing it in TypeScript or
+        // forcing a fake Entity round solely to trigger checkpoint export.
+        let checkpoint = if import_existing {
+            None
+        } else {
+            Some(engine.export_checkpoint()?)
+        };
+        self.authority = Some(Box::new(engine));
+        Ok((
+            wire_encode::loaded(revision, accounts_root, checkpoint.as_ref())?,
+            false,
+        ))
     }
 
     /// Replace an authority session from exact durable rows. The candidate
@@ -581,7 +465,7 @@ impl ProcessSession {
         expected: xln_rscore_batch::CheckpointToken,
         accounts: Vec<xln_rscore_batch::AccountRestore>,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.engine.is_some() || self.authority.is_some() {
+        if self.authority.is_some() {
             return Err(ProcessError::EngineAlreadyLoaded);
         }
         let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
@@ -602,144 +486,7 @@ impl ProcessSession {
         Ok((crate::checkpoint_wire::exact_restored(&expected), false))
     }
 
-    fn upsert_accounts(
-        &mut self,
-        accounts: Vec<xln_rscore_batch::AccountSeed>,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        // Authority membership is created only by a staged WaveOp::Create or
-        // exact recovery. Upsert is a mirror import primitive: allowing it
-        // here would mutate the authoritative tree outside the Runtime-frame
-        // candidate and leave WAL/abort unable to account for the new leaf.
-        if self.authority.is_some() {
-            return Err(ProcessError::AuthorityUpsertForbidden);
-        }
-        if self.pending.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
-        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
-        let accounts_root = engine.upsert_accounts(accounts)?;
-        Ok((
-            wire_encode::upserted(engine.revision(), accounts_root),
-            false,
-        ))
-    }
-
-    /// Shell-only refresh: the Entity commits mempool, frame bindings, hankos
-    /// and acks around a state no account transaction touches, and they move
-    /// between account frames. Without this the engine's leaf would be the
-    /// Entity's leaf only at the instant a frame committed.
-    fn update_account_shells(
-        &mut self,
-        shells: Vec<(
-            xln_rscore_batch::AccountId,
-            xln_rscore_engine::AccountEnvelope,
-        )>,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
-        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
-        let accounts_root = engine.update_shells(shells)?;
-        Ok((
-            wire_encode::upserted(engine.revision(), accounts_root),
-            false,
-        ))
-    }
-
-    fn remove_accounts(
-        &mut self,
-        account_ids: &[xln_rscore_batch::AccountId],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
-        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
-        let accounts_root = engine.remove_accounts(account_ids)?;
-        Ok((
-            wire_encode::upserted(engine.revision(), accounts_root),
-            false,
-        ))
-    }
-
-    fn prepare(
-        &mut self,
-        request_id: [u8; 8],
-        jobs: &[xln_rscore_batch::BatchJob],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
-        // The session owns the market tables; every job executes against the
-        // exact policy installed at Hello.
-        let jobs: Vec<xln_rscore_batch::BatchJob> = jobs
-            .iter()
-            .map(|job| {
-                let mut job = job.clone();
-                job.context.swap_market = std::sync::Arc::clone(&self.swap_market);
-                job
-            })
-            .collect();
-        // Engine-side execution time, excluding transport and encoding: the
-        // caller compares it against its own reducer to see which side is
-        // actually faster, not how fast the pipe is.
-        let (candidate, engine_micros) = {
-            let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
-            let started = std::time::Instant::now();
-            let candidate = engine.prepare(&jobs)?;
-            let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-            (candidate, engine_micros)
-        };
-        let token = self.issue_candidate_token(request_id, candidate.candidate_id())?;
-        let response = wire_encode::prepared(&candidate, engine_micros, token.as_bytes())?;
-        self.pending = Some(PendingBatch { token, candidate });
-        Ok((response, false))
-    }
-
-    fn commit(
-        &mut self,
-        candidate_token: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.validate_pending_token(candidate_token)?;
-        let pending = self.pending.take().ok_or(ProcessError::PrepareNotPending)?;
-        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
-        match engine.commit(pending.candidate) {
-            Ok(response) => Ok((wire_encode::committed(&response), false)),
-            Err(error) => {
-                self.stopped = true;
-                Err(error.into())
-            }
-        }
-    }
-
-    fn abort(
-        &mut self,
-        candidate_token: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.validate_pending_token(candidate_token)?;
-        self.pending = None;
-        let revision = self
-            .engine
-            .as_ref()
-            .ok_or(ProcessError::EngineNotLoaded)?
-            .revision();
-        Ok((wire_encode::aborted(revision), false))
-    }
-
-    fn validate_pending_token(&self, actual: [u8; 32]) -> Result<(), ProcessError> {
-        let pending = self
-            .pending
-            .as_ref()
-            .ok_or(ProcessError::PrepareNotPending)?;
-        if pending.token != CandidateToken::from_bytes(actual) {
-            return Err(ProcessError::CandidateTokenMismatch);
-        }
-        Ok(())
-    }
-
     fn shutdown(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
         self.stopped = true;
         Ok((wire_encode::shutdown(), true))
     }

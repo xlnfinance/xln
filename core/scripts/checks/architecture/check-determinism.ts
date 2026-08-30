@@ -38,7 +38,7 @@ const BANNED_PATTERNS: Array<{ pattern: RegExp; rule: string }> = [
 // none contributes bytes to Runtime, Entity, Account, or Jurisdiction state.
 // Keep every exception exact so adding another nondeterministic call fails CI.
 const ALLOWED_INFRA_CALLS = new Set([
-  'core/entity/htlc/payment-admission.ts:getRandomValues',
+  'core/entity/paybook/payment-admission.ts:getRandomValues',
   'core/runtime/frame/process-profile.ts:Date.now',
   'core/runtime/frame/lifecycle/start.ts:Date.now',
 ]);

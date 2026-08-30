@@ -4,8 +4,9 @@ import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../../../entity/tx/apply';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -206,6 +207,7 @@ import { LIMITS } from '../../../config/constants';
 import { getEffectiveEntityInputTxs } from '../../../entity/consensus/output/envelope';
 
 import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authorization';
+import { materializeCommittedEntityOutputs } from '../../../entity/consensus/output/publication';
 import { getAccountJClaimNodeStore } from '../../../entity/account/account-j-claim-node-store';
 
 import { cloneIsolatedEntityInput } from '../../../entity/state/input-clone';
@@ -329,14 +331,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHubState = makeState(targetHub, targetHubSigner, targetJ, targetUser);
     const sourceHubBState = makeState(sourceHubB, sourceHubBSigner, sourceJ, sourceUser);
     const targetHubBState = makeState(targetHubB, targetHubBSigner, targetJ, targetUser);
-    sourceUserState.accounts = sourceUserState.accounts.updated(
-      sourceHubB,
-      makeAccount(sourceUser, sourceHubB, sourceJ),
-    );
-    targetUserState.accounts = targetUserState.accounts.updated(
-      targetHubB,
-      makeAccount(targetUser, targetHubB, targetJ),
-    );
+    sourceUserState.accounts.set(sourceHubB, makeAccount(sourceUser, sourceHubB, sourceJ));
+    targetUserState.accounts.set(targetHubB, makeAccount(targetUser, targetHubB, targetJ));
     sourceUserState.profile.name = 'source user';
     targetUserState.profile.name = 'target user';
     sourceHubState.profile.name = 'source hub';
@@ -1028,7 +1024,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       userAckPass.entityOutbox
         .flatMap(output => output.entityTxs ?? [])
         .every(
-          tx => tx.type === 'accountInput' && (tx.data.kind === 'ack' || tx.data.kind === 'frame_ack'),
+          tx => tx.type === 'accountInput' && (tx.data.kind === 'ack' || tx.data.kind === 'ack_frame'),
         ),
     ).toBe(true);
     expect(userAckPass.localCrossJurisdictionEventTrace).toEqual([]);
@@ -1154,11 +1150,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       if (rejected.pairs.length === 0) {
         expect(rejected.inputs, corruption.name).toEqual([ordinaryHubInput]);
       } else {
-        for (const replica of hubEnv.state.eReplicas.values()) {
-          if (replica.certifiedFrameHead) {
-            throw new Error(`TEST_RUNTIME_CHECKPOINT_HEAD_RETAINED:${corruption.name}:${replica.entityId}`);
-          }
-        }
         try {
           const applied = await applyMergedEntityInputs(
             hubEnv,
@@ -1443,9 +1434,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(hubCancelAckPass.localCrossJurisdictionEventTrace.filter(input =>
       getEffectiveEntityInputTxs(input).some(tx => tx.type === 'crossJurisdictionFillNotice'))).toEqual([]);
     expect(hubEnv.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)
-      ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
+      ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clearing');
     expect(hubEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)
-      ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
+      ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clearing');
 
   });
 
@@ -1584,6 +1575,49 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceAuthorization.outputs[0]?.entityId).toBe(sourceHub);
     expect(sourceRetry.newState.crossJurisdictionAuthorizations?.has(result.route.orderId)).toBe(true);
     expect(targetRetry.newState.crossJurisdictionAuthorizations?.has(result.route.orderId)).toBe(true);
+
+    const committedRuntimeOutput = materializeCommittedEntityOutputs(
+      sourceAuthorization.outputs,
+      sourceUser,
+      sourceUserSigner,
+      true,
+    );
+    expect(committedRuntimeOutput).toHaveLength(1);
+    const plannedRuntimeOutput = planEntityOutputs(
+      env,
+      committedRuntimeOutput,
+      createRuntimeOutputRoutingDeps(routingDeps),
+    );
+    expect(plannedRuntimeOutput.localOutputs).toEqual([]);
+    expect(plannedRuntimeOutput.remoteOutputs).toHaveLength(1);
+    const deliverableRuntimeOutput = plannedRuntimeOutput.remoteOutputs[0]!.output;
+    const admittedRuntimeOutput = validateInboundP2PEntityInputsEnvelope(
+      hubEnv,
+      env.runtimeId!,
+      signRuntimeEntityInputsEnvelope(env, hubEnv.runtimeId!, {
+        sourceRuntimeId: env.runtimeId!,
+        sourceRuntimeHeight: env.state.height,
+        sourceRuntimeTimestamp: env.state.timestamp,
+        entityInputs: [deliverableRuntimeOutput],
+      }),
+      routingDeps,
+    );
+    expect(admittedRuntimeOutput).toHaveLength(1);
+    expect(admittedRuntimeOutput[0]?.from).toBe(env.runtimeId);
+    expect(admittedRuntimeOutput[0]?.entityTxs?.[0]).toMatchObject({
+      type: 'runtimeOutput',
+      data: {
+        sourceEntityId: sourceUser,
+        sourceSignerId: sourceUserSigner,
+        targetEntityId: sourceHub,
+      },
+    });
+    const admittedSourceHub = await applyEntityFrameWithMaterializedTestInfraContext(
+      hubEnv,
+      sourceHubState,
+      admittedRuntimeOutput[0]!.entityTxs!,
+    );
+    expect(admittedSourceHub.newState.crossJurisdictionSwaps?.has(result.route.orderId)).toBe(true);
 
     await submitCrossJurisdictionSwap(env, {
       ...submitParams,

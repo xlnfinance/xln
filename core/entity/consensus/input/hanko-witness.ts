@@ -15,7 +15,7 @@ import {
   cloneIsolatedAccountTx,
 } from '../../../protocol/state/account-input-clone';
 import {
-  requireCertifiedAccountFrameAck,
+  requireCertifiedAccountAckFrame,
   requireCertifiedAccountFrameProposal,
 } from '../../../account/consensus/frame/phase-views';
 import { getEntityAccountForWrite } from '../../state/persistent-account-map';
@@ -208,7 +208,7 @@ const attachAccountInputHankos = (
     }
   }
 
-  // A frame_ack first acknowledges the committed current frame and then opens
+  // A ack_frame first acknowledges the committed current frame and then opens
   // the next pending proposal. Preserve that semantic order: currentFrameHanko
   // must end on the new proposal exactly as proposeAccountFrame did before the
   // multisig two-phase Hanko attachment path existed.
@@ -233,7 +233,7 @@ const attachAccountInputHankos = (
     attached += 1;
   }
 
-  if (ack) requireCertifiedAccountFrameAck(ack);
+  if (ack) requireCertifiedAccountAckFrame(ack);
   if (proposal) requireCertifiedAccountFrameProposal(proposal);
 
   return attached;
@@ -407,11 +407,11 @@ export const attachHankoWitnessesToState = (
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) throw new Error(`HANKO_ATTACHMENT_TOUCHED_ACCOUNT_MISSING:${accountId}`);
     attached += attachSettlementAccountMempoolHankos(account, state, hankoWitness, entityHeight);
-    // Attach the reusable ACK cache first. A bundled pending frame_ack is newer
+    // Attach the reusable ACK cache first. A bundled pending ack_frame is newer
     // and must leave currentFrameHanko on its proposal, not on the old ACK.
-    if (account.lastOutboundFrameAck) {
+    if (account.lastOutboundAckFrame) {
       attached += attachAccountInputHankos(
-        account.lastOutboundFrameAck.response,
+        account.lastOutboundAckFrame.response,
         state,
         hankoWitness,
         entityHeight,

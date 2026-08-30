@@ -13,13 +13,11 @@ const emptyCounterReport = {
   hubs: { H1: {}, H2: {}, H3: {} },
 };
 
-test('HLT resource ledger resets every Hub process exactly once', () => {
+test('HLT resource ledger resets only the Hub processes in the active run', () => {
   expect(hltProcessOpCounterResetTargets(20_000, [
     { wsUrl: 'ws://127.0.0.1:20010/rpc', label: 'H1' },
   ])).toEqual([
     ['http://127.0.0.1:20010/api/control/performance/op-counters/reset', 'H1'],
-    ['http://127.0.0.1:20011/api/control/performance/op-counters/reset', 'H2'],
-    ['http://127.0.0.1:20012/api/control/performance/op-counters/reset', 'H3'],
   ]);
 });
 

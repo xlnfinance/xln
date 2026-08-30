@@ -6,7 +6,7 @@ import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../../../entity/tx/apply';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -45,7 +45,6 @@ import { buildCrossJurisdictionSwapSubmission } from '../../../runtime/j-submit/
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
 import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/account';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../../../runtime/types';
@@ -55,6 +54,7 @@ import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
 
 import { createDefaultDelta } from '../../../account/state/delta';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
@@ -106,8 +106,7 @@ const withCanonicalCrossJurisdictionRouteHash = (
 );
 
 const installSwapOffer = (account: AccountReplica, offer: SwapOffer): void => {
-  account.state.swapOffers.set(offer.offerId, offer);
-  recordSwapOfferLifecycle(account, offer);
+  putTestAccountSwapOffer(account, offer);
 };
 
 import {
@@ -181,6 +180,10 @@ import {
   makeJurisdiction,
   makeState,
   partialBinary,
+  getTestAccountForWrite,
+  putTestAccountDelta,
+  putTestAccountPull,
+  putTestAccountSwapOffer,
   registerTestSigner,
   secret,
   prepareJEventInput,
@@ -366,7 +369,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     const invalidTargetAccount = makeAccount(sourceHub, sourceUser);
-    invalidTargetAccount.state.swapOffers.set(route.orderId, {
+    putTestAccountSwapOffer(invalidTargetAccount, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(2, 1),
       giveTokenId: 2,
@@ -509,7 +512,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: committedRoute,
     });
-    account.state.pulls = new Map([
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.sourcePull!.pullId,
         {
@@ -621,15 +624,17 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     targetState.crossJurisdictionSwaps?.set(route.orderId, cloneCrossJurisdictionRoute(route));
-    const account = state.accounts.get(sourceUser)!;
+    const account = getTestAccountForWrite(state, sourceUser);
     const sourcePullAbsAmount =
       route.sourcePull!.signedAmount >= 0n ? route.sourcePull!.signedAmount : -route.sourcePull!.signedAmount;
     const sourcePullPayerIsLeft = route.sourcePull!.signedAmount < 0n;
-    const sourceDelta = account.state.deltas.get(route.sourcePull!.tokenId) ?? createDefaultDelta(route.sourcePull!.tokenId);
-    account.state.deltas.set(route.sourcePull!.tokenId, sourceDelta);
+    const sourceDelta = {
+      ...(account.state.deltas.get(route.sourcePull!.tokenId) ?? createDefaultDelta(route.sourcePull!.tokenId)),
+    };
     if (sourcePullPayerIsLeft) sourceDelta.leftHold = sourcePullAbsAmount;
     else sourceDelta.rightHold = sourcePullAbsAmount;
-    account.state.pulls = new Map([
+    putTestAccountDelta(account, sourceDelta);
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.sourcePull!.pullId,
         {
@@ -649,16 +654,17 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       ],
     ]);
-    const targetAccount = targetState.accounts.get(targetUser)!;
+    const targetAccount = getTestAccountForWrite(targetState, targetUser);
     const targetPullAbsAmount =
       route.targetPull!.signedAmount >= 0n ? route.targetPull!.signedAmount : -route.targetPull!.signedAmount;
     const targetPullPayerIsLeft = route.targetPull!.signedAmount < 0n;
-    const targetDelta =
-      targetAccount.state.deltas.get(route.targetPull!.tokenId) ?? createDefaultDelta(route.targetPull!.tokenId);
-    targetAccount.state.deltas.set(route.targetPull!.tokenId, targetDelta);
+    const targetDelta = {
+      ...(targetAccount.state.deltas.get(route.targetPull!.tokenId) ?? createDefaultDelta(route.targetPull!.tokenId)),
+    };
     if (targetPullPayerIsLeft) targetDelta.leftHold = targetPullAbsAmount;
     else targetDelta.rightHold = targetPullAbsAmount;
-    targetAccount.state.pulls = new Map([
+    putTestAccountDelta(targetAccount, targetDelta);
+    targetAccount.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.targetPull!.pullId,
         {
@@ -705,7 +711,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetCloseOutput).toMatchObject({
       entityId: targetHub,
       signerId: targetHubSigner,
-      localRuntimeProtocol: 'cross-j',
     });
     expect(targetCloseOutput?.entityTxs?.map(tx => tx.type)).toEqual(['crossPullClose']);
     expect(materialized.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
@@ -719,7 +724,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(stagedTargetClose.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
     const byTargetHub = targetHub.toLowerCase() < targetUser.toLowerCase();
     const targetCloseResult = await applyAccountTx(
-      stagedTargetClose.newState.accounts.get(targetUser)!,
+      getTestAccountForWrite(stagedTargetClose.newState, targetUser),
       stagedTargetClose.accountTxs![0]!.tx,
       byTargetHub,
       env.state.timestamp,
@@ -728,7 +733,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetCloseResult.ok, targetCloseResult.ok ? undefined : targetCloseResult.rejection.message).toBe(true);
     expect(stagedTargetClose.newState.accounts.get(targetUser)!.state.pulls?.has(route.targetPull!.pullId)).toBe(false);
 
-    const accountAfterClear = materialized.newState.accounts.get(sourceUser)!;
+    const accountAfterClear = getTestAccountForWrite(materialized.newState, sourceUser);
     const invalidProposalAccount = forkAccountReplicaShell(accountAfterClear);
     const validClose = materialized.accountTxs![0]!.tx;
     if (validClose.type !== 'cross_pull_close') throw new Error('TEST_CROSS_J_CLOSE_REQUIRED');
@@ -823,11 +828,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetClaimed: 450n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const account = state.accounts.get(sourceUser)!;
-    account.state.pulls = new Map([
-      [
-        route.sourcePull!.pullId,
-        {
+    const account = getTestAccountForWrite(state, sourceUser);
+    putTestAccountPull(account, route.sourcePull!.pullId, {
           pullId: route.sourcePull!.pullId,
           tokenId: route.sourcePull!.tokenId,
           amount: route.sourcePull!.signedAmount,
@@ -841,9 +843,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           ),
           createdHeight: 0,
           createdTimestamp: env.state.timestamp,
-        },
-      ],
-    ]);
+        });
 
     const requested = await applyEntityTx(env, state, {
       type: 'requestCrossJurisdictionClear',
@@ -871,7 +871,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const capacityState = requested.newState;
     capacityState.prevFrameHash ??= `0x${'91'.repeat(32)}`;
-    const capacityAccount = capacityState.accounts.get(sourceUser)!;
+    const capacityAccount = getTestAccountForWrite(capacityState, sourceUser);
     capacityAccount.mempool = Array.from(
       { length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 1 },
       (_, index): AccountTx => ({
@@ -977,16 +977,17 @@ describe('cross-jurisdiction hashledger swap', () => {
     const highProof = buildCrossJurisdictionCloseProof(highRoute, highBinary);
     const lowProof = buildCrossJurisdictionCloseProof(lowRoute, lowBinary);
     const account = makeAccount(targetUser, targetHub);
-    const targetDelta =
-      account.state.deltas.get(highRoute.targetPull!.tokenId) ?? createDefaultDelta(highRoute.targetPull!.tokenId);
-    account.state.deltas.set(highRoute.targetPull!.tokenId, targetDelta);
+    const targetDelta = {
+      ...(account.state.deltas.get(highRoute.targetPull!.tokenId) ?? createDefaultDelta(highRoute.targetPull!.tokenId)),
+    };
     const targetAbsAmount =
       highRoute.targetPull!.signedAmount >= 0n
         ? highRoute.targetPull!.signedAmount
         : -highRoute.targetPull!.signedAmount;
     if (highRoute.targetPull!.signedAmount > 0n) targetDelta.rightHold = targetAbsAmount;
     else targetDelta.leftHold = targetAbsAmount;
-    account.state.pulls = new Map([
+    putTestAccountDelta(account, targetDelta);
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         highRoute.targetPull!.pullId,
         {
@@ -1095,12 +1096,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     const forgedProof = buildCrossJurisdictionCloseProof(filledRoute, binary);
     const account = makeAccount(targetUser, targetHub);
     const targetPull = prepared.targetPull!;
-    const targetDelta = account.state.deltas.get(targetPull.tokenId) ?? createDefaultDelta(targetPull.tokenId);
-    account.state.deltas.set(targetPull.tokenId, targetDelta);
+    const targetDelta = { ...(account.state.deltas.get(targetPull.tokenId) ?? createDefaultDelta(targetPull.tokenId)) };
     const targetAbsAmount = targetPull.signedAmount >= 0n ? targetPull.signedAmount : -targetPull.signedAmount;
     if (targetPull.signedAmount > 0n) targetDelta.rightHold = targetAbsAmount;
     else targetDelta.leftHold = targetAbsAmount;
-    account.state.pulls = new Map([
+    putTestAccountDelta(account, targetDelta);
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         targetPull.pullId,
         {
@@ -1192,12 +1193,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     }, binary);
     const account = makeAccount(sourceUser, sourceHub);
     const sourcePull = prepared.sourcePull!;
-    const delta = account.state.deltas.get(sourcePull.tokenId) ?? createDefaultDelta(sourcePull.tokenId);
-    account.state.deltas.set(sourcePull.tokenId, delta);
+    const delta = { ...(account.state.deltas.get(sourcePull.tokenId) ?? createDefaultDelta(sourcePull.tokenId)) };
     const held = sourcePull.signedAmount >= 0n ? sourcePull.signedAmount : -sourcePull.signedAmount;
     if (sourcePull.signedAmount > 0n) delta.rightHold = held;
     else delta.leftHold = held;
-    account.state.pulls = new Map([
+    putTestAccountDelta(account, delta);
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [sourcePull.pullId, {
         pullId: sourcePull.pullId,
         tokenId: sourcePull.tokenId,
@@ -1233,13 +1234,19 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.state.pulls?.has(sourcePull.pullId)).toBe(true);
 
     const committedAccount = forkAccountReplicaShell(account);
-    const binding = committedAccount.state.pulls!.get(sourcePull.pullId)!.crossJurisdiction!;
-    binding.status = 'clearing';
-    binding.cumulativeFillRatio = fillRatio;
-    binding.fillNumerator = 1n;
-    binding.fillDenominator = 2n;
-    binding.filledSourceAmount = 500n;
-    binding.filledTargetAmount = 450n;
+    const committedPull = committedAccount.state.pulls!.get(sourcePull.pullId)!;
+    putTestAccountPull(committedAccount, sourcePull.pullId, {
+      ...committedPull,
+      crossJurisdiction: {
+        ...committedPull.crossJurisdiction!,
+        status: 'clearing',
+        cumulativeFillRatio: fillRatio,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
+        filledSourceAmount: 500n,
+        filledTargetAmount: 450n,
+      },
+    });
     const committedRoot = computeAccountStateRoot(committedAccount.state);
     const forgedAmountResult = await applyAccountTx(
       committedAccount,
@@ -1322,8 +1329,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
     };
     state.crossJurisdictionSwaps?.set(restingRoute.orderId, restingRoute);
-    const account = state.accounts.get(sourceHub)!;
-    account.state.swapOffers.set(restingRoute.orderId, {
+    const account = getTestAccountForWrite(state, sourceHub);
+    putTestAccountSwapOffer(account, {
       offerId: restingRoute.orderId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -1359,7 +1366,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetClaimed: 450n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    installSwapOffer(account, {
+    installSwapOffer(getTestAccountForWrite(state, sourceHub), {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
@@ -1441,7 +1448,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetClaimed: 450n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const account = state.accounts.get(sourceUser)!;
+    const account = getTestAccountForWrite(state, sourceUser);
     installSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),
@@ -1457,7 +1464,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route },
     });
-    account.state.pulls = new Map([
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         route.sourcePull!.pullId,
         {
@@ -1532,7 +1539,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-cancel-no-swap-resolve', now: 1_000 },
     );
-    const account = state.accounts.get(sourceUser)!;
+    const account = getTestAccountForWrite(state, sourceUser);
     installSwapOffer(account, {
       offerId: route.orderId,
       ...getStaticSwapTokenDimensions(1, 1),

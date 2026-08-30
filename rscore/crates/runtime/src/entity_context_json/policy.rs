@@ -112,10 +112,12 @@ fn pair_policy(
 }
 
 fn pair_policies(core: &Map<String, Value>) -> Result<Vec<Value>, EntityContextJsonError> {
-    let tagged = object(
-        required(core, "orderbookPairDimensions", "state.core")?,
-        "state.core.orderbookPairDimensions",
-    )?;
+    // TS `entityDeterministicContextWire` emits an empty pair vector until
+    // `initOrderbookExt` installs the optional orderbook state.
+    let Some(dimensions) = core.get("orderbookPairDimensions") else {
+        return Ok(Vec::new());
+    };
+    let tagged = object(dimensions, "state.core.orderbookPairDimensions")?;
     if required(tagged, "__xlnType", "orderbookPairDimensions")?.as_str() != Some("Map") {
         return Err(EntityContextJsonError::InvalidValue(
             "state.core.orderbookPairDimensions.__xlnType".into(),
@@ -172,10 +174,20 @@ pub(crate) fn entity_context_policy_from_core(
     active_jurisdiction: Option<&Value>,
 ) -> Result<Value, EntityContextJsonError> {
     let core = object(core, "state.core")?;
-    let profile = object(
-        required(core, "orderbookHubProfile", "state.core")?,
-        "state.core.orderbookHubProfile",
-    )?;
+    // `orderbookExt` is optional in canonical TS state. Before its init tx,
+    // the deterministic context is minTradeSize=0 and has no pair policies.
+    let minimum_trade_size = match core.get("orderbookHubProfile") {
+        Some(value) => required(
+            object(value, "state.core.orderbookHubProfile")?,
+            "minTradeSize",
+            "orderbookHubProfile",
+        )?
+        .clone(),
+        None => Value::Object(Map::from_iter([
+            ("__xlnType".into(), Value::String("BigInt".into())),
+            ("value".into(), Value::String("0".into())),
+        ])),
+    };
     let fee = swap_taker_fee(core)?;
     let jurisdiction = match active_jurisdiction {
         Some(Value::String(value)) if !value.is_empty() => Value::String(value.clone()),
@@ -187,10 +199,7 @@ pub(crate) fn entity_context_policy_from_core(
         }
     };
     Ok(Value::Object(Map::from_iter([
-        (
-            "minimumTradeSize".into(),
-            required(profile, "minTradeSize", "orderbookHubProfile")?.clone(),
-        ),
+        ("minimumTradeSize".into(), minimum_trade_size),
         ("swapTakerFeeBps".into(), Value::Number(Number::from(fee))),
         ("jurisdictionId".into(), jurisdiction),
         ("pairPolicies".into(), Value::Array(pair_policies(core)?)),
@@ -262,6 +271,19 @@ mod tests {
         });
         assert_eq!(
             entity_context_policy_from_core(&core, None).expect("policy"),
+            json!({
+                "minimumTradeSize": { "__xlnType": "BigInt", "value": "0" },
+                "swapTakerFeeBps": 0,
+                "jurisdictionId": null,
+                "pairPolicies": [],
+            }),
+        );
+    }
+
+    #[test]
+    fn absent_orderbook_projects_the_typescript_pre_init_policy() {
+        assert_eq!(
+            entity_context_policy_from_core(&json!({}), None).expect("pre-init policy"),
             json!({
                 "minimumTradeSize": { "__xlnType": "BigInt", "value": "0" },
                 "swapTakerFeeBps": 0,

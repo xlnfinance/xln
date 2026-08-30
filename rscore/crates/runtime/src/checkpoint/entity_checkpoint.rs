@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 use xln_rscore_entity_kernel::{
     CrontabState, CrontabTaskMethod, CrontabTaskParam, CrontabTaskState, EntityConsensusSection,
-    EntityKernelError, ScheduledHook, ScheduledHookKind,
+    EntityKernelError, ScheduledHook, ScheduledHookKind, ScheduledHookMap,
     collection_commitment as entity_collection_commitment, compute_entity_section_digest,
     is_entity_owned_consensus_field,
 };
@@ -41,12 +41,10 @@ const CONSENSUS_FIELDS: &[&str] = &[
     "entityProviderActionState",
     "entityEncryptionPublicKey",
     "profile",
-    "htlcRoutes",
-    "htlcFeesEarned",
+    "paybook",
     "outDebtsByToken",
     "inDebtsByToken",
     "orderbookExt",
-    "lockBook",
     "swapTradingPairs",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
@@ -79,11 +77,9 @@ const STORAGE_CORE_FIELDS: &[&str] = &[
     "entityProviderActionState",
     "entityEncryptionPublicKey",
     "profile",
-    "htlcRoutes",
-    "htlcFeesEarned",
+    "paybook",
     "outDebtsByToken",
     "inDebtsByToken",
-    "lockBook",
     "swapTradingPairs",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
@@ -103,6 +99,8 @@ const STORAGE_ONLY_FIELDS: &[&str] = &[
     "orderbookReferrals",
 ];
 const COLLECTION_FIELDS: &[&str] = &[
+    "deferredAccountProposals",
+    "settlementContinuations",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
     "pendingCrossJurisdictionFillAcks",
@@ -377,6 +375,8 @@ pub fn entity_checkpoint_crontab(
             )));
         }
     }
+    let hooks = ScheduledHookMap::restore(hooks)
+        .map_err(|error| EntityCheckpointError::Encoding(error.to_string()))?;
     Ok(Some(CrontabState { tasks, hooks }))
 }
 
@@ -455,6 +455,6 @@ mod tests {
 
     #[test]
     fn consensus_allowlist_matches_typescript_field_count() {
-        assert_eq!(CONSENSUS_FIELDS.len(), 34);
+        assert_eq!(CONSENSUS_FIELDS.len(), 32);
     }
 }

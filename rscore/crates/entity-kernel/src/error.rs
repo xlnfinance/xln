@@ -2,10 +2,10 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum EntityKernelError {
+    #[error("ENTITY_BOARD_HANDOVER_INVALID:{detail}")]
+    BoardHandoverInvalid { detail: String },
     #[error("ENTITY_KERNEL_CROSS_J_UNSUPPORTED:{account_id}")]
     CrossJurisdictionUnsupported { account_id: String },
-    #[error("ENTITY_KERNEL_TX_UNSUPPORTED:{kind}")]
-    UnsupportedAccountTx { kind: &'static str },
     #[error("ENTITY_J_EVENT_INGRESS_TX_UNSUPPORTED:{kind}")]
     UnsupportedJEventIngress { kind: &'static str },
     #[error("ENTITY_J_EVENT_INVALID:{detail}")]
@@ -24,6 +24,8 @@ pub enum EntityKernelError {
     HtlcInvariant { detail: String },
     #[error("ENTITY_KERNEL_ORDERBOOK_INVARIANT:{detail}")]
     OrderbookInvariant { detail: String },
+    #[error("ENTITY_KERNEL_LENDING_INVARIANT:{detail}")]
+    LendingInvariant { detail: String },
     #[error("ENTITY_KERNEL_SWAP_REJECTED:{code}")]
     SwapRejected { code: &'static str },
     #[error("ENTITY_KERNEL_TIF_UNSUPPORTED:{value}")]
@@ -62,6 +64,12 @@ impl EntityKernelError {
 
     pub(crate) fn htlc(detail: impl Into<String>) -> Self {
         Self::HtlcInvariant {
+            detail: detail.into(),
+        }
+    }
+
+    pub(crate) fn lending(detail: impl Into<String>) -> Self {
+        Self::LendingInvariant {
             detail: detail.into(),
         }
     }

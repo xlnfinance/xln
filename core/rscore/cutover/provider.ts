@@ -103,7 +103,7 @@ const executeInboundBatch = async (
       });
     }
     const input = request.input;
-    if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'frame_ack') {
+    if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'ack_frame') {
       return halt('INBOUND_BATCH_KIND', { account: accountId, kind: input.kind });
     }
     return { request, accountId, input, operationIndex };
@@ -131,9 +131,7 @@ const executeInboundBatch = async (
   });
   const fused = entityAuthorityDriverEnabled(env);
   if (fused) {
-    const unsupported = [...new Set((batch.canonicalEntityInput.entityTxs ?? [])
-      .map(tx => tx.type)
-      .filter(type => type !== 'accountInput'))].sort();
+    const unsupported = batch.unsupportedEntityTxTypes;
     if (unsupported.length > 0) {
       return halt('ENTITY_ROUND_TX_OUTSIDE_PROFILE', { unsupported });
     }
@@ -328,7 +326,6 @@ const executeOutboundBatch = async (
       admits,
       propose: proposals.map(row => row.accountId),
       materialize: batch.materializeAccountIds,
-      failedHtlcRoutes: batch.failedHtlcRoutes,
       timestamp,
       jHeight,
       checkpointDue: env.accountAuthorityCheckpointDue === true,
@@ -364,7 +361,7 @@ const executeOutboundBatch = async (
         owner: batch.ownerEntityId,
         expected: expectedSections,
         actual: entityRound.ownedSections,
-        htlcRoutes: [...batch.entityState.htlcRoutes.entries()],
+        paybook: [...batch.entityState.paybook.entries.entries()],
         entityOutputs: entityRound.outputs,
         proposalFailures: entityRound.outbound.proposals.flatMap(proposal =>
           proposal.failedHtlcLocks.map(failed => ({

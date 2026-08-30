@@ -12,13 +12,6 @@ use normalize::{invalid, metadata, record};
 
 const FRAME_VERSION: &str = "xln:j-event-range-frame:v1";
 
-const UNSUPPORTED: &[&str] = &[
-    "DisputeStarted",
-    "DisputeFinalized",
-    "CounterDisputeRegistered",
-    "HashLadderRevealRegistered",
-];
-
 fn object<'a>(value: &'a Value, path: &str) -> Result<&'a Map<String, Value>, EntityFrameError> {
     value
         .as_object()
@@ -96,11 +89,6 @@ fn project_event(value: &Value, index: usize) -> Result<Value, EntityFrameError>
         .get("type")
         .and_then(Value::as_str)
         .ok_or_else(|| invalid(index))?;
-    if UNSUPPORTED.contains(&kind) {
-        return Err(EntityFrameError::Value(format!(
-            "J_EVENT_UNSUPPORTED:{kind}"
-        )));
-    }
     let data = event
         .get("data")
         .and_then(record)
@@ -344,22 +332,46 @@ mod tests {
     }
 
     #[test]
-    fn dispute_events_stay_loud_unsupported() {
-        for kind in [
-            "DisputeStarted",
-            "DisputeFinalized",
-            "CounterDisputeRegistered",
-            "HashLadderRevealRegistered",
-        ] {
-            let err = canonical_j_event_data_for_frame_hash(&wrap(json!([{
-                "type": kind,
-                "data": {}
-            }])))
-            .expect_err(kind);
-            assert!(
-                err.to_string()
-                    .contains(&format!("J_EVENT_UNSUPPORTED:{kind}"))
-            );
-        }
+    fn dispute_and_hash_ladder_events_project() {
+        let hash = entity("ab");
+        let proof = json!({
+            "watchSeed": hash,
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 20,
+            "offdeltas": [{"__xlnType":"BigInt","value":"-1"}],
+            "tokenIds": [{"__xlnType":"BigInt","value":"7"}],
+            "transformers": []
+        });
+        let events = project_events(json!([
+            {"type":"DisputeStarted","data":{
+                "sender":entity("11"),"counterentity":entity("22"),"nonce":"7",
+                "proposerIsLeft":true,"proofbodyHash":hash,"watchSeed":hash,
+                "starterInitialArguments":"0x","starterCounterArguments":"0x",
+                "starterCounterProofCommitment":hash,"initialProofbody":proof,
+                "disputeTimeout":130,"disputeStartTimestamp":100,
+                "leftResponseSeconds":10,"rightResponseSeconds":20
+            }},
+            {"type":"DisputeFinalized","data":{
+                "sender":entity("11"),"counterentity":entity("22"),"initialNonce":"7",
+                "initialProofbodyHash":hash,"finalProofbodyHash":hash,
+                "finalizationEvidenceHash":hash,"finalProofbody":proof
+            }},
+            {"type":"CounterDisputeRegistered","data":{
+                "sender":entity("11"),"counterentity":entity("22"),"nonce":8,
+                "proposerIsLeft":false,"proofbodyHash":hash,"counterProofbody":proof
+            }},
+            {"type":"HashLadderRevealRegistered","data":{
+                "entity":entity("11"),"counterpartyEntity":entity("22"),"ladderHash":hash,
+                "fillRatio":65535,"fullSecret":hash,"reveals":[hash,hash,hash,hash],
+                "targetRole":true,"revealedAt":101
+            }}
+        ]));
+        assert_eq!(events.as_array().expect("events").len(), 4);
+        assert_eq!(events[0]["data"]["nonce"], "7");
+        assert_eq!(
+            events[0]["data"]["initialProofbody"]["tokenIds"][0]["value"],
+            "7"
+        );
+        assert_eq!(events[3]["data"]["fillRatio"], 65535);
     }
 }

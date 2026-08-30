@@ -163,6 +163,13 @@ export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeRep
   ) {
     env.runtimeConfig.storage = { ...env.runtimeConfig.storage, snapshotPeriodFrames };
   }
+  const materializePeriodFrames = readPositiveInteger('XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES');
+  if (
+    materializePeriodFrames !== undefined &&
+    env.runtimeConfig.storage?.materializePeriodFrames === undefined
+  ) {
+    env.runtimeConfig.storage = { ...env.runtimeConfig.storage, materializePeriodFrames };
+  }
   for (const [name, value] of Object.entries(env.runtimeConfig.performance ?? {})) {
     if (!Number.isFinite(value) || Number(value) <= 0) {
       throw new Error(`RUNTIME_CONFIG_PERFORMANCE_${name.toUpperCase()}_INVALID:${String(value)}`);

@@ -3,17 +3,18 @@
 use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{
-    AccountSettledEvent, AccountTx, BilateralRebalanceFeePolicy, DeliveryMode, Delta,
-    HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
-    JClaimAccumulator, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
-    JEventMetadata, JurisdictionEvent, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, Side,
-    SwapOffer, TokenId,
+    AccountTx, BilateralRebalanceFeePolicy, DeliveryMode, Delta, HtlcDeliveryMode, HtlcHashlock,
+    HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode,
+    JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction,
+    LendingTermId, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason,
+    ReserveSide, Side, SwapOffer, TokenId,
 };
 
+use super::account_canonical;
+
 use super::account_value::{
-    AccountWireRestoreError, bigint, bounded_u32, entity, exact, fixed_bytes, hex_fixed, integer,
-    invalid, js_number, optional_fixed_bytes, optional_text, text, text_list, token, tuple,
-    unsigned,
+    AccountWireRestoreError, bigint, bounded_u32, exact, fixed_bytes, hex_fixed, integer, invalid,
+    js_number, optional_fixed_bytes, optional_text, text, text_list, token, tuple, unsigned,
 };
 
 fn optional_bigint(
@@ -36,13 +37,12 @@ fn optional_u32(
     }
 }
 
-fn optional_js_number(
-    value: &AbiValue,
-    field: &'static str,
-) -> Result<Option<u64>, AccountWireRestoreError> {
-    match value {
-        AbiValue::Nil => Ok(None),
-        value => js_number(value, field).map(Some),
+fn lending_term(value: &AbiValue) -> Result<LendingTermId, AccountWireRestoreError> {
+    match integer(value)? {
+        0 => Ok(LendingTermId::OneHour),
+        1 => Ok(LendingTermId::OneDay),
+        2 => Ok(LendingTermId::OneMonth),
+        value => Err(invalid(format!("LENDING_TERM:{value}"))),
     }
 }
 
@@ -161,7 +161,7 @@ fn rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestore
 }
 
 fn swap_offer(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
-    let fields = exact(fields, 12, "swapOffer")?;
+    let fields = exact(fields, 13, "swapOffer")?;
     let time_in_force = match &fields[10] {
         AbiValue::Nil => None,
         value => Some(
@@ -181,6 +181,10 @@ fn swap_offer(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError>
         min_net_receive: bigint(&fields[9], "minNetReceive")?,
         time_in_force,
         price_ticks: optional_bigint(&fields[11], "priceTicks")?,
+        cross_jurisdiction: match &fields[12] {
+            AbiValue::Nil => None,
+            value => Some(canonical_object(value, "swapOfferCrossJurisdiction")?),
+        },
     })
 }
 
@@ -219,33 +223,153 @@ fn swap_resolve(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreErro
     })
 }
 
-fn event_metadata(value: &AbiValue) -> Result<JEventMetadata, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 5, "jEventMetadata")?;
-    Ok(JEventMetadata {
-        block_number: optional_js_number(&fields[0], "jEventBlockNumber")?,
-        block_hash: optional_fixed_bytes(&fields[1], "jEventBlockHash")?,
-        transaction_hash: optional_fixed_bytes(&fields[2], "jEventTransactionHash")?,
-        log_index: optional_js_number(&fields[3], "jEventLogIndex")?,
-        event_index: optional_js_number(&fields[4], "jEventIndex")?,
+fn canonical_object(
+    value: &AbiValue,
+    field: &'static str,
+) -> Result<xln_rscore_engine::CanonicalValue, AccountWireRestoreError> {
+    let value = account_canonical::value(value)?;
+    if !matches!(value, xln_rscore_engine::CanonicalValue::Object(_)) {
+        return Err(invalid(format!("CANONICAL_OBJECT:{field}")));
+    }
+    Ok(value)
+}
+
+fn lending_fund(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 8, "lendingFund")?;
+    Ok(AccountTx::LendingFund {
+        position_id: text(&fields[1])?.to_owned(),
+        hub_entity_id: text(&fields[2])?.to_owned(),
+        lender_entity_id: text(&fields[3])?.to_owned(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
+        term_id: lending_term(&fields[6])?,
+        interest_bps: i64::try_from(integer(&fields[7])?)
+            .map_err(|_| invalid("LENDING_INTEREST_BPS"))?,
     })
 }
 
+fn lending_borrow_request(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 8, "lendingBorrowRequest")?;
+    Ok(AccountTx::LendingBorrowRequest {
+        request_id: text(&fields[1])?.to_owned(),
+        hub_entity_id: text(&fields[2])?.to_owned(),
+        borrower_entity_id: text(&fields[3])?.to_owned(),
+        token_id: unsigned(&fields[4], "tokenId")?,
+        amount: bigint(&fields[5], "amount")?,
+        term_id: lending_term(&fields[6])?,
+        max_interest_bps: i64::try_from(integer(&fields[7])?)
+            .map_err(|_| invalid("LENDING_MAX_INTEREST_BPS"))?,
+    })
+}
+
+fn lending_repay(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 6, "lendingRepay")?;
+    Ok(AccountTx::LendingRepay {
+        loan_id: text(&fields[1])?.to_owned(),
+        hub_entity_id: text(&fields[2])?.to_owned(),
+        borrower_entity_id: text(&fields[3])?.to_owned(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
+    })
+}
+
+fn lending_credit(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 7, "lendingCredit")?;
+    let action = match integer(&fields[1])? {
+        0 => LendingAction::Grant,
+        1 => LendingAction::Revoke,
+        value => return Err(invalid(format!("LENDING_ACTION:{value}"))),
+    };
+    Ok(AccountTx::LendingCredit {
+        action,
+        loan_id: text(&fields[2])?.to_owned(),
+        hub_entity_id: text(&fields[3])?.to_owned(),
+        borrower_entity_id: text(&fields[4])?.to_owned(),
+        token_id: token(&fields[5])?,
+        credit_limit: bigint(&fields[6], "creditLimit")?,
+    })
+}
+
+fn lending_close_request(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 4, "lendingCloseRequest")?;
+    Ok(AccountTx::LendingCloseRequest {
+        position_id: text(&fields[1])?.to_owned(),
+        hub_entity_id: text(&fields[2])?.to_owned(),
+        lender_entity_id: text(&fields[3])?.to_owned(),
+    })
+}
+
+fn lending_close_payout(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 6, "lendingClosePayout")?;
+    Ok(AccountTx::LendingClosePayout {
+        position_id: text(&fields[1])?.to_owned(),
+        hub_entity_id: text(&fields[2])?.to_owned(),
+        lender_entity_id: text(&fields[3])?.to_owned(),
+        token_id: token(&fields[4])?,
+        amount: bigint(&fields[5], "amount")?,
+    })
+}
+
+fn reserve_to_collateral(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 7, "reserveToCollateral")?;
+    let side = match integer(&fields[4])? {
+        0 => ReserveSide::Receiving,
+        1 => ReserveSide::Counterparty,
+        value => return Err(invalid(format!("RESERVE_SIDE:{value}"))),
+    };
+    Ok(AccountTx::ReserveToCollateral {
+        token_id: token(&fields[1])?,
+        collateral: text(&fields[2])?.to_owned(),
+        ondelta: text(&fields[3])?.to_owned(),
+        side,
+        block_number: i64::try_from(integer(&fields[5])?)
+            .map_err(|_| invalid("RESERVE_BLOCK_NUMBER"))?,
+        transaction_hash: text(&fields[6])?.to_owned(),
+    })
+}
+
+fn request_collateral(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 6, "requestCollateral")?;
+    Ok(AccountTx::RequestCollateral {
+        token_id: token(&fields[1])?,
+        amount: bigint(&fields[2], "amount")?,
+        fee_token_id: match &fields[3] {
+            AbiValue::Nil => None,
+            value => Some(token(value)?),
+        },
+        fee_amount: bigint(&fields[4], "feeAmount")?,
+        policy_version: js_number(&fields[5], "policyVersion")?,
+    })
+}
+
+fn rebalance_refund(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 5, "rebalanceRefund")?;
+    let reason = match text(&fields[4])? {
+        "policy_mismatch" => RebalanceRefundReason::PolicyMismatch,
+        "timeout" => RebalanceRefundReason::Timeout,
+        "fee_too_low" => RebalanceRefundReason::FeeTooLow,
+        "manual" => RebalanceRefundReason::Manual,
+        value => return Err(invalid(format!("REBALANCE_REFUND_REASON:{value}"))),
+    };
+    Ok(AccountTx::RebalanceRefund {
+        request_id: text(&fields[1])?.to_owned(),
+        request_token_id: token(&fields[2])?,
+        amount: bigint(&fields[3], "amount")?,
+        reason,
+    })
+}
+
+fn canonical_tx(
+    fields: &[AbiValue],
+    field: &'static str,
+    build: impl FnOnce(xln_rscore_engine::CanonicalValue) -> AccountTx,
+) -> Result<AccountTx, AccountWireRestoreError> {
+    let fields = exact(fields, 2, field)?;
+    Ok(build(canonical_object(&fields[1], field)?))
+}
+
 fn jurisdiction_event(value: &AbiValue) -> Result<JurisdictionEvent, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 10, "jurisdictionEvent")?;
-    match integer(&fields[0])? {
-        0 => Ok(JurisdictionEvent::AccountSettled(AccountSettledEvent {
-            metadata: event_metadata(&fields[1])?,
-            left_entity: entity(&fields[2], "settledLeftEntity")?,
-            right_entity: entity(&fields[3], "settledRightEntity")?,
-            token_id: token(&fields[4])?,
-            left_reserve: bigint(&fields[5], "settledLeftReserve")?,
-            right_reserve: bigint(&fields[6], "settledRightReserve")?,
-            collateral: bigint(&fields[7], "settledCollateral")?,
-            ondelta: bigint(&fields[8], "settledOndelta")?,
-            nonce: js_number(&fields[9], "settledNonce")?,
-        })),
-        value => Err(invalid(format!("JURISDICTION_EVENT:{value}"))),
-    }
+    xln_rscore_batch::decode_jurisdiction_event(value).map_err(|error| invalid(error.to_string()))
 }
 
 fn claim_record(value: &AbiValue) -> Result<JClaimRecord, AccountWireRestoreError> {
@@ -348,6 +472,30 @@ pub fn transaction(value: &AbiValue) -> Result<AccountTx, AccountWireRestoreErro
         7 => swap_cancel_request(fields),
         8 => swap_resolve(fields),
         9 => j_event_claim(fields),
+        10 => lending_fund(fields),
+        11 => lending_borrow_request(fields),
+        12 => lending_repay(fields),
+        13 => lending_credit(fields),
+        14 => lending_close_request(fields),
+        15 => lending_close_payout(fields),
+        16 => reserve_to_collateral(fields),
+        17 => request_collateral(fields),
+        18 => rebalance_refund(fields),
+        19 => canonical_tx(fields, "crossPullLock", |data| AccountTx::CrossPullLock {
+            data,
+        }),
+        20 => canonical_tx(fields, "crossPullClose", |data| AccountTx::CrossPullClose {
+            data,
+        }),
+        21 => canonical_tx(fields, "crossPullProgress", |data| {
+            AccountTx::CrossPullProgress { data }
+        }),
+        22 => canonical_tx(fields, "crossSwapFillAck", |data| {
+            AccountTx::CrossSwapFillAck { data }
+        }),
+        23 => canonical_tx(fields, "settleTransition", |data| {
+            AccountTx::SettleTransition { data }
+        }),
         value => Err(invalid(format!("TX_TAG:{value}"))),
     }
 }
@@ -421,7 +569,7 @@ fn offer_fields(
 }
 
 pub fn swap_offer_state(value: &AbiValue) -> Result<SwapOffer, AccountWireRestoreError> {
-    let row = exact(tuple(value)?, 15, "swapOffer")?;
+    let row = exact(tuple(value)?, 16, "swapOffer")?;
     let mut offer = offer_fields(
         row,
         bigint(&row[3], "giveAmount")?,
@@ -433,6 +581,10 @@ pub fn swap_offer_state(value: &AbiValue) -> Result<SwapOffer, AccountWireRestor
             bigint(&row[14], "quantizedWant")?,
         )
         .map_err(|error| invalid(format!("SWAP_OFFER_QUANTIZED:{error}")))?;
+    offer.set_cross_jurisdiction(match &row[15] {
+        AbiValue::Nil => None,
+        value => Some(canonical_object(value, "swapOfferCrossJurisdiction")?),
+    });
     Ok(offer)
 }
 

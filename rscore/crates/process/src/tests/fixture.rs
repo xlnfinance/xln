@@ -8,7 +8,11 @@ fn tuple(fields: Vec<AbiValue>) -> AbiValue {
 
 pub fn request(id: u64, op_tag: OpTag, payload: Vec<AbiValue>) -> Envelope {
     Envelope {
-        binding: binding(),
+        binding: ProtocolBinding {
+            protocol_version: crate::PAYMENT_PROFILE_BINDING.protocol_version,
+            storage_schema_version: crate::PAYMENT_PROFILE_BINDING.storage_schema_version,
+            protocol_fingerprint: crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint,
+        },
         identity: EngineIdentity {
             engine_generation: [0x42; 8],
             runtime_id: [0x11; 20],
@@ -21,35 +25,20 @@ pub fn request(id: u64, op_tag: OpTag, payload: Vec<AbiValue>) -> Envelope {
     }
 }
 
-fn binding() -> ProtocolBinding {
-    crate::PAYMENT_PROFILE_BINDING
-}
-
 pub fn hello(id: u64) -> Envelope {
     hello_with_authority(id, AbiValue::Nil)
 }
 
-/// The same Hello, with the authority config a session that owns its accounts
-/// sends: `(privateKey, signerId)`. The fixture derives the key from a seed
-/// the way the runtime does, because the tests still name signers by label.
 pub fn hello_authority(id: u64, seed: &str, signer_id: &str) -> Envelope {
-    hello_authority_key(id, authority_key(seed, signer_id), signer_id)
-}
-
-/// Authority Hello with an exact key, including invalid-key boundary tests.
-pub fn hello_authority_key(id: u64, private_key: [u8; 32], signer_id: &str) -> Envelope {
+    let private_key =
+        xln_rscore_engine::derive_signer_key(seed, signer_id).expect("fixture signer key");
     hello_with_authority(
         id,
         tuple(vec![
             AbiValue::Bytes(private_key.to_vec()),
-            AbiValue::Text(signer_id.into()),
+            AbiValue::Text(signer_id.to_string()),
         ]),
     )
-}
-
-/// The key a runtime would derive for this signer label.
-pub fn authority_key(seed: &str, signer_id: &str) -> [u8; 32] {
-    xln_rscore_engine::derive_signer_key(seed, signer_id).expect("signer key")
 }
 
 fn hello_with_authority(id: u64, authority: AbiValue) -> Envelope {
@@ -58,8 +47,7 @@ fn hello_with_authority(id: u64, authority: AbiValue) -> Envelope {
         OpTag::Hello,
         vec![
             AbiValue::Integer(i128::from(crate::PROCESS_ABI_VERSION)),
-            AbiValue::Integer(20),
-            // Market policy: WETH(2, 18) based against USDC(1, 6).
+            AbiValue::Integer(8),
             tuple(vec![
                 tuple(vec![
                     tuple(vec![
@@ -84,509 +72,19 @@ fn hello_with_authority(id: u64, authority: AbiValue) -> Envelope {
     )
 }
 
-pub fn load(id: u64, revision: u64, locks: Vec<AbiValue>) -> Envelope {
-    load_profile(id, crate::PROCESS_PROFILE, revision, locks)
-}
-
-pub fn load_profile(id: u64, profile: &str, revision: u64, locks: Vec<AbiValue>) -> Envelope {
+pub fn load_accounts(id: u64, revision: u64) -> Envelope {
     request(
         id,
         OpTag::BootstrapAccounts,
         vec![
-            AbiValue::Text(profile.into()),
+            AbiValue::Text(crate::PROCESS_PROFILE.to_string()),
             AbiValue::Integer(i128::from(revision)),
-            tuple(vec![account(locks)]),
+            tuple(Vec::new()),
             AbiValue::Bool(false),
         ],
-    )
-}
-
-pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
-    tuple(vec![
-        AbiValue::Bytes(entity_bytes(id_byte).to_vec()),
-        AbiValue::Bytes(entity_bytes(1).to_vec()),
-        AbiValue::Bytes(entity_bytes(1).to_vec()),
-        AbiValue::Bytes(entity_bytes(id_byte).to_vec()),
-        AbiValue::Integer(31_337),
-        AbiValue::Bytes(vec![0x88; 20]),
-        AbiValue::Bytes(vec![0x99; 32]),
-        tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
-        tuple(vec![delta()]),
-        tuple(locks),
-        tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
-        tuple(vec![
-            AbiValue::Bytes(vec![0_u8; 32]),
-            // Swap offers and rebalance fee registers are owned by the engine,
-            // so the seed ships their rows instead of a carried root.
-            tuple(Vec::new()),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            tuple(Vec::new()),
-            tuple(vec![
-                AbiValue::Bytes(empty_j_claim_root().to_vec()),
-                AbiValue::Integer(0),
-            ]),
-            tuple(vec![
-                AbiValue::Bytes(empty_j_claim_root().to_vec()),
-                AbiValue::Integer(0),
-            ]),
-        ]),
-        // No replica shell: this fixture exercises the financial engine, so
-        // the leaf stays the payment-profile state root.
-        AbiValue::Nil,
-        // No consensus state either: the account starts at genesis, and it
-        // builds no recovery proof of its own.
-        AbiValue::Nil,
-        AbiValue::Nil,
-    ])
-}
-
-fn account(locks: Vec<AbiValue>) -> AbiValue {
-    tuple(vec![
-        AbiValue::Bytes(account_id().to_vec()),
-        AbiValue::Bytes(entity_bytes(1).to_vec()),
-        AbiValue::Bytes(entity_bytes(1).to_vec()),
-        AbiValue::Bytes(entity_bytes(2).to_vec()),
-        AbiValue::Integer(31_337),
-        AbiValue::Bytes(vec![0x88; 20]),
-        AbiValue::Bytes(vec![0x99; 32]),
-        tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
-        tuple(vec![delta()]),
-        tuple(locks),
-        tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
-        tuple(vec![
-            AbiValue::Bytes(vec![0_u8; 32]),
-            // Swap offers and rebalance fee registers are owned by the engine,
-            // so the seed ships their rows instead of a carried root.
-            tuple(Vec::new()),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            tuple(Vec::new()),
-            tuple(vec![
-                AbiValue::Bytes(empty_j_claim_root().to_vec()),
-                AbiValue::Integer(0),
-            ]),
-            tuple(vec![
-                AbiValue::Bytes(empty_j_claim_root().to_vec()),
-                AbiValue::Integer(0),
-            ]),
-        ]),
-        // No replica shell: this fixture exercises the financial engine, so
-        // the leaf stays the payment-profile state root.
-        AbiValue::Nil,
-        // No consensus state either: the account starts at genesis, and it
-        // builds no recovery proof of its own.
-        AbiValue::Nil,
-        AbiValue::Nil,
-    ])
-}
-
-/// Collateral plus credit both ways, so either side can pay.
-fn funded_delta() -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(1),
-        AbiValue::Text("1000000".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("500000".into()),
-        AbiValue::Text("500000".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-    ])
-}
-
-fn delta() -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(1),
-        AbiValue::Text("1000000".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-        AbiValue::Text("0".into()),
-    ])
-}
-
-pub fn committed_lock() -> AbiValue {
-    tuple(vec![
-        AbiValue::Text(format!("0x{}", "ab".repeat(32))),
-        AbiValue::Bytes(vec![0xcd; 32]),
-        AbiValue::Text("2000".into()),
-        AbiValue::Integer(50),
-        AbiValue::Text("1".into()),
-        AbiValue::Integer(1),
-        AbiValue::Integer(0),
-        AbiValue::Integer(7),
-        AbiValue::Integer(1000),
-        AbiValue::Nil,
-    ])
-}
-
-pub fn prepare(id: u64, amount: i64) -> Envelope {
-    let tx = tuple(vec![
-        AbiValue::Integer(0),
-        AbiValue::Integer(1),
-        AbiValue::Text(amount.to_string()),
-        tuple(vec![AbiValue::Text(entity_hex(1))]),
-        AbiValue::Text("process-payment".into()),
-        AbiValue::Text(entity_hex(2)),
-        AbiValue::Text(entity_hex(1)),
-        AbiValue::Integer(0),
-        AbiValue::Nil,
-    ]);
-    let job = tuple(vec![
-        AbiValue::Integer(0),
-        AbiValue::Bytes(account_id().to_vec()),
-        AbiValue::Integer(1),
-        tuple(vec![
-            AbiValue::Integer(1000),
-            AbiValue::Integer(1000),
-            AbiValue::Integer(50),
-            AbiValue::Integer(0),
-            AbiValue::Integer(50),
-        ]),
-        tx,
-        AbiValue::Nil,
-        AbiValue::Nil,
-    ]);
-    request(id, OpTag::ExecuteWave, vec![tuple(vec![job])])
-}
-
-pub fn prepare_htlc_lifecycle(id: u64) -> Envelope {
-    let lock_id = format!("0x{}", "ab".repeat(32));
-    let secret = vec![1_u8; 32];
-    let hashlock = hex::decode("cebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc")
-        .expect("literal hashlock");
-    let lock = tuple(vec![
-        AbiValue::Integer(1),
-        AbiValue::Text(lock_id.clone()),
-        AbiValue::Bytes(hashlock),
-        AbiValue::Text("2000".into()),
-        AbiValue::Integer(50),
-        AbiValue::Text("3".into()),
-        AbiValue::Integer(1),
-        AbiValue::Nil,
-        AbiValue::Nil,
-    ]);
-    let resolve = tuple(vec![
-        AbiValue::Integer(2),
-        AbiValue::Text(lock_id),
-        AbiValue::Integer(0),
-        AbiValue::Bytes(secret),
-    ]);
-    request(
-        id,
-        OpTag::ExecuteWave,
-        vec![tuple(vec![job(0, 1, lock), job(1, 0, resolve)])],
-    )
-}
-
-fn job(input_index: u32, proposer: i128, tx: AbiValue) -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(i128::from(input_index)),
-        AbiValue::Bytes(account_id().to_vec()),
-        AbiValue::Integer(proposer),
-        tuple(vec![
-            AbiValue::Integer(1000),
-            AbiValue::Integer(1000),
-            AbiValue::Integer(1),
-            AbiValue::Integer(0),
-            AbiValue::Integer(1),
-        ]),
-        tx,
-        // No replica shell and no authority: these fixtures drive the session
-        // directly rather than mirroring a signed peer input.
-        AbiValue::Nil,
-        AbiValue::Nil,
-    ])
-}
-
-pub fn candidate_command(id: u64, op_tag: OpTag, candidate_token: [u8; 32]) -> Envelope {
-    request(id, op_tag, vec![AbiValue::Bytes(candidate_token.to_vec())])
-}
-
-pub fn restore_exact(id: u64, token: AbiValue, accounts: Vec<AbiValue>) -> Envelope {
-    request(id, OpTag::RestoreExact, vec![token, tuple(accounts)])
-}
-
-/// Build the exact durable rows old authority tests need without reopening the
-/// production Bootstrap import path. Production authority Bootstrap is empty
-/// revision zero only; every nonempty/revisioned start is RestoreExact.
-pub fn restore_authority_accounts_with_rows(
-    id: u64,
-    seed: &str,
-    signer_id: &str,
-    accounts: Vec<AbiValue>,
-) -> (Envelope, Vec<AbiValue>) {
-    use xln_rscore_batch::{
-        EngineGeneration, EntityInboundRequest, EntityOutboundRequest, ReceiverClock,
-        ResidentConsensusEngine,
-    };
-    use xln_rscore_engine::{SwapMarketPolicy, SwapToken};
-
-    let seeds = accounts
-        .iter()
-        .map(crate::wire_decode::decode_seed_account)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("authority restore seeds");
-    // An offline import marks every seed dirty, so the first checkpoint
-    // export materializes exactly the durable rows these tests need.
-    let mut engine = ResidentConsensusEngine::import_existing(
-        EngineGeneration::from_bytes([0x42; 8]),
-        20,
-        authority_key(seed, signer_id),
-        signer_id.to_string(),
-        std::sync::Arc::new(SwapMarketPolicy::new(
-            vec![
-                SwapToken {
-                    token_id: 1,
-                    decimals: 6,
-                    liquid: true,
-                },
-                SwapToken {
-                    token_id: 2,
-                    decimals: 18,
-                    liquid: false,
-                },
-            ],
-            vec![((2, 1), 1)],
-        )),
-        seeds,
-    )
-    .expect("authority restore engine");
-    let owner = authority_entity(seed, signer_id);
-    engine
-        .entity_inbound(EntityInboundRequest {
-            owner_entity_id: owner,
-            expected_accounts_root: engine.accounts_root(),
-            clock: ReceiverClock {
-                entity_timestamp: 1,
-                finalized_j_height: 1,
-            },
-            rows: Vec::new(),
-            post_accounts: false,
-        })
-        .expect("authority restore inbound");
-    let checkpoint = engine
-        .entity_outbound(EntityOutboundRequest {
-            owner_entity_id: owner,
-            timestamp: 1,
-            j_height: 1,
-            creates: Vec::new(),
-            admits: Vec::new(),
-            propose: Vec::new(),
-            materialize: Vec::new(),
-            failed_htlc_routes: Vec::new(),
-            checkpoint_due: true,
-            post_accounts: false,
-        })
-        .expect("authority restore outbound")
-        .checkpoint
-        .expect("authority checkpoint");
-    let incremental_rows = checkpoint
-        .accounts
-        .iter()
-        .map(|row| crate::checkpoint_wire::account_rows(row, true))
-        .collect::<Result<Vec<_>, _>>()
-        .expect("authority checkpoint rows");
-    let rows: Vec<AbiValue> = incremental_rows
-        .iter()
-        .map(crate::tests::materialize_restore_row)
-        .collect();
-    (
-        restore_exact(
-            id,
-            crate::checkpoint_wire::token(&checkpoint.restore_token()),
-            rows.clone(),
-        ),
-        rows,
     )
 }
 
 pub fn shutdown(id: u64) -> Envelope {
     request(id, OpTag::Shutdown, Vec::new())
-}
-
-// Owner is entity(1) and the pair is (1, 2), so the account id must be the
-// counterparty entity id — the decoder enforces that binding.
-fn account_id() -> [u8; 32] {
-    entity_bytes(2)
-}
-
-pub fn fixture_account_id() -> [u8; 32] {
-    account_id()
-}
-
-/// keccak256("xln.account-j-claim.empty.v1") — the genesis accumulator root.
-/// Pinned here rather than recomputed so the fixture does not silently follow
-/// a change to the engine's domain string.
-fn empty_j_claim_root() -> [u8; 32] {
-    xln_rscore_engine::JClaimAccumulator::default().root
-}
-
-/// The lazy entity a signer id defines under this seed — the only owner an
-/// authoritative session can sign for.
-pub fn authority_entity(seed: &str, signer_id: &str) -> [u8; 32] {
-    *xln_rscore_engine::SigningIdentity::lazy_from_key(
-        authority_key(seed, signer_id),
-        signer_id,
-        1,
-        1,
-        xln_rscore_engine::BoardDelays::default(),
-    )
-    .expect("identity")
-    .entity_id()
-}
-
-/// One account between two lazy entities, seeded with a funded delta.
-pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
-    authority_account_with(
-        owner,
-        counterparty,
-        vec![funded_delta()],
-        AbiValue::Nil,
-        AbiValue::Nil,
-    )
-}
-
-/// The exact seed WaveOp::Create accepts: financial genesis, empty mempool,
-/// no consensus snapshot and a jurisdiction DeltaTransformer.
-pub fn authority_genesis_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
-    authority_account_with(
-        owner,
-        counterparty,
-        Vec::new(),
-        authority_genesis_envelope(owner, counterparty),
-        AbiValue::Bytes(vec![0x77; 20]),
-    )
-}
-
-fn authority_account_with(
-    owner: [u8; 32],
-    counterparty: [u8; 32],
-    deltas: Vec<AbiValue>,
-    envelope: AbiValue,
-    delta_transformer: AbiValue,
-) -> AbiValue {
-    let (left, right) = if owner <= counterparty {
-        (owner, counterparty)
-    } else {
-        (counterparty, owner)
-    };
-    tuple(vec![
-        AbiValue::Bytes(counterparty.to_vec()),
-        AbiValue::Bytes(owner.to_vec()),
-        AbiValue::Bytes(left.to_vec()),
-        AbiValue::Bytes(right.to_vec()),
-        AbiValue::Integer(31_337),
-        AbiValue::Bytes(vec![0x88; 20]),
-        AbiValue::Bytes(vec![0x99; 32]),
-        tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
-        tuple(deltas),
-        tuple(Vec::new()),
-        tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
-        tuple(vec![
-            AbiValue::Bytes(vec![0_u8; 32]),
-            tuple(Vec::new()),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            tuple(Vec::new()),
-            tuple(vec![
-                AbiValue::Bytes(empty_j_claim_root().to_vec()),
-                AbiValue::Integer(0),
-            ]),
-            tuple(vec![
-                AbiValue::Bytes(empty_j_claim_root().to_vec()),
-                AbiValue::Integer(0),
-            ]),
-        ]),
-        envelope,
-        AbiValue::Nil,
-        delta_transformer,
-    ])
-}
-
-fn authority_genesis_envelope(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
-    use xln_rscore_engine::{AccountEnvelope, CanonicalNumber, CanonicalValue};
-
-    let entity = |value: [u8; 32]| format!("0x{}", hex::encode(value));
-    let number = |value| CanonicalValue::Number(CanonicalNumber::from_u32(value));
-    let zero_root = CanonicalValue::String(format!("0x{}", "00".repeat(32)));
-    let envelope = AccountEnvelope::new(
-        vec![
-            (
-                "status".to_string(),
-                CanonicalValue::String("active".to_string()),
-            ),
-            ("currentHeight".to_string(), number(0)),
-            ("rollbackCount".to_string(), number(0)),
-            (
-                "proofHeader".to_string(),
-                CanonicalValue::Object(vec![
-                    (
-                        "fromEntity".to_string(),
-                        CanonicalValue::String(entity(owner)),
-                    ),
-                    (
-                        "toEntity".to_string(),
-                        CanonicalValue::String(entity(counterparty)),
-                    ),
-                    ("nextProofNonce".to_string(), number(1)),
-                ]),
-            ),
-            (
-                "currentFrameHash".to_string(),
-                CanonicalValue::String(String::new()),
-            ),
-            ("pendingWithdrawals".to_string(), zero_root.clone()),
-            (
-                "shadow".to_string(),
-                CanonicalValue::Object(vec![(
-                    "rebalance".to_string(),
-                    CanonicalValue::Object(vec![
-                        ("policyRoot".to_string(), zero_root.clone()),
-                        ("submittedAtByTokenRoot".to_string(), zero_root),
-                    ]),
-                )]),
-            ),
-        ],
-        Vec::new(),
-    )
-    .expect("canonical authority genesis envelope");
-    xln_rscore_batch::encode_account_envelope(&envelope)
-}
-
-/// `BootstrapAccounts` carrying accounts an authoritative session owns.
-pub fn load_accounts(id: u64, revision: u64, accounts: Vec<AbiValue>) -> Envelope {
-    request(
-        id,
-        OpTag::BootstrapAccounts,
-        vec![
-            AbiValue::Text(crate::PROCESS_PROFILE.into()),
-            AbiValue::Integer(i128::from(revision)),
-            tuple(accounts),
-            AbiValue::Bool(false),
-        ],
-    )
-}
-
-/// One runtime frame for one owner Entity: what it queued, what arrived for
-/// it, and whether it proposes. The wire carries a group per Entity, each with
-/// its own clocks and its own ordered operations.
-fn entity_bytes(suffix: u8) -> [u8; 32] {
-    let mut bytes = [0_u8; 32];
-    bytes[31] = suffix;
-    bytes
-}
-
-fn entity_hex(suffix: u8) -> String {
-    format!("0x{}", hex::encode(entity_bytes(suffix)))
 }

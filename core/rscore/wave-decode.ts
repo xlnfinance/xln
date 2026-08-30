@@ -19,6 +19,7 @@
 
 import { createHash } from '../support/platform-crypto';
 import { packWireValue, type RscoreWireValue } from './process-wire-value';
+import { decodeRscoreCanonicalValue } from './canonical-wire';
 import {
   decodeRscoreAccountTx,
   rscoreWireBig,
@@ -40,7 +41,7 @@ import {
 } from './checkpoint/checkpoint-wire';
 import { decodeRscoreWavePostAccount } from './checkpoint/wave-checkpoint-decode';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
-import { accountTxWire, type ShadowOutputRow } from './shadow-wire';
+import { accountTxWire, canonicalValueWire, type ShadowOutputRow } from './shadow-wire';
 import type { AccountFrame } from '../types/account';
 
 export { decodeRscoreAccountTx };
@@ -64,7 +65,7 @@ type WaveProposal = {
   dispute: WaveDisputeDraft | null;
   /**
    * The acknowledgement this proposal also carries, which makes what the
-   * publisher sends a `frame_ack` rather than a `frame`.
+   * publisher sends a `ack_frame` rather than a `frame`.
    */
   bundledAck: Readonly<{
     height: number;
@@ -162,6 +163,7 @@ type WaveSwapOffer = {
   createdHeight: number;
   quantizedGive: string;
   quantizedWant: string;
+  crossJurisdiction: import('../types/cross-jurisdiction').CrossJurisdictionSwapRoute | null;
 };
 
 /**
@@ -172,6 +174,7 @@ type WaveSwapOffer = {
  * across the wire for every operation, which is the whole cost this avoids.
  */
 export type WaveDisputeDraft = {
+  hanko?: string;
   hash: string;
   proofBodyHash: string;
   nonce: number;
@@ -237,11 +240,11 @@ type WaveVerdict =
   /**
    * The child types are deliberately narrower than `WaveVerdict`: Rust can
    * emit only one ACK verdict followed by one frame verdict here. Accepting a
-   * recursive FrameAck or a generic Failed child would create wire states the
+   * recursive AckFrame or a generic Failed child would create wire states the
    * authoritative transition never produced.
    */
-  | { kind: 'frameAckApplied'; ackVerdict: WaveAckVerdict; frameVerdict: WaveFrameVerdict }
-  | { kind: 'frameAckRejected'; phase: 'ack' | 'frame'; reason: string }
+  | { kind: 'ackFrameApplied'; ackVerdict: WaveAckVerdict; frameVerdict: WaveFrameVerdict }
+  | { kind: 'ackFrameRejected'; phase: 'ack' | 'frame'; reason: string }
   | { kind: 'disputeApplied' }
   | { kind: 'disputeRejected'; reason: string }
   | { kind: 'boardHankoRefreshApplied'; events: string[] }
@@ -367,7 +370,7 @@ const decodeWavePayload = (value: unknown): Wave => {
   for (const [index, created] of createdAccounts.entries()) {
     const committedH1 = applied.some(row => {
       if (row.accountId !== created.accountId) return false;
-      const verdict = row.verdict.kind === 'frameAckApplied'
+      const verdict = row.verdict.kind === 'ackFrameApplied'
         ? row.verdict.frameVerdict
         : row.verdict;
       return verdict.kind === 'frameCommitted' && verdict.height === 1;
@@ -421,12 +424,15 @@ const decodeRolledBack = (
 
 const decodeDisputeDraft = (value: unknown, field: string): WaveDisputeDraft | null => {
   if (value === null) return null;
-  const row = rscoreWireTuple(value, 4, field);
+  const row = rscoreWireTuple(value, 5, field);
   return {
-    hash: rscoreWireHex(row[0], `${field}.hash`, 32),
-    proofBodyHash: rscoreWireHex(row[1], `${field}.proofBodyHash`, 32),
-    nonce: rscoreWireInt(row[2], `${field}.nonce`),
-    proposerIsLeft: rscoreWireBool(row[3], `${field}.proposerIsLeft`),
+    ...(row[0] === null
+      ? {}
+      : { hanko: `0x${Buffer.from(rscoreWireBytes(row[0], `${field}.hanko`)).toString('hex')}` }),
+    hash: rscoreWireHex(row[1], `${field}.hash`, 32),
+    proofBodyHash: rscoreWireHex(row[2], `${field}.proofBodyHash`, 32),
+    nonce: rscoreWireInt(row[3], `${field}.nonce`),
+    proposerIsLeft: rscoreWireBool(row[4], `${field}.proposerIsLeft`),
   };
 };
 
@@ -680,7 +686,7 @@ const decodeAckVerdict = (value: unknown, field: string): WaveAckVerdict => {
   }
 };
 
-const FRAME_ACK_PHASES = ['ack', 'frame'] as const;
+const ACK_FRAME_PHASES = ['ack', 'frame'] as const;
 
 const decodeVerdict = (value: unknown): WaveVerdict => {
   const row = rscoreWireList(value, 'verdict');
@@ -693,24 +699,24 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
       return { kind: 'failed', message: rscoreWireText(fields[1], 'verdict.message') };
     }
     case 9: {
-      const fields = rscoreWireTuple(row, 3, 'verdict.frameAckApplied');
+      const fields = rscoreWireTuple(row, 3, 'verdict.ackFrameApplied');
       return {
-        kind: 'frameAckApplied',
-        ackVerdict: decodeAckVerdict(fields[1], 'verdict.frameAckApplied.ackVerdict'),
-        frameVerdict: decodeFrameVerdict(fields[2], 'verdict.frameAckApplied.frameVerdict'),
+        kind: 'ackFrameApplied',
+        ackVerdict: decodeAckVerdict(fields[1], 'verdict.ackFrameApplied.ackVerdict'),
+        frameVerdict: decodeFrameVerdict(fields[2], 'verdict.ackFrameApplied.frameVerdict'),
       };
     }
     case 10: {
-      const fields = rscoreWireTuple(row, 3, 'verdict.frameAckRejected');
-      const phaseValue = rscoreWireInt(fields[1], 'verdict.frameAckRejected.phase');
-      const phase = FRAME_ACK_PHASES[phaseValue];
+      const fields = rscoreWireTuple(row, 3, 'verdict.ackFrameRejected');
+      const phaseValue = rscoreWireInt(fields[1], 'verdict.ackFrameRejected.phase');
+      const phase = ACK_FRAME_PHASES[phaseValue];
       if (phase === undefined) {
-        return rscoreWireDecodeFail(`verdict.frameAckRejected.phase:${phaseValue}`);
+        return rscoreWireDecodeFail(`verdict.ackFrameRejected.phase:${phaseValue}`);
       }
       return {
-        kind: 'frameAckRejected',
+        kind: 'ackFrameRejected',
         phase,
-        reason: rscoreWireText(fields[2], 'verdict.frameAckRejected.reason'),
+        reason: rscoreWireText(fields[2], 'verdict.ackFrameRejected.reason'),
       };
     }
     case 12:
@@ -791,7 +797,7 @@ const decodeOutput = (value: unknown): WaveOutput => {
       };
     }
     case 3: {
-      const fields = rscoreWireTuple(row, 18, 'output.swapOfferUpsert');
+      const fields = rscoreWireTuple(row, 19, 'output.swapOfferUpsert');
       const makerIsRight = rscoreWireInt(fields[14], 'output.makerIsRight');
       if (makerIsRight !== 0 && makerIsRight !== 1) return rscoreWireDecodeFail(`output.makerIsRight:${makerIsRight}`);
       return {
@@ -814,6 +820,12 @@ const decodeOutput = (value: unknown): WaveOutput => {
           createdHeight: rscoreWireInt(fields[15], 'output.createdHeight'),
           quantizedGive: rscoreWireBig(fields[16], 'output.quantizedGive').toString(),
           quantizedWant: rscoreWireBig(fields[17], 'output.quantizedWant').toString(),
+          crossJurisdiction: fields[18] === null
+            ? null
+            : decodeRscoreCanonicalValue(
+                fields[18],
+                'output.crossJurisdiction',
+              ) as import('../types/cross-jurisdiction').CrossJurisdictionSwapRoute,
         },
       };
     }
@@ -898,6 +910,7 @@ export const waveOutputRow = (output: WaveOutput): ShadowOutputRow => {
         offer.createdHeight,
         offer.quantizedGive,
         offer.quantizedWant,
+        offer.crossJurisdiction === null ? null : canonicalValueWire(offer.crossJurisdiction),
       ];
     }
     case 'swapOfferRemove':
@@ -992,6 +1005,7 @@ const outputWire = (output: WaveOutput): RscoreWireValue => {
         offer.createdHeight,
         offer.quantizedGive,
         offer.quantizedWant,
+        offer.crossJurisdiction === null ? null : canonicalValueWire(offer.crossJurisdiction),
       ];
     }
     case 'swapOfferRemove':
@@ -1007,6 +1021,7 @@ const disputeDraftWire = (draft: WaveDisputeDraft | null): RscoreWireValue =>
   draft === null
     ? null
     : [
+        draft.hanko === undefined ? null : hexToBytes(draft.hanko, 'transcript.dispute.hanko'),
         hexToBytes(draft.hash, 'transcript.dispute.hash'),
         hexToBytes(draft.proofBodyHash, 'transcript.dispute.proofBodyHash'),
         draft.nonce,
@@ -1084,13 +1099,13 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
     case 'ackStale':
     case 'ackRejected':
       return ackVerdictWire(verdict);
-    case 'frameAckApplied':
+    case 'ackFrameApplied':
       return [
         9,
         ackVerdictWire(verdict.ackVerdict),
         frameVerdictWire(verdict.frameVerdict),
       ];
-    case 'frameAckRejected':
+    case 'ackFrameRejected':
       return [10, verdict.phase === 'ack' ? 0 : 1, verdict.reason];
     case 'disputeApplied':
       return [12];

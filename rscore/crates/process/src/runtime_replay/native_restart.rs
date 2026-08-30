@@ -30,10 +30,6 @@ pub struct NativeRuntimeReady {
     /// used only to materialize each signed Entity context; financial state
     /// itself remains inside the resident replica and path-keyed checkpoint.
     pub entity_context_policy: Value,
-    /// Public HTLC policy authenticated by the restored Entity checkpoint.
-    /// The matching private key is supplied separately by the operator and is
-    /// never persisted in Runtime consensus state.
-    pub entity_encryption_public_key: [u8; 32],
     pub htlc_routing_fee_ppm: u32,
     pub htlc_routing_base_fee: BigInt,
 }
@@ -129,7 +125,6 @@ fn restore_native_runtime(
     .map_err(|error| format!("RRS_NATIVE_RESTART_CHECKPOINT:{error}"))?;
     let checkpoint_period_frames = decoded.limits.checkpoint_period_frames;
     let entity_context_policy = decoded.entity_context_policy.clone();
-    let entity_encryption_public_key = decoded.entity_encryption_public_key;
     let htlc_routing_fee_ppm = decoded.htlc_routing_fee_ppm;
     let htlc_routing_base_fee = decoded.htlc_routing_base_fee.clone();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
@@ -184,7 +179,6 @@ fn restore_native_runtime(
         restore_elapsed: restore_started.elapsed(),
         restored_wal_frames,
         entity_context_policy,
-        entity_encryption_public_key,
         htlc_routing_fee_ppm,
         htlc_routing_base_fee,
     })

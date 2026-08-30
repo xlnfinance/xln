@@ -8,6 +8,7 @@
 import { HTLC_OPAQUE_CIPHERTEXT_VERSION } from '../protocol/htlc/multi-recipient';
 import type { AccountTx } from '../types/account';
 import { jEventClaimFromWire } from './process/j-claim-wire';
+import { decodeRscoreCanonicalValue } from './canonical-wire';
 
 export const rscoreWireDecodeFail = (code: string): never => {
   throw new Error(`RSCORE_WAVE_DECODE:${code}`);
@@ -77,152 +78,259 @@ export const rscoreWireBig = (value: unknown, code: string): bigint => {
 const DELIVERY_MODES = ['direct', 'trusted'] as const;
 const HTLC_DELIVERY_MODES = ['instant', 'async'] as const;
 
+const decodeDirectPayment = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 9, 'tx.directPayment');
+  const deliveryMode = DELIVERY_MODES[rscoreWireInt(fields[7], 'tx.deliveryMode')];
+  if (deliveryMode === undefined) return rscoreWireDecodeFail('tx.deliveryMode:unknown');
+  const description = rscoreWireOptionalText(fields[4], 'tx.description');
+  const gateway = rscoreWireOptionalText(fields[8], 'tx.trustedGateway');
+  return {
+    type: 'direct_payment',
+    data: {
+      tokenId: rscoreWireInt(fields[1], 'tx.tokenId'),
+      amount: rscoreWireBig(fields[2], 'tx.amount'),
+      route: rscoreWireList(fields[3], 'tx.route')
+        .map(hop => rscoreWireText(hop, 'tx.route.hop')),
+      ...(description === null ? {} : { description }),
+      fromEntityId: rscoreWireText(fields[5], 'tx.fromEntityId'),
+      toEntityId: rscoreWireText(fields[6], 'tx.toEntityId'),
+      deliveryMode,
+      ...(gateway === null ? {} : { trustedGatewayEntityId: gateway }),
+    },
+  } as AccountTx;
+};
+
+const decodeHtlcLock = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 9, 'tx.htlcLock');
+  const mode = fields[7] === null
+    ? null
+    : HTLC_DELIVERY_MODES[rscoreWireInt(fields[7], 'tx.htlcDeliveryMode')];
+  if (mode === undefined) return rscoreWireDecodeFail('tx.htlcDeliveryMode:unknown');
+  const envelope = fields[8] === null ? null : rscoreWireBytes(fields[8], 'tx.envelope');
+  return {
+    type: 'htlc_lock',
+    data: {
+      lockId: rscoreWireText(fields[1], 'tx.lockId'),
+      hashlock: rscoreWireHex(fields[2], 'tx.hashlock', 32),
+      timelock: rscoreWireBig(fields[3], 'tx.timelock'),
+      revealBeforeHeight: rscoreWireInt(fields[4], 'tx.revealBeforeHeight'),
+      amount: rscoreWireBig(fields[5], 'tx.amount'),
+      tokenId: rscoreWireInt(fields[6], 'tx.tokenId'),
+      ...(mode === null ? {} : { deliveryMode: mode }),
+      // The accepted wire version is explicit in the engine's canonical form.
+      ...(envelope === null
+        ? {}
+        : {
+            envelope: {
+              version: HTLC_OPAQUE_CIPHERTEXT_VERSION,
+              ciphertext: Buffer.from(envelope).toString('base64'),
+            },
+          }),
+    },
+  } as AccountTx;
+};
+
+const decodeHtlcResolve = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 4, 'tx.htlcResolve');
+  const outcome = rscoreWireInt(fields[2], 'tx.htlcOutcome');
+  if (outcome === 0) {
+    return {
+      type: 'htlc_resolve',
+      data: {
+        lockId: rscoreWireText(fields[1], 'tx.lockId'),
+        outcome: 'secret',
+        secret: rscoreWireHex(fields[3], 'tx.secret', 32),
+      },
+    } as AccountTx;
+  }
+  if (outcome !== 1) return rscoreWireDecodeFail('tx.htlcOutcome:unknown');
+  const reason = rscoreWireOptionalText(fields[3], 'tx.reason');
+  return {
+    type: 'htlc_resolve',
+    data: {
+      lockId: rscoreWireText(fields[1], 'tx.lockId'),
+      outcome: 'error',
+      ...(reason === null ? {} : { reason }),
+    },
+  } as AccountTx;
+};
+
+const decodeAddDelta = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 2, 'tx.addDelta');
+  return {
+    type: 'add_delta',
+    data: { tokenId: rscoreWireInt(fields[1], 'tx.tokenId') },
+  } as AccountTx;
+};
+
+const decodeSetCreditLimit = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 3, 'tx.setCreditLimit');
+  return {
+    type: 'set_credit_limit',
+    data: {
+      tokenId: rscoreWireInt(fields[1], 'tx.tokenId'),
+      amount: rscoreWireBig(fields[2], 'tx.amount'),
+    },
+  } as AccountTx;
+};
+
+const decodeRebalancePolicy = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 6, 'tx.rebalancePolicy');
+  return {
+    type: 'rebalance_policy',
+    data: {
+      tokenId: rscoreWireInt(fields[1], 'tx.tokenId'),
+      policyVersion: rscoreWireInt(fields[2], 'tx.policyVersion'),
+      baseFee: rscoreWireBig(fields[3], 'tx.baseFee'),
+      liquidityFeeBps: rscoreWireBig(fields[4], 'tx.liquidityFeeBps'),
+      gasFee: rscoreWireBig(fields[5], 'tx.gasFee'),
+    },
+  } as AccountTx;
+};
+
+const decodeSwapOffer = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 13, 'tx.swapOffer');
+  const timeInForce = fields[10] === null ? null : rscoreWireInt(fields[10], 'tx.timeInForce');
+  const priceTicks = fields[11] === null ? null : rscoreWireBig(fields[11], 'tx.priceTicks');
+  const crossJurisdiction = fields[12] === null
+    ? null
+    : decodeRscoreCanonicalValue(fields[12], 'TX_SWAP_OFFER_CROSS_JURISDICTION');
+  return {
+    type: 'swap_offer',
+    data: {
+      offerId: rscoreWireText(fields[1], 'tx.offerId'),
+      giveTokenId: rscoreWireInt(fields[2], 'tx.giveTokenId'),
+      giveTokenDecimals: rscoreWireInt(fields[3], 'tx.giveTokenDecimals'),
+      giveAmount: rscoreWireBig(fields[4], 'tx.giveAmount'),
+      wantTokenId: rscoreWireInt(fields[5], 'tx.wantTokenId'),
+      wantTokenDecimals: rscoreWireInt(fields[6], 'tx.wantTokenDecimals'),
+      wantAmount: rscoreWireBig(fields[7], 'tx.wantAmount'),
+      maxFee: rscoreWireBig(fields[8], 'tx.maxFee'),
+      minNetReceive: rscoreWireBig(fields[9], 'tx.minNetReceive'),
+      ...(timeInForce === null ? {} : { timeInForce }),
+      ...(priceTicks === null ? {} : { priceTicks }),
+      ...(crossJurisdiction === null ? {} : { crossJurisdiction }),
+    },
+  } as AccountTx;
+};
+
+const decodeSwapCancelRequest = (row: readonly unknown[]): AccountTx => {
+  const fields = rscoreWireTuple(row, 2, 'tx.swapCancelRequest');
+  return {
+    type: 'swap_cancel_request',
+    data: { offerId: rscoreWireText(fields[1], 'tx.offerId') },
+  } as AccountTx;
+};
+
 export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
   const row = rscoreWireList(value, 'tx');
   switch (rscoreWireInt(row[0], 'tx.tag')) {
-    case 0: {
-      const fields = rscoreWireTuple(row, 9, 'tx.directPayment');
-      const deliveryMode = DELIVERY_MODES[rscoreWireInt(fields[7], 'tx.deliveryMode')];
-      if (deliveryMode === undefined) return rscoreWireDecodeFail('tx.deliveryMode:unknown');
-      const description = rscoreWireOptionalText(fields[4], 'tx.description');
-      const gateway = rscoreWireOptionalText(fields[8], 'tx.trustedGateway');
-      return {
-        type: 'direct_payment',
-        data: {
-          tokenId: rscoreWireInt(fields[1], 'tx.tokenId'),
-          amount: rscoreWireBig(fields[2], 'tx.amount'),
-          route: rscoreWireList(fields[3], 'tx.route')
-            .map(hop => rscoreWireText(hop, 'tx.route.hop')),
-          ...(description === null ? {} : { description }),
-          fromEntityId: rscoreWireText(fields[5], 'tx.fromEntityId'),
-          toEntityId: rscoreWireText(fields[6], 'tx.toEntityId'),
-          deliveryMode,
-          ...(gateway === null ? {} : { trustedGatewayEntityId: gateway }),
-        },
-      } as AccountTx;
-    }
-    case 1: {
-      const fields = rscoreWireTuple(row, 9, 'tx.htlcLock');
-      const mode = fields[7] === null
-        ? null
-        : HTLC_DELIVERY_MODES[rscoreWireInt(fields[7], 'tx.htlcDeliveryMode')];
-      if (mode === undefined) return rscoreWireDecodeFail('tx.htlcDeliveryMode:unknown');
-      const envelope = fields[8] === null ? null : rscoreWireBytes(fields[8], 'tx.envelope');
-      return {
-        type: 'htlc_lock',
-        data: {
-          lockId: rscoreWireText(fields[1], 'tx.lockId'),
-          hashlock: rscoreWireHex(fields[2], 'tx.hashlock', 32),
-          timelock: rscoreWireBig(fields[3], 'tx.timelock'),
-          revealBeforeHeight: rscoreWireInt(fields[4], 'tx.revealBeforeHeight'),
-          amount: rscoreWireBig(fields[5], 'tx.amount'),
-          tokenId: rscoreWireInt(fields[6], 'tx.tokenId'),
-          ...(mode === null ? {} : { deliveryMode: mode }),
-          // The wire carries only the ciphertext: the version is the one
-          // constant this profile accepts, and the engine's own canonical
-          // form states it. A decoded envelope that omitted it would
-          // re-encode into a different canonical transaction than the one
-          // that arrived.
-          ...(envelope === null
-            ? {}
-            : {
-                envelope: {
-                  version: HTLC_OPAQUE_CIPHERTEXT_VERSION,
-                  ciphertext: Buffer.from(envelope).toString('base64'),
-                },
-              }),
-        },
-      } as AccountTx;
-    }
-    case 2: {
-      const fields = rscoreWireTuple(row, 4, 'tx.htlcResolve');
-      const outcome = rscoreWireInt(fields[2], 'tx.htlcOutcome');
-      if (outcome === 0) {
-        return {
-          type: 'htlc_resolve',
-          data: {
-            lockId: rscoreWireText(fields[1], 'tx.lockId'),
-            outcome: 'secret',
-            secret: rscoreWireHex(fields[3], 'tx.secret', 32),
-          },
-        } as AccountTx;
-      }
-      if (outcome !== 1) return rscoreWireDecodeFail('tx.htlcOutcome:unknown');
-      const reason = rscoreWireOptionalText(fields[3], 'tx.reason');
-      return {
-        type: 'htlc_resolve',
-        data: {
-          lockId: rscoreWireText(fields[1], 'tx.lockId'),
-          outcome: 'error',
-          ...(reason === null ? {} : { reason }),
-        },
-      } as AccountTx;
-    }
-    case 3: {
-      const fields = rscoreWireTuple(row, 2, 'tx.addDelta');
-      return {
-        type: 'add_delta',
-        data: { tokenId: rscoreWireInt(fields[1], 'tx.tokenId') },
-      } as AccountTx;
-    }
-    case 4: {
-      const fields = rscoreWireTuple(row, 3, 'tx.setCreditLimit');
-      return {
-        type: 'set_credit_limit',
-        data: {
-          tokenId: rscoreWireInt(fields[1], 'tx.tokenId'),
-          amount: rscoreWireBig(fields[2], 'tx.amount'),
-        },
-      } as AccountTx;
-    }
-    case 5: {
-      const fields = rscoreWireTuple(row, 6, 'tx.rebalancePolicy');
-      return {
-        type: 'rebalance_policy',
-        data: {
-          tokenId: rscoreWireInt(fields[1], 'tx.tokenId'),
-          policyVersion: rscoreWireInt(fields[2], 'tx.policyVersion'),
-          baseFee: rscoreWireBig(fields[3], 'tx.baseFee'),
-          liquidityFeeBps: rscoreWireBig(fields[4], 'tx.liquidityFeeBps'),
-          gasFee: rscoreWireBig(fields[5], 'tx.gasFee'),
-        },
-      } as AccountTx;
-    }
-    case 6: {
-      const fields = rscoreWireTuple(row, 12, 'tx.swapOffer');
-      const timeInForce = fields[10] === null ? null : rscoreWireInt(fields[10], 'tx.timeInForce');
-      const priceTicks = fields[11] === null ? null : rscoreWireBig(fields[11], 'tx.priceTicks');
-      return {
-        type: 'swap_offer',
-        data: {
-          offerId: rscoreWireText(fields[1], 'tx.offerId'),
-          giveTokenId: rscoreWireInt(fields[2], 'tx.giveTokenId'),
-          giveTokenDecimals: rscoreWireInt(fields[3], 'tx.giveTokenDecimals'),
-          giveAmount: rscoreWireBig(fields[4], 'tx.giveAmount'),
-          wantTokenId: rscoreWireInt(fields[5], 'tx.wantTokenId'),
-          wantTokenDecimals: rscoreWireInt(fields[6], 'tx.wantTokenDecimals'),
-          wantAmount: rscoreWireBig(fields[7], 'tx.wantAmount'),
-          maxFee: rscoreWireBig(fields[8], 'tx.maxFee'),
-          minNetReceive: rscoreWireBig(fields[9], 'tx.minNetReceive'),
-          ...(timeInForce === null ? {} : { timeInForce }),
-          ...(priceTicks === null ? {} : { priceTicks }),
-        },
-      } as AccountTx;
-    }
-    case 7: {
-      const fields = rscoreWireTuple(row, 2, 'tx.swapCancelRequest');
-      return {
-        type: 'swap_cancel_request',
-        data: { offerId: rscoreWireText(fields[1], 'tx.offerId') },
-      } as AccountTx;
-    }
+    case 0: return decodeDirectPayment(row);
+    case 1: return decodeHtlcLock(row);
+    case 2: return decodeHtlcResolve(row);
+    case 3: return decodeAddDelta(row);
+    case 4: return decodeSetCreditLimit(row);
+    case 5: return decodeRebalancePolicy(row);
+    case 6: return decodeSwapOffer(row);
+    case 7: return decodeSwapCancelRequest(row);
     case 8:
       return decodeSwapResolve(row);
     case 9:
       return jEventClaimFromWire(row);
+    case 10: return decodeLendingFund(row);
+    case 11: return decodeLendingBorrow(row);
+    case 12: return decodeLendingRepay(row);
+    case 13: return decodeLendingCredit(row);
+    case 14: return decodeLendingCloseRequest(row);
+    case 15: return decodeLendingClosePayout(row);
+    case 16: return decodeReserveToCollateral(row);
+    case 17: return decodeRequestCollateral(row);
+    case 18: return decodeRebalanceRefund(row);
+    case 19: return decodeCanonicalTx(row, 'cross_pull_lock');
+    case 20: return decodeCanonicalTx(row, 'cross_pull_close');
+    case 21: return decodeCanonicalTx(row, 'cross_pull_progress');
+    case 22: return decodeCanonicalTx(row, 'cross_swap_fill_ack');
+    case 23: return decodeCanonicalTx(row, 'settle_transition');
     default:
       return rscoreWireDecodeFail('tx.tag:unknown');
   }
+};
+
+const lendingTerm = (value: unknown): '1h' | '1d' | '1m' => {
+  const term = ['1h', '1d', '1m'] as const;
+  return term[rscoreWireInt(value, 'tx.termId')] ?? rscoreWireDecodeFail('tx.termId:unknown');
+};
+
+const decodeLendingFund = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 8, 'tx.lendingFund');
+  return { type: 'lending_fund', data: { positionId: rscoreWireText(f[1], 'tx.positionId'),
+    hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), lenderEntityId: rscoreWireText(f[3], 'tx.lenderEntityId'),
+    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount'),
+    termId: lendingTerm(f[6]), interestBps: rscoreWireInt(f[7], 'tx.interestBps') } };
+};
+const decodeLendingBorrow = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 8, 'tx.lendingBorrow');
+  return { type: 'lending_borrow_request', data: { requestId: rscoreWireText(f[1], 'tx.requestId'),
+    hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'),
+    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount'),
+    termId: lendingTerm(f[6]), maxInterestBps: rscoreWireInt(f[7], 'tx.maxInterestBps') } };
+};
+const decodeLendingRepay = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 6, 'tx.lendingRepay');
+  return { type: 'lending_repay', data: { loanId: rscoreWireText(f[1], 'tx.loanId'),
+    hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), borrowerEntityId: rscoreWireText(f[3], 'tx.borrowerEntityId'),
+    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount') } };
+};
+const decodeLendingCredit = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 7, 'tx.lendingCredit');
+  const action = rscoreWireInt(f[1], 'tx.action');
+  if (action !== 0 && action !== 1) return rscoreWireDecodeFail('tx.action:unknown');
+  return { type: 'lending_credit', data: { action: action === 0 ? 'grant' : 'revoke',
+    loanId: rscoreWireText(f[2], 'tx.loanId'), hubEntityId: rscoreWireText(f[3], 'tx.hubEntityId'),
+    borrowerEntityId: rscoreWireText(f[4], 'tx.borrowerEntityId'), tokenId: rscoreWireUint(f[5], 'tx.tokenId'),
+    creditLimit: rscoreWireBig(f[6], 'tx.creditLimit') } };
+};
+const decodeLendingCloseRequest = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 4, 'tx.lendingCloseRequest');
+  return { type: 'lending_close_request', data: { positionId: rscoreWireText(f[1], 'tx.positionId'),
+    hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), lenderEntityId: rscoreWireText(f[3], 'tx.lenderEntityId') } };
+};
+const decodeLendingClosePayout = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 6, 'tx.lendingClosePayout');
+  return { type: 'lending_close_payout', data: { positionId: rscoreWireText(f[1], 'tx.positionId'),
+    hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), lenderEntityId: rscoreWireText(f[3], 'tx.lenderEntityId'),
+    tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount') } };
+};
+const decodeReserveToCollateral = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 7, 'tx.reserveToCollateral'); const side = rscoreWireInt(f[4], 'tx.side');
+  if (side !== 0 && side !== 1) return rscoreWireDecodeFail('tx.side:unknown');
+  return { type: 'reserve_to_collateral', data: { tokenId: rscoreWireUint(f[1], 'tx.tokenId'),
+    collateral: rscoreWireText(f[2], 'tx.collateral'), ondelta: rscoreWireText(f[3], 'tx.ondelta'),
+    side: side === 0 ? 'receiving' : 'counterparty', blockNumber: rscoreWireInt(f[5], 'tx.blockNumber'),
+    transactionHash: rscoreWireText(f[6], 'tx.transactionHash') } };
+};
+const decodeRequestCollateral = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 6, 'tx.requestCollateral');
+  return { type: 'request_collateral', data: { tokenId: rscoreWireUint(f[1], 'tx.tokenId'),
+    amount: rscoreWireBig(f[2], 'tx.amount'), ...(f[3] === null ? {} : { feeTokenId: rscoreWireUint(f[3], 'tx.feeTokenId') }),
+    feeAmount: rscoreWireBig(f[4], 'tx.feeAmount'), policyVersion: rscoreWireUint(f[5], 'tx.policyVersion') } };
+};
+const decodeRebalanceRefund = (row: readonly unknown[]): AccountTx => {
+  const f = rscoreWireTuple(row, 5, 'tx.rebalanceRefund');
+  const reason = rscoreWireText(f[4], 'tx.reason');
+  if (!['policy_mismatch', 'timeout', 'fee_too_low', 'manual'].includes(reason)) return rscoreWireDecodeFail('tx.reason:unknown');
+  return { type: 'rebalance_refund', data: { requestId: rscoreWireText(f[1], 'tx.requestId'),
+    requestTokenId: rscoreWireUint(f[2], 'tx.requestTokenId'), amount: rscoreWireBig(f[3], 'tx.amount'),
+    reason: reason as Extract<AccountTx, { type: 'rebalance_refund' }>['data']['reason'] } };
+};
+const decodeCanonicalTx = (
+  row: readonly unknown[],
+  type: 'cross_pull_lock' | 'cross_pull_close' | 'cross_pull_progress' | 'cross_swap_fill_ack' | 'settle_transition',
+): AccountTx => {
+  const f = rscoreWireTuple(row, 2, `tx.${type}`);
+  const data = decodeRscoreCanonicalValue(f[1], `TX_${type.toUpperCase()}`);
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return rscoreWireDecodeFail(`tx.${type}:data`);
+  return { type, data } as AccountTx;
 };
 
 const optionalBig = (value: unknown, code: string): bigint | null =>

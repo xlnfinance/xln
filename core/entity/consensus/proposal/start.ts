@@ -17,7 +17,7 @@ import {
   createEntityFrameHashFromStateRoot,
   entityFrameEventsEqual,
 } from '../frame';
-import { applyEntityFrame, applyRuntimeOwnedEntityFrame } from '../frame/application';
+import { applyEntityFrame } from '../frame/application';
 import { copyProposableAccounts } from '../account/touched-accounts';
 import {
   buildEntityHashesToSign,
@@ -41,23 +41,15 @@ import {
 } from '../frame/lineage';
 import {
   buildEntityFrameAuthority,
-  computeEntityAccountDigests,
-  computeEntityAccountFieldDigests,
   computeCanonicalEntityConsensusStateHash,
-  computeEntityConsensusSectionDigestsCold,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
-import { safeStringify } from '../../../protocol/serialization';
 import { fitEntityProposalToWireBudget } from './wire-budget';
 import { primeProposalHankos } from './hanko/prime-hankos';
-import {
-  hashEntityProposalTxPrefix,
-  requireEntityProposalReplayOracleEntry,
-} from './replay-oracle';
 import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
 import { assertEstimatedCertifiedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
-import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../htlc/materialize-context';
+import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../paybook/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 import {
@@ -409,10 +401,7 @@ const fitAndApplyEntityProposal = async (
   // Hanko recovery for the candidate set started at proposal start; the
   // synchronous verifiers below hit the memo once it lands.
   await (context.hankoPriming ?? primeProposalHankos(selection.proposalTxs));
-  const applyFrame = context.promoteCandidateState && selection.isSingleSigner
-    ? applyRuntimeOwnedEntityFrame
-    : applyEntityFrame;
-  const applied = await applyFrame(
+  const applied = await applyEntityFrame(
     env,
     workingReplica.state,
     fitted.entityContext,
@@ -429,37 +418,6 @@ const fitAndApplyEntityProposal = async (
     leader,
     jPrefixCertificate: proposalJPrefixCertificate ?? undefined,
   };
-};
-
-const assertReplayOracleFrameHash = (
-  context: ApplyEntityInputContext,
-  state: EntityState,
-  height: number,
-  txs: readonly EntityTx[],
-  stateRoot: string,
-  frameHash: string,
-): void => {
-  const replayOracle = context.env.infrastructure?.replayEntityProposalOracle;
-  if (!replayOracle || !context.usePersistedReplayContext) return;
-  const expected = requireEntityProposalReplayOracleEntry(
-    replayOracle,
-    context.workingReplica.entityId,
-    height,
-  );
-  if (frameHash === expected.frameHash) return;
-  const txPrefixHash = hashEntityProposalTxPrefix(state.entityId, height, txs);
-  const commitmentDiagnostics = {
-    sections: computeEntityConsensusSectionDigestsCold(state),
-    accounts: computeEntityAccountDigests(state),
-    accountFields: computeEntityAccountFieldDigests(state),
-  };
-  throw new Error(
-    `HLT_ENTITY_PROPOSAL_ORACLE_FRAME_HASH_MISMATCH:${height}:` +
-    `expected=${expected.frameHash}:actual=${frameHash}:` +
-    `txCount=${expected.txCount}:${txs.length}:` +
-    `txPrefix=${expected.txPrefixHash}:${txPrefixHash}:stateRoot=${stateRoot}:` +
-    `commitments=${safeStringify(commitmentDiagnostics)}`,
-  );
 };
 
 const certifyEntityProposal = async (
@@ -485,7 +443,6 @@ const certifyEntityProposal = async (
     parentFrameHash, height, timestamp, txs, applied.events, state.entityId,
     stateRoot, authorityRoot, entityContext, jPrefixCertificate,
   );
-  assertReplayOracleFrameHash(context, state, height, txs, stateRoot, frameHash);
   profile.checkpoint('frameHash');
   const hashesToSign = buildEntityHashesToSign(
     workingReplica.state.entityId,

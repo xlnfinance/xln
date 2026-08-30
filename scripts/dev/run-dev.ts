@@ -71,6 +71,7 @@ const parseInvocation = (): { mode: DevMode; commands: readonly DevCommand[] } =
     return {
       mode: 'default',
       commands: [
+        ['bun', 'scripts/dev/checks/check-rscore-runtime-freshness.ts'],
         ['bash', 'scripts/dev/prepare-start.sh'],
         ['bash', 'scripts/dev/run-dev.sh'],
       ],
@@ -85,6 +86,7 @@ const parseInvocation = (): { mode: DevMode; commands: readonly DevCommand[] } =
       return {
         mode,
         commands: [
+          ['bun', 'scripts/dev/checks/check-rscore-runtime-freshness.ts'],
           ['bash', 'scripts/dev/prepare-start.sh'],
           ['bash', 'scripts/dev/run-dev.sh'],
         ],

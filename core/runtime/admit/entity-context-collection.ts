@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { canonicalConsensusValuesEqual } from '../../protocol/serialization/binary-codec';
 import { shortHash } from '../../support/logger';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 
@@ -86,7 +86,7 @@ export const collectRuntimeEntityContext = (
   const existing = contexts.get(commitKey);
   if (
     existing &&
-    encodeCanonicalConsensusValue(existing) !== encodeCanonicalConsensusValue(context)
+    !canonicalConsensusValuesEqual(existing, context)
   ) {
     throw new Error(
       `RUNTIME_ENTITY_CONTEXT_COLLISION:${commitKey}:` +

@@ -159,6 +159,12 @@ export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue =>
   return [
     [8, fields],
     account.mempool.map(tx => canonicalValueWire(canonicalAccountTxForFrameHash(tx))),
+    Array.from(account.shadow.rebalance.policy.entries()).map(
+      ([tokenId, policy]) => [tokenId, canonicalValueWire(policy)],
+    ),
+    Array.from(account.shadow.rebalance.submittedAtByToken.entries()).map(
+      ([tokenId, timestamp]) => [tokenId, timestamp],
+    ),
   ];
 };
 
@@ -168,21 +174,17 @@ export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue =>
  * Most out-of-profile sections are *carried*: the engine commits their roots
  * verbatim and no supported transaction mutates them, so a live account with
  * swap/pull/rebalance/J-claim state still reproduces its exact state root.
- * Two cannot be carried and are refused loudly:
- *   - lendingIntents: the engine owns this map itself (it computes the root
- *     from its own entries), so a non-empty one would need the entries.
- *   - settlementWorkspace: TypeScript commits the whole object, not a root,
- *     and the engine has no representation for it.
+ * Lending intents remain ineligible because the engine owns their map and a
+ * live seed does not yet carry its entries. Settlement workspaces are carried
+ * exactly, including Hankos; Rust strips only the same non-unique witnesses
+ * as `settlementWorkspaceWithoutHankos` when computing the Account root.
  */
 export const shadowIneligibilityReason = (state: AccountState): string | null => {
   if ((state.lendingIntents?.size ?? 0) > 0) return 'LENDING_INTENTS';
-  if (state.settlementWorkspace !== undefined) return 'PROPOSABILITY_SETTLEMENT_UNREPRESENTED';
-  // The engine owns the offer rows now, so it can only import offers it can
-  // represent: same-j offers whose committed price and quantized amounts are
-  // present and equal to the resting amounts. Anything else would be re-encoded
-  // lossily into a root that happens to look right.
+  // Live cutover imports complete same-j and cross-j offers. Quantized amounts
+  // must still equal the live resting amounts; exact checkpoint recovery owns
+  // the independently committed quantized fields.
   for (const offer of (state.swapOffers ?? new Map<string, SwapOffer>()).values()) {
-    if (offer.crossJurisdiction) return 'CROSS_J_SWAP_OFFER';
     if (offer.priceTicks === undefined) return 'SWAP_OFFER_WITHOUT_PRICE';
     if (offer.quantizedGive !== offer.giveAmount || offer.quantizedWant !== offer.wantAmount) {
       return 'SWAP_OFFER_QUANTIZED_MISMATCH';
@@ -281,7 +283,12 @@ const collectionRoot = (
   ? EMPTY_ACCOUNT_STATE_ROOT
   : requirePersistentAccountStateMap(map, namespace).rootHash());
 
-/** Roots of the sections the engine carries without interpreting them. */
+const pullsWire = (pulls: AccountState['pulls']): RscoreWireValue[] =>
+  [...(pulls ?? new Map()).entries()]
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([pullId, pull]) => [pullId, canonicalValueWire(pull)]);
+
+/** Complete native bodies plus roots of sections Rust does not interpret. */
 const carriedSectionsWire = (state: AccountState): RscoreWireValue[] => {
   const claim = (accumulator: { root: string; count: bigint }): RscoreWireValue[] => [
     hexToWireBytes(accumulator.root, 32, 'SHADOW_J_CLAIM_ROOT'),
@@ -296,7 +303,7 @@ const carriedSectionsWire = (state: AccountState): RscoreWireValue[] => {
     `SHADOW_${namespace.toUpperCase()}_ROOT`,
   );
   return [
-    root('pulls', state.pulls),
+    pullsWire(state.pulls),
     swapOffersWire(state.swapOffers),
     root('subcontracts', state.subcontracts),
     root('requestedRebalance', state.requestedRebalance),
@@ -304,10 +311,13 @@ const carriedSectionsWire = (state: AccountState): RscoreWireValue[] => {
     rebalanceFeePoliciesWire(state.rebalanceFeePolicies),
     claim(state.leftPendingJClaims),
     claim(state.rightPendingJClaims),
+    state.settlementWorkspace === undefined
+      ? null
+      : canonicalValueWire(state.settlementWorkspace),
   ];
 };
 
-/** Resting same-j offers, in the engine's own field order. */
+/** Complete resting offers, in the engine's own field order. */
 const swapOffersWire = (
   offers: AccountState['swapOffers'],
 ): RscoreWireValue[] => [...(offers ?? new Map<string, SwapOffer>()).values()]
@@ -326,6 +336,9 @@ const swapOffersWire = (
     offer.timeInForce ?? null,
     offer.makerIsLeft ? 0 : 1,
     offer.createdHeight,
+    offer.crossJurisdiction === undefined
+      ? null
+      : canonicalValueWire(offer.crossJurisdiction),
   ]);
 
 /**
@@ -386,7 +399,7 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
       accountFrameWire(pending),
       hexToWireBytes(pending.stateHash, 32, 'SHADOW_PENDING_STATE_HASH'),
       hankoWireBytes(pendingFrameHanko(account)),
-      outboundAckWire(account.pendingAccountInput?.kind === 'frame_ack'
+      outboundAckWire(account.pendingAccountInput?.kind === 'ack_frame'
         ? account.pendingAccountInput.ack
         : undefined),
       disputeDraftWire(account.pendingAccountInput?.proposal?.disputeHanko),
@@ -399,7 +412,7 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
       ? null
       : hankoWireBytes(account.counterpartyFrameHanko),
     localCommittedHanko,
-    outboundAckWire(account.lastOutboundFrameAck?.response.ack),
+    outboundAckWire(account.lastOutboundAckFrame?.response.ack),
     // The recovery proof this account already stands behind. The engine
     // replaces it the next time a frame moves the state, and spends the nonce
     // after this one when it does.
@@ -408,6 +421,9 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
       || account.currentDisputeProofNonce === undefined
       ? undefined
       : {
+          ...(account.currentDisputeProofHanko === undefined
+            ? {}
+            : { hanko: account.currentDisputeProofHanko }),
           hash: account.currentDisputeHash,
           proofBodyHash: account.currentDisputeProofBodyHash,
           proofNonce: Number(account.currentDisputeProofNonce),
@@ -454,7 +470,7 @@ const committedHankoWire = (
 /**
  * An acknowledgement this side sent, as the engine needs it: the height it
  * covers and the frame hash it binds. The Entity commits both — inside
- * `lastOutboundFrameAck`, and inside a proposal that carried the ack with it.
+ * `lastOutboundAckFrame`, and inside a proposal that carried the ack with it.
  */
 const outboundAckWire = (
   ack: {
@@ -489,10 +505,17 @@ const pendingFrameHanko = (account: AccountReplica): string => {
 };
 
 /** A proposed frame, whole: the engine replays it and checks its own hash. */
-/** The four fields that name a recovery proof, never the signature on it. */
+/** Recovery proof identity plus its exact local certificate when committed. */
 const disputeDraftWire = (
-  draft: { hash: string; proofBodyHash: string; proofNonce: number; proposerIsLeft: boolean } | undefined,
+  draft: {
+    hanko?: string;
+    hash: string;
+    proofBodyHash: string;
+    proofNonce: number;
+    proposerIsLeft: boolean;
+  } | undefined,
 ): RscoreWireValue => (draft === undefined ? null : [
+  draft.hanko === undefined ? null : hankoWireBytes(draft.hanko),
   hexToWireBytes(draft.hash, 32, 'SHADOW_DISPUTE_DRAFT_HASH'),
   hexToWireBytes(draft.proofBodyHash, 32, 'SHADOW_DISPUTE_DRAFT_BODY_HASH'),
   Number(draft.proofNonce),
@@ -625,6 +648,7 @@ export type ShadowOutputRow =
       createdHeight: number,
       quantizedGive: string,
       quantizedWant: string,
+      crossJurisdiction: RscoreWireValue | null,
     ]
   | readonly [kind: 'offerRemove', offerId: string]
   | readonly [kind: 'cancelRequest', offerId: string]
@@ -691,6 +715,9 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
           offer.createdHeight,
           offer.quantizedGive.toString(),
           offer.quantizedWant.toString(),
+          offer.crossJurisdiction === undefined
+            ? null
+            : canonicalValueWire(offer.crossJurisdiction),
         ]);
         break;
       }
@@ -769,7 +796,7 @@ const optionalAmount = (value: bigint | undefined): string | null =>
   value === undefined ? null : value.toString();
 
 /** Process-wire tx tuple, or null when the tx type is outside the profile. */
-export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
+export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
   switch (tx.type) {
     case 'direct_payment':
       return [
@@ -809,10 +836,6 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         tx.data.gasFee.toString(),
       ];
     case 'swap_offer':
-      // Cross-jurisdiction offers carry a route, paired pulls and their own
-      // settlement path: outside the payment profile, so the engine is never
-      // handed one.
-      if (tx.data.crossJurisdiction) return null;
       return [
         6,
         tx.data.offerId,
@@ -826,6 +849,7 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         tx.data.minNetReceive.toString(),
         tx.data.timeInForce ?? null,
         optionalAmount(tx.data.priceTicks),
+        tx.data.crossJurisdiction === undefined ? null : canonicalValueWire(tx.data.crossJurisdiction),
       ];
     case 'swap_cancel_request':
       return [7, tx.data.offerId];
@@ -859,7 +883,41 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         : [2, tx.data.lockId, 1, tx.data.reason ?? null];
     case 'j_event_claim':
       return jEventClaimWire(tx);
-    default:
-      return null;
+    case 'lending_fund':
+      return [10, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId,
+        tx.data.tokenId, tx.data.amount.toString(),
+        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.interestBps];
+    case 'lending_borrow_request':
+      return [11, tx.data.requestId, tx.data.hubEntityId, tx.data.borrowerEntityId,
+        tx.data.tokenId, tx.data.amount.toString(),
+        tx.data.termId === '1h' ? 0 : tx.data.termId === '1d' ? 1 : 2, tx.data.maxInterestBps];
+    case 'lending_repay':
+      return [12, tx.data.loanId, tx.data.hubEntityId, tx.data.borrowerEntityId,
+        tx.data.tokenId, tx.data.amount.toString()];
+    case 'lending_credit':
+      return [13, tx.data.action === 'grant' ? 0 : 1, tx.data.loanId, tx.data.hubEntityId,
+        tx.data.borrowerEntityId, tx.data.tokenId, tx.data.creditLimit.toString()];
+    case 'lending_close_request':
+      return [14, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId];
+    case 'lending_close_payout':
+      return [15, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId,
+        tx.data.tokenId, tx.data.amount.toString()];
+    case 'reserve_to_collateral':
+      return [16, tx.data.tokenId, tx.data.collateral, tx.data.ondelta,
+        tx.data.side === 'receiving' ? 0 : 1, tx.data.blockNumber, tx.data.transactionHash];
+    case 'request_collateral':
+      return [17, tx.data.tokenId, tx.data.amount.toString(), tx.data.feeTokenId ?? null,
+        tx.data.feeAmount.toString(), tx.data.policyVersion];
+    case 'rebalance_refund':
+      return [18, tx.data.requestId, tx.data.requestTokenId, tx.data.amount.toString(), tx.data.reason];
+    case 'cross_pull_lock': return [19, canonicalValueWire(tx.data)];
+    case 'cross_pull_close': return [20, canonicalValueWire(tx.data)];
+    case 'cross_pull_progress': return [21, canonicalValueWire(tx.data)];
+    case 'cross_swap_fill_ack': return [22, canonicalValueWire(tx.data)];
+    case 'settle_transition': return [23, canonicalValueWire(tx.data)];
+    default: {
+      const exhaustive: never = tx;
+      throw new Error(`SHADOW_ACCOUNT_TX_UNREACHABLE:${String(exhaustive)}`);
+    }
   }
 };

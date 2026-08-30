@@ -23,7 +23,7 @@ const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): nev
 };
 
 /** The three arrival shapes the Account layer accepts from a peer. */
-type PeerArrivalInput = Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+type PeerArrivalInput = Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'ack_frame' }>;
 
 /** One arrival waiting to be handed over, in the order the frame carries it. */
 export type InboundArrival = Readonly<{
@@ -65,7 +65,7 @@ export const inboundArrivals = (entityTxs: readonly EntityTx[]): InboundArrival[
     const input = entityTx.data;
     const accountId = String(input.fromEntityId ?? '').trim().toLowerCase();
     if (accountId.length === 0) return fail('ARRIVAL_PEER_MISSING');
-    if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'frame_ack') {
+    if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'ack_frame') {
       return fail('ARRIVAL_KIND_OUTSIDE_PROFILE', { account: accountId, kind: input.kind });
     }
     return [{ accountId, input }];

@@ -44,7 +44,6 @@ import { verifyStorageSnapshotIntegrity , verifyStorageTailIntegrity } from '../
 import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
 import { prepareRuntimeOutputRows } from '../wal/outbox-payload';
-import { buildHistoryViewPuts } from '../history/history-view';
 import { prepareBoundedStorageValueRows } from '../codec/bounded-value';
 import {
   preparePathKeyedAuxiliaryRows,
@@ -63,7 +62,7 @@ import type {
 type ReplicaMetaEntry = { key: Buffer; value: Buffer };
 type EncodedNode = { key: Buffer; value: Buffer };
 
-type ExistingHistoryDecision =
+type ExistingWalDecision =
   { kind: 'replace' } | { kind: 'idempotent'; head: StorageHead; frame: RuntimeFrame };
 
 export type RestoredStorageBaseOptions = {
@@ -75,7 +74,7 @@ export type RestoredStorageBaseOptions = {
   replicaMetas: ReplicaMetaEntry[];
   headConfig: Omit<
     StorageHead,
-    'latestHeight' | 'latestMaterializedHeight' | 'latestSnapshotHeight' | 'epochReplayBytes' | 'retainedHistoryBytes'
+    'latestHeight' | 'latestMaterializedHeight' | 'latestSnapshotHeight' | 'epochReplayBytes' | 'retainedWalBytes'
   >;
   canonicalStateHash: string;
   canonicalEntityHashes: StorageFrameEntityHash[];
@@ -199,12 +198,12 @@ const readAuthoritativeReplicaMetas = async (db: RuntimeDbLike): Promise<Replica
   return entries;
 };
 
-const decideExistingHistory = async (options: RestoredStorageBaseOptions): Promise<ExistingHistoryDecision> => {
+const decideExistingWal = async (options: RestoredStorageBaseOptions): Promise<ExistingWalDecision> => {
   const verified = await verifyStorageTailIntegrity(options.walDb);
   if (verified.latestHeight === 0) return { kind: 'replace' };
   const head = await readStorageHead(options.walDb);
   const frame = await readStorageFrameRecord(options.walDb, verified.latestHeight);
-  if (!head || !frame) throw new Error('RECOVERY_IMPORT_EXISTING_HISTORY_INCOMPLETE');
+  if (!head || !frame) throw new Error('RECOVERY_IMPORT_EXISTING_WAL_INCOMPLETE');
   if (verified.latestHeight > options.height) {
     throw new Error(
       `RECOVERY_IMPORT_ROLLBACK_REJECTED:existing=${verified.latestHeight}:candidate=${options.height}:` +
@@ -235,11 +234,11 @@ const decideExistingHistory = async (options: RestoredStorageBaseOptions): Promi
   return { kind: 'idempotent', head, frame };
 };
 
-const queueHistoryReplacement = async (
+const queueWalReplacement = async (
   db: RuntimeDbLike,
   entries: readonly { key: Buffer; value: Buffer }[],
 ): Promise<ReturnType<RuntimeDbLike['batch']>> => {
-  if (typeof db.keys !== 'function') throw new Error('RECOVERY_IMPORT_HISTORY_KEYS_UNSUPPORTED');
+  if (typeof db.keys !== 'function') throw new Error('RECOVERY_IMPORT_WAL_KEYS_UNSUPPORTED');
   const batch = db.batch();
   for await (const key of iterateKeys(db, {})) batch.del(key);
   for (const item of entries) batch.put(item.key, item.value);
@@ -287,7 +286,7 @@ const prepareCertifiedNodes = (
 type RestoreNodeRows = ReturnType<typeof prepareCertifiedNodes>;
 type RestoreOutputPayloads = ReturnType<typeof prepareRuntimeOutputRows>;
 
-const publishNewHistoryBase = async (
+const publishNewWalBase = async (
   options: RestoredStorageBaseOptions,
   liveRows: readonly PhysicalRow[],
   nodes: RestoreNodeRows,
@@ -344,23 +343,12 @@ const publishNewHistoryBase = async (
   }, { omitSymbolKeys: true });
   const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
   const frameRows = prepareBoundedStorageValueRows(keyFrame(options.height), encodeBufferAsIs(frame));
-  const [activityEntry] = buildHistoryViewPuts({
-    height: options.height,
-    timestamp: options.timestamp,
-    logs: [],
-    touchedEntities: frame.touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
-  });
-  if (!activityEntry) throw new Error('RESTORE_RUNTIME_ACTIVITY_ENTRY_MISSING');
-  const activityRows = prepareBoundedStorageValueRows(activityEntry.key, activityEntry.value);
   const durableRows = [
     ...snapshotEntries,
     ...snapshotReplicaMetaEntries,
     ...snapshotAuxiliaryRows,
     manifestEntry,
     ...frameRows,
-    ...activityRows,
     ...options.replicaMetas,
     ...liveAuxiliaryRows,
     ...outputPayloads.rows,
@@ -373,9 +361,9 @@ const publishNewHistoryBase = async (
     latestMaterializedHeight: options.height,
     latestSnapshotHeight: options.height,
     epochReplayBytes: 0,
-    retainedHistoryBytes: entriesBytes(durableRows),
+    retainedWalBytes: entriesBytes(durableRows),
   };
-  const walBatch = await queueHistoryReplacement(options.walDb, [
+  const walBatch = await queueWalReplacement(options.walDb, [
     ...durableRows,
     { key: KEY_HEAD, value: encodeBuffer(head) },
   ]);
@@ -389,9 +377,9 @@ const publishNewHistoryBase = async (
 };
 
 /**
- * Publish a restored checkpoint without an empty-history window. The current
+ * Publish a restored checkpoint without an empty-WAL window. The current
  * database is only a cache: its head is removed first, so every crash before
- * the authoritative atomic history batch rebuilds from the old history. After
+ * the authoritative atomic WAL batch rebuilds from the old WAL. After
  * that batch, every crash rebuilds from the complete new snapshot.
  */
 export const replaceRestoredStorageBase = async (
@@ -399,7 +387,7 @@ export const replaceRestoredStorageBase = async (
 ): Promise<'idempotent' | 'replaced'> => {
   assertUniqueReplicaMetas(options.replicaMetas);
   const nodes = prepareCertifiedNodes(options);
-  const existing = await decideExistingHistory(options);
+  const existing = await decideExistingWal(options);
   await invalidateCurrentCache(options.currentDb, options.onPersistenceBoundary);
   const entityStates = options.docs
     .filter((doc): doc is Extract<StorageDoc, { family: 'entity' }> => doc.family === 'entity')
@@ -467,7 +455,7 @@ export const replaceRestoredStorageBase = async (
     return 'idempotent';
   }
 
-  await publishNewHistoryBase(
+  await publishNewWalBase(
     options,
     liveRows,
     nodes,

@@ -8,7 +8,7 @@ import {
   MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES,
   MAX_PROFILE_ADVERTISED_ACCOUNTS,
 } from '../../../entity/profile/profile-descriptor';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { HANKO_MAX_BYTES } from '../../../hanko/codec';
 import type { EntityState } from '../../../entity/types';
 import {
@@ -47,14 +47,12 @@ const stateWithAccounts = (entityId: string, accountCount: number, tokenCount: n
   })) as EntityState['accounts'],
   lastFinalizedJHeight: 0,
   profile: { name: 'profile-budget', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 test('profile caps advertised accounts, keeps one best liquid token each, then fills within the byte budget', () => {
   const descriptor = buildEntityProfileDescriptor(stateWithAccounts(id(1), 1_000, 32));
-  const bytes = new TextEncoder().encode(encodeCanonicalConsensusValue(descriptor)).byteLength;
+  const bytes = encodeCanonicalConsensusBytes(descriptor).byteLength;
   expect(bytes).toBeLessThanOrEqual(MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES);
   expect(bytes).toBeLessThan(LIMITS.MAX_PROFILE_BYTES);
   expect(descriptor.accounts).toHaveLength(MAX_PROFILE_ADVERTISED_ACCOUNTS);
@@ -82,7 +80,7 @@ test('profile caps advertised accounts, keeps one best liquid token each, then f
       profileHanko: `0x${'ff'.repeat(HANKO_MAX_BYTES)}`,
     },
   };
-  expect(new TextEncoder().encode(encodeCanonicalConsensusValue(fullProfile)).byteLength)
+  expect(encodeCanonicalConsensusBytes(fullProfile).byteLength)
     .toBeLessThanOrEqual(LIMITS.MAX_PROFILE_BYTES);
 });
 
@@ -202,4 +200,5 @@ test('canonicalizeProfile is identity on a gossip-cached output', () => {
   expect(() => {
     canonical.lastUpdated += 1;
   }).toThrow();
+  expect(parseProfile(canonical)).toBe(canonical);
 });

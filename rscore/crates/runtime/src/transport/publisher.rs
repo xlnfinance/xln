@@ -1,14 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::storage::native::{DurableRuntimeFrame, NativeRuntimeStore};
 
 use super::RuntimeTransportError;
 use super::crypto::{EncryptionIdentity, derive_local_runtime_id, encryption_identity};
-use super::inbound::InboundSessionTable;
+use super::inbound::{InboundSessionTable, OutboundCompletion, QueueOwnedResult};
 use super::routing::{
     DirectRouteTable, OutboundEnvelope, PreparedEnvelopeBatch, normalize_entity_id,
-    prepare_envelopes,
+    prepare_envelopes, prepare_envelopes_from_values,
 };
 use super::session::{DirectSession, SessionConfig};
 
@@ -19,12 +21,16 @@ const DEFAULT_MAX_PLAINTEXT_BYTES: usize = 24 * 1024 * 1024;
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 const TARGET_RETRY_BACKOFF: Duration = Duration::from_millis(100);
 
+fn profile_publication() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_PUBLICATION").as_deref() == Ok("1"))
+}
+
 #[derive(Clone, Debug)]
 pub struct DirectOutboxPublisherConfig {
     pub source_seed: String,
     pub source_signer_id: String,
     pub routes: DirectRouteTable,
-    pub allowed_targets: BTreeSet<String>,
     pub local_entity_signers: BTreeMap<String, String>,
     pub max_queue_rows: usize,
     pub max_queue_bytes: usize,
@@ -41,12 +47,10 @@ impl DirectOutboxPublisherConfig {
         source_signer_id: impl Into<String>,
         routes: DirectRouteTable,
     ) -> Self {
-        let allowed_targets = routes.targets().map(str::to_owned).collect();
         Self {
             source_seed: source_seed.into(),
             source_signer_id: source_signer_id.into(),
             routes,
-            allowed_targets,
             local_entity_signers: BTreeMap::new(),
             max_queue_rows: DEFAULT_MAX_QUEUE_ROWS,
             max_queue_bytes: DEFAULT_MAX_QUEUE_BYTES,
@@ -56,17 +60,6 @@ impl DirectOutboxPublisherConfig {
             reconnect_attempts: 2,
             io_timeout: Duration::from_secs(10),
         }
-    }
-
-    pub fn with_allowed_targets<'a>(
-        mut self,
-        targets: impl IntoIterator<Item = &'a str>,
-    ) -> Result<Self, RuntimeTransportError> {
-        for target in targets {
-            self.allowed_targets
-                .insert(super::routing::normalize_runtime_id(target)?);
-        }
-        Ok(self)
     }
 
     pub fn with_local_entity(
@@ -120,6 +113,13 @@ pub struct DirectOutboxPublisher {
     sessions: BTreeMap<String, DirectSession>,
     inbound: InboundSessionTable,
     pending: BTreeMap<String, VecDeque<OutboundEnvelope>>,
+    /// At most one socket write per target is in flight. This preserves each
+    /// target's canonical FIFO while allowing the single Runtime writer to
+    /// start the next independent frame instead of waiting for every socket.
+    /// Completion is transient transport state and is never persisted.
+    in_flight: BTreeMap<String, InFlightEnvelope>,
+    inbound_completion_tx: SyncSender<OutboundCompletion>,
+    inbound_completion_rx: Receiver<OutboundCompletion>,
     target_order: VecDeque<String>,
     retry_after: BTreeMap<String, Instant>,
     last_errors: BTreeMap<String, String>,
@@ -128,9 +128,15 @@ pub struct DirectOutboxPublisher {
     last_staged_height: Option<u64>,
 }
 
+struct InFlightEnvelope {
+    envelope: Arc<OutboundEnvelope>,
+}
+
 impl DirectOutboxPublisher {
     pub fn new(config: DirectOutboxPublisherConfig) -> Result<Self, RuntimeTransportError> {
         validate_config(&config)?;
+        let (inbound_completion_tx, inbound_completion_rx) =
+            sync_channel(config.max_queue_rows.max(1));
         let source_runtime_id =
             derive_local_runtime_id(&config.source_seed, &config.source_signer_id)?;
         let identity = encryption_identity(&config.source_seed);
@@ -141,6 +147,9 @@ impl DirectOutboxPublisher {
             sessions: BTreeMap::new(),
             inbound: InboundSessionTable::default(),
             pending: BTreeMap::new(),
+            in_flight: BTreeMap::new(),
+            inbound_completion_tx,
+            inbound_completion_rx,
             target_order: VecDeque::new(),
             retry_after: BTreeMap::new(),
             last_errors: BTreeMap::new(),
@@ -165,7 +174,7 @@ impl DirectOutboxPublisher {
         store: &mut NativeRuntimeStore,
         durable: &DurableRuntimeFrame,
     ) -> Result<PublicationReport, RuntimeTransportError> {
-        let prepared = self.prepare_durable(store, durable)?;
+        let total_started = Instant::now();
         if self
             .last_staged_height
             .is_some_and(|height| durable.height() <= height)
@@ -177,22 +186,47 @@ impl DirectOutboxPublisher {
             self.flush_pending(&mut report)?;
             return Ok(report);
         }
+        let prepared = self.prepare_durable(store, durable)?;
+        let prepare_done = total_started.elapsed();
+        let row_count = prepared.row_count;
+        let envelope_count = prepared.envelopes.len();
+        let durable_bytes = prepared.bytes;
         self.ensure_queue_capacity(&prepared)?;
+        let capacity_done = total_started.elapsed();
         let mut report = PublicationReport {
             durable_height: durable.height(),
             durable_bytes: prepared.bytes,
             ..PublicationReport::default()
         };
         self.stage(prepared)?;
+        let stage_done = total_started.elapsed();
         self.last_staged_height = Some(durable.height());
         self.flush_pending(&mut report)?;
+        if profile_publication() {
+            let total = total_started.elapsed();
+            eprintln!(
+                "RSCORE_PUBLICATION_PHASE h={} prepare={} capacity={} stage={} flush={} total={} rows={} envelopes={} bytes={} inflight={} pendingTargets={} pendingRows={}",
+                durable.height(),
+                prepare_done.as_micros(),
+                capacity_done.saturating_sub(prepare_done).as_micros(),
+                stage_done.saturating_sub(capacity_done).as_micros(),
+                total.saturating_sub(stage_done).as_micros(),
+                total.as_micros(),
+                row_count,
+                envelope_count,
+                durable_bytes,
+                self.in_flight.len(),
+                self.pending.len(),
+                self.pending_rows,
+            );
+        }
         Ok(report)
     }
 
     /// Replay-only terminal for the production durable path. It re-reads the
-    /// fsynced rows, performs the identical decode, local/remote binding,
-    /// queue budgeting and route validation, then deliberately performs no
-    /// socket I/O. No delivery receipt or durable marker is created.
+    /// fsynced rows and performs the identical decode, local signer binding
+    /// and queue budgeting, then deliberately performs no socket I/O.
+    /// Reachability is transient and cannot invalidate committed outbox bytes.
     pub fn validate_durable(
         &mut self,
         store: &mut NativeRuntimeStore,
@@ -214,20 +248,24 @@ impl DirectOutboxPublisher {
         store: &mut NativeRuntimeStore,
         durable: &DurableRuntimeFrame,
     ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
-        let prepared = self.decode_durable(store, durable)?;
-        for envelope in &prepared.envelopes {
-            if !self
-                .config
-                .allowed_targets
-                .contains(&envelope.target_runtime_id)
-                && !self.inbound.has_open(&envelope.target_runtime_id)?
-            {
-                return Err(RuntimeTransportError::Route(format!(
-                    "missing:{}",
-                    envelope.target_runtime_id
-                )));
-            }
-        }
+        let rows = store.publication_outputs(durable)?;
+        let prepared = match durable.take_resident_output_values() {
+            Some(values) => prepare_envelopes_from_values(
+                &self.source_runtime_id,
+                rows.as_ref(),
+                values,
+                &self.config.local_entity_signers,
+                self.config.max_envelope_rows,
+                self.config.max_plaintext_bytes,
+            )?,
+            None => prepare_envelopes(
+                &self.source_runtime_id,
+                rows.as_ref(),
+                &self.config.local_entity_signers,
+                self.config.max_envelope_rows,
+                self.config.max_plaintext_bytes,
+            )?,
+        };
         Ok(prepared)
     }
 
@@ -237,19 +275,6 @@ impl DirectOutboxPublisher {
         durable: &DurableRuntimeFrame,
     ) -> Result<bool, RuntimeTransportError> {
         let prepared = self.decode_durable(store, durable)?;
-        for envelope in &prepared.envelopes {
-            if !self
-                .config
-                .allowed_targets
-                .contains(&envelope.target_runtime_id)
-                && !self.inbound.has_open(&envelope.target_runtime_id)?
-            {
-                return Err(RuntimeTransportError::Route(format!(
-                    "missing:{}",
-                    envelope.target_runtime_id
-                )));
-            }
-        }
         Ok(
             self.pending_rows.saturating_add(prepared.row_count) <= self.config.max_queue_rows
                 && self.pending_bytes.saturating_add(prepared.bytes) <= self.config.max_queue_bytes,
@@ -334,6 +359,7 @@ impl DirectOutboxPublisher {
         &mut self,
         report: &mut PublicationReport,
     ) -> Result<(), RuntimeTransportError> {
+        self.collect_inbound_completions(report)?;
         let mut blocked = BTreeSet::new();
         loop {
             let targets = self.target_order.len();
@@ -344,6 +370,7 @@ impl DirectOutboxPublisher {
                     .pop_front()
                     .ok_or(RuntimeTransportError::Config("target-order-missing"))?;
                 let retry_ready = !blocked.contains(&target)
+                    && !self.in_flight.contains_key(&target)
                     && (self.inbound.has_open(&target)?
                         || self
                             .retry_after
@@ -361,18 +388,28 @@ impl DirectOutboxPublisher {
             if batch.is_empty() {
                 break;
             }
-            let envelopes = batch
-                .iter()
-                .map(|(_, envelope)| envelope.clone())
-                .collect::<Vec<_>>();
-            let results = self
-                .inbound
-                .publish_open_batch(&envelopes, self.config.io_timeout);
-            for ((target, envelope), result) in batch.into_iter().zip(results) {
-                let result = match result {
-                    Ok(true) => Ok(0),
-                    Ok(false) => self.publish_one(&envelope),
-                    Err(error) => Err(error),
+            for (target, envelope) in batch {
+                let (envelope, result) = match self
+                    .inbound
+                    .queue_owned_if_open(envelope, &self.inbound_completion_tx)
+                {
+                    QueueOwnedResult::Queued { envelope } => {
+                        if self
+                            .in_flight
+                            .insert(target, InFlightEnvelope { envelope })
+                            .is_some()
+                        {
+                            return Err(RuntimeTransportError::Config(
+                                "target-in-flight-duplicate",
+                            ));
+                        }
+                        continue;
+                    }
+                    QueueOwnedResult::Missing(envelope) => {
+                        let result = self.publish_direct_one(&envelope);
+                        (envelope, result)
+                    }
+                    QueueOwnedResult::Rejected { envelope, error } => (envelope, Err(error)),
                 };
                 match result {
                     Ok(reconnects) => {
@@ -390,6 +427,31 @@ impl DirectOutboxPublisher {
         report.rows_pending = self.pending_rows;
         report.bytes_pending = self.pending_bytes;
         report.failed_targets = self.last_errors.keys().cloned().collect();
+        Ok(())
+    }
+
+    fn collect_inbound_completions(
+        &mut self,
+        report: &mut PublicationReport,
+    ) -> Result<(), RuntimeTransportError> {
+        while let Ok(completion) = self.inbound_completion_rx.try_recv() {
+            let target = completion.envelope.target_runtime_id.clone();
+            let in_flight = self
+                .in_flight
+                .remove(&target)
+                .ok_or(RuntimeTransportError::Config("target-in-flight-missing"))?;
+            drop(completion.envelope);
+            match completion.result {
+                Ok(()) => self.finish_published(report, &target, &in_flight.envelope, 0)?,
+                Err(error) => self.retain_failed(
+                    &target,
+                    Arc::try_unwrap(in_flight.envelope)
+                        .expect("reactor drops envelope before reporting completion"),
+                    &error,
+                )?,
+            }
+            self.finish_target(target);
+        }
         Ok(())
     }
 
@@ -440,6 +502,7 @@ impl DirectOutboxPublisher {
             .pending
             .get(&target)
             .is_some_and(|queue| queue.is_empty())
+            && !self.in_flight.contains_key(&target)
         {
             self.pending.remove(&target);
             self.retry_after.remove(&target);
@@ -464,13 +527,10 @@ impl DirectOutboxPublisher {
         }
     }
 
-    fn publish_one(&mut self, envelope: &OutboundEnvelope) -> Result<usize, RuntimeTransportError> {
-        if self
-            .inbound
-            .publish_if_open(envelope, self.config.io_timeout)?
-        {
-            return Ok(0);
-        }
+    fn publish_direct_one(
+        &mut self,
+        envelope: &OutboundEnvelope,
+    ) -> Result<usize, RuntimeTransportError> {
         let mut reconnects = 0;
         let mut last_error = String::new();
         for attempt in 0..=self.config.reconnect_attempts {

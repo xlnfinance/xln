@@ -23,7 +23,7 @@ import {
   handleRuntimeAdapterMessage,
 } from '../../../../api/runtime-adapter/server';
 import { registerRuntimeAdapterAuthSeed } from '../../../../api/runtime-adapter/security/auth';
-import { serializeTaggedJson, safeStringify, safeParse } from '../../../../protocol/serialization';
+import { serializeTaggedJson, safeStringify } from '../../../../protocol/serialization';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -65,22 +65,26 @@ import {
   resetOpCounters,
   snapshotOpCounters,
 } from '../../../../support/performance/op-counters';
-import { SOVEREIGN_RUNTIMES_PER_WORKER } from './sovereign-runtime-sharding';
+import {
+  decodeSovereignRuntimeSeeds,
+  SOVEREIGN_RUNTIMES_PER_WORKER,
+} from './sovereign-runtime-sharding';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { getEntityReplicaById } from '../../../../entity/replica/replica-lookup';
 import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
+import { summarizeRuntimeQuiescence } from '../../../../orchestrator/mesh/mesh-common';
+import { parseProfile } from '../../../../entity/profile';
+import { toEntityId } from '../../../../protocol/identity';
+import {
+  resetHltPaymentOperationLedger,
+  snapshotHltPaymentOperationLedger,
+} from '../../../../support/performance/account-delivery-trace';
 
 type HostSocketData = Readonly<{ type: 'rpc'; runtimeId: string }>;
 type HostSocket = ServerWebSocket<HostSocketData>;
 
 const JSON_HEADERS = { 'content-type': 'application/json', 'cache-control': 'no-store' };
 const HLT_HOST_BATCH_MAX_BODY_BYTES = LIMITS.MAX_HLT_HOST_BATCH_BODY_BYTES;
-const lanePersistenceEnabled = (() => {
-  const raw = String(process.env['XLN_HLT_LANE_PERSISTENCE'] ?? '0').trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
-  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
-  throw new Error(`HLT_LANE_PERSISTENCE_INVALID:${raw}`);
-})();
 const isShardWorker = !isMainThread;
 const processFirstPort = isShardWorker
   ? 0
@@ -94,25 +98,43 @@ let firstPort = processFirstPort;
 let opCounterLabel = `load-host-${firstPort}`;
 let authSeed = '';
 
-const decodeLaneSeeds = (raw: string | undefined): string[] => {
-  const parsed = safeParse(String(raw || ''));
-  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 1_000) {
-    throw new Error('HLT_SOVEREIGN_HOST_LANE_SEEDS_INVALID');
-  }
-  return parsed.map((value, index) => {
-    if (typeof value !== 'string' || !value.trim()) {
-      throw new Error(`HLT_SOVEREIGN_HOST_LANE_SEED_INVALID:${index}`);
-    }
-    return value.trim();
-  });
-};
-
 let laneSeeds: string[] = [];
 let processRuntimeCount = 0;
 let hostReady = false;
 const runtimes = new Map<string, RuntimeReplica>();
 const runtimeSlots: Array<Readonly<{ env: RuntimeReplica; runtimeId: string; port: number }>> = [];
 const activeServers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+
+const traceLaneProgress = (): void => {
+  if (process.env['XLN_HLT_TRACE_LANE_PROGRESS'] !== '1') return;
+  const quiescence = [...runtimes.values()].reduce((total, env) => {
+    const current = summarizeRuntimeQuiescence(env);
+    total.pendingRuntimeWork += current.pendingRuntimeWork;
+    total.pendingAccountFrames += current.pendingAccountFrames;
+    total.accountMempoolTxs += current.accountMempoolTxs;
+    return total;
+  }, {
+    runtimes: runtimes.size,
+    pendingRuntimeWork: 0,
+    pendingAccountFrames: 0,
+    accountMempoolTxs: 0,
+  });
+  const ledger = snapshotHltPaymentOperationLedger();
+  const paymentStages = Object.fromEntries(Object.entries(ledger.stages).map(([stage, row]) => [
+    stage,
+    {
+      operations: row.operationAppearances,
+      locks: row.lockIds.length,
+      resolves: row.resolveIds.length,
+      outcomes: row.outcomes,
+    },
+  ]));
+  console.log(`HLT_LANE_PROGRESS ${safeStringify({
+    firstPort,
+    ...quiescence,
+    paymentStages,
+  })}`);
+};
 
 const resolveHltJurisdiction = (): JReplica => {
   const entries = Object.values(loadJurisdictions().jurisdictions);
@@ -172,9 +194,33 @@ const drainHostBatches = (): void => {
       // Validate the complete host wave before mutating any Runtime queue.
       // Queue acceptance is not a protocol receipt: bilateral Account state
       // and ACK drain remain the only financial completion evidence.
-      for (const entry of batch.entries) validateRuntimeInputAdmission(entry.env, entry.input);
-      for (const entry of batch.entries) enqueueRuntimeInput(entry.env, entry.input);
+      for (const entry of batch.entries) {
+        try {
+          validateRuntimeInputAdmission(entry.env, entry.input);
+        } catch (error) {
+          throw new Error(
+            `HLT_HOST_RUNTIME_INPUT_ADMISSION_FAILED:runtime=${entry.env.runtimeId}:` +
+            `cause=${error instanceof Error ? error.message : String(error)}:` +
+            `fatal=${safeStringify(entry.env.infrastructure?.fatalDebugPayload ?? null)}`,
+          );
+        }
+      }
+      // The authenticated host queue owns these validated bytes now. Return
+      // the ingress result before CPU-heavy sovereign Runtime loops can delay
+      // flushing the HTTP body; committed completion and Account ACK drain,
+      // never this process-local response, remain the financial authority.
       batch.resolve(response({ ok: true, wave: batch.wave, accepted: batch.entries.length }));
+      setTimeout(() => {
+        try {
+          for (const entry of batch.entries) enqueueRuntimeInput(entry.env, entry.input);
+        } catch (error) {
+          const message = `HLT_HOST_ACCEPTED_BATCH_ENQUEUE_FATAL:wave=${batch.wave}:` +
+            (error instanceof Error ? error.message : String(error));
+          console.error(message);
+          if (isShardWorker) postShardStatus({ type: 'fatal', error: message });
+          void stop(1);
+        }
+      }, 0);
     } catch (error) {
       batch.resolve(response({
         ok: false,
@@ -272,7 +318,7 @@ const handleHostReadiness = async (
     requireExactBoundaryKeys(
       body,
       ['hubEntityId', 'hubRuntimeId', 'runtimeIds'],
-      [],
+      ['hubProfile'],
       'HLT_HOST_READINESS_FIELDS_INVALID',
     );
     const hubEntityId = String(body['hubEntityId'] || '').trim().toLowerCase();
@@ -294,17 +340,279 @@ const handleHostReadiness = async (
     if (new Set(runtimeIds).size !== runtimeIds.length) {
       throw new Error('HLT_HOST_READINESS_RUNTIME_ID_DUPLICATE');
     }
+    const sourceEnv = runtimes.get(runtimeIds[0]!)!;
+    const sourceP2P = startP2P(sourceEnv);
+    const suppliedProfile = body['hubProfile'] === undefined ? null : parseProfile(body['hubProfile']);
+    if (
+      suppliedProfile &&
+      (suppliedProfile.entityId !== hubEntityId || suppliedProfile.runtimeId !== hubRuntimeId)
+    ) {
+      throw new Error('HLT_HOST_READINESS_PROFILE_IDENTITY_INVALID');
+    }
+    if (suppliedProfile && sourceP2P) await sourceP2P.admitSharedProfiles([suppliedProfile]);
+    let hubProfile = sourceEnv.gossip.getProfile(hubEntityId);
+    const cachedProfileReady = hubProfile?.runtimeId?.toLowerCase() === hubRuntimeId &&
+      /^0x[0-9a-f]{64}$/.test(String(hubProfile.runtimeEncPubKey || ''));
+    if (!cachedProfileReady && sourceP2P) {
+      const refreshed = await sourceP2P.refreshSeedProfilesAndWait([hubEntityId], 4_000);
+      hubProfile = refreshed ? sourceEnv.gossip.getProfile(hubEntityId) : undefined;
+    }
+    if (
+      !hubProfile ||
+      hubProfile.runtimeId?.toLowerCase() !== hubRuntimeId ||
+      !/^0x[0-9a-f]{64}$/.test(String(hubProfile.runtimeEncPubKey || ''))
+    ) return response({ ok: true, ready: false, missing: runtimeIds });
     const ready = await Promise.all(runtimeIds.map(async runtimeId => {
       const env = runtimes.get(runtimeId);
       if (!env) throw new Error(`HLT_HOST_READINESS_RUNTIME_MISSING:${runtimeId}`);
       const p2p = startP2P(env);
-      if (!p2p || !(await p2p.bootstrapDirectEntityRoutes([hubEntityId], 10_000))) return false;
+      if (!p2p) return false;
+      if (!env.gossip.profiles.has(hubEntityId)) await p2p.admitSharedProfiles([hubProfile]);
+      const directReady = p2p.prepareDirectEntityRoutes([hubEntityId]);
       const profile = env.gossip.profiles.get(hubEntityId);
-      return profile?.runtimeId?.toLowerCase() === hubRuntimeId &&
+      const ready = directReady && profile?.runtimeId?.toLowerCase() === hubRuntimeId &&
         /^0x[0-9a-f]{64}$/.test(String(profile.runtimeEncPubKey || ''));
+      return ready;
     }));
     const missing = runtimeIds.filter((_runtimeId, index) => !ready[index]);
     return response({ ok: true, ready: missing.length === 0, missing });
+  } catch (error) {
+    return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+};
+
+/** Commit barrier plus P2P configuration for every Runtime packed into this
+ * host. This replaces one control request and one read request per user; each
+ * Runtime still owns and starts its own independent P2P instance. */
+const handleHostPopulationConfigure = async (
+  request: Request,
+  authEnv: RuntimeReplica,
+): Promise<Response> => {
+  const authError = requireDaemonControlAuth(request, authEnv);
+  if (authError) return authError;
+  try {
+    const body = requireBoundaryRecord(
+      await parseTaggedControlBody(request, HLT_HOST_BATCH_MAX_BODY_BYTES),
+      'HLT_HOST_POPULATION_CONFIGURE_INVALID',
+    );
+    requireExactBoundaryKeys(
+      body,
+      ['targets', 'announceProfiles'],
+      [],
+      'HLT_HOST_POPULATION_CONFIGURE_FIELDS_INVALID',
+    );
+    if (typeof body['announceProfiles'] !== 'boolean') {
+      throw new Error('HLT_HOST_POPULATION_CONFIGURE_ANNOUNCE_PROFILES_INVALID');
+    }
+    const announceProfiles = body['announceProfiles'];
+    if (!Array.isArray(body['targets']) || body['targets'].length < 1 || body['targets'].length > runtimes.size) {
+      throw new Error('HLT_HOST_POPULATION_CONFIGURE_TARGETS_INVALID');
+    }
+    const targets = body['targets'].map((value, index) => {
+      const target = requireBoundaryRecord(value, `HLT_HOST_POPULATION_CONFIGURE_TARGET_INVALID:${index}`);
+      requireExactBoundaryKeys(target, ['runtimeId', 'entityId'], [], `HLT_HOST_POPULATION_CONFIGURE_TARGET_FIELDS_INVALID:${index}`);
+      const runtimeId = String(target['runtimeId'] || '').trim().toLowerCase();
+      const entityId = String(target['entityId'] || '').trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(runtimeId) || !/^0x[0-9a-f]{64}$/.test(entityId) || !runtimes.has(runtimeId)) {
+        throw new Error(`HLT_HOST_POPULATION_CONFIGURE_TARGET_ID_INVALID:${index}:${runtimeId}:${entityId}`);
+      }
+      return { runtimeId, entityId };
+    });
+    if (new Set(targets.map(target => target.runtimeId)).size !== targets.length) {
+      throw new Error('HLT_HOST_POPULATION_CONFIGURE_RUNTIME_DUPLICATE');
+    }
+    const committed = await Promise.all(targets.map(target => {
+      const env = runtimes.get(target.runtimeId)!;
+      return waitForCommittedCondition(
+        env,
+        () => env.infrastructure?.stateMutationInFlight !== true &&
+          getEntityReplicaById(env, target.entityId) !== undefined,
+        10_000,
+      );
+    }));
+    const missing = targets.filter((_target, index) => !committed[index]);
+    if (missing.length > 0) {
+      throw new Error(`HLT_HOST_POPULATION_CONFIGURE_ENTITY_NOT_COMMITTED:${safeStringify(missing)}`);
+    }
+    for (const target of targets) {
+      const env = runtimes.get(target.runtimeId)!;
+      startP2P(env, {
+        relayUrls: [],
+        advertiseEntityIds: announceProfiles ? [target.entityId] : [],
+      });
+    }
+    return response({ ok: true, configured: targets.length });
+  } catch (error) {
+    return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+};
+
+/** Operator-planned transport drain for TS Hub -> Rust Hub ownership transfer.
+ * This is process infrastructure only: no ACK, cursor or receipt enters state. */
+const handleHostPopulationP2PStop = async (
+  request: Request,
+  authEnv: RuntimeReplica,
+): Promise<Response> => {
+  const authError = requireDaemonControlAuth(request, authEnv);
+  if (authError) return authError;
+  try {
+    const body = requireBoundaryRecord(
+      await parseTaggedControlBody(request, HLT_HOST_BATCH_MAX_BODY_BYTES),
+      'HLT_HOST_POPULATION_P2P_STOP_INVALID',
+    );
+    requireExactBoundaryKeys(body, ['runtimeIds'], [], 'HLT_HOST_POPULATION_P2P_STOP_FIELDS_INVALID');
+    if (!Array.isArray(body['runtimeIds']) || body['runtimeIds'].length < 1 || body['runtimeIds'].length > runtimes.size) {
+      throw new Error('HLT_HOST_POPULATION_P2P_STOP_RUNTIME_IDS_INVALID');
+    }
+    const runtimeIds = body['runtimeIds'].map((value, index) => {
+      const runtimeId = String(value || '').trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(runtimeId) || !runtimes.has(runtimeId)) {
+        throw new Error(`HLT_HOST_POPULATION_P2P_STOP_RUNTIME_ID_INVALID:${index}:${runtimeId}`);
+      }
+      return runtimeId;
+    });
+    if (new Set(runtimeIds).size !== runtimeIds.length) {
+      throw new Error('HLT_HOST_POPULATION_P2P_STOP_RUNTIME_ID_DUPLICATE');
+    }
+    for (const runtimeId of runtimeIds) {
+      const pending = summarizeRuntimeQuiescence(runtimes.get(runtimeId)!);
+      if (pending.pendingRuntimeWork !== 0 || pending.pendingAccountFrames !== 0 || pending.accountMempoolTxs !== 0) {
+        throw new Error(`HLT_HOST_POPULATION_P2P_STOP_NOT_QUIESCENT:${runtimeId}:${safeStringify(pending)}`);
+      }
+    }
+    await Promise.all(runtimeIds.map(runtimeId => stopP2PAndWait(runtimes.get(runtimeId)!, 5_000)));
+    return response({ ok: true, stopped: runtimeIds.length });
+  } catch (error) {
+    return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+};
+
+const handleHostRouteReadiness = async (
+  request: Request,
+  authEnv: RuntimeReplica,
+): Promise<Response> => {
+  const authError = requireDaemonControlAuth(request, authEnv);
+  if (authError) return authError;
+  try {
+    const body = requireBoundaryRecord(
+      await parseTaggedControlBody(request, HLT_HOST_BATCH_MAX_BODY_BYTES),
+      'HLT_HOST_ROUTE_READINESS_INVALID',
+    );
+    requireExactBoundaryKeys(body, ['hubEntityId', 'targets', 'profiles'], [], 'HLT_HOST_ROUTE_READINESS_FIELDS_INVALID');
+    const hubEntityId = String(body['hubEntityId'] || '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(hubEntityId)) throw new Error('HLT_HOST_ROUTE_READINESS_HUB_INVALID');
+    if (!Array.isArray(body['targets']) || body['targets'].length < 1 || body['targets'].length > runtimes.size) {
+      throw new Error('HLT_HOST_ROUTE_READINESS_TARGETS_INVALID');
+    }
+    const targets = body['targets'].map((value, index) => {
+      const target = requireBoundaryRecord(value, `HLT_HOST_ROUTE_READINESS_TARGET_INVALID:${index}`);
+      requireExactBoundaryKeys(target, ['runtimeId', 'receiverEntityIds'], [], `HLT_HOST_ROUTE_READINESS_TARGET_FIELDS_INVALID:${index}`);
+      const runtimeId = String(target['runtimeId'] || '').trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(runtimeId) || !runtimes.has(runtimeId)) {
+        throw new Error(`HLT_HOST_ROUTE_READINESS_RUNTIME_INVALID:${index}:${runtimeId}`);
+      }
+      if (!Array.isArray(target['receiverEntityIds']) || target['receiverEntityIds'].length < 1 || target['receiverEntityIds'].length > 1_000) {
+        throw new Error(`HLT_HOST_ROUTE_READINESS_RECEIVERS_INVALID:${index}`);
+      }
+      const receiverEntityIds = target['receiverEntityIds'].map((raw, receiverIndex) => {
+        const entityId = String(raw || '').trim().toLowerCase();
+        if (!/^0x[0-9a-f]{64}$/.test(entityId)) {
+          throw new Error(`HLT_HOST_ROUTE_READINESS_RECEIVER_INVALID:${index}:${receiverIndex}`);
+        }
+        return entityId;
+      });
+      return { runtimeId, receiverEntityIds: [...new Set(receiverEntityIds)] };
+    });
+    if (new Set(targets.map(target => target.runtimeId)).size !== targets.length) {
+      throw new Error('HLT_HOST_ROUTE_READINESS_RUNTIME_DUPLICATE');
+    }
+    if (!Array.isArray(body['profiles']) || body['profiles'].length < 1 || body['profiles'].length > 1_000) {
+      throw new Error('HLT_HOST_ROUTE_READINESS_PROFILES_INVALID');
+    }
+    const suppliedProfiles = new Map(body['profiles'].map((raw, index) => {
+      const profile = parseProfile(raw);
+      if (profile.entityId === hubEntityId) {
+        throw new Error(`HLT_HOST_ROUTE_READINESS_PROFILE_IS_HUB:${index}`);
+      }
+      return [profile.entityId, profile] as const;
+    }));
+    if (suppliedProfiles.size !== body['profiles'].length) {
+      throw new Error('HLT_HOST_ROUTE_READINESS_PROFILE_DUPLICATE');
+    }
+    // Fetch the worker-wide union over one authenticated Runtime session.
+    // Each receiving Runtime then independently sanitizes and verifies those
+    // exact public profile bytes before installing them in its own RAM cache.
+    // This removes one network round-trip per sender without sharing financial
+    // state, signer keys, Runtime inputs or transport authority.
+    const union = [...new Set(targets.flatMap(target => target.receiverEntityIds).map(toEntityId))];
+    const sourceEnv = runtimes.get(targets[0]!.runtimeId)!;
+    const absentUnion = union.filter(entityId => !sourceEnv.gossip.profiles.has(entityId));
+    const sourceP2P = sourceEnv.infrastructure?.p2p;
+    if (!sourceP2P) throw new Error('HLT_HOST_ROUTE_READINESS_SOURCE_P2P_MISSING');
+    const absentProfiles = absentUnion.map(entityId => suppliedProfiles.get(entityId) ?? (() => {
+      throw new Error(`HLT_HOST_ROUTE_READINESS_PROFILE_MISSING:${entityId}`);
+    })());
+    if (absentProfiles.length > 0) await sourceP2P.admitSharedProfiles(absentProfiles);
+    const fetchedProfiles = new Map(union.flatMap(entityId => {
+      const profile = sourceEnv.gossip.getProfile(entityId);
+      return profile ? [[entityId, profile] as const] : [];
+    }));
+    const rows = await Promise.all(targets.map(async target => {
+      const env = runtimes.get(target.runtimeId)!;
+      const absentProfiles = target.receiverEntityIds.map(toEntityId).flatMap(entityId => {
+        if (env.gossip.profiles.has(entityId)) return [];
+        const profile = fetchedProfiles.get(entityId);
+        return profile ? [profile] : [];
+      });
+      if (absentProfiles.length > 0) {
+        const p2p = env.infrastructure?.p2p;
+        if (!p2p) throw new Error(`HLT_HOST_ROUTE_READINESS_P2P_MISSING:${target.runtimeId}`);
+        await p2p.admitSharedProfiles(absentProfiles);
+      }
+      return target.receiverEntityIds.flatMap(receiverEntityId => {
+        const profile = env.gossip.profiles.get(receiverEntityId);
+        const routable = profile?.accounts.some(account => account.counterpartyId.toLowerCase() === hubEntityId) === true;
+        return routable ? [] : [`${target.runtimeId}:${receiverEntityId}`];
+      });
+    }));
+    const missing = rows.flat();
+    return response({ ok: true, ready: missing.length === 0, missing });
+  } catch (error) {
+    return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+};
+
+const handleHostLocalProfiles = async (
+  request: Request,
+  authEnv: RuntimeReplica,
+): Promise<Response> => {
+  const authError = requireDaemonControlAuth(request, authEnv);
+  if (authError) return authError;
+  try {
+    const body = requireBoundaryRecord(
+      await parseTaggedControlBody(request, HLT_HOST_BATCH_MAX_BODY_BYTES),
+      'HLT_HOST_LOCAL_PROFILES_INVALID',
+    );
+    requireExactBoundaryKeys(body, ['targets'], [], 'HLT_HOST_LOCAL_PROFILES_FIELDS_INVALID');
+    if (!Array.isArray(body['targets']) || body['targets'].length < 1 || body['targets'].length > runtimes.size) {
+      throw new Error('HLT_HOST_LOCAL_PROFILES_TARGETS_INVALID');
+    }
+    const profiles = body['targets'].map((raw, index) => {
+      const target = requireBoundaryRecord(raw, `HLT_HOST_LOCAL_PROFILE_TARGET_INVALID:${index}`);
+      requireExactBoundaryKeys(target, ['runtimeId', 'entityId'], [], `HLT_HOST_LOCAL_PROFILE_TARGET_FIELDS_INVALID:${index}`);
+      const runtimeId = String(target['runtimeId'] || '').toLowerCase();
+      const entityId = String(target['entityId'] || '').toLowerCase();
+      const env = runtimes.get(runtimeId);
+      if (!env || !/^0x[0-9a-f]{64}$/.test(entityId)) {
+        throw new Error(`HLT_HOST_LOCAL_PROFILE_TARGET_ID_INVALID:${index}`);
+      }
+      const profile = parseProfile(env.gossip.getProfile(entityId));
+      if (profile.runtimeId !== runtimeId || profile.entityId !== entityId) {
+        throw new Error(`HLT_HOST_LOCAL_PROFILE_IDENTITY_INVALID:${index}`);
+      }
+      return profile;
+    });
+    return response({ ok: true, profiles });
   } catch (error) {
     return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
   }
@@ -358,6 +666,74 @@ const handleHostDiagnostics = (request: Request, authEnv: RuntimeReplica): Respo
     },
     totals,
   });
+};
+
+/** One resident scan per OS host after the measured phase. This proves every
+ * sovereign user Runtime and Account drained without 1,000 HTTP/RPC reads. */
+const handleHostQuiescence = async (
+  request: Request,
+  authEnv: RuntimeReplica,
+): Promise<Response> => {
+  const authError = requireDaemonControlAuth(request, authEnv);
+  if (authError) return authError;
+  try {
+    const body = requireBoundaryRecord(
+      await parseTaggedControlBody(request, HLT_HOST_BATCH_MAX_BODY_BYTES),
+      'HLT_HOST_QUIESCENCE_INVALID',
+    );
+    requireExactBoundaryKeys(body, ['hubRuntimeId', 'runtimeIds'], [], 'HLT_HOST_QUIESCENCE_FIELDS_INVALID');
+    const hubRuntimeId = String(body['hubRuntimeId'] || '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(hubRuntimeId)) throw new Error('HLT_HOST_QUIESCENCE_HUB_INVALID');
+    if (!Array.isArray(body['runtimeIds']) || body['runtimeIds'].length < 1 || body['runtimeIds'].length > runtimes.size) {
+      throw new Error('HLT_HOST_QUIESCENCE_RUNTIME_IDS_INVALID');
+    }
+    const runtimeIds = body['runtimeIds'].map((value, index) => {
+      const runtimeId = String(value || '').trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(runtimeId) || !runtimes.has(runtimeId)) {
+        throw new Error(`HLT_HOST_QUIESCENCE_RUNTIME_ID_INVALID:${index}:${runtimeId}`);
+      }
+      return runtimeId;
+    });
+    if (new Set(runtimeIds).size !== runtimeIds.length) throw new Error('HLT_HOST_QUIESCENCE_RUNTIME_ID_DUPLICATE');
+    const totals = runtimeIds.reduce((result, runtimeId) => {
+      const env = runtimes.get(runtimeId)!;
+      const current = summarizeRuntimeQuiescence(env);
+      result.pendingRuntimeWork += current.pendingRuntimeWork;
+      result.pendingAccountFrames += current.pendingAccountFrames;
+      result.accountMempoolTxs += current.accountMempoolTxs;
+      const open = env.infrastructure?.p2p?.getDirectPeerState()
+        .some(peer => peer.runtimeId.toLowerCase() === hubRuntimeId && peer.open) ?? false;
+      if (open) result.openHubPeers += 1;
+      return result;
+    }, {
+      runtimes: runtimeIds.length,
+      openHubPeers: 0,
+      pendingRuntimeWork: 0,
+      pendingAccountFrames: 0,
+      accountMempoolTxs: 0,
+    });
+    const details = runtimeIds.flatMap(runtimeId => {
+      const env = runtimes.get(runtimeId)!;
+      return [...env.state.eReplicas.values()].flatMap(entity =>
+        [...entity.state.accounts.entries()].flatMap(([counterpartyId, account]) => {
+          if (!account.pendingFrame) return [];
+          return [{
+            runtimeId,
+            entityId: entity.entityId,
+            counterpartyId,
+            currentHeight: account.currentHeight,
+            pendingFrameHeight: account.pendingFrame.height,
+            pendingFrameStateHash: account.pendingFrame.stateHash,
+            pendingFrameTxTypes: account.pendingFrame.accountTxs.map(tx => tx.type),
+            pendingInputKind: account.pendingAccountInput?.kind ?? null,
+            lastOutboundAckHeight: account.lastOutboundAckFrame?.height ?? null,
+          }];
+        }));
+    });
+    return response({ ok: true, ...totals, ...(details.length > 0 ? { details } : {}) });
+  } catch (error) {
+    return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+  }
 };
 
 const waitForCommittedCondition = (
@@ -427,6 +803,9 @@ const handleHostFinancialReadiness = async (
     });
     const targetReady = (target: (typeof targets)[number]): boolean => {
       const env = runtimes.get(target.runtimeId)!;
+      // Runtime mutates H+1 in place before WAL publication. Never let the
+      // HLT treat that unpublished candidate as committed financial state.
+      if (env.infrastructure?.stateMutationInFlight === true) return false;
       const account = getEntityReplicaById(env, target.entityId)?.state.accounts.get(target.hubEntityId);
       if (!account) return false;
       const viewer = perspective === 'user' ? target.entityId : target.hubEntityId;
@@ -440,7 +819,7 @@ const handleHostFinancialReadiness = async (
     };
     const ready = await Promise.all(targets.map(target => {
       const env = runtimes.get(target.runtimeId)!;
-      return waitForCommittedCondition(env, () => targetReady(target), 120_000);
+      return waitForCommittedCondition(env, () => targetReady(target), 1_000);
     }));
     const missing = targets.filter((_target, index) => !ready[index]).map(target => target.runtimeId);
     const details = targets.flatMap((target, index) => {
@@ -460,7 +839,7 @@ const handleHostFinancialReadiness = async (
         pendingFrameHeight: account?.pendingFrame?.height ?? null,
         pendingFrameTxTypes: account?.pendingFrame?.accountTxs.map(tx => tx.type) ?? [],
         pendingInputKind: account?.pendingAccountInput?.kind ?? null,
-        lastOutboundAckHeight: account?.lastOutboundFrameAck?.height ?? null,
+        lastOutboundAckHeight: account?.lastOutboundAckFrame?.height ?? null,
         profileKnown: profile !== undefined,
         profileHasHub: profile?.publicAccounts.includes(target.hubEntityId) ?? false,
         windows: target.windows.map(window => {
@@ -544,6 +923,7 @@ const adapterDeps = {
 const bootRuntime = async (laneSeed: string, index: number): Promise<void> => {
   const env = await main(`${laneSeed}:runtime`, {
     localSigners: [{ label: 'owner', seed: laneSeed }],
+    numericSignerPrewarmCount: 1,
   });
   installHltJurisdiction(env);
   const runtimeId = String(env.runtimeId || '').trim().toLowerCase();
@@ -555,7 +935,7 @@ const bootRuntime = async (laneSeed: string, index: number): Promise<void> => {
     ...env.runtimeConfig,
     storage: {
       ...env.runtimeConfig?.storage,
-      enabled: lanePersistenceEnabled,
+      enabled: false,
     },
   };
   startRuntimeLoop(env, {
@@ -638,7 +1018,17 @@ const run = async (): Promise<void> => {
     setInterval(() => dumpRuntimeSamplingProfile('interval'), 5_000).unref();
   }
   await bootAll();
-  const servers = runtimeSlots.map(({ env, runtimeId, port }) => Bun.serve<HostSocketData>({
+  if (process.env['XLN_HLT_TRACE_LANE_PROGRESS'] === '1') {
+    setInterval(traceLaneProgress, 1_000).unref();
+  }
+  // The production traffic path is each Runtime's own authenticated outbound
+  // P2P socket. When per-user diagnostics are disabled, one authenticated
+  // host control endpoint is sufficient; opening thousands of unused HTTP/RPC
+  // listeners only measures HLT setup overhead.
+  const controlSlots = process.env['XLN_HLT_PER_RUNTIME_CONTROL'] === '1'
+    ? runtimeSlots
+    : runtimeSlots.slice(0, 1);
+  const servers = controlSlots.map(({ env, runtimeId, port }) => Bun.serve<HostSocketData>({
     port,
     hostname: '127.0.0.1',
     fetch: async (request, server) => {
@@ -651,6 +1041,7 @@ const run = async (): Promise<void> => {
           runtimes: hostReady ? processRuntimeCount : runtimes.size,
           expected: processRuntimeCount,
           runtimeId,
+          runtimeIds: runtimeSlots.map(slot => slot.runtimeId),
         });
       }
       if (pathname === '/rpc') {
@@ -667,6 +1058,22 @@ const run = async (): Promise<void> => {
         if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
         return handleHostReadiness(request, env);
       }
+      if (pathname === '/api/hlt/population-configure' && request.method === 'POST') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        return handleHostPopulationConfigure(request, env);
+      }
+      if (pathname === '/api/hlt/population-p2p-stop' && request.method === 'POST') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        return handleHostPopulationP2PStop(request, env);
+      }
+      if (pathname === '/api/hlt/route-readiness' && request.method === 'POST') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        return handleHostRouteReadiness(request, env);
+      }
+      if (pathname === '/api/hlt/local-profiles' && request.method === 'POST') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        return handleHostLocalProfiles(request, env);
+      }
       if (pathname === '/api/hlt/diagnostics' && request.method === 'GET') {
         if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
         return handleHostDiagnostics(request, env);
@@ -676,6 +1083,7 @@ const run = async (): Promise<void> => {
         const authError = requireDaemonControlAuth(request, env);
         if (authError) return authError;
         resetOpCounters();
+        resetHltPaymentOperationLedger();
         return response({ ok: true });
       }
       if (pathname === '/api/hlt/op-counters' && request.method === 'GET') {
@@ -684,9 +1092,19 @@ const run = async (): Promise<void> => {
         if (authError) return authError;
         return response({ counters: snapshotOpCounters() });
       }
+      if (pathname === '/api/hlt/payment-ledger' && request.method === 'GET') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        const authError = requireDaemonControlAuth(request, env);
+        if (authError) return authError;
+        return response(snapshotHltPaymentOperationLedger());
+      }
       if (pathname === '/api/hlt/financial-readiness' && request.method === 'POST') {
         if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
         return handleHostFinancialReadiness(request, env);
+      }
+      if (pathname === '/api/hlt/quiescence' && request.method === 'POST') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        return handleHostQuiescence(request, env);
       }
       return handleControl(request, env, pathname);
     },
@@ -713,7 +1131,9 @@ const run = async (): Promise<void> => {
     },
   }));
   activeServers.push(...servers);
-  console.log(`HLT_SOVEREIGN_WORKER_READY ports=${firstPort}-${firstPort + runtimeSlots.length - 1} runtimes=${runtimes.size}`);
+  console.log(
+    `HLT_SOVEREIGN_WORKER_READY controls=${servers.length} runtimes=${runtimes.size}`,
+  );
 };
 
 type ShardInitMessage = Readonly<{
@@ -805,7 +1225,7 @@ const waitForShardReady = (
 const runCoordinator = async (): Promise<void> => {
   const secrets = readInheritedChildSecrets();
   const processAuthSeed = String(secrets['authSeed'] || '').trim();
-  const processLaneSeeds = decodeLaneSeeds(secrets['laneSeedsJson']);
+  const processLaneSeeds = decodeSovereignRuntimeSeeds(secrets['laneSeedsBase64']);
   if (!processAuthSeed) throw new Error('HLT_SOVEREIGN_HOST_AUTH_SEED_MISSING');
   if (processFirstPort + processLaneSeeds.length - 1 > 65_535) {
     throw new Error(`HLT_SOVEREIGN_HOST_PORT_RANGE_INVALID:${processFirstPort}:${processLaneSeeds.length}`);

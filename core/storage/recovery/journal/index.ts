@@ -8,8 +8,6 @@ import {
 import {
   clearPendingAuditEvents,
   clearRuntimeFrameEvents,
-  dropPendingHistoryRecords,
-  peekPendingHistoryRecords,
   readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
 import { recordCommittedRuntimeEntityMetrics } from '../../../runtime/observability/entity-metrics';
@@ -194,12 +192,10 @@ const replayOneFrame = async (
         height,
       ));
     }
-    const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);
     const committedEvents = readRuntimeFrameEvents(env);
     clearPendingAuditEvents(env);
     env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];
-    dropPendingHistoryRecords(env, history.length);
     if (options.verify) {
       timePerfPhase('recovery.frame.verifyJournal', () =>
         verifyRecoveryJournalFrame(env, frame, height, result));

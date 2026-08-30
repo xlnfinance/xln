@@ -221,8 +221,7 @@ export const isProposalDeferrableEntityInput = (input: EntityInput): boolean =>
   !(input.hashPrecommits && input.hashPrecommits.size > 0) &&
   !input.hashPrecommitFrame &&
   !input.jPrefixAttestations &&
-  !input.leaderTimeoutVote &&
-  !input.localRuntimeProtocol;
+  !input.leaderTimeoutVote;
 
 const requiredAtomicAccountTx = (
   input: EntityInput,
@@ -282,11 +281,6 @@ export const applyEntityInput = async (
   if (!ingress.accepted) return ingress.result;
   const phaseContext = ingress.context;
   entityInput = phaseContext.entityInput;
-  // Bind the isolated, ingress-validated EntityInput before any Account child
-  // transition. The Runtime-routed object and the post-TS result are both the
-  // wrong authority boundary: one is not canonical yet, the other is already
-  // the answer produced by TypeScript.
-  env.accountAuthorityEntityStage?.bindCanonicalInput(entityInput);
   const requiredEntityTx = requiredAtomicAccountTx(entityInput, options.requiredEntityTxIndex);
   const { entityOutbox, workingReplica } = phaseContext;
   profile.checkpoint('ingress');

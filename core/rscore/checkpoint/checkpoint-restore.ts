@@ -4,7 +4,7 @@
  * This deliberately does not return AccountReplica: Rust checkpoints retain
  * only the roots of TS-owned carried trees, not their bodies. Fabricating
  * empty maps would create a second state with the same claimed roots. The
- * returned seed is complete for Rust-owned state and explicit about the four
+ * returned seed is complete for Rust-owned state and explicit about the three
  * root-only sections.
  */
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
@@ -34,7 +34,6 @@ import {
 } from './j-claim-checkpoint';
 
 const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
-  'pulls',
   'subcontracts',
   'requestedRebalance',
   'requestedRebalanceFeeState',
@@ -60,7 +59,7 @@ const DERIVED_CONSENSUS_FIELDS: ReadonlySet<string> = new Set([
   'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeProofHanko',
   'pendingAccountInput',
-  'lastOutboundFrameAck',
+  'lastOutboundAckFrame',
   'proofHeader',
   'currentDisputeHash',
   'currentDisputeProofBodyHash',
@@ -100,7 +99,7 @@ const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =
         'commitments',
         {
           locksRoot: seed.locks.rootHash(),
-          pullsRoot: seed.carried.pullsRoot,
+          pullsRoot: seed.pulls.rootHash(),
           swapOffersRoot: seed.swapOffers.rootHash(),
           subcontractsRoot: seed.carried.subcontractsRoot,
           lendingIntentsRoot: seed.lendingIntents.rootHash(),
@@ -140,7 +139,7 @@ const ackFields = (ack: RscoreOutboundAck): Record<string, unknown> => ({
 });
 
 const pendingBinding = (pending: RscorePendingFrame, seed: RscoreAccountStateSeed): Record<string, unknown> => ({
-  kind: pending.bundledAck ? 'frame_ack' : 'frame',
+  kind: pending.bundledAck ? 'ack_frame' : 'frame',
   fromEntityId: seed.ownerEntityId,
   toEntityId: seed.accountId,
   proposal: {
@@ -226,7 +225,7 @@ const computeRestoredEntityLeaf = (
     nextProofNonce: consensus.nextProofNonce,
   };
   if (consensus.lastOutboundAck) {
-    projection['lastOutboundFrameAck'] = outboundAckBinding(consensus.lastOutboundAck, seed);
+    projection['lastOutboundAckFrame'] = outboundAckBinding(consensus.lastOutboundAck, seed);
   }
   if (consensus.counterpartyDispute) {
     const dispute = consensus.counterpartyDispute;
@@ -280,15 +279,15 @@ const restoredMempoolRoot = (
 };
 
 export const decodeRscoreAccountRestoreRow = (value: unknown): RscoreDecodedAccountRestore => {
-  const row = rscoreCheckpointTuple(value, 10, 'RESTORE_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 11, 'RESTORE_ACCOUNT');
   return buildRscoreAccountRestore(
     checkpointHex(row[0], 32, 'ACCOUNT_ID'),
     checkpointHex(row[1], 32, 'ACCOUNT_LEAF'),
     row[2],
-    decodeRscoreAccountStateTrees(row.slice(3, 8)),
-    decodeRscoreConsensusSeed(row[9]),
+    decodeRscoreAccountStateTrees(row.slice(3, 9)),
+    decodeRscoreConsensusSeed(row[10]),
     true,
-    decodeRscoreExactJClaimNodes(row[8], 'RESTORE_J_CLAIM_NODES'),
+    decodeRscoreExactJClaimNodes(row[9], 'RESTORE_J_CLAIM_NODES'),
   );
 };
 
@@ -311,6 +310,9 @@ export const buildRscoreAccountRestore = (
 ): RscoreDecodedAccountRestore => {
   const stateSeed = decodeRscoreAccountStateSeed(accountId, headerValue, trees);
   if (stateSeed.domain.chainId === 0) checkpointRestoreFail('CHAIN_ID_ZERO');
+  if (stateSeed.pulls.rootHash() !== stateSeed.carried.pullsRoot) {
+    checkpointRestoreFail('PULL_BODY_ROOT_MISMATCH');
+  }
   const accountStateRoot = computeRestoredAccountStateRoot(stateSeed);
   if (
     consensus.currentFrame?.accountStateRoot !== undefined &&

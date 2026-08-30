@@ -11,11 +11,10 @@ use crate::commitment::{
 use crate::scheduler::canonical_crontab_state_from_storage;
 use crate::{
     ConsensusMode, CrontabState, CrontabTaskMethod, CrontabTaskParam, CrontabTaskState,
-    EntityConsensusConfig, EntityConsensusState, EntityFrameAuthority, EntityHtlcNoteIndex,
-    EntityLeaderState, EntityReferral, HtlcRoute, HubProfile, LockBookEntry,
-    OrderbookConsensusMetadata, OrderbookState, ScheduledHook, SpreadDistribution,
-    compute_entity_owned_sections, compute_entity_section_digest,
-    project_entity_consensus_sections,
+    EntityCanonicalCollection, EntityConsensusConfig, EntityConsensusState, EntityFrameAuthority,
+    EntityLeaderState, EntityReferral, HubProfile, OrderbookConsensusMetadata, OrderbookState,
+    PaybookEntry, PaybookState, ScheduledHook, SpreadDistribution, compute_entity_owned_sections,
+    compute_entity_section_digest, project_entity_consensus_sections,
 };
 
 const ENTITY: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
@@ -96,20 +95,43 @@ fn state() -> EntityStateSlice {
     let mut state = EntityStateSlice::empty(ENTITY, 101);
     state.height = 9;
     state.last_finalized_j_height = 8;
+    state.j_history_finality = Some(CanonicalValue::String("finality".into()));
+    state.certified_board_state = Some(crate::CertifiedBoardState::empty([0x45; 32]));
+    state.j_batch_state = Some(crate::JBatchState::default());
+    state.hub_rebalance_config = Some(CanonicalValue::String("rebalance".into()));
+    state.entity_encryption_public_key = [0x44; 32];
     state.reserves.insert(1, BigInt::from(500));
-    state.htlc_fees_earned = BigInt::from(3);
-    state.htlc_routes.insert(
-        "route-1".to_string(),
-        HtlcRoute {
+    state.deferred_account_proposals = Some(
+        EntityCanonicalCollection::from_entries([(
+            PEER.to_string(),
+            CanonicalValue::String(format!("0x{}", "61".repeat(32))),
+        )])
+        .expect("deferred proposals"),
+    );
+    state.settlement_continuations = Some(
+        EntityCanonicalCollection::from_entries([(
+            PEER.to_string(),
+            CanonicalValue::Object(vec![
+                (
+                    "workspaceHash".into(),
+                    CanonicalValue::String(format!("0x{}", "62".repeat(32))),
+                ),
+                ("actions".into(), CanonicalValue::Array(Vec::new())),
+                ("broadcast".into(), CanonicalValue::Bool(false)),
+            ]),
+        )])
+        .expect("settlement continuations"),
+    );
+    state.paybook = PaybookState::from_entries(
+        [PaybookEntry {
             hashlock: "route-1".to_string(),
+            description: Some("invoice".to_string()),
             token_id: Some(1),
             amount: Some(BigInt::from(20)),
             started_at_ms: Some(90),
             originated: true,
             inbound_entity: None,
-            inbound_lock_id: None,
             outbound_entity: Some(PEER.to_string()),
-            outbound_lock_id: Some("lock-1".to_string()),
             inbound_settled: false,
             outbound_settled: false,
             secret: None,
@@ -118,21 +140,10 @@ fn state() -> EntityStateSlice {
             secret_ack_deadline_at: None,
             pending_fee: Some(BigInt::from(1)),
             created_timestamp: 91,
-        },
-    );
-    state.lock_book.insert(
-        "lock-1".to_string(),
-        LockBookEntry {
-            lock_id: "lock-1".to_string(),
-            account_id: PEER.to_string(),
-            token_id: 1,
-            amount: BigInt::from(20),
-            hashlock: "route-1".to_string(),
-            timelock: BigInt::from(120),
-            outgoing: true,
-            created_at: BigInt::from(91),
-        },
-    );
+        }],
+        BigInt::from(3),
+    )
+    .expect("paybook");
     state.crontab = Some(crontab());
     state.orderbook = Some(OrderbookState::empty(10_000));
     state.orderbook_metadata = Some(orderbook_metadata());
@@ -154,10 +165,11 @@ fn crontab() -> CrontabState {
                 )]),
             },
         )]),
-        hooks: BTreeMap::from([(
+        hooks: crate::ScheduledHookMap::restore(BTreeMap::from([(
             "htlc-timeout:lock-1".to_string(),
             ScheduledHook::htlc_timeout(PEER.to_string(), "lock-1".to_string(), 120),
-        )]),
+        )]))
+        .expect("scheduled hooks"),
     }
 }
 
@@ -186,7 +198,6 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
             authority: authority(),
         },
         certified_frame_head: None,
-        htlc_notes: EntityHtlcNoteIndex::default(),
     };
     let projection = project_entity_storage(&state, &consensus).expect("projection");
     let owned = compute_entity_owned_sections(&state, [0x55; 32], 1).expect("owned sections");
@@ -202,7 +213,33 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
         ("timestamp", &projection.timestamp),
         ("reserves", &projection.reserves),
         ("lastFinalizedJHeight", &projection.last_finalized_j_height),
-        ("htlcFeesEarned", &projection.htlc_fees_earned),
+        (
+            "jHistoryFinality",
+            projection.j_history_finality.as_ref().expect("j finality"),
+        ),
+        (
+            "certifiedBoardState",
+            projection
+                .certified_board_state
+                .as_ref()
+                .expect("certified board"),
+        ),
+        (
+            "jBatchState",
+            projection.j_batch_state.as_ref().expect("j batch"),
+        ),
+        (
+            "hubRebalanceConfig",
+            projection
+                .hub_rebalance_config
+                .as_ref()
+                .expect("hub config"),
+        ),
+        (
+            "entityEncryptionPublicKey",
+            &projection.entity_encryption_public_key,
+        ),
+        ("profile", &projection.profile),
     ] {
         assert_section(&sections, field, value);
     }
@@ -222,16 +259,22 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
     assert_eq!(stored_leader, committed_leader);
     assert_section(&sections, "config", &committed_config);
     assert_section(&sections, "leaderState", &committed_leader);
-    assert_section(
-        &sections,
-        "htlcRoutes",
-        &logical_commitment(&projection.htlc_routes),
-    );
-    assert_section(
-        &sections,
-        "lockBook",
-        &logical_commitment(&projection.lock_book),
-    );
+    let CanonicalValue::Object(paybook_scalar) = &projection.paybook else {
+        panic!("paybook scalar");
+    };
+    let fees = paybook_scalar
+        .iter()
+        .find(|(key, _)| key == "feesEarned")
+        .map(|(_, value)| value.clone())
+        .expect("paybook fees");
+    let paybook = CanonicalValue::Object(vec![
+        (
+            "entries".to_string(),
+            logical_commitment(&projection.paybook_entries),
+        ),
+        ("feesEarned".to_string(), fees),
+    ]);
+    assert_section(&sections, "paybook", &paybook);
 
     let crontab = canonical_crontab_state_from_storage(
         projection.crontab_state.clone().expect("crontab scalar"),
@@ -239,6 +282,16 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
     )
     .expect("crontab consensus");
     assert_section(&sections, "crontabState", &crontab);
+    assert_section(
+        &sections,
+        "deferredAccountProposals",
+        &logical_commitment(&projection.deferred_account_proposals),
+    );
+    assert_section(
+        &sections,
+        "settlementContinuations",
+        &logical_commitment(&projection.settlement_continuations),
+    );
 
     let orderbook = canonical_orderbook_ext_from_storage_fields(
         state.orderbook.as_ref().expect("orderbook"),
@@ -258,6 +311,8 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
             .scalar_fields()
             .map(|(tag, _)| tag)
             .collect::<Vec<_>>(),
-        vec![1, 2, 3, 7, 9, 10, 14, 17, 23, 35, 36, 37],
+        vec![
+            1, 2, 3, 6, 7, 9, 10, 14, 15, 16, 17, 18, 20, 21, 22, 34, 35, 36, 37,
+        ],
     );
 }

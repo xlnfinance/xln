@@ -1,8 +1,8 @@
 import type { BookState, EntityReferral, HubProfile, OrderbookExtState } from '../orderbook';
 import type { CrontabState } from '../entity/scheduler/types';
 import type { JBatchState } from '../jurisdiction/machine/batch';
-import type { AccountReplica, HtlcRoute } from '../types/account';
-import type { ConsensusConfig, EntityReplica, EntityState, EntitySwapPair, LockBookEntry, Proposal } from '../entity/types';
+import type { AccountReplica } from '../types/account';
+import type { ConsensusConfig, EntityReplica, EntityState, EntitySwapPair, Proposal } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import type { DebtEntry } from '../types/finance/debt';
 import type { FrameLogEntry } from '../types/logging';
@@ -37,8 +37,6 @@ export type StorageRuntimeConfig = {
   snapshotPeriodFrames?: number;
   retainSnapshots?: number;
   epochMaxBytes?: number;
-  historyViewMaxBytes?: number;
-  historyViewRetainFrames?: number;
   materializePeriodFrames?: number;
   /**
    * Canonical runtime-state commitment.
@@ -51,23 +49,20 @@ export type StorageRuntimeConfig = {
 };
 
 export type StoragePersistenceBoundary =
-  | 'after-authoritative-history-commit'
-  | 'after-history-view-commit'
+  | 'after-authoritative-commit'
   | 'after-current-cache-commit'
-  | 'after-history-view-prune'
   | 'after-snapshot-body-batch'
   | 'after-snapshot-manifest'
-  | 'after-snapshot-history-publish'
+  | 'after-snapshot-wal-publish'
   | 'after-snapshot-retention-prune'
   | 'after-replay-prune'
-  | 'after-snapshot-history-head'
+  | 'after-snapshot-wal-head'
   | 'after-snapshot-current-head'
-  | 'after-epoch-history-head-reset'
+  | 'after-epoch-wal-head-reset'
   | 'after-restore-current-fence'
   | 'after-restore-current-clear-batch'
   | 'after-restore-current-body'
   | 'after-restore-authoritative-swap'
-  | 'after-restore-history-view-clear'
   | 'after-restore-current-head';
 
 export type StoragePersistenceBoundaryHook = (
@@ -86,7 +81,7 @@ export type StorageHead = {
   epochMaxBytes: number;
   accountMerkleRadix: RadixMerkleRadix;
   epochReplayBytes: number;
-  retainedHistoryBytes: number;
+  retainedWalBytes: number;
 };
 
 export type StorageEntityCoreDoc = {
@@ -111,11 +106,12 @@ export type StorageEntityCoreDoc = {
   entityProviderActionState?: EntityState['entityProviderActionState'];
   entityEncryptionPublicKey: EntityState['entityEncryptionPublicKey'];
   profile: EntityState['profile'];
-  htlcRoutes: Map<string, HtlcRoute>;
-  htlcFeesEarned: bigint;
+  paybook: {
+    entries: Map<string, EntityState['paybook']['entries'] extends Map<string, infer Entry> ? Entry : never>;
+    feesEarned: bigint;
+  };
   outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
   inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
-  lockBook: Map<string, LockBookEntry>;
   swapTradingPairs?: EntitySwapPair[];
   crossJurisdictionSwaps?: EntityState['crossJurisdictionSwaps'];
   crossJurisdictionAuthorizations?: EntityState['crossJurisdictionAuthorizations'];
@@ -219,8 +215,6 @@ export type StorageReplicaMeta = {
   entityId: string;
   signerId: string;
   isProposer: boolean;
-  /** Validator-local presentation index rebuilt from certified Entity frames. */
-  htlcNotes?: EntityReplica['htlcNotes'];
   position?: EntityReplica['position'];
   certifiedFrameHead?: EntityReplica['certifiedFrameHead'];
   hankoWitness?: EntityReplica['hankoWitness'];
@@ -290,23 +284,22 @@ export type StorageDebugStats = {
   frameBytes: number;
   boundedValueCount?: number;
   boundedValueBytes?: number;
-  historyViewBytes?: number;
   snapshotBytes: number;
   liveBytes: number;
-  historyBytes: number;
+  walBytes: number;
   totalBytes: number;
   maxFrameBytes: number;
   maxPhysicalValueBytes?: number;
   maxSnapshotBytes: number;
   epochDbs?: Array<{
-    role: 'current' | 'history';
+    role: 'current' | 'wal';
     path: string;
     latestHeight: number;
     latestSnapshotHeight: number;
     frameCount: number;
     snapshotCount: number;
     liveBytes: number;
-    historyBytes: number;
+    walBytes: number;
     totalBytes: number;
   }>;
 };
@@ -321,17 +314,6 @@ export type StorageOverlayRefs = {
 };
 
 export type StorageReplicaLookup = Map<string, { replicaKey: string; replica: EntityReplica; state: EntityState }>;
-
-export type HistoryViewPut = { key: Buffer; value: Buffer };
-
-export type StorageHistoryViewHead = {
-  schemaVersion: number;
-  latestHeight: number;
-  latestPrunedRuntimeHeight: number;
-  retainedBytes: number;
-  maxBytes: number;
-  retainFrames: number;
-};
 
 export type NamespaceBytes = {
   count: number;

@@ -76,7 +76,7 @@ import {
 } from './dispute/deadline-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
 import { handleBoardHankoRefresh } from './incoming/board-hanko-refresh';
-import { handlePendingFrameAck } from './incoming/ack-commit';
+import { handlePendingAckFrame } from './incoming/ack-commit';
 import {
   getDisputeHankoRequirementError,
   replaceLocalDisputeDraft,
@@ -564,7 +564,7 @@ const noteCommittedIncomingFrameForShadow = (value: Readonly<{
   });
 };
 
-type IncomingFrameAckMaterial = {
+type IncomingAckFrameMaterial = {
   response: Extract<AccountPeerInput, { kind: 'ack' }>;
   outboundAck: {
     height: number;
@@ -578,8 +578,8 @@ type IncomingFrameAckMaterial = {
   proofChanged: boolean;
 };
 
-type IncomingFrameAckMaterialResult =
-  { kind: 'continue'; material: IncomingFrameAckMaterial } | { kind: 'return'; result: HandleAccountInputResult };
+type IncomingAckFrameMaterialResult =
+  { kind: 'continue'; material: IncomingAckFrameMaterial } | { kind: 'return'; result: HandleAccountInputResult };
 
 const selectAckDisputeHanko = (
   account: AccountReplica,
@@ -613,14 +613,14 @@ const selectAckDisputeHanko = (
   };
 };
 
-async function buildIncomingFrameAckMaterial(
+async function buildIncomingAckFrameMaterial(
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
   events: string[],
-): Promise<IncomingFrameAckMaterialResult> {
+): Promise<IncomingAckFrameMaterialResult> {
   const ackEntityId = account.proofHeader.fromEntity;
   accountLog.debug('hanko.ack.defer_to_entity_consensus', {
     entity: shortId(ackEntityId),
@@ -689,7 +689,7 @@ async function buildIncomingFrameAckMaterial(
   };
 }
 
-function storeAckDisputeState(account: AccountReplica, material: IncomingFrameAckMaterial): void {
+function storeAckDisputeState(account: AccountReplica, material: IncomingAckFrameMaterial): void {
   if (material.proofChanged && material.ackDisputeHash) {
     replaceLocalDisputeDraft(account, {
       hash: material.ackDisputeHash,
@@ -775,7 +775,7 @@ async function buildAckResponseForIncomingFrame(
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<HandleAccountInputResult> {
-  const ackMaterial = await buildIncomingFrameAckMaterial(
+  const ackMaterial = await buildIncomingAckFrameMaterial(
     account,
     input,
     receivedFrame,
@@ -790,7 +790,7 @@ async function buildAckResponseForIncomingFrame(
   // Install the reusable ACK before the final Entity flush. The flush may
   // combine it with a successor proposal, while retries retain these exact
   // ACK bytes independently of that successor.
-  account.lastOutboundFrameAck = material.outboundAck;
+  account.lastOutboundAckFrame = material.outboundAck;
   // Entity consensus owns the only Account-output flush point. Do not propose
   // here: later AccountInputs, matching, HTLC hooks, and cross-j hooks in the
   // same Entity frame may enqueue more work for this account. The final
@@ -1026,7 +1026,7 @@ const handleAccountAckPhase = async (
     };
   }
   const { ackHeight } = resolveAccountAckTarget(account, input, normalizedInputHeight);
-  const pending = await handlePendingFrameAck(
+  const pending = await handlePendingAckFrame(
     context,
     account,
     input,

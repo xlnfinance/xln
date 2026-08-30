@@ -7,7 +7,6 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   getRuntimeWalDb,
-  getHistoryViewDb,
   getRuntimeStorageDb,
   loadEnvFromDB,
   saveEnvToDB,
@@ -31,11 +30,10 @@ import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-has
 import { buildCertifiedEntityHeadPlan } from '../../../storage/replica/entity-head';
 import {
   readStorageHead,
-  readHistoryViewHead,
   resolveStorageRuntimeConfig,
   readStorageFrameRecord,
   loadEntityStateFromStorage,
-  recoverStorageDbFromHistory,
+  recoverStorageDbFromWal,
   type StoragePersistenceBoundary,
 } from '../../../storage';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
@@ -68,8 +66,6 @@ const config: Required<StorageRuntimeConfig> = {
   snapshotPeriodFrames: 1,
   retainSnapshots: 1,
   epochMaxBytes: 1_000_000_000,
-  historyViewMaxBytes: 1,
-  historyViewRetainFrames: 1,
   materializePeriodFrames: 1_000,
   canonicalHashPeriodFrames: 1,
   accountMerkleRadix: 16,
@@ -192,12 +188,6 @@ describe('real process storage crash recovery', () => {
       if (!restored) throw new Error('real crash fixture did not restore');
       try {
         expect(restored.state.height).toBe(2);
-        expect(
-          (await readHistoryViewHead(
-            getHistoryViewDb(restored),
-            resolveStorageRuntimeConfig(restored),
-          )).latestHeight,
-        ).toBe(2);
         const signerA = deriveSignerAddressSync(seed, '1').toLowerCase();
         const signerB = deriveSignerAddressSync(seed, '2').toLowerCase();
         const entityId = generateNumberedEntityId(2).toLowerCase();
@@ -313,7 +303,7 @@ describe('real process storage crash recovery', () => {
         expect(historyHead?.latestHeight).toBe(2);
         const frame = await readStorageFrameRecord(historyDb, 2);
         expect(frame?.canonicalStateHash).toBe(computeCanonicalStateHashFromEnv(restored));
-        await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
+        await recoverStorageDbFromWal({ db: currentDb, walDb: historyDb, config });
         expect(await readStorageHead(currentDb)).toEqual(historyHead);
         expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerB))).toBeNull();
         expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerA))).toBeNull();
@@ -464,7 +454,7 @@ describe('real process storage crash recovery', () => {
     try {
       const historyDb = getRuntimeWalDb(restored);
       const currentDb = getRuntimeStorageDb(restored);
-      const recovery = await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
+      const recovery = await recoverStorageDbFromWal({ db: currentDb, walDb: historyDb, config });
       expect(recovery.recovered).toBe(true);
       expect(await readStorageHead(currentDb)).toEqual(await readStorageHead(historyDb));
 

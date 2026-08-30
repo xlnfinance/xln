@@ -30,8 +30,6 @@ import type { DecodedRuntimeEntityInputsEnvelope } from '../../../../network/p2p
 import type { DecodedRuntimeInput } from '../../../../runtime/decode';
 import type { DecodedJInput, DecodedJTx } from '../../../../storage/wal/runtime-machine-schema/j';
 import {
-  parseHistoryViewAccountFrameKey,
-  parseHistoryViewEntityFrameKey,
   parseSnapshotEntityKey,
 } from '../../../../storage/keys';
 import type { DecodedAccountFrame } from '../../../../account/validation/frame-validation';
@@ -67,8 +65,6 @@ type RuntimeIngressTargetIsRuntime = Expect<Equal<NonNullable<DecodedRuntimeInpu
 type WalJurisdictionIsJId = Expect<Equal<DecodedJInput['jurisdictionName'], JId>>;
 type WalJTxClockIsUnixMs = Expect<Equal<DecodedJTx['timestamp'], UnixMs>>;
 type StorageRuntimeHeight = Expect<Equal<ReturnType<typeof parseSnapshotEntityKey>['height'], RuntimeHeight>>;
-type StorageEntityHeight = Expect<Equal<ReturnType<typeof parseHistoryViewEntityFrameKey>['entityHeight'], EntityHeight>>;
-type StorageAccountHeight = Expect<Equal<ReturnType<typeof parseHistoryViewAccountFrameKey>['accountHeight'], AccountHeight>>;
 type DistinctFrameAndStateHashes = Expect<NotEqual<FrameHash, StateHash>>;
 type DistinctEvidenceAndFrameHashes = Expect<NotEqual<EvidenceHash, FrameHash>>;
 type AccountDecoderMintsHeight = Expect<Equal<DecodedAccountFrame['height'], AccountHeight>>;
@@ -110,8 +106,6 @@ export const fintsPositiveProtocolBrands = (): readonly [
   WalJurisdictionIsJId,
   WalJTxClockIsUnixMs,
   StorageRuntimeHeight,
-  StorageEntityHeight,
-  StorageAccountHeight,
   DistinctFrameAndStateHashes,
   DistinctEvidenceAndFrameHashes,
   AccountDecoderMintsHeight,
@@ -134,8 +128,6 @@ export const fintsPositiveProtocolBrands = (): readonly [
   toFrameHash(`0x${'33'.repeat(32)}`),
   toStateHash(`0x${'44'.repeat(32)}`),
   toEvidenceHash(`0x${'55'.repeat(32)}`),
-  true,
-  true,
   true,
   true,
   true,

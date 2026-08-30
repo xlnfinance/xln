@@ -230,7 +230,25 @@ const planRemoteEntityOutput = (
       ' txTypes=' + (output.entityTxs || []).map(tx => tx.type).join(','),
     );
   }
-  if (entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
+  const runtimeOutput = output.entityTxs?.length === 1 &&
+    output.entityTxs[0]?.type === 'runtimeOutput'
+    ? output.entityTxs[0]
+    : null;
+  if (runtimeOutput) {
+    const signerBoundRuntimeId = normalizeRuntimeId(
+      deps.resolveRuntimeIdForCrossJurisdictionEntity(
+        env,
+        output.entityId,
+        output.signerId,
+      ) || '',
+    );
+    if (!signerBoundRuntimeId || signerBoundRuntimeId !== targetRuntimeId) {
+      throw new Error(
+        `CROSS_J_RUNTIME_OUTPUT_TARGET_UNVERIFIED:${output.entityId}:` +
+          `${output.signerId}:${targetRuntimeId || 'missing'}`,
+      );
+    }
+  } else if (entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
     throw new Error(
       'CROSS_J_REMOTE_OUTPUT_FORBIDDEN: entity=' +
       String(output.entityId || '').toLowerCase() + ' targetRuntime=' + targetRuntimeId +

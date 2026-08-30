@@ -1,41 +1,34 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use num_bigint::BigInt;
-use xln_rscore_engine::{AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx};
+use xln_rscore_engine::{
+    AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx, SwapOfferSnapshot,
+};
 use xln_rscore_protocol::CanonicalValue;
 
 use crate::commitment::compute_commitments;
-use crate::j_events::{account_tx_kind, apply_committed_j_event_claim};
-use crate::local_financial::{
-    LocalAccountFinancialView, LocalEntityFinancialTx, apply_local_entity_financial_txs,
-};
+use crate::j_events::apply_committed_j_event_claim;
+use crate::local_financial::{LocalAccountFinancialView, apply_local_entity_financial_txs};
 use crate::orderbook::{SameJOffer, SameJOutputDelta, apply_orderbook_outputs};
 use crate::paybook::{
-    PaybookEffects, committed_htlc_lock, committed_htlc_resolve, direct_payment_forward,
-    revealed_secret_followup, timed_out_followup,
+    PaybookChanges, PaybookEffects, committed_htlc_lock, committed_htlc_resolve,
+    direct_payment_forward, revealed_secret_followup, timed_out_followup,
 };
 use crate::types::{AccountProposalWork, TargetedAccountTx};
 use crate::{
     DeterministicContext, EntityKernelError, EntityKernelOutput, EntityKernelResult,
     EntityStateSlice, JurisdictionScope, OrderedAccountCommit, SchedulerCommand,
 };
+use crate::{
+    LocalEntityOutput, LocalEntityTx, apply_cross_jurisdiction_entity_txs,
+    apply_local_entity_control_tx, authorize_runtime_output,
+};
 
-fn ensure_supported(tx: &AccountTx) -> Result<(), EntityKernelError> {
-    match tx {
-        AccountTx::AddDelta { .. }
-        | AccountTx::SetCreditLimit { .. }
-        | AccountTx::RebalancePolicy { .. }
-        | AccountTx::SwapOffer { .. }
-        | AccountTx::SwapResolve { .. }
-        | AccountTx::SwapCancelRequest { .. }
-        | AccountTx::DirectPayment { .. }
-        | AccountTx::HtlcLock(_)
-        | AccountTx::HtlcResolve(_)
-        | AccountTx::JEventClaim(_) => Ok(()),
-        _ => Err(EntityKernelError::UnsupportedAccountTx {
-            kind: account_tx_kind(tx),
-        }),
-    }
+fn profile_entity() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
 }
 
 fn hub_config_field<'a>(
@@ -151,79 +144,138 @@ fn validate_direct_outputs(outputs: &[AccountOutput]) -> Result<(), EntityKernel
     Ok(())
 }
 
+fn same_j_offer(offer: SwapOfferSnapshot) -> SameJOffer {
+    SameJOffer {
+        offer_id: offer.offer_id,
+        left_entity: offer.left_entity,
+        right_entity: offer.right_entity,
+        give_token_id: offer.give_token_id,
+        give_token_decimals: offer.give_token_decimals,
+        give_amount: offer.give_amount,
+        want_token_id: offer.want_token_id,
+        want_token_decimals: offer.want_token_decimals,
+        want_amount: offer.want_amount,
+        max_fee: offer.max_fee,
+        min_net_receive: offer.min_net_receive,
+        price_ticks: offer.price_ticks,
+        time_in_force: offer.time_in_force,
+        maker_is_left: offer.maker_is_left,
+        created_height: offer.created_height,
+        quantized_give: offer.quantized_give,
+        quantized_want: offer.quantized_want,
+        cross_jurisdiction: offer.cross_jurisdiction,
+    }
+}
+
 fn swap_offer_delta(
+    state: &mut EntityStateSlice,
     account_id: &str,
     offer_id: &str,
-    outputs: &[AccountOutput],
-) -> Result<SameJOutputDelta, EntityKernelError> {
-    let output = require_one_output(outputs, "SWAP_OFFER")?;
-    let AccountOutput::SwapOfferUpsert { offer } = output else {
+    outputs: Vec<AccountOutput>,
+) -> Result<Option<SameJOutputDelta>, EntityKernelError> {
+    let [AccountOutput::SwapOfferUpsert { offer }] = outputs.as_slice() else {
+        if outputs.len() != 1 {
+            return Err(EntityKernelError::output(format!(
+                "SWAP_OFFER:COUNT:{}",
+                outputs.len()
+            )));
+        }
         return Err(EntityKernelError::output("SWAP_OFFER_KIND"));
     };
     if offer.offer_id != offer_id {
         return Err(EntityKernelError::output("SWAP_OFFER_ID"));
     }
-    Ok(SameJOutputDelta::Upsert {
+    let AccountOutput::SwapOfferUpsert { offer } = outputs
+        .into_iter()
+        .next()
+        .ok_or_else(|| EntityKernelError::output("SWAP_OFFER:COUNT:0"))?
+    else {
+        unreachable!("validated swap offer output")
+    };
+    if let Some(route) = offer.cross_jurisdiction.as_ref() {
+        let route_id = match route {
+            xln_rscore_protocol::CanonicalValue::Object(fields) => fields
+                .iter()
+                .find_map(|(key, value)| (key == "orderId").then_some(value)),
+            _ => None,
+        }
+        .and_then(|value| match value {
+            xln_rscore_protocol::CanonicalValue::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .ok_or_else(|| EntityKernelError::output("CROSS_J_SWAP_ROUTE_ORDER_ID"))?;
+        if route_id != offer_id {
+            return Err(EntityKernelError::output("CROSS_J_SWAP_ROUTE_ID_MISMATCH"));
+        }
+        state
+            .cross_jurisdiction_swaps
+            .get_or_insert_with(crate::EntityCanonicalCollection::empty)
+            .insert(offer_id.to_string(), route.clone())?;
+        let (route_account_id, working_offer) =
+            crate::cross_j::cross_jurisdiction_working_offer(route)?;
+        if route_account_id != account_id {
+            return Err(EntityKernelError::output(
+                "CROSS_J_SWAP_SOURCE_ACCOUNT_MISMATCH",
+            ));
+        }
+        return Ok(Some(SameJOutputDelta::Upsert {
+            account_id: route_account_id,
+            offer: Box::new(working_offer),
+        }));
+    }
+    Ok(Some(SameJOutputDelta::Upsert {
         account_id: account_id.to_string(),
-        offer: Box::new(SameJOffer {
-            offer_id: offer.offer_id.clone(),
-            left_entity: offer.left_entity.clone(),
-            right_entity: offer.right_entity.clone(),
-            give_token_id: offer.give_token_id,
-            give_token_decimals: offer.give_token_decimals,
-            give_amount: offer.give_amount.clone(),
-            want_token_id: offer.want_token_id,
-            want_token_decimals: offer.want_token_decimals,
-            want_amount: offer.want_amount.clone(),
-            max_fee: offer.max_fee.clone(),
-            min_net_receive: offer.min_net_receive.clone(),
-            price_ticks: offer.price_ticks.clone(),
-            time_in_force: offer.time_in_force,
-            maker_is_left: offer.maker_is_left,
-            created_height: offer.created_height,
-            quantized_give: offer.quantized_give.clone(),
-            quantized_want: offer.quantized_want.clone(),
-        }),
-    })
+        offer: Box::new(same_j_offer(*offer)),
+    }))
 }
 
 fn swap_resolve_delta(
+    state: &mut EntityStateSlice,
     account_id: &str,
     offer_id: &str,
-    outputs: &[AccountOutput],
-) -> Result<SameJOutputDelta, EntityKernelError> {
-    match require_one_output(outputs, "SWAP_RESOLVE")? {
+    outputs: Vec<AccountOutput>,
+) -> Result<Option<SameJOutputDelta>, EntityKernelError> {
+    if outputs.len() != 1 {
+        return Err(EntityKernelError::output(format!(
+            "SWAP_RESOLVE:COUNT:{}",
+            outputs.len()
+        )));
+    }
+    match outputs
+        .into_iter()
+        .next()
+        .ok_or_else(|| EntityKernelError::output("SWAP_RESOLVE:COUNT:0"))?
+    {
         AccountOutput::SwapOfferUpsert { offer } if offer.offer_id == offer_id => {
-            Ok(SameJOutputDelta::Upsert {
+            if let Some(route) = offer.cross_jurisdiction.as_ref() {
+                state
+                    .cross_jurisdiction_swaps
+                    .get_or_insert_with(crate::EntityCanonicalCollection::empty)
+                    .insert(offer_id.to_string(), route.clone())?;
+                return Ok(None);
+            }
+            Ok(Some(SameJOutputDelta::Upsert {
                 account_id: account_id.to_string(),
-                offer: Box::new(SameJOffer {
-                    offer_id: offer.offer_id.clone(),
-                    left_entity: offer.left_entity.clone(),
-                    right_entity: offer.right_entity.clone(),
-                    give_token_id: offer.give_token_id,
-                    give_token_decimals: offer.give_token_decimals,
-                    give_amount: offer.give_amount.clone(),
-                    want_token_id: offer.want_token_id,
-                    want_token_decimals: offer.want_token_decimals,
-                    want_amount: offer.want_amount.clone(),
-                    max_fee: offer.max_fee.clone(),
-                    min_net_receive: offer.min_net_receive.clone(),
-                    price_ticks: offer.price_ticks.clone(),
-                    time_in_force: offer.time_in_force,
-                    maker_is_left: offer.maker_is_left,
-                    created_height: offer.created_height,
-                    quantized_give: offer.quantized_give.clone(),
-                    quantized_want: offer.quantized_want.clone(),
-                }),
-            })
+                offer: Box::new(same_j_offer(*offer)),
+            }))
         }
         AccountOutput::SwapOfferRemove {
             offer_id: output_id,
             maker_is_left: _,
-        } if output_id == offer_id => Ok(SameJOutputDelta::Remove {
-            account_id: account_id.to_string(),
-            offer_id: offer_id.to_string(),
-        }),
+        } if output_id == offer_id => {
+            if state
+                .cross_jurisdiction_swaps
+                .as_ref()
+                .is_some_and(|routes| routes.get(offer_id).is_some())
+            {
+                Ok(None)
+            } else {
+                Ok(Some(SameJOutputDelta::Remove {
+                    account_id: account_id.to_string(),
+                    offer_id: output_id,
+                }))
+            }
+        }
         _ => Err(EntityKernelError::output("SWAP_RESOLVE_KIND_OR_ID")),
     }
 }
@@ -273,47 +325,122 @@ fn htlc_output<'a>(
 
 fn preapply_resolves(
     state: &mut EntityStateSlice,
-    commit: &OrderedAccountCommit,
+    paybook: &mut PaybookChanges,
+    commit: &mut OrderedAccountCommit,
     jurisdiction_id: Option<&str>,
     outputs: &mut Vec<EntityKernelOutput>,
     account_txs: &mut Vec<TargetedAccountTx>,
-) -> Result<(), EntityKernelError> {
+) -> Result<(Vec<AccountOutput>, Vec<AccountOutput>), EntityKernelError> {
     let mut effects = PaybookEffects {
         account_txs,
         outputs,
     };
-    for transition in &commit.transitions {
+    let mut retained = Vec::with_capacity(commit.transitions.len());
+    let mut timed_out = Vec::new();
+    let mut revealed = Vec::new();
+    for transition in std::mem::take(&mut commit.transitions) {
         let AccountTx::HtlcResolve(tx) = &transition.tx else {
+            retained.push(transition);
             continue;
         };
         let output = htlc_output(tx, &transition.outputs)?;
         committed_htlc_resolve(
             state,
+            paybook,
             &commit.account_id,
             output,
             jurisdiction_id,
             &mut effects,
         )?;
+        let output = transition
+            .outputs
+            .into_iter()
+            .next()
+            .ok_or_else(|| EntityKernelError::output("HTLC_RESOLVE_OUTPUT_MISSING"))?;
+        match output {
+            AccountOutput::HtlcSecret { .. } => revealed.push(output),
+            AccountOutput::HtlcError { .. } => timed_out.push(output),
+            _ => return Err(EntityKernelError::output("HTLC_RESOLVE_KIND_OR_ID")),
+        }
     }
-    Ok(())
+    commit.transitions = retained;
+    Ok((timed_out, revealed))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn apply_commit_transitions(
     state: &mut EntityStateSlice,
-    commit: &OrderedAccountCommit,
+    paybook: &mut PaybookChanges,
+    commit: &mut OrderedAccountCommit,
     context: &DeterministicContext,
     consumed_htlcs: &mut BTreeSet<(String, String)>,
     deltas: &mut Vec<SameJOutputDelta>,
     account_txs: &mut Vec<TargetedAccountTx>,
     outputs: &mut Vec<EntityKernelOutput>,
+    routed_entity_outputs: &mut Vec<LocalEntityOutput>,
     created_accounts: &BTreeSet<String>,
+    timed_out: Vec<AccountOutput>,
+    revealed: Vec<AccountOutput>,
+    local_account_views: &BTreeMap<String, LocalAccountFinancialView>,
 ) -> Result<(), EntityKernelError> {
     let mut direct_forwards = Vec::new();
-    let mut timed_out = Vec::new();
-    let mut revealed = Vec::new();
-    for transition in &commit.transitions {
-        ensure_supported(&transition.tx)?;
+    let initial_policy_txs = initial_hub_policy_txs(state, commit, created_accounts)?;
+    let transitions = std::mem::take(&mut commit.transitions);
+    let last_settlement_transition = transitions
+        .iter()
+        .rposition(|transition| matches!(transition.tx, AccountTx::SettleTransition { .. }));
+    let local_is_left = state.entity_id.as_str() < commit.account_id.as_str();
+    let proposer_is_left = if commit.committed_via_new_frame {
+        !local_is_left
+    } else {
+        local_is_left
+    };
+    for (transition_index, mut transition) in transitions.into_iter().enumerate() {
+        if crate::local_financial::apply_committed_settlement_followup(
+            state,
+            &commit.account_id,
+            &transition.tx,
+            last_settlement_transition == Some(transition_index),
+            proposer_is_left,
+            local_account_views.get(&commit.account_id),
+        )? {
+            if !transition.outputs.is_empty() {
+                return Err(EntityKernelError::output(format!(
+                    "SETTLEMENT_COMMITTED_OUTPUTS:{}",
+                    transition.outputs.len()
+                )));
+            }
+            continue;
+        }
+        if crate::lending::apply_committed_lending_followup(
+            state,
+            commit,
+            &transition,
+            local_account_views.get(&commit.account_id),
+            account_txs,
+        )? {
+            continue;
+        }
+        if let Some(applied) = crate::cross_j::apply_committed_account_tx_followup(
+            state,
+            &commit.account_id,
+            commit.frame_timestamp,
+            &transition.tx,
+        )? {
+            if !transition.outputs.is_empty() {
+                return Err(EntityKernelError::output(format!(
+                    "CROSS_J_COMMITTED_OUTPUTS:{}:{}",
+                    transition.tx.wire_name(),
+                    transition.outputs.len(),
+                )));
+            }
+            deltas.extend(applied.orderbook_deltas);
+            for work in applied.proposal_work {
+                account_txs.extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
+            }
+            routed_entity_outputs.extend(applied.outputs);
+            continue;
+        }
         let mut effects = PaybookEffects {
             account_txs,
             outputs,
@@ -321,42 +448,64 @@ fn apply_commit_transitions(
         match &transition.tx {
             AccountTx::DirectPayment { .. } => {
                 validate_direct_outputs(&transition.outputs)?;
-                direct_forwards.extend(transition.outputs.iter().cloned());
+                direct_forwards.extend(std::mem::take(&mut transition.outputs));
             }
             AccountTx::HtlcLock(tx) => {
                 if !transition.outputs.is_empty() {
                     return Err(EntityKernelError::output("HTLC_LOCK_OUTPUTS"));
                 }
-                committed_htlc_lock(state, commit, tx, context, consumed_htlcs, &mut effects)?;
+                committed_htlc_lock(
+                    state,
+                    paybook,
+                    commit,
+                    tx,
+                    context,
+                    consumed_htlcs,
+                    &mut effects,
+                )?;
             }
-            AccountTx::HtlcResolve(tx) => {
-                let output = htlc_output(tx, &transition.outputs)?.clone();
-                match output {
-                    AccountOutput::HtlcSecret { .. } => revealed.push(output),
-                    AccountOutput::HtlcError { .. } => timed_out.push(output),
-                    _ => return Err(EntityKernelError::output("HTLC_RESOLVE_KIND_OR_ID")),
+            AccountTx::HtlcResolve(_) => unreachable!("resolve transitions were pre-applied"),
+            AccountTx::SwapOffer { offer_id, .. } => {
+                if let Some(delta) = swap_offer_delta(
+                    state,
+                    &commit.account_id,
+                    offer_id,
+                    std::mem::take(&mut transition.outputs),
+                )? {
+                    deltas.push(delta);
                 }
             }
-            AccountTx::SwapOffer { offer_id, .. } => {
-                deltas.push(swap_offer_delta(
-                    &commit.account_id,
-                    offer_id,
-                    &transition.outputs,
-                )?);
-            }
             AccountTx::SwapResolve { offer_id, .. } => {
-                deltas.push(swap_resolve_delta(
+                if let Some(delta) = swap_resolve_delta(
+                    state,
                     &commit.account_id,
                     offer_id,
-                    &transition.outputs,
-                )?);
+                    std::mem::take(&mut transition.outputs),
+                )? {
+                    deltas.push(delta);
+                }
             }
             AccountTx::SwapCancelRequest { offer_id } => {
-                deltas.push(swap_cancel_delta(
-                    &commit.account_id,
-                    offer_id,
-                    &transition.outputs,
-                )?);
+                if state
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .is_some_and(|routes| routes.get(offer_id).is_some())
+                {
+                    // Cross-j cancellation stays in the route/book lifecycle;
+                    // it must never delete a coincident same-J order key.
+                    if transition.outputs.len() != 1 {
+                        return Err(EntityKernelError::output(format!(
+                            "CROSS_J_SWAP_CANCEL:COUNT:{}",
+                            transition.outputs.len()
+                        )));
+                    }
+                } else {
+                    deltas.push(swap_cancel_delta(
+                        &commit.account_id,
+                        offer_id,
+                        &transition.outputs,
+                    )?);
+                }
             }
             AccountTx::JEventClaim(claim) => {
                 apply_committed_j_event_claim(
@@ -369,20 +518,43 @@ fn apply_commit_transitions(
             }
             AccountTx::AddDelta { .. }
             | AccountTx::SetCreditLimit { .. }
+            | AccountTx::ReserveToCollateral { .. }
+            | AccountTx::RequestCollateral { .. }
+            | AccountTx::RebalanceRefund { .. }
             | AccountTx::RebalancePolicy { .. } => {
                 if !transition.outputs.is_empty() {
                     return Err(EntityKernelError::output("STATE_ONLY_TX_OUTPUTS"));
                 }
             }
-            _ => {
-                return Err(EntityKernelError::UnsupportedAccountTx {
-                    kind: account_tx_kind(&transition.tx),
-                });
+            AccountTx::LendingFund { .. }
+            | AccountTx::LendingBorrowRequest { .. }
+            | AccountTx::LendingRepay { .. }
+            | AccountTx::LendingCredit { .. }
+            | AccountTx::LendingCloseRequest { .. }
+            | AccountTx::LendingClosePayout { .. } => {
+                return Err(EntityKernelError::lending(format!(
+                    "COMMITTED_FOLLOWUP_NOT_HANDLED:{}",
+                    transition.tx.wire_name()
+                )));
+            }
+            AccountTx::CrossPullLock { .. }
+            | AccountTx::CrossPullClose { .. }
+            | AccountTx::CrossPullProgress { .. }
+            | AccountTx::CrossSwapFillAck { .. } => {
+                return Err(EntityKernelError::output(format!(
+                    "CROSS_J_COMMITTED_FOLLOWUP_NOT_HANDLED:{}",
+                    transition.tx.wire_name()
+                )));
+            }
+            AccountTx::SettleTransition { .. } => {
+                return Err(EntityKernelError::output(
+                    "SETTLEMENT_COMMITTED_FOLLOWUP_NOT_HANDLED",
+                ));
             }
         }
     }
     account_txs.extend(
-        initial_hub_policy_txs(state, commit, created_accounts)?
+        initial_policy_txs
             .into_iter()
             .map(|tx| (commit.account_id.clone(), tx)),
     );
@@ -397,11 +569,12 @@ fn apply_commit_transitions(
         direct_payment_forward(state, output, &mut effects)?;
     }
     for output in &timed_out {
-        timed_out_followup(state, output, &mut effects)?;
+        timed_out_followup(state, paybook, output, &mut effects)?;
     }
     for output in &revealed {
         revealed_secret_followup(
             state,
+            paybook,
             output,
             context.jurisdiction_id.as_deref(),
             &mut effects,
@@ -428,7 +601,9 @@ fn validate_commit(
 }
 
 fn group_proposal_work(account_txs: Vec<TargetedAccountTx>) -> Vec<AccountProposalWork> {
-    let mut positions = BTreeMap::<String, usize>::new();
+    // The map is lookup-only; canonical proposal order lives in `grouped`, so
+    // randomized hash iteration can never affect committed bytes.
+    let mut positions = HashMap::<String, usize>::new();
     let mut grouped = Vec::<AccountProposalWork>::new();
     for (account_id, tx) in account_txs {
         if let Some(index) = positions.get(&account_id).copied() {
@@ -473,52 +648,258 @@ fn append_scheduled_account_txs(
 
 pub(crate) struct EntityTransitionResult {
     pub(crate) state: EntityStateSlice,
+    pub(crate) account_creates: Vec<xln_rscore_batch::AccountSeed>,
     pub(crate) proposal_work: Vec<AccountProposalWork>,
     pub(crate) outputs: Vec<EntityKernelOutput>,
     pub(crate) local_events: Vec<crate::EntityFrameEvent>,
     pub(crate) non_mutating_wake_targets: Vec<String>,
+    pub(crate) routed_entity_outputs: Vec<LocalEntityOutput>,
+    pub(crate) j_outputs: Vec<crate::EntityJOutput>,
+    pub(crate) local_hashes_to_sign: Vec<crate::HashToSign>,
+    pub(crate) account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
+    pub(crate) paybook_changes: PaybookChanges,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the canonical pure Entity transition keeps all input branches explicit"
+)]
 pub(crate) fn apply_entity_transitions(
     mut state: EntityStateSlice,
-    commits: &[OrderedAccountCommit],
+    commits: Vec<OrderedAccountCommit>,
     created_accounts: &BTreeSet<String>,
-    local_txs: Vec<LocalEntityFinancialTx>,
+    local_txs: Vec<crate::AdmittedLocalEntityTx>,
     local_account_views: &BTreeMap<String, LocalAccountFinancialView>,
+    local_account_genesis_policy: Option<&xln_rscore_batch::EntityAccountGenesisPolicy>,
+    entity_authority: Option<&crate::EntityFrameAuthority>,
+    runtime_seed: Option<&str>,
     context: &DeterministicContext,
     scheduled_commands: &[SchedulerCommand],
 ) -> Result<EntityTransitionResult, EntityKernelError> {
+    let total_started = Instant::now();
+    let profile = profile_entity();
+    let paybook_rows_before = state.paybook.entries.len();
+    // This cardinality exists only for the opt-in profiler. Keeping the scan
+    // outside the guard made ordinary production walk every committed Account
+    // transition once before the real Entity transition began.
+    let (
+        transition_count,
+        resolve_transition_count,
+        resolve_commit_count,
+        lock_transition_count,
+        lock_new_frame_count,
+        lock_envelope_count,
+    ) = if profile {
+        commits.iter().fold(
+            (0_usize, 0_usize, 0_usize, 0_usize, 0_usize, 0_usize),
+            |(transitions, resolves, resolve_commits, locks, new_locks, enveloped_locks),
+             commit| {
+                let commit_resolves = commit
+                    .transitions
+                    .iter()
+                    .filter(|transition| matches!(transition.tx, AccountTx::HtlcResolve(_)))
+                    .count();
+                let (commit_locks, commit_enveloped_locks) = commit.transitions.iter().fold(
+                    (0_usize, 0_usize),
+                    |(locks, enveloped), transition| match &transition.tx {
+                        AccountTx::HtlcLock(tx) => (
+                            locks.saturating_add(1),
+                            enveloped.saturating_add(usize::from(tx.envelope.is_some())),
+                        ),
+                        _ => (locks, enveloped),
+                    },
+                );
+                (
+                    transitions.saturating_add(commit.transitions.len()),
+                    resolves.saturating_add(commit_resolves),
+                    resolve_commits.saturating_add(usize::from(commit_resolves > 0)),
+                    locks.saturating_add(commit_locks),
+                    new_locks.saturating_add(if commit.committed_via_new_frame {
+                        commit_locks
+                    } else {
+                        0
+                    }),
+                    enveloped_locks.saturating_add(commit_enveloped_locks),
+                )
+            },
+        )
+    } else {
+        (0, 0, 0, 0, 0, 0)
+    };
     let mut deltas = Vec::new();
     let mut account_txs = Vec::new();
     let mut outputs = Vec::new();
+    let mut routed_entity_outputs = Vec::new();
     let mut consumed_htlcs = BTreeSet::new();
-    for commit in commits {
-        validate_commit(&state, commit)?;
-        preapply_resolves(
+    let mut paybook_changes = PaybookChanges::default();
+    let mut preapply_elapsed = Duration::ZERO;
+    let mut apply_elapsed = Duration::ZERO;
+    let commit_count = commits.len();
+    for mut commit in commits {
+        validate_commit(&state, &commit)?;
+        let started = profile.then(Instant::now);
+        let (timed_out, revealed) = preapply_resolves(
             &mut state,
-            commit,
+            &mut paybook_changes,
+            &mut commit,
             context.jurisdiction_id.as_deref(),
             &mut outputs,
             &mut account_txs,
         )?;
+        if let Some(started) = started {
+            preapply_elapsed = preapply_elapsed.saturating_add(started.elapsed());
+        }
+        let started = profile.then(Instant::now);
         apply_commit_transitions(
             &mut state,
-            commit,
+            &mut paybook_changes,
+            &mut commit,
             context,
             &mut consumed_htlcs,
             &mut deltas,
             &mut account_txs,
             &mut outputs,
+            &mut routed_entity_outputs,
             created_accounts,
+            timed_out,
+            revealed,
+            local_account_views,
         )?;
+        if let Some(started) = started {
+            apply_elapsed = apply_elapsed.saturating_add(started.elapsed());
+        }
     }
+    let local_started = Instant::now();
+    let mut local_account_txs = Vec::new();
+    let mut local_outputs = Vec::new();
+    let mut local_events = Vec::new();
+    let mut local_wake_targets = Vec::new();
+    let mut j_outputs = Vec::new();
+    let mut local_hashes_to_sign = Vec::new();
+    let mut account_envelope_mutations = Vec::new();
+    let mut account_creates = Vec::new();
+    let mut local_txs = std::collections::VecDeque::from(local_txs);
+    while let Some(admitted) = local_txs.pop_front() {
+        let signer_id = admitted.signer_id;
+        let board_epoch = admitted.board_epoch;
+        match admitted.tx {
+            LocalEntityTx::Financial(tx) => {
+                let applied = apply_local_entity_financial_txs(
+                    &mut state,
+                    &mut paybook_changes,
+                    vec![tx],
+                    context,
+                    local_account_views,
+                    local_account_genesis_policy,
+                    runtime_seed,
+                )?;
+                account_creates.extend(applied.account_creates);
+                local_account_txs.extend(applied.account_txs);
+                local_outputs.extend(applied.outputs);
+                local_events.extend(applied.events);
+                local_wake_targets.extend(applied.wake_targets);
+                account_envelope_mutations.extend(applied.envelope_mutations);
+                routed_entity_outputs.extend(applied.routed_entity_outputs);
+            }
+            LocalEntityTx::Control(tx) => {
+                let authority = entity_authority.ok_or_else(|| {
+                    EntityKernelError::local("proposal", "ENTITY_GOVERNANCE_AUTHORITY_REQUIRED")
+                })?;
+                let applied = apply_local_entity_control_tx(
+                    &mut state,
+                    tx,
+                    &mut local_events,
+                    authority,
+                    board_epoch,
+                )?;
+                j_outputs.extend(applied.j_outputs);
+                local_hashes_to_sign.extend(applied.hashes_to_sign);
+                for approved in applied.approved_entity_txs.into_iter().rev() {
+                    local_txs.push_front(crate::AdmittedLocalEntityTx {
+                        signer_id: signer_id.clone(),
+                        board_epoch,
+                        tx: approved,
+                    });
+                }
+            }
+            LocalEntityTx::CrossJurisdiction(tx) => {
+                let authority = entity_authority.ok_or_else(|| {
+                    EntityKernelError::local("crossJurisdiction", "ENTITY_AUTHORITY_REQUIRED")
+                })?;
+                let applied = apply_cross_jurisdiction_entity_txs(
+                    &mut state,
+                    local_account_views,
+                    &[tx],
+                    Some(&signer_id),
+                    authority,
+                )?;
+                deltas.extend(applied.orderbook_deltas);
+                for work in applied.proposal_work {
+                    for tx in work.txs {
+                        local_account_txs.push((work.account_id.clone(), tx));
+                    }
+                }
+                account_envelope_mutations.extend(applied.account_envelope_mutations);
+                routed_entity_outputs.extend(applied.outputs);
+            }
+            LocalEntityTx::RuntimeOutput(output) => {
+                // Authorization observes the pre-output state, exactly like TS
+                // applyRuntimeOutput. Only after the entire wrapper is proven
+                // do its nested transactions execute in their original order.
+                let authority = entity_authority.ok_or_else(|| {
+                    EntityKernelError::local("runtimeOutput", "ENTITY_AUTHORITY_REQUIRED")
+                })?;
+                authorize_runtime_output(&state, &output, authority)?;
+                // Re-enter the one canonical Entity dispatcher. In particular,
+                // nested disputeStart is the same financial transition as a
+                // locally admitted disputeStart; sending the whole wrapper to
+                // cross_j used to strand it behind a second, incomplete path.
+                for nested in output.entity_txs.into_iter().rev() {
+                    let decoded = crate::decode_local_entity_tx(&nested)?.ok_or_else(|| {
+                        EntityKernelError::local(
+                            "runtimeOutput",
+                            format!("NESTED_TX_UNSUPPORTED:{}", nested.kind.as_str()),
+                        )
+                    })?;
+                    if matches!(decoded, LocalEntityTx::RuntimeOutput(_)) {
+                        return Err(EntityKernelError::local(
+                            "runtimeOutput",
+                            "NESTED_RUNTIME_OUTPUT_FORBIDDEN",
+                        ));
+                    }
+                    local_txs.push_front(crate::AdmittedLocalEntityTx {
+                        signer_id: signer_id.clone(),
+                        board_epoch,
+                        tx: decoded,
+                    });
+                }
+            }
+        }
+    }
+    let mut seen_wake_targets = BTreeSet::new();
+    local_wake_targets.retain(|target| seen_wake_targets.insert(target.clone()));
+    let local_elapsed = local_started.elapsed();
+    account_txs.extend(local_account_txs);
+    outputs.extend(local_outputs);
     if !deltas.is_empty() && state.orderbook.is_none() {
         return Err(EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"));
     }
+    // TS applies every Account output and EntityTx before matching. Cross-j
+    // admission can therefore publish a working order in this same frame.
+    // One shared matcher then consumes cross-j first and same-J second.
+    let orderbook_started = Instant::now();
     if let Some(orderbook) = &mut state.orderbook {
         let orderbook_effects =
             apply_orderbook_outputs(orderbook, &deltas, context, &state.entity_id)?;
         account_txs.extend(orderbook_effects.account_txs);
+        routed_entity_outputs.extend(orderbook_effects.routed_entity_outputs);
+        for fill in orderbook_effects.cross_jurisdiction_fills {
+            let applied = crate::cross_j::commit_cross_jurisdiction_book_fill(&mut state, fill)?;
+            for work in applied.proposal_work {
+                account_txs.extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
+            }
+            routed_entity_outputs.extend(applied.outputs);
+        }
         if orderbook_effects.matched_swaps > 0 {
             outputs.push(EntityKernelOutput::SwapMatched {
                 entity_id: state.entity_id.clone(),
@@ -526,18 +907,47 @@ pub(crate) fn apply_entity_transitions(
             });
         }
     }
-    let local =
-        apply_local_entity_financial_txs(&mut state, local_txs, context, local_account_views)?;
-    account_txs.extend(local.account_txs);
-    outputs.extend(local.outputs);
+    let orderbook_elapsed = orderbook_started.elapsed();
+    let group_started = Instant::now();
     append_scheduled_account_txs(scheduled_commands, &mut account_txs)?;
+    let account_tx_count = account_txs.len();
     let proposal_work = group_proposal_work(account_txs);
+    let group_elapsed = group_started.elapsed();
+    if profile {
+        eprintln!(
+            "RSCORE_ENTITY_TRANSITION_PHASE preapply={} apply={} orderbook={} local={} group={} total={} commits={} transitions={} resolveTransitions={} resolveCommits={} lockTransitions={} lockNewFrames={} lockEnvelopes={} deltas={} accountTxs={} proposals={} paybookBefore={} paybookMutations={}",
+            preapply_elapsed.as_micros(),
+            apply_elapsed.as_micros(),
+            orderbook_elapsed.as_micros(),
+            local_elapsed.as_micros(),
+            group_elapsed.as_micros(),
+            total_started.elapsed().as_micros(),
+            commit_count,
+            transition_count,
+            resolve_transition_count,
+            resolve_commit_count,
+            lock_transition_count,
+            lock_new_frame_count,
+            lock_envelope_count,
+            deltas.len(),
+            account_tx_count,
+            proposal_work.len(),
+            paybook_rows_before,
+            paybook_changes.mutation_count(),
+        );
+    }
     Ok(EntityTransitionResult {
         state,
+        account_creates,
         proposal_work,
         outputs,
-        local_events: local.events,
-        non_mutating_wake_targets: local.wake_targets,
+        local_events,
+        non_mutating_wake_targets: local_wake_targets,
+        routed_entity_outputs,
+        j_outputs,
+        local_hashes_to_sign,
+        account_envelope_mutations,
+        paybook_changes,
     })
 }
 
@@ -546,15 +956,19 @@ pub fn apply_entity_kernel(
     commits: &[OrderedAccountCommit],
     context: &DeterministicContext,
 ) -> Result<EntityKernelResult, EntityKernelError> {
-    let result = apply_entity_transitions(
+    let mut result = apply_entity_transitions(
         state,
-        commits,
+        commits.to_vec(),
         &BTreeSet::new(),
         Vec::new(),
         &BTreeMap::new(),
+        None,
+        None,
+        None,
         context,
         &[],
     )?;
+    std::mem::take(&mut result.paybook_changes).commit_sequential(&mut result.state)?;
     let commitments = compute_commitments(&result.state, &result.proposal_work, &result.outputs)?;
     Ok(EntityKernelResult {
         state: result.state,

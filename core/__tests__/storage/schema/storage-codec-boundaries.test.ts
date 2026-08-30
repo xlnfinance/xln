@@ -1,105 +1,36 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { rmSync } from 'fs';
+import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
-import { Level } from 'level';
 
-import type { AccountFrame } from '../../../types/account';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 import { decodeBuffer, encodeBuffer, writeBatch } from '../../../storage/codec/codec';
 import {
-  readHistoryViewAccountFrames,
-  readHistoryViewHead,
-  readHistoryViewRuntimeActivity,
-  type StoredAccountFrameValue,
-} from '../../../storage/history/history-view';
-import {
-  KEY_HISTORY_VIEW_HEAD,
-  STORAGE_SCHEMA_VERSION,
   decodeEntityId,
   hexBytes,
   keyCertifiedBoardNodePrefix,
-  keyHistoryViewAccountFrame,
-  keyHistoryViewEntityFrame,
-  keyHistoryViewRuntimeActivity,
   keyLiveAccount,
   keyLiveBook,
   keyLiveEntity,
   keyLiveReplicaMeta,
   keySnapshotAccountPrefix,
   keySnapshotEntity,
-  parseHistoryViewAccountFrameKey,
-  parseHistoryViewEntityFrameKey,
   parseLiveAccountKey,
   parseLiveBookKey,
   parseSnapshotAccountKey,
   parseSnapshotEntityKey,
 } from '../../../storage/keys';
-import type { RuntimeDbLike, StorageRuntimeConfig } from '../../../storage/types';
 
-const tempPaths: string[] = [];
-const zeroHash = `0x${'00'.repeat(32)}`;
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
 
-// XLN_BINARY_FORMAT_V2 (magic 0x03): standard MessagePack via msgpackr with
-// moreTypes and WITHOUT structured-clone reference markers, Buffer folded into
-// Uint8Array. Pinned bytes: changing a literal requires a new codec magic plus
-// a storage schema bump; never "refresh" these after a refactor.
-// Changing a literal requires a new codec magic/storage schema version plus an
-// independently reviewed vector; never "refresh" these after a refactor.
-const GOLDEN_MSGPACK_V1_HEX =
+// The only binary format: canonical MessagePack via msgpackr with moreTypes,
+// no reference markers, and Buffer folded into Uint8Array.
+const GOLDEN_MSGPACK_HEX =
   '03d4724098a6626967696e74a6627566666572a464617465a36d6170a66f626a656374a3736574a57479706564a776657273696f6e' +
   'cfab54a98ceb1f0ad2c70574010001feffd7ffa1a5d60065937d2582a161d30000000000000001a17ad30000000000000002d4724192' +
   'a161a17aa17802d4730092a161a17ac704740109080701';
-const GOLDEN_JSON_V1_BODY =
-  '{"bigint":{"__xlnType":"BigInt","value":"12345678901234567890"},' +
-  '"buffer":{"__xlnType":"TypedArray","kind":"Uint8Array","value":"AAH+/w=="},' +
-  '"date":{"__xlnType":"Date","value":"2024-01-02T03:04:05.678Z"},' +
-  '"map":{"__xlnType":"Map","value":[["a",{"__xlnType":"BigInt","value":"1"}],["z",{"__xlnType":"BigInt","value":"2"}]]},' +
-  '"object":{"a":"x","z":2},"set":{"__xlnType":"Set","value":["a","z"]},' +
-  '"typed":{"__xlnType":"TypedArray","kind":"Uint8Array","value":"CQgH"},"version":1}';
-const GOLDEN_HASHES_V1 = {
-  msgpack: '0x6a2608adeb9078a0bec8693b5a8a72827d7f1a0324d3ee3a001f74c8348dd080',
-  json: '0x03aad9703a471b8347d48e6f13e00d6eb3a3ddc165de9bf9e13c2e08809ae6b7',
-  frameMsgpack: '0x2535f1b32ce8e1e368534afa3df6f40578806848dd708e71c7d3106d6fb5dd1d',
-  frameJson: '0x863eef139d80887612e7291b04bfec5cbb8f596ef028bbd42610866d672fed7b',
-} as const;
+const GOLDEN_MSGPACK_HASH = '0x6a2608adeb9078a0bec8693b5a8a72827d7f1a0324d3ee3a001f74c8348dd080';
 
-const storageConfig: Required<StorageRuntimeConfig> = {
-  snapshotPeriodFrames: 100,
-  materializePeriodFrames: 1,
-  retainSnapshots: 2,
-  maxStateBytes: 1024 * 1024,
-  warningStateBytes: 512 * 1024,
-  maxReplayBytes: 1024 * 1024,
-  historyViewMaxBytes: 1024 * 1024,
-  historyViewRetainFrames: 100,
-};
-
-const openDb = async (label: string): Promise<Level<Buffer, Buffer>> => {
-  const path = `/tmp/xln-storage-codec-${label}-${process.pid}-${Date.now()}`;
-  tempPaths.push(path);
-  const db = new Level<Buffer, Buffer>(path, {
-    keyEncoding: 'buffer',
-    valueEncoding: 'buffer',
-  });
-  await db.open();
-  return db;
-};
-
-const validFrame = (): AccountFrame => ({
-  height: 2,
-  timestamp: 123,
-  jHeight: 7,
-  accountTxs: [],
-  prevFrameHash: zeroHash,
-  accountStateRoot: zeroHash,
-  stateHash: zeroHash,
-  byLeft: true,
-  deltas: [],
-});
-
-const goldenCodecValueV1 = () => ({
+const goldenCodecValue = () => ({
   version: 1,
   object: { z: 2, a: 'x' },
   map: new Map([['z', 2n], ['a', 1n]]),
@@ -108,17 +39,6 @@ const goldenCodecValueV1 = () => ({
   buffer: Buffer.from([0, 1, 254, 255]),
   typed: new Uint8Array([9, 8, 7]),
   date: new Date('2024-01-02T03:04:05.678Z'),
-});
-
-const goldenFrameV1 = (): StoredAccountFrameValue => ({
-  source: 'ackCommit',
-  frame: validFrame(),
-  runtimeHeight: 8,
-  timestamp: 456,
-});
-
-afterEach(() => {
-  for (const path of tempPaths.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
 describe('canonical binary codec', () => {
@@ -160,8 +80,6 @@ describe('canonical binary codec', () => {
   test('all fixed-width storage key parsers reject wrong tags, truncation, and trailing bytes', () => {
     const validKeys: Array<[Buffer, (key: Buffer) => unknown]> = [
       [keyLiveAccount(entityId, counterpartyId), parseLiveAccountKey],
-      [keyHistoryViewEntityFrame(entityId, 7), parseHistoryViewEntityFrameKey],
-      [keyHistoryViewAccountFrame(entityId, counterpartyId, 7), parseHistoryViewAccountFrameKey],
       [keySnapshotEntity(8, entityId), parseSnapshotEntityKey],
       [Buffer.concat([keySnapshotAccountPrefix(8, entityId), hexBytes(counterpartyId)]), parseSnapshotAccountKey],
     ];
@@ -215,25 +133,11 @@ describe('canonical binary codec', () => {
     });
   });
 
-  test('matches independent XLN_BINARY_FORMAT_V1 bytes and hashes', () => {
-    const value = goldenCodecValueV1();
-    const msgpack = encodeBinaryPayload(value, 'msgpack');
-    const json = encodeBinaryPayload(value, 'json');
+  test('matches independent canonical MessagePack bytes and hash', () => {
+    const msgpack = encodeBinaryPayload(goldenCodecValue());
 
-    expect(Buffer.from(msgpack).toString('hex')).toBe(GOLDEN_MSGPACK_V1_HEX);
-    expect(ethers.keccak256(msgpack)).toBe(GOLDEN_HASHES_V1.msgpack);
-    expect(json[0]).toBe(0x02);
-    expect(new TextDecoder().decode(json.subarray(1))).toBe(GOLDEN_JSON_V1_BODY);
-    expect(ethers.keccak256(json)).toBe(GOLDEN_HASHES_V1.json);
-  });
-
-  test('pins representative frame wrapper hashes in both codecs', () => {
-    const frame = goldenFrameV1();
-    const frameMsgpack = encodeBinaryPayload(frame, 'msgpack');
-    const frameJson = encodeBinaryPayload(frame, 'json');
-
-    expect(ethers.keccak256(frameMsgpack)).toBe(GOLDEN_HASHES_V1.frameMsgpack);
-    expect(ethers.keccak256(frameJson)).toBe(GOLDEN_HASHES_V1.frameJson);
+    expect(Buffer.from(msgpack).toString('hex')).toBe(GOLDEN_MSGPACK_HEX);
+    expect(ethers.keccak256(msgpack)).toBe(GOLDEN_MSGPACK_HASH);
   });
 
   test('produces identical MessagePack bytes independent of insertion order', () => {
@@ -246,8 +150,8 @@ describe('canonical binary codec', () => {
       z: new Map<unknown, unknown>([['a', new Set([2, 3, 1])], ['b', 2n]]),
     };
 
-    const firstBytes = encodeBinaryPayload(first, 'msgpack');
-    const secondBytes = encodeBinaryPayload(second, 'msgpack');
+    const firstBytes = encodeBinaryPayload(first);
+    const secondBytes = encodeBinaryPayload(second);
 
     expect(Buffer.from(firstBytes).equals(Buffer.from(secondBytes))).toBe(true);
     expect(decodeBinaryPayload(secondBytes)).toEqual(first);
@@ -256,102 +160,28 @@ describe('canonical binary codec', () => {
   test('rejects cycles and unsupported values instead of silently changing them', () => {
     const cyclic: Record<string, unknown> = {};
     cyclic['self'] = cyclic;
-    expect(() => encodeBinaryPayload(cyclic, 'msgpack')).toThrow('XLN_BINARY_CODEC_CYCLE');
-    expect(() => encodeBinaryPayload({ fn: () => 1 }, 'msgpack'))
+    expect(() => encodeBinaryPayload(cyclic)).toThrow('XLN_BINARY_CODEC_CYCLE');
+    expect(() => encodeBinaryPayload({ fn: () => 1 }))
       .toThrow('XLN_BINARY_CODEC_UNSUPPORTED');
     const symbolKey = Symbol('ephemeral');
     const symbolMarked = { durable: 1, [symbolKey]: true };
-    expect(() => encodeBinaryPayload(symbolMarked, 'msgpack')).toThrow('detail=symbol-key');
-    expect(decodeBinaryPayload(encodeBinaryPayload(symbolMarked, 'msgpack', { omitSymbolKeys: true })))
+    expect(() => encodeBinaryPayload(symbolMarked)).toThrow('detail=symbol-key');
+    expect(decodeBinaryPayload(encodeBinaryPayload(symbolMarked, { omitSymbolKeys: true })))
       .toEqual({ durable: 1 });
   });
 
-  test('authoritative MessagePack preserves own undefined while debug JSON rejects it', () => {
+  test('canonical MessagePack preserves own undefined', () => {
     const source = { optional: undefined, array: [1, undefined, 3] };
-    const decoded = decodeBinaryPayload<typeof source>(encodeBinaryPayload(source, 'msgpack'));
+    const decoded = decodeBinaryPayload<typeof source>(encodeBinaryPayload(source));
 
     expect(Object.hasOwn(decoded, 'optional')).toBe(true);
     expect(decoded.optional).toBeUndefined();
     expect(Object.hasOwn(decoded.array, 1)).toBe(true);
     expect(decoded.array).toEqual([1, undefined, 3]);
-    expect(() => encodeBinaryPayload(source, 'json')).toThrow(
-      'XLN_BINARY_CODEC_UNSUPPORTED:path=$.array[1]:detail=type=undefined',
-    );
   });
 
-  test('canonical JSON preserves every named field and rejects cycles', () => {
-    const first = { provider: 'named-domain-value', b: 2, a: 1 };
-    const second = { a: 1, b: 2, provider: 'named-domain-value' };
-    const firstBytes = encodeBinaryPayload(first, 'json');
-    const secondBytes = encodeBinaryPayload(second, 'json');
-    expect(Buffer.from(firstBytes).equals(Buffer.from(secondBytes))).toBe(true);
-    expect(decodeBinaryPayload(firstBytes)).toEqual(first);
-
-    const cyclic: Record<string, unknown> = {};
-    cyclic['self'] = cyclic;
-    expect(() => encodeBinaryPayload(cyclic, 'json')).toThrow('XLN_BINARY_CODEC_CYCLE');
-  });
-
-  test('authoritative storage rejects debug JSON payloads', () => {
-    const debugPayload = Buffer.from(encodeBinaryPayload({ height: 1 }, 'json'));
+  test('authoritative storage rejects every non-MessagePack payload', () => {
+    const debugPayload = Buffer.from([0x02, 0x00]);
     expect(() => decodeBuffer(debugPayload)).toThrow('STORAGE_CODEC_MSGPACK_REQUIRED');
-  });
-});
-
-describe('strict LevelDB decode boundaries', () => {
-  test('rejects malformed history-view head fields after a real close and reopen', async () => {
-    const db = await openDb('head');
-    const path = db.location;
-    await db.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer({
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: '7junk',
-      latestPrunedRuntimeHeight: 0,
-      retainedBytes: 0,
-      maxBytes: storageConfig.historyViewMaxBytes,
-      retainFrames: storageConfig.historyViewRetainFrames,
-    }));
-    await db.close();
-
-    const reopened = new Level<Buffer, Buffer>(path, {
-      keyEncoding: 'buffer',
-      valueEncoding: 'buffer',
-    });
-    await reopened.open();
-    await expect(readHistoryViewHead(reopened as unknown as RuntimeDbLike, storageConfig))
-      .rejects.toThrow('HISTORY_VIEW_HEAD_LATEST_HEIGHT_INVALID');
-    await reopened.close();
-  });
-
-  test('rejects missing compact activity fields instead of defaulting them', async () => {
-    const db = await openDb('activity');
-    await db.put(keyHistoryViewRuntimeActivity(3), encodeBuffer({
-      timestamp: 123,
-      runtimeInput: { entityInputs: [] },
-      logs: [],
-      touchedAccounts: [],
-      touchedBookEntities: [],
-    }));
-
-    await expect(readHistoryViewRuntimeActivity(db as unknown as RuntimeDbLike, 3))
-      .rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID:height=3');
-    await db.close();
-  });
-
-  test('rejects missing and extra compact account-frame fields', async () => {
-    const db = await openDb('account');
-    const key = keyHistoryViewAccountFrame(entityId, counterpartyId, 2);
-    await db.put(key, encodeBuffer({
-      frame: validFrame(),
-      runtimeHeight: 8,
-      timestamp: 456,
-      unexpected: true,
-    }));
-
-    await expect(readHistoryViewAccountFrames(
-      db as unknown as RuntimeDbLike,
-      entityId,
-      counterpartyId,
-    )).rejects.toThrow('HISTORY_VIEW_ACCOUNT_FRAME_FIELDS_INVALID');
-    await db.close();
   });
 });

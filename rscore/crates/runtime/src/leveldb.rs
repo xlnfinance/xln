@@ -227,12 +227,15 @@ impl RuntimeWalReader {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Canonical TS durability deliberately separates append-only Runtime
-        // frame/context/machine rows from the permanent path-keyed state DB.
-        // Reading both families from either database would accept a layout
-        // that production never writes and makes a real checkpoint impossible
-        // to import.  Join them only after each side has been decoded exactly.
+        // The disposable current DB owns the materialized TS Entity/Account
+        // graph. The synced WAL owns the Rust Account checkpoint (0x17-0x19)
+        // and exact EntityReplica envelope (0x26) in the same authoritative
+        // frame batch. Join those disjoint path families here; copying either
+        // into the other DB would create a second source of truth solely for
+        // import. Duplicate keys are accepted only when their decoded bytes
+        // are identical.
         let rows = state_reader.checkpoint_state_rows()?;
+        let wal_rows = self.checkpoint_wal_owned_rows()?;
         let mut state_rows = BTreeMap::new();
         for (key, owner) in rows {
             let value = if dedicated_field_row(&key) {
@@ -241,6 +244,17 @@ impl RuntimeWalReader {
                 state_reader.bounded_bytes_from_owner(&key, owner)?
             };
             state_rows.insert(key, value);
+        }
+        for (key, owner) in wal_rows {
+            let value = self.bounded_bytes_from_owner(&key, owner)?;
+            if let Some(previous) = state_rows.insert(key.clone(), value.clone())
+                && previous != value
+            {
+                return Err(RuntimeLevelDbError::Output(format!(
+                    "CHECKPOINT_STATE_SOURCE_DIVERGED:{}",
+                    hex(&key),
+                )));
+            }
         }
         let source = ConcreteCheckpointSource {
             height,
@@ -347,7 +361,6 @@ impl RuntimeWalReader {
             frame_bytes: source.frame_bytes,
             outputs,
             entity_contexts,
-            watcher_cursor_changes: Vec::new(),
             checkpoint: Some(CheckpointGraph {
                 state_root,
                 full: true,
@@ -429,6 +442,17 @@ impl RuntimeWalReader {
         Ok(rows)
     }
 
+    fn checkpoint_wal_owned_rows(&mut self) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {
+        let mut rows = Vec::new();
+        for tag in [0x17_u8, 0x18, 0x19, 0x26] {
+            for (key, value) in self.prefixed_rows(&[tag])? {
+                validate_checkpoint_state_key(&key)?;
+                rows.push((key, value));
+            }
+        }
+        Ok(rows)
+    }
+
     fn required_decoded(&mut self, key: &[u8]) -> Result<Value, RuntimeLevelDbError> {
         let bytes = self.required_raw(key)?;
         decode_storage_payload(&bytes).map_err(Into::into)
@@ -444,6 +468,14 @@ impl RuntimeWalReader {
         key: &[u8],
         owner: Vec<u8>,
     ) -> Result<Vec<u8>, RuntimeLevelDbError> {
+        // A chunk manifest is a five-field object of short scalars, far under
+        // this bound by construction. A row larger than it is the payload
+        // itself, so decoding it here only to have `bounded_manifest` answer
+        // None again is a full second msgpack pass over every stored frame.
+        const MAX_MANIFEST_BYTES: usize = 4096;
+        if owner.len() > MAX_MANIFEST_BYTES {
+            return Ok(owner);
+        }
         let decoded = decode_storage_payload(&owner)?;
         let Some(manifest) = bounded_manifest(&decoded)? else {
             return Ok(owner);
@@ -528,6 +560,14 @@ pub struct RawConcreteWalRows {
 impl RawConcreteWalRows {
     pub fn height(&self) -> u64 {
         self.height
+    }
+
+    /// Raw flat-outbox payloads in row order, without frame verification.
+    /// Only for reads that are configuration, not an execution oracle (route
+    /// discovery); every replayed frame is still fully verified by
+    /// `concrete_wal_source_from_raw` before it is applied.
+    pub fn output_rows(&self) -> &[Vec<u8>] {
+        &self.output_rows
     }
 }
 
@@ -1132,6 +1172,13 @@ mod tests {
                 &leaf_value,
             )
             .expect("machine leaf");
+        wal_database
+            .put(
+                &[vec![0x26], owner.to_vec(), vec![0; 12], vec![0x22; 20]].concat(),
+                &crate::encode_storage_payload(&CanonicalValue::Object(Vec::new()))
+                    .expect("replica meta value"),
+            )
+            .expect("WAL-owned replica meta row");
         state_database
             .put(
                 &[vec![0x21], owner.to_vec()].concat(),
@@ -1297,7 +1344,7 @@ mod tests {
             .expect("exact checkpoint source");
         assert_eq!(source.height, 100);
         assert_eq!(source.runtime_machine_leaves.len(), 1);
-        assert_eq!(source.state_rows.len(), 1);
+        assert_eq!(source.state_rows.len(), 2);
         drop(reader);
         drop(state_reader);
         std::fs::remove_dir_all(wal_path).expect("clean WAL fixture");

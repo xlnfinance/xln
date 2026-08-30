@@ -1,6 +1,6 @@
 use xln_rscore_abi::AbiValue;
 use xln_rscore_batch::{AccountId, AccountInputKind, AccountInputResult, AccountInputVerdict};
-use xln_rscore_engine::{AccountFrame, FrameAckPhase, HtlcEvidenceSecret, SignedIncomingFrame};
+use xln_rscore_engine::{AccountFrame, AckFramePhase, HtlcEvidenceSecret, SignedIncomingFrame};
 
 use crate::wire_decode::decode_input_row;
 use crate::wire_encode::input_result;
@@ -11,12 +11,12 @@ use fixture::*;
 
 #[test]
 fn exact_peer_variants_round_trip_without_losing_received_fields() {
-    let value = frame_ack_row();
+    let value = ack_frame_row();
     let bytes = xln_rscore_abi::encode_value(&value).expect("encode exact peer row");
     let wire = xln_rscore_abi::decode_value(&bytes).expect("decode exact peer row");
     assert_eq!(wire, value, "the canonical tuple survives MessagePack");
 
-    let row = decode_input_row(&wire).expect("decode frame_ack");
+    let row = decode_input_row(&wire).expect("decode ack_frame");
     assert_eq!(row.operation_index, 7);
     assert_eq!(row.account_id.as_bytes(), &[0x11; 32]);
     assert_eq!(row.input.envelope.from_entity_id, [0x11; 32]);
@@ -44,12 +44,12 @@ fn exact_peer_variants_round_trip_without_losing_received_fields() {
         &[0x44; 32]
     );
 
-    let AccountInputKind::FrameAck {
+    let AccountInputKind::AckFrame {
         ack: incoming_ack,
         frame,
     } = row.input.kind
     else {
-        panic!("one canonical FrameAck expected")
+        panic!("one canonical AckFrame expected")
     };
     assert_eq!(incoming_ack.height, 42, "ACK is the first composite phase");
     assert_eq!(incoming_ack.frame_hash, [0xbb; 32]);
@@ -117,10 +117,11 @@ fn inbound_genesis_policy_is_typed_exact_and_not_peer_derived() {
             AbiValue::Bytes(vec![0x33; 20]),
         ]),
         AbiValue::Bytes(vec![0x91; 32]),
+        tuple(Vec::new()),
         AbiValue::Bytes(vec![0x92; 20]),
         AbiValue::Bool(false),
     ]);
-    let value = replace_at(&frame_ack_row(), &[3], policy);
+    let value = replace_at(&ack_frame_row(), &[3], policy);
     let row = decode_input_row(&value).expect("decode typed genesis policy");
     let genesis = row.genesis_policy.expect("genesis policy");
     assert_eq!(genesis.expected_domain.chain_id(), 31_337);
@@ -129,13 +130,14 @@ fn inbound_genesis_policy_is_typed_exact_and_not_peer_derived() {
         &[0x33; 20]
     );
     assert_eq!(genesis.shadow_policy_root, [0x91; 32]);
+    assert!(genesis.shadow_policy_rows.is_empty());
     assert_eq!(genesis.delta_transformer, [0x92; 20]);
     assert!(!genesis.public_pinned);
 
     for mutation in [
         width_at(&value, &[3, 1], 31),
-        width_at(&value, &[3, 2], 21),
-        replace_at(&value, &[3, 3], AbiValue::Integer(0)),
+        width_at(&value, &[3, 3], 21),
+        replace_at(&value, &[3, 4], AbiValue::Integer(0)),
     ] {
         assert!(decode_input_row(&mutation).is_err());
     }
@@ -153,7 +155,7 @@ fn certified_board_authority_is_typed_local_context() {
         ])
     };
     let value = replace_at(
-        &frame_ack_row(),
+        &ack_frame_row(),
         &[4],
         tuple(vec![authority(0xa3, 0xa2), authority(0xb3, 0xb2)]),
     );
@@ -179,7 +181,7 @@ fn certified_board_authority_is_typed_local_context() {
 
 #[test]
 fn exact_peer_decoder_rejects_mutated_shapes_widths_and_aliases() {
-    let canonical = frame_ack_row();
+    let canonical = ack_frame_row();
     let cases = vec![
         ("row trailing", append_at(&canonical, &[])),
         ("row missing", remove_last_at(&canonical, &[])),
@@ -255,13 +257,13 @@ fn exact_peer_decoder_rejects_mutated_shapes_widths_and_aliases() {
 }
 
 #[test]
-fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() {
+fn ack_frame_result_is_one_row_with_ack_before_frame_and_closed_child_domains() {
     let account_id = AccountId::from_bytes([0x11; 32]);
     let result = AccountInputResult {
         operation_index: 17,
         account_id,
         response: xln_rscore_batch::AccountResponseDirective::Preserve,
-        verdict: AccountInputVerdict::FrameAckApplied {
+        verdict: AccountInputVerdict::AckFrameApplied {
             ack: Box::new(AccountInputVerdict::AckStale { height: 42 }),
             frame: Box::new(AccountInputVerdict::FrameCollisionIgnored {
                 height: 43,
@@ -270,7 +272,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         },
     };
     assert_eq!(
-        input_result(&result).expect("encode FrameAck result"),
+        input_result(&result).expect("encode AckFrame result"),
         tuple(vec![
             AbiValue::Integer(17),
             AbiValue::Bytes(vec![0x11; 32]),
@@ -290,12 +292,12 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         operation_index: 18,
         account_id,
         response: xln_rscore_batch::AccountResponseDirective::Preserve,
-        verdict: AccountInputVerdict::FrameAckRejected {
-            phase: FrameAckPhase::Frame,
+        verdict: AccountInputVerdict::AckFrameRejected {
+            phase: AckFramePhase::Frame,
             reason: "proposal rejected".into(),
         },
     };
-    let encoded = input_result(&rejected).expect("encode rejected FrameAck");
+    let encoded = input_result(&rejected).expect("encode rejected AckFrame");
     assert_eq!(
         at(&encoded, &[2]),
         &tuple(vec![
@@ -309,7 +311,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         operation_index: 19,
         account_id,
         response: xln_rscore_batch::AccountResponseDirective::Preserve,
-        verdict: AccountInputVerdict::FrameAckApplied {
+        verdict: AccountInputVerdict::AckFrameApplied {
             ack: Box::new(AccountInputVerdict::FrameCollisionIgnored {
                 height: 1,
                 queued: 0,

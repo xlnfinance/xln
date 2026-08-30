@@ -1,7 +1,7 @@
 import type {
   AccountDisputeHanko,
   AccountFrame,
-  AccountFrameAck,
+  AccountAckFrame,
   AccountFrameProposal,
   AccountInput,
   AccountState,
@@ -37,7 +37,7 @@ export const cloneIsolatedAccountFrame = (frame: AccountFrame): AccountFrame => 
 
 const cloneDisputeHanko = (disputeHanko: AccountDisputeHanko): AccountDisputeHanko => ({ ...disputeHanko });
 
-const cloneFrameAck = <T extends AccountFrameAck>(ack: T): T => ({
+const cloneAckFrame = <T extends AccountAckFrame>(ack: T): T => ({
   ...ack,
   ...(ack.disputeHanko ? { disputeHanko: cloneDisputeHanko(ack.disputeHanko) } : {}),
 });
@@ -76,17 +76,17 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
     case 'frame':
       return { ...base, kind: input.kind, proposal: cloneFrameProposal(input.proposal) };
     case 'ack':
-      return { ...base, kind: input.kind, ack: cloneFrameAck(input.ack) };
-    case 'frame_ack':
+      return { ...base, kind: input.kind, ack: cloneAckFrame(input.ack) };
+    case 'ack_frame':
       return {
         ...base,
         kind: input.kind,
-        ack: cloneFrameAck(input.ack),
+        ack: cloneAckFrame(input.ack),
         proposal: cloneFrameProposal(input.proposal),
       };
     case 'dispute':
       return { ...base, kind: input.kind, disputeHanko: cloneDisputeHanko(input.disputeHanko) };
     case 'board_hanko_refresh':
-      return { ...base, kind: input.kind, boardHankoRefresh: cloneFrameAck(input.boardHankoRefresh) };
+      return { ...base, kind: input.kind, boardHankoRefresh: cloneAckFrame(input.boardHankoRefresh) };
   }
 }

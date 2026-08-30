@@ -7,31 +7,15 @@ import {
   readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
-import { ENV_REPLAY_MODE_KEY, writeRuntimeMetadata } from '../../../runtime/loop/loop-environment';
 
-test('read-only replay keeps storage invalidation without building disposable history', () => {
-  const env = createEmptyEnv('replay-history-side-effect-seed');
-  writeRuntimeMetadata(env, ENV_REPLAY_MODE_KEY, true);
+test('committed Account effects mark only the current path-keyed state dirty', () => {
+  const env = createEmptyEnv('account-commit-storage-mark-seed');
   publishEntityCandidateEffects(env, null, [{
-    kind: 'accountFrameHistory',
+    kind: 'accountFrameCommitted',
     entityId: '0x01',
     counterpartyId: '0x02',
-    accountHeight: 1,
-    source: 'peerCommit',
-    frame: {
-      height: 1,
-      timestamp: 100,
-      jHeight: 0,
-      accountTxs: [],
-      prevFrameHash: 'genesis',
-      accountStateRoot: '0x01',
-      stateHash: '0x02',
-      byLeft: true,
-      deltas: [],
-    },
   }]);
 
-  expect(env.infrastructure?.pendingHistoryRecords).toBeUndefined();
   expect([...env.overlay!.values()]).toEqual([{
     family: 'account',
     entityId: '0x01',
@@ -39,7 +23,7 @@ test('read-only replay keeps storage invalidation without building disposable hi
   }]);
 });
 
-test('machine events stay in durable Runtime history without relay duplication', () => {
+test('machine events stay in the durable Runtime WAL without relay duplication', () => {
   const env = createEmptyEnv('env-events-audit-commit-seed');
   const forwarded: Array<Record<string, unknown>> = [];
   env.infrastructure!.p2p = {
@@ -140,91 +124,4 @@ test('candidate notifications remain inert until commit publication and dedupe b
 
   flushPendingAuditEvents(env);
   expect(forwarded).toEqual([effect.payload]);
-});
-
-test('candidate Account history is idempotent and conflicting bytes fail fast', () => {
-  const env = createEmptyEnv('candidate-account-history');
-  const frame = {
-    height: 1,
-    timestamp: 100,
-    jHeight: 0,
-    accountTxs: [],
-    prevFrameHash: 'genesis',
-    accountStateRoot: '0x01',
-    stateHash: '0x02',
-    byLeft: true,
-    deltas: [],
-  };
-  const effect = {
-    kind: 'accountFrameHistory' as const,
-    entityId: '0x01',
-    counterpartyId: '0x02',
-    accountHeight: 1,
-    source: 'peerCommit' as const,
-    frame,
-  };
-
-  publishEntityCandidateEffects(env, null, [effect, effect]);
-  expect(env.infrastructure?.pendingHistoryRecords).toHaveLength(1);
-  publishEntityCandidateEffects(env, null, [{ ...effect, source: 'ackCommit' }]);
-  expect(env.infrastructure?.pendingHistoryRecords).toHaveLength(1);
-  expect(() => publishEntityCandidateEffects(env, null, [{
-    ...effect,
-    frame: { ...frame, stateHash: '0x03' },
-  }])).toThrow('CERTIFIED_ACCOUNT_FRAME_FORK');
-});
-
-test('candidate Account history stores one semantic frame across valid Hanko subsets', () => {
-  const env = createEmptyEnv('candidate-account-history-hanko-subsets');
-  const frame = {
-    height: 1,
-    timestamp: 100,
-    jHeight: 0,
-    accountTxs: [{
-      type: 'settle_transition' as const,
-      data: {
-        kind: 'hanko' as const,
-        revision: 1,
-        workspaceHash: '0xworkspace',
-        settlementNonce: 2,
-        settlementHash: '0xsettlement',
-        settlementHanko: '0xsubset-a',
-        postProof: {
-          nonce: 3,
-          proposerIsLeft: true,
-          proofBodyHash: '0xproof',
-          disputeHash: '0xdispute',
-          hanko: '0xpost-a',
-        },
-      },
-    }],
-    prevFrameHash: 'genesis',
-    accountStateRoot: '0x01',
-    stateHash: '0x02',
-    byLeft: true,
-    deltas: [],
-  };
-  const second = structuredClone(frame);
-  second.accountTxs[0].data.settlementHanko = '0xsubset-b';
-  second.accountTxs[0].data.postProof.hanko = '0xpost-b';
-  const base = {
-    kind: 'accountFrameHistory' as const,
-    entityId: '0x01',
-    counterpartyId: '0x02',
-    accountHeight: 1,
-    source: 'peerCommit' as const,
-  };
-
-  publishEntityCandidateEffects(env, null, [{ ...base, frame }, { ...base, frame: second }]);
-
-  const records = env.infrastructure?.pendingHistoryRecords ?? [];
-  expect(records).toHaveLength(1);
-  const stored = records[0];
-  if (stored?.kind !== 'accountFrame') throw new Error('TEST_ACCOUNT_HISTORY_MISSING');
-  const storedTx = stored.frame.accountTxs[0];
-  if (storedTx?.type !== 'settle_transition' || storedTx.data.kind !== 'hanko') {
-    throw new Error('TEST_SETTLEMENT_FRAME_MISSING');
-  }
-  expect(storedTx.data.settlementHanko).toBeUndefined();
-  expect(storedTx.data.postProof.hanko).toBeUndefined();
 });

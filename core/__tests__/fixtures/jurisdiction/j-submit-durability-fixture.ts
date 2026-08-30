@@ -6,6 +6,7 @@ import {
 import { collectDueJSubmitRuntimeTxs } from '../../../runtime/j-submit/j-submit-scheduler';
 import { createEmptyBatch } from '../../../jurisdiction/machine/batch';
 import type { EntityReplica, EntityState } from '../../../entity/types';
+import { makeState as makeCanonicalEntityState } from '../../helpers/cross-j';
 
 export const entityId = `0x${'31'.repeat(32)}`;
 export const signerId = `0x${'41'.repeat(20)}`;
@@ -15,50 +16,33 @@ export const batchHash = `0x${'51'.repeat(32)}`;
 const makeState = (): EntityState => {
   const batch = createEmptyBatch();
   batch.reserveToReserve.push({ receivingEntity: `0x${'61'.repeat(32)}`, tokenId: 1, amount: 10n });
-  return {
-    entityId,
-    entityEncryptionPublicKey: `0x${'71'.repeat(32)}`,
-    height: 1,
-    timestamp: 1_000,
-    nonces: new Map(),
-    proposals: new Map(),
-    config: {
-      mode: 'proposer-based',
-      threshold: 1n,
-      validators: [signerId],
-      shares: { [signerId]: 1n },
-      jurisdiction: {
-        name: jurisdictionName,
-        chainId: 31337,
-        depositoryAddress: '0x000000000000000000000000000000000000dead',
-        entityProviderAddress: '0x000000000000000000000000000000000000beef',
-      },
+  const state = makeCanonicalEntityState(entityId, signerId, {
+    name: jurisdictionName,
+    address: `rpc://${jurisdictionName}`,
+    chainId: 31_337,
+    blockTimeMs: 1_000,
+    depositoryAddress: '0x000000000000000000000000000000000000dead',
+    entityProviderAddress: '0x000000000000000000000000000000000000beef',
+  });
+  state.profile = { name: 'j-submit', isHub: false, avatar: '', bio: '', website: '' };
+  state.jBatchState = {
+    batch: createEmptyBatch(),
+    jurisdiction: null,
+    lastBroadcast: 1_000,
+    broadcastCount: 1,
+    failedAttempts: 0,
+    status: 'sent',
+    sentBatch: {
+      batch,
+      batchHash,
+      encodedBatch: '0x1234',
+      entityNonce: 1,
+      firstSubmittedAt: 1_000,
+      lastSubmittedAt: 0,
+      submitAttempts: 0,
     },
-    reserves: new Map(),
-    accounts: new Map(),
-    lastFinalizedJHeight: 0,
-    profile: { name: 'j-submit', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
-    jBatchState: {
-      batch: createEmptyBatch(),
-      jurisdiction: null,
-      lastBroadcast: 1_000,
-      broadcastCount: 1,
-      failedAttempts: 0,
-      status: 'sent',
-      sentBatch: {
-        batch,
-        batchHash,
-        encodedBatch: '0x1234',
-        entityNonce: 1,
-        firstSubmittedAt: 1_000,
-        lastSubmittedAt: 0,
-        submitAttempts: 0,
-      },
-    },
-  } as EntityState;
+  };
+  return state;
 };
 
 export const makeJSubmitDurabilityFixture = () => {

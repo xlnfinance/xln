@@ -21,7 +21,7 @@ use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
 use crate::{AccountExecutionContext, AccountOutput, Side};
 
 use super::types::{
-    AccountPeerEnvelope, BoardHankoRefreshInput, FrameAckOutcome, FrameAckPhase, IncomingAck,
+    AccountPeerEnvelope, AckFrameOutcome, AckFramePhase, BoardHankoRefreshInput, IncomingAck,
     IncomingFrame, StandaloneInputOutcome, validate_peer_envelope,
 };
 
@@ -51,7 +51,7 @@ pub struct ReceiverClock {
     pub finalized_j_height: u64,
 }
 
-/// Parent-owned verification context shared by both phases of `frame_ack`.
+/// Parent-owned verification context shared by both phases of `ack_frame`.
 #[derive(Clone, Copy, Debug)]
 pub struct IncomingFrameSecurityContext<'a> {
     pub clock: ReceiverClock,
@@ -107,9 +107,8 @@ pub enum IncomingOutcome {
         ack_hanko: Vec<u8>,
         /// Worker-authored witness for the ACK dispute, when the draft still
         /// needs the parent Entity manifest to attach its Hanko.
-        ack_dispute_signature: Option<[u8; 65]>,
+        ack_dispute_signature: Option<Box<[u8; 65]>>,
         ack_dispute_hanko: Option<Vec<u8>>,
-        outputs: Vec<AccountOutput>,
         /// What this frame's transactions said they did, in transaction order.
         /// The Entity frame commits them, so they travel with the verdict
         /// rather than being re-derived by whoever publishes it.
@@ -122,7 +121,7 @@ pub enum IncomingOutcome {
         /// one. It travels with the verdict because the acknowledgement is
         /// what the publisher sends, and it must not have to read the account
         /// back to learn what it just signed.
-        ack_dispute: Option<crate::consensus::replica::DisputeDraft>,
+        ack_dispute: Option<Box<crate::consensus::replica::DisputeDraft>>,
     },
     /// We are LEFT and the peer raced us at the same height: our proposal
     /// stands and their frame is ignored until they ack it.
@@ -137,7 +136,7 @@ pub enum IncomingOutcome {
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
         /// The same proof the original acknowledgement carried, replayed.
-        ack_dispute: Option<crate::consensus::replica::DisputeDraft>,
+        ack_dispute: Option<Box<crate::consensus::replica::DisputeDraft>>,
     },
     /// Already behind our chain head: an at-least-once retransmission, which
     /// is applied as a no-op rather than treated as a fault.
@@ -166,7 +165,6 @@ pub enum AckOutcome {
     Committed {
         height: u64,
         state_hash: [u8; 32],
-        outputs: Vec<AccountOutput>,
         /// Canonical acknowledgement event. Transaction handler events were
         /// speculative and are not replayed into the ACK's Entity frame.
         events: Vec<String>,
@@ -590,7 +588,8 @@ pub fn apply_incoming_frame_with_authority(
             ack_dispute: account
                 .outbound_ack()
                 .filter(|ack| ack.height == frame.height)
-                .and_then(|ack| ack.dispute.clone()),
+                .and_then(|ack| ack.dispute.clone())
+                .map(Box::new),
         });
     }
     if frame.height < current_height {
@@ -717,6 +716,8 @@ pub fn apply_incoming_frame_with_authority(
     // The committed clock is the peer's — it is what they signed — but
     // enforcement is judged on our own clock, so a backdated frame cannot
     // decide our timeouts for us.
+    let settlement =
+        account.settlement_execution_context(security.peer_certified_board_authority.copied());
     let context = AccountExecutionContext::with_market(
         frame.timestamp,
         clock.entity_timestamp,
@@ -724,7 +725,8 @@ pub fn apply_incoming_frame_with_authority(
         current_height,
         frame.j_height,
         std::sync::Arc::clone(swap_market),
-    );
+    )
+    .with_settlement(settlement);
     let execution = execute_window(
         account.replica(),
         proposer,
@@ -735,9 +737,9 @@ pub fn apply_incoming_frame_with_authority(
     let WindowExecution {
         mut candidate,
         applied,
-        outputs,
         outputs_by_tx,
         events,
+        consensus_effects,
         dropped,
     } = execution;
     if let Some(first) = dropped.first() {
@@ -760,14 +762,17 @@ pub fn apply_incoming_frame_with_authority(
         .delta_transformer()
         .map(|transformer| proof_body_hash(&candidate, transformer))
         .transpose()?;
+    let mut effect_preview = account.clone();
+    effect_preview.apply_consensus_effects(&consensus_effects)?;
     if let Some(reason) = counterparty_dispute_requirement_error(
         expected_proof_body_hash.as_ref(),
-        account.counterparty_dispute(),
+        effect_preview.counterparty_dispute(),
         candidate.state().j_nonce(),
         dispute.as_ref(),
     ) {
         return Ok(rejected(reason));
     }
+    account.apply_consensus_effects(&consensus_effects)?;
 
     // Only now, with the frame proven to be one we can commit, does our own
     // proposal give way to it.
@@ -820,17 +825,22 @@ pub fn apply_incoming_frame_with_authority(
         ack_hanko.clone(),
         ack_dispute.clone(),
     );
+    // Keep the freshly authored local proof during this existing worker visit.
+    // The returned draft stays witness-free so Entity certification preserves
+    // the same secondary manifest entry and signed bytes.
+    if let (Some(dispute), Some(hanko)) = (&ack_dispute, &ack_dispute_hanko) {
+        account.attach_local_dispute_hanko(dispute.hash, hanko.clone())?;
+    }
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,
         ack_signature,
         ack_hanko,
-        ack_dispute_signature,
+        ack_dispute_signature: ack_dispute_signature.map(Box::new),
         ack_dispute_hanko,
-        outputs,
         events,
         rolled_back,
-        ack_dispute,
+        ack_dispute: ack_dispute.map(Box::new),
         committed_frame: Box::new(CommittedFrameEvidence {
             frame,
             state_hash,
@@ -949,7 +959,7 @@ pub fn apply_incoming_ack_with_authority(
             reason: "ACCOUNT_PEER_ACK_HANKO_MISSING".to_string(),
         });
     };
-    let pending = account.pending().cloned().ok_or_else(|| {
+    let pending = account.pending().ok_or_else(|| {
         StateError::TransitionFailed("ACCOUNT_PENDING_DISAPPEARED_DURING_ACK".to_string())
     })?;
     if let Some(reason) = counterparty_dispute_requirement_error(
@@ -981,9 +991,15 @@ pub fn apply_incoming_ack_with_authority(
     if let Some(dispute) = dispute {
         account.store_counterparty_dispute(dispute);
     }
+    // Authentication, dispute binding and frame binding are now complete.
+    // Consume the resident pending row instead of cloning its full candidate
+    // and output body before `commit_from_ack` clears it.
+    let pending = account.take_pending().ok_or_else(|| {
+        StateError::TransitionFailed("ACCOUNT_PENDING_DISAPPEARED_DURING_ACK".to_string())
+    })?;
     let domain = pending.candidate.state().identity().domain().clone();
-    let outputs = pending.outputs;
-    let outputs_by_tx = pending.outputs_by_tx;
+    let outputs_by_tx = std::sync::Arc::try_unwrap(pending.outputs_by_tx)
+        .unwrap_or_else(|shared| shared.as_ref().clone());
     let events = vec![format!("✅ Frame {height} confirmed and committed")];
     account.commit_from_ack(
         pending.candidate,
@@ -995,7 +1011,6 @@ pub fn apply_incoming_ack_with_authority(
     Ok(AckOutcome::Committed {
         height,
         state_hash: pending.state_hash,
-        outputs,
         events,
         committed_frame: Box::new(CommittedFrameEvidence {
             frame: pending.frame,
@@ -1007,13 +1022,13 @@ pub fn apply_incoming_ack_with_authority(
     })
 }
 
-/// Apply one canonical `frame_ack` input in ACK-before-proposal order.
+/// Apply one canonical `ack_frame` input in ACK-before-proposal order.
 ///
 /// The phases mutate sequentially, exactly like TypeScript. A valid ACK is a
 /// completed bilateral certificate and remains committed even when the bundled
 /// proposal is invalid. Rolling it back would fork the two implementations at
 /// the next height.
-pub fn apply_incoming_frame_ack(
+pub fn apply_incoming_ack_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
     envelope: &AccountPeerEnvelope,
@@ -1021,8 +1036,8 @@ pub fn apply_incoming_frame_ack(
     ack: IncomingAck,
     frame: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
-) -> Result<FrameAckOutcome, StateError> {
-    apply_incoming_frame_ack_with_authority(
+) -> Result<AckFrameOutcome, StateError> {
+    apply_incoming_ack_frame_with_authority(
         account,
         identity,
         envelope,
@@ -1037,7 +1052,7 @@ pub fn apply_incoming_frame_ack(
     )
 }
 
-pub fn apply_incoming_frame_ack_with_authority(
+pub fn apply_incoming_ack_frame_with_authority(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
     envelope: &AccountPeerEnvelope,
@@ -1045,7 +1060,7 @@ pub fn apply_incoming_frame_ack_with_authority(
     frame: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     security: IncomingFrameSecurityContext<'_>,
-) -> Result<FrameAckOutcome, StateError> {
+) -> Result<AckFrameOutcome, StateError> {
     let ack = apply_incoming_ack_with_authority(
         account,
         envelope,
@@ -1054,8 +1069,8 @@ pub fn apply_incoming_frame_ack_with_authority(
         security.peer_certified_board_authority,
     )?;
     if let AckOutcome::Rejected { reason } = &ack {
-        return Ok(FrameAckOutcome::Rejected {
-            phase: FrameAckPhase::Ack,
+        return Ok(AckFrameOutcome::Rejected {
+            phase: AckFramePhase::Ack,
             reason: reason.clone(),
         });
     }
@@ -1067,7 +1082,7 @@ pub fn apply_incoming_frame_ack_with_authority(
         swap_market,
         security,
     )?;
-    Ok(FrameAckOutcome::Applied {
+    Ok(AckFrameOutcome::Applied {
         ack: Box::new(ack),
         frame: Box::new(frame),
     })

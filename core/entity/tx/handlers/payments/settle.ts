@@ -15,6 +15,7 @@ import type { AccountFrame, AccountTx, SettlementDiff, SettlementWorkspace , Acc
 import type { EntityInput, EntityState , HashToSign } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
+import { ensureEntityCollectionCandidate } from '../../../state/persistent-collection-map';
 import { getAccountPerspective } from '../../../../account/state/perspective';
 import { addMessage } from '../../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../../jurisdiction/machine/batch';
@@ -254,7 +255,10 @@ export async function handleSettlePropose(
       executorIsLeft,
       ...(memo !== undefined ? { memo } : {}),
     });
-    newState.settlementContinuations ??= new Map();
+    newState.settlementContinuations = ensureEntityCollectionCandidate(
+      newState.settlementContinuations,
+      pending => ({ ...pending, actions: pending.actions.map(action => ({ ...action })) }),
+    );
     newState.settlementContinuations.set(counterpartyEntityId, {
       workspaceHash,
       actions: structuredClone(continuation.actions),
@@ -373,7 +377,10 @@ export async function handleSettleApprove(
       `SETTLEMENT_APPROVAL_WORKSPACE_HASH_MISMATCH:${requestedWorkspaceHash}:${canonicalWorkspaceHash}`,
     );
   }
-  newState.deferredAccountProposals ??= new Map();
+  newState.deferredAccountProposals = ensureEntityCollectionCandidate(
+    newState.deferredAccountProposals,
+    value => value,
+  );
   const existing = newState.deferredAccountProposals.get(counterpartyEntityId);
   if (existing && existing !== canonicalWorkspaceHash) {
     throw new Error(`SETTLEMENT_APPROVAL_ALREADY_DEFERRED:${existing}:${canonicalWorkspaceHash}`);
@@ -815,7 +822,10 @@ export async function processCommittedSettlementTransitionFollowup(
     revision: workspace.revision,
     workspaceHash,
   });
-  entityState.deferredAccountProposals ??= new Map();
+  entityState.deferredAccountProposals = ensureEntityCollectionCandidate(
+    entityState.deferredAccountProposals,
+    value => value,
+  );
   const existing = entityState.deferredAccountProposals.get(counterpartyEntityId);
   if (existing && existing !== workspaceHash) {
     throw new Error(`SETTLEMENT_APPROVAL_ALREADY_DEFERRED:${existing}:${workspaceHash}`);

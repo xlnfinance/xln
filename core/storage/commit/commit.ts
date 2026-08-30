@@ -7,8 +7,6 @@ import { runtimeIsBrowser } from '../../support/process/runtime-process';
 import { getPerfMs } from '../../support/time';
 import {
   dropOverlay,
-  dropPendingHistoryRecords,
-  peekPendingHistoryRecords,
 } from '../../runtime/observability/env-events';
 import { transitionRuntimeLifecycle } from '../../runtime/replica/lifecycle';
 import { ensureRuntimeInfrastructure } from '../../runtime/envelope/replica-envelope';
@@ -52,7 +50,7 @@ const formatPerfMs = (value: number): string => value.toFixed(2);
 
 type StorageOuterPerfMarks = {
   startedAt: number;
-  historyPreparedAt: number;
+  preparedAt: number;
   lockStartedAt: number;
   lockAcquiredAt: number;
   coreDoneAt: number;
@@ -64,8 +62,8 @@ const buildStorageOuterPerf = (
   finishedAt: number,
 ): { outerStages: Record<string, number>; outerTotal: number } => ({
   outerStages: {
-    historyPrepare: marks.historyPreparedAt - marks.startedAt,
-    deadlineSetup: marks.lockStartedAt - marks.historyPreparedAt,
+    prepare: marks.preparedAt - marks.startedAt,
+    deadlineSetup: marks.lockStartedAt - marks.preparedAt,
     writerLockAcquire: marks.lockAcquiredAt - marks.lockStartedAt,
     storageCore: marks.coreDoneAt - marks.lockAcquiredAt,
     writerLockRelease: marks.lockReleasedAt - marks.coreDoneAt,
@@ -160,7 +158,7 @@ const createStorageOuterPerfMarks = (
   startedAt: number,
 ): StorageOuterPerfMarks => ({
   startedAt,
-  historyPreparedAt: getPerfMs(),
+  preparedAt: getPerfMs(),
   lockStartedAt: 0,
   lockAcquiredAt: 0,
   coreDoneAt: 0,
@@ -193,7 +191,6 @@ type PersistRuntimeEnvironmentOptions = {
   currentFrameInput: RuntimeInput | undefined;
   currentFrameOutputs: RoutedEntityInput[] | undefined;
   entityContexts: Map<string, EntityInfraContext>;
-  pendingHistoryRecords: ReturnType<typeof peekPendingHistoryRecords>;
   outerMarks: StorageOuterPerfMarks;
   authorityState: AuthoritySaveState;
   accountAuthority: AccountAuthoritySave | undefined;
@@ -208,11 +205,17 @@ const persistRuntimeEnvironment = async (
     currentFrameInput,
     currentFrameOutputs,
     entityContexts,
-    pendingHistoryRecords,
     outerMarks,
     authorityState,
     accountAuthority,
   } = options;
+  // An ephemeral Runtime has no storage namespace to serialize. Bypass the
+  // durable writer lock as well as LevelDB; otherwise each RAM-only HLT user
+  // creates writer-lock release files despite correctly skipping state/WAL.
+  if (env.runtimeConfig?.storage?.enabled === false) {
+    if (accountAuthority) throw new AccountAuthorityPreWalError('STORAGE_DISABLED');
+    return { materialized: false, materializedOverlayKeys: [] };
+  }
   return withStorageWriteDeadline(env, markStorageProgress => {
     outerMarks.lockStartedAt = getPerfMs();
     return withRetainedStorageWriterLock(env, async () => {
@@ -225,12 +228,9 @@ const persistRuntimeEnvironment = async (
           deps.getStorageDb(targetEnv, 'current'),
         tryOpenRuntimeWalDb: deps.tryOpenRuntimeWalDb,
         getRuntimeWalDb: deps.getRuntimeWalDb,
-        tryOpenHistoryViewDb: deps.tryOpenHistoryViewDb,
-        getHistoryViewDb: deps.getHistoryViewDb,
         rotateEpochDb: deps.rotateStorageEpochDb,
         getPerfMs,
         formatPerfMs,
-        historyRecords: pendingHistoryRecords,
         entityContexts,
         inProcessInfraValidated: true,
         stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
@@ -346,18 +346,9 @@ const throwRuntimeStorageFailure = async (
 
 const finalizeRuntimeStorageSave = (
   env: RuntimeReplica,
-  pendingHistoryRecords: ReturnType<typeof peekPendingHistoryRecords>,
   outerMarks: StorageOuterPerfMarks,
   saveResult: RuntimeStorageSaveResult,
 ): RuntimeStorageSaveOutcome => {
-  if (!saveResult.historyViewsMaterialized && !saveResult.staleWriterStopped) {
-    throw new RuntimeFrameStorageError(
-      'not-committed',
-      new Error(
-        `STORAGE_AUTHORITATIVE_FRAME_NOT_COMMITTED:height=${env.state.height}`,
-      ),
-    );
-  }
   if (saveResult.staleWriterStopped) {
     const state = ensureRuntimeInfrastructure(env);
     transitionRuntimeLifecycle(state, 'halted');
@@ -370,9 +361,6 @@ const finalizeRuntimeStorageSave = (
     };
     state.stopLoop?.();
     return { staleWriterStopped: true };
-  }
-  if (saveResult.historyViewsMaterialized) {
-    dropPendingHistoryRecords(env, pendingHistoryRecords.length);
   }
   if (saveResult.materialized) {
     dropOverlay(env, saveResult.materializedOverlayKeys);
@@ -398,11 +386,6 @@ const saveRuntimeEnvironment = async (
   if (readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
-  const pendingHistoryRecords = peekPendingHistoryRecords(
-    env,
-    env.state.height,
-    env.state.timestamp,
-  );
   const outerMarks = createStorageOuterPerfMarks(outerStartedAt);
   const authorityState: AuthoritySaveState = {};
   let saveResult: RuntimeStorageSaveResult;
@@ -413,7 +396,6 @@ const saveRuntimeEnvironment = async (
       currentFrameInput,
       currentFrameOutputs,
       entityContexts,
-      pendingHistoryRecords,
       outerMarks,
       authorityState,
       accountAuthority,
@@ -429,7 +411,6 @@ const saveRuntimeEnvironment = async (
   }
   return finalizeRuntimeStorageSave(
     env,
-    pendingHistoryRecords,
     outerMarks,
     saveResult,
   );

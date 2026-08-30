@@ -1,21 +1,22 @@
 #!/usr/bin/env bun
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { REMOTE_RUNTIME } from '../config/constants';
 import { readBooleanEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../support/logger';
-import { deriveSignerAddressSync } from '../account/crypto';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
-import { buildHubChildProcessEnv, buildHubEngineArgs } from './process/hub-runtime-env';
-import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../support/process/child-secrets';
-import { buildRuntimeChildGcEnv } from '../support/process/runtime-gc-env';
+import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
+import { createHubSpawner } from './process/spawn/hub';
+import { createMarketMakerSpawner } from './process/spawn/market-maker';
+import { canonicalHubEngine } from './process/hub-engine-plan';
+import { parseProfile } from '../entity/profile';
+import { verifyProfileSignature } from '../entity/profile/profile-signing';
 import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
 import {
   clearDebugTimeline,
@@ -23,6 +24,7 @@ import {
   normalizeRuntimeKey,
   pushDebugEvent,
   removeClient,
+  storeVerifiedGossipProfile,
   type RelayStore,
 } from '../network/relay/store';
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
@@ -49,7 +51,6 @@ import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
 import { createAssistantProxyFromEnv, resolveAssistantDirectClientIp, resolveAssistantRateClientId } from '../api/server/assistant/proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
-import { resolveRequestClientIp } from '../api/server/network/relay-direct';
 import { dumpOpCounters, installGlobalOpCounters, resetOpCounters } from '../support/performance/op-counters';
 import {
   isOperatorRequest,
@@ -58,10 +59,10 @@ import {
   ORCHESTRATOR_JSON_HEADERS,
 } from './hub/operator-access';
 import {
-  resolveOrchestratorSocketType,
   type AggregatedHealth,
   type CustodySupportState,
   type HubChild,
+  type HubHealthPayload,
   type ManagedRuntimeSpec,
   type MarketMakerChild,
   type MarketMakerHealthPayload,
@@ -132,99 +133,67 @@ import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
 import { createHubApiRoutes } from './hub/hub-api-routes';
 import { findMissingRpcContractCode, type RpcContractAddresses } from './bootstrap/contract-readiness';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
-import { resolveConfiguredRelayAudience } from './mesh/relay-audience';
 import { areHubChildrenReady } from './hub/hub-mesh-readiness';
 import {
   HUB_MESH_CREDIT_AMOUNT,
-  deriveMarketMakerEntityId,
-  planMarketMakerIdentityLabels,
-  type MarketMakerEntityJurisdictionConfig,
+  HUB_DEFAULT_MIN_TRADE_SIZE,
+  HUB_DEFAULT_SUPPORTED_PAIRS,
+  getBootstrapCreditAmount,
 } from './mesh/mesh-common';
 import {
-  requireJurisdictionBlockTimeMs,
-  resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
-  type ResolvedMeshJurisdictionConfig,
 } from './mesh/mesh-jurisdictions';
-import { buildRuntimeImportLogLine } from './replica-import/runtime-import-log';
 import { normalizeMarketMakerHealthPayload } from './market-maker/health/market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker/health/market-maker-child-poll';
+import { createMarketMakerIdentityResolver } from './market-maker/identity-resolver';
 import { createManagedRuntimeSecurityTelemetrySync } from './health/runtime-security-telemetry';
 import {
+  createCurrentBootstrapTimelineBuilder,
   createBootstrapTimelineTools,
-  projectCurrentBootstrapTimelineParams,
 } from './bootstrap/bootstrap-timeline';
 import { createProcessHealthBuilder } from './health/process-health';
-import {
-  flushPrefixedLogChunk,
-  pushChildLogLines,
-  type PrefixLogState,
-  writePrefixedLogChunk,
-} from './process/child-log-buffer';
 import { evaluateHubBaselineDeadlines, type HubBaselineProgressState } from './hub/hub-baseline-progress';
-import { resolveRuntimeImportReadiness } from './replica-import/runtime-import-readiness';
 import { handleRuntimeImportHttpRequest } from './replica-import/runtime-import-http';
+import { createRuntimeImportController } from './replica-import/runtime-import-controller';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './process/child-failure-diagnostics';
-import { attachManagedChildFatalIpc, type ManagedChildFatalReport } from './process/managed-child-fatal-ipc';
+import type { ManagedChildFatalReport } from './process/managed-child-fatal-ipc';
 import {
   decideChildFailure,
-  selectChildFailureReason,
-  shouldCaptureUnexpectedChildExit,
   type ChildFailureDecision,
   type ChildFailureObservation,
 } from './process/child-recovery-policy';
 import { buildRuntimeHealthFailures, normalizeRuntimeFailureCode } from '../protocol/errors/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import { deriveManagedSignerInventory, deriveMeshChildSeed, readMeshSeedOverrides, requireMeshRootSeed, resolveMeshRuntimeSeed } from './mesh/mesh-seeds';
+import { deriveManagedEntityIdentity } from './daemon-control';
+import { createJAdapter } from '../jurisdiction/adapter';
+import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
+import { getBootstrapTokenAmount } from '../jurisdiction/machine/config/bootstrap-economy';
 import {
   createResetCoordinator,
   resolveActiveResetOptions,
-  resolveHealthResetOptions,
-  resolveResetCapabilityHealth,
   type OrchestratorResetOptions,
 } from './process/reset-coordinator';
 import { buildDiskSummary } from './health/disk-health';
 import {
-  buildCustodyRpcUrl,
-  buildPublicDirectWsUrl,
-  buildRuntimeImportUrl,
-  buildRuntimeNodeRpcUrl,
-  createRuntimeImportManifest,
-  type RuntimeImportCandidate,
-  type RuntimeImportManifest,
-} from './replica-import/runtime-import-manifest';
+  createBaselineWaitReporter,
+  createHealthRecomputer,
+  openDirectHubPairCount,
+  resolveCurrentCapabilityHealth,
+} from './health/orchestrator-health-support';
+import {
+  projectNativeH1ReserveHealth,
+  readOrchestratorCodeFingerprint,
+  resolveOrchestratorRelayUpgradeData,
+  type NativeH1MeshPair,
+  type NativeH1ReserveTarget,
+} from './support/runtime-support';
 
 const args = parseArgs();
 await installGlobalOpCounters('orchestrator');
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
-const readGitValue = (gitArgs: string[]): string => {
-  try {
-    return execFileSync('git', gitArgs, {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
-  } catch (error) {
-    throw new Error(
-      `ORCHESTRATOR_GIT_FINGERPRINT_FAILED:command=${gitArgs.join(' ')}:` +
-      `${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-};
-const orchestratorCodeFingerprint = (() => {
-  const gitHead = readGitValue(['rev-parse', 'HEAD']);
-  const gitBranch = readGitValue(['rev-parse', '--abbrev-ref', 'HEAD']);
-  const gitStatus = readGitValue(['status', '--porcelain']);
-  const dirty = gitStatus.length > 0;
-  return {
-    gitHead,
-    gitBranch,
-    dirty,
-    codeHash: gitHead ? `${gitHead}${dirty ? '-dirty' : ''}` : null,
-    computedAt: Date.now(),
-  };
-})();
+const orchestratorCodeFingerprint = readOrchestratorCodeFingerprint();
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS = Math.max(
   CHILD_HEALTH_TIMEOUT_MS,
@@ -248,18 +217,8 @@ const resolveRelayUpgradeData = (
   request: Request,
   url: URL,
   peerAddress: string | null,
-): OrchestratorWebSocket['data'] | null => {
-  const type = resolveOrchestratorSocketType(url.searchParams.get('protocol'));
-  const audience = type === 'relay'
-    ? resolveConfiguredRelayAudience({
-      requestUrl: request.url,
-      origin: request.headers.get('origin'),
-      configuredAudiences: relayAudiences,
-    })
-    : canonicalizeRuntimeWsAudience(request.url);
-  if (!audience) return null;
-  return { type, audience, clientIp: resolveRequestClientIp(request, peerAddress) };
-};
+): OrchestratorWebSocket['data'] | null =>
+  resolveOrchestratorRelayUpgradeData(request, url, peerAddress, relayAudiences);
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
 const childDiagnosticsDir = join(controlPlaneDir, 'diagnostics');
@@ -354,30 +313,55 @@ const runtimeSeedFor = (name: string): string => resolveMeshRuntimeSeed(meshRoot
 const radapterAuthSeedFor = (name: string): string =>
   radapterAuthSeeds[name.toUpperCase()] || deriveMeshChildSeed(meshRootSeed, `radapter:${name}`);
 
-const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
-  name,
-  region: 'global',
-  seed: runtimeSeedFor(name),
-  authSeed: radapterAuthSeedFor(name),
-  signerLabel: `${name.toLowerCase()}-hub`,
-  apiPort: args.nodeApiPortBase + index,
-  publicPort: args.nodePublicPortBase + index,
-  dbPath: join(args.dbRoot, name.toLowerCase()),
-  deployTokens: index === 0,
-  proc: null,
-  startedAt: null,
-  exitedAt: null,
-  exitCode: null,
-  exitSignal: null,
-  restartTimer: null,
-  restartCount: 0,
-  recoveryInProgress: false,
-  failureCounts: {},
-  lastHealth: null,
-  lastInfo: null,
-  recentStdout: [],
-  recentStderr: [],
-}));
+const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => {
+  const engine = canonicalHubEngine(name);
+  const apiPort = args.nodeApiPortBase + index;
+  const configuredPublicPort = args.nodePublicPortBase + index;
+  // TS owns /rpc and /ws on one Bun server. Native H1 currently owns two
+  // independent listeners, so its direct socket must use the first free slot
+  // after the three hubs and MM when the configured bases coincide.
+  const publicPort = engine === 'rust' && configuredPublicPort === apiPort
+    ? args.nodePublicPortBase + HUB_COUNT + 1
+    : configuredPublicPort;
+  return {
+    name,
+    region: 'global',
+    seed: runtimeSeedFor(name),
+    authSeed: radapterAuthSeedFor(name),
+    signerLabel: `${name.toLowerCase()}-hub`,
+    apiPort,
+    publicPort,
+    dbPath: join(args.dbRoot, name.toLowerCase()),
+    deployTokens: index === 0,
+    engine,
+    proc: null,
+    startedAt: null,
+    exitedAt: null,
+    exitCode: null,
+    exitSignal: null,
+    restartTimer: null,
+    restartCount: 0,
+    recoveryInProgress: false,
+    failureCounts: {},
+    lastHealth: null,
+    lastInfo: null,
+    recentStdout: [],
+    recentStderr: [],
+  };
+});
+
+let nativeH1ReserveTargets: readonly NativeH1ReserveTarget[] = [];
+const nativeH1MeshPairs = new Map<string, NativeH1MeshPair>();
+
+const projectNativeH1ReserveHealthForMesh = (health: HubHealthPayload): HubHealthPayload =>
+  projectNativeH1ReserveHealth(
+    health,
+    hubChildren,
+    relayStore,
+    nativeH1ReserveTargets,
+    nativeH1MeshPairs,
+    HUB_REQUIRED_TOKEN_COUNT,
+  );
 
 const marketMakerChild: MarketMakerChild = {
   name: 'MM',
@@ -428,115 +412,7 @@ const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH'
   || join(args.dbRoot, 'runtime-import-manifest.json');
 const runtimeImportLogUrlEnabled = readBooleanEnv('XLN_RUNTIME_IMPORT_LOG_URL', false);
 
-const isLoopbackPublicBase = /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(
-  new URL(args.publicWsBaseUrl).hostname,
-);
-
 const custodyPublicRpcUrlEnv = String(process.env['XLN_CUSTODY_PUBLIC_RPC_URL'] || '').trim();
-
-const resolveWalletRuntimeImportUrl = (): string => buildRuntimeImportUrl(args.walletUrl);
-
-const runtimeIdFromChild = (child: HubChild | MarketMakerChild): string =>
-  String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim().toLowerCase();
-
-const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
-  const candidates: RuntimeImportCandidate[] = hubChildren.flatMap(child => {
-    const runtimeId = runtimeIdFromChild(child);
-    return runtimeId ? [{
-      label: child.name,
-      wsUrl: buildRuntimeNodeRpcUrl(args.publicWsBaseUrl, isLoopbackPublicBase, child.apiPort, child.publicPort),
-      authSeed: child.authSeed,
-      audience: runtimeId,
-      keyId: child.name.toLowerCase(),
-    }] : [];
-  });
-  const marketMakerRuntimeId = runtimeIdFromChild(marketMakerChild);
-  if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId) {
-    candidates.push({
-      label: marketMakerChild.name,
-      wsUrl: buildRuntimeNodeRpcUrl(
-        args.publicWsBaseUrl,
-        isLoopbackPublicBase,
-        marketMakerChild.apiPort,
-        marketMakerChild.publicPort,
-      ),
-      authSeed: marketMakerChild.authSeed,
-      audience: marketMakerRuntimeId,
-      keyId: 'mm',
-    });
-  }
-  if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
-    const custodyWsUrl = buildCustodyRpcUrl(
-      custodyPublicRpcUrlEnv,
-      args.publicWsBaseUrl,
-      isLoopbackPublicBase,
-      args.custodyDaemonPort,
-    );
-    if (custodyWsUrl) {
-      candidates.push({
-        label: 'Custody',
-        wsUrl: custodyWsUrl,
-        authSeed: custodySupport.daemonAuthSeed,
-        audience: custodySupport.daemonAuthAudience,
-        keyId: 'custody',
-      });
-    }
-  }
-  return createRuntimeImportManifest(candidates, runtimeImportTokenTtlMs);
-};
-
-const clearRuntimeImportManifestFile = (): void => {
-  rmSync(runtimeImportManifestPath, { force: true });
-};
-
-const publishRuntimeImportManifest = async (): Promise<boolean> => {
-  const health = await buildAggregatedHealthResponse();
-  const readiness = resolveRuntimeImportReadiness(health);
-  if (!readiness.ok) {
-    clearRuntimeImportManifestFile();
-    scheduleRuntimeImportManifestRefresh(null);
-    return false;
-  }
-  const manifest = buildRuntimeImportManifest();
-  if (!manifest) {
-    clearRuntimeImportManifestFile();
-    scheduleRuntimeImportManifestRefresh(null);
-    return false;
-  }
-  const importUrl = resolveWalletRuntimeImportUrl();
-  mkdirSync(dirname(runtimeImportManifestPath), { recursive: true });
-  writeFileSync(
-    runtimeImportManifestPath,
-    `${safeStringify({ importUrl, manifest })}\n`,
-    { encoding: 'utf8', mode: 0o600 },
-  );
-  console.log(buildRuntimeImportLogLine({
-    manifest,
-    importUrl,
-    access: 'admin',
-    manifestPath: runtimeImportManifestPath,
-    exposeUrl: runtimeImportLogUrlEnabled,
-  }));
-  scheduleRuntimeImportManifestRefresh(manifest);
-  return true;
-};
-
-let runtimeImportRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-
-const scheduleRuntimeImportManifestRefresh = (manifest: RuntimeImportManifest | null): void => {
-  if (runtimeImportRefreshTimer) clearTimeout(runtimeImportRefreshTimer);
-  const delayMs = manifest
-    ? Math.max(10_000, manifest.expiresAt - Date.now() - runtimeImportRefreshMarginMs)
-    : 10_000;
-  runtimeImportRefreshTimer = setTimeout(() => {
-    runtimeImportRefreshTimer = null;
-    void publishRuntimeImportManifest().catch((error) => {
-      meshLog.warn('runtime_import_manifest.refresh_failed', { error: serializeError(error) });
-      clearRuntimeImportManifestFile();
-      scheduleRuntimeImportManifestRefresh(null);
-    });
-  }, delayMs);
-};
 
 const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
 const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;
@@ -823,7 +699,10 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   }
   if (rawHealth) {
     try {
-      const nextHealth = validateHubHealthPayload(rawHealth);
+      const validatedHealth = validateHubHealthPayload(rawHealth);
+      const nextHealth = child.engine === 'rust'
+        ? projectNativeH1ReserveHealthForMesh(validatedHealth)
+        : validatedHealth;
       syncManagedRuntimeSecurityTelemetry(child.name, nextHealth);
       child.lastHealth = nextHealth;
       observeManagedRuntimeHalt(child, child.lastHealth);
@@ -855,6 +734,453 @@ const pollAllHubHealth = async (): Promise<void> => {
       hubHealthPollInFlight = null;
     });
   return hubHealthPollInFlight;
+};
+
+const publishNativeHubProfile = async (child: HubChild): Promise<void> => {
+  if (child.engine !== 'rust') return;
+  await pollHubHealth(child);
+  const entityId = String(child.lastInfo?.entityId || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(entityId)) {
+    throw new Error(`RUST_HUB_PROFILE_ENTITY_ID_MISSING:${child.name}`);
+  }
+  const payload = await fetchJson<Record<string, unknown>>(
+    `http://${args.host}:${String(child.apiPort)}/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
+    CHILD_HEALTH_TIMEOUT_MS,
+  );
+  if (
+    !payload || payload['ok'] !== true || payload['found'] !== true ||
+    String(payload['entityId'] || '').toLowerCase() !== entityId ||
+    !Array.isArray(payload['peers'])
+  ) throw new Error(`RUST_HUB_PROFILE_RESPONSE_INVALID:${child.name}`);
+  const profile = parseProfile(payload['profile']);
+  const verified = await verifyProfileSignature(profile);
+  if (!verified.valid) {
+    throw new Error(`RUST_HUB_PROFILE_SIGNATURE_INVALID:${child.name}:${verified.reason || 'unknown'}`);
+  }
+  if (!storeVerifiedGossipProfile(relayStore, profile) && !relayStore.gossipProfiles.has(entityId)) {
+    throw new Error(`RUST_HUB_PROFILE_RELAY_REJECTED:${child.name}`);
+  }
+};
+
+type NativeAccountStatus = Readonly<{
+  hasAccount: boolean;
+  ready: boolean;
+  currentHeight: number;
+  pendingFrameHeight: number | null;
+  tokens: readonly Readonly<{
+    tokenId: number;
+    hubGranted: string;
+    peerGranted: string;
+    delta: null | Readonly<{ leftCreditLimit: string; rightCreditLimit: string }>;
+  }>[];
+}>;
+
+const logNativeH1Bootstrap = (
+  event: string,
+  fields: Readonly<Record<string, unknown>>,
+): void => {
+  meshLog.warn('native_h1.bootstrap_phase', { event, ...fields });
+};
+
+const readNativeAccountStatus = async (
+  child: HubChild,
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  tokenIds: readonly number[],
+): Promise<NativeAccountStatus | null> => {
+  const url = new URL(`http://${args.host}:${String(child.apiPort)}/api/account/status`);
+  url.searchParams.set('hubEntityId', hubEntityId);
+  url.searchParams.set('counterpartyEntityId', counterpartyEntityId);
+  url.searchParams.set('tokenIds', tokenIds.join(','));
+  const payload = await fetchJson<Record<string, unknown>>(url.toString(), CHILD_HEALTH_TIMEOUT_MS);
+  if (!payload) return null;
+  if (payload['success'] !== true || !Array.isArray(payload['tokens'])) {
+    throw new Error(`RUST_HUB_ACCOUNT_STATUS_INVALID:${counterpartyEntityId}`);
+  }
+  const tokens = payload['tokens'].map((raw): NativeAccountStatus['tokens'][number] => {
+    const row = requireBoundaryRecord(raw, 'RUST_HUB_ACCOUNT_STATUS_TOKEN');
+    const tokenId = Number(row['tokenId']);
+    const hubGranted = String(row['hubGranted'] || '');
+    const peerGranted = String(row['peerGranted'] || '');
+    const delta = row['delta'];
+    if (!Number.isSafeInteger(tokenId) || tokenId < 1) {
+      throw new Error(`RUST_HUB_ACCOUNT_STATUS_TOKEN_ID:${String(row['tokenId'])}`);
+    }
+    if (!/^-?\d+$/.test(hubGranted) || !/^-?\d+$/.test(peerGranted)) {
+      throw new Error(`RUST_HUB_ACCOUNT_STATUS_GRANTED:${tokenId}`);
+    }
+    if (delta === null) return { tokenId, hubGranted, peerGranted, delta: null };
+    const fields = requireBoundaryRecord(delta, 'RUST_HUB_ACCOUNT_STATUS_DELTA');
+    const leftCreditLimit = String(fields['leftCreditLimit'] || '');
+    const rightCreditLimit = String(fields['rightCreditLimit'] || '');
+    if (!/^-?\d+$/.test(leftCreditLimit) || !/^-?\d+$/.test(rightCreditLimit)) {
+      throw new Error(`RUST_HUB_ACCOUNT_STATUS_CREDIT:${tokenId}`);
+    }
+    return { tokenId, hubGranted, peerGranted, delta: { leftCreditLimit, rightCreditLimit } };
+  });
+  const currentHeight = Number(payload['currentHeight'] || 0);
+  const pendingFrameHeight = payload['pendingFrameHeight'] === null
+    ? null
+    : Number(payload['pendingFrameHeight']);
+  if (!Number.isSafeInteger(currentHeight) || currentHeight < 0 ||
+      (pendingFrameHeight !== null && (!Number.isSafeInteger(pendingFrameHeight) || pendingFrameHeight < 1))) {
+    throw new Error(`RUST_HUB_ACCOUNT_STATUS_HEIGHT:${currentHeight}:${String(pendingFrameHeight)}`);
+  }
+  return {
+    hasAccount: payload['hasAccount'] === true,
+    ready: payload['ready'] === true,
+    currentHeight,
+    pendingFrameHeight,
+    tokens,
+  };
+};
+
+const submitNativeBootstrapCredit = async (
+  child: HubChild,
+  entityId: string,
+  signerId: string,
+  counterpartyEntityId: string,
+  tokenIds: readonly number[],
+): Promise<void> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetchLoopback(
+      `http://${args.host}:${String(child.apiPort)}/api/control/runtime/entity-inputs`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/json' },
+        body: safeStringify({
+          commandId: `bootstrap-credit:${counterpartyEntityId}:${tokenIds.join(',')}`,
+          entityInputs: [{
+            entityId,
+            signerId,
+            entityTxs: tokenIds.map(tokenId => ({
+              type: 'extendCredit',
+              data: {
+                counterpartyEntityId,
+                tokenId,
+                amount: getBootstrapCreditAmount(tokenId),
+              },
+            })),
+          }],
+        }),
+      },
+    );
+    const payload = requireBoundaryRecord(await response.json(), 'RUST_HUB_BOOTSTRAP_CREDIT_RESPONSE');
+    if (!response.ok || payload['ok'] !== true || !Number.isSafeInteger(payload['height'])) {
+      throw new Error(
+        `RUST_HUB_BOOTSTRAP_CREDIT_FAILED:${counterpartyEntityId}:${response.status}:${safeStringify(payload)}`,
+      );
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const configureNativeH1Entity = async (
+  child: HubChild,
+  entityId: string,
+  signerId: string,
+): Promise<void> => {
+  const quoteAuthority = getMarketMakerIdentities()[0];
+  if (!quoteAuthority) throw new Error('RUST_HUB_QUOTE_AUTHORITY_MISSING:H1');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetchLoopback(
+      `http://${args.host}:${String(child.apiPort)}/api/control/runtime/entity-inputs`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/json' },
+        body: safeStringify({
+          commandId: 'bootstrap-hub-policy:H1',
+          entityInputs: [{
+            entityId,
+            signerId,
+            entityTxs: [
+              {
+                type: 'setHubConfig',
+                data: {
+                  matchingStrategy: 'amount',
+                  policyVersion: 1,
+                  routingFeePPM: 1,
+                  baseFee: 0n,
+                  swapTakerFeeBps: 1,
+                  rebalanceLiquidityFeeBps: 1n,
+                  rebalanceTimeoutMs: 10 * 60 * 1_000,
+                },
+              },
+              {
+                type: 'initOrderbookExt',
+                data: {
+                  name: child.name,
+                  spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+                  referenceTokenId: 1,
+                  usdQuoteAuthorityEntityId: quoteAuthority.entityId,
+                  minTradeSize: HUB_DEFAULT_MIN_TRADE_SIZE,
+                  supportedPairs: [...HUB_DEFAULT_SUPPORTED_PAIRS],
+                },
+              },
+            ],
+          }],
+        }),
+      },
+    );
+    const payload = requireBoundaryRecord(await response.json(), 'RUST_HUB_BOOTSTRAP_POLICY_RESPONSE');
+    if (!response.ok || payload['ok'] !== true || !Number.isSafeInteger(payload['height'])) {
+      throw new Error(`RUST_HUB_BOOTSTRAP_POLICY_FAILED:${response.status}:${safeStringify(payload)}`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const creditGrantedByNativeHub = (
+  status: NativeAccountStatus,
+  tokenId: number,
+): bigint => {
+  const row = status.tokens.find(token => token.tokenId === tokenId);
+  return row ? BigInt(row.hubGranted) : 0n;
+};
+
+const fundNativeH1BootstrapReserves = async (entityId: string): Promise<void> => {
+  const startedAt = Date.now();
+  const primary = resolveMeshJurisdictionConfig(args.rpcUrl);
+  const jurisdictions = [primary, ...resolveSecondaryJurisdictions(primary.rpc)];
+  // Native H1 becomes ready before the TS hubs have necessarily published
+  // their complete multi-jurisdiction Entity inventory. Funding from that
+  // partial snapshot silently leaves H2/H3 reserves at zero. Wait for the
+  // authoritative child /api/info rows; the reset stall detector owns the
+  // deadline and any exited child fails the reset through the normal path.
+  while (hubChildren.slice(1).some(child => (child.lastInfo?.hubEntities?.length ?? 0) === 0)) {
+    await scheduler.wait(25);
+  }
+  const hubEntities = hubChildren.flatMap(child => child.lastInfo?.hubEntities ?? []);
+  logNativeH1Bootstrap('bootstrap_funding_inventory_ready', {
+    elapsedMs: Date.now() - startedAt,
+    entities: new Set([entityId, ...hubEntities.map(entry => entry.entityId)]).size,
+    jurisdictions: jurisdictions.length,
+  });
+  const targets = jurisdictions.map(jurisdiction => ({
+    jurisdiction,
+    entityIds: Array.from(new Set([
+      ...(jurisdiction.name === primary.name ? [entityId] : []),
+      ...hubEntities
+        .filter(entry => String(entry.jurisdictionName || '').trim() === jurisdiction.name)
+        .map(entry => String(entry.entityId || '').trim().toLowerCase())
+        .filter(candidate => /^0x[0-9a-f]{64}$/.test(candidate)),
+    ])),
+  }));
+  for (const { jurisdiction, entityIds } of targets) {
+    if (entityIds.length === 0) continue;
+    const rpcUrl = resolveLocalMarketMakerRpcUrl(jurisdiction.rpc);
+    const adapter: JAdapter = await createJAdapter({
+      mode: 'rpc',
+      chainId: jurisdiction.chainId,
+      rpcUrl,
+      fromReplica: {
+        chainId: jurisdiction.chainId,
+        name: jurisdiction.name,
+        entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
+        contracts: { ...jurisdiction.contracts },
+      },
+    });
+    logNativeH1Bootstrap('bootstrap_funding_adapter_ready', {
+      elapsedMs: Date.now() - startedAt,
+      jurisdiction: jurisdiction.name,
+      entities: entityIds.length,
+    });
+    try {
+    const catalog = await adapter.getTokenRegistry();
+    logNativeH1Bootstrap('bootstrap_funding_catalog_ready', {
+      elapsedMs: Date.now() - startedAt,
+      jurisdiction: jurisdiction.name,
+      tokens: catalog.length,
+    });
+    const configured = getTokenIdsForJurisdiction({
+      name: jurisdiction.name,
+      chainId: jurisdiction.chainId,
+    });
+    const desired = new Set(
+      configured.length >= HUB_REQUIRED_TOKEN_COUNT
+        ? configured
+        : DEFAULT_ACCOUNT_TOKEN_IDS,
+    );
+    const selected = catalog.filter(token => desired.has(Number(token.tokenId)));
+    const bootstrapCatalog = selected.length >= HUB_REQUIRED_TOKEN_COUNT
+      ? selected
+      : catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
+    if (bootstrapCatalog.length < HUB_REQUIRED_TOKEN_COUNT) {
+      throw new Error(
+        `RUST_HUB_TOKEN_CATALOG_INCOMPLETE:required=${HUB_REQUIRED_TOKEN_COUNT}:actual=${bootstrapCatalog.length}`,
+      );
+    }
+    if (jurisdiction.name === primary.name) {
+      nativeH1ReserveTargets = bootstrapCatalog.map((token: JTokenInfo) => ({
+        tokenId: Number(token.tokenId),
+        symbol: String(token.symbol || `token-${String(token.tokenId)}`),
+        decimals: Number(token.decimals),
+        expectedMin: getBootstrapTokenAmount(Number(token.tokenId), Number(token.decimals)),
+      }));
+    }
+    const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
+    for (const targetEntityId of entityIds) {
+      for (const token of bootstrapCatalog) {
+        const tokenId = Number(token.tokenId);
+        const expectedMin = getBootstrapTokenAmount(tokenId, Number(token.decimals));
+        const current = await adapter.getReserves(targetEntityId, tokenId);
+        if (current < expectedMin) {
+          mints.push({
+            entityId: targetEntityId,
+            tokenId,
+            amount: expectedMin - current,
+          });
+        }
+      }
+    }
+    if (mints.length > 0) await adapter.debugFundReservesBatch(mints);
+    logNativeH1Bootstrap('bootstrap_funding_mints_ready', {
+      elapsedMs: Date.now() - startedAt,
+      jurisdiction: jurisdiction.name,
+      mints: mints.length,
+    });
+    } finally {
+      await adapter.close();
+    }
+  }
+};
+
+const driveNativeH1Bootstrap = async (
+  h1: HubChild,
+  includeMarketMaker: boolean,
+): Promise<void> => {
+  if (h1.engine !== 'rust') return;
+  const entityId = String(h1.lastInfo?.entityId || '').trim().toLowerCase();
+  const signerId = String(h1.lastInfo?.hubEntities?.[0]?.signerId || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(entityId) || !/^0x[0-9a-f]{40}$/.test(signerId)) {
+    throw new Error('RUST_HUB_BOOTSTRAP_IDENTITY_MISSING:H1');
+  }
+  const bootstrapStartedAt = Date.now();
+  await configureNativeH1Entity(h1, entityId, signerId);
+  await publishNativeHubProfile(h1);
+  logNativeH1Bootstrap('bootstrap_policy_committed', {
+    elapsedMs: Date.now() - bootstrapStartedAt,
+    entityId,
+  });
+  await fundNativeH1BootstrapReserves(entityId);
+  logNativeH1Bootstrap('bootstrap_reserves_funded', {
+    elapsedMs: Date.now() - bootstrapStartedAt,
+    entityId,
+  });
+  const hubPeers = hubChildren.slice(1).map(peer => ({
+    name: peer.name,
+    isHub: true,
+    entityId: deriveManagedEntityIdentity({
+      name: peer.name,
+      seed: peer.seed,
+      signerLabel: peer.signerLabel,
+    }).entityId,
+    tokenIds: [...DEFAULT_ACCOUNT_TOKEN_IDS] as number[],
+  }));
+  const primaryJurisdiction = resolveMeshJurisdictionConfig(args.rpcUrl).name;
+  const supportPeers = includeMarketMaker ? getMarketMakerIdentities()
+    .filter(peer => peer.jurisdictionName === primaryJurisdiction)
+    .map(peer => {
+    const configured = getTokenIdsForJurisdiction({
+      name: peer.jurisdictionName,
+      chainId: peer.chainId,
+    });
+    return {
+      name: peer.name,
+      isHub: false,
+      entityId: peer.entityId,
+      tokenIds: configured.length >= HUB_REQUIRED_TOKEN_COUNT
+        ? configured
+        : [...DEFAULT_ACCOUNT_TOKEN_IDS],
+    };
+    }) : [];
+  const peers = [...hubPeers, ...supportPeers];
+  let lastProgress = {
+    complete: 0,
+    observed: 0,
+    ready: 0,
+    awaitingHubCredit: 0,
+  };
+  let lastProgressLogAt = 0;
+  while (resetState.inProgress && h1.proc && h1.exitCode === null && h1.exitSignal === null) {
+    let complete = 0;
+    let observed = 0;
+    let ready = 0;
+    let awaitingHubCredit = 0;
+    for (const peer of peers) {
+      const status = await readNativeAccountStatus(h1, entityId, peer.entityId, peer.tokenIds);
+      if (!status) continue;
+      observed += 1;
+      const referenceToken = peer.tokenIds[0];
+      const reference = referenceToken === undefined
+        ? undefined
+        : status.tokens.find(token => token.tokenId === referenceToken);
+      const bilateralReady = status.hasAccount && status.ready && peer.tokenIds.every(tokenId => {
+        const row = status.tokens.find(token => token.tokenId === tokenId);
+        const target = getBootstrapCreditAmount(tokenId);
+        return row !== undefined && BigInt(row.hubGranted) >= target && BigInt(row.peerGranted) >= target;
+      });
+      if (peer.isHub) {
+        nativeH1MeshPairs.set(peer.entityId, {
+          counterpartyId: peer.entityId,
+          counterpartyName: peer.name,
+          hasAccount: status.hasAccount,
+          currentHeight: status.currentHeight,
+          pendingFrameHeight: status.pendingFrameHeight,
+          pendingFrameHash: null,
+          grantedByMe: reference?.hubGranted ?? '0',
+          grantedByPeer: reference?.peerGranted ?? '0',
+          ready: bilateralReady,
+        });
+      }
+      if (!status.hasAccount || !status.ready) continue;
+      ready += 1;
+      const missing = peer.tokenIds.filter(tokenId =>
+        creditGrantedByNativeHub(status, tokenId) <
+        getBootstrapCreditAmount(tokenId));
+      if (missing.length > 0) {
+        awaitingHubCredit += 1;
+        logNativeH1Bootstrap('bootstrap_credit_submit', {
+          counterpartyEntityId: peer.entityId,
+          peer: peer.name,
+          tokenIds: missing,
+        });
+        await submitNativeBootstrapCredit(h1, entityId, signerId, peer.entityId, missing);
+        logNativeH1Bootstrap('bootstrap_credit_committed', {
+          counterpartyEntityId: peer.entityId,
+          peer: peer.name,
+          tokenIds: missing,
+        });
+        continue;
+      }
+      if (bilateralReady) complete += 1;
+    }
+    lastProgress = { complete, observed, ready, awaitingHubCredit };
+    if (Date.now() - lastProgressLogAt >= 1_000) {
+      lastProgressLogAt = Date.now();
+      logNativeH1Bootstrap('bootstrap_progress', {
+        ...lastProgress,
+        elapsedMs: Date.now() - bootstrapStartedAt,
+        peers: peers.length,
+      });
+    }
+    const reservesReady = h1.lastHealth?.bootstrapReserves?.targetMet === true;
+    if (complete === peers.length && reservesReady) return;
+    await scheduler.wait(50);
+  }
+  throw new Error(
+    `RUST_HUB_BOOTSTRAP_STOPPED:complete=${lastProgress.complete}/${peers.length}` +
+    `:observed=${lastProgress.observed}:ready=${lastProgress.ready}` +
+    `:awaitingHubCredit=${lastProgress.awaitingHubCredit}`,
+  );
 };
 
 const marketMakerPoller = createMarketMakerChildPoller({
@@ -890,100 +1216,14 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
 
 const getHubSpecsArg = (): string => HUB_NAMES.join(',');
 
-type MarketMakerJurisdictionConfig = ResolvedMeshJurisdictionConfig;
-
-type MarketMakerSupportPeerIdentity = {
-  name: string;
-  entityId: string;
-  signerId: string;
-  jurisdictionName: string;
-  chainId: number;
-  depositoryAddress: string;
-};
-
-const resolveLocalMarketMakerRpcUrl = (value: string): string => {
-  const raw = String(value || '').trim();
-  if (!raw.startsWith('/')) return raw;
-  const match = raw.match(/^\/(?:api\/)?rpc([2-8])?(?:\?.*)?$/);
-  if (match) {
-    const index = match[1] ? Number(match[1]) : 1;
-    const rpc = String(args.rpcUrls[index] || '').trim();
-    if (rpc) return rpc;
-  }
-  return new URL(raw, `http://${args.host}:${marketMakerChild.apiPort}`).toString();
-};
-
-const toMarketMakerEntityJurisdictionConfig = (
-  jurisdiction: MarketMakerJurisdictionConfig,
-): MarketMakerEntityJurisdictionConfig => {
-  if (!jurisdiction.contracts?.entityProvider || !jurisdiction.contracts?.depository) {
-    throw new Error(`MARKET_MAKER_JURISDICTION_CONTRACTS_MISSING:${jurisdiction.name || 'unknown'}`);
-  }
-  return {
-    name: jurisdiction.name,
-    address: resolveLocalMarketMakerRpcUrl(jurisdiction.rpc),
-    entityProviderAddress: jurisdiction.contracts.entityProvider,
-    depositoryAddress: jurisdiction.contracts.depository,
-    chainId: Number(jurisdiction.chainId || 0),
-    blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
-  };
-};
-
-const buildMarketMakerIdentity = (
-  jurisdiction: MarketMakerJurisdictionConfig,
-  signerLabel: string,
-  name: string,
-): MarketMakerSupportPeerIdentity => {
-  const signerId = deriveSignerAddressSync(marketMakerChild.seed, signerLabel).toLowerCase();
-  const entityId = deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction));
-  return {
-    name,
-    entityId,
-    signerId,
-    jurisdictionName: jurisdiction.name,
-    chainId: Number(jurisdiction.chainId || 0),
-    depositoryAddress: jurisdiction.contracts.depository,
-  };
-};
-
-const buildMarketMakerJurisdictionIdentities = (
-  jurisdiction: MarketMakerJurisdictionConfig,
-  signerLabel: string,
-  name: string,
-): MarketMakerSupportPeerIdentity[] => {
-  const configuredTokenIds = getTokenIdsForJurisdiction({
-    name: jurisdiction.name,
-    chainId: jurisdiction.chainId,
-  });
-  const tokenIds = configuredTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
-    ? configuredTokenIds
-    : [...DEFAULT_ACCOUNT_TOKEN_IDS];
-  return planMarketMakerIdentityLabels(signerLabel, name, tokenIds).map(plan =>
-    buildMarketMakerIdentity(jurisdiction, plan.signerLabel, plan.profileName));
-};
-
-const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
-  // Reset may atomically replace the shard jurisdiction file with freshly
-  // deployed contract addresses. Quote-authority identity must bind those
-  // exact bytes, never the process-start cache from before deployment.
-  resetMeshJurisdictionsCache();
-  const primary = resolveMeshJurisdictionConfig(args.rpcUrl);
-  const identities = buildMarketMakerJurisdictionIdentities(
-    primary,
-    marketMakerChild.signerLabel,
-    marketMakerChild.name,
-  );
-  for (const [index, secondary] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
-    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
-    if (!secondaryName) continue;
-    identities.push(...buildMarketMakerJurisdictionIdentities(
-      secondary,
-      `${marketMakerChild.signerLabel}:${secondaryName}`,
-      `${marketMakerChild.name} ${secondaryName}`,
-    ));
-  }
-  return identities;
-};
+const {
+  getMarketMakerIdentities,
+  resolveLocalMarketMakerRpcUrl,
+} = createMarketMakerIdentityResolver({
+  args,
+  marketMakerChild,
+  requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
+});
 
 const clearChildRestartTimer = (child: { restartTimer: ReturnType<typeof setTimeout> | null }): void => {
   if (!child.restartTimer) return;
@@ -994,7 +1234,9 @@ const clearChildRestartTimer = (child: { restartTimer: ReturnType<typeof setTime
 const managedSpecForHub = (child: HubChild): ManagedRuntimeSpec => ({
   role: 'hub',
   name: child.name,
-  script: 'core/orchestrator/hub-node.ts',
+  script: child.engine === 'rust'
+    ? 'rscore/target/release/xlnrs'
+    : 'core/orchestrator/hub-node.ts',
   apiPort: child.apiPort,
   dbPath: child.dbPath,
 });
@@ -1297,6 +1539,7 @@ const handleUnexpectedHubFailure = (
     child.restartTimer = null;
     void spawnHub(child).then(async () => {
       await waitForHubSelfReady(child);
+      await publishNativeHubProfile(child);
       child.recoveryInProgress = false;
       meshLog.info('child.respawned_from_checkpoint', {
         child: child.name,
@@ -1463,219 +1706,49 @@ const resetSupervisedChildForSpawn = (child: HubChild | MarketMakerChild): void 
   managedChildFatalRoot.delete(child.name);
 };
 
-const spawnHub = async (child: HubChild): Promise<void> => {
-  await reapStaleHubProcess(child);
-  mkdirSync(child.dbPath, { recursive: true });
-  clearChildRestartTimer(child);
-  const spec = managedSpecForHub(child);
-  // Runtime-level profiling belongs to the process that owns the frame loop.
-  // Operators pass engine flags (e.g. --cpu-prof) per hub without the
-  // orchestrator knowing which profiler is in use.
-  const engineArgs = buildHubEngineArgs(child.name);
-  const cmd = [
-    ...engineArgs,
-    'core/orchestrator/hub-node.ts',
-    '--name', child.name,
-    '--region', child.region,
-    '--signer-label', child.signerLabel,
-    '--relay-url', relayUrl,
-    '--api-host', args.host,
-    '--api-port', String(child.apiPort),
-    '--direct-ws-url', buildPublicDirectWsUrl(args.publicWsBaseUrl, child.publicPort),
-    '--rpc-url', args.rpcUrl,
-    ...buildSecondaryRpcArgs(),
-    '--mesh-hub-names', getHubSpecsArg(),
-    '--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities()),
-    '--db-path', child.dbPath,
-    ...(child.deployTokens ? ['--deploy-tokens'] : []),
-  ];
-  resetSupervisedChildForSpawn(child);
-  const proc = spawn('bun', cmd, {
-    cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    env: sanitizeChildProcessEnv(buildHubChildProcessEnv({
-      hubName: child.name,
-      dbPath: child.dbPath,
-      brainvaultOwnerPath: join(child.dbPath, 'brainvault-owner.json'),
-      jurisdictionsPath: shardJurisdictionsPath,
-      rpcEnv: buildRpcChildEnv(),
-      orchestratorPid: process.pid,
-      orchestratorOwnerId,
-      startupTimeoutMs: STARTUP_TIMEOUT_MS,
-      hubDelayMs: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'],
-    })),
-  });
-  child.proc = proc;
-  if (!proc.pid) {
-    throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
-  }
-  attachManagedChildFatalIpc(proc, report => persistManagedChildFatalReport(child, report));
-  await managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
-  const stdoutPrefixState: PrefixLogState = { pending: '' };
-  const stderrPrefixState: PrefixLogState = { pending: '' };
-  proc.stdout?.on('data', chunk => {
-    pushChildLogLines(child.recentStdout, chunk);
-    writePrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState, chunk);
-  });
-  proc.stderr?.on('data', chunk => {
-    pushChildLogLines(child.recentStderr, chunk);
-    writePrefixedLogChunk(
-      process.stderr,
-      `[${child.name}:err]`,
-      stderrPrefixState,
-      chunk,
-      line => captureManagedChildErrorLine(child, line),
-    );
-  });
-  proc.once('exit', (code, signal) => {
-    flushPrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState);
-    flushPrefixedLogChunk(
-      process.stderr,
-      `[${child.name}:err]`,
-      stderrPrefixState,
-      line => captureManagedChildErrorLine(child, line),
-    );
-    const pid = proc.pid ?? null;
-    const controlledStop = consumeControlledStop(pid);
-    const isCurrentProc = child.proc === proc;
-    managedRuntimeLeases.removeLease(spec, pid);
-    if (isCurrentProc) {
-      child.exitedAt = Date.now();
-      child.exitCode = code ?? null;
-      child.exitSignal = signal ?? null;
-    }
-    if (shouldCaptureUnexpectedChildExit(
-      controlledStop,
-      orchestratorShutdownStarted,
-      isCurrentProc,
-    )) {
-      handleUnexpectedHubFailure(child, {
-        role: 'hub',
-        name: child.name,
-        code: code ?? null,
-        signal: signal ?? null,
-        reason: selectChildFailureReason(
-          child.recentStderr,
-          child.recentStdout,
-          `${child.name}_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)}`,
-        ),
-      });
-    }
-  });
-  await writeInheritedChildSecrets(proc, {
-    runtimeSeed: child.seed,
-    radapterAuthSeed: child.authSeed,
-  });
-};
-
-const spawnMarketMaker = async (): Promise<void> => {
-  await reapStaleMarketMakerProcess();
-  mkdirSync(marketMakerChild.dbPath, { recursive: true });
-  clearChildRestartTimer(marketMakerChild);
-  const spec = managedSpecForMarketMaker();
-  const cmd = [
-    'core/orchestrator/mm-node.ts',
-    '--name', marketMakerChild.name,
-    '--signer-label', marketMakerChild.signerLabel,
-    '--relay-url', relayUrl,
-    '--api-host', args.host,
-    '--api-port', String(marketMakerChild.apiPort),
-    '--direct-ws-url', buildPublicDirectWsUrl(args.publicWsBaseUrl, marketMakerChild.publicPort),
-    '--rpc-url', args.rpcUrl,
-    ...buildSecondaryRpcArgs(),
-    '--mesh-hub-names', getHubSpecsArg(),
-    '--db-path', marketMakerChild.dbPath,
-  ];
-  resetSupervisedChildForSpawn(marketMakerChild);
-  marketMakerChild.lastStartupPhase = null;
-  const proc = spawn('bun', cmd, {
-    cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    env: sanitizeChildProcessEnv({
-      ...buildManagedRuntimeChildSecretEnv(process.env),
-      ...buildRuntimeChildGcEnv(process.env),
-      XLN_DB_PATH: marketMakerChild.dbPath,
-      XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
-      ...buildRpcChildEnv(),
-      USE_ANVIL: 'true',
-      XLN_ORCHESTRATOR_PID: String(process.pid),
-      XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
-      XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
-      XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
-      XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1',
-      XLN_STORAGE_CERTIFIED_HISTORY: process.env['XLN_STORAGE_CERTIFIED_HISTORY'] ?? '1',
-      XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0',
-      XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:
-        process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ??
-        join(marketMakerChild.dbPath, 'bootstrap-events.jsonl'),
-      XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
-    }),
-  });
-  marketMakerChild.proc = proc;
-  if (!proc.pid) {
-    throw new Error('MM_SPAWN_FAILED_NO_PID');
-  }
-  attachManagedChildFatalIpc(
-    proc,
-    report => persistManagedChildFatalReport(marketMakerChild, report),
-  );
-  await managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
-  const stdoutPrefixState: PrefixLogState = { pending: '' };
-  const stderrPrefixState: PrefixLogState = { pending: '' };
-  proc.stdout?.on('data', chunk => {
-    pushChildLogLines(marketMakerChild.recentStdout, chunk);
-    writePrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState, chunk);
-  });
-  proc.stderr?.on('data', chunk => {
-    pushChildLogLines(marketMakerChild.recentStderr, chunk);
-    writePrefixedLogChunk(
-      process.stderr,
-      '[MM:err]',
-      stderrPrefixState,
-      chunk,
-      line => captureManagedChildErrorLine(marketMakerChild, line),
-    );
-  });
-  proc.once('exit', (code, signal) => {
-    flushPrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState);
-    flushPrefixedLogChunk(
-      process.stderr,
-      '[MM:err]',
-      stderrPrefixState,
-      line => captureManagedChildErrorLine(marketMakerChild, line),
-    );
-    const pid = proc.pid ?? null;
-    const controlledStop = consumeControlledStop(pid);
-    const isCurrentProc = marketMakerChild.proc === proc;
-    managedRuntimeLeases.removeLease(spec, pid);
-    if (isCurrentProc) {
-      marketMakerChild.exitedAt = Date.now();
-      marketMakerChild.exitCode = code ?? null;
-      marketMakerChild.exitSignal = signal ?? null;
-    }
-    if (shouldCaptureUnexpectedChildExit(
-      controlledStop,
-      orchestratorShutdownStarted,
-      isCurrentProc,
-    )) {
-      handleUnexpectedMarketMakerFailure({
-        role: 'market-maker',
-        name: marketMakerChild.name,
-        code: code ?? null,
-        signal: signal ?? null,
-        reason: selectChildFailureReason(
-          marketMakerChild.recentStderr,
-          marketMakerChild.recentStdout,
-          `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
-        ),
-      });
-    }
-  });
-  await writeInheritedChildSecrets(proc, {
-    runtimeSeed: marketMakerChild.seed,
-    radapterAuthSeed: marketMakerChild.authSeed,
-  });
-};
+const spawnHub = createHubSpawner({
+  args,
+  relayUrl,
+  shardJurisdictionsPath,
+  orchestratorOwnerId,
+  startupTimeoutMs: STARTUP_TIMEOUT_MS,
+  hubChildren,
+  marketMakerChild,
+  getHubSpecsArg,
+  getMarketMakerIdentities,
+  runtimeSeedFor,
+  buildSecondaryRpcArgs,
+  buildRpcChildEnv,
+  managedSpecForHub,
+  reapStaleHubProcess,
+  resetSupervisedChildForSpawn,
+  managedRuntimeLeases,
+  persistManagedChildFatalReport,
+  captureManagedChildErrorLine,
+  consumeControlledStop,
+  isOrchestratorShutdownStarted: () => orchestratorShutdownStarted,
+  handleUnexpectedHubFailure,
+});
+const spawnMarketMaker = createMarketMakerSpawner({
+  args,
+  relayUrl,
+  shardJurisdictionsPath,
+  orchestratorOwnerId,
+  startupTimeoutMs: STARTUP_TIMEOUT_MS,
+  marketMakerChild,
+  buildSecondaryRpcArgs,
+  buildRpcChildEnv,
+  getHubSpecsArg,
+  managedSpecForMarketMaker,
+  reapStaleMarketMakerProcess,
+  resetSupervisedChildForSpawn,
+  managedRuntimeLeases,
+  persistManagedChildFatalReport,
+  captureManagedChildErrorLine,
+  consumeControlledStop,
+  isOrchestratorShutdownStarted: () => orchestratorShutdownStarted,
+  handleUnexpectedMarketMakerFailure,
+});
 
 const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<void> => {
   for (const child of hubChildren) {
@@ -1753,64 +1826,18 @@ const {
   warnTailRead: warnBootstrapTailRead,
 });
 
-const buildCurrentBootstrapTimeline = (input: {
-  storageOk: boolean;
-  resetOk: boolean;
-  hubs: AggregatedHealth['hubs'];
-  hubsOnline: boolean;
-  hubMeshOk: boolean;
-  directOpenLinks: number;
-  capabilities: ReturnType<typeof resolveResetCapabilityHealth>;
-  marketMakerActive: boolean;
-  marketMaker: AggregatedHealth['marketMaker'];
-  marketMakerStartupPhase: string | null;
-  bootstrapReservesOk: boolean;
-  bootstrapReserveTargetsMet: boolean;
-  reserveEntityCount: number;
-}): AggregatedHealth['bootstrapTimeline'] =>
-  buildBootstrapTimeline(projectCurrentBootstrapTimelineParams({
-    storageOk: input.storageOk,
-    resetOk: input.resetOk,
-    hubs: input.hubs,
-    hubsOnline: input.hubsOnline,
-    hubMeshOk: input.hubMeshOk,
-    directOpenLinks: input.directOpenLinks,
-    marketMakerEnabled: input.capabilities.marketMakerEnabled,
-    marketMakerActive: input.marketMakerActive,
-    marketMaker: input.marketMaker,
-    marketMakerStartupPhase: input.marketMakerStartupPhase,
-    hubNameCount: HUB_NAMES.length,
-    custodyEnabled: input.capabilities.custodyEnabled,
-    custodyOk: input.capabilities.custodyOk,
-    bootstrapReservesOk: input.bootstrapReservesOk,
-    bootstrapReserveTargetsMet: input.bootstrapReserveTargetsMet,
-    reserveEntityCount: input.reserveEntityCount,
-  }));
+const buildCurrentBootstrapTimeline = createCurrentBootstrapTimelineBuilder(
+  buildBootstrapTimeline,
+  HUB_NAMES.length,
+);
 
-const resolveCurrentCapabilityHealth = (): ReturnType<
-  typeof resolveResetCapabilityHealth
-> => {
-  const marketMakerOnline =
-    marketMakerChild.proc?.exitCode === null &&
-    marketMakerChild.proc?.signalCode === null &&
-    marketMakerChild.exitCode === null &&
-    marketMakerChild.exitSignal === null &&
-    marketMakerChild.lastHealth?.runtime?.halted !== true;
-  const custodyOnline = Boolean(
-    custodySupport?.identity.entityId &&
-      custodySupport.daemonChild.proc.exitCode === null &&
-      custodySupport.custodyChild.proc.exitCode === null,
-  );
-  const resetOptions = resolveHealthResetOptions(
-    activeResetOptions,
-    pendingResetOptions,
-    resetState.inProgress,
-  );
-  return resolveResetCapabilityHealth(resetOptions, {
-    marketMakerOnline,
-    custodyOnline,
-  });
-};
+const resolveCurrentCapabilityHealthForMesh = () => resolveCurrentCapabilityHealth(
+  marketMakerChild,
+  custodySupport,
+  activeResetOptions,
+  pendingResetOptions,
+  resetState.inProgress,
+);
 
 const computeAggregatedHealth = (options: {
   marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
@@ -1841,7 +1868,7 @@ const computeAggregatedHealth = (options: {
   const { pairs: pairSet, directLinks: directLinkMap } =
     collectAggregatedHubMesh(hubChildren, HUB_MESH_CREDIT_AMOUNT);
   const reserveEntities = collectBootstrapReserveEntities(hubChildren);
-  const capabilityHealth = resolveCurrentCapabilityHealth();
+  const capabilityHealth = resolveCurrentCapabilityHealthForMesh();
   const marketMakerActive = capabilityHealth.marketMakerActive;
   const marketMakerBootstrapEvent = readLastMarketMakerBootstrapEvent();
   const eventStartupPhase = String(marketMakerBootstrapEvent?.stage || '').trim() || null;
@@ -1984,53 +2011,9 @@ const fetchRouteMarketSnapshots = async (
   ]));
 };
 
-const recomputeHealthWithMarketMaker = (
-  health: AggregatedHealth,
-  marketMaker: AggregatedHealth['marketMaker'],
-): AggregatedHealth => {
-  const resetOk = deriveResetHealthOk(health.reset);
-  const systemOk = health.coreOk &&
-    resetOk &&
-    marketMaker.ok === true &&
-    health.custody.ok === true &&
-    health.bootstrapReserves.ok === true;
-  // marketMaker.ok = hubsDepthReady && crossDepthReady (mm-node-health.ts), so
-  // systemOk is coupled to cross-jurisdiction swap route convergence even for
-  // workloads (e.g. HLT `payments` mode) that never touch cross-J swaps. Split
-  // the single 'marketMaker' bucket so a cross-only stall is distinguishable
-  // in the health payload from a same-chain (payment-relevant) one, instead of
-  // requiring a manual read of the nested hubs/cross arrays to tell them apart.
-  const sameChainOk = marketMaker.hubs.length > 0 && marketMaker.hubs.every((hub) => hub.depthReady === true);
-  const crossOk = marketMaker.cross.applicable !== true || marketMaker.cross.ok === true;
-  const degraded = [
-    health.storage.ok ? null : 'storage',
-    health.hubs.every((hub) => hub.online) ? null : 'hubs',
-    health.hubMesh.ok ? null : 'hubMesh',
-    resetOk ? null : 'reset',
-    marketMaker.ok ? null : 'marketMaker',
-    sameChainOk ? null : 'marketMakerSameChain',
-    crossOk ? null : 'marketMakerCross',
-    health.custody.ok ? null : 'custody',
-    health.bootstrapReserves.ok ? null : 'bootstrapReserves',
-    health.bootstrapReserves.targetMet ? null : 'bootstrapReserveTargets',
-  ].filter((value): value is string => Boolean(value));
-  if (!marketMaker.ok && sameChainOk && !crossOk) {
-    meshLog.warn('health.system_ok_blocked_by_cross_only', {
-      detail: 'same-chain market-maker depth is ready; systemOk is held back solely by cross-jurisdiction route convergence',
-      expectedRoutes: marketMaker.cross.expectedRoutes,
-      routesReady: marketMaker.cross.routes.filter((route) => route.depthReady === true).length,
-      routesTotal: marketMaker.cross.routes.length,
-    });
-  }
-  const failures = buildRuntimeHealthFailures(degraded);
-  return {
-    ...health,
-    systemOk,
-    degraded,
-    failures,
-    marketMaker,
-  };
-};
+const recomputeHealthWithMarketMaker = createHealthRecomputer(details => {
+  meshLog.warn('health.system_ok_blocked_by_cross_only', details);
+});
 
 const enrichMarketMakerFromHubSnapshots = async (health: AggregatedHealth): Promise<AggregatedHealth> => {
   const marketMaker = await buildPublicMarketMakerHealth(
@@ -2090,18 +2073,31 @@ const buildAggregatedHealthResponse = async (
   return recomputeHealthWithMarketMaker(nextHealth, nextHealth.marketMaker);
 };
 
-const reportBaselineWait = (
-  startedAt: number,
-  lastReportedAt: number,
-  now: number,
-  status: Record<string, unknown>,
-): number => {
-  if (now - lastReportedAt < HUB_BASELINE_STATUS_LOG_INTERVAL_MS) return lastReportedAt;
-  console.warn(
-    `[MESH] baseline still waiting: waitedMs=${now - startedAt} status=${safeStringify(status)}`,
-  );
-  return now;
-};
+const {
+  buildRuntimeImportManifest,
+  clearRuntimeImportManifestFile,
+  publishRuntimeImportManifest,
+  resolveWalletRuntimeImportUrl,
+} = createRuntimeImportController({
+  publicWsBaseUrl: args.publicWsBaseUrl,
+  walletUrl: args.walletUrl,
+  custodyDaemonPort: args.custodyDaemonPort,
+  custodyPublicRpcUrl: custodyPublicRpcUrlEnv,
+  manifestPath: runtimeImportManifestPath,
+  exposeUrl: runtimeImportLogUrlEnabled,
+  tokenTtlMs: runtimeImportTokenTtlMs,
+  refreshMarginMs: runtimeImportRefreshMarginMs,
+  hubChildren,
+  marketMakerChild,
+  getActiveResetOptions: () => activeResetOptions,
+  getCustodySupport: () => custodySupport,
+  buildAggregatedHealthResponse,
+  warnRefreshFailed: error => {
+    meshLog.warn('runtime_import_manifest.refresh_failed', { error: serializeError(error) });
+  },
+});
+
+const reportBaselineWait = createBaselineWaitReporter(HUB_BASELINE_STATUS_LOG_INTERVAL_MS);
 
 /**
  * A direct link is one WebSocket, and only the dialing side registers it: a
@@ -2112,10 +2108,6 @@ const reportBaselineWait = (
  * Count unordered pairs so the gate asks for connectivity, not for both sides
  * to have happened to dial.
  */
-const openDirectHubPairCount = (health: AggregatedHealth): number => new Set(
-  health.hubMesh.direct.links.map(link =>
-    [link.fromRuntimeId, link.toRuntimeId].sort(compareStableText).join(':')),
-).size;
 
 const waitForHubBaseline = async (): Promise<void> => {
   const hubCount = HUB_NAMES.length;
@@ -2374,6 +2366,8 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
   resetState.startedAt = Date.now();
   resetState.completedAt = null;
   resetState.failedAt = null;
+  nativeH1ReserveTargets = [];
+  nativeH1MeshPairs.clear();
   activeResetOptions = { enableMarketMaker: false, enableCustody: false };
   clearRuntimeImportManifestFile();
   const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';
@@ -2430,6 +2424,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
 
     const waitH1StartedAt = startTiming('reset_wait_h1');
     await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));
+    await publishNativeHubProfile(h1);
     finishTiming('reset_wait_h1', waitH1StartedAt);
     await waitForShardJurisdictions(h1);
 
@@ -2489,6 +2484,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
 
     await Promise.all([
       waitForMesh(),
+      driveNativeH1Bootstrap(h1, shouldStartMarketMaker),
       startConfiguredMarketMaker(),
       startConfiguredCustody(),
     ]);

@@ -13,6 +13,9 @@ pub(crate) struct PaymentAccountRoots {
     pub lending_intents: [u8; 32],
     pub rebalance_fee_policies: [u8; 32],
     pub swap_offers: [u8; 32],
+    pub requested_rebalance: [u8; 32],
+    pub requested_rebalance_fee_state: [u8; 32],
+    pub pulls: [u8; 32],
 }
 
 pub(crate) struct AccountJournal {
@@ -57,10 +60,18 @@ pub(crate) fn payment_account_state_root(
     roots: PaymentAccountRoots,
     journal: AccountJournal,
     carried: &CarriedSections,
+    settlement_workspace: Option<&CanonicalValue>,
 ) -> Result<[u8; 32], StateError> {
     compute_flat_integrity_root(
         ACCOUNT_STATE_NAMESPACE,
-        &account_state_entries(identity, dispute_config, roots, journal, carried)?,
+        &account_state_entries(
+            identity,
+            dispute_config,
+            roots,
+            journal,
+            carried,
+            settlement_workspace,
+        )?,
     )
     .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
@@ -75,12 +86,13 @@ pub(crate) fn payment_account_state_root(
 type FinancialKey = ([u8; 32], u64, u32, u32);
 /// `(last finalized J height, left claims root+count, right claims root+count)`.
 type JurisdictionKey = (u64, [u8; 32], u64, [u8; 32], u64);
+type CommitmentsKey = ([[u8; 32]; 5], Option<[u8; 32]>);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccountRootCache {
     identity: Option<[u8; 32]>,
     financial: Option<(FinancialKey, [u8; 32])>,
-    commitments: Option<([[u8; 32]; 5], [u8; 32])>,
+    commitments: Option<(CommitmentsKey, [u8; 32])>,
     jurisdiction: Option<(JurisdictionKey, [u8; 32])>,
     rebalance: Option<([[u8; 32]; 3], [u8; 32])>,
 }
@@ -145,14 +157,22 @@ fn financial_key(
     )
 }
 
-fn commitments_key(roots: &PaymentAccountRoots, carried: &CarriedSections) -> [[u8; 32]; 5] {
-    [
-        roots.locks,
-        carried.pulls_root,
-        roots.swap_offers,
-        carried.subcontracts_root,
-        roots.lending_intents,
-    ]
+fn commitments_key(
+    roots: &PaymentAccountRoots,
+    carried: &CarriedSections,
+    settlement_workspace: Option<&CanonicalValue>,
+) -> Result<CommitmentsKey, StateError> {
+    let workspace = crate::state::settlement::without_hankos(settlement_workspace)?;
+    Ok((
+        [
+            roots.locks,
+            roots.pulls,
+            roots.swap_offers,
+            carried.subcontracts_root,
+            roots.lending_intents,
+        ],
+        workspace.as_ref().map(section_hash).transpose()?,
+    ))
 }
 
 fn jurisdiction_key(journal: &AccountJournal, carried: &CarriedSections) -> JurisdictionKey {
@@ -165,10 +185,10 @@ fn jurisdiction_key(journal: &AccountJournal, carried: &CarriedSections) -> Juri
     )
 }
 
-fn rebalance_key(roots: &PaymentAccountRoots, carried: &CarriedSections) -> [[u8; 32]; 3] {
+fn rebalance_key(roots: &PaymentAccountRoots, _carried: &CarriedSections) -> [[u8; 32]; 3] {
     [
-        carried.requested_rebalance_root,
-        carried.requested_rebalance_fee_state_root,
+        roots.requested_rebalance,
+        roots.requested_rebalance_fee_state,
         roots.rebalance_fee_policies,
     ]
 }
@@ -180,6 +200,7 @@ pub(crate) fn cached_payment_account_state_root(
     roots: &PaymentAccountRoots,
     journal: &AccountJournal,
     carried: &CarriedSections,
+    settlement_workspace: Option<&CanonicalValue>,
 ) -> Option<[u8; 32]> {
     let identity = cache.identity?;
     let (financial_cached, financial) = cache.financial.as_ref()?;
@@ -187,7 +208,7 @@ pub(crate) fn cached_payment_account_state_root(
         return None;
     }
     let (commitments_cached, commitments) = cache.commitments.as_ref()?;
-    if *commitments_cached != commitments_key(roots, carried) {
+    if *commitments_cached != commitments_key(roots, carried, settlement_workspace).ok()? {
         return None;
     }
     let (jurisdiction_cached, jurisdiction) = cache.jurisdiction.as_ref()?;
@@ -215,8 +236,16 @@ pub(crate) fn refresh_payment_account_state_root(
     roots: &PaymentAccountRoots,
     journal: &AccountJournal,
     carried: &CarriedSections,
+    settlement_workspace: Option<&CanonicalValue>,
 ) -> Result<[u8; 32], StateError> {
-    let entries = account_state_entries_ref(identity, dispute_config, roots, journal, carried)?;
+    let entries = account_state_entries_ref(
+        identity,
+        dispute_config,
+        roots,
+        journal,
+        carried,
+        settlement_workspace,
+    )?;
     let identity_hash = match cache.identity {
         Some(hash) => hash,
         None => {
@@ -232,7 +261,7 @@ pub(crate) fn refresh_payment_account_state_root(
     )?;
     let commitments = refresh_section(
         &mut cache.commitments,
-        commitments_key(roots, carried),
+        commitments_key(roots, carried, settlement_workspace)?,
         &entries[2],
     )?;
     let jurisdiction = refresh_section(
@@ -276,6 +305,7 @@ fn account_state_entries_ref(
     roots: &PaymentAccountRoots,
     journal: &AccountJournal,
     carried: &CarriedSections,
+    settlement_workspace: Option<&CanonicalValue>,
 ) -> Result<[CanonicalValue; 5], StateError> {
     let entries = account_state_entries(
         identity,
@@ -286,12 +316,16 @@ fn account_state_entries_ref(
             lending_intents: roots.lending_intents,
             rebalance_fee_policies: roots.rebalance_fee_policies,
             swap_offers: roots.swap_offers,
+            requested_rebalance: roots.requested_rebalance,
+            requested_rebalance_fee_state: roots.requested_rebalance_fee_state,
+            pulls: roots.pulls,
         },
         AccountJournal {
             j_nonce: journal.j_nonce,
             last_finalized_j_height: journal.last_finalized_j_height,
         },
         carried,
+        settlement_workspace,
     )?;
     let mut values = entries.into_iter().map(|(_, value)| value);
     Ok([
@@ -309,7 +343,18 @@ fn account_state_entries(
     roots: PaymentAccountRoots,
     journal: AccountJournal,
     carried: &CarriedSections,
+    settlement_workspace: Option<&CanonicalValue>,
 ) -> Result<Vec<(String, CanonicalValue)>, StateError> {
+    let mut commitments = vec![
+        ("locksRoot", root_value(&roots.locks)),
+        ("pullsRoot", root_value(&roots.pulls)),
+        ("swapOffersRoot", root_value(&roots.swap_offers)),
+        ("subcontractsRoot", root_value(&carried.subcontracts_root)),
+        ("lendingIntentsRoot", root_value(&roots.lending_intents)),
+    ];
+    if let Some(workspace) = crate::state::settlement::without_hankos(settlement_workspace)? {
+        commitments.push(("settlementWorkspace", workspace));
+    }
     Ok(vec![
         ("identity".into(), identity_value(identity)?),
         (
@@ -320,16 +365,7 @@ fn account_state_entries(
                 ("disputeConfig", dispute_config_value(dispute_config)?),
             ]),
         ),
-        (
-            "commitments".into(),
-            object(vec![
-                ("locksRoot", root_value(&roots.locks)),
-                ("pullsRoot", root_value(&carried.pulls_root)),
-                ("swapOffersRoot", root_value(&roots.swap_offers)),
-                ("subcontractsRoot", root_value(&carried.subcontracts_root)),
-                ("lendingIntentsRoot", root_value(&roots.lending_intents)),
-            ]),
-        ),
+        ("commitments".into(), object(commitments)),
         (
             "jurisdiction".into(),
             object(vec![
@@ -352,11 +388,11 @@ fn account_state_entries(
             object(vec![
                 (
                     "requestedRebalanceRoot",
-                    root_value(&carried.requested_rebalance_root),
+                    root_value(&roots.requested_rebalance),
                 ),
                 (
                     "requestedRebalanceFeeStateRoot",
-                    root_value(&carried.requested_rebalance_fee_state_root),
+                    root_value(&roots.requested_rebalance_fee_state),
                 ),
                 (
                     "rebalanceFeePoliciesRoot",

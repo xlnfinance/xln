@@ -167,7 +167,7 @@ const validateHookData = (
     case 'htlc_secret_ack_timeout':
       rejectUnexpectedKeys(
         data,
-        ['hashlock', 'counterpartyEntityId', 'inboundLockId'],
+        ['hashlock', 'counterpartyEntityId'],
         context,
       );
       return {
@@ -175,10 +175,6 @@ const validateHookData = (
         counterpartyEntityId: validateString(
           data['counterpartyEntityId'],
           `${context}.counterpartyEntityId`,
-        ),
-        inboundLockId: validateString(
-          data['inboundLockId'],
-          `${context}.inboundLockId`,
         ),
       };
     case 'settlement_window':

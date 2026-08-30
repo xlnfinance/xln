@@ -213,7 +213,7 @@ class BilateralHarness {
   /**
    * Entity hanko-witness boundary (core/entity/consensus/input/hanko-witness.ts
    * reduced to single-signer lazy entities): every manifest hash is signed once
-   * at certification and cached; later drafts (e.g. a frame_ack bundling an
+   * at certification and cached; later drafts (e.g. a ack_frame bundling an
    * already-certified ACK) reuse the exact cached witness bytes.
    */
   private async certifyManifest(side: HarnessSide, manifest: readonly AccountConsensusHashToSign[]): Promise<void> {
@@ -247,7 +247,7 @@ class BilateralHarness {
       if (!hanko) throw new Error(`HARNESS_WITNESS_UNDECLARED:${this.sides[side].entityId}:${hash}`);
       return hanko;
     };
-    if (input.kind === 'ack' || input.kind === 'frame_ack') {
+    if (input.kind === 'ack' || input.kind === 'ack_frame') {
       const ack = input.ack;
       ack.frameHanko = ack.frameHanko ?? requireWitness(ack.frameHash);
       if (account) account.currentFrameHanko = ack.frameHanko;
@@ -256,7 +256,7 @@ class BilateralHarness {
         if (account) account.currentDisputeProofHanko = ack.disputeHanko.hanko;
       }
     }
-    if (input.kind === 'frame' || input.kind === 'frame_ack') {
+    if (input.kind === 'frame' || input.kind === 'ack_frame') {
       const proposal = input.proposal;
       proposal.frameHanko = proposal.frameHanko ?? requireWitness(proposal.frame.stateHash);
       if (account) account.currentFrameHanko = proposal.frameHanko;
@@ -269,8 +269,8 @@ class BilateralHarness {
 
   /** Persist certified witnesses onto the Account envelope like the Entity frame does. */
   private persistWitnesses(side: HarnessSide, shell: AccountReplica): void {
-    if (shell.lastOutboundFrameAck) {
-      this.attachInPlace(side, shell, shell.lastOutboundFrameAck.response);
+    if (shell.lastOutboundAckFrame) {
+      this.attachInPlace(side, shell, shell.lastOutboundAckFrame.response);
     }
     if (shell.pendingAccountInput) {
       this.attachInPlace(side, shell, shell.pendingAccountInput);
@@ -511,11 +511,13 @@ class BilateralHarness {
       case 'delta':
         return [{ type: 'add_delta', data: { tokenId: spec.tokenId } }];
       case 'htlc_lock':
+        {
+        const lockId = hashHtlcSecret(htlcSecretHex(spec.lockId));
         return [{
           type: 'htlc_lock',
           data: {
-            lockId: `lock${spec.lockId}`,
-            hashlock: hashHtlcSecret(htlcSecretHex(spec.lockId)),
+            lockId,
+            hashlock: lockId,
             timelock: HTLC_TIMELOCK_MS,
             revealBeforeHeight: HTLC_REVEAL_BEFORE_HEIGHT,
             amount: spec.amount,
@@ -523,8 +525,9 @@ class BilateralHarness {
             ...(spec.mode === 'none' ? {} : { deliveryMode: spec.mode }),
           },
         }];
+        }
       case 'htlc_resolve': {
-        const lockId = `lock${spec.lockId}`;
+        const lockId = hashHtlcSecret(htlcSecretHex(spec.lockId));
         const lock = this.committed(side).state.locks.get(lockId);
         if (!lock) return [];
         if (spec.outcome === 'secret') {
@@ -558,7 +561,7 @@ class BilateralHarness {
         if (byLeft === offer.makerIsLeft) return []; // only the counterparty resolves
         return [{ type: 'swap_resolve', data: { offerId, fillRatio: 0, cancelRemainder: true } }];
       }
-      case 'pull_lock': {
+      case 'cross_pull_lock': {
         const account = this.committed(side);
         const orderId = `ord${spec.orderId}`;
         const pullId = `${orderId}s`;
@@ -876,7 +879,7 @@ const txSpecArb = fc.oneof(
   { weight: 8, arbitrary: fc.record({ kind: fc.constant('htlc_resolve' as const), lockId: lockIdArb, outcome: fc.constantFrom('secret' as const, 'error' as const) }) },
   { weight: 8, arbitrary: fc.record({ kind: fc.constant('swap_offer' as const), offerId: offerIdArb, giveTokenId: swapTokenPairArb.map(([give]) => give), wantTokenId: swapTokenPairArb.map(([, want]) => want), amount: swapAmountArb }) },
   { weight: 5, arbitrary: fc.record({ kind: fc.constant('swap_cancel' as const), offerId: offerIdArb }) },
-  { weight: 4, arbitrary: fc.record({ kind: fc.constant('pull_lock' as const), orderId: fc.integer({ min: 1, max: 3 }), tokenId: tokenIdArb, amount: fc.bigInt({ min: 10n, max: 2_000n }) }) },
+  { weight: 4, arbitrary: fc.record({ kind: fc.constant('cross_pull_lock' as const), orderId: fc.integer({ min: 1, max: 3 }), tokenId: tokenIdArb, amount: fc.bigInt({ min: 10n, max: 2_000n }) }) },
   { weight: 5, arbitrary: fc.record({ kind: fc.constant('rebalance_policy' as const), tokenId: tokenIdArb, policyVersion: fc.integer({ min: 1, max: 3 }), baseFee: fc.bigInt({ min: 0n, max: 5n }), liquidityFeeBps: fc.bigInt({ min: 0n, max: 100n }), gasFee: fc.bigInt({ min: 0n, max: 3n }) }) },
   { weight: 6, arbitrary: fc.record({ kind: fc.constant('request_collateral' as const), tokenId: tokenIdArb, amount: fc.bigInt({ min: 20n, max: 500n }), feeAmount: fc.bigInt({ min: 1n, max: 9n }) }) },
   { weight: 4, arbitrary: fc.record({ kind: fc.constant('rebalance_refund' as const), tokenId: tokenIdArb }) },

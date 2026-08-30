@@ -113,8 +113,6 @@ fn field_name(tag: u8) -> Option<&'static str> {
         9 => "leaderState",
         10 => "reserves",
         11 => "externalWallet",
-        12 => "deferredAccountProposals",
-        13 => "settlementContinuations",
         14 => "lastFinalizedJHeight",
         15 => "jHistoryFinality",
         16 => "certifiedBoardState",
@@ -123,7 +121,7 @@ fn field_name(tag: u8) -> Option<&'static str> {
         19 => "entityProviderActionState",
         20 => "entityEncryptionPublicKey",
         21 => "profile",
-        23 => "htlcFeesEarned",
+        22 => "paybook",
         26 => "outDebtsByToken",
         27 => "inDebtsByToken",
         29 => "swapTradingPairs",
@@ -132,15 +130,16 @@ fn field_name(tag: u8) -> Option<&'static str> {
         36 => "orderbookReferrals",
         37 => "orderbookPairDimensions",
         38 => "lending",
-        // Tree-backed fields 22, 28 and 30..33 never appear as scalar rows.
+        // Tree-backed fields 12, 13, 28 and 30..33 never appear as scalar rows.
         _ => return None,
     })
 }
 
 fn namespace(value: &str) -> Option<(&'static str, u8)> {
     Some(match value {
-        "htlcRoutes" => ("htlcRoutes", 1),
-        "lockBook" => ("lockBook", 2),
+        "paybookEntries" => ("paybookEntries", 1),
+        "deferredAccountProposals" => ("deferredAccountProposals", 8),
+        "settlementContinuations" => ("settlementContinuations", 9),
         "crossJurisdictionSwaps" => ("crossJurisdictionSwaps", 3),
         "crossJurisdictionAuthorizations" => ("crossJurisdictionAuthorizations", 4),
         "pendingCrossJurisdictionFillAcks" => ("pendingCrossJurisdictionFillAcks", 5),
@@ -364,6 +363,12 @@ pub fn hydrate_entity_graph(
                 .and_then(Value::as_object_mut)
                 .ok_or_else(|| invalid("CRONTAB_TASKS_MISSING"))?;
             crontab.insert("hooks".into(), hydrated.tagged_map);
+        } else if tree.namespace == "paybookEntries" {
+            let paybook = core
+                .get_mut("paybook")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| invalid("PAYBOOK_SCALAR_MISSING"))?;
+            paybook.insert("entries".into(), hydrated.tagged_map);
         } else {
             core.insert(tree.namespace.clone(), hydrated.tagged_map);
         }

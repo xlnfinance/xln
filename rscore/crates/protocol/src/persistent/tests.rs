@@ -2,7 +2,10 @@ use crate::persistent::{
     PERSISTENT_RADIX_SHARD_COUNT, PersistentRadixMapError, PersistentRadixOverlayWork,
     PersistentRadixShard, PersistentRadixShardCoordinator,
 };
-use crate::{PersistentNodeRecord, PersistentRadixMap, SlotWork, encode_raw_text_key};
+use crate::{
+    PersistentNodeRecord, PersistentRadixMap, PersistentRadixMutation, SlotWork,
+    encode_raw_text_key,
+};
 
 fn digest(byte: u8) -> [u8; 32] {
     [byte; 32]
@@ -232,6 +235,58 @@ fn two_level_batch_matches_serial_for_large_replacements_and_inserts() {
         let byte = (index as u8).wrapping_add(17);
         assert_eq!(batched.get(&key), Some(&digest(byte)));
     }
+}
+
+#[test]
+fn two_level_mutation_batch_matches_serial_puts_and_removes() {
+    let mut base = PersistentRadixMap::empty();
+    for (key, byte) in [
+        (vec![0x12, 0x34], 1),
+        (vec![0x12, 0x56], 2),
+        (vec![0xab, 0xcd], 3),
+        (vec![0xfe, 0xdc], 4),
+    ] {
+        base = base.updated(key, digest(byte), digest(byte)).expect("base");
+    }
+    let mut serial = base.clone();
+    serial = serial.removed(&[0x12, 0x34]).expect("remove existing");
+    serial = serial.removed(&[0x44, 0x44]).expect("remove missing");
+    serial = serial
+        .updated(vec![0xab, 0xcd], digest(13), digest(13))
+        .expect("replace");
+    serial = serial
+        .updated(vec![0x44, 0x44], digest(14), digest(14))
+        .expect("insert");
+    serial = serial.removed(&[0xfe, 0xdc]).expect("remove lone prefix");
+
+    let batched = base
+        .mutated_batch_two_levels(
+            vec![
+                PersistentRadixMutation::Remove {
+                    key: vec![0x12, 0x34],
+                },
+                PersistentRadixMutation::Remove {
+                    key: vec![0x44, 0x44],
+                },
+                PersistentRadixMutation::Put {
+                    key: vec![0xab, 0xcd],
+                    value: digest(13),
+                    value_digest: digest(13),
+                },
+                PersistentRadixMutation::Put {
+                    key: vec![0x44, 0x44],
+                    value: digest(14),
+                    value_digest: digest(14),
+                },
+                PersistentRadixMutation::Remove {
+                    key: vec![0xfe, 0xdc],
+                },
+            ],
+            sequential_slots,
+        )
+        .expect("two-level mutations");
+
+    assert_exact_map(&batched, &serial);
 }
 
 #[test]

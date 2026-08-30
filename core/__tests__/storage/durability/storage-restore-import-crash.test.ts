@@ -13,7 +13,7 @@ import { deriveSignerAddressSync } from '../../../account/crypto';
 import { LIMITS } from '../../../config/constants';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { dbRootPath } from '../../../runtime/replica/platform';
-import { readStorageHead, recoverStorageDbFromHistory } from '../../../storage';
+import { readStorageHead, recoverStorageDbFromWal } from '../../../storage';
 import type { StoragePersistenceBoundary } from '../../../storage/types';
 
 const fixture = join(import.meta.dir, '..', '..', 'fixtures/storage/storage-restore-import-crash-child.ts');
@@ -77,7 +77,7 @@ describe('restored checkpoint atomic publication', () => {
           .toBe(BigInt(LIMITS.MAX_ACCOUNT_TOKEN_ROWS));
         const historyHead = await readStorageHead(getRuntimeWalDb(restored));
         expect(historyHead?.latestHeight).toBe(expectedHeight);
-        await recoverStorageDbFromHistory({
+        await recoverStorageDbFromWal({
           db: getRuntimeStorageDb(restored),
           walDb: getRuntimeWalDb(restored),
           config: {
@@ -85,8 +85,6 @@ describe('restored checkpoint atomic publication', () => {
             snapshotPeriodFrames: historyHead!.snapshotPeriodFrames,
             retainSnapshots: historyHead!.retainSnapshots,
             epochMaxBytes: historyHead!.epochMaxBytes,
-            historyViewMaxBytes: 1_073_741_824,
-            historyViewRetainFrames: 100_000,
             materializePeriodFrames: 64,
             canonicalHashPeriodFrames: 1,
             accountMerkleRadix: historyHead!.accountMerkleRadix,

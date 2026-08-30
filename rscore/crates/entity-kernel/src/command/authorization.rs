@@ -14,40 +14,77 @@ fn uint_word(value: u64) -> [u8; 32] {
     output
 }
 
-/// Exact singleton `keccak256(abi.encode(Board))` used by TS `encodeBoard`.
+fn board_entity_id(value: &str) -> Result<[u8; 32], EntityCommandError> {
+    if let Ok(address) = fixed_hex::<20>(value, "BOARD_VALIDATOR_ADDRESS_REQUIRED") {
+        let mut output = [0_u8; 32];
+        output[12..].copy_from_slice(&address);
+        return Ok(output);
+    }
+    fixed_hex::<32>(value, "BOARD_VALIDATOR_ENTITY_ID_REQUIRED")
+}
+
+/// Exact `keccak256(abi.encode(Board))` used by TS `encodeBoard` for any
+/// weighted board. Validator order is authority order; shares are looked up
+/// by canonical signer id and encoded in the same positional order.
 pub fn current_entity_command_board_hash(
     authority: &EntityFrameAuthority,
-    signer_address: &str,
+    _local_signer_address: &str,
 ) -> Result<String, EntityCommandError> {
     let authority = authority
         .validate_and_normalize()
         .map_err(|error| invalid(error.to_string()))?;
-    if !authority
-        .is_single_signer()
-        .map_err(|error| invalid(error.to_string()))?
-    {
-        return Err(invalid("ENTITY_COMMAND_SINGLE_SIGNER_BOARD_REQUIRED"));
-    }
-    let signer_id = authority.config.validators[0].clone();
-    let signer = fixed_hex::<20>(signer_address, "BOARD_PROPOSER_EOA_REQUIRED")?;
-    let mut encoded = Vec::with_capacity(32 * 11);
+    // TypeScript requires the first validator to be an EOA even though later
+    // members may be bytes32 Entity ids.
+    fixed_hex::<20>(
+        &authority.config.validators[0],
+        "BOARD_PROPOSER_EOA_REQUIRED",
+    )?;
+    let count = authority.config.validators.len();
+    let entity_ids = authority
+        .config
+        .validators
+        .iter()
+        .map(|validator| board_entity_id(validator))
+        .collect::<Result<Vec<_>, _>>()?;
+    let powers = authority
+        .config
+        .validators
+        .iter()
+        .map(|validator| {
+            authority
+                .config
+                .shares
+                .get(validator)
+                .copied()
+                .ok_or_else(|| invalid(format!("ENTITY_FRAME_AUTHORITY_SHARE_MISSING:{validator}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let ids_offset = 32 * 6;
+    let powers_offset = ids_offset + 32 + 32 * count;
+    let mut encoded = Vec::with_capacity(32 * (9 + count * 2));
     for value in [
         32,
         u64::from(authority.config.threshold),
-        192,
-        256,
+        u64::try_from(ids_offset).map_err(|_| invalid("ENTITY_COMMAND_BOARD_SIZE"))?,
+        u64::try_from(powers_offset).map_err(|_| invalid("ENTITY_COMMAND_BOARD_SIZE"))?,
         0,
         0,
         0,
-        1,
     ] {
         encoded.extend_from_slice(&uint_word(value));
     }
-    let mut signer_word = [0_u8; 32];
-    signer_word[12..].copy_from_slice(&signer);
-    encoded.extend_from_slice(&signer_word);
-    encoded.extend_from_slice(&uint_word(1));
-    encoded.extend_from_slice(&uint_word(u64::from(authority.config.shares[&signer_id])));
+    encoded.extend_from_slice(&uint_word(
+        u64::try_from(count).map_err(|_| invalid("ENTITY_COMMAND_BOARD_SIZE"))?,
+    ));
+    for entity_id in entity_ids {
+        encoded.extend_from_slice(&entity_id);
+    }
+    encoded.extend_from_slice(&uint_word(
+        u64::try_from(count).map_err(|_| invalid("ENTITY_COMMAND_BOARD_SIZE"))?,
+    ));
+    for power in powers {
+        encoded.extend_from_slice(&uint_word(u64::from(power)));
+    }
     use sha3::{Digest as _, Keccak256};
     Ok(hex(&Keccak256::digest(encoded)))
 }
@@ -90,15 +127,14 @@ pub fn assert_signed_entity_command(
             command.board_epoch
         )));
     }
-    let signer_id = normalized.config.validators[0].clone();
-    if command.author_signer_id != signer_id {
+    let signer_id = command.author_signer_id.clone();
+    if !normalized.config.validators.contains(&signer_id) {
         return Err(invalid(format!(
-            "ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:{}",
-            command.author_signer_id
+            "ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:{signer_id}"
         )));
     }
     let signer = hex(&fixed_hex::<20>(
-        signer_address,
+        &signer_id,
         "ENTITY_COMMAND_BOARD_SIGNER_INVALID",
     )?);
     if command.author_signer != signer {

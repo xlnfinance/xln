@@ -1,13 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { recoverStorageDbFromHistory } from '../../../storage';
-import {
-  buildHistoryViewPuts,
-  prepareHistoryViewCommit,
-  putHistoryViewCommit,
-  readHistoryViewHead,
-  readHistoryViewRuntimeActivity,
-} from '../../../storage/history/history-view';
+import { recoverStorageDbFromWal } from '../../../storage';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { liveKeyForDoc } from '../../../storage/schema/doc-refs';
 import {
@@ -34,8 +27,6 @@ const config: Required<StorageRuntimeConfig> = {
   snapshotPeriodFrames: 256,
   retainSnapshots: 3,
   epochMaxBytes: 1_000_000,
-  historyViewMaxBytes: 1_000_000,
-  historyViewRetainFrames: 128,
   materializePeriodFrames: 1,
   accountMerkleRadix: 16,
 };
@@ -87,7 +78,7 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
   epochMaxBytes: config.epochMaxBytes,
   accountMerkleRadix: config.accountMerkleRadix,
   epochReplayBytes: 0,
-  retainedHistoryBytes: 0,
+  retainedWalBytes: 0,
 });
 
 describe('storage crash recovery', () => {
@@ -122,42 +113,19 @@ describe('storage crash recovery', () => {
       [KEY_HEAD, encodeBuffer(head(1, 0))],
       [row.key, row.value],
     ]);
-    await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
+    await recoverStorageDbFromWal({ db: currentDb, walDb: historyDb, config });
     expect(validatePersistedCertifiedBoardPathNode(
       decodeBuffer(await currentDb.get(row.key)),
     ).node).toEqual([...boardStore.values()][0]);
     expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
   });
 
-  test('rejects current DB state that is ahead of authoritative history DB', async () => {
+  test('rejects current DB state that is ahead of the authoritative Runtime WAL', async () => {
     const currentDb = makeMemoryDb([[KEY_HEAD, encodeBuffer(head(4, 4))]]);
     const historyDb = makeMemoryDb([[KEY_HEAD, encodeBuffer(head(3, 3))]]);
 
-    await expect(recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config }))
-      .rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
-  });
-
-  test('history-view activity rows and head can be committed by the caller batch', async () => {
-    const historyDb = makeMemoryDb();
-    const puts = buildHistoryViewPuts({
-      height: 7,
-      timestamp: 700,
-      logs: [{ id: 1, category: 'system', level: 'info', message: 'durable', timestamp: 700 }],
-      touchedEntities: [entityId],
-      touchedAccounts: [],
-      touchedBookEntities: [],
-    });
-    const plan = await prepareHistoryViewCommit({ db: historyDb, height: 7, puts, config });
-    const batch = historyDb.batch();
-    putHistoryViewCommit(batch, plan);
-    await batch.write();
-
-    const activity = await readHistoryViewRuntimeActivity(historyDb, 7);
-    expect(activity?.logs[0]?.message).toBe('durable');
-
-    const frameHead = await readHistoryViewHead(historyDb, config);
-    expect(frameHead.latestHeight).toBe(7);
-    expect(frameHead.retainedBytes).toBe(plan.writtenBytes);
+    await expect(recoverStorageDbFromWal({ db: currentDb, walDb: historyDb, config }))
+      .rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_WAL');
   });
 
 });

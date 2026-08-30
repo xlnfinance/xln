@@ -45,7 +45,7 @@ const consensusConfig = {
 const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 
-const makeAccount = (frameStateHash: string): AccountReplica => {
+const makeAccount = (): AccountReplica => {
   const account = makeBaseAccount(entityId, counterpartyId, {
     chainId: 31_337,
     depositoryAddress: `0x${'de'.repeat(20)}`,
@@ -62,20 +62,7 @@ const makeAccount = (frameStateHash: string): AccountReplica => {
     prevFrameHash: 'genesis',
     accountStateRoot: `0x${'00'.repeat(32)}`,
     stateHash: `0x${'01'.repeat(32)}`,
-    deltas: [],
-    byLeft: entityId < counterpartyId,
   };
-  (account as AccountReplica & { frameHistory: unknown[] }).frameHistory = [{
-      height: 1,
-      timestamp: 100,
-      jHeight: 0,
-      accountTxs: [],
-      prevFrameHash: 'genesis',
-      accountStateRoot: `0x${'00'.repeat(32)}`,
-      stateHash: frameStateHash,
-      deltas: [],
-      byLeft: entityId < counterpartyId,
-    }];
   return account;
 };
 
@@ -108,9 +95,7 @@ const makeEnv = (account: AccountReplica, reserves: Array<[number, bigint]>): Ru
           deferredAccountProposals: new Map(),
           lastFinalizedJHeight: 0,
           profile: { name: 'canonical-test', isHub: false, avatar: '', bio: '', website: '' },
-          htlcRoutes: new Map(),
-          htlcFeesEarned: 0n,
-          lockBook: new Map(),
+          paybook: { entries: new Map(), feesEarned: 0n },
           swapTradingPairs: [],
         },
         } as EntityReplica],
@@ -135,7 +120,7 @@ const createBookWithSharedOrder = () => {
 };
 
 const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeReplica => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const orderbookExt = {
     books: new Map(),
@@ -152,8 +137,8 @@ const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeReplica => {
 };
 
 test('canonical storage hash is deterministic across Map insertion order', () => {
-  const left = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[2, 20n], [1, 10n]]));
-  const right = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n], [2, 20n]]));
+  const left = computeCanonicalStateHashFromEnv(makeEnv(makeAccount(), [[2, 20n], [1, 10n]]));
+  const right = computeCanonicalStateHashFromEnv(makeEnv(makeAccount(), [[1, 10n], [2, 20n]]));
   expect(left).toBe(right);
 });
 
@@ -331,17 +316,15 @@ test('canonical storage hash is deterministic across orderbook pair index insert
   expect(computeCanonicalStateHashFromEnv(left)).toBe(computeCanonicalStateHashFromEnv(right));
 });
 
-test('canonical storage hash ignores UI frameHistory and reacts to consensus state', () => {
-  const base = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n]]));
-  const changedHistory = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-b'), [[1, 10n]]));
-  const changedReserve = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 11n]]));
+test('canonical storage hash reacts to consensus state', () => {
+  const base = computeCanonicalStateHashFromEnv(makeEnv(makeAccount(), [[1, 10n]]));
+  const changedReserve = computeCanonicalStateHashFromEnv(makeEnv(makeAccount(), [[1, 11n]]));
 
-  expect(changedHistory).toBe(base);
   expect(changedReserve).not.toBe(base);
 });
 
 test('canonical Entity hash excludes validator-private J history', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const before = computeCanonicalEntityHash(replica).hash;
 
@@ -364,7 +347,7 @@ test('canonical Entity hash excludes validator-private J history', () => {
 });
 
 test('validator-local HTLC notes neither diverge shared storage nor leak into Entity core', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const first = Array.from(env.state.eReplicas.values())[0]!;
   const second: EntityReplica = { ...first, state: { ...first.state } };
   second.signerId = signerIds[1]!;
@@ -380,7 +363,7 @@ test('validator-local HTLC notes neither diverge shared storage nor leak into En
 });
 
 test('canonical storage rejects conflicting validator replicas of one Entity', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const first = Array.from(env.state.eReplicas.values())[0]!;
   const conflicting: EntityReplica = { ...first, state: { ...first.state } };
   conflicting.signerId = signerIds[1]!;
@@ -392,7 +375,7 @@ test('canonical storage rejects conflicting validator replicas of one Entity', (
 });
 
 test('storage projection round-trip preserves canonical account optional-field shape', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const state = replica.state;
   const currentAccount = state.accounts.get(counterpartyId)!;
@@ -431,8 +414,6 @@ test('storage projection round-trip preserves canonical account optional-field s
     loans: new Map(),
   };
   expect(account.state.pulls).toBeUndefined();
-  expect(account.swapOrderHistory).toBeUndefined();
-  expect(account.swapClosedOrders).toBeUndefined();
   expect(projectAccountDoc(account)).toBe(account);
 
   const hydratedState = hydrateEntityStateFromStorage({
@@ -447,8 +428,6 @@ test('storage projection round-trip preserves canonical account optional-field s
 
   expect(hydratedState.accounts.get(counterpartyId)?.state.pulls).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.state.domain).toEqual(account.state.domain);
-  expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
-  expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
   expect(hydratedState.accounts.get(counterpartyId)?.state.lendingIntents).toEqual(account.state.lendingIntents);
   expect(hydratedState.accounts.get(counterpartyId)?.state.subcontracts).toEqual(account.state.subcontracts);
@@ -457,8 +436,8 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(after.hash).toBe(before.hash);
 });
 
-test('replica metadata projection preserves in-flight consensus and layout state', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+test('replica metadata projection omits transient mempool while preserving durable layout and J state', () => {
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.mempool = [{ type: 'broadcast', data: { message: 'pending' } }];
   replica.position = { x: 1, y: 2, z: 3, jurisdiction: 'Testnet' };
@@ -474,15 +453,14 @@ test('replica metadata projection preserves in-flight consensus and layout state
   const meta = projectReplicaMeta(replica);
 
   expect('state' in meta).toBeFalse();
-  expect(meta.mempool).toBe(replica.mempool);
-  expect(meta.mempool).toEqual(replica.mempool);
+  expect('mempool' in meta).toBeFalse();
   expect(meta.position).toEqual(replica.position);
   expect(meta.jHistory).toEqual(replica.jHistory);
   expect('entityEncPrivKey' in meta).toBeFalse();
 });
 
 test('immediate replica metadata encoding matches the persistent recovery view', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   Object.defineProperty(replica, Symbol('ephemeral-replica-marker'), {
     configurable: true,
@@ -497,7 +475,7 @@ test('immediate replica metadata encoding matches the persistent recovery view',
 });
 
 test('live replica metadata omits transient commitment caches at every in-flight state level', () => {
-  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const validatorState = commitEntityFrameCandidateState(
     createEntityFrameCandidateState(replica.state),

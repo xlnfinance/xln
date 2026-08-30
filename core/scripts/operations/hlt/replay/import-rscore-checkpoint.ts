@@ -111,7 +111,7 @@ const sortedSeeds = (
   });
 
 const exactBootstrapRoot = (raw: unknown, expectedRoot: string): string => {
-  if (!Array.isArray(raw) || raw.length !== 2 || raw[0] !== 0 || !(raw[1] instanceof Uint8Array)) {
+  if (!Array.isArray(raw) || raw.length !== 3 || raw[0] !== 0 || !(raw[1] instanceof Uint8Array)) {
     throw new Error('NATIVE_FIXTURE_RSCORE_BOOTSTRAP_RESPONSE');
   }
   const root = `0x${Buffer.from(raw[1]).toString('hex')}`;
@@ -245,7 +245,7 @@ export const importRscoreCheckpointIntoFrozenState = async (options: Readonly<{
   }
   const binaryPath = options.binaryPath ?? process.env['XLN_RSCORE_BINARY'] ?? resolve(
     import.meta.dir,
-    '../../../../../rscore/target/release/xln-rscore',
+    '../../../../../rscore/target/release/xlnrs',
   );
   if (!existsSync(binaryPath)) throw new Error(`NATIVE_FIXTURE_RSCORE_BINARY_MISSING:${binaryPath}`);
   const client = new RscoreProcessClient(
@@ -299,7 +299,6 @@ export const importRscoreCheckpointIntoFrozenState = async (options: Readonly<{
       admits: [],
       propose: [],
       materialize: [],
-      failedHtlcRoutes: [],
       postAccounts: false,
       checkpointDue: true,
     });

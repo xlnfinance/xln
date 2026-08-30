@@ -64,7 +64,7 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides =
     ? { kind: 'forward' as const, nextHopEntityId: next, forwardAmount: 9n, innerEnvelope: opaque }
     : kind === 'final'
       ? { kind: 'final' as const, secret: id('7') }
-      : { kind: 'reject' as const, reason: 'next_hop_offline' as const };
+      : { kind: 'reject' as const, reason: 'insufficient_capacity' as const };
   const consumedPreparedHtlcBindings = new Set<string>();
   const preparedEntry = { binding, outcome };
   const context = {

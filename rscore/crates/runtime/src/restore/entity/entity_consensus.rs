@@ -8,7 +8,7 @@ use thiserror::Error;
 use xln_rscore_engine::BoardDelays;
 use xln_rscore_entity_kernel::{
     ConsensusMode, EntityConsensusConfig, EntityConsensusState, EntityFrameAuthority,
-    EntityHtlcNoteIndex, EntityLeaderState, EntitySingleSigner, ResidentEntityConsensusReplica,
+    EntityLeaderState, EntitySingleSigner, ResidentEntityConsensusReplica,
 };
 use xln_rscore_protocol::CanonicalValue;
 
@@ -24,8 +24,6 @@ pub enum EntityConsensusRestoreError {
     Tagged(#[from] TaggedJsonError),
     #[error("RRS_RESTORE_ENTITY_SIGNER:{0}")]
     Signer(String),
-    #[error("RRS_RESTORE_ENTITY_NOTES:{0}")]
-    Notes(String),
 }
 
 fn invalid(detail: impl Into<String>) -> EntityConsensusRestoreError {
@@ -85,20 +83,6 @@ fn positive_u16(value: &Value, path: &str) -> Result<u16, EntityConsensusRestore
         .ok()
         .filter(|value| *value > 0)
         .ok_or_else(|| invalid(format!("U16:{path}")))
-}
-
-fn tagged_map<'a>(
-    value: &'a Value,
-    path: &str,
-) -> Result<&'a [Value], EntityConsensusRestoreError> {
-    let map = object(value, path)?;
-    if map.len() != 2 || map.get("__xlnType").and_then(Value::as_str) != Some("Map") {
-        return Err(invalid(format!("MAP:{path}")));
-    }
-    map.get("value")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .ok_or_else(|| invalid(format!("MAP:{path}")))
 }
 
 fn canonical_jurisdiction(
@@ -179,33 +163,6 @@ pub(super) fn decode_entity_authority(
     .map_err(|error| invalid(error.to_string()))
 }
 
-fn notes(meta: &Map<String, Value>) -> Result<EntityHtlcNoteIndex, EntityConsensusRestoreError> {
-    let Some(value) = meta.get("htlcNotes") else {
-        return Ok(EntityHtlcNoteIndex::default());
-    };
-    let mut notes = BTreeMap::new();
-    for (index, row) in tagged_map(value, "htlcNotes")?.iter().enumerate() {
-        let row = row
-            .as_array()
-            .filter(|row| row.len() == 2)
-            .ok_or_else(|| invalid(format!("NOTE_ROW:{index}")))?;
-        let key = text(&row[0], "htlcNotes.key")?;
-        let description = row[1]
-            .as_str()
-            .map(str::to_owned)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| invalid("NOTE_VALUE"))?;
-        if !key.starts_with("hashlock:")
-            || key.ends_with(':')
-            || notes.insert(key.clone(), description).is_some()
-        {
-            return Err(invalid(format!("NOTE_KEY:{key}")));
-        }
-    }
-    EntityHtlcNoteIndex::from_notes(notes)
-        .map_err(|error| EntityConsensusRestoreError::Notes(error.to_string()))
-}
-
 /// Hydrate the complete live consensus envelope. The certified head is decoded
 /// by the exact Entity-frame codec and passed in; a non-genesis graph without
 /// one is rejected by `RuntimeReplica::new::validate_restored`.
@@ -253,7 +210,6 @@ pub fn hydrate_entity_consensus(
                 authority,
             },
             certified_frame_head,
-            htlc_notes: notes(metadata_value)?,
         },
         entity_signer,
     ))

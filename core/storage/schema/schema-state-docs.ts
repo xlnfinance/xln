@@ -27,8 +27,8 @@ import {
 
 const ENTITY_REQUIRED = [
   'entityId', 'height', 'timestamp', 'nonces', 'proposals', 'config',
-  'reserves', 'lastFinalizedJHeight', 'profile', 'htlcRoutes',
-  'htlcFeesEarned', 'lockBook', 'entityEncryptionPublicKey',
+  'reserves', 'lastFinalizedJHeight', 'profile', 'paybook',
+  'entityEncryptionPublicKey',
 ] as const;
 
 const ENTITY_OPTIONAL = [
@@ -151,7 +151,7 @@ const ACCOUNT_REPLICA_REQUIRED = [
 
 const ACCOUNT_REPLICA_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput',
-  'lastOutboundFrameAck', 'lastRollbackFrameHash',
+  'lastOutboundAckFrame', 'lastRollbackFrameHash',
   'currentFrameHanko', 'counterpartyFrameHanko', 'boardHankoRefreshMigration',
   'counterpartyBoardHankoRefresh', 'currentDisputeProofHanko', 'currentDisputeProofNonce',
   'currentDisputeProofBodyHash', 'currentDisputeHash', 'counterpartyDisputeProofHanko',
@@ -318,9 +318,10 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
     if (typeof profile[key] !== 'string') throw new Error(`${code}_PROFILE_${key}`);
   }
   if (typeof profile['isHub'] !== 'boolean') throw new Error(`${code}_PROFILE_IS_HUB`);
-  requireStorageMap(doc['htlcRoutes'], `${code}_HTLC_ROUTES`);
-  requireStorageBigInt(doc['htlcFeesEarned'], `${code}_HTLC_FEES`);
-  requireStorageMap(doc['lockBook'], `${code}_LOCK_BOOK`);
+  const paybook = requireBoundaryRecord(doc['paybook'], `${code}_PAYBOOK`);
+  requireExactBoundaryKeys(paybook, ['entries', 'feesEarned'], [], `${code}_PAYBOOK_FIELDS`);
+  requireStorageMap(paybook['entries'], `${code}_PAYBOOK_ENTRIES`);
+  requireStorageBigInt(paybook['feesEarned'], `${code}_PAYBOOK_FEES`);
   validateStorageHubRebalanceConfig(doc['hubRebalanceConfig'], `${code}_HUB_REBALANCE_CONFIG`);
   validateStorageOrderbookHubProfile(
     doc['orderbookHubProfile'],

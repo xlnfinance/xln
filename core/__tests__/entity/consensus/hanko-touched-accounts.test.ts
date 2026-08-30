@@ -51,7 +51,7 @@ describe('Hanko touched Account set', () => {
     const frameHash = `0x${'33'.repeat(32)}`;
     const hanko = '0x01' as HankoString;
     account.currentFrame.stateHash = frameHash;
-    account.lastOutboundFrameAck = {
+    account.lastOutboundAckFrame = {
       height: 0,
       counterpartyEntityId: counterpartyId,
       response: {

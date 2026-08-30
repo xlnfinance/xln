@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+hex.workspace = true
 sha2.workspace = true
 num-bigint.workspace = true
 rayon.workspace = true

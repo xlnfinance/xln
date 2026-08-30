@@ -60,6 +60,12 @@ export type PersistentRadixNodeRecord<K, V> =
   | PersistentRadixBranchRecord
   | PersistentRadixLeafRecord<K, V>;
 
+export type PersistentRadixNodeCommitment = Readonly<{
+  kind: 'branch' | 'leaf';
+  path: readonly number[];
+  hash: string;
+}>;
+
 type PersistentRadixNodeRef =
   | Readonly<{ kind: 'branch'; path: readonly number[] }>
   | Readonly<{ kind: 'leaf'; path: readonly number[]; keyBytes: Uint8Array }>;
@@ -546,6 +552,23 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     }
     this.#hash = sealRadixNode(this.#options, this.#root, this.#stats);
     return this.#hash;
+  }
+
+  /** O(path): exact committed Patricia node covering one slot prefix. */
+  nodeCommitmentAtPath(prefix: readonly number[]): PersistentRadixNodeCommitment | null {
+    if (this.#options.commitment === false) {
+      throw new Error('PERSISTENT_RADIX_COMMITMENT_DISABLED');
+    }
+    if (prefix.some(slot => !Number.isSafeInteger(slot) || slot < 0 || slot >= this.#options.radix)) {
+      throw new Error('PERSISTENT_RADIX_PREFIX_SLOT_INVALID');
+    }
+    const node = prefixNode(this.#root, prefix);
+    if (!node) return null;
+    return {
+      kind: node.kind,
+      path: [...node.path],
+      hash: sealRadixNode(this.#options, node, this.#stats),
+    };
   }
 
   /**

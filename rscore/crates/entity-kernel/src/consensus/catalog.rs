@@ -1,11 +1,77 @@
-//! Closed Entity transaction catalog for the native single-Entity Runtime.
+//! Closed Entity transaction catalog for the native Runtime.
 //!
 //! Keep this list byte-for-byte parallel with
-//! `core/entity/tx/processing/catalog.ts`.  Recognition and native support are
-//! deliberately separate: a known transaction outside the RRS milestone is a
-//! typed rejection, never an "unknown" value and never a TypeScript fallback.
+//! `core/entity/tx/processing/catalog.ts`. Every recognized transaction belongs
+//! to the one production execution path; there is no milestone/legacy subset.
 
 use thiserror::Error;
+
+/// Closed canonical EntityTx discriminant set shared with TypeScript.
+pub const ENTITY_TX_TYPES: [&str; 63] = [
+    "accountInput",
+    "admitCrossJurisdictionBookOrder",
+    "applyCrossJurisdictionBookProgress",
+    "boardHandover",
+    "chat",
+    "chatMessage",
+    "crossJurisdictionBookOrderRemoved",
+    "crossJurisdictionFillNotice",
+    "crossJurisdictionForceSiblingDispute",
+    "crossJurisdictionSalvage",
+    "crossPullClose",
+    "directPayment",
+    "disputeFinalize",
+    "disputeStart",
+    "e2r",
+    "entityCommand",
+    "entityProviderActivateBoard",
+    "entityProviderCancelAction",
+    "entityProviderProposeControlBoard",
+    "entityProviderReleaseControlShares",
+    "entityProviderTransfer",
+    "extendCredit",
+    "htlcPayment",
+    "initOrderbookExt",
+    "j_abort_sent_batch",
+    "j_broadcast",
+    "j_clear_batch",
+    "j_event",
+    "j_rebroadcast",
+    "lendingBorrow",
+    "lendingClosePosition",
+    "lendingOffer",
+    "lendingRepay",
+    "mintReserves",
+    "openAccount",
+    "orderbookSweepCrossJurisdiction",
+    "placeSwapOffer",
+    "prepareCrossJurisdictionSwap",
+    "prepareDispute",
+    "processHtlcTimeouts",
+    "profile-update",
+    "propose",
+    "proposeCancelSwap",
+    "r2c",
+    "r2e",
+    "r2r",
+    "registerCrossJurisdictionSwap",
+    "removeCrossJurisdictionBookOrder",
+    "requestCollateral",
+    "requestCrossJurisdictionClear",
+    "materializeCrossJurisdictionClear",
+    "materializeCrossJurisdictionSwap",
+    "resolveHtlcLock",
+    "runtimeOutput",
+    "scheduledWake",
+    "setHubConfig",
+    "setRebalancePolicy",
+    "settle_approve",
+    "settle_execute",
+    "settle_propose",
+    "settle_reject",
+    "settle_update",
+    "vote",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntityTxKind {
@@ -74,20 +140,10 @@ pub enum EntityTxKind {
     Vote,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EntityTxSupport {
-    /// Included in the RRS pay, HTLC, same-J swap and finalized-J-event slice.
-    NativeMvp,
-    /// Recognized protocol bytes that are explicitly outside this milestone.
-    Excluded,
-}
-
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum EntityTxCatalogError {
     #[error("ENTITY_TX_TYPE_UNKNOWN:{0}")]
     Unknown(String),
-    #[error("ENTITY_TX_NATIVE_UNSUPPORTED:{0}")]
-    Unsupported(&'static str),
 }
 
 impl EntityTxKind {
@@ -228,35 +284,6 @@ impl EntityTxKind {
             Self::Vote => "vote",
         }
     }
-
-    pub const fn support(self) -> EntityTxSupport {
-        match self {
-            Self::AccountInput
-            | Self::DirectPayment
-            | Self::EntityCommand
-            | Self::ExtendCredit
-            | Self::HtlcPayment
-            | Self::InitOrderbookExt
-            | Self::JEvent
-            | Self::OpenAccount
-            | Self::PlaceSwapOffer
-            | Self::ProcessHtlcTimeouts
-            | Self::ProposeCancelSwap
-            | Self::RequestCollateral
-            | Self::ResolveHtlcLock
-            | Self::ScheduledWake
-            | Self::SetHubConfig
-            | Self::SetRebalancePolicy => EntityTxSupport::NativeMvp,
-            _ => EntityTxSupport::Excluded,
-        }
-    }
-
-    pub fn require_native_mvp(self) -> Result<Self, EntityTxCatalogError> {
-        match self.support() {
-            EntityTxSupport::NativeMvp => Ok(self),
-            EntityTxSupport::Excluded => Err(EntityTxCatalogError::Unsupported(self.as_str())),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -264,7 +291,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_round_trips_and_exclusions_are_loud() {
+    fn catalog_round_trips_and_unknowns_are_loud() {
         let kinds = [
             "accountInput",
             "directPayment",
@@ -278,11 +305,6 @@ mod tests {
         for text in kinds {
             assert_eq!(EntityTxKind::parse(text).expect("known").as_str(), text);
         }
-        assert!(EntityTxKind::DirectPayment.require_native_mvp().is_ok());
-        assert_eq!(
-            EntityTxKind::CrossPullClose.require_native_mvp(),
-            Err(EntityTxCatalogError::Unsupported("crossPullClose")),
-        );
         assert!(matches!(
             EntityTxKind::parse("newUnreviewedTx"),
             Err(EntityTxCatalogError::Unknown(value)) if value == "newUnreviewedTx"

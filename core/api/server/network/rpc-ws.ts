@@ -36,7 +36,7 @@ const stringList = (value: string[] | string | undefined): string[] =>
     .map(entry => entry.trim())
     .filter(Boolean);
 
-export const readFrameReceipts = async (
+const readFrameReceipts = async (
   env: RuntimeReplica,
   query: RuntimeAdapterReadQuery = {},
 ): Promise<RuntimeAdapterFrameReceiptResponse> => {

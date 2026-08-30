@@ -260,7 +260,7 @@ fn build_plan(
     current_order_id: &str,
     current: &SameJOffer,
     offers: &BTreeMap<(String, String), SameJOffer>,
-    batch: &BTreeMap<String, SameJOffer>,
+    batch: &BTreeMap<String, &SameJOffer>,
     book: &BookState,
     dimensions: PairDimensions,
     taker_fee_bps: u16,
@@ -280,6 +280,7 @@ fn build_plan(
     } else {
         let source = batch
             .get(order_id)
+            .copied()
             .or_else(|| offers.get(&(account_id.clone(), offer_id.clone())))
             .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_FILL_SOURCE_MISSING"))?;
         resting_execution_offer(source, &resting_price, &fill.original_lots, dimensions)?
@@ -347,7 +348,7 @@ pub(crate) fn build_resolve_plans(
     current_order_id: &str,
     current: &SameJOffer,
     offers: &BTreeMap<(String, String), SameJOffer>,
-    batch: &BTreeMap<String, SameJOffer>,
+    batch: &BTreeMap<String, &SameJOffer>,
     book: &BookState,
     dimensions: PairDimensions,
     taker_fee_bps: u16,

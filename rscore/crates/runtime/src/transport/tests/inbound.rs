@@ -147,23 +147,113 @@ fn inbound_session_replies_after_wal_without_a_second_dial() {
         .publish_durable(&mut store, &first)
         .expect("reply on inbound session");
     assert_eq!(
-        (first_report.rows_published, first_report.reconnects),
-        (1, 0)
+        (first_report.rows_published, first_report.rows_pending),
+        (0, 1)
     );
     let first_reply = user.recv_envelope().expect("first hub reply");
     assert_eq!(first_reply["sourceRuntimeHeight"], 1);
     assert_eq!(first_reply["sourceRuntimeId"], hub_runtime_id);
+    let first_completion = publisher
+        .retry_pending()
+        .expect("collect first socket write");
+    assert_eq!(
+        (
+            first_completion.rows_published,
+            first_completion.rows_pending
+        ),
+        (1, 0)
+    );
     let second_report = publisher
         .publish_durable(&mut store, &second)
         .expect("fifo second reply");
-    assert_eq!(second_report.rows_published, 1);
+    assert_eq!(
+        (second_report.rows_published, second_report.rows_pending),
+        (0, 1)
+    );
     let second_reply = user.recv_envelope().expect("second hub reply");
     assert_eq!(second_reply["sourceRuntimeHeight"], 2);
+    let second_completion = publisher
+        .retry_pending()
+        .expect("collect second socket write");
+    assert_eq!(
+        (
+            second_completion.rows_published,
+            second_completion.rows_pending
+        ),
+        (1, 0)
+    );
     publisher.close();
     user.close();
     ingress.shutdown().expect("clean shutdown");
     drop(store);
     fs::remove_dir_all(base).expect("remove reply fixture");
+}
+
+#[test]
+fn full_writer_queue_applies_backpressure_without_dropping_the_batch() {
+    let mut config = DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        "rrs-ingress-backpressure-server",
+        "server",
+    );
+    config.queue_capacity = 1;
+    let mut ingress = DirectRuntimeIngress::bind(config).expect("bind ingress");
+    let hub_runtime_id = ingress.runtime_id().to_owned();
+    let mut users = ["backpressure-a", "backpressure-b"].map(|seed| {
+        let runtime_id = derive_local_runtime_id(seed, "user").expect("user runtime id");
+        let session = DirectSession::connect(SessionConfig {
+            url: &format!("ws://{}/ws", ingress.local_address()),
+            target_runtime_id: &hub_runtime_id,
+            source_runtime_id: &runtime_id,
+            source_seed: seed,
+            source_signer_id: "user",
+            identity: &encryption_identity(seed),
+            io_timeout: Duration::from_secs(3),
+            max_message_bytes: 32 * 1024 * 1024,
+        })
+        .expect("user dials hub");
+        (runtime_id, session)
+    });
+    for (runtime_id, session) in &mut users {
+        wait_for_open_session(&ingress, runtime_id);
+        session
+            .send_envelope(&user_to_hub_envelope(&hub_runtime_id, runtime_id))
+            .expect("user inbound entity_inputs");
+    }
+    let blocked_deadline = Instant::now() + Duration::from_secs(1);
+    while ingress.metrics().backpressure_events == 0 && Instant::now() < blocked_deadline {
+        std::thread::yield_now();
+    }
+    let blocked = ingress.metrics();
+    assert_eq!(blocked.backpressure_events, 1);
+    assert_eq!(blocked.pending_batches_high_water, 2);
+    assert_eq!(blocked.queue_rejections, 0);
+
+    let received = [0, 1].map(|_| {
+        ingress
+            .recv_timeout(Duration::from_secs(1))
+            .expect("ingress healthy")
+            .expect("retained batch")
+            .peer_runtime_id
+    });
+    assert!(
+        users
+            .iter()
+            .all(|(runtime_id, _)| received.contains(runtime_id))
+    );
+    let accepted_deadline = Instant::now() + Duration::from_secs(1);
+    while ingress.metrics().accepted_batches != 2 && Instant::now() < accepted_deadline {
+        std::thread::yield_now();
+    }
+    let metrics = ingress.metrics();
+    assert_eq!(metrics.accepted_batches, 2);
+    assert_eq!(metrics.pending_batches, 0);
+    assert!(metrics.backpressure_wait_micros > 0);
+    assert!(metrics.backpressure_wait_max_micros > 0);
+    for (_, session) in users {
+        session.close();
+    }
+    ingress.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -220,7 +310,7 @@ fn stalled_inbound_target_does_not_block_a_healthy_target() {
         (first_report.rows_published, first_report.rows_pending),
         (1, 1)
     );
-    assert_eq!(first_report.failed_targets, vec![user.clone()]);
+    assert!(first_report.failed_targets.is_empty());
     let first_received = healthy
         .recv_timeout(Duration::from_secs(1))
         .expect("healthy ingress")
@@ -234,7 +324,7 @@ fn stalled_inbound_target_does_not_block_a_healthy_target() {
         (second_report.rows_published, second_report.rows_pending),
         (1, 1)
     );
-    assert_eq!(second_report.failed_targets, vec![user]);
+    assert!(second_report.failed_targets.is_empty());
     let second_received = healthy
         .recv_timeout(Duration::from_secs(1))
         .expect("healthy ingress")
@@ -400,7 +490,7 @@ fn canonical_typescript_client_receives_rust_outbox_on_the_same_authenticated_so
     let report = publisher
         .publish_durable(&mut store, &durable)
         .expect("reply on retained ingress session");
-    assert_eq!((report.rows_published, report.reconnects), (1, 0));
+    assert_eq!((report.rows_published, report.rows_pending), (0, 1));
 
     let output = child.wait_with_output().expect("typescript client exit");
     assert!(
@@ -417,6 +507,10 @@ fn canonical_typescript_client_receives_rust_outbox_on_the_same_authenticated_so
     assert_eq!(reply["signerId"], "1");
     assert_eq!(reply["entityTxs"], json!([]));
     assert_eq!(reply["sessionAuthenticated"], true);
+    let completion = publisher
+        .retry_pending()
+        .expect("collect TypeScript socket write");
+    assert_eq!((completion.rows_published, completion.rows_pending), (1, 0));
 
     publisher.close();
     ingress.shutdown().expect("clean shutdown");

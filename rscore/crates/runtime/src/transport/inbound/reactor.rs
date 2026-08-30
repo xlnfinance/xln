@@ -21,9 +21,9 @@ use super::super::crypto::static_public_hex;
 use super::super::entity_inputs_frame::{SessionCounters, SessionFrameContext, send_entity_inputs};
 use super::super::wire::try_read_value;
 use super::frame::FrameState;
-use super::reply::{OutboundWork, ReplyGuard};
+use super::reply::{OutboundCompletion, OutboundWork, ReplyGuard};
 use super::session::{AcceptedHello, AcceptedSession, PeerGuard};
-use super::{SharedIngress, enqueue, session_failed};
+use super::{SharedIngress, enqueue_batch, enqueue_gossip, session_failed};
 
 const WAKE_TOKEN: Token = Token(0);
 const ACCEPTED_SESSION_QUEUE: usize = 2_048;
@@ -92,25 +92,62 @@ struct LiveSession {
     outbound: SessionCounters,
     inbound: FrameState,
     work: Receiver<OutboundWork>,
-    pending_write: Option<std::sync::mpsc::SyncSender<Result<(), RuntimeTransportError>>>,
+    pending_write: Option<OutboundWork>,
     encryption_public_hex: String,
     _reply: ReplyGuard,
     _peer: PeerGuard,
 }
 
 impl LiveSession {
+    fn fail_queued_outbound(&mut self, reason: &str) {
+        if let Some(work) = self.pending_write.take() {
+            let _ = work.done.send(OutboundCompletion {
+                envelope: work.envelope,
+                result: Err(RuntimeTransportError::Inbound(reason.into())),
+            });
+        }
+        while let Ok(work) = self.work.try_recv() {
+            let _ = work.done.send(OutboundCompletion {
+                envelope: work.envelope,
+                result: Err(RuntimeTransportError::Inbound(reason.into())),
+            });
+        }
+    }
+
     fn read(&mut self, shared: &SharedIngress) -> Result<(), RuntimeTransportError> {
         while let Some(message) = try_read_value(&mut self.socket)? {
-            let batch = super::frame::decode(
-                message,
-                &self.accepted,
-                &self.keys,
-                &self.audience,
-                &self.challenge,
-                &shared.config.runtime_id,
-                &mut self.inbound,
-            )?;
-            enqueue(shared, batch)?;
+            match message.get("type").and_then(serde_json::Value::as_str) {
+                Some("entity_inputs") => {
+                    let batch = super::frame::decode(
+                        message,
+                        &self.accepted,
+                        &self.keys,
+                        &self.audience,
+                        &self.challenge,
+                        &shared.config.runtime_id,
+                        &mut self.inbound,
+                    )?;
+                    enqueue_batch(shared, batch)?;
+                }
+                Some("gossip_announce") => {
+                    let gossip = super::gossip::decode(
+                        message,
+                        &self.accepted,
+                        &self.keys,
+                        &self.audience,
+                        &self.challenge,
+                        &shared.config.runtime_id,
+                        &mut self.inbound,
+                    )?;
+                    enqueue_gossip(shared, gossip)?;
+                }
+                Some(kind) => {
+                    return Err(RuntimeTransportError::Inbound(format!(
+                        "unsupported-direct-message:{kind}"
+                    )));
+                }
+                None => return Err(RuntimeTransportError::Inbound("message-type".into())),
+            }
         }
         Ok(())
     }
@@ -145,19 +182,25 @@ impl LiveSession {
                                     "entity-inputs-hello-ack-auth-not-consumed".into(),
                                 ));
                             }
-                            let _ = work.done.send(Ok(()));
+                            let _ = work.done.send(OutboundCompletion {
+                                envelope: work.envelope,
+                                result: Ok(()),
+                            });
                         }
                         Err(error) if is_would_block(&error) => {
                             // tungstenite has queued the frame internally; a
                             // writable event completes its flush without
                             // blocking every other sovereign session.
-                            self.pending_write = Some(work.done);
+                            self.pending_write = Some(work);
                             return Ok(true);
                         }
                         Err(error) => {
-                            let _ = work
-                                .done
-                                .send(Err(RuntimeTransportError::Inbound(error.to_string())));
+                            let completion_error =
+                                RuntimeTransportError::Inbound(error.to_string());
+                            let _ = work.done.send(OutboundCompletion {
+                                envelope: work.envelope,
+                                result: Err(completion_error),
+                            });
                             return Err(error);
                         }
                     }
@@ -176,8 +219,11 @@ impl LiveSession {
         }
         match self.socket.flush() {
             Ok(()) => {
-                if let Some(done) = self.pending_write.take() {
-                    let _ = done.send(Ok(()));
+                if let Some(work) = self.pending_write.take() {
+                    let _ = work.done.send(OutboundCompletion {
+                        envelope: work.envelope,
+                        result: Ok(()),
+                    });
                 }
                 Ok(false)
             }
@@ -188,14 +234,21 @@ impl LiveSession {
             }
             Err(error) => {
                 let runtime_error = RuntimeTransportError::WebSocket(error.to_string());
-                if let Some(done) = self.pending_write.take() {
-                    let _ = done.send(Err(RuntimeTransportError::Inbound(
-                        runtime_error.to_string(),
-                    )));
+                if let Some(work) = self.pending_write.take() {
+                    let _ = work.done.send(OutboundCompletion {
+                        envelope: work.envelope,
+                        result: Err(RuntimeTransportError::Inbound(runtime_error.to_string())),
+                    });
                 }
                 Err(runtime_error)
             }
         }
+    }
+}
+
+impl Drop for LiveSession {
+    fn drop(&mut self) {
+        self.fail_queued_outbound("session-reactor-dropped");
     }
 }
 
@@ -276,7 +329,8 @@ fn drain_accepted(
     sessions: &mut BTreeMap<Token, LiveSession>,
 ) {
     while let Ok(session) = accepted.try_recv() {
-        if let Err((session, error)) = install_session(poll, session, waker, shared, sessions) {
+        if let Err(failure) = install_session(poll, session, waker, shared, sessions) {
+            let (session, error) = *failure;
             super::listener::remove_socket(shared, session.serial);
             session_failed(shared, &error);
         }
@@ -289,12 +343,12 @@ fn install_session(
     waker: &Arc<Waker>,
     shared: &Arc<SharedIngress>,
     sessions: &mut BTreeMap<Token, LiveSession>,
-) -> Result<(), (AcceptedSession, RuntimeTransportError)> {
+) -> Result<(), Box<(AcceptedSession, RuntimeTransportError)>> {
     let Ok(token_value) = usize::try_from(session.serial) else {
-        return Err((
+        return Err(Box::new((
             session,
             RuntimeTransportError::Inbound("session-token".into()),
-        ));
+        )));
     };
     let token = Token(token_value);
     let raw_fd = session.socket.get_ref().as_raw_fd();
@@ -302,7 +356,10 @@ fn install_session(
         .registry()
         .register(&mut SourceFd(&raw_fd), token, Interest::READABLE)
     {
-        return Err((session, RuntimeTransportError::WebSocket(error.to_string())));
+        return Err(Box::new((
+            session,
+            RuntimeTransportError::WebSocket(error.to_string()),
+        )));
     }
     let (work_tx, work_rx) = sync_channel(1);
     let reply = match shared.replies.register(
@@ -313,7 +370,7 @@ fn install_session(
         Ok(reply) => reply,
         Err(error) => {
             let _ = poll.registry().deregister(&mut SourceFd(&raw_fd));
-            return Err((session, error));
+            return Err(Box::new((session, error)));
         }
     };
     let serial = session.serial;

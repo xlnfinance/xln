@@ -220,6 +220,7 @@ fn apply_fill(
     taker: &AddOrder,
     remaining: &BigInt,
     fill: &BigInt,
+    execution_price: &BigInt,
     events: &mut Vec<BookEvent>,
 ) -> Result<(), EntityKernelError> {
     state.trade_count = state
@@ -227,10 +228,10 @@ fn apply_fill(
         .checked_add(1)
         .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_TRADE_COUNT_OVERFLOW"))?;
     state.trade_qty_sum += fill;
-    state.last_trade_price_ticks = maker.price_ticks.clone();
-    bump_hash(state, 3, &maker.price_ticks, fill);
+    state.last_trade_price_ticks = execution_price.clone();
+    bump_hash(state, 3, execution_price, fill);
     events.push(BookEvent::Trade {
-        price: maker.price_ticks.clone(),
+        price: execution_price.clone(),
         qty: fill.clone(),
         maker_order_id: maker.order_id.clone(),
         taker_order_id: taker.order_id.clone(),
@@ -259,15 +260,17 @@ fn apply_fill(
     Ok(())
 }
 
-fn match_order<F>(
+fn match_order<F, P>(
     state: &mut BookState,
     taker: &AddOrder,
     dimensions: PairDimensions,
     classify: &mut F,
+    execution_price: &mut P,
     events: &mut Vec<BookEvent>,
 ) -> Result<MatchResult, EntityKernelError>
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
+    P: FnMut(&BookOrder, &AddOrder) -> BigInt,
 {
     let mut remaining = taker.qty_lots.clone();
     while remaining > BigInt::from(0) {
@@ -285,12 +288,13 @@ where
             });
         }
         let candidate = maker.qty_lots.clone().min(remaining.clone());
-        let multiple = exact_quote_lot_multiple(dimensions, &maker.price_ticks)?;
+        let price = execution_price(&maker, taker);
+        let multiple = exact_quote_lot_multiple(dimensions, &price)?;
         let fill = execution_qty(&candidate, &multiple);
         if fill <= BigInt::from(0) {
             break;
         }
-        apply_fill(state, &maker, taker, &remaining, &fill, events)?;
+        apply_fill(state, &maker, taker, &remaining, &fill, &price, events)?;
         remaining -= &fill;
         if fill < maker.qty_lots {
             break;
@@ -306,10 +310,26 @@ pub(crate) fn apply_gtc<F>(
     state: &mut BookState,
     input: AddOrder,
     dimensions: PairDimensions,
-    mut classify: F,
+    classify: F,
 ) -> Result<Vec<BookEvent>, EntityKernelError>
 where
     F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
+{
+    apply_gtc_with_execution_price(state, input, dimensions, classify, |maker, _| {
+        maker.price_ticks.clone()
+    })
+}
+
+pub(crate) fn apply_gtc_with_execution_price<F, P>(
+    state: &mut BookState,
+    input: AddOrder,
+    dimensions: PairDimensions,
+    mut classify: F,
+    mut execution_price: P,
+) -> Result<Vec<BookEvent>, EntityKernelError>
+where
+    F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
+    P: FnMut(&BookOrder, &AddOrder) -> BigInt,
 {
     if input.qty_lots <= BigInt::from(0) || input.qty_lots > max_qty_lots() {
         return Ok(vec![BookEvent::Reject {
@@ -323,7 +343,14 @@ where
     // The Entity transition owns this book value and drops it on any error.
     // A second transactional clone here would make a sweep O(orders * offers).
     let mut events = Vec::new();
-    let matched = match_order(state, &input, dimensions, &mut classify, &mut events)?;
+    let matched = match_order(
+        state,
+        &input,
+        dimensions,
+        &mut classify,
+        &mut execution_price,
+        &mut events,
+    )?;
     if matched.remaining > BigInt::from(0) && matched.blocking_order_id.is_none() {
         let multiple = exact_quote_lot_multiple(dimensions, &input.price_ticks)?;
         let resting = execution_qty(&matched.remaining, &multiple);
@@ -376,7 +403,14 @@ where
         qty_lots: taker_order.qty_lots.clone(),
     };
     let mut events = Vec::new();
-    let matched = match_order(state, &taker, dimensions, &mut classify, &mut events)?;
+    let matched = match_order(
+        state,
+        &taker,
+        dimensions,
+        &mut classify,
+        &mut |maker: &BookOrder, _taker: &AddOrder| maker.price_ticks.clone(),
+        &mut events,
+    )?;
     if matched.blocking_order_id.is_some() || matched.remaining == BigInt::from(0) {
         remove_order(state, &taker.order_id)?;
     } else if matched.remaining < taker.qty_lots {

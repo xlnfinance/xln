@@ -53,7 +53,8 @@ stop_owned_dev_processes "$DEV_OWNER_FILE" "$DEV_PID_DIR" "$ROOT_DIR"
 assert_dev_ports_clear "$DEV_PID_DIR" "$DEV_OWNER_FILE" \
   "$RPC_PORT" "$RPC2_PORT" "$WEB_PORT" "$WEB_HTTP_PORT" "$API_PORT" \
   "$CUSTODY_PORT" "$CUSTODY_DAEMON_PORT" "$WATCHTOWER_PORT" \
-  "$((API_PORT + 10))" "$((API_PORT + 11))" "$((API_PORT + 12))" "$((API_PORT + 13))"
+  "$((API_PORT + 10))" "$((API_PORT + 11))" "$((API_PORT + 12))" "$((API_PORT + 13))" \
+  "$((API_PORT + 14))"
 rm -f "$DEV_OWNER_FILE" "$DEV_PID_DIR"/*.pid
 
 "$ROOT_DIR/scripts/sync-contract-artifacts.sh"

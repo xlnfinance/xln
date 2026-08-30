@@ -110,6 +110,7 @@ type HubProcessSpec = {
   publicPort: number;
   dbPath: string;
   deployTokens: boolean;
+  engine: 'rust' | 'typescript';
 };
 
 export type HubChild = HubProcessSpec & {
@@ -570,7 +571,10 @@ export type CustodySupportState = {
 export type ManagedRuntimeSpec = {
   role: ManagedRuntimeRole;
   name: string;
-  script: 'core/orchestrator/hub-node.ts' | 'core/orchestrator/mm-node.ts';
+  script:
+    | 'core/orchestrator/hub-node.ts'
+    | 'core/orchestrator/mm-node.ts'
+    | 'rscore/target/release/xlnrs';
   apiPort: number;
   dbPath: string;
 };

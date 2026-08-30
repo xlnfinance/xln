@@ -1,4 +1,4 @@
-//! Resting same-jurisdiction swap offers.
+//! Resting swap offers.
 //!
 //! Parity target: `core/account/tx/handlers/swap/offer/*.ts`. A cross-j offer
 //! is not represented here — its route, pulls and settlement live outside the
@@ -31,11 +31,13 @@ pub struct SwapOfferSnapshot {
     pub created_height: u64,
     pub quantized_give: BigInt,
     pub quantized_want: BigInt,
+    pub cross_jurisdiction: Option<CanonicalValue>,
 }
 
 /// Total, same-j and per-side-per-market ceilings (core/config/constants.ts).
 pub const MAX_ACCOUNT_SWAP_OFFERS: usize = 38;
 pub const MAX_ACCOUNT_SAME_J_SWAP_OFFERS: usize = 20;
+pub const MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: usize = 18;
 pub const MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: usize = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +57,7 @@ pub struct SwapOffer {
     created_height: u64,
     quantized_give: BigInt,
     quantized_want: BigInt,
+    cross_jurisdiction: Option<CanonicalValue>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -90,6 +93,7 @@ impl SwapOffer {
             time_in_force,
             maker_is_left,
             created_height,
+            cross_jurisdiction: None,
         }
     }
 
@@ -153,6 +157,37 @@ impl SwapOffer {
         self.created_height
     }
 
+    pub const fn cross_jurisdiction(&self) -> Option<&CanonicalValue> {
+        self.cross_jurisdiction.as_ref()
+    }
+
+    pub fn set_cross_jurisdiction(&mut self, route: Option<CanonicalValue>) {
+        self.cross_jurisdiction = route;
+    }
+
+    pub(crate) fn apply_cross_j_remainder(
+        &mut self,
+        give_amount: BigInt,
+        want_amount: BigInt,
+        price_ticks: Option<BigInt>,
+    ) -> Result<(), StateError> {
+        if give_amount <= BigInt::from(0) || want_amount <= BigInt::from(0) {
+            return Err(StateError::AccountStateRoot(
+                "CROSS_J_REMAINDER_AMOUNT_INVALID".into(),
+            ));
+        }
+        self.give_amount = give_amount.clone();
+        self.want_amount = want_amount.clone();
+        self.quantized_give = give_amount;
+        self.quantized_want = want_amount.clone();
+        self.max_fee = BigInt::from(0);
+        self.min_net_receive = want_amount;
+        if let Some(price_ticks) = price_ticks {
+            self.price_ticks = price_ticks;
+        }
+        Ok(())
+    }
+
     /// Restore the exact committed quantized lots. They normally equal the
     /// effective resting amounts, but are committed fields in their own right
     /// and a checkpoint must not infer them.
@@ -198,6 +233,7 @@ impl SwapOffer {
             created_height: self.created_height,
             quantized_give: self.quantized_give.clone(),
             quantized_want: self.quantized_want.clone(),
+            cross_jurisdiction: self.cross_jurisdiction.clone(),
         }
     }
 
@@ -271,6 +307,9 @@ impl SwapOffer {
                 "timeInForce".into(),
                 CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(time_in_force))),
             ));
+        }
+        if let Some(route) = &self.cross_jurisdiction {
+            fields.push(("crossJurisdiction".into(), route.clone()));
         }
         Ok(CanonicalValue::Object(fields))
     }

@@ -1,9 +1,8 @@
-//! Canonical v1 Entity context to path-keyed v2 WAL rows.
+//! Canonical Entity context to path-keyed WAL rows.
 
-use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
-use xln_rscore_protocol::CanonicalValue;
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use crate::storage::native::{
     EntityContextPayloadError, EntityContextPayloadKind, EntityContextPayloadRow,
@@ -16,10 +15,7 @@ pub(crate) fn prepare_entity_context_rows(
     applied_replica_id: &str,
     context: &CanonicalValue,
 ) -> Result<EntityContextPayloadRows, EntityContextProjectionError> {
-    let context = super::output::canonical_json_ref(context)?;
-    let source = context
-        .as_object()
-        .ok_or(EntityContextProjectionError::ContextObject)?;
+    let source = object_ref(context).ok_or(EntityContextProjectionError::ContextObject)?;
     exact_fields(
         source,
         &[
@@ -40,8 +36,9 @@ pub(crate) fn prepare_entity_context_rows(
         return Err(EntityContextProjectionError::ReplicaBinding);
     }
     let height = source
-        .get("height")
-        .and_then(Value::as_u64)
+        .iter()
+        .find(|(field, _)| field == "height")
+        .and_then(|(_, value)| number_u64(value))
         .filter(|value| *value <= 9_007_199_254_740_991)
         .ok_or(EntityContextProjectionError::ContextHeight)?;
     // Multiple certified Entity frames from one replica may commit in one
@@ -57,8 +54,9 @@ pub(crate) fn prepare_entity_context_rows(
         "profile",
     )?;
     let htlc = source
-        .get("htlc")
-        .and_then(Value::as_object)
+        .iter()
+        .find(|(field, _)| field == "htlc")
+        .and_then(|(_, value)| object_ref(value))
         .ok_or(EntityContextProjectionError::HtlcObject)?;
     exact_fields(htlc, &["entries", "originated", "version"], "htlc")?;
     let htlc_entry_digests = leaf_rows(
@@ -128,13 +126,13 @@ pub(crate) fn prepare_entity_context_rows(
         ),
         ("height", required(source, "height")?.clone()),
     ]);
-    rows.push(row(
+    let manifest = row(
         &applied_replica_id,
         EntityContextPayloadKind::Manifest,
         0,
         object([
-            ("kind", Value::String("entityContext".into())),
-            ("version", Value::from(2)),
+            ("kind", CanonicalValue::String("entityContext".into())),
+            ("version", number(2)),
             ("header", header),
             ("profilePageDigests", digests_value(&profile_pages)),
             ("peerAssertionPageDigests", digests_value(&peer_pages)),
@@ -144,15 +142,18 @@ pub(crate) fn prepare_entity_context_rows(
                 digests_value(&originated_pages),
             ),
         ]),
-    )?);
-    EntityContextPayloadRows::validate(rows).map_err(EntityContextProjectionError::from)
+    )?;
+    let manifest_digest = Sha256::digest(manifest.value()).into();
+    rows.push(manifest);
+    EntityContextPayloadRows::projected(rows, applied_replica_id, manifest_digest)
+        .map_err(EntityContextProjectionError::from)
 }
 
 fn leaf_rows(
     rows: &mut Vec<EntityContextPayloadRow>,
     replica_id: &str,
     path_kind: EntityContextPayloadKind,
-    values: &[Value],
+    values: &[CanonicalValue],
     kind: &str,
     payload_field: &str,
 ) -> Result<Vec<[u8; 32]>, EntityContextProjectionError> {
@@ -166,11 +167,11 @@ fn leaf_rows(
                 replica_id,
                 path_kind,
                 index,
-                Value::Object(Map::from_iter([
-                    ("kind".into(), Value::String(kind.into())),
-                    ("version".into(), Value::from(2)),
+                CanonicalValue::Object(vec![
+                    ("kind".into(), CanonicalValue::String(kind.into())),
+                    ("version".into(), number(2)),
                     (payload_field.into(), value.clone()),
-                ])),
+                ]),
             )?;
             let digest = Sha256::digest(row.value()).into();
             rows.push(row);
@@ -183,7 +184,7 @@ fn chunked_leaf_rows(
     rows: &mut Vec<EntityContextPayloadRow>,
     replica_id: &str,
     kind: EntityContextPayloadKind,
-    values: &[Value],
+    values: &[CanonicalValue],
 ) -> Result<Vec<[u8; 32]>, EntityContextProjectionError> {
     values
         .chunks(PAGE_SIZE)
@@ -196,9 +197,9 @@ fn chunked_leaf_rows(
                 kind,
                 index,
                 object([
-                    ("kind", Value::String("peerAssertions".into())),
-                    ("version", Value::from(2)),
-                    ("assertions", Value::Array(chunk.to_vec())),
+                    ("kind", CanonicalValue::String("peerAssertions".into())),
+                    ("version", number(2)),
+                    ("assertions", CanonicalValue::Array(chunk.to_vec())),
                 ]),
             )?;
             let digest = Sha256::digest(row.value()).into();
@@ -226,9 +227,9 @@ fn digest_pages(
                 path_kind,
                 index,
                 object([
-                    ("kind", Value::String("digestPage".into())),
-                    ("version", Value::from(2)),
-                    ("childKind", Value::String(child_kind.into())),
+                    ("kind", CanonicalValue::String("digestPage".into())),
+                    ("version", number(2)),
+                    ("childKind", CanonicalValue::String(child_kind.into())),
                     ("digests", digests_value(chunk)),
                 ]),
             )?;
@@ -243,31 +244,35 @@ fn row(
     replica_id: &str,
     kind: EntityContextPayloadKind,
     index: u32,
-    value: Value,
+    value: CanonicalValue,
 ) -> Result<EntityContextPayloadRow, EntityContextProjectionError> {
+    // Keep the existing storage encoder as the byte authority.  The win here
+    // is eliminating the eager clone of the entire context; each projected
+    // leaf is converted exactly once when its owning row is encoded.
+    let value = super::output::canonical_json(value)?;
     let encoded = crate::transport::msgpack::encode_framed(&value)?;
-    EntityContextPayloadRow::new(replica_id, kind, index, encoded)
+    EntityContextPayloadRow::projected(replica_id, kind, index, encoded)
         .map_err(EntityContextProjectionError::from)
 }
 
-fn digests_value(digests: &[[u8; 32]]) -> Value {
-    Value::Array(
+fn digests_value(digests: &[[u8; 32]]) -> CanonicalValue {
+    CanonicalValue::Array(
         digests
             .iter()
-            .map(|digest| Value::String(hex(digest)))
+            .map(|digest| CanonicalValue::String(hex(digest)))
             .collect(),
     )
 }
 
 fn exact_fields(
-    object: &Map<String, Value>,
+    object: &[(String, CanonicalValue)],
     expected: &[&str],
     path: &'static str,
 ) -> Result<(), EntityContextProjectionError> {
     if object.len() == expected.len()
-        && object
-            .keys()
-            .all(|field| expected.contains(&field.as_str()))
+        && expected
+            .iter()
+            .all(|expected| object.iter().filter(|(field, _)| field == expected).count() == 1)
     {
         Ok(())
     } else {
@@ -276,39 +281,61 @@ fn exact_fields(
 }
 
 fn required<'a>(
-    object: &'a Map<String, Value>,
+    object: &'a [(String, CanonicalValue)],
     field: &'static str,
-) -> Result<&'a Value, EntityContextProjectionError> {
+) -> Result<&'a CanonicalValue, EntityContextProjectionError> {
     object
-        .get(field)
+        .iter()
+        .find(|(name, _)| name == field)
+        .map(|(_, value)| value)
         .ok_or(EntityContextProjectionError::Fields(field))
 }
 
 fn text<'a>(
-    object: &'a Map<String, Value>,
+    object: &'a [(String, CanonicalValue)],
     field: &'static str,
 ) -> Result<&'a str, EntityContextProjectionError> {
-    required(object, field)?
-        .as_str()
-        .ok_or(EntityContextProjectionError::Fields(field))
+    match required(object, field)? {
+        CanonicalValue::String(value) => Ok(value),
+        _ => Err(EntityContextProjectionError::Fields(field)),
+    }
 }
 
 fn array<'a>(
-    object: &'a Map<String, Value>,
+    object: &'a [(String, CanonicalValue)],
     field: &'static str,
-) -> Result<&'a [Value], EntityContextProjectionError> {
-    required(object, field)?
-        .as_array()
-        .map(Vec::as_slice)
-        .ok_or(EntityContextProjectionError::Fields(field))
+) -> Result<&'a [CanonicalValue], EntityContextProjectionError> {
+    match required(object, field)? {
+        CanonicalValue::Array(values) => Ok(values),
+        _ => Err(EntityContextProjectionError::Fields(field)),
+    }
 }
 
-fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
-    Value::Object(Map::from_iter(
+fn object<const N: usize>(entries: [(&str, CanonicalValue); N]) -> CanonicalValue {
+    CanonicalValue::Object(
         entries
             .into_iter()
-            .map(|(key, value)| (key.to_string(), value)),
-    ))
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
+}
+
+fn object_ref(value: &CanonicalValue) -> Option<&[(String, CanonicalValue)]> {
+    match value {
+        CanonicalValue::Object(entries) => Some(entries),
+        _ => None,
+    }
+}
+
+fn number(value: u32) -> CanonicalValue {
+    CanonicalValue::Number(CanonicalNumber::from_u32(value))
+}
+
+fn number_u64(value: &CanonicalValue) -> Option<u64> {
+    match value {
+        CanonicalValue::Number(value) => value.as_str().parse().ok(),
+        _ => None,
+    }
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
@@ -363,5 +390,30 @@ mod tests {
         assert_eq!(rows.rows().len(), 1);
         assert_eq!(rows.frame_refs().len(), 1);
         assert_eq!(rows.frame_refs()[0].0, format!("{replica}:1"));
+    }
+
+    #[test]
+    fn two_entity_heights_in_one_runtime_frame_keep_distinct_context_paths() {
+        let entity = format!("0x{}", "33".repeat(32));
+        let signer = format!("0x{}", "44".repeat(20));
+        let replica = format!("{entity}:{signer}");
+        let context = |height| {
+            crate::canonical_value_from_tagged_json(&json!({
+                "version":1,"proposerReplicaId":replica,"entityId":entity,
+                "proposerSignerId":signer,"parentFrameHash":"genesis","height":height,
+                "gossipProfiles":[],"peerAssertions":[],
+                "htlc":{"version":1,"entries":[],"originated":[]}
+            }))
+            .expect("context")
+        };
+        let merged = EntityContextPayloadRows::merge([
+            prepare_entity_context_rows(&replica, &context(46)).expect("height 46"),
+            prepare_entity_context_rows(&replica, &context(47)).expect("height 47"),
+        ])
+        .expect("distinct paths");
+
+        assert_eq!(merged.frame_refs().len(), 2);
+        assert_eq!(merged.frame_refs()[0].0, format!("{replica}:46"));
+        assert_eq!(merged.frame_refs()[1].0, format!("{replica}:47"));
     }
 }

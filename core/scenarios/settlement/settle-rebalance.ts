@@ -30,7 +30,7 @@ import { deriveDelta } from '../../account/utils';
 import { isLeftEntity } from '../../entity/id';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
-import { startRuntimeHistoryTraceForTesting } from '../../runtime/observability/history-retention';
+import { startRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
 import { ethers } from 'ethers';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
 
@@ -454,7 +454,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
 
   // Production history is intentionally bounded to one snapshot. This
   // scenario owns the multi-frame trace only for the causal assertion below.
-  const phase65Trace = startRuntimeHistoryTraceForTesting(env);
+  const phase65Trace = startRuntimeTraceForTesting(env);
   try {
     await process(env, [{
       entityId: hub.id,

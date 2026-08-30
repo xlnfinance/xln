@@ -51,20 +51,20 @@ describe('WebSocket trusted decode boundary', () => {
       pong: { type: 'pong' },
     } satisfies Record<string, RuntimeWsMessage>;
     const expected = {
-      hello: '0x45218b0572920fd44e65f2e69e6d648e230f00a4a4b836fa1f1920cd24d661d9',
-      hello_challenge: '0x6d1fdf678f897e7e99b101a7535112026e686bd2bdd35c4fd2e532a842b18fb2',
-      hello_ack: '0xe706a531cecdffe5272cd73732ac38f4160898935e265befd9da95b72cdef81b',
-      entity_inputs: '0x27d24811c53f68697c47e4c55f6ccf4848ba52f8395969aba5038a2f9a5cff04',
-      debug_event: '0xe0af6238b04d11eb2c5722f791096bf1379718b9a0d96de9069f76e476364dd9',
-      gossip_request: '0xfa2d937758c36668a0f728722494f59e19a183eaec2ed082e340283aae2af679',
-      gossip_response: '0xb7c17ab8f547e8f41ee39cec7b1c8a7d0bb3a974d4513ce2471f104e5f959069',
-      gossip_announce: '0x3e738bb000b77b4af6749052e1b408fbc0458b8a0197d3d7c698a2e84b03453a',
-      gossip_update: '0x6dc0078b944a9e92fa5104e846da5f2697fc6a15719bb8b9eac338d3c8ce2ada',
-      recovery_bundle_request: '0x0989b1dd84030997b89a0d7d1f2f35ae1e8f12518ba7b6789608dd9185ba2b5e',
-      recovery_bundle_response: '0x9e0bbb626bb4e6e7b464242a676d00c5f6fd1f456ef7d3912889b1b978a9f407',
-      error: '0xe3bad0c0db2f6047e71a6214f0fe9f890de66b87507de8d08a27a26fa937fb9a',
-      ping: '0x9404c21fe688b87cd4371b28f4152440ffcb95b00c577e64b954f71b3bc57394',
-      pong: '0x42684cebef0591f8c704eae43ffafc1577e6833e251111cdbcccc5f26de08e8c',
+      hello: '0x7d1cdf738ad92df1102294c0ba3f3905565ec647fee53fd8c6bd86e34b6ee30a',
+      hello_challenge: '0xb0f776a1452bd5053220e1cd415889f3ea2ad691d93bd20c5adbc7437e1237b4',
+      hello_ack: '0xd646382e68b53131842a9e6bc94d300b15db9da985358ac1960303fbad226364',
+      entity_inputs: '0xaa281d3de87c89a267adf1b71f922f41db6b4634e161eb421a236d7b7ac67163',
+      debug_event: '0x1ab877491e9781ac22ff85db90c642a19c45a00bb700e95bbcc455ca8a3b0e6a',
+      gossip_request: '0x2c28d91481c0ef4716bf88d9ec05b16efa22d1dcf12ea7d7b8b95cecd03ecd68',
+      gossip_response: '0x3a53351d8615b708c228206c90323713a1e5f1a72b6c6ee2c8d518535ca296a1',
+      gossip_announce: '0xed0c41139f2d34527396fd9680803102bc35ee744d172d601265e91a6c6036c2',
+      gossip_update: '0x7266cb9f2bbd2a02d53e30d1417cad37310332d74bca3babe36b96f6501e5520',
+      recovery_bundle_request: '0x0f74f0ebd99eeb631a403a9a6a74fe6c9e62293b50c66b11b8f59fcb9f42f9c4',
+      recovery_bundle_response: '0x4a89fd210cadfbc82c3e7f5a3bbf8f09367e30e6b751c32a7e36c9c242d69ca5',
+      error: '0x402d41a3aed08327cf662964a20e65d5d9e549f371687abe1340390d2a2fd3d9',
+      ping: '0x2dc0089c6e599d87d53ea3b8d2b22453ce87dbda787842434fb3c2511b0ebfcb',
+      pong: '0x2fd07c58cdf34bee955037ac41e0be62e255d423b5ebf3848e13b64755ff1368',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [
@@ -80,10 +80,8 @@ describe('WebSocket trusted decode boundary', () => {
       .toThrow('WS_WIRE_BINARY_REQUIRED');
   });
 
-  test('rejects a debug JSON binary envelope before peer payload decoding', () => {
-    const debugEnvelope = encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, type: 'ping' }, 'json');
-
-    expect(debugEnvelope[0]).toBe(0x02);
+  test('rejects every non-MessagePack binary envelope before peer payload decoding', () => {
+    const debugEnvelope = new Uint8Array([0x02, 0x00]);
     expect(() => deserializeWsMessage(debugEnvelope))
       .toThrow('WS_WIRE_MESSAGEPACK_REQUIRED:magic=2');
   });
@@ -98,7 +96,7 @@ describe('WebSocket trusted decode boundary', () => {
     ['type-confused tick timestamp', { type: 'ping', timestamp: '1' }],
     ['unknown envelope field', { type: 'ping', surprise: true }],
   ])('rejects %s before routing', (_label, value) => {
-    expect(() => deserializeWsMessage(encodeBinaryPayload(value, 'msgpack')))
+    expect(() => deserializeWsMessage(encodeBinaryPayload(value)))
       .toThrow(/WS_MESSAGE_/);
   });
 
@@ -144,12 +142,12 @@ describe('rAdapter trusted decode boundary', () => {
       tick: { v: XLN_PROTOCOL_VERSION, op: 'tick', height: 1, commandReady: true, commandReadyReason: null },
     } satisfies Record<string, RuntimeAdapterWireMessage>;
     const expected = {
-      auth: '0xf31dbd2448bc0430a3bf0e82f1e431143f2276207c4bb6490a1295af20992a5b',
-      read: '0xc0e19dfc04346f4a9f8783b798d462572c1cb178947b8addf8cae6298b097854',
-      send: '0xbd1a3eabf0d5ec7bf8f4c46096f11d044de406b47d6a12d34dab769272b8385e',
-      ok: '0x59110d26493d012f3810c1e32854d7a17b6e4ee14c188aded493505e27a3b61b',
-      error: '0xedf10168afa765b872ca86fc53775d150ef8af30a61457841d43b6ca4efcefdb',
-      tick: '0x4ce3f9a45cc138030713992c84ac62318daedccbe078d66f790ef949b6cb4a85',
+      auth: '0x89b559a9513a25b21aed3d0d06e25fb0c1d388c9adaf1e82da61a533fe3a8b5c',
+      read: '0x35a60583df70e8aa7778c2791b058b3a10d3fe3a25f218dc3932b8c4171f4692',
+      send: '0x50e7a3006cc2646eb8dbbd37c3c87209bea163b7732fcd147a963f32bcc70386',
+      ok: '0x281dc0a21601fba2eb93c599257a704a460b6d785d4971bc22461391f8af84fe',
+      error: '0x81327bd0cbe0f4cd84b494e1f29c8017da136e171a5c4b3cdebe3e61e848f4f3',
+      tick: '0x232677f7fa2520c665e153131505113a9c779f659f62cd8eee5707d740bbdef2',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [
@@ -175,29 +173,22 @@ describe('rAdapter trusted decode boundary', () => {
     }
   });
 
-  test('rejects a debug JSON binary envelope before rAdapter payload decoding', () => {
-    const debugEnvelope = encodeBinaryPayload({
-      v: XLN_PROTOCOL_VERSION,
-      id: 'read-1',
-      op: 'read',
-      path: 'head',
-    }, 'json');
-
-    expect(debugEnvelope[0]).toBe(0x02);
+  test('rejects every non-MessagePack binary envelope before rAdapter payload decoding', () => {
+    const debugEnvelope = new Uint8Array([0x02, 0x00]);
     expect(() => decodeRuntimeAdapterMessage(debugEnvelope))
       .toThrow('RADAPTER_WIRE_MESSAGEPACK_REQUIRED:magic=2');
   });
 
   test.each([
     ['JSON text', '{"v":1,"id":"x","op":"read","path":"head"}'],
-    ['null', encodeBinaryPayload(null, 'msgpack')],
-    ['array', encodeBinaryPayload([], 'msgpack')],
-    ['unknown op', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, id: 'x', op: 'wat' }, 'msgpack')],
-    ['missing request id', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'read', path: 'head' }, 'msgpack')],
-    ['missing read path', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, id: 'x', op: 'read' }, 'msgpack')],
-    ['type-confused tick height', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'tick', height: '9' }, 'msgpack')],
-    ['missing tick readiness', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'tick', height: 9 }, 'msgpack')],
-    ['type-confused response status', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'x', ok: 'true', payload: null }, 'msgpack')],
+    ['null', encodeBinaryPayload(null)],
+    ['array', encodeBinaryPayload([])],
+    ['unknown op', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, id: 'x', op: 'wat' })],
+    ['missing request id', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'read', path: 'head' })],
+    ['missing read path', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, id: 'x', op: 'read' })],
+    ['type-confused tick height', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'tick', height: '9' })],
+    ['missing tick readiness', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'tick', height: 9 })],
+    ['type-confused response status', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'x', ok: 'true', payload: null })],
     ['missing send input arrays', encodeBinaryPayload({
       v: XLN_PROTOCOL_VERSION,
       id: 'x',
@@ -205,14 +196,14 @@ describe('rAdapter trusted decode boundary', () => {
       commandId: 'command-00000001',
       commandSequence: 1,
       input: {},
-    }, 'msgpack')],
+    })],
     ['unknown request field', encodeBinaryPayload({
       v: XLN_PROTOCOL_VERSION,
       id: 'x',
       op: 'read',
       path: 'head',
       surprise: true,
-    }, 'msgpack')],
+    })],
   ])('rejects %s before handling', (_label, raw) => {
     expect(() => decodeRuntimeAdapterMessage(raw)).toThrow(/RADAPTER_(?:WIRE|REQUEST|RESPONSE|PUSH)/);
   });

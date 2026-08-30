@@ -58,6 +58,22 @@ impl CertifiedBoardRegistry {
         self.authorities.is_empty()
     }
 
+    /// Exact currently registered board accepted by Depository for outer
+    /// `processBatch` authorization. Historical boards are deliberately not
+    /// returned: their seven-day window is dispute evidence only.
+    pub fn current_board_hash(&self, entity_id: &[u8; 32]) -> Option<[u8; 32]> {
+        self.authorities
+            .get(entity_id)
+            .map(|authority| authority.registered_board_hash)
+    }
+
+    pub(crate) fn current_authority(
+        &self,
+        entity_id: &[u8; 32],
+    ) -> Option<CertifiedBoardAuthority> {
+        self.authorities.get(entity_id).copied()
+    }
+
     pub(crate) fn entity_command_board(
         &self,
         entity_id: &[u8; 32],

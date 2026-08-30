@@ -63,12 +63,11 @@ pub(super) fn decode_envelope(
     message_id: String,
     ingress_timestamp: Option<u64>,
 ) -> Result<InboundEntityInputs, RuntimeTransportError> {
-    let value = decode_transport(plaintext)?;
-    let envelope = value
-        .as_object()
-        .ok_or_else(|| RuntimeTransportError::Inbound("envelope-object".into()))?;
+    let Value::Object(mut envelope) = decode_transport(plaintext)? else {
+        return Err(RuntimeTransportError::Inbound("envelope-object".into()));
+    };
     exact_fields(
-        envelope,
+        &envelope,
         &[
             "sourceRuntimeId",
             "sourceRuntimeHeight",
@@ -78,7 +77,7 @@ pub(super) fn decode_envelope(
         &["sourceSignature", "atomicCrossJurisdictionPair"],
         "envelope",
     )?;
-    let source_runtime_id = normalize_runtime_id(text(envelope, "sourceRuntimeId")?)?;
+    let source_runtime_id = normalize_runtime_id(text(&envelope, "sourceRuntimeId")?)?;
     if source_runtime_id != peer_runtime_id {
         return Err(RuntimeTransportError::Inbound("source-runtime".into()));
     }
@@ -98,11 +97,14 @@ pub(super) fn decode_envelope(
             return Err(RuntimeTransportError::Inbound("source-signature".into()));
         }
     }
-    let source_runtime_height = safe_u64(envelope, "sourceRuntimeHeight")?;
-    let source_runtime_timestamp = safe_u64(envelope, "sourceRuntimeTimestamp")?;
+    let source_runtime_height = safe_u64(&envelope, "sourceRuntimeHeight")?;
+    let source_runtime_timestamp = safe_u64(&envelope, "sourceRuntimeTimestamp")?;
     let rows = envelope
-        .get("entityInputs")
-        .and_then(Value::as_array)
+        .remove("entityInputs")
+        .and_then(|value| match value {
+            Value::Array(rows) => Some(rows),
+            _ => None,
+        })
         .ok_or_else(|| RuntimeTransportError::Inbound("entity-inputs-array".into()))?;
     if rows.is_empty() || rows.len() > MAX_ENTITY_INPUTS {
         return Err(RuntimeTransportError::Inbound(format!(
@@ -112,11 +114,12 @@ pub(super) fn decode_envelope(
     }
     let mut entity_inputs = Vec::with_capacity(rows.len());
     let mut entity_tx_count = 0_u64;
-    for (index, row) in rows.iter().enumerate() {
-        let mut row = row
-            .as_object()
-            .cloned()
-            .ok_or_else(|| RuntimeTransportError::Inbound(format!("entity-input:{index}")))?;
+    for (index, row) in rows.into_iter().enumerate() {
+        let Value::Object(mut row) = row else {
+            return Err(RuntimeTransportError::Inbound(format!(
+                "entity-input:{index}"
+            )));
+        };
         let row_tx_count =
             row.get("entityTxs")
                 .map(|value| {

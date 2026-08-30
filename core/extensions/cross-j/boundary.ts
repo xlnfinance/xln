@@ -4,25 +4,29 @@ import type { EntityTx } from '../../types/entity-tx';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 
 /**
- * Cross-j Entity messages are runtime-local only. The only admissible edges are
- * the two sibling pairs committed by the route:
+ * Cross-j Entity effects travel only as one committed Runtime output. The
+ * admissible Entity edges are the two sibling pairs committed by the route:
  *
  *   source user <-> target user
  *   source hub  <-> target hub / canonical book owner
  *
  * The two same-jurisdiction edges are bilateral Account machines, never Entity
- * messages. Consequently no cross-j EntityTx is network-deliverable, even when
- * all four route participants happen to form a known two-runtime topology.
+ * messages. A raw cross-j EntityTx is never network-deliverable; Runtime wraps
+ * it after the source Entity frame commits and authenticates the source Runtime.
  */
 const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
+  'prepareCrossJurisdictionSwap',
+  'materializeCrossJurisdictionSwap',
   'registerCrossJurisdictionSwap',
   'crossJurisdictionFillNotice',
   'requestCrossJurisdictionClear',
+  'materializeCrossJurisdictionClear',
   'crossPullClose',
   'crossJurisdictionSalvage',
   'crossJurisdictionForceSiblingDispute',
   'orderbookSweepCrossJurisdiction',
   'admitCrossJurisdictionBookOrder',
+  'applyCrossJurisdictionBookProgress',
   'removeCrossJurisdictionBookOrder',
   'crossJurisdictionBookOrderRemoved',
 ]);
@@ -73,6 +77,34 @@ export const crossJurisdictionRouteProfileEntityIds = (
   normalizeEntityRef(route.target?.entityId),
 ].filter(Boolean))];
 
+/** Board signer committed by the route for one exact cross-j Entity owner. */
+export const crossJurisdictionRouteSigner = (
+  route: CrossJurisdictionSwapRoute,
+  entityId: string,
+): string | null => {
+  const target = normalizeEntityRef(entityId);
+  if (!target) return null;
+  if (normalizeEntityRef(route.source.entityId) === target) return normalizeEntityRef(route.sourceSignerId) || null;
+  if (normalizeEntityRef(route.source.counterpartyEntityId) === target) {
+    return normalizeEntityRef(route.sourceHubSignerId) || null;
+  }
+  if (normalizeEntityRef(route.target.entityId) === target) return normalizeEntityRef(route.targetHubSignerId) || null;
+  if (normalizeEntityRef(route.target.counterpartyEntityId) === target) {
+    return normalizeEntityRef(route.targetSignerId) || null;
+  }
+  const bookOwner = normalizeEntityRef(
+    route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId,
+  );
+  if (bookOwner !== target) return null;
+  if (bookOwner === normalizeEntityRef(route.source.counterpartyEntityId)) {
+    return normalizeEntityRef(route.sourceHubSignerId) || null;
+  }
+  if (bookOwner === normalizeEntityRef(route.target.entityId)) {
+    return normalizeEntityRef(route.targetHubSignerId) || null;
+  }
+  return null;
+};
+
 export const isCrossJurisdictionSiblingPair = (
   route: CrossJurisdictionSwapRoute,
   sourceEntityId: string,
@@ -91,6 +123,21 @@ export const isCrossJurisdictionSiblingPair = (
     (source === sourceHub && target === targetHub) ||
     (source === targetHub && target === sourceHub)
   );
+};
+
+export const isCrossJurisdictionRouteParticipant = (
+  route: CrossJurisdictionSwapRoute,
+  entityId: string,
+): boolean => {
+  const participant = normalizeEntityRef(entityId);
+  return Boolean(participant) && [
+    route.source.entityId,
+    route.source.counterpartyEntityId,
+    route.target.entityId,
+    route.target.counterpartyEntityId,
+    route.bookOwnerEntityId,
+    route.hubEntityId,
+  ].some(candidate => normalizeEntityRef(candidate) === participant);
 };
 
 export const resolveCrossJurisdictionRuntimeTopology = (

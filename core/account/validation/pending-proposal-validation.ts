@@ -32,7 +32,7 @@ export const validatePendingAccountProposal = (
   }
 
   const input = validateObject(pendingInput, `${context}.pendingAccountInput`);
-  if (input['kind'] !== 'frame' && input['kind'] !== 'frame_ack') {
+  if (input['kind'] !== 'frame' && input['kind'] !== 'ack_frame') {
     throw new FinancialDataCorruptionError(
       `${context}.pendingAccountInput must carry a frame proposal`,
     );

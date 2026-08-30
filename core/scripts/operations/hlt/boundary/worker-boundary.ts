@@ -187,14 +187,14 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
   requireExactBoundaryKeys(core, [
     'entityId', 'entityEncryptionPublicKey', 'height', 'timestamp', 'profile', 'config',
     'nonces', 'proposals', 'reserves', 'lastFinalizedJHeight',
-    'htlcRoutes', 'htlcFeesEarned', 'lockBook',
+    'paybook',
   ], [
     'signerId', 'isProposer', 'prevFrameHash', 'externalWallet',
-    'deferredAccountProposals', 'jBatchState', 'htlcNotes', 'outDebtsByToken',
+    'deferredAccountProposals', 'jBatchState', 'outDebtsByToken',
     'inDebtsByToken', 'swapTradingPairs', 'crossJurisdictionSwaps',
     'pendingCrossJurisdictionFillAcks', 'crossJurisdictionBookAdmissions',
     'orderbookReferrals', 'orderbookHubProfile', 'hubRebalanceConfig',
-    'lockBookOpen', 'metrics',
+    'paybookOpen', 'metrics',
   ], 'PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
   return core;
 };
@@ -241,7 +241,7 @@ const ACCOUNT_VIEW_REQUIRED = [
   'pendingWithdrawals', 'shadow',
 ] as const;
 const ACCOUNT_VIEW_OPTIONAL = [
-  'pendingFrame', 'pendingAccountInput', 'lastOutboundFrameAck',
+  'pendingFrame', 'pendingAccountInput', 'lastOutboundAckFrame',
   'lastRollbackFrameHash', 'currentFrameHanko',
   'counterpartyFrameHanko', 'boardHankoRefreshMigration', 'counterpartyBoardHankoRefresh',
   'currentDisputeProofHanko', 'currentDisputeProofNonce', 'currentDisputeProofBodyHash',
@@ -350,8 +350,8 @@ export const decodeAccountPageCursor = (value: unknown): {
 
 export type HubSettlementCounters = Readonly<{
   height: number;
-  lockBookOpen: number;
-  htlcFeesEarned: bigint;
+  paybookOpen: number;
+  paybookFeesEarned: bigint;
   acceptedPayments: number;
   completedPayments: number;
   matchedSwaps: number;
@@ -362,16 +362,16 @@ export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounte
   const core = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_HUB_SETTLEMENT_COUNTERS_INVALID');
   requireExactBoundaryKeys(
     core,
-    ['height', 'lockBookOpen', 'htlcFeesEarned', 'metrics'],
+    ['height', 'paybookOpen', 'paybookFeesEarned', 'metrics'],
     [],
     'PRODUCTION_SWAP_LOAD_HUB_SETTLEMENT_COUNTERS_FIELDS_INVALID',
   );
-  const lockBookOpen = core['lockBookOpen'];
-  if (!Number.isSafeInteger(lockBookOpen) || Number(lockBookOpen) < 0) {
-    throw new Error('PRODUCTION_SWAP_LOAD_HUB_LOCKBOOK_OPEN_INVALID');
+  const paybookOpen = core['paybookOpen'];
+  if (!Number.isSafeInteger(paybookOpen) || Number(paybookOpen) < 0) {
+    throw new Error('PRODUCTION_SWAP_LOAD_HUB_PAYBOOK_OPEN_INVALID');
   }
-  const fees = core['htlcFeesEarned'];
-  if (typeof fees !== 'bigint' || fees < 0n) throw new Error('PRODUCTION_SWAP_LOAD_HUB_HTLC_FEES_INVALID');
+  const fees = core['paybookFeesEarned'];
+  if (typeof fees !== 'bigint' || fees < 0n) throw new Error('PRODUCTION_SWAP_LOAD_HUB_PAYBOOK_FEES_INVALID');
   const metrics = requireBoundaryRecord(core['metrics'], 'PRODUCTION_SWAP_LOAD_HUB_METRICS_INVALID');
   requireExactBoundaryKeys(
     metrics,
@@ -381,8 +381,8 @@ export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounte
   );
   return {
     height: requireBoundaryInteger(core['height'], 'PRODUCTION_SWAP_LOAD_HUB_HEIGHT_INVALID', 0),
-    lockBookOpen: Number(lockBookOpen),
-    htlcFeesEarned: fees,
+    paybookOpen: Number(paybookOpen),
+    paybookFeesEarned: fees,
     acceptedPayments: requireBoundaryInteger(
       metrics['acceptedPayments'],
       'PRODUCTION_SWAP_LOAD_HUB_ACCEPTED_PAYMENTS_INVALID',

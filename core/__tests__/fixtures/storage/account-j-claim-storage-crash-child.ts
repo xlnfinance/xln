@@ -3,12 +3,10 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getRuntimeWalDb,
-  getHistoryViewDb,
   getRuntimeStorageDb,
   processRuntime,
   tryOpenStorageDb,
   tryOpenRuntimeWalDb,
-  tryOpenHistoryViewDb,
 } from '../../../runtime';
 import { applyAccountInput } from '../../../account/consensus';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
@@ -91,8 +89,6 @@ const storageConfig = {
     snapshotPeriodFrames: 256,
     retainSnapshots: 3,
     epochMaxBytes: 1_000_000_000,
-    historyViewMaxBytes: 1_000_000_000,
-    historyViewRetainFrames: 100_000,
     materializePeriodFrames: 1,
     canonicalHashPeriodFrames: 0,
     accountMerkleRadix: 16,
@@ -249,8 +245,6 @@ await saveRuntimeFrameToStorage({
   getRuntimeDb: getRuntimeStorageDb,
   tryOpenRuntimeWalDb,
   getRuntimeWalDb,
-  tryOpenHistoryViewDb,
-  getHistoryViewDb,
   getPerfMs,
   formatPerfMs: (value) => value.toFixed(2),
 });
@@ -301,8 +295,6 @@ await saveRuntimeFrameToStorage({
   getRuntimeDb: getRuntimeStorageDb,
   tryOpenRuntimeWalDb,
   getRuntimeWalDb,
-  tryOpenHistoryViewDb,
-  getHistoryViewDb,
   getPerfMs,
   formatPerfMs: (value) => value.toFixed(2),
   onPersistenceBoundary: (boundary: StoragePersistenceBoundary) => {

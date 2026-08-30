@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../../account/crypto';
 import { applyEntityInput } from '../../../entity/consensus';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
+import { cloneEntityState, emptyEntityAccountMap } from '../../helpers/entity-account-map';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
@@ -73,7 +74,7 @@ const makeState = (validators: string[]): EntityState => ({
     },
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: emptyEntityAccountMap(entityId),
   lastFinalizedJHeight: 10,
   jHistoryFinality: {
     jurisdictionRef,
@@ -86,9 +87,7 @@ const makeState = (validators: string[]): EntityState => ({
     entityHeight: 0,
   },
   profile: { name: 'J prefix', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const disputeStarted = (): JurisdictionEvent => ({
@@ -479,7 +478,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      state: structuredClone(state),
+      state: cloneEntityState(state),
       mempool: [],
       isProposer,
       jHistory: history,
@@ -524,7 +523,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer,
       jHistory: history,
@@ -572,11 +571,14 @@ describe('validator J-prefix consensus', () => {
 
     entityId = generateLazyEntityId(validators, 3n);
     const baseState = makeState(validators);
+    baseState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(proposerEnv, entityId).publicKey;
+    provisionTestEntityEncryptionKey(validatorEnv, entityId);
+    provisionTestEntityEncryptionKey(thirdEnv, entityId);
     const makeReplica = (signerId: string, isProposer: boolean): EntityReplica => ({
       entityId,
       signerId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer,
       jHistory: observedThrough(11, true),
@@ -717,7 +719,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer: signerId === leftId,
       jHistory: history,
@@ -770,7 +772,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId: leftId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer: true,
       jHistory: history(`0x${'a1'.repeat(32)}`),
@@ -779,7 +781,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId: rightId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer: false,
       jHistory: history(`0x${'b2'.repeat(32)}`),
@@ -812,7 +814,7 @@ describe('validator J-prefix consensus', () => {
       }),
     ).toThrow('J_PREFIX_RANGE_COUNT_INVALID:1');
 
-    const unregisteredState = structuredClone(baseState);
+    const unregisteredState = cloneEntityState(baseState);
     delete unregisteredState.jHistoryFinality;
     delete unregisteredState.config.jurisdiction;
     unregisteredState.lastFinalizedJHeight = 0;
@@ -880,7 +882,7 @@ describe('validator J-prefix consensus', () => {
     };
     const stale = buildLocalJPrefixAttestation(env, sourceReplica)!;
     const committedState = {
-      ...structuredClone(preState),
+      ...cloneEntityState(preState),
       height: 1,
       prevFrameHash: `0x${'a7'.repeat(32)}`,
       config: {
@@ -1061,7 +1063,7 @@ describe('validator J-prefix consensus', () => {
           entityId,
           signerId,
           entityEncPubKey: '',
-          state: structuredClone(state),
+          state: cloneEntityState(state),
           mempool: [],
           isProposer: index === 0,
           jHistory: history,
@@ -1357,7 +1359,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId: proposerId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer: true,
       jHistory: observedThrough(11, true),
@@ -1366,7 +1368,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId: validatorId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer: false,
       jHistory: observedThrough(11, true),
@@ -1375,7 +1377,7 @@ describe('validator J-prefix consensus', () => {
       entityId,
       signerId: laggingId,
       entityEncPubKey: '',
-      state: structuredClone(baseState),
+      state: cloneEntityState(baseState),
       mempool: [],
       isProposer: false,
       jHistory: observedThrough(10, false),

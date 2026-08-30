@@ -27,4 +27,4 @@ export const computeStorageReplicaMetaDigest = (
       const byKey = compareStableText(left.key, right.key);
       return byKey !== 0 ? byKey : compareStableText(left.valueHash, right.valueHash);
     }),
-}, 'msgpack'));
+}));

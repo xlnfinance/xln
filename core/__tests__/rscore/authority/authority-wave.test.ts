@@ -64,8 +64,8 @@ const frameOf = (height: number): AccountFrame => ({
   stateHash: `0x${'44'.repeat(32)}`,
 });
 
-const frameAck = (height: number, fromEntityId = B, toEntityId = A): AccountPeerInput => ({
-  kind: 'frame_ack',
+const ackFrame = (height: number, fromEntityId = B, toEntityId = A): AccountPeerInput => ({
+  kind: 'ack_frame',
   fromEntityId,
   toEntityId,
   domain: { chainId: 31_337, depositoryAddress: `0x${'11'.repeat(20)}` },
@@ -196,10 +196,10 @@ describe('authority wave', () => {
     resetAuthorityRecordForTests();
   });
 
-  test('one frame_ack stays one operation with ACK before proposal inside its kind', () => {
+  test('one ack_frame stays one operation with ACK before proposal inside its kind', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    recordAccountInput('r', replica(A, B), frameAck(4));
+    recordAccountInput('r', replica(A, B), ackFrame(4));
     const wave = buildAuthorityWave('r');
 
     expect(wave.kind).toBe('wave');
@@ -209,7 +209,7 @@ describe('authority wave', () => {
     if (entity === undefined) throw new Error('expected one Entity');
     const ops = entity.ops as unknown[][];
     expect(ops).toHaveLength(1);
-    expect(wave.inputs.map(row => row.kind)).toEqual(['frame_ack']);
+    expect(wave.inputs.map(row => row.kind)).toEqual(['ack_frame']);
     expect(wave.inputs.map(row => row.operationIndex)).toEqual([0]);
     expect(entity.operations).toEqual([
       {
@@ -244,7 +244,7 @@ describe('authority wave', () => {
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_500, 101);
     recordAccountInput('r', replica(A, B), enqueue([payment(B)]));
     noteAuthorityEntityClock('r', C, 'enforce', 1_700_000_009_000, 77);
-    recordAccountInput('r', replica(C, B), frameAck(2, B, C));
+    recordAccountInput('r', replica(C, B), ackFrame(2, B, C));
     const wave = buildAuthorityWave('r');
 
     if (wave.kind !== 'wave') throw new Error('expected a wave');
@@ -264,19 +264,15 @@ describe('authority wave', () => {
     expect(second!.finalizedJHeight).toBe(77);
   });
 
-  test('a transaction outside the profile makes the whole frame undrivable', () => {
+  test('a transaction outside the closed profile fails before a partial wave exists', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
     recordAccountInput('r', replica(A, B), enqueue([
       { type: 'settle_hold', data: {} } as unknown as AccountTx,
     ]));
-    const wave = buildAuthorityWave('r');
-
     // Not "skip the transaction": the engine would build a different mempool
     // and every frame after it would disagree.
-    expect(wave.kind).toBe('ineligible');
-    if (wave.kind !== 'ineligible') throw new Error('expected ineligible');
-    expect(wave.reason).toBe('tx:settle_hold');
+    expect(() => buildAuthorityWave('r')).toThrow('SHADOW_ACCOUNT_TX_UNREACHABLE');
   });
 
   test('an Entity with no clock is refused rather than given a neighbour to borrow', () => {
@@ -322,11 +318,11 @@ describe('authority wave guards', () => {
   test('two different clocks for one Entity refuse the frame instead of keeping the last', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    recordAccountInput('r', replica(A, B), frameAck(2));
+    recordAccountInput('r', replica(A, B), ackFrame(2));
     // The same Entity, judged again at a different J height inside one frame:
     // the Runtime frame is then not this Entity's wave unit.
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 101);
-    recordAccountInput('r', replica(A, C), frameAck(2, C, A));
+    recordAccountInput('r', replica(A, C), ackFrame(2, C, A));
     const wave = buildAuthorityWave('r');
 
     expect(wave.kind).toBe('ineligible');
@@ -337,7 +333,7 @@ describe('authority wave guards', () => {
   test('the same clock recorded twice is not a conflict', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    recordAccountInput('r', replica(A, B), frameAck(2));
+    recordAccountInput('r', replica(A, B), ackFrame(2));
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
     expect(buildAuthorityWave('r').kind).toBe('wave');
   });
@@ -348,13 +344,13 @@ describe('authority wave guards', () => {
     noteAuthorityEntityClock('r', C, 'enforce', 1_700_000_000_000, 100);
     // A, then C, then A again: grouping sends A's two inputs together.
     recordAccountInput('r', replica(A, B), enqueue([payment(B)]));
-    recordAccountInput('r', replica(C, B), frameAck(2, B, C));
-    recordAccountInput('r', replica(A, B), frameAck(3));
+    recordAccountInput('r', replica(C, B), ackFrame(2, B, C));
+    recordAccountInput('r', replica(A, B), ackFrame(3));
     const wave = buildAuthorityWave('r');
 
     if (wave.kind !== 'wave') throw new Error('expected a wave');
     // Sent as A's group first, so A's composite input is operation 1 even
-    // though C's composite input arrived first. Each frame_ack consumes one
+    // though C's composite input arrived first. Each ack_frame consumes one
     // global arrival and one candidate operation.
     expect(wave.inputs.map(row => row.operationIndex)).toEqual([1, 0]);
     expect(wave.inputs.map(row => row.arrivalIndex)).toEqual([2, 1]);

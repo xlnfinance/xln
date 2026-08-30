@@ -1,4 +1,7 @@
-import { encodeCanonicalConsensusValue } from '../../../../protocol/serialization/canonical-consensus-value';
+import {
+  canonicalConsensusValuesEqual,
+  encodeCanonicalConsensusBytes,
+} from '../../../../protocol/serialization/binary-codec';
 import { expect, test } from 'bun:test';
 
 import {
@@ -26,8 +29,6 @@ const signerId = `0x${'33'.repeat(20)}`;
 
 
 const persistentEnvelope = (account: ReturnType<typeof makeAccountReplica>) => {
-  delete (account as { swapOrderHistory?: unknown }).swapOrderHistory;
-  delete (account as { swapClosedOrders?: unknown }).swapClosedOrders;
   account.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
     'pendingWithdrawals',
     account.pendingWithdrawals,
@@ -82,9 +83,7 @@ const baseState = (): EntityState => ({
     eventHistoryRoot: `0x${'04'.repeat(32)}`,
   },
   profile: { name: 'state-root', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 type StateMutator = (state: EntityState) => void;
@@ -174,11 +173,10 @@ const mutators = {
   profile: state => {
     state.profile.bio = 'consensus-profile';
   },
-  htlcRoutes: state => {
-    state.htlcRoutes.set('route', { marker: 'route' } as never);
-  },
-  htlcFeesEarned: state => {
-    state.htlcFeesEarned = 1n;
+  paybook: state => {
+    const hashlock = `0x${'99'.repeat(32)}`;
+    state.paybook.entries.set(hashlock, { hashlock, createdTimestamp: 1 });
+    state.paybook.feesEarned = 1n;
   },
   outDebtsByToken: state => {
     state.outDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'out-debt' } as never]])]]);
@@ -194,9 +192,6 @@ const mutators = {
       referrals: new Map(),
       hubProfile: { marker: 'orderbook' },
     } as never;
-  },
-  lockBook: state => {
-    state.lockBook.set('lock', { marker: 'lock' } as never);
   },
   swapTradingPairs: state => {
     state.swapTradingPairs = [{ baseTokenId: 1, quoteTokenId: 2, pairId: '1:2' }];
@@ -355,16 +350,16 @@ test('Entity consensus root is insertion-order independent without recursive key
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(mutated));
 });
 
-test('Entity consensus root excludes only typed Account replica caches', () => {
+test('Entity consensus root excludes Account replica mempools', () => {
   const left = baseState();
   const right = baseState();
   const leftAccount = {
     ...makeAccountReplica(entityId, counterpartyId),
-    frameHistory: [{ stateHash: 'left-cache' }],
+    mempool: [],
   } as never;
   const rightAccount = {
     ...makeAccountReplica(entityId, counterpartyId),
-    frameHistory: [{ stateHash: 'right-cache' }],
+    mempool: [{ type: 'direct_payment', data: { tokenId: 1, amount: 1n } }],
   } as never;
   left.accounts = persistentAccounts([[counterpartyId, leftAccount]]);
   right.accounts = persistentAccounts([[counterpartyId, rightAccount]]);
@@ -515,7 +510,7 @@ test('Entity consensus root commits peer Hankos while own post-quorum subsets st
         disputeConfig: account.state.disputeConfig,
         proposal: { frame: pendingFrame, frameHanko: ownHanko },
       };
-    account.lastOutboundFrameAck = {
+    account.lastOutboundAckFrame = {
         height: 1,
         counterpartyEntityId: counterpartyId,
         response: {
@@ -730,28 +725,24 @@ test('Entity frame strict codec binds arbitrary transaction metadata keys', asyn
 });
 
 test('strict Entity codec is injective across tagged and adversarial values', () => {
-  expect(encodeCanonicalConsensusValue(new Map())).not.toBe(
-    encodeCanonicalConsensusValue({ __xlnType: 'Map', value: [] }),
-  );
-  expect(encodeCanonicalConsensusValue(1n)).not.toBe(
-    encodeCanonicalConsensusValue({ __xlnType: 'BigInt', value: '1' }),
-  );
-  expect(encodeCanonicalConsensusValue({ x: undefined })).not.toBe(encodeCanonicalConsensusValue({}));
-  expect(encodeCanonicalConsensusValue(-0)).not.toBe(encodeCanonicalConsensusValue(0));
+  expect(canonicalConsensusValuesEqual(new Map(), { __xlnType: 'Map', value: [] })).toBe(false);
+  expect(canonicalConsensusValuesEqual(1n, { __xlnType: 'BigInt', value: '1' })).toBe(false);
+  expect(() => encodeCanonicalConsensusBytes({ x: undefined })).toThrow('type=undefined');
+  expect(() => encodeCanonicalConsensusBytes(-0)).toThrow('negative-zero');
 
   const protoKey = Object.create(null) as Record<string, unknown>;
   Object.defineProperty(protoKey, '__proto__', { value: 'bound', enumerable: true });
-  expect(encodeCanonicalConsensusValue(protoKey)).not.toBe(encodeCanonicalConsensusValue(Object.create(null)));
+  expect(canonicalConsensusValuesEqual(protoKey, Object.create(null))).toBe(false);
 });
 
 test('strict Entity codec rejects sparse, symbolic, hidden and accessor state', () => {
-  expect(() => encodeCanonicalConsensusValue(Array(1))).toThrow('ENTITY_STATE_ROOT_SPARSE_ARRAY');
-  expect(() => encodeCanonicalConsensusValue({ [Symbol('hidden')]: 1 })).toThrow('ENTITY_STATE_ROOT_SYMBOL_KEY');
+  expect(() => encodeCanonicalConsensusBytes(Array(1))).toThrow('sparse-array');
+  expect(() => encodeCanonicalConsensusBytes({ [Symbol('hidden')]: 1 })).toThrow('symbol-key');
 
   const hidden = {};
   Object.defineProperty(hidden, 'value', { value: 1, enumerable: false });
-  expect(() => encodeCanonicalConsensusValue(hidden)).toThrow('ENTITY_STATE_ROOT_OBJECT_DESCRIPTOR_INVALID');
+  expect(() => encodeCanonicalConsensusBytes(hidden)).toThrow('non-data-property');
   const accessor = {};
   Object.defineProperty(accessor, 'value', { get: () => 1, enumerable: true });
-  expect(() => encodeCanonicalConsensusValue(accessor)).toThrow('ENTITY_STATE_ROOT_OBJECT_DESCRIPTOR_INVALID');
+  expect(() => encodeCanonicalConsensusBytes(accessor)).toThrow('non-data-property');
 });

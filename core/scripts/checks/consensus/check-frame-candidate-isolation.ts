@@ -27,14 +27,11 @@ if (
 if (frameApplication.includes('cloneEntityState(normalized)')) {
   throw new Error('ENTITY_FRAME_FULL_STATE_CLONE_FORBIDDEN');
 }
-if (!/export const applyRuntimeOwnedEntityFrame[\s\S]*?frameTimestamp,\s*true,\s*inProcessInfraValidated,\s*\);/.test(frameApplication)) {
+if (!/export const applyEntityFrame[\s\S]*?frameTimestamp,\s*true,\s*inProcessInfraValidated,\s*\);/.test(frameApplication)) {
   throw new Error('SINGLE_SIGNER_ENTITY_CANDIDATE_BOUNDARY_MISSING');
 }
-if (!singleSigner.includes('? applyRuntimeOwnedEntityFrame')) {
-  throw new Error('SINGLE_SIGNER_CROSS_J_RUNTIME_OWNED_FRAME_MISSING');
-}
-if (multiSigner.includes('applyRuntimeOwnedEntityFrame')) {
-  throw new Error('MULTI_SIGNER_RUNTIME_OWNED_FRAME_FORBIDDEN');
+if (singleSigner.includes('applyRuntimeOwnedEntityFrame') || multiSigner.includes('applyRuntimeOwnedEntityFrame')) {
+  throw new Error('DUPLICATE_RUNTIME_OWNED_ENTITY_FRAME_PATH_FORBIDDEN');
 }
 if (runtimeProcess.includes('cloneRuntimeState(')) {
   throw new Error('RUNTIME_FRAME_FULL_STATE_CLONE_FORBIDDEN');

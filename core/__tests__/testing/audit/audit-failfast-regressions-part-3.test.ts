@@ -216,7 +216,7 @@ import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 
 import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
 
-import { buildHtlcOnionAdvanceTx } from '../../../entity/htlc/onion-advance';
+import { buildHtlcOnionAdvanceTx } from '../../../entity/paybook/onion-advance';
 import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
@@ -355,8 +355,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -570,9 +568,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
       bio: '',
       website: '',
     },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     crontabState: initCrontab(),
   },
@@ -597,9 +593,7 @@ const makeEntityState = (entityId: string): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });

@@ -137,7 +137,7 @@ test('RuntimeP2P reconnect flushes locally queued jurisdiction discovery without
   expect(sent).toEqual([{ profiles: [], jurisdictions: [announcement] }]);
 });
 
-test('RuntimeP2P accepts a reconnect batch above one authority-scope cap and rejects above both caps', () => {
+test('RuntimeP2P accepts a reconnect batch above one authority-scope cap and rejects above both caps', async () => {
   const privateKey = `0x${'56'.repeat(32)}`;
   const signerId = new Wallet(privateKey).address.toLowerCase();
   const announcement = createJurisdictionGossipAnnouncement({
@@ -172,16 +172,13 @@ test('RuntimeP2P accepts a reconnect batch above one authority-scope cap and rej
     onGossipProfiles: () => {},
     onGossipJurisdictions: (_from, values) => accepted.push(...values),
   });
-  const handle = Reflect.get(p2p, 'handleGossipAnnounce');
-  expect(typeof handle).toBe('function');
-
-  expect(() => Reflect.apply(handle, p2p, [signerId, {
+  await expect(p2p.admitGossipAnnouncement(signerId, {
     profiles: [],
     jurisdictions: Array.from({ length: 129 }, () => announcement),
-  }])).not.toThrow();
+  })).resolves.toBeUndefined();
   expect(accepted).toEqual([announcement]);
-  expect(() => Reflect.apply(handle, p2p, [signerId, {
+  await expect(p2p.admitGossipAnnouncement(signerId, {
     profiles: [],
     jurisdictions: Array.from({ length: 257 }, () => announcement),
-  }])).toThrow('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
+  })).rejects.toThrow('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
 });

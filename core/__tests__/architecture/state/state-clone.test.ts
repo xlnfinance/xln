@@ -22,9 +22,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
  computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
-import {
-  applyRuntimeOwnedEntityFrame,
-} from '../../../entity/consensus/frame/application';
+import { applyEntityFrame } from '../../../entity/consensus/frame/application';
 import { materializeEntityInfraContext } from '../../../entity/consensus/proposal/infra-context';
 import { prepareEntityInputIngress } from '../../../entity/consensus/input/ingress';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
@@ -215,9 +213,7 @@ const makeProjectionReplica = () => ({
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     profile: { name: 'Projection', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
   },
 });
@@ -249,6 +245,36 @@ describe('state cloning', () => {
     expect(candidate.crontabState?.hooks).toBeInstanceOf(PersistentEntityCollectionMap);
     expect(candidate.crontabState?.hooks.has('watchdog:next')).toBeTrue();
     expect(sourceHooks.has('watchdog:next')).toBeFalse();
+  });
+
+  test('Entity frame candidate path-copies settlement control collections', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    const accountId = `0x${'bb'.repeat(32)}`;
+    source.deferredAccountProposals = PersistentEntityCollectionMap.from(new Map([
+      [accountId, `0x${'31'.repeat(32)}`],
+    ]));
+    source.settlementContinuations = PersistentEntityCollectionMap.from(new Map([[
+      accountId,
+      {
+        workspaceHash: `0x${'32'.repeat(32)}`,
+        actions: [{ type: 'r2r' as const, toEntityId: accountId, tokenId: 1, amount: 2n }],
+        broadcast: false,
+      },
+    ]]));
+
+    const candidate = createEntityFrameCandidateState(source);
+    expect(candidate.deferredAccountProposals).toBeInstanceOf(EntityCollectionCandidateMap);
+    expect(candidate.settlementContinuations).toBeInstanceOf(EntityCollectionCandidateMap);
+    candidate.deferredAccountProposals!.set(accountId, `0x${'33'.repeat(32)}`);
+    candidate.settlementContinuations!.delete(accountId);
+    expect(source.deferredAccountProposals.get(accountId)).toBe(`0x${'31'.repeat(32)}`);
+    expect(source.settlementContinuations.has(accountId)).toBeTrue();
+
+    commitEntityFrameCandidateState(candidate);
+    expect(candidate.deferredAccountProposals).toBeInstanceOf(PersistentEntityCollectionMap);
+    expect(candidate.settlementContinuations).toBeInstanceOf(PersistentEntityCollectionMap);
+    expect(candidate.deferredAccountProposals?.get(accountId)).toBe(`0x${'33'.repeat(32)}`);
+    expect(candidate.settlementContinuations?.has(accountId)).toBeFalse();
   });
 
   test('Entity frame candidate clones only an Account it touches', () => {
@@ -450,7 +476,7 @@ describe('state cloning', () => {
       state: ownedSource,
       isProposer: true,
     }, [], { usePersistedReplayContext: true });
-    const owned = await applyRuntimeOwnedEntityFrame(
+    const owned = await applyEntityFrame(
       env,
       ownedSource,
       ownedContext,
@@ -684,21 +710,16 @@ describe('state cloning', () => {
           createdAt: 1,
         },
       ]]),
-      htlcNotes: new Map([['hashlock:0x01', 'private invoice']]),
     } as any;
 
     const fork = forkEntityReplicaForInput(replica);
     fork.hankoWitness!.clear();
-    fork.htlcNotes!.set('lock:0x02', 'second invoice');
 
     expect(fork).not.toBe(replica);
     expect(fork.state).toBe(replica.state);
     expect(fork.candidate).toBe(replica.candidate);
     expect(fork.mempool).not.toBe(replica.mempool);
     expect(replica.hankoWitness.size).toBe(1);
-    expect(fork.htlcNotes).not.toBe(replica.htlcNotes);
-    expect(replica.htlcNotes.has('lock:0x02')).toBe(false);
-    expect(fork.htlcNotes.get('hashlock:0x01')).toBe('private invoice');
   });
 
   test('runtime frame snapshot fails fast with the non-cloneable field path', () => {

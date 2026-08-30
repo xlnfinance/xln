@@ -165,7 +165,7 @@ const installOneMillionRuntimeAdapterSocket = async (
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
       epochReplayBytes: 0,
-      retainedHistoryBytes: 4096,
+      retainedWalBytes: 4096,
     };
     const counterparties = Array.from({ length: 10 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`);
     const accounts = counterparties.map((rightEntity, index) => ({

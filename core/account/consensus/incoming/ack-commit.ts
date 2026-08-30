@@ -26,17 +26,17 @@ import { timePerfPhase } from '../../../support/performance/profile';
 
 const ackLog = createStructuredLogger('account.ack');
 
-export type PendingFrameAckResult =
+export type PendingAckFrameResult =
   | { kind: 'not_applicable' }
   | { kind: 'fallthrough' }
   | { kind: 'return'; result: HandleAccountInputResult };
 
-type AccountFrameAck = NonNullable<ReturnType<typeof accountInputAck>>;
+type AccountAckFrame = NonNullable<ReturnType<typeof accountInputAck>>;
 
 type PendingAckCertificateResult =
   | {
     kind: 'continue';
-    ack: AccountFrameAck;
+    ack: AccountAckFrame;
     ackHanko: string;
     frameHash: string;
   }
@@ -44,7 +44,7 @@ type PendingAckCertificateResult =
 
 const verifyPendingAckCertificate = async (
   account: AccountReplica,
-  ack: AccountFrameAck,
+  ack: AccountAckFrame,
   ackHeight: number,
   validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
@@ -215,7 +215,7 @@ const installPendingFrameCommit = (
   account: AccountReplica,
   input: AccountPeerInput,
   pendingFrame: AccountFrame,
-  ack: AccountFrameAck,
+  ack: AccountAckFrame,
   ackHanko: string,
   validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   committedFrames: AccountCommittedFrame[],
@@ -241,10 +241,10 @@ const installPendingFrameCommit = (
   delete account.pendingFrame;
   delete account.pendingAccountInput;
   if (
-    account.lastOutboundFrameAck
-    && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)
+    account.lastOutboundAckFrame
+    && Number(account.lastOutboundAckFrame.height) < Number(pendingFrame.height)
   ) {
-    delete account.lastOutboundFrameAck;
+    delete account.lastOutboundAckFrame;
   }
   account.rollbackCount = Math.max(0, account.rollbackCount - 1);
   if (account.rollbackCount === 0) delete account.lastRollbackFrameHash;
@@ -273,7 +273,7 @@ const queuePostAckWork = async (
   events.push(`🔄 Auto-rebalance queued ${txs.length} tx(s) after ACK commit`);
 };
 
-export const handlePendingFrameAck = async (
+export const handlePendingAckFrame = async (
   context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountPeerInput,
@@ -285,7 +285,7 @@ export const handlePendingFrameAck = async (
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
   candidateEffects: AccountOutput[],
-): Promise<PendingFrameAckResult> => {
+): Promise<PendingAckFrameResult> => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
   const pendingFrame = account.pendingFrame;

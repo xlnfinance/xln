@@ -19,7 +19,7 @@ import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { requireStorageDbOpen } from '../commit/availability';
 
 export type PersistedStorageHandle = {
-  role: 'history';
+  role: 'wal';
   db: Level<Buffer, Buffer>;
   head: StorageHead;
   latestHeight: number;
@@ -57,7 +57,7 @@ const createPersistedStorageNavigationApi = (
     const head = await readStorageHead(db);
     if (!head || head.latestHeight <= 0) return [];
     return [{
-      role: 'history',
+      role: 'wal',
       db,
       head,
       latestHeight: head.latestHeight,

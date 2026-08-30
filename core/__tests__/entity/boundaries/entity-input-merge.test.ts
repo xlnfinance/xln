@@ -69,18 +69,6 @@ describe('mergeEntityInputs', () => {
     expect(merged[0]?.entityTxs).toEqual(original.entityTxs);
   });
 
-  test('keeps the local protocol lane distinct from ordinary inputs', () => {
-    const localProtocol: RoutedEntityInput = {
-      ...inputFor('2'),
-      localRuntimeProtocol: 'cross-j',
-    };
-
-    const merged = mergeEntityInputs([inputFor('2'), localProtocol]);
-
-    expect(merged).toHaveLength(2);
-    expect(merged.some(input => input.localRuntimeProtocol === 'cross-j')).toBe(true);
-  });
-
   test('does not merge remote entity txs across their authenticated runtime origins', () => {
     const target = entityId('2');
     const fromA = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';

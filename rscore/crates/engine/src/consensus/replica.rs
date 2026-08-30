@@ -7,12 +7,11 @@
 //! state stays in `AccountReplica` so executing a transaction never copies the
 //! queue.
 
+use std::sync::Arc;
+
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
-use crate::consensus::frame::hash::{
-    AccountFrame, GENESIS_PREV_FRAME_HASH, MAX_POLICY_VERSION, canonical_tx_value,
-    is_frame_hashable, unsupported_kind,
-};
+use crate::consensus::frame::hash::{AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value};
 use crate::consensus::proposal::propose::{WindowExecution, execute_window};
 use crate::error::StateError;
 use crate::input::mempool::{
@@ -21,6 +20,25 @@ use crate::input::mempool::{
 use crate::j_claims::{LocalClaimPlan, QueuedClaimWitness, plan_local_claim};
 use crate::state::account_replica_shell::AccountEnvelope;
 use crate::{AccountRejection, AccountReplica, AccountTx};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountDisputeStartedFinality {
+    pub active_dispute: CanonicalValue,
+    pub j_nonce: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountDisputeFinality {
+    pub finalized_j_nonce: u64,
+    pub finalized_token_ids: Vec<crate::TokenId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountDisputeFinalityResult {
+    pub had_active_dispute: bool,
+    pub had_settlement_workspace: bool,
+    pub removed_settlement_txs: usize,
+}
 
 fn number(value: u64) -> Result<CanonicalValue, StateError> {
     CanonicalNumber::try_from_u64(value)
@@ -63,7 +81,7 @@ pub struct AccountAdmission {
 /// because the Entity commits it in the account leaf: a proposal built right
 /// after it carries it, and a retry of the ack must be the same bytes.
 ///
-/// Parity target: `lastOutboundFrameAck` and the `ack` half of
+/// Parity target: `lastOutboundAckFrame` and the `ack` half of
 /// `pendingAccountInput` (core/types/account.ts).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboundAck {
@@ -168,21 +186,16 @@ pub struct PendingFrame {
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
     pub(crate) candidate: AccountReplica,
-    /// What the frame's transactions produced — forwards, revealed secrets,
-    /// settlement effects. They are held here until the peer acks: an effect
-    /// released before the counterparty commits is one the account cannot
-    /// enforce.
-    ///
+    /// What each frame transaction produced, held until the peer acks: an
+    /// effect released before the counterparty commits is unenforceable.
     /// Parity target: `rememberProposalForAck`
     /// (core/account/consensus/proposal/propose.ts), which keeps
     /// `candidateEffects` in the prepared commit; the proposal result carries
-    /// none, and the ACK path releases them.
-    pub(crate) outputs: Vec<crate::AccountOutput>,
-    /// Exact output rows in `frame.txs` order. This is rebuilt by replay on
+    /// none, and the ACK path releases them. Rows are rebuilt by replay on
     /// restore, so the checkpoint stores no duplicate effect payload.
-    pub(crate) outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
+    pub(crate) outputs_by_tx: Arc<Vec<Vec<crate::AccountOutput>>>,
     /// The acknowledgement carried by the message that sent this proposal, if
-    /// it carried one. Present means the message was a `frame_ack` rather than
+    /// it carried one. Present means the message was a `ack_frame` rather than
     /// a `frame`, which the account leaf commits.
     pub(crate) bundled_ack: Option<OutboundAck>,
     /// The recovery proof this proposal travels with, when it does. The
@@ -196,14 +209,22 @@ pub struct AccountConsensus {
     replica: AccountReplica,
     mempool: Vec<AccountTx>,
     pending: Option<PendingFrame>,
-    current: Option<CommittedFrame>,
+    // The committed frame is immutable until the next commit. Resident radix
+    // candidates clone `AccountConsensus` to preserve the rollback head; an
+    // owned frame here copied the complete transaction body on every inbound
+    // and outbound visit. Share that immutable body and deep-copy it only at
+    // the checkpoint serialization boundary.
+    current: Option<Arc<CommittedFrame>>,
     rollback_count: u64,
     last_rollback_frame_hash: Option<[u8; 32]>,
     /// The counterparty's signature over the committed frame — their proposal
     /// Hanko when we accepted their frame, their ack when they accepted ours.
     /// It is the second half of the bilateral certificate, so a later board
     /// rotation can still prove both parties committed this height.
-    counterparty_frame_hanko: Option<Vec<u8>>,
+    // Immutable certificates are shared across resident rollback candidates.
+    // The checkpoint boundary materializes owned bytes only when persistence
+    // is actually due.
+    counterparty_frame_hanko: Option<Arc<[u8]>>,
     /// The leaf commits the Hanko's digest. A Hanko is ~1.4 KB of hex and the
     /// leaf is recomputed on every tree put, so the digest is taken once, when
     /// the Hanko is stored — exact by identity, like the memo TypeScript keys
@@ -226,7 +247,11 @@ pub struct AccountConsensus {
     /// Our own certificate for the committed frame. It is not part of the
     /// Entity leaf, but canonical Account storage persists it and dispute
     /// recovery must not depend on re-signing historical evidence.
-    local_committed_frame_hanko: Option<Vec<u8>>,
+    local_committed_frame_hanko: Option<Arc<[u8]>>,
+    /// Parent Entity-certified authority for the local owner during the
+    /// current execution turn. This is verification context, not Account
+    /// state: every parent call replaces it from the certified registry.
+    local_board_authority: Option<crate::CertifiedBoardAuthority>,
 }
 
 impl AccountConsensus {
@@ -251,23 +276,156 @@ impl AccountConsensus {
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,
             local_committed_frame_hanko: None,
+            local_board_authority: None,
         }
+    }
+
+    pub fn set_local_board_authority(&mut self, authority: Option<crate::CertifiedBoardAuthority>) {
+        self.local_board_authority = authority;
+    }
+
+    pub(crate) const fn local_board_authority(&self) -> Option<crate::CertifiedBoardAuthority> {
+        self.local_board_authority
     }
 
     pub const fn replica(&self) -> &AccountReplica {
         &self.replica
     }
 
+    pub fn set_rebalance_shadow_policy(
+        &mut self,
+        token_id: crate::TokenId,
+        policy: crate::CanonicalValue,
+    ) -> Result<(), StateError> {
+        self.replica.set_rebalance_shadow_policy(token_id, policy)
+    }
+
+    pub fn clear_rebalance_active_quote(&mut self) -> Result<(), StateError> {
+        self.replica.clear_rebalance_active_quote()
+    }
+
+    fn freeze_for_dispute(&mut self, retain_optional_evidence: bool) -> Result<(), StateError> {
+        let retain_deferred_claims = matches!(
+            self.replica.envelope().field("status"),
+            Some(CanonicalValue::String(status)) if status == "dispute_preparing"
+        );
+        let retain = |tx: &AccountTx| {
+            (retain_deferred_claims && matches!(tx, AccountTx::JEventClaim(_)))
+                || (retain_optional_evidence
+                    && matches!(
+                        tx,
+                        AccountTx::SwapResolve { .. } | AccountTx::CrossPullClose { .. }
+                    ))
+        };
+        let pending = self
+            .pending
+            .as_ref()
+            .into_iter()
+            .flat_map(|pending| pending.frame.txs.iter())
+            .filter(|tx| retain(tx))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.mempool.retain(&retain);
+        for tx in pending.into_iter().rev() {
+            if !self.mempool.contains(&tx) {
+                self.mempool.insert(0, tx);
+            }
+        }
+        assert_mempool_within_limit(self.mempool.len(), 0, "accountConsensus:disputeFreeze")?;
+        self.pending = None;
+        self.rollback_count = 0;
+        self.last_rollback_frame_hash = None;
+        Ok(())
+    }
+
+    pub fn apply_entity_dispute_started(
+        &mut self,
+        finality: AccountDisputeStartedFinality,
+    ) -> Result<(), StateError> {
+        self.freeze_for_dispute(true)?;
+        let j_nonce = self.replica.state().j_nonce().max(finality.j_nonce);
+        self.replica.state_mut().set_j_nonce(j_nonce);
+        self.replace_entity_dispute_lifecycle("disputed", None, Some(finality.active_dispute))
+    }
+
+    pub fn apply_entity_dispute_finality(
+        &mut self,
+        finality: AccountDisputeFinality,
+    ) -> Result<AccountDisputeFinalityResult, StateError> {
+        let had_active_dispute = self.replica.envelope().field("activeDispute").is_some();
+        let had_settlement_workspace = self.replica.state().settlement_workspace().is_some();
+        let removed_settlement_txs = self
+            .mempool
+            .iter()
+            .filter(|tx| matches!(tx, AccountTx::SettleTransition { .. }))
+            .count();
+        self.mempool
+            .retain(|tx| !matches!(tx, AccountTx::SettleTransition { .. }));
+        let finalized = finality.finalized_token_ids.into_iter().collect();
+        self.replica
+            .state_mut()
+            .apply_dispute_finality(&finalized)?;
+        self.replica
+            .state_mut()
+            .set_j_nonce(finality.finalized_j_nonce);
+        self.next_proof_nonce = self.next_proof_nonce.max(
+            finality
+                .finalized_j_nonce
+                .checked_add(1)
+                .ok_or_else(|| StateError::TransitionFailed("J_NONCE_OVERFLOW".into()))?,
+        );
+        self.counterparty_dispute = None;
+        self.counterparty_dispute_hash = None;
+        self.counterparty_dispute_hanko_digest = None;
+        self.replace_entity_dispute_lifecycle("disputed", None, None)?;
+        self.freeze_for_dispute(false)?;
+        Ok(AccountDisputeFinalityResult {
+            had_active_dispute,
+            had_settlement_workspace,
+            removed_settlement_txs,
+        })
+    }
+
     pub fn mempool(&self) -> &[AccountTx] {
         &self.mempool
+    }
+
+    pub fn settlement_hanko_draft(&self) -> Result<crate::SettlementHankoDraft, StateError> {
+        crate::build_settlement_hanko_draft(&self.replica, &self.settlement_execution_context(None))
+            .map_err(StateError::CheckpointRestore)
+    }
+
+    pub fn admit_certified_settlement_hanko(
+        &mut self,
+        draft: crate::SettlementHankoDraft,
+        settlement_hanko: Option<&[u8]>,
+        dispute_hanko: &[u8],
+    ) -> Result<(), StateError> {
+        let tx = crate::attach_settlement_hanko_witnesses(draft, settlement_hanko, dispute_hanko)
+            .map_err(StateError::CheckpointRestore)?;
+        let admission = self.admit_txs(vec![tx], "settlement-certified-hanko")?;
+        if admission.admitted != 1 || !admission.rejections.is_empty() {
+            return Err(StateError::CheckpointRestore(
+                "SETTLEMENT_CERTIFIED_HANKO_NOT_ADMITTED".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub const fn pending(&self) -> Option<&PendingFrame> {
         self.pending.as_ref()
     }
 
-    pub const fn current(&self) -> Option<&CommittedFrame> {
-        self.current.as_ref()
+    /// Move the already-verified proposal into the ACK commit. Callers must
+    /// finish every fallible authentication and binding check first; cloning
+    /// this row copied its candidate state, frame, outputs and Hankos only to
+    /// discard the resident original one instruction later.
+    pub(crate) fn take_pending(&mut self) -> Option<PendingFrame> {
+        self.pending.take()
+    }
+
+    pub fn current(&self) -> Option<&CommittedFrame> {
+        self.current.as_deref()
     }
 
     /// Exact local certificate retained for the committed head. A pending
@@ -314,28 +472,12 @@ impl AccountConsensus {
             txs.len(),
             context,
         )?;
-        // A transaction the frame hash cannot express must never enter the
-        // queue: it would fail every later proposal and every leaf digest,
-        // with nothing to remove it.
+        // Validate through the canonical frame projection itself. Collapsing
+        // every projection error into `UnsupportedFrameTx` hid typed field
+        // failures such as an unsafe policyVersion and let admission disagree
+        // with `AccountFrame::hash` about the same transaction.
         for tx in &txs {
-            if !is_frame_hashable(tx) {
-                return Err(StateError::UnsupportedFrameTx(unsupported_kind(tx)));
-            }
-        }
-        // FX-1 (proofs/fixes.md D2): a policyVersion beyond the protocol range
-        // `0..=MAX_POLICY_VERSION` is a distinct admission violation — the tx
-        // kind is modelled, but TypeScript would silently round the field
-        // while hashing it. Reject the whole batch before the mempool, with
-        // the account unchanged, exactly like an unhashable kind.
-        for tx in &txs {
-            if let AccountTx::RebalancePolicy { policy_version, .. } = tx
-                && *policy_version > MAX_POLICY_VERSION
-            {
-                return Err(StateError::PolicyVersionOutOfRange {
-                    version: *policy_version,
-                    maximum: MAX_POLICY_VERSION,
-                });
-            }
+            canonical_tx_value(tx)?;
         }
         let incoming_claim_heights: std::collections::BTreeSet<u64> = txs
             .iter()
@@ -456,7 +598,7 @@ impl AccountConsensus {
     /// Remember the acknowledgement we are sending for a frame we just
     /// committed from the counterparty.
     ///
-    /// Parity target: `account.lastOutboundFrameAck = material.outboundAck`
+    /// Parity target: `account.lastOutboundAckFrame = material.outboundAck`
     /// (core/account/consensus/index.ts).
     pub(crate) fn note_outbound_ack(
         &mut self,
@@ -511,7 +653,7 @@ impl AccountConsensus {
     /// The proof this side sends with the acknowledgement of a frame it just
     /// committed, and the draft it stands behind afterwards.
     ///
-    /// Parity target: `buildIncomingFrameAckMaterial` + `storeAckDisputeState`
+    /// Parity target: `buildIncomingAckFrameMaterial` + `storeAckDisputeState`
     /// (core/account/consensus/index.ts). The proof is built for the side that
     /// proposed the frame, because that is the side the contract will check it
     /// against.
@@ -581,7 +723,7 @@ impl AccountConsensus {
     ) {
         self.install_commit(candidate, frame, state_hash);
         self.store_counterparty_hanko(counterparty_hanko);
-        self.local_committed_frame_hanko = Some(local_hanko);
+        self.local_committed_frame_hanko = Some(Arc::from(local_hanko));
     }
 
     /// Commit our own frame on the peer's ack. Their ack is the certificate,
@@ -601,7 +743,7 @@ impl AccountConsensus {
     ) {
         self.install_commit(candidate, frame, state_hash);
         self.store_counterparty_hanko(ack_hanko);
-        self.local_committed_frame_hanko = Some(local_hanko);
+        self.local_committed_frame_hanko = Some(Arc::from(local_hanko));
         // Parity target: the same drop in `installPendingFrameCommit`
         // (core/account/consensus/incoming/ack-commit.ts).
         if self
@@ -619,7 +761,7 @@ impl AccountConsensus {
 
     fn store_counterparty_hanko(&mut self, hanko: Vec<u8>) {
         self.counterparty_frame_hanko_digest = Some(hanko_leaf_digest(&hanko));
-        self.counterparty_frame_hanko = Some(hanko);
+        self.counterparty_frame_hanko = Some(Arc::from(hanko));
     }
 
     fn install_commit(
@@ -629,10 +771,10 @@ impl AccountConsensus {
         state_hash: [u8; 32],
     ) {
         self.replica = candidate;
-        self.current = Some(CommittedFrame {
+        self.current = Some(Arc::new(CommittedFrame {
             frame: frame.clone(),
             state_hash,
-        });
+        }));
         self.pending = None;
     }
 
@@ -685,44 +827,156 @@ impl AccountConsensus {
         self.dispute.as_ref()
     }
 
-    /// Fresh local proofs retained anywhere in the Account envelope. The
-    /// list is tiny (current, pending proposal, and at most two ACK copies)
-    /// and preserves first occurrence without a global scan or index.
-    pub fn unsigned_local_dispute_hashes(&self) -> Vec<[u8; 32]> {
-        let mut hashes = Vec::new();
-        let drafts = self
-            .dispute
-            .iter()
-            .chain(
-                self.last_outbound_ack
-                    .iter()
-                    .filter_map(|ack| ack.dispute.as_ref()),
-            )
-            .chain(
-                self.pending
-                    .iter()
-                    .filter_map(|pending| pending.proposal_dispute.as_ref()),
-            )
-            .chain(self.pending.iter().filter_map(|pending| {
-                pending
-                    .bundled_ack
-                    .as_ref()
-                    .and_then(|ack| ack.dispute.as_ref())
-            }));
-        for draft in drafts {
-            if draft.hanko.is_none() && !hashes.contains(&draft.hash) {
-                hashes.push(draft.hash);
-            }
-        }
-        hashes
-    }
-
     pub const fn counterparty_dispute(&self) -> Option<&CounterpartyDispute> {
         self.counterparty_dispute.as_ref()
     }
 
+    /// Apply the Entity-owned dispute shell atomically to the resident Account.
+    /// These fields are outside the bilateral AccountState, but are committed
+    /// by the parent Entity leaf.  Keeping one typed entry point prevents a
+    /// generic Entity-side field writer from becoming a second Account path.
+    pub fn replace_entity_dispute_lifecycle(
+        &mut self,
+        status: &str,
+        dispute_prepare: Option<CanonicalValue>,
+        active_dispute: Option<CanonicalValue>,
+    ) -> Result<(), StateError> {
+        if !matches!(status, "active" | "dispute_preparing" | "disputed") {
+            return Err(StateError::Envelope(format!(
+                "ACCOUNT_DISPUTE_STATUS_INVALID:{status}"
+            )));
+        }
+        self.replica
+            .set_envelope_field("status", CanonicalValue::String(status.to_string()))?;
+        match dispute_prepare {
+            Some(value) => self.replica.set_envelope_field("disputePrepare", value)?,
+            None => self.replica.forget_envelope_field("disputePrepare"),
+        }
+        match active_dispute {
+            Some(value) => self.replica.set_envelope_field("activeDispute", value)?,
+            None => self.replica.forget_envelope_field("activeDispute"),
+        }
+        Ok(())
+    }
+
+    /// Commit one authenticated remote-book removal ACK into the existing
+    /// preparation shell. The exact pending list is Entity-owned; Account
+    /// financial state and bilateral frame history are untouched.
+    pub fn confirm_dispute_book_removal(&mut self, order_id: &str) -> Result<(), StateError> {
+        let status = match self.replica.envelope().field("status") {
+            Some(CanonicalValue::String(value)) => value.as_str(),
+            _ => "active",
+        };
+        if status != "dispute_preparing" {
+            return Err(StateError::Envelope(format!(
+                "DISPUTE_BOOK_REMOVAL_ACCOUNT_NOT_PREPARING:{order_id}:{status}"
+            )));
+        }
+        let mut preparation = self
+            .replica
+            .envelope()
+            .field("disputePrepare")
+            .cloned()
+            .ok_or_else(|| StateError::Envelope("DISPUTE_PREPARE_MISSING".into()))?;
+        let CanonicalValue::Object(fields) = &mut preparation else {
+            return Err(StateError::Envelope("DISPUTE_PREPARE_OBJECT".into()));
+        };
+        let pending_index = fields
+            .iter()
+            .position(|(name, _)| name == "pendingOrderbookRemovalIds")
+            .ok_or_else(|| {
+                StateError::Envelope(format!("DISPUTE_BOOK_REMOVAL_NOT_PENDING:{order_id}"))
+            })?;
+        let CanonicalValue::Array(pending) = &mut fields[pending_index].1 else {
+            return Err(StateError::Envelope(
+                "DISPUTE_PENDING_ORDERBOOK_REMOVALS_ARRAY".into(),
+            ));
+        };
+        let before = pending.len();
+        pending
+            .retain(|value| !matches!(value, CanonicalValue::String(value) if value == order_id));
+        if pending.len() == before {
+            return Err(StateError::Envelope(format!(
+                "DISPUTE_BOOK_REMOVAL_NOT_PENDING:{order_id}"
+            )));
+        }
+        if pending.is_empty() {
+            fields.remove(pending_index);
+        }
+        self.replica
+            .set_envelope_field("disputePrepare", preparation)
+    }
+
     pub const fn next_proof_nonce(&self) -> u64 {
         self.next_proof_nonce
+    }
+
+    pub(crate) fn settlement_execution_context(
+        &self,
+        proposer_board_authority: Option<crate::CertifiedBoardAuthority>,
+    ) -> crate::SettlementExecutionContext {
+        crate::SettlementExecutionContext {
+            next_proof_nonce: self.next_proof_nonce,
+            current_dispute_proof_nonce: self.dispute.as_ref().map(|proof| proof.nonce),
+            counterparty_dispute_proof_nonce: self
+                .counterparty_dispute
+                .as_ref()
+                .map(|proof| proof.nonce),
+            proposer_board_authority,
+        }
+    }
+
+    pub(crate) fn apply_consensus_effects(
+        &mut self,
+        effects: &[crate::tx::apply_types::AccountConsensusEffect],
+    ) -> Result<(), StateError> {
+        for effect in effects {
+            match effect {
+                crate::tx::apply_types::AccountConsensusEffect::ActivatePostSettlementProof {
+                    local,
+                    counterparty,
+                    next_proof_nonce,
+                } => {
+                    if let Some(current) =
+                        self.dispute.as_ref().filter(|row| row.nonce == local.nonce)
+                        && (current.hash != local.hash
+                            || current.proof_body_hash != local.proof_body_hash
+                            || current.proposer_is_left != local.proposer_is_left)
+                    {
+                        return Err(StateError::TransitionFailed(format!(
+                            "POST_SETTLEMENT_LOCAL_PROOF_EQUIVOCATION:{}",
+                            local.nonce
+                        )));
+                    }
+                    if self.dispute.as_ref().map_or(0, |row| row.nonce) < local.nonce {
+                        self.dispute = Some(local.clone());
+                    }
+                    if let Some(current) = self
+                        .counterparty_dispute
+                        .as_ref()
+                        .filter(|row| row.nonce == counterparty.nonce)
+                        && (current.hash != counterparty.hash
+                            || current.proof_body_hash != counterparty.proof_body_hash
+                            || current.proposer_is_left != counterparty.proposer_is_left)
+                    {
+                        return Err(StateError::TransitionFailed(format!(
+                            "POST_SETTLEMENT_COUNTERPARTY_PROOF_EQUIVOCATION:{}",
+                            counterparty.nonce
+                        )));
+                    }
+                    if self
+                        .counterparty_dispute
+                        .as_ref()
+                        .map_or(0, |row| row.nonce)
+                        < counterparty.nonce
+                    {
+                        self.store_counterparty_dispute(counterparty.clone());
+                    }
+                    self.next_proof_nonce = self.next_proof_nonce.max(*next_proof_nonce);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Stand behind a new recovery proof for the state this frame commits to.
@@ -844,7 +1098,7 @@ pub struct PendingFrameSnapshot {
     pub hanko: Vec<u8>,
     /// The acknowledgement the message carrying this proposal also carried,
     /// if any. It decides whether the leaf calls the message a `frame` or a
-    /// `frame_ack`, so it is saved with the proposal rather than rederived.
+    /// `ack_frame`, so it is saved with the proposal rather than rederived.
     pub bundled_ack: Option<OutboundAck>,
     /// The recovery proof the proposal travelled with, if it carried one.
     pub proposal_dispute: Option<DisputeDraft>,
@@ -886,7 +1140,7 @@ impl AccountConsensus {
     pub fn consensus_snapshot(&self) -> ConsensusSnapshot {
         ConsensusSnapshot {
             mempool: self.mempool.clone(),
-            current: self.current.clone(),
+            current: self.current.as_deref().cloned(),
             pending: self.pending.as_ref().map(|pending| PendingFrameSnapshot {
                 frame: pending.frame.clone(),
                 state_hash: pending.state_hash,
@@ -896,12 +1150,15 @@ impl AccountConsensus {
             }),
             rollback_count: self.rollback_count,
             last_rollback_frame_hash: self.last_rollback_frame_hash,
-            counterparty_frame_hanko: self.counterparty_frame_hanko.clone(),
+            counterparty_frame_hanko: self.counterparty_frame_hanko.as_deref().map(<[u8]>::to_vec),
             last_outbound_ack: self.last_outbound_ack.clone(),
             dispute: self.dispute.clone(),
             next_proof_nonce: self.next_proof_nonce,
             counterparty_dispute: self.counterparty_dispute.clone(),
-            local_committed_frame_hanko: self.local_committed_frame_hanko.clone(),
+            local_committed_frame_hanko: self
+                .local_committed_frame_hanko
+                .as_deref()
+                .map(<[u8]>::to_vec),
         }
     }
 
@@ -1021,20 +1278,21 @@ impl AccountConsensus {
             replica,
             mempool,
             pending: None,
-            current,
+            current: current.map(Arc::new),
             rollback_count,
             last_rollback_frame_hash,
             counterparty_frame_hanko_digest: counterparty_frame_hanko
                 .as_deref()
                 .map(hanko_leaf_digest),
-            counterparty_frame_hanko,
+            counterparty_frame_hanko: counterparty_frame_hanko.map(Arc::from),
             last_outbound_ack,
             dispute,
             next_proof_nonce,
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,
             counterparty_dispute: None,
-            local_committed_frame_hanko,
+            local_committed_frame_hanko: local_committed_frame_hanko.map(Arc::from),
+            local_board_authority: None,
         };
         if let Some(dispute) = counterparty_dispute {
             account.store_counterparty_dispute(dispute);
@@ -1057,18 +1315,17 @@ impl AccountConsensus {
         }
         // The replay reproduces the effects too, so a restart does not lose
         // what the pending frame will release when it is acked.
+        let settlement = account.settlement_execution_context(None);
         let PendingReplay {
             candidate,
-            outputs,
             outputs_by_tx,
-        } = replay_pending(&account.replica, &pending, swap_market)?;
+        } = replay_pending(&account.replica, &pending, swap_market, settlement)?;
         account.pending = Some(PendingFrame {
             frame: pending.frame,
             state_hash: pending.state_hash,
             hanko: pending.hanko,
             candidate,
-            outputs,
-            outputs_by_tx,
+            outputs_by_tx: Arc::new(outputs_by_tx),
             bundled_ack: pending.bundled_ack,
             proposal_dispute: pending.proposal_dispute,
         });
@@ -1094,7 +1351,6 @@ fn verify_restored_outbound_ack(
 /// same frame: same transactions applied, same account state root, same hash.
 struct PendingReplay {
     candidate: AccountReplica,
-    outputs: Vec<crate::AccountOutput>,
     outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
 }
 
@@ -1102,6 +1358,7 @@ fn replay_pending(
     replica: &AccountReplica,
     pending: &PendingFrameSnapshot,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+    settlement: crate::SettlementExecutionContext,
 ) -> Result<PendingReplay, StateError> {
     let context = crate::AccountExecutionContext::with_market(
         pending.frame.timestamp,
@@ -1110,12 +1367,12 @@ fn replay_pending(
         pending.frame.height.saturating_sub(1),
         pending.frame.j_height,
         std::sync::Arc::clone(swap_market),
-    );
+    )
+    .with_settlement(settlement);
     let proposer = replica.owner_side();
     let WindowExecution {
         mut candidate,
         applied,
-        outputs,
         outputs_by_tx,
         ..
     } = execute_window(replica, proposer, pending.frame.txs.clone(), &context, true)?;
@@ -1139,7 +1396,6 @@ fn replay_pending(
     }
     Ok(PendingReplay {
         candidate,
-        outputs,
         outputs_by_tx,
     })
 }
@@ -1250,7 +1506,7 @@ impl AccountConsensus {
         ));
         if let Some(ack) = &self.last_outbound_ack {
             fields.push((
-                "lastOutboundFrameAck".to_string(),
+                "lastOutboundAckFrame".to_string(),
                 CanonicalValue::Object(vec![
                     ("height".to_string(), number(ack.height)?),
                     (
@@ -1299,7 +1555,9 @@ impl AccountConsensus {
                 CanonicalValue::String(digest.clone()),
             ));
         }
-        AccountEnvelope::new(fields, mempool)
+        self.replica
+            .envelope()
+            .reproject(fields, mempool)
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
@@ -1317,7 +1575,7 @@ impl AccountConsensus {
                 "kind".to_string(),
                 CanonicalValue::String(
                     if pending.bundled_ack.is_some() {
-                        "frame_ack"
+                        "ack_frame"
                     } else {
                         "frame"
                     }
@@ -1353,7 +1611,7 @@ impl AccountConsensus {
     }
 
     /// The standalone acknowledgement message this side sent, as the Entity
-    /// commits it inside `lastOutboundFrameAck`.
+    /// commits it inside `lastOutboundAckFrame`.
     fn ack_binding(&self, ack: &OutboundAck) -> Result<CanonicalValue, StateError> {
         Ok(CanonicalValue::Object(vec![
             (
@@ -1437,7 +1695,7 @@ const DERIVED_CONSENSUS_FIELDS: [&str; 18] = [
     "counterpartyDisputeProofProposerIsLeft",
     "counterpartyDisputeProofHanko",
     "pendingAccountInput",
-    "lastOutboundFrameAck",
+    "lastOutboundAckFrame",
     "proofHeader",
     "currentDisputeHash",
     "currentDisputeProofBodyHash",

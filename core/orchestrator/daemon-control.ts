@@ -445,6 +445,14 @@ export class DaemonControlClient {
     return response.ok === true && response.found === true;
   }
 
+  async gossipProfile(entityId: string): Promise<DecodedProfile | null> {
+    const response = decodeGossipProfileResponse(await this.get(
+      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
+    ));
+    if (response.ok !== true) throw new Error(`CONTROL_GOSSIP_PROFILE_REJECTED:${entityId}`);
+    return response.found ? response.profile ?? null : null;
+  }
+
   /**
    * Send-readiness for encrypting straight to a runtime: the admitted profile
    * must bind the exact hub `runtimeId` and carry a valid X25519 key. A
@@ -464,24 +472,34 @@ export class DaemonControlClient {
   async gossipProfilesSendReady(
     targets: readonly Readonly<{ entityId: string; runtimeId: string }>[],
   ): Promise<Readonly<{ ready: boolean; missing: string[] }>> {
-    const response = requireBoundaryRecord(
-      await this.post('/api/control/gossip-profiles-send-ready', { targets }),
-      'CONTROL_GOSSIP_SEND_READY_RESPONSE_INVALID',
-    );
-    requireExactBoundaryKeys(
-      response,
-      ['ok', 'ready', 'missing'],
-      [],
-      'CONTROL_GOSSIP_SEND_READY_RESPONSE_FIELDS_INVALID',
-    );
-    if (response['ok'] !== true || typeof response['ready'] !== 'boolean' || !Array.isArray(response['missing'])) {
-      throw new Error('CONTROL_GOSSIP_SEND_READY_RESPONSE_INVALID');
+    if (targets.length < 1) throw new Error('CONTROL_GOSSIP_SEND_READY_TARGETS_INVALID');
+    const missing: string[] = [];
+    // 1,000 fixed-width target rows encode to ~139 KiB, below the daemon's
+    // 256 KiB authenticated-control cap. Keep the probes sequential: this is
+    // one setup barrier and must not create unbounded request fan-out.
+    for (let offset = 0; offset < targets.length; offset += 1_000) {
+      const response = requireBoundaryRecord(
+        await this.post('/api/control/gossip-profiles-send-ready', {
+          targets: targets.slice(offset, offset + 1_000),
+        }),
+        'CONTROL_GOSSIP_SEND_READY_RESPONSE_INVALID',
+      );
+      requireExactBoundaryKeys(
+        response,
+        ['ok', 'ready', 'missing'],
+        [],
+        'CONTROL_GOSSIP_SEND_READY_RESPONSE_FIELDS_INVALID',
+      );
+      if (response['ok'] !== true || typeof response['ready'] !== 'boolean' || !Array.isArray(response['missing'])) {
+        throw new Error('CONTROL_GOSSIP_SEND_READY_RESPONSE_INVALID');
+      }
+      const batchMissing = response['missing'].map(value => String(value).trim().toLowerCase());
+      if (batchMissing.some(entityId => !/^0x[0-9a-f]{64}$/.test(entityId))) {
+        throw new Error('CONTROL_GOSSIP_SEND_READY_RESPONSE_MISSING_INVALID');
+      }
+      missing.push(...batchMissing);
     }
-    const missing = response['missing'].map(value => String(value).trim().toLowerCase());
-    if (missing.some(entityId => !/^0x[0-9a-f]{64}$/.test(entityId))) {
-      throw new Error('CONTROL_GOSSIP_SEND_READY_RESPONSE_MISSING_INVALID');
-    }
-    return { ready: response['ready'], missing };
+    return { ready: missing.length === 0, missing };
   }
 
   /**

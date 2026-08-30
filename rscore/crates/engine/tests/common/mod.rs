@@ -1,3 +1,8 @@
+#![allow(
+    dead_code,
+    reason = "shared integration-test helpers compile as part of each independent test target"
+)]
+
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, Delta,

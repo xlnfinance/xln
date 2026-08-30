@@ -82,8 +82,6 @@ const makeAccount = (mempool: AccountTx[] = []): AccountReplica => ({
   proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 1 },
   pendingWithdrawals: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-  swapOrderHistory: new Map(),
-  swapClosedOrders: new Map(),
 });
 
 const makeState = (): EntityState => ({
@@ -104,9 +102,7 @@ const makeState = (): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const memoTx = (index: number): AccountTx => ({

@@ -109,12 +109,16 @@ const decodeCrossJCommand = (
   const sourceEntityId = String(wrapper.data.sourceEntityId || '')
     .trim()
     .toLowerCase();
+  const sourceSignerId = String(wrapper.data.sourceSignerId || '')
+    .trim()
+    .toLowerCase();
   const targetEntityId = String(wrapper.data.targetEntityId || '')
     .trim()
     .toLowerCase();
   const targetSignerId = String(output.signerId || '').trim().toLowerCase();
   if (
     !sourceEntityId ||
+    !sourceSignerId ||
     !targetEntityId ||
     !targetSignerId ||
     targetEntityId !== String(output.entityId || '').toLowerCase()
@@ -138,6 +142,7 @@ const decodeCrossJCommand = (
   return {
     kind: 'entity-txs',
     sourceEntityId,
+    sourceSignerId,
     targetEntityId,
     targetSignerId,
     entityTxs: structuredClone(wrapper.data.entityTxs),
@@ -160,6 +165,7 @@ const commandToEntityInput = (
         data: {
           protocol: 'cross-j',
           sourceEntityId: command.sourceEntityId,
+          sourceSignerId: command.sourceSignerId,
           targetEntityId: command.targetEntityId,
           entityTxs: structuredClone(command.entityTxs),
         },
@@ -176,8 +182,18 @@ const routeCommittedEntityOutputs = (
   const indexes = new Map<string, number>();
   for (const output of outputs) {
     if (isCrossJCommandEnvelope(output)) {
+      const targetIsLocal = findEntityReplicaKey(
+        env,
+        output.entityId,
+        output.signerId,
+      );
+      if (!targetIsLocal) {
+        context.entityOutbox.push(output);
+        continue;
+      }
       const command = decodeCrossJCommand(env, output);
-      const key = `${command.kind}\0${command.sourceEntityId}\0${command.targetEntityId}\0${command.targetSignerId}`;
+      const key = `${command.kind}\0${command.sourceEntityId}\0${command.sourceSignerId}\0` +
+        `${command.targetEntityId}\0${command.targetSignerId}`;
       const index = indexes.get(key);
       if (index === undefined) {
         indexes.set(key, commands.length);
@@ -189,10 +205,6 @@ const routeCommittedEntityOutputs = (
         }
         existing.entityTxs.push(...command.entityTxs);
       }
-    } else if (output.localRuntimeProtocol === 'cross-j') {
-      throw new Error(
-        `RUNTIME_CROSS_J_UNCOMMITTED_OUTPUT_FORBIDDEN:entity=${output.entityId}`,
-      );
     } else {
       context.entityOutbox.push(output);
     }

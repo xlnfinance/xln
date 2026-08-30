@@ -2,7 +2,7 @@
  * Scenario determinism oracle.
  *
  * Runs each deterministic scenario multiple times with the same runtime seed and
- * compares the complete runtime history hash sequence plus final state hash.
+ * compares the explicitly captured Runtime-frame hash sequence plus final state hash.
  */
 
 import type { EnvSnapshot, RuntimeReplica } from '../../runtime/types';
@@ -16,7 +16,7 @@ import { assertRuntimeIdle } from '../harness/helpers';
 import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../../entity/consensus/frame';
 import { stopManagedScenarioAnvil } from '../harness/boot';
 import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';
-import { startRuntimeHistoryTraceForTesting } from '../../runtime/observability/history-retention';
+import { startRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
 import {
   setAccountStateRootDebugRecorder,
   type AccountStateRootDebugRecord,
@@ -293,11 +293,11 @@ const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =
 
 const buildOracle = (
   env: RuntimeReplica,
-  history: readonly EnvSnapshot[],
+  snapshots: readonly EnvSnapshot[],
   frameHashRecords: EntityFrameHashDebugRecord[],
   accountStateRootRecords: AccountStateRootDebugRecord[],
 ): ScenarioOracle => {
-  const frameValues = history.map((snapshot) => toOracleValue(snapshotProjection(snapshot)));
+  const frameValues = snapshots.map((snapshot) => toOracleValue(snapshotProjection(snapshot)));
   const frameHashes = frameValues.map((snapshot) => hashOracleValue(snapshot, 24));
   const frameHashTrace = buildFrameHashTrace(frameHashRecords);
   const accountStateRootTrace = accountStateRootRecords.map((record) => toDebugTraceValue(record));
@@ -466,8 +466,8 @@ const runScenarioOnce = async (
   const previousForceFreshAnvil = process.env['XLN_FORCE_FRESH_ANVIL'];
   let env: RuntimeReplica | null = null;
   let activeEnv: RuntimeReplica | null = null;
-  let stopHistoryTrace: (() => void) | null = null;
-  let fullHistory: readonly EnvSnapshot[] = [];
+  let stopRuntimeTrace: (() => void) | null = null;
+  let capturedSnapshots: readonly EnvSnapshot[] = [];
   const frameHashRecords: EntityFrameHashDebugRecord[] = [];
   const accountStateRootRecords: AccountStateRootDebugRecord[] = [];
   const restoreFrameHashRecorder = setEntityFrameHashDebugRecorder((record) => {
@@ -494,9 +494,9 @@ const runScenarioOnce = async (
     clearSignerKeys(SEED);
     env = createEmptyEnv(SEED);
     activeEnv = env;
-    const historyTrace = startRuntimeHistoryTraceForTesting(env);
-    stopHistoryTrace = historyTrace.stop;
-    fullHistory = historyTrace.snapshots;
+    const runtimeTrace = startRuntimeTraceForTesting(env);
+    stopRuntimeTrace = runtimeTrace.stop;
+    capturedSnapshots = runtimeTrace.snapshots;
     env.dbNamespace = `determinism-${scenario.key}-${runIndex}`;
     env.gossip = createGossipLayer();
     env.scenarioMode = true;
@@ -540,9 +540,9 @@ const runScenarioOnce = async (
         `total=${jEventTrace.headerReads.length}`,
       );
     }
-    return buildOracle(activeEnv, fullHistory, frameHashRecords, accountStateRootRecords);
+    return buildOracle(activeEnv, capturedSnapshots, frameHashRecords, accountStateRootRecords);
   } finally {
-    stopHistoryTrace?.();
+    stopRuntimeTrace?.();
     restoreFrameHashRecorder();
     restoreAccountStateRootRecorder();
     restoreJEventIngressTransform();

@@ -119,7 +119,6 @@ export const buildCanonicalEntityReplicaSnapshot = (
     ...(replica.entityProviderActionSubmitState
       ? { entityProviderActionSubmitState: replica.entityProviderActionSubmitState }
       : {}),
-    ...(replica.htlcNotes ? { htlcNotes: replica.htlcNotes } : {}),
     ...(replica.position ? { position: replica.position } : {}),
     ...(replica.hankoWitness ? { hankoWitness: replica.hankoWitness } : {}),
   };
@@ -148,7 +147,6 @@ export const hydratePersistedEntityReplicaSnapshot = (
   ...(snapshot.entityProviderActionSubmitState
     ? { entityProviderActionSubmitState: snapshot.entityProviderActionSubmitState }
     : {}),
-  ...(snapshot.htlcNotes ? { htlcNotes: snapshot.htlcNotes } : {}),
   ...(snapshot.position ? { position: snapshot.position } : {}),
   ...(snapshot.hankoWitness ? { hankoWitness: snapshot.hankoWitness } : {}),
 });
@@ -212,7 +210,6 @@ const hasDurableEntries = (value: unknown): boolean => {
 const DURABLE_RUNTIME_STATE_KEYS = [
   'maxEntityInputsPerFrame',
   'maxEntityTxsPerFrame',
-  'pendingHistoryRecords',
   'runtimeAdapterCommandFrontiers',
   'pendingCommittedJOutbox',
   'pendingJurisdictionImports',
@@ -225,7 +222,6 @@ const buildDurableRuntimeStateSnapshot = (
   env: RuntimeReplica,
   options?: {
     includeCertifiedBoardNodes?: boolean;
-    excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> | undefined => {
   const state = env.infrastructure;
@@ -233,9 +229,6 @@ const buildDurableRuntimeStateSnapshot = (
   const durable = {
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
-    ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
-      ? { pendingHistoryRecords: state.pendingHistoryRecords }
-      : {}),
     ...(hasDurableEntries(state.runtimeAdapterCommandFrontiers)
       ? { runtimeAdapterCommandFrontiers: state.runtimeAdapterCommandFrontiers }
       : {}),
@@ -272,23 +265,19 @@ const buildDurableRuntimeStateSnapshot = (
 
 export const buildDurableRuntimeMachineSnapshot = (
   env: RuntimeReplica,
-  options?: {
-    // WAL still passes this empty override. RAM queue bodies never enter durable snapshots.
-    pendingNetworkOutputs?: RoutedEntityInput[];
-    excludePersistedHistoryRecords?: boolean;
-  },
 ): Record<string, unknown> => {
   const browserVMState = env.browserVMState;
   const runtimeConfig = env.runtimeConfig;
-  const infrastructure = buildDurableRuntimeStateSnapshot(env, {
-    excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
-  });
+  const infrastructure = buildDurableRuntimeStateSnapshot(env);
   return {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
     ...(browserVMState ? { browserVMState } : {}),
     ...(runtimeConfig ? { runtimeConfig } : {}),
-    ...(infrastructure ? { infrastructure } : {}),
+    // Runtime-machine storage has one exact shape across TS and Rust. An
+    // empty object is meaningful: it proves that no durable infrastructure
+    // rows exist, while absence would make the native envelope undecodable.
+    infrastructure: infrastructure ?? {},
     jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([key, replica]) => [
       key,
       buildDurableJReplicaSnapshot(replica),
@@ -302,8 +291,7 @@ export const buildDurableRuntimeMachineSnapshot = (
  */
 export const buildStorageRuntimeMachineSnapshot = (
   env: RuntimeReplica,
-  options?: { excludePersistedHistoryRecords?: boolean },
-): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env, options);
+): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env);
 
 /**
  * Project the part of a durable Runtime snapshot that deterministic frame
@@ -325,12 +313,8 @@ export const projectReplayVerifiableRuntimeMachine = (
 
 export const buildReplayVerifiableRuntimeMachineSnapshot = (
   env: RuntimeReplica,
-  options?: {
-    pendingNetworkOutputs?: RoutedEntityInput[];
-    excludePersistedHistoryRecords?: boolean;
-  },
 ): Record<string, unknown> => projectReplayVerifiableRuntimeMachine(
-  buildDurableRuntimeMachineSnapshot(env, options),
+  buildDurableRuntimeMachineSnapshot(env),
 );
 
 /**
@@ -350,14 +334,8 @@ const projectBrowserVmPostState = (
 
 export const buildReplayVerifiableRuntimePostStateView = (
   env: RuntimeReplica,
-  options?: {
-    pendingNetworkOutputs?: RoutedEntityInput[];
-    excludePersistedHistoryRecords?: boolean;
-  },
 ): Record<string, unknown> => {
-  const infrastructure = buildDurableRuntimeStateSnapshot(env, {
-    excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
-  });
+  const infrastructure = buildDurableRuntimeStateSnapshot(env);
   return {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.browserVMState

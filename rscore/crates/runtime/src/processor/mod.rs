@@ -10,7 +10,9 @@ mod envelope;
 mod live;
 mod machine_snapshot;
 mod output;
+mod profile_route;
 mod projection;
+#[path = "projection/replica_meta.rs"]
 mod replica_meta;
 mod routing;
 
@@ -22,7 +24,7 @@ mod tests;
 
 pub use durable::{
     DurableRuntimeProcessor, DurableRuntimeProcessorError, RuntimeDurableCommitments,
-    RuntimeProcessReport, RuntimeSignerLabel,
+    RuntimeDurableEntityCommitment, RuntimeProcessReport, RuntimeSignerLabel,
 };
 pub use envelope::{RuntimeDurableEnvelope, RuntimeDurableEnvelopeError, RuntimeOperatorConfig};
 pub use live::{ResidentRuntimeService, ResidentRuntimeServiceError};

@@ -48,7 +48,7 @@ export const copyEntityFrameEvents = (
  * Record a signed frame event without retaining an ever-growing log in state.
  *
  * Validators certify these events as part of the Entity frame. Runtime writes
- * them to Activity history only after the enclosing frame commits.
+ * them to the enclosing Runtime WAL frame only after the Entity frame commits.
  */
 export const addMessage = (state: EntityState, message: string): void => {
   mutableEntityFrameEvents(state).push({ type: 'status', message });

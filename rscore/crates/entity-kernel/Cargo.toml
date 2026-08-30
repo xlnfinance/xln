@@ -1,5 +1,6 @@
 [package]
 name = "xln-rscore-entity-kernel"
+autobins = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,14 +9,11 @@ rust-version.workspace = true
 [features]
 bench = []
 
-[[bin]]
-name = "rscore-orderbook-bench"
-path = "src/bin/rscore-orderbook-bench.rs"
-required-features = ["bench"]
-
 [dependencies]
 aes-gcm = "0.10"
+ethabi = "18.0.0"
 hkdf = "0.12"
+hex.workspace = true
 num-bigint.workspace = true
 sha2.workspace = true
 sha3.workspace = true
@@ -23,9 +21,9 @@ thiserror.workspace = true
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 xln-rscore-engine = { path = "../engine" }
 xln-rscore-batch = { path = "../batch" }
+xln-rscore-hanko = { path = "../hanko" }
 xln-rscore-protocol = { path = "../protocol" }
 
 [dev-dependencies]
-hex.workspace = true
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

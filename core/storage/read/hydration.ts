@@ -138,13 +138,20 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withDefinedProperty('jHistoryFinality', core.jHistoryFinality),
     ...withDefinedProperty('certifiedBoardState', core.certifiedBoardState),
     profile: core.profile,
-    htlcRoutes: PersistentEntityCollectionMap.from(core.htlcRoutes),
-    htlcFeesEarned: core.htlcFeesEarned,
-    lockBook: PersistentEntityCollectionMap.from(core.lockBook),
+    paybook: {
+      entries: PersistentEntityCollectionMap.from(core.paybook.entries),
+      feesEarned: core.paybook.feesEarned,
+    },
     ...withDefinedProperty('prevFrameHash', core.prevFrameHash),
     ...withDefinedProperty('leaderState', core.leaderState),
-    ...withDefinedProperty('deferredAccountProposals', core.deferredAccountProposals),
-    ...withDefinedProperty('settlementContinuations', core.settlementContinuations),
+    ...withDefinedProperty(
+      'deferredAccountProposals',
+      core.deferredAccountProposals && PersistentEntityCollectionMap.from(core.deferredAccountProposals),
+    ),
+    ...withDefinedProperty(
+      'settlementContinuations',
+      core.settlementContinuations && PersistentEntityCollectionMap.from(core.settlementContinuations),
+    ),
     ...withDefinedProperty(
       'crontabState',
       core.crontabState && {

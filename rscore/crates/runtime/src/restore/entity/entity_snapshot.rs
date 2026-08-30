@@ -6,8 +6,9 @@ use num_bigint::BigInt;
 use serde_json::{Map, Value};
 use thiserror::Error;
 use xln_rscore_entity_kernel::{
-    EntityCommandNonceRecord, EntityCommandNonceState, EntityStateSlice, EntityStateSnapshot,
-    HtlcRoute, LockBookEntry, compute_entity_owned_sections,
+    EntityCanonicalCollection, EntityCommandNonceRecord, EntityCommandNonceState, EntityProfile,
+    EntityStateSlice, EntityStateSnapshot, LendingState, PaybookEntry, PaybookState,
+    compute_entity_owned_sections,
 };
 
 use crate::{EntityCheckpointError, canonical_value_from_tagged_json, entity_checkpoint_crontab};
@@ -97,6 +98,53 @@ fn optional<T>(
     value.map(decode).transpose()
 }
 
+fn profile(value: &Value) -> Result<EntityProfile, EntitySnapshotRestoreError> {
+    let value = object(value, "core.profile")?;
+    exact_allowed(
+        value,
+        &[
+            "name",
+            "isHub",
+            "entityKind",
+            "sectors",
+            "avatar",
+            "bio",
+            "website",
+        ],
+        "core.profile",
+    )?;
+    let sectors = match value.get("sectors") {
+        None => Vec::new(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| text(value, "core.profile.sector"))
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(_) => return Err(invalid("ARRAY:core.profile.sectors")),
+    };
+    Ok(EntityProfile {
+        name: text(
+            required(value, "name", "core.profile")?,
+            "core.profile.name",
+        )?,
+        is_hub: required(value, "isHub", "core.profile")?
+            .as_bool()
+            .ok_or_else(|| invalid("BOOL:core.profile.isHub"))?,
+        entity_kind: optional(value.get("entityKind"), |value| {
+            text(value, "core.profile.entityKind")
+        })?,
+        sectors,
+        avatar: text(
+            required(value, "avatar", "core.profile")?,
+            "core.profile.avatar",
+        )?,
+        bio: text(required(value, "bio", "core.profile")?, "core.profile.bio")?,
+        website: text(
+            required(value, "website", "core.profile")?,
+            "core.profile.website",
+        )?,
+    })
+}
+
 fn tagged_rows<'a>(
     value: &'a Value,
     path: &str,
@@ -136,6 +184,17 @@ fn hex32(value: &Value, path: &str) -> Result<String, EntitySnapshotRestoreError
         return Err(invalid(format!("HEX32:{path}")));
     }
     Ok(value)
+}
+
+fn hex32_bytes(value: &Value, path: &str) -> Result<[u8; 32], EntitySnapshotRestoreError> {
+    let value = hex32(value, path)?;
+    let payload = &value[2..];
+    let mut bytes = [0u8; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&payload[index * 2..index * 2 + 2], 16)
+            .map_err(|_| invalid(format!("HEX32:{path}")))?;
+    }
+    Ok(bytes)
 }
 
 fn command_nonces(
@@ -222,27 +281,28 @@ fn command_nonces(
     }))
 }
 
-fn routes(value: &Value) -> Result<BTreeMap<String, HtlcRoute>, EntitySnapshotRestoreError> {
+fn paybook_entries(
+    value: &Value,
+) -> Result<BTreeMap<String, PaybookEntry>, EntitySnapshotRestoreError> {
     let mut output = BTreeMap::new();
-    for (index, row) in tagged_rows(value, "htlcRoutes")?.iter().enumerate() {
+    for (index, row) in tagged_rows(value, "paybook.entries")?.iter().enumerate() {
         let row = row
             .as_array()
             .filter(|row| row.len() == 2)
-            .ok_or_else(|| invalid(format!("MAP_ROW:htlcRoutes:{index}")))?;
-        let key = text(&row[0], "htlcRoutes.key")?;
-        let route = object(&row[1], "htlcRoutes.value")?;
+            .ok_or_else(|| invalid(format!("MAP_ROW:paybook.entries:{index}")))?;
+        let key = text(&row[0], "paybook.entries.key")?;
+        let route = object(&row[1], "paybook.entries.value")?;
         exact_allowed(
             route,
             &[
                 "hashlock",
+                "description",
                 "tokenId",
                 "amount",
                 "startedAtMs",
                 "originated",
                 "inboundEntity",
-                "inboundLockId",
                 "outboundEntity",
-                "outboundLockId",
                 "inboundSettled",
                 "outboundSettled",
                 "secret",
@@ -252,14 +312,20 @@ fn routes(value: &Value) -> Result<BTreeMap<String, HtlcRoute>, EntitySnapshotRe
                 "pendingFee",
                 "createdTimestamp",
             ],
-            "htlcRoutes.value",
+            "paybook.entries.value",
         )?;
-        let hashlock = text(required(route, "hashlock", "htlcRoutes.value")?, "hashlock")?;
+        let hashlock = text(
+            required(route, "hashlock", "paybook.entries.value")?,
+            "hashlock",
+        )?;
         if key != hashlock {
             return Err(invalid(format!("ROUTE_KEY:{key}:{hashlock}")));
         }
-        let route = HtlcRoute {
+        let route = PaybookEntry {
             hashlock,
+            description: optional(route.get("description"), |value| {
+                text(value, "route.description")
+            })?,
             token_id: optional(route.get("tokenId"), |value| token(value, "route.tokenId"))?,
             amount: optional(route.get("amount"), |value| bigint(value, "route.amount"))?,
             started_at_ms: optional(route.get("startedAtMs"), |value| {
@@ -272,14 +338,8 @@ fn routes(value: &Value) -> Result<BTreeMap<String, HtlcRoute>, EntitySnapshotRe
             inbound_entity: optional(route.get("inboundEntity"), |value| {
                 text(value, "route.inboundEntity")
             })?,
-            inbound_lock_id: optional(route.get("inboundLockId"), |value| {
-                text(value, "route.inboundLockId")
-            })?,
             outbound_entity: optional(route.get("outboundEntity"), |value| {
                 text(value, "route.outboundEntity")
-            })?,
-            outbound_lock_id: optional(route.get("outboundLockId"), |value| {
-                text(value, "route.outboundLockId")
             })?,
             inbound_settled: route
                 .get("inboundSettled")
@@ -304,7 +364,7 @@ fn routes(value: &Value) -> Result<BTreeMap<String, HtlcRoute>, EntitySnapshotRe
                 bigint(value, "route.pendingFee")
             })?,
             created_timestamp: unsigned(
-                required(route, "createdTimestamp", "htlcRoutes.value")?,
+                required(route, "createdTimestamp", "paybook.entries.value")?,
                 "route.createdTimestamp",
             )?,
         };
@@ -334,68 +394,42 @@ fn reserves(value: &Value) -> Result<BTreeMap<u16, BigInt>, EntitySnapshotRestor
     Ok(output)
 }
 
-fn locks(value: &Value) -> Result<BTreeMap<String, LockBookEntry>, EntitySnapshotRestoreError> {
-    let mut output = BTreeMap::new();
-    for (index, row) in tagged_rows(value, "lockBook")?.iter().enumerate() {
-        let row = row
-            .as_array()
-            .filter(|row| row.len() == 2)
-            .ok_or_else(|| invalid(format!("MAP_ROW:lockBook:{index}")))?;
-        let key = text(&row[0], "lockBook.key")?;
-        let lock = object(&row[1], "lockBook.value")?;
-        exact_allowed(
-            lock,
-            &[
-                "lockId",
-                "accountId",
-                "tokenId",
-                "amount",
-                "hashlock",
-                "timelock",
-                "direction",
-                "createdAt",
-            ],
-            "lockBook.value",
-        )?;
-        let lock_id = text(required(lock, "lockId", "lockBook.value")?, "lock.lockId")?;
-        if key != lock_id {
-            return Err(invalid(format!("LOCK_KEY:{key}:{lock_id}")));
-        }
-        let direction = required(lock, "direction", "lockBook.value")?
-            .as_str()
-            .ok_or_else(|| invalid("LOCK_DIRECTION"))?;
-        let outgoing = match direction {
-            "outgoing" => true,
-            "incoming" => false,
-            _ => return Err(invalid(format!("LOCK_DIRECTION:{direction}"))),
-        };
-        let entry = LockBookEntry {
-            lock_id,
-            account_id: text(
-                required(lock, "accountId", "lockBook.value")?,
-                "lock.accountId",
-            )?,
-            token_id: token(required(lock, "tokenId", "lockBook.value")?, "lock.tokenId")?,
-            amount: bigint(required(lock, "amount", "lockBook.value")?, "lock.amount")?,
-            hashlock: text(
-                required(lock, "hashlock", "lockBook.value")?,
-                "lock.hashlock",
-            )?,
-            timelock: bigint(
-                required(lock, "timelock", "lockBook.value")?,
-                "lock.timelock",
-            )?,
-            outgoing,
-            created_at: bigint(
-                required(lock, "createdAt", "lockBook.value")?,
-                "lock.createdAt",
-            )?,
-        };
-        if output.insert(key.clone(), entry).is_some() {
-            return Err(invalid(format!("LOCK_DUPLICATE:{key}")));
-        }
-    }
-    Ok(output)
+fn lending_state(value: &Value) -> Result<LendingState, EntitySnapshotRestoreError> {
+    let canonical = canonical_value_from_tagged_json(value)
+        .map_err(|error| invalid(format!("LENDING_CANONICAL:{error}")))?;
+    xln_rscore_entity_kernel::decode_canonical_lending_state(&canonical)
+        .map_err(|error| EntitySnapshotRestoreError::Kernel(error.to_string()))
+}
+
+fn entity_collection(
+    value: Option<&Value>,
+    path: &str,
+) -> Result<Option<EntityCanonicalCollection>, EntitySnapshotRestoreError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let entries = tagged_rows(value, path)?
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let row = row
+                .as_array()
+                .filter(|row| row.len() == 2)
+                .ok_or_else(|| invalid(format!("MAP_ROW:{path}:{index}")))?;
+            let key = row[0]
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| invalid(format!("MAP_KEY:{path}:{index}")))?;
+            Ok((
+                key.to_string(),
+                canonical_value_from_tagged_json(&row[1])
+                    .map_err(|error| invalid(format!("CANONICAL:{path}:{index}:{error}")))?,
+            ))
+        })
+        .collect::<Result<Vec<_>, EntitySnapshotRestoreError>>()?;
+    EntityCanonicalCollection::from_entries(entries)
+        .map(Some)
+        .map_err(|error| EntitySnapshotRestoreError::Kernel(error.to_string()))
 }
 
 fn wrap_core(core: Value) -> Value {
@@ -417,23 +451,99 @@ pub fn entity_snapshot_from_graph(
     if entity_id != expected_id {
         return Err(invalid(format!("ENTITY_ID:{entity_id}:{expected_id}")));
     }
+    let paybook = object(required(core, "paybook", "core")?, "core.paybook")?;
+    exact_allowed(paybook, &["entries", "feesEarned"], "core.paybook")?;
     let state = EntityStateSlice {
         entity_id,
         height: unsigned(required(core, "height", "core")?, "core.height")?,
         timestamp: unsigned(required(core, "timestamp", "core")?, "core.timestamp")?,
         entity_command_nonces: command_nonces(core.get("entityCommandNonces"))?,
+        proposals: xln_rscore_entity_kernel::decode_canonical_entity_proposals(
+            &canonical_value_from_tagged_json(required(core, "proposals", "core")?)
+                .map_err(|error| invalid(format!("PROPOSALS:{error}")))?,
+        )
+        .map_err(|error| invalid(format!("PROPOSALS:{error}")))?,
         last_finalized_j_height: unsigned(
             required(core, "lastFinalizedJHeight", "core")?,
             "core.lastFinalizedJHeight",
         )?,
         reserves: reserves(required(core, "reserves", "core")?)?,
-        known_accounts,
-        htlc_routes: routes(required(core, "htlcRoutes", "core")?)?,
-        htlc_fees_earned: bigint(
-            required(core, "htlcFeesEarned", "core")?,
-            "core.htlcFeesEarned",
+        external_wallet: core
+            .get("externalWallet")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("EXTERNAL_WALLET:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_external_wallet)
+            .transpose()
+            .map_err(|error| invalid(format!("EXTERNAL_WALLET:{error}")))?,
+        deferred_account_proposals: entity_collection(
+            core.get("deferredAccountProposals"),
+            "deferredAccountProposals",
         )?,
-        lock_book: locks(required(core, "lockBook", "core")?)?,
+        settlement_continuations: entity_collection(
+            core.get("settlementContinuations"),
+            "settlementContinuations",
+        )?,
+        out_debts_by_token: core
+            .get("outDebtsByToken")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("OUT_DEBTS:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_debt_ledger)
+            .transpose()
+            .map_err(|error| invalid(format!("OUT_DEBTS:{error}")))?,
+        in_debts_by_token: core
+            .get("inDebtsByToken")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("IN_DEBTS:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_debt_ledger)
+            .transpose()
+            .map_err(|error| invalid(format!("IN_DEBTS:{error}")))?,
+        entity_encryption_public_key: hex32_bytes(
+            required(core, "entityEncryptionPublicKey", "core")?,
+            "core.entityEncryptionPublicKey",
+        )?,
+        profile: profile(required(core, "profile", "core")?)?,
+        j_batch_state: core
+            .get("jBatchState")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("J_BATCH_STATE:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_j_batch_state)
+            .transpose()
+            .map_err(|error| invalid(format!("J_BATCH_STATE:{error}")))?,
+        entity_provider_action_state: core
+            .get("entityProviderActionState")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("ENTITY_PROVIDER_ACTION_STATE:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_entity_provider_action_state)
+            .transpose()
+            .map_err(|error| invalid(format!("ENTITY_PROVIDER_ACTION_STATE:{error}")))?,
+        certified_board_state: core
+            .get("certifiedBoardState")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("CERTIFIED_BOARD_STATE:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_certified_board_state)
+            .transpose()
+            .map_err(|error| invalid(format!("CERTIFIED_BOARD_STATE:{error}")))?,
+        known_accounts: known_accounts.into(),
+        paybook: PaybookState::from_entries(
+            paybook_entries(required(paybook, "entries", "core.paybook")?)?.into_values(),
+            bigint(
+                required(paybook, "feesEarned", "core.paybook")?,
+                "core.paybook.feesEarned",
+            )?,
+        )
+        .map_err(|error| EntitySnapshotRestoreError::Kernel(error.to_string()))?,
         crontab: entity_checkpoint_crontab(&wrap_core(graph.core.clone()))?,
         hub_rebalance_config: core
             .get("hubRebalanceConfig")
@@ -447,6 +557,32 @@ pub fn entity_snapshot_from_graph(
             .transpose()
             .map_err(|error| EntitySnapshotRestoreError::Kernel(error.to_string()))?,
         orderbook_metadata: orderbook.as_ref().map(|value| value.metadata.clone()),
+        swap_trading_pairs: core
+            .get("swapTradingPairs")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("SWAP_TRADING_PAIRS:{error}")))?
+            .as_ref()
+            .map(xln_rscore_entity_kernel::decode_canonical_swap_trading_pairs)
+            .transpose()
+            .map_err(|error| invalid(format!("SWAP_TRADING_PAIRS:{error}")))?,
+        lending: core.get("lending").map(lending_state).transpose()?,
+        cross_jurisdiction_swaps: entity_collection(
+            core.get("crossJurisdictionSwaps"),
+            "crossJurisdictionSwaps",
+        )?,
+        cross_jurisdiction_authorizations: entity_collection(
+            core.get("crossJurisdictionAuthorizations"),
+            "crossJurisdictionAuthorizations",
+        )?,
+        pending_cross_jurisdiction_fill_acks: entity_collection(
+            core.get("pendingCrossJurisdictionFillAcks"),
+            "pendingCrossJurisdictionFillAcks",
+        )?,
+        cross_jurisdiction_book_admissions: entity_collection(
+            core.get("crossJurisdictionBookAdmissions"),
+            "crossJurisdictionBookAdmissions",
+        )?,
         j_history_finality: core
             .get("jHistoryFinality")
             .map(canonical_value_from_tagged_json)
@@ -461,16 +597,31 @@ pub fn entity_snapshot_from_graph(
         height: state.height,
         timestamp: state.timestamp,
         entity_command_nonces: state.entity_command_nonces,
+        proposals: state.proposals,
         last_finalized_j_height: state.last_finalized_j_height,
         reserves: state.reserves,
-        known_accounts: state.known_accounts,
-        htlc_routes: state.htlc_routes,
-        htlc_fees_earned: state.htlc_fees_earned,
-        lock_book: state.lock_book,
+        out_debts_by_token: state.out_debts_by_token,
+        in_debts_by_token: state.in_debts_by_token,
+        external_wallet: state.external_wallet,
+        deferred_account_proposals: state.deferred_account_proposals,
+        settlement_continuations: state.settlement_continuations,
+        entity_encryption_public_key: state.entity_encryption_public_key,
+        profile: state.profile,
+        j_batch_state: state.j_batch_state,
+        entity_provider_action_state: state.entity_provider_action_state,
+        certified_board_state: state.certified_board_state,
+        known_accounts: state.known_accounts.iter().cloned().collect(),
+        paybook: state.paybook,
         crontab: state.crontab,
         hub_rebalance_config: state.hub_rebalance_config,
         orderbook: orderbook.map(|value| value.snapshot),
         orderbook_metadata: state.orderbook_metadata,
+        swap_trading_pairs: state.swap_trading_pairs,
+        lending: state.lending,
+        cross_jurisdiction_swaps: state.cross_jurisdiction_swaps,
+        cross_jurisdiction_authorizations: state.cross_jurisdiction_authorizations,
+        pending_cross_jurisdiction_fill_acks: state.pending_cross_jurisdiction_fill_acks,
+        cross_jurisdiction_book_admissions: state.cross_jurisdiction_book_admissions,
         j_history_finality: state.j_history_finality,
         expected_owned_sections,
     })

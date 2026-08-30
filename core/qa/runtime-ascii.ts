@@ -281,12 +281,11 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
   ];
 
   // HTLC stats (amounts first)
-  const lockCount = entity.lockBook?.size || 0;
-  const routeCount = entity.htlcRoutes?.size || 0;
-  const feesEarned = entity.htlcFeesEarned || 0n;
+  const paymentCount = entity.paybook.entries.size;
+  const feesEarned = entity.paybook.feesEarned;
 
-  if (lockCount > 0 || feesEarned > 0n) {
-    summary.push(`HTLC: Fees=${formatBigInt(feesEarned)} | Locks=${lockCount} | Routes=${routeCount}`);
+  if (paymentCount > 0 || feesEarned > 0n) {
+    summary.push(`Paybook: Fees=${formatBigInt(feesEarned)} | Active=${paymentCount}`);
   }
 
   // Swap stats
@@ -301,36 +300,12 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
 
   output.push(drawBox(title, summary, indent));
 
-  // HTLC detail (comprehensive: locks + routes + fees)
-  if (!opts.showReservesOnly && (lockCount > 0 || routeCount > 0 || feesEarned > 0n)) {
+  if (!opts.showReservesOnly && (paymentCount > 0 || feesEarned > 0n)) {
     output.push('');
-    output.push(' '.repeat(indent) + '  HTLC Detail:');
-
-    // Active locks from lockBook
-    if (lockCount > 0 && entity.lockBook) {
-      output.push(' '.repeat(indent) + `    Locks (${lockCount}):`);
-
-      const locks = Array.from(entity.lockBook.values())
-        .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))
-        .slice(0, opts.maxLocks);
-
-      for (const lock of locks) {
-        const status = getLockStatus(lock, entity);
-        const dir = lock.direction === 'outgoing' ? '→' : '←';
-        const timeLeft = formatDuration(Number(lock.timelock) - getWallClockMs());
-        output.push(' '.repeat(indent) + `      ${dir} ${formatBigInt(lock.amount)} | hash=${lock.hashlock.slice(0, 12)}... | ${status} | ${timeLeft}`);
-      }
-
-      if (entity.lockBook.size > (opts.maxLocks || 10)) {
-        output.push(' '.repeat(indent) + `      ... and ${entity.lockBook.size - (opts.maxLocks || 10)} more`);
-      }
-    }
-
-    // Active routes (multi-hop tracking)
-    if (routeCount > 0 && entity.htlcRoutes) {
-      output.push(' '.repeat(indent) + `    Routes (${routeCount}):`);
-
-      const routes = Array.from(entity.htlcRoutes.entries()).slice(0, 5);
+    output.push(' '.repeat(indent) + '  Paybook Detail:');
+    if (paymentCount > 0) {
+      output.push(' '.repeat(indent) + `    Active (${paymentCount}):`);
+      const routes = Array.from(entity.paybook.entries.entries()).slice(0, opts.maxLocks);
       for (const [hashlock, route] of routes) {
         const inbound = route.inboundEntity ? formatAddress(route.inboundEntity) : 'origin';
         const outbound = route.outboundEntity ? formatAddress(route.outboundEntity) : 'final';
@@ -474,21 +449,6 @@ export function formatAccount(account: AccountReplica, myEntityId: string, optio
   }
 
   return output.join('\n');
-}
-
-// Helper: Get lock status
-function getLockStatus(lock: { timelock: bigint | number | string; hashlock: string }, entity: EntityState): string {
-  const now = getWallClockMs();
-  if (now > Number(lock.timelock)) {
-    return '🔴 Expired';
-  }
-
-  const route = entity.htlcRoutes?.get(lock.hashlock);
-  if (route?.secret) {
-    return '🟢 Revealed';
-  }
-
-  return '🟡 Pending';
 }
 
 // Helper: Format reserves map

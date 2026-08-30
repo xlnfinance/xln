@@ -101,6 +101,7 @@ impl SequentialAccountEngine {
                 MutationDecision::Applied {
                     events: next_events,
                     outputs: next_outputs,
+                    consensus_effects: _,
                 } => {
                     events.extend(next_events);
                     outputs.extend(next_outputs);
@@ -127,6 +128,7 @@ impl SequentialAccountEngine {
                 MutationDecision::Applied {
                     events: next_events,
                     outputs: next_outputs,
+                    consensus_effects: _,
                 } => {
                     events.extend(next_events);
                     outputs.extend(next_outputs);
@@ -145,16 +147,18 @@ fn transition_from_decision(
     decision: MutationDecision,
 ) -> AccountTransition {
     match decision {
-        MutationDecision::Applied { events, outputs } => {
-            AccountTransition::applied(candidate, events, outputs)
-        }
+        MutationDecision::Applied {
+            events,
+            outputs,
+            consensus_effects: _,
+        } => AccountTransition::applied(candidate, events, outputs),
         MutationDecision::Rejected { rejection, events } => {
             AccountTransition::rejected(rejection, events)
         }
     }
 }
 
-fn apply_to_candidate(
+pub(crate) fn apply_to_candidate(
     candidate: &mut AccountReplica,
     proposer: Side,
     tx: &AccountTx,
@@ -203,6 +207,7 @@ fn apply_to_candidate(
             min_net_receive,
             time_in_force,
             price_ticks,
+            cross_jurisdiction,
         } => {
             let context = context.ok_or(TransitionError::ExecutionContextRequired("swap_offer"))?;
             crate::swap::apply_offer(
@@ -220,6 +225,7 @@ fn apply_to_candidate(
                     min_net_receive,
                     time_in_force: *time_in_force,
                     price_ticks: price_ticks.as_ref(),
+                    cross_jurisdiction: cross_jurisdiction.as_ref(),
                 },
                 proposer,
                 // core/account/tx/mutation.ts routes swap_offer with the
@@ -307,6 +313,75 @@ fn apply_to_candidate(
             crate::tx::handlers::lending::apply(candidate, tx, proposer)
         }
         AccountTx::ReserveToCollateral { .. } => Ok(balance::reserve_to_collateral()),
+        AccountTx::RequestCollateral {
+            token_id,
+            amount,
+            fee_token_id,
+            fee_amount,
+            policy_version,
+        } => {
+            let context = context.ok_or(TransitionError::ExecutionContextRequired(
+                "request_collateral",
+            ))?;
+            crate::tx::handlers::rebalance::apply_request_collateral(
+                candidate,
+                proposer,
+                *token_id,
+                amount,
+                *fee_token_id,
+                fee_amount,
+                *policy_version,
+                context.committed_timestamp,
+                context.current_account_height,
+            )
+        }
+        AccountTx::RebalanceRefund {
+            request_id,
+            request_token_id,
+            amount,
+            reason,
+        } => crate::tx::handlers::rebalance::apply_rebalance_refund(
+            candidate,
+            proposer,
+            request_id,
+            *request_token_id,
+            amount,
+            *reason,
+        ),
+        AccountTx::CrossPullLock { data } => {
+            let context =
+                context.ok_or(TransitionError::ExecutionContextRequired("cross_pull_lock"))?;
+            crate::tx::handlers::cross_j::apply_pull_lock(
+                candidate,
+                data,
+                proposer,
+                context.current_account_height,
+                context.committed_timestamp,
+            )
+        }
+        AccountTx::CrossPullClose { data } => {
+            crate::tx::handlers::cross_j::apply_pull_close(candidate, data, proposer)
+        }
+        AccountTx::CrossPullProgress { data } => {
+            crate::tx::handlers::cross_j::apply_pull_progress(candidate, data, proposer)
+        }
+        AccountTx::CrossSwapFillAck { data } => {
+            let context = context.ok_or(TransitionError::ExecutionContextRequired(
+                "cross_swap_fill_ack",
+            ))?;
+            crate::tx::handlers::cross_j::apply_swap_fill_ack(
+                candidate,
+                data,
+                proposer,
+                context.committed_timestamp,
+            )
+        }
+        AccountTx::SettleTransition { data } => {
+            let context = context.ok_or(TransitionError::ExecutionContextRequired(
+                "settle_transition",
+            ))?;
+            crate::tx::handlers::settlement::apply(candidate, data, proposer, context)
+        }
         AccountTx::HtlcLock(tx) => {
             let context = context.ok_or(TransitionError::ExecutionContextRequired("htlc_lock"))?;
             crate::tx::handlers::htlc::apply_lock(candidate, proposer, tx, context)

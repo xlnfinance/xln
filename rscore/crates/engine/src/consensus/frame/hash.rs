@@ -264,6 +264,172 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
                 ],
             )
         }
+        AccountTx::RequestCollateral {
+            token_id,
+            amount,
+            fee_token_id,
+            fee_amount,
+            policy_version,
+        } => {
+            let mut fields = vec![
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
+            ];
+            push_optional(&mut fields, "feeTokenId", fee_token_id.map(token));
+            fields.push(("feeAmount".to_string(), big(fee_amount)));
+            fields.push(("policyVersion".to_string(), number(*policy_version)?));
+            ("request_collateral", fields)
+        }
+        AccountTx::RebalanceRefund {
+            request_id,
+            request_token_id,
+            amount,
+            reason,
+        } => (
+            "rebalance_refund",
+            vec![
+                ("requestId".to_string(), text(request_id)),
+                ("requestTokenId".to_string(), token(*request_token_id)),
+                ("amount".to_string(), big(amount)),
+                ("reason".to_string(), text(reason.wire_name())),
+            ],
+        ),
+        AccountTx::LendingFund {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+            token_id,
+            amount,
+            term_id,
+            interest_bps,
+        } => (
+            "lending_fund",
+            vec![
+                ("positionId".to_string(), text(position_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("lenderEntityId".to_string(), text(lender_entity_id)),
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
+                ("termId".to_string(), text(term_id.wire_name())),
+                ("interestBps".to_string(), number_i64(*interest_bps)?),
+            ],
+        ),
+        AccountTx::LendingBorrowRequest {
+            request_id,
+            hub_entity_id,
+            borrower_entity_id,
+            token_id,
+            amount,
+            term_id,
+            max_interest_bps,
+        } => (
+            "lending_borrow_request",
+            vec![
+                ("requestId".to_string(), text(request_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("borrowerEntityId".to_string(), text(borrower_entity_id)),
+                ("tokenId".to_string(), number(*token_id)?),
+                ("amount".to_string(), big(amount)),
+                ("termId".to_string(), text(term_id.wire_name())),
+                ("maxInterestBps".to_string(), number_i64(*max_interest_bps)?),
+            ],
+        ),
+        AccountTx::LendingRepay {
+            loan_id,
+            hub_entity_id,
+            borrower_entity_id,
+            token_id,
+            amount,
+        } => (
+            "lending_repay",
+            vec![
+                ("loanId".to_string(), text(loan_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("borrowerEntityId".to_string(), text(borrower_entity_id)),
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
+            ],
+        ),
+        AccountTx::LendingCredit {
+            action,
+            loan_id,
+            hub_entity_id,
+            borrower_entity_id,
+            token_id,
+            credit_limit,
+        } => (
+            "lending_credit",
+            vec![
+                ("action".to_string(), text(action.wire_name())),
+                ("loanId".to_string(), text(loan_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("borrowerEntityId".to_string(), text(borrower_entity_id)),
+                ("tokenId".to_string(), token(*token_id)),
+                ("creditLimit".to_string(), big(credit_limit)),
+            ],
+        ),
+        AccountTx::LendingCloseRequest {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+        } => (
+            "lending_close_request",
+            vec![
+                ("positionId".to_string(), text(position_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("lenderEntityId".to_string(), text(lender_entity_id)),
+            ],
+        ),
+        AccountTx::LendingClosePayout {
+            position_id,
+            hub_entity_id,
+            lender_entity_id,
+            token_id,
+            amount,
+        } => (
+            "lending_close_payout",
+            vec![
+                ("positionId".to_string(), text(position_id)),
+                ("hubEntityId".to_string(), text(hub_entity_id)),
+                ("lenderEntityId".to_string(), text(lender_entity_id)),
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
+            ],
+        ),
+        AccountTx::ReserveToCollateral {
+            token_id,
+            collateral,
+            ondelta,
+            side,
+            block_number,
+            transaction_hash,
+        } => (
+            "reserve_to_collateral",
+            vec![
+                ("tokenId".to_string(), token(*token_id)),
+                ("collateral".to_string(), text(collateral)),
+                ("ondelta".to_string(), text(ondelta)),
+                ("side".to_string(), text(side.wire_name())),
+                ("blockNumber".to_string(), number_i64(*block_number)?),
+                ("transactionHash".to_string(), text(transaction_hash)),
+            ],
+        ),
+        AccountTx::CrossPullLock { data }
+        | AccountTx::CrossPullClose { data }
+        | AccountTx::CrossPullProgress { data }
+        | AccountTx::CrossSwapFillAck { data } => {
+            let kind = match tx {
+                AccountTx::CrossPullLock { .. } => "cross_pull_lock",
+                AccountTx::CrossPullClose { .. } => "cross_pull_close",
+                AccountTx::CrossPullProgress { .. } => "cross_pull_progress",
+                AccountTx::CrossSwapFillAck { .. } => "cross_swap_fill_ack",
+                _ => unreachable!(),
+            };
+            (kind, canonical_object_fields(data, kind)?)
+        }
+        AccountTx::SettleTransition { data } => {
+            ("settle_transition", unsigned_settlement_fields(data)?)
+        }
         AccountTx::SwapOffer {
             offer_id,
             give_token_id,
@@ -276,6 +442,7 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             min_net_receive,
             time_in_force,
             price_ticks,
+            cross_jurisdiction,
         } => {
             let mut fields = vec![
                 ("offerId".to_string(), text(offer_id)),
@@ -300,6 +467,7 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
                 time_in_force.map(|value| number_u32(u32::from(value))),
             );
             push_optional(&mut fields, "priceTicks", price_ticks.as_ref().map(big));
+            push_optional(&mut fields, "crossJurisdiction", cross_jurisdiction.clone());
             ("swap_offer", fields)
         }
         AccountTx::SwapResolve {
@@ -401,14 +569,48 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             "swap_cancel_request",
             vec![("offerId".to_string(), text(offer_id))],
         ),
-        other => {
-            return Err(StateError::UnsupportedFrameTx(unsupported_kind(other)));
-        }
     };
     Ok(CanonicalValue::Object(vec![
         ("type".to_string(), text(kind)),
         ("data".to_string(), CanonicalValue::Object(data)),
     ]))
+}
+
+fn canonical_object_fields(
+    value: &CanonicalValue,
+    kind: &'static str,
+) -> Result<Vec<(String, CanonicalValue)>, StateError> {
+    match value {
+        CanonicalValue::Object(fields) => Ok(fields.clone()),
+        _ => Err(StateError::UnsupportedFrameTx(kind)),
+    }
+}
+
+fn unsigned_settlement_fields(
+    value: &CanonicalValue,
+) -> Result<Vec<(String, CanonicalValue)>, StateError> {
+    let mut fields = canonical_object_fields(value, "settle_transition")?;
+    let is_hanko = fields
+        .iter()
+        .any(|(name, value)| name == "kind" && value == &CanonicalValue::String("hanko".into()));
+    if !is_hanko {
+        return Ok(fields);
+    }
+    fields.retain(|(name, _)| name != "settlementHanko");
+    let Some((_, post)) = fields.iter_mut().find(|(name, _)| name == "postProof") else {
+        return Err(StateError::UnsupportedFrameTx("settle_transition"));
+    };
+    let CanonicalValue::Object(post) = post else {
+        return Err(StateError::UnsupportedFrameTx("settle_transition"));
+    };
+    post.retain(|(name, _)| name != "hanko");
+    Ok(fields)
+}
+
+fn number_i64(value: i64) -> Result<CanonicalValue, StateError> {
+    CanonicalNumber::try_from_i64(value)
+        .map(CanonicalValue::Number)
+        .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
 
 fn text(value: &str) -> CanonicalValue {
@@ -451,29 +653,11 @@ pub fn canonical_tx_digest(tx: &AccountTx) -> Result<[u8; 32], StateError> {
 /// permanently: every proposal and every leaf digest would fail on it, and
 /// nothing removes it. Admission refuses it instead.
 pub fn is_frame_hashable(tx: &AccountTx) -> bool {
-    !matches!(
-        tx,
-        AccountTx::LendingFund { .. }
-            | AccountTx::LendingBorrowRequest { .. }
-            | AccountTx::LendingRepay { .. }
-            | AccountTx::LendingCredit { .. }
-            | AccountTx::LendingCloseRequest { .. }
-            | AccountTx::LendingClosePayout { .. }
-            | AccountTx::ReserveToCollateral { .. }
-    )
+    canonical_tx_value(tx).is_ok()
 }
 
 pub fn unsupported_kind(tx: &AccountTx) -> &'static str {
-    match tx {
-        AccountTx::LendingFund { .. } => "lending_fund",
-        AccountTx::LendingBorrowRequest { .. } => "lending_borrow_request",
-        AccountTx::LendingRepay { .. } => "lending_repay",
-        AccountTx::LendingCredit { .. } => "lending_credit",
-        AccountTx::LendingCloseRequest { .. } => "lending_close_request",
-        AccountTx::LendingClosePayout { .. } => "lending_close_payout",
-        AccountTx::ReserveToCollateral { .. } => "reserve_to_collateral",
-        _ => "unknown",
-    }
+    tx.wire_name()
 }
 
 /// Big-endian helper for callers that hold a hex account state root.
@@ -592,6 +776,7 @@ mod tests {
             } else {
                 None
             },
+            cross_jurisdiction: None,
         }
     }
 
@@ -789,10 +974,8 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-    /// A transaction the engine does not model natively must fail loudly: a
-    /// frame hash computed from a guessed shape would be silently wrong.
     #[test]
-    fn refuses_to_hash_a_transaction_it_does_not_model() {
+    fn reserve_transition_is_part_of_the_exhaustive_frame_hash_catalog() {
         let tx = AccountTx::ReserveToCollateral {
             token_id: TokenId::new(1).expect("token"),
             collateral: "1".to_string(),
@@ -801,9 +984,59 @@ mod tests {
             block_number: 1,
             transaction_hash: format!("0x{}", "ee".repeat(32)),
         };
+        assert!(is_frame_hashable(&tx));
+        frame_for(tx)
+            .hash()
+            .expect("reserve transaction frame hash");
+    }
+
+    #[test]
+    fn settlement_post_commit_hankos_do_not_move_the_frame_or_mempool_root() {
+        let unsigned_post = CanonicalValue::Object(vec![
+            (
+                "disputeHash".into(),
+                text(&format!("0x{}", "22".repeat(32))),
+            ),
+            ("nonce".into(), number(2).expect("nonce")),
+        ]);
+        let unsigned = AccountTx::SettleTransition {
+            data: CanonicalValue::Object(vec![
+                ("kind".into(), text("hanko")),
+                (
+                    "settlementHash".into(),
+                    text(&format!("0x{}", "11".repeat(32))),
+                ),
+                ("postProof".into(), unsigned_post.clone()),
+            ]),
+        };
+        let signed = AccountTx::SettleTransition {
+            data: CanonicalValue::Object(vec![
+                ("kind".into(), text("hanko")),
+                (
+                    "settlementHash".into(),
+                    text(&format!("0x{}", "11".repeat(32))),
+                ),
+                ("settlementHanko".into(), text("0x1234")),
+                (
+                    "postProof".into(),
+                    CanonicalValue::Object(vec![
+                        (
+                            "disputeHash".into(),
+                            text(&format!("0x{}", "22".repeat(32))),
+                        ),
+                        ("nonce".into(), number(2).expect("nonce")),
+                        ("hanko".into(), text("0xabcd")),
+                    ]),
+                ),
+            ]),
+        };
         assert_eq!(
-            frame_for(tx).hash().expect_err("unsupported"),
-            StateError::UnsupportedFrameTx("reserve_to_collateral"),
+            canonical_tx_value(&unsigned).expect("unsigned"),
+            canonical_tx_value(&signed).expect("signed"),
+        );
+        assert_eq!(
+            frame_for(unsigned).hash().expect("unsigned frame"),
+            frame_for(signed).hash().expect("signed frame"),
         );
     }
 }

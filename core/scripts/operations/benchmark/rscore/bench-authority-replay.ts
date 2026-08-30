@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { safeParse, safeStringify } from '../../../../protocol/serialization';
+import { summarizeRecordedPaymentWork } from '../../hlt/replay/payment-work-ledger';
+import { readHltHubRecording, recordingFrames } from '../../hlt/replay/recording';
 
 type ProcessSample = Readonly<{ cpuCores: number; rssKiB: number }>;
 type BenchRow = Readonly<{
@@ -166,6 +168,7 @@ const runOne = async (
   maxMs: number,
   completeEvidence: boolean,
   deepVerify: boolean,
+  printReplayRate: boolean,
 ): Promise<BenchRow> => {
   const output = join(mkdtempSync(join(tmpdir(), `xln-ars-w${workers}-`)), 'report.json');
   const env: NodeJS.ProcessEnv = {
@@ -198,20 +201,33 @@ const runOne = async (
     '--require-rust-account-authority',
   ], { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
   if (!child.stdout || !child.stderr) throw new Error('RSCORE_ARS_BENCH_PIPE_MISSING');
-  const stdout = collectLines(child.stdout, /^HLT_REPLAY_EQUIVALENT /);
+  // A smoke run proves execution/parity only. Do not forward the replay-rate
+  // line: that made a tiny fixture too easy to quote as throughput evidence.
+  const stdout = collectLines(child.stdout, printReplayRate ? /^HLT_REPLAY_EQUIVALENT / : /$a/);
   const stderr = collectLines(child.stderr, /^RSCORE_(AUTHORITY_DRIVER|ACCOUNT_EXECUTION) /);
   const samples: ProcessSample[] = [sampleProcessTree(child.pid ?? 0)];
   const sampler = setInterval(() => samples.push(sampleProcessTree(child.pid ?? 0)), 100);
-  const status = await new Promise<number | null>((resolveExit, rejectExit) => {
-    child.once('error', rejectExit);
-    child.once('exit', resolveExit);
-  });
-  clearInterval(sampler);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, maxMs);
+  let status: number | null;
+  try {
+    status = await new Promise<number | null>((resolveExit, rejectExit) => {
+      child.once('error', rejectExit);
+      child.once('exit', resolveExit);
+    });
+  } finally {
+    clearTimeout(timeout);
+    clearInterval(sampler);
+  }
   const [, stderrLines] = await Promise.all([stdout, stderr]);
   const childWallMs = performance.now() - startedAt;
-  if (status !== 0) {
+  if (timedOut || status !== 0) {
     throw new Error(
-      `RSCORE_ARS_BENCH_CHILD_FAILED:w=${workers}:status=${String(status)}\n` +
+      `RSCORE_ARS_BENCH_CHILD_FAILED:w=${workers}:` +
+      `${timedOut ? `timeout=${maxMs}ms` : `status=${String(status)}`}\n` +
       stderrLines.slice(-20).join('\n'),
     );
   }
@@ -250,41 +266,84 @@ const runOne = async (
 };
 
 const recording = resolve(requiredArgument('recording'));
-const binary = resolve(argument('binary') ?? 'rscore/target/release/xln-rscore');
+const binary = resolve(argument('binary') ?? 'rscore/target/release/xlnrs');
 const runtimeSeedFile = argument('runtime-seed-file');
 const entitySignerLabel = argument('entity-signer-label');
 const maxMs = Number(argument('max-ms') ?? '20000');
 const completeEvidence = process.argv.includes('--complete-evidence');
 const deepVerify = process.argv.includes('--deep-verify');
-if (!Number.isSafeInteger(maxMs) || maxMs < 1_000 || maxMs > 120_000) {
+const allowSmoke = process.argv.includes('--allow-smoke');
+if (!Number.isSafeInteger(maxMs) || maxMs < 1_000 || maxMs > 20_000) {
   throw new Error(`RSCORE_ARS_BENCH_MAX_MS_INVALID:${String(maxMs)}`);
 }
 accessSync(recording, constants.R_OK);
 accessSync(binary, constants.X_OK);
+const artifact = readHltHubRecording(recording);
+const frames = recordingFrames(artifact.recording);
+const paymentWork = summarizeRecordedPaymentWork(frames);
+const minimumScaleCardinality = 1_000;
+const scaleEligible = artifact.source.workload === 'payments'
+  && artifact.source.users >= minimumScaleCardinality
+  && paymentWork.nonHubEntities >= minimumScaleCardinality
+  && paymentWork.economicPayments >= minimumScaleCardinality
+  && artifact.totals.runtimeFrames >= minimumScaleCardinality;
+if (!allowSmoke && !scaleEligible) {
+  throw new Error(
+    `RSCORE_ARS_SCALE_RECORDING_TOO_SMALL:min=${minimumScaleCardinality}:` +
+    `declaredUsers=${artifact.source.users}:activeUsers=${paymentWork.nonHubEntities}:` +
+    `payments=${paymentWork.economicPayments}:frames=${artifact.totals.runtimeFrames}:` +
+    'use --allow-smoke only for execution/parity',
+  );
+}
+console.log(allowSmoke
+  ? `RSCORE_ARS_SMOKE_ONLY_NOT_RATE_EVIDENCE users=${paymentWork.nonHubEntities} payments=${paymentWork.economicPayments} frames=${artifact.totals.runtimeFrames}`
+  : `RSCORE_ARS_SCALE_DIAGNOSTIC_NOT_LIVE_TPS users=${paymentWork.nonHubEntities} payments=${paymentWork.economicPayments} frames=${artifact.totals.runtimeFrames}`);
 const rows: BenchRow[] = [];
+const deadline = performance.now() + maxMs;
 for (const workers of parseWorkers()) {
+  const remainingMs = Math.floor(deadline - performance.now());
+  if (remainingMs < 1_000) throw new Error(`RSCORE_ARS_BENCH_GLOBAL_TIMEOUT:${maxMs}ms`);
   rows.push(await runOne(
     recording,
     binary,
     runtimeSeedFile ? resolve(runtimeSeedFile) : null,
     entitySignerLabel,
     workers,
-    maxMs,
+    remainingMs,
     completeEvidence,
     deepVerify,
+    !allowSmoke,
   ));
 }
-console.table(rows.map(row => ({
-  workers: row.workers,
-  replayEconomicOpsPerSecond: row.economicOpsPerSecond.toFixed(2),
-  rustEconomicOpsPerSecond: row.rustEconomicOpsPerSecond.toFixed(2),
-  accountProtocolRowsPerSecond: row.accountProtocolRowsPerSecond.toFixed(2),
-  replayMs: row.replayMs.toFixed(2),
-  cpuCores: row.averageCpuCores.toFixed(2),
-  peakRssMiB: row.peakRssMiB.toFixed(1),
-  engineMs: row.engineMs.toFixed(2),
-  boundaryMs: row.boundaryMs.toFixed(2),
-  visits: `${row.inboundRounds}+${row.outboundRounds}`,
-  verification: row.verification,
-})));
-console.log(`RSCORE_ARS_BENCH ${safeStringify({ recording, rows })}`);
+if (allowSmoke) {
+  console.table(rows.map(row => ({
+    workers: row.workers,
+    payments: row.payments,
+    replayMs: row.replayMs.toFixed(2),
+    verification: row.verification,
+  })));
+  console.log(`RSCORE_ARS_SMOKE ${safeStringify({
+    recording,
+    rows: rows.map(row => ({
+      workers: row.workers,
+      payments: row.payments,
+      replayMs: row.replayMs,
+      verification: row.verification,
+    })),
+  })}`);
+} else {
+  console.table(rows.map(row => ({
+    workers: row.workers,
+    replayEconomicOpsPerSecond: row.economicOpsPerSecond.toFixed(2),
+    rustEconomicOpsPerSecond: row.rustEconomicOpsPerSecond.toFixed(2),
+    accountProtocolRowsPerSecond: row.accountProtocolRowsPerSecond.toFixed(2),
+    replayMs: row.replayMs.toFixed(2),
+    cpuCores: row.averageCpuCores.toFixed(2),
+    peakRssMiB: row.peakRssMiB.toFixed(1),
+    engineMs: row.engineMs.toFixed(2),
+    boundaryMs: row.boundaryMs.toFixed(2),
+    visits: `${row.inboundRounds}+${row.outboundRounds}`,
+    verification: row.verification,
+  })));
+  console.log(`RSCORE_ARS_SCALE_DIAGNOSTIC ${safeStringify({ recording, rows })}`);
+}

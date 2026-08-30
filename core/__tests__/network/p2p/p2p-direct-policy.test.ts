@@ -63,6 +63,34 @@ const makeP2P = (profiles: Profile[]): RuntimeP2P => new RuntimeP2P({
 });
 
 describe('RuntimeP2P direct transport policy', () => {
+  test('sends the signed local profile on the exact authenticated direct socket without a relay', async () => {
+    const targetRuntimeId = runtimeIdFor('profile-target');
+    const profile = buildProfile('10', runtimeIdFor('profile-source'), key('10'), false, null);
+    const sent: Array<{ to: string; payload: unknown }> = [];
+    const directClient = {
+      isOpen: () => true,
+      sendGossipAnnounce: (to: string, payload: unknown) => {
+        sent.push({ to, payload });
+        return true;
+      },
+    };
+    const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+    p2p.closing = false;
+    p2p.closed = false;
+    p2p.backgroundIoPaused = false;
+    p2p.directClients = new Map([[targetRuntimeId, directClient]]);
+    p2p.getLocalProfilesForEntities = async () => [profile];
+    p2p.rememberAnnouncedProfile = () => undefined;
+    p2p.env = { gossip: { announce: () => undefined } };
+
+    await p2p.announceLocalProfilesToDirectRuntime(targetRuntimeId, directClient);
+
+    expect(sent).toEqual([{
+      to: targetRuntimeId,
+      payload: { profiles: [profile], jurisdictions: [] },
+    }]);
+  });
+
   test('halts on a correlated post-WAL delivery rejection', () => {
     const env = {
       state: { height: 41, timestamp: 123 },

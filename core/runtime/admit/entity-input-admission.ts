@@ -54,13 +54,22 @@ export const collectAppliedAccountSenderHints = (
 export const assertExternalEntityInputAllowed = (
   entityInput: RoutedEntityInput,
 ): void => {
-  if (
-    entityInput.localRuntimeProtocol === 'cross-j' ||
-    (entityInput.entityTxs ?? []).some(tx => tx.type === 'runtimeOutput')
-  ) {
-    throw new Error(
-      `RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN:entity=${entityInput.entityId}`,
-    );
+  const hasRuntimeOutput = (entityInput.entityTxs ?? [])
+    .some(tx => tx.type === 'runtimeOutput');
+  if (hasRuntimeOutput) {
+    if (
+      !entityInput.from ||
+      !entityInput.sourceRuntimeFrame ||
+      entityInput.entityTxs?.length !== 1
+    ) {
+      throw new Error(
+        `RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN:entity=${entityInput.entityId}`,
+      );
+    }
+    // P2P admission already authenticated and signer-bound this exact Runtime
+    // envelope. `from` + sourceRuntimeFrame are retained in Runtime WAL so the
+    // identical input remains admissible during deterministic replay.
+    return;
   }
   if (!entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput)) return;
   const containsRawSalvage = getEffectiveEntityInputTxs(entityInput)
@@ -69,7 +78,7 @@ export const assertExternalEntityInputAllowed = (
   assertRuntimeEntityIngress(
     false,
     'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN',
-    'Cross-j Entity inputs are runtime-private and require a certified runtimeOutput envelope',
+    'Cross-j Entity inputs require a committed authenticated runtimeOutput envelope',
     {
       entityId: entityInput.entityId,
       from: entityInput.from,

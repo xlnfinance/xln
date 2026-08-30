@@ -1,5 +1,6 @@
 [package]
 name = "xln-rscore-process"
+autobins = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,11 +8,13 @@ rust-version.workspace = true
 publish = false
 
 [features]
-bench = []
+default = ["bench"]
+bench = ["xln-rscore-entity-kernel/bench"]
 
 [dependencies]
 base64.workspace = true
 getrandom.workspace = true
+form_urlencoded.workspace = true
 mimalloc.workspace = true
 num-bigint.workspace = true
 sha2.workspace = true
@@ -23,25 +26,12 @@ xln-rscore-engine = { path = "../engine" }
 xln-rscore-entity-kernel = { path = "../entity-kernel" }
 xln-rscore-protocol = { path = "../protocol" }
 xln-rscore-runtime = { path = "../runtime" }
+xln-rscore-crypto = { path = "../crypto" }
 serde_json = "1.0"
 
 [dev-dependencies]
 hex.workspace = true
 
 [[bin]]
-name = "xln-rscore"
+name = "xlnrs"
 path = "src/main.rs"
-
-[[bin]]
-name = "rscore-native-entity-replay"
-path = "src/bin/rscore-native-entity-replay.rs"
-required-features = ["bench"]
-
-[[bin]]
-name = "rscore-runtime-replay"
-path = "src/bin/rscore-runtime-replay.rs"
-required-features = ["bench"]
-
-[[bin]]
-name = "rscore-runtime"
-path = "src/bin/rscore-runtime.rs"

@@ -1,10 +1,10 @@
-import type { AccountDisputeHanko, AccountFrameAck, AccountFrameProposal, AccountBoardHankoRefresh, AccountInput } from '../../types/account';
+import type { AccountDisputeHanko, AccountAckFrame, AccountFrameProposal, AccountBoardHankoRefresh, AccountInput } from '../../types/account';
 
-export const accountInputAck = (input: AccountInput): AccountFrameAck | undefined =>
-  input.kind === 'ack' || input.kind === 'frame_ack' ? input.ack : undefined;
+export const accountInputAck = (input: AccountInput): AccountAckFrame | undefined =>
+  input.kind === 'ack' || input.kind === 'ack_frame' ? input.ack : undefined;
 
 export const accountInputProposal = (input: AccountInput): AccountFrameProposal | undefined =>
-  input.kind === 'frame' || input.kind === 'frame_ack' ? input.proposal : undefined;
+  input.kind === 'frame' || input.kind === 'ack_frame' ? input.proposal : undefined;
 
 export const accountInputDisputeHanko = (input: AccountInput): AccountDisputeHanko | undefined =>
   input.kind === 'dispute'

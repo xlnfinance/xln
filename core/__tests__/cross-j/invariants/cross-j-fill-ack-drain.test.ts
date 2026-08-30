@@ -14,6 +14,8 @@ import {
   jref,
   makeJurisdiction,
   makeState,
+  getTestAccountForWrite,
+  putTestAccountSwapOffer,
   secret,
 } from '../../helpers/cross-j';
 
@@ -28,7 +30,7 @@ test('pending fill ack is retained (and its incident never resolves) when admiss
   const hubEntity = entity('71');
   const userEntity = entity('72');
   const state = makeState(hubEntity, addr('73'), eth, userEntity);
-  const account = state.accounts.get(userEntity)!;
+  const account = getTestAccountForWrite(state, userEntity);
   const route = buildPreparedCrossJurisdictionRoute({
     orderId: 'offer-1',
     makerEntityId: userEntity,
@@ -56,7 +58,7 @@ test('pending fill ack is retained (and its incident never resolves) when admiss
   // The offer exists (so the drain attempts admission), and the same ack is
   // already queued in the account mempool, so local admission dedups it and the
   // drain must retain the pending entry instead of deleting it silently.
-  account.state.swapOffers.set('offer-1', {
+  putTestAccountSwapOffer(account, {
     offerId: 'offer-1',
     giveTokenId: 1,
     giveAmount: 100n,
@@ -116,8 +118,8 @@ test('pending fill ack drains once admission succeeds', async () => {
   const hubEntity = entity('74');
   const userEntity = entity('75');
   const state = makeState(hubEntity, addr('76'), eth, userEntity);
-  const account = state.accounts.get(userEntity)!;
-  account.state.swapOffers.set('offer-1', {
+  const account = getTestAccountForWrite(state, userEntity);
+  putTestAccountSwapOffer(account, {
     offerId: 'offer-1',
     giveTokenId: 1,
     giveAmount: 100n,

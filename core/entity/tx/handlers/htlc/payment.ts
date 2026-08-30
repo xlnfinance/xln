@@ -13,7 +13,7 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
-import { validatePreparedHtlcPayment } from '../../../htlc/payment-admission';
+import { validatePreparedHtlcPayment } from '../../../paybook/payment-admission';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../../support/logger';
 import type { EntityInfraContext } from '../../../../types/entity/infra-context';
 
@@ -29,7 +29,7 @@ type HtlcPaymentResult = {
 const buildOutboundLockTx = (prepared: PreparedHtlcPayment): AccountTx => ({
   type: 'htlc_lock',
   data: {
-    lockId: prepared.lockId,
+    lockId: prepared.hashlock,
     hashlock: prepared.hashlock,
     timelock: prepared.timelock,
     revealBeforeHeight: prepared.revealBeforeHeight,
@@ -45,14 +45,14 @@ const recordOriginatedHtlc = (
   prepared: PreparedHtlcPayment,
   candidateEffects: EntityCandidateEffect[],
 ): void => {
-  newState.htlcRoutes.set(prepared.hashlock, {
+  newState.paybook.entries.set(prepared.hashlock, {
     hashlock: prepared.hashlock,
+    ...(prepared.description ? { description: prepared.description } : {}),
     tokenId: prepared.tokenId,
     amount: prepared.recipientAmount,
     startedAtMs: prepared.startedAtMs,
     originated: true,
     outboundEntity: prepared.nextHopEntityId,
-    outboundLockId: prepared.lockId,
     createdTimestamp: newState.timestamp,
   });
   candidateEffects.push({
@@ -67,21 +67,11 @@ const recordOriginatedHtlc = (
       senderAmount: prepared.senderLockAmount.toString(),
       fee: prepared.totalFee.toString(),
       hashlock: prepared.hashlock,
-      lockId: prepared.lockId,
+      lockId: prepared.hashlock,
       route: prepared.route,
       ...(prepared.description ? { description: prepared.description } : {}),
       startedAtMs: prepared.startedAtMs,
     },
-  });
-  newState.lockBook.set(prepared.lockId, {
-    lockId: prepared.lockId,
-    accountId: prepared.nextHopEntityId,
-    tokenId: prepared.tokenId,
-    amount: prepared.senderLockAmount,
-    hashlock: prepared.hashlock,
-    timelock: prepared.timelock,
-    direction: 'outgoing',
-    createdAt: BigInt(newState.timestamp),
   });
 };
 
@@ -116,7 +106,7 @@ export async function handleHtlcPayment(
   );
   trace('mempool.queued', {
     account: shortId(prepared.nextHopEntityId),
-    lockId: shortHash(prepared.lockId),
+    lockId: shortHash(prepared.hashlock),
     revealBeforeHeight: prepared.revealBeforeHeight,
     amount: formatAmount(prepared.senderLockAmount),
     tokenId: prepared.tokenId,

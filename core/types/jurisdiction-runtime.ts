@@ -61,6 +61,16 @@ export interface JReplica {
   chainId?: number;
   /** Trusted watcher finality policy persisted with validator-local receipt evidence. */
   watcherConfirmationDepth?: number;
+  /** Committed token registry used by authenticated receipt filtering. */
+  tokenRegistry?: Array<{
+    symbol: string;
+    name: string;
+    address: string;
+    decimals: number;
+    tokenId: number;
+    tokenType: 0 | 1 | 2;
+    externalTokenId: bigint;
+  }>;
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };

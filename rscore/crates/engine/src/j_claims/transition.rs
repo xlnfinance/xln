@@ -1,10 +1,11 @@
 use crate::commitment::JClaimAccumulator;
 use crate::j_claims::accumulator::{JClaimStore, delete, insert, prune};
 use crate::j_claims::codec::{JClaimRecord, JClaimSide, account_key, j_error, same_record};
+use crate::j_claims::event_types::JurisdictionEvent;
 use crate::j_claims::events::{MAX_SAFE_INTEGER, canonical_events, canonical_events_hash};
 use crate::j_claims::proof::{ProofResult, create, inspect};
 use crate::j_claims::store::apply_changes;
-use crate::j_claims::types::{JClaimStatus, JClaimTransition, JEventClaimTx, JurisdictionEvent};
+use crate::j_claims::types::{JClaimStatus, JClaimTransition, JEventClaimTx};
 use crate::{AccountIdentity, JClaimProof, Side, StateError, ValidationRejection};
 
 pub(crate) struct AccountJEventClaimAdmission {

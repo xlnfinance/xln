@@ -4,8 +4,9 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::{
-    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeMempool, RuntimeTx,
-    canonical_value_from_tagged_json, decode_entity_deterministic_context,
+    RuntimeEntityFrameContext, RuntimeEntityInput, RuntimeEntityKey, RuntimeFrameContext,
+    RuntimeInput, RuntimeMempool, RuntimeTx, canonical_value_from_tagged_json,
+    decode_entity_deterministic_context,
 };
 
 use super::{ConcreteWalSource, DecodedRuntimeWalFrame};
@@ -137,11 +138,158 @@ fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteW
     let kind = tx["type"]
         .as_str()
         .ok_or_else(|| invalid(format!("STRING:{path}.type")))?;
+    let data_path = format!("{path}.data");
+    let data = object(&tx["data"], &data_path)?;
+    if kind == "recordRuntimeAdapterCommand" {
+        exact_fields(
+            data,
+            &[
+                "laneId",
+                "sequence",
+                "commandId",
+                "inputHash",
+                "expiresAtMs",
+            ],
+            &data_path,
+        )?;
+        let normalized_hash = |field: &str| -> Result<String, ConcreteWalDecodeError> {
+            let value = data[field]
+                .as_str()
+                .map(str::trim)
+                .map(str::to_ascii_lowercase)
+                .filter(|value| {
+                    value.len() == 66
+                        && value.starts_with("0x")
+                        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+                .ok_or_else(|| invalid(format!("HASH:{data_path}.{field}")))?;
+            Ok(value)
+        };
+        let command_id = data["commandId"]
+            .as_str()
+            .map(str::trim)
+            .filter(|value| {
+                (16..=128).contains(&value.len())
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')
+                    })
+            })
+            .ok_or_else(|| invalid(format!("COMMAND_ID:{data_path}.commandId")))?
+            .to_owned();
+        let sequence = safe_unsigned(&data["sequence"], &format!("{data_path}.sequence"))?;
+        if sequence == 0 {
+            return Err(invalid(format!("UNSIGNED:{data_path}.sequence")));
+        }
+        let expires_at_ms = match &data["expiresAtMs"] {
+            Value::Null => None,
+            value => {
+                let value = safe_unsigned(value, &format!("{data_path}.expiresAtMs"))?;
+                if value == 0 {
+                    return Err(invalid(format!("UNSIGNED:{data_path}.expiresAtMs")));
+                }
+                Some(value)
+            }
+        };
+        return Ok(RuntimeTx::RecordRuntimeAdapterCommand(
+            crate::RuntimeAdapterCommandMarker {
+                lane_id: normalized_hash("laneId")?,
+                sequence,
+                command_id,
+                input_hash: normalized_hash("inputHash")?,
+                expires_at_ms,
+            },
+        ));
+    }
+    if kind == "importJ" {
+        return crate::j_import::decode_import_request(&tx["data"])
+            .map(RuntimeTx::ImportJ)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "completeImportJ" {
+        return crate::j_import::decode_import_result(&tx["data"])
+            .map(RuntimeTx::CompleteImportJ)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "retryJSubmit" {
+        return crate::j_submit::lifecycle::decode_retry(&tx["data"])
+            .map(RuntimeTx::RetryJSubmit)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "recordJSubmitResult" {
+        return crate::j_submit::lifecycle::decode_result(&tx["data"])
+            .map(RuntimeTx::RecordJSubmitResult)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "retryEntityProviderAction" {
+        return crate::j_submit::provider_lifecycle::decode_retry_entity_provider_action(
+            &tx["data"],
+        )
+        .map(RuntimeTx::RetryEntityProviderAction)
+        .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "recordEntityProviderActionSubmitResult" {
+        return crate::j_submit::provider_lifecycle::decode_entity_provider_action_result(
+            &tx["data"],
+        )
+        .map(RuntimeTx::RecordEntityProviderActionSubmitResult)
+        .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "observeJRange" {
+        return crate::j_watcher::decode_observe_j_range(&tx["data"])
+            .map(RuntimeTx::ObserveJRange)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "recordGovernanceJSubmitResult" {
+        return crate::j_submit::decode_governance_result(&tx["data"])
+            .map(RuntimeTx::RecordGovernanceJSubmitResult)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if kind == "rewindJHistory" {
+        exact_fields(
+            data,
+            &[
+                "entityId",
+                "signerId",
+                "jurisdictionRef",
+                "conflictingHeight",
+                "conflictingBlockHash",
+            ],
+            &data_path,
+        )?;
+        let entity = digest(&data["entityId"], &format!("{data_path}.entityId"))?;
+        let signer_id = data["signerId"]
+            .as_str()
+            .filter(|value| !value.is_empty() && value.trim() == *value)
+            .ok_or_else(|| invalid(format!("STRING:{data_path}.signerId")))?
+            .to_ascii_lowercase();
+        let jurisdiction_ref = data["jurisdictionRef"]
+            .as_str()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| invalid(format!("STRING:{data_path}.jurisdictionRef")))?;
+        return Ok(RuntimeTx::RewindJHistory(crate::RewindJHistory {
+            entity_id: entity,
+            signer_id,
+            jurisdiction_ref,
+            conflicting_height: {
+                let value = safe_unsigned(
+                    &data["conflictingHeight"],
+                    &format!("{data_path}.conflictingHeight"),
+                )?;
+                if value == 0 {
+                    return Err(invalid(format!("UNSIGNED:{data_path}.conflictingHeight")));
+                }
+                value
+            },
+            conflicting_block_hash: digest(
+                &data["conflictingBlockHash"],
+                &format!("{data_path}.conflictingBlockHash"),
+            )?,
+        }));
+    }
     if kind != "advanceJWatcherCursor" {
         return Err(invalid(format!("RUNTIME_TX_UNSUPPORTED:{index}:{kind}")));
     }
-    let data_path = format!("{path}.data");
-    let data = object(&tx["data"], &data_path)?;
     exact_fields(
         data,
         &["depositoryAddress", "chainId", "blockNumber"],
@@ -186,9 +334,9 @@ pub fn decode_concrete_runtime_wal_frame(
     hub_rebalance_has_pending_work: bool,
 ) -> Result<DecodedRuntimeWalFrame, ConcreteWalDecodeError> {
     let frame = source.frame();
-    let height = safe_unsigned(field(&frame, "height", "frame")?, "frame.height")?;
-    let timestamp = safe_unsigned(field(&frame, "timestamp", "frame")?, "frame.timestamp")?;
-    let runtime_input = field(&frame, "runtimeInput", "frame")?;
+    let height = safe_unsigned(field(frame, "height", "frame")?, "frame.height")?;
+    let timestamp = safe_unsigned(field(frame, "timestamp", "frame")?, "frame.timestamp")?;
+    let runtime_input = field(frame, "runtimeInput", "frame")?;
     let runtime_input_object = object(runtime_input, "frame.runtimeInput")?;
     validate_runtime_input_fields(runtime_input_object)?;
     let runtime_txs = array(
@@ -223,28 +371,81 @@ pub fn decode_concrete_runtime_wal_frame(
             .map_err(|error| invalid(format!("ENTITY_INPUT:{height}:{index}:{error}")))
     })
     .collect::<Result<Vec<_>, _>>()?;
-    let entity_context_required = !entity_inputs.is_empty();
-    if source.entity_contexts().len() > 1
-        || (entity_context_required && source.entity_contexts().len() != 1)
-    {
-        return Err(invalid(format!(
-            "ENTITY_CONTEXT_COUNT:{height}:{}",
-            source.entity_contexts().len()
-        )));
-    }
-    let (entity_context, canonical_entity_context) = match source.entity_contexts().values().next()
-    {
-        Some(context) => (
-            decode_entity_deterministic_context(context_policy, &context.value)
+    let mut entity_contexts =
+        std::collections::BTreeMap::<RuntimeEntityKey, Vec<(u64, RuntimeEntityFrameContext)>>::new(
+        );
+    for (replica_id, context) in source.entity_contexts() {
+        // Canonical native WAL always binds one context to one exact Entity
+        // frame height. A bare `entity:signer` key collapses multiple frames
+        // and is rejected rather than treated as a compatibility format.
+        let mut replica_parts = replica_id.split(':');
+        let entity_text = replica_parts
+            .next()
+            .ok_or_else(|| invalid(format!("ENTITY_CONTEXT_REPLICA:{height}:{replica_id}")))?;
+        let signer_id = replica_parts
+            .next()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| invalid(format!("ENTITY_CONTEXT_REPLICA:{height}:{replica_id}")))?;
+        let entity_height = replica_parts
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0 && *value <= MAX_SAFE_INTEGER)
+            .ok_or_else(|| invalid(format!("ENTITY_CONTEXT_REPLICA:{height}:{replica_id}")))?;
+        if replica_parts.next().is_some() {
+            return Err(invalid(format!(
+                "ENTITY_CONTEXT_REPLICA:{height}:{replica_id}"
+            )));
+        }
+        let entity_id = parse_entity_id(entity_text)
+            .ok_or_else(|| invalid(format!("ENTITY_CONTEXT_REPLICA:{height}:{replica_id}")))?;
+        let key = RuntimeEntityKey::new(entity_id, signer_id)
+            .map_err(|error| invalid(format!("ENTITY_CONTEXT_KEY:{height}:{error}")))?;
+        let encoded_height = context
+            .value
+            .get("height")
+            .and_then(Value::as_u64)
+            .filter(|value| *value <= MAX_SAFE_INTEGER)
+            .ok_or_else(|| invalid(format!("ENTITY_CONTEXT_HEIGHT:{height}:{replica_id}")))?;
+        if encoded_height != entity_height {
+            return Err(invalid(format!(
+                "ENTITY_CONTEXT_HEIGHT_BINDING:{height}:{replica_id}:{encoded_height}"
+            )));
+        }
+        let decoded = RuntimeEntityFrameContext {
+            execution: decode_entity_deterministic_context(context_policy, &context.value)
                 .map_err(|error| invalid(format!("ENTITY_CONTEXT:{height}:{error}")))?,
-            canonical_value_from_tagged_json(&context.value)
+            canonical: canonical_value_from_tagged_json(&context.value)
                 .map_err(|error| invalid(format!("ENTITY_CONTEXT_VALUE:{height}:{error}")))?,
-        ),
-        None => (
-            xln_rscore_entity_kernel::DeterministicContext::hlt_default(),
-            xln_rscore_protocol::CanonicalValue::Object(Vec::new()),
-        ),
-    };
+        };
+        let contexts = entity_contexts.entry(key).or_default();
+        if contexts
+            .iter()
+            .any(|(seen_height, _)| *seen_height == entity_height)
+        {
+            return Err(invalid(format!(
+                "ENTITY_CONTEXT_DUPLICATE:{height}:{entity_text}:{entity_height}"
+            )));
+        }
+        contexts.push((entity_height, decoded));
+    }
+    // Runtime-generated Entity work (scheduler wakes and resident
+    // continuations) is intentionally absent from serialized `entityInputs`,
+    // but consumes an exact committed context during replay. The reducer
+    // rejects both missing and unconsumed contexts after reconstructing that
+    // deterministic work, which is the authoritative cardinality check.
+    let entity_contexts = entity_contexts
+        .into_iter()
+        .map(|(key, mut contexts)| {
+            contexts.sort_by_key(|(entity_height, _)| *entity_height);
+            (
+                key,
+                contexts
+                    .into_iter()
+                    .map(|(_, context)| context)
+                    .collect::<std::collections::VecDeque<_>>(),
+            )
+        })
+        .collect();
     let validated = source.validated();
     Ok(DecodedRuntimeWalFrame {
         height,
@@ -256,16 +457,27 @@ pub fn decode_concrete_runtime_wal_frame(
                 timestamp,
                 finalized_j_height,
                 hub_rebalance_has_pending_work,
-                entity_context,
-                canonical_entity_context,
+                entity_contexts,
             },
         },
         expected_accounts_root: None,
-        expected_entity_root: expected_entity_root(&frame)?,
+        expected_entity_root: expected_entity_root(frame)?,
         expected_previous_frame_hash: validated.prev_frame_hash,
         expected_frame_hash: validated.frame_hash,
         canonical_state_hash: validated.canonical_state_hash,
     })
+}
+
+fn parse_entity_id(value: &str) -> Option<[u8; 32]> {
+    let body = value.strip_prefix("0x")?;
+    if body.len() != 64 || !body.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut output = [0_u8; 32];
+    for (index, byte) in output.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&body[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(output)
 }
 
 /// Remove one resident occurrence for each byte-identical recorded input.
@@ -324,6 +536,8 @@ mod tests {
         let mut input = RuntimeInput::empty_frame(
             7,
             0,
+            [0x11; 32],
+            "first",
             DeterministicContext::hlt_default(),
             CanonicalValue::Object(Vec::new()),
         );
@@ -349,5 +563,27 @@ mod tests {
                 .collect::<Vec<_>>(),
             expected
         );
+    }
+
+    #[test]
+    fn runtime_adapter_command_marker_decodes_to_typed_runtime_tx() {
+        let value = json!({
+            "type": "recordRuntimeAdapterCommand",
+            "data": {
+                "laneId": format!("0x{}", "AB".repeat(32)),
+                "sequence": 1,
+                "commandId": "command-id-00001",
+                "inputHash": format!("0x{}", "CD".repeat(32)),
+                "expiresAtMs": null,
+            }
+        });
+        let RuntimeTx::RecordRuntimeAdapterCommand(marker) =
+            decode_runtime_tx(&value, 0).expect("typed marker")
+        else {
+            panic!("wrong RuntimeTx variant");
+        };
+        assert_eq!(marker.lane_id, format!("0x{}", "ab".repeat(32)));
+        assert_eq!(marker.input_hash, format!("0x{}", "cd".repeat(32)));
+        assert_eq!(marker.expires_at_ms, None);
     }
 }

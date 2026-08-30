@@ -4,7 +4,6 @@ import { join } from 'node:path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../account/crypto';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { computeEntityConsensusSectionDigestsCold } from '../../../entity/consensus/state-root';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { applyCommand, createBook } from '../../../orderbook/core';
 import { replaceOrderbookPair } from '../../../orderbook/order-index';
@@ -16,8 +15,7 @@ import {
 } from '../../../orderbook/types';
 import { RscoreProcessClient } from '../../../rscore/client';
 import { entityDeterministicContextWire } from '../../../rscore/entity/round-wire';
-import { entitySnapshotWire } from '../../../rscore/entity/snapshot-wire';
-import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
+import { entityOwnedSectionDigests, entitySnapshotWire } from '../../../rscore/entity/snapshot-wire';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import {
   accountConsensusWire,
@@ -30,19 +28,13 @@ import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { SwapOffer } from '../../../types/account';
 import { addr, entity, makeAccount, makeJurisdiction, makeState } from '../../helpers/cross-j';
 
-const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xlnrs');
 
 const identity = () => ({
   engineGeneration: Buffer.alloc(8, 0xa1),
   runtimeId: Buffer.alloc(20, 0x11),
   sessionId: Buffer.alloc(16, 0x21),
 });
-
-const owned = new Set([
-  'accounts', 'entityId', 'height', 'timestamp', 'lastFinalizedJHeight',
-  'htlcRoutes', 'htlcFeesEarned', 'lockBook', 'orderbookExt',
-  'crontabState', 'reserves',
-]);
 
 describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
   test('restores exact TS book pages and executes one fused empty round', async () => {
@@ -84,7 +76,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
       ['offer-a', offer('offer-a')],
       ['offer-c', offer('offer-c')],
     ]);
-    state.accounts = state.accounts.updated(counterparty, account);
+    state.accounts.set(counterparty, account);
 
     let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 32, stpPolicy: 1 });
     for (const offerId of ['offer-a', 'hole', 'offer-c']) {
@@ -133,14 +125,12 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
       data: { accountId: counterparty, lockId: `0x${'bc'.repeat(32)}` },
     });
     const routeHashlock = `0x${'ab'.repeat(32)}`;
-    state.htlcRoutes = PersistentEntityCollectionMap.empty().updated(routeHashlock, {
+    state.paybook.entries.set(routeHashlock, {
       hashlock: routeHashlock,
       tokenId: 1,
       amount: 1_000n,
       inboundEntity: counterparty,
-      inboundLockId: `0x${'bc'.repeat(32)}`,
       outboundEntity: counterparty,
-      outboundLockId: `0x${'cd'.repeat(32)}`,
       pendingFee: 0n,
       createdTimestamp: state.timestamp,
     });
@@ -163,11 +153,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         .toBe(state.accounts.rootHash());
       const entityLoaded = await client.bootstrapEntity(entitySnapshotWire(state));
       expect(entityLoaded.accountsRoot).toBe(state.accounts.rootHash());
-      expect(entityLoaded.ownedSections).toEqual(
-        computeEntityConsensusSectionDigestsCold(state)
-          .filter(section => owned.has(section.field))
-          .sort((left, right) => left.field.localeCompare(right.field)),
-      );
+      expect(entityLoaded.ownedSections).toEqual(entityOwnedSectionDigests(state));
 
       const context: EntityInfraContext = {
         version: 1,
@@ -198,11 +184,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
       expect(round.outbound.proposals).toEqual([]);
       expect(round.outputs).toEqual([]);
       const expected = { ...state, height: state.height + 1, timestamp: state.timestamp + 1 };
-      expect(round.ownedSections).toEqual(
-        computeEntityConsensusSectionDigestsCold(expected)
-          .filter(section => owned.has(section.field))
-          .sort((left, right) => left.field.localeCompare(right.field)),
-      );
+      expect(round.ownedSections).toEqual(entityOwnedSectionDigests(expected));
 
       // A Runtime frame may be retried after its candidate was never made
       // durable. The process must discard that candidate and deterministically
@@ -221,11 +203,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         context: entityDeterministicContextWire(state, context, jurisdiction.name),
       });
       const retryExpected = { ...state, height: state.height + 1, timestamp: state.timestamp + 2 };
-      expect(retry.ownedSections).toEqual(
-        computeEntityConsensusSectionDigestsCold(retryExpected)
-          .filter(section => owned.has(section.field))
-          .sort((left, right) => left.field.localeCompare(right.field)),
-      );
+      expect(retry.ownedSections).toEqual(entityOwnedSectionDigests(retryExpected));
 
       // Advancing from the candidate's root/height promotes it implicitly.
       const advanced = await client.entityRound({
@@ -250,11 +228,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         height: state.height + 2,
         timestamp: state.timestamp + 3,
       };
-      expect(advanced.ownedSections).toEqual(
-        computeEntityConsensusSectionDigestsCold(advancedExpected)
-          .filter(section => owned.has(section.field))
-          .sort((left, right) => left.field.localeCompare(right.field)),
-      );
+      expect(advanced.ownedSections).toEqual(entityOwnedSectionDigests(advancedExpected));
       await client.shutdown();
     } finally {
       client.kill();

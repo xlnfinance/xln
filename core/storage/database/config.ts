@@ -2,8 +2,6 @@ import type { RuntimeReplica } from '../../runtime/types';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
-  DEFAULT_HISTORY_VIEW_MAX_BYTES,
-  DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
   DEFAULT_MATERIALIZE_PERIOD_FRAMES,
   DEFAULT_RETAIN_SNAPSHOTS,
   DEFAULT_SNAPSHOT_PERIOD_FRAMES,
@@ -52,11 +50,6 @@ export const resolveStorageRuntimeConfig = (env: RuntimeReplica): Required<Stora
     ),
     retainSnapshots: positiveStorageInteger(raw?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS, 'RETAIN_SNAPSHOTS'),
     epochMaxBytes: positiveStorageInteger(raw?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES, 'EPOCH_MAX_BYTES'),
-    historyViewMaxBytes: positiveStorageInteger(raw?.historyViewMaxBytes ?? DEFAULT_HISTORY_VIEW_MAX_BYTES, 'HISTORY_VIEW_MAX_BYTES'),
-    historyViewRetainFrames: positiveStorageInteger(
-      raw?.historyViewRetainFrames ?? DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
-      'HISTORY_VIEW_RETAIN_FRAMES',
-    ),
     materializePeriodFrames: positiveStorageInteger(
       raw?.materializePeriodFrames ?? DEFAULT_MATERIALIZE_PERIOD_FRAMES,
       'MATERIALIZE_PERIOD_FRAMES',

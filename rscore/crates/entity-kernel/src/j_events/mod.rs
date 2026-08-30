@@ -10,7 +10,7 @@ pub use history::{
     CanonicalJEventBlock, EMPTY_J_HISTORY_ROOT, canonical_j_event_blocks,
     canonical_j_event_range_hash, fold_j_history_root, j_event_range_digest,
 };
-pub use ingress::apply_finalized_j_event_batches;
+pub use ingress::{apply_finalized_j_event_batches, project_finalized_j_event_batch};
 pub use types::{
     EntityJEventIngress, FinalizedJEventBatch, JClaimIngress, JEventClaimQueued, JReserveUpdate,
 };
@@ -27,6 +27,13 @@ pub(crate) fn account_tx_kind(tx: &AccountTx) -> &'static str {
         AccountTx::LendingCloseRequest { .. } => "lending_close_request",
         AccountTx::LendingClosePayout { .. } => "lending_close_payout",
         AccountTx::ReserveToCollateral { .. } => "reserve_to_collateral",
+        AccountTx::RequestCollateral { .. } => "request_collateral",
+        AccountTx::RebalanceRefund { .. } => "rebalance_refund",
+        AccountTx::CrossPullLock { .. } => "cross_pull_lock",
+        AccountTx::CrossPullClose { .. } => "cross_pull_close",
+        AccountTx::CrossPullProgress { .. } => "cross_pull_progress",
+        AccountTx::CrossSwapFillAck { .. } => "cross_swap_fill_ack",
+        AccountTx::SettleTransition { .. } => "settle_transition",
         AccountTx::SwapOffer { .. } => "swap_offer",
         AccountTx::SwapResolve { .. } => "swap_resolve",
         AccountTx::SwapCancelRequest { .. } => "swap_cancel_request",

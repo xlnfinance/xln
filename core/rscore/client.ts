@@ -80,7 +80,7 @@ const RSCORE_ABI_VERSION = 1;
 // Propose are bound to its content-derived key; Seal cannot cross an open
 // stage, and accept/rollback advance the explicit accepted-stage ordinal.
 // 14: peer inputs carry the exact Account envelope plus the closed
-// Frame/Ack/FrameAck shapes. FrameAck is one ACK-first operation and returns
+// Frame/Ack/AckFrame shapes. AckFrame is one ACK-first operation and returns
 // one ordered composite row; its valid ACK survives a rejected proposal.
 // 21: inbound-first Account genesis carries trusted Entity policy and returns
 // its exact H=1 materialization separately from the final touched rows.
@@ -105,7 +105,9 @@ const RSCORE_ABI_VERSION = 1;
 // 34: Account frames no longer duplicate deltas or proposer side.
 // 35: Account input rows carry full peer/local certified-board authority.
 // 36: Entity snapshots carry the bounded Entity-command nonce fence.
-export const RSCORE_PROCESS_ABI_VERSION = 37;
+// 38: fresh Account bootstrap returns its exact empty checkpoint with the
+// loaded root, so an idle Runtime persists one canonical restore base.
+export const RSCORE_PROCESS_ABI_VERSION = 38;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -637,7 +639,6 @@ export class RscoreProcessClient {
     admits: readonly RscoreWireValue[];
     propose: readonly RscoreWireValue[];
     materialize: readonly RscoreWireValue[];
-    failedHtlcRoutes: readonly RscoreWireValue[];
     postAccounts: boolean;
     checkpointDue: boolean;
   }>): Promise<Wave> {
@@ -649,7 +650,6 @@ export class RscoreProcessClient {
       [...wave.admits],
       [...wave.propose],
       [...wave.materialize],
-      [...wave.failedHtlcRoutes],
       wave.postAccounts,
       wave.checkpointDue,
     ]);

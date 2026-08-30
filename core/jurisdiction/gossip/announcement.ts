@@ -4,14 +4,15 @@
  * Entity: contract readiness and local operator admission remain mandatory. [96/100]
  */
 
-import { Signature, Wallet, getAddress, hexlify, keccak256, recoverAddress } from 'ethers';
+import { Signature, Wallet, getAddress, hexlify, recoverAddress } from 'ethers';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
 } from '../../protocol/boundary/boundary-primitives';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 const JURISDICTION_GOSSIP_DOMAIN = 'xln-jurisdiction-gossip-v1' as const;
 export const MAX_JURISDICTION_GOSSIP_RECORDS = 128;
@@ -125,9 +126,9 @@ const unsignedAnnouncement = (
 
 export const computeJurisdictionGossipHash = (
   announcement: JurisdictionGossipAnnouncement | UnsignedAnnouncement,
-): string => keccak256(new TextEncoder().encode(encodeCanonicalConsensusValue(
+): string => keccakBytesHash(encodeCanonicalConsensusBytes(
   'signature' in announcement ? unsignedAnnouncement(announcement) : announcement,
-)));
+));
 
 const assertCanonicalSignature = (signature: string, hash: string, signerId: string): void => {
   if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('JURISDICTION_GOSSIP_SIGNATURE_INVALID');

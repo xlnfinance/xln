@@ -69,6 +69,10 @@ pub struct EncodedRuntimeFrame {
     pub(crate) output_digest: Digest,
     pub(crate) validated: ValidatedRuntimeFrame,
     pub(crate) commit: RuntimeFrameCommit,
+    /// Transient values that produced `commit.outputs`. They cross the fsync
+    /// boundary only in RAM so immediate publication does not decode the WAL
+    /// bytes it just encoded. They are never persisted or reconstructed.
+    pub(crate) resident_output_values: Option<Vec<Value>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

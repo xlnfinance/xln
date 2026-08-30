@@ -10,12 +10,6 @@ import { ensureRuntimeInfrastructure } from '../../runtime/envelope/replica-enve
 import type { RuntimeReplica } from '../../runtime/types';
 import { clearDatabase } from '../database/clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
-import { resolveStorageRuntimeConfig } from '../database/config';
-import { listSnapshotHeights } from '../database/lifecycle';
-import {
-  readHistoryViewRuntimeActivity,
-  reconcileHistoryViews,
-} from '../history/history-view';
 import {
   applyCertifiedEntityHeadPlan,
   buildCertifiedEntityHeadPlan,
@@ -29,7 +23,7 @@ import {
 } from '../keys';
 import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
 import { buildStorageReplicaMetaCommitment } from '../replica/replicas';
-import { readStorageFrameRecord, replaceRestoredStorageBase } from '../index';
+import { replaceRestoredStorageBase } from '../index';
 import { type StorageDbRole, withStorageWriterLock } from '../runtime-dbs';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from '../types';
 import { buildStorageRuntimeMachineSnapshot } from '../wal/snapshot';
@@ -37,10 +31,8 @@ import { buildStorageRuntimeMachineSnapshot } from '../wal/snapshot';
 export interface PersistRestoredRuntimeDeps {
   getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
   getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
-  getHistoryViewDb(env: RuntimeReplica): Level<Buffer, Buffer>;
   tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
   tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
-  tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
 }
 
 export interface PersistRestoredRuntimeOptions {
@@ -134,9 +126,8 @@ const persistRestoredRuntimeStateUnlocked = async (
     throw new Error('RECOVERY_PERSIST_STORAGE_OPEN_FAILED');
   }
   if (!(await deps.tryOpenRuntimeWalDb(env))) throw new Error('RECOVERY_PERSIST_RUNTIME_WAL_OPEN_FAILED');
-  if (!(await deps.tryOpenHistoryViewDb(env))) throw new Error('RECOVERY_PERSIST_HISTORY_VIEW_OPEN_FAILED');
 
-  const replacement = await replaceRestoredStorageBase({
+  await replaceRestoredStorageBase({
     currentDb: deps.getStorageDb(env, 'current'),
     walDb: deps.getRuntimeWalDb(env),
     ...coordinates,
@@ -160,27 +151,8 @@ const persistRestoredRuntimeStateUnlocked = async (
     accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),
     ...(options.onPersistenceBoundary ? { onPersistenceBoundary: options.onPersistenceBoundary } : {}),
   });
-  const walDb = deps.getRuntimeWalDb(env);
-  const viewDb = deps.getHistoryViewDb(env);
-  if (replacement === 'replaced') {
-    // A checkpoint import replaces the complete WAL lineage. Runtime activity
-    // is only a rebuildable projection, so retaining any row from the retired
-    // lineage would make the exact activity->RuntimeFrame join lie. Clear it;
-    // never add a tolerant reader or a compatibility merge.
-    await clearDatabase(viewDb);
-    await options.onPersistenceBoundary?.('after-restore-history-view-clear');
-  }
-  const firstWalHeight = (await listSnapshotHeights(walDb))[0] ?? coordinates.height;
-  await reconcileHistoryViews({
-    viewDb,
-    firstWalHeight,
-    latestWalHeight: coordinates.height,
-    readWalFrame: height => readStorageFrameRecord(walDb, height),
-    readWalActivity: height => readHistoryViewRuntimeActivity(walDb, height),
-    config: resolveStorageRuntimeConfig(env),
-  });
   // Publish the same full current heads in RAM only after the atomic storage
-  // swap succeeds. Older certified frames remain in history, never the live replica.
+  // swap succeeds. No separate Entity/Account history is persisted.
   applyCertifiedEntityHeadPlan(env, headPlan);
   if (await deps.tryOpenStorageDb(env, 'previous')) {
     await clearDatabase(deps.getStorageDb(env, 'previous'));

@@ -46,7 +46,7 @@ impl SwapMarketPolicy {
         self.tokens.is_empty()
     }
 
-    fn liquid(&self, token_id: u32) -> bool {
+    pub(crate) fn liquid(&self, token_id: u32) -> bool {
         self.tokens.get(&token_id).is_some_and(|token| token.liquid)
     }
 

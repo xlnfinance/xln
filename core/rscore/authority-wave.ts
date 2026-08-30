@@ -24,6 +24,7 @@ import {
   accountTxWire,
   accountEnvelopeWire,
   accountSeedWire,
+  canonicalValueWire,
   hexToWireBytes,
   shadowOutputRows,
   waveAdmitOp,
@@ -35,7 +36,7 @@ import type { RscoreWireValue } from './client';
 import type {
   AccountDisputeHanko,
   AccountFrame,
-  AccountFrameAck,
+  AccountAckFrame,
   AccountFrameProposal,
   AccountInput,
   AccountPeerInput,
@@ -54,12 +55,12 @@ import type { CertifiedBoardRecord } from '../types/entity-board-registry';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
-type RawAccountInputKind = 'create' | 'enqueue' | 'frame' | 'ack' | 'frame_ack' | 'dispute'
+type RawAccountInputKind = 'create' | 'enqueue' | 'frame' | 'ack' | 'ack_frame' | 'dispute'
   | 'external_finality' | 'other';
 
 type AuthorityPeerInput = Extract<
   AccountPeerInput,
-  { kind: 'frame' | 'ack' | 'frame_ack' }
+  { kind: 'frame' | 'ack' | 'ack_frame' }
 >;
 
 /** What arrived for one account, as the engine would be handed it. */
@@ -68,7 +69,7 @@ type RecordedPayload =
   | { kind: 'admit'; txs: readonly AccountTx[] }
   | { kind: 'frame'; input: Extract<AccountPeerInput, { kind: 'frame' }> }
   | { kind: 'ack'; input: Extract<AccountPeerInput, { kind: 'ack' }> }
-  | { kind: 'frame_ack'; input: Extract<AccountPeerInput, { kind: 'frame_ack' }> }
+  | { kind: 'ack_frame'; input: Extract<AccountPeerInput, { kind: 'ack_frame' }> }
   /** Inputs no wave can carry: they are counted, and the frame is not driven. */
   | { kind: 'unsupported'; reason: string };
 
@@ -223,7 +224,7 @@ const classify = (input: AccountInput): RawAccountInputKind => {
     case 'dispute': return 'dispute';
     case 'frame': return 'frame';
     case 'ack': return 'ack';
-    case 'frame_ack': return 'frame_ack';
+    case 'ack_frame': return 'ack_frame';
     case 'board_hanko_refresh': return 'other';
   }
 };
@@ -276,7 +277,7 @@ export const noteRawAccountInput = (
 const responseAckHanko = (result: HandleAccountInputResult): string | null => {
   if (!result.ok || result.response === undefined) return null;
   const response = result.response;
-  if (response.kind !== 'ack' && response.kind !== 'frame_ack') return null;
+  if (response.kind !== 'ack' && response.kind !== 'ack_frame') return null;
   return response.ack.frameHanko ?? null;
 };
 
@@ -386,7 +387,7 @@ export const noteAuthorityAccountCreate = (
 
 /**
  * Preserve one canonical peer envelope as one authority operation. A
- * `frame_ack` still has ACK-before-proposal semantics, but the order lives
+ * `ack_frame` still has ACK-before-proposal semantics, but the order lives
  * inside its composite kind instead of inventing two arrivals and two result
  * rows for the one AccountInput TypeScript received.
  */
@@ -398,8 +399,8 @@ const payloadsOf = (input: AccountInput): RecordedPayload[] => {
       return [{ kind: 'frame', input }];
     case 'ack':
       return [{ kind: 'ack', input }];
-    case 'frame_ack':
-      return [{ kind: 'frame_ack', input }];
+    case 'ack_frame':
+      return [{ kind: 'ack_frame', input }];
     case 'external_finality':
     case 'dispute':
     case 'board_hanko_refresh':
@@ -485,7 +486,7 @@ export const noteAuthorityAccountProposalResult = (
   let frame: AccountFrame | null = null;
   if (result.outcome === 'proposed') {
     const outbound = result.accountInput;
-    if (outbound.kind !== 'frame' && outbound.kind !== 'frame_ack') {
+    if (outbound.kind !== 'frame' && outbound.kind !== 'ack_frame') {
       throw new Error(`RSCORE_AUTHORITY_PROPOSAL_INPUT_KIND:${outbound.kind}`);
     }
     frame = outbound.proposal.frame;
@@ -1045,10 +1046,11 @@ const authorityBoardWire = (
 export const authorityPeerInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
-  payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' | 'frame_ack' }>,
+  payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' | 'ack_frame' }>,
   genesisPolicy?: Readonly<{
     expectedDomain: Readonly<{ chainId: number; depositoryAddress: string }>;
     shadowPolicyRoot: string;
+    shadowPolicyRows: readonly (readonly [number, unknown])[];
     deltaTransformer: string;
     publicPinned: false;
   }>,
@@ -1063,7 +1065,7 @@ export const authorityPeerInputRow = (
   switch (decoded.kind) {
     case 'frame':
     case 'ack':
-    case 'frame_ack':
+    case 'ack_frame':
       return [
         operationIndex,
         accountId,
@@ -1080,6 +1082,10 @@ export const authorityPeerInputRow = (
                 ),
               ],
               hexToWireBytes(genesisPolicy.shadowPolicyRoot, 32, 'AUTHORITY_GENESIS_POLICY_ROOT'),
+              genesisPolicy.shadowPolicyRows.map(([tokenId, policy]) => [
+                tokenId,
+                canonicalValueWire(policy),
+              ]),
               hexToWireBytes(genesisPolicy.deltaTransformer, 20, 'AUTHORITY_GENESIS_TRANSFORMER'),
               genesisPolicy.publicPinned,
             ],
@@ -1113,14 +1119,14 @@ const peerEnvelopeWire = (input: AuthorityPeerInput): RscoreWireValue => [
   peerKindWire(input),
 ];
 
-/** Tags 0/1/2 are Frame/Ack/FrameAck; composite order is ACK then proposal. */
+/** Tags 0/1/2 are Frame/Ack/AckFrame; composite order is ACK then proposal. */
 const peerKindWire = (input: AuthorityPeerInput): RscoreWireValue => {
   switch (input.kind) {
     case 'frame':
       return [0, peerProposalWire(input.proposal)];
     case 'ack':
       return [1, peerAckWire(input.ack)];
-    case 'frame_ack':
+    case 'ack_frame':
       return [2, peerAckWire(input.ack), peerProposalWire(input.proposal)];
   }
 };
@@ -1131,7 +1137,7 @@ const peerProposalWire = (proposal: AccountFrameProposal): RscoreWireValue => [
   peerDisputeWire(proposal.disputeHanko),
 ];
 
-const peerAckWire = (ack: AccountFrameAck): RscoreWireValue => [
+const peerAckWire = (ack: AccountAckFrame): RscoreWireValue => [
   ack.height,
   hexToWireBytes(ack.frameHash, 32, 'AUTHORITY_ACK_FRAME_HASH'),
   optionalHankoWire(ack.frameHanko),

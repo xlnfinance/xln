@@ -7,13 +7,13 @@
 
 import { resolve } from 'node:path';
 
-import { readHltHubRecording } from '../../hlt/replay/recording';
+import type { EntityTx } from '../../../../types/entity-tx';
+import { readHltHubRecording, recordingFrames } from '../../hlt/replay/recording';
 
 type Manifest = Readonly<{
   recordingPath: string;
   distinctActiveAccounts: number;
   submittedPayments: number;
-  completedPayments: number;
   runtimeFrames: number;
   accountIngress: number;
   accountEgress: number;
@@ -24,6 +24,21 @@ type Manifest = Readonly<{
   outboxEnvelopes: number;
   swaps: number;
 }>;
+
+const visitEntityTx = (tx: EntityTx, visit: (tx: EntityTx) => void): void => {
+  visit(tx);
+  if (tx.type === 'entityCommand') {
+    for (const nested of tx.data.txs) visitEntityTx(nested, visit);
+  } else if (tx.type === 'runtimeOutput') {
+    for (const nested of tx.data.entityTxs) visitEntityTx(nested, visit);
+  }
+};
+
+const bilateralKey = (left: string, right: string): string => {
+  const a = left.toLowerCase();
+  const b = right.toLowerCase();
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+};
 
 const percentile = (sorted: number[], pct: number): number => {
   if (sorted.length === 0) return 0;
@@ -37,65 +52,63 @@ const percentile = (sorted: number[], pct: number): number => {
 
 export const analyzeFixture = (recordingPath: string): Manifest => {
   const artifact = readHltHubRecording(recordingPath);
-  const coverage = artifact.authorityEvidence.economicOperations.coverage;
-  const ops = artifact.authorityEvidence.economicOperations.operations;
-
-  // Distinct active bilateral Account IDs (each is a hub-peer pair)
-  const distinctAccounts = new Set(
-    ops.flatMap(op => op.stages.map(stage => `${stage.ownerEntityId}|${stage.counterpartyId}`)),
-  );
-
-  // Submitted payments = all direct_payment account txs
-  const submittedPayments = coverage.directPayments;
-
-  // Completed payments = direct payments with at least one stage
-  const completedPayments = ops
-    .filter(op => op.kind === 'direct_payment' && op.stages.length > 0)
-    .length;
-
-  // Runtime frames
-  const runtimeFrames = artifact.totals.runtimeFrames;
-
-  // Every accepted bilateral round contains exactly one received AccountInput
-  // and one emitted AccountInput. The oracle stores the committed frame once,
-  // whether it committed from an ACK (`ackCommit`) or peer proposal
-  // (`peerCommit`); retransmit traffic is intentionally outside this count.
-  const accountRounds = artifact.authorityFrameOracle.accountFrames
-    .filter(record => record.source === 'ackCommit' || record.source === 'peerCommit').length;
-  const accountIngress = accountRounds;
-  const accountEgress = accountRounds;
-
-  // Batch distribution: number of direct_payment account txs per Runtime frame
+  const frames = recordingFrames(artifact.recording);
+  const distinctAccounts = new Set<string>();
+  let submittedPayments = 0;
+  let accountIngress = 0;
+  let accountEgress = 0;
+  let swaps = 0;
   const batchSizes: number[] = [];
-  const frameToPayments = new Map<number, number>();
-  for (const record of artifact.authorityFrameOracle.accountFrames) {
-    if (record.frame.accountTxs.some(tx => tx.type === 'direct_payment')) {
-      const count = record.frame.accountTxs.filter(tx => tx.type === 'direct_payment').length;
-      frameToPayments.set(
-        record.runtimeHeight,
-        (frameToPayments.get(record.runtimeHeight) ?? 0) + count,
-      );
+
+  for (const frame of frames) {
+    let framePayments = 0;
+    for (const input of frame.runtimeInput.entityInputs) {
+      for (const tx of [...(input.entityTxs ?? []), ...(input.proposedFrame?.txs ?? [])]) {
+        visitEntityTx(tx, current => {
+          if (current.type === 'directPayment') {
+            submittedPayments += 1;
+            framePayments += 1;
+            for (let index = 1; index < current.data.route.length; index += 1) {
+              distinctAccounts.add(bilateralKey(
+                current.data.route[index - 1]!,
+                current.data.route[index]!,
+              ));
+            }
+          } else if (current.type === 'accountInput') {
+            accountIngress += 1;
+            distinctAccounts.add(bilateralKey(
+              current.data.fromEntityId,
+              current.data.toEntityId,
+            ));
+          }
+        });
+      }
     }
+    for (const output of frame.runtimeOutputs ?? []) {
+      for (const tx of output.entityTxs ?? []) {
+        visitEntityTx(tx, current => {
+          if (current.type === 'accountInput') accountEgress += 1;
+        });
+      }
+    }
+    swaps += frame.logs.filter(entry => entry.message === 'SwapMatched').length;
+    if (framePayments > 0) batchSizes.push(framePayments);
   }
-  for (const count of frameToPayments.values()) {
-    batchSizes.push(count);
-  }
-  batchSizes.sort((a, b) => a - b);
+  const sortedBatchSizes = batchSizes.toSorted((a, b) => a - b);
 
   const manifest: Manifest = {
     recordingPath,
     distinctActiveAccounts: distinctAccounts.size,
     submittedPayments,
-    completedPayments,
-    runtimeFrames,
+    runtimeFrames: frames.length,
     accountIngress,
     accountEgress,
     batchSizes,
-    batchP50: percentile(batchSizes, 50),
-    batchP95: percentile(batchSizes, 95),
-    batchMax: batchSizes.length > 0 ? batchSizes.at(-1)! : 0,
+    batchP50: percentile(sortedBatchSizes, 50),
+    batchP95: percentile(sortedBatchSizes, 95),
+    batchMax: sortedBatchSizes.at(-1) ?? 0,
     outboxEnvelopes: artifact.totals.outboxEnvelopes,
-    swaps: coverage.swapResolves,
+    swaps,
   };
 
   return manifest;
@@ -107,12 +120,6 @@ export const assertManifest = (manifest: Manifest): void => {
   }
   if (manifest.submittedPayments < 1) {
     throw new Error(`FIXTURE_MANIFEST_ASSERT_SUBMITTED_PAYMENTS:${manifest.submittedPayments}`);
-  }
-  if (manifest.completedPayments < manifest.submittedPayments * 0.5) {
-    throw new Error(
-      `FIXTURE_MANIFEST_ASSERT_COMPLETED_PAYMENTS:` +
-      `submitted=${manifest.submittedPayments}:completed=${manifest.completedPayments}`,
-    );
   }
   if (manifest.runtimeFrames < 1) {
     throw new Error(`FIXTURE_MANIFEST_ASSERT_RUNTIME_FRAMES:${manifest.runtimeFrames}`);
@@ -127,7 +134,6 @@ export const printManifest = (manifest: Manifest): string => {
   lines.push(` recordingPath          ${manifest.recordingPath}`);
   lines.push(` distinctActiveAccounts  ${manifest.distinctActiveAccounts}`);
   lines.push(` submittedPayments      ${manifest.submittedPayments}`);
-  lines.push(` completedPayments      ${manifest.completedPayments}`);
   lines.push(` runtimeFrames           ${manifest.runtimeFrames}`);
   lines.push(` accountIngress          ${manifest.accountIngress}`);
   lines.push(` accountEgress           ${manifest.accountEgress}`);

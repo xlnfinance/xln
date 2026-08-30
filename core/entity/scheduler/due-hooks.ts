@@ -7,13 +7,13 @@ import type {
 } from './types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/history/height';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { HTLC_SECRET_ACK_TIMEOUT_MS, terminateHtlcRoute } from '../tx/j-events-htlc/route-lifecycle';
+import { HTLC_SECRET_ACK_TIMEOUT_MS, terminatePayment } from '../paybook/lifecycle';
 import { scheduleHook } from './hook-state';
 import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
 import { processBoardHankoRefreshHook } from './board-hanko-refresh-hook';
-import { isDisputeReadyHtlcRoute } from '../htlc/route-views';
+import { isDisputeReadyPayment } from '../paybook/views';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -22,10 +22,10 @@ const processSecretAckTimeout = (
   replica: EntityTransitionContext,
   plan: DueHookPlan,
 ): void => {
-  const { hashlock, counterpartyEntityId, inboundLockId } = hook.data;
-  const route = replica.state.htlcRoutes.get(hashlock);
+  const { hashlock, counterpartyEntityId } = hook.data;
+  const route = replica.state.paybook.entries.get(hashlock);
   if (!route) return;
-  if (!isDisputeReadyHtlcRoute(route, replica.state.timestamp)) {
+  if (!isDisputeReadyPayment(route, replica.state.timestamp)) {
     if (route.secretAckPending) {
       throw new Error(`HTLC_SECRET_ACK_ROUTE_INVALID:${hashlock}`);
     }
@@ -33,8 +33,8 @@ const processSecretAckTimeout = (
   }
   const account = replica.state.accounts.get(counterpartyEntityId);
   if (!account) return;
-  if (inboundLockId && !account.state.locks?.has(inboundLockId)) {
-    terminateHtlcRoute(replica.state, hashlock, replica.state.timestamp);
+  if (!account.state.locks?.has(hashlock)) {
+    terminatePayment(replica.state, hashlock);
     return;
   }
   if (account.activeDispute) return;

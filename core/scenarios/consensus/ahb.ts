@@ -34,9 +34,9 @@ import { deriveDelta, isLeftEntity } from '../../account/utils';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { clearRuntimeFrameEvents } from '../../runtime/observability/env-events';
 import {
-  readRuntimeHistoryTraceForTesting,
-  startRuntimeHistoryTraceForTesting,
-} from '../../runtime/observability/history-retention';
+  readRuntimeTraceForTesting,
+  startRuntimeTraceForTesting,
+} from '../../runtime/observability/runtime-trace';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { readEntityFrameEventMessages } from '../../entity/frame-events';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
@@ -1650,8 +1650,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   // Run until both payments settle (max 20 rounds for safety). The timeline is
   // owned by an explicit collector, never by RuntimeReplica.
-  const existingTrace = readRuntimeHistoryTraceForTesting(env);
-  const ownedTrace = existingTrace ? null : startRuntimeHistoryTraceForTesting(env);
+  const existingTrace = readRuntimeTraceForTesting(env);
+  const ownedTrace = existingTrace ? null : startRuntimeTraceForTesting(env);
   const consensusTrace = existingTrace ?? ownedTrace!.snapshots;
   let traceCursor = consensusTrace.length;
   let rounds = 0;

@@ -12,9 +12,12 @@ use std::collections::BTreeMap;
 
 use sha3::{Digest as _, Keccak256};
 use thiserror::Error;
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_canonical_consensus_text};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_canonical_consensus_bytes};
 
-use crate::{CanonicalJEventBlock, EntityStateSlice, j_events::canonical_j_event_range_hash};
+use crate::{
+    CanonicalJEventBlock, EntityStateSlice,
+    j_events::{canonical_j_event_range_hash, j_event_range_digest},
+};
 
 use super::authority::{EntityAuthorityError, EntityFrameAuthority};
 use super::single_signer::EntitySingleSigner;
@@ -50,8 +53,22 @@ pub enum JPrefixError {
     Encoding(String),
 }
 
-/// Exact `JPrefixClaim` (no event blocks: the H1 steady-state path only
-/// certifies the already-finalized base anchor).
+/// Exact single-signer range already derived from the authenticated local
+/// watcher history. Runtime constructs this value once and uses it for both
+/// the `j_event` transaction and the J-prefix certificate; the consensus
+/// layer must never rebuild a second view of the same range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JPrefixRangeClaim {
+    pub jurisdiction_ref: String,
+    pub base_height: u64,
+    pub scanned_through_height: u64,
+    pub tip_block_hash: String,
+    pub event_history_root: String,
+    pub range_hash: String,
+    pub headers: Vec<CanonicalValue>,
+    pub blocks: Vec<CanonicalValue>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JPrefixClaim {
     jurisdiction_ref: String,
@@ -60,6 +77,7 @@ struct JPrefixClaim {
     tip_block_hash: String,
     event_history_root: String,
     range_hash: String,
+    blocks: Vec<CanonicalValue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +87,7 @@ struct JPrefixAttestation {
     parent_frame_hash: String,
     validator_id: String,
     claim: JPrefixClaim,
+    headers: Vec<CanonicalValue>,
     signature: String,
 }
 
@@ -101,7 +120,7 @@ fn claim_canonical(claim: &JPrefixClaim) -> Result<CanonicalValue, JPrefixError>
             "rangeHash".into(),
             CanonicalValue::String(claim.range_hash.clone()),
         ),
-        ("blocks".into(), CanonicalValue::Array(Vec::new())),
+        ("blocks".into(), CanonicalValue::Array(claim.blocks.clone())),
     ]))
 }
 
@@ -149,8 +168,14 @@ fn attestation_fields(
             "rangeHash".into(),
             CanonicalValue::String(attestation.claim.range_hash.clone()),
         ),
-        ("headers".into(), CanonicalValue::Array(Vec::new())),
-        ("blocks".into(), CanonicalValue::Array(Vec::new())),
+        (
+            "headers".into(),
+            CanonicalValue::Array(attestation.headers.clone()),
+        ),
+        (
+            "blocks".into(),
+            CanonicalValue::Array(attestation.claim.blocks.clone()),
+        ),
     ])
 }
 
@@ -177,9 +202,9 @@ fn attestation_full_canonical(
 }
 
 fn hash_attestation(attestation: &JPrefixAttestation) -> Result<[u8; 32], JPrefixError> {
-    let text = encode_canonical_consensus_text(&attestation_unsigned_canonical(attestation)?)
+    let bytes = encode_canonical_consensus_bytes(&attestation_unsigned_canonical(attestation)?)
         .map_err(|error| JPrefixError::Encoding(error.to_string()))?;
-    Ok(Keccak256::digest(text.as_bytes()).into())
+    Ok(Keccak256::digest(bytes).into())
 }
 
 fn hex32(bytes: &[u8; 32]) -> String {
@@ -253,8 +278,8 @@ pub fn entity_requires_j_prefix_certificate(
 }
 
 /// Exact `buildCertifiedBaseClaim`: the only claim shape this native slice
-/// builds. `state.jHistoryFinality` is restored verbatim from checkpoint/WAL
-/// (`EntityStateSlice::j_history_finality`) and never locally recomputed.
+/// builds. `state.jHistoryFinality` is committed by native J-event
+/// finalization and restored verbatim from checkpoint/WAL.
 fn build_certified_base_claim(
     state: &EntityStateSlice,
     jurisdiction: Option<&CanonicalValue>,
@@ -300,6 +325,45 @@ fn build_certified_base_claim(
         tip_block_hash,
         event_history_root,
         range_hash,
+        blocks: Vec::new(),
+    })
+}
+
+fn validate_range_claim(
+    state: &EntityStateSlice,
+    jurisdiction: Option<&CanonicalValue>,
+    range: &JPrefixRangeClaim,
+) -> Result<JPrefixClaim, JPrefixError> {
+    let expected_ref = jurisdiction_ref(jurisdiction)?;
+    if range.jurisdiction_ref.trim().to_lowercase() != expected_ref {
+        return Err(JPrefixError::JurisdictionMismatch);
+    }
+    if range.base_height != state.last_finalized_j_height
+        || range.scanned_through_height <= range.base_height
+    {
+        return Err(JPrefixError::HistoryFinalityHeightMismatch {
+            finality: range.base_height,
+            last_finalized: state.last_finalized_j_height,
+        });
+    }
+    if !is_hex32(&range.tip_block_hash)
+        || !is_hex32(&range.event_history_root)
+        || !is_hex32(&range.range_hash)
+    {
+        return Err(JPrefixError::HistoryFinalityInvalid("RANGE_HASH"));
+    }
+    let expected_headers = range.scanned_through_height - range.base_height;
+    if u64::try_from(range.headers.len()).ok() != Some(expected_headers) {
+        return Err(JPrefixError::HistoryFinalityInvalid("RANGE_HEADERS"));
+    }
+    Ok(JPrefixClaim {
+        jurisdiction_ref: expected_ref,
+        base_height: range.base_height,
+        scanned_through_height: range.scanned_through_height,
+        tip_block_hash: range.tip_block_hash.clone(),
+        event_history_root: range.event_history_root.clone(),
+        range_hash: range.range_hash.clone(),
+        blocks: range.blocks.clone(),
     })
 }
 
@@ -326,7 +390,7 @@ pub fn build_required_j_prefix_certificate(
     post_state: &EntityStateSlice,
     target_entity_height: u64,
     prior_certified_frame_hash: &str,
-    pending_local_j_event: bool,
+    range: Option<&JPrefixRangeClaim>,
 ) -> Result<Option<CanonicalValue>, JPrefixError> {
     let jurisdiction = authority.config.jurisdiction.as_ref();
     if !entity_requires_j_prefix_certificate(jurisdiction, post_state.j_history_finality.as_ref()) {
@@ -335,10 +399,11 @@ pub fn build_required_j_prefix_certificate(
     if !authority.is_single_signer()? {
         return Err(JPrefixError::MultiValidatorUnsupported);
     }
-    if pending_local_j_event {
-        return Err(JPrefixError::PendingLocalEventUnsupported);
-    }
-    let claim = build_certified_base_claim(post_state, jurisdiction)?;
+    let claim = match range {
+        Some(range) => validate_range_claim(post_state, jurisdiction, range)?,
+        None => build_certified_base_claim(post_state, jurisdiction)?,
+    };
+    let headers = range.map_or_else(Vec::new, |range| range.headers.clone());
     let parent_frame_hash =
         current_parent_frame_hash(target_entity_height - 1, prior_certified_frame_hash);
     let validator_id = signer.signer_id().trim().to_lowercase();
@@ -348,6 +413,7 @@ pub fn build_required_j_prefix_certificate(
         parent_frame_hash: parent_frame_hash.clone(),
         validator_id: validator_id.clone(),
         claim: claim.clone(),
+        headers,
         signature: String::new(),
     };
     let digest = hash_attestation(&unsigned)?;
@@ -400,6 +466,36 @@ fn hex65(signature: &[u8; 65]) -> String {
         output.push_str(&format!("{byte:02x}"));
     }
     output
+}
+
+/// Sign the exact TS `buildJEventRangeDigest` preimage without exposing the
+/// Entity private key or a generic raw-digest signing API across crates.
+#[allow(clippy::too_many_arguments)]
+pub fn sign_j_event_range(
+    signer: &EntitySingleSigner,
+    entity_id: &str,
+    jurisdiction_ref: &str,
+    base_height: u64,
+    scanned_through_height: u64,
+    tip_block_hash: &[u8; 32],
+    event_history_root: &[u8; 32],
+    range_hash: &[u8; 32],
+) -> Result<String, JPrefixError> {
+    let digest = j_event_range_digest(
+        entity_id,
+        jurisdiction_ref,
+        signer.signer_id(),
+        base_height,
+        scanned_through_height,
+        tip_block_hash,
+        event_history_root,
+        range_hash,
+    )
+    .map_err(|error| JPrefixError::Encoding(error.to_string()))?;
+    signer
+        .sign_raw_digest(&digest)
+        .map(|signature| hex65(&signature))
+        .ok_or(JPrefixError::SigningFailed)
 }
 
 #[cfg(test)]
@@ -481,11 +577,11 @@ mod tests {
         let authority = authority();
         let signer = signer();
         let first =
-            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", false)
+            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", None)
                 .expect("certificate")
                 .expect("non-empty");
         let second =
-            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", false)
+            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", None)
                 .expect("certificate")
                 .expect("non-empty");
         assert_eq!(
@@ -524,7 +620,7 @@ mod tests {
         };
         let signer = signer();
         let certificate =
-            build_required_j_prefix_certificate(&signer, &authority, &state, 1, "genesis", false)
+            build_required_j_prefix_certificate(&signer, &authority, &state, 1, "genesis", None)
                 .expect("no error");
         assert_eq!(certificate, None);
     }
@@ -538,17 +634,45 @@ mod tests {
         authority.config.threshold = 2;
         let signer = signer();
         let result =
-            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", false);
+            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", None);
         assert_eq!(result, Err(JPrefixError::MultiValidatorUnsupported));
     }
 
     #[test]
-    fn pending_local_event_fails_loudly_instead_of_certifying_a_stale_prefix() {
+    fn pending_local_event_certifies_the_exact_supplied_range() {
         let state = state_with_finality();
         let authority = authority();
         let signer = signer();
-        let result =
-            build_required_j_prefix_certificate(&signer, &authority, &state, 31, "genesis", true);
-        assert_eq!(result, Err(JPrefixError::PendingLocalEventUnsupported));
+        let range = JPrefixRangeClaim {
+            jurisdiction_ref: "stack:31337:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853".into(),
+            base_height: 35,
+            scanned_through_height: 36,
+            tip_block_hash: format!("0x{}", "44".repeat(32)),
+            event_history_root: format!("0x{}", "55".repeat(32)),
+            range_hash: format!("0x{}", "66".repeat(32)),
+            headers: vec![CanonicalValue::Object(vec![
+                ("jHeight".into(), number(36).expect("height")),
+                (
+                    "jBlockHash".into(),
+                    CanonicalValue::String(format!("0x{}", "44".repeat(32))),
+                ),
+            ])],
+            blocks: Vec::new(),
+        };
+        let result = build_required_j_prefix_certificate(
+            &signer,
+            &authority,
+            &state,
+            31,
+            "genesis",
+            Some(&range),
+        )
+        .expect("certificate")
+        .expect("required");
+        assert_eq!(
+            object_field(&result, "selected")
+                .and_then(|value| field_u64(value, "scannedThroughHeight")),
+            Some(36)
+        );
     }
 }

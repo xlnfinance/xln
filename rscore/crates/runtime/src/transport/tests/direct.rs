@@ -16,7 +16,7 @@ use crate::storage::native::{
 static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 #[test]
-fn websocket_and_replay_targets_reject_the_same_missing_route_and_bad_row() {
+fn durable_dynamic_target_waits_for_a_session_while_bad_rows_still_fail() {
     let serial = TEST_SERIAL.fetch_add(1, Ordering::Relaxed);
     let base = std::env::temp_dir().join(format!(
         "xln-rscore-publisher-validation-{}-{serial}",
@@ -42,14 +42,15 @@ fn websocket_and_replay_targets_reject_the_same_missing_route_and_bad_row() {
         empty_routes,
     ))
     .expect("replay target");
-    assert!(matches!(
-        websocket.publish_durable(&mut store, &missing_route),
-        Err(RuntimeTransportError::Route(_))
-    ));
-    assert!(matches!(
-        replay.validate_durable(&mut store, &missing_route),
-        Err(RuntimeTransportError::Route(_))
-    ));
+    let pending = websocket
+        .publish_durable(&mut store, &missing_route)
+        .expect("committed dynamic target stays pending");
+    assert_eq!(pending.rows_pending, 1);
+    assert_eq!(pending.failed_targets, vec![target.clone()]);
+    let validated = replay
+        .validate_durable(&mut store, &missing_route)
+        .expect("replay validates bytes without live reachability");
+    assert_eq!(validated.rows_published, 1);
 
     let routes = DirectRouteTable::new([DirectRoute {
         target_runtime_id: target.clone(),

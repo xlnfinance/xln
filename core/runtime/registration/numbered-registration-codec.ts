@@ -1,4 +1,5 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 import { ethers } from 'ethers';
 import { EntityProvider__factory } from '../../../jurisdictions/typechain-types';
 
@@ -33,29 +34,21 @@ const address = (value: string, label: string): string => {
 };
 
 export const computeNumberedRegistrationRequestHash = (request: NumberedRegistrationRequest): string =>
-  ethers
-    .keccak256(
-      ethers.toUtf8Bytes(
-        encodeCanonicalConsensusValue({
+  keccakBytesHash(
+        encodeCanonicalConsensusBytes({
           domain: 'xln.numbered-registration.intent.v1',
           request,
         }),
-      ),
-    )
-    .toLowerCase();
+  );
 
 const computeNumberedRegistrationIntentId = (
   request: Omit<NumberedRegistrationRequest, 'intentId'>,
-): string => ethers
-  .keccak256(
-    ethers.toUtf8Bytes(
-      encodeCanonicalConsensusValue({
+): string => keccakBytesHash(
+      encodeCanonicalConsensusBytes({
         domain: 'xln.numbered-registration.intent-id.v1',
         request,
       }),
-    ),
-  )
-  .toLowerCase();
+);
 
 export const encodeNumberedRegistrationCalldata = (request: NumberedRegistrationRequest): string =>
   entityProviderInterface

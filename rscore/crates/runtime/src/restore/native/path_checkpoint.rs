@@ -239,7 +239,7 @@ fn account_nodes(
         }
         let decoded = decode_storage_payload(bytes)?;
         reject_uncollapsed_bounded(&decoded, "accountNode")?;
-        if namespace == 6 {
+        if namespace == 7 {
             let side = *payload.first().ok_or_else(|| invalid("J_CLAIM_SIDE"))?;
             let logical_path = payload
                 .get(1..)
@@ -251,7 +251,7 @@ fn account_nodes(
                 path: logical_path.to_vec(),
                 value: decoded,
             });
-        } else if (1..=5).contains(&namespace) {
+        } else if (1..=6).contains(&namespace) {
             let logical_path = if kind == 0 {
                 unpack_radix16_path(payload).map_err(invalid)?
             } else {
@@ -269,7 +269,7 @@ fn account_nodes(
             return Err(invalid(format!("ACCOUNT_NAMESPACE:{namespace}")));
         }
     }
-    if namespace == 6 {
+    if namespace == 7 {
         let roots = j_claim_roots.ok_or_else(|| invalid("J_CLAIM_ROOTS_MISSING"))?;
         values = restore_j_claim_rows(j_claim_rows, roots).map_err(invalid)?;
     } else {
@@ -432,7 +432,7 @@ pub fn restore_path_checkpoint(
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
         let namespace = *key.get(65).ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
-        if !(1..=6).contains(&namespace) || key.len() < 68 {
+        if !(1..=7).contains(&namespace) || key.len() < 68 {
             return Err(invalid("ACCOUNT_NODE_KEY"));
         }
         nodes_by_account
@@ -461,17 +461,17 @@ pub fn restore_path_checkpoint(
             return Err(invalid("ACCOUNT_LEAF"));
         }
         let j_claim_roots = j_claim_accumulators(&account_meta[1]).map_err(invalid)?;
-        let mut row = Vec::with_capacity(10);
+        let mut row = Vec::with_capacity(11);
         row.push(tagged_bytes(&account));
         row.extend([account_meta[0].clone(), account_meta[1].clone()]);
-        for namespace in 1..=6 {
+        for namespace in 1..=7 {
             let node_rows = nodes_by_account
                 .remove(&(account, namespace))
                 .unwrap_or_default();
             row.push(Value::Array(account_nodes(
                 &node_rows,
                 namespace,
-                (namespace == 6).then_some(&j_claim_roots),
+                (namespace == 7).then_some(&j_claim_roots),
             )?));
         }
         row.push(account_meta[2].clone());

@@ -1,7 +1,7 @@
 //! Exact inverse of `core/storage/schema/rscore/checkpoint.ts`.
 //!
 //! The durable Runtime WAL stores one checkpoint header per Entity, one
-//! bounded Account shell row, and six namespaces of Account-owned leaves.
+//! bounded Account shell row, and seven namespaces of Account-owned leaves.
 //! Recovery rebuilds the exact `RestoreExact` wire rows; it never imports the
 //! TypeScript Account objects kept in an old Runtime snapshot.
 
@@ -17,8 +17,8 @@ use crate::checkpoint_node_key::{
 const KEY_RSCORE_CHECKPOINT: u8 = 0x17;
 const KEY_RSCORE_ACCOUNT: u8 = 0x18;
 const KEY_RSCORE_ACCOUNT_NODE: u8 = 0x19;
-const TREE_NAMESPACES: std::ops::RangeInclusive<u8> = 1..=5;
-const J_CLAIM_NAMESPACE: u8 = 6;
+const TREE_NAMESPACES: std::ops::RangeInclusive<u8> = 1..=6;
+const J_CLAIM_NAMESPACE: u8 = 7;
 
 #[derive(Clone, Debug)]
 pub struct StoredRscoreCheckpoint {
@@ -29,7 +29,7 @@ pub struct StoredRscoreCheckpoint {
     pub accounts_root: [u8; 32],
     pub signer_digest: [u8; 32],
     pub account_count: usize,
-    /// Exact ten-field rows accepted by process `RestoreExact`.
+    /// Exact eleven-field rows accepted by process `RestoreExact`.
     pub accounts: Vec<Value>,
 }
 
@@ -305,7 +305,7 @@ impl RuntimeWalReader {
             if leaf.len() != 32 {
                 return Err(invalid("ACCOUNT_LEAF"));
             }
-            let mut row = Vec::with_capacity(10);
+            let mut row = Vec::with_capacity(11);
             row.push(tagged_bytes(&account));
             row.push(meta[0].clone());
             row.push(meta[1].clone());

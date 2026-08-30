@@ -14,7 +14,7 @@ import type { StorageReplicaLookup } from '../types';
 
 export type CertifiedEntityHeadPlan = {
   lookup: StorageReplicaLookup;
-  /** Exactly one current certified head per non-genesis replica; history is stored separately. */
+  /** Exactly one current certified head per non-genesis replica; no separate Entity archive exists. */
   headByReplicaKey: Map<string, CertifiedEntityFrameLink | undefined>;
 };
 

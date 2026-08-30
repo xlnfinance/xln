@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { validateHtlcPreparedInfraContext } from '../../../entity/htlc/prepared-context-validation';
-import { getEffectiveHtlcFrameTxs } from '../../../entity/htlc/materialize-context';
+import { validateHtlcPreparedInfraContext } from '../../../entity/paybook/prepared-context-validation';
+import { getEffectiveHtlcFrameTxs } from '../../../entity/paybook/materialize-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityState } from '../../../entity/types';
 
@@ -46,10 +46,10 @@ describe('HTLC prepared Entity context boundary', () => {
     const binding = {
       fromEntityId: id('1'), toEntityId: id('2'),
       domain: { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` },
-      accountFrameHash: id('3'), accountHeight: 1, lockId: id('4'), envelopeHash: id('5'),
+      accountFrameHash: id('3'), accountHeight: 1, envelopeHash: id('5'),
       hashlock: id('6'), tokenId: 1, amount: 10n, timelock: 100n, revealBeforeHeight: 9,
     };
-    const entry = { binding, outcome: { kind: 'reject', reason: 'next_hop_offline' } };
+    const entry = { binding, outcome: { kind: 'reject', reason: 'insufficient_capacity' } };
     expect(() => validateHtlcPreparedInfraContext({ version: 1, entries: [entry, entry], originated: [] }))
       .toThrow('HTLC_PREPARED_BINDING_DUPLICATE');
     expect(() => validateHtlcPreparedInfraContext({
@@ -59,7 +59,7 @@ describe('HTLC prepared Entity context boundary', () => {
         txHash: id('7'), targetEntityId: id('2'), tokenId: 1, recipientAmount: 10n,
         route: [id('1'), id('2')], description: '', deliveryMode: 'instant', startedAtMs: 1,
         hashlock: id('6'), senderLockAmount: 9n, maxSenderDebit: 10n, totalFee: -1n,
-        lockId: id('4'), timelock: 100n, revealBeforeHeight: 9, nextHopEntityId: id('2'), envelope,
+        timelock: 100n, revealBeforeHeight: 9, nextHopEntityId: id('2'), envelope,
       }],
     })).toThrow('HTLC_PREPARED_ORIGIN_ECONOMICS_INVALID');
   });
@@ -68,7 +68,7 @@ describe('HTLC prepared Entity context boundary', () => {
     const binding = {
       fromEntityId: id('1'), toEntityId: id('2'),
       domain: { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` },
-      accountFrameHash: id('3'), accountHeight: 1, lockId: id('4'), envelopeHash: id('5'),
+      accountFrameHash: id('3'), accountHeight: 1, envelopeHash: id('5'),
       hashlock: id('6'), tokenId: 1, amount: 10n, timelock: 100n, revealBeforeHeight: 9,
     };
     expect(() => validateHtlcPreparedInfraContext({
@@ -89,7 +89,7 @@ describe('HTLC prepared Entity context boundary', () => {
     const binding = {
       fromEntityId: id('1'), toEntityId: id('2'),
       domain: { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` },
-      accountFrameHash: id('3'), accountHeight: 1, lockId: id('4'), envelopeHash: id('5'),
+      accountFrameHash: id('3'), accountHeight: 1, envelopeHash: id('5'),
       hashlock: id('6'), tokenId: 1, amount: 10n, timelock: 100n, revealBeforeHeight: 9,
     };
     const context = {
@@ -104,13 +104,13 @@ describe('HTLC prepared Entity context boundary', () => {
   });
 
   test('does not spanning-structuredClone the HTLC graph', () => {
-    const source = readFileSync(join(import.meta.dir, '../../../entity/htlc/prepared-context-validation.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../../entity/paybook/prepared-context-validation.ts'), 'utf8');
     expect(source).toContain('cloneIsolatedProtocolValue(context');
     expect(source).not.toContain('structuredClone(context)');
   });
 
   test('inbound canonicalize decorate-sorts binding keys once', () => {
-    const source = readFileSync(join(import.meta.dir, '../../../entity/htlc/materialize-context.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../../entity/paybook/materialize-context.ts'), 'utf8');
     expect(source).toContain('const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }))');
     expect(source).toContain('decorated.sort((left, right) => left.key.localeCompare(right.key))');
     expect(source).not.toContain('preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding))');

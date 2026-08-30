@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 
-import { HASHABLE_LOCK_BOOK_ENTRY_FIELDS, type LockBookFieldCoverage } from '../../../entity/state/lock-book-fields';
 import { BATCH_ABI, PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
 import {
   HASHABLE_ACCOUNT_TX_DATA_FIELDS,
@@ -192,22 +191,6 @@ for (const entry of NESTED_HASH_COVERAGE) {
     continue;
   }
   errors.push(`${entry.typeName}:shape-mismatch:${entry.shape}`);
-}
-
-type LockBookCoverageHeld<T extends never = LockBookFieldCoverage> = [T] extends [never]
-  ? typeof HASHABLE_LOCK_BOOK_ENTRY_FIELDS
-  : never;
-
-const lockBookSource = readSource('core/entity/types.ts');
-const lockBook = findNamed(lockBookSource, 'LockBookEntry');
-if (!lockBook || !ts.isInterfaceDeclaration(lockBook)) {
-  errors.push('LockBookEntry:declaration-missing');
-} else {
-  compareSets(
-    'LockBookEntry',
-    interfaceKeys(lockBook),
-    HASHABLE_LOCK_BOOK_ENTRY_FIELDS satisfies LockBookCoverageHeld,
-  );
 }
 
 compareOrder('RuntimeProofBody.abi', HASHABLE_RUNTIME_PROOF_BODY_FIELDS, abiComponentNames(PROOF_BODY_ABI.components));

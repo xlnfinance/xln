@@ -37,24 +37,6 @@ pub(crate) struct AccountShardPlan {
 }
 
 impl AccountShardPlan {
-    pub(crate) fn balanced(worker_count: usize) -> Result<Self, BatchError> {
-        if worker_count == 0 || worker_count > u16::MAX as usize {
-            return Err(BatchError::InvalidWorkerCount(worker_count));
-        }
-        let worker_by_shard = (0..PERSISTENT_RADIX_SHARD_COUNT)
-            .map(|shard| (shard % worker_count) as u16)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        let counters = (0..PERSISTENT_RADIX_SHARD_COUNT)
-            .map(|_| ShardCounters::default())
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        Ok(Self {
-            worker_by_shard,
-            counters,
-        })
-    }
-
     pub(crate) fn weighted(worker_count: usize, shard_weights: &[u64]) -> Result<Self, BatchError> {
         if worker_count == 0 || worker_count > u16::MAX as usize {
             return Err(BatchError::InvalidWorkerCount(worker_count));
@@ -193,14 +175,6 @@ mod tests {
                 logical_account_shard(AccountId::from_bytes(bytes)),
                 expected
             );
-        }
-    }
-
-    #[test]
-    fn balanced_assignment_is_total_and_deterministic() {
-        let plan = AccountShardPlan::balanced(20).expect("plan");
-        for shard in 0..PERSISTENT_RADIX_SHARD_COUNT {
-            assert_eq!(plan.worker(shard), shard % 20);
         }
     }
 

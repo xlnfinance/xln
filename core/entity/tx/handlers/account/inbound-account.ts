@@ -108,7 +108,7 @@ const assertUnknownAccountGenesis = (
   hasProposal: boolean,
 ): void => {
   const runtimeKind = (input as { kind?: unknown }).kind;
-  if (!['frame', 'ack', 'frame_ack', 'dispute', 'board_hanko_refresh'].includes(String(runtimeKind))) {
+  if (!['frame', 'ack', 'ack_frame', 'dispute', 'board_hanko_refresh'].includes(String(runtimeKind))) {
     const error =
       `ACCOUNT_GENESIS_FRAME_REQUIRED: entity=${shortId(state.entityId)} ` +
       `counterparty=${shortId(counterpartyId)} inputHeight=0`;

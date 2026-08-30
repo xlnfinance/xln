@@ -19,7 +19,7 @@ export const encodeBuffer = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},
 ): Buffer => {
-  const buffer = Buffer.from(encodeBinaryPayload(value, 'msgpack', options));
+  const buffer = Buffer.from(encodeBinaryPayload(value, options));
   countOpWithSite('storage.encode', buffer.byteLength, 1);
   return buffer;
 };
@@ -35,7 +35,7 @@ export const encodeBufferPrepared = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},
 ): { buffer: Buffer; canonical: unknown } => {
-  const encoded = encodeBinaryPayloadWithCanonical(value, 'msgpack', options);
+  const encoded = encodeBinaryPayloadWithCanonical(value, options);
   const buffer = Buffer.from(encoded.bytes);
   countOpWithSite('storage.encodePrepared', buffer.byteLength, 1);
   return { buffer, canonical: encoded.canonical };

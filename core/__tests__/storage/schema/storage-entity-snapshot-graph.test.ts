@@ -5,8 +5,7 @@ import { PersistentEntityAccountMap } from '../../../entity/state/persistent-acc
 import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import type { ScheduledHook } from '../../../entity/scheduler/types';
-import type { EntityState } from '../../../entity/types';
-import type { HtlcRoute } from '../../../types/account';
+import type { EntityState, PaybookEntry } from '../../../entity/types';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { createSnapshot, readSnapshotDocs } from '../../../storage/database/lifecycle';
 import {
@@ -30,12 +29,13 @@ import type { StorageHead } from '../../../storage/types';
 import { MemoryRuntimeDb } from '../../fixtures/storage/memory-runtime-db';
 
 const entityId = `0x${'31'.repeat(32)}`;
+const counterpartyId = `0x${'32'.repeat(32)}`;
 const validatorId = `0x${'51'.repeat(20)}`;
 
-const route = (index: number): HtlcRoute => ({
+const payment = (index: number): PaybookEntry => ({
   hashlock: `0x${index.toString(16).padStart(64, '0')}`,
-  createdHeight: index + 1,
-  priceTicks: BigInt(index + 1),
+  amount: BigInt(index + 1),
+  createdTimestamp: index + 1,
 });
 
 const state = (routes = 1, bioBytes = 0): EntityState => ({
@@ -52,14 +52,29 @@ const state = (routes = 1, bioBytes = 0): EntityState => ({
   },
   reserves: new Map(),
   accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
+  deferredAccountProposals: PersistentEntityCollectionMap.from(new Map([
+    [counterpartyId, `0x${'61'.repeat(32)}`],
+  ])),
+  settlementContinuations: PersistentEntityCollectionMap.from(new Map([[
+    counterpartyId,
+    {
+      workspaceHash: `0x${'62'.repeat(32)}`,
+      actions: [{ type: 'r2r', toEntityId: counterpartyId, tokenId: 1, amount: 2n }],
+      broadcast: false,
+    },
+  ]])),
   lastFinalizedJHeight: 0,
   entityEncryptionPublicKey: `0x${'41'.repeat(32)}`,
   profile: { name: 'entity-graph', isHub: true, avatar: '', bio: 'x'.repeat(bioBytes), website: '' },
-  htlcRoutes: PersistentEntityCollectionMap.from(new Map(
-    Array.from({ length: routes }, (_, index) => [`route-${index}`, route(index)]),
-  )),
-  htlcFeesEarned: 0n,
-  lockBook: PersistentEntityCollectionMap.empty(),
+  paybook: {
+    entries: PersistentEntityCollectionMap.from(new Map(
+      Array.from({ length: routes }, (_, index) => {
+        const entry = payment(index);
+        return [entry.hashlock, entry];
+      }),
+    )),
+    feesEarned: 0n,
+  },
 });
 
 const head = (): StorageHead => ({
@@ -72,7 +87,7 @@ const head = (): StorageHead => ({
   epochMaxBytes: Number.MAX_SAFE_INTEGER,
   accountMerkleRadix: 16,
   epochReplayBytes: 0,
-  retainedHistoryBytes: 0,
+  retainedWalBytes: 0,
 });
 
 const stateWithHooks = (count: number): EntityState => {
@@ -111,9 +126,10 @@ test('Entity checkpoint rows stay bounded and exact Patricia paths are dirty-onl
   expect(initial.puts.some(row => row.key[0] === KEY_LIVE_ENTITY_FIELD && row.key.byteLength === 38))
     .toBeTrue();
 
-  const nextRoutes = (previous.htlcRoutes as PersistentEntityCollectionMap<HtlcRoute>)
-    .updated('route-128', { ...route(128), amount: 999n });
-  const next = { ...previous, height: 2, htlcRoutes: nextRoutes };
+  const changedHashlock = payment(128).hashlock;
+  const nextEntries = (previous.paybook.entries as PersistentEntityCollectionMap<PaybookEntry>)
+    .updated(changedHashlock, { ...payment(128), amount: 999n });
+  const next = { ...previous, height: 2, paybook: { ...previous.paybook, entries: nextEntries } };
   const changed = await install(db, next, previous);
   const initialTreeRows = initial.puts.filter(row =>
     row.key[0] === KEY_LIVE_ENTITY_BRANCH || row.key[0] === KEY_LIVE_ENTITY_LEAF);
@@ -125,7 +141,10 @@ test('Entity checkpoint rows stay bounded and exact Patricia paths are dirty-onl
   const restored = await readEntityStorageLayout(db, entityId, keyLiveEntity(entityId));
   expect(restored?.doc.height).toBe(2);
   expect(restored?.doc.profile.bio.length).toBe(25_000);
-  expect(restored?.doc.htlcRoutes.get('route-128')?.amount).toBe(999n);
+  expect(restored?.doc.paybook.entries.get(changedHashlock)?.amount).toBe(999n);
+  expect(restored?.doc.deferredAccountProposals?.get(counterpartyId)).toBe(`0x${'61'.repeat(32)}`);
+  expect(restored?.doc.settlementContinuations?.get(counterpartyId)?.workspaceHash)
+    .toBe(`0x${'62'.repeat(32)}`);
 });
 
 test('Entity snapshot copies and relinks its graph without live rows', async () => {
@@ -142,7 +161,7 @@ test('Entity snapshot copies and relinks its graph without live rows', async () 
   const entity = restored.find(
     (doc): doc is Extract<(typeof restored)[number], { family: 'entity' }> => doc.family === 'entity',
   );
-  expect(entity?.value.htlcRoutes.size).toBe(32);
+  expect(entity?.value.paybook.entries.size).toBe(32);
   expect(snapshot.rows.has(keyLiveEntity(entityId).toString('hex'))).toBeFalse();
   const graphKeys = [...snapshot.rows.keys()].filter(key =>
     Number.parseInt(key.slice(0, 2), 16) === KEY_SNAPSHOT_GRAPH);

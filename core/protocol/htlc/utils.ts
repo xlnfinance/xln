@@ -62,31 +62,6 @@ export function calculateRequiredInboundForDesiredForward(
 }
 
 /**
- * Generate deterministic lock ID
- * Pattern: keccak256(hashlock + height + nonce + timestamp)
- */
-export function generateLockId(
-  hashlock: string,
-  height: number,
-  nonce: number,
-  timestamp: number
-): string {
-  return ethers.keccak256(
-    ethers.toUtf8Bytes(`${hashlock}:${height}:${nonce}:${timestamp}`)
-  );
-}
-
-/** Derive the next hop's canonical bytes32 lock identifier from the current hop. */
-export function deriveForwardHtlcLockId(currentLockId: string): string {
-  if (!ethers.isHexString(currentLockId, 32)) {
-    throw new Error(`HTLC current lock ID must be 32-byte hex (got ${currentLockId.length} chars)`);
-  }
-  return ethers.keccak256(
-    ethers.toUtf8Bytes(`xln:htlc-forward-lock:v1:${currentLockId.toLowerCase()}`),
-  );
-}
-
-/**
  * Hash HTLC secret using the on-chain convention (keccak256(abi.encode(secret))).
  */
 // abi.encode(bytes32) is the 32 bytes themselves; the generic ABI coder plus a

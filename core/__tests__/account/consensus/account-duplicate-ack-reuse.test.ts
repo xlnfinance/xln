@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildDuplicateCommittedFrameAck } from '../../../account/consensus/incoming/replay';
+import { buildDuplicateCommittedAckFrame } from '../../../account/consensus/incoming/replay';
 import type { AccountInputSecurityContext } from '../../../account/consensus/dispute/deadline-policy';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
@@ -89,7 +89,7 @@ const verifier = (
   },
 });
 
-const countDraftSignerCalls = (result: Awaited<ReturnType<typeof buildDuplicateCommittedFrameAck>>): number => {
+const countDraftSignerCalls = (result: Awaited<ReturnType<typeof buildDuplicateCommittedAckFrame>>): number => {
   let calls = 0;
   for (const _hash of result?.ok ? result.hashesToSign ?? [] : []) calls += 1;
   return calls;
@@ -99,7 +99,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
   test('returns the byte-identical persisted ACK Hanko without scheduling a signer', async () => {
     const current = account();
     current.currentFrameHanko = ACK_HANKO;
-    current.lastOutboundFrameAck = {
+    current.lastOutboundAckFrame = {
       height: 10,
       counterpartyEntityId: RIGHT,
       response: {
@@ -113,7 +113,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
     };
     const verifyCalls = { count: 0 };
 
-    const result = await buildDuplicateCommittedFrameAck(
+    const result = await buildDuplicateCommittedAckFrame(
       current,
       duplicateInput(current),
       [],
@@ -124,7 +124,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
 
     expect(result?.ok).toBe(true);
     expect(result?.response?.kind === 'ack' ? result.response.ack.frameHanko : undefined).toBe(ACK_HANKO);
-    expect(result?.response).toEqual(current.lastOutboundFrameAck.response);
+    expect(result?.response).toEqual(current.lastOutboundAckFrame.response);
     expect(countDraftSignerCalls(result)).toBe(0);
     expect(verifyCalls.count).toBe(1);
   });
@@ -135,7 +135,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
     current.pendingFrame = successor;
     current.currentFrameHanko = SUCCESSOR_HANKO;
     current.pendingAccountInput = {
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       fromEntityId: LEFT,
       toEntityId: RIGHT,
       domain: { ...current.state.domain },
@@ -148,7 +148,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
     };
     const verifyCalls = { count: 0 };
 
-    const result = await buildDuplicateCommittedFrameAck(
+    const result = await buildDuplicateCommittedAckFrame(
       current,
       duplicateInput(current),
       [],
@@ -159,7 +159,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
 
     expect(result?.response?.kind === 'ack' ? result.response.ack.frameHanko : undefined).toBe(ACK_HANKO);
     expect(current.currentFrameHanko).toBe(SUCCESSOR_HANKO);
-    expect(current.lastOutboundFrameAck?.response.ack.frameHanko).toBe(ACK_HANKO);
+    expect(current.lastOutboundAckFrame?.response.ack.frameHanko).toBe(ACK_HANKO);
     expect(countDraftSignerCalls(result)).toBe(0);
     expect(verifyCalls.count).toBe(1);
   });
@@ -169,7 +169,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
     current.currentFrameHanko = ACK_HANKO;
     const verifyCalls = { count: 0 };
 
-    const result = await buildDuplicateCommittedFrameAck(
+    const result = await buildDuplicateCommittedAckFrame(
       current,
       duplicateInput(current),
       [],
@@ -185,7 +185,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
 
   test('missing or corrupt persisted ACK Hankos fail loud instead of scheduling signing', async () => {
     const missing = account();
-    missing.lastOutboundFrameAck = {
+    missing.lastOutboundAckFrame = {
       height: 10,
       counterpartyEntityId: RIGHT,
       response: {
@@ -197,7 +197,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
         ack: { height: 10, frameHash: FRAME_HASH },
       },
     };
-    await expect(buildDuplicateCommittedFrameAck(
+    await expect(buildDuplicateCommittedAckFrame(
       missing,
       duplicateInput(missing),
       [],
@@ -207,7 +207,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
     )).rejects.toThrow('DUPLICATE_ACK_CACHED_HANKO_MISSING:height=10');
 
     const corruptCached = account();
-    corruptCached.lastOutboundFrameAck = {
+    corruptCached.lastOutboundAckFrame = {
       height: 10,
       counterpartyEntityId: RIGHT,
       response: {
@@ -219,7 +219,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
         ack: { height: 10, frameHash: FRAME_HASH, frameHanko: ACK_HANKO },
       },
     };
-    await expect(buildDuplicateCommittedFrameAck(
+    await expect(buildDuplicateCommittedAckFrame(
       corruptCached,
       duplicateInput(corruptCached),
       [],
@@ -230,7 +230,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
 
     const corruptCurrent = account();
     corruptCurrent.currentFrameHanko = ACK_HANKO;
-    await expect(buildDuplicateCommittedFrameAck(
+    await expect(buildDuplicateCommittedAckFrame(
       corruptCurrent,
       duplicateInput(corruptCurrent),
       [],

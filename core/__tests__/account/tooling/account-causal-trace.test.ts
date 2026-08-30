@@ -3,8 +3,8 @@ import { summarizeRuntimeAccountCausality } from '../../../qa/account-causal-tra
 import type { AccountInput } from '../../../types/account';
 import type { EntityInput } from '../../../entity/types';
 
-const frameAck = {
-  kind: 'frame_ack',
+const ackFrame = {
+  kind: 'ack_frame',
   fromEntityId: '0xhub',
   toEntityId: '0xuser',
   domain: { chainId: 31337, depositoryAddress: '0xdep' },
@@ -31,12 +31,12 @@ describe('account causal trace', () => {
     const trace = summarizeRuntimeAccountCausality([{
       entityId: '0xuser',
       signerId: '0xsigner',
-      entityTxs: [{ type: 'accountInput', data: frameAck }],
+      entityTxs: [{ type: 'accountInput', data: ackFrame }],
     }]);
 
     expect(trace).toHaveLength(1);
     expect(trace[0]?.accountEnvelopes).toEqual([{
-      kind: 'frame_ack',
+      kind: 'ack_frame',
       from: '0xhub',
       to: '0xuser',
       ackHeight: 10,

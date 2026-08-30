@@ -32,8 +32,6 @@ export type EntityConsensusStateQuotaAssessment = Readonly<{
 const DEFAULT_CONFIG: EntityConsensusStateQuotaConfig = Object.freeze({
   warningBytes: DEFAULT_ENTITY_CONSENSUS_STATE_WARNING_BYTES,
 });
-const UTF8_ENCODER = new TextEncoder();
-
 const strictConfigRecord = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('ENTITY_STATE_QUOTA_CONFIG_INVALID');
@@ -72,7 +70,7 @@ export const measureEntityConsensusStateBytes = (
   state: EntityState,
 ): EntityConsensusStateByteMeasurement => {
   const canonicalState = encodeCanonicalEntityConsensusState(state);
-  const canonicalBytes = BigInt(UTF8_ENCODER.encode(canonicalState).byteLength);
+  const canonicalBytes = BigInt(canonicalState.byteLength);
   return Object.freeze({
     canonicalBytes,
     totalBytes: canonicalBytes,

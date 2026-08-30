@@ -1,12 +1,12 @@
-import { keccak256 } from 'ethers';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 import { deriveDelta } from '../../account/utils';
 import { getAccountPerspective } from '../../account/state/perspective';
 import type { EntityState } from '../types';
 import { PersistentEntityAccountMap } from '../state/persistent-account-map';
-import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
+import { compareStableText } from '../../protocol/serialization';
 import { LIMITS } from '../../config/constants';
 import { HANKO_MAX_BYTES } from '../../hanko/codec';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import { RecencyMemo } from '../../support/collections/recency-memo';
 import type {
   Profile,
@@ -79,9 +79,7 @@ const MAX_PROFILE_TOKENS_PER_ACCOUNT = 16;
  * Accounts are advertised and never more than this many of them.
  */
 export const MAX_PROFILE_ADVERTISED_ACCOUNTS = 100;
-const UTF8 = new TextEncoder();
-
-const MAX_PROFILE_ROUTE_OVERHEAD_BYTES = new TextEncoder().encode(encodeCanonicalConsensusValue({
+const MAX_PROFILE_ROUTE_OVERHEAD_BYTES = encodeCanonicalConsensusBytes({
   lastUpdated: Number.MAX_SAFE_INTEGER,
   runtimeId: 'x'.repeat(128),
   runtimeEncPubKey: `0x${'f'.repeat(64)}`,
@@ -98,7 +96,7 @@ const MAX_PROFILE_ROUTE_OVERHEAD_BYTES = new TextEncoder().encode(encodeCanonica
     },
   })),
   profileHanko: `0x${'ff'.repeat(HANKO_MAX_BYTES)}`,
-})).byteLength;
+}).byteLength;
 
 export const MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES = LIMITS.MAX_PROFILE_BYTES - MAX_PROFILE_ROUTE_OVERHEAD_BYTES;
 
@@ -236,7 +234,7 @@ export const buildEntityProfileDescriptor = (
     })) };
   };
   const bytes = (descriptor: EntityProfileDescriptor): number =>
-    UTF8.encode(encodeCanonicalConsensusValue(descriptor)).byteLength;
+    encodeCanonicalConsensusBytes(descriptor).byteLength;
   // Common case: every ranked capacity fits. This is exactly the value the
   // binary search below converges to, found with one encode instead of log2(n)+1.
   const full = withExtraPrefix(extras.length);
@@ -255,7 +253,7 @@ export const buildEntityProfileDescriptor = (
 };
 
 export const computeEntityProfileDescriptorHash = (descriptor: EntityProfileDescriptor): string =>
-  keccak256(UTF8.encode(serializeTaggedJson(descriptor)));
+  keccakBytesHash(encodeCanonicalConsensusBytes(descriptor));
 
 /**
  * The descriptor walks every Account; the hub rebuilt it four times per

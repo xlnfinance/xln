@@ -52,7 +52,6 @@ type DisputeDeadlineHook = ScheduledHookBase<'dispute_deadline', {
 type HtlcSecretAckTimeoutHook = ScheduledHookBase<'htlc_secret_ack_timeout', {
   hashlock: string;
   counterpartyEntityId: string;
-  inboundLockId: string;
 }>;
 
 type SettlementWindowHook = ScheduledHookBase<'settlement_window', Record<string, never>>;

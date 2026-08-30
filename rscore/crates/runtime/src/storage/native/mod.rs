@@ -36,7 +36,7 @@ pub use store::NativeRuntimeStore;
 pub use types::{
     CheckpointGraph, DurableRuntimeFrame, NativeRuntimeRecovery, NativeStorageConfig,
     PathNodeChange, RecoveredCheckpoint, RecoveredOutboxFrame, RecoveredWalFrame,
-    RuntimeFrameCommit, RuntimeMachineLeafRow, RuntimeWatcherCursorRow,
+    RuntimeFrameCommit, RuntimeMachineLeafRow,
 };
 
 const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
@@ -97,12 +97,6 @@ pub enum NativeStorageError {
     CheckpointImportNotEmpty,
     #[error("RRS_STORAGE_CHECKPOINT_IMPORT_FULL_REQUIRED")]
     CheckpointImportFullRequired,
-    #[error("RRS_STORAGE_WATCHER_CURSOR_COUNT:{0}")]
-    WatcherCursorCount(usize),
-    #[error("RRS_STORAGE_WATCHER_CURSOR_DUPLICATE")]
-    WatcherCursorDuplicate,
-    #[error("RRS_STORAGE_WATCHER_CURSOR_VALUE:{0}")]
-    WatcherCursorValue(&'static str),
     #[error("RRS_STORAGE_HEAD:{0}")]
     Head(&'static str),
     #[error("RRS_STORAGE_UNSAFE_NUMBER:{0}")]

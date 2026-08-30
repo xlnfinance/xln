@@ -13,6 +13,7 @@ import {
 } from '../../../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 import { resolveCertifiedAccountCounterpartyProposer } from '../../../runtime/delivery/topology/account-counterparty-route';
 
@@ -80,8 +81,10 @@ import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
+  computeEntityAccountValueHash,
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 
 import {
   assertCrossJurisdictionOrderAdmissible,
@@ -160,7 +163,9 @@ import {
   applyCommand,
   createBook,
   getBookOrder,
+  getStaticSwapTokenDimensions,
   getSwapLotScale,
+  getSwapPairDimensions,
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type OrderbookExtState,
@@ -192,11 +197,7 @@ import { buffersEqual, safeStringify } from '../../../protocol/serialization';
 
 import type { ProofBodyStruct } from '../../../protocol/dispute/proof-body';
 
-import { hydrateAccountDocFromStorage, projectAccountDoc } from '../../../storage/read/projections';
-
-import { validateStorageAccountDocValue } from '../../../storage/schema/authoritative-schema';
-
-import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
+import { projectAccountDoc } from '../../../storage/read/projections';
 
 import { createDefaultDelta } from '../../../account/state/delta';
 
@@ -219,7 +220,7 @@ import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 
 import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
 
-import { buildHtlcOnionAdvanceTx } from '../../../entity/htlc/onion-advance';
+import { buildHtlcOnionAdvanceTx } from '../../../entity/paybook/onion-advance';
 import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
@@ -228,7 +229,6 @@ import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -349,21 +349,19 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
         entityId: leftEntity,
         counterpartyId: rightEntity,
       }),
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     },
     status: 'active',
     mempool: [...mempool],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -378,8 +376,13 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     currentHeight: 0,
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
 };
 
@@ -576,7 +579,10 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     proposals: new Map(),
     config: makeSingleSignerConfig(),
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: PersistentEntityAccountMap.empty(
+      `0x${'11'.repeat(32)}`,
+      computeEntityAccountValueHash,
+    ),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     profile: {
@@ -586,9 +592,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
       bio: '',
       website: '',
     },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     crontabState: initCrontab(),
   },
@@ -603,7 +607,7 @@ const makeEntityState = (entityId: string): EntityState => ({
   proposals: new Map(),
   config: makeSingleSignerConfig(),
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: {
@@ -613,9 +617,7 @@ const makeEntityState = (entityId: string): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
@@ -625,6 +627,23 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   const counterpartyId = `0x${'34'.repeat(32)}`;
   const state = makeEntityState(entityId);
   const account = makeProposalAccount([], entityId, counterpartyId);
+  account.state.watchSeed = finalProofbody.watchSeed;
+  account.state.disputeConfig = {
+    leftResponseSeconds: Number(finalProofbody.leftResponseSeconds),
+    rightResponseSeconds: Number(finalProofbody.rightResponseSeconds),
+  };
+  if (finalProofbody.tokenIds.length === finalProofbody.offdeltas.length) {
+    account.state.deltas = PersistentAccountStateMap.fromEntries(
+      'deltas',
+      finalProofbody.tokenIds.map((rawTokenId, index) => {
+        const tokenId = Number(rawTokenId);
+        return [tokenId, {
+          ...createDefaultDelta(tokenId),
+          offdelta: finalProofbody.offdeltas[index]!,
+        }] as const;
+      }),
+    );
+  }
   const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
   account.activeDispute = {
     startedByLeft: true,
@@ -635,7 +654,6 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
     initialNonce: 7,
     finalizeQueued: true,
   } as AccountState['activeDispute'];
-  state.accounts.set(counterpartyId, account);
   return {
     account,
     counterpartyId,
@@ -664,8 +682,9 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
 const applyDisputeFinalizedFixture = async (
   fixture: ReturnType<typeof makeDisputeFinalizedFixture>,
   evidence: DisputeFinalizationEvidence[] = [],
-) =>
-  applyJEventRange(
+) => {
+  fixture.state.accounts = fixture.state.accounts.updated(fixture.counterpartyId, fixture.account);
+  return applyJEventRange(
     fixture.state,
     {
       from: '1',
@@ -684,6 +703,7 @@ const applyDisputeFinalizedFixture = async (
     },
     fixture.env,
   );
+};
 
 const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void => {
   for (const input of inputs) {
@@ -812,7 +832,7 @@ describe('audit fail-fast regressions', () => {
 
     const leftState = makeEntityState(left.entityId);
     leftState.config = makeSingleSignerConfigFor(left.signerId);
-    leftState.accounts.set(right.entityId, leftAccount);
+    leftState.accounts = leftState.accounts.updated(right.entityId, leftAccount);
     const applied = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       leftState,
@@ -880,7 +900,7 @@ describe('audit fail-fast regressions', () => {
       transformers: [],
     };
     const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
-    account.state.deltas.set(1, {
+    account.state.deltas = account.state.deltas.updated(1, {
       tokenId: 1,
       collateral: 100n,
       ondelta: 25n,
@@ -904,7 +924,7 @@ describe('audit fail-fast regressions', () => {
     // Prime the incremental trie before the jurisdiction event mutates the
     // same Delta objects in place. Dispute finalization must invalidate it.
     computeAccountStateRoot(account.state);
-    state.accounts.set(counterpartyId, account);
+    state.accounts = state.accounts.updated(counterpartyId, account);
     state.jBatchState = {
       batch: {
         ...createEmptyBatch(),
@@ -1103,7 +1123,11 @@ describe('audit fail-fast regressions', () => {
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-missing', finalProofbody);
     delete (fixture.event.data as { finalProofbody?: ProofBodyStruct }).finalProofbody;
-    fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    fixture.account.state.deltas = fixture.account.state.deltas.updated(1, {
+      ...createDefaultDelta(1),
+      collateral: 100n,
+      offdelta: 50n,
+    });
     const stateBefore = safeStringify(fixture.state);
 
     await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_EVENT_PROOFBODY');
@@ -1174,23 +1198,31 @@ describe('audit fail-fast regressions', () => {
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-shape', malformedProofbody);
-    fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    fixture.account.state.deltas = fixture.account.state.deltas.updated(1, {
+      ...createDefaultDelta(1),
+      collateral: 100n,
+      offdelta: 50n,
+    });
 
-    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_DISPUTE_PROOFBODY_LENGTH_MISMATCH');
+    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID');
   });
 
-  test('DisputeFinalized clears proof tokens and retires omitted offchain fields', async () => {
+  test('DisputeFinalized clears every frozen proof token and retires offchain fields', async () => {
     const finalProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,
       leftResponseSeconds: 10,
       rightResponseSeconds: 10,
-      offdeltas: [50n],
-      tokenIds: [1n],
+      offdeltas: [50n, 75n],
+      tokenIds: [1n, 2n],
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-exact-token-cleanup', finalProofbody);
-    fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
-    fixture.account.state.deltas.set(2, {
+    fixture.account.state.deltas = fixture.account.state.deltas.updated(1, {
+      ...createDefaultDelta(1),
+      collateral: 100n,
+      offdelta: 50n,
+    });
+    fixture.account.state.deltas = fixture.account.state.deltas.updated(2, {
       ...createDefaultDelta(2),
       collateral: 200n,
       ondelta: -9n,
@@ -1205,8 +1237,8 @@ describe('audit fail-fast regressions', () => {
     const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
     expect(account.state.deltas.get(1)).toMatchObject({ collateral: 0n, ondelta: 0n, offdelta: 0n });
     expect(account.state.deltas.get(2)).toMatchObject({
-      collateral: 200n,
-      ondelta: -9n,
+      collateral: 0n,
+      ondelta: 0n,
       offdelta: 0n,
       leftHold: 0n,
       rightHold: 0n,
@@ -1216,7 +1248,7 @@ describe('audit fail-fast regressions', () => {
     expect(Object.hasOwn(account, 'disputeProofBodiesByHash')).toBeFalse();
     expect(Object.hasOwn(account, 'disputeProofNoncesByHash')).toBeFalse();
     expect(Object.hasOwn(account, 'disputeArgumentSnapshotsByHash')).toBeFalse();
-    const persisted = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(account)));
+    const persisted = projectAccountDoc(account);
     expect(Object.hasOwn(persisted, 'disputeProofBodiesByHash')).toBeFalse();
     expect(Object.hasOwn(persisted, 'disputeProofNoncesByHash')).toBeFalse();
     expect(Object.hasOwn(persisted, 'disputeArgumentSnapshotsByHash')).toBeFalse();
@@ -1232,7 +1264,7 @@ describe('audit fail-fast regressions', () => {
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-settlement-race', finalProofbody);
-    fixture.account.state.deltas.set(1, {
+    fixture.account.state.deltas = fixture.account.state.deltas.updated(1, {
       ...createDefaultDelta(1),
       collateral: 100n,
       offdelta: 50n,
@@ -1285,7 +1317,7 @@ describe('audit fail-fast regressions', () => {
       observedOnChain: false,
       finalizeQueued: false,
     };
-    state.accounts.set(starterId, account);
+    state.accounts = state.accounts.updated(starterId, account);
 
     const env = createEmptyEnv('placeholder-dispute-finalize-runtime');
     env.quietRuntimeLogs = true;
@@ -1322,10 +1354,10 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], starterId, finalizerId);
     account.state.domain = { chainId: 31337, depositoryAddress };
     account.proofHeader = { fromEntity: starterId, toEntity: finalizerId, nextProofNonce: 2 };
-    account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
+    account.state.deltas = account.state.deltas.updated(1, { ...createDefaultDelta(1), offdelta: 50n });
 
     const initialProof = buildAccountProofBody(account, '');
-    account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
+    account.state.deltas = account.state.deltas.updated(1, { ...createDefaultDelta(1), offdelta: 75n });
     const counterProof = buildAccountProofBody(account, '');
     account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 2;
@@ -1357,7 +1389,7 @@ describe('audit fail-fast regressions', () => {
       observedOnChain: true,
       finalizeQueued: false,
     };
-    state.accounts.set(starterId, account);
+    state.accounts = state.accounts.updated(starterId, account);
 
     const env = createEmptyEnv('counter-finalize-runtime');
     env.quietRuntimeLogs = true;
@@ -1429,7 +1461,7 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], user.entityId, hub.entityId);
     account.state.jNonce = 1;
     account.proofHeader = { fromEntity: user.entityId, toEntity: hub.entityId, nextProofNonce: 50 };
-    account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 10n });
+    account.state.deltas = account.state.deltas.updated(1, { ...createDefaultDelta(1), collateral: 10n });
 
     const transition: AccountTx = {
       type: 'settle_transition',
@@ -1442,6 +1474,7 @@ describe('audit fail-fast regressions', () => {
     };
     const applied = await applyAccountTx(account, transition, false, 1_000);
     expect(applied.ok).toBe(true);
+    const candidateState = createEntityFrameCandidateState(userState);
     const result = await processCommittedSettlementTransitionFollowup(
       account,
       transition,
@@ -1450,17 +1483,17 @@ describe('audit fail-fast regressions', () => {
         height: 1,
         timestamp: 1_000,
         accountTxs: [transition],
-        byLeft: false,
       },
+      false,
       hub.entityId,
-      userState,
+      candidateState,
       env,
     );
 
     expect(result.outputs).toEqual([]);
     expect(result.accountTxs).toEqual([]);
-    expect(userState.deferredAccountProposals?.get(hub.entityId)).toBe(account.state.settlementWorkspace?.workspaceHash);
-    expect(buildSettlementHankoDraft(account, userState, hub.entityId, env).tx).toMatchObject({
+    expect(candidateState.deferredAccountProposals?.get(hub.entityId)).toBe(account.state.settlementWorkspace?.workspaceHash);
+    expect(buildSettlementHankoDraft(account, candidateState, hub.entityId, env).tx).toMatchObject({
       type: 'settle_transition',
       data: {
         kind: 'hanko',
@@ -1478,7 +1511,7 @@ describe('audit fail-fast regressions', () => {
     const depositoryAddress = hex20('1');
     const account = makeProposalAccount([], leftId, rightId);
     account.proofHeader = { fromEntity: leftId, toEntity: rightId, nextProofNonce: 2 };
-    account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
+    account.state.deltas = account.state.deltas.updated(1, { ...createDefaultDelta(1), offdelta: 50n });
 
     const postProof = buildAccountProofBody(account, '');
     const postDisputeHash = createDisputeProofHashWithNonce(
@@ -1736,7 +1769,7 @@ describe('audit fail-fast regressions', () => {
       {
         type: 'htlc_lock',
         data: {
-          lockId: 'overflow-lock',
+          lockId: `0x${'11'.repeat(32)}`,
           hashlock: `0x${'11'.repeat(32)}`,
           timelock: 1_000_000n,
           revealBeforeHeight: 100,
@@ -1899,6 +1932,10 @@ describe('audit fail-fast regressions', () => {
     targetState.orderbookExt = {
       books: new Map([[pairId, book]]),
       orderPairs: new Map([[namespacedOrderId, [pairId]]]),
+      pairDimensions: new Map([[
+        pairId,
+        getSwapPairDimensions(1, getStaticSwapTokenDimensions(route.source.tokenId, route.target.tokenId)),
+      ]]),
       referrals: new Map(),
       hubProfile: {
         entityId: targetHub,
@@ -1941,7 +1978,8 @@ describe('audit fail-fast regressions', () => {
         cancelRemainder: true,
       },
     };
-    const applied = applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceState, sourceUser, ackTx, outputs);
+    const sourceCandidate = createEntityFrameCandidateState(sourceState);
+    const applied = applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceCandidate, sourceUser, ackTx, outputs);
 
     expect(applied).toBe(true);
     const removal = outputs.find(
@@ -1958,7 +1996,7 @@ describe('audit fail-fast regressions', () => {
     });
     expect((removal?.entityTxs?.[0] as any)?.data?.route?.orderId).toBe(orderId);
 
-    const removed = await applyEntityTx(env, targetState, removal!.entityTxs![0]!);
+    const removed = await applyEntityTx(env, createEntityFrameCandidateState(targetState), removal!.entityTxs![0]!);
     const nextBook = removed.newState.orderbookExt?.books.get(pairId);
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
   });
@@ -2105,12 +2143,20 @@ describe('audit fail-fast regressions', () => {
     };
     sourceState.crossJurisdictionSwaps = new Map([[makerRoute.orderId, makerRoute]]);
     const makerSourceAccount = makeCanonicalAccount(sourceHub, remoteMaker);
-    makerSourceAccount.state.swapOffers.set(makerRoute.orderId, {
+    makerSourceAccount.state.swapOffers = makerSourceAccount.state.swapOffers.updated(makerRoute.orderId, {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
+      giveTokenDecimals: getStaticSwapTokenDimensions(
+        makerRoute.source.tokenId,
+        makerRoute.target.tokenId,
+      ).giveTokenDecimals,
       giveAmount: makerRoute.source.amount,
       quantizedGive: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
+      wantTokenDecimals: getStaticSwapTokenDimensions(
+        makerRoute.source.tokenId,
+        makerRoute.target.tokenId,
+      ).wantTokenDecimals,
       wantAmount: makerRoute.target.amount,
       maxFee: 0n,
       minNetReceive: makerRoute.target.amount,
@@ -2121,8 +2167,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
     });
-    recordSwapOfferLifecycle(makerSourceAccount, makerSourceAccount.state.swapOffers.get(makerRoute.orderId)!);
-    sourceState.accounts.set(remoteMaker, makerSourceAccount);
+    sourceState.accounts = sourceState.accounts.updated(remoteMaker, makerSourceAccount);
 
     const bookOwnerState = makeEntityState(bookOwnerHub);
     bookOwnerState.config = makeSingleSignerConfigFor(bookOwnerSigner);
@@ -2199,6 +2244,10 @@ describe('audit fail-fast regressions', () => {
       // keys even though this fixture uses the same executed WETH/USDC book.
       books: new Map([[pairId, book], ['1/2', book]]),
       orderPairs: new Map([[`${remoteMaker}:${makerRoute.orderId}`, [pairId]]]),
+      pairDimensions: new Map([
+        [pairId, getSwapPairDimensions(1, getStaticSwapTokenDimensions(2, 1))],
+        ['1/2', getSwapPairDimensions(1, getStaticSwapTokenDimensions(2, 1))],
+      ]),
       referrals: new Map(),
       hubProfile: {
         entityId: bookOwnerHub,
@@ -2211,12 +2260,20 @@ describe('audit fail-fast regressions', () => {
     } satisfies OrderbookExtState;
 
     const takerAccount = makeCanonicalAccount(bookOwnerHub, localTaker);
-    takerAccount.state.swapOffers.set(takerRoute.orderId, {
+    takerAccount.state.swapOffers = takerAccount.state.swapOffers.updated(takerRoute.orderId, {
       offerId: takerRoute.orderId,
       giveTokenId: takerRoute.source.tokenId,
+      giveTokenDecimals: getStaticSwapTokenDimensions(
+        takerRoute.source.tokenId,
+        takerRoute.target.tokenId,
+      ).giveTokenDecimals,
       giveAmount: takerRoute.source.amount,
       quantizedGive: takerRoute.source.amount,
       wantTokenId: takerRoute.target.tokenId,
+      wantTokenDecimals: getStaticSwapTokenDimensions(
+        takerRoute.source.tokenId,
+        takerRoute.target.tokenId,
+      ).wantTokenDecimals,
       wantAmount: takerRoute.target.amount,
       maxFee: 0n,
       minNetReceive: takerRoute.target.amount,
@@ -2227,19 +2284,26 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
     });
-    recordSwapOfferLifecycle(takerAccount, takerAccount.state.swapOffers.get(takerRoute.orderId)!);
-    bookOwnerState.accounts.set(localTaker, takerAccount);
+    bookOwnerState.accounts = bookOwnerState.accounts.updated(localTaker, takerAccount);
 
     const collisionOwner = `0x${'35'.repeat(32)}`;
     const collisionState = makeEntityState(collisionOwner);
     collisionState.config = makeSingleSignerConfigFor(collisionSigner);
     const collisionAccount = makeCanonicalAccount(collisionOwner, remoteMaker);
-    collisionAccount.state.swapOffers.set(makerRoute.orderId, {
+    collisionAccount.state.swapOffers = collisionAccount.state.swapOffers.updated(makerRoute.orderId, {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
+      giveTokenDecimals: getStaticSwapTokenDimensions(
+        makerRoute.source.tokenId,
+        makerRoute.target.tokenId,
+      ).giveTokenDecimals,
       giveAmount: makerRoute.source.amount,
       quantizedGive: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
+      wantTokenDecimals: getStaticSwapTokenDimensions(
+        makerRoute.source.tokenId,
+        makerRoute.target.tokenId,
+      ).wantTokenDecimals,
       wantAmount: makerRoute.target.amount,
       maxFee: 0n,
       minNetReceive: makerRoute.target.amount,
@@ -2250,8 +2314,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
     });
-    recordSwapOfferLifecycle(collisionAccount, collisionAccount.state.swapOffers.get(makerRoute.orderId)!);
-    collisionState.accounts.set(remoteMaker, collisionAccount);
+    collisionState.accounts = collisionState.accounts.updated(remoteMaker, collisionAccount);
     env.state.eReplicas.set(`${collisionOwner}:${collisionSigner}`, {
       entityId: collisionOwner,
       signerId: collisionSigner,
@@ -2296,7 +2359,6 @@ describe('audit fail-fast regressions', () => {
         output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice',
     );
     expect(sourceNotice?.signerId).toBe('committed-source-hub-route');
-    expect(sourceNotice?.localRuntimeProtocol).toBe('cross-j');
     expect(sourceNotice?.entityTxs?.[0]).toMatchObject({
       type: 'crossJurisdictionFillNotice',
       data: {
@@ -2317,6 +2379,7 @@ describe('audit fail-fast regressions', () => {
         data: {
           protocol: 'cross-j',
           sourceEntityId: bookOwnerHub,
+          sourceSignerId: bookOwnerSigner,
           targetEntityId: sourceHub,
           entityTxs: sourceNotice!.entityTxs!,
         },
@@ -2386,12 +2449,20 @@ describe('audit fail-fast regressions', () => {
     installSingleSignerBoard(env, sourceState);
     sourceState.crossJurisdictionSwaps = new Map([[orderId, restingRoute]]);
     const account = makeProposalAccount([], sourceHub, user);
-    account.state.swapOffers.set(orderId, {
+    account.state.swapOffers = account.state.swapOffers.updated(orderId, {
       offerId: orderId,
       giveTokenId: restingRoute.source.tokenId,
+      giveTokenDecimals: getStaticSwapTokenDimensions(
+        restingRoute.source.tokenId,
+        restingRoute.target.tokenId,
+      ).giveTokenDecimals,
       giveAmount: restingRoute.source.amount,
       quantizedGive: restingRoute.source.amount,
       wantTokenId: restingRoute.target.tokenId,
+      wantTokenDecimals: getStaticSwapTokenDimensions(
+        restingRoute.source.tokenId,
+        restingRoute.target.tokenId,
+      ).wantTokenDecimals,
       wantAmount: restingRoute.target.amount,
       maxFee: 0n,
       minNetReceive: restingRoute.target.amount,
@@ -2402,8 +2473,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: restingRoute,
     });
-    recordSwapOfferLifecycle(account, account.state.swapOffers.get(orderId)!);
-    sourceState.accounts.set(user, account);
+    sourceState.accounts = sourceState.accounts.updated(user, account);
 
     const conflictingRoute = buildPreparedCrossJurisdictionRoute(
       {

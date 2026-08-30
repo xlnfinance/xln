@@ -94,6 +94,28 @@ impl EntityContextPayloadRow {
         })
     }
 
+    /// Hot projector boundary: bytes came directly from the canonical encoder
+    /// in this crate, so decoding and re-encoding them here would prove the
+    /// encoder against itself while copying the entire context again.
+    pub(crate) fn projected(
+        replica_id: impl Into<String>,
+        kind: EntityContextPayloadKind,
+        index: u32,
+        value: Vec<u8>,
+    ) -> Result<Self, EntityContextPayloadError> {
+        let replica_id = replica_id.into();
+        validate_replica_id(&replica_id)?;
+        if value.is_empty() || value.len() >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES {
+            return Err(EntityContextPayloadError::RowBytes(value.len()));
+        }
+        Ok(Self {
+            replica_id,
+            kind,
+            index,
+            value,
+        })
+    }
+
     pub fn replica_id(&self) -> &str {
         &self.replica_id
     }
@@ -127,6 +149,12 @@ pub struct EntityContextPayloadRows {
 impl EntityContextPayloadRows {
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn merge(
+        parts: impl IntoIterator<Item = Self>,
+    ) -> Result<Self, EntityContextPayloadError> {
+        Self::validate(parts.into_iter().flat_map(|part| part.rows).collect())
     }
 
     pub fn validate(rows: Vec<EntityContextPayloadRow>) -> Result<Self, EntityContextPayloadError> {
@@ -168,6 +196,66 @@ impl EntityContextPayloadRows {
             rows: ordered_rows,
             frame_refs,
         })
+    }
+
+    /// Assemble rows produced by the typed context projector without a second
+    /// decode/graph walk. Recovery/import still uses `validate`; test/debug
+    /// builds compare this fast path to that full oracle byte-for-byte.
+    pub(crate) fn projected(
+        mut rows: Vec<EntityContextPayloadRow>,
+        replica_id: String,
+        manifest_digest: EntityContextPayloadDigest,
+    ) -> Result<Self, EntityContextPayloadError> {
+        validate_replica_id(&replica_id)?;
+        let mut paths = BTreeSet::new();
+        let mut manifest_found = false;
+        for row in &rows {
+            if row.replica_id != replica_id {
+                return Err(EntityContextPayloadError::Replica(row.replica_id.clone()));
+            }
+            let path = RowPath {
+                kind: row.kind,
+                index: row.index,
+            };
+            if !paths.insert(path) {
+                return Err(EntityContextPayloadError::DuplicatePath {
+                    replica: replica_id.clone(),
+                    kind: path.kind.label(),
+                    index: path.index,
+                });
+            }
+            if path.kind == EntityContextPayloadKind::Manifest && path.index == 0 {
+                manifest_found = true;
+                if <[u8; 32]>::from(Sha256::digest(&row.value)) != manifest_digest {
+                    return Err(EntityContextPayloadError::Digest {
+                        replica: replica_id.clone(),
+                        kind: path.kind.label(),
+                        index: path.index,
+                    });
+                }
+            }
+        }
+        if !manifest_found {
+            return Err(EntityContextPayloadError::Missing {
+                replica: replica_id,
+                kind: EntityContextPayloadKind::Manifest.label(),
+                index: 0,
+            });
+        }
+        rows.sort_by_key(|row| RowPath {
+            kind: row.kind,
+            index: row.index,
+        });
+        let projected = Self {
+            rows,
+            frame_refs: vec![(replica_id, manifest_digest)],
+        };
+        #[cfg(any(test, debug_assertions))]
+        {
+            let oracle = Self::validate(projected.rows.clone())?;
+            assert_eq!(projected, oracle, "RSCORE_PROJECTED_CONTEXT_ROWS_DIVERGED");
+        }
+        Ok(projected)
     }
 
     pub fn rows(&self) -> &[EntityContextPayloadRow] {

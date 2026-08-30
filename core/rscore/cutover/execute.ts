@@ -109,7 +109,7 @@ export const materializeCutoverAccount = (
   for (const key of [
     'pendingFrame',
     'pendingAccountInput',
-    'lastOutboundFrameAck',
+    'lastOutboundAckFrame',
     'currentFrameHanko',
     'counterpartyFrameHanko',
     'lastRollbackFrameHash',
@@ -173,8 +173,8 @@ const cutoverAccountInputEvents = (
   fromEntityId: string,
 ): string[] => {
   const events: string[] = [];
-  const ack = verdict.kind === 'frameAckApplied' ? verdict.ackVerdict : verdict;
-  const frame = verdict.kind === 'frameAckApplied' ? verdict.frameVerdict : verdict;
+  const ack = verdict.kind === 'ackFrameApplied' ? verdict.ackVerdict : verdict;
+  const frame = verdict.kind === 'ackFrameApplied' ? verdict.frameVerdict : verdict;
   if (ack.kind === 'ackCommitted') {
     events.push(`✅ Frame ${ack.height} confirmed and committed`);
   }
@@ -261,7 +261,7 @@ const collectAckCommit = (
   verdict: CutoverVerdict,
   accumulator: CutoverInputAccumulator,
 ): void => {
-  const ack = verdict.kind === 'frameAckApplied' ? verdict.ackVerdict : verdict;
+  const ack = verdict.kind === 'ackFrameApplied' ? verdict.ackVerdict : verdict;
   if (ack.kind === 'ackCommitted') {
     const effects = appliedFromCommit(
       request.account,
@@ -287,7 +287,7 @@ const collectFrameCommit = (
   publishPostState: boolean,
   accumulator: CutoverInputAccumulator,
 ): HandleAccountInputResult | null => {
-  const frame = verdict.kind === 'frameAckApplied' ? verdict.frameVerdict : verdict;
+  const frame = verdict.kind === 'ackFrameApplied' ? verdict.frameVerdict : verdict;
   if (frame.kind === 'frameCommitted') {
     const effects = appliedFromCommit(
       request.account,
@@ -333,8 +333,8 @@ const collectFrameCommit = (
     }, accumulator.events);
   } else if (frame.kind === 'frameRejected') {
     fail('FRAME_REJECTED', { account: request.accountId, reason: frame.reason });
-  } else if (frame.kind === 'frameAckRejected') {
-    fail('FRAME_ACK_REJECTED', {
+  } else if (frame.kind === 'ackFrameRejected') {
+    fail('ACK_FRAME_REJECTED', {
       account: request.accountId,
       phase: frame.phase,
       reason: frame.reason,

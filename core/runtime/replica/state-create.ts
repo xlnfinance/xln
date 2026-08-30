@@ -8,7 +8,7 @@ import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import type { Profile } from '../../entity/profile';
 import { buildLocalEntityProfile } from '../../network/p2p/gossip/helper';
-import { deriveRuntimeIdFromSeed, normalizeDbNamespace } from '../../storage/runtime-dbs';
+import { normalizeDbNamespace } from '../../storage/runtime-dbs';
 import type { RuntimeReplica } from '../types';
 import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop/loop-environment';
 
@@ -20,19 +20,22 @@ export type RuntimeStateCreateDeps = {
   trackInfraDbWrite(env: RuntimeReplica, promise: Promise<void>): void;
 };
 
-export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
-  const prewarmRuntimeSignerCache = (seedText: string, count = 20): string[] => {
-    try {
-      return prewarmSignerKeyCache(seedText, count);
-    } catch (error) {
-      runtimeLog.error('signer_cache.prewarm_failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-  };
+const prewarmRuntimeSignerCache = (seedText: string, count = 20): string[] => {
+  try {
+    return prewarmSignerKeyCache(seedText, count);
+  } catch (error) {
+    runtimeLog.error('signer_cache.prewarm_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+};
 
-  const createEmptyEnv = (seed?: Uint8Array | string | null): RuntimeReplica => {
+export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
+  const createEmptyEnv = (
+    seed?: Uint8Array | string | null,
+    numericSignerPrewarmCount = 20,
+  ): RuntimeReplica => {
     const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
     const seedText =
       normalizedSeed !== undefined && normalizedSeed !== null
@@ -40,7 +43,12 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
           ? normalizedSeed
           : new TextDecoder().decode(normalizedSeed)
         : '';
-    const derivedRuntimeId = seedText ? deriveRuntimeIdFromSeed(seedText) : null;
+    // Numeric signer 1 is the Runtime identity. Prewarm it once and reuse its
+    // address instead of repeating the same BIP-39 derivation for runtimeId.
+    const prewarmedSignerIds = seedText
+      ? prewarmRuntimeSignerCache(seedText, numericSignerPrewarmCount)
+      : [];
+    const derivedRuntimeId = prewarmedSignerIds[0] ?? null;
     const resolvedRuntimeId = derivedRuntimeId?.toLowerCase() ?? null;
     const dbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
 
@@ -112,7 +120,6 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     requireRuntimeMempool(env);
     deps.ensureRuntimeConfig(env);
     ensureRuntimeInfrastructure(env);
-    if (seedText) prewarmRuntimeSignerCache(seedText, 20);
     return env;
   };
 

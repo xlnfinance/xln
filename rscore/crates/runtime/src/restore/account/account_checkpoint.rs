@@ -1,4 +1,4 @@
-//! Exact ten-field `RestoreExact` Account-row decoder.
+//! Exact eleven-field `RestoreExact` Account-row decoder.
 
 use serde_json::Value;
 use xln_rscore_abi::AbiValue;
@@ -161,7 +161,7 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Accoun
 }
 
 fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 9, "checkpointHeader")?;
+    let fields = exact(tuple(value)?, 10, "checkpointHeader")?;
     let identity = exact(tuple(&fields[2])?, 5, "checkpointIdentity")?;
     let dispute = exact(tuple(&fields[3])?, 2, "checkpointDispute")?;
     let carried = exact(tuple(&fields[6])?, 6, "checkpointCarried")?;
@@ -206,11 +206,15 @@ fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, AccountWireRestor
             AbiValue::Nil => None,
             value => Some(fixed_bytes(value, "deltaTransformer")?),
         },
+        settlement_workspace: match &fields[9] {
+            AbiValue::Nil => None,
+            value => Some(super::account_canonical::value(value)?),
+        },
     })
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 10, "accountRestore")?;
+    let fields = exact(tuple(value)?, 11, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -234,7 +238,11 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
         .iter()
         .map(policy_entry)
         .collect::<Result<_, _>>()?;
-    let j_claim_nodes = tuple(&fields[8])?
+    let pulls = tuple(&fields[8])?
+        .iter()
+        .map(pull_entry)
+        .collect::<Result<_, _>>()?;
+    let j_claim_nodes = tuple(&fields[9])?
         .iter()
         .map(|entry| {
             let row = exact(tuple(entry)?, 2, "jClaimNodeEntry")?;
@@ -244,7 +252,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
             ))
         })
         .collect::<Result<Vec<_>, AccountWireRestoreError>>()?;
-    let consensus = consensus(&fields[9])?;
+    let consensus = consensus(&fields[10])?;
     let counterparty = if &header.owner == header.identity.left() {
         header.identity.right()
     } else if &header.owner == header.identity.right() {
@@ -268,6 +276,8 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
             rebalance_fee_policies,
             swap_offers,
             lending_intents,
+            pulls,
+            settlement_workspace: header.settlement_workspace,
         })
         .map_err(|error| invalid(format!("ACCOUNT_STATE:{error}")))?,
     )
@@ -288,7 +298,25 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
     })
 }
 
-/// Decode exactly the persisted ten-field rows accepted by the process
+fn pull_entry(
+    value: &AbiValue,
+) -> Result<(String, xln_rscore_engine::CanonicalValue), AccountWireRestoreError> {
+    let pull = super::account_canonical::value(value)?;
+    let pull_id = match &pull {
+        xln_rscore_engine::CanonicalValue::Object(fields) => fields
+            .iter()
+            .find(|(key, _)| key == "pullId")
+            .and_then(|(_, value)| match value {
+                xln_rscore_engine::CanonicalValue::String(value) => Some(value.clone()),
+                _ => None,
+            }),
+        _ => None,
+    }
+    .ok_or_else(|| invalid("CHECKPOINT_PULL_ID"))?;
+    Ok((pull_id, pull))
+}
+
+/// Decode exactly the persisted eleven-field rows accepted by the process
 /// `RestoreExact` operation. This is the same positional ABI, not a second
 /// semantic checkpoint shape.
 pub fn decode_account_rows(rows: &[Value]) -> Result<Vec<AccountRestore>, AccountWireRestoreError> {

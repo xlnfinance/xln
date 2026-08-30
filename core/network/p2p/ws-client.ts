@@ -157,6 +157,12 @@ export type RuntimeWsClientOptions = {
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefined';
+let nodeWebSocketConstructor: Promise<typeof import('ws')['default']> | null = null;
+
+const loadNodeWebSocketConstructor = (): Promise<typeof import('ws')['default']> => {
+  nodeWebSocketConstructor ??= import('ws').then(module => module.default);
+  return nodeWebSocketConstructor;
+};
 
 const createWs = async (
   url: string,
@@ -170,9 +176,9 @@ const createWs = async (
     onCreated(ws as BrowserWebSocket);
     return ws as BrowserWebSocket;
   }
-  const ws = await import('ws');
+  const NodeWebSocket = await loadNodeWebSocketConstructor();
   if (!shouldCreate()) return null;
-  const instance = new ws.default(url);
+  const instance = new NodeWebSocket(url);
   onCreated(instance as NodeWebSocket);
   return instance as NodeWebSocket;
 };
@@ -202,6 +208,7 @@ export class RuntimeWsClient {
   private suppressNextClose = false;
   private helloSent = false;
   private helloAcknowledged = false;
+  private everAuthenticated = false;
   private helloAudience: string | null = null;
   private helloNonce: string | null = null;
   private directPeerEncryptionPubKey: string | null = null;
@@ -316,6 +323,7 @@ export class RuntimeWsClient {
 
   private handleSocketClose(generation: number, codeInput: number, reasonInput: string, wasClean?: boolean): void {
     if (generation !== this.lifecycleGeneration) return;
+    const authenticated = this.helloAcknowledged || this.everAuthenticated;
     this.connecting = false;
     this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
     if (this.suppressNextClose) {
@@ -333,16 +341,19 @@ export class RuntimeWsClient {
       `buffered=${Number(this.ws && isNodeWebSocket(this.ws) ? this.ws.bufferedAmount ?? 0 : 0)}`;
     this.helloAcknowledged = false;
     this.sessionKeys = null;
+    if (!authenticated) {
+      wsLog.warn('initial_connect.closed', { summary });
+      return;
+    }
     console.error(`[WS] ${summary}`);
-    // A close frame is never Account-consensus evidence. Reconnecting here can
-    // replace an authenticated socket while committed ACK bytes are still in
-    // flight, so the transport has one canonical policy: halt and let an
-    // operator establish a fresh route explicitly.
+    // Once authenticated, reconnecting can replace a socket while committed
+    // Account ACK bytes are still in flight. Freeze the Runtime for audit.
     this.options.onError?.(new Error(summary));
   }
 
   private handleSocketError(generation: number, error: Error): void {
     if (this.closed || generation !== this.lifecycleGeneration) return;
+    const authenticated = this.helloAcknowledged || this.everAuthenticated;
     this.connecting = false;
     const fatal = new Error(
       `WS_UNEXPECTED_ERROR:runtime=${this.options.runtimeId}:url=${this.options.url}:` +
@@ -352,6 +363,10 @@ export class RuntimeWsClient {
       `error=${error.message}`,
       { cause: error },
     );
+    if (!authenticated) {
+      wsLog.warn('initial_connect.error', { summary: fatal.message });
+      return;
+    }
     console.error(`[WS] ${fatal.message}`);
     this.options.onError?.(fatal);
   }
@@ -576,6 +591,7 @@ export class RuntimeWsClient {
       }
       if (this.helloAcknowledged) return true;
       this.helloAcknowledged = true;
+      this.everAuthenticated = true;
       this.connecting = false;
       if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
         this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
@@ -668,6 +684,12 @@ export class RuntimeWsClient {
           ? decryptSessionPayload(msg.payload as Uint8Array, sessionKeys.s2c, msg.encSeq)
           : decryptPayload(msg.payload as Uint8Array, this.options.encryptionKeyPair.privateKey),
       );
+      traceAccountDeliveryHop('direct-decoded', envelope, {
+        runtimeId: this.options.runtimeId,
+        peerRuntimeId: msg.from,
+        messageId: msg.id,
+        encSeq: msg.encSeq ?? null,
+      });
     } catch (error) {
       console.error('❌ WS-CLIENT-DECRYPT-FAILED:', error);
       this.sendDebugEvent({
@@ -690,6 +712,11 @@ export class RuntimeWsClient {
         typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
         Boolean(sessionKeys && msg.encSeq !== undefined),
       );
+      traceAccountDeliveryHop('direct-admitted', envelope, {
+        runtimeId: this.options.runtimeId,
+        peerRuntimeId: msg.from,
+        messageId: msg.id,
+      });
     } catch (error) {
       const handlerError = error instanceof Error ? error : new Error(String(error));
       console.error('❌ WS-CLIENT-ENTITY-INPUT-HANDLER-FAILED:', handlerError);
@@ -1121,6 +1148,18 @@ export class RuntimeWsClient {
 
   isConnecting(): boolean {
     return this.connecting;
+  }
+
+  /** Retry only an initial TCP/WebSocket admission that never authenticated.
+   * Once hello_ack was observed, reconnect is forbidden because Account bytes
+   * may have been in flight when the socket closed. */
+  retryInitialConnect(): boolean {
+    if (this.closed || this.everAuthenticated || this.isOpen() || this.connecting) return false;
+    if (this.ws && readSocketReadyState(this.ws) !== 3) return false;
+    this.connect().catch(error => this.options.onError?.(
+      error instanceof Error ? error : new Error(String(error)),
+    ));
+    return true;
   }
 
   pause() {

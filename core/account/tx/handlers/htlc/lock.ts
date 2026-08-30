@@ -35,7 +35,8 @@ const validateHtlcLock = (
   currentTimestamp: number,
   currentJHeight: number,
 ): string | undefined => {
-  const { lockId, timelock, revealBeforeHeight, amount } = tx.data;
+  const { lockId, hashlock, timelock, revealBeforeHeight, amount } = tx.data;
+  if (lockId !== hashlock) return `Lock ID must equal hashlock (${lockId} != ${hashlock})`;
   if (account.state.locks.has(lockId)) return `Lock ${lockId} already exists`;
   if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
     return `Timelock ${timelock} already expired (timestamp)`;

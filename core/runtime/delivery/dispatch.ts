@@ -37,6 +37,38 @@ import { traceAccountDeliveryHop } from '../../support/performance/account-deliv
 
 const routeLog = createStructuredLogger('network.route');
 
+const mergeRuntimeOutputEnvelopes = (
+  existing: DeliverableEntityInput,
+  incoming: DeliverableEntityInput,
+): boolean => {
+  const left = existing.entityTxs?.length === 1 && existing.entityTxs[0]?.type === 'runtimeOutput'
+    ? existing.entityTxs[0]
+    : null;
+  const right = incoming.entityTxs?.length === 1 && incoming.entityTxs[0]?.type === 'runtimeOutput'
+    ? incoming.entityTxs[0]
+    : null;
+  if (!left && !right) return false;
+  if (!left || !right) throw new Error('ROUTE_RUNTIME_OUTPUT_MIXED_ENVELOPE');
+  const leftData = left.data;
+  const rightData = right.data;
+  if (
+    leftData.protocol !== rightData.protocol ||
+    leftData.sourceEntityId !== rightData.sourceEntityId ||
+    leftData.sourceSignerId !== rightData.sourceSignerId ||
+    leftData.targetEntityId !== rightData.targetEntityId
+  ) {
+    throw new Error('ROUTE_RUNTIME_OUTPUT_AUTHORITY_MISMATCH');
+  }
+  existing.entityTxs = [{
+    type: 'runtimeOutput',
+    data: {
+      ...leftData,
+      entityTxs: [...leftData.entityTxs, ...rightData.entityTxs],
+    },
+  }];
+  return true;
+};
+
 const batchOutputsByTarget = (
   outputs: DeliverableEntityInput[],
   graph: PreparedOutputGraph,
@@ -44,7 +76,9 @@ const batchOutputsByTarget = (
   const batched = new Map<string, DeliverableEntityInput>();
 
   for (const output of outputs.flatMap(candidate => graph.split(candidate))) {
-    const laneKey = `${output.runtimeId}:${output.entityId}:${output.signerId || ''}`;
+    const runtimeId = output.runtimeId;
+    if (!runtimeId) throw new Error('ROUTE_RUNTIME_OUTPUT_RUNTIME_ID_MISSING');
+    const laneKey = `${runtimeId}:${output.entityId}:${output.signerId || ''}`;
     // Only tx-only outputs of one lane merge into a single input; every
     // consensus payload keeps its own input.
     const key = output.entityTxs?.length && !output.proposedFrame && !output.hashPrecommits
@@ -54,12 +88,15 @@ const batchOutputsByTarget = (
     const existing = batched.get(key);
 
     if (existing) {
-      mergeRoutedEntityOutput(existing, output);
+      if (!mergeRuntimeOutputEnvelopes(existing, { ...output, runtimeId })) {
+        mergeRoutedEntityOutput(existing, output);
+      }
       graph.invalidate(existing);
       routeLog.debug('batch.merge', { key, txs: existing.entityTxs?.length || 0 });
     } else {
       const target = validateDeliverableEntityInput({
         ...output,
+        runtimeId,
         ...(output.entityTxs ? { entityTxs: [...output.entityTxs] } : {}),
       });
       graph.adopt(output, target);

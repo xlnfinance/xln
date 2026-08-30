@@ -14,6 +14,7 @@ import type { DebtEntry } from '../../../types/finance/debt';
 import type { EntityState } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
+import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
@@ -32,7 +33,7 @@ const makeEntityState = (): EntityState => ({
     threshold: 1n,
   },
   reserves: new Map([[1, 100n]]),
-  accounts: new Map(),
+  accounts: emptyEntityAccountMap(entityId),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: {
@@ -42,9 +43,7 @@ const makeEntityState = (): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
 });
 

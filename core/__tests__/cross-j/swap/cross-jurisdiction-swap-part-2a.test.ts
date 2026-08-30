@@ -5,7 +5,7 @@ import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../../../entity/tx/apply';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -43,7 +43,6 @@ import { buildCrossJurisdictionSwapSubmission } from '../../../runtime/j-submit/
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
 import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/account';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../../../runtime/types';
@@ -102,8 +101,7 @@ const withCanonicalCrossJurisdictionRouteHash = (
 );
 
 const installSwapOffer = (account: AccountReplica, offer: SwapOffer): void => {
-  account.state.swapOffers.set(offer.offerId, offer);
-  recordSwapOfferLifecycle(account, offer);
+  putTestAccountSwapOffer(account, offer);
 };
 
 import {
@@ -176,6 +174,8 @@ import {
   makeJurisdiction,
   makeState,
   partialBinary,
+  putTestAccountPull,
+  putTestAccountSwapOffer,
   registerTestSigner,
   secret,
   prepareJEventInput,
@@ -317,8 +317,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...preparedRoute,
       status: 'resting' as const,
     };
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(route.sourcePull!.pullId, {
+    putTestAccountPull(account, route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
@@ -397,8 +396,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ),
       status: 'resting' as const,
     };
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(route.sourcePull!.pullId, {
+    putTestAccountPull(account, route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
@@ -858,10 +856,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route, status: 'resting' },
     });
-    account.state.pulls = new Map([
-      [
-        route.sourcePull!.pullId,
-        {
+    putTestAccountPull(account, route.sourcePull!.pullId, {
           pullId: route.sourcePull!.pullId,
           tokenId: 1,
           amount: route.sourcePull!.signedAmount,
@@ -871,9 +866,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           partialRoot: route.sourcePull!.partialRoot,
           createdHeight: 0,
           createdTimestamp: 1_000,
-        },
-      ],
-    ]);
+        });
     account.currentFrame.timestamp = 1_500;
     account.pendingFrame = { ...account.currentFrame, height: 1, timestamp: 9_000 };
 
@@ -1001,9 +994,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
     expect(updatedRoute?.filledSourceAmount).toBe(500n);
     expect(updatedRoute?.priceImprovementSourceAmount).toBe(25n);
-    const history = account.swapOrderHistory?.get(route.orderId);
-    expect(history?.resolves.at(-1)?.executionGiveAmount).toBe(475n);
-    expect(history?.resolves.at(-1)?.executionWantAmount).toBe(450n);
   });
 
   test('cross-j terminal fill ack copies final resolve into closed-order history', async () => {
@@ -1086,11 +1076,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.ok).toBe(true);
     expect(account.state.swapOffers.has(route.orderId)).toBe(false);
-    const closed = account.swapClosedOrders?.get(route.orderId);
-    expect(closed?.resolves).toHaveLength(1);
-    expect(closed?.resolves[0]?.fillRatio).toBe(65_535);
-    expect(closed?.resolves[0]?.executionGiveAmount).toBe(950n);
-    expect(closed?.resolves[0]?.executionWantAmount).toBe(900n);
   });
 
   /**
@@ -1138,7 +1123,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-entity-dust-seed', now: 1_000 },
     );
-    state.crossJurisdictionSwaps = new Map([[route.orderId, { ...route, status: 'resting' }]]);
+    state.crossJurisdictionSwaps!.set(route.orderId, { ...route, status: 'resting' });
 
     // Leaves lot-1 on each leg: below one lot, so it can never match again.
     const cumulative = lot + 1n;
@@ -1176,7 +1161,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceHub = entity('7a');
     const sourceUser = entity('79');
     const state = makeState(sourceHub, addr('7a'), eth, sourceUser);
-    state.crossJurisdictionSwaps = new Map();
+    state.crossJurisdictionSwaps!.clear();
     const outputs: EntityInput[] = [];
     const ackTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
       type: 'cross_swap_fill_ack',
@@ -1643,11 +1628,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.ok).toBe(true);
     expect(account.state.swapOffers.has(route.orderId)).toBe(false);
-    const closed = account.swapClosedOrders?.get(route.orderId);
-    expect(closed).toBeDefined();
-    expect(closed?.resolves.at(-1)?.cancelRemainder).toBe(true);
-    expect(closed?.resolves.at(-1)?.fillNumerator).toBe(cumulative);
-    expect(closed?.resolves.at(-1)?.fillDenominator).toBe(2n * lot);
   });
 
   test('cross-j settles a resting bid and taker sell at the ask so both legs conserve', () => {

@@ -43,10 +43,22 @@ const riskState = (withPrice = true): EntityState => ({
   orderbookExt: {
     books: new Map(withPrice ? [['1/2', internalWethUsdBook()]] : []),
     orderPairs: new Map(),
+    pairDimensions: new Map(),
     referrals: new Map(),
     hubProfile: {
+      entityId: 'market-hub',
+      name: 'market hub',
+      spreadDistribution: {
+        makerBps: 0,
+        takerBps: 10_000,
+        hubBps: 0,
+        makerReferrerBps: 0,
+        takerReferrerBps: 0,
+      },
       referenceTokenId: 1,
       usdQuoteAuthorityEntityId: 'market-maker',
+      minTradeSize: 0n,
+      supportedPairs: ['1/2'],
     },
   },
 } as EntityState);
@@ -169,7 +181,7 @@ describe('cross-j hub USD admission cap', () => {
 
   test('user quotes and trades cannot mutate the persisted authority price', () => {
     const book = internalWethUsdBook();
-    applyCommand(book, {
+    const traded = applyCommand(book, {
       kind: 0,
       ownerId: 'untrusted-user',
       orderId: 'crossing-buy',
@@ -178,8 +190,10 @@ describe('cross-j hub USD admission cap', () => {
       postOnly: false,
       priceTicks: 30_000_000n,
       qtyLots: 1n,
-    });
-    expect(book.lastTradePriceTicks).toBe(25_000_000n);
+    }).state;
+    expect(book.lastTradePriceTicks).toBe(0n);
+    expect(traded.lastTradePriceTicks).toBe(25_000_000n);
+    expect(traded.lastAcceptedUsdAskPriceTicks).toBe(25_000_000n);
     expect(book.lastAcceptedUsdAskPriceTicks).toBe(25_000_000n);
   });
 

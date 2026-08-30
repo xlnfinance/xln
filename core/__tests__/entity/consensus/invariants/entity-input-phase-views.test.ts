@@ -40,7 +40,7 @@ describe('FinTS EntityInput phase views', () => {
     expect(Object.keys(ENTITY_INPUT_FIELD_PHASE).sort()).toEqual([
       'entityId', 'entityTxs', 'from',
       'hashPrecommitFrame', 'hashPrecommits', 'jPrefixAttestations',
-      'leaderTimeoutVote', 'localRuntimeProtocol', 'proposedFrame',
+      'leaderTimeoutVote', 'proposedFrame',
       'runtimeId', 'signerId',
     ]);
   });

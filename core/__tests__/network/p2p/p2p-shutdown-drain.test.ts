@@ -76,6 +76,29 @@ test('direct runtime rejection is a visible transport error, never a retry hint'
   expect(warnings).toEqual([]);
 });
 
+test('direct peer close during an established quiesce is visible but non-fatal', () => {
+  const env = createEmptyEnv('p2p-direct-quiesce-close');
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  env.error = (_category, message) => { errors.push(message); };
+  env.warn = (_category, message) => { warnings.push(message); };
+  env.infrastructure = {
+    ...env.infrastructure,
+    lifecyclePhase: 'quiescing',
+    persistenceQuiescing: true,
+  };
+
+  expect(reportDirectClientError(
+    env,
+    'ws://peer/ws',
+    `0x${'22'.repeat(20)}`,
+    new Error('peer completed coordinated shutdown'),
+  )).toBe('transport-error');
+  expect(errors).toEqual([]);
+  expect(warnings).toEqual(['WS_DIRECT_QUIESCE_CLOSE']);
+  expect(env.infrastructure.operatorStatus).toBeUndefined();
+});
+
 test('node websocket async send failures retain exact envelope correlation', () => {
   const errors: string[] = [];
   const client = new RuntimeWsClient({
@@ -114,7 +137,7 @@ test('node websocket async send failures retain exact envelope correlation', () 
   expect(errors[0]).toContain(':buffered=77:error=kernel flush failed');
 });
 
-test('a socket close never schedules an implicit transport retry', () => {
+test('a pre-auth socket close remains eligible for explicit initial retry', () => {
   const errors: string[] = [];
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
@@ -137,6 +160,31 @@ test('a socket close never schedules an implicit transport retry', () => {
   expect(internals.lifecycleGeneration).toBe(0);
   expect(internals.connecting).toBe(false);
   expect(internals.closed).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('an authenticated socket close remains fatal', () => {
+  const errors: string[] = [];
+  const client = new RuntimeWsClient({
+    url: 'ws://127.0.0.1:1/relay',
+    runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
+    onError: error => errors.push(error.message),
+  });
+  const internals = client as unknown as {
+    connecting: boolean;
+    everAuthenticated: boolean;
+    lifecycleGeneration: number;
+    ws: { readyState: number; bufferedAmount: number };
+    handleSocketClose: (generation: number, code: number, reason: string) => void;
+  };
+
+  internals.ws = { readyState: 3, bufferedAmount: 0 };
+  internals.connecting = true;
+  internals.everAuthenticated = true;
+  internals.handleSocketClose(0, 4009, 'authenticated-session-lost');
+
+  expect(internals.connecting).toBe(false);
   expect(errors).toEqual([
     expect.stringContaining('WS_UNEXPECTED_CLOSE:'),
   ]);

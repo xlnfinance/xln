@@ -24,8 +24,9 @@ pub(crate) fn apply_committed_j_event_claim(
     else {
         return Err(EntityKernelError::output("J_EVENT_CLAIM_OUTPUTS"));
     };
-    let first_token = claim.events.first().map(|event| match event {
-        JurisdictionEvent::AccountSettled(event) => event.token_id,
+    let first_token = claim.events.iter().find_map(|event| match event {
+        JurisdictionEvent::AccountSettled(event) => Some(event.token_id),
+        _ => None,
     });
     if first_token != Some(*token_id)
         || claim.j_height != *j_height

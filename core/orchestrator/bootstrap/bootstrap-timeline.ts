@@ -104,8 +104,33 @@ export type CurrentBootstrapTimelineInput = {
   reserveEntityCount: number;
 };
 
+type CurrentBootstrapTimelineBuilderInput = Omit<
+  CurrentBootstrapTimelineInput,
+  'marketMakerEnabled' | 'hubNameCount' | 'custodyEnabled' | 'custodyOk'
+> & {
+  capabilities: {
+    marketMakerEnabled: boolean;
+    custodyEnabled: boolean;
+    custodyOk: boolean;
+  };
+};
+
+export const createCurrentBootstrapTimelineBuilder = (
+  build: (params: BootstrapTimelineParams) => AggregatedHealth['bootstrapTimeline'],
+  hubNameCount: number,
+) => (input: CurrentBootstrapTimelineBuilderInput): AggregatedHealth['bootstrapTimeline'] => {
+  const { capabilities, ...current } = input;
+  return build(projectCurrentBootstrapTimelineParams({
+    ...current,
+    marketMakerEnabled: capabilities.marketMakerEnabled,
+    hubNameCount,
+    custodyEnabled: capabilities.custodyEnabled,
+    custodyOk: capabilities.custodyOk,
+  }));
+};
+
 /** Project AggregatedHealth-ish fields into the stage timeline params. */
-export const projectCurrentBootstrapTimelineParams = (
+const projectCurrentBootstrapTimelineParams = (
   input: CurrentBootstrapTimelineInput,
 ): BootstrapTimelineParams => {
   const mmHubs = input.marketMaker.hubs;

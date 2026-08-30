@@ -210,6 +210,7 @@ const validateCompleteImport = (value: unknown, code: string): void => {
   requireExactBoundaryKeys(data, [
     'importId', 'requestHash', 'name', 'chainId', 'ticker', 'rpcs', 'blockNumber', 'stateRoot',
     'watcherConfirmationDepth', 'entityProviderDeploymentBlock', 'contracts',
+    'tokenRegistry',
   ], ['blockTimeMs', 'browserVMState'], `${code}_FIELDS`);
   for (const field of ['importId', 'requestHash', 'name', 'ticker', 'blockNumber']) {
     requireString(data[field], `${code}_${field.toUpperCase()}`);
@@ -220,6 +221,22 @@ const validateCompleteImport = (value: unknown, code: string): void => {
   if (data['stateRoot'] !== null) requireBytes32(data['stateRoot'], `${code}_STATE_ROOT`);
   requireBoundaryInteger(data['watcherConfirmationDepth'], `${code}_CONFIRMATION_DEPTH`);
   requireBoundaryInteger(data['entityProviderDeploymentBlock'], `${code}_DEPLOYMENT_BLOCK`, 1);
+  const tokenRegistry = requireArray(data['tokenRegistry'], `${code}_TOKEN_REGISTRY`);
+  for (const [index, raw] of tokenRegistry.entries()) {
+    const token = requireBoundaryRecord(raw, `${code}_TOKEN_${index}`);
+    requireExactBoundaryKeys(token, [
+      'symbol', 'name', 'address', 'decimals', 'tokenId', 'tokenType', 'externalTokenId',
+    ], [], `${code}_TOKEN_${index}_FIELDS`);
+    requireString(token['symbol'], `${code}_TOKEN_${index}_SYMBOL`);
+    requireString(token['name'], `${code}_TOKEN_${index}_NAME`);
+    requireAddress(token['address'], `${code}_TOKEN_${index}_ADDRESS`);
+    const decimals = requireBoundaryInteger(token['decimals'], `${code}_TOKEN_${index}_DECIMALS`);
+    if (decimals > 255) throw new Error(`${code}_TOKEN_${index}_DECIMALS:${decimals}`);
+    requireBoundaryInteger(token['tokenId'], `${code}_TOKEN_${index}_ID`, 1);
+    const tokenType = requireBoundaryInteger(token['tokenType'], `${code}_TOKEN_${index}_TYPE`);
+    if (tokenType > 2) throw new Error(`${code}_TOKEN_${index}_TYPE:${tokenType}`);
+    requireBigInt(token['externalTokenId'], `${code}_TOKEN_${index}_EXTERNAL_ID`, 0n);
+  }
   if (data['blockTimeMs'] !== undefined) requireBoundaryInteger(data['blockTimeMs'], `${code}_BLOCK_TIME`, 1);
   const contracts = requireBoundaryRecord(data['contracts'], `${code}_CONTRACTS`);
   requireExactBoundaryKeys(

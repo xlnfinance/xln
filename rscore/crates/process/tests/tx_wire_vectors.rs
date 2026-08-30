@@ -43,11 +43,13 @@ fn vectors() -> Vec<(String, Vec<u8>)> {
 
 #[test]
 fn every_transaction_typescript_writes_decodes_and_re_encodes_identically() {
+    let mut covered = std::collections::BTreeSet::new();
     for (name, bytes) in vectors() {
         let value = xln_rscore_process::decode_wire_value(&bytes)
             .unwrap_or_else(|error| panic!("{name}: decode bytes: {error}"));
         let tx = xln_rscore_process::decode_account_tx(&value)
             .unwrap_or_else(|error| panic!("{name}: decode tx: {error}"));
+        covered.insert(tx.wire_name());
         let re_encoded = xln_rscore_process::encode_account_tx(&tx)
             .unwrap_or_else(|error| panic!("{name}: encode: {error}"));
         assert_eq!(re_encoded, value, "{name}: re-encoded to a different value");
@@ -59,4 +61,9 @@ fn every_transaction_typescript_writes_decodes_and_re_encodes_identically() {
             "{name}: re-encoded to different bytes",
         );
     }
+    assert_eq!(
+        covered,
+        xln_rscore_engine::ACCOUNT_TX_TYPES.into_iter().collect(),
+        "shared vectors must cover every canonical AccountTx exactly by kind",
+    );
 }

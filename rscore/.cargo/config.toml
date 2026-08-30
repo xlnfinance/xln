@@ -1,0 +1,6 @@
+[target.'cfg(target_arch = "aarch64")']
+# RustCrypto keeps ARMv8 AES/PMULL behind explicit cfg gates. Both crates still
+# runtime-detect the instructions on macOS/Linux and fall back safely; without
+# these gates every Apple Silicon production build silently uses fixslice AES
+# and software POLYVAL.
+rustflags = ["--cfg", "aes_armv8", "--cfg", "polyval_armv8"]

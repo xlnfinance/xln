@@ -54,7 +54,7 @@ const head = (): StorageHead => ({
   epochMaxBytes: Number.MAX_SAFE_INTEGER,
   accountMerkleRadix: 16,
   epochReplayBytes: 0,
-  retainedHistoryBytes: 0,
+  retainedWalBytes: 0,
 });
 
 test('Account snapshot copies and relinks the exact Patricia graph without live rows', async () => {

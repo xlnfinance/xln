@@ -44,7 +44,6 @@ import { buildHashLadderProof, revealHashLadder } from '../../../protocol/htlc/h
 import { checkAutoRebalance, handleRequestCollateral } from '../../../account/tx/handlers/rebalance/request-collateral';
 
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer/index';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 import {
   buildAccountProofBodyFromJurisdictions,
@@ -360,8 +359,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -574,9 +571,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
       bio: '',
       website: '',
     },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     crontabState: initCrontab(),
   },
@@ -600,9 +595,7 @@ const makeEntityState = (entityId: string): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
@@ -830,9 +823,9 @@ describe('audit fail-fast regressions', () => {
       7,
     );
     expect(isProposedAccountFrame(flushed)).toBe(true);
-    expect(flushed.accountInput?.kind).toBe('frame_ack');
-    if (flushed.accountInput?.kind !== 'frame_ack') throw new Error('expected Entity-flushed frame_ack');
-    expect(receiver.pendingAccountInput?.kind).toBe('frame_ack');
+    expect(flushed.accountInput?.kind).toBe('ack_frame');
+    if (flushed.accountInput?.kind !== 'ack_frame') throw new Error('expected Entity-flushed ack_frame');
+    expect(receiver.pendingAccountInput?.kind).toBe('ack_frame');
     expect(receiver.pendingAccountInput).toEqual(flushed.accountInput);
     expect(flushed.accountInput.proposal.frame.accountTxs.map(tx => tx.type)).toEqual(['j_event_claim']);
     expect(receiver.currentHeight).toBe(1);
@@ -1956,7 +1949,6 @@ describe('audit fail-fast regressions', () => {
       quantizedWant: wantAmount,
     };
     account.state.swapOffers.set(liveOffer.offerId, liveOffer);
-    recordSwapOfferLifecycle(account, liveOffer);
 
     const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
 

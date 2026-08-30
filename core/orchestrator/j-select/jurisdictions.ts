@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../../jurisdiction/adapter';
-import type { JAdapter } from '../../jurisdiction/adapter/types';
+import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../../jurisdiction/adapter/kernel/jurisdictions-version';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
@@ -95,6 +95,10 @@ export const parseShardJurisdictions = (raw: string, label: string): ShardJurisd
 
 type CompleteRpcContractAddresses = Record<(typeof REQUIRED_RPC_CONTRACT_KEYS)[number], string>;
 
+type PersistedJTokenInfo = Omit<JTokenInfo, 'externalTokenId'> & {
+  externalTokenId: string;
+};
+
 export type PrimaryRpcProvisionResult = {
   key: string;
   chainId: number;
@@ -106,7 +110,59 @@ export type PrimaryRpcProvisionResult = {
 type ProvisionedRpcStack = Pick<
   PrimaryRpcProvisionResult,
   'contracts' | 'entityProviderDeploymentBlock'
->;
+> & { tokenRegistry: PersistedJTokenInfo[] };
+
+const persistableTokenRegistry = (tokens: readonly JTokenInfo[], code: string): PersistedJTokenInfo[] => {
+  if (tokens.length === 0) throw new Error(`${code}_EMPTY`);
+  const ids = new Set<number>();
+  const addresses = new Set<string>();
+  return [...tokens]
+    .sort((left, right) => left.tokenId - right.tokenId)
+    .map((token, index) => {
+      const address = String(token.address || '').trim().toLowerCase();
+      if (!Number.isSafeInteger(token.tokenId) || token.tokenId < 1 || ids.has(token.tokenId)) {
+        throw new Error(`${code}_${String(index)}_ID`);
+      }
+      if (
+        !Number.isSafeInteger(token.decimals) || token.decimals < 0 || token.decimals > 255 ||
+        ![0, 1, 2].includes(token.tokenType) || token.externalTokenId < 0n ||
+        !/^0x[0-9a-f]{40}$/.test(address) || addresses.has(address)
+      ) {
+        throw new Error(`${code}_${String(index)}_IDENTITY`);
+      }
+      ids.add(token.tokenId);
+      addresses.add(address);
+      return {
+        symbol: token.symbol,
+        name: token.name,
+        address,
+        decimals: token.decimals,
+        tokenId: token.tokenId,
+        tokenType: token.tokenType,
+        externalTokenId: token.externalTokenId.toString(),
+      };
+    });
+};
+
+export const requirePersistedTokenRegistry = (value: unknown, code: string): PersistedJTokenInfo[] => {
+  if (!Array.isArray(value)) throw new Error(`${code}_MISSING`);
+  return persistableTokenRegistry(value.map((raw, index) => {
+    const token = requireBoundaryRecord(raw, `${code}_${String(index)}`);
+    const externalTokenId = String(token['externalTokenId']);
+    if (!/^(0|[1-9][0-9]*)$/.test(externalTokenId)) {
+      throw new Error(`${code}_${String(index)}_EXTERNAL_ID`);
+    }
+    return {
+      symbol: String(token['symbol'] || ''),
+      name: String(token['name'] || ''),
+      address: String(token['address'] || ''),
+      decimals: Number(token['decimals']),
+      tokenId: Number(token['tokenId']),
+      tokenType: Number(token['tokenType']) as 0 | 1 | 2,
+      externalTokenId: BigInt(externalTokenId),
+    };
+  }), code);
+};
 
 const LOCAL_TESTNET_BLOCK_TIME_MS = 10_000;
 
@@ -311,6 +367,7 @@ const deployRpcStack = async (
   const adapter: JAdapter = await createJAdapter({ mode: 'rpc', chainId, rpcUrl });
   let contracts: CompleteRpcContractAddresses | undefined;
   let entityProviderDeploymentBlock: number | undefined;
+  let tokenRegistry: PersistedJTokenInfo[] | undefined;
   let deploymentError: unknown;
   try {
     await adapter.deployStack();
@@ -318,6 +375,10 @@ const deployRpcStack = async (
     entityProviderDeploymentBlock = requireEntityProviderDeploymentBlock(
       adapter.entityProviderDeploymentBlock,
       'PRIMARY_RPC_DEPLOYED',
+    );
+    tokenRegistry = persistableTokenRegistry(
+      await adapter.getTokenRegistry(),
+      'PRIMARY_RPC_DEPLOYED_TOKEN_REGISTRY',
     );
   } catch (error) {
     deploymentError = error;
@@ -335,7 +396,8 @@ const deployRpcStack = async (
   if (entityProviderDeploymentBlock === undefined) {
     throw new Error('PRIMARY_RPC_DEPLOYED_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_MISSING');
   }
-  return { contracts, entityProviderDeploymentBlock };
+  if (!tokenRegistry) throw new Error('PRIMARY_RPC_DEPLOYED_TOKEN_REGISTRY_MISSING');
+  return { contracts, entityProviderDeploymentBlock, tokenRegistry };
 };
 
 const persistPrimaryRpcStack = (
@@ -346,6 +408,7 @@ const persistPrimaryRpcStack = (
   chainId: number,
   contracts: CompleteRpcContractAddresses,
   entityProviderDeploymentBlock: number,
+  tokenRegistry: PersistedJTokenInfo[],
 ): void => {
   const jurisdiction = payload.jurisdictions?.[key];
   if (!jurisdiction) throw new Error(`PRIMARY_RPC_JURISDICTION_MISSING:${key}`);
@@ -353,6 +416,7 @@ const persistPrimaryRpcStack = (
     ...jurisdiction,
     chainId,
     entityProviderDeploymentBlock,
+    tokenRegistry,
     rpc: toPublicRpcUrl(rpcUrl, '/rpc'),
     contracts: { ...(jurisdiction.contracts ?? {}), ...contracts },
   };
@@ -407,8 +471,12 @@ export const provisionPrimaryRpcJurisdictionStack = async (
               jurisdiction.entityProviderDeploymentBlock,
               'PRIMARY_RPC_CONFIGURED',
             ),
+        tokenRegistry: requirePersistedTokenRegistry(
+          jurisdiction['tokenRegistry'],
+          'PRIMARY_RPC_CONFIGURED_TOKEN_REGISTRY',
+        ),
       };
-  const { contracts, entityProviderDeploymentBlock } = provisioned;
+  const { contracts, entityProviderDeploymentBlock, tokenRegistry } = provisioned;
   await assertCanonicalRpcContractStack(rpcUrl, contracts, 'PRIMARY_RPC');
   if (deployed || configuredDeploymentBlockMissing || blockTimeChanged) {
     persistPrimaryRpcStack(
@@ -419,6 +487,7 @@ export const provisionPrimaryRpcJurisdictionStack = async (
       chainId,
       contracts,
       entityProviderDeploymentBlock,
+      tokenRegistry,
     );
   }
   return { key: primary.key, chainId, contracts, entityProviderDeploymentBlock, deployed };
@@ -466,9 +535,13 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
               existing.entityProviderDeploymentBlock,
               'RPC2_CONFIGURED',
             ),
+        tokenRegistry: requirePersistedTokenRegistry(
+          existing?.['tokenRegistry'],
+          'RPC2_CONFIGURED_TOKEN_REGISTRY',
+        ),
       }
     : await deployRpcStack(config.rpc2Url, chainId);
-  const { contracts, entityProviderDeploymentBlock } = provisioned;
+  const { contracts, entityProviderDeploymentBlock, tokenRegistry } = provisioned;
   await assertCanonicalRpcContractStack(config.rpc2Url, contracts, 'RPC2');
   const primaryContracts = requireCompleteRpcContracts(
     jurisdictions[primary.key]?.contracts as RpcContractAddresses | undefined,
@@ -481,6 +554,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
     name: 'Tron',
     chainId,
     entityProviderDeploymentBlock,
+    tokenRegistry,
     rpc: toPublicRpcUrl(config.rpc2Url, '/rpc2'),
     blockTimeMs: LOCAL_TESTNET_BLOCK_TIME_MS,
     explorer: '',

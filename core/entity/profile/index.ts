@@ -7,9 +7,11 @@
 
 import { compareCanonicalText } from '../../orderbook/swap-keys';
 import { observePerfCount, timePerfPhase } from '../../support/performance/profile';
-import { utf8ByteLength } from '../../protocol/crypto/keccak-text';
 import { LIMITS, UINT16_MAX } from '../../config/constants';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import {
+  canonicalConsensusValuesEqual,
+  encodeCanonicalConsensusBytes,
+} from '../../protocol/serialization/binary-codec';
 import { MAX_ROUTING_FEE_PPM } from '../../pathfinding/fees';
 import type { AccountStateDomain } from '../../types/account';
 import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
@@ -167,7 +169,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const assertProfileByteLimit = (value: unknown, entityId: string): void => {
-  const bytes = utf8ByteLength(encodeCanonicalConsensusValue(value));
+  const bytes = encodeCanonicalConsensusBytes(value).byteLength;
   if (bytes > LIMITS.MAX_PROFILE_BYTES) {
     throw new Error(`GOSSIP_PROFILE_BYTE_LIMIT_EXCEEDED:entity=${entityId || 'unknown'}:bytes=${bytes}:max=${LIMITS.MAX_PROFILE_BYTES}`);
   }
@@ -602,6 +604,12 @@ export const parseProfile = (raw: unknown): DecodedProfile => {
   if (!isRecord(raw)) {
     throw new Error('GOSSIP_PROFILE_OBJECT_REQUIRED');
   }
+  // Gossip, Entity infra materialization and proposal apply pass the same
+  // immutable object through several boundaries. `rememberCanonicalProfile`
+  // below is reached only after the complete strict parse succeeds, so doing
+  // that parse again cannot add authority; it only re-encodes the whole
+  // profile for its byte limit and rebuilds every nested collection.
+  if (immutableCanonicalProfiles.has(raw as Profile)) return raw as DecodedProfile;
   const rawEntityId = typeof raw['entityId'] === 'string' ? raw['entityId'].trim() : '';
   assertProfileByteLimit(raw, rawEntityId);
   if (!/^0x[0-9a-f]{64}$/.test(rawEntityId)) {
@@ -713,7 +721,7 @@ const canonicalizeProfileAccounts = (
 }));
 
 const CANONICAL_PROFILE_CACHE_MAX = 4_096;
-const canonicalProfileCache = new Map<Profile, { encoded: string; canonical: Profile }>();
+const canonicalProfileCache = new Map<Profile, { canonical: Profile }>();
 const immutableCanonicalProfiles = new Set<Profile>();
 
 const freezeCanonicalProfileValue = (value: unknown, seen: Set<object>): void => {
@@ -747,9 +755,6 @@ const rememberCanonicalProfile = (profile: Profile, canonical: Profile): Profile
     ? canonical
     : freezeCanonicalProfile(canonical);
   canonicalProfileCache.set(profile, {
-    // The fingerprint is strict: symbols, accessors and unsupported values
-    // cannot collide with a previously validated financial profile.
-    encoded: encodeCanonicalConsensusValue(profile),
     canonical: immutable,
   });
   return immutable;
@@ -763,7 +768,7 @@ export const canonicalizeProfile = (
     observePerfCount('profile.canonicalize');
     if (immutableCanonicalProfiles.has(profile)) return profile;
     const cached = canonicalProfileCache.get(profile);
-    if (cached && encodeCanonicalConsensusValue(profile) === cached.encoded) {
+    if (cached && canonicalConsensusValuesEqual(profile, cached.canonical)) {
       return cached.canonical;
     }
     if (cached) canonicalProfileCache.delete(profile);

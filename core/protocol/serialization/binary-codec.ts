@@ -1,27 +1,7 @@
-import { Packr } from 'msgpackr';
-import {
-  deserializeTaggedJson,
-  serializeCanonicalTaggedJson,
-} from './';
+import { Packr, addExtension } from 'msgpackr';
 
-export type XlnBinaryCodecName = 'json' | 'msgpack';
-
-// 0x01 was msgpack with structured-clone reference markers (XLN_BINARY_FORMAT_V1);
-// 0x03 is value-only msgpack (moreTypes, Buffer folded into Uint8Array). A V1
-// payload is refused by magic rather than decoded into a different value graph.
-const XLN_BINARY_CODEC_MAGIC: Record<XlnBinaryCodecName, number> = {
-  msgpack: 0x03,
-  json: 0x02,
-};
-
-export const XLN_BINARY_MSGPACK_MAGIC = XLN_BINARY_CODEC_MAGIC.msgpack;
-
-const XLN_BINARY_CODEC_BY_MAGIC = new Map<number, XlnBinaryCodecName>(
-  Object.entries(XLN_BINARY_CODEC_MAGIC).map(([codec, magic]) => [magic, codec as XlnBinaryCodecName]),
-);
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+/** The only durable/wire payload format: canonical value-only MessagePack. */
+export const XLN_BINARY_MSGPACK_MAGIC = 0x03;
 const ALREADY_CANONICAL = Symbol.for('xln.binary-codec.canonical');
 
 const isAlreadyCanonical = (value: object): boolean =>
@@ -55,6 +35,70 @@ const msgpackCodec = new Packr({
   moreTypes: true,
 });
 
+const HEX_BYTES_EXTENSION = 0x48;
+const HEX_BYTES_MIN_LENGTH = 16;
+const CANONICAL_HEX_BYTES = /^0x[0-9a-f]+$/;
+
+class CanonicalHexBytes {
+  readonly bytes: Uint8Array;
+
+  constructor(value: string) {
+    this.bytes = hexBytes(value);
+  }
+}
+
+const isCanonicalHexBytes = (value: string): boolean => {
+  if (value.length < 2 + HEX_BYTES_MIN_LENGTH * 2 || !value.startsWith('0x') || value.length % 2 !== 0) {
+    return false;
+  }
+  return CANONICAL_HEX_BYTES.test(value);
+};
+
+const hexBytes = (value: string): Uint8Array => {
+  const bytes = new Uint8Array((value.length - 2) / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    const offset = 2 + index * 2;
+    const high = value.charCodeAt(offset);
+    const low = value.charCodeAt(offset + 1);
+    bytes[index] = ((high <= 57 ? high - 48 : high - 87) << 4)
+      | (low <= 57 ? low - 48 : low - 87);
+  }
+  return bytes;
+};
+
+const hexText = (bytes: Uint8Array): string => {
+  if (bytes.length < HEX_BYTES_MIN_LENGTH) throw new Error(`BINARY_CODEC_HEX_BYTES_TOO_SHORT:${bytes.length}`);
+  return `0x${Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('hex')}`;
+};
+
+addExtension({
+  Class: CanonicalHexBytes,
+  type: HEX_BYTES_EXTENSION,
+  pack: (value: CanonicalHexBytes): Uint8Array => value.bytes,
+  unpack: (bytes: Uint8Array): string => hexText(bytes),
+});
+
+const projectBinaryScalar = (value: unknown): unknown =>
+  typeof value === 'string' && isCanonicalHexBytes(value) ? new CanonicalHexBytes(value) : value;
+
+const projectBinaryValue = (value: unknown): unknown => {
+  const scalar = projectBinaryScalar(value);
+  if (scalar !== value || value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) return scalar;
+  if (Array.isArray(value)) return value.map(projectBinaryValue);
+  if (value instanceof Map) {
+    return new Map(Array.from(value, ([key, entry]) => [projectBinaryValue(key), projectBinaryValue(entry)]));
+  }
+  if (value instanceof Set) return new Set(Array.from(value, projectBinaryValue));
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const projected = Object.create(prototype) as Record<string, unknown>;
+  for (const [key, entry] of Object.entries(value)) projected[key] = projectBinaryValue(entry);
+  return projected;
+};
+
+const packBinaryValue = (value: unknown): Uint8Array =>
+  asBytes(msgpackCodec.pack(projectBinaryValue(value)));
+
 type BinaryPayloadValidator<T> = (value: unknown) => T;
 
 const asBytes = (value: Uint8Array | ArrayBuffer): Uint8Array =>
@@ -73,7 +117,7 @@ const unsupported = (path: string, detail: string): never => {
   throw new Error(`XLN_BINARY_CODEC_UNSUPPORTED:path=${path}:detail=${detail}`);
 };
 
-const canonicalSortBytes = (value: unknown): Uint8Array => asBytes(msgpackCodec.pack(value));
+const canonicalSortBytes = (value: unknown): Uint8Array => packBinaryValue(value);
 
 const canonicalize = (
   value: unknown,
@@ -81,14 +125,17 @@ const canonicalize = (
   stack: Set<object>,
   preserveUndefined: boolean,
   omitSymbolKeys: boolean,
+  projectHex: boolean,
 ): unknown => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'bigint') {
+  if (value === null || typeof value === 'boolean' || typeof value === 'bigint') {
     return value;
   }
+  if (typeof value === 'string') return projectHex ? projectBinaryScalar(value) : value;
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
       return unsupported(path, `number=${String(value)}`);
     }
+    if (Object.is(value, -0)) return unsupported(path, 'negative-zero');
     return value;
   }
   if (value === undefined) {
@@ -122,15 +169,36 @@ const canonicalize = (
   stack.add(value);
   try {
     if (Array.isArray(value)) {
-      return markCanonical(value.map((entry, index) => {
-        if (!(index in value)) return unsupported(`${path}[${index}]`, 'sparse-array');
-        return canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined, omitSymbolKeys);
-      }));
+      if (!omitSymbolKeys && Object.getOwnPropertySymbols(value).length > 0) {
+        return unsupported(path, 'symbol-key');
+      }
+      const output = new Array<unknown>(value.length);
+      for (let index = 0; index < value.length; index += 1) {
+        const key = String(index);
+        if (!Object.prototype.hasOwnProperty.call(value, key)) {
+          return unsupported(`${path}[${index}]`, 'sparse-array');
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (!descriptor?.enumerable || !('value' in descriptor)) {
+          return unsupported(`${path}[${index}]`, 'non-data-property');
+        }
+        output[index] = canonicalize(
+          descriptor.value,
+          `${path}[${index}]`,
+          stack,
+          preserveUndefined,
+          omitSymbolKeys,
+          projectHex,
+        );
+      }
+      const names = Object.getOwnPropertyNames(value);
+      if (names.length !== value.length + 1) return unsupported(path, 'array-extra-property');
+      return markCanonical(output);
     }
     if (value instanceof Map) {
       const entries = Array.from(value.entries()).map(([key, entryValue], index) => {
-        const canonicalKey = canonicalize(key, `${path}.key[${index}]`, stack, preserveUndefined, omitSymbolKeys);
-        const canonicalValue = canonicalize(entryValue, `${path}.value[${index}]`, stack, preserveUndefined, omitSymbolKeys);
+        const canonicalKey = canonicalize(key, `${path}.key[${index}]`, stack, preserveUndefined, omitSymbolKeys, projectHex);
+        const canonicalValue = canonicalize(entryValue, `${path}.value[${index}]`, stack, preserveUndefined, omitSymbolKeys, projectHex);
         return {
           key: canonicalKey,
           value: canonicalValue,
@@ -152,7 +220,7 @@ const canonicalize = (
     }
     if (value instanceof Set) {
       const entries = Array.from(value.values()).map((entry, index) => {
-        const canonical = canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined, omitSymbolKeys);
+        const canonical = canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined, omitSymbolKeys, projectHex);
         return { value: canonical, bytes: canonicalSortBytes(canonical) };
       });
       entries.sort((left, right) => compareBytes(left.bytes, right.bytes));
@@ -166,13 +234,15 @@ const canonicalize = (
     if (!omitSymbolKeys && Object.getOwnPropertySymbols(value).length > 0) {
       return unsupported(path, 'symbol-key');
     }
-    const output: Record<string, unknown> = {};
+    // Null prototype prevents an own `__proto__` data key from invoking the
+    // host setter and disappearing from the signed bytes.
+    const output = Object.create(null) as Record<string, unknown>;
     for (const key of Object.getOwnPropertyNames(value).sort()) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor?.enumerable || !('value' in descriptor)) {
         return unsupported(`${path}.${key}`, 'non-data-property');
       }
-      output[key] = canonicalize(descriptor.value, `${path}.${key}`, stack, preserveUndefined, omitSymbolKeys);
+      output[key] = canonicalize(descriptor.value, `${path}.${key}`, stack, preserveUndefined, omitSymbolKeys, projectHex);
     }
     return markCanonical(output);
   } finally {
@@ -180,12 +250,10 @@ const canonicalize = (
   }
 };
 
-const packCanonical = (canonical: unknown, codec: XlnBinaryCodecName): Uint8Array => {
-  const body = codec === 'json'
-    ? textEncoder.encode(serializeCanonicalTaggedJson(canonical))
-    : asBytes(msgpackCodec.pack(canonical));
+const packCanonical = (canonical: unknown): Uint8Array => {
+  const body = packBinaryValue(canonical);
   const encoded = new Uint8Array(1 + body.byteLength);
-  encoded[0] = XLN_BINARY_CODEC_MAGIC[codec];
+  encoded[0] = XLN_BINARY_MSGPACK_MAGIC;
   encoded.set(body, 1);
   return encoded;
 };
@@ -196,7 +264,7 @@ const packCanonical = (canonical: unknown, codec: XlnBinaryCodecName): Uint8Arra
  * (exact bigint / Uint8Array / undefined round trip). Decoders still run the
  * boundary validators on the unpacked value.
  */
-export const packTransportValue = (value: unknown): Uint8Array => asBytes(msgpackCodec.pack(value));
+export const packTransportValue = (value: unknown): Uint8Array => packBinaryValue(value);
 
 /**
  * Payload-framed (magic-prefixed) pack WITHOUT the canonical walk. Only for
@@ -204,25 +272,40 @@ export const packTransportValue = (value: unknown): Uint8Array => asBytes(msgpac
  * scalars and bytes): the bytes then equal encodeBinaryPayload's.
  */
 export const packPreorderedBinaryPayload = (value: unknown): Uint8Array => {
-  const body = asBytes(msgpackCodec.pack(value));
+  const body = packBinaryValue(value);
   const encoded = new Uint8Array(1 + body.byteLength);
-  encoded[0] = XLN_BINARY_CODEC_MAGIC.msgpack;
+  encoded[0] = XLN_BINARY_MSGPACK_MAGIC;
   encoded.set(body, 1);
   return encoded;
 };
 export const unpackTransportValue = (bytes: Uint8Array): unknown => msgpackCodec.unpack(bytes);
 
+/**
+ * One ordered, process-local transport stream. Record structures are learned
+ * once per long-lived sender/receiver pair; these bytes are never durable,
+ * hashed, replayed, or accepted by a different protocol boundary.
+ */
+export const createSequentialTransportValueCodec = (): Readonly<{
+  pack(value: unknown): Uint8Array;
+  unpack(bytes: Uint8Array): unknown;
+}> => {
+  const codec = new Packr({ mapsAsObjects: false, moreTypes: true, sequential: true });
+  return {
+    pack: value => asBytes(codec.pack(projectBinaryValue(value))),
+    unpack: bytes => codec.unpack(bytes),
+  };
+};
+
 /** Canonical (sorted, marked) copy of a value; later encodes of it skip the walk. */
 export const canonicalizeBinaryPayload = <T>(value: T, options: { omitSymbolKeys?: boolean } = {}): T =>
-  canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true) as T;
+  canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true, false) as T;
 
 export const encodeBinaryPayloadWithCanonical = (
   value: unknown,
-  codec: XlnBinaryCodecName = 'msgpack',
   options: { omitSymbolKeys?: boolean } = {},
 ): { bytes: Uint8Array; canonical: unknown } => {
-  const canonical = canonicalize(value, '$', new Set(), codec === 'msgpack', options.omitSymbolKeys === true);
-  return { bytes: packCanonical(canonical, codec), canonical };
+  const canonical = canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true, false);
+  return { bytes: packCanonical(canonical), canonical };
 };
 
 /**
@@ -231,24 +314,30 @@ export const encodeBinaryPayloadWithCanonical = (
  * field. No framing magic: the bytes are an input to keccak, not a payload.
  */
 export const encodeCanonicalConsensusBytes = (value: unknown): Uint8Array =>
-  asBytes(msgpackCodec.pack(canonicalize(value, '$', new Set(), false, false)));
+  // Canonicalization already walks every node. Project hex scalars during
+  // that same walk, then pack directly; the old path walked and cloned the
+  // complete canonical tree a second time in `projectBinaryValue`.
+  asBytes(msgpackCodec.pack(canonicalize(value, '$', new Set(), false, false, true)));
+
+export const compareCanonicalConsensusValues = (left: unknown, right: unknown): number =>
+  compareBytes(encodeCanonicalConsensusBytes(left), encodeCanonicalConsensusBytes(right));
+
+export const canonicalConsensusValuesEqual = (left: unknown, right: unknown): boolean =>
+  compareCanonicalConsensusValues(left, right) === 0;
 
 export const encodeBinaryPayload = (
   value: unknown,
-  codec: XlnBinaryCodecName = 'msgpack',
   options: { omitSymbolKeys?: boolean } = {},
-): Uint8Array => encodeBinaryPayloadWithCanonical(value, codec, options).bytes;
+): Uint8Array => encodeBinaryPayloadWithCanonical(value, options).bytes;
 
 export const decodeBinaryPayload = (
   bytes: Uint8Array,
 ): unknown => {
   const magic = bytes[0];
-  const codec = magic === undefined ? undefined : XLN_BINARY_CODEC_BY_MAGIC.get(magic);
-  if (!codec) {
+  if (magic !== XLN_BINARY_MSGPACK_MAGIC) {
     throw new Error(`XLN_BINARY_CODEC_MAGIC_MISSING: firstByte=${magic ?? 'none'}`);
   }
   const body = bytes.subarray(1);
-  if (codec === 'json') return deserializeTaggedJson(textDecoder.decode(body));
   return msgpackCodec.unpack(body) as unknown;
 };
 

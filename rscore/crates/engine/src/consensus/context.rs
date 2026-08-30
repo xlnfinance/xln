@@ -1,6 +1,15 @@
 use std::sync::Arc;
 
+use crate::CertifiedBoardAuthority;
 use crate::swap::SwapMarketPolicy;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SettlementExecutionContext {
+    pub next_proof_nonce: u64,
+    pub current_dispute_proof_nonce: Option<u64>,
+    pub counterparty_dispute_proof_nonce: Option<u64>,
+    pub proposer_board_authority: Option<CertifiedBoardAuthority>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountExecutionContext {
@@ -15,6 +24,7 @@ pub struct AccountExecutionContext {
     /// Registry-derived market tables. They are not account state and cannot
     /// be derived from it, so the runtime installs them with the frame.
     pub swap_market: Arc<SwapMarketPolicy>,
+    pub settlement: Option<SettlementExecutionContext>,
 }
 
 impl AccountExecutionContext {
@@ -50,6 +60,12 @@ impl AccountExecutionContext {
             current_account_height,
             frame_j_height,
             swap_market,
+            settlement: None,
         }
+    }
+
+    pub const fn with_settlement(mut self, settlement: SettlementExecutionContext) -> Self {
+        self.settlement = Some(settlement);
+        self
     }
 }

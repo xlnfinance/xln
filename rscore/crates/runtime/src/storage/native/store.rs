@@ -14,11 +14,10 @@ use super::codec::{
 use super::entity_context::frame_entity_context_refs;
 use super::frame::{EncodedRuntimeFrame, ValidatedRuntimeFrame, validate_runtime_frame};
 use super::fsync::{DurableEnv, sync_database_directory};
+use super::keys::runtime_machine_leaf_key;
 use super::keys::{KEY_HEAD, KEY_NATIVE_CHECKPOINT, frame_key, output_key};
-use super::keys::{runtime_machine_leaf_key, runtime_watcher_cursor_key};
 use super::types::{
-    DurableRuntimeFrame, NativeStorageConfig, PathNodeChange, RuntimeFrameCommit,
-    RuntimeWatcherCursorRow, StorageHead,
+    DurableRuntimeFrame, NativeStorageConfig, PathNodeChange, RuntimeFrameCommit, StorageHead,
 };
 use super::{MAX_FRAME_BYTES, MAX_OUTPUT_BYTES, MAX_OUTPUT_ROWS, NativeStorageError};
 
@@ -126,12 +125,15 @@ impl NativeRuntimeStore {
     /// decoding and re-encoding bytes that this process just constructed.
     pub(crate) fn append_encoded_frame(
         &mut self,
-        encoded: EncodedRuntimeFrame,
+        mut encoded: EncodedRuntimeFrame,
     ) -> Result<DurableRuntimeFrame, NativeStorageError> {
         self.ensure_healthy()?;
         validate_encoded_frame(&encoded)?;
+        let resident_output_values = encoded.resident_output_values.take();
         let prepared = self.prepare_validated_frame(encoded.commit, encoded.validated)?;
-        self.persist_frame(prepared)
+        let mut durable = self.persist_frame(prepared)?;
+        durable.resident_output_values = std::cell::RefCell::new(resident_output_values);
+        Ok(durable)
     }
 
     /// Atomically install one already-verified materialized Runtime checkpoint
@@ -144,7 +146,7 @@ impl NativeRuntimeStore {
         frame: RuntimeFrameCommit,
     ) -> Result<DurableRuntimeFrame, NativeStorageError> {
         self.ensure_healthy()?;
-        if !self.is_empty()? {
+        if !self.is_pristine()? {
             return Err(NativeStorageError::CheckpointImportNotEmpty);
         }
         let checkpoint = frame
@@ -194,29 +196,6 @@ impl NativeRuntimeStore {
             return Ok(Cow::Borrowed(outputs));
         }
         self.read_durable_outputs(durable).map(Cow::Owned)
-    }
-
-    /// Read the exact native Runtime-envelope watcher cursor before enabling
-    /// polling. Absence means this `(Entity, chain, depository)` has never
-    /// consumed a finalized range in the native store.
-    pub fn read_runtime_watcher_cursor(
-        &mut self,
-        entity_id: [u8; 32],
-        chain_id: u64,
-        depository_address: [u8; 20],
-    ) -> Result<Option<RuntimeWatcherCursorRow>, NativeStorageError> {
-        self.ensure_healthy()?;
-        let key = runtime_watcher_cursor_key(&entity_id, chain_id, &depository_address);
-        self.database
-            .get(&key)
-            .map(|value| RuntimeWatcherCursorRow {
-                entity_id,
-                chain_id,
-                depository_address,
-                value_bytes: value.to_vec(),
-            })
-            .map(validate_watcher_cursor_row)
-            .transpose()
     }
 
     fn prepare_frame(
@@ -370,11 +349,11 @@ impl NativeRuntimeStore {
             self.poisoned = true;
             return Err(NativeStorageError::Database(error.to_string()));
         }
-        if self.config.durable_fsync {
-            if let Err(error) = sync_database_directory(&self.path) {
-                self.poisoned = true;
-                return Err(error);
-            }
+        if self.config.durable_fsync
+            && let Err(error) = sync_database_directory(&self.path)
+        {
+            self.poisoned = true;
+            return Err(error);
         }
         match prepared.frame.checkpoint.as_mut() {
             Some(checkpoint) if checkpoint.full => {
@@ -413,6 +392,7 @@ impl NativeRuntimeStore {
             output_count,
             output_digest: prepared.digest,
             resident_outputs: Some(prepared.frame.outputs),
+            resident_output_values: std::cell::RefCell::new(None),
         })
     }
 
@@ -424,7 +404,11 @@ impl NativeRuntimeStore {
         }
     }
 
-    fn is_empty(&mut self) -> Result<bool, NativeStorageError> {
+    /// True only before this store owns any checkpoint, Runtime WAL row, or
+    /// auxiliary durable state. Fresh-genesis admission uses this exact
+    /// physical check; a non-pristine store with a missing checkpoint is
+    /// corruption and must go through restore's loud failure path.
+    pub fn is_pristine(&mut self) -> Result<bool, NativeStorageError> {
         if self.head != super::types::StorageHead::default() {
             return Ok(false);
         }
@@ -480,22 +464,6 @@ fn validate_frame(frame: &RuntimeFrameCommit) -> Result<ValidatedRuntimeFrame, N
     if digest != validated.output_digest {
         return Err(NativeStorageError::OutputDigest(frame.height));
     }
-    if frame.watcher_cursor_changes.len() > 256 {
-        return Err(NativeStorageError::WatcherCursorCount(
-            frame.watcher_cursor_changes.len(),
-        ));
-    }
-    let mut watcher_keys = BTreeSet::new();
-    for row in &frame.watcher_cursor_changes {
-        validate_watcher_cursor_row(row.clone())?;
-        if !watcher_keys.insert(runtime_watcher_cursor_key(
-            &row.entity_id,
-            row.chain_id,
-            &row.depository_address,
-        )) {
-            return Err(NativeStorageError::WatcherCursorDuplicate);
-        }
-    }
     Ok(validated)
 }
 
@@ -517,6 +485,23 @@ fn validate_encoded_frame(encoded: &EncodedRuntimeFrame) -> Result<(), NativeSto
     {
         return Err(NativeStorageError::DurableToken(frame.height));
     }
+    if encoded
+        .resident_output_values
+        .as_ref()
+        .is_some_and(|values| values.len() != frame.outputs.len())
+    {
+        return Err(NativeStorageError::DurableToken(frame.height));
+    }
+    #[cfg(debug_assertions)]
+    if let Some(values) = &encoded.resident_output_values {
+        for (value, bytes) in values.iter().zip(&frame.outputs) {
+            let rebuilt = crate::transport::msgpack::encode_framed(value)
+                .map_err(|_| NativeStorageError::DurableToken(frame.height))?;
+            if &rebuilt != bytes {
+                return Err(NativeStorageError::DurableToken(frame.height));
+            }
+        }
+    }
     if frame.outputs.len() > MAX_OUTPUT_ROWS {
         return Err(NativeStorageError::OutputCount(frame.outputs.len()));
     }
@@ -528,22 +513,6 @@ fn validate_encoded_frame(encoded: &EncodedRuntimeFrame) -> Result<(), NativeSto
     for output in &frame.outputs {
         if output.len() > MAX_OUTPUT_BYTES {
             return Err(NativeStorageError::OutputBytes(output.len()));
-        }
-    }
-    if frame.watcher_cursor_changes.len() > 256 {
-        return Err(NativeStorageError::WatcherCursorCount(
-            frame.watcher_cursor_changes.len(),
-        ));
-    }
-    let mut watcher_keys = BTreeSet::new();
-    for row in &frame.watcher_cursor_changes {
-        validate_watcher_cursor_row(row.clone())?;
-        if !watcher_keys.insert(runtime_watcher_cursor_key(
-            &row.entity_id,
-            row.chain_id,
-            &row.depository_address,
-        )) {
-            return Err(NativeStorageError::WatcherCursorDuplicate);
         }
     }
     Ok(())
@@ -574,17 +543,7 @@ fn committed_bytes(frame: &RuntimeFrameCommit) -> Result<u64, NativeStorageError
                     .and_then(|value| value.checked_add(key_bytes))
                     .ok_or(NativeStorageError::ByteCountOverflow)
             })?;
-    frame
-        .watcher_cursor_changes
-        .iter()
-        .try_fold(context_bytes, |total, row| {
-            let value_bytes = u64::try_from(row.value_bytes.len())
-                .map_err(|_| NativeStorageError::ByteCountOverflow)?;
-            total
-                .checked_add(61)
-                .and_then(|value| value.checked_add(value_bytes))
-                .ok_or(NativeStorageError::ByteCountOverflow)
-        })
+    Ok(context_bytes)
 }
 
 fn put_frame_rows(
@@ -597,12 +556,6 @@ fn put_frame_rows(
     }
     for row in frame.entity_contexts.rows() {
         batch.put(&row.key(frame.height)?, row.value());
-    }
-    for row in &frame.watcher_cursor_changes {
-        batch.put(
-            &runtime_watcher_cursor_key(&row.entity_id, row.chain_id, &row.depository_address),
-            &row.value_bytes,
-        );
     }
     Ok(())
 }
@@ -657,70 +610,6 @@ fn put_runtime_machine_rows(
 fn format_hash(value: &[u8; 32]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(66);
-    output.push_str("0x");
-    for byte in value {
-        output.push(char::from(DIGITS[usize::from(byte >> 4)]));
-        output.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
-    }
-    output
-}
-
-fn validate_watcher_cursor_row(
-    row: RuntimeWatcherCursorRow,
-) -> Result<RuntimeWatcherCursorRow, NativeStorageError> {
-    if row.chain_id == 0 || row.chain_id > 9_007_199_254_740_991 {
-        return Err(NativeStorageError::WatcherCursorValue("chainId"));
-    }
-    let value = crate::decode_storage_payload(&row.value_bytes)?;
-    if crate::transport::msgpack::encode_framed(&value)
-        .map_err(|_| NativeStorageError::WatcherCursorValue("encoding"))?
-        != row.value_bytes
-    {
-        return Err(NativeStorageError::WatcherCursorValue("canonical"));
-    }
-    let object = value
-        .as_object()
-        .filter(|object| {
-            object.len() == 4
-                && [
-                    "chainId",
-                    "depositoryAddress",
-                    "scannedThrough",
-                    "blockHash",
-                ]
-                .iter()
-                .all(|field| object.contains_key(*field))
-        })
-        .ok_or(NativeStorageError::WatcherCursorValue("object"))?;
-    let expected_address = format_bytes(&row.depository_address);
-    let scanned_through = object
-        .get("scannedThrough")
-        .and_then(serde_json::Value::as_u64)
-        .filter(|height| *height <= 9_007_199_254_740_991)
-        .ok_or(NativeStorageError::WatcherCursorValue("binding"))?;
-    if object.get("chainId").and_then(serde_json::Value::as_u64) != Some(row.chain_id)
-        || object
-            .get("depositoryAddress")
-            .and_then(serde_json::Value::as_str)
-            != Some(expected_address.as_str())
-    {
-        return Err(NativeStorageError::WatcherCursorValue("binding"));
-    }
-    match (scanned_through, object.get("blockHash")) {
-        (0, Some(serde_json::Value::Null)) => {}
-        (1.., Some(serde_json::Value::String(value)))
-            if value == &value.to_ascii_lowercase()
-                && value.len() == 66
-                && value.starts_with("0x")
-                && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit()) => {}
-        _ => return Err(NativeStorageError::WatcherCursorValue("blockHash")),
-    }
-    Ok(row)
-}
-
-fn format_bytes(value: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(value.len().saturating_mul(2).saturating_add(2));
     output.push_str("0x");
     for byte in value {
         output.push(char::from(DIGITS[usize::from(byte >> 4)]));

@@ -512,7 +512,7 @@ pub(crate) fn project_j_claim_rows(
 }
 
 pub(crate) fn j_claim_accumulators(header: &Value) -> Result<[JClaimAccumulatorRef; 2], String> {
-    let header = array(header, 9, "header")?;
+    let header = array(header, 10, "header")?;
     let carried = array(&header[6], 6, "carried")?;
     let decode = |value: &Value, path: &str| -> Result<JClaimAccumulatorRef, String> {
         let fields = array(value, 2, path)?;

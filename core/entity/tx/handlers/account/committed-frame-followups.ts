@@ -1,9 +1,9 @@
-import type { AccountFrame, AccountTx, HtlcRoute } from '../../../../types/account';
-import type { EntityCandidateEffect, EntityState } from '../../../types';
+import type { AccountFrame, AccountTx } from '../../../../types/account';
+import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../support/debug-flags';
 import { cancelHook } from '../../../scheduler';
-import { terminateHtlcRoute } from '../../j-events-htlc/route-lifecycle';
+import { terminatePayment } from '../../../paybook/lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../support/logger';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
@@ -12,9 +12,9 @@ import { applyCommittedLendingFollowup } from './committed-lending-followup';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import {
-  hasInboundHtlcRoute,
-  isForwardingHtlcRoute,
-} from '../../../htlc/route-views';
+  hasInboundPayment,
+  isForwardingPayment,
+} from '../../../paybook/views';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -24,12 +24,12 @@ const jurisdictionIdFor = (state: EntityState, env?: EntityRuntimeContext): stri
 function emitOriginatedHtlcFinalized(
   env: EntityRuntimeContext | undefined,
   state: EntityState,
-  route: HtlcRoute,
+  route: PaybookEntry,
   accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
   candidateEffects: EntityCandidateEffect[],
 ): void {
   if (accountTx.data.outcome !== 'secret') return;
-  if ((!route.originated && hasInboundHtlcRoute(route)) || route.outboundLockId !== accountTx.data.lockId) return;
+  if ((!route.originated && hasInboundPayment(route)) || route.hashlock !== accountTx.data.lockId) return;
   candidateEffects.push({
     kind: 'runtimeEvent',
     eventName: 'HtlcFinalized',
@@ -43,6 +43,7 @@ function emitOriginatedHtlcFinalized(
       ...(route.amount !== undefined ? { amount: route.amount } : {}),
       ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
       ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+      ...(route.description ? { description: route.description } : {}),
       ...(jurisdictionIdFor(state, env) ? { jurisdictionId: jurisdictionIdFor(state, env) } : {}),
       finalizedAtMs: state.timestamp,
     }),
@@ -64,20 +65,23 @@ const applyCommittedHtlcResolveFollowup = (
       !(mempoolTx.type === 'htlc_lock' && mempoolTx.data.lockId === accountTx.data.lockId)
     );
   }
-  newState.lockBook.delete(accountTx.data.lockId);
   if (newState.crontabState) cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
   if (accountTx.data.outcome !== 'secret') return;
 
   // Account already verified hashHtlcSecret(secret) against the lock. Routes
   // are keyed by that hash, so this is one direct lookup, never a route scan.
   const hashlock = hashHtlcSecret(accountTx.data.secret);
-  const route = newState.htlcRoutes.get(hashlock);
+  if (hashlock !== accountTx.data.lockId.toLowerCase()) {
+    throw new Error(`PAYBOOK_RESOLVE_ID_MISMATCH:${accountTx.data.lockId}:${hashlock}`);
+  }
+  const route = newState.paybook.entries.get(hashlock);
   if (!route) return;
-  const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
-  const resolvesOriginatedOutbound = route.outboundLockId === accountTx.data.lockId
-    && (route.originated || !hasInboundHtlcRoute(route));
-  const resolvesForwardedOutbound = route.outboundLockId === accountTx.data.lockId
-    && isForwardingHtlcRoute(route) && !route.originated;
+  const normalizedCounterparty = counterpartyId.toLowerCase();
+  const resolvesInbound = route.inboundEntity?.toLowerCase() === normalizedCounterparty;
+  const resolvesOriginatedOutbound = route.outboundEntity?.toLowerCase() === normalizedCounterparty
+    && (route.originated || !hasInboundPayment(route));
+  const resolvesForwardedOutbound = route.outboundEntity?.toLowerCase() === normalizedCounterparty
+    && isForwardingPayment(route) && !route.originated;
   if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) return;
   if (resolvesInbound) {
     candidateEffects.push({
@@ -92,6 +96,7 @@ const applyCommittedHtlcResolveFollowup = (
         ...(route.amount !== undefined ? { amount: route.amount } : {}),
         ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
         ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+        ...(route.description ? { description: route.description } : {}),
         ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
         receivedAtMs: newState.timestamp,
       }),
@@ -102,13 +107,13 @@ const applyCommittedHtlcResolveFollowup = (
   if (resolvesForwardedOutbound) return;
   emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
   if (route.originated && route.inboundEntity) {
-    const writableRoute = getEntityCollectionValueForWrite(newState.htlcRoutes, hashlock);
-    if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${hashlock}`);
+    const writableRoute = getEntityCollectionValueForWrite(newState.paybook.entries, hashlock);
+    if (!writableRoute) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${hashlock}`);
     if (resolvesInbound) writableRoute.inboundSettled = true;
     if (resolvesOriginatedOutbound) writableRoute.outboundSettled = true;
     if (!writableRoute.inboundSettled || !writableRoute.outboundSettled) return;
   }
-  terminateHtlcRoute(newState, hashlock, newState.timestamp);
+  terminatePayment(newState, hashlock);
 };
 
 export function applyCommittedAccountFrameFollowups(

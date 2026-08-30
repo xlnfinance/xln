@@ -73,6 +73,7 @@ export type RscoreAccountCheckpointRow = Readonly<{
     lendingIntents: RscoreCheckpointTreeDescriptor;
     swapOffers: RscoreCheckpointTreeDescriptor;
     rebalanceFeePolicies: RscoreCheckpointTreeDescriptor;
+    pulls: RscoreCheckpointTreeDescriptor;
   }>;
   nodeChanges: Readonly<{
     deltas: RscoreCheckpointNodeChanges;
@@ -80,6 +81,7 @@ export type RscoreAccountCheckpointRow = Readonly<{
     lendingIntents: RscoreCheckpointNodeChanges;
     swapOffers: RscoreCheckpointNodeChanges;
     rebalanceFeePolicies: RscoreCheckpointNodeChanges;
+    pulls: RscoreCheckpointNodeChanges;
   }>;
   jClaimNodeChanges: RscoreJClaimNodeChanges;
   /**
@@ -262,6 +264,7 @@ export const resolveRscoreWaveAccount = (
     lendingIntents: treeFor('lendingIntents'),
     swapOffers: treeFor('swapOffers'),
     rebalanceFeePolicies: treeFor('rebalanceFeePolicies'),
+    pulls: treeFor('pulls'),
   };
   return {
     ...row,
@@ -280,7 +283,7 @@ const header = (
   value: unknown,
   accountId: Uint8Array,
 ): readonly RscoreWireValue[] => {
-  const row = rscoreCheckpointTuple(value, 9, 'WAVE_POST_ACCOUNT_HEADER');
+  const row = rscoreCheckpointTuple(value, 10, 'WAVE_POST_ACCOUNT_HEADER');
   const owner = rscoreCheckpointBytes(row[0], 32, 'WAVE_POST_ACCOUNT_OWNER');
   if (text(row[1], 'postAccount.header.signerId').length === 0) {
     return fail('postAccount.header.signerId:empty');
@@ -319,22 +322,23 @@ const header = (
   }
   // Null on the round wire: the engine hands the envelope back only to a
   // reader that holds no Account of its own.
-  if (row[7] !== null) rscoreCheckpointTuple(row[7], 2, 'WAVE_POST_ACCOUNT_ENVELOPE');
+  if (row[7] !== null) rscoreCheckpointTuple(row[7], 4, 'WAVE_POST_ACCOUNT_ENVELOPE');
   if (row[8] !== null) rscoreCheckpointBytes(row[8], 20, 'WAVE_POST_ACCOUNT_DELTA_TRANSFORMER');
   return row;
 };
 
 export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckpointRow => {
-  const row = rscoreCheckpointTuple(value, 11, 'WAVE_POST_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 12, 'WAVE_POST_ACCOUNT');
   const accountId = rscoreCheckpointBytes(row[0], 32, 'WAVE_POST_ACCOUNT_ID');
   const parsedHeader = header(row[2], accountId);
-  const rawSections = rscoreCheckpointTuple(row[3], 5, 'WAVE_POST_ACCOUNT_SECTIONS');
+  const rawSections = rscoreCheckpointTuple(row[3], 6, 'WAVE_POST_ACCOUNT_SECTIONS');
   const sections = {
     deltas: descriptor(rawSections[0], 'WAVE_POST_ACCOUNT_DELTAS'),
     locks: descriptor(rawSections[1], 'WAVE_POST_ACCOUNT_LOCKS'),
     lendingIntents: descriptor(rawSections[2], 'WAVE_POST_ACCOUNT_LENDING'),
     swapOffers: descriptor(rawSections[3], 'WAVE_POST_ACCOUNT_SWAPS'),
     rebalanceFeePolicies: descriptor(rawSections[4], 'WAVE_POST_ACCOUNT_POLICIES'),
+    pulls: descriptor(rawSections[5], 'WAVE_POST_ACCOUNT_PULLS'),
   };
   const nodeChanges = {
     deltas: changes(row[4], 'postAccount.deltas'),
@@ -342,6 +346,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     lendingIntents: changes(row[6], 'postAccount.lendingIntents'),
     swapOffers: changes(row[7], 'postAccount.swapOffers'),
     rebalanceFeePolicies: changes(row[8], 'postAccount.rebalanceFeePolicies'),
+    pulls: changes(row[9], 'postAccount.pulls'),
   };
   return {
     wire: row,
@@ -352,7 +357,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     header: parsedHeader,
     sections,
     nodeChanges,
-    jClaimNodeChanges: decodeRscoreJClaimNodeChanges(row[9], 'postAccount.jClaimNodes'),
-    consensus: decodeRscoreConsensusSeed(row[10], RSCORE_CUTOVER_VERIFY),
+    jClaimNodeChanges: decodeRscoreJClaimNodeChanges(row[10], 'postAccount.jClaimNodes'),
+    consensus: decodeRscoreConsensusSeed(row[11], RSCORE_CUTOVER_VERIFY),
   };
 };

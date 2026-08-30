@@ -7,14 +7,13 @@ import type {
   ProposeAccountFrameResult,
 } from '../../account/consensus/types';
 import type { AccountInput } from '../../types/account';
-import type { EntityInput } from '../../entity/types';
+import type { EntityTx } from '../../types/entity-tx';
 import type {
   AccountAuthorityFrameBeginRequest,
   AccountAuthorityFrameOutboundRequest,
   AccountAuthorityEntityStageCapability,
   EntityRuntimeContext,
 } from '../../entity/runtime-context';
-import { cloneIsolatedEntityInput } from '../../entity/state/input-clone';
 import { accountInputApplied } from '../../account/consensus/result';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { inboundArrivals } from '../round/inbound';
@@ -31,9 +30,9 @@ export type AccountAuthorityEntityOccurrence =
   | Readonly<{ kind: 'runtime-input'; inputIndex: number }>
   | Readonly<{ kind: 'local-event'; ordinal: number }>;
 
-export type AccountAuthorityEntityStageBegin = Readonly<{
+type AccountAuthorityEntityStageBegin = Readonly<{
   ownerEntityId: string;
-  canonicalEntityInput: EntityInput;
+  unsupportedEntityTxTypes: readonly EntityTx['type'][];
   occurrence: AccountAuthorityEntityOccurrence;
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
   deferProposal: boolean;
@@ -79,6 +78,7 @@ type AccountAuthorityPreparedOutbound = Readonly<{
 type AccountAuthorityInboundGenesisPolicy = Readonly<{
   expectedDomain: AccountAuthorityInputRequest['account']['state']['domain'];
   shadowPolicyRoot: string;
+  shadowPolicyRows: readonly (readonly [number, unknown])[];
   deltaTransformer: string;
   publicPinned: false;
 }>;
@@ -90,7 +90,7 @@ type AccountAuthorityInboundBatchRequest = AccountAuthorityInputRequest & Readon
 
 type AccountAuthorityEntityParent = Readonly<{
   ownerEntityId: string;
-  canonicalEntityInput: EntityInput;
+  unsupportedEntityTxTypes: readonly EntityTx['type'][];
   occurrence: AccountAuthorityEntityOccurrence;
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
   deferProposal: boolean;
@@ -108,16 +108,14 @@ export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent &
   entityState: AccountAuthorityFrameOutboundRequest['entityState'];
   entityHeight: AccountAuthorityFrameOutboundRequest['entityHeight'];
   accountForWrite(accountId: string): AccountAuthorityInputRequest['account'] | undefined;
-  failedHtlcRoutes: AccountAuthorityFrameOutboundRequest['failedHtlcRoutes'];
   admissions: readonly AccountAuthorityInputRequest[];
   proposals: readonly AccountAuthorityProposalRequest[];
   materializeAccountIds: readonly string[];
 }>;
 
-export interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
+interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
   readonly mode: AccountAuthorityExecutionMode;
   readonly ownerEntityId: string;
-  bindCanonicalInput(input: EntityInput): void;
   typeScriptExecutionCounts(): TypeScriptAccountExecutionCounts;
   authoritativeExecutionCount(): number;
   discard(): Promise<void>;
@@ -231,7 +229,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   readonly ownerEntityId: string;
   private readonly options: AccountAuthorityEntityStageOptions;
   private readonly occurrence: AccountAuthorityEntityOccurrence;
-  private canonicalEntityInput: EntityInput | null = null;
+  private unsupportedEntityTxTypes: EntityTx['type'][] | null = null;
   private beginPromise: Promise<AccountAuthorityEntitySavepoint> | null = null;
   private savepoint: AccountAuthorityEntitySavepoint | null = null;
   private beginFailed = false;
@@ -263,12 +261,12 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
 
   private parentOf(): AccountAuthorityEntityParent {
     if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
-    if (this.canonicalEntityInput === null) {
-      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${this.ownerEntityId}`);
+    if (this.unsupportedEntityTxTypes === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_ENTITY_FRAME_REQUIRED:${this.ownerEntityId}`);
     }
     return {
       ownerEntityId: this.ownerEntityId,
-      canonicalEntityInput: cloneIsolatedEntityInput(this.canonicalEntityInput),
+      unsupportedEntityTxTypes: this.unsupportedEntityTxTypes,
       occurrence: this.occurrence,
       ...(this.options.trustedLocalRuntimeProtocol === undefined
         ? {}
@@ -290,24 +288,14 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     return value as NonNullable<AccountAuthorityEntityStageProvider[K]>;
   }
 
-  bindCanonicalInput(input: EntityInput): void {
-    if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
-    if (this.canonicalEntityInput !== null) {
-      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_ALREADY_BOUND:${this.ownerEntityId}`);
-    }
-    if (normalizeEntityId(input.entityId) !== this.ownerEntityId) {
-      throw new Error(
-        `ACCOUNT_AUTHORITY_CANONICAL_INPUT_OWNER_MISMATCH:${this.ownerEntityId}:${input.entityId}`,
-      );
-    }
-    this.canonicalEntityInput = cloneIsolatedEntityInput(input);
-  }
-
   async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
-    if (this.mode !== 'cutover') return;
     if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
       throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
     }
+    this.unsupportedEntityTxTypes = [...new Set(request.entityTxs
+      .map(tx => tx.type)
+      .filter(type => type !== 'accountInput'))].sort();
+    if (this.mode !== 'cutover') return;
     // Entity fitting may reject one transaction after an isolated apply and
     // rebuild the proposal. A retry is a new attempt against the same parent
     // head, not a third Account phase. Rust reconciles its held path-copy
@@ -359,6 +347,10 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
             created.account.shadow.rebalance.policy,
             'rebalanceShadowPolicy',
           ).rootHash(),
+          shadowPolicyRows: [...requirePersistentAccountStateMap(
+            created.account.shadow.rebalance.policy,
+            'rebalanceShadowPolicy',
+          ).entries()],
           deltaTransformer: created.deltaTransformer,
           publicPinned: false,
         },
@@ -417,7 +409,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       entityState: request.entityState,
       entityHeight: request.entityHeight,
       accountForWrite: request.accountForWrite,
-      failedHtlcRoutes: request.failedHtlcRoutes,
       admissions: this.admissionRequests,
       proposals,
       materializeAccountIds,
@@ -496,8 +487,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     accountId: string,
   ): Promise<void> {
     if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
-    if (this.canonicalEntityInput === null) {
-      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${this.ownerEntityId}`);
+    if (this.unsupportedEntityTxTypes === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_ENTITY_FRAME_REQUIRED:${this.ownerEntityId}`);
     }
     if (this.beginPromise === null) this.openObservationStage(kind, accountId);
     await this.beginPromise;
@@ -515,8 +506,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     kind: 'applyAccountInput' | 'proposeAccountFrame',
     accountId: string,
   ): void {
-    if (this.canonicalEntityInput === null) {
-      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${this.ownerEntityId}`);
+    if (this.unsupportedEntityTxTypes === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_ENTITY_FRAME_REQUIRED:${this.ownerEntityId}`);
     }
     this.beginPromise = this.options.provider.beginEntityStage({
       ...this.parentOf(),
@@ -676,12 +667,12 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 }
 
-export const createAccountAuthorityEntityStage = (
+const createAccountAuthorityEntityStage = (
   options: AccountAuthorityEntityStageOptions,
 ): AccountAuthorityEntityStage => new AccountAuthorityEntityStageImpl(options);
 
 type AccountAuthorityStageHost = EntityRuntimeContext & {
-  accountAuthorityEntityStage?: AccountAuthorityEntityStage | undefined;
+  accountAuthorityEntityStage?: AccountAuthorityEntityStageCapability | undefined;
 };
 
 /** Install exactly for one Entity transition and clear even when cleanup fails. */

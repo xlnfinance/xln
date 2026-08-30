@@ -48,7 +48,7 @@ const assertRuntimeAdapterMessagePack = (bytes: Uint8Array): void => {
 };
 
 const runtimeAdapterWireCodec: Codec<RuntimeAdapterWireMessage> = {
-  encode: (message) => encodeBinaryPayload(validateRuntimeAdapterWireMessage(message), 'msgpack'),
+  encode: (message) => encodeBinaryPayload(validateRuntimeAdapterWireMessage(message)),
   decode: (bytes) => {
     assertRuntimeAdapterMessagePack(bytes);
     return decodeValidatedBinaryPayload(bytes, validateRuntimeAdapterWireMessage);

@@ -68,9 +68,7 @@ const installVoteTarget = (env: RuntimeReplica): {
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
     profile: { name: 'leader vote durability', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
   };
   state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId);

@@ -3,13 +3,13 @@ import { encodeBinaryPayload } from '../../../protocol/serialization/binary-code
 import type { EntityFrameEvent } from '../../types';
 
 /**
- * Entity events are signed history, not live state. They still cross the
+ * Entity events belong to the signed frame, not live state. They still cross the
  * consensus boundary, so an adversarial proposer must not be able to attach an
  * unbounded event payload to an otherwise valid frame.
  */
 export const MAX_ENTITY_FRAME_EVENT_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 
-// The budget is a wire/history bound; the canonical binary form is what is
+// The budget is a wire/WAL bound; the canonical binary form is what is
 // stored and hashed, and it is measured without a JSON text detour.
 const getEntityFrameEventByteLength = (events: EntityFrameEvent[]): number =>
   events.length === 0 ? 0 : encodeBinaryPayload(events).byteLength;

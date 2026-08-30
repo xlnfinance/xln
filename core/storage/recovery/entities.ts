@@ -110,7 +110,6 @@ const installPersistedEntityReplicas = async (
         // from Runtime WAL; unaccepted work is best-effort resent by peers.
         mempool: [],
         isProposer,
-        ...(meta?.htlcNotes ? { htlcNotes: meta.htlcNotes } : {}),
         // Absence and an empty witness map are different canonical envelope
         // bytes. Recovery must reproduce the persisted replica exactly; the
         // consensus path creates this optional map only when it stores the

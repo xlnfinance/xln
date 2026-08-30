@@ -1,8 +1,8 @@
-import { keccakTextHash } from '../../protocol/crypto/keccak-text';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../../account/crypto.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import type {
   RuntimeEntityInputsEnvelope,
   RuntimeReplica,
@@ -24,7 +24,7 @@ const hashRuntimeEntityInputsEnvelope = (
 ): string => {
   const targetRuntimeId = normalizeRuntimeId(targetRuntimeIdRaw);
   if (!targetRuntimeId) throw new Error('RUNTIME_ENTITY_INPUTS_TARGET_RUNTIME_INVALID');
-  return keccakTextHash(encodeCanonicalConsensusValue([
+  return keccakBytesHash(encodeCanonicalConsensusBytes([
     ENVELOPE_SIGNATURE_DOMAIN,
     targetRuntimeId,
     body,

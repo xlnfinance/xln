@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { getBytes } from 'ethers';
-import { createOnionEnvelopes, computeHtlcEnvelopeContextHash, deriveHtlcLockIdAtHop, unwrapEnvelope } from '../../../protocol/htlc/codec/envelope';
+import { createOnionEnvelopes, computeHtlcEnvelopeContextHash, unwrapEnvelope } from '../../../protocol/htlc/codec/envelope';
 import { assertOpaqueHtlcCiphertext, decryptOpaqueHtlcBytes, hashOpaqueHtlcCiphertext } from '../../../protocol/htlc/multi-recipient';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,18 +18,18 @@ describe('opaque Entity HTLC encryption', () => {
     const recipientPublic = hex(x25519.getPublicKey(getBytes(recipientSecret)));
     const route = [entity('a'), entity('b')];
     const binding = {
-      rootLockId: `0x${'41'.repeat(32)}`, hashlock: `0x${'51'.repeat(32)}`, tokenId: 1,
+      hashlock: `0x${'51'.repeat(32)}`, tokenId: 1,
       senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
     };
-    const build = (lockId = binding.rootLockId) => createOnionEnvelopes(
+    const build = (hashlock = binding.hashlock) => createOnionEnvelopes(
       route, `0x${'81'.repeat(32)}`, new Map([[route[0]!, hex(x25519.getPublicKey(getBytes(sourceSecret)))], [route[1]!, recipientPublic]]),
-      [domain], new Map(), undefined, 1, { ...binding, rootLockId: lockId }, () => sourceSecret,
+      [domain], new Map(), undefined, 1, { ...binding, hashlock }, () => sourceSecret,
     );
     const first = await build();
     expect(await build()).toEqual(first);
     expect(await build(`0x${'42'.repeat(32)}`)).not.toEqual(first);
     const contextHash = computeHtlcEnvelopeContextHash({
-      fromEntityId: route[0]!, toEntityId: route[1]!, domain, lockId: binding.rootLockId,
+      fromEntityId: route[0]!, toEntityId: route[1]!, domain,
       hashlock: binding.hashlock, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
     });
     expect(unwrapEnvelope(decryptOpaqueHtlcBytes(first, recipientPublic, recipientSecret, contextHash))).toEqual({
@@ -53,7 +53,7 @@ describe('opaque Entity HTLC encryption', () => {
       [target, hex(x25519.getPublicKey(getBytes(targetSecret)))],
     ]);
     const binding = {
-      rootLockId: `0x${'51'.repeat(32)}`, hashlock: `0x${'61'.repeat(32)}`, tokenId: 1,
+      hashlock: `0x${'61'.repeat(32)}`, tokenId: 1,
       senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
     };
     const preimage = `0x${'71'.repeat(32)}`;
@@ -64,7 +64,7 @@ describe('opaque Entity HTLC encryption', () => {
     const hubLayer = unwrapEnvelope(decryptOpaqueHtlcBytes(
       encrypted, publicKeys.get(hub)!, hubSecret,
       computeHtlcEnvelopeContextHash({
-        fromEntityId: source, toEntityId: hub, domain, lockId: binding.rootLockId,
+        fromEntityId: source, toEntityId: hub, domain,
         hashlock: binding.hashlock, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
       }),
     ));
@@ -76,7 +76,7 @@ describe('opaque Entity HTLC encryption', () => {
     expect(() => decryptOpaqueHtlcBytes(
       hubLayer.innerEnvelope, publicKeys.get(target)!, hubSecret,
       computeHtlcEnvelopeContextHash({
-        fromEntityId: hub, toEntityId: target, domain, lockId: deriveHtlcLockIdAtHop(binding.rootLockId, 2),
+        fromEntityId: hub, toEntityId: target, domain,
         hashlock: binding.hashlock, tokenId: 1, amount: 9n,
         timelock: 100_000n - BigInt(30_000), revealBeforeHeight: 98,
       }),
@@ -97,7 +97,7 @@ describe('opaque Entity HTLC encryption', () => {
       ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     };
     const context = {
-      fromEntityId: entity('a'), toEntityId: entity('b'), domain, lockId: `0x${'41'.repeat(32)}`,
+      fromEntityId: entity('a'), toEntityId: entity('b'), domain,
       hashlock: `0x${'51'.repeat(32)}`, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
     };
     expect(hashOpaqueHtlcCiphertext(opaque)).toBe(hashOpaqueHtlcCiphertext({ ...opaque }));

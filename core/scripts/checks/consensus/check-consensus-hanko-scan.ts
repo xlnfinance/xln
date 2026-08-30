@@ -216,14 +216,14 @@ assertNotMatches(
   'speculative Account history publication',
 );
 assertOrder(accountHandler, accountHandlerPath, [
-  'for (const { frame, committedViaNewFrame } of result.committedFrames ?? []) {',
+  'if ((result.committedFrames?.length ?? 0) > 0) {',
   'effects.candidateEffects.push({',
-  "kind: 'accountFrameHistory',",
+  "kind: 'accountFrameCommitted',",
 ]);
 assertOrder(envEvents, envEventsPath, [
   'export const publishEntityCandidateEffects = (',
-  "if (effect.kind === 'accountFrameHistory') {",
-  'recordAccountFrameHistory(env, effect);',
+  "if (effect.kind === 'accountFrameCommitted') {",
+  "family: 'account',",
 ]);
 const candidatePublicationCount =
   entityEffectPublication.match(/publishEntityCandidateEffects\(env, /g)?.length ?? 0;

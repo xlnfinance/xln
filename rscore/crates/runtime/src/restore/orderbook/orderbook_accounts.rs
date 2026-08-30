@@ -32,28 +32,7 @@ pub fn restore_orderbook_accounts(rows: &[AccountRestore]) -> RestoredOrderbookA
             let snapshot =
                 offer.snapshot(identity.left().to_string(), identity.right().to_string());
             let offer_id = snapshot.offer_id.clone();
-            offers.insert(
-                (account_id.clone(), offer_id),
-                SameJOffer {
-                    offer_id: snapshot.offer_id,
-                    left_entity: snapshot.left_entity,
-                    right_entity: snapshot.right_entity,
-                    give_token_id: snapshot.give_token_id,
-                    give_token_decimals: snapshot.give_token_decimals,
-                    give_amount: snapshot.give_amount,
-                    want_token_id: snapshot.want_token_id,
-                    want_token_decimals: snapshot.want_token_decimals,
-                    want_amount: snapshot.want_amount,
-                    max_fee: snapshot.max_fee,
-                    min_net_receive: snapshot.min_net_receive,
-                    price_ticks: snapshot.price_ticks,
-                    time_in_force: snapshot.time_in_force,
-                    maker_is_left: snapshot.maker_is_left,
-                    created_height: snapshot.created_height,
-                    quantized_give: snapshot.quantized_give,
-                    quantized_want: snapshot.quantized_want,
-                },
-            );
+            offers.insert((account_id.clone(), offer_id), SameJOffer::from(snapshot));
         }
         let pending = row
             .consensus

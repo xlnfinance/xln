@@ -8,7 +8,6 @@ import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
 import {
   closeRuntimeWalDb,
-  closeHistoryViewDb,
   closeInfraDb,
   closeStorageDb,
   releaseRetainedStorageWriterLock,
@@ -31,15 +30,13 @@ import {
   enqueueRuntimeContinuation,
   enqueueRuntimeInputs,
   getCleanLogs,
-  getRuntimeHistoryView,
-  getRuntimeHistoryViewDb,
+  getRuntimeWal,
   getRuntimeInfraDb,
   getRuntimeStorageDb,
   infraGossipDbAccess,
   rotateRuntimeStorageEpochDb,
   trackInfraDbWrite,
-  tryOpenRuntimeHistoryView,
-  tryOpenRuntimeHistoryViewDb,
+  tryOpenRuntimeWal,
   tryOpenRuntimeInfraDb,
   tryOpenRuntimeStorageDb,
 } from './loop-envelope.ts';
@@ -112,7 +109,6 @@ const createRuntimeDbCloser = (
     closeStorageDb(env, 'current'),
     closeStorageDb(env, 'previous'),
     closeRuntimeWalDb(env),
-    closeHistoryViewDb(env),
   ]);
   throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
   if (!borrowedWal) await releaseRetainedStorageWriterLock(env);
@@ -161,12 +157,10 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     getRuntimeStorageDb,
     getStorageDb: getRuntimeStorageDb,
     getInfraDb: getRuntimeInfraDb,
-    getRuntimeWalDb: getRuntimeHistoryView,
-    getHistoryViewDb: getRuntimeHistoryViewDb,
+    getRuntimeWalDb: getRuntimeWal,
     tryOpenStorageDb: tryOpenRuntimeStorageDb,
     rotateStorageEpochDb: rotateRuntimeStorageEpochDb,
-    tryOpenRuntimeWalDb: tryOpenRuntimeHistoryView,
-    tryOpenHistoryViewDb: tryOpenRuntimeHistoryViewDb,
+    tryOpenRuntimeWalDb: tryOpenRuntimeWal,
     closeRuntimeDb,
     closeInfraDb: closeManagedInfraDb,
     getCleanLogs,

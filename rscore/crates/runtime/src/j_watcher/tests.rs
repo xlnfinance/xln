@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use num_bigint::BigInt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use xln_rscore_abi::{AbiValue, BodyTuple, encode_value};
@@ -255,7 +254,11 @@ fn config() -> JWatcherConfig {
     JWatcherConfig {
         chain_id: 31337,
         depository_address: [0x11; 20],
+        entity_provider_address: [0x12; 20],
         entity_id: EntityId::parse(&hex_repeat(0xaa, 32)).expect("entity"),
+        erc20_tokens: BTreeMap::new(),
+        external_wallets: Vec::new(),
+        hash_ladders: Default::default(),
         confirmation_depth: 0,
         max_blocks_per_poll: 16,
     }
@@ -277,8 +280,11 @@ fn authenticated_http_range_matches_typescript_receipt_and_claim_goldens() {
     assert_eq!(result.cursor.block_hash, Some([0xcc; 32]));
     assert_eq!(result.batches.len(), 1);
     let batch = &result.batches[0];
-    assert_eq!(batch.reserve_updates.len(), 1);
-    assert_eq!(batch.reserve_updates[0].own_reserve, BigInt::from(0));
+    assert_eq!(batch.events.len(), 1);
+    let JurisdictionEvent::AccountSettled(_) = &batch.events[0] else {
+        panic!("expected AccountSettled");
+    };
+    assert!(batch.reserve_updates.is_empty());
     assert_eq!(batch.account_claims.len(), 1);
     assert_eq!(
         hex::encode(claim_wire(&batch.account_claims[0].tx)),
@@ -291,17 +297,7 @@ fn committed_cursor_deduplicates_restart_and_detects_finalized_reorg() {
     let server = FakeRpcServer::start(fixture_chain());
     let client = HttpJsonRpc::new(&server.endpoint).expect("http client");
     let first = poll_finalized_j_events(&client, &config(), &cursor_42()).expect("first poll");
-    let checkpoint = first
-        .cursor
-        .durable_change(&[0xaa; 32], 31_337, &[0x11; 20])
-        .expect("cursor checkpoint");
-    let restored = FinalizedWatcherCursor::restore_durable_change(
-        &checkpoint,
-        &[0xaa; 32],
-        31_337,
-        &[0x11; 20],
-    )
-    .expect("cursor restore");
+    let restored = first.cursor.clone();
     assert_eq!(restored, first.cursor);
     let restarted = poll_finalized_j_events(&client, &config(), &restored).expect("restart poll");
     assert!(restarted.batches.is_empty());
@@ -373,7 +369,9 @@ fn claim_wire(tx: &AccountTx) -> Vec<u8> {
 }
 
 fn event_wire(event: &JurisdictionEvent) -> AbiValue {
-    let JurisdictionEvent::AccountSettled(event) = event;
+    let JurisdictionEvent::AccountSettled(event) = event else {
+        panic!("fixture claim must contain AccountSettled");
+    };
     let metadata = &event.metadata;
     AbiValue::Tuple(BodyTuple::from_vec(vec![
         AbiValue::Integer(0),

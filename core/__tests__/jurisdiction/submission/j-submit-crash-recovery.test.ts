@@ -20,7 +20,7 @@ import {
   driveRuntimeUntil,
   findJSubmitCrashReplica,
   processUntilJSubmitCrash,
-} from '../../fixtures/j-submit/j-submit-crash-helpers';
+} from '../../fixtures/jurisdiction/j-submit-crash-helpers';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 
 type RealCrashBoundary =
@@ -97,8 +97,8 @@ describe('J submit crash recovery', () => {
     const intentReplica = findReplica(afterIntent, sender.id);
     expect(intentReplica.state.jBatchState?.status).toBe('sent');
     expect(intentReplica.jSubmitState).toBeUndefined();
-    expect(afterIntent.runtimeMempool?.runtimeTxs).toHaveLength(1);
-    expect(afterIntent.runtimeMempool?.runtimeTxs[0]?.type).toBe('retryJSubmit');
+    expect(afterIntent.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
+    expect(getNextJSubmitRetryTimestamp(afterIntent)).toBe(0);
     registerRecoveryBackupBarrier(afterIntent, async () => {
       throw new Error('CRASH_AFTER_ATTEMPT_COMMIT');
     });
@@ -250,7 +250,7 @@ describe('J submit crash recovery', () => {
           expect(replica.state.jBatchState?.sentBatch?.entityNonce).toBe(1);
           expect(replica.jSubmitState).toBeUndefined();
           expect(pending).toEqual([]);
-          expect(restored.runtimeMempool?.runtimeTxs.some((tx) => tx.type === 'retryJSubmit')).toBe(true);
+          expect(restored.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
           expect(getNextJSubmitRetryTimestamp(restored)).toBe(0);
         } else if (boundary === 'after-rpc-submit-before-result') {
           expect(replica.jSubmitState).toMatchObject({

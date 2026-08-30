@@ -6,7 +6,7 @@ import {
 import type {
   AccountBoardHankoRefresh,
   AccountDisputeHanko,
-  AccountFrameAck,
+  AccountAckFrame,
   AccountFrameProposal,
   AccountPeerInput,
   AccountStateDomain,
@@ -77,7 +77,7 @@ const decodeDisputeHanko = (value: unknown, code: string): AccountDisputeHanko =
   };
 };
 
-const decodeFrameAck = (value: unknown, code: string): AccountFrameAck => {
+const decodeAckFrame = (value: unknown, code: string): AccountAckFrame => {
   const ack = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     ack,
@@ -126,7 +126,7 @@ const decodeBoardHankoRefresh = (value: unknown, code: string): AccountBoardHank
     ['frameHanko', 'disputeHanko'],
     `${code}_FIELDS`,
   );
-  const ack = decodeFrameAck(
+  const ack = decodeAckFrame(
     {
       height: boardHankoRefresh['height'],
       frameHash: boardHankoRefresh['frameHash'],
@@ -181,8 +181,8 @@ export const decodeAccountPeerInput = (value: unknown, code: string): AccountPee
       return { ...base, kind, proposal: decodeFrameProposal(input['proposal'], `${code}_PROPOSAL`) };
     case 'ack':
       requireExactBoundaryKeys(input, [...baseKeys, 'ack'], optionalBaseKeys, `${code}_FIELDS`);
-      return { ...base, kind, ack: decodeFrameAck(input['ack'], `${code}_ACK`) };
-    case 'frame_ack':
+      return { ...base, kind, ack: decodeAckFrame(input['ack'], `${code}_ACK`) };
+    case 'ack_frame':
       requireExactBoundaryKeys(
         input,
         [...baseKeys, 'ack', 'proposal'],
@@ -192,7 +192,7 @@ export const decodeAccountPeerInput = (value: unknown, code: string): AccountPee
       return {
         ...base,
         kind,
-        ack: decodeFrameAck(input['ack'], `${code}_ACK`),
+        ack: decodeAckFrame(input['ack'], `${code}_ACK`),
         proposal: decodeFrameProposal(input['proposal'], `${code}_PROPOSAL`),
       };
     case 'dispute':

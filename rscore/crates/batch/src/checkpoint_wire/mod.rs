@@ -7,6 +7,7 @@
 
 mod account_tx;
 mod canonical;
+mod j_event;
 mod nodes;
 mod rows;
 mod state_value;
@@ -15,6 +16,7 @@ use thiserror::Error;
 
 pub use account_tx::{encode_account_tx, encode_bigint, encode_delta, encode_j_claim_node};
 pub use canonical::{encode_account_envelope, encode_canonical_value};
+pub use j_event::{JEventWireError, decode_jurisdiction_event, encode_jurisdiction_event};
 pub use nodes::{
     AccountCheckpointNamespace, EncodedAccountCheckpointNodeAddress,
     EncodedAccountCheckpointNodeMutation, EncodedAccountCheckpointNodes,

@@ -10,6 +10,7 @@ import {
   addReplica,
   addr,
   entity,
+  getTestAccountForWrite,
   makeJurisdiction,
   makeState,
   registerTestSigner,
@@ -313,7 +314,7 @@ describe('cross-j sibling dispute fanout', () => {
     const sourceUser = entity('71');
     const sourceHub = entity('72');
     const state = makeState(sourceUser, addr('a1'), eth, sourceHub);
-    const account = state.accounts.get(sourceHub)!;
+    const account = getTestAccountForWrite(state, sourceHub);
     account.state.disputeConfig = { leftResponseSeconds: 10, rightResponseSeconds: 11 };
     const route = baseRoute('delay-mismatch', {
       sourceUser,

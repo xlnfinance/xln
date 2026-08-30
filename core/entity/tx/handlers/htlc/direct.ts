@@ -5,7 +5,7 @@ import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { findAccountKey } from '../../account-key';
 import type { AccountTxTarget } from '../account';
-import { persistVerifiedHtlcSecret } from '../../j-events-htlc/route-lifecycle';
+import { persistVerifiedPaymentSecret } from '../../../paybook/lifecycle';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -53,7 +53,7 @@ export const handleResolveHtlcLockEntityTx = (
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  persistVerifiedHtlcSecret(newState, normalizedCounterparty, lock, secret);
+  persistVerifiedPaymentSecret(newState, normalizedCounterparty, lock, secret);
   accountTxs.push({
     accountId: normalizedCounterparty,
     tx: {

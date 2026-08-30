@@ -134,10 +134,10 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
   };
   if (base.pendingFrame) shell.pendingFrame = copyFrame(base.pendingFrame);
   if (base.pendingAccountInput) shell.pendingAccountInput = forkAccountInputShell(base.pendingAccountInput);
-  if (base.lastOutboundFrameAck) {
-    shell.lastOutboundFrameAck = {
-      ...base.lastOutboundFrameAck,
-      response: forkAccountInputShell(base.lastOutboundFrameAck.response),
+  if (base.lastOutboundAckFrame) {
+    shell.lastOutboundAckFrame = {
+      ...base.lastOutboundAckFrame,
+      response: forkAccountInputShell(base.lastOutboundAckFrame.response),
     };
   }
   if (base.boardHankoRefreshMigration) shell.boardHankoRefreshMigration = copyRecord(base.boardHankoRefreshMigration);

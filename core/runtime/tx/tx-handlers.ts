@@ -425,7 +425,7 @@ const buildGenesisReplica = (
       entityEncryptionPublicKey: deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey,
       reserves: new Map(),
       accounts: PersistentEntityAccountMap.empty(identity.entityId, engineAccountValueHash(identity.entityId)),
-      deferredAccountProposals: new Map(),
+      deferredAccountProposals: PersistentEntityCollectionMap.empty(),
       lastFinalizedJHeight: getJHistoryRegistrationBaseHeight(config.jurisdiction),
       profile: {
         name:
@@ -438,9 +438,10 @@ const buildGenesisReplica = (
         bio: '',
         website: '',
       },
-      htlcRoutes: PersistentEntityCollectionMap.empty(),
-      htlcFeesEarned: 0n,
-      lockBook: PersistentEntityCollectionMap.empty(),
+      paybook: {
+        entries: PersistentEntityCollectionMap.empty(),
+        feesEarned: 0n,
+      },
       crontabState: initCrontab(),
       swapTradingPairs: buildDefaultEntitySwapPairs(
         getTokenIdsForJurisdiction(config.jurisdiction),

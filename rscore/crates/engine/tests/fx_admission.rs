@@ -4,12 +4,9 @@
 //! (core/__tests__/proofs/fx-admission.test.ts) — same accept/reject
 //! classification per case, different transport for the same verdict:
 //!
-//! - local admission: `AccountConsensus::admit_txs` returns
-//!   `Err(StateError::PolicyVersionOutOfRange)` /
-//!   `Err(StateError::UnsupportedFrameTx(kind))` with the mempool unchanged;
-//!   TypeScript's enqueue path throws `AccountTxAdmissionError` with codes
-//!   `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` / `ACCOUNT_TX_KIND_OUT_OF_PROFILE`
-//!   with the mempool unchanged.
+//! - local admission: every canonical AccountTx kind is hashable; malformed
+//!   fields such as an unsafe policyVersion retain their exact typed error and
+//!   leave the mempool unchanged.
 //! - incoming peer frame: `apply_incoming_frame` returns `Rejected` whose
 //!   reason carries `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
 //!   `ACCOUNT_FRAME_TX_UNSUPPORTED:<kind>` (refused by `AccountFrame::hash`);
@@ -131,7 +128,7 @@ fn rebalance_policy(policy_version: u64) -> AccountTx {
     }
 }
 
-fn out_of_profile_transactions() -> Vec<(&'static str, AccountTx)> {
+fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
     let token = TokenId::new(1).expect("token");
     vec![
         (
@@ -343,25 +340,23 @@ fn out_of_range_policy_version_reaching_the_hash_is_an_admission_bug() {
 }
 
 #[test]
-fn rejects_every_out_of_profile_kind_with_its_name() {
-    for (kind, tx) in out_of_profile_transactions() {
+fn admits_every_canonical_extended_kind_and_hashes_it() {
+    for (kind, tx) in extended_transactions() {
         let (mut left, _right) = parties();
-        let error = left
+        let admission = left
             .account
-            .admit_txs(vec![tx], "test")
-            .expect_err("out-of-profile kind must be refused at admission");
-        assert_eq!(
-            error.to_string(),
-            format!("ACCOUNT_FRAME_TX_UNSUPPORTED:{kind}")
-        );
-        assert!(left.account.mempool().is_empty());
+            .admit_txs(vec![tx.clone()], "test")
+            .unwrap_or_else(|error| panic!("{kind} must admit: {error}"));
+        assert_eq!(admission.admitted, 1, "{kind}");
+        assert!(xln_rscore_engine::is_frame_hashable(&tx), "{kind}");
+        assert_eq!(left.account.mempool()[0].wire_name(), kind);
     }
 }
 
 #[test]
-fn an_incoming_frame_with_an_out_of_profile_kind_is_rejected_before_replay() {
+fn an_incoming_frame_with_a_supported_kind_reaches_hash_binding() {
     let (left, mut right) = parties();
-    for (kind, tx) in out_of_profile_transactions() {
+    for (kind, tx) in extended_transactions() {
         let (envelope, incoming) = incoming_from_left(&left, &right, tx);
         let outcome = apply_incoming_frame(
             &mut right.account,
@@ -373,9 +368,9 @@ fn an_incoming_frame_with_an_out_of_profile_kind_is_rejected_before_replay() {
         )
         .unwrap_or_else(|error| panic!("{kind} is a rejection, not a fault: {error}"));
         let IncomingOutcome::Rejected { reason } = outcome else {
-            panic!("{kind} must be rejected, got {outcome:?}");
+            panic!("{kind} must reach hash binding, got {outcome:?}");
         };
-        assert_eq!(reason, format!("ACCOUNT_FRAME_TX_UNSUPPORTED:{kind}"));
+        assert_eq!(reason, "ACCOUNT_PEER_FRAME_HASH_MISMATCH", "{kind}");
         assert_eq!(right.account.current_height(), 0);
     }
 }

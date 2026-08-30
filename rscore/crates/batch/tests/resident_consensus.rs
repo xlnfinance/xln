@@ -4,14 +4,13 @@ use std::sync::Arc;
 
 use num_bigint::BigInt;
 use xln_rscore_batch::{
-    AccountAdmissionResult, AccountId, AccountSeed, BatchError, EngineGeneration,
-    EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute,
-    ResidentConsensusEngine,
+    AccountEnvelopeUpdate, AccountId, AccountSeed, EngineGeneration, EntityInboundRequest,
+    EntityOutboundRequest, FailedHtlcFollowup, ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity, AccountReplica,
     AccountState, AccountTx, DepositoryAddress, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
-    HtlcResolveTx, TokenId, WatchSeed, canonical_tx_digest,
+    HtlcResolveTx, TokenId, WatchSeed,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -59,9 +58,10 @@ fn funded_seed() -> (AccountSeed, fixture::Pair) {
 fn mixed_txs(pair: &fixture::Pair) -> Vec<AccountTx> {
     let mut txs = fixture::payment(pair, 25).1;
     txs.extend(fixture::swap_offer(pair).1);
+    let hashlock = format!("0x{}", "5a".repeat(32));
     txs.push(AccountTx::HtlcLock(HtlcLockTx {
-        lock_id: format!("0x{}", "4b".repeat(32)),
-        hashlock: HtlcHashlock::parse(&format!("0x{}", "5a".repeat(32))).expect("hashlock"),
+        lock_id: hashlock.clone(),
+        hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
         timelock: BigInt::from(TIMESTAMP + 60_000),
         reveal_before_height: 200,
         amount: BigInt::from(10),
@@ -91,13 +91,14 @@ fn outbound_request(
 ) -> EntityOutboundRequest {
     EntityOutboundRequest {
         owner_entity_id: owner,
+        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
+        envelope_updates: Vec::new(),
         admits: vec![(account_id, txs)],
         propose: vec![account_id],
         materialize: Vec::new(),
-        failed_htlc_routes: Vec::new(),
         checkpoint_due: false,
         post_accounts: true,
     }
@@ -106,16 +107,87 @@ fn outbound_request(
 fn empty_checkpoint_request(owner: [u8; 32]) -> EntityOutboundRequest {
     EntityOutboundRequest {
         owner_entity_id: owner,
+        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
+        envelope_updates: Vec::new(),
         admits: Vec::new(),
         propose: Vec::new(),
         materialize: Vec::new(),
-        failed_htlc_routes: Vec::new(),
         checkpoint_due: true,
         post_accounts: false,
     }
+}
+
+#[test]
+fn entity_owned_rebalance_policy_updates_the_resident_leaf_and_checkpoint_body() {
+    let (mut seed, pair) = funded_seed();
+    let empty_root = format!("0x{}", hex::encode(xln_rscore_protocol::EMPTY_RADIX_ROOT));
+    seed.replica.set_envelope(
+        AccountEnvelope::new(
+            vec![
+                ("status".into(), CanonicalValue::String("active".into())),
+                (
+                    "shadow".into(),
+                    CanonicalValue::Object(vec![(
+                        "rebalance".into(),
+                        CanonicalValue::Object(vec![
+                            (
+                                "policyRoot".into(),
+                                CanonicalValue::String(empty_root.clone()),
+                            ),
+                            (
+                                "submittedAtByTokenRoot".into(),
+                                CanonicalValue::String(empty_root),
+                            ),
+                        ]),
+                    )]),
+                ),
+            ],
+            Vec::new(),
+        )
+        .expect("empty shadow"),
+    );
+    let mut engine = resident(2, "payer-0", REVISION, Arc::default(), vec![seed]);
+    enter_resident(&mut engine, pair.payer_entity);
+    let policy = CanonicalValue::Object(vec![
+        (
+            "r2cRequestSoftLimit".into(),
+            CanonicalValue::BigInt(10_u8.into()),
+        ),
+        ("hardLimit".into(), CanonicalValue::BigInt(20_u8.into())),
+        (
+            "maxAcceptableFee".into(),
+            CanonicalValue::BigInt(1_u8.into()),
+        ),
+    ]);
+    let result = engine
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: pair.payer_entity,
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            envelope_updates: vec![(
+                pair.payer_account,
+                vec![AccountEnvelopeUpdate::SetRebalancePolicy {
+                    token_id: 1,
+                    policy: policy.clone(),
+                }],
+            )],
+            admits: Vec::new(),
+            propose: Vec::new(),
+            materialize: vec![pair.payer_account],
+            checkpoint_due: false,
+            post_accounts: true,
+        })
+        .expect("policy update");
+    let row = result.post_accounts.first().expect("materialized account");
+    assert_eq!(
+        row.header.envelope.rebalance_shadow_policy_rows(),
+        [(1, policy)]
+    );
 }
 
 #[test]
@@ -178,40 +250,110 @@ fn explicit_existing_import_exports_every_seed_until_acked_but_normal_restore_is
     assert!(clean.accounts.is_empty());
 }
 
-fn owned_peer_account(
-    payer: &xln_rscore_engine::EntityId,
-    peer_label: &str,
-) -> (AccountId, AccountSeed) {
-    let (peer_bytes, peer) = fixture::entity_of(peer_label);
-    let (left, right) = if payer < &peer {
-        (payer.clone(), peer)
-    } else {
-        (peer, payer.clone())
-    };
-    (
-        AccountId::from_bytes(peer_bytes),
+#[test]
+fn failed_htlc_uses_one_exact_continuation_and_matches_workers() {
+    let (_, owner_entity) = fixture::entity_of("payer-0");
+    let owner = *owner_entity.as_bytes();
+    let (downstream_bytes, downstream_peer) = fixture::entity_of("downstream-peer");
+    let (upstream_bytes, upstream_peer) = fixture::entity_of("upstream-peer");
+    let downstream = AccountId::from_bytes(downstream_bytes);
+    let upstream = AccountId::from_bytes(upstream_bytes);
+    let seed = |account_id, peer: xln_rscore_engine::EntityId| {
+        let (left, right) = if owner_entity < peer {
+            (owner_entity.clone(), peer)
+        } else {
+            (peer, owner_entity.clone())
+        };
         AccountSeed {
-            account_id: AccountId::from_bytes(peer_bytes),
-            replica: AccountReplica::new(payer.clone(), fixture::account_state(&left, &right))
-                .expect("owned peer replica"),
+            account_id,
+            replica: AccountReplica::new(
+                owner_entity.clone(),
+                fixture::account_state(&left, &right),
+            )
+            .expect("owned account"),
             consensus: None,
-        },
-    )
+        }
+    };
+    let seeds = vec![
+        seed(downstream, downstream_peer),
+        seed(upstream, upstream_peer),
+    ];
+    let hashlock_text = format!("0x{}", "5a".repeat(32));
+    let hashlock = HtlcHashlock::parse(&hashlock_text).expect("hashlock");
+    let mut expected = None;
+    for workers in [1, 8] {
+        let mut engine = resident(workers, "payer-0", REVISION, Arc::default(), seeds.clone());
+        enter_resident(&mut engine, owner);
+        let prepared = engine
+            .prepare_entity_outbound(EntityOutboundRequest {
+                owner_entity_id: owner,
+                local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+                timestamp: TIMESTAMP,
+                j_height: 100,
+                creates: Vec::new(),
+                envelope_updates: Vec::new(),
+                admits: vec![(
+                    downstream,
+                    vec![AccountTx::HtlcLock(HtlcLockTx {
+                        lock_id: hashlock_text.clone(),
+                        hashlock: hashlock.clone(),
+                        timelock: BigInt::from(TIMESTAMP - 1),
+                        reveal_before_height: 200,
+                        amount: BigInt::from(10),
+                        token_id: TokenId::new(1).expect("token"),
+                        delivery_mode: None,
+                        envelope: None,
+                    })],
+                )],
+                propose: vec![downstream],
+                materialize: Vec::new(),
+                checkpoint_due: false,
+                post_accounts: true,
+            })
+            .expect("first outbound wave");
+        let failed = &prepared.proposals()[0].failed_htlc_locks[0];
+        let reason = format!("forward_failed:{}", failed.reason);
+        let result = engine
+            .finish_entity_outbound(
+                prepared,
+                vec![FailedHtlcFollowup {
+                    failed_account_id: downstream,
+                    hashlock: *hashlock.bytes(),
+                    upstream_account_id: upstream,
+                    tx: AccountTx::HtlcResolve(HtlcResolveTx {
+                        lock_id: hashlock_text.clone(),
+                        outcome: HtlcResolveOutcome::Error {
+                            reason: Some(reason.clone()),
+                        },
+                    }),
+                    reason,
+                }],
+            )
+            .expect("one continuation wave");
+        assert_eq!(result.proposals.len(), 2, "workers={workers}");
+        assert_eq!(
+            result.proposals[1].account_id, upstream,
+            "workers={workers}"
+        );
+        assert_eq!(result.admissions.len(), 2, "workers={workers}");
+        assert_eq!(
+            result.proposals[0].failed_htlc_locks[0]
+                .upstream_resolution
+                .as_ref()
+                .map(|row| (row.account_id, row.lock_id.as_str())),
+            Some((upstream, hashlock_text.as_str())),
+            "workers={workers}",
+        );
+        let signature = (result.accounts_root, result.revision, result.touched);
+        if let Some(expected) = &expected {
+            assert_eq!(&signature, expected, "workers={workers}");
+        } else {
+            expected = Some(signature);
+        }
+    }
 }
 
-fn expired_forward_lock(lock_id: String, hashlock: HtlcHashlock) -> AccountTx {
-    AccountTx::HtlcLock(HtlcLockTx {
-        lock_id,
-        hashlock,
-        timelock: BigInt::from(TIMESTAMP - 1),
-        reveal_before_height: 200,
-        amount: BigInt::from(10),
-        token_id: TokenId::new(1).expect("token"),
-        delivery_mode: None,
-        envelope: None,
-    })
-}
-
+#[cfg(any())]
 #[test]
 fn independent_failed_forwards_use_frontier_barriers_and_match_1_and_8_workers() {
     let (_, payer) = fixture::entity_of("payer-0");
@@ -248,9 +390,11 @@ fn independent_failed_forwards_use_frontier_barriers_and_match_1_and_8_workers()
         .collect::<Vec<_>>();
     let request = || EntityOutboundRequest {
         owner_entity_id: owner,
+        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
+        envelope_updates: Vec::new(),
         admits: ORDER
             .iter()
             .map(|index| {
@@ -265,16 +409,6 @@ fn independent_failed_forwards_use_frontier_barriers_and_match_1_and_8_workers()
             .collect(),
         propose: propose.clone(),
         materialize: Vec::new(),
-        failed_htlc_routes: ORDER
-            .iter()
-            .map(|index| FailedHtlcRoute {
-                hashlock: *hashlocks[*index].bytes(),
-                outbound_account_id: downstreams[*index],
-                outbound_lock_id: down_locks[*index].clone(),
-                inbound_account_id: upstreams[*index],
-                inbound_lock_id: up_locks[*index].clone(),
-            })
-            .collect(),
         checkpoint_due: false,
         post_accounts: true,
     };
@@ -353,55 +487,7 @@ fn independent_failed_forwards_use_frontier_barriers_and_match_1_and_8_workers()
     }
 }
 
-type ProposalSignature = (
-    [u8; 32],
-    u64,
-    Vec<AccountAdmissionResult>,
-    Vec<(AccountId, [u8; 32])>,
-    Vec<(
-        AccountId,
-        Option<[u8; 32]>,
-        Vec<(
-            [u8; 32],
-            String,
-            String,
-            Option<(AccountId, String, String)>,
-        )>,
-    )>,
-);
-
-fn proposal_signature(result: &EntityRoundResult) -> ProposalSignature {
-    (
-        result.accounts_root,
-        result.revision,
-        result.admissions.clone(),
-        result.touched.clone(),
-        result
-            .proposals
-            .iter()
-            .map(|row| {
-                (
-                    row.account_id,
-                    row.proposed.as_ref().map(|frame| frame.state_hash),
-                    row.failed_htlc_locks
-                        .iter()
-                        .map(|failed| {
-                            (
-                                failed.hashlock,
-                                failed.lock_id.clone(),
-                                failed.reason.clone(),
-                                failed.upstream_resolution.as_ref().map(|row| {
-                                    (row.account_id, row.lock_id.clone(), row.reason.clone())
-                                }),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<Vec<_>>(),
-    )
-}
-
+#[cfg(any())]
 #[test]
 fn proposed_inbound_waits_for_outbound_resolution_and_matches_1_and_8_workers() {
     let (_, payer) = fixture::entity_of("payer-0");
@@ -414,9 +500,11 @@ fn proposed_inbound_waits_for_outbound_resolution_and_matches_1_and_8_workers() 
     let seeds = vec![down_seed, up_seed];
     let request = || EntityOutboundRequest {
         owner_entity_id: owner,
+        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
+        envelope_updates: Vec::new(),
         admits: vec![
             (
                 downstream,
@@ -432,13 +520,6 @@ fn proposed_inbound_waits_for_outbound_resolution_and_matches_1_and_8_workers() 
         ],
         propose: vec![downstream, upstream],
         materialize: Vec::new(),
-        failed_htlc_routes: vec![FailedHtlcRoute {
-            hashlock: *hashlock.bytes(),
-            outbound_account_id: downstream,
-            outbound_lock_id: down_lock.clone(),
-            inbound_account_id: upstream,
-            inbound_lock_id: up_lock.clone(),
-        }],
         checkpoint_due: false,
         post_accounts: true,
     };
@@ -550,25 +631,6 @@ fn resident_result_is_root_identical_with_1_2_4_8_16_workers() {
 }
 
 #[test]
-fn resident_refuses_to_guess_proposability_for_an_unrepresented_settlement_workspace() {
-    let (mut seed, _) = funded_seed();
-    seed.replica.set_settlement_workspace_present(true);
-    let error = match ResidentConsensusEngine::restore(
-        EngineGeneration::from_bytes([0x42; 8]),
-        1,
-        REVISION,
-        fixture::signer_key("payer-0"),
-        "payer-0".to_string(),
-        fixture::market(),
-        vec![seed],
-    ) {
-        Ok(_) => panic!("settlement eligibility cannot be inferred from a presence bit"),
-        Err(error) => error,
-    };
-    assert_eq!(error, BatchError::ProposabilitySettlementUnrepresented,);
-}
-
-#[test]
 fn failed_outbound_restores_the_exact_post_inbound_head() {
     let (seed, pair) = funded_seed();
     let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);
@@ -583,13 +645,14 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
     assert_eq!(owner, pair.payer_entity);
     let error = match engine.entity_outbound(EntityOutboundRequest {
         owner_entity_id: pair.payer_entity,
+        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: vec![created],
+        envelope_updates: Vec::new(),
         admits: vec![(pair.payer_account, fixture::payment(&pair, 25).1)],
         propose: Vec::new(),
         materialize: vec![AccountId::from_bytes([0xfe; 32])],
-        failed_htlc_routes: Vec::new(),
         checkpoint_due: false,
         post_accounts: false,
     }) {

@@ -70,7 +70,7 @@ const inspectInputs = (
       if (tx.type !== 'accountInput') continue;
       ledger.accountInputs += 1;
       bump(ledger.accountInputKinds, tx.data.kind);
-      if (tx.data.kind !== 'frame' && tx.data.kind !== 'frame_ack') continue;
+      if (tx.data.kind !== 'frame' && tx.data.kind !== 'ack_frame') continue;
       const from = tx.data.fromEntityId.toLowerCase();
       const to = tx.data.toEntityId.toLowerCase();
       const leg = accountLeg(from, to);
@@ -113,11 +113,14 @@ const commonHubEntity = (legs: readonly (readonly [string, string])[]): string =
  * Counts a subpayment by `(bilateral Account, lockId)`. The same lock material
  * on sender→H1 and H1→receiver is therefore two required legs, never a duplicate.
  */
-export const summarizePaymentWork = (
+const summarizePaymentWorkInternal = (
   frames: readonly PersistedFrameJournal[],
-  economicPayments: number,
+  suppliedEconomicPayments: number | null,
 ): PaymentWorkLedger => {
-  if (!Number.isSafeInteger(economicPayments) || economicPayments < 1) {
+  if (
+    suppliedEconomicPayments !== null &&
+    (!Number.isSafeInteger(suppliedEconomicPayments) || suppliedEconomicPayments < 1)
+  ) {
     throw new Error('HLT_PAYMENT_LEDGER_ECONOMIC_COUNT_INVALID');
   }
   const ingress = emptyDirectionLedger();
@@ -129,6 +132,13 @@ export const summarizePaymentWork = (
     inspectInputs('ingress', frame.runtimeInput.entityInputs, ingress, accountLegs, lockLegs, resolveLegs);
     inspectInputs('egress', frame.runtimeOutputs ?? [], egress, accountLegs, lockLegs, resolveLegs);
   }
+  if (
+    suppliedEconomicPayments === null &&
+    (lockLegs.size < 2 || lockLegs.size % 2 !== 0)
+  ) {
+    throw new Error(`HLT_PAYMENT_LEDGER_SUBPAYMENTS_ODD:locks=${lockLegs.size}`);
+  }
+  const economicPayments = suppliedEconomicPayments ?? lockLegs.size / 2;
   const expectedAccountSubpayments = economicPayments * 2;
   if (lockLegs.size !== expectedAccountSubpayments || resolveLegs.size !== expectedAccountSubpayments) {
     throw new Error(
@@ -151,3 +161,18 @@ export const summarizePaymentWork = (
     egress: finalizeDirection(egress),
   };
 };
+
+/** Validate a workload against an independently supplied economic count. */
+export const summarizePaymentWork = (
+  frames: readonly PersistedFrameJournal[],
+  economicPayments: number,
+): PaymentWorkLedger => summarizePaymentWorkInternal(frames, economicPayments);
+
+/**
+ * Infer real routed payments from the canonical per-operation ledger itself.
+ * One payment has exactly two unique bilateral `(Account, lockId)` legs; the
+ * faucet's directPayment tx is setup and therefore cannot inflate this count.
+ */
+export const summarizeRecordedPaymentWork = (
+  frames: readonly PersistedFrameJournal[],
+): PaymentWorkLedger => summarizePaymentWorkInternal(frames, null);

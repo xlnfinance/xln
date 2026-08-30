@@ -280,6 +280,14 @@ export const readEntityStorageLayout = async (
   }
   const trees = await hydrateEntityTrees(db, entityId, manifest.trees);
   for (const [namespace, tree] of trees) {
+    if (namespace === 'paybookEntries') {
+      const paybook = raw['paybook'];
+      if (typeof paybook !== 'object' || paybook === null || Array.isArray(paybook)) {
+        throw new Error('STORAGE_ENTITY_PAYBOOK_SCALAR_MISSING');
+      }
+      raw['paybook'] = { ...paybook, entries: tree };
+      continue;
+    }
     if (namespace !== 'crontabHooks') {
       raw[namespace] = tree;
       continue;

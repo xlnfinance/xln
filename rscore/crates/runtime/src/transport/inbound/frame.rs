@@ -8,7 +8,7 @@ use super::session::AcceptedHello;
 
 #[derive(Default)]
 pub(super) struct FrameState {
-    auth_timestamp: u64,
+    pub(super) auth_timestamp: u64,
     encryption_sequence: u64,
 }
 

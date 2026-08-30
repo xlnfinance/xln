@@ -376,6 +376,29 @@ mod tests {
     }
 
     #[test]
+    fn matches_typescript_hex_signer_authority_root_golden() {
+        let signer = format!("0x{}", "11".repeat(20));
+        let authority = EntityFrameAuthority {
+            config: EntityConsensusConfig {
+                mode: ConsensusMode::ProposerBased,
+                threshold: 1,
+                validators: vec![signer.clone()],
+                shares: BTreeMap::from([(signer.clone(), 1)]),
+                jurisdiction: None,
+            },
+            leader_state: EntityLeaderState {
+                active_validator_id: signer,
+                view: 0,
+                changed_at_height: 0,
+            },
+        };
+        assert_eq!(
+            authority.root().expect("authority root"),
+            "0x88bc0b422d4d903a1630c3b2665df65fda9009e2a338c656d8bedc844f386081",
+        );
+    }
+
+    #[test]
     fn rejects_duplicate_or_unreachable_authority() {
         let mut duplicate = authority();
         duplicate.config.validators.push("h1-hub".into());

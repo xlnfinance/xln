@@ -1,18 +1,20 @@
 //! Exact inbound HTLC context materialization for the live Runtime path.
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use num_bigint::BigInt;
-use serde_json::{Map, Number, Value, json};
 use xln_rscore_batch::{AccountId, AccountInputKind};
 use xln_rscore_engine::{
     AccountTx, HTLC_OPAQUE_CIPHERTEXT_VERSION, IncomingFrame, OpaqueHtlcCiphertext, TokenId,
 };
 use xln_rscore_entity_kernel::{
-    HtlcMaterializeEnvironment, HtlcMaterializeInput, HtlcPreparedBinding, HtlcPreparedOutcome,
-    PreparedAccountView, PreparedHtlcEntry, decrypt_htlc_materialize_inputs,
-    materialize_decrypted_htlc_entries, required_htlc_account_tokens,
+    DecodedOnionLayer, DecryptedHtlcLayer, HtlcMaterializeEnvironment, HtlcMaterializeInput,
+    HtlcPreparedBinding, HtlcPreparedOutcome, PreparedAccountView, PreparedContextError,
+    PreparedHtlcEntry, decrypt_htlc_materialize_inputs, materialize_decrypted_htlc_entries,
+    required_htlc_account_tokens,
 };
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use super::{EntityInfraMaterializeRequest, FreshEntityContextError, InboundHtlcInfrastructure};
 
@@ -37,8 +39,27 @@ fn account_id(value: &str) -> Result<AccountId, FreshEntityContextError> {
     Ok(AccountId::from_bytes(bytes))
 }
 
-fn bigint(value: &BigInt) -> Value {
-    json!({ "__xlnType": "BigInt", "value": value.to_string() })
+fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
+    let mut entries = entries
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.encode_utf16().cmp(right.0.encode_utf16()));
+    CanonicalValue::Object(entries)
+}
+
+fn text(value: impl Into<String>) -> CanonicalValue {
+    CanonicalValue::String(value.into())
+}
+
+fn number(value: u64) -> Result<CanonicalValue, FreshEntityContextError> {
+    CanonicalNumber::try_from_u64(value)
+        .map(CanonicalValue::Number)
+        .map_err(|_| FreshEntityContextError::HtlcInfrastructureInvalid("NUMBER".into()))
+}
+
+fn bigint(value: &BigInt) -> CanonicalValue {
+    CanonicalValue::BigInt(value.clone())
 }
 
 fn collect_frame(
@@ -60,7 +81,6 @@ fn collect_frame(
                 domain: row.input.envelope.domain.clone(),
                 account_frame_hash: hex(&frame.state_hash),
                 account_height: frame.frame.height,
-                lock_id: lock.lock_id.clone(),
                 envelope_hash: hex(&envelope.integrity_hash()),
                 hashlock: lock.hashlock.to_string(),
                 token_id: lock.token_id.get(),
@@ -73,12 +93,14 @@ fn collect_frame(
     }
 }
 
-fn collect_inputs(request: &EntityInfraMaterializeRequest<'_>) -> Vec<HtlcMaterializeInput> {
+pub(super) fn collect_inputs(
+    request: &EntityInfraMaterializeRequest<'_>,
+) -> Vec<HtlcMaterializeInput> {
     let mut output = Vec::new();
     for row in request.account_inputs {
         match &row.input.kind {
             AccountInputKind::Frame(frame) => collect_frame(row, frame, &mut output),
-            AccountInputKind::FrameAck { frame, .. } => collect_frame(row, frame, &mut output),
+            AccountInputKind::AckFrame { frame, .. } => collect_frame(row, frame, &mut output),
             AccountInputKind::Ack(_)
             | AccountInputKind::Dispute(_)
             | AccountInputKind::BoardHankoRefresh(_) => {}
@@ -87,87 +109,96 @@ fn collect_inputs(request: &EntityInfraMaterializeRequest<'_>) -> Vec<HtlcMateri
     output
 }
 
-fn envelope(value: &OpaqueHtlcCiphertext) -> Value {
-    json!({
-        "version": HTLC_OPAQUE_CIPHERTEXT_VERSION,
-        "ciphertext": value.ciphertext(),
-    })
+fn envelope(value: &OpaqueHtlcCiphertext) -> Result<CanonicalValue, FreshEntityContextError> {
+    Ok(object(vec![
+        ("version", text(HTLC_OPAQUE_CIPHERTEXT_VERSION)),
+        ("ciphertext", text(value.ciphertext())),
+    ]))
 }
 
-fn binding(value: &HtlcPreparedBinding) -> Value {
-    json!({
-        "fromEntityId": value.from_entity_id,
-        "toEntityId": value.to_entity_id,
-        "domain": {
-            "chainId": value.domain.chain_id(),
-            "depositoryAddress": value.domain.depository_address().as_hex(),
-        },
-        "accountFrameHash": value.account_frame_hash,
-        "accountHeight": value.account_height,
-        "lockId": value.lock_id,
-        "envelopeHash": value.envelope_hash,
-        "hashlock": value.hashlock,
-        "tokenId": value.token_id,
-        "amount": bigint(&value.amount),
-        "timelock": bigint(&value.timelock),
-        "revealBeforeHeight": value.reveal_before_height,
-    })
+fn binding(value: &HtlcPreparedBinding) -> Result<CanonicalValue, FreshEntityContextError> {
+    Ok(object(vec![
+        ("fromEntityId", text(value.from_entity_id.clone())),
+        ("toEntityId", text(value.to_entity_id.clone())),
+        (
+            "domain",
+            object(vec![
+                ("chainId", number(value.domain.chain_id())?),
+                (
+                    "depositoryAddress",
+                    text(value.domain.depository_address().as_hex()),
+                ),
+            ]),
+        ),
+        ("accountFrameHash", text(value.account_frame_hash.clone())),
+        ("accountHeight", number(value.account_height)?),
+        ("envelopeHash", text(value.envelope_hash.clone())),
+        ("hashlock", text(value.hashlock.clone())),
+        ("tokenId", number(u64::from(value.token_id))?),
+        ("amount", bigint(&value.amount)),
+        ("timelock", bigint(&value.timelock)),
+        ("revealBeforeHeight", number(value.reveal_before_height)?),
+    ]))
 }
 
-fn outcome(value: &HtlcPreparedOutcome) -> Value {
+fn outcome(value: &HtlcPreparedOutcome) -> Result<CanonicalValue, FreshEntityContextError> {
     match value {
-        HtlcPreparedOutcome::Reject { reason } => json!({
-            "kind": "reject",
-            "reason": reason,
-        }),
+        HtlcPreparedOutcome::Reject { reason } => Ok(object(vec![
+            ("kind", text("reject")),
+            ("reason", text(reason.clone())),
+        ])),
         HtlcPreparedOutcome::Forward {
             next_hop_entity_id,
             forward_amount,
             inner_envelope,
-        } => json!({
-            "kind": "forward",
-            "nextHopEntityId": next_hop_entity_id,
-            "forwardAmount": bigint(forward_amount),
-            "innerEnvelope": envelope(inner_envelope),
-        }),
+        } => Ok(object(vec![
+            ("kind", text("forward")),
+            ("nextHopEntityId", text(next_hop_entity_id.clone())),
+            ("forwardAmount", bigint(forward_amount)),
+            ("innerEnvelope", envelope(inner_envelope)?),
+        ])),
         HtlcPreparedOutcome::Final {
             secret,
             description,
             started_at_ms,
         } => {
-            let mut row = Map::from_iter([
-                ("kind".into(), Value::String("final".into())),
-                ("secret".into(), Value::String(secret.clone())),
-            ]);
+            let mut row = vec![("kind", text("final")), ("secret", text(secret.clone()))];
             if let Some(description) = description {
-                row.insert("description".into(), Value::String(description.clone()));
+                row.push(("description", text(description.clone())));
             }
             if let Some(started_at_ms) = started_at_ms {
-                row.insert(
-                    "startedAtMs".into(),
-                    Value::Number(Number::from(*started_at_ms)),
-                );
+                row.push(("startedAtMs", number(*started_at_ms)?));
             }
-            Value::Object(row)
+            Ok(object(row))
         }
     }
 }
 
-fn entry(value: &PreparedHtlcEntry) -> Value {
-    json!({
-        "binding": binding(&value.binding),
-        "outcome": outcome(&value.outcome),
-    })
+fn entry(value: &PreparedHtlcEntry) -> Result<CanonicalValue, FreshEntityContextError> {
+    Ok(object(vec![
+        ("binding", binding(&value.binding)?),
+        ("outcome", outcome(&value.outcome)?),
+    ]))
 }
+
+type PreparedInboundHtlcContext = (
+    Vec<PreparedHtlcEntry>,
+    Vec<CanonicalValue>,
+    BTreeMap<(String, String), String>,
+);
 
 pub(super) fn materialize_inbound_htlc_context(
     infrastructure: &InboundHtlcInfrastructure,
+    reachability: &(
+        crate::processor::EntityRouteTable,
+        crate::transport::InboundSessionTable,
+    ),
     request: &mut EntityInfraMaterializeRequest<'_>,
-) -> Result<(Vec<Value>, Vec<Value>), FreshEntityContextError> {
-    let inputs = collect_inputs(request);
-    if inputs.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
+    inputs: Vec<HtlcMaterializeInput>,
+) -> Result<PreparedInboundHtlcContext, FreshEntityContextError> {
+    let total_started = Instant::now();
+    let input_count = inputs.len();
+    debug_assert!(!inputs.is_empty());
     let worker_count = request.replica.accounts.worker_count();
     let chunk_size = inputs.len().div_ceil(worker_count);
     let mut inputs = inputs.into_iter();
@@ -189,7 +220,29 @@ pub(super) fn materialize_inbound_htlc_context(
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
+    let decrypt_done = total_started.elapsed();
+    let mut observed_peer_by_prepared = BTreeMap::new();
+    for input in &decrypted {
+        let DecryptedHtlcLayer::Decoded(DecodedOnionLayer::Forward { next_hop, .. }) = &input.layer
+        else {
+            continue;
+        };
+        let key = (
+            input.binding.account_frame_hash.clone(),
+            input.binding.hashlock.clone(),
+        );
+        if let Some(previous) = observed_peer_by_prepared.insert(key.clone(), next_hop.clone())
+            && previous != *next_hop
+        {
+            return Err(FreshEntityContextError::Htlc(
+                PreparedContextError::BindingConflict {
+                    key: format!("{}:{}", key.0, key.1),
+                },
+            ));
+        }
+    }
     let requested = required_htlc_account_tokens(&decrypted);
+    let requested_account_count = requested.len();
     let account_requests = requested
         .iter()
         .map(|(entity_id, tokens)| {
@@ -201,26 +254,40 @@ pub(super) fn materialize_inbound_htlc_context(
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok((account_id(entity_id)?, tokens))
+            Ok((
+                account_id(entity_id)?,
+                xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                    token_ids: tokens,
+                    htlc_lock_ids: Vec::new(),
+                    pull_ids: Vec::new(),
+                    swap_offer_ids: Vec::new(),
+                    dispute: false,
+                },
+            ))
         })
         .collect::<Result<Vec<_>, FreshEntityContextError>>()?;
+    let plan_done = total_started.elapsed();
     let views = request
         .replica
         .accounts
         .local_financial_views(account_requests)
         .map_err(|error| FreshEntityContextError::HtlcAccountRead(error.to_string()))?;
+    let view_count = views.len();
     let views = views.into_iter().collect::<BTreeMap<_, _>>();
+    let views_done = total_started.elapsed();
     let mut accounts = BTreeMap::new();
     let mut assertions = BTreeMap::<String, bool>::new();
     for (entity_id, tokens) in requested {
         let Some(view) = views.get(&account_id(&entity_id)?) else {
             continue;
         };
-        let known = infrastructure.known_profile_entity_ids.contains(&entity_id);
-        let online = known && infrastructure.online_entity_ids.contains(&entity_id);
-        if known {
-            assertions.insert(entity_id.clone(), online);
-        }
+        let online = reachability
+            .0
+            .is_paybook_peer_online(&entity_id, &reachability.1)
+            .map_err(|error| {
+                FreshEntityContextError::HtlcInfrastructureInvalid(error.to_string())
+            })?;
+        assertions.insert(entity_id.clone(), online);
         for token_id in tokens {
             let token = TokenId::new(u32::from(token_id)).map_err(|error| {
                 FreshEntityContextError::HtlcInfrastructureInvalid(error.to_string())
@@ -255,18 +322,46 @@ pub(super) fn materialize_inbound_htlc_context(
             accounts,
         },
     )?;
+    let materialize_done = total_started.elapsed();
+    if super::profile_entity_context() {
+        eprintln!(
+            "RSCORE_HTLC_CONTEXT_PHASE decrypt={} plan={} views={} materialize={} total={} inputs={} requestedAccounts={} viewsRead={}",
+            decrypt_done.as_micros(),
+            plan_done.saturating_sub(decrypt_done).as_micros(),
+            views_done.saturating_sub(plan_done).as_micros(),
+            materialize_done.saturating_sub(views_done).as_micros(),
+            materialize_done.as_micros(),
+            input_count,
+            requested_account_count,
+            view_count,
+        );
+    }
     Ok((
-        materialized.iter().map(entry).collect(),
+        materialized,
         assertions
             .into_iter()
-            .map(|(entity_id, online)| json!({ "entityId": entity_id, "online": online }))
+            .map(|(entity_id, online)| {
+                object(vec![
+                    ("entityId", text(entity_id)),
+                    ("online", CanonicalValue::Bool(online)),
+                ])
+            })
             .collect(),
+        observed_peer_by_prepared,
     ))
+}
+
+pub(super) fn canonical_entry(
+    value: &PreparedHtlcEntry,
+) -> Result<CanonicalValue, FreshEntityContextError> {
+    entry(value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonical_value_from_tagged_json;
+    use serde_json::json;
     use xln_rscore_batch::{AccountPeerInput, PeerBoardAuthority};
     use xln_rscore_engine::{
         AccountDisputeConfig, AccountDomain, AccountFrame, AccountPeerEnvelope, DepositoryAddress,
@@ -278,7 +373,7 @@ mod tests {
         let to_entity_id = [0x22; 32];
         let envelope = OpaqueHtlcCiphertext::parse(
             HTLC_OPAQUE_CIPHERTEXT_VERSION,
-            "ZLEBsdC+WocEvQePmJUAH8A+jp+VIvGI3RKNmEbUhGanXH41W7vcvi12F50b84riPUmDmGE7/CrmiJ/vubHZI9sKBN3d4dOWkWmpAHNtixC9R3cYLkr/2auDN17fXzydAauQ3khq4kn+cRqOgvKv",
+            "EyxEK+AQ+9V+cmAzKKp25x/MwVA6riGTJ9FNnJmT9HICUR2hh3m4QkbXs2jc1x2BebzxGNFx/fyl2TH6CABq/GdmvSQCiNm7Yv2wZ2m6s434RXwI687JlOPA7YbyXPh0v/B8QlM1OKEdSpTNKviT",
         )
         .expect("TypeScript golden envelope");
         let frame = IncomingFrame {
@@ -287,7 +382,7 @@ mod tests {
                 timestamp: 1,
                 j_height: 1,
                 txs: vec![AccountTx::HtlcLock(HtlcLockTx {
-                    lock_id: format!("0x{}", "44".repeat(32)),
+                    lock_id: format!("0x{}", "55".repeat(32)),
                     hashlock: HtlcHashlock::parse(&format!("0x{}", "55".repeat(32)))
                         .expect("hashlock"),
                     timelock: BigInt::from(987_654_321_u64),
@@ -367,8 +462,8 @@ mod tests {
         .expect("materialize TypeScript golden");
 
         assert_eq!(
-            entry(&entries[0]),
-            json!({
+            entry(&entries[0]).expect("direct canonical entry"),
+            canonical_value_from_tagged_json(&json!({
                 "binding": {
                     "fromEntityId": format!("0x{}", "11".repeat(32)),
                     "toEntityId": format!("0x{}", "22".repeat(32)),
@@ -378,8 +473,7 @@ mod tests {
                     },
                     "accountFrameHash": format!("0x{}", "77".repeat(32)),
                     "accountHeight": 1,
-                    "lockId": format!("0x{}", "44".repeat(32)),
-                    "envelopeHash": "0x1e48740c3da2cc697f19ee3c72ec0ae2a4e1bfb57ab0dead24ad6c5534f5b2b8",
+                    "envelopeHash": "0x1b5fc4d2d3579f354e8fef129658b96b5e275d0dd623428a9357441811e787c1",
                     "hashlock": format!("0x{}", "55".repeat(32)),
                     "tokenId": 7,
                     "amount": { "__xlnType": "BigInt", "value": "123456789" },
@@ -392,7 +486,8 @@ mod tests {
                     "description": "rust-ts-golden",
                     "startedAtMs": 777,
                 },
-            }),
+            }))
+            .expect("tagged canonical fixture"),
         );
     }
 }

@@ -32,6 +32,19 @@ const readMarketMakerNodeSource = (): string =>
     'market-maker/node/mm-node-run.ts',
   ].map(readMarketMakerNodeModule).join('\n');
 
+const readOrchestratorSource = (): string =>
+  [
+    'orchestrator.ts',
+    'process/spawn/hub.ts',
+    'process/spawn/market-maker.ts',
+    'support/runtime-support.ts',
+    'replica-import/runtime-import-controller.ts',
+    'health/orchestrator-health-support.ts',
+    'market-maker/identity-resolver.ts',
+  ]
+    .map(file => readFileSync(join(repoRoot, 'core/orchestrator', file), 'utf8'))
+    .join('\n');
+
 const readRpcAdapterSource = (): string =>
   [
     'rpc-public.ts',
@@ -63,7 +76,7 @@ describe('production startup wiring', () => {
   });
 
   test('Hub child drains by default and activates an explicit steady start period after bootstrap', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const inherited = applyHubRuntimeFrameDelay({
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20',
       XLN_UNRELATED_SETTING: 'kept',
@@ -88,9 +101,6 @@ describe('production startup wiring', () => {
       XLN_HUB_STEADY_FRAME_PERIOD_MS: '-1',
     })).toThrow('HUB_STEADY_FRAME_PERIOD_MS_INVALID:-1');
     expect(orchestrator).toContain('env: sanitizeChildProcessEnv(buildHubChildProcessEnv({');
-    expect(orchestrator).toContain(
-      "XLN_STORAGE_CERTIFIED_HISTORY: process.env['XLN_STORAGE_CERTIFIED_HISTORY'] ?? '1'",
-    );
     expect(buildHubEngineArgs('h1', {
       XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
     })).toEqual(['--cpu-prof', '--smol']);
@@ -109,8 +119,9 @@ describe('production startup wiring', () => {
         XLN_RSCORE_BINARY: '/bin/rscore',
         XLN_RSCORE_AUTHORITY_CUTOVER: '1',
         XLN_RSCORE_AUTHORITY_RECORD: '1',
-        XLN_STORAGE_CERTIFIED_HISTORY: '1',
         XLN_RUNTIME_APPLY_PROFILE: '1',
+        XLN_HLT_ENGINE: 'rust',
+        XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
       },
     })).toMatchObject({
       XLN_DB_PATH: '/db/h1',
@@ -119,8 +130,9 @@ describe('production startup wiring', () => {
       XLN_RSCORE_BINARY: '/bin/rscore',
       XLN_RSCORE_AUTHORITY_CUTOVER: '1',
       XLN_RSCORE_AUTHORITY_RECORD: '1',
-      XLN_STORAGE_CERTIFIED_HISTORY: '1',
       XLN_RUNTIME_APPLY_PROFILE: '1',
+      XLN_HLT_ENGINE: 'rust',
+      XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
       XLN_HUB_STEADY_FRAME_PERIOD_MS: '25',
     });
@@ -134,11 +146,14 @@ describe('production startup wiring', () => {
   });
 
   test('health enrichment cannot erase an active reset failure', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readFileSync(
+      join(repoRoot, 'core/orchestrator/health/orchestrator-health-support.ts'),
+      'utf8',
+    );
     const recompute = extractSourceBlock(
       orchestrator,
-      'const recomputeHealthWithMarketMaker = (',
-      'const enrichMarketMakerFromHubSnapshots = async',
+      'export const createHealthRecomputer = (',
+      'export const createBaselineWaitReporter =',
     );
     expect(recompute).toContain('const resetOk = deriveResetHealthOk(health.reset);');
     expect(recompute).toContain('health.coreOk &&\n    resetOk &&');
@@ -203,6 +218,9 @@ describe('production startup wiring', () => {
 
   test('Rust authority restart proves the exact persisted H1 checkpoint root', () => {
     const smoke = readFileSync(join(repoRoot, 'core/scripts/operations/production/local-prod-smoke.ts'), 'utf8');
+    expect(smoke).not.toContain("inheritedProcessEnv['XLN_HUB_RSCORE_AUTHORITY_H1'] = '1';");
+    expect(smoke).not.toContain("inheritedProcessEnv['XLN_RSCORE_AUTHORITY_CUTOVER'] = '1';");
+    expect(smoke).not.toContain('XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES:');
     expect(smoke).toContain("readH1AuthorityFrame(before.height)");
     expect(smoke).toContain('restored.canonicalStateHash !== before.canonicalStateHash');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_AUTHORITY_CHECKPOINT_DIVERGED');
@@ -365,7 +383,7 @@ describe('production startup wiring', () => {
     expect(mmP2PStart).toBeGreaterThan(mmIngressReady);
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
 
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     expect(orchestrator).toContain('const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;');
     const restartLog = orchestrator.indexOf('[MESH] restarting MM during readiness');
     const restartGrace = orchestrator.indexOf(
@@ -469,7 +487,7 @@ describe('production startup wiring', () => {
       .join('\n');
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts'), 'utf8');
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const runtimeImportHttp = readFileSync(join(repoRoot, 'core/orchestrator/replica-import/runtime-import-http.ts'), 'utf8');
     const bootstrapTimeline = readFileSync(join(repoRoot, 'core/orchestrator/bootstrap/bootstrap-timeline-stages.ts'), 'utf8');
     const isolatedRunner = readFileSync(join(repoRoot, 'core/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
@@ -706,7 +724,7 @@ describe('production startup wiring', () => {
   test('local prod smoke records bootstrap benchmark stages and hash assertions', () => {
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     const smoke = readFileSync(join(repoRoot, 'core/scripts/operations/production/local-prod-smoke.ts'), 'utf8');
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const mmNode = readMarketMakerNodeSource();
     const benchmark = readFileSync(join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-benchmark.ts'), 'utf8');
     const soundcheck = readFileSync(join(repoRoot, 'core/scripts/operations/bootstrap/bootstrap-soundcheck.ts'), 'utf8');
@@ -753,7 +771,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("schema: 'xln-market-maker-bootstrap-debug-event-v1'");
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL']");
     expect(orchestrator).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:');
-    expect(orchestrator).toContain("join(marketMakerChild.dbPath, 'bootstrap-events.jsonl')");
+    expect(orchestrator).toContain("join(child.dbPath, 'bootstrap-events.jsonl')");
     expect(mmNode).toContain("deps.emit('same-quote-progress'");
     expect(mmNode).not.toContain("emitBootstrapDebugEvent('cross-progress'");
     expect(mmNode).not.toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue'");
@@ -1182,7 +1200,7 @@ describe('production startup wiring', () => {
   });
 
   test('orchestrator health does not enrich cross market snapshots by default', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const buildHealthStart = orchestrator.indexOf('const buildAggregatedHealthResponse = async (');
     const waitBaselineStart = orchestrator.indexOf('const waitForHubBaseline = async (): Promise<void> => {');
     expect(buildHealthStart).toBeGreaterThan(0);
@@ -1316,7 +1334,7 @@ describe('production startup wiring', () => {
 
   test('market maker bootstrap never sends hub-side credit inputs itself', () => {
     const mmNode = readMarketMakerNodeSource();
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
     expect(ensureStart).toBeGreaterThan(0);
@@ -1341,7 +1359,7 @@ describe('production startup wiring', () => {
     expect(ensureConnectivity).not.toContain('remoteCreditInputs');
     expect(ensureConnectivity).not.toContain('sendEntityInput');
     expect(mmNode).not.toContain('RoutedEntityInput');
-    expect(orchestrator).toContain("'--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities())");
+    expect(orchestrator).toContain("'--support-peer-identities-json', safeStringify(deps.getMarketMakerIdentities())");
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
   });
 
@@ -1393,14 +1411,8 @@ describe('production startup wiring', () => {
     const reserveBootstrap = hubNode.slice(reserveStart, supportPeerReserveEnd);
     expect(reserveBootstrap).toContain('tokenCatalogForHubJurisdiction(tokenCatalog, {');
     expect(reserveBootstrap).toContain(
-      'const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });',
+      'const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {',
     );
-    expect(reserveBootstrap).toContain("const jurisdictionKey = String(profile.jurisdictionRef || '').trim();");
-    expect(reserveBootstrap).toContain('resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef)');
-    expect(reserveBootstrap).toContain('sameJurisdictionRef(jurisdiction, activeJurisdiction)');
-    expect(reserveBootstrap).not.toContain('profile.jurisdictionRef || jurisdictionName');
-    expect(reserveBootstrap).not.toContain('jurisdiction.jurisdictionRef || jurisdiction');
-    expect(reserveBootstrap).not.toContain('profilesByJurisdiction.has(jurisdictionName)');
     expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
@@ -1415,7 +1427,7 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).toContain('getEntityJurisdiction(input.env, input.bootstrap.entityId)');
     expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(input.env, jurisdiction)');
     expect(driveMeshBootstrap).toContain('if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return false;');
-    expect(hubNode).toContain('peerReady = peerProfiles.length >= expected;');
+    expect(driveMeshBootstrap).toContain('const supportReady = supportPeerProvisioningReady(');
     expect(driveMeshBootstrap).toContain('input.milestones.reserveReady = await ensureHubMeshReserves(input);');
     const creditFence = driveMeshBootstrap.indexOf('if (!creditReady) return false;');
     const reserveProvision = driveMeshBootstrap.indexOf('if (!input.milestones.reserveReady) {');
@@ -1468,7 +1480,7 @@ describe('production startup wiring', () => {
   });
 
   test('secondary hubs wait until every primary contract address has deployed bytecode', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const readiness = extractSourceBlock(
       orchestrator,
       'const waitForShardJurisdictions = async (child: HubChild): Promise<void> =>',
@@ -1481,7 +1493,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub mesh, market maker, and custody bootstrap behind one parallel readiness barrier', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const orchestrator = readOrchestratorSource();
     const custodyBootstrapSource = readFileSync(join(repoRoot, 'core/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
     const resetStart = orchestrator.indexOf('const runReset = async (');
     const resetEnd = orchestrator.indexOf('const resetCoordinator =', resetStart);
@@ -1489,7 +1501,9 @@ describe('production startup wiring', () => {
     expect(reset).toContain('await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));');
     expect(reset).toContain('const startConfiguredMarketMaker = async (): Promise<void> => {');
     expect(reset).toContain('const startConfiguredCustody = async (): Promise<void> => {');
-    expect(reset).toContain('await Promise.all([\n      waitForMesh(),\n      startConfiguredMarketMaker(),\n      startConfiguredCustody(),');
+    expect(reset).toContain(
+      'await Promise.all([\n      waitForMesh(),\n      driveNativeH1Bootstrap(h1, shouldStartMarketMaker),\n      startConfiguredMarketMaker(),\n      startConfiguredCustody(),',
+    );
     expect(orchestrator).not.toContain('continuing market maker startup before failing reset');
     expect(custodyBootstrapSource).toContain('XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId');
     expect(custodyBootstrapSource).toContain('discoverHubIds(options.apiBaseUrl, 3, 30_000, jurisdictionTarget)');
@@ -1955,7 +1969,9 @@ describe('production startup wiring', () => {
       } else {
         process.env['XLN_RPC_PROXY_TIMEOUT_MS'] = previousTimeout;
       }
-      await server.stop(true);
+      // Bun 1.4 correctly aborts the client request, but awaiting stop() can
+      // wait forever for the deliberately unresolved test handler itself.
+      server.stop(true);
     }
   }, 2_000);
 });

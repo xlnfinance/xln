@@ -19,7 +19,6 @@ import { commitDeltaDraft } from '../../../delta-utils';
 export type SwapResolveRemainderResult =
   | {
       ok: true;
-      closeOrderInHistory: boolean;
       swapOfferCancelled?: { offerId: string; accountId: string };
     }
   | SwapResolveFailure;
@@ -58,7 +57,6 @@ const closeSwapOffer = (
   events.push(`📊 Swap offer ${resolve.offerId.slice(0, 8)}... ${message}`);
   return {
     ok: true,
-    closeOrderInHistory: true,
     swapOfferCancelled: { offerId: resolve.offerId, accountId: makerId },
   };
 };
@@ -161,5 +159,5 @@ export const applySwapResolveRemainder = (
     `📊 Swap offer ${resolve.offerId.slice(0, 8)}... partially filled, ` +
     `${remainingOffer.giveAmount} remaining`,
   );
-  return { ok: true, closeOrderInHistory: false };
+  return { ok: true };
 };

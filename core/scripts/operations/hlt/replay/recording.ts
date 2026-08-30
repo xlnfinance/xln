@@ -18,19 +18,11 @@ import {
 } from '../../../../runtime';
 import type { PersistedFrameJournal } from '../../../../storage/types';
 import {
-  buildEntityProposalReplayOracleMap,
-  type EntityProposalReplayOracleEntry,
-} from '../../../../entity/consensus/proposal/replay-oracle';
-import {
   buildHltAuthorityEvidence,
   type HltAuthorityEvidence,
 } from './authority-evidence';
-import {
-  decodeHltAuthorityFrameOracle,
-  type HltAuthorityFrameOracle,
-} from './authority-frame-oracle';
 
-export const HLT_HUB_RECORDING_SCHEMA = 'xln-hlt-account-authority-recording-v1' as const;
+export const HLT_HUB_RECORDING_SCHEMA = 'xln-hlt-runtime-wal-recording-v1' as const;
 
 export type HltHubRecordingTotals = Readonly<{
   runtimeFrames: number;
@@ -54,10 +46,7 @@ export type HltHubRecording = Readonly<{
     disputes: 'disabled';
     lending: 'disabled';
   }>;
-  authorityFrameOracle: HltAuthorityFrameOracle;
   authorityEvidence: HltAuthorityEvidence;
-  /** Exact certified Entity proposal boundaries. Optional for v1 recordings written before this oracle. */
-  entityProposalOracle?: readonly EntityProposalReplayOracleEntry[];
 }>;
 
 export const summarizeHltHubFrames = (
@@ -78,36 +67,15 @@ export const recordingFrames = (recording: RuntimeRecording): PersistedFrameJour
 const sameTotals = (left: HltHubRecordingTotals, right: HltHubRecordingTotals): boolean =>
   Object.keys(left).every(key => left[key as keyof HltHubRecordingTotals] === right[key as keyof HltHubRecordingTotals]);
 
-const decodeEntityProposalOracle = (value: unknown): readonly EntityProposalReplayOracleEntry[] => {
-  if (!Array.isArray(value)) throw new Error('HLT_ENTITY_PROPOSAL_ORACLE_INVALID');
-  const entries = value.map((source, index) => {
-    const entry = requireBoundaryRecord(source, `HLT_ENTITY_PROPOSAL_ORACLE_ENTRY_INVALID:${index}`);
-    requireExactBoundaryKeys(
-      entry,
-      ['entityId', 'entityHeight', 'txCount', 'txPrefixHash', 'frameHash'],
-      [],
-      `HLT_ENTITY_PROPOSAL_ORACLE_ENTRY:${index}`,
-    );
-    return {
-      entityId: String(entry['entityId']),
-      entityHeight: Number(entry['entityHeight']),
-      txCount: Number(entry['txCount']),
-      txPrefixHash: String(entry['txPrefixHash']),
-      frameHash: String(entry['frameHash']),
-    };
-  });
-  return Array.from(buildEntityProposalReplayOracleMap(entries).values());
-};
-
 export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   const root = requireBoundaryRecord(value, 'HLT_HUB_RECORDING_INVALID');
   requireExactBoundaryKeys(
     root,
     [
       'schema', 'createdAt', 'source', 'recording', 'totals', 'featurePolicy',
-      'authorityFrameOracle', 'authorityEvidence',
+      'authorityEvidence',
     ],
-    ['entityProposalOracle'],
+    [],
     'HLT_HUB_RECORDING',
   );
   if (root['schema'] !== HLT_HUB_RECORDING_SCHEMA) throw new Error('HLT_HUB_RECORDING_SCHEMA_INVALID');
@@ -134,8 +102,7 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
     featurePolicy['disputes'] !== 'disabled' ||
     featurePolicy['lending'] !== 'disabled'
   ) throw new Error('HLT_AUTHORITY_FEATURE_POLICY_INVALID');
-  const authorityFrameOracle = decodeHltAuthorityFrameOracle(root['authorityFrameOracle']);
-  const authorityEvidence = buildHltAuthorityEvidence(recordingFrames(recording), authorityFrameOracle);
+  const authorityEvidence = buildHltAuthorityEvidence(recordingFrames(recording));
   if (safeStringify(root['authorityEvidence']) !== safeStringify(authorityEvidence)) {
     throw new Error('HLT_AUTHORITY_EVIDENCE_MISMATCH');
   }
@@ -159,11 +126,7 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
       disputes: 'disabled',
       lending: 'disabled',
     },
-    authorityFrameOracle,
     authorityEvidence,
-    ...(root['entityProposalOracle'] !== undefined
-      ? { entityProposalOracle: decodeEntityProposalOracle(root['entityProposalOracle']) }
-      : {}),
   };
   if (!Number.isSafeInteger(decoded.createdAt) || decoded.createdAt < 0) throw new Error('HLT_HUB_RECORDING_CREATED_AT_INVALID');
   if (!decoded.source.workDir || !decoded.source.workload || !Number.isSafeInteger(decoded.source.users) || decoded.source.users < 1) {

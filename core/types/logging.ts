@@ -1,5 +1,5 @@
 /** Log severity levels - ordered by priority */
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
 /** Log categories for filtering */
 export type LogCategory =

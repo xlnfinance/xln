@@ -104,6 +104,11 @@ export const createHubDirectRuntimeRoute = (
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed,
     signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(env, to, envelope),
+    onGossipAnnounce: async (from, payload) => {
+      const p2p = env.infrastructure?.p2p;
+      if (!p2p) throw new Error('DIRECT_GOSSIP_P2P_UNAVAILABLE');
+      await p2p.admitGossipAnnouncement(from, payload);
+    },
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead(
         { env },

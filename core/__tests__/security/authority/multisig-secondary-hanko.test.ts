@@ -187,9 +187,7 @@ const createMultisigAccountState = (
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     profile: { name: 'Multisig entity', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
   } as EntityState;
   state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId);
@@ -660,8 +658,8 @@ describe('multisig secondary Hanko production', () => {
     const proposalDisputeHash = digest('d');
     account.currentFrame = { ...account.currentFrame, height: 1, stateHash: ackFrameHash };
     account.currentHeight = 1;
-    const combined: Extract<AccountInput, { kind: 'frame_ack' }> = {
-      kind: 'frame_ack',
+    const combined: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      kind: 'ack_frame',
       fromEntityId: setup.entityId,
       toEntityId: setup.counterpartyId,
       domain: account.state.domain,
@@ -684,7 +682,7 @@ describe('multisig secondary Hanko production', () => {
         },
       },
     };
-    account.lastOutboundFrameAck = {
+    account.lastOutboundAckFrame = {
       height: 1,
       counterpartyEntityId: setup.counterpartyId,
       response: {
@@ -722,7 +720,7 @@ describe('multisig secondary Hanko production', () => {
     const hankoAttachedTx = outputs[0]?.entityTxs?.[0];
     if (hankoAttachedTx?.type !== 'accountInput') throw new Error('TEST_HANKO_ATTACHED_ACCOUNT_OUTPUT_MISSING');
     const hankoAttachedRouted = hankoAttachedTx.data;
-    if (hankoAttachedRouted.kind !== 'frame_ack') throw new Error('TEST_HANKO_ATTACHED_FRAME_ACK_MISSING');
+    if (hankoAttachedRouted.kind !== 'ack_frame') throw new Error('TEST_HANKO_ATTACHED_ACK_FRAME_MISSING');
     expect(routed.ack.frameHanko).toBeUndefined();
     expect(hankoAttachedRouted.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(hankoAttachedRouted.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
@@ -730,7 +728,7 @@ describe('multisig secondary Hanko production', () => {
     expect(hankoAttachedRouted.proposal.disputeHanko?.hanko).toBe(hankos.get(proposalDisputeHash)?.hanko);
 
     attachHankoWitnessesToState(setup.state, hankos, 1, [setup.counterpartyId]);
-    expect(account.lastOutboundFrameAck.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
+    expect(account.lastOutboundAckFrame.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(account.pendingAccountInput.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
     expect(account.currentFrameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
     expect(account.currentDisputeProofHanko).toBe(hankos.get(proposalDisputeHash)?.hanko);
@@ -739,7 +737,7 @@ describe('multisig secondary Hanko production', () => {
     // state. It must reuse that exact older witness instead of pretending the
     // secondary hash was signed again at the new Entity height.
     expect(() => attachHankoWitnessesToState(setup.state, hankos, 2, [setup.counterpartyId])).not.toThrow();
-    expect(account.lastOutboundFrameAck.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
+    expect(account.lastOutboundAckFrame.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(account.pendingAccountInput.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
 
     const originalAckWitness = hankos.get(ackFrameHash);

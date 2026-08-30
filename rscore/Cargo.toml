@@ -13,6 +13,7 @@ base64 = "0.22.1"
 hex = "0.4.3"
 mimalloc = "0.1.52"
 getrandom = "0.3.4"
+form_urlencoded = "1.2.2"
 num-bigint = "0.4.6"
 num-integer = "0.1.46"
 rayon = "1.12.0"
@@ -23,7 +24,11 @@ thiserror = "2.0.16"
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
+# Whole-workspace thin LTO made the smallest H1 source edit spend more than
+# the hard 20-second gate in the final process link. Hot crates remain
+# optimized at one codegen unit; live HLT, not linker folklore, is the
+# authority for accepting this build configuration.
+lto = false
 panic = "unwind"
 # Consensus arithmetic must fail identically in debug and production. This is
 # a backstop, not a substitute for checked_add/checked_sub at financial
@@ -31,3 +36,21 @@ panic = "unwind"
 overflow-checks = true
 # Symbols only; they cost nothing at runtime and make a profile readable.
 debug = "line-tables-only"
+
+# The operator binary is glue around the optimized Runtime/Entity/Account
+# crates. Compiling that wrapper as one monolithic unit repeatedly exceeded
+# the repository's 20-second hard gate after any Runtime edit. Keep the hot
+# libraries at one codegen unit above, but compile independent process glue in
+# parallel; thin LTO still sees the final program.
+[profile.release.package.xln-rscore-process]
+codegen-units = 16
+
+# These two orchestration crates otherwise exceed the mandatory 20-second
+# incremental build gate as single LLVM units. The financial engine and batch
+# worker remain at one unit; authoritative live HLT must reject this setting if
+# it causes a material runtime regression.
+[profile.release.package.xln-rscore-entity-kernel]
+codegen-units = 4
+
+[profile.release.package.xln-rscore-runtime]
+codegen-units = 8

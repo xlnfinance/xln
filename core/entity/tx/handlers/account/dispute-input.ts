@@ -3,10 +3,10 @@ import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountInputDisputeRequired } from '../../../../account/consensus/types';
 import { addMessage } from '../../../frame-events';
-import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../../j-events-htlc/route-lifecycle';
+import { armPaymentSecretAckTimeout, persistVerifiedPaymentSecret } from '../../../paybook/lifecycle';
 import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';
-import { hasInboundHtlcRoute } from '../../../htlc/route-views';
+import { hasInboundPayment } from '../../../paybook/views';
 
 type UnsafeFrameContext = {
   env: EntityRuntimeContext;
@@ -31,18 +31,18 @@ const persistDisputeEvidenceSecrets = (context: UnsafeFrameContext): void => {
       candidate => candidate.hashlock.toLowerCase() === hashlock.toLowerCase(),
     );
     if (!lock) throw new Error(`HTLC_DISPUTE_EVIDENCE_LOCK_MISSING:${hashlock}`);
-    const route = persistVerifiedHtlcSecret(state, counterpartyId, lock, secret);
+    const route = persistVerifiedPaymentSecret(state, counterpartyId, lock, secret);
     const localIsLeft = account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase();
     const localSentLock = lock.senderIsLeft === localIsLeft;
-    if (!localSentLock || !hasInboundHtlcRoute(route)) continue;
+    if (!localSentLock || !hasInboundPayment(route)) continue;
     effects.accountTxs.push({
       accountId: route.inboundEntity,
       tx: {
         type: 'htlc_resolve',
-        data: { lockId: route.inboundLockId, outcome: 'secret', secret },
+        data: { lockId: hashlock, outcome: 'secret', secret },
       },
     });
-    armHtlcSecretAckTimeout(state, route);
+    armPaymentSecretAckTimeout(state, route);
   }
 };
 

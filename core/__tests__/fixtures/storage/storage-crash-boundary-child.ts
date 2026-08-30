@@ -2,12 +2,10 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getRuntimeWalDb,
-  getHistoryViewDb,
   getRuntimeStorageDb,
   processRuntime,
   tryOpenStorageDb,
   tryOpenRuntimeWalDb,
-  tryOpenHistoryViewDb,
 } from '../../../runtime';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
@@ -272,8 +270,6 @@ env.runtimeConfig = {
     snapshotPeriodFrames: 1,
     retainSnapshots: 1,
     epochMaxBytes: 1_000_000_000,
-    historyViewMaxBytes: 1,
-    historyViewRetainFrames: 1,
     materializePeriodFrames: 1_000,
     canonicalHashPeriodFrames: 1,
     accountMerkleRadix: 16,
@@ -480,8 +476,6 @@ await saveRuntimeFrameToStorage({
     getRuntimeDb: getRuntimeStorageDb,
     tryOpenRuntimeWalDb,
     getRuntimeWalDb,
-    tryOpenHistoryViewDb,
-    getHistoryViewDb,
     getPerfMs,
     formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
     ...(crashOnFirstFrame
@@ -536,8 +530,6 @@ await saveRuntimeFrameToStorage({
     getRuntimeDb: getRuntimeStorageDb,
     tryOpenRuntimeWalDb,
     getRuntimeWalDb,
-    tryOpenHistoryViewDb,
-    getHistoryViewDb,
     getPerfMs,
     formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
     onPersistenceBoundary: (reached) => {

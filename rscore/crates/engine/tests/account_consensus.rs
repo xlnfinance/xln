@@ -5,12 +5,11 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope,
-    AccountReplica, AccountState, AccountTx, BoardDelays, BoardHankoRefreshInput,
+    AccountReplica, AccountState, AccountTx, AckFrameOutcome, BoardDelays, BoardHankoRefreshInput,
     CertifiedBoardAuthority, CounterpartyDispute, DeliveryMode, Delta, DepositoryAddress,
-    DisputeDraft, EntityId, FrameAckOutcome, IncomingAck, IncomingFrame, IncomingOutcome,
-    ProposalOutcome, ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity,
-    StandaloneInputOutcome, TokenId, WatchSeed, apply_board_hanko_refresh,
-    apply_incoming_ack as apply_exact_incoming_ack,
+    DisputeDraft, EntityId, IncomingAck, IncomingFrame, IncomingOutcome, ProposalOutcome,
+    ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity, StandaloneInputOutcome,
+    TokenId, WatchSeed, apply_board_hanko_refresh, apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, apply_standalone_dispute,
     dispute_proof_hash, propose_account_frame,
 };
@@ -369,6 +368,12 @@ fn a_proposal_clamps_its_timestamp_to_the_committed_account_watermark() {
         panic!("expected lagging-clock proposal");
     };
     assert_eq!(next.frame.timestamp, committed_timestamp);
+    assert_eq!(next.frame.height, 2);
+    assert_eq!(
+        next.bundled_ack.as_ref().map(|ack| ack.height),
+        Some(1),
+        "the successor proposal must carry the ACK for the peer's committed H=1 frame",
+    );
 }
 
 /// The Entity layer must receive the complete committed frame in canonical
@@ -771,9 +776,10 @@ fn enforcement_is_judged_on_the_receiver_clock() {
     let (mut left, mut right) = parties();
     // The lock is alive at the frame's own clock and dead at ours.
     let timelock = 1_700_000_060_000_u64;
+    let hashlock = format!("0x{}", "11".repeat(32));
     let lock = AccountTx::HtlcLock(HtlcLockTx {
-        lock_id: "lock-1".to_string(),
-        hashlock: HtlcHashlock::parse(&format!("0x{}", "11".repeat(32))).expect("hashlock"),
+        lock_id: hashlock.clone(),
+        hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
         timelock: Big::from(timelock),
         reveal_before_height: 100,
         amount: Big::from(10),
@@ -842,7 +848,7 @@ fn enforcement_is_judged_on_the_receiver_clock() {
 /// A bad proposal must therefore not resurrect the pending frame the valid ACK
 /// just certified.
 #[test]
-fn frame_ack_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
+fn ack_frame_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
     let (mut left, mut right) = parties();
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
@@ -899,7 +905,7 @@ fn frame_ack_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
     );
 
     let right_to_left = envelope(&left.account, right.identity.entity_id());
-    let outcome = xln_rscore_engine::apply_incoming_frame_ack(
+    let outcome = xln_rscore_engine::apply_incoming_ack_frame(
         &mut left.account,
         &left.identity,
         &right_to_left,
@@ -913,9 +919,9 @@ fn frame_ack_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
         invalid,
         &market(),
     )
-    .expect("sequential frame_ack");
+    .expect("sequential ack_frame");
 
-    let FrameAckOutcome::Applied { ack, frame } = outcome else {
+    let AckFrameOutcome::Applied { ack, frame } = outcome else {
         panic!("ACK phase must commit, got {outcome:?}");
     };
     assert!(matches!(
@@ -1468,12 +1474,12 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
     );
 }
 
-/// A transaction the frame hash cannot express never enters the queue: once
-/// queued, nothing could remove it and every later frame would fail.
+/// Every canonical AccountTx must be hashable even when its current machine
+/// policy rejects execution. Admission and execution rejection are distinct.
 #[test]
-fn an_unhashable_transaction_is_refused_at_admission() {
+fn reserve_to_collateral_is_hashable_then_rejected_by_execution() {
     let (mut left, right) = parties();
-    let error = left
+    let admission = left
         .account
         .admit_txs(
             vec![AccountTx::ReserveToCollateral {
@@ -1486,11 +1492,19 @@ fn an_unhashable_transaction_is_refused_at_admission() {
             }],
             "test",
         )
-        .expect_err("unhashable");
-    assert_eq!(
-        error.to_string(),
-        "ACCOUNT_FRAME_TX_UNSUPPORTED:reserve_to_collateral"
-    );
+        .expect("canonical transaction is hashable");
+    assert_eq!(admission.admitted, 1);
+    let ProposalOutcome::Idle { dropped } = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        0,
+        &market(),
+    )
+    .expect("policy rejection") else {
+        panic!("blocked reserve transition must not produce a frame")
+    };
+    assert_eq!(dropped.len(), 1);
     assert!(left.account.mempool().is_empty());
     // The account still works.
     left.account
@@ -1555,10 +1569,10 @@ fn the_proposal_window_defers_a_capacity_rejection() {
 
     let (mut left, right) = parties();
     let lock = |index: usize| {
+        let hashlock = format!("0x{:02x}{}", index % 256, "11".repeat(31));
         AccountTx::HtlcLock(HtlcLockTx {
-            lock_id: format!("lock-{index}"),
-            hashlock: HtlcHashlock::parse(&format!("0x{:02x}{}", index % 256, "11".repeat(31)))
-                .expect("hashlock"),
+            lock_id: hashlock.clone(),
+            hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
             timelock: Big::from(1_700_000_900_000_u64),
             reveal_before_height: 100,
             amount: Big::from(10),
@@ -1606,20 +1620,20 @@ fn outputs_are_held_until_the_peer_acks() {
     let secret_bytes = [0x5a_u8; 32];
     let secret = format!("0x{}", hex::encode(secret_bytes));
     let hashlock_bytes: [u8; 32] = Keccak256::digest(secret_bytes).into();
-    let hashlock =
-        HtlcHashlock::parse(&format!("0x{}", hex::encode(hashlock_bytes))).expect("hashlock");
+    let hashlock_text = format!("0x{}", hex::encode(hashlock_bytes));
+    let hashlock = HtlcHashlock::parse(&hashlock_text).expect("hashlock");
     let second_secret_bytes = [0x6b_u8; 32];
     let second_secret = format!("0x{}", hex::encode(second_secret_bytes));
     let second_hashlock_bytes: [u8; 32] = Keccak256::digest(second_secret_bytes).into();
-    let second_hashlock = HtlcHashlock::parse(&format!("0x{}", hex::encode(second_hashlock_bytes)))
-        .expect("second hashlock");
+    let second_hashlock_text = format!("0x{}", hex::encode(second_hashlock_bytes));
+    let second_hashlock = HtlcHashlock::parse(&second_hashlock_text).expect("second hashlock");
 
     // Height 1: LEFT locks, both sides commit.
     left.account
         .admit_txs(
             vec![
                 AccountTx::HtlcLock(HtlcLockTx {
-                    lock_id: "lock-1".to_string(),
+                    lock_id: hashlock_text.clone(),
                     hashlock,
                     timelock: Big::from(1_700_000_900_000_u64),
                     reveal_before_height: 100,
@@ -1629,7 +1643,7 @@ fn outputs_are_held_until_the_peer_acks() {
                     envelope: None,
                 }),
                 AccountTx::HtlcLock(HtlcLockTx {
-                    lock_id: "lock-2".to_string(),
+                    lock_id: second_hashlock_text.clone(),
                     hashlock: second_hashlock,
                     timelock: Big::from(1_700_000_900_000_u64),
                     reveal_before_height: 100,
@@ -1682,11 +1696,11 @@ fn outputs_are_held_until_the_peer_acks() {
         .admit_txs(
             vec![
                 AccountTx::HtlcResolve(HtlcResolveTx {
-                    lock_id: "lock-1".to_string(),
+                    lock_id: hashlock_text.clone(),
                     outcome: HtlcResolveOutcome::Secret { secret },
                 }),
                 AccountTx::HtlcResolve(HtlcResolveTx {
-                    lock_id: "lock-2".to_string(),
+                    lock_id: second_hashlock_text.clone(),
                     outcome: HtlcResolveOutcome::Secret {
                         secret: second_secret,
                     },
@@ -1727,13 +1741,17 @@ fn outputs_are_held_until_the_peer_acks() {
     .expect("apply resolve");
     let IncomingOutcome::Committed {
         ack_hanko,
-        outputs,
         committed_frame,
         ..
     } = outcome
     else {
         panic!("expected a commit");
     };
+    let outputs = committed_frame
+        .outputs_by_tx
+        .iter()
+        .flatten()
+        .collect::<Vec<_>>();
     assert!(
         outputs
             .iter()
@@ -1744,22 +1762,13 @@ fn outputs_are_held_until_the_peer_acks() {
     for (row, expected_lock_id) in committed_frame
         .outputs_by_tx
         .iter()
-        .zip(["lock-1", "lock-2"])
+        .zip([hashlock_text.as_str(), second_hashlock_text.as_str()])
     {
         assert!(
             matches!(row.as_slice(), [AccountOutput::HtlcSecret { lock_id, .. }] if lock_id == expected_lock_id),
             "{row:?}",
         );
     }
-    assert_eq!(
-        committed_frame
-            .outputs_by_tx
-            .iter()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>(),
-        outputs,
-    );
 
     // RIGHT only learns the frame is committed when the ack arrives, and that
     // is when its own copy of the effect is released.
@@ -1773,13 +1782,16 @@ fn outputs_are_held_until_the_peer_acks() {
     )
     .expect("ack resolve");
     let xln_rscore_engine::AckOutcome::Committed {
-        outputs,
-        committed_frame,
-        ..
+        committed_frame, ..
     } = ack
     else {
         panic!("expected an ack commit, got {ack:?}");
     };
+    let outputs = committed_frame
+        .outputs_by_tx
+        .iter()
+        .flatten()
+        .collect::<Vec<_>>();
     assert!(
         outputs
             .iter()
@@ -1787,15 +1799,6 @@ fn outputs_are_held_until_the_peer_acks() {
         "{outputs:?}",
     );
     assert_eq!(committed_frame.outputs_by_tx.len(), 2);
-    assert_eq!(
-        committed_frame
-            .outputs_by_tx
-            .iter()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>(),
-        outputs,
-    );
 }
 
 /// A valid signed secret inside the 30-second enforcement reserve is dispute
@@ -1815,7 +1818,7 @@ fn a_secret_inside_the_enforcement_reserve_requires_dispute() {
     left.account
         .admit_txs(
             vec![AccountTx::HtlcLock(HtlcLockTx {
-                lock_id: format!("0x{}", "ab".repeat(32)),
+                lock_id: hashlock_text.clone(),
                 hashlock: HtlcHashlock::parse(&hashlock_text).expect("hashlock"),
                 timelock: Big::from(timelock),
                 reveal_before_height: 100,
@@ -1862,7 +1865,7 @@ fn a_secret_inside_the_enforcement_reserve_requires_dispute() {
     left.account
         .admit_txs(
             vec![AccountTx::HtlcResolve(HtlcResolveTx {
-                lock_id: format!("0x{}", "ab".repeat(32)),
+                lock_id: hashlock_text.clone(),
                 outcome: HtlcResolveOutcome::Secret {
                     secret: secret.clone(),
                 },
@@ -2100,15 +2103,18 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
         panic!("expected first proposal");
     };
     let first = *first;
-    let first_dispute = first.dispute.clone().expect("first recovery draft");
-    let first_dispute_hanko = left
-        .identity
-        .sign_frame(&first_dispute.hash)
-        .expect("certify first dispute");
+    first.dispute.as_ref().expect("first recovery draft");
+    let first_dispute_hanko = first
+        .dispute_hanko
+        .clone()
+        .expect("proposal presigned recovery draft");
     assert!(
         left.account
-            .attach_local_dispute_hanko(first_dispute.hash, first_dispute_hanko.clone())
-            .expect("attach first dispute")
+            .consensus_snapshot()
+            .pending
+            .and_then(|pending| pending.proposal_dispute)
+            .and_then(|draft| draft.hanko)
+            .is_some_and(|hanko| hanko == first_dispute_hanko)
     );
 
     let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(

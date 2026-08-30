@@ -1,4 +1,4 @@
-import { decodeTsAccountWorkerTransfer, encodeTsAccountWorkerTransfer } from './codec';
+import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from './codec';
 import { getPerfMs } from '../../support/time';
 import type {
   TsAccountWorkerInitResult,
@@ -14,6 +14,7 @@ export type WorkerRequestResult = Readonly<{
   encodeMs: number;
   decodeMs: number;
   roundTripMs: number;
+  workerEncodeMs: number;
 }>;
 
 type PendingRequest = Readonly<{
@@ -33,6 +34,8 @@ export class TsAccountWorkerClient {
   readonly #pending = new Map<number, PendingRequest>();
   #nextRequestId = 1;
   #closed = false;
+  readonly #requestEncoder = new TsAccountWorkerTransferEncoder();
+  readonly #responseDecoder = new TsAccountWorkerTransferDecoder();
 
   constructor(workerIndex: number) {
     this.#workerIndex = workerIndex;
@@ -68,7 +71,7 @@ export class TsAccountWorkerClient {
     }
     try {
       const decodeStart = getPerfMs();
-      const value = decodeTsAccountWorkerTransfer(response.payload);
+      const value = this.#responseDecoder.decode(response.payload);
       const decodeMs = getPerfMs() - decodeStart;
       pending.resolve({
         value,
@@ -77,6 +80,7 @@ export class TsAccountWorkerClient {
         encodeMs: pending.encodeMs,
         decodeMs,
         roundTripMs: getPerfMs() - pending.sentAt,
+        workerEncodeMs: response.encodeUs / 1_000,
       });
     } catch (error) {
       pending.reject(new Error(
@@ -100,7 +104,7 @@ export class TsAccountWorkerClient {
     const requestId = this.#nextRequestId;
     this.#nextRequestId += 1;
     const encodeStart = getPerfMs();
-    const payload = encodeTsAccountWorkerTransfer(value);
+    const payload = this.#requestEncoder.encode(value);
     const encodeMs = getPerfMs() - encodeStart;
     const request: TsAccountWorkerRequestEnvelope = { requestId, kind, payload };
     const sentAt = getPerfMs();
@@ -167,6 +171,10 @@ export const parseWorkerPhaseResult = (
     || !Number.isSafeInteger(result.operations)
     || !Number.isSafeInteger(result.elapsedUs)
     || !Number.isFinite(result.heapUsedBytes)
+    || !Number.isSafeInteger(result.threadCpuUserUs)
+    || !Number.isSafeInteger(result.threadCpuSystemUs)
+    || result.timings === null
+    || typeof result.timings !== 'object'
   ) throw new Error(`TS_ACCOUNT_WORKER_PHASE_RESULT_SHAPE:${expectedWorkerIndex}`);
   return result;
 };

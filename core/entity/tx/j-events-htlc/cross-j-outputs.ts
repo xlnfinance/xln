@@ -4,7 +4,7 @@ import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdicti
 import type { AccountTx } from '../../../types/account';
 import type { EntityInput, EntityOutput, EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
-import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
+import { crossJurisdictionRouteSigner } from '../../../extensions/cross-j/boundary';
 import { buildCrossJurisdictionFillNoticeTx } from '../../../extensions/cross-j/fill-ack';
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
@@ -12,17 +12,7 @@ const normalizeEntityRef = (value: string): string => String(value || '').trim()
 export const crossJurisdictionRouteSignerHint = (
   route: CrossJurisdictionSwapRoute,
   entityId: string,
-): string | null => {
-  const target = normalizeEntityRef(entityId);
-  if (!target) return null;
-  const bookOwner = normalizeEntityRef(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
-  if (normalizeEntityRef(route.source.entityId) === target) return route.sourceSignerId || null;
-  if (normalizeEntityRef(route.source.counterpartyEntityId) === target) return route.sourceHubSignerId || null;
-  if (normalizeEntityRef(route.target.entityId) === target) return route.targetHubSignerId || null;
-  if (normalizeEntityRef(route.target.counterpartyEntityId) === target) return route.targetSignerId || null;
-  if (bookOwner === target || normalizeEntityRef(route.hubEntityId) === target) return route.bookHubSignerId || null;
-  return null;
-};
+): string | null => crossJurisdictionRouteSigner(route, entityId);
 
 export const buildCrossJurisdictionEntityOutput = (
   entityId: string,
@@ -36,14 +26,12 @@ export const buildCrossJurisdictionEntityOutput = (
   }
 
   // Cross-J routes commit every destination signer before either Account leg
-  // can settle. Entity consensus therefore emits only the exact certified
-  // lane; consulting Runtime topology here would make pure replay depend on
-  // validator-local replicas, gossip, or private keys.
+  // can settle. Runtime resolves transport only after this Entity output is
+  // committed; pure Entity replay never consults gossip or private keys.
   return {
     entityId: normalizedEntityId,
     signerId: normalizedSignerId,
     entityTxs,
-    localRuntimeProtocol: 'cross-j',
   };
 };
 
@@ -78,8 +66,8 @@ export const appendCrossJurisdictionTargetProgressAfterAdmission = (
   outputs.push(buildCrossJurisdictionTargetFillNoticeOutput(currentEntityState, tx));
 };
 
-/** Generic E→E output. Publication rejects this unsupported production path loudly. */
-export const buildGenericEntityOutput = (
+/** Exact Account protocol output; publication revalidates its bilateral route. */
+export const buildAccountEntityOutput = (
   entityId: string,
   signerId: string,
   entityTxs: EntityTx[],

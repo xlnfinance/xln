@@ -13,6 +13,7 @@
 //! effects that the parent commits and routes.
 
 use xln_rscore_engine::{AccountDomain, AccountTx, ReceiverClock};
+use xln_rscore_protocol::CanonicalValue;
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint};
 use crate::consensus::{AccountAdmissionResult, AccountInputResult, AccountInputRow, ProposalRow};
@@ -37,6 +38,10 @@ pub struct EntityInboundRequest {
 pub struct EntityAccountGenesisPolicy {
     pub expected_domain: AccountDomain,
     pub shadow_policy_root: [u8; 32],
+    /// Canonical value-bearing policy rows behind `shadow_policy_root`.
+    /// Carrying only the root made a freshly-created Account impossible to
+    /// restore without consulting TypeScript state outside the Runtime WAL.
+    pub shadow_policy_rows: Vec<(u32, CanonicalValue)>,
     pub delta_transformer: [u8; 20],
     /// Kept explicit in the typed boundary so an eventual pinned-account
     /// policy change cannot silently alter H=0 leaves. Inbound peer genesis is
@@ -44,15 +49,41 @@ pub struct EntityAccountGenesisPolicy {
     pub public_pinned: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AccountEnvelopeUpdate {
+    ClearRebalanceActiveQuote,
+    SetRebalancePolicy {
+        token_id: u32,
+        policy: CanonicalValue,
+    },
+    ReplaceDisputeLifecycle {
+        status: String,
+        dispute_prepare: Option<CanonicalValue>,
+        active_dispute: Option<CanonicalValue>,
+    },
+    ApplyDisputeStarted(xln_rscore_engine::AccountDisputeStartedFinality),
+    ApplyDisputeFinality(xln_rscore_engine::AccountDisputeFinality),
+    ConfirmDisputeBookRemoval {
+        order_id: String,
+    },
+}
+
 /// Everything one Entity input carries outward.
 #[derive(Debug)]
 pub struct EntityOutboundRequest {
     pub owner_entity_id: [u8; 32],
+    /// Current local board authority resolved by the parent Entity registry.
+    /// `Unresolved` is rejected; this transient fact is never Account state.
+    pub local_certified_board_authority: crate::PeerBoardAuthority,
     /// The clock this Entity stamps the frames it proposes with.
     pub timestamp: u64,
     pub j_height: u64,
     /// Accounts created at financial genesis by this Entity input.
     pub creates: Vec<AccountSeed>,
+    /// Entity-owned Account envelope mutations applied on the same worker and
+    /// in the same candidate as admissions/proposals. They never enter the
+    /// bilateral Account frame, but their root is part of the Entity leaf.
+    pub envelope_updates: Vec<(AccountId, Vec<AccountEnvelopeUpdate>)>,
     /// Transactions the Entity's own logic produced, per account.
     pub admits: Vec<(AccountId, Vec<AccountTx>)>,
     /// The accounts asked to propose once their transactions are queued.
@@ -60,11 +91,6 @@ pub struct EntityOutboundRequest {
     /// Accounts changed on the inbound visit whose final bodies the parent
     /// needs only after all Entity-derived work has run.
     pub materialize: Vec<AccountId>,
-    /// Active forwarded-payment routes whose downstream Account may reject a
-    /// lock during this proposal pass. These are Entity-owned routing facts,
-    /// supplied before execution so Rust can enqueue the exact upstream
-    /// resolve and finish the canonical worklist without a third process call.
-    pub failed_htlc_routes: Vec<FailedHtlcRoute>,
     /// Export every Account changed since the previous durable checkpoint.
     /// Export itself is repeatable and non-acknowledging. The next inbound
     /// expected root implicitly advances the worker-local durable baseline
@@ -73,13 +99,16 @@ pub struct EntityOutboundRequest {
     pub post_accounts: bool,
 }
 
+/// One exact same-round rollback generated only after an actual downstream
+/// HTLC lock was removed. The parent Entity resolves `hashlock` by a point
+/// lookup in Paybook; no Account worker scans or stores Entity routing state.
 #[derive(Clone, Debug)]
-pub struct FailedHtlcRoute {
+pub struct FailedHtlcFollowup {
+    pub failed_account_id: AccountId,
     pub hashlock: [u8; 32],
-    pub outbound_account_id: AccountId,
-    pub outbound_lock_id: String,
-    pub inbound_account_id: AccountId,
-    pub inbound_lock_id: String,
+    pub upstream_account_id: AccountId,
+    pub tx: AccountTx,
+    pub reason: String,
 }
 
 /// What one visit changed.

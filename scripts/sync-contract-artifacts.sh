@@ -10,6 +10,43 @@ LOCK_DIR="$ROOT_DIR/.tmp/contracts-sync.lock"
 TYPECHAIN_BUILD_DIR=".typechain-types-build-$$"
 TYPECHAIN_BUILD_PATH="$ROOT_DIR/jurisdictions/$TYPECHAIN_BUILD_DIR"
 TYPECHAIN_PUBLISH_PATH="$ROOT_DIR/jurisdictions/typechain-types"
+CONTRACT_INPUT_CACHE="$ROOT_DIR/.tmp/contracts-sync-input.sha256"
+CONTRACT_OUTPUT_CACHE="$ROOT_DIR/.tmp/contracts-sync-output.sha256"
+
+hash_contract_inputs() {
+  (
+    cd "$ROOT_DIR"
+    find \
+      jurisdictions/contracts \
+      jurisdictions/scripts/generate-typechain.cjs \
+      jurisdictions/hardhat.config.ts \
+      jurisdictions/package.json \
+      jurisdictions/tsconfig.json \
+      package.json bun.lock \
+      -type f -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 shasum -a 256 \
+      | shasum -a 256 \
+      | awk '{print $1}'
+  )
+}
+
+hash_contract_outputs() {
+  if [[ ! -d "$ROOT_DIR/jurisdictions/artifacts/contracts" \
+    || ! -f "$TYPECHAIN_PUBLISH_PATH/index.ts" ]]; then
+    echo missing
+    return
+  fi
+  (
+    cd "$ROOT_DIR"
+    find jurisdictions/artifacts/contracts jurisdictions/typechain-types \
+      -type f -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 shasum -a 256 \
+      | shasum -a 256 \
+      | awk '{print $1}'
+  )
+}
 
 acquire_contract_sync_lock() {
   mkdir -p "$ROOT_DIR/.tmp"
@@ -93,28 +130,41 @@ choose_supported_node() {
 NODE_BIN="$(choose_supported_node)"
 export PATH="$(dirname "$NODE_BIN"):$ROOT_DIR/node_modules/.bin:$HOME/.bun/bin:$PATH"
 
-echo "[contracts-sync] compiling jurisdictions contracts"
-cd "$ROOT_DIR/jurisdictions"
-rm -rf "$ROOT_DIR/jurisdictions/node_modules"
-HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION=true "$ROOT_DIR/node_modules/.bin/hardhat" clean
-HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION=true "$ROOT_DIR/node_modules/.bin/hardhat" compile --force
-"$NODE_BIN" scripts/generate-typechain.cjs
+contract_input_hash="$(hash_contract_inputs)"
+contract_output_hash="$(hash_contract_outputs)"
+cached_input_hash="$(cat "$CONTRACT_INPUT_CACHE" 2>/dev/null || true)"
+cached_output_hash="$(cat "$CONTRACT_OUTPUT_CACHE" 2>/dev/null || true)"
+if [[ "$contract_input_hash" == "$cached_input_hash" \
+  && "$contract_output_hash" == "$cached_output_hash" ]]; then
+  echo "[contracts-sync] verified cache hit; Solidity artifacts and TypeChain unchanged"
+else
+  echo "[contracts-sync] compiling jurisdictions contracts"
+  cd "$ROOT_DIR/jurisdictions"
+  rm -rf "$ROOT_DIR/jurisdictions/node_modules"
+  HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION=true "$ROOT_DIR/node_modules/.bin/hardhat" clean
+  HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION=true "$ROOT_DIR/node_modules/.bin/hardhat" compile --force
+  "$NODE_BIN" scripts/generate-typechain.cjs
 
-if [[ ! -f "$TYPECHAIN_BUILD_PATH/index.ts" ]]; then
-  echo "[contracts-sync] ERROR: generated TypeChain index is missing" >&2
-  exit 1
+  if [[ ! -f "$TYPECHAIN_BUILD_PATH/index.ts" ]]; then
+    echo "[contracts-sync] ERROR: generated TypeChain index is missing" >&2
+    exit 1
+  fi
+  mkdir -p "$TYPECHAIN_PUBLISH_PATH"
+  # Keep the old index and every file it references until all files for the new
+  # generation exist. Then switch the sole runtime entrypoint atomically and
+  # delete stale files only after the new index is visible.
+  rsync -a --checksum --exclude='/index.ts' "$TYPECHAIN_BUILD_PATH/" "$TYPECHAIN_PUBLISH_PATH/"
+  if ! cmp -s "$TYPECHAIN_BUILD_PATH/index.ts" "$TYPECHAIN_PUBLISH_PATH/index.ts"; then
+    cp "$TYPECHAIN_BUILD_PATH/index.ts" "$TYPECHAIN_PUBLISH_PATH/.index.ts.next"
+    mv "$TYPECHAIN_PUBLISH_PATH/.index.ts.next" "$TYPECHAIN_PUBLISH_PATH/index.ts"
+  fi
+  rsync -a --checksum --delete-after --exclude='/index.ts' "$TYPECHAIN_BUILD_PATH/" "$TYPECHAIN_PUBLISH_PATH/"
+  echo "[contracts-sync] published complete TypeChain generation dependencies-first"
+  printf '%s\n' "$contract_input_hash" > "$CONTRACT_INPUT_CACHE.next"
+  hash_contract_outputs > "$CONTRACT_OUTPUT_CACHE.next"
+  mv "$CONTRACT_INPUT_CACHE.next" "$CONTRACT_INPUT_CACHE"
+  mv "$CONTRACT_OUTPUT_CACHE.next" "$CONTRACT_OUTPUT_CACHE"
 fi
-mkdir -p "$TYPECHAIN_PUBLISH_PATH"
-# Keep the old index and every file it references until all files for the new
-# generation exist. Then switch the sole runtime entrypoint atomically and
-# delete stale files only after the new index is visible.
-rsync -a --checksum --exclude='/index.ts' "$TYPECHAIN_BUILD_PATH/" "$TYPECHAIN_PUBLISH_PATH/"
-if ! cmp -s "$TYPECHAIN_BUILD_PATH/index.ts" "$TYPECHAIN_PUBLISH_PATH/index.ts"; then
-  cp "$TYPECHAIN_BUILD_PATH/index.ts" "$TYPECHAIN_PUBLISH_PATH/.index.ts.next"
-  mv "$TYPECHAIN_PUBLISH_PATH/.index.ts.next" "$TYPECHAIN_PUBLISH_PATH/index.ts"
-fi
-rsync -a --checksum --delete-after --exclude='/index.ts' "$TYPECHAIN_BUILD_PATH/" "$TYPECHAIN_PUBLISH_PATH/"
-echo "[contracts-sync] published complete TypeChain generation dependencies-first"
 
 echo "[contracts-sync] copying fresh contract artifacts to frontend/static"
 cd "$ROOT_DIR/frontend"

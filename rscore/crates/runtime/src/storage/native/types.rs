@@ -1,6 +1,9 @@
 //! Values crossing the native Runtime persistence boundary.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+
+use serde_json::Value;
 
 use super::entity_context::EntityContextPayloadRows;
 use super::keys::PathNodeKey;
@@ -40,18 +43,6 @@ pub struct RuntimeMachineLeafRow {
     pub value_bytes: Vec<u8>,
 }
 
-/// External J-watcher progress bound to one fixed native path. It is Runtime
-/// replica-envelope metadata, never Entity consensus state and never part of
-/// the checkpoint Merkle graph. The store overwrites it atomically with the
-/// Runtime frame that consumed the corresponding finalized range.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeWatcherCursorRow {
-    pub entity_id: [u8; 32],
-    pub chain_id: u64,
-    pub depository_address: [u8; 20],
-    pub value_bytes: Vec<u8>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointGraph {
     pub state_root: [u8; 32],
@@ -74,7 +65,6 @@ pub struct RuntimeFrameCommit {
     /// Complete verified v2 Entity replay-context graphs. The RuntimeFrame
     /// references are derived from these rows and can never be supplied alone.
     pub entity_contexts: EntityContextPayloadRows,
-    pub watcher_cursor_changes: Vec<RuntimeWatcherCursorRow>,
     pub checkpoint: Option<CheckpointGraph>,
 }
 
@@ -87,6 +77,9 @@ pub struct DurableRuntimeFrame {
     /// retained only until immediate publication; recovered resend tokens use
     /// `None` and read the same rows from LevelDB.
     pub(super) resident_outputs: Option<Vec<Vec<u8>>>,
+    /// Ephemeral by-construction projection paired with `resident_outputs`.
+    /// A recovered token never has it; publication consumes it exactly once.
+    pub(super) resident_output_values: RefCell<Option<Vec<Value>>>,
 }
 
 impl DurableRuntimeFrame {
@@ -100,6 +93,10 @@ impl DurableRuntimeFrame {
 
     pub(crate) fn resident_outputs(&self) -> Option<&[Vec<u8>]> {
         self.resident_outputs.as_deref()
+    }
+
+    pub(crate) fn take_resident_output_values(&self) -> Option<Vec<Value>> {
+        self.resident_output_values.borrow_mut().take()
     }
 }
 

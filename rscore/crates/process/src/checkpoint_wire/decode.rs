@@ -36,7 +36,7 @@ pub fn restore_request(
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
-    let fields = exact(tuple(value)?, 10, "accountRestore")?;
+    let fields = exact(tuple(value)?, 11, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -60,7 +60,11 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         .iter()
         .map(policy_entry)
         .collect::<Result<_, _>>()?;
-    let j_claim_nodes = tuple(&fields[8])?
+    let pulls = tuple(&fields[8])?
+        .iter()
+        .map(pull_entry)
+        .collect::<Result<_, _>>()?;
+    let j_claim_nodes = tuple(&fields[9])?
         .iter()
         .map(|entry| {
             let row = exact(tuple(entry)?, 2, "jClaimNodeEntry")?;
@@ -70,7 +74,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
             ))
         })
         .collect::<Result<Vec<_>, ProcessError>>()?;
-    let consensus = consensus(&fields[9])?;
+    let consensus = consensus(&fields[10])?;
     let AccountCheckpointHeader {
         owner,
         signer_id,
@@ -81,6 +85,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         carried,
         envelope,
         delta_transformer,
+        settlement_workspace,
     } = header;
     let counterparty = if &owner == identity.left() {
         identity.right()
@@ -105,6 +110,8 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
             rebalance_fee_policies,
             swap_offers,
             lending_intents,
+            pulls,
+            settlement_workspace,
         })?,
     )?;
     replica.set_envelope(envelope);
@@ -121,8 +128,26 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
     })
 }
 
+fn pull_entry(
+    value: &AbiValue,
+) -> Result<(String, xln_rscore_engine::CanonicalValue), ProcessError> {
+    let pull = crate::canonical::canonical_value(value)?;
+    let pull_id = match &pull {
+        xln_rscore_engine::CanonicalValue::Object(fields) => fields
+            .iter()
+            .find(|(key, _)| key == "pullId")
+            .and_then(|(_, value)| match value {
+                xln_rscore_engine::CanonicalValue::String(value) => Some(value.clone()),
+                _ => None,
+            }),
+        _ => None,
+    }
+    .ok_or(ProcessError::Expected("checkpointPullId"))?;
+    Ok((pull_id, pull))
+}
+
 pub fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, ProcessError> {
-    let fields = exact(tuple(value)?, 9, "checkpointHeader")?;
+    let fields = exact(tuple(value)?, 10, "checkpointHeader")?;
     let identity = exact(tuple(&fields[2])?, 5, "checkpointIdentity")?;
     let dispute = exact(tuple(&fields[3])?, 2, "checkpointDispute")?;
     let carried = exact(tuple(&fields[6])?, 6, "checkpointCarried")?;
@@ -160,6 +185,10 @@ pub fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, ProcessError>
         delta_transformer: match &fields[8] {
             AbiValue::Nil => None,
             value => Some(fixed_bytes(value, "deltaTransformer")?),
+        },
+        settlement_workspace: match &fields[9] {
+            AbiValue::Nil => None,
+            value => Some(crate::canonical::canonical_value(value)?),
         },
     })
 }

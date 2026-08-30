@@ -1,36 +1,14 @@
-import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
-import { hexToBytes } from '../../support/bytes/hex-bytes';
+import {
+  computeRadixMerkleBranchHashFromSlots,
+  computeRadixMerkleEdgeHash,
+  EMPTY_RADIX_MERKLE_ROOT,
+} from '../../protocol/state/radix-merkle';
+import type { PersistentRadixNodeCommitment } from '../../protocol/state/persistent-radix-value-map';
 
 export const TS_ACCOUNT_LOGICAL_SHARDS = 4_096;
 const TS_ACCOUNT_SHARD_NIBBLES = 3;
 
 const ACCOUNT_ID_PATTERN = /^0x[0-9a-f]{64}$/;
-const SHARD_ROOT_DOMAIN = new TextEncoder().encode('xln.ts-account-worker.shard-root:v1');
-const TREE_NODE_DOMAIN = new TextEncoder().encode('xln.ts-account-worker.shard-tree:v1');
-
-const u16 = (value: number): Uint8Array => {
-  const bytes = new Uint8Array(2);
-  new DataView(bytes.buffer).setUint16(0, value, false);
-  return bytes;
-};
-
-const u32 = (value: number): Uint8Array => {
-  const bytes = new Uint8Array(4);
-  new DataView(bytes.buffer).setUint32(0, value, false);
-  return bytes;
-};
-
-const concatBytes = (parts: readonly Uint8Array[]): Uint8Array => {
-  const byteLength = parts.reduce((total, part) => total + part.byteLength, 0);
-  const output = new Uint8Array(byteLength);
-  let offset = 0;
-  for (const part of parts) {
-    output.set(part, offset);
-    offset += part.byteLength;
-  }
-  return output;
-};
-
 export const normalizeTsWorkerAccountId = (accountId: string): string => {
   const normalized = accountId.trim().toLowerCase();
   if (!ACCOUNT_ID_PATTERN.test(normalized)) {
@@ -42,6 +20,13 @@ export const normalizeTsWorkerAccountId = (accountId: string): string => {
 /** The first three Account-key nibbles select one of 4096 stable logical shards. */
 export const tsAccountLogicalShard = (accountId: string): number =>
   Number.parseInt(normalizeTsWorkerAccountId(accountId).slice(2, 2 + TS_ACCOUNT_SHARD_NIBBLES), 16);
+
+export const tsAccountLogicalShardPath = (shardId: number): readonly number[] => {
+  if (!Number.isSafeInteger(shardId) || shardId < 0 || shardId >= TS_ACCOUNT_LOGICAL_SHARDS) {
+    throw new Error(`TS_ACCOUNT_WORKER_SHARD_INVALID:${shardId}`);
+  }
+  return [shardId >>> 8, (shardId >>> 4) & 0x0f, shardId & 0x0f];
+};
 
 /** Default operational assignment used only when no weighted assignment is supplied. */
 export const createBalancedTsAccountShardAssignment = (workerCount: number): readonly number[] => {
@@ -95,127 +80,142 @@ export const tsAccountWorkerForShard = (
   return workerIndex;
 };
 
-export type TsAccountShardLeaf = Readonly<{
-  accountId: string;
-  valueHash: string;
-}>;
-
-/**
- * Commits one logical shard without serializing Account state. The leaf digest is the
- * canonical Entity Account value hash; sorted Account ids make completion order irrelevant.
- */
-export const computeTsAccountLogicalShardRoot = (
-  shardId: number,
-  leaves: readonly TsAccountShardLeaf[],
-): string => {
-  if (!Number.isSafeInteger(shardId) || shardId < 0 || shardId >= TS_ACCOUNT_LOGICAL_SHARDS) {
-    throw new Error(`TS_ACCOUNT_WORKER_SHARD_INVALID:${shardId}`);
-  }
-  const ordered = leaves
-    .map(leaf => ({
-      accountId: normalizeTsWorkerAccountId(leaf.accountId),
-      valueHash: leaf.valueHash.toLowerCase(),
-    }))
-    .sort((left, right) => left.accountId.localeCompare(right.accountId));
-  const parts: Uint8Array[] = [SHARD_ROOT_DOMAIN, u16(shardId), u32(ordered.length)];
-  let previous = '';
-  for (const leaf of ordered) {
-    if (leaf.accountId === previous) {
-      throw new Error(`TS_ACCOUNT_WORKER_SHARD_DUPLICATE_ACCOUNT:${leaf.accountId}`);
-    }
-    if (!/^0x[0-9a-f]{64}$/.test(leaf.valueHash)) {
-      throw new Error(`TS_ACCOUNT_WORKER_VALUE_HASH_INVALID:${leaf.accountId}`);
-    }
-    if (tsAccountLogicalShard(leaf.accountId) !== shardId) {
-      throw new Error(`TS_ACCOUNT_WORKER_SHARD_ACCOUNT_MISMATCH:${shardId}:${leaf.accountId}`);
-    }
-    parts.push(hexToBytes(leaf.accountId), hexToBytes(leaf.valueHash));
-    previous = leaf.accountId;
-  }
-  return computeIntegrityDigest(concatBytes(parts));
+type CanonicalFoldNode = {
+  readonly kind: 'branch' | 'leaf';
+  readonly path: readonly number[];
+  hash: string;
+  parent?: CanonicalFoldNode;
+  children?: Map<number, CanonicalFoldNode>;
 };
 
-const computeTreeNode = (
-  level: number,
-  nodeIndex: number,
-  children: readonly string[],
-): string => {
-  if (children.length !== 16) throw new Error(`TS_ACCOUNT_WORKER_TREE_ARITY:${children.length}`);
-  return computeIntegrityDigest(concatBytes([
-    TREE_NODE_DOMAIN,
-    Uint8Array.of(level),
-    u16(nodeIndex),
-    ...children.map((child, index) => {
-      const normalized = child.toLowerCase();
-      if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
-        throw new Error(`TS_ACCOUNT_WORKER_SUBROOT_INVALID:${level}:${nodeIndex}:${index}`);
-      }
-      return hexToBytes(normalized);
-    }),
-  ]));
+type ShardFoldNode = Readonly<{ shardId: number; node: CanonicalFoldNode }>;
+
+const sharedPathLength = (entries: readonly ShardFoldNode[]): number => {
+  const first = entries[0]?.node;
+  if (!first) throw new Error('TS_ACCOUNT_WORKER_COMMITMENT_EMPTY');
+  let shared = first.path.length;
+  for (const { node } of entries) {
+    let index = 0;
+    while (index < shared && node.path[index] === first.path[index]) index += 1;
+    shared = index;
+  }
+  return shared;
 };
 
-/** Incremental fixed 16-ary tree: 4096 leaves -> 256 -> 16 -> one root. */
-export class TsAccountShardRootTree {
-  readonly #levels: [string[], string[], string[], string[]];
-
-  constructor() {
-    const leaves = Array.from({ length: TS_ACCOUNT_LOGICAL_SHARDS }, (_, shardId) =>
-      computeTsAccountLogicalShardRoot(shardId, []));
-    const levelOne = Array.from({ length: 256 }, (_, index) =>
-      computeTreeNode(1, index, leaves.slice(index * 16, index * 16 + 16)));
-    const levelTwo = Array.from({ length: 16 }, (_, index) =>
-      computeTreeNode(2, index, levelOne.slice(index * 16, index * 16 + 16)));
-    const root = [computeTreeNode(3, 0, levelTwo)];
-    this.#levels = [leaves, levelOne, levelTwo, root];
+const combineCanonicalNodes = (
+  entries: readonly ShardFoldNode[],
+): CanonicalFoldNode => {
+  const first = entries[0];
+  if (!first) throw new Error('TS_ACCOUNT_WORKER_COMMITMENT_EMPTY');
+  if (entries.length === 1) return first.node;
+  const depth = sharedPathLength(entries);
+  const buckets = new Map<number, ShardFoldNode[]>();
+  for (const entry of entries) {
+    const { node } = entry;
+    const slot = node.path[depth];
+    if (slot === undefined) throw new Error('TS_ACCOUNT_WORKER_COMMITMENT_PREFIX_COLLISION');
+    const bucket = buckets.get(slot);
+    if (bucket) bucket.push(entry);
+    else buckets.set(slot, [entry]);
   }
+  const path = first.node.path.slice(0, depth);
+  const edgeHashes: Array<string | undefined> = Array(16);
+  const children = new Map<number, CanonicalFoldNode>();
+  const branch: CanonicalFoldNode = { kind: 'branch', path, hash: '', children };
+  for (const [slot, bucket] of buckets) {
+    const child = combineCanonicalNodes(bucket);
+    child.parent = branch;
+    children.set(slot, child);
+    edgeHashes[slot] = computeRadixMerkleEdgeHash(16, path, child.kind, child.path, child.hash);
+  }
+  branch.hash = computeRadixMerkleBranchHashFromSlots(16, edgeHashes);
+  return branch;
+};
+
+const recomputeCanonicalBranch = (branch: CanonicalFoldNode): void => {
+  const children = branch.children;
+  if (!children) throw new Error('TS_ACCOUNT_WORKER_COMMITMENT_BRANCH_OPAQUE');
+  const edgeHashes: Array<string | undefined> = Array(16);
+  for (const [slot, child] of children) {
+    edgeHashes[slot] = computeRadixMerkleEdgeHash(16, branch.path, child.kind, child.path, child.hash);
+  }
+  branch.hash = computeRadixMerkleBranchHashFromSlots(16, edgeHashes);
+};
+
+/** RAM-only coordinator fold of the workers' canonical Patricia subtrees. */
+export class TsAccountCanonicalRoot {
+  readonly #shards = new Map<number, PersistentRadixNodeCommitment>();
+  readonly #shardNodes = new Map<number, CanonicalFoldNode>();
+  #tree: CanonicalFoldNode | null = null;
+  #root = EMPTY_RADIX_MERKLE_ROOT;
 
   get root(): string {
-    const root = this.#levels[3][0];
-    if (root === undefined) throw new Error('TS_ACCOUNT_WORKER_ROOT_MISSING');
-    return root;
+    return this.#root;
   }
 
-  subroot(shardId: number): string {
-    const root = this.#levels[0][shardId];
-    if (root === undefined) throw new Error(`TS_ACCOUNT_WORKER_SHARD_INVALID:${shardId}`);
-    return root;
-  }
-
-  update(changes: readonly Readonly<{ shardId: number; root: string }>[]): void {
-    const last = new Map<number, string>();
-    for (const change of changes) {
-      if (!Number.isSafeInteger(change.shardId) || change.shardId < 0 || change.shardId >= TS_ACCOUNT_LOGICAL_SHARDS) {
-        throw new Error(`TS_ACCOUNT_WORKER_SHARD_INVALID:${change.shardId}`);
+  update(changes: readonly Readonly<{
+    shardId: number;
+    node: PersistentRadixNodeCommitment | null;
+  }>[]): void {
+    if (changes.length === 0) return;
+    let shapeChanged = this.#tree === null;
+    for (const { shardId, node } of changes) {
+      const prefix = tsAccountLogicalShardPath(shardId);
+      if (node === null) {
+        shapeChanged ||= this.#shards.has(shardId);
+        this.#shards.delete(shardId);
+        continue;
       }
-      const root = change.root.toLowerCase();
-      if (!/^0x[0-9a-f]{64}$/.test(root)) {
-        throw new Error(`TS_ACCOUNT_WORKER_SUBROOT_INVALID:${change.shardId}`);
+      if (node.path.length < prefix.length || prefix.some((slot, index) => node.path[index] !== slot)) {
+        throw new Error(`TS_ACCOUNT_WORKER_COMMITMENT_SHARD_MISMATCH:${shardId}`);
       }
-      last.set(change.shardId, root);
+      const previous = this.#shards.get(shardId);
+      shapeChanged ||= previous === undefined || previous.kind !== node.kind
+        || previous.path.length !== node.path.length
+        || previous.path.some((slot, index) => node.path[index] !== slot);
+      this.#shards.set(shardId, node);
     }
-    if (last.size === 0) return;
-    const dirtyOne = new Set<number>();
-    for (const [shardId, root] of last) {
-      this.#levels[0][shardId] = root;
-      dirtyOne.add(Math.floor(shardId / 16));
+    if (this.#shards.size === 0) {
+      this.#tree = null;
+      this.#shardNodes.clear();
+      this.#root = EMPTY_RADIX_MERKLE_ROOT;
+      return;
     }
-    const dirtyTwo = new Set<number>();
-    for (const index of [...dirtyOne].sort((left, right) => left - right)) {
-      this.#levels[1][index] = computeTreeNode(
-        1,
-        index,
-        this.#levels[0].slice(index * 16, index * 16 + 16),
-      );
-      dirtyTwo.add(Math.floor(index / 16));
+    if (shapeChanged) {
+      this.#shardNodes.clear();
+      const entries = [...this.#shards].map(([shardId, commitment]) => {
+        const node: CanonicalFoldNode = { ...commitment };
+        this.#shardNodes.set(shardId, node);
+        return { shardId, node };
+      });
+      const combined = combineCanonicalNodes(entries);
+      if (combined.kind === 'branch' && combined.path.length === 0) {
+        this.#tree = combined;
+      } else {
+        const slot = combined.path[0];
+        if (slot === undefined) throw new Error('TS_ACCOUNT_WORKER_COMMITMENT_ROOT_SLOT');
+        const tree: CanonicalFoldNode = {
+          kind: 'branch', path: [], hash: '', children: new Map([[slot, combined]]),
+        };
+        combined.parent = tree;
+        recomputeCanonicalBranch(tree);
+        this.#tree = tree;
+      }
+      this.#root = this.#tree.hash;
+      return;
     }
-    for (const index of [...dirtyTwo].sort((left, right) => left - right)) {
-      this.#levels[2][index] = computeTreeNode(
-        2,
-        index,
-        this.#levels[1].slice(index * 16, index * 16 + 16),
-      );
+    const dirty = new Set<CanonicalFoldNode>();
+    for (const { shardId, node } of changes) {
+      if (!node) continue;
+      const shard = this.#shardNodes.get(shardId);
+      if (!shard) throw new Error(`TS_ACCOUNT_WORKER_COMMITMENT_SHARD_MISSING:${shardId}`);
+      shard.hash = node.hash;
+      for (let parent = shard.parent; parent; parent = parent.parent) dirty.add(parent);
     }
-    this.#levels[3][0] = computeTreeNode(3, 0, this.#levels[2]);
+    for (const branch of [...dirty].sort((left, right) => right.path.length - left.path.length)) {
+      recomputeCanonicalBranch(branch);
+    }
+    if (!this.#tree) throw new Error('TS_ACCOUNT_WORKER_COMMITMENT_TREE_MISSING');
+    this.#root = this.#tree.hash;
   }
 }

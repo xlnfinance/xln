@@ -1,6 +1,6 @@
 import type {
   AccountDisputeHanko,
-  AccountFrameAck,
+  AccountAckFrame,
   AccountFrameProposal,
 } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
@@ -17,12 +17,12 @@ export type CertifiedAccountFrameProposal = AccountFrameProposal & {
   disputeHanko?: CertifiedDisputeHanko;
 };
 
-export type DraftAccountFrameAck = AccountFrameAck & {
+export type DraftAccountAckFrame = AccountAckFrame & {
   frameHanko?: never;
   disputeHanko?: (AccountDisputeHanko & { hanko?: never });
 };
 
-export type CertifiedAccountFrameAck = AccountFrameAck & {
+export type CertifiedAccountAckFrame = AccountAckFrame & {
   frameHanko: HankoString;
   disputeHanko?: CertifiedDisputeHanko;
 };
@@ -43,14 +43,14 @@ export const isCertifiedAccountFrameProposal = (
 ): proposal is CertifiedAccountFrameProposal => hasText(proposal.frameHanko)
   && hasCertifiedOptionalDisputeHanko(proposal.disputeHanko);
 
-export const isDraftAccountFrameAck = (
-  ack: AccountFrameAck,
-): ack is DraftAccountFrameAck => ack.frameHanko === undefined
+export const isDraftAccountAckFrame = (
+  ack: AccountAckFrame,
+): ack is DraftAccountAckFrame => ack.frameHanko === undefined
   && ack.disputeHanko?.hanko === undefined;
 
-export const isCertifiedAccountFrameAck = (
-  ack: AccountFrameAck,
-): ack is CertifiedAccountFrameAck => hasText(ack.frameHanko)
+export const isCertifiedAccountAckFrame = (
+  ack: AccountAckFrame,
+): ack is CertifiedAccountAckFrame => hasText(ack.frameHanko)
   && hasCertifiedOptionalDisputeHanko(ack.disputeHanko);
 
 export const requireCertifiedAccountFrameProposal = (
@@ -62,11 +62,11 @@ export const requireCertifiedAccountFrameProposal = (
   return proposal;
 };
 
-export const requireCertifiedAccountFrameAck = (
-  ack: AccountFrameAck,
-): CertifiedAccountFrameAck => {
-  if (!isCertifiedAccountFrameAck(ack)) {
-    throw new Error(`ACCOUNT_FRAME_ACK_CERTIFICATION_INCOMPLETE:${ack.frameHash}`);
+export const requireCertifiedAccountAckFrame = (
+  ack: AccountAckFrame,
+): CertifiedAccountAckFrame => {
+  if (!isCertifiedAccountAckFrame(ack)) {
+    throw new Error(`ACCOUNT_ACK_FRAME_CERTIFICATION_INCOMPLETE:${ack.frameHash}`);
   }
   return ack;
 };

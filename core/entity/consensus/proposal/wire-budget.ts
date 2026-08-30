@@ -15,12 +15,8 @@ import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
 import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
-import { collectInboundHtlcBindingKeys } from '../../htlc/materialize-context';
+import { collectInboundHtlcBindingKeys } from '../../paybook/materialize-context';
 import { hasReplayEntityContext, materializeEntityInfraContext } from './infra-context';
-import {
-  hashEntityProposalTxPrefix,
-  requireEntityProposalReplayOracleEntry,
-} from './replay-oracle';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
 const MAX_FIT_ATTEMPTS = 16;
@@ -140,30 +136,6 @@ const fitTxsToPersistedWireContext = (
   return allTxs.slice(0, replayCount);
 };
 
-const fitTxsToCertifiedReplayOracle = (
-  env: EntityRuntimeContext,
-  replica: EntityReplica,
-  allTxs: EntityTx[],
-  requiredPrefixCount: number,
-): EntityTx[] | undefined => {
-  const oracle = env.infrastructure?.replayEntityProposalOracle;
-  if (!oracle) return undefined;
-  const height = replica.state.height + 1;
-  const entry = requireEntityProposalReplayOracleEntry(oracle, replica.entityId, height);
-  if (entry.txCount < requiredPrefixCount) {
-    throw new Error(`HLT_ENTITY_PROPOSAL_ORACLE_REQUIRED_PREFIX:${requiredPrefixCount}:${entry.txCount}`);
-  }
-  if (entry.txCount > allTxs.length) {
-    throw new Error(`HLT_ENTITY_PROPOSAL_ORACLE_PREFIX_MISSING:${entry.txCount}:${allTxs.length}`);
-  }
-  const txs = allTxs.slice(0, entry.txCount);
-  const actualHash = hashEntityProposalTxPrefix(replica.entityId, height, txs);
-  if (actualHash !== entry.txPrefixHash) {
-    throw new Error(`HLT_ENTITY_PROPOSAL_ORACLE_PREFIX_HASH_MISMATCH:${height}:${entry.txPrefixHash}:${actualHash}`);
-  }
-  return txs;
-};
-
 type EntityProposalWireBudgetParams = {
   env: EntityRuntimeContext;
   replica: EntityReplica;
@@ -174,9 +146,6 @@ type EntityProposalWireBudgetParams = {
   /** Exact FIFO prefix ending at a Runtime-tagged atomic AccountInput. */
   requiredPrefixCount?: number;
 };
-
-/** Last certified wire bytes / tx bytes per Entity; a prediction, never a bound. */
-const lastWireToTxByteRatio = new Map<string, number>();
 
 const fitLiveEntityProposal = async (
   params: EntityProposalWireBudgetParams,
@@ -199,27 +168,11 @@ const fitLiveEntityProposal = async (
     const maxBytes = proposalWireMaxBytes();
     const measurePrefix = params.wirePrefixMeter ?? createEntityFrameWirePrefixMeter(allTxs);
     measurePrefix.txBytes(allTxs.length);
-    // Always start from the whole mempool: the byte measurement below is the
-    // only authority on what fits. A "last certified count" hint once capped the
-    // first attempt at 1.15x the previous frame, which turned every lull into
-    // a 30-frame slow start while hundreds of inputs waited (2026-08-22).
-    // Each extra attempt re-materializes the whole HTLC context. The measured
-    // wire/tx byte ratio of this Entity's last certified frame predicts where the
-    // first attempt will land; tx bytes are exact from the prefix meter and the
-    // loop below remains the only authority, so this is never a cap.
+    // `selectEntityFrameTxByteBudgetWithMeter` already reduced this proposal to
+    // the exact 5 MB tx prefix. Starting from it bounds expensive HTLC context
+    // materialization without process-history hints that could change frame
+    // boundaries after restart.
     let candidate = allTxs.length;
-    const lastRatio = lastWireToTxByteRatio.get(replica.state.entityId);
-    if (lastRatio !== undefined && measurePrefix.txBytes(allTxs.length) * lastRatio > maxBytes) {
-      let low = Math.max(1, requiredPrefixCount);
-      let high = allTxs.length;
-      while (low < high) {
-        const mid = Math.ceil((low + high) / 2);
-        const txBytes = measurePrefix.txBytes(mid);
-        if (txBytes * lastRatio <= maxBytes && txBytes <= MAX_ENTITY_FRAME_TX_BYTES) low = mid;
-        else high = mid - 1;
-      }
-      candidate = low;
-    }
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
       countOp('entity.wireFit.attempt', slice.length);
@@ -234,9 +187,6 @@ const fitLiveEntityProposal = async (
       const bytes = measureBoundPrefix(candidate);
       const txBytes = measurePrefix.txBytes(candidate);
       if (bytes <= maxBytes && txBytes <= MAX_ENTITY_FRAME_TX_BYTES) {
-        if (txBytes > 0 && candidate >= 16) {
-          lastWireToTxByteRatio.set(replica.state.entityId, bytes / txBytes);
-        }
         if (requiredPrefixCount > 0 || slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {
             entityId: replica.state.entityId,
@@ -297,12 +247,7 @@ export const fitEntityProposalToWireBudget = async (
       usePersistedReplayContext: true,
     });
     return {
-      txs: fitTxsToCertifiedReplayOracle(
-        env,
-        replica,
-        params.proposalTxs,
-        requiredPrefixCount,
-      ) ?? fitTxsToPersistedWireContext(
+      txs: fitTxsToPersistedWireContext(
         env,
         replica,
         params.proposalTxs,

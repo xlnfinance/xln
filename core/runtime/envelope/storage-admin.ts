@@ -13,11 +13,9 @@ type RuntimeStorageAdminDeps = Pick<
   | 'tryOpenInfraDb'
   | 'tryOpenStorageDb'
   | 'tryOpenRuntimeWalDb'
-  | 'tryOpenHistoryViewDb'
   | 'getInfraDb'
   | 'getStorageDb'
   | 'getRuntimeWalDb'
-  | 'getHistoryViewDb'
 >;
 
 const clearNodeRuntimeDatabases = async (
@@ -40,12 +38,10 @@ const clearBrowserRuntimeDatabases = async (
   const currentReady = await deps.tryOpenStorageDb(env, 'current');
   const previousReady = await deps.tryOpenStorageDb(env, 'previous');
   const frameReady = await deps.tryOpenRuntimeWalDb(env);
-  const historyViewReady = await deps.tryOpenHistoryViewDb(env);
   if (infraReady) await deps.getInfraDb(env).clear();
   if (currentReady) await deps.getStorageDb(env, 'current').clear();
   if (previousReady) await deps.getStorageDb(env, 'previous').clear();
   if (frameReady) await deps.getRuntimeWalDb(env).clear();
-  if (historyViewReady) await deps.getHistoryViewDb(env).clear();
   runtimeLog.info('db.clear_complete');
 };
 

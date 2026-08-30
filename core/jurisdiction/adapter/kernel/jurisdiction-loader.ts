@@ -107,7 +107,7 @@ const decodeJurisdiction = (
     'explorer', 'currency', 'status',
   ], [
     'description', 'rebalancePolicyUsd',
-    'entityProviderDeploymentBlock', 'tokens', 'tronContracts', 'evmContracts',
+    'entityProviderDeploymentBlock', 'tokens', 'tokenRegistry', 'tronContracts', 'evmContracts',
     'primary', 'stackVersion', 'deployer', 'foundationRecipient',
   ], `${code}_FIELDS`);
   const contracts = requireBoundaryRecord(entry['contracts'], `${code}_CONTRACTS`);
@@ -143,7 +143,7 @@ const decodeJurisdiction = (
           ),
         }),
   };
-  for (const field of ['tokens', 'tronContracts', 'evmContracts'] as const) {
+  for (const field of ['tokens', 'tokenRegistry', 'tronContracts', 'evmContracts'] as const) {
     if (entry[field] !== undefined) {
       validateStorageSafeValue(entry[field], `${code}_${field.toUpperCase()}`);
     }

@@ -5,7 +5,7 @@
  * locally for contract submission.
  */
 
-import type { AccountFrame, AccountTx, SettlementWorkspace } from '../../types/account';
+import type { AccountTx, SettlementWorkspace } from '../../types/account';
 import { cloneIsolatedAccountTx } from '../../protocol/state/account-input-clone';
 
 export const settlementWorkspaceWithoutHankos = (
@@ -59,9 +59,3 @@ export const accountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
   }
   return unsigned;
 };
-
-/** Owned copy for the certified history record: every tx is cloned, hankos stripped. */
-export const accountFrameWithoutPostCommitHankos = (frame: AccountFrame): AccountFrame => ({
-  ...frame,
-  accountTxs: frame.accountTxs.map(tx => accountTxWithoutPostCommitHankos(cloneIsolatedAccountTx(tx))),
-});

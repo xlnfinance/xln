@@ -1,7 +1,7 @@
 import type {
   AccountDisputeHanko,
   AccountFrame,
-  AccountFrameAck,
+  AccountAckFrame,
   AccountPeerInput,
   AccountReplica,
 } from '../../../types/account';
@@ -132,7 +132,7 @@ const applyDuplicateAck = (
 
 const requireVerifiedDuplicateAckHanko = async (
   account: AccountReplica,
-  ack: AccountFrameAck,
+  ack: AccountAckFrame,
   frameHash: string,
   receivedHeight: number,
   securityContext: AccountInputSecurityContext,
@@ -209,7 +209,7 @@ const cacheAckOnlyResponse = (
     ...(pendingResponse.watchSeed !== undefined ? { watchSeed: pendingResponse.watchSeed } : {}),
     ack: structuredClone(pendingAck),
   };
-  account.lastOutboundFrameAck = {
+  account.lastOutboundAckFrame = {
     height: receivedHeight,
     counterpartyEntityId: input.fromEntityId,
     response: structuredClone(response),
@@ -229,7 +229,7 @@ const reusableCertifiedAckHanko = (account: AccountReplica): AccountDisputeHanko
   };
 };
 
-const rebuildDuplicateCommittedFrameAck = async (
+const rebuildDuplicateCommittedAckFrame = async (
   account: AccountReplica,
   input: AccountPeerInput,
   frameHash: string,
@@ -258,7 +258,7 @@ const rebuildDuplicateCommittedFrameAck = async (
       ...(disputeHanko ? { disputeHanko } : {}),
     },
   };
-  account.lastOutboundFrameAck = {
+  account.lastOutboundAckFrame = {
     height: receivedHeight,
     counterpartyEntityId: input.fromEntityId,
     response: structuredClone(response),
@@ -287,7 +287,7 @@ const reuseLastOutboundDuplicateAck = async (
   events: string[],
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | null> => {
-  const cached = account.lastOutboundFrameAck;
+  const cached = account.lastOutboundAckFrame;
   if (!cached || !isDuplicateAckTarget(
     cached.height,
     cached.counterpartyEntityId,
@@ -314,7 +314,7 @@ const reuseLastOutboundDuplicateAck = async (
   return applyDuplicateAck(cached.response, events);
 };
 
-export const buildDuplicateCommittedFrameAck = async (
+export const buildDuplicateCommittedAckFrame = async (
   account: AccountReplica,
   input: AccountPeerInput,
   events: string[],
@@ -351,10 +351,10 @@ export const buildDuplicateCommittedFrameAck = async (
       securityContext,
       'CACHED',
     );
-    const retainedAck = account.lastOutboundFrameAck
-      && Number(account.lastOutboundFrameAck.height) === receivedHeight
-      && account.lastOutboundFrameAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
-      ? accountInputAck(account.lastOutboundFrameAck.response)
+    const retainedAck = account.lastOutboundAckFrame
+      && Number(account.lastOutboundAckFrame.height) === receivedHeight
+      && account.lastOutboundAckFrame.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
+      ? accountInputAck(account.lastOutboundAckFrame.response)
       : undefined;
     if (retainedAck) {
       if (!retainedAck.frameHanko) {
@@ -392,7 +392,7 @@ export const buildDuplicateCommittedFrameAck = async (
   if (!account.currentFrame?.stateHash || !account.proofHeader.fromEntity) {
     throw new Error(`DUPLICATE_ACK_CURRENT_FRAME_BINDING_MISSING:height=${receivedHeight}`);
   }
-  return rebuildDuplicateCommittedFrameAck(
+  return rebuildDuplicateCommittedAckFrame(
     account,
     input,
     account.currentFrame.stateHash,
@@ -413,7 +413,7 @@ export const handleReplayOrObsoleteAccountInput = async (
   const proposal = accountInputProposal(input);
   if (proposal) {
     // At-least-once delivery may retry an exact committed frame after ACK loss.
-    const duplicateAck = await buildDuplicateCommittedFrameAck(
+    const duplicateAck = await buildDuplicateCommittedAckFrame(
       account,
       input,
       events,

@@ -812,7 +812,7 @@ test(
         latestHeight?: number;
         latestSnapshotHeight?: number;
         snapshotPeriodFrames?: number;
-        retainedHistoryBytes?: number;
+        retainedWalBytes?: number;
       }>();
       const checkpoints = await adapter.query.checkpoints<Array<{ height?: number }>>();
       return {
@@ -820,7 +820,7 @@ test(
         latestSnapshotHeight: Number(head.latestSnapshotHeight || 0),
         snapshotPeriodFrames: Number(head.snapshotPeriodFrames || 0),
         epochReplayBytes: 0,
-        retainedHistoryBytes: Number(head.retainedHistoryBytes || 0),
+        retainedWalBytes: Number(head.retainedWalBytes || 0),
         checkpointHeights: checkpoints.map(entry => Number(entry.height || 0)),
       };
     });

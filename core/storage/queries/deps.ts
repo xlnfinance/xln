@@ -12,8 +12,6 @@ export type PersistenceQueryDeps = {
   getStorageDb(env: RuntimeReplica, role: StorageDbRole): RuntimeDb;
   tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
   getRuntimeWalDb(env: RuntimeReplica): RuntimeDb;
-  tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
-  getHistoryViewDb(env: RuntimeReplica): RuntimeDb;
   resolvePersistedLatestHeight(env: RuntimeReplica): Promise<number>;
   resolvePersistedCheckpointHeights(env: RuntimeReplica): Promise<number[]>;
   readPersistedStorageFrameRecord(env: RuntimeReplica, height: number): Promise<RuntimeFrame | null>;

@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { canonicalConsensusValuesEqual } from '../../../protocol/serialization/binary-codec';
 import {
   getJPrefixAttestationTemporalDisposition,
   hasDueLocalJPrefixAdvance,
@@ -70,7 +70,7 @@ const rebroadcastLocalAttestation = (
       continue;
     }
     const previous = priorRound?.attestations.get(normalizedSignerId);
-    if (previous && encodeCanonicalConsensusValue(previous) === encodeCanonicalConsensusValue(attestation)) {
+    if (previous && canonicalConsensusValuesEqual(previous, attestation)) {
       continue;
     }
     for (const validatorId of authorityReplica.state.config.validators) {
@@ -123,7 +123,7 @@ export const handleJPrefixAttestations = (context: ApplyEntityInputContext): App
   }
 
   const priorRound = workingReplica.jPrefixRound;
-  const priorHeads = encodeCanonicalConsensusValue(priorRound?.attestations ?? new Map());
+  const priorHeads = priorRound?.attestations ?? new Map();
   let merged;
   try {
     const authorityReplica = getJPrefixAuthorityReplica(workingReplica);
@@ -135,7 +135,7 @@ export const handleJPrefixAttestations = (context: ApplyEntityInputContext): App
     });
     return rejectEntityConsensusInput(context, 'J_PREFIX_ATTESTATION_REJECTED');
   }
-  const changed = priorHeads !== encodeCanonicalConsensusValue(merged.attestations);
+  const changed = !canonicalConsensusValuesEqual(priorHeads, merged.attestations);
   if (changed && (workingReplica.proposal || workingReplica.lockedFrame)) {
     // A signed/locked frame freezes its J round. A later head belongs to the
     // next Entity height or the validator could authorize two maximum prefixes.

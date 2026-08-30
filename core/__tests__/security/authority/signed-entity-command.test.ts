@@ -27,6 +27,7 @@ import {
   hashEntityProposalAction,
 } from '../../../entity/auth/authorization';
 import { applyEntityInput } from '../../../entity/consensus';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 import {
@@ -39,6 +40,7 @@ import {
 import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../extensions/cross-j';
+import { crossJurisdictionRouteSigner } from '../../../extensions/cross-j/boundary';
 import { routeInboundP2PEntityInput } from '../../../runtime/delivery/topology/entity-routing';
 import {
   applyCertifiedBoardRegistryEvent,
@@ -92,9 +94,7 @@ const setup = (label: string) => {
     accounts: PersistentEntityAccountMap.empty(id, computeEntityAccountValueHash),
     lastFinalizedJHeight: 0,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
   };
   state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, id);
   const replica: EntityReplica = {
@@ -108,32 +108,8 @@ const setup = (label: string) => {
   return { env, signerId, state, replica };
 };
 
-const cloneTestEntityState = (state: EntityState): EntityState => {
-  const cloned = structuredClone({
-    ...state,
-    accounts: new Map(),
-    htlcRoutes: new Map(),
-    lockBook: new Map(),
-    ...(state.crossJurisdictionSwaps ? { crossJurisdictionSwaps: new Map() } : {}),
-    ...(state.crossJurisdictionAuthorizations ? { crossJurisdictionAuthorizations: new Map() } : {}),
-    ...(state.pendingCrossJurisdictionFillAcks ? { pendingCrossJurisdictionFillAcks: new Map() } : {}),
-    ...(state.crossJurisdictionBookAdmissions ? { crossJurisdictionBookAdmissions: new Map() } : {}),
-  }) as EntityState;
-  cloned.accounts = PersistentEntityAccountMap.empty(cloned.entityId, computeEntityAccountValueHash);
-  cloned.htlcRoutes = new Map(state.htlcRoutes);
-  cloned.lockBook = new Map(state.lockBook);
-  if (state.crossJurisdictionSwaps) cloned.crossJurisdictionSwaps = new Map(state.crossJurisdictionSwaps);
-  if (state.crossJurisdictionAuthorizations) {
-    cloned.crossJurisdictionAuthorizations = new Map(state.crossJurisdictionAuthorizations);
-  }
-  if (state.pendingCrossJurisdictionFillAcks) {
-    cloned.pendingCrossJurisdictionFillAcks = new Map(state.pendingCrossJurisdictionFillAcks);
-  }
-  if (state.crossJurisdictionBookAdmissions) {
-    cloned.crossJurisdictionBookAdmissions = new Map(state.crossJurisdictionBookAdmissions);
-  }
-  return cloned;
-};
+const cloneTestEntityState = (state: EntityState): EntityState =>
+  createEntityFrameCandidateState(state);
 
 const hubCommand = (): EntityTx => ({
   type: 'setHubConfig',
@@ -1018,12 +994,16 @@ describe('signed Entity command admission', () => {
       .toThrow('ENTITY_FRAME_EVENT_BYTE_LIMIT_EXCEEDED');
   });
 
-  test('binds trusted cross-j runtime outputs to the two exact sibling edges', () => {
+  test('binds trusted cross-j runtime outputs to exact route roles and signers', () => {
     const sourceUser = entityId('11');
     const sourceHub = entityId('12');
     const targetHub = entityId('13');
     const targetUser = entityId('14');
     const attacker = entityId('16');
+    const sourceUserSigner = address('31');
+    const sourceHubSigner = address('32');
+    const targetHubSigner = address('33');
+    const targetUserSigner = address('34');
     const orderId = 'semantic-order';
     const route = withCanonicalCrossJurisdictionRouteHash({
       orderId,
@@ -1057,6 +1037,10 @@ describe('signed Entity command admission', () => {
       status: 'resting',
       createdAt: 1,
       updatedAt: 1,
+      sourceSignerId: sourceUserSigner,
+      sourceHubSignerId: sourceHubSigner,
+      targetHubSignerId: targetHubSigner,
+      targetSignerId: targetUserSigner,
     } satisfies CrossJurisdictionSwapRoute);
     const routeHash = route.routeHash!;
     const baseState = cloneTestEntityState(setup('runtime-semantic-roles').state);
@@ -1188,12 +1172,14 @@ describe('signed Entity command admission', () => {
     for (const variant of variants) {
       expect(() => assertRuntimeOutputAuthorization(
         variant.source,
+        crossJurisdictionRouteSigner(route, variant.source)!,
         variant.target,
         variant.txs,
         stateFor(variant.target),
       ), variant.txs.map(tx => tx.type).join(',')).not.toThrow();
       expect(() => assertRuntimeOutputAuthorization(
         attacker,
+        sourceUserSigner,
         variant.target,
         variant.txs,
         stateFor(variant.target),
@@ -1216,27 +1202,67 @@ describe('signed Entity command admission', () => {
     };
     expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
+      sourceUserSigner,
       sourceHub,
       [targetRegistration],
       stateFor(sourceHub),
-    )).toThrow('RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN');
+    )).toThrow('RUNTIME_OUTPUT_SEMANTIC_SOURCE_MISMATCH');
     expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
+      sourceUserSigner,
       targetUser,
       [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
       stateFor(targetUser),
     )).toThrow('RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:prepareCrossJurisdictionSwap');
     expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
+      sourceUserSigner,
       targetUser,
       [accountInput],
       stateFor(targetUser),
     )).toThrow('RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:accountInput');
     expect(() => assertRuntimeOutputAuthorization(
       targetHub,
+      targetHubSigner,
       targetHub,
       [targetRegistration],
       stateFor(targetHub),
+    )).toThrow('RUNTIME_OUTPUT_SELF_FORBIDDEN');
+
+    const selfState = stateFor(sourceHub);
+    selfState.config = {
+      ...selfState.config,
+      threshold: 1n,
+      validators: [sourceHubSigner],
+      shares: { [sourceHubSigner]: 1n },
+    };
+    expect(() => assertRuntimeOutputAuthorization(
+      sourceHub,
+      sourceHubSigner,
+      sourceHub,
+      [{ type: 'j_broadcast', data: {} }],
+      selfState,
+    )).not.toThrow();
+    expect(() => assertRuntimeOutputAuthorization(
+      sourceHub,
+      sourceHubSigner,
+      sourceHub,
+      [{ type: 'requestCrossJurisdictionClear', data: { orderId, cancelRemainder: true } }],
+      selfState,
+    )).not.toThrow();
+    expect(() => assertRuntimeOutputAuthorization(
+      sourceHub,
+      attacker,
+      sourceHub,
+      [{ type: 'j_broadcast', data: {} }],
+      selfState,
+    )).toThrow('RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH');
+    expect(() => assertRuntimeOutputAuthorization(
+      sourceHub,
+      sourceHubSigner,
+      sourceHub,
+      [{ type: 'setHubConfig', data: { routingFeePPM: 1 } }],
+      selfState,
     )).toThrow('RUNTIME_OUTPUT_SELF_FORBIDDEN');
   });
 

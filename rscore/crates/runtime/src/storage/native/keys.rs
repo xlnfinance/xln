@@ -7,7 +7,6 @@ pub(super) const KEY_RUNTIME_OUTPUT_ROW: u8 = 0x13;
 pub(super) const KEY_RUNTIME_MACHINE_LEAF: u8 = 0x16;
 pub(super) const KEY_HEAD: &[u8] = &[0x20];
 pub(super) const KEY_NATIVE_CHECKPOINT: &[u8] = &[0x39];
-pub(super) const KEY_RUNTIME_WATCHER_CURSOR: u8 = 0x3a;
 
 const PATH_KEY_TAGS: &[u8] = &[
     0x17, // Rust Account checkpoint meta: owner.
@@ -182,17 +181,4 @@ pub(super) fn runtime_machine_leaf_key(
     key.extend_from_slice(&prefix);
     key.extend_from_slice(path_bytes);
     Ok(key)
-}
-
-pub(super) fn runtime_watcher_cursor_key(
-    entity_id: &[u8; 32],
-    chain_id: u64,
-    depository_address: &[u8; 20],
-) -> [u8; 61] {
-    let mut key = [0_u8; 61];
-    key[0] = KEY_RUNTIME_WATCHER_CURSOR;
-    key[1..33].copy_from_slice(entity_id);
-    key[33..41].copy_from_slice(&chain_id.to_be_bytes());
-    key[41..].copy_from_slice(depository_address);
-    key
 }

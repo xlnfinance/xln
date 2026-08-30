@@ -11,7 +11,7 @@ import {
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
 } from '../../jurisdiction/machine/event-observation';
-import type { AccountReplica } from '../../types/account';
+import type { AccountReplica, Delta, PullCommitment, SwapOffer } from '../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
@@ -24,6 +24,7 @@ import {
 } from '../../entity/state/persistent-account-map';
 import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
+import { createEntityFrameCandidateState } from '../../entity/state-clone';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 export const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -145,6 +146,28 @@ export const makeAccount = (
   };
 };
 
+export const putTestAccountDelta = (account: AccountReplica, delta: Delta): void => {
+  const deltas = account.state.deltas;
+  if (!(deltas instanceof PersistentAccountStateMap)) throw new Error('TEST_ACCOUNT_DELTAS_NOT_PERSISTENT');
+  account.state.deltas = deltas.updated(delta.tokenId, delta);
+};
+
+export const putTestAccountPull = (
+  account: AccountReplica,
+  pullId: string,
+  pull: PullCommitment,
+): void => {
+  const pulls = account.state.pulls ?? PersistentAccountStateMap.empty<string, PullCommitment>('pulls');
+  if (!(pulls instanceof PersistentAccountStateMap)) throw new Error('TEST_ACCOUNT_PULLS_NOT_PERSISTENT');
+  account.state.pulls = pulls.updated(pullId, pull);
+};
+
+export const putTestAccountSwapOffer = (account: AccountReplica, offer: SwapOffer): void => {
+  const offers = account.state.swapOffers;
+  if (!(offers instanceof PersistentAccountStateMap)) throw new Error('TEST_ACCOUNT_SWAP_OFFERS_NOT_PERSISTENT');
+  account.state.swapOffers = offers.updated(offer.offerId, offer);
+};
+
 export const makeState = (
   entityId: string,
   signerId: string,
@@ -161,11 +184,11 @@ export const makeState = (
     const account = makeAccount(entityId, counterpartyId, { chainId, depositoryAddress });
     accounts = accounts.updated(counterpartyId, account);
   }
-  return {
+  const committed: EntityState = {
     entityId,
     entityEncryptionPublicKey: deriveEntityEncryptionPublicKey(entityEncryptionPrivateKey, entityId),
-    height: 1,
-    prevFrameHash: `0x${'01'.repeat(32)}`,
+    height: 0,
+    prevFrameHash: 'genesis',
     timestamp: 1_000,
     nonces: new Map(),
     proposals: new Map(),
@@ -174,12 +197,13 @@ export const makeState = (
     accounts,
     lastFinalizedJHeight: 0,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: PersistentEntityCollectionMap.empty(),
-    htlcFeesEarned: 0n,
-    lockBook: PersistentEntityCollectionMap.empty(),
+    paybook: { entries: PersistentEntityCollectionMap.empty(), feesEarned: 0n },
     crossJurisdictionSwaps: PersistentEntityCollectionMap.empty(),
     swapTradingPairs: [],
   };
+  // Cross-j handler tests mutate the same ephemeral Entity-frame overlay that
+  // production creates before apply; committed Patricia roots stay immutable.
+  return createEntityFrameCandidateState(committed);
 };
 
 /** Entity-frame write overlay. Committed Patricia maps reject `.set` and in-place status edits. */
@@ -191,6 +215,12 @@ export const openWritableEntityAccounts = (state: EntityState): EntityAccountCan
   const overlay = new EntityAccountCandidateMap(committed);
   state.accounts = overlay;
   return overlay;
+};
+
+export const getTestAccountForWrite = (state: EntityState, counterpartyId: string): AccountReplica => {
+  const account = openWritableEntityAccounts(state).getForWrite(counterpartyId);
+  if (!account) throw new Error(`TEST_ACCOUNT_MISSING:${counterpartyId}`);
+  return account;
 };
 
 export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: string, isProposer = true): void => {

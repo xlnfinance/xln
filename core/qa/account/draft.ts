@@ -45,11 +45,11 @@ export const attachAccountDraftHankosAsEntity = async (
     return hanko;
   };
 
-  if (input.kind === 'ack' || input.kind === 'frame_ack') {
+  if (input.kind === 'ack' || input.kind === 'ack_frame') {
     input.ack.frameHanko = requireWitness(input.ack.frameHash);
     if (input.ack.disputeHanko) input.ack.disputeHanko.hanko = requireWitness(input.ack.disputeHanko.hash);
   }
-  if (input.kind === 'frame' || input.kind === 'frame_ack') {
+  if (input.kind === 'frame' || input.kind === 'ack_frame') {
     input.proposal.frameHanko = requireWitness(input.proposal.frame.stateHash);
     if (input.proposal.disputeHanko) {
       input.proposal.disputeHanko.hanko = requireWitness(input.proposal.disputeHanko.hash);

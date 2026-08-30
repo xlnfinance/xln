@@ -922,7 +922,7 @@ const run = async () => {
     while (true) {
       await processRuntime(env);
       const hubReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
-      observedHtlcRoute ||= (hubReplica?.state.htlcRoutes.size ?? 0) > 0;
+      observedHtlcRoute ||= (hubReplica?.state.paybook.entries.size ?? 0) > 0;
       const accountsSettled = hubReplica
         ? Array.from(hubReplica.state.accounts.values()).every(account =>
             !account.pendingFrame
@@ -932,7 +932,7 @@ const run = async () => {
       if (
         observedHtlcRoute
         && !reportedEndToEndSettlement
-        && hubReplica?.state.htlcRoutes.size === 0
+        && hubReplica?.state.paybook.entries.size === 0
         && accountsSettled
       ) {
         reportedEndToEndSettlement = true;

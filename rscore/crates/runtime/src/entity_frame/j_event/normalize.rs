@@ -54,8 +54,23 @@ pub(super) fn normalize_big_numberish(value: &Value) -> Option<String> {
             }
             inner.parse::<BigInt>().ok().map(|n| n.to_string())
         }
+        Value::Object(tagged)
+            if tagged.get("__xlnType").and_then(Value::as_str) == Some("BigInt") =>
+        {
+            let text = tagged.get("value")?.as_str()?;
+            is_signed_digits(text)
+                .then(|| text.parse::<BigInt>().ok().map(|n| n.to_string()))
+                .flatten()
+        }
         _ => None,
     }
+}
+
+pub(super) fn normalize_hex_bytes(value: &Value) -> Option<String> {
+    let bytes = value.as_str()?.trim().to_ascii_lowercase();
+    let payload = bytes.strip_prefix("0x")?;
+    (payload.len() % 2 == 0 && payload.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then_some(bytes)
 }
 
 pub(super) fn normalize_int(value: &Value) -> Option<i64> {

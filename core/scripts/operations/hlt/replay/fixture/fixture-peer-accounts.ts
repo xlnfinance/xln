@@ -97,9 +97,7 @@ const barePeerEntityState = (identity: ManagedEntityIdentity): EntityState => {
     accounts: PersistentEntityAccountMap.empty(identity.entityId, computeEntityAccountValueHash),
     lastFinalizedJHeight: 0,
     profile: { name: identity.name, isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     crossJurisdictionSwaps: new Map(),
     swapTradingPairs: [],
   } as EntityState;
@@ -180,7 +178,7 @@ export const createFixturePeerAccounts = (args: Readonly<{
     const signed = await attachAccountDraftHankosAsEntity(
       peerEnv, peer.identity.entityId, peer.identity.signerId, draft,
     );
-    if (signed.kind !== 'frame' && signed.kind !== 'ack' && signed.kind !== 'frame_ack') {
+    if (signed.kind !== 'frame' && signed.kind !== 'ack' && signed.kind !== 'ack_frame') {
       throw new Error(`FIXTURE_PEER_REPLY_KIND_INVALID:${signed.kind}`);
     }
     enqueueReply(signed, timestamp);
@@ -265,8 +263,9 @@ export const createFixturePeerAccounts = (args: Readonly<{
     peerEnv.state.timestamp = timestamp;
     const ctx = createAccountConsensusContext(peerEnv);
     let replies = 0;
-    while (queue.length > 0) {
-      const entry = queue.shift()!;
+    let cursor = 0;
+    while (cursor < queue.length) {
+      const entry = queue[cursor++]!;
       const peer = peers.get(entry.peerKey)!;
       if (!peer.account) throw new Error(`FIXTURE_PEER_ACCOUNT_UNSEEDED:${entry.peerKey}`);
       const received = await applyAccountInput(ctx, peer.account, entry.input);
@@ -281,6 +280,9 @@ export const createFixturePeerAccounts = (args: Readonly<{
       await signAndSend(peer, draft, timestamp);
       replies += 1;
     }
+    // One linear compaction after the batch; Array.shift() made a 10k-peer
+    // fixture quadratic by moving the remaining queue for every reply.
+    queue.splice(0, cursor);
     return replies;
   };
 

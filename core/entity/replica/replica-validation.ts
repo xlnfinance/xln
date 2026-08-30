@@ -7,7 +7,6 @@ import {
   validateString,
 } from '../../protocol/boundary/validation-primitives';
 import type { EntityReplica } from '../types';
-import { validateHtlcNotes } from '../htlc/note-validation';
 import {
   validateEntityLeaderCertificate,
   validateEntityLeaderVote,
@@ -231,7 +230,6 @@ function assertEntityReplicaCoordination(
   validateReplicaLineageAndWitnesses(replica, context);
   validatePosition(replica['position'], context);
   validateLeaderConsensus(replica, context);
-  validateHtlcNotes(replica['htlcNotes'], context);
   validateReplicaJHistory(replica['jHistory'], context);
   validateJPrefixRound(replica['jPrefixRound'], context);
   if (replica['jSubmitState'] !== undefined) {

@@ -7,12 +7,12 @@ use xln_rscore_protocol::PersistentNodeChanges;
 use super::nodes::{EncodedAccountCheckpointNodeAddress, encode_node_del, encode_node_put};
 use super::state_value::{encode_lending_kind, encode_lock, encode_policy, encode_swap_offer};
 use super::{
-    AccountWireEncodeError, encode_account_envelope, encode_account_tx, encode_delta,
-    encode_j_claim_node, integer, tuple,
+    AccountWireEncodeError, encode_account_envelope, encode_account_tx, encode_canonical_value,
+    encode_delta, encode_j_claim_node, integer, tuple,
 };
 use crate::{AccountCheckpointHeader, AccountCheckpointRows};
 
-/// Canonical eleven-field incremental checkpoint row used by both the
+/// Canonical twelve-field incremental checkpoint row used by both the
 /// process ABI and path-keyed storage projection.
 pub fn encode_account_checkpoint_rows(
     value: &AccountCheckpointRows,
@@ -28,6 +28,7 @@ pub fn encode_account_checkpoint_rows(
         changes(&value.lending_intents, encode_lending_kind)?,
         changes(&value.swap_offers, encode_swap_offer)?,
         changes(&value.rebalance_fee_policies, encode_policy)?,
+        changes(&value.pulls, super::encode_canonical_value)?,
         j_claim_changes(&value.j_claim_nodes)?,
         consensus(&value.consensus)?,
     ]))
@@ -61,6 +62,7 @@ fn sections(value: &crate::AccountCheckpointSections) -> AbiValue {
         descriptor(&value.lending_intents),
         descriptor(&value.swap_offers),
         descriptor(&value.rebalance_fee_policies),
+        descriptor(&value.pulls),
     ])
 }
 
@@ -134,6 +136,10 @@ fn header(value: &AccountCheckpointHeader, carry_envelope: bool) -> AbiValue {
         value
             .delta_transformer
             .map_or(AbiValue::Nil, |address| AbiValue::Bytes(address.to_vec())),
+        value
+            .settlement_workspace
+            .as_ref()
+            .map_or(AbiValue::Nil, encode_canonical_value),
     ])
 }
 

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Number, Value};
 use sha2::{Digest as _, Sha256};
-use xln_rscore_protocol::encode_canonical_consensus_bytes;
+use xln_rscore_protocol::{CanonicalValue, encode_canonical_consensus_bytes};
 
 use super::EntityFrameError;
 use super::account_input_commitment::account_input_commitment;
@@ -38,10 +38,17 @@ fn entity_tx_payload(tx: &Value) -> Result<Vec<u8>, EntityFrameError> {
     let data = tx
         .get("data")
         .ok_or_else(|| EntityFrameError::Value("FIELD:entityTx.data".into()))?;
-    payload(&Value::Object(Map::from_iter([
-        ("type".into(), Value::String("accountInput".into())),
-        ("data".into(), account_input_commitment(data)?),
-    ])))
+    let data = canonical_value_from_tagged_json(data)?;
+    let projected = CanonicalValue::Object(vec![
+        ("type".into(), CanonicalValue::String("accountInput".into())),
+        ("data".into(), account_input_commitment(&data)?),
+    ]);
+    let body = encode_canonical_consensus_bytes(&projected)
+        .map_err(|error| EntityFrameError::Encoding(error.to_string()))?;
+    let mut bytes = Vec::with_capacity(body.len() + 1);
+    bytes.push(BINARY_MAGIC);
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
 }
 
 fn tx_prefix(txs: &[Value]) -> Result<Vec<usize>, EntityFrameError> {

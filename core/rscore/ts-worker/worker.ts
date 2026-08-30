@@ -4,15 +4,14 @@ import { applyAccountInput, proposeAccountFrame } from '../../account/consensus'
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { HandleAccountInputResult } from '../../account/consensus/types';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
-import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
 import type { AccountReplica } from '../../types/account';
 import { getPerfMs } from '../../support/time';
-import { decodeTsAccountWorkerTransfer, encodeTsAccountWorkerTransfer } from './codec';
+import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from './codec';
 import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
 import {
   collectWorkerCheckpoint,
-  computeWorkerShardRoot,
+  computeWorkerShardCommitment,
   createWorkerConsensusContext,
   initializeWorkerState,
   workerHeapUsedBytes,
@@ -42,6 +41,21 @@ type PhaseWorkspace = Readonly<{
 const scope: WorkerScope = self;
 let state: TsAccountWorkerState | null = null;
 let busy = false;
+const requestDecoder = new TsAccountWorkerTransferDecoder();
+const responseEncoder = new TsAccountWorkerTransferEncoder();
+
+type ThreadCpuUsage = Readonly<{ user: number; system: number }>;
+type BunThreadCpuProcess = typeof process & {
+  threadCpuUsage(previous?: ThreadCpuUsage): ThreadCpuUsage;
+};
+
+const readThreadCpuUsage = (previous?: ThreadCpuUsage): ThreadCpuUsage => {
+  const candidate = process as Partial<BunThreadCpuProcess>;
+  if (typeof candidate.threadCpuUsage !== 'function') {
+    throw new Error('TS_ACCOUNT_WORKER_THREAD_CPU_USAGE_UNAVAILABLE');
+  }
+  return candidate.threadCpuUsage(previous);
+};
 
 const createWorkspace = (worker: TsAccountWorkerState): PhaseWorkspace => {
   const working = new Map<string, AccountReplica>();
@@ -84,8 +98,7 @@ const applyInbound = async (
     input.finalizedJHeight,
     worker.jClaimNodes,
   );
-  const ordered = [...input.inputs].sort((left, right) =>
-    left.accountId.localeCompare(right.accountId) || left.order - right.order);
+  const ordered = [...input.inputs].sort((left, right) => left.order - right.order);
   const effects: TsAccountWorkerEffect[] = [];
   for (const item of ordered) {
     const result = await applyAccountInput(context, workspace.forWrite(item.accountId), item.input, {
@@ -106,8 +119,7 @@ const applyOutboundTxs = async (
   workspace: PhaseWorkspace,
 ): Promise<TsAccountWorkerEffect[]> => {
   const effects: TsAccountWorkerEffect[] = [];
-  const ordered = [...input.txs].sort((left, right) =>
-    left.accountId.localeCompare(right.accountId) || left.order - right.order);
+  const ordered = [...input.txs].sort((left, right) => left.order - right.order);
   for (const item of ordered) {
     const result: HandleAccountInputResult = await applyAccountInput(
       context,
@@ -126,8 +138,7 @@ const applyOutboundProposals = async (
   workspace: PhaseWorkspace,
 ): Promise<TsAccountWorkerEffect[]> => {
   const effects: TsAccountWorkerEffect[] = [];
-  const ordered = [...input.proposals].sort((left, right) =>
-    left.accountId.localeCompare(right.accountId) || left.order - right.order);
+  const ordered = [...input.proposals].sort((left, right) => left.order - right.order);
   for (const item of ordered) {
     const result = await proposeAccountFrame(
       context,
@@ -140,41 +151,26 @@ const applyOutboundProposals = async (
   return effects;
 };
 
-const applyOutbound = async (
-  worker: TsAccountWorkerState,
-  input: TsAccountWorkerOutboundPayload,
-  workspace: PhaseWorkspace,
-): Promise<TsAccountWorkerEffect[]> => {
-  const context = createWorkerConsensusContext(worker, input.timestamp, input.jHeight, worker.jClaimNodes);
-  return [
-    ...await applyOutboundTxs(context, input, workspace),
-    ...await applyOutboundProposals(context, input, workspace),
-  ];
-};
-
 const publishWorkspace = (
   worker: TsAccountWorkerState,
   workspace: PhaseWorkspace,
 ): TsAccountWorkerSubroot[] => {
   const touchedShards = new Set<number>();
+  const mutations: Array<Readonly<{ kind: 'put'; key: string; value: AccountReplica }>> = [];
   for (const accountId of [...workspace.touched].sort()) {
     const account = workspace.working.get(accountId);
     if (account === undefined) {
       throw new Error(`TS_ACCOUNT_WORKER_TOUCHED_ACCOUNT_MISSING:${accountId}`);
     }
-    const valueHash = computeEntityAccountValueHash(account);
     const shardId = tsAccountLogicalShard(accountId);
-    worker.accounts.set(accountId, account);
-    worker.leafHashes.set(accountId, valueHash);
-    const leaves = worker.shardLeaves.get(shardId);
-    if (!leaves) throw new Error(`TS_ACCOUNT_WORKER_SHARD_LEAVES_MISSING:${shardId}`);
-    leaves.set(accountId, valueHash);
+    mutations.push({ kind: 'put', key: accountId, value: account });
     touchedShards.add(shardId);
     worker.checkpointAccountIds.add(accountId);
   }
+  worker.accounts = worker.accounts.foldDirty(mutations);
   return [...touchedShards]
     .sort((left, right) => left - right)
-    .map(shardId => ({ shardId, root: computeWorkerShardRoot(worker, shardId) }));
+    .map(shardId => computeWorkerShardCommitment(worker, shardId));
 };
 
 const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult> => {
@@ -182,16 +178,43 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   if (!worker) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
   const input = decodeWorkerPhasePayload(worker, value);
   const startedAt = getPerfMs();
+  const cpuStartedAt = readThreadCpuUsage();
   const workspace = createWorkspace(worker);
-  const effects = input.phase === 'inbound'
-    ? await applyInbound(worker, input, workspace)
-    : await applyOutbound(worker, input, workspace);
+  let transitionUs = 0;
+  let proposalUs = 0;
+  let effects: TsAccountWorkerEffect[];
+  if (input.phase === 'inbound') {
+    const transitionStartedAt = getPerfMs();
+    effects = await applyInbound(worker, input, workspace);
+    transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
+  } else {
+    const transitionStartedAt = getPerfMs();
+    const admissions = await applyOutboundTxs(
+      createWorkerConsensusContext(worker, input.timestamp, input.jHeight, worker.jClaimNodes),
+      input,
+      workspace,
+    );
+    transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
+    const proposalStartedAt = getPerfMs();
+    const proposals = await applyOutboundProposals(
+      createWorkerConsensusContext(worker, input.timestamp, input.jHeight, worker.jClaimNodes),
+      input,
+      workspace,
+    );
+    proposalUs = Math.round((getPerfMs() - proposalStartedAt) * 1_000);
+    effects = [...admissions, ...proposals];
+  }
   // Publish only after this worker completed every canonical transition. If a
   // sibling fails, the coordinator becomes permanently fatal and kills all isolates.
+  const rootStartedAt = getPerfMs();
   const subroots = publishWorkspace(worker, workspace);
+  const rootUs = Math.round((getPerfMs() - rootStartedAt) * 1_000);
+  const checkpointStartedAt = getPerfMs();
   const checkpointChanges = input.phase === 'outbound' && input.checkpointDue
     ? collectWorkerCheckpoint(worker)
     : undefined;
+  const checkpointUs = Math.round((getPerfMs() - checkpointStartedAt) * 1_000);
+  const cpu = readThreadCpuUsage(cpuStartedAt);
   return {
     workerIndex: worker.workerIndex,
     effects: effects.sort((left, right) => left.order - right.order),
@@ -200,12 +223,17 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     operations: effects.length,
     elapsedUs: Math.round((getPerfMs() - startedAt) * 1_000),
     heapUsedBytes: workerHeapUsedBytes(),
+    timings: { transitionUs, proposalUs, rootUs, checkpointUs },
+    threadCpuUserUs: cpu.user,
+    threadCpuSystemUs: cpu.system,
   };
 };
 
 const postResult = (requestId: number, result: unknown): void => {
-  const payload = encodeTsAccountWorkerTransfer(result);
-  const response: TsAccountWorkerResponseEnvelope = { requestId, kind: 'result', payload };
+  const startedAt = getPerfMs();
+  const payload = responseEncoder.encode(result);
+  const encodeUs = Math.round((getPerfMs() - startedAt) * 1_000);
+  const response: TsAccountWorkerResponseEnvelope = { requestId, kind: 'result', payload, encodeUs };
   scope.postMessage(response, [payload]);
 };
 
@@ -229,7 +257,7 @@ scope.onmessage = event => {
   busy = true;
   void (async () => {
     try {
-      const decoded = decodeTsAccountWorkerTransfer(request.payload);
+      const decoded = requestDecoder.decode(request.payload);
       if (request.kind === 'init') {
         if (state !== null) throw new Error('TS_ACCOUNT_WORKER_ALREADY_INITIALIZED');
         const initialized = initializeWorkerState(decodeWorkerInitPayload(decoded));

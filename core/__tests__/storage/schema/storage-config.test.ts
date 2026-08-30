@@ -4,8 +4,6 @@ import { createEmptyEnv } from '../../../runtime';
 import { resolveStorageRuntimeConfig } from '../../../storage';
 import {
   DEFAULT_EPOCH_MAX_BYTES,
-  DEFAULT_HISTORY_VIEW_MAX_BYTES,
-  DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
   DEFAULT_RETAIN_SNAPSHOTS,
 } from '../../../storage/keys';
 import { ensureRuntimeConfig } from '../../../runtime/loop/loop-environment.ts';
@@ -37,20 +35,16 @@ describe('storage config', () => {
     const env = createEmptyEnv('sparse-storage-checkpoints');
     env.runtimeConfig = { ...(env.runtimeConfig || {}) };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
-    expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
+    expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(1_000);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
     expect(resolveStorageRuntimeConfig(env)).toMatchObject({
       retainSnapshots: Number.MAX_SAFE_INTEGER,
       epochMaxBytes: Number.MAX_SAFE_INTEGER,
-      historyViewMaxBytes: Number.MAX_SAFE_INTEGER,
-      historyViewRetainFrames: Number.MAX_SAFE_INTEGER,
     });
     expect([
       DEFAULT_RETAIN_SNAPSHOTS,
       DEFAULT_EPOCH_MAX_BYTES,
-      DEFAULT_HISTORY_VIEW_MAX_BYTES,
-      DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
-    ]).toEqual(Array(4).fill(Number.MAX_SAFE_INTEGER));
+    ]).toEqual(Array(2).fill(Number.MAX_SAFE_INTEGER));
     env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
   });
@@ -60,21 +54,12 @@ describe('storage config', () => {
       ['snapshotPeriodFrames', Number.NaN],
       ['retainSnapshots', 0],
       ['epochMaxBytes', -1],
-      ['historyViewMaxBytes', 'invalid'],
-      ['historyViewRetainFrames', 1.5],
       ['materializePeriodFrames', Number.POSITIVE_INFINITY],
     ] as const) {
       const env = createEmptyEnv(`invalid-storage-${field}`);
       env.runtimeConfig = { storage: { [field]: value } } as typeof env.runtimeConfig;
       expect(() => resolveStorageRuntimeConfig(env)).toThrow(`STORAGE_CONFIG_${field.replaceAll(/([A-Z])/g, '_$1').toUpperCase()}_INVALID`);
     }
-  });
-
-  test('accepts an explicit 10 TiB hub budget without losing integer precision', () => {
-    const env = createEmptyEnv('large-hub-storage');
-    const tenTiB = 10 * 1024 ** 4;
-    env.runtimeConfig = { storage: { historyViewMaxBytes: tenTiB } };
-    expect(resolveStorageRuntimeConfig(env).historyViewMaxBytes).toBe(tenTiB);
   });
 
   test('persists a fail-fast epoch byte override into each fresh Runtime config', () => {
@@ -108,6 +93,23 @@ describe('storage config', () => {
     } finally {
       if (previous === undefined) delete process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'];
       else process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = previous;
+    }
+  });
+
+  test('persists a fail-fast materialization cadence override into each fresh Runtime config', () => {
+    const previous = process.env['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'];
+    try {
+      process.env['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] = '1';
+      const env = createEmptyEnv('forced-rust-handoff-materialization-cadence');
+      expect(env.runtimeConfig?.storage?.materializePeriodFrames).toBe(1);
+      expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(1);
+
+      process.env['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] = '0';
+      expect(() => createEmptyEnv('invalid-forced-materialization-cadence'))
+        .toThrow('RUNTIME_CONFIG_STORAGE_MATERIALIZE_PERIOD_FRAMES_INVALID:0');
+    } finally {
+      if (previous === undefined) delete process.env['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'];
+      else process.env['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] = previous;
     }
   });
 

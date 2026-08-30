@@ -3,7 +3,7 @@ import {
   createBalancedTsAccountShardAssignment,
   normalizeTsWorkerAccountId,
   TS_ACCOUNT_LOGICAL_SHARDS,
-  TsAccountShardRootTree,
+  TsAccountCanonicalRoot,
   tsAccountLogicalShard,
   tsAccountWorkerForShard,
   validateTsAccountShardAssignment,
@@ -41,7 +41,7 @@ export class TsAccountWorkerCoordinator {
   readonly #clients: TsAccountWorkerClient[];
   readonly #workerCount: number;
   readonly #logicalShardToWorker: readonly number[];
-  readonly #rootTree: TsAccountShardRootTree;
+  readonly #rootTree: TsAccountCanonicalRoot;
   readonly #dirtyWorkerIndexes = new Set<number>();
   #fatal: Error | null = null;
   #inFlight = false;
@@ -51,7 +51,7 @@ export class TsAccountWorkerCoordinator {
   private constructor(
     clients: TsAccountWorkerClient[],
     logicalShardToWorker: readonly number[],
-    rootTree: TsAccountShardRootTree,
+    rootTree: TsAccountCanonicalRoot,
     initialization: TsAccountWorkerInitialization,
   ) {
     this.#clients = clients;
@@ -111,8 +111,9 @@ export class TsAccountWorkerCoordinator {
         };
         return client.request('init', payload);
       }));
-      const rootTree = new TsAccountShardRootTree();
-      const roots = new Map<number, string>();
+      const rootTree = new TsAccountCanonicalRoot();
+      const shardIds = new Set<number>();
+      const subroots = [] as import('./protocol').TsAccountWorkerSubroot[];
       let accounts = 0;
       for (const [workerIndex, response] of responses.entries()) {
         const result = parseWorkerInitResult(response.value, workerIndex);
@@ -121,21 +122,22 @@ export class TsAccountWorkerCoordinator {
           if (tsAccountWorkerForShard(subroot.shardId, logicalShardToWorker) !== workerIndex) {
             throw new Error(`TS_ACCOUNT_WORKER_INIT_SUBROOT_OWNER:${workerIndex}:${subroot.shardId}`);
           }
-          if (roots.has(subroot.shardId)) {
+          if (shardIds.has(subroot.shardId)) {
             throw new Error(`TS_ACCOUNT_WORKER_INIT_SUBROOT_DUPLICATE:${subroot.shardId}`);
           }
-          roots.set(subroot.shardId, subroot.root);
+          shardIds.add(subroot.shardId);
+          subroots.push(subroot);
         }
       }
       if (accounts !== options.accounts.size) {
         throw new Error(`TS_ACCOUNT_WORKER_INIT_ACCOUNT_COUNT:${accounts}:${options.accounts.size}`);
       }
-      rootTree.update([...roots].map(([shardId, root]) => ({ shardId, root })));
+      rootTree.update(subroots);
       const initialization: TsAccountWorkerInitialization = {
         accounts,
         logicalShards: TS_ACCOUNT_LOGICAL_SHARDS,
         workers: workerCount,
-        shadowAccountsRoot: rootTree.root,
+        accountsRoot: rootTree.root,
         requestBytes: responses.reduce((sum, response) => sum + response.requestBytes, 0),
         responseBytes: responses.reduce((sum, response) => sum + response.responseBytes, 0),
       };
@@ -151,8 +153,15 @@ export class TsAccountWorkerCoordinator {
     }
   }
 
-  get shadowAccountsRoot(): string {
+  get accountsRoot(): string {
     return this.#rootTree.root;
+  }
+
+  /** Explicit owner shutdown for bounded diagnostics and process teardown. */
+  close(): void {
+    if (this.#inFlight) throw new Error('TS_ACCOUNT_WORKER_COORDINATOR_CLOSE_IN_FLIGHT');
+    if (!this.#fatal) this.#fatal = new Error('TS_ACCOUNT_WORKER_COORDINATOR_CLOSED');
+    for (const client of this.#clients) client.terminate();
   }
 
   #assertUsable(): void {
@@ -177,17 +186,23 @@ export class TsAccountWorkerCoordinator {
     this.#assertUsable();
     this.#inFlight = true;
     try {
-      const responses = await Promise.all(dispatches.map(async ({ workerIndex, payload }) => {
+      const dispatchStartedAt = performance.now();
+      const pending = dispatches.map(async ({ workerIndex, payload }) => {
         const client = this.#clients[workerIndex];
         if (!client) throw new Error(`TS_ACCOUNT_WORKER_DISPATCH_SLOT:${workerIndex}`);
         return { workerIndex, response: await client.request('phase', payload) };
-      }));
+      });
+      const dispatchedAt = performance.now();
+      const responses = await Promise.all(pending);
+      const joinedAt = performance.now();
       return aggregateWorkerPhaseResults({
         responses,
         logicalShardToWorker: this.#logicalShardToWorker,
         checkpointDue,
         expectedEffects,
         rootTree: this.#rootTree,
+        dispatchMs: dispatchedAt - dispatchStartedAt,
+        joinMs: joinedAt - dispatchedAt,
       });
     } catch (error) {
       throw this.#poison(error);
@@ -196,7 +211,7 @@ export class TsAccountWorkerCoordinator {
     }
   }
 
-  /** Phase 1/2: all peer Account inputs for exactly one Entity frame. */
+  /** Inbound Account stage for exactly one Entity frame. */
   async applyAccountInputs(input: TsApplyAccountInputsRequest): Promise<TsAccountWorkerBatchResult> {
     const frameId = requireWorkerFrameId(input.frameId);
     requireWorkerInteger(input.entityTimestamp, 'TS_ACCOUNT_WORKER_INBOUND_TIMESTAMP_INVALID');
@@ -235,7 +250,7 @@ export class TsAccountWorkerCoordinator {
     return result;
   }
 
-  /** Phase 2/2: local admissions, one canonical proposal worklist, optional checkpoint changes. */
+  /** Outbound Account proposal stage after Entity-owned work has completed. */
   async proposeAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
     const frameId = requireWorkerFrameId(input.frameId);
     requireWorkerInteger(input.timestamp, 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP_INVALID');

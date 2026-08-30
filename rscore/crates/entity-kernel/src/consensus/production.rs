@@ -23,15 +23,16 @@ pub use authority::{
     ConsensusMode, EntityAuthorityError, EntityConsensusConfig, EntityFrameAuthority,
     EntityLeaderState,
 };
-pub use catalog::{EntityTxCatalogError, EntityTxKind, EntityTxSupport};
+pub use catalog::{ENTITY_TX_TYPES, EntityTxCatalogError, EntityTxKind};
 pub use encoding::EntityEncodingError;
 pub use frame::{
-    CanonicalEntityTx, EntityFrame, EntityFrameBody, EntityFrameError, EntityFrameEvent,
-    EntityFrameLeader, EntityFrameWireMeasure, EntityFrameWireMeasureBody, HashToSign, HashType,
-    MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
-    compute_entity_events_parity_digest, compute_entity_frame_hash, measure_entity_frame_wire,
+    CanonicalEntityTx, EntityFrame, EntityFrameBody, EntityFrameDraft, EntityFrameError,
+    EntityFrameEvent, EntityFrameLeader, EntityFrameWireMeasure, EntityFrameWireMeasureBody,
+    HashToSign, HashType, MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES,
+    MAX_ENTITY_PROPOSAL_WIRE_BYTES, compute_entity_events_parity_digest, compute_entity_frame_hash,
+    measure_entity_frame_tx_bytes, measure_entity_frame_wire,
 };
-pub use j_prefix::build_required_j_prefix_certificate;
+pub use j_prefix::{JPrefixRangeClaim, build_required_j_prefix_certificate, sign_j_event_range};
 pub use lineage::{
     CertifiedEntityFrameLink, EntityLineageError, build_certified_entity_frame_link,
 };
@@ -45,7 +46,7 @@ pub use single_signer::{
 };
 pub use transition::{
     CertifiedEntityTransition, ENTITY_OWNED_CONSENSUS_FIELDS, EntityConsensusState,
-    EntityHtlcNoteIndex, EntityTransitionCertificationRequest, EntityTransitionError,
-    PendingNonMutatingWake, ResidentEntityConsensusReplica, certify_entity_transition,
-    is_entity_owned_consensus_field, project_entity_consensus_sections,
+    EntityTransitionCertificationRequest, EntityTransitionError, PendingNonMutatingWake,
+    ResidentEntityConsensusReplica, certify_entity_transition, is_entity_owned_consensus_field,
+    project_entity_consensus_sections,
 };

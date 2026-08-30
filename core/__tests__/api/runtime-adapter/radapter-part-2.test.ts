@@ -218,9 +218,7 @@ const makeEnv = (): RuntimeReplica =>
               deferredAccountProposals: new Map(),
               lastFinalizedJHeight: 0,
               profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
-              htlcRoutes: new Map(),
-              htlcFeesEarned: 0n,
-              lockBook: new Map(),
+              paybook: { entries: new Map(), feesEarned: 0n },
               swapTradingPairs: [],
             },
           } as EntityReplica,
@@ -529,8 +527,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
           currentFrame: { accountTxs: unknown[]; deltas: unknown[] };
           pendingFrame?: { accountTxs: unknown[]; deltas: unknown[] };
           settlementWorkspace?: unknown;
-          swapOrderHistory?: Map<string, unknown>;
-          swapClosedOrders?: Map<string, unknown>;
           leftPendingJClaims: { root: string; count: bigint };
           rightPendingJClaims: { root: string; count: bigint };
           boardHankoRefreshMigration?: {
@@ -553,8 +549,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.pendingFrame?.accountTxs.length ?? 0).toBeLessThanOrEqual(20);
   expect(compact?.pendingFrame?.deltas.length ?? 0).toBeLessThanOrEqual(100);
   expect(compact?.state.settlementWorkspace).toBeUndefined();
-  expect(compact?.swapOrderHistory).toBeUndefined();
-  expect(compact?.swapClosedOrders).toBeUndefined();
   expect(compact?.state.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.state.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.boardHankoRefreshMigration).toEqual(account.boardHankoRefreshMigration);
@@ -572,7 +566,7 @@ test('runtime adapter returns an owned projection after releasing the committed-
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   };
   const projectedHead = await resolveRuntimeAdapterRead<StorageHead>(
     { env, readHead: async () => persistedHead },
@@ -602,7 +596,7 @@ test('storage-backed historical view pages support desc account and book cursors
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   };
   const manifest: StorageSnapshotManifest = { height: snapshotHeight, createdAt: 400, docCount: 7 };
   const core = projectEntityCoreDoc(replica.state);
@@ -670,7 +664,7 @@ test('storage readers reject requested heights beyond the persisted head', async
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
     epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
+    retainedWalBytes: 0,
   };
   const db = makeMemoryDb([
     [KEY_HEAD, encodeBuffer(head)],

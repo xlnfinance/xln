@@ -405,7 +405,7 @@ const captureTranscript = async (
 };
 
 const recording = resolve(requiredArgument('recording'));
-const binary = resolve(argument('binary') ?? 'rscore/target/release/xln-rscore');
+const binary = resolve(argument('binary') ?? 'rscore/target/release/xlnrs');
 const transcript = resolve(argument('transcript') ?? recording + '.apo-transcript-v1');
 const runtimeSeedFileArgument = argument('runtime-seed-file');
 const runtimeSeedFile = runtimeSeedFileArgument ? resolve(runtimeSeedFileArgument) : null;

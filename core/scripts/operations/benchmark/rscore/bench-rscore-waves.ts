@@ -1,13 +1,7 @@
 /**
- * The mirror path, not the authority path: this drives `executeWave`, where
- * the engine re-applies transitions TypeScript already decided, with no
- * consensus of its own — no mempool, no proposal, no signature, no clocks.
- * It measures what the shadow comparison costs per transition.
- *
- * For what the runtime will actually delegate — the engine owning the
- * accounts, signing frames and verifying acks — use
- * the integrated resident two-call replay. Numbers from this script are not payments per
- * second and must never be quoted as such.
+ * Synthetic mirror smoke only: no Runtime/Entity consensus, WAL, publication,
+ * sovereign users or authoritative economic completion. It deliberately emits
+ * no elapsed time or rate so its output cannot be quoted as production TPS.
  *
  * Usage: bun core/scripts/operations/benchmark/rscore/bench-rscore-waves.ts \
  *          [accounts=1000] [waves=20] [txsPerWave=10000] [workers=8]
@@ -19,7 +13,7 @@ import { RscoreProcessClient, type RscoreWireValue } from '../../../../rscore/cl
 import { swapMarketPolicyWire } from '../../../../rscore/shadow-wire';
 import { safeStringify } from '../../../../protocol/serialization';
 
-const BINARY = join(import.meta.dir, '../../../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../../rscore/target/release/xlnrs');
 
 const accounts = Number(process.argv[2] ?? '1000');
 const waves = Number(process.argv[3] ?? '20');
@@ -141,14 +135,9 @@ const main = async (): Promise<void> => {
   });
   await client.hello(workers, swapMarketPolicyWire());
   const seeds = Array.from({ length: accounts }, (_, index) => seed(index));
-  const restoreStarted = performance.now();
   await client.bootstrapAccounts(0, seeds);
-  console.log(`restore accounts=${accounts} ms=${Math.ceil(performance.now() - restoreStarted)}`);
 
   let applied = 0;
-  let engineUs = 0;
-  let commitMs = 0;
-  const started = performance.now();
   for (let wave = 0; wave < waves; wave += 1) {
     const jobs = Array.from({ length: txsPerWave }, (_, index) =>
       directPayment(index, (wave * 7 + index) % accounts, 5n, (wave + index) % 2 === 0));
@@ -163,18 +152,12 @@ const main = async (): Promise<void> => {
       const verdict = (row as unknown[])[2] as unknown[];
       if (Number((verdict as unknown[])[0]) === 0) applied += 1;
     }
-    engineUs += Number(prepared[5]);
-    const commitStarted = performance.now();
     await client.commit(token);
-    commitMs += performance.now() - commitStarted;
   }
-  const elapsedMs = performance.now() - started;
   const total = waves * txsPerWave;
   console.log(
-    `waves=${waves} txs=${total} applied=${applied} elapsedMs=${Math.ceil(elapsedMs)} ` +
-    `txPerSec=${Math.round(total / (elapsedMs / 1_000))} workers=${workers} ` +
-    `engineMs=${Math.round(engineUs / 1000)} commitMs=${Math.round(commitMs)} ` +
-    `engineUsPerTx=${(engineUs / total).toFixed(2)} shell=${withShell}`,
+    `RSCORE_MIRROR_SMOKE_ONLY_NOT_TPS accounts=${accounts} waves=${waves} ` +
+    `txs=${total} applied=${applied} workers=${workers} shell=${withShell}`,
   );
   await client.shutdown();
 };

@@ -13,12 +13,10 @@ import {
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import {
   getRuntimeWalDb,
-  getHistoryViewDb,
   getInfraDb,
   getStorageDb,
   rotateStorageEpochDb,
   tryOpenRuntimeWalDb,
-  tryOpenHistoryViewDb,
   tryOpenStorageDb,
   type StorageDbRole,
 } from '../../storage/runtime-dbs.ts';
@@ -39,11 +37,8 @@ export const getRuntimeStorageDb = (
 export const getRuntimeInfraDb = (env: RuntimeReplica): Level<Buffer, Buffer> =>
   getInfraDb(env, storageDeps);
 
-export const getRuntimeHistoryView = (env: RuntimeReplica): Level<Buffer, Buffer> =>
+export const getRuntimeWal = (env: RuntimeReplica): Level<Buffer, Buffer> =>
   getRuntimeWalDb(env, storageDeps);
-
-export const getRuntimeHistoryViewDb = (env: RuntimeReplica): Level<Buffer, Buffer> =>
-  getHistoryViewDb(env, storageDeps);
 
 export const tryOpenRuntimeStorageDb = (
   env: RuntimeReplica,
@@ -57,11 +52,8 @@ export const rotateRuntimeStorageEpochDb = (
 ): Promise<boolean> =>
   rotateStorageEpochDb(env, storageDeps, snapshotHeight, timestamp);
 
-export const tryOpenRuntimeHistoryView = (env: RuntimeReplica): Promise<boolean> =>
+export const tryOpenRuntimeWal = (env: RuntimeReplica): Promise<boolean> =>
   tryOpenRuntimeWalDb(env, storageDeps);
-
-export const tryOpenRuntimeHistoryViewDb = (env: RuntimeReplica): Promise<boolean> =>
-  tryOpenHistoryViewDb(env, storageDeps);
 
 export const waitForRuntimeLoopWake = async (env: RuntimeReplica): Promise<void> => {
   const state = ensureRuntimeInfrastructure(env);
@@ -148,6 +140,10 @@ export const enqueueRuntimeContinuation = (
 ): void => enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, explicitTimestamp, { acceptedBeforeQuiesce: true });
 
 export const tryOpenRuntimeInfraDb = async (env: RuntimeReplica): Promise<boolean> => {
+  // `storage.enabled=false` means the whole Runtime is ephemeral. Opening the
+  // gossip DB here used to leave one LevelDB directory per HLT load user even
+  // though its Runtime state and WAL were correctly kept in RAM.
+  if (env.runtimeConfig?.storage?.enabled === false) return false;
   const state = ensureRuntimeInfrastructure(env);
   if (state.infraDbClosing) return false;
   state.infraDbOpenPromise ??= getRuntimeInfraDb(env).open().then(

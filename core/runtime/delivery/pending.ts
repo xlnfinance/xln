@@ -1,4 +1,7 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import {
+  canonicalConsensusValuesEqual,
+  compareCanonicalConsensusValues,
+} from '../../protocol/serialization/binary-codec';
 import type {
   DeliverableEntityInput,
   RuntimeReplica,
@@ -182,7 +185,7 @@ const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, sou
 };
 
 const selectCanonicalOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T =>
-  compareStableText(encodeCanonicalConsensusValue(existing), encodeCanonicalConsensusValue(incoming)) <= 0
+  compareCanonicalConsensusValues(existing, incoming) <= 0
     ? existing
     : incoming;
 
@@ -220,8 +223,9 @@ const normalizePrecommitBundles = (bundles: Map<string, string[]>): Map<string, 
 const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
   if (
     (incoming.leaderTimeoutVote || existing.leaderTimeoutVote) &&
-    encodeCanonicalConsensusValue(incoming.leaderTimeoutVote) !==
-      encodeCanonicalConsensusValue(existing.leaderTimeoutVote)
+    (incoming.leaderTimeoutVote === undefined || existing.leaderTimeoutVote === undefined
+      ? incoming.leaderTimeoutVote !== existing.leaderTimeoutVote
+      : !canonicalConsensusValuesEqual(incoming.leaderTimeoutVote, existing.leaderTimeoutVote))
   ) {
     throw new Error(`ROUTE_LEADER_VOTE_EQUIVOCATION:${incoming.leaderTimeoutVote?.voterId ?? 'missing'}`);
   }
@@ -231,8 +235,7 @@ const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming:
   if (incoming.hashPrecommits?.size) {
     if (
       existing.hashPrecommitFrame &&
-      encodeCanonicalConsensusValue(existing.hashPrecommitFrame) !==
-        encodeCanonicalConsensusValue(incoming.hashPrecommitFrame)
+      !canonicalConsensusValuesEqual(existing.hashPrecommitFrame, incoming.hashPrecommitFrame)
     ) {
       throw new Error('ROUTE_PRECOMMIT_FRAME_CONFLICT');
     }

@@ -11,10 +11,11 @@ use num_bigint::BigInt;
 use thiserror::Error;
 use xln_rscore_protocol::CanonicalValue;
 
-use crate::LocalEntityFinancialTx;
+use crate::LocalEntityTx;
 
 pub use authorization::{assert_signed_entity_command, current_entity_command_board_hash};
 pub use build::build_collective_entity_command;
+pub(crate) use command_codec::decode_collective_action_txs;
 pub use command_codec::decode_signed_entity_command;
 pub use nonce::{
     advance_entity_command_nonce, canonical_entity_command_nonces, get_entity_command_disposition,
@@ -59,7 +60,7 @@ pub struct SignedEntityCommandV1 {
     pub command_hash: String,
     /// Exact single-signer proposal actions. The signed wrapper, not these
     /// derived rows, remains the Entity-frame transaction.
-    pub native_txs: Vec<LocalEntityFinancialTx>,
+    pub native_txs: Vec<LocalEntityTx>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

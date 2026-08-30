@@ -1434,6 +1434,7 @@ const validateInboundEntityCommands = (
   env: RuntimeReplica,
   from: string,
   input: RoutedEntityInput,
+  deps: RuntimeEntityRoutingDeps,
 ): void => {
   let commandState = findInboundTargetReplica(env, input)?.state;
   for (const tx of input.entityTxs ?? []) {
@@ -1448,7 +1449,31 @@ const validateInboundEntityCommands = (
       );
     }
     if (tx.type === 'runtimeOutput') {
-      throw new Error(`INBOUND_RUNTIME_OUTPUT_FORBIDDEN:entity=${input.entityId}:from=${from}`);
+      if (
+        input.entityTxs?.length !== 1 ||
+        normalizeEntityKey(tx.data.targetEntityId) !== normalizeEntityKey(input.entityId)
+      ) {
+        throw new Error(
+          `INBOUND_RUNTIME_OUTPUT_ENVELOPE_INVALID:entity=${input.entityId}:from=${from}` +
+          `:txCount=${String(input.entityTxs?.length ?? 0)}:target=${tx.data.targetEntityId}`,
+        );
+      }
+      const sourceRuntimeId = resolveRuntimeIdForCrossJurisdictionEntity(
+        env,
+        tx.data.sourceEntityId,
+        tx.data.sourceSignerId,
+        deps,
+      );
+      if (
+        !sourceRuntimeId ||
+        normalizeRuntimeId(sourceRuntimeId) !== normalizeRuntimeId(from)
+      ) {
+        throw new Error(
+          `INBOUND_RUNTIME_OUTPUT_SOURCE_UNVERIFIED:${tx.data.sourceEntityId}:` +
+            `${tx.data.sourceSignerId}:${from}`,
+        );
+      }
+      continue;
     }
     if (tx.type !== 'entityCommand') {
       const payload = { fromRuntimeId: from, entityId: input.entityId, txType: tx.type };
@@ -1533,7 +1558,7 @@ const validateInboundP2PEntityInput = (
     }, context);
   }
 
-  validateInboundEntityCommands(env, from, input);
+  validateInboundEntityCommands(env, from, input, deps);
   assertInboundCrossJCommandsUseCanonicalTopology(env, from, input, deps);
   // Never learn sender routes from raw payload fields. The authenticated
   // account/entity transition registers them only after successful apply.

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -13,6 +14,8 @@ use xln_rscore_engine::{HTLC_OPAQUE_CIPHERTEXT_VERSION, OpaqueHtlcCiphertext};
 use crate::{HtlcPreparedBinding, HtlcPreparedOutcome, PreparedHtlcEntry};
 
 const CONTEXT_DOMAIN: &[u8] = b"xln:htlc-envelope-context:binary";
+const AEAD_CONTEXT_PREFIX: &[u8; 24] = b"xln:htlc-opaque:aes-gcm:";
+const AEAD_CONTEXT_BYTES: usize = AEAD_CONTEXT_PREFIX.len() + 2 + 64;
 const MAX_HTLC_BINARY_LAYER_BYTES: usize = (10_000_000 - 1_000_000) * 3 / 4;
 const MAX_ENTITY_HTLC_NOTE_BYTES: usize = 256;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -137,7 +140,6 @@ pub fn compute_htlc_envelope_context_hash(
 ) -> Result<[u8; 32], PreparedContextError> {
     let from = lower_hex::<32>(&binding.from_entity_id, "FROM_ENTITY")?;
     let to = lower_hex::<32>(&binding.to_entity_id, "TO_ENTITY")?;
-    let lock = lower_hex::<32>(&binding.lock_id, "LOCK_ID")?;
     let hashlock = lower_hex::<32>(&binding.hashlock, "HASHLOCK")?;
     let amount = uint256_bytes(&binding.amount, "AMOUNT")?;
     let timelock = uint256_bytes(&binding.timelock, "TIMELOCK")?;
@@ -147,31 +149,92 @@ pub fn compute_htlc_envelope_context_hash(
     {
         return Err(PreparedContextError::BindingInvalid { detail: "NUMBER" });
     }
-    let mut preimage = Vec::with_capacity(CONTEXT_DOMAIN.len() + 236);
-    preimage.extend_from_slice(CONTEXT_DOMAIN);
-    preimage.extend_from_slice(&from);
-    preimage.extend_from_slice(&to);
-    preimage.extend_from_slice(&binding.domain.chain_id().to_be_bytes());
-    preimage.extend_from_slice(binding.domain.depository_address().as_bytes());
-    preimage.extend_from_slice(&lock);
-    preimage.extend_from_slice(&hashlock);
-    preimage.extend_from_slice(&u64::from(binding.token_id).to_be_bytes());
-    preimage.extend_from_slice(&amount);
-    preimage.extend_from_slice(&timelock);
-    preimage.extend_from_slice(&binding.reveal_before_height.to_be_bytes());
-    Ok(Keccak256::digest(preimage).into())
+    let mut digest = Keccak256::new();
+    digest.update(CONTEXT_DOMAIN);
+    digest.update(from);
+    digest.update(to);
+    digest.update(binding.domain.chain_id().to_be_bytes());
+    digest.update(binding.domain.depository_address().as_bytes());
+    digest.update(hashlock);
+    digest.update(u64::from(binding.token_id).to_be_bytes());
+    digest.update(amount);
+    digest.update(timelock);
+    digest.update(binding.reveal_before_height.to_be_bytes());
+    Ok(digest.finalize().into())
 }
 
 fn derive_aead_key(shared: &[u8; 32], context: &[u8]) -> Result<[u8; 32], PreparedContextError> {
     if shared.iter().all(|byte| *byte == 0) {
         return Err(PreparedContextError::LowOrderSharedSecret);
     }
-    let salt = Sha256::digest(format!("{HTLC_OPAQUE_CIPHERTEXT_VERSION}:hkdf-salt"));
-    let hkdf = Hkdf::<Sha256>::new(Some(&salt), shared);
+    static SALT: OnceLock<[u8; 32]> = OnceLock::new();
+    let salt = SALT.get_or_init(|| {
+        let mut digest = Sha256::new();
+        digest.update(HTLC_OPAQUE_CIPHERTEXT_VERSION.as_bytes());
+        digest.update(b":hkdf-salt");
+        digest.finalize().into()
+    });
+    let hkdf = Hkdf::<Sha256>::new(Some(salt), shared);
     let mut key = [0_u8; 32];
     hkdf.expand(context, &mut key)
         .map_err(|_| PreparedContextError::ContextInvalid { detail: "HKDF" })?;
     Ok(key)
+}
+
+fn aead_context(context_hash: &[u8; 32]) -> [u8; AEAD_CONTEXT_BYTES] {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut context = [0_u8; AEAD_CONTEXT_BYTES];
+    context[..AEAD_CONTEXT_PREFIX.len()].copy_from_slice(AEAD_CONTEXT_PREFIX);
+    let hex_offset = AEAD_CONTEXT_PREFIX.len();
+    context[hex_offset..hex_offset + 2].copy_from_slice(b"0x");
+    for (index, byte) in context_hash.iter().enumerate() {
+        context[hex_offset + 2 + index * 2] = HEX[usize::from(byte >> 4)];
+        context[hex_offset + 3 + index * 2] = HEX[usize::from(byte & 0x0f)];
+    }
+    context
+}
+
+fn decrypt_opaque_htlc_layer_with_private(
+    envelope: &OpaqueHtlcCiphertext,
+    entity_public_key: &[u8; 32],
+    private: &StaticSecret,
+    context_hash: &[u8; 32],
+) -> Result<Vec<u8>, PreparedContextError> {
+    let packed = envelope.packed();
+    if packed.len() < 48 {
+        return Err(PreparedContextError::OnionInvalid { detail: "SIZE" });
+    }
+    let ephemeral_bytes: [u8; 32] =
+        packed[..32]
+            .try_into()
+            .map_err(|_| PreparedContextError::OnionInvalid {
+                detail: "EPHEMERAL",
+            })?;
+    let shared = private.diffie_hellman(&PublicKey::from(ephemeral_bytes));
+    let context = aead_context(context_hash);
+    let key = derive_aead_key(shared.as_bytes(), &context)?;
+    let mut nonce_digest = Sha256::new();
+    nonce_digest.update(ephemeral_bytes);
+    nonce_digest.update(entity_public_key);
+    nonce_digest.update(context);
+    let nonce_digest = nonce_digest.finalize();
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|_| PreparedContextError::ContextInvalid { detail: "AEAD_KEY" })?;
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(&nonce_digest[..12]),
+            Payload {
+                msg: &packed[32..],
+                aad: &context,
+            },
+        )
+        .map_err(|_| PreparedContextError::AuthenticationFailed)?;
+    if plaintext.len() > MAX_HTLC_BINARY_LAYER_BYTES {
+        return Err(PreparedContextError::OnionInvalid {
+            detail: "PLAINTEXT_SIZE",
+        });
+    }
+    Ok(plaintext)
 }
 
 /// X25519 + HKDF-SHA256 + AES-256-GCM counterpart of
@@ -187,45 +250,7 @@ pub fn decrypt_opaque_htlc_layer(
     if PublicKey::from(&private).as_bytes() != entity_public_key {
         return Err(PreparedContextError::KeypairMismatch);
     }
-    let packed = envelope.packed();
-    if packed.len() < 48 {
-        return Err(PreparedContextError::OnionInvalid { detail: "SIZE" });
-    }
-    let ephemeral_bytes: [u8; 32] =
-        packed[..32]
-            .try_into()
-            .map_err(|_| PreparedContextError::OnionInvalid {
-                detail: "EPHEMERAL",
-            })?;
-    let shared = private.diffie_hellman(&PublicKey::from(ephemeral_bytes));
-    let context = format!(
-        "{HTLC_OPAQUE_CIPHERTEXT_VERSION}:{}",
-        prefixed_hex(context_hash)
-    );
-    let context = context.as_bytes();
-    let key = derive_aead_key(shared.as_bytes(), context)?;
-    let mut nonce_material = Vec::with_capacity(32 + 32 + context.len());
-    nonce_material.extend_from_slice(&ephemeral_bytes);
-    nonce_material.extend_from_slice(entity_public_key);
-    nonce_material.extend_from_slice(context);
-    let nonce_digest = Sha256::digest(nonce_material);
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|_| PreparedContextError::ContextInvalid { detail: "AEAD_KEY" })?;
-    let plaintext = cipher
-        .decrypt(
-            Nonce::from_slice(&nonce_digest[..12]),
-            Payload {
-                msg: &packed[32..],
-                aad: context,
-            },
-        )
-        .map_err(|_| PreparedContextError::AuthenticationFailed)?;
-    if plaintext.len() > MAX_HTLC_BINARY_LAYER_BYTES {
-        return Err(PreparedContextError::OnionInvalid {
-            detail: "PLAINTEXT_SIZE",
-        });
-    }
-    Ok(plaintext)
+    decrypt_opaque_htlc_layer_with_private(envelope, entity_public_key, &private, context_hash)
 }
 
 struct Reader<'a> {
@@ -447,10 +472,10 @@ pub fn decrypt_htlc_materialize_inputs(
         .map(|input| {
             validate_materialize_input(&input)?;
             let context_hash = compute_htlc_envelope_context_hash(&input.binding)?;
-            let layer = match decrypt_opaque_htlc_layer(
+            let layer = match decrypt_opaque_htlc_layer_with_private(
                 &input.envelope,
                 entity_public_key,
-                entity_private_key,
+                &private,
                 &context_hash,
             ) {
                 Ok(plaintext) => match decode_onion_layer(&plaintext) {
@@ -579,31 +604,21 @@ pub fn materialize_decrypted_htlc_entries(
     inputs: Vec<DecryptedHtlcMaterializeInput>,
     env: &HtlcMaterializeEnvironment,
 ) -> Result<Vec<PreparedHtlcEntry>, PreparedContextError> {
-    let mut decorated = inputs
-        .into_iter()
-        .map(|input| {
-            let key = format!(
-                "{}:{}",
-                input.binding.account_frame_hash, input.binding.lock_id
-            );
-            (key, input)
-        })
-        .collect::<Vec<_>>();
-    decorated.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut output = Vec::<PreparedHtlcEntry>::with_capacity(decorated.len());
-    let mut previous_key: Option<String> = None;
-    for (key, input) in decorated {
+    let mut output = Vec::<PreparedHtlcEntry>::with_capacity(inputs.len());
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    for input in inputs {
+        let key = format!(
+            "{}:{}",
+            input.binding.account_frame_hash, input.binding.hashlock
+        );
         let entry = materialize_decrypted_one(input, env)?;
-        if previous_key.as_deref() == Some(key.as_str()) {
-            let previous = output
-                .last()
-                .ok_or(PreparedContextError::BindingConflict { key: key.clone() })?;
+        if let Some(previous) = seen.get(&key).and_then(|index| output.get(*index)) {
             if previous != &entry {
                 return Err(PreparedContextError::BindingConflict { key });
             }
             continue;
         }
-        previous_key = Some(key);
+        seen.insert(key, output.len());
         output.push(entry);
     }
     Ok(output)
@@ -644,8 +659,7 @@ mod tests {
             .expect("domain"),
             account_frame_hash: format!("0x{}", "77".repeat(32)),
             account_height: 1,
-            lock_id: format!("0x{}", "44".repeat(32)),
-            envelope_hash: "0x1e48740c3da2cc697f19ee3c72ec0ae2a4e1bfb57ab0dead24ad6c5534f5b2b8"
+            envelope_hash: "0x1b5fc4d2d3579f354e8fef129658b96b5e275d0dd623428a9357441811e787c1"
                 .to_string(),
             hashlock: format!("0x{}", "55".repeat(32)),
             token_id: 7,
@@ -660,7 +674,7 @@ mod tests {
         let binding = golden_binding();
         assert_eq!(
             prefixed_hex(&compute_htlc_envelope_context_hash(&binding).expect("context")),
-            "0x90ebf1c888746e8ecb0a7572a6b695f901a2ec0bf227e131f97c56553f00d83d",
+            "0x9b94710457f5228c8956ad0d46c62edb0f426cd27d5dfdbdb6729deacd762616",
         );
         let private_key =
             decode_hex::<32>("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
@@ -668,7 +682,7 @@ mod tests {
             decode_hex::<32>("0x07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c");
         let envelope = OpaqueHtlcCiphertext::parse(
             HTLC_OPAQUE_CIPHERTEXT_VERSION,
-            "ZLEBsdC+WocEvQePmJUAH8A+jp+VIvGI3RKNmEbUhGanXH41W7vcvi12F50b84riPUmDmGE7/CrmiJ/vubHZI9sKBN3d4dOWkWmpAHNtixC9R3cYLkr/2auDN17fXzydAauQ3khq4kn+cRqOgvKv",
+            "EyxEK+AQ+9V+cmAzKKp25x/MwVA6riGTJ9FNnJmT9HICUR2hh3m4QkbXs2jc1x2BebzxGNFx/fyl2TH6CABq/GdmvSQCiNm7Yv2wZ2m6s434RXwI687JlOPA7YbyXPh0v/B8QlM1OKEdSpTNKviT",
         )
         .expect("golden envelope");
         let plaintext = decrypt_opaque_htlc_layer(
@@ -730,7 +744,7 @@ mod tests {
             .into_iter()
             .map(|token_id| {
                 let mut binding = golden_binding();
-                binding.lock_id = format!("0x{:064x}", token_id);
+                binding.hashlock = format!("0x{:064x}", token_id);
                 binding.account_frame_hash = format!("0x{:064x}", token_id + 100);
                 binding.token_id = token_id;
                 binding.amount = BigInt::from(200);

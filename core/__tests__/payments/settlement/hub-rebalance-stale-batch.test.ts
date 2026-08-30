@@ -35,9 +35,7 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'H1', isHub: true, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   hubRebalanceConfig: {
     matchingStrategy: 'amount',

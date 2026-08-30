@@ -57,7 +57,10 @@ import {
   type RscoreProcessClient,
   type RscoreWireValue,
 } from './client';
-import { assertRscoreCheckpointCandidate } from './checkpoint/checkpoint-wire';
+import {
+  assertRscoreCheckpointCandidate,
+  decodeRscoreCheckpointChanges,
+} from './checkpoint/checkpoint-wire';
 import { decodeRscoreAccountRestoreRow } from './checkpoint/checkpoint-restore';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import type { AccountPeerInput, AccountReplica, AccountTx } from '../types/account';
@@ -139,6 +142,8 @@ type Session = {
   residentAccounts: Set<string>;
   /** Exact Entity state is installed beside the resident Account forest. */
   entityResident: boolean;
+  /** Fresh empty base returned by Rust; retained only until its first WAL commit. */
+  bootstrapCheckpoint: RscoreCheckpointChanges | null;
 };
 
 type OpenFrame = {
@@ -335,7 +340,7 @@ const openAuthoritySession = async (
 
   const { RscoreProcessClient } = await import('./client');
   const binaryPath = process.env['XLN_RSCORE_BINARY']
-    ?? new URL('../../rscore/target/release/xln-rscore', import.meta.url).pathname;
+    ?? new URL('../../rscore/target/release/xlnrs', import.meta.url).pathname;
   const client = new RscoreProcessClient(
     binaryPath,
     authoritySessionIdentityFor(String(env.runtimeId ?? ''), ownerEntityId),
@@ -390,6 +395,7 @@ const openAuthoritySession = async (
     ownerEntityId,
     residentAccounts: new Set(),
     entityResident: false,
+    bootstrapCheckpoint: null,
   };
 };
 
@@ -499,7 +505,14 @@ const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<S
       accountCount: accounts.size,
     });
   } else {
-    await session.client.bootstrapAccounts(0, []);
+    const loaded = await session.client.bootstrapAccounts(0, []);
+    if (!Array.isArray(loaded) || loaded.length !== 3 || loaded[2] === null) {
+      session.client.kill();
+      return halt('AUTHORITY_EMPTY_BOOTSTRAP_CHECKPOINT_MISSING', {
+        owner: ownerEntityId,
+      });
+    }
+    session.bootstrapCheckpoint = decodeRscoreCheckpointChanges(loaded[2]);
   }
   await bootstrapResidentEntity(env, session);
   authorityLog.error('authority.armed', {
@@ -589,7 +602,9 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       latest: null,
       acceptedAccountsRoot,
       candidateAccounts: new Set(session.residentAccounts),
-      checkpoints: new Map(),
+      checkpoints: session.bootstrapCheckpoint === null
+        ? new Map()
+        : new Map([[acceptedAccountsRoot, session.bootstrapCheckpoint]]),
       entityRound: null,
     } satisfies OpenFrame;
   });
@@ -841,12 +856,13 @@ export const runAuthorityCutoverEntityBatch = async (
     finalizedJHeight: number;
     inputs: readonly Readonly<{
       accountId: string;
-      input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+      input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'ack_frame' }>;
       peerBoardAuthority?: AuthorityCertifiedBoard;
       localBoardAuthority?: AuthorityCertifiedBoard;
       genesisPolicy?: Readonly<{
         expectedDomain: AccountReplica['state']['domain'];
         shadowPolicyRoot: string;
+        shadowPolicyRows: readonly (readonly [number, unknown])[];
         deltaTransformer: string;
         publicPinned: false;
       }>;
@@ -965,12 +981,13 @@ export const runAuthorityCutoverInboundBatch = async (
   clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
   inputs: readonly Readonly<{
     accountId: string;
-    input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+    input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'ack_frame' }>;
     peerBoardAuthority?: AuthorityCertifiedBoard;
     localBoardAuthority?: AuthorityCertifiedBoard;
     genesisPolicy?: Readonly<{
       expectedDomain: AccountReplica['state']['domain'];
       shadowPolicyRoot: string;
+      shadowPolicyRows: readonly (readonly [number, unknown])[];
       deltaTransformer: string;
       publicPinned: false;
     }>;
@@ -995,13 +1012,6 @@ export const runAuthorityCutoverOutboundBatch = async (
     admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
     propose: readonly string[];
     materialize: readonly string[];
-    failedHtlcRoutes: readonly Readonly<{
-      hashlock: string;
-      outboundAccountId: string;
-      outboundLockId: string;
-      inboundAccountId: string;
-      inboundLockId: string;
-    }>[];
     timestamp: number;
     jHeight: number;
     checkpointDue: boolean;
@@ -1029,13 +1039,6 @@ export const runAuthorityCutoverOutboundBatch = async (
     ]),
     propose: request.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
     materialize: request.materialize.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
-    failedHtlcRoutes: request.failedHtlcRoutes.map(route => [
-      hexToWireBytes(route.hashlock, 32, 'AUTHORITY_HASHLOCK'),
-      hexToWireBytes(route.outboundAccountId, 32, 'AUTHORITY_ACCOUNT'),
-      route.outboundLockId,
-      hexToWireBytes(route.inboundAccountId, 32, 'AUTHORITY_ACCOUNT'),
-      route.inboundLockId,
-    ]),
     postAccounts: true,
     checkpointDue: request.checkpointDue,
   });
@@ -1052,7 +1055,10 @@ export const runAuthorityCutoverOutboundBatch = async (
     assertRscoreCheckpointCandidate(wave.checkpoint, {
       revision: wave.revision,
       accountsRoot: wave.accountsRoot,
-      accountCount: accountsOf(env, owner).size,
+      // The Entity candidate has not been published into env.state yet.
+      // New inbound H0 accounts already exist in Rust and in this frame's
+      // membership set, while accountsOf(env) still names the parent forest.
+      accountCount: frame.candidateAccounts.size,
     });
     frame.checkpoints.set(checkpointRoot, wave.checkpoint);
   }
@@ -1396,6 +1402,9 @@ export const finalizeAuthorityFrameAfterWal = async (env: RuntimeReplica): Promi
       });
     }
     report.finalizedFrames += 1;
+    if (env.accountAuthorityCheckpointDue === true) {
+      candidate.session.bootstrapCheckpoint = null;
+    }
   }
   pending.delete(env);
   arrivalCursors.delete(env);

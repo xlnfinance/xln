@@ -1,4 +1,8 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import {
+  canonicalConsensusValuesEqual,
+  encodeCanonicalConsensusBytes,
+} from '../../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
 import { ethers } from 'ethers';
 
 import { signAccountFrame, verifyAccountSignature } from '../../../account/crypto';
@@ -80,9 +84,8 @@ const buildRegistrationEvidenceRawLogDigest = (
     | 'logIndex'
   >,
 ): string =>
-  ethers.keccak256(
-    ethers.toUtf8Bytes(
-      encodeCanonicalConsensusValue({
+  keccakBytesHash(
+      encodeCanonicalConsensusBytes({
         domain: 'xln.j-authority.raw-log.v1',
         emitter: address(value.emitter, 'EMITTER'),
         topics: value.topics.map((topic, index) => bytes32(topic, `TOPIC_${index}`)),
@@ -93,33 +96,27 @@ const buildRegistrationEvidenceRawLogDigest = (
         transactionIndex: safeInt(value.transactionIndex, 'TRANSACTION_INDEX'),
         logIndex: safeInt(value.logIndex, 'LOG_INDEX'),
       }),
-    ),
   );
 
 export const buildRegistrationEvidenceDigest = (evidence: CertifiedRegistrationEvidence): string =>
-  ethers.keccak256(
-    ethers.toUtf8Bytes(
-      encodeCanonicalConsensusValue({
+  keccakBytesHash(
+      encodeCanonicalConsensusBytes({
         domain: 'xln.j-authority.witness.v1',
         evidence: evidenceBody(evidence),
       }),
-    ),
   );
 
 export const computeRegistrationEvidenceHash = (evidence: CertifiedRegistrationEvidence): string =>
-  ethers.keccak256(
-    ethers.toUtf8Bytes(
-      encodeCanonicalConsensusValue({
+  keccakBytesHash(
+      encodeCanonicalConsensusBytes({
         domain: 'xln.j-authority.evidence.v1',
         evidence,
       }),
-    ),
   );
 
 export const computeRegistrationEvidenceClaimHash = (evidence: CertifiedRegistrationEvidence): string =>
-  ethers.keccak256(
-    ethers.toUtf8Bytes(
-      encodeCanonicalConsensusValue({
+  keccakBytesHash(
+      encodeCanonicalConsensusBytes({
         domain: 'xln.j-authority.receipt-claim.v1',
         version: evidence.version,
         source: evidence.source,
@@ -140,7 +137,6 @@ export const computeRegistrationEvidenceClaimHash = (evidence: CertifiedRegistra
         receiptProofNodes: evidence.receiptProofNodes,
         receiptLogIndex: evidence.receiptLogIndex,
       }),
-    ),
   );
 
 const jReplicaStackKey = (replica: JReplica): string | null => {
@@ -305,7 +301,7 @@ const assertRegistrationEvidenceEnvelope = (
   };
   for (const [field, value] of Object.entries(canonical)) {
     const actual = evidence[field as keyof CertifiedRegistrationEvidence];
-    if (encodeCanonicalConsensusValue(actual) !== encodeCanonicalConsensusValue(value)) {
+    if (!canonicalConsensusValuesEqual(actual, value)) {
       throw new Error(`J_AUTHORITY_NON_CANONICAL_FIELD:${field}`);
     }
   }
@@ -368,7 +364,7 @@ const assertReceiptContainsRawLog = async (evidence: CertifiedRegistrationEviden
   const receiptData = ethers.hexlify(rawLog[2] as Uint8Array).toLowerCase();
   if (
     receiptAddress !== evidence.emitter ||
-    encodeCanonicalConsensusValue(receiptTopics) !== encodeCanonicalConsensusValue(evidence.topics) ||
+    !canonicalConsensusValuesEqual(receiptTopics, evidence.topics) ||
     receiptData !== evidence.data.toLowerCase()
   ) {
     throw new Error(`J_AUTHORITY_RECEIPT_LOG_MISMATCH:${evidence.transactionHash}:${evidence.logIndex}`);

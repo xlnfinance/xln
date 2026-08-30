@@ -8,6 +8,30 @@ pub fn encode_account_envelope(value: &AccountEnvelope) -> AbiValue {
     tuple(vec![
         encode_canonical_value(&fields),
         tuple(value.mempool().iter().map(encode_canonical_value).collect()),
+        tuple(
+            value
+                .rebalance_shadow_policy_rows()
+                .into_iter()
+                .map(|(token_id, policy)| {
+                    tuple(vec![
+                        AbiValue::Integer(i128::from(token_id)),
+                        encode_canonical_value(&policy),
+                    ])
+                })
+                .collect(),
+        ),
+        tuple(
+            value
+                .rebalance_shadow_submitted_rows()
+                .into_iter()
+                .map(|(token_id, timestamp)| {
+                    tuple(vec![
+                        AbiValue::Integer(i128::from(token_id)),
+                        AbiValue::Integer(i128::from(timestamp)),
+                    ])
+                })
+                .collect(),
+        ),
     ])
 }
 

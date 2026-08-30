@@ -20,9 +20,9 @@ use crate::{
 
 use super::authority::{EntityAuthorityError, EntityFrameAuthority};
 use super::frame::{
-    CanonicalEntityTx, EntityFrameBody, EntityFrameError, EntityFrameEvent, HashToSign,
+    CanonicalEntityTx, EntityFrameDraft, EntityFrameError, EntityFrameEvent, HashToSign,
 };
-use super::j_prefix::{self, JPrefixError};
+use super::j_prefix::JPrefixError;
 use super::lineage::{
     CertifiedEntityFrameLink, EntityLineageError, build_certified_entity_frame_link,
 };
@@ -50,21 +50,34 @@ pub const ENTITY_OWNED_CONSENSUS_FIELDS: &[&str] = &[
     "timestamp",
     "entityCommandNonces",
     "reserves",
+    "externalWallet",
+    "outDebtsByToken",
+    "inDebtsByToken",
+    "entityEncryptionPublicKey",
+    "profile",
+    "jBatchState",
+    "entityProviderActionState",
+    "certifiedBoardState",
     "lastFinalizedJHeight",
-    "htlcRoutes",
-    "htlcFeesEarned",
-    "lockBook",
+    "jHistoryFinality",
+    "paybook",
     "crontabState",
     "hubRebalanceConfig",
+    "deferredAccountProposals",
+    "settlementContinuations",
+    "crossJurisdictionSwaps",
+    "crossJurisdictionAuthorizations",
+    "pendingCrossJurisdictionFillAcks",
+    "crossJurisdictionBookAdmissions",
     "orderbookExt",
+    "swapTradingPairs",
+    "lending",
     "config",
+    "proposals",
     "leaderState",
 ];
 const RETIRED_ENTITY_CONSENSUS_FIELDS: &[&str] =
     &["certifiedOutputSequences", "consumptionAccumulator"];
-const MAX_ENTITY_HTLC_NOTES: usize = 64_000;
-const MAX_ENTITY_HTLC_NOTE_LENGTH: usize = 256;
-
 /// Consensus data surrounding the resident financial slice.
 ///
 /// `sections` is the complete current manifest, including carried fields.
@@ -75,12 +88,10 @@ pub struct EntityConsensusState {
 }
 
 /// Live Entity replica metadata owned by the parent Runtime replica.
-/// Notes and the current certified head never enter `EntityState` roots.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ResidentEntityConsensusReplica {
     pub state: EntityConsensusState,
     pub certified_frame_head: Option<CertifiedEntityFrameLink>,
-    pub htlc_notes: EntityHtlcNoteIndex,
 }
 
 impl ResidentEntityConsensusReplica {
@@ -120,149 +131,6 @@ impl ResidentEntityConsensusReplica {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct EntityHtlcNoteIndex {
-    notes: BTreeMap<String, String>,
-}
-
-impl EntityHtlcNoteIndex {
-    pub fn from_notes(notes: BTreeMap<String, String>) -> Result<Self, EntityTransitionError> {
-        let mut index = Self::default();
-        for (key, description) in notes {
-            index.put(key, description)?;
-        }
-        Ok(index)
-    }
-
-    pub fn notes(&self) -> &BTreeMap<String, String> {
-        &self.notes
-    }
-
-    /// Attach then consume presentation-only text for a terminal Runtime event.
-    pub fn take_terminal(&mut self, event_name: &str, hashlock: &str) -> Option<String> {
-        let key = format!("hashlock:{hashlock}");
-        if matches!(event_name, "HtlcFailed" | "HtlcFinalized" | "HtlcReceived") {
-            self.notes.remove(&key)
-        } else {
-            self.notes.get(&key).cloned()
-        }
-    }
-
-    fn put(&mut self, key: String, description: String) -> Result<(), EntityTransitionError> {
-        let key_length = key.encode_utf16().count();
-        let description_length = description.encode_utf16().count();
-        if key_length > MAX_ENTITY_HTLC_NOTE_LENGTH
-            || description_length > MAX_ENTITY_HTLC_NOTE_LENGTH
-        {
-            return Err(EntityTransitionError::HtlcNoteLength {
-                key,
-                length: key_length.max(description_length),
-            });
-        }
-        match self.notes.get(&key) {
-            Some(existing) if existing != &description => {
-                return Err(EntityTransitionError::HtlcNoteConflict(key));
-            }
-            Some(_) => return Ok(()),
-            None if self.notes.len() >= MAX_ENTITY_HTLC_NOTES => {
-                return Err(EntityTransitionError::HtlcNoteLimit(
-                    self.notes.len().saturating_add(1),
-                ));
-            }
-            None => {}
-        }
-        self.notes.insert(key, description);
-        Ok(())
-    }
-
-    fn index_certified_frame(
-        &mut self,
-        txs: &[CanonicalEntityTx],
-        entity_context: &CanonicalValue,
-    ) -> Result<(), EntityTransitionError> {
-        for tx in txs {
-            self.index_tx(tx.kind.as_str(), &tx.data)?;
-        }
-        self.index_prepared_context(entity_context)
-    }
-
-    fn index_tx(&mut self, kind: &str, data: &CanonicalValue) -> Result<(), EntityTransitionError> {
-        if kind == "htlcPayment"
-            && let (Some(hashlock), Some(description)) = (
-                object_string(data, "hashlock"),
-                object_string(data, "description")
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty()),
-            )
-        {
-            self.put(format!("hashlock:{hashlock}"), description.to_string())?;
-        }
-        let nested = match kind {
-            "entityCommand" | "runtimeOutput" => {
-                object_field(data, "entityTxs").or_else(|| object_field(data, "txs"))
-            }
-            "propose" => object_field(data, "action")
-                .filter(|action| object_string(action, "type") == Some("entity_transaction"))
-                .and_then(|action| object_field(action, "data"))
-                .and_then(|value| object_field(value, "txs")),
-            _ => None,
-        };
-        if let Some(CanonicalValue::Array(txs)) = nested {
-            for tx in txs {
-                let kind = object_string(tx, "type")
-                    .ok_or(EntityTransitionError::HtlcNoteShape("NESTED_TYPE"))?;
-                let data = object_field(tx, "data")
-                    .ok_or(EntityTransitionError::HtlcNoteShape("NESTED_DATA"))?;
-                self.index_tx(kind, data)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn index_prepared_context(
-        &mut self,
-        entity_context: &CanonicalValue,
-    ) -> Result<(), EntityTransitionError> {
-        let entries =
-            object_field(entity_context, "htlc").and_then(|htlc| object_field(htlc, "entries"));
-        let Some(CanonicalValue::Array(entries)) = entries else {
-            return Ok(());
-        };
-        for entry in entries {
-            let binding = object_field(entry, "binding")
-                .ok_or(EntityTransitionError::HtlcNoteShape("BINDING"))?;
-            let outcome = object_field(entry, "outcome")
-                .ok_or(EntityTransitionError::HtlcNoteShape("OUTCOME"))?;
-            if object_string(outcome, "kind") != Some("final") {
-                continue;
-            }
-            let Some(description) = object_string(outcome, "description") else {
-                continue;
-            };
-            let hashlock = object_string(binding, "hashlock")
-                .ok_or(EntityTransitionError::HtlcNoteShape("HASHLOCK"))?;
-            self.put(format!("hashlock:{hashlock}"), description.to_string())?;
-        }
-        Ok(())
-    }
-}
-
-fn object_field<'a>(value: &'a CanonicalValue, field: &str) -> Option<&'a CanonicalValue> {
-    let CanonicalValue::Object(entries) = value else {
-        return None;
-    };
-    entries
-        .iter()
-        .find_map(|(key, value)| (key == field).then_some(value))
-}
-
-fn object_string<'a>(value: &'a CanonicalValue, field: &str) -> Option<&'a str> {
-    match object_field(value, field) {
-        Some(CanonicalValue::String(value)) => Some(value),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingNonMutatingWake {
     /// Position in the exact Entity output list. Wakes occupy a real outbox
@@ -275,20 +143,23 @@ pub struct EntityTransitionCertificationRequest<'a> {
     pub post_state: &'a EntityStateSlice,
     pub accounts_root: [u8; 32],
     pub account_count: usize,
-    pub txs: &'a [CanonicalEntityTx],
-    pub events: &'a [EntityFrameEvent],
+    pub txs: Vec<CanonicalEntityTx>,
+    pub events: Vec<EntityFrameEvent>,
     pub entity_context: &'a CanonicalValue,
-    /// True when the validator-local J-event watcher has a semantic event
-    /// pending beyond `post_state.last_finalized_j_height` that the base-claim
-    /// J-prefix path does not (yet) cover. The base claim always applies for a
-    /// registered Entity with no pending event; a pending event fails loudly
-    /// instead of certifying a stale or wrong prefix.
-    pub j_prefix_pending_local_event: bool,
+    /// Exact certificate selected and signed against the pre-transition J
+    /// anchor. Runtime also derived the frame's `j_event` transaction from the
+    /// same range value. Certification commits these bytes verbatim instead of
+    /// rebuilding a second J-history oracle from post-state.
+    pub j_prefix_certificate: Option<CanonicalValue>,
     pub post_authority: EntityFrameAuthority,
     pub secondary_hashes: Vec<HashToSign>,
     pub presigned_manifest: PresignedManifest,
     /// Raw Account outputs in their exact relative Entity-output order.
     pub account_outputs: Vec<xln_rscore_batch::AccountPeerInput>,
+    /// Already-authorized non-Account Entity outputs in exact transition
+    /// order. They occupy the leading output slots; Account Hankos are
+    /// attached only to the later Account outputs.
+    pub routed_entity_outputs: Vec<LocalEntityOutput>,
     pub non_mutating_wakes: Vec<PendingNonMutatingWake>,
 }
 
@@ -346,14 +217,6 @@ pub enum EntityTransitionError {
     OutputIndexOutOfRange { index: u64, count: usize },
     #[error("ENTITY_TRANSITION_OUTPUT_LAYOUT_INVALID")]
     OutputLayout,
-    #[error("ENTITY_HTLC_NOTE_INVALID_LENGTH:key={key}:length={length}")]
-    HtlcNoteLength { key: String, length: usize },
-    #[error("ENTITY_HTLC_NOTE_CONFLICT:{0}")]
-    HtlcNoteConflict(String),
-    #[error("ENTITY_HTLC_NOTE_LIMIT_EXCEEDED:{0}")]
-    HtlcNoteLimit(usize),
-    #[error("ENTITY_HTLC_NOTE_SHAPE_INVALID:{0}")]
-    HtlcNoteShape(&'static str),
 }
 
 fn authority_difference(left: &EntityFrameAuthority, right: &EntityFrameAuthority) -> String {
@@ -481,6 +344,8 @@ pub fn certify_entity_transition(
     let output_count = request
         .account_outputs
         .len()
+        .checked_add(request.routed_entity_outputs.len())
+        .ok_or(EntityTransitionError::OutputCountOverflow)?
         .checked_add(request.non_mutating_wakes.len())
         .ok_or(EntityTransitionError::OutputCountOverflow)?;
     let mut pending_wakes = request.non_mutating_wakes;
@@ -521,31 +386,24 @@ pub fn certify_entity_transition(
     let authority_root = request.post_authority.root()?;
     let roots_done = total_started.elapsed();
     let parent_hash = lineage_parent_hash(&consensus);
-    let j_prefix_certificate = j_prefix::build_required_j_prefix_certificate(
-        signer,
-        &request.post_authority,
-        request.post_state,
-        request.post_state.height,
-        parent_hash,
-        request.j_prefix_pending_local_event,
-    )?;
+    let j_prefix_certificate = request.j_prefix_certificate;
     let j_prefix_done = total_started.elapsed();
-    let body = EntityFrameBody {
-        parent_frame_hash: parent_hash,
+    let draft = EntityFrameDraft {
+        parent_frame_hash: parent_hash.to_string(),
         height: request.post_state.height,
         timestamp: request.post_state.timestamp,
         txs: request.txs,
         events: request.events,
-        entity_id: &request.post_state.entity_id,
-        state_root: &state_root,
-        authority_root: &authority_root,
-        entity_context: request.entity_context,
-        j_prefix_certificate: j_prefix_certificate.as_ref(),
+        entity_id: request.post_state.entity_id.clone(),
+        state_root: state_root.clone(),
+        authority_root: authority_root.clone(),
+        entity_context: request.entity_context.clone(),
+        j_prefix_certificate,
     };
-    let certified = certify_single_signer_entity_frame(
+    let mut certified = certify_single_signer_entity_frame(
         signer,
         &request.post_authority,
-        body,
+        draft,
         request.secondary_hashes,
         request.presigned_manifest,
     )?;
@@ -558,7 +416,10 @@ pub fn certify_entity_transition(
         .hashes_to_sign
         .iter()
         .cloned()
-        .zip(certified.manifest_hankos.iter().cloned())
+        // The signer result is owned by this transition. Move every Hanko
+        // into its exact output witness instead of cloning the full manifest
+        // immediately before the transient proof is compacted.
+        .zip(certified.manifest_hankos)
         .map(|(entry, hanko)| {
             (
                 entry.hash,
@@ -572,6 +433,9 @@ pub fn certify_entity_transition(
     let mut local_outputs = std::iter::repeat_with(|| None)
         .take(output_count)
         .collect::<Vec<Option<LocalEntityOutput>>>();
+    for (index, output) in request.routed_entity_outputs.into_iter().enumerate() {
+        local_outputs[index] = Some(output);
+    }
     for wake in pending_wakes {
         let output_index = usize::try_from(wake.output_index)
             .map_err(|_| EntityTransitionError::OutputCountOverflow)?;
@@ -593,6 +457,10 @@ pub fn certify_entity_transition(
         .collect::<Option<Vec<_>>>()
         .ok_or(EntityTransitionError::OutputLayout)?;
     let outputs_done = total_started.elapsed();
+    // Every secondary Hanko is now attached to its exact Account/output.
+    // Keep only the Entity-frame proof in durable lineage; replica-meta must
+    // never serialize the transient commit manifest again on the next frame.
+    certified.frame.compact_lineage_proof()?;
     // `certify_single_signer_entity_frame` just built and proof-checked this
     // frame from the exact post-state roots above. Recomputing its full hash
     // here encoded every Entity tx and the HTLC context a second time. Keep
@@ -602,9 +470,6 @@ pub fn certify_entity_transition(
         frame: certified.frame,
         post_authority: request.post_authority.clone(),
     };
-    consensus
-        .htlc_notes
-        .index_certified_frame(&link.frame.txs, &link.frame.entity_context)?;
     consensus.state.sections = sections;
     consensus.state.authority = request.post_authority;
     consensus.certified_frame_head = Some(link);
@@ -726,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn one_transition_advances_one_certified_head_and_notes() {
+    fn one_transition_advances_one_certified_head() {
         let entity = "0x1b7a1f31158ced332b779dd6b985ff695b22358470d1cbf6fac0c6db84478d08";
         let mut state = EntityStateSlice::empty(entity, 1_000);
         state.height = 1;
@@ -754,20 +619,20 @@ mod tests {
                     authority: authority.clone(),
                 },
                 certified_frame_head: None,
-                htlc_notes: EntityHtlcNoteIndex::default(),
             },
             EntityTransitionCertificationRequest {
                 post_state: &state,
                 accounts_root: [0_u8; 32],
                 account_count: 0,
-                txs: &[tx],
-                events: &[],
+                txs: vec![tx],
+                events: vec![],
                 entity_context: &context,
-                j_prefix_pending_local_event: false,
+                j_prefix_certificate: None,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
                 presigned_manifest: PresignedManifest::new(),
                 account_outputs: Vec::new(),
+                routed_entity_outputs: Vec::new(),
                 non_mutating_wakes: Vec::new(),
             },
         )
@@ -779,10 +644,6 @@ mod tests {
             .expect("head");
         assert_eq!(head.frame.height, 1);
         assert_eq!(head.frame.state_root, result.state_root);
-        assert_eq!(
-            result.consensus.htlc_notes.notes().get("hashlock:0xfeed"),
-            Some(&"coffee".to_string()),
-        );
     }
 
     #[test]
@@ -800,20 +661,20 @@ mod tests {
                     authority: authority.clone(),
                 },
                 certified_frame_head: None,
-                htlc_notes: EntityHtlcNoteIndex::default(),
             },
             EntityTransitionCertificationRequest {
                 post_state: &state,
                 accounts_root: [0_u8; 32],
                 account_count: 0,
-                txs: &[],
-                events: &[],
+                txs: vec![],
+                events: vec![],
                 entity_context: &context,
-                j_prefix_pending_local_event: false,
+                j_prefix_certificate: None,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
                 presigned_manifest: PresignedManifest::new(),
                 account_outputs: Vec::new(),
+                routed_entity_outputs: Vec::new(),
                 non_mutating_wakes: vec![PendingNonMutatingWake {
                     output_index: 0,
                     target_entity_id: entity.into(),

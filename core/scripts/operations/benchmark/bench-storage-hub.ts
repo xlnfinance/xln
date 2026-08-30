@@ -216,12 +216,10 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
   crontabState: state.crontabState,
   jBatchState: state.jBatchState,
   profile: state.profile,
-  htlcRoutes: state.htlcRoutes,
-  htlcFeesEarned: state.htlcFeesEarned,
+  paybook: state.paybook,
   outDebtsByToken: state.outDebtsByToken,
   inDebtsByToken: state.inDebtsByToken,
   orderbookExt: state.orderbookExt,
-  lockBook: state.lockBook,
   swapTradingPairs: state.swapTradingPairs,
   hubRebalanceConfig: state.hubRebalanceConfig,
 });
@@ -354,9 +352,8 @@ const paymentTxFor = (
 
 type OpenHtlcLockStats = {
   total: number;
-  entityLockBook: number;
+  paybookEntries: number;
   accountLocks: number;
-  htlcRoutes: number;
   samples: string[];
 };
 
@@ -395,21 +392,15 @@ const describeRouteLockRefs = (
 };
 
 const summarizeOpenHtlcLocks = (env: RuntimeReplica): OpenHtlcLockStats => {
-  const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
+  const stats: OpenHtlcLockStats = { total: 0, paybookEntries: 0, accountLocks: 0, samples: [] };
   for (const replica of env.state.eReplicas.values()) {
     const entityId = String(replica.state.entityId || '').slice(0, 10);
-    for (const lock of replica.state.lockBook?.values?.() ?? []) {
-      stats.entityLockBook += 1;
-      if (stats.samples.length < 8) stats.samples.push(`lockBook:${entityId}:${String(lock.lockId).slice(0, 12)}`);
-    }
-    for (const [hashlock, route] of replica.state.htlcRoutes?.entries?.() ?? []) {
-      stats.htlcRoutes += 1;
+    for (const [hashlock, route] of replica.state.paybook.entries) {
+      stats.paybookEntries += 1;
       if (stats.samples.length < 8) {
-        const refs = describeRouteLockRefs(replica.state, route.outboundEntity, route.outboundLockId);
+        const refs = describeRouteLockRefs(replica.state, route.outboundEntity, hashlock);
         stats.samples.push(
-          `route:${entityId}:${String(hashlock).slice(0, 12)}:` +
-            `in=${String(route.inboundLockId || '').slice(0, 12) || '-'}:` +
-            `out=${String(route.outboundLockId || '').slice(0, 12) || '-'}:${refs}`,
+          `paybook:${entityId}:${String(hashlock).slice(0, 12)}:${refs}`,
         );
       }
     }
@@ -420,7 +411,7 @@ const summarizeOpenHtlcLocks = (env: RuntimeReplica): OpenHtlcLockStats => {
       }
     }
   }
-  stats.total = stats.entityLockBook + stats.accountLocks + stats.htlcRoutes;
+  stats.total = stats.paybookEntries + stats.accountLocks;
   return stats;
 };
 
@@ -437,7 +428,7 @@ const drainHtlcSettlements = async (
     if (verbose || round === 0 || round === maxRounds - 1 || stats.total === 0) {
       console.log(
         `HTLC drain round ${round + 1}/${maxRounds}: total=${stats.total} ` +
-          `lockBook=${stats.entityLockBook} accounts=${stats.accountLocks} routes=${stats.htlcRoutes} ` +
+          `paybook=${stats.paybookEntries} accounts=${stats.accountLocks} ` +
           `samples=${stats.samples.join(' | ') || 'none'}`,
       );
     }
@@ -814,7 +805,7 @@ async function main() {
   if (paymentKind === 'htlc' && openHtlcLocks !== 0) {
     throw new Error(
       `HTLC_LOCKS_LEFT:${openHtlcLocks}:` +
-        `lockBook=${openHtlcStats.entityLockBook}:accounts=${openHtlcStats.accountLocks}:routes=${openHtlcStats.htlcRoutes}`,
+        `paybook=${openHtlcStats.paybookEntries}:accounts=${openHtlcStats.accountLocks}`,
     );
   }
 
@@ -1034,7 +1025,7 @@ async function main() {
           `liveEntities=${storageStats.liveEntityCount} liveAccounts=${storageStats.liveAccountCount} liveBooks=${storageStats.liveBookCount}`,
       );
       console.log(
-        `Storage bytes: live=${formatBytes(storageStats.liveBytes)} history=${formatBytes(storageStats.historyBytes)} ` +
+        `Storage bytes: live=${formatBytes(storageStats.liveBytes)} history=${formatBytes(storageStats.walBytes)} ` +
           `frames=${formatBytes(storageStats.frameBytes)} ` +
           `snapshots=${formatBytes(storageStats.snapshotBytes)} ` +
           `total=${formatBytes(storageStats.totalBytes)}`,

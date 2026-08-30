@@ -16,6 +16,7 @@ import { parseReceiptLogsToJEvents } from '../../../jurisdiction/adapter/j-event
 import { bindLocalJEventIngressSource } from '../../../jurisdiction/adapter/events/local-ingress-source';
 import { resolveApprovalReceiptLogIndex } from '../../../jurisdiction/adapter/rpc-public';
 import { createEmptyEnv } from '../../../runtime';
+import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 
@@ -76,13 +77,11 @@ const entityReplica = (
       jurisdiction: config,
     },
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: emptyEntityAccountMap(id),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     profile: { name: 'source-bound', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
   },
 } as EntityReplica);

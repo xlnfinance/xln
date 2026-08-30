@@ -11,7 +11,7 @@ export function asOfferId(value: string): OfferId {
   const normalized = String(value);
   if (
     normalized.length === 0
-    || normalized.length > LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT
+    || normalized.length > LIMITS.MAX_SWAP_OFFER_ID_LENGTH
     || normalized.includes(':')
   ) {
     throw new Error(`SWAP_OFFER_ID_INVALID:${normalized.length}`);

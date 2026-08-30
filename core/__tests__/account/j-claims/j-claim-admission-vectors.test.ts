@@ -127,14 +127,14 @@ class VectorHarness {
   private attachHankos(side: Side, input: AccountInput): AccountInput {
     const signed = structuredClone(input);
     const attach = (value: AccountInput): void => {
-      if (value.kind === 'ack' || value.kind === 'frame_ack') {
+      if (value.kind === 'ack' || value.kind === 'ack_frame') {
         value.ack.frameHanko = value.ack.frameHanko ?? this.requireWitness(side, value.ack.frameHash);
         if (value.ack.disputeHanko) {
           value.ack.disputeHanko.hanko = value.ack.disputeHanko.hanko
             ?? this.requireWitness(side, value.ack.disputeHanko.hash);
         }
       }
-      if (value.kind === 'frame' || value.kind === 'frame_ack') {
+      if (value.kind === 'frame' || value.kind === 'ack_frame') {
         value.proposal.frameHanko = value.proposal.frameHanko
           ?? this.requireWitness(side, value.proposal.frame.stateHash);
         if (value.proposal.disputeHanko) {

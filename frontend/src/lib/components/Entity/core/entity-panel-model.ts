@@ -235,9 +235,7 @@ function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEnti
     accounts,
     lastFinalizedJHeight: core.lastFinalizedJHeight,
     profile: core.profile,
-    htlcRoutes: core.htlcRoutes,
-    htlcFeesEarned: core.htlcFeesEarned,
-    lockBook: core.lockBook,
+    paybook: core.paybook,
     ...(core.entityCommandNonces === undefined ? {} : { entityCommandNonces: core.entityCommandNonces }),
     ...(core.prevFrameHash === undefined ? {} : { prevFrameHash: core.prevFrameHash }),
     ...(core.externalWallet === undefined ? {} : { externalWallet: core.externalWallet }),
@@ -265,7 +263,6 @@ function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEnti
     isProposer: activeEntity.core.isProposer === true,
     mempool: [],
     state,
-    ...(core.htlcNotes === undefined ? {} : { htlcNotes: core.htlcNotes }),
   };
 }
 

@@ -8,19 +8,19 @@ use xln_rscore_engine::{AccountDomain, DepositoryAddress, OpaqueHtlcCiphertext};
 use xln_rscore_entity_kernel::{
     BookPricePageEntrySnapshot, BookPricePageSnapshot, BookStateSnapshot, CrontabState,
     CrontabTaskMethod, CrontabTaskParam, CrontabTaskState, DeterministicContext,
-    EntityCommandNonceRecord, EntityCommandNonceState, EntityConsensusSection,
-    EntityKernelCommitments, EntityKernelOutput, EntityReferral, EntityStateSnapshot,
-    HtlcPreparedBinding, HtlcPreparedOutcome, HtlcRoute, HubProfile, LockBookEntry,
-    OrderbookConsensusMetadata, OrderbookStateSnapshot, PairDimensions, PairPolicy,
-    PreparedHtlcEntry, ResidentEntityResult, SameJOffer, ScheduledHook, ScheduledHookKind,
-    SpreadDistribution,
+    EntityCanonicalCollection, EntityCommandNonceRecord, EntityCommandNonceState,
+    EntityConsensusSection, EntityKernelCommitments, EntityKernelOutput, EntityReferral,
+    EntityStateSnapshot, HtlcPreparedBinding, HtlcPreparedOutcome, HubProfile,
+    OrderbookConsensusMetadata, OrderbookStateSnapshot, PairDimensions, PairPolicy, PaybookEntry,
+    PaybookState, PreparedHtlcEntry, ResidentEntityResult, ScheduledHook, ScheduledHookKind,
+    ScheduledHookMap, SpreadDistribution,
 };
 use xln_rscore_protocol::CanonicalNumber;
 
 use crate::ProcessError;
 use crate::wire_value::{
-    bigint, boolean, bounded_u32, exact, hex_fixed, js_number, optional_text, text, text_list,
-    tuple, unsigned,
+    bigint, boolean, bounded_u32, exact, fixed_bytes, hex_fixed, js_number, optional_text, text,
+    text_list, tuple, unsigned,
 };
 
 fn optional_bigint(value: &AbiValue, field: &'static str) -> Result<Option<BigInt>, ProcessError> {
@@ -60,13 +60,14 @@ fn map_insert<K: Ord, V>(
     Ok(())
 }
 
-fn decode_route(value: &AbiValue) -> Result<(String, HtlcRoute), ProcessError> {
-    let row = exact(tuple(value)?, 17, "entityHtlcRoute")?;
+fn decode_paybook_entry(value: &AbiValue) -> Result<(String, PaybookEntry), ProcessError> {
+    let row = exact(tuple(value)?, 16, "entityPaybookEntry")?;
     let hashlock = hex_fixed(&row[0], "hashlock", 32)?;
     Ok((
         hashlock.clone(),
-        HtlcRoute {
+        PaybookEntry {
             hashlock,
+            description: optional_text(&row[15])?,
             token_id: match &row[1] {
                 AbiValue::Nil => None,
                 value => Some(
@@ -78,36 +79,15 @@ fn decode_route(value: &AbiValue) -> Result<(String, HtlcRoute), ProcessError> {
             started_at_ms: optional_u64(&row[3], "startedAtMs")?,
             originated: boolean(&row[4], "originated")?,
             inbound_entity: optional_hex(&row[5], "inboundEntity", 32)?,
-            inbound_lock_id: optional_hex(&row[6], "inboundLockId", 32)?,
-            outbound_entity: optional_hex(&row[7], "outboundEntity", 32)?,
-            outbound_lock_id: optional_hex(&row[8], "outboundLockId", 32)?,
-            inbound_settled: boolean(&row[9], "inboundSettled")?,
-            outbound_settled: boolean(&row[10], "outboundSettled")?,
-            secret: optional_hex(&row[11], "secret", 32)?,
-            secret_ack_pending: boolean(&row[12], "secretAckPending")?,
-            secret_ack_started_at: optional_u64(&row[13], "secretAckStartedAt")?,
-            secret_ack_deadline_at: optional_u64(&row[14], "secretAckDeadlineAt")?,
-            pending_fee: optional_bigint(&row[15], "pendingFee")?,
-            created_timestamp: js_number(&row[16], "createdTimestamp")?,
-        },
-    ))
-}
-
-fn decode_lock(value: &AbiValue) -> Result<(String, LockBookEntry), ProcessError> {
-    let row = exact(tuple(value)?, 8, "entityLockBookEntry")?;
-    let lock_id = hex_fixed(&row[0], "lockId", 32)?;
-    Ok((
-        lock_id.clone(),
-        LockBookEntry {
-            lock_id,
-            account_id: hex_fixed(&row[1], "accountId", 32)?,
-            token_id: u16::try_from(bounded_u32(&row[2], "tokenId")?)
-                .map_err(|_| ProcessError::Expected("tokenId"))?,
-            amount: bigint(&row[3], "lockAmount")?,
-            hashlock: hex_fixed(&row[4], "hashlock", 32)?,
-            timelock: bigint(&row[5], "timelock")?,
-            outgoing: boolean(&row[6], "outgoing")?,
-            created_at: bigint(&row[7], "createdAt")?,
+            outbound_entity: optional_hex(&row[6], "outboundEntity", 32)?,
+            inbound_settled: boolean(&row[7], "inboundSettled")?,
+            outbound_settled: boolean(&row[8], "outboundSettled")?,
+            secret: optional_hex(&row[9], "secret", 32)?,
+            secret_ack_pending: boolean(&row[10], "secretAckPending")?,
+            secret_ack_started_at: optional_u64(&row[11], "secretAckStartedAt")?,
+            secret_ack_deadline_at: optional_u64(&row[12], "secretAckDeadlineAt")?,
+            pending_fee: optional_bigint(&row[13], "pendingFee")?,
+            created_timestamp: js_number(&row[14], "createdTimestamp")?,
         },
     ))
 }
@@ -173,45 +153,11 @@ fn decode_book(value: &AbiValue) -> Result<BookStateSnapshot, ProcessError> {
     })
 }
 
-fn decode_offer(value: &AbiValue) -> Result<((String, String), SameJOffer), ProcessError> {
-    let row = exact(tuple(value)?, 18, "sameJOffer")?;
-    let account_id = hex_fixed(&row[0], "offerAccountId", 32)?;
-    let offer_id = text(&row[1])?.to_string();
-    Ok((
-        (account_id, offer_id.clone()),
-        SameJOffer {
-            offer_id,
-            left_entity: hex_fixed(&row[2], "leftEntity", 32)?,
-            right_entity: hex_fixed(&row[3], "rightEntity", 32)?,
-            give_token_id: bounded_u32(&row[4], "giveTokenId")?,
-            give_token_decimals: bounded_u32(&row[5], "giveTokenDecimals")?,
-            give_amount: bigint(&row[6], "giveAmount")?,
-            want_token_id: bounded_u32(&row[7], "wantTokenId")?,
-            want_token_decimals: bounded_u32(&row[8], "wantTokenDecimals")?,
-            want_amount: bigint(&row[9], "wantAmount")?,
-            max_fee: bigint(&row[10], "maxFee")?,
-            min_net_receive: bigint(&row[11], "minNetReceive")?,
-            price_ticks: bigint(&row[12], "priceTicks")?,
-            time_in_force: match &row[13] {
-                AbiValue::Nil => None,
-                value => Some(
-                    u8::try_from(unsigned(value, "timeInForce")?)
-                        .map_err(|_| ProcessError::Expected("timeInForce"))?,
-                ),
-            },
-            maker_is_left: boolean(&row[14], "makerIsLeft")?,
-            created_height: js_number(&row[15], "createdHeight")?,
-            quantized_give: bigint(&row[16], "quantizedGive")?,
-            quantized_want: bigint(&row[17], "quantizedWant")?,
-        },
-    ))
-}
-
 fn decode_orderbook(value: &AbiValue) -> Result<Option<OrderbookStateSnapshot>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let row = exact(tuple(value)?, 6, "orderbookState")?;
+    let row = exact(tuple(value)?, 3, "orderbookState")?;
     let mut books = BTreeMap::new();
     for value in tuple(&row[0])? {
         let entry = exact(tuple(value)?, 2, "orderbookBook")?;
@@ -235,39 +181,26 @@ fn decode_orderbook(value: &AbiValue) -> Result<Option<OrderbookStateSnapshot>, 
             "orderbookPairDimensionsDuplicate",
         )?;
     }
-    let mut offers = BTreeMap::new();
-    for value in tuple(&row[2])? {
-        let (key, offer) = decode_offer(value)?;
-        map_insert(&mut offers, key, offer, "orderbookOfferDuplicate")?;
-    }
-    let mut resolving_offers = BTreeSet::new();
-    for value in tuple(&row[3])? {
-        let entry = exact(tuple(value)?, 2, "resolvingOffer")?;
-        let key = (
-            hex_fixed(&entry[0], "offerAccountId", 32)?,
-            text(&entry[1])?.to_string(),
-        );
-        if !resolving_offers.insert(key) {
-            return Err(ProcessError::Expected("resolvingOfferDuplicate"));
-        }
-    }
     let mut pair_by_order = BTreeMap::new();
-    for value in tuple(&row[4])? {
-        let entry = exact(tuple(value)?, 2, "pairByOrder")?;
-        map_insert(
-            &mut pair_by_order,
-            text(&entry[0])?.to_string(),
-            text(&entry[1])?.to_string(),
-            "pairByOrderDuplicate",
-        )?;
+    for (pair_id, book) in &books {
+        for page in book.bid_pages.iter().chain(&book.ask_pages) {
+            for order in page.slots.iter().flatten() {
+                map_insert(
+                    &mut pair_by_order,
+                    order.order_id.clone(),
+                    pair_id.clone(),
+                    "pairByOrderDuplicate",
+                )?;
+            }
+        }
     }
     Ok(Some(OrderbookStateSnapshot {
         books,
         pair_dimensions,
-        offers,
-        resolving_offers,
+        offers: BTreeMap::new(),
+        resolving_offers: BTreeSet::new(),
         pair_by_order,
-        max_orders_per_pair: usize::try_from(unsigned(&row[5], "maxOrdersPerPair")?)
+        max_orders_per_pair: usize::try_from(unsigned(&row[2], "maxOrdersPerPair")?)
             .map_err(|_| ProcessError::Expected("maxOrdersPerPair"))?,
     }))
 }
@@ -458,11 +391,37 @@ fn decode_crontab(value: &AbiValue) -> Result<Option<CrontabState>, ProcessError
         }
         map_insert(&mut hooks, id, scheduled, "crontabHookDuplicate")?;
     }
-    Ok(Some(CrontabState { tasks, hooks }))
+    Ok(Some(CrontabState {
+        tasks,
+        hooks: ScheduledHookMap::restore(hooks)?,
+    }))
+}
+
+fn decode_entity_collection(
+    value: &AbiValue,
+    field: &'static str,
+) -> Result<Option<EntityCanonicalCollection>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let entries = tuple(value)?
+        .iter()
+        .map(|value| {
+            let row = exact(tuple(value)?, 2, field)?;
+            let key = text(&row[0])?.to_string();
+            if key.is_empty() {
+                return Err(ProcessError::Expected(field));
+            }
+            Ok((key, crate::canonical::canonical_value(&row[1])?))
+        })
+        .collect::<Result<Vec<_>, ProcessError>>()?;
+    EntityCanonicalCollection::from_entries(entries)
+        .map(Some)
+        .map_err(ProcessError::from)
 }
 
 pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, ProcessError> {
-    let row = exact(tuple(value)?, 15, "entityStateSnapshot")?;
+    let row = exact(tuple(value)?, 30, "entityStateSnapshot")?;
     let mut reserves = BTreeMap::new();
     for value in tuple(&row[4])? {
         let entry = exact(tuple(value)?, 2, "entityReserve")?;
@@ -480,17 +439,13 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
             return Err(ProcessError::Expected("knownAccountDuplicate"));
         }
     }
-    let mut htlc_routes = BTreeMap::new();
-    for value in tuple(&row[6])? {
-        let (key, route) = decode_route(value)?;
-        map_insert(&mut htlc_routes, key, route, "htlcRouteDuplicate")?;
+    let paybook = exact(tuple(&row[6])?, 2, "entityPaybook")?;
+    let mut paybook_entries = BTreeMap::new();
+    for value in tuple(&paybook[0])? {
+        let (key, entry) = decode_paybook_entry(value)?;
+        map_insert(&mut paybook_entries, key, entry, "paybookEntryDuplicate")?;
     }
-    let mut lock_book = BTreeMap::new();
-    for value in tuple(&row[8])? {
-        let (key, lock) = decode_lock(value)?;
-        map_insert(&mut lock_book, key, lock, "lockBookDuplicate")?;
-    }
-    let expected_owned_sections = tuple(&row[11])?
+    let expected_owned_sections = tuple(&row[9])?
         .iter()
         .map(|value| {
             let entry = exact(tuple(value)?, 2, "entityOwnedSection")?;
@@ -500,25 +455,123 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
             })
         })
         .collect::<Result<_, ProcessError>>()?;
+    let profile = exact(tuple(&row[13])?, 7, "entityProfile")?;
+    let entity_kind = if matches!(profile[2], AbiValue::Nil) {
+        None
+    } else {
+        Some(text(&profile[2])?.to_string())
+    };
+    let sectors = text_list(&profile[3])?;
     Ok(EntityStateSnapshot {
         entity_id: hex_fixed(&row[0], "entityId", 32)?,
         height: js_number(&row[1], "entityHeight")?,
         timestamp: js_number(&row[2], "entityTimestamp")?,
-        entity_command_nonces: decode_entity_command_nonces(&row[13])?,
+        entity_command_nonces: decode_entity_command_nonces(&row[11])?,
+        proposals: xln_rscore_entity_kernel::decode_canonical_entity_proposals(
+            &crate::canonical::canonical_value(&row[20])?,
+        )?,
         last_finalized_j_height: js_number(&row[3], "lastFinalizedJHeight")?,
         reserves,
-        known_accounts,
-        htlc_routes,
-        htlc_fees_earned: bigint(&row[7], "htlcFeesEarned")?,
-        lock_book,
-        orderbook: decode_orderbook(&row[9])?,
-        orderbook_metadata: decode_metadata(&row[10])?,
-        expected_owned_sections,
-        crontab: decode_crontab(&row[12])?,
-        hub_rebalance_config: if matches!(row[14], AbiValue::Nil) {
+        out_debts_by_token: if matches!(row[24], AbiValue::Nil) {
             None
         } else {
-            Some(crate::canonical::canonical_value(&row[14])?)
+            Some(xln_rscore_entity_kernel::decode_canonical_debt_ledger(
+                &crate::canonical::canonical_value(&row[24])?,
+            )?)
+        },
+        in_debts_by_token: if matches!(row[25], AbiValue::Nil) {
+            None
+        } else {
+            Some(xln_rscore_entity_kernel::decode_canonical_debt_ledger(
+                &crate::canonical::canonical_value(&row[25])?,
+            )?)
+        },
+        external_wallet: if matches!(row[26], AbiValue::Nil) {
+            None
+        } else {
+            Some(xln_rscore_entity_kernel::decode_canonical_external_wallet(
+                &crate::canonical::canonical_value(&row[26])?,
+            )?)
+        },
+        deferred_account_proposals: decode_entity_collection(&row[27], "deferredAccountProposals")?,
+        settlement_continuations: decode_entity_collection(&row[28], "settlementContinuations")?,
+        entity_encryption_public_key: fixed_bytes(&row[29], "entityEncryptionPublicKey")?,
+        profile: xln_rscore_entity_kernel::EntityProfile {
+            name: text(&profile[0])?.to_string(),
+            is_hub: boolean(&profile[1], "entityProfileIsHub")?,
+            entity_kind,
+            sectors,
+            avatar: text(&profile[4])?.to_string(),
+            bio: text(&profile[5])?.to_string(),
+            website: text(&profile[6])?.to_string(),
+        },
+        j_batch_state: if matches!(row[14], AbiValue::Nil) {
+            None
+        } else {
+            Some(xln_rscore_entity_kernel::decode_canonical_j_batch_state(
+                &crate::canonical::canonical_value(&row[14])?,
+            )?)
+        },
+        entity_provider_action_state: if matches!(row[21], AbiValue::Nil) {
+            None
+        } else {
+            Some(
+                xln_rscore_entity_kernel::decode_canonical_entity_provider_action_state(
+                    &crate::canonical::canonical_value(&row[21])?,
+                )?,
+            )
+        },
+        certified_board_state: if matches!(row[23], AbiValue::Nil) {
+            None
+        } else {
+            Some(
+                xln_rscore_entity_kernel::decode_canonical_certified_board_state(
+                    &crate::canonical::canonical_value(&row[23])?,
+                )?,
+            )
+        },
+        swap_trading_pairs: if matches!(row[22], AbiValue::Nil) {
+            None
+        } else {
+            Some(
+                xln_rscore_entity_kernel::decode_canonical_swap_trading_pairs(
+                    &crate::canonical::canonical_value(&row[22])?,
+                )?,
+            )
+        },
+        lending: if matches!(row[15], AbiValue::Nil) {
+            None
+        } else {
+            Some(xln_rscore_entity_kernel::decode_canonical_lending_state(
+                &crate::canonical::canonical_value(&row[15])?,
+            )?)
+        },
+        cross_jurisdiction_swaps: decode_entity_collection(&row[16], "crossJurisdictionSwaps")?,
+        cross_jurisdiction_authorizations: decode_entity_collection(
+            &row[17],
+            "crossJurisdictionAuthorizations",
+        )?,
+        pending_cross_jurisdiction_fill_acks: decode_entity_collection(
+            &row[18],
+            "pendingCrossJurisdictionFillAcks",
+        )?,
+        cross_jurisdiction_book_admissions: decode_entity_collection(
+            &row[19],
+            "crossJurisdictionBookAdmissions",
+        )?,
+        known_accounts,
+        paybook: PaybookState::from_entries(
+            paybook_entries.into_values(),
+            bigint(&paybook[1], "paybookFeesEarned")?,
+        )?,
+        orderbook: decode_orderbook(&row[7])?,
+        orderbook_metadata: decode_metadata(&row[8])?,
+        expected_owned_sections,
+        crontab: decode_crontab(&row[10])?,
+        hub_rebalance_config: if matches!(row[12], AbiValue::Nil) {
+            None
+        } else {
+            Some(crate::canonical::canonical_value(&row[12])?)
         },
         // This control-plane ABI row does not carry the jHistoryFinality
         // anchor; only the checkpoint/WAL restore path
@@ -575,10 +628,10 @@ fn decode_prepared_htlc(
     value: &AbiValue,
 ) -> Result<((String, String), PreparedHtlcEntry), ProcessError> {
     let row = exact(tuple(value)?, 2, "preparedHtlc")?;
-    let binding = exact(tuple(&row[0])?, 12, "preparedHtlcBinding")?;
+    let binding = exact(tuple(&row[0])?, 11, "preparedHtlcBinding")?;
     let domain = exact(tuple(&binding[2])?, 2, "preparedHtlcDomain")?;
     let account_frame_hash = hex_fixed(&binding[3], "accountFrameHash", 32)?;
-    let lock_id = hex_fixed(&binding[5], "lockId", 32)?;
+    let hashlock = hex_fixed(&binding[6], "hashlock", 32)?;
     let binding = HtlcPreparedBinding {
         from_entity_id: hex_fixed(&binding[0], "fromEntityId", 32)?,
         to_entity_id: hex_fixed(&binding[1], "toEntityId", 32)?,
@@ -588,14 +641,13 @@ fn decode_prepared_htlc(
         )?,
         account_frame_hash: account_frame_hash.clone(),
         account_height: js_number(&binding[4], "accountHeight")?,
-        lock_id: lock_id.clone(),
-        envelope_hash: hex_fixed(&binding[6], "envelopeHash", 32)?,
-        hashlock: hex_fixed(&binding[7], "hashlock", 32)?,
-        token_id: u16::try_from(bounded_u32(&binding[8], "tokenId")?)
+        envelope_hash: hex_fixed(&binding[5], "envelopeHash", 32)?,
+        hashlock: hashlock.clone(),
+        token_id: u16::try_from(bounded_u32(&binding[7], "tokenId")?)
             .map_err(|_| ProcessError::Expected("tokenId"))?,
-        amount: bigint(&binding[9], "amount")?,
-        timelock: bigint(&binding[10], "timelock")?,
-        reveal_before_height: js_number(&binding[11], "revealBeforeHeight")?,
+        amount: bigint(&binding[8], "amount")?,
+        timelock: bigint(&binding[9], "timelock")?,
+        reveal_before_height: js_number(&binding[10], "revealBeforeHeight")?,
     };
     let outcome = tuple(&row[1])?;
     let tag = outcome
@@ -635,7 +687,7 @@ fn decode_prepared_htlc(
         }
     };
     Ok((
-        (account_frame_hash, lock_id),
+        (account_frame_hash, hashlock),
         PreparedHtlcEntry { binding, outcome },
     ))
 }
@@ -692,7 +744,6 @@ mod prepared_context_wire_tests {
             ]),
             AbiValue::Bytes(vec![0x44; 32]),
             AbiValue::Integer(1),
-            AbiValue::Bytes(vec![0x55; 32]),
             AbiValue::Bytes(vec![0x66; 32]),
             AbiValue::Bytes(vec![0x77; 32]),
             AbiValue::Integer(7),
@@ -865,12 +916,14 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             hashlock,
             lock_id,
             reason,
+            description,
         } => vec![
             AbiValue::Integer(1),
             AbiValue::Bytes(fixed_hex_bytes(entity_id, 32, "entityId")?),
             AbiValue::Bytes(fixed_hex_bytes(hashlock, 32, "hashlock")?),
             optional_hex_bytes(lock_id.as_ref(), "lockId")?,
             AbiValue::Text(reason.clone()),
+            description.clone().map_or(AbiValue::Nil, AbiValue::Text),
         ],
         EntityKernelOutput::HtlcReceived {
             entity_id,
@@ -880,6 +933,7 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             lock_id,
             token_id,
             amount,
+            description,
             started_at_ms,
             jurisdiction_id,
             received_at_ms,
@@ -892,6 +946,7 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             AbiValue::Bytes(fixed_hex_bytes(lock_id, 32, "lockId")?),
             token_id.map_or(AbiValue::Nil, |value| AbiValue::Integer(i128::from(value))),
             optional_bigint_value(amount.as_ref()),
+            description.clone().map_or(AbiValue::Nil, AbiValue::Text),
             optional_integer(*started_at_ms),
             jurisdiction_id
                 .clone()
@@ -907,6 +962,7 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             lock_id,
             token_id,
             amount,
+            description,
             started_at_ms,
             jurisdiction_id,
             finalized_at_ms,
@@ -920,6 +976,7 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             optional_hex_bytes(lock_id.as_ref(), "lockId")?,
             token_id.map_or(AbiValue::Nil, |value| AbiValue::Integer(i128::from(value))),
             optional_bigint_value(amount.as_ref()),
+            description.clone().map_or(AbiValue::Nil, AbiValue::Text),
             optional_integer(*started_at_ms),
             jurisdiction_id
                 .clone()

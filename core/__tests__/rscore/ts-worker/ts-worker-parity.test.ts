@@ -4,6 +4,7 @@ import type { AccountConsensusContext } from '../../../account/consensus/context
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import { projectPortableAccountDoc } from '../../../storage/read/projections';
@@ -11,11 +12,7 @@ import { makeAccount } from '../../helpers/cross-j';
 import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { TsAccountWorkerCoordinator } from '../../../rscore/ts-worker';
-import {
-  computeTsAccountLogicalShardRoot,
-  tsAccountLogicalShard,
-  TsAccountShardRootTree,
-} from '../../../rscore/ts-worker/sharding';
+import { tsAccountLogicalShard } from '../../../rscore/ts-worker/sharding';
 import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../rscore/ts-worker/worker-state';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
@@ -124,17 +121,20 @@ const paymentTx = (accountId: string, amount: bigint): AccountTx => ({
   },
 });
 
-const htlcLockTx = (lockIndex: number): AccountTx => ({
-  type: 'htlc_lock',
-  data: {
-    lockId: `0x${String(lockIndex).padStart(2, '0').repeat(32)}`,
-    hashlock: `0x${'ab'.repeat(32)}`,
-    timelock: 60_000n,
-    revealBeforeHeight: 100,
-    amount: 1n,
-    tokenId: 1,
-  },
-});
+const htlcLockTx = (lockIndex: number): AccountTx => {
+  const hashlock = `0x${String(lockIndex).padStart(2, '0').repeat(32)}`;
+  return {
+    type: 'htlc_lock',
+    data: {
+      lockId: hashlock,
+      hashlock,
+      timelock: 60_000n,
+      revealBeforeHeight: 100,
+      amount: 1n,
+      tokenId: 1,
+    },
+  };
+};
 
 /** Same-J resting offer, mirroring the canonical swap authorization fixture. */
 const swapOfferTx = (offerId: string): AccountTx => ({
@@ -185,7 +185,7 @@ const inboundDisputeInput = async (accountId: string, index: number): Promise<Ac
 type EffectRecord = Readonly<{ phase: string; order: number; accountId: string; result: unknown }>;
 
 type SequentialOutcome = Readonly<{
-  shadowRoot: string;
+  accountsRoot: string;
   inboundEffects: readonly EffectRecord[];
   outboundEffects: readonly EffectRecord[];
 }>;
@@ -245,22 +245,12 @@ const runSequential = async (
       result: await proposeAccountFrame(context, account, 1_000, 0),
     });
   }
-  const shardLeaves = new Map<number, Map<string, string>>();
-  for (const [accountId, account] of accounts) {
-    const shardId = tsAccountLogicalShard(accountId);
-    const leaves = shardLeaves.get(shardId) ?? new Map<string, string>();
-    leaves.set(accountId, computeEntityAccountValueHash(account));
-    shardLeaves.set(shardId, leaves);
-  }
-  const tree = new TsAccountShardRootTree();
-  tree.update([...shardLeaves].map(([shardId, leaves]) => ({
-    shardId,
-    root: computeTsAccountLogicalShardRoot(
-      shardId,
-      [...leaves].map(([accountId, valueHash]) => ({ accountId, valueHash })),
-    ),
-  })));
-  return { shadowRoot: tree.root, inboundEffects, outboundEffects };
+  const accountsRoot = PersistentEntityAccountMap.fromEntries(
+    accounts,
+    OWNER,
+    computeEntityAccountValueHash,
+  ).rootHash();
+  return { accountsRoot, inboundEffects, outboundEffects };
 };
 
 const runCoordinator = async (
@@ -282,27 +272,27 @@ const runCoordinator = async (
     jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
   });
   const inbound = await coordinator.applyAccountInputs({
-      frameId: 'parity-frame-1',
-      entityTimestamp: 1_000,
-      finalizedJHeight: 0,
-      inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
-    });
-    if (inbound.checkpointChanges !== undefined) {
-      throw new Error('PARITY_INBOUND_CHECKPOINT_LEAKED');
-    }
-    const outbound = await coordinator.proposeAccountFrames({
-      frameId: 'parity-frame-1',
-      timestamp: 1_000,
-      jHeight: 0,
-      txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
-      proposalAccountIds: ids,
-      checkpointDue: false,
-    });
-    // Normal frames must not return Account replicas: only ordered effects,
-    // changed shard subroots, and metrics.
-    if (outbound.checkpointChanges !== undefined) {
-      throw new Error('PARITY_CHECKPOINT_LEAKED_ON_NORMAL_FRAME');
-    }
+    frameId: 'parity-frame-1',
+    entityTimestamp: 1_000,
+    finalizedJHeight: 0,
+    inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
+  });
+  if (inbound.checkpointChanges !== undefined) {
+    throw new Error('PARITY_INBOUND_CHECKPOINT_LEAKED');
+  }
+  const outbound = await coordinator.proposeAccountFrames({
+    frameId: 'parity-frame-1',
+    timestamp: 1_000,
+    jHeight: 0,
+    txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
+    proposalAccountIds: ids,
+    checkpointDue: false,
+  });
+  // Normal frames must not return Account replicas: only ordered effects,
+  // changed shard subroots, and metrics.
+  if (outbound.checkpointChanges !== undefined) {
+    throw new Error('PARITY_CHECKPOINT_LEAKED_ON_NORMAL_FRAME');
+  }
   return { inbound, outbound };
 };
 
@@ -327,6 +317,46 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     if (inboundInputs.length === 0) inboundInputs = await Promise.all(inboundAccountIds.map(inboundDisputeInput));
     return inboundInputs;
   };
+
+  // Run fail-stop before fixture signing starts crypto workers. Successful
+  // pools intentionally live until process exit because terminating a
+  // completed Worker crashes Bun 1.4 on macOS.
+  test('worker failure is fail-stop and cannot publish a partial root', async () => {
+    const validId = `0x000${'1'.repeat(61)}`;
+    const missingId = `0x001${'e'.repeat(61)}`;
+    const coordinator = await TsAccountWorkerCoordinator.create({
+      ownerEntityId: OWNER,
+      workerCount: 2,
+      logicalShardToWorker: Array.from({ length: 4096 }, (_, shardId) => shardId % 2),
+      accounts: new Map([[validId, parityAccount(validId)]]),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    const initialRoot = coordinator.accountsRoot;
+    await coordinator.applyAccountInputs({
+      frameId: 'fail-stop-frame',
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      inputs: [],
+    });
+    await expect(coordinator.proposeAccountFrames({
+      frameId: 'fail-stop-frame',
+      timestamp: 1_000,
+      jHeight: 0,
+      txs: [
+        { accountId: validId, txs: [paymentTx(validId, 1n)] },
+        { accountId: missingId, txs: [paymentTx(missingId, 1n)] },
+      ],
+      proposalAccountIds: [validId],
+      checkpointDue: false,
+    })).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+    expect(coordinator.accountsRoot).toBe(initialRoot);
+    await expect(coordinator.applyAccountInputs({
+      frameId: 'after-fatal',
+      entityTimestamp: 2_000,
+      finalizedJHeight: 0,
+      inputs: [],
+    })).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
+  });
 
   test('fixture mixes inbound peers, payments, HTLC locks, and same-J swap offers', async () => {
     await fixtureInboundInputs();
@@ -382,9 +412,77 @@ describe('TS Account worker engine parity with canonical sequential transitions'
         .toEqual(Array.from({ length: INBOUND_COUNT }, (_, order) => order));
       expect(digest(inbound.effects)).toBe(digest(baseline.inboundEffects));
       expect(digest(outbound.effects)).toBe(digest(baseline.outboundEffects));
-      expect(outbound.shadowAccountsRoot).toBe(baseline.shadowRoot);
+      expect(outbound.accountsRoot).toBe(baseline.accountsRoot);
     });
   }
+
+  test('multiple Accounts in one shard retain dense input order', async () => {
+    const sameShardIds = [
+      `0xabc${'f'.repeat(61)}`,
+      `0xabc${'0'.repeat(61)}`,
+      `0xabc${'8'.repeat(61)}`,
+    ];
+    expect(new Set(sameShardIds.map(tsAccountLogicalShard))).toEqual(new Set([0xabc]));
+    const sameShardTxs = sameShardIds.map((accountId, index) => [
+      paymentTx(accountId, BigInt(index + 1)),
+    ]);
+    const baseline = await runSequential(sameShardIds, sameShardTxs, [], []);
+    const { inbound, outbound } = await runCoordinator(sameShardIds, sameShardTxs, [], 2);
+    expect(inbound.effects).toEqual([]);
+    expect(outbound.effects.map(effect => effect.accountId)).toEqual([
+      ...sameShardIds,
+      ...sameShardIds,
+    ]);
+    expect(digest(outbound.effects)).toBe(digest(baseline.outboundEffects));
+    expect(outbound.accountsRoot).toBe(baseline.accountsRoot);
+  });
+
+  test('one hot shard plus many cold shards matches w1 and w8', async () => {
+    const hotIds = Array.from({ length: 32 }, (_, index) =>
+      `0x777${index.toString(16).padStart(61, '0')}`);
+    const coldIds = syntheticAccountIds(64).map((accountId, index) =>
+      `0x${((index * 61) % 4096).toString(16).padStart(3, '0')}${accountId.slice(5)}`);
+    const mixedIds = [...hotIds, ...coldIds];
+    expect(mixedIds.filter(accountId => tsAccountLogicalShard(accountId) === 0x777)).toHaveLength(32);
+    const mixedTxs = mixedIds.map(accountId => [paymentTx(accountId, 1n)]);
+    const w1 = await runCoordinator(mixedIds, mixedTxs, [], 1);
+    const w8 = await runCoordinator(mixedIds, mixedTxs, [], 8);
+    expect(w8.outbound.accountsRoot).toBe(w1.outbound.accountsRoot);
+    expect(digest(w8.outbound.effects)).toBe(digest(w1.outbound.effects));
+  });
+
+  test('exact duplicate inbound delivery replays without changing the root', async () => {
+    const input = (await fixtureInboundInputs())[0];
+    if (!input) throw new Error('PARITY_DUPLICATE_INPUT_MISSING');
+    const accountId = input.fromEntityId;
+    const coordinator = await TsAccountWorkerCoordinator.create({
+      ownerEntityId: OWNER,
+      workerCount: 4,
+      logicalShardToWorker: Array.from({ length: 4096 }, (_, shardId) => shardId % 4),
+      accounts: new Map([[accountId, parityAccount(accountId, true)]]),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    const first = await coordinator.applyAccountInputs({
+      frameId: 'duplicate-frame-1', entityTimestamp: 1_000, finalizedJHeight: 0,
+      inputs: [{ accountId, input }],
+    });
+    await coordinator.proposeAccountFrames({
+      frameId: 'duplicate-frame-1', timestamp: 1_000, jHeight: 0,
+      txs: [], proposalAccountIds: [], checkpointDue: false,
+    });
+    const firstRoot = coordinator.accountsRoot;
+    const second = await coordinator.applyAccountInputs({
+      frameId: 'duplicate-frame-2', entityTimestamp: 2_000, finalizedJHeight: 0,
+      inputs: [{ accountId, input }],
+    });
+    await coordinator.proposeAccountFrames({
+      frameId: 'duplicate-frame-2', timestamp: 2_000, jHeight: 0,
+      txs: [], proposalAccountIds: [], checkpointDue: false,
+    });
+    expect(first.effects).toHaveLength(1);
+    expect(second.effects).toHaveLength(1);
+    expect(coordinator.accountsRoot).toBe(firstRoot);
+  });
 
   test('Account documents cross IPC only at the configured checkpoint cadence', async () => {
     const accounts = new Map(ids.map(accountId => [
@@ -399,46 +497,46 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     await coordinator.applyAccountInputs({
-        frameId: 'parity-checkpoint-1',
-        entityTimestamp: 1_000,
-        finalizedJHeight: 0,
-        inputs: [],
-      });
-      const normal = await coordinator.proposeAccountFrames({
-        frameId: 'parity-checkpoint-1',
-        timestamp: 1_000,
-        jHeight: 0,
-        txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
-        proposalAccountIds: ids,
-        checkpointDue: false,
-      });
-      expect(normal.checkpointChanges).toBeUndefined();
-      const encodedEffects = encodeCanonicalConsensusBytes(normal.effects);
-      // Returning the resident replicas would cost at least one portable
-      // document per Account per frame; the actual effects batch is a small
-      // fraction of that, proving replicas are not shipped back per frame.
-      const portableDocsBytes = ids.reduce((sum, accountId) =>
-        sum + encodeCanonicalConsensusBytes(
-          projectPortableAccountDoc(accounts.get(accountId) as AccountReplica),
-        ).byteLength, 0);
-      expect(encodedEffects.byteLength).toBeLessThan(portableDocsBytes);
+      frameId: 'parity-checkpoint-1',
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      inputs: [],
+    });
+    const normal = await coordinator.proposeAccountFrames({
+      frameId: 'parity-checkpoint-1',
+      timestamp: 1_000,
+      jHeight: 0,
+      txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
+      proposalAccountIds: ids,
+      checkpointDue: false,
+    });
+    expect(normal.checkpointChanges).toBeUndefined();
+    const encodedEffects = encodeCanonicalConsensusBytes(normal.effects);
+    // Returning the resident replicas would cost at least one portable
+    // document per Account per frame; the actual effects batch is a small
+    // fraction of that, proving replicas are not shipped back per frame.
+    const portableDocsBytes = ids.reduce((sum, accountId) =>
+      sum + encodeCanonicalConsensusBytes(
+        projectPortableAccountDoc(accounts.get(accountId) as AccountReplica),
+      ).byteLength, 0);
+    expect(encodedEffects.byteLength).toBeLessThan(portableDocsBytes);
 
-      await coordinator.applyAccountInputs({
-        frameId: 'parity-checkpoint-2',
-        entityTimestamp: 2_000,
-        finalizedJHeight: 0,
-        inputs: [],
-      });
-      const checkpoint = await coordinator.proposeAccountFrames({
-        frameId: 'parity-checkpoint-2',
-        timestamp: 2_000,
-        jHeight: 0,
-        txs: [],
-        proposalAccountIds: [],
-        checkpointDue: true,
-      });
-      expect(checkpoint.checkpointChanges?.accounts).toHaveLength(COUNT);
-    expect(checkpoint.shadowAccountsRoot).toBe(normal.shadowAccountsRoot);
+    await coordinator.applyAccountInputs({
+      frameId: 'parity-checkpoint-2',
+      entityTimestamp: 2_000,
+      finalizedJHeight: 0,
+      inputs: [],
+    });
+    const checkpoint = await coordinator.proposeAccountFrames({
+      frameId: 'parity-checkpoint-2',
+      timestamp: 2_000,
+      jHeight: 0,
+      txs: [],
+      proposalAccountIds: [],
+      checkpointDue: true,
+    });
+    expect(checkpoint.checkpointChanges?.accounts).toHaveLength(COUNT);
+    expect(checkpoint.accountsRoot).toBe(normal.accountsRoot);
   });
 });
 

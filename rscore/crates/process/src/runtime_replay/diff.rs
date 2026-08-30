@@ -166,16 +166,37 @@ fn account_commit_value(commit: &AccountCommitEvidence) -> Value {
 fn commitment_value(commitments: &RuntimeDurableCommitments) -> Value {
     Value::Object(Map::from_iter([
         (
-            "accountsRoot".into(),
-            Value::String(hex_digest(&commitments.accounts_root)),
-        ),
-        (
-            "entityStateRoot".into(),
-            Value::String(hex_digest(&commitments.entity_state_root)),
-        ),
-        (
-            "entityAuthorityRoot".into(),
-            Value::String(hex_digest(&commitments.entity_authority_root)),
+            "entities".into(),
+            Value::Array(
+                commitments
+                    .entities
+                    .iter()
+                    .map(|entity| {
+                        Value::Object(Map::from_iter([
+                            (
+                                "entityId".into(),
+                                Value::String(hex_digest(&entity.entity_id)),
+                            ),
+                            (
+                                "certifiedFrameHash".into(),
+                                Value::String(hex_digest(&entity.certified_frame_hash)),
+                            ),
+                            (
+                                "accountsRoot".into(),
+                                Value::String(hex_digest(&entity.accounts_root)),
+                            ),
+                            (
+                                "entityStateRoot".into(),
+                                Value::String(hex_digest(&entity.state_root)),
+                            ),
+                            (
+                                "entityAuthorityRoot".into(),
+                                Value::String(hex_digest(&entity.authority_root)),
+                            ),
+                        ]))
+                    })
+                    .collect(),
+            ),
         ),
         (
             "entityEffectCount".into(),

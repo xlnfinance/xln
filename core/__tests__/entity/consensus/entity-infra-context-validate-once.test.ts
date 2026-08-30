@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateEntityInfraContext } from '../../../entity/consensus/frame/infra-context-validation';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const makeContext = (): EntityInfraContext => ({
@@ -21,7 +21,7 @@ describe('Entity infra context in-process validate-once', () => {
   test('a decoded context has no symbol keys and hashes as Entity protocol bytes', () => {
     const decoded = validateEntityInfraContext(makeContext());
     expect(Object.getOwnPropertySymbols(decoded)).toEqual([]);
-    expect(() => encodeCanonicalConsensusValue(decoded)).not.toThrow();
+    expect(() => encodeCanonicalConsensusBytes(decoded)).not.toThrow();
   });
 
   test('live proposal and live WAL write skip the second parse; recovery still calls it', () => {

@@ -26,6 +26,7 @@ import { buildProposalFrame } from './frame';
 import { prepareProposalProof } from './proof';
 import { finalizeAccountProposal } from './finalize';
 import { prepareProposalAdmission } from './admission';
+import { traceHltSwapProposalOutcomes } from '../../../support/performance/account-delivery-trace';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -205,6 +206,7 @@ export async function proposeAccountFrame(
     frameJHeight,
     jClaimNodeStore: context.jClaimNodeStore,
   });
+  traceHltSwapProposalOutcomes(proposalWindow, validation.droppedTransactions);
 
   const {
     clonedMachine,
@@ -253,7 +255,6 @@ export async function proposeAccountFrame(
     events,
     checkpointProfile,
   );
-  // Timing is operational telemetry and never affects proposal validity.
   logProposalProfile(proof, frameBuild, counterparty, optimisticBatch, profileCheckpoints, profileStartMs);
   return finalResult;
 }

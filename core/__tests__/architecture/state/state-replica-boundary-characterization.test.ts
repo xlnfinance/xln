@@ -191,9 +191,9 @@ describe('State and Replica boundary characterization', () => {
     getEntityAccountForWrite(localWitness.accounts, counterpartyId)!.currentFrameHanko = hex('92', 65);
     expect(computeCanonicalEntityConsensusStateHash(localWitness)).toBe(entityRoot);
 
-    const historyView = createEntityFrameCandidateState(baselineState);
-    historyView.prevFrameHash = hex('93', 32);
-    expect(computeCanonicalEntityConsensusStateHash(historyView)).toBe(entityRoot);
+    const candidateView = createEntityFrameCandidateState(baselineState);
+    candidateView.prevFrameHash = hex('93', 32);
+    expect(computeCanonicalEntityConsensusStateHash(candidateView)).toBe(entityRoot);
 
     const replicaStateRoot = computeCanonicalEntityConsensusStateHash(replica.state);
     replica.htlcNotes = new Map([[`hashlock:${hex('94', 32)}`, 'history-only']]);

@@ -6,7 +6,6 @@ export const ENTITY_INPUT_FIELD_PHASE = {
   signerId: 'identity',
   runtimeId: 'routing',
   from: 'routing',
-  localRuntimeProtocol: 'routing',
   entityTxs: 'transactions',
   proposedFrame: 'proposal',
   hashPrecommitFrame: 'precommit',

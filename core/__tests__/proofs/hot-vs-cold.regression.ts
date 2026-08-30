@@ -29,7 +29,7 @@ export type HarnessTxSpec =
    * Only the maker's counterparty may resolve (preconditioned at instantiate). */
   | { kind: 'swap_cancel'; offerId: number }
   /** Cross-j pull lock → `pulls.put` (route+binding built by production builders). */
-  | { kind: 'pull_lock'; orderId: number; tokenId: number; amount: bigint }
+  | { kind: 'cross_pull_lock'; orderId: number; tokenId: number; amount: bigint }
   /** Fee-policy publication → `rebalanceFeePolicies.put` (per side, per token). */
   | { kind: 'rebalance_policy'; tokenId: number; policyVersion: number; baseFee: bigint; liquidityFeeBps: bigint; gasFee: bigint }
   /** Collateral request → `requestedRebalance.put` + `requestedRebalanceFeeState.put`. */
@@ -208,11 +208,11 @@ export const REGRESSION_SEQUENCES: readonly RegressionSequence[] = [
     name: 'r8-cross-j-pull-lock-nonempty-pulls',
     ops: [
       { kind: 'admit', side: 'alpha', txs: [
-        { kind: 'pull_lock', orderId: 1, tokenId: 1, amount: 700n },
+        { kind: 'cross_pull_lock', orderId: 1, tokenId: 1, amount: 700n },
       ] },
       ...roundTrip('alpha'),
       { kind: 'admit', side: 'beta', txs: [
-        { kind: 'pull_lock', orderId: 2, tokenId: 3, amount: 900n },
+        { kind: 'cross_pull_lock', orderId: 2, tokenId: 3, amount: 900n },
         { kind: 'payment', tokenId: 1, amount: 4n },
       ] },
       ...roundTrip('beta'),

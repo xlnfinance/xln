@@ -214,7 +214,6 @@ import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -346,8 +345,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -570,9 +567,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
       bio: '',
       website: '',
     },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    lockBook: new Map(),
+    paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
     crontabState: initCrontab(),
   },
@@ -597,9 +592,7 @@ const makeEntityState = (entityId: string): EntityState => ({
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
@@ -889,7 +882,6 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: route,
     });
-    recordSwapOfferLifecycle(sourceAccount, sourceAccount.state.swapOffers.get(orderId)!);
 
     const second = await applyEntityFrameWithMaterializedTestInfraContext(env, stateWithOffer, []);
     expect(second.newState.pendingCrossJurisdictionFillAcks?.size ?? 0).toBe(0);
@@ -976,7 +968,6 @@ describe('audit fail-fast regressions', () => {
         entityId: target,
         signerId: committedSigner,
         entityTxs: txs,
-        localRuntimeProtocol: 'cross-j',
       });
   });
 

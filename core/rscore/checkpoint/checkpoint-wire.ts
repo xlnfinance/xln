@@ -99,7 +99,7 @@ export const decodeRscoreCheckpointChanges = (value: unknown): RscoreCheckpointC
   }
   const accounts = rscoreCheckpointList(tuple[2], 'ACCOUNTS')
     .map((account, index) => {
-      const row = rscoreCheckpointTuple(account, 11, `ACCOUNT_${index}`);
+      const row = rscoreCheckpointTuple(account, 12, `ACCOUNT_${index}`);
       rscoreCheckpointBytes(row[0], 32, `ACCOUNT_${index}_ID`);
       rscoreCheckpointBytes(row[1], 32, `ACCOUNT_${index}_LEAF`);
       return row;
@@ -124,6 +124,11 @@ export const assertRscoreCheckpointCandidate = (
     checkpointRoot.toLowerCase() !== expected.accountsRoot.toLowerCase() ||
     checkpoint.restoreToken[4] !== expected.accountCount
   ) {
-    throw new Error('RSCORE_CHECKPOINT_CANDIDATE_MISMATCH');
+    throw new Error(
+      `RSCORE_CHECKPOINT_CANDIDATE_MISMATCH:` +
+      `revision=${String(checkpoint.restoreToken[1])}/${String(expected.revision)}:` +
+      `root=${checkpointRoot.toLowerCase()}/${expected.accountsRoot.toLowerCase()}:` +
+      `count=${String(checkpoint.restoreToken[4])}/${String(expected.accountCount)}`,
+    );
   }
 };

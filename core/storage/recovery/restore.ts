@@ -1,5 +1,5 @@
 /**
- * Replays committed WAL/history into a Runtime and reconstructs durable output delivery.
+ * Restores one checkpoint, replays the bounded Runtime WAL, and republishes its flat outbox.
  * Key paths: restore one canonical head without executing pre-commit external effects.
  * Human-audit importance: 100/100 — this is the event-sourcing equivalence proof path.
  */
@@ -38,10 +38,8 @@ export type RuntimeRecoveryDeps = Pick<
   createEmptyEnv: RuntimeModule['createEmptyEnv'];
   getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
   getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
-  getHistoryViewDb(env: RuntimeReplica): Level<Buffer, Buffer>;
   tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
   tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
-  tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
   enqueueRuntimeContinuation(
     env: RuntimeReplica,
     inputs?: import('../../entity/types').EntityInput[],
@@ -62,10 +60,8 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     createEmptyEnv,
     getStorageDb,
     getRuntimeWalDb,
-    getHistoryViewDb,
     tryOpenStorageDb,
     tryOpenRuntimeWalDb,
-    tryOpenHistoryViewDb,
     closeRuntimeDb,
     closeInfraDb,
     enqueueRuntimeContinuation,
@@ -165,10 +161,8 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     return persistRestoredRuntimeState({
       getStorageDb,
       getRuntimeWalDb,
-      getHistoryViewDb,
       tryOpenStorageDb,
       tryOpenRuntimeWalDb,
-      tryOpenHistoryViewDb,
     }, env, options);
   };
 

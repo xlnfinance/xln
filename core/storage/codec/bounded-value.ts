@@ -1,4 +1,4 @@
-/** Bounded physical rows for large authoritative WAL and history values. */
+/** Bounded physical rows for large authoritative WAL and checkpoint values. */
 
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import type { RuntimeDbLike } from '../types';

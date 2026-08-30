@@ -100,7 +100,7 @@ const createMirror = async (): Promise<MirrorLike> => {
     import('./client'),
   ]);
   const binaryPath = process.env['XLN_RSCORE_BINARY']
-    ?? new URL('../../rscore/target/release/xln-rscore', import.meta.url).pathname;
+    ?? new URL('../../rscore/target/release/xlnrs', import.meta.url).pathname;
   const started = new RscoreShadowMirror({
     binaryPath,
     workers: Number(process.env['XLN_RSCORE_SHADOW_WORKERS'] ?? '4'),

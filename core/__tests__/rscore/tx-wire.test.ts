@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { HTLC_OPAQUE_CIPHERTEXT_VERSION } from '../../protocol/htlc/multi-recipient';
+import { safeStringify } from '../../protocol/serialization';
 import { packWireValue, unpackWireValue } from '../../rscore/client';
 import { accountTxWire } from '../../rscore/shadow-wire';
 import { decodeRscoreAccountTx } from '../../rscore/wave-decode';
+import { ACCOUNT_TX_TYPES } from '../../account/tx/catalog';
 import type { AccountTx } from '../../types/account';
 
 /**
@@ -15,13 +17,9 @@ import type { AccountTx } from '../../types/account';
  * them, and crates/process/tests/tx_wire_vectors.rs holds Rust to the same
  * file.
  *
- * Scope: the payment-profile transactions, which is what the two engines
- * currently both execute — payments, HTLCs, deltas, credit limits, rebalance
- * policy and same-jurisdiction swaps. Settlement, lending, disputes,
- * every cross-jurisdiction transaction are deliberately absent, because no
- * Rust codec claims them yet. AccountSettled J-claims are included because
- * collateral finality is part of the Rust authority profile. This corpus is not "every
- * AccountTx", and a transaction missing from it is not a covered one.
+ * Scope: every canonical AccountTx. The catalog assertion below is the gate:
+ * adding or removing a TypeScript variant without a shared TS/Rust byte vector
+ * fails before either engine may claim parity.
  *
  * Every case appears twice — once with every optional field present, once
  * with none — because absent and present take different branches on both
@@ -44,6 +42,12 @@ const D = `0x${'dd'.repeat(32)}`;
 export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'direct_payment/full', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 25n, route: [B], description: 'memo', fromEntityId: A, toEntityId: B, deliveryMode: 'trusted', trustedGatewayEntityId: B } } },
   { name: 'direct_payment/minimal', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 1n, route: [], fromEntityId: A, toEntityId: B, deliveryMode: 'direct' } } },
+  { name: 'lending_fund', tx: { type: 'lending_fund', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 100n, termId: '1d', interestBps: 250 } } },
+  { name: 'lending_borrow_request', tx: { type: 'lending_borrow_request', data: { requestId: 'borrow-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 50n, termId: '1h', maxInterestBps: 300 } } },
+  { name: 'lending_repay', tx: { type: 'lending_repay', data: { loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, amount: 25n } } },
+  { name: 'lending_credit', tx: { type: 'lending_credit', data: { action: 'grant', loanId: 'loan-1', hubEntityId: A, borrowerEntityId: B, tokenId: 1, creditLimit: 500n } } },
+  { name: 'lending_close_request', tx: { type: 'lending_close_request', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B } } },
+  { name: 'lending_close_payout', tx: { type: 'lending_close_payout', data: { positionId: 'position-1', hubEntityId: A, lenderEntityId: B, tokenId: 1, amount: 75n } } },
   { name: 'htlc_lock/full', tx: { type: 'htlc_lock', data: { lockId: 'lock-1', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 12, amount: 500n, tokenId: 1, deliveryMode: 'async' } } },
   { name: 'htlc_lock/envelope', tx: { type: 'htlc_lock', data: { lockId: 'lock-3', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 5, amount: 10n, tokenId: 1, deliveryMode: 'instant', envelope: { version: HTLC_OPAQUE_CIPHERTEXT_VERSION, ciphertext: Buffer.alloc(80, 0x5a).toString('base64') } } } },
   { name: 'htlc_lock/minimal', tx: { type: 'htlc_lock', data: { lockId: 'lock-2', hashlock: HASHLOCK, timelock: 1n, revealBeforeHeight: 0, amount: 1n, tokenId: 1 } } },
@@ -52,8 +56,12 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'htlc_resolve/error-no-reason', tx: { type: 'htlc_resolve', data: { lockId: 'lock-1', outcome: 'error' } } },
   { name: 'add_delta', tx: { type: 'add_delta', data: { tokenId: 2 } } },
   { name: 'set_credit_limit', tx: { type: 'set_credit_limit', data: { tokenId: 1, amount: 1000n } } },
+  { name: 'reserve_to_collateral', tx: { type: 'reserve_to_collateral', data: { tokenId: 1, collateral: '100', ondelta: '-5', side: 'receiving', blockNumber: 42, transactionHash: C } } },
+  { name: 'request_collateral', tx: { type: 'request_collateral', data: { tokenId: 1, amount: 100n, feeTokenId: 2, feeAmount: 3n, policyVersion: 7 } } },
+  { name: 'rebalance_refund', tx: { type: 'rebalance_refund', data: { requestId: 'rebalance-1', requestTokenId: 1, amount: 25n, reason: 'policy_mismatch' } } },
   { name: 'rebalance_policy', tx: { type: 'rebalance_policy', data: { tokenId: 1, policyVersion: 3, baseFee: 11n, liquidityFeeBps: 12n, gasFee: 13n } } },
   { name: 'swap_offer/full', tx: { type: 'swap_offer', data: { offerId: 'offer-1', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 1_000_000n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 2_000_000n, maxFee: 0n, minNetReceive: 1_900_000n, timeInForce: 1, priceTicks: 20_000n } } },
+  { name: 'swap_offer/cross', tx: { type: 'swap_offer', data: { offerId: 'offer-cross', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 10n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 20n, maxFee: 1n, minNetReceive: 19n, crossJurisdiction: { routeId: 'route-1', amount: 10n } } } as AccountTx },
   { name: 'swap_offer/minimal', tx: { type: 'swap_offer', data: { offerId: 'offer-2', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 1_000_000n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 2_000_000n, maxFee: 0n, minNetReceive: 1n } } },
   { name: 'swap_cancel_request', tx: { type: 'swap_cancel_request', data: { offerId: 'offer-1' } } },
   { name: 'swap_resolve/full', tx: { type: 'swap_resolve', data: { offerId: 'offer-1', fillRatio: 10_000, fillNumerator: 1n, fillDenominator: 2n, cancelRemainder: true, comment: 'STP:book', feeTokenId: 2, feeAmount: 7n, executionGiveAmount: 1_000_000n, executionWantAmount: 2_000_000n, restingGiveTokenId: 1, restingWantTokenId: 2, restingPriceTicks: 20_000n, restingGiveAmount: 3n, restingWantAmount: 4n, restingQuantizedGive: 5n, restingQuantizedWant: 6n } } },
@@ -63,6 +71,11 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   // the remainder attached. Rust used to omit the false flag and drop the
   // three carried fields, so its frame hash could not be reproduced here.
   { name: 'swap_resolve/partial-fill', tx: { type: 'swap_resolve', data: { offerId: 'offer-3', fillRatio: 3_333, fillNumerator: 1n, fillDenominator: 3n, cancelRemainder: false, comment: 'book:partial', feeTokenId: 2, feeAmount: 1n, executionGiveAmount: 333_333n, executionWantAmount: 666_666n, restingGiveTokenId: 1, restingWantTokenId: 2, restingPriceTicks: 20_000n, restingGiveAmount: 666_667n, restingWantAmount: 1_333_334n, restingQuantizedGive: 666_667n, restingQuantizedWant: 1_333_334n } } },
+  { name: 'cross_pull_lock', tx: { type: 'cross_pull_lock', data: { pullId: 'pull-1', tokenId: 1, amount: 10n, fullHash: C, partialRoot: D, crossJurisdiction: { routeId: 'route-1' }, crossJurisdictionRoute: { routeId: 'route-1' } } } as AccountTx },
+  { name: 'cross_pull_close', tx: { type: 'cross_pull_close', data: { pullId: 'pull-1', binary: '0x01', proof: { routeId: 'route-1', fillRatio: 65535 } } } as AccountTx },
+  { name: 'cross_pull_progress', tx: { type: 'cross_pull_progress', data: { pullId: 'pull-1', fill: { routeId: 'route-1', fillSeq: 1, cumulativeFillRatio: 32768, fillNumerator: 1n, fillDenominator: 2n } } } as AccountTx },
+  { name: 'cross_swap_fill_ack', tx: { type: 'cross_swap_fill_ack', data: { routeId: 'route-1', fillSeq: 1, cumulativeFillRatio: 32768, fillNumerator: 1n, fillDenominator: 2n } } as AccountTx },
+  { name: 'settle_transition', tx: { type: 'settle_transition', data: { kind: 'clear', revision: 1, workspaceHash: C } } },
   { name: 'j_event_claim/minimal', tx: { type: 'j_event_claim', data: { jHeight: 43, jBlockHash: C, events: [{ type: 'AccountSettled', blockNumber: 43, blockHash: C, transactionHash: D, logIndex: 1, data: { leftEntity: A, rightEntity: B, tokenId: 1, leftReserve: '0', rightReserve: '1999999000000', collateral: '1000000', ondelta: '0', nonce: 0 } }] } } },
   { name: 'j_event_claim/proofs', tx: { type: 'j_event_claim', data: { jHeight: 44, jBlockHash: D, events: [{ type: 'AccountSettled', blockNumber: 44, blockHash: D, transactionHash: C, logIndex: 2, eventIndex: 3, data: { leftEntity: A, rightEntity: B, tokenId: 2, leftReserve: '7', rightReserve: '9', collateral: '11', ondelta: '-13', nonce: 5 } }], leftProof: { version: 1, nodes: [{ version: 1, type: 'leaf', key: C, record: { version: 1, accountKey: D, side: 'left', jHeight: 42, jBlockHash: C, eventsHash: D } }] }, rightProof: { version: 1, nodes: [{ version: 1, type: 'branch', bit: 7, left: C, right: D }, { version: 1, type: 'leaf', key: D, record: { version: 1, accountKey: C, side: 'right', jHeight: 41, jBlockHash: D, eventsHash: C } }] } } } },
 ];
@@ -71,7 +84,19 @@ type Vector = { name: string; bytes: string };
 
 const vectors = (): Vector[] => JSON.parse(readFileSync(VECTORS, 'utf8')) as Vector[];
 
-describe('account transaction wire', () => {
+if (Bun.env['RSCORE_GENERATE_TX_WIRE'] === '1') {
+  test('generate account transaction wire vectors', async () => {
+    const rows = TX_WIRE_CASES.map(({ name, tx }) => ({
+      name,
+      bytes: packWireValue(accountTxWire(tx)).toString('hex'),
+    }));
+    await Bun.write(VECTORS, `${safeStringify(rows, 2)}\n`);
+  });
+} else describe('account transaction wire', () => {
+  test('the vectors cover the exhaustive canonical AccountTx catalog', () => {
+    const covered = [...new Set(TX_WIRE_CASES.map(row => row.tx.type))].sort();
+    expect(covered).toEqual([...ACCOUNT_TX_TYPES].sort());
+  });
   test('the vectors cover every case, and nothing else', () => {
     expect(vectors().map(row => row.name)).toEqual(TX_WIRE_CASES.map(row => row.name));
   });
@@ -100,10 +125,4 @@ describe('account transaction wire', () => {
 
 // Regenerate the vectors (run from the repo root):
 //
-//   bun -e 'import("./core/__tests__/rscore/tx-wire.test.ts").then(async m => {
-//     const { packWireValue } = await import("./core/rscore/client");
-//     const { accountTxWire } = await import("./core/rscore/shadow-wire");
-//     const rows = m.TX_WIRE_CASES.map(c => ({ name: c.name,
-//       bytes: packWireValue(accountTxWire(c.tx)).toString("hex") }));
-//     await Bun.write("core/__tests__/rscore/tx-wire-vectors.json",
-//       JSON.stringify(rows, null, 2) + "\n"); })'
+//   RSCORE_GENERATE_TX_WIRE=1 bun test core/__tests__/rscore/tx-wire.test.ts

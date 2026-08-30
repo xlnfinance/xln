@@ -12,6 +12,7 @@ import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import type { StorageReplicaLookup } from '../types';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { computeCanonicalEntityConsensusStateHash } from '../../entity/consensus/state-root';
+import { projectCertifiedEntityFrameLinkIdentity } from '../../entity/consensus/frame/lineage';
 
 /**
  * A compact materialized Entity graph has one committed state per Entity.
@@ -153,13 +154,17 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
     const signerId = normalizeEntityId(replica.signerId || '');
     if (!entityId || !signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
     // EntityState cannot include its own certified frame because the frame
-    // contains stateRoot. The parent Runtime replica-meta commitment therefore
-    // binds the exact full head bytes. Checkpoints persist those bytes; ordinary
-    // frames persist their digest so one mutated signature/manifest byte still
-    // changes Runtime postStateHash without copying the full Entity graph.
+    // contains stateRoot. The parent Runtime commitment therefore binds the
+    // compact certificate identity. frameHash already binds txs, events,
+    // context and roots; encoding those bodies again made every ordinary
+    // Runtime frame O(previous Entity-frame bytes). Checkpoints still persist
+    // the one full head needed as their replay floor.
     const head = replica.certifiedFrameHead;
     const certifiedFrameHeadDigest = head
-      ? computeIntegrityDigest(encodeBuffer(head, { omitSymbolKeys: true }))
+      ? computeIntegrityDigest(encodeBuffer(
+          projectCertifiedEntityFrameLinkIdentity(head),
+          { omitSymbolKeys: true },
+        ))
       : undefined;
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),

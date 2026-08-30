@@ -21,7 +21,7 @@ export const frozenAccountInputLogLevel = (
   const durableOnchainFreeze =
     account.status === 'disputed' &&
     (account.activeDispute?.observedOnChain === true || account.activeDispute === undefined);
-  return durableOnchainFreeze && input.kind === 'frame_ack' ? 'info' : 'error';
+  return durableOnchainFreeze && input.kind === 'ack_frame' ? 'info' : 'error';
 };
 
 export const canProcessFrozenAccountInput = (

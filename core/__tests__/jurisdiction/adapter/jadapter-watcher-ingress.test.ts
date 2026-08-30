@@ -47,6 +47,7 @@ import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 
 const makeJReplica = (
   name: string,
@@ -104,7 +105,7 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
         shares: { [signerId]: 1n },
       },
       reserves: new Map(),
-      accounts: new Map(),
+      accounts: emptyEntityAccountMap(entityId),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
       profile: {
@@ -114,9 +115,7 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
         bio: '',
         website: '',
       },
-      htlcRoutes: new Map(),
-      htlcFeesEarned: 0n,
-      lockBook: new Map(),
+      paybook: { entries: new Map(), feesEarned: 0n },
       swapTradingPairs: [],
     },
   }) as EntityReplica;

@@ -24,7 +24,6 @@ import {
 import { validateAccountReplica } from '../../account/validation/state-validation';
 import {
   computeEntityAccountLeafDigest,
-  computeEntityAccountValueHash,
   projectEntityAccountLeaf,
 } from '../../entity/consensus/state-root';
 import {
@@ -33,7 +32,7 @@ import {
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../protocol/state/account-input-clone';
-import { buffersEqual } from '../../protocol/serialization';
+import { buffersEqual, compareStableText } from '../../protocol/serialization';
 import type {
   AccountDisputeHanko,
   AccountFrame,
@@ -214,7 +213,7 @@ const priorLocalWitnesses = (
   const frames = new Map<string, HankoString>();
   const disputes = new Map<string, HankoString>();
   if (prior === null) return { frames, disputes };
-  addPriorInputWitnesses(frames, disputes, prior.lastOutboundFrameAck?.response);
+  addPriorInputWitnesses(frames, disputes, prior.lastOutboundAckFrame?.response);
   addPriorInputWitnesses(frames, disputes, prior.pendingAccountInput);
   const localFrameHash = prior.pendingFrame?.stateHash ?? prior.currentFrame.stateHash;
   if (localFrameHash.length > 0) {
@@ -333,7 +332,7 @@ const pendingInput = (
   seed: RscoreAccountStateSeed,
   witnesses: LocalWitnessResolver,
   pending: NonNullable<RscoreResolvedAccountRow['decoded']['consensus']['pending']>,
-): Extract<AccountPeerInput, { kind: 'frame' | 'frame_ack' }> => {
+): Extract<AccountPeerInput, { kind: 'frame' | 'ack_frame' }> => {
   const prefix = `account:${seed.accountId.slice(-8)}`;
   const frameHanko = witnesses.frame(
     pending.frame.stateHash,
@@ -362,7 +361,7 @@ const pendingInput = (
   };
   if (pending.bundledAck === undefined) return { kind: 'frame', ...common };
   return {
-    kind: 'frame_ack',
+    kind: 'ack_frame',
     ...common,
     ack: ackInput(seed, witnesses, pending.bundledAck).ack,
   };
@@ -418,6 +417,8 @@ const assertPriorBinding = (
 const envelopeCollections = (
   fields: Readonly<Record<string, unknown>> | null,
   prior: AccountReplica | null,
+  policyRows: readonly (readonly [number, import('../../types/finance/rebalance').RebalancePolicy])[] | null,
+  submittedRows: readonly (readonly [number, number])[] | null,
 ): Pick<AccountReplica, 'pendingWithdrawals' | 'shadow'> => {
   if (fields === null) {
     if (prior === null) return fail('ENVELOPE_REQUIRED_ON_CREATE');
@@ -436,23 +437,18 @@ const envelopeCollections = (
   const rebalanceValue = record(shadowValue['rebalance'], 'SHADOW_REBALANCE');
   const policyRoot = canonicalRoot(rebalanceValue['policyRoot'], 'SHADOW_POLICY');
   const submittedRoot = canonicalRoot(rebalanceValue['submittedAtByTokenRoot'], 'SHADOW_SUBMITTED');
-  if (create && policyRoot !== EMPTY_ACCOUNT_STATE_ROOT) {
-    fail('CREATE_REBALANCE_POLICY_ABI_INCOMPLETE');
-  }
-  const policy = carriedMap(
+  const presentPolicyRows = policyRows ?? fail('SHADOW_POLICY_BODY_MISSING');
+  const policy = PersistentAccountStateMap.fromEntries(
     'rebalanceShadowPolicy',
-    policyRoot,
-    prior?.shadow.rebalance.policy,
-    create,
-    'SHADOW_POLICY',
+    presentPolicyRows,
   );
-  const submittedAtByToken = carriedMap(
+  if (policy.rootHash() !== policyRoot) fail('SHADOW_POLICY_ROOT_MISMATCH');
+  const presentSubmittedRows = submittedRows ?? fail('SHADOW_SUBMITTED_BODY_MISSING');
+  const submittedAtByToken = PersistentAccountStateMap.fromEntries(
     'rebalanceShadowSubmitted',
-    submittedRoot,
-    prior?.shadow.rebalance.submittedAtByToken,
-    create,
-    'SHADOW_SUBMITTED',
+    presentSubmittedRows,
   );
+  if (submittedAtByToken.rootHash() !== submittedRoot) fail('SHADOW_SUBMITTED_ROOT_MISMATCH');
   const shadow: AccountReplica['shadow'] = create
     ? { rebalance: { policy, submittedAtByToken } }
     : {
@@ -489,9 +485,6 @@ const stateFromSeed = (
   prior: AccountReplica | null,
 ): AccountState => {
   const create = prior === null;
-  const pulls = carriedMap(
-    'pulls', seed.carried.pullsRoot, prior?.state.pulls, create, 'PULLS',
-  );
   const subcontracts = carriedMap(
     'subcontracts', seed.carried.subcontractsRoot, prior?.state.subcontracts, create, 'SUBCONTRACTS',
   );
@@ -509,9 +502,6 @@ const stateFromSeed = (
     create,
     'REQUESTED_REBALANCE_FEE_STATE',
   );
-  if (prior?.state.settlementWorkspace !== undefined) {
-    fail('SETTLEMENT_WORKSPACE_UNSUPPORTED');
-  }
   return {
     leftEntity: seed.leftEntity,
     rightEntity: seed.rightEntity,
@@ -520,7 +510,7 @@ const stateFromSeed = (
     deltas: seed.deltas,
     locks: seed.locks,
     swapOffers: seed.swapOffers,
-    pulls,
+    pulls: seed.pulls,
     subcontracts,
     lendingIntents: seed.lendingIntents,
     leftPendingJClaims: { ...seed.carried.leftPendingJClaims },
@@ -531,13 +521,16 @@ const stateFromSeed = (
     requestedRebalance,
     requestedRebalanceFeeState,
     rebalanceFeePolicies: seed.rebalanceFeePolicies,
+    ...(seed.settlementWorkspace === undefined
+      ? {}
+      : { settlementWorkspace: seed.settlementWorkspace }),
   };
 };
 
 const clearConsensusFields = (account: AccountReplica): void => {
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  delete account.lastOutboundFrameAck;
+  delete account.lastOutboundAckFrame;
   delete account.lastRollbackFrameHash;
   delete account.currentFrameHanko;
   delete account.counterpartyFrameHanko;
@@ -601,10 +594,9 @@ const assertMaterializedAccount = (
   const projected = projectEntityAccountLeaf(account);
   requireCanonicalEqual(projected, expectedProjection, 'ENTITY_PROJECTION');
   const projectedLeaf = computeEntityAccountLeafDigest(
-    Object.entries(projected).sort(([left], [right]) => left.localeCompare(right)),
+    Object.entries(projected).sort(([left], [right]) => compareStableText(left, right)),
   );
-  if (projectedLeaf !== row.entityAccountLeaf) fail('PROJECTED_LEAF_MISMATCH');
-  if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
+  if (projectedLeaf !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
 };
 
 /**
@@ -647,7 +639,12 @@ export const materializeRscoreAccountReplica = (
     assertPriorBinding(prior, ownerEntityId, accountId, seed, currentFrame);
   }
   const fields = seed.envelope?.fields ?? null;
-  const collections = envelopeCollections(fields, prior);
+  const collections = envelopeCollections(
+    fields,
+    prior,
+    seed.envelope?.rebalanceShadowPolicy ?? null,
+    seed.envelope?.rebalanceShadowSubmitted ?? null,
+  );
   if (prior === null) {
     if (fields === null) return fail('ENVELOPE_REQUIRED_ON_CREATE');
     if (fields['status'] !== 'active') fail('CREATE_STATUS_NON_CANONICAL');
@@ -695,7 +692,7 @@ export const materializeRscoreAccountReplica = (
     account.counterpartyFrameHanko = consensus.counterpartyFrameHanko;
   }
   if (consensus.lastOutboundAck) {
-    account.lastOutboundFrameAck = {
+    account.lastOutboundAckFrame = {
       height: consensus.lastOutboundAck.height,
       counterpartyEntityId: accountId,
       response: ackInput(seed, witnesses, consensus.lastOutboundAck),
@@ -731,7 +728,7 @@ export const materializeRscoreAccountReplica = (
   const pendingProposal = account.pendingAccountInput
     ? accountInputProposal(account.pendingAccountInput)
     : undefined;
-  const outboundAck = account.lastOutboundFrameAck?.response.ack;
+  const outboundAck = account.lastOutboundAckFrame?.response.ack;
   if (pendingProposal) {
     if (pendingProposal.frameHanko) account.currentFrameHanko = pendingProposal.frameHanko;
   } else if (outboundAck) {

@@ -6,9 +6,10 @@ import {
   RSCORE_PROCESS_ABI_VERSION,
   RscoreProcessClient,
 } from '../../../rscore/client';
+import { deriveSignerKeySync } from '../../../account/crypto';
 import { swapMarketPolicyWire } from '../../../rscore/shadow-wire';
 
-const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xlnrs');
 const POISONED_PROCESS = join(
   import.meta.dir,
   '../../fixtures/process/rscore-poisoned-process.ts',
@@ -18,6 +19,10 @@ const identity = () => ({
   engineGeneration: Buffer.alloc(8, 0xa0),
   runtimeId: Buffer.alloc(20, 0x10),
   sessionId: Buffer.alloc(16, 0x20),
+});
+const authority = () => ({
+  privateKey: deriveSignerKeySync(`0x${'7a'.repeat(32)}`, '1'),
+  signerId: '1',
 });
 
 if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
@@ -127,23 +132,26 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
     }
   });
 
-  test('speaks the framed mirror ABI end to end', async () => {
+  test('speaks the framed authority ABI end to end', async () => {
     const client = new RscoreProcessClient(BINARY, identity());
     try {
-      const hello = (await client.hello(4, swapMarketPolicyWire())) as unknown[];
+      const hello = (await client.hello(4, swapMarketPolicyWire(), authority())) as unknown[];
       expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
       expect(hello[2]).toBe(4);
 
-      const loaded = (await client.bootstrapAccounts(7, [])) as unknown[];
-      expect(loaded[0]).toBe(7);
+      const loaded = (await client.bootstrapAccounts(0, [])) as unknown[];
+      expect(loaded[0]).toBe(0);
       expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(new Uint8Array(32));
-
-      const page = (await client.readAccountSummaryPage(null, 8, [1])) as unknown[];
-      expect(page[0]).toBe(7);
-      expect(page[1]).toEqual([]);
-      expect((page[3] as unknown[])[0]).toBe(0);
-
-      await expect(client.prepareCandidate([])).rejects.toThrow('RSCORE_BATCH_EMPTY');
+      const inbound = await client.accountInbound({
+        ownerEntityId: new Uint8Array(hello[5] as Uint8Array),
+        expectedAccountsRoot: new Uint8Array(loaded[1] as Uint8Array),
+        entityTimestamp: 0,
+        finalizedJHeight: 0,
+        rows: [],
+        postAccounts: false,
+      });
+      expect(inbound.revision).toBe(0);
+      expect(inbound.accountsRoot).toBe(`0x${'00'.repeat(32)}`);
       await client.shutdown();
     } finally {
       client.kill();
@@ -153,14 +161,28 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
   test('a request that was never written leaves the sequence intact', async () => {
     const client = new RscoreProcessClient(BINARY, identity());
     try {
-      await client.hello(2, swapMarketPolicyWire());
-      await client.bootstrapAccounts(3, []);
+      const hello = await client.hello(2, swapMarketPolicyWire(), authority()) as unknown[];
+      const loaded = await client.bootstrapAccounts(0, []) as unknown[];
 
-      await expect(client.readAccountSummaryPage(undefined as never, 8, [1]))
+      await expect(client.accountInbound({
+        ownerEntityId: new Uint8Array(hello[5] as Uint8Array),
+        expectedAccountsRoot: new Uint8Array(loaded[1] as Uint8Array),
+        entityTimestamp: 0,
+        finalizedJHeight: 0,
+        rows: [undefined as never],
+        postAccounts: false,
+      }))
         .rejects.toThrow('RSCORE_CLIENT_VALUE_UNSUPPORTED');
 
-      const page = (await client.readAccountSummaryPage(null, 8, [1])) as unknown[];
-      expect(page[0]).toBe(3);
+      const inbound = await client.accountInbound({
+        ownerEntityId: new Uint8Array(hello[5] as Uint8Array),
+        expectedAccountsRoot: new Uint8Array(loaded[1] as Uint8Array),
+        entityTimestamp: 0,
+        finalizedJHeight: 0,
+        rows: [],
+        postAccounts: false,
+      });
+      expect(inbound.revision).toBe(0);
       await client.shutdown();
     } finally {
       client.kill();

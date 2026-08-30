@@ -23,8 +23,9 @@ pub fn canonical_value(value: &AbiValue) -> Result<CanonicalValue, ProcessError>
     decode(value, 0)
 }
 
-/// `[fields, mempool]`: the account-leaf projection minus the derived roots,
-/// and the canonical frame-hash form of every queued tx.
+/// `[fields, mempool, rebalanceShadowPolicyRows,
+/// rebalanceShadowSubmittedRows]`: one canonical envelope, including the
+/// value-bearing bodies behind both committed radix roots.
 pub fn envelope(
     value: &AbiValue,
 ) -> Result<Option<xln_rscore_engine::AccountEnvelope>, ProcessError> {
@@ -32,7 +33,7 @@ pub fn envelope(
         return Ok(None);
     }
     let fields = tuple(value)?;
-    if fields.len() != 2 {
+    if fields.len() != 4 {
         return Err(ProcessError::Expected("envelope"));
     }
     let projected = match canonical_value(&fields[0])? {
@@ -43,9 +44,37 @@ pub fn envelope(
         .iter()
         .map(canonical_value)
         .collect::<Result<Vec<_>, _>>()?;
-    xln_rscore_engine::AccountEnvelope::new(projected, mempool)
-        .map(Some)
-        .map_err(|error| ProcessError::Envelope(error.to_string()))
+    let policy = tuple(&fields[2])?
+        .iter()
+        .map(|row| {
+            let row = tuple(row)?;
+            if row.len() != 2 {
+                return Err(ProcessError::Expected("rebalanceShadowPolicyRow"));
+            }
+            let token_id = u32::try_from(integer(&row[0])?)
+                .map_err(|_| ProcessError::Expected("rebalanceShadowPolicyToken"))?;
+            Ok((token_id, canonical_value(&row[1])?))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let submitted = tuple(&fields[3])?
+        .iter()
+        .map(|row| {
+            let row = tuple(row)?;
+            if row.len() != 2 {
+                return Err(ProcessError::Expected("rebalanceShadowSubmittedRow"));
+            }
+            let token_id = u32::try_from(integer(&row[0])?)
+                .map_err(|_| ProcessError::Expected("rebalanceShadowSubmittedToken"))?;
+            let timestamp = u64::try_from(integer(&row[1])?)
+                .map_err(|_| ProcessError::Expected("rebalanceShadowSubmittedTimestamp"))?;
+            Ok((token_id, timestamp))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    xln_rscore_engine::AccountEnvelope::new_with_rebalance_shadow_rows(
+        projected, mempool, policy, submitted,
+    )
+    .map(Some)
+    .map_err(|error| ProcessError::Envelope(error.to_string()))
 }
 
 fn decode(value: &AbiValue, depth: usize) -> Result<CanonicalValue, ProcessError> {

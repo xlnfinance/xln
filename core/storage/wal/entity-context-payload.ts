@@ -146,8 +146,8 @@ const exactKeys = (value: Record<string, unknown>, expected: readonly string[], 
 
 const payloadBudgetLabel = (payload: StoredEntityContextRow): string => {
   if (payload.kind === 'gossipProfile') return `gossipProfile:${payload.profile.entityId}`;
-  if (payload.kind === 'htlcEntry') return `htlcEntry:${payload.entry.binding.lockId}`;
-  if (payload.kind === 'htlcOriginated') return `htlcOriginated:${payload.originated.lockId}`;
+  if (payload.kind === 'htlcEntry') return `htlcEntry:${payload.entry.binding.hashlock}`;
+  if (payload.kind === 'htlcOriginated') return `htlcOriginated:${payload.originated.hashlock}`;
   if (payload.kind === 'peerAssertions') return `peerAssertions:${payload.assertions.length}`;
   if (payload.kind === 'digestPage') {
     return `digestPage:${payload.childKind}:digests=${payload.digests.length}`;

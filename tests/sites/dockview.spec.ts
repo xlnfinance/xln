@@ -185,10 +185,10 @@ test.describe('dockview', () => {
     await expect(page.getByRole('button', { name: '🗄️ Storage', exact: true })).toHaveClass(/active/);
     await expect(page.getByTestId('runtime-storage-limits')).toBeVisible();
     await expect(page.getByTestId('storage-wal-gib')).toHaveAttribute('placeholder', 'Unlimited');
-    await page.getByTestId('storage-common-gib').fill('0');
+    await page.getByTestId('storage-wal-gib').fill('0');
     await page.getByTestId('storage-limits-save').click();
     await expect(page.getByTestId('storage-limits-error')).toContainText('positive GiB');
-    await page.getByTestId('storage-common-gib').fill('');
+    await page.getByTestId('storage-wal-gib').fill('');
     await expect(page.getByTestId('leveldb-inspector')).toBeVisible();
     await page.getByRole('button', { name: 'Performance', exact: true }).click();
     await expect(page.getByTestId('runtime-performance-budgets')).toBeVisible();

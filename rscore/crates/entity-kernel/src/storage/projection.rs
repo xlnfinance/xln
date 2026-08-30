@@ -10,8 +10,8 @@ use thiserror::Error;
 use xln_rscore_protocol::CanonicalValue;
 
 use crate::commitment::{
-    CanonicalOrderbookStorageFields, canonical_htlc_route, canonical_lock_entry,
-    canonical_orderbook_storage_fields, canonical_reserves, number,
+    CanonicalOrderbookStorageFields, canonical_orderbook_storage_fields, canonical_paybook_entry,
+    canonical_profile, canonical_reserves, canonical_swap_trading_pairs, hex, number,
 };
 use crate::scheduler::{canonical_crontab_storage_state, canonical_hook};
 use crate::{
@@ -24,21 +24,44 @@ pub struct EntityStorageProjection {
     pub height: CanonicalValue,
     pub timestamp: CanonicalValue,
     pub entity_command_nonces: Option<CanonicalValue>,
+    pub proposals: CanonicalValue,
+    pub entity_provider_action_state: Option<CanonicalValue>,
+    pub entity_encryption_public_key: CanonicalValue,
+    pub profile: CanonicalValue,
     pub config: CanonicalValue,
     pub leader_state: CanonicalValue,
     pub reserves: CanonicalValue,
+    pub external_wallet: Option<CanonicalValue>,
+    pub out_debts_by_token: Option<CanonicalValue>,
+    pub in_debts_by_token: Option<CanonicalValue>,
+    pub swap_trading_pairs: Option<CanonicalValue>,
     pub last_finalized_j_height: CanonicalValue,
+    pub j_history_finality: Option<CanonicalValue>,
+    pub certified_board_state: Option<CanonicalValue>,
     pub crontab_state: Option<CanonicalValue>,
-    pub htlc_fees_earned: CanonicalValue,
+    pub j_batch_state: Option<CanonicalValue>,
+    pub paybook: CanonicalValue,
+    pub hub_rebalance_config: Option<CanonicalValue>,
     pub orderbook_hub_profile: Option<CanonicalValue>,
     pub orderbook_referrals: Option<CanonicalValue>,
     pub orderbook_pair_dimensions: Option<CanonicalValue>,
+    pub lending: Option<CanonicalValue>,
     /// Logical namespace 1 leaves, before text-key framing and Patricia layout.
-    pub htlc_routes: BTreeMap<String, CanonicalValue>,
-    /// Logical namespace 2 leaves, before text-key framing and Patricia layout.
-    pub lock_book: BTreeMap<String, CanonicalValue>,
+    pub paybook_entries: BTreeMap<String, CanonicalValue>,
     /// Logical namespace 7 leaves, before text-key framing and Patricia layout.
     pub crontab_hooks: BTreeMap<String, CanonicalValue>,
+    pub deferred_account_proposals: BTreeMap<String, CanonicalValue>,
+    pub deferred_account_proposals_present: bool,
+    pub settlement_continuations: BTreeMap<String, CanonicalValue>,
+    pub settlement_continuations_present: bool,
+    pub cross_jurisdiction_swaps: BTreeMap<String, CanonicalValue>,
+    pub cross_jurisdiction_swaps_present: bool,
+    pub cross_jurisdiction_authorizations: BTreeMap<String, CanonicalValue>,
+    pub cross_jurisdiction_authorizations_present: bool,
+    pub pending_cross_jurisdiction_fill_acks: BTreeMap<String, CanonicalValue>,
+    pub pending_cross_jurisdiction_fill_acks_present: bool,
+    pub cross_jurisdiction_book_admissions: BTreeMap<String, CanonicalValue>,
+    pub cross_jurisdiction_book_admissions_present: bool,
 }
 
 impl EntityStorageProjection {
@@ -49,17 +72,32 @@ impl EntityStorageProjection {
             Some((2, &self.height)),
             Some((3, &self.timestamp)),
             self.entity_command_nonces.as_ref().map(|value| (5, value)),
+            Some((6, &self.proposals)),
             Some((7, &self.config)),
             Some((9, &self.leader_state)),
             Some((10, &self.reserves)),
+            self.external_wallet.as_ref().map(|value| (11, value)),
             Some((14, &self.last_finalized_j_height)),
+            self.j_history_finality.as_ref().map(|value| (15, value)),
+            self.certified_board_state.as_ref().map(|value| (16, value)),
             self.crontab_state.as_ref().map(|value| (17, value)),
-            Some((23, &self.htlc_fees_earned)),
+            self.j_batch_state.as_ref().map(|value| (18, value)),
+            self.entity_provider_action_state
+                .as_ref()
+                .map(|value| (19, value)),
+            Some((20, &self.entity_encryption_public_key)),
+            Some((21, &self.profile)),
+            Some((22, &self.paybook)),
+            self.out_debts_by_token.as_ref().map(|value| (26, value)),
+            self.in_debts_by_token.as_ref().map(|value| (27, value)),
+            self.swap_trading_pairs.as_ref().map(|value| (29, value)),
+            self.hub_rebalance_config.as_ref().map(|value| (34, value)),
             self.orderbook_hub_profile.as_ref().map(|value| (35, value)),
             self.orderbook_referrals.as_ref().map(|value| (36, value)),
             self.orderbook_pair_dimensions
                 .as_ref()
                 .map(|value| (37, value)),
+            self.lending.as_ref().map(|value| (38, value)),
         ]
         .into_iter()
         .flatten()
@@ -74,21 +112,14 @@ pub enum EntityStorageProjectionError {
     Kernel(#[from] EntityKernelError),
 }
 
-fn project_htlc_routes(
+fn project_paybook_entries(
     state: &EntityStateSlice,
 ) -> Result<BTreeMap<String, CanonicalValue>, EntityKernelError> {
     state
-        .htlc_routes
+        .paybook
+        .entries
         .iter()
-        .map(|(key, route)| Ok((key.clone(), canonical_htlc_route(route)?)))
-        .collect()
-}
-
-fn project_lock_book(state: &EntityStateSlice) -> BTreeMap<String, CanonicalValue> {
-    state
-        .lock_book
-        .iter()
-        .map(|(key, lock)| (key.clone(), canonical_lock_entry(lock)))
+        .map(|(_, entry)| Ok((entry.hashlock.clone(), canonical_paybook_entry(entry)?)))
         .collect()
 }
 
@@ -102,6 +133,36 @@ fn project_crontab_hooks(
         .hooks
         .iter()
         .map(|(key, hook)| Ok((key.clone(), canonical_hook(hook)?)))
+        .collect()
+}
+
+fn decode_text_key(key: &[u8]) -> Result<String, EntityKernelError> {
+    let length = key
+        .get(..2)
+        .and_then(|value| <[u8; 2]>::try_from(value).ok())
+        .map(u16::from_be_bytes)
+        .map(usize::from)
+        .ok_or_else(|| EntityKernelError::CommitmentEncoding {
+            detail: "ENTITY_COLLECTION_KEY_PREFIX".into(),
+        })?;
+    let payload = key
+        .get(2..)
+        .filter(|value| value.len() == length)
+        .ok_or_else(|| EntityKernelError::CommitmentEncoding {
+            detail: "ENTITY_COLLECTION_KEY_LENGTH".into(),
+        })?;
+    String::from_utf8(payload.to_vec()).map_err(|error| EntityKernelError::CommitmentEncoding {
+        detail: format!("ENTITY_COLLECTION_KEY_UTF8:{error}"),
+    })
+}
+
+fn project_collection(
+    collection: Option<&crate::EntityCanonicalCollection>,
+) -> Result<BTreeMap<String, CanonicalValue>, EntityKernelError> {
+    collection
+        .into_iter()
+        .flat_map(|collection| collection.keyed_values())
+        .map(|(key, value)| Ok((decode_text_key(key)?, value.clone())))
         .collect()
 }
 
@@ -139,22 +200,98 @@ pub fn project_entity_storage(
             .map_err(|error| EntityKernelError::CommitmentEncoding {
                 detail: error.to_string(),
             })?,
+        proposals: crate::canonical_entity_proposals(&state.proposals)?,
+        entity_provider_action_state: state
+            .entity_provider_action_state
+            .as_ref()
+            .map(crate::canonical_entity_provider_action_state)
+            .transpose()?,
+        entity_encryption_public_key: CanonicalValue::String(hex(
+            &state.entity_encryption_public_key
+        )),
+        profile: canonical_profile(&state.profile),
         config,
         leader_state,
         reserves: canonical_reserves(state),
+        external_wallet: state
+            .external_wallet
+            .as_ref()
+            .map(crate::canonical_external_wallet)
+            .transpose()?,
+        out_debts_by_token: state
+            .out_debts_by_token
+            .as_ref()
+            .map(crate::canonical_debt_ledger)
+            .transpose()?,
+        in_debts_by_token: state
+            .in_debts_by_token
+            .as_ref()
+            .map(crate::canonical_debt_ledger)
+            .transpose()?,
+        swap_trading_pairs: state
+            .swap_trading_pairs
+            .as_deref()
+            .map(canonical_swap_trading_pairs)
+            .transpose()?,
         last_finalized_j_height: number("lastFinalizedJHeight", state.last_finalized_j_height)?,
+        j_history_finality: state.j_history_finality.clone(),
+        certified_board_state: state
+            .certified_board_state
+            .as_ref()
+            .map(crate::canonical_certified_board_state)
+            .transpose()?,
         crontab_state: state
             .crontab
             .as_ref()
             .map(canonical_crontab_storage_state)
             .transpose()?,
-        htlc_fees_earned: CanonicalValue::BigInt(state.htlc_fees_earned.clone()),
+        j_batch_state: state
+            .j_batch_state
+            .as_ref()
+            .map(crate::canonical_j_batch_state)
+            .transpose()
+            .map_err(|error| EntityKernelError::CommitmentEncoding {
+                detail: error.to_string(),
+            })?,
+        paybook: CanonicalValue::Object(vec![(
+            "feesEarned".to_string(),
+            CanonicalValue::BigInt(state.paybook.fees_earned.clone()),
+        )]),
+        hub_rebalance_config: state.hub_rebalance_config.clone(),
         orderbook_hub_profile: orderbook.as_ref().map(|value| value.hub_profile.clone()),
         orderbook_referrals: orderbook.as_ref().map(|value| value.referrals.clone()),
         orderbook_pair_dimensions: orderbook.map(|value| value.pair_dimensions),
-        htlc_routes: project_htlc_routes(state)?,
-        lock_book: project_lock_book(state),
+        lending: state
+            .lending
+            .as_ref()
+            .map(crate::canonical_lending_state)
+            .transpose()?,
+        paybook_entries: project_paybook_entries(state)?,
         crontab_hooks: project_crontab_hooks(state)?,
+        deferred_account_proposals: project_collection(state.deferred_account_proposals.as_ref())?,
+        deferred_account_proposals_present: state.deferred_account_proposals.is_some(),
+        settlement_continuations: project_collection(state.settlement_continuations.as_ref())?,
+        settlement_continuations_present: state.settlement_continuations.is_some(),
+        cross_jurisdiction_swaps: project_collection(state.cross_jurisdiction_swaps.as_ref())?,
+        cross_jurisdiction_swaps_present: state.cross_jurisdiction_swaps.is_some(),
+        cross_jurisdiction_authorizations: project_collection(
+            state.cross_jurisdiction_authorizations.as_ref(),
+        )?,
+        cross_jurisdiction_authorizations_present: state
+            .cross_jurisdiction_authorizations
+            .is_some(),
+        pending_cross_jurisdiction_fill_acks: project_collection(
+            state.pending_cross_jurisdiction_fill_acks.as_ref(),
+        )?,
+        pending_cross_jurisdiction_fill_acks_present: state
+            .pending_cross_jurisdiction_fill_acks
+            .is_some(),
+        cross_jurisdiction_book_admissions: project_collection(
+            state.cross_jurisdiction_book_admissions.as_ref(),
+        )?,
+        cross_jurisdiction_book_admissions_present: state
+            .cross_jurisdiction_book_admissions
+            .is_some(),
     })
 }
 

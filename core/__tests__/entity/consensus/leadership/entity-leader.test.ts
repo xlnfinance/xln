@@ -79,9 +79,7 @@ const state = (leaderState?: EntityState['leaderState']): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 describe('entity leader policy', () => {

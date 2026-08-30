@@ -1,6 +1,6 @@
 import { parseWorkerPhaseResult, type WorkerRequestResult } from './coordinator-client';
 import { getPerfMs } from '../../support/time';
-import { TsAccountShardRootTree, tsAccountWorkerForShard } from './sharding';
+import { TsAccountCanonicalRoot, tsAccountWorkerForShard } from './sharding';
 import type {
   TsAccountWorkerBatchResult,
   TsAccountWorkerCheckpointChanges,
@@ -17,14 +17,16 @@ type AggregateOptions = Readonly<{
   logicalShardToWorker: readonly number[];
   checkpointDue: boolean;
   expectedEffects: number;
-  rootTree: TsAccountShardRootTree;
+  rootTree: TsAccountCanonicalRoot;
+  dispatchMs: number;
+  joinMs: number;
 }>;
 
 export const aggregateWorkerPhaseResults = (
   options: AggregateOptions,
 ): TsAccountWorkerBatchResult => {
   const effects: TsAccountWorkerEffect[] = [];
-  const subroots = new Map<number, string>();
+  const subroots = new Map<number, TsAccountWorkerSubroot>();
   const metrics: TsAccountWorkerPhaseMetrics[] = [];
   const checkpointAccounts = new Map<string, Record<string, unknown>>();
   for (const { workerIndex, response } of options.responses) {
@@ -37,7 +39,7 @@ export const aggregateWorkerPhaseResults = (
       if (subroots.has(subroot.shardId)) {
         throw new Error(`TS_ACCOUNT_WORKER_PHASE_SUBROOT_DUPLICATE:${subroot.shardId}`);
       }
-      subroots.set(subroot.shardId, subroot.root);
+      subroots.set(subroot.shardId, subroot);
     }
     if (options.checkpointDue !== (result.checkpointChanges !== undefined)) {
       throw new Error(`TS_ACCOUNT_WORKER_CHECKPOINT_RESPONSE_MISMATCH:${workerIndex}`);
@@ -64,15 +66,21 @@ export const aggregateWorkerPhaseResults = (
       roundTripMs,
       workMs,
       waitMs: Math.max(0, roundTripMs - workMs),
+      transitionMs: result.timings.transitionUs / 1_000,
+      proposalMs: result.timings.proposalUs / 1_000,
+      rootMs: result.timings.rootUs / 1_000,
+      checkpointMs: result.timings.checkpointUs / 1_000,
+      workerEncodeMs: response.workerEncodeMs,
+      threadCpuUserMs: result.threadCpuUserUs / 1_000,
+      threadCpuSystemMs: result.threadCpuSystemUs / 1_000,
     });
   }
   if (effects.length !== options.expectedEffects) {
     throw new Error(`TS_ACCOUNT_WORKER_EFFECT_COUNT:${effects.length}:${options.expectedEffects}`);
   }
   const foldStart = getPerfMs();
-  const changedSubroots: TsAccountWorkerSubroot[] = [...subroots]
-    .sort(([left], [right]) => left - right)
-    .map(([shardId, root]) => ({ shardId, root }));
+  const changedSubroots: TsAccountWorkerSubroot[] = [...subroots.values()]
+    .sort((left, right) => left.shardId - right.shardId);
   options.rootTree.update(changedSubroots);
   const checkpointChanges: TsAccountWorkerCheckpointChanges | undefined = options.checkpointDue
     ? {
@@ -82,7 +90,7 @@ export const aggregateWorkerPhaseResults = (
       }
     : undefined;
   return {
-    shadowAccountsRoot: options.rootTree.root,
+    accountsRoot: options.rootTree.root,
     effects: effects.sort((left, right) => left.order - right.order),
     changedSubroots,
     ...(checkpointChanges ? { checkpointChanges } : {}),
@@ -95,7 +103,8 @@ export const aggregateWorkerPhaseResults = (
       encodeMs: metrics.reduce((sum, metric) => sum + metric.encodeMs, 0),
       decodeMs: metrics.reduce((sum, metric) => sum + metric.decodeMs, 0),
       foldMs: getPerfMs() - foldStart,
-      dispatchMs: metrics.reduce((max, metric) => Math.max(max, metric.roundTripMs), 0),
+      dispatchMs: options.dispatchMs,
+      joinMs: options.joinMs,
     },
   };
 };

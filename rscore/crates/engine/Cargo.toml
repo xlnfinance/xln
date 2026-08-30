@@ -9,10 +9,12 @@ rust-version.workspace = true
 base64.workspace = true
 num-bigint.workspace = true
 num-integer.workspace = true
+hex.workspace = true
 secp256k1 = { version = "0.31.1", features = ["recovery"] }
 sha2.workspace = true
 sha3.workspace = true
 thiserror.workspace = true
+serde_json = "1.0"
 xln-rscore-crypto = { path = "../crypto" }
 xln-rscore-hanko = { path = "../hanko" }
 xln-rscore-protocol = { path = "../protocol" }

@@ -5,12 +5,16 @@
 //! what the account leaf commits: a body that hashes differently is a proof the
 //! counterparty never agreed to and the jurisdiction would not accept.
 
+#[path = "dispute_proof/external_finality.rs"]
+mod dispute_external_finality;
+
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState,
     AccountStateSeed, Delta, DepositoryAddress, EntityId, HtlcHashlock, HtlcLock, Side, SwapOffer,
-    TokenId, WatchSeed, build_dispute_proof,
+    TokenId, WatchSeed, build_dispute_proof, build_dispute_proof_body,
 };
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 const TRANSFORMER: [u8; 20] = [0x11; 20];
 
@@ -38,18 +42,11 @@ fn delta(token_id: u32, offdelta: i64) -> Delta {
     .expect("delta")
 }
 
-fn lock(
-    id: &str,
-    token_id: u32,
-    sender: Side,
-    amount: i64,
-    timelock: i64,
-    hash_byte: u8,
-) -> HtlcLock {
+fn lock(token_id: u32, sender: Side, amount: i64, timelock: i64, hash_byte: u8) -> HtlcLock {
+    let hashlock = format!("0x{}", format!("{hash_byte:02x}").repeat(32));
     HtlcLock::restore(
-        id.to_string(),
-        HtlcHashlock::parse(&format!("0x{}", format!("{hash_byte:02x}").repeat(32)))
-            .expect("hashlock"),
+        hashlock.clone(),
+        HtlcHashlock::parse(&hashlock).expect("hashlock"),
         BigInt::from(timelock),
         8,
         BigInt::from(amount),
@@ -62,7 +59,11 @@ fn lock(
     .expect("lock")
 }
 
-fn replica(locks: Vec<HtlcLock>, offers: Vec<SwapOffer>) -> AccountReplica {
+fn replica_with_pulls(
+    locks: Vec<HtlcLock>,
+    offers: Vec<SwapOffer>,
+    pulls: Vec<(String, CanonicalValue)>,
+) -> AccountReplica {
     let left = EntityId::parse(&format!("0x{}", "01".repeat(32))).expect("left");
     let right = EntityId::parse(&format!("0x{}", "02".repeat(32))).expect("right");
     let identity = AccountIdentity::new(
@@ -88,9 +89,15 @@ fn replica(locks: Vec<HtlcLock>, offers: Vec<SwapOffer>) -> AccountReplica {
         rebalance_fee_policies: Vec::new(),
         swap_offers: offers,
         lending_intents: Vec::new(),
+        pulls,
+        settlement_workspace: None,
     })
     .expect("state");
     AccountReplica::new(left, state).expect("replica")
+}
+
+fn replica(locks: Vec<HtlcLock>, offers: Vec<SwapOffer>) -> AccountReplica {
+    replica_with_pulls(locks, offers, Vec::new())
 }
 
 fn offer() -> SwapOffer {
@@ -130,31 +137,17 @@ fn a_body_with_only_deltas_hashes_as_typescript_hashes_it() {
 #[test]
 fn locks_become_a_payment_clause_ordered_by_lock_id() {
     let locks = vec![
-        lock(
-            &format!("0x{}", "b1".repeat(32)),
-            2,
-            Side::Right,
-            25,
-            1_700_000_001_000,
-            0xab,
-        ),
-        lock(
-            &format!("0x{}", "a1".repeat(32)),
-            1,
-            Side::Left,
-            40,
-            1_700_000_000_000,
-            0xcd,
-        ),
+        lock(2, Side::Right, 25, 1_700_000_001_000, 0xcd),
+        lock(1, Side::Left, 40, 1_700_000_000_000, 0xab),
     ];
     let proof = build_dispute_proof(&replica(locks, Vec::new()), &TRANSFORMER, 7).expect("proof");
     assert_eq!(
         hex_32(&proof.proof_body_hash),
-        "0x7ebceac0e674263ab459f7149e83f067603cf6c9a40dc952815c86de630fdaaf"
+        "0x860e44478e36a70e099975da3d68e32f0001b4e196a420731d3dd30774b70ce0"
     );
     assert_eq!(
         hex_32(&proof.dispute_hash),
-        "0x7fc1b106b3b875abca2019e51aa2f6b8ea60321f173e8bb4a1ab0331f75b6065"
+        "0xf6dee326d3f38ce0a7b386a6ebb8a6fc86804a55b205c23553e84bfbbd13fac4"
     );
 }
 
@@ -162,14 +155,7 @@ fn locks_become_a_payment_clause_ordered_by_lock_id() {
 /// allowances.
 #[test]
 fn a_resting_offer_becomes_its_own_swap_clause() {
-    let locks = vec![lock(
-        &format!("0x{}", "a1".repeat(32)),
-        1,
-        Side::Left,
-        40,
-        1_700_000_000_000,
-        0xcd,
-    )];
+    let locks = vec![lock(1, Side::Left, 40, 1_700_000_000_000, 0xcd)];
     let proof =
         build_dispute_proof(&replica(locks, vec![offer()]), &TRANSFORMER, 7).expect("proof");
     assert_eq!(
@@ -179,5 +165,53 @@ fn a_resting_offer_becomes_its_own_swap_clause() {
     assert_eq!(
         hex_32(&proof.dispute_hash),
         "0x79c03688ab8052914b50f8a32ef49ee11ffc629b93be55aafe011b5274db4083"
+    );
+}
+
+#[test]
+fn a_pull_becomes_the_third_canonical_clause_byte_for_byte_with_typescript() {
+    let number =
+        |value| CanonicalValue::Number(CanonicalNumber::try_from_u64(value).expect("number"));
+    let pull = CanonicalValue::Object(vec![
+        ("pullId".into(), CanonicalValue::String("pull-b".into())),
+        ("tokenId".into(), number(1)),
+        ("amount".into(), CanonicalValue::BigInt(BigInt::from(-25))),
+        ("claimedRatio".into(), number(17)),
+        (
+            "fullHash".into(),
+            CanonicalValue::String(format!("0x{}", "aa".repeat(32))),
+        ),
+        (
+            "partialRoot".into(),
+            CanonicalValue::String(format!("0x{}", "bb".repeat(32))),
+        ),
+        (
+            "crossJurisdiction".into(),
+            CanonicalValue::Object(vec![(
+                "leg".into(),
+                CanonicalValue::String("target".into()),
+            )]),
+        ),
+        ("createdHeight".into(), number(1)),
+        ("createdTimestamp".into(), number(2)),
+    ]);
+    let replica = replica_with_pulls(Vec::new(), Vec::new(), vec![("pull-b".into(), pull)]);
+    let proof = build_dispute_proof(&replica, &TRANSFORMER, 7).expect("proof");
+    assert_eq!(
+        hex_32(&proof.proof_body_hash),
+        "0x828a4d04cce3c523d22d80a87231306065279a419191608b6afd12544e5f4a72"
+    );
+    let body = build_dispute_proof_body(&replica, &TRANSFORMER).expect("body");
+    assert_eq!(body.transformers.len(), 1);
+    assert_eq!(
+        body.transformers[0]
+            .encoded_batch
+            .iter()
+            .fold(String::from("0x"), |mut text, byte| {
+                use std::fmt::Write as _;
+                let _ = write!(text, "{byte:02x}");
+                text
+            }),
+        "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe70000000000000000000000000000000000000000000000000000000000000011aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0000000000000000000000000000000000000000000000000000000000000001"
     );
 }

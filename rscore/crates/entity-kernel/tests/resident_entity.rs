@@ -5,25 +5,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountId, AccountInputKind, AccountInputRow, AccountPeerInput, AccountSeed, EngineGeneration,
-    EntityInboundRequest, ResidentConsensusEngine,
+    EntityAccountGenesisPolicy, EntityInboundRequest, ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountExecutionContext,
     AccountIdentity, AccountPeerEnvelope, AccountReplica, AccountSettledEvent, AccountState,
-    AccountTx, AccountVerdict, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId,
-    HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, IncomingFrame, JEventClaimTx, JEventMetadata,
-    JurisdictionEvent, OpaqueHtlcCiphertext, ProposalOutcome, ReceiverClock,
-    SequentialAccountEngine, SigningIdentity, TokenId, WatchSeed, derive_signer_key,
-    propose_account_frame,
+    AccountTx, AccountVerdict, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
+    DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, IncomingFrame,
+    JEventClaimTx, JEventMetadata, JurisdictionEvent, OpaqueHtlcCiphertext, ProposalOutcome,
+    ReceiverClock, ReserveUpdatedEvent, SequentialAccountEngine, SigningIdentity, TokenId,
+    WatchSeed, derive_signer_key, propose_account_frame,
 };
 use xln_rscore_entity_kernel::{
-    CrontabState, DeterministicContext, DirectPaymentEntityTx, EntityKernelCommitments,
-    EntityKernelOutput, EntityStateSlice, FinalizedJEventBatch, HtlcPaymentEntityTx, JClaimIngress,
-    JReserveUpdate, LocalEntityFinancialTx, OrderbookState, OriginatedHtlcDeliveryMode,
-    PreparedOriginatedHtlcPayment, ResidentEntityError, ResidentEntityRequest,
-    ResidentJEventProjection, ScheduledHook, ScheduledWake, SchedulerError,
+    AdmittedLocalEntityTx, ConsensusMode, CrontabState, DeterministicContext,
+    DirectPaymentEntityTx, EntityConsensusConfig, EntityFrameAuthority, EntityFrameEvent,
+    EntityKernelCommitments, EntityKernelOutput, EntityLeaderState, EntityStateSlice,
+    FinalizedJEventBatch, HtlcPaymentEntityTx, JClaimIngress, JReserveUpdate, LocalEntityControlTx,
+    LocalEntityFinancialTx, LocalEntityTx, OrderbookState, OriginatedHtlcDeliveryMode,
+    PreparedOriginatedHtlcPayment, ResidentEntityError, ResidentEntityOperation,
+    ResidentEntityRequest, ResidentJEventProjection, ScheduledHook, ScheduledWake, SchedulerError,
     apply_resident_entity_round, collect_due_scheduled_wake_jobs,
 };
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 const TIMESTAMP: u64 = 1_700_000_000_000;
@@ -43,6 +46,23 @@ fn domain() -> AccountDomain {
         DepositoryAddress::parse("0x8888888888888888888888888888888888888888").expect("depository"),
     )
     .expect("domain")
+}
+
+fn single_signer_authority(signer_id: &str) -> EntityFrameAuthority {
+    EntityFrameAuthority {
+        config: EntityConsensusConfig {
+            mode: ConsensusMode::ProposerBased,
+            threshold: 1,
+            validators: vec![signer_id.to_string()],
+            shares: BTreeMap::from([(signer_id.to_string(), 1)]),
+            jurisdiction: None,
+        },
+        leader_state: EntityLeaderState {
+            active_validator_id: signer_id.to_string(),
+            view: 0,
+            changed_at_height: 0,
+        },
+    }
 }
 
 fn account_state(first: &EntityId, second: &EntityId) -> AccountState {
@@ -106,6 +126,7 @@ fn offer_tx(offer_id: &str, ask: bool) -> AccountTx {
         max_fee,
         time_in_force: Some(0),
         price_ticks: Some(BigInt::from(25_000_000_u64)),
+        cross_jurisdiction: None,
     }
 }
 
@@ -169,6 +190,200 @@ fn peer_proposal(
 }
 
 #[test]
+fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
+    let hub_identity = identity("hub");
+    let peer_identity = identity("genesis-peer");
+    let hub = entity(&hub_identity);
+    let peer = entity(&peer_identity);
+    let account_id = AccountId::from_bytes(*peer.as_bytes());
+    let transformer = [0x77; 20];
+    let identity = AccountIdentity::new(
+        domain(),
+        if hub < peer {
+            hub.clone()
+        } else {
+            peer.clone()
+        },
+        if hub < peer {
+            peer.clone()
+        } else {
+            hub.clone()
+        },
+        WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+    )
+    .expect("account identity");
+    let mut peer_replica = AccountReplica::new(
+        peer.clone(),
+        AccountState::new(
+            identity,
+            AccountDisputeConfig::new(10, 10).expect("dispute config"),
+            Vec::new(),
+        )
+        .expect("genesis state"),
+    )
+    .expect("peer replica");
+    peer_replica.set_delta_transformer(transformer);
+    let mut peer_account = AccountConsensus::new(peer_replica);
+    peer_account
+        .admit_txs(
+            vec![AccountTx::AddDelta {
+                token_id: TokenId::new(1).expect("token"),
+            }],
+            "resident-genesis-bundle-test",
+        )
+        .expect("peer admission");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut peer_account,
+        &peer_identity,
+        TIMESTAMP,
+        100,
+        &support::market(),
+    )
+    .expect("peer proposal") else {
+        panic!("peer must propose")
+    };
+    let proposed = *proposed;
+    let dispute = proposed.dispute.as_ref().map(|draft| CounterpartyDispute {
+        hanko: proposed.dispute_hanko.clone(),
+        hash: draft.hash,
+        proof_body_hash: draft.proof_body_hash,
+        nonce: draft.nonce,
+        proposer_is_left: draft.proposer_is_left,
+    });
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x51; 8]),
+        4,
+        0,
+        derive_signer_key(SEED, "hub").expect("hub key"),
+        "hub".to_string(),
+        support::market(),
+        Vec::new(),
+    )
+    .expect("empty resident accounts");
+    let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+    state.hub_rebalance_config = Some(CanonicalValue::Object(vec![
+        (
+            "policyVersion".to_string(),
+            CanonicalValue::Number(CanonicalNumber::from_u32(1)),
+        ),
+        (
+            "rebalanceLiquidityFeeBps".to_string(),
+            CanonicalValue::BigInt(BigInt::from(0)),
+        ),
+    ]));
+    let base_root = accounts.accounts_root();
+    let result = apply_resident_entity_round(
+        &mut accounts,
+        state,
+        ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root: base_root,
+                clock: ReceiverClock {
+                    entity_timestamp: TIMESTAMP,
+                    finalized_j_height: 100,
+                },
+                rows: vec![AccountInputRow {
+                    operation_index: 0,
+                    account_id,
+                    genesis_policy: Some(EntityAccountGenesisPolicy {
+                        expected_domain: domain(),
+                        shadow_policy_root: xln_rscore_protocol::EMPTY_RADIX_ROOT,
+                        shadow_policy_rows: Vec::new(),
+                        delta_transformer: transformer,
+                        public_pinned: false,
+                    }),
+                    certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+                    local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+                    input: AccountPeerInput {
+                        envelope: AccountPeerEnvelope {
+                            from_entity_id: *peer.as_bytes(),
+                            to_entity_id: *hub.as_bytes(),
+                            domain: domain(),
+                            dispute_config: AccountDisputeConfig::new(10, 10)
+                                .expect("dispute config"),
+                            watch_seed: Some(
+                                WatchSeed::parse(&format!("0x{}", "99".repeat(32)))
+                                    .expect("watch seed"),
+                            ),
+                        },
+                        kind: AccountInputKind::Frame(Box::new(IncomingFrame {
+                            frame: proposed.frame,
+                            state_hash: proposed.state_hash,
+                            frame_hanko: Some(proposed.hanko),
+                            dispute,
+                        })),
+                    },
+                }],
+                post_accounts: false,
+            },
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: TIMESTAMP,
+            outbound_j_height: 100,
+            checkpoint_due: false,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            expected_proposer_signer_id: "hub".to_string(),
+            hub_rebalance_has_pending_work: false,
+            finalized_j_events: None,
+            entity_authority: Some(single_signer_authority("hub")),
+            local_account_genesis_policy: None,
+            operations: vec![
+                ResidentEntityOperation::Local(vec![AdmittedLocalEntityTx {
+                    signer_id: "hub".into(),
+                    board_epoch: 0,
+                    tx: LocalEntityTx::Control(LocalEntityControlTx::ChatMessage {
+                        message: "before-account".into(),
+                    }),
+                }]),
+                ResidentEntityOperation::AccountRange { start: 0, len: 1 },
+                ResidentEntityOperation::Local(vec![AdmittedLocalEntityTx {
+                    signer_id: "hub".into(),
+                    board_epoch: 0,
+                    tx: LocalEntityTx::Control(LocalEntityControlTx::ChatMessage {
+                        message: "after-account".into(),
+                    }),
+                }]),
+            ],
+        },
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("resident genesis round");
+    let status = result
+        .entity_frame_events
+        .iter()
+        .filter_map(|event| match event {
+            EntityFrameEvent::Status { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let before = status
+        .iter()
+        .position(|message| *message == "before-account")
+        .expect("before local event");
+    let account = status
+        .iter()
+        .position(|message| message.starts_with("🤝 Accepted frame"))
+        .expect("account event");
+    let after = status
+        .iter()
+        .position(|message| *message == "after-account")
+        .expect("after local event");
+    assert!(before < account && account < after);
+    let outbound = result.outbound.proposals[0]
+        .outbound_input
+        .as_ref()
+        .expect("hub ACK plus proposal");
+    assert!(matches!(
+        &outbound.kind,
+        AccountInputKind::AckFrame { ack, frame }
+            if ack.height == 1 && frame.frame.height == 2
+    ));
+}
+
+#[test]
 fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
     let hub_identity = identity("hub");
     let peer_identity = identity("j-peer");
@@ -217,6 +432,21 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
     });
     let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
     state.known_accounts.insert(peer.to_string());
+    let mut j_authority = single_signer_authority("hub");
+    j_authority.config.jurisdiction = Some(CanonicalValue::Object(vec![
+        (
+            "chainId".into(),
+            CanonicalValue::Number(CanonicalNumber::try_from_u64(31_337).expect("chain id")),
+        ),
+        (
+            "depositoryAddress".into(),
+            CanonicalValue::String("0x8888888888888888888888888888888888888888".into()),
+        ),
+        (
+            "entityProviderAddress".into(),
+            CanonicalValue::String("0x9999999999999999999999999999999999999999".into()),
+        ),
+    ]));
     let result = apply_resident_entity_round(
         &mut accounts,
         state,
@@ -231,32 +461,67 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 43,
             checkpoint_due: false,
             post_accounts: false,
+            runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".into(),
             hub_rebalance_has_pending_work: false,
             finalized_j_events: Some(ResidentJEventProjection {
                 scanned_through: 43,
+                runtime_seed: "runtime-seed".into(),
+                claim: xln_rscore_entity_kernel::JPrefixRangeClaim {
+                    jurisdiction_ref: "local".into(),
+                    base_height: 42,
+                    scanned_through_height: 43,
+                    tip_block_hash: format!("0x{}", "43".repeat(32)),
+                    event_history_root: format!("0x{}", "44".repeat(32)),
+                    range_hash: format!("0x{}", "45".repeat(32)),
+                    headers: Vec::new(),
+                    blocks: Vec::new(),
+                },
+                proposer_signer_id: "hub".into(),
+                proposer_signature: "0x".into(),
                 batches: vec![FinalizedJEventBatch {
                     j_height: 43,
                     j_block_hash: [0x43; 32],
+                    events: {
+                        let mut events = match &claim {
+                            AccountTx::JEventClaim(tx) => tx.events.clone(),
+                            _ => Vec::new(),
+                        };
+                        events.push(JurisdictionEvent::ReserveUpdated(ReserveUpdatedEvent {
+                            metadata: JEventMetadata {
+                                block_number: Some(43),
+                                block_hash: Some([0x43; 32]),
+                                transaction_hash: Some([0x44; 32]),
+                                log_index: Some(0),
+                                event_index: None,
+                            },
+                            entity: hub.as_hex(),
+                            token_id: 1,
+                            new_balance: BigInt::from(7),
+                        }));
+                        xln_rscore_engine::canonical_events(&events).expect("events")
+                    },
+                    dispute_finalization_evidence: vec![],
                     reserve_updates: vec![JReserveUpdate {
                         token_id: 1,
                         own_reserve: BigInt::from(7),
-                        counterparty_id: peer.clone(),
                     }],
                     account_claims: vec![JClaimIngress {
                         account_id: peer.clone(),
                         tx: claim,
                     }],
                 }],
-                active_account_ids: BTreeSet::from([peer.to_string()]),
             }),
-            local_financial_txs: Vec::new(),
+            entity_authority: Some(j_authority),
+            local_account_genesis_policy: None,
+            operations: Vec::new(),
         },
         &DeterministicContext::hlt_default(),
     )
@@ -297,7 +562,7 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
     let base_root = accounts.accounts_root();
     let tx_hash = format!("0x{}", "aa".repeat(32));
     let hashlock = format!("0x{}", "bb".repeat(32));
-    let lock_id = format!("0x{}", "cc".repeat(32));
+    let lock_id = hashlock.clone();
     let route = vec![hub.to_string(), peer.to_string()];
     let mut context = DeterministicContext::hlt_default();
     context.originated_htlcs.insert(
@@ -315,7 +580,6 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
             sender_lock_amount: BigInt::from(110),
             max_sender_debit: BigInt::from(120),
             total_fee: BigInt::from(10),
-            lock_id: lock_id.clone(),
             timelock: BigInt::from(TIMESTAMP + 60_000),
             reveal_before_height: 200,
             next_hop_entity_id: peer.to_string(),
@@ -338,55 +602,77 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 100,
             checkpoint_due: false,
             post_accounts: false,
+            runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".into(),
             hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
-            local_financial_txs: vec![
-                LocalEntityFinancialTx::DirectPayment(DirectPaymentEntityTx {
-                    target_entity_id: peer.to_string(),
-                    token_id: TokenId::new(1).expect("token"),
-                    amount: BigInt::from(7),
-                    route: route.clone(),
-                    description: Some(String::new()),
-                    delivery_mode: DeliveryMode::Direct,
-                    trusted_gateway_entity_id: None,
-                }),
-                LocalEntityFinancialTx::HtlcPayment(HtlcPaymentEntityTx {
-                    target_entity_id: peer.to_string(),
-                    token_id: TokenId::new(1).expect("token"),
-                    amount: BigInt::from(100),
-                    max_sender_debit: BigInt::from(120),
-                    route,
-                    description: Some("resident exact".into()),
-                    delivery_mode: OriginatedHtlcDeliveryMode::Instant,
-                    started_at_ms: Some(TIMESTAMP),
-                    hashlock: Some(hashlock.clone()),
-                    tx_hash,
-                }),
-            ],
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations: vec![ResidentEntityOperation::Local(vec![
+                xln_rscore_entity_kernel::AdmittedLocalEntityTx {
+                    signer_id: "hub".into(),
+                    board_epoch: 0,
+                    tx: xln_rscore_entity_kernel::LocalEntityTx::Financial(
+                        LocalEntityFinancialTx::DirectPayment(DirectPaymentEntityTx {
+                            target_entity_id: peer.to_string(),
+                            token_id: TokenId::new(1).expect("token"),
+                            amount: BigInt::from(7),
+                            route: route.clone(),
+                            description: Some(String::new()),
+                            delivery_mode: DeliveryMode::Direct,
+                            trusted_gateway_entity_id: None,
+                        }),
+                    ),
+                },
+                xln_rscore_entity_kernel::AdmittedLocalEntityTx {
+                    signer_id: "hub".into(),
+                    board_epoch: 0,
+                    tx: xln_rscore_entity_kernel::LocalEntityTx::Financial(
+                        LocalEntityFinancialTx::HtlcPayment(HtlcPaymentEntityTx {
+                            target_entity_id: peer.to_string(),
+                            token_id: TokenId::new(1).expect("token"),
+                            amount: BigInt::from(100),
+                            max_sender_debit: BigInt::from(120),
+                            route,
+                            description: Some("resident exact".into()),
+                            delivery_mode: OriginatedHtlcDeliveryMode::Instant,
+                            started_at_ms: Some(TIMESTAMP),
+                            hashlock: Some(hashlock.clone()),
+                            tx_hash,
+                        }),
+                    ),
+                },
+            ])],
         },
         &context,
     )
     .expect("fused local financial round");
     assert_eq!(result.non_mutating_wake_targets, vec![hub.to_string()]);
     assert_eq!(result.outbound.admissions.len(), 1);
-    let proposal = result.outbound.proposals[0]
-        .proposed
-        .as_ref()
-        .expect("outbound proposal");
+    let proposal_row = &result.outbound.proposals[0];
+    assert!(proposal_row.proposed.is_some(), "outbound proposal");
+    let proposal_frame = &proposal_row.incoming_ref().expect("outbound frame").frame;
     assert!(matches!(
-        proposal.frame.txs.as_slice(),
+        proposal_frame.txs.as_slice(),
         [AccountTx::DirectPayment { description, .. }, AccountTx::HtlcLock(lock)]
             if description.as_deref() == Some(format!("Payment to {peer}").as_str())
                 && lock.lock_id == lock_id
     ));
-    assert!(result.state.htlc_routes.contains_key(&hashlock));
+    assert!(
+        result
+            .state
+            .paybook
+            .entry(&hashlock)
+            .expect("paybook lookup")
+            .is_some()
+    );
     assert!(result
         .outputs
         .iter()
@@ -494,22 +780,26 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
         post_accounts: false,
     };
     let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
-    state.known_accounts = BTreeSet::from([payer.to_string(), next.to_string()]);
+    state.known_accounts = BTreeSet::from([payer.to_string(), next.to_string()]).into();
     let result = apply_resident_entity_round(
         &mut accounts,
         state,
         ResidentEntityRequest {
             inbound,
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 100,
             checkpoint_due: false,
             post_accounts: false,
+            runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".to_string(),
             hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
-            local_financial_txs: Vec::new(),
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
         },
         &DeterministicContext::hlt_default(),
     )
@@ -517,7 +807,15 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
 
     assert_eq!(result.inbound.applied.len(), 1);
     assert_eq!(result.outbound.admissions.len(), 1);
-    assert_eq!(result.outbound.proposals.len(), 1);
+    assert_eq!(
+        result
+            .outbound
+            .proposals
+            .iter()
+            .filter(|row| row.proposed.is_some())
+            .count(),
+        1,
+    );
     assert!(
         !result.entity_frame_events.is_empty(),
         "Account ingress/proposal status events are signed by the Entity frame"
@@ -541,18 +839,21 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
         2,
         "the inbound Account frame and outbound Account frame are both in the manifest"
     );
-    let proposal = result.outbound.proposals[0]
-        .proposed
-        .as_ref()
-        .expect("forward proposal");
-    assert_eq!(result.outbound.proposals[0].account_id, next_id);
-    assert_eq!(proposal.frame.txs.len(), 1);
+    let proposal_row = result
+        .outbound
+        .proposals
+        .iter()
+        .find(|row| row.account_id == next_id)
+        .expect("forward proposal row");
+    assert!(proposal_row.proposed.is_some(), "forward proposal");
+    let proposal_frame = &proposal_row.incoming_ref().expect("forward frame").frame;
+    assert_eq!(proposal_frame.txs.len(), 1);
     let AccountTx::DirectPayment {
         from_entity_id,
         to_entity_id,
         route,
         ..
-    } = &proposal.frame.txs[0]
+    } = &proposal_frame.txs[0]
     else {
         panic!("paybook must produce a direct payment")
     };
@@ -584,7 +885,7 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
         )
         .expect("resident accounts");
         let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
-        state.known_accounts = BTreeSet::from([maker.to_string(), taker.to_string()]);
+        state.known_accounts = BTreeSet::from([maker.to_string(), taker.to_string()]).into();
         state.orderbook = Some(OrderbookState::empty(10_000));
         let expected_accounts_root = accounts.accounts_root();
         let result = apply_resident_entity_round(
@@ -601,16 +902,20 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                     rows: rows.clone(),
                     post_accounts: false,
                 },
+                local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
                 entity_height: 1,
                 outbound_timestamp: TIMESTAMP,
                 outbound_j_height: 100,
                 checkpoint_due: false,
                 post_accounts: false,
+                runtime_seed: None,
                 scheduled_wake: None,
                 expected_proposer_signer_id: "hub".to_string(),
                 hub_rebalance_has_pending_work: false,
                 finalized_j_events: None,
-                local_financial_txs: Vec::new(),
+                entity_authority: None,
+                local_account_genesis_policy: None,
+                operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 2 }],
             },
             &DeterministicContext::hlt_default(),
         )
@@ -631,8 +936,9 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
             .iter()
             .map(|row| {
                 let proposed = row.proposed.as_ref().expect("swap resolve proposal");
+                let frame = &row.incoming_ref().expect("swap resolve frame").frame;
                 assert!(matches!(
-                    proposed.frame.txs.as_slice(),
+                    frame.txs.as_slice(),
                     [AccountTx::SwapResolve { .. }]
                 ));
                 proposed.state_hash
@@ -659,7 +965,7 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
     let lock_id = format!("0x{}", "ab".repeat(32));
     let lock = AccountTx::HtlcLock(HtlcLockTx {
         lock_id: lock_id.clone(),
-        hashlock: HtlcHashlock::parse(&format!("0x{}", "cd".repeat(32))).expect("hashlock"),
+        hashlock: HtlcHashlock::parse(&lock_id).expect("hashlock"),
         timelock: BigInt::from(TIMESTAMP + 60_000),
         reveal_before_height: 1_000,
         amount: BigInt::from(100),
@@ -695,10 +1001,11 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
     let due_at = TIMESTAMP + 60_000;
     let crontab = CrontabState {
         tasks: BTreeMap::new(),
-        hooks: BTreeMap::from([(
+        hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
             format!("htlc-timeout:{lock_id}"),
             ScheduledHook::htlc_timeout(peer.to_string(), lock_id.clone(), due_at),
-        )]),
+        )]))
+        .expect("scheduled hooks"),
     };
     let jobs = collect_due_scheduled_wake_jobs(&crontab, due_at, false).expect("due jobs");
     let mut state = EntityStateSlice::empty(hub.to_string(), due_at);
@@ -718,11 +1025,13 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: due_at,
             outbound_j_height: 100,
             checkpoint_due: false,
             post_accounts: false,
+            runtime_seed: None,
             scheduled_wake: Some(ScheduledWake {
                 version: 1,
                 proposer_signer_id: "hub".to_string(),
@@ -732,7 +1041,9 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
             expected_proposer_signer_id: "hub".to_string(),
             hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
-            local_financial_txs: Vec::new(),
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations: Vec::new(),
         },
         &DeterministicContext::hlt_default(),
     )
@@ -740,13 +1051,16 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
 
     assert!(result.state.crontab.expect("crontab").hooks.is_empty());
     assert_eq!(result.outbound.admissions.len(), 1);
-    let proposal = result.outbound.proposals[0]
-        .proposed
-        .as_ref()
-        .expect("timeout proposal");
+    let proposal_row = &result.outbound.proposals[0];
+    assert!(proposal_row.proposed.is_some(), "timeout proposal");
     assert_eq!(result.outbound.proposals[0].account_id, peer_id);
     assert!(matches!(
-        proposal.frame.txs.as_slice(),
+        proposal_row
+            .incoming_ref()
+            .expect("timeout frame")
+            .frame
+            .txs
+            .as_slice(),
         [AccountTx::HtlcResolve(resolve)]
             if resolve.lock_id == lock_id
                 && matches!(
@@ -775,10 +1089,11 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
     let base_root = accounts.accounts_root();
     let crontab = CrontabState {
         tasks: BTreeMap::new(),
-        hooks: BTreeMap::from([(
+        hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
             "htlc-timeout:forged".to_string(),
             ScheduledHook::htlc_timeout("peer".to_string(), "forged".to_string(), 150),
-        )]),
+        )]))
+        .expect("scheduled hooks"),
     };
     let jobs = collect_due_scheduled_wake_jobs(&crontab, 200, false).expect("due jobs");
     let mut state = EntityStateSlice::empty(hub.to_string(), 200);
@@ -797,11 +1112,13 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
+            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: 200,
             outbound_j_height: 0,
             checkpoint_due: false,
             post_accounts: false,
+            runtime_seed: None,
             scheduled_wake: Some(ScheduledWake {
                 version: 1,
                 proposer_signer_id: "attacker".to_string(),
@@ -811,7 +1128,9 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
             expected_proposer_signer_id: "hub".to_string(),
             hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
-            local_financial_txs: Vec::new(),
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations: Vec::new(),
         },
         &DeterministicContext::hlt_default(),
     );

@@ -21,13 +21,11 @@ import { hexToBytes } from '../../../support/bytes/hex-bytes';
 import { HTLC, LIMITS } from '../../../config/constants';
 import { safeStringify } from '../../serialization';
 import { encryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../multi-recipient';
-import { deriveForwardHtlcLockId } from '../utils';
 import { decodeOnionLayer, encodeOnionLayer, type DecodedOnionLayer } from './onion';
 
 const MAX_ENVELOPE_SERIALIZED_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 
 export type HtlcEnvelopeBinding = Readonly<{
-  rootLockId: string;
   hashlock: string;
   tokenId: number;
   senderLockAmount: bigint;
@@ -39,7 +37,6 @@ export type HtlcEnvelopeContext = Readonly<{
   fromEntityId: string;
   toEntityId: string;
   domain: Readonly<{ chainId: number; depositoryAddress: string }>;
-  lockId: string;
   hashlock: string;
   tokenId: number;
   amount: bigint;
@@ -48,7 +45,7 @@ export type HtlcEnvelopeContext = Readonly<{
 }>;
 
 const CONTEXT_DOMAIN = new TextEncoder().encode('xln:htlc-envelope-context:binary');
-const CONTEXT_PREIMAGE_BYTES = CONTEXT_DOMAIN.length + 32 + 32 + 8 + 20 + 32 + 32 + 8 + 32 + 32 + 8;
+const CONTEXT_PREIMAGE_BYTES = CONTEXT_DOMAIN.length + 32 + 32 + 8 + 20 + 32 + 8 + 32 + 32 + 8;
 
 const writeHex = (out: Uint8Array, offset: number, hex: string, length: number, code: string): number => {
   const normalized = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
@@ -87,7 +84,6 @@ export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): st
   offset = writeHex(out, offset, context.toEntityId.toLowerCase(), 32, 'HTLC_CONTEXT_TO_INVALID');
   offset = writeUint64(out, offset, context.domain.chainId, 'HTLC_CONTEXT_CHAIN_INVALID');
   offset = writeHex(out, offset, context.domain.depositoryAddress.toLowerCase(), 20, 'HTLC_CONTEXT_DEPOSITORY_INVALID');
-  offset = writeHex(out, offset, context.lockId.toLowerCase(), 32, 'HTLC_CONTEXT_LOCK_INVALID');
   offset = writeHex(out, offset, context.hashlock.toLowerCase(), 32, 'HTLC_CONTEXT_HASHLOCK_INVALID');
   offset = writeUint64(out, offset, context.tokenId, 'HTLC_CONTEXT_TOKEN_INVALID');
   offset = writeUint256(out, offset, context.amount, 'HTLC_CONTEXT_AMOUNT_INVALID');
@@ -95,12 +91,6 @@ export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): st
   offset = writeUint64(out, offset, context.revealBeforeHeight, 'HTLC_CONTEXT_REVEAL_INVALID');
   if (offset !== CONTEXT_PREIMAGE_BYTES) throw new Error('HTLC_CONTEXT_PREIMAGE_LENGTH');
   return keccakBytesHash(out);
-};
-
-export const deriveHtlcLockIdAtHop = (rootLockId: string, hopIndex: number): string => {
-  let lockId = rootLockId;
-  for (let index = 1; index < hopIndex; index += 1) lockId = deriveForwardHtlcLockId(lockId);
-  return lockId;
 };
 
 const inboundAmountAt = (
@@ -126,7 +116,6 @@ const contextAt = (
   fromEntityId: route[hopIndex - 1]!,
   toEntityId: route[hopIndex]!,
   domain: hopAccountDomains[hopIndex - 1] ?? (() => { throw new Error(`Missing Account domain for hop ${hopIndex}`); })(),
-  lockId: deriveHtlcLockIdAtHop(binding.rootLockId, hopIndex),
   hashlock: binding.hashlock,
   tokenId: binding.tokenId,
   amount: inboundAmountAt(route, hopIndex, binding.senderLockAmount, hopForwardAmounts),

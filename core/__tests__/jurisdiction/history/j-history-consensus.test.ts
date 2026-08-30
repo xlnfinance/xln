@@ -20,6 +20,7 @@ import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-w
 import { applyEntityInput } from '../../../entity/consensus/index';
 import { applyJEvent } from '../../../entity/tx/j-events';
 import { createEmptyEnv } from '../../../runtime';
+import { emptyEntityAccountMap } from '../../helpers/entity-account-map';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -103,12 +104,10 @@ const state = (): EntityState => ({
     },
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: emptyEntityAccountMap(entityId),
   lastFinalizedJHeight: 0,
   profile: { name: 'J history', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 describe('J validator-local history and Entity-finalized ranges', () => {
@@ -542,6 +541,17 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const proposalHeight = validatorState.height + 1;
     const stateRoot = `0x${'00'.repeat(32)}`;
     const authorityRoot = `0x${'00'.repeat(32)}`;
+    const entityContext = {
+      version: 1 as const,
+      proposerReplicaId: `${validatorState.entityId}:${activeLeaderId}`,
+      entityId: validatorState.entityId,
+      proposerSignerId: activeLeaderId,
+      parentFrameHash: previousFrameHash,
+      height: proposalHeight,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries: [], originated: [] },
+    };
     const frameHash = createEntityFrameHashFromStateRoot(
       previousFrameHash,
       proposalHeight,
@@ -551,6 +561,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       validatorState.entityId,
       stateRoot,
       authorityRoot,
+      entityContext,
     );
     const result = await applyEntityInput(env, replica, {
       entityId: validatorState.entityId,
@@ -561,6 +572,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         stateRoot,
         authorityRoot,
         timestamp: validatorState.timestamp,
+        entityContext,
         txs: [tx],
         events: [],
         hash: frameHash,
@@ -1241,6 +1253,17 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const proposalHeight = entityState.height + 1;
     const stateRoot = `0x${'00'.repeat(32)}`;
     const authorityRoot = `0x${'00'.repeat(32)}`;
+    const entityContext = {
+      version: 1 as const,
+      proposerReplicaId: `${entityState.entityId}:${activeLeaderId}`,
+      entityId: entityState.entityId,
+      proposerSignerId: activeLeaderId,
+      parentFrameHash: previousFrameHash,
+      height: proposalHeight,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries: [], originated: [] },
+    };
     const frameHash = createEntityFrameHashFromStateRoot(
       previousFrameHash,
       proposalHeight,
@@ -1250,6 +1273,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       entityState.entityId,
       stateRoot,
       authorityRoot,
+      entityContext,
     );
 
     await expect(applyEntityInput(env, replica, {
@@ -1261,6 +1285,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         stateRoot,
         authorityRoot,
         timestamp: entityState.timestamp,
+        entityContext,
         txs: [tx],
         events: [],
         hash: frameHash,
@@ -1602,23 +1627,10 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     expect(retainedLeafReads).toBe(0);
   });
 
-  test('validates bounded display bodies without making them root authority', () => {
+  test('validates only the certified anchor and retains no display-history authority', () => {
     const entityState = state();
     let prefixRoot = EMPTY_J_HISTORY_ROOT;
-    entityState.jBlockChain = [1, 2, 3].map((height) => {
-      const block = eventBlock(height, String(height));
-      prefixRoot = foldJHistoryRoot(prefixRoot, [block]);
-      return {
-        jurisdictionRef,
-        jHeight: block.jHeight,
-        jBlockHash: block.jBlockHash,
-        eventsHash: block.eventsHash,
-        events: structuredClone(block.events),
-        finalizedAt: entityState.timestamp,
-        proposerSignerId: leaderId,
-        proposerSignature: '0xsig',
-      };
-    });
+    for (const height of [1, 2, 3]) prefixRoot = foldJHistoryRoot(prefixRoot, [eventBlock(height, String(height))]);
     entityState.lastFinalizedJHeight = 3;
     entityState.jHistoryFinality = {
       jurisdictionRef,
@@ -1632,19 +1644,17 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     };
 
     expect(() => assertCertifiedJHistoryIntegrity(entityState)).not.toThrow();
-    const originalTipHash = entityState.jHistoryFinality.tipBlockHash;
-    entityState.jHistoryFinality.tipBlockHash = `0x${'aa'.repeat(32)}`;
+    expect(entityState.jBlockChain).toBeUndefined();
+    entityState.jHistoryFinality.tipBlockHash = 'invalid';
     expect(() => assertCertifiedJHistoryIntegrity(entityState))
-      .toThrow('J_HISTORY_FINALITY_TIP_CORRUPTION:3');
-    entityState.jHistoryFinality.tipBlockHash = originalTipHash;
-    const originalEventsHash = entityState.jBlockChain[1]!.eventsHash;
-    entityState.jBlockChain[1]!.eventsHash = `0x${'ff'.repeat(32)}`;
+      .toThrow('J_HISTORY_FINALITY_HASH_CORRUPTION');
+    entityState.jHistoryFinality.tipBlockHash = blockHash(3);
+    entityState.jHistoryFinality.eventHistoryRoot = 'invalid';
     expect(() => assertCertifiedJHistoryIntegrity(entityState))
-      .toThrow('J_HISTORY_FINALITY_EVENTS_HASH_CORRUPTION:2');
-    entityState.jBlockChain[1]!.eventsHash = originalEventsHash;
-    const retainedEvent = entityState.jBlockChain[1]!.events[0]!;
-    retainedEvent.data = { ...retainedEvent.data, newBalance: '999' };
+      .toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
+    entityState.jHistoryFinality.eventHistoryRoot = prefixRoot;
+    entityState.lastFinalizedJHeight = 2;
     expect(() => assertCertifiedJHistoryIntegrity(entityState))
-      .toThrow('J_HISTORY_FINALITY_EVENTS_HASH_CORRUPTION:2');
+      .toThrow('J_HISTORY_FINALITY_HEIGHT_CORRUPTION');
   });
 });

@@ -32,12 +32,12 @@ const inspectRuntimeStorage = async (
     tryOpenDb: (targetEnv) => deps.tryOpenStorageDb(targetEnv, 'current'),
     getRuntimeDb: (targetEnv) => deps.getStorageDb(targetEnv, 'current'),
   });
-  const history = await inspectStorage({
+  const wal = await inspectStorage({
     env,
     tryOpenDb: deps.tryOpenRuntimeWalDb,
     getRuntimeDb: deps.getRuntimeWalDb,
   });
-  if (!current && !history) return null;
+  if (!current && !wal) return null;
 
   const epochDbs = [
     current
@@ -49,52 +49,50 @@ const inspectRuntimeStorage = async (
           frameCount: current.frameCount,
           snapshotCount: current.snapshotHeights.length,
           liveBytes: current.liveBytes,
-          historyBytes: current.historyBytes,
+          walBytes: current.walBytes,
           totalBytes: current.totalBytes,
         }
       : null,
-    history
+    wal
       ? {
-          role: 'history' as const,
+          role: 'wal' as const,
           path: resolveRuntimeWalDbPath(env),
-          latestHeight: history.head?.latestHeight ?? 0,
-          latestSnapshotHeight: history.head?.latestSnapshotHeight ?? 0,
-          frameCount: history.frameCount,
-          snapshotCount: history.snapshotHeights.length,
-          liveBytes: history.liveBytes,
-          historyBytes: history.historyBytes,
-          totalBytes: history.totalBytes,
+          latestHeight: wal.head?.latestHeight ?? 0,
+          latestSnapshotHeight: wal.head?.latestSnapshotHeight ?? 0,
+          frameCount: wal.frameCount,
+          snapshotCount: wal.snapshotHeights.length,
+          liveBytes: wal.liveBytes,
+          walBytes: wal.walBytes,
+          totalBytes: wal.totalBytes,
         }
       : null,
   ].filter(Boolean);
 
   return {
-    head: history?.head ?? current?.head ?? null,
-    frameCount: history?.frameCount ?? 0,
-    snapshotHeights: Array.from(new Set(history?.snapshotHeights ?? []))
+    head: wal?.head ?? current?.head ?? null,
+    frameCount: wal?.frameCount ?? 0,
+    snapshotHeights: Array.from(new Set(wal?.snapshotHeights ?? []))
       .sort((left, right) => left - right),
     liveEntityCount: current?.liveEntityCount ?? 0,
     liveAccountCount: current?.liveAccountCount ?? 0,
     liveAccountFieldCount: current?.liveAccountFieldCount ?? 0,
     liveAccountFieldBytes: current?.liveAccountFieldBytes ?? 0,
     liveBookCount: current?.liveBookCount ?? 0,
-    frameBytes: history?.frameBytes ?? 0,
-    boundedValueCount: history?.boundedValueCount ?? 0,
-    boundedValueBytes: history?.boundedValueBytes ?? 0,
-    historyViewBytes: history?.historyViewBytes ?? 0,
-    snapshotBytes: history?.snapshotBytes ?? 0,
+    frameBytes: wal?.frameBytes ?? 0,
+    boundedValueCount: wal?.boundedValueCount ?? 0,
+    boundedValueBytes: wal?.boundedValueBytes ?? 0,
+    snapshotBytes: wal?.snapshotBytes ?? 0,
     liveBytes: current?.liveBytes ?? 0,
-    historyBytes: history?.historyBytes ?? 0,
+    walBytes: wal?.walBytes ?? 0,
     totalBytes:
       (current?.liveBytes ?? 0) +
-      (history?.historyBytes ?? 0) +
-      (history?.historyViewBytes ?? 0),
-    maxFrameBytes: history?.maxFrameBytes ?? 0,
+      (wal?.walBytes ?? 0),
+    maxFrameBytes: wal?.maxFrameBytes ?? 0,
     maxPhysicalValueBytes: Math.max(
       current?.maxPhysicalValueBytes ?? 0,
-      history?.maxPhysicalValueBytes ?? 0,
+      wal?.maxPhysicalValueBytes ?? 0,
     ),
-    maxSnapshotBytes: history?.maxSnapshotBytes ?? 0,
+    maxSnapshotBytes: wal?.maxSnapshotBytes ?? 0,
     epochDbs,
   };
 };

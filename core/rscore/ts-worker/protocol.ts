@@ -9,6 +9,7 @@ import type {
 } from '../../account/consensus/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
+import type { PersistentRadixNodeCommitment } from '../../protocol/state/persistent-radix-value-map';
 
 export type TsAccountWorkerOptions = Readonly<{
   ownerEntityId: string;
@@ -66,7 +67,7 @@ export type TsAccountWorkerEffect =
 
 export type TsAccountWorkerSubroot = Readonly<{
   shardId: number;
-  root: string;
+  node: PersistentRadixNodeCommitment | null;
 }>;
 
 /** Portable dirty Account document. Present only on an explicitly due checkpoint. */
@@ -93,10 +94,17 @@ export type TsAccountWorkerPhaseMetrics = Readonly<{
   /** Worker busy time; wait is queue/IPC idle inside the round trip. */
   workMs: number;
   waitMs: number;
+  transitionMs: number;
+  proposalMs: number;
+  rootMs: number;
+  checkpointMs: number;
+  workerEncodeMs: number;
+  threadCpuUserMs: number;
+  threadCpuSystemMs: number;
 }>;
 
 export type TsAccountWorkerBatchResult = Readonly<{
-  shadowAccountsRoot: string;
+  accountsRoot: string;
   effects: readonly TsAccountWorkerEffect[];
   changedSubroots: readonly TsAccountWorkerSubroot[];
   checkpointChanges?: TsAccountWorkerCheckpointChanges;
@@ -113,8 +121,10 @@ export type TsAccountWorkerBatchResult = Readonly<{
     decodeMs: number;
     /** Radix fold + ordinal restore + aggregate of worker results. */
     foldMs: number;
-    /** Wall clock from first dispatch to last worker response. */
+    /** Coordinator wall time to encode and post every worker request. */
     dispatchMs: number;
+    /** Wall time from final post until all required workers responded. */
+    joinMs: number;
   }>;
 }>;
 
@@ -122,7 +132,7 @@ export type TsAccountWorkerInitialization = Readonly<{
   accounts: number;
   logicalShards: number;
   workers: number;
-  shadowAccountsRoot: string;
+  accountsRoot: string;
   requestBytes: number;
   responseBytes: number;
 }>;
@@ -179,6 +189,14 @@ export type TsAccountWorkerPhaseResult = Readonly<{
   operations: number;
   elapsedUs: number;
   heapUsedBytes: number;
+  timings: Readonly<{
+    transitionUs: number;
+    proposalUs: number;
+    rootUs: number;
+    checkpointUs: number;
+  }>;
+  threadCpuUserUs: number;
+  threadCpuSystemUs: number;
 }>;
 
 export type TsAccountWorkerInitResult = Readonly<{
@@ -199,6 +217,7 @@ export type TsAccountWorkerResponseEnvelope =
       requestId: number;
       kind: 'result';
       payload: ArrayBuffer;
+      encodeUs: number;
     }>
   | Readonly<{
       requestId: number;

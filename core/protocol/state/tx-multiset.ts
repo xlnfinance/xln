@@ -52,10 +52,10 @@ const accountInputBodyDigests = new RecencyMemo<object, string>(16_384);
  * identity before body validation: two envelopes claiming one `stateHash`
  * over different txs must never share a mempool key.
  */
-export const accountInputBodyDigest = (input: object): string => {
+const accountInputBodyDigest = (input: object): string => {
   const hit = accountInputBodyDigests.get(input);
   if (hit !== undefined) return hit;
-  const digest = keccakBytesHash(encodeBinaryPayload(input, 'msgpack', { omitSymbolKeys: true }));
+  const digest = keccakBytesHash(encodeBinaryPayload(input, { omitSymbolKeys: true }));
   accountInputBodyDigests.set(input, digest);
   return digest;
 };
@@ -69,7 +69,7 @@ export const accountInputBodyDigest = (input: object): string => {
 const compactAccountInputFingerprint = (data: unknown): string | undefined => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
   const input = data as CompactAccountInput;
-  if (input.kind !== 'frame' && input.kind !== 'frame_ack' && input.kind !== 'ack') return undefined;
+  if (input.kind !== 'frame' && input.kind !== 'ack_frame' && input.kind !== 'ack') return undefined;
   if (typeof input.fromEntityId !== 'string' || typeof input.toEntityId !== 'string') return undefined;
   const proposal = input.kind === 'ack' ? undefined : input.proposal;
   const ack = input.kind === 'frame' ? undefined : input.ack;

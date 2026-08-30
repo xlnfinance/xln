@@ -22,7 +22,7 @@ const hashStable = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},
 ): string =>
-  computeIntegrityDigest(encodeBinaryPayload(value, 'msgpack', options));
+  computeIntegrityDigest(encodeBinaryPayload(value, options));
 
 /** Bounded Entity roots plus durable Runtime state form the only checkpoint root. */
 export const prepareStorageCanonicalStateHashes = (

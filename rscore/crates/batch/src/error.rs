@@ -35,10 +35,8 @@ pub enum BatchError {
     DuplicateAccount(AccountId),
     #[error("RSCORE_BATCH_EMPTY")]
     EmptyBatch,
-    #[error("RSCORE_BATCH_TOO_LARGE:{actual}:{maximum}")]
-    BatchTooLarge { actual: usize, maximum: usize },
-    #[error("RSCORE_BATCH_INPUT_INDEX:{actual}:{expected}")]
-    InputIndex { actual: u32, expected: u32 },
+    #[error("RSCORE_BATCH_FINANCIAL_VIEW:{0}")]
+    FinancialView(String),
     #[error("RSCORE_BATCH_OPERATION_INDEX:{actual}:after={after:?}")]
     OperationIndex { actual: u64, after: Option<u64> },
     #[error("RSCORE_BATCH_BOARD_AUTHORITY_UNRESOLVED")]
@@ -48,57 +46,17 @@ pub enum BatchError {
         input_index: u32,
         account_id: AccountId,
     },
-    #[error("RSCORE_BATCH_TX_UNSUPPORTED:{input_index}:{tag}")]
-    UnsupportedTx { input_index: u32, tag: &'static str },
-    /// Settlement proposal eligibility depends on the signed workspace body
-    /// and post-commit Hanko drafts. The current payment/swap Account profile
-    /// deliberately represents neither; treating a mere presence bit as the
-    /// canonical rule would silently propose a frozen transaction.
-    #[error("PROPOSABILITY_SETTLEMENT_UNREPRESENTED")]
-    ProposabilitySettlementUnrepresented,
     #[error("RSCORE_BATCH_TRANSITION:{input_index}:{source}")]
     Transition {
         input_index: u32,
         source: TransitionError,
     },
-    #[error("RSCORE_BATCH_ENGINE_PANIC:{input_index}:{account_id}")]
-    EnginePanic {
-        input_index: u32,
-        account_id: AccountId,
-    },
-    #[error("RSCORE_BATCH_OUTPUT_INDEX_OVERFLOW:{input_index}:{actual}")]
-    OutputIndexOverflow { input_index: u32, actual: usize },
-    #[error("RSCORE_BATCH_APPLIED_WITHOUT_CANDIDATE:{0}")]
-    AppliedWithoutCandidate(u32),
-    #[error("RSCORE_BATCH_REJECTED_WITH_OUTPUTS:{input_index}:{actual}")]
-    RejectedWithOutputs { input_index: u32, actual: usize },
-    #[error("RSCORE_BATCH_ENGINE_GENERATION_MISMATCH")]
-    EngineGenerationMismatch,
     #[error("RSCORE_BATCH_CANDIDATE_ACCOUNT_NOT_FOUND:{0}")]
     CandidateAccountNotFound(AccountId),
-    #[error("RSCORE_BATCH_CANDIDATE_BASE_MISMATCH:{0}")]
-    CandidateBaseMismatch(AccountId),
-    #[error("RSCORE_BATCH_CANDIDATE_FINGERPRINT:{account_id}:{source}")]
-    CandidateFingerprint {
-        account_id: AccountId,
-        source: xln_rscore_engine::StateError,
-    },
-    #[error("RSCORE_BATCH_CANDIDATE_STALE:{actual}:{expected}")]
-    StaleCandidate { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_REVISION_OVERFLOW")]
     RevisionOverflow,
     #[error("RSCORE_BATCH_CANDIDATE_ATTEMPT_OVERFLOW")]
     CandidateAttemptOverflow,
-    /// An account input whose signature does not recover the expected signer.
-    ///
-    /// Not a transaction rejection: the authority verifies before it hands the
-    /// input over, so disagreement here is a divergence between the two
-    /// engines (or a forged input) and the whole candidate is refused.
-    #[error("RSCORE_BATCH_INPUT_SIGNATURE_INVALID:{input_index}:{account_id}")]
-    InputSignatureInvalid {
-        input_index: u32,
-        account_id: AccountId,
-    },
     /// An Entity's group naming an account owned by someone else. The account
     /// says who owns it; the group is not trusted to.
     #[error("RSCORE_BATCH_WAVE_ACCOUNT_OWNER:{account_id}:{entity_id}")]
@@ -141,6 +99,21 @@ pub enum BatchError {
     EntityRoundOwner { actual: String, expected: String },
     #[error("RSCORE_BATCH_ENTITY_INBOUND_POST_ACCOUNTS")]
     EntityInboundPostAccounts,
+    #[error("RSCORE_BATCH_HTLC_FOLLOWUP_UNMATCHED:{account_id}:{hashlock}")]
+    HtlcFollowupUnmatched {
+        account_id: AccountId,
+        hashlock: String,
+    },
+    #[error("RSCORE_BATCH_HTLC_FOLLOWUP_TX:{account_id}:{hashlock}")]
+    HtlcFollowupTx {
+        account_id: AccountId,
+        hashlock: String,
+    },
+    #[error("RSCORE_BATCH_HTLC_FOLLOWUP_CASCADE:{account_id}:{hashlock}")]
+    HtlcFollowupCascade {
+        account_id: AccountId,
+        hashlock: String,
+    },
     #[error("RSCORE_BATCH_INBOUND_GENESIS:{account_id}:{detail}")]
     InboundGenesis {
         account_id: AccountId,
@@ -151,14 +124,6 @@ pub enum BatchError {
         actual: String,
         base: String,
         candidate: String,
-    },
-    #[error("RSCORE_BATCH_FAILED_HTLC_ROUTE_DUPLICATE:{hashlock}")]
-    FailedHtlcRouteDuplicate { hashlock: String },
-    #[error("RSCORE_BATCH_FAILED_HTLC_ROUTE_MISMATCH:{hashlock}:{account}:{lock_id}")]
-    FailedHtlcRouteMismatch {
-        hashlock: String,
-        account: String,
-        lock_id: String,
     },
     #[error("RSCORE_BATCH_CHECKPOINT_REVISION:{actual}:{expected}")]
     CheckpointRevision { actual: u64, expected: u64 },

@@ -102,6 +102,8 @@ describe('runtime snapshot codec', () => {
     const checkpoint = buildDurableRuntimeMachineSnapshot(env);
     const restored = createEmptyEnv('durable-runtime-snapshot-restored');
 
+    expect(checkpoint.infrastructure).toBeDefined();
+
     restoreDurableRuntimeSnapshot(restored, checkpoint);
 
     expect(restored.runtimeMempool).toEqual({ runtimeTxs: [], entityInputs: [] });

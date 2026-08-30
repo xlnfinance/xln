@@ -31,16 +31,22 @@ export const collectKnownDisputeSecretsForState = (
   counterpartyEntityId: string,
 ): string[] => {
   const plan = buildCurrentDisputeArgumentPlan(account);
-  if (!entityState.htlcRoutes?.size || plan.paymentHashlocks.length === 0) return [];
-  const required = new Set(plan.paymentHashlocks.map(hashlock => hashlock.toLowerCase()));
+  if (entityState.paybook.entries.size === 0 || plan.paymentHashlocks.length === 0) return [];
   const seen = new Set<string>();
   const secrets: string[] = [];
-  for (const route of entityState.htlcRoutes.values()) {
+  // AccountState already names the exact hashlocks required by the frozen
+  // proof. Point-read those paybook entries in transformer order; scanning the
+  // whole Entity paybook made one disputed Account O(all active payments) and
+  // could also return secrets in unrelated insertion order.
+  for (const rawHashlock of plan.paymentHashlocks) {
+    const hashlock = rawHashlock.toLowerCase();
+    const route = entityState.paybook.entries.get(hashlock);
+    if (!route || route.hashlock.toLowerCase() !== hashlock) continue;
     if (!route.secret || !/^0x[0-9a-fA-F]{64}$/.test(route.secret)) continue;
     if (route.inboundEntity !== counterpartyEntityId && route.outboundEntity !== counterpartyEntityId) {
       continue;
     }
-    if (!required.has(hashHtlcSecret(route.secret)) || seen.has(route.secret)) continue;
+    if (hashHtlcSecret(route.secret) !== hashlock || seen.has(route.secret)) continue;
     seen.add(route.secret);
     secrets.push(route.secret);
   }

@@ -580,8 +580,6 @@ describe('price improvement', () => {
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.ok).toBe(true);
       expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
-      expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.cancelRemainder).toBe(true);
-      expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.comment).toBe('manual-cancel');
     });
 
     test('handleSwapResolve rejects hold underflow instead of clamping', async () => {

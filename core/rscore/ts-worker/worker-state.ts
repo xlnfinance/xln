@@ -1,5 +1,6 @@
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { hashAccountJClaimNode } from '../../account/j-claims/j-claim-accumulator';
 import type { AccountReplica } from '../../types/account';
@@ -17,10 +18,10 @@ import {
   projectPortableAccountDoc,
 } from '../../storage/read/projections';
 import {
-  computeTsAccountLogicalShardRoot,
   normalizeTsWorkerAccountId,
   TS_ACCOUNT_LOGICAL_SHARDS,
   tsAccountLogicalShard,
+  tsAccountLogicalShardPath,
 } from './sharding';
 import type {
   TsAccountWorkerCheckpointChanges,
@@ -33,9 +34,8 @@ export type TsAccountWorkerState = {
   readonly workerIndex: number;
   readonly ownedShardIds: ReadonlySet<number>;
   readonly ownerEntityId: string;
-  readonly accounts: Map<string, AccountReplica>;
-  readonly leafHashes: Map<string, string>;
-  readonly shardLeaves: Map<number, Map<string, string>>;
+  accounts: PersistentEntityAccountMap;
+  readonly populatedShardIds: ReadonlySet<number>;
   readonly jReplicas: Map<string, JReplica>;
   readonly jClaimNodes: Map<string, AccountJClaimNode>;
   readonly settlementBoardAuthorities: Map<string, string>;
@@ -57,21 +57,18 @@ export const requireWorkerAccount = (
   return accountId;
 };
 
-export const computeWorkerShardRoot = (
+export const computeWorkerShardCommitment = (
   worker: TsAccountWorkerState,
   shardId: number,
-): string => {
-  const leaves = worker.shardLeaves.get(shardId);
-  return computeTsAccountLogicalShardRoot(
-    shardId,
-    leaves ? [...leaves].map(([accountId, valueHash]) => ({ accountId, valueHash })) : [],
-  );
-};
+): TsAccountWorkerSubroot => ({
+  shardId,
+  node: worker.accounts.nodeCommitmentAtPath(tsAccountLogicalShardPath(shardId)),
+});
 
 const populatedSubroots = (worker: TsAccountWorkerState): TsAccountWorkerSubroot[] =>
-  [...worker.shardLeaves.keys()]
+  [...worker.populatedShardIds]
     .sort((left, right) => left - right)
-    .map(shardId => ({ shardId, root: computeWorkerShardRoot(worker, shardId) }));
+    .map(shardId => computeWorkerShardCommitment(worker, shardId));
 
 export const initializeWorkerState = (
   input: TsAccountWorkerInitPayload,
@@ -89,15 +86,15 @@ export const initializeWorkerState = (
   if (ownedShardIds.size === 0) {
     throw new Error(`TS_ACCOUNT_WORKER_INIT_OWNED_SHARDS_EMPTY:${input.workerIndex}`);
   }
-  const accounts = new Map<string, AccountReplica>();
-  const leafHashes = new Map<string, string>();
-  const shardLeaves = new Map<number, Map<string, string>>();
+  const accountEntries: Array<readonly [string, AccountReplica]> = [];
+  const populatedShardIds = new Set<number>();
+  const seenAccountIds = new Set<string>();
   for (const [accountId, portable] of input.accounts) {
     const shardId = tsAccountLogicalShard(accountId);
     if (!ownedShardIds.has(shardId)) {
       throw new Error(`TS_ACCOUNT_WORKER_INIT_OWNERSHIP:${input.workerIndex}:${accountId}`);
     }
-    if (accounts.has(accountId)) throw new Error(`TS_ACCOUNT_WORKER_INIT_DUPLICATE:${accountId}`);
+    if (seenAccountIds.has(accountId)) throw new Error(`TS_ACCOUNT_WORKER_INIT_DUPLICATE:${accountId}`);
     const validated = assertStorageAccountDocBinding(
       validateStorageAccountDocValue(portable),
       input.ownerEntityId,
@@ -105,12 +102,9 @@ export const initializeWorkerState = (
       'ts-account-worker-init',
     );
     const account = hydrateAccountDocFromStorage(validated);
-    const valueHash = computeEntityAccountValueHash(account);
-    accounts.set(accountId, account);
-    leafHashes.set(accountId, valueHash);
-    const leaves = shardLeaves.get(shardId) ?? new Map<string, string>();
-    leaves.set(accountId, valueHash);
-    shardLeaves.set(shardId, leaves);
+    seenAccountIds.add(accountId);
+    accountEntries.push([accountId, account]);
+    populatedShardIds.add(shardId);
   }
   const jClaimNodes = new Map(input.jClaimNodes);
   for (const [hash, node] of jClaimNodes) {
@@ -121,9 +115,12 @@ export const initializeWorkerState = (
     workerIndex: input.workerIndex,
     ownedShardIds,
     ownerEntityId: input.ownerEntityId,
-    accounts,
-    leafHashes,
-    shardLeaves,
+    accounts: PersistentEntityAccountMap.fromEntries(
+      accountEntries,
+      input.ownerEntityId,
+      computeEntityAccountValueHash,
+    ),
+    populatedShardIds,
     jReplicas: new Map(input.jReplicas),
     jClaimNodes,
     settlementBoardAuthorities: new Map(

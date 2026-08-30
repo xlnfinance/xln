@@ -2,6 +2,8 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
+use xln_rscore_engine::SwapOfferSnapshot;
+use xln_rscore_protocol::CanonicalValue;
 
 use crate::EntityKernelError;
 
@@ -26,6 +28,32 @@ pub struct SameJOffer {
     pub created_height: u64,
     pub quantized_give: BigInt,
     pub quantized_want: BigInt,
+    pub cross_jurisdiction: Option<CanonicalValue>,
+}
+
+impl From<SwapOfferSnapshot> for SameJOffer {
+    fn from(offer: SwapOfferSnapshot) -> Self {
+        Self {
+            offer_id: offer.offer_id,
+            left_entity: offer.left_entity,
+            right_entity: offer.right_entity,
+            give_token_id: offer.give_token_id,
+            give_token_decimals: offer.give_token_decimals,
+            give_amount: offer.give_amount,
+            want_token_id: offer.want_token_id,
+            want_token_decimals: offer.want_token_decimals,
+            want_amount: offer.want_amount,
+            max_fee: offer.max_fee,
+            min_net_receive: offer.min_net_receive,
+            price_ticks: offer.price_ticks,
+            time_in_force: offer.time_in_force,
+            maker_is_left: offer.maker_is_left,
+            created_height: offer.created_height,
+            quantized_give: offer.quantized_give,
+            quantized_want: offer.quantized_want,
+            cross_jurisdiction: offer.cross_jurisdiction,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,6 +85,14 @@ pub struct BookOrder {
     pub seq: u64,
     pub page_sequence: u16,
     pub page_slot: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BookSideLevel {
+    pub price_ticks: BigInt,
+    pub qty_lots: BigInt,
+    pub owner_ids: Vec<String>,
+    pub order_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +159,50 @@ impl BookState {
     pub fn best_ask(&self) -> Option<&BigInt> {
         let order_id = self.asks.first_key_value()?.1;
         self.orders.get(order_id).map(|order| &order.price_ticks)
+    }
+
+    /// Bounded top-of-book projection over the maintained price/time indexes.
+    /// This never scans unrelated prices or rebuilds a book from `orders`.
+    pub fn side_levels(
+        &self,
+        side: Side,
+        depth: usize,
+    ) -> Result<Vec<BookSideLevel>, EntityKernelError> {
+        let ids: Box<dyn Iterator<Item = &String> + '_> = match side {
+            Side::Bid => Box::new(self.bids.values()),
+            Side::Ask => Box::new(self.asks.values()),
+        };
+        let mut levels = Vec::<BookSideLevel>::with_capacity(depth);
+        let mut owners = BTreeSet::<String>::new();
+        for order_id in ids {
+            let order = self
+                .orders
+                .get(order_id)
+                .filter(|order| order.side == side)
+                .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_PRICE_INDEX_DIVERGED"))?;
+            if levels
+                .last()
+                .is_none_or(|level| level.price_ticks != order.price_ticks)
+            {
+                if levels.len() >= depth {
+                    break;
+                }
+                owners.clear();
+                levels.push(BookSideLevel {
+                    price_ticks: order.price_ticks.clone(),
+                    qty_lots: BigInt::from(0),
+                    owner_ids: Vec::new(),
+                    order_ids: Vec::new(),
+                });
+            }
+            let level = levels.last_mut().expect("level was just installed");
+            level.qty_lots += &order.qty_lots;
+            if owners.insert(order.owner_id.clone()) {
+                level.owner_ids.push(order.owner_id.clone());
+            }
+            level.order_ids.push(order.order_id.clone());
+        }
+        Ok(levels)
     }
 
     pub fn bid_pages_root(&self) -> String {
@@ -356,5 +436,49 @@ impl OrderbookState {
             pair_by_order: self.pair_by_order.clone(),
             max_orders_per_pair: self.max_orders_per_pair,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn order(id: &str, owner: &str, side: Side, price: u32, qty: u32, seq: u64) -> BookOrder {
+        BookOrder {
+            order_id: id.into(),
+            owner_id: owner.into(),
+            side,
+            price_ticks: price.into(),
+            qty_lots: qty.into(),
+            seq,
+            page_sequence: 0,
+            page_slot: 0,
+        }
+    }
+
+    #[test]
+    fn bounded_side_levels_preserve_price_time_and_unique_owner_order() {
+        let mut book = BookState::empty(16, 10);
+        for row in [
+            order("b1", "alice", Side::Bid, 110, 2, 1),
+            order("b2", "alice", Side::Bid, 110, 3, 2),
+            order("b3", "bob", Side::Bid, 110, 5, 3),
+            order("b4", "carol", Side::Bid, 100, 7, 4),
+            order("b5", "dave", Side::Bid, 90, 11, 5),
+        ] {
+            book.bids.insert(
+                (Reverse(row.price_ticks.clone()), row.seq),
+                row.order_id.clone(),
+            );
+            book.orders.insert(row.order_id.clone(), row);
+        }
+        let levels = book.side_levels(Side::Bid, 2).expect("levels");
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[0].price_ticks, BigInt::from(110));
+        assert_eq!(levels[0].qty_lots, BigInt::from(10));
+        assert_eq!(levels[0].owner_ids, ["alice", "bob"]);
+        assert_eq!(levels[0].order_ids, ["b1", "b2", "b3"]);
+        assert_eq!(levels[1].price_ticks, BigInt::from(100));
+        assert_eq!(levels[1].order_ids, ["b4"]);
     }
 }

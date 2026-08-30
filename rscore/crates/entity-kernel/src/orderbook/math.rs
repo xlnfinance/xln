@@ -4,7 +4,7 @@ use crate::EntityKernelError;
 
 use super::{PairDimensions, Side};
 
-pub(crate) const PRICE_SCALE: u64 = 10_000;
+pub const PRICE_SCALE: u64 = 10_000;
 pub(crate) const MAX_FILL_RATIO: u32 = 65_535;
 
 pub(crate) fn canonical_pair(give: u32, want: u32) -> (u32, u32, String) {

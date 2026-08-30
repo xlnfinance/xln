@@ -11,9 +11,9 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../support/debug-flags';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 import {
-  armHtlcSecretAckTimeout,
-  terminateHtlcRoute,
-} from '../../j-events-htlc/route-lifecycle';
+  armPaymentSecretAckTimeout,
+  terminatePayment,
+} from '../../../paybook/lifecycle';
 import { pushCrossJurisdictionEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
@@ -23,12 +23,11 @@ import { MalformedEntityFrameInputError } from '../../processing/invariant-error
 import type { EntityInfraContext } from '../../../../types/entity/infra-context';
 import { preparedHtlcBindingKey, type PreparedHtlcEntry } from '../../../../types/entity/htlc-infra-context';
 import { HTLC } from '../../../../config/constants';
-import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
-import { deriveForwardHtlcLockId } from '../../../../protocol/htlc/utils';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
-import { hasInboundHtlcRoute } from '../../../htlc/route-views';
+import { hasInboundPayment } from '../../../paybook/views';
 import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import { countOp } from '../../../../support/performance/op-counters';
+import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -77,6 +76,7 @@ const requirePreparedHtlcEntry = (
     binding.fromEntityId !== ctx.input.fromEntityId.toLowerCase()
     || binding.toEntityId !== ctx.input.toEntityId.toLowerCase()
     || binding.accountHeight !== committedFrame.height
+    || binding.accountFrameHash !== committedFrame.stateHash.toLowerCase()
     || binding.envelopeHash !== envelopeHash
     || !sameAccountStateDomain(binding.domain, ctx.input.domain)
     || binding.hashlock !== lock.hashlock.toLowerCase()
@@ -94,10 +94,13 @@ const applyPreparedHtlcOutcome = (
   prepared: PreparedHtlcEntry,
 ): void => {
   const inboundEntity = ctx.input.fromEntityId.toLowerCase();
-  const existingRoute = ctx.newState.htlcRoutes.get(lock.hashlock);
+  if (lock.lockId.toLowerCase() !== lock.hashlock.toLowerCase()) {
+    throw new Error(`PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK:${lock.lockId}:${lock.hashlock}`);
+  }
+  const existingRoute = ctx.newState.paybook.entries.get(lock.hashlock);
   const closesOriginatedSelfCycle = prepared.outcome.kind === 'final'
     && existingRoute?.originated === true
-    && !hasInboundHtlcRoute(existingRoute);
+    && !hasInboundPayment(existingRoute);
   if ((existingRoute && !closesOriginatedSelfCycle) || prepared.outcome.kind === 'reject') {
     const reason = existingRoute
       ? 'hashlock_already_active'
@@ -110,15 +113,15 @@ const applyPreparedHtlcOutcome = (
   }
   if (prepared.outcome.kind === 'final') {
     if (closesOriginatedSelfCycle) {
-      const writableRoute = getEntityCollectionValueForWrite(ctx.newState.htlcRoutes, lock.hashlock);
-      if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${lock.hashlock}`);
+      const writableRoute = getEntityCollectionValueForWrite(ctx.newState.paybook.entries, lock.hashlock);
+      if (!writableRoute) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${lock.hashlock}`);
       writableRoute.inboundEntity = inboundEntity;
-      writableRoute.inboundLockId = lock.lockId;
     } else {
-      ctx.newState.htlcRoutes.set(lock.hashlock, {
+      ctx.newState.paybook.entries.set(lock.hashlock, {
         hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
         ...(prepared.outcome.startedAtMs !== undefined ? { startedAtMs: prepared.outcome.startedAtMs } : {}),
-        inboundEntity, inboundLockId: lock.lockId, createdTimestamp: ctx.newState.timestamp,
+        ...(prepared.outcome.description ? { description: prepared.outcome.description } : {}),
+        inboundEntity, createdTimestamp: ctx.newState.timestamp,
       });
     }
     ctx.accountTxs.push({ accountId: inboundEntity, tx: {
@@ -127,11 +130,10 @@ const applyPreparedHtlcOutcome = (
     countOp('htlc.inbound.final');
     return;
   }
-  const outboundLockId = deriveForwardHtlcLockId(lock.lockId);
-  ctx.newState.htlcRoutes.set(lock.hashlock, {
+  ctx.newState.paybook.entries.set(lock.hashlock, {
     hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
-    inboundEntity, inboundLockId: lock.lockId,
-    outboundEntity: prepared.outcome.nextHopEntityId, outboundLockId,
+    inboundEntity,
+    outboundEntity: prepared.outcome.nextHopEntityId,
     pendingFee: lock.amount - prepared.outcome.forwardAmount,
     createdTimestamp: ctx.newState.timestamp,
   });
@@ -141,7 +143,7 @@ const applyPreparedHtlcOutcome = (
     data: { entityId: ctx.newState.entityId, hashlock: lock.hashlock },
   });
   ctx.accountTxs.push({ accountId: prepared.outcome.nextHopEntityId, tx: { type: 'htlc_lock', data: {
-    lockId: outboundLockId, hashlock: lock.hashlock, tokenId: lock.tokenId,
+    lockId: lock.hashlock, hashlock: lock.hashlock, tokenId: lock.tokenId,
     amount: prepared.outcome.forwardAmount,
     timelock: lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
     revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
@@ -252,14 +254,14 @@ export function applyDirectPaymentForwardFollowups(
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {
   const { state, newState, accountTxs, candidateEffects } = ctx;
   for (const timedOutHashlock of timedOutHashlocks) {
-    const route = newState.htlcRoutes.get(timedOutHashlock);
+    const route = newState.paybook.entries.get(timedOutHashlock);
     if (!route) continue;
-    if (hasInboundHtlcRoute(route)) {
+    if (hasInboundPayment(route)) {
       accountTxs.push({
         accountId: route.inboundEntity,
         tx: {
           type: 'htlc_resolve',
-          data: { lockId: route.inboundLockId, outcome: 'error', reason: 'downstream_error' },
+          data: { lockId: timedOutHashlock, outcome: 'error', reason: 'downstream_error' },
         },
       });
     } else {
@@ -268,14 +270,14 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
         eventName: 'HtlcFailed',
         data: {
           hashlock: timedOutHashlock,
-          ...(route.outboundLockId ? { lockId: route.outboundLockId } : {}),
+          lockId: timedOutHashlock,
           reason: 'timeout',
           entityId: state.entityId,
+          ...(route.description ? { description: route.description } : {}),
         },
       });
     }
-    if (route.outboundLockId) newState.lockBook.delete(route.outboundLockId);
-    terminateHtlcRoute(newState, timedOutHashlock, newState.timestamp);
+    terminatePayment(newState, timedOutHashlock);
   }
 }
 
@@ -284,26 +286,20 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
   if (HEAVY_LOGS) accountFollowupLog.debug('htlc.secret_check', { secrets: revealedSecrets.length });
 
   for (const { secret, hashlock } of revealedSecrets) {
-    const route = getEntityCollectionValueForWrite(newState.htlcRoutes, hashlock);
+    const route = getEntityCollectionValueForWrite(newState.paybook.entries, hashlock);
     if (!route || route.secret) continue;
-    const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
-    const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
-    const eventLock = inboundLock ?? outboundLock;
-    const eventAmount = eventLock?.amount ?? route.amount;
-    const eventTokenId = eventLock?.tokenId ?? route.tokenId;
-    const eventLockId = eventLock?.lockId ?? route.inboundLockId ?? route.outboundLockId;
+    const eventAmount = route.amount;
+    const eventTokenId = route.tokenId;
     route.secret = secret;
     if (route.pendingFee) {
-      newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
+      newState.paybook.feesEarned += route.pendingFee;
       delete route.pendingFee;
     }
-    if (route.outboundLockId) newState.lockBook.delete(route.outboundLockId);
-    if (route.inboundLockId) newState.lockBook.delete(route.inboundLockId);
 
-    if (hasInboundHtlcRoute(route)) {
+    if (hasInboundPayment(route)) {
       accountTxs.push({
         accountId: route.inboundEntity,
-        tx: { type: 'htlc_resolve', data: { lockId: route.inboundLockId, outcome: 'secret', secret } },
+        tx: { type: 'htlc_resolve', data: { lockId: hashlock, outcome: 'secret', secret } },
       });
       // Never also resolve an originated self-cycle's outbound lock here.
       // The same entity may be both route origin and terminal recipient, but
@@ -311,7 +307,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
       // downstream Account frame and propagate it upstream. Closing the first
       // and last legs together would hide a broken middle-hop propagation path
       // and can leave asymmetric commitments across a crash or dispute.
-      armHtlcSecretAckTimeout(newState, route);
+      armPaymentSecretAckTimeout(newState, route);
       continue;
     }
 
@@ -328,7 +324,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
         },
       }], relay.targetSignerId);
     }
-    terminateHtlcRoute(newState, hashlock, newState.timestamp);
+    terminatePayment(newState, hashlock);
     candidateEffects.push({
       kind: 'runtimeEvent',
       eventName: 'HtlcFinalized',
@@ -338,10 +334,11 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
         ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),
         hashlock,
         secret,
-        ...(eventLockId ? { lockId: eventLockId } : {}),
+        lockId: hashlock,
         ...(eventAmount !== undefined ? { amount: eventAmount } : {}),
         ...(eventTokenId !== undefined ? { tokenId: eventTokenId } : {}),
         ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+        ...(route.description ? { description: route.description } : {}),
         ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
         finalizedAtMs: newState.timestamp,
       }),

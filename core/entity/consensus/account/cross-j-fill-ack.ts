@@ -27,7 +27,6 @@ const buildCrossJurisdictionAdmissionFillNoticeOutput = (
     entityId: sourceHubEntityId,
     signerId: hintedSignerRaw,
     entityTxs: [buildCrossJurisdictionFillNoticeTx(tx, accountId)],
-    localRuntimeProtocol: 'cross-j',
   };
 };
 

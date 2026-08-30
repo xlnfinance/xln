@@ -1,27 +1,35 @@
 //! Exact TS-readable path-keyed projection of the native-owned Entity slice.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::{BigInt, Sign};
 use serde_json::{Map, Number, Value};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use xln_rscore_protocol::{
-    CanonicalValue, PersistentNodeRecord, PersistentRadixMap, encode_canonical_consensus_bytes,
-    pack_path16,
+    CanonicalNumber, CanonicalValue, PersistentNodeRecord, PersistentRadixMap,
+    encode_canonical_consensus_bytes, pack_path16,
 };
 
 use crate::storage::native::{PathNodeChange, PathNodeKey};
 use crate::{
     EntityCheckpointProjectionMetadata, EntityFieldProjectionDescriptor,
-    EntityTreeProjectionDescriptor, RuntimeReplica, StorageReplicaMetaEntry,
+    EntityTreeProjectionDescriptor, StorageReplicaMetaEntry,
 };
 
 const MAX_FIELD_BYTES: usize = 10_000;
 const FIELD_CHUNK_BYTES: usize = MAX_FIELD_BYTES - 1;
-const OWNED_FIELD_TAGS: &[u8] = &[1, 2, 3, 5, 7, 8, 9, 10, 14, 17, 23, 35, 36, 37];
-const OWNED_TREE_TAGS: &[u8] = &[1, 2, 7];
+// Every scalar produced by `EntityStorageProjection::scalar_fields`, plus the
+// certified-head hash (8) and retired scalar collection rows (12/13), is
+// replaced from the live native Entity on every checkpoint. Omitting a tag
+// leaves a stale imported value beside a newer signed Entity root.
+const OWNED_FIELD_TAGS: &[u8] = &[
+    1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 29, 34, 35,
+    36, 37, 38,
+];
+const OWNED_TREE_TAGS: &[u8] = &[1, 3, 4, 5, 6, 7, 8, 9];
 const ORDERBOOK_GRAPH_TAGS: &[u8] = &[0x23, 0x2d, 0x2e];
+const CERTIFIED_BOARD_GRAPH_TAG: u8 = 0x2a;
 
 pub(crate) struct PreparedEntityCheckpoint {
     pub(crate) changes: Vec<PathNodeChange>,
@@ -29,7 +37,8 @@ pub(crate) struct PreparedEntityCheckpoint {
 }
 
 pub(crate) fn prepare_entity_checkpoint(
-    replica: &RuntimeReplica,
+    state: &crate::RuntimeEntityState,
+    replica: &crate::RuntimeEntityReplica,
     replica_meta: &StorageReplicaMetaEntry,
     prior: &BTreeMap<Vec<u8>, Vec<u8>>,
 ) -> Result<PreparedEntityCheckpoint, EntityCheckpointProjectionError> {
@@ -56,10 +65,8 @@ pub(crate) fn prepare_entity_checkpoint(
     } else {
         replica.protocol_fingerprint
     };
-    let storage = xln_rscore_entity_kernel::project_entity_storage(
-        &replica.state.entity,
-        &replica.entity_consensus,
-    )?;
+    let storage =
+        xln_rscore_entity_kernel::project_entity_storage(&state.entity, &replica.entity_consensus)?;
     let mut mutations = BTreeMap::<Vec<u8>, Option<Vec<u8>>>::new();
     let mut fields = retained
         .fields()
@@ -77,6 +84,14 @@ pub(crate) fn prepare_entity_checkpoint(
         .as_ref()
         .ok_or(EntityCheckpointProjectionError::CertifiedHeadMissing)?;
     projected_fields.insert(8, CanonicalValue::String(certified_head.frame.hash.clone()));
+    if let Some(tag) = projected_fields
+        .keys()
+        .find(|tag| !OWNED_FIELD_TAGS.contains(tag))
+    {
+        return Err(EntityCheckpointProjectionError::ProjectedFieldNotOwned(
+            *tag,
+        ));
+    }
     for tag in OWNED_FIELD_TAGS {
         for key in prior
             .keys()
@@ -105,12 +120,52 @@ pub(crate) fn prepare_entity_checkpoint(
             mutations.insert(key.clone(), None);
         }
     }
-    for (namespace, tag, values) in [
-        ("htlcRoutes", 1_u8, storage.htlc_routes),
-        ("lockBook", 2_u8, storage.lock_book),
-        ("crontabHooks", 7_u8, storage.crontab_hooks),
+    for (namespace, tag, present, values) in [
+        ("paybookEntries", 1_u8, true, storage.paybook_entries),
+        (
+            "deferredAccountProposals",
+            8_u8,
+            storage.deferred_account_proposals_present,
+            storage.deferred_account_proposals,
+        ),
+        (
+            "settlementContinuations",
+            9_u8,
+            storage.settlement_continuations_present,
+            storage.settlement_continuations,
+        ),
+        (
+            "crossJurisdictionSwaps",
+            3_u8,
+            storage.cross_jurisdiction_swaps_present,
+            storage.cross_jurisdiction_swaps,
+        ),
+        (
+            "crossJurisdictionAuthorizations",
+            4_u8,
+            storage.cross_jurisdiction_authorizations_present,
+            storage.cross_jurisdiction_authorizations,
+        ),
+        (
+            "pendingCrossJurisdictionFillAcks",
+            5_u8,
+            storage.pending_cross_jurisdiction_fill_acks_present,
+            storage.pending_cross_jurisdiction_fill_acks,
+        ),
+        (
+            "crossJurisdictionBookAdmissions",
+            6_u8,
+            storage.cross_jurisdiction_book_admissions_present,
+            storage.cross_jurisdiction_book_admissions,
+        ),
+        (
+            "crontabHooks",
+            7_u8,
+            state.entity.crontab.is_some(),
+            storage.crontab_hooks,
+        ),
     ] {
-        if tag == 7 && replica.state.entity.crontab.is_none() {
+        if !present {
             continue;
         }
         let descriptor = write_tree(&mut mutations, owner, namespace, tag, values)?;
@@ -119,7 +174,13 @@ pub(crate) fn prepare_entity_checkpoint(
     write_orderbook_graph(
         &mut mutations,
         owner,
-        replica.state.entity.orderbook.as_ref(),
+        state.entity.orderbook.as_ref(),
+        prior,
+    )?;
+    write_certified_board_graph(
+        &mut mutations,
+        owner,
+        state.entity.certified_board_state.as_ref(),
         prior,
     )?;
 
@@ -142,6 +203,54 @@ pub(crate) fn prepare_entity_checkpoint(
             .collect::<Result<_, crate::storage::native::NativeStorageError>>()?,
         protocol_fingerprint,
     })
+}
+
+fn write_certified_board_graph(
+    changes: &mut BTreeMap<Vec<u8>, Option<Vec<u8>>>,
+    owner: [u8; 32],
+    state: Option<&xln_rscore_entity_kernel::CertifiedBoardState>,
+    prior: &BTreeMap<Vec<u8>, Vec<u8>>,
+) -> Result<(), EntityCheckpointProjectionError> {
+    for key in prior
+        .keys()
+        .filter(|key| is_certified_board_graph_key(key, &owner))
+    {
+        changes.insert(key.clone(), None);
+    }
+    let Some(state) = state else {
+        return Ok(());
+    };
+    let mut projected_keys = BTreeSet::new();
+    for row in xln_rscore_entity_kernel::project_certified_board_storage_nodes(state)? {
+        let mut key = vec![CERTIFIED_BOARD_GRAPH_TAG];
+        key.extend_from_slice(&owner);
+        match row.path {
+            xln_rscore_entity_kernel::CertifiedBoardStoragePath::Leaf(logical_key) => {
+                key.push(1);
+                key.extend_from_slice(&logical_key);
+            }
+            xln_rscore_entity_kernel::CertifiedBoardStoragePath::Branch { bit, prefix } => {
+                key.push(0);
+                key.extend_from_slice(&bit.to_be_bytes());
+                key.extend_from_slice(&prefix);
+            }
+        }
+        let value = CanonicalValue::Object(vec![
+            (
+                "version".into(),
+                CanonicalValue::Number(CanonicalNumber::from_u32(1)),
+            ),
+            ("hash".into(), CanonicalValue::String(hex(&row.hash))),
+            ("node".into(), row.node),
+        ]);
+        if !projected_keys.insert(key.clone()) {
+            return Err(EntityCheckpointProjectionError::CertifiedBoard(
+                "PATH_COLLISION",
+            ));
+        }
+        changes.insert(key, Some(encode_canonical_storage(value)?));
+    }
+    Ok(())
 }
 
 fn write_orderbook_graph(
@@ -421,6 +530,10 @@ fn is_orderbook_graph_key(key: &[u8], owner: &[u8; 32]) -> bool {
         && key.get(1..33) == Some(owner)
 }
 
+fn is_certified_board_graph_key(key: &[u8], owner: &[u8; 32]) -> bool {
+    key.first() == Some(&CERTIFIED_BOARD_GRAPH_TAG) && key.get(1..33) == Some(owner)
+}
+
 fn write_field(
     changes: &mut BTreeMap<Vec<u8>, Option<Vec<u8>>>,
     owner: [u8; 32],
@@ -696,8 +809,12 @@ pub(crate) enum EntityCheckpointProjectionError {
     MetadataOwner,
     #[error("RRS_CHECKPOINT_ENTITY_CERTIFIED_HEAD_MISSING")]
     CertifiedHeadMissing,
+    #[error("RRS_CHECKPOINT_ENTITY_PROJECTED_FIELD_NOT_OWNED:{0}")]
+    ProjectedFieldNotOwned(u8),
     #[error("RRS_CHECKPOINT_ENTITY_ORDERBOOK:{0}")]
     Orderbook(&'static str),
+    #[error("RRS_CHECKPOINT_ENTITY_CERTIFIED_BOARD:{0}")]
+    CertifiedBoard(&'static str),
     #[error("RRS_CHECKPOINT_ENTITY_FIELD_EMPTY:{0}")]
     FieldEmpty(u8),
     #[error("RRS_CHECKPOINT_ENTITY_FIELD_CHUNK:{0}")]

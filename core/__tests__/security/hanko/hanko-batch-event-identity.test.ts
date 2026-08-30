@@ -50,9 +50,7 @@ const makeEntityState = (): EntityState => ({
     },
   },
   profile: { name: 'Batch identity', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
   swapTradingPairs: [],
 });
 

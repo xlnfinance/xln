@@ -2,21 +2,16 @@ import { expect, test } from 'bun:test';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
-import {
-  recordSwapClosedLifecycle,
-  recordSwapOfferLifecycle,
-  recordSwapResolveLifecycle,
-} from '../../../account/tx/handlers/swap/lifecycle/history';
 import { LIMITS } from '../../../config/constants';
 import {
   consumeHtlcRuntimeEvent,
   indexCertifiedEntityFrameNotes,
-} from '../../../entity/htlc/note-index';
+} from '../../../entity/paybook/note-index';
 import { terminateHtlcRoute } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../../../runtime';
 import { readRuntimeFrameEvents , publishEntityCandidateEffects } from '../../../runtime/observability/env-events';
-import type { AccountReplica, SwapOffer } from '../../../types/account';
+import type { AccountReplica } from '../../../types/account';
 import type {
   EntityCandidateEffect,
   EntityReplica,
@@ -26,7 +21,6 @@ import type {
 import type { EntityTx } from '../../../types/entity-tx';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { validateEntityReplica } from '../../../entity/replica/replica-validation';
-import { getStaticSwapTokenDimensions } from '../../../orderbook/types';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -62,12 +56,8 @@ const makeAccount = (): AccountReplica => ({
     accountTxs: [],
     prevFrameHash: '',
     accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
-    deltas: [],
     stateHash: '',
-    byLeft: true,
   },
-  swapOrderHistory: new Map(),
-  swapClosedOrders: new Map(),
   currentHeight: 0,
   rollbackCount: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
@@ -75,17 +65,6 @@ const makeAccount = (): AccountReplica => ({
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-});
-
-const makeOffer = (index: number): SwapOffer => ({
-  offerId: `offer-${index.toString().padStart(4, '0')}`,
-  ...getStaticSwapTokenDimensions(1, 2),
-  giveTokenId: 1,
-  giveAmount: 100n,
-  wantTokenId: 2,
-  wantAmount: 50n,
-  makerIsLeft: true,
-  createdHeight: index + 1,
 });
 
 const makeEntity = (): EntityState => ({
@@ -112,9 +91,7 @@ const makeEntity = (): EntityState => ({
   lastFinalizedJHeight: 0,
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
   entityEncryptionPublicKey: `0x${'77'.repeat(32)}`,
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  paybook: { entries: new Map(), feesEarned: 0n },
 });
 
 const makeReplica = (state = makeEntity()): EntityReplica => ({
@@ -124,69 +101,6 @@ const makeReplica = (state = makeEntity()): EntityReplica => ({
   state,
   mempool: [],
   isProposer: true,
-});
-
-test('terminal swap histories retain a deterministic bounded tail without losing active rows', () => {
-  const account = makeAccount();
-  const activeOffer = makeOffer(9_999);
-  account.state.swapOffers.set(activeOffer.offerId, activeOffer);
-  recordSwapOfferLifecycle(account, activeOffer);
-  const count = LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY + 1;
-  for (let index = 0; index < count; index += 1) {
-    const offer = makeOffer(index);
-    recordSwapOfferLifecycle(account, offer);
-    recordSwapResolveLifecycle(account, offer.offerId, index + 1, {
-      fillRatio: 0xffff,
-      cancelRemainder: true,
-      height: index + 1,
-    });
-    recordSwapClosedLifecycle(account, offer.offerId);
-  }
-
-  expect(account.swapClosedOrders).toHaveLength(LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY);
-  expect(account.swapOrderHistory).toHaveLength(LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY + 1);
-  expect(account.swapOrderHistory?.has(activeOffer.offerId)).toBe(true);
-  expect(account.swapClosedOrders?.has('offer-0000')).toBe(false);
-  expect(account.swapClosedOrders?.has(`offer-${(count - 1).toString().padStart(4, '0')}`)).toBe(true);
-});
-
-test('swap resolve detail retains only the deterministic newest tail', () => {
-  const account = makeAccount();
-  const offer = makeOffer(0);
-  recordSwapOfferLifecycle(account, offer);
-  for (let index = 0; index <= LIMITS.MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER; index += 1) {
-    recordSwapResolveLifecycle(account, offer.offerId, index + 1, {
-      fillRatio: index,
-      cancelRemainder: false,
-      height: index + 1,
-    });
-  }
-
-  const resolves = account.swapOrderHistory?.get(offer.offerId)?.resolves ?? [];
-  expect(resolves).toHaveLength(LIMITS.MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER);
-  expect(resolves[0]?.height).toBe(2);
-});
-
-test('swap lifecycle text bounds reject before mutating the projection', () => {
-  const account = makeAccount();
-  const oversizedOffer = {
-    ...makeOffer(0),
-    offerId: 'x'.repeat(LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT + 1),
-  };
-  expect(() => recordSwapOfferLifecycle(account, oversizedOffer)).toThrow(
-    'ACCOUNT_SWAP_HISTORY_OFFER_ID_INVALID',
-  );
-  expect(account.swapOrderHistory).toHaveLength(0);
-
-  const offer = makeOffer(1);
-  recordSwapOfferLifecycle(account, offer);
-  expect(() => recordSwapResolveLifecycle(account, offer.offerId, 2, {
-    fillRatio: 1,
-    cancelRemainder: false,
-    height: 2,
-    comment: 'x'.repeat(LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT + 1),
-  })).toThrow('ACCOUNT_SWAP_HISTORY_COMMENT_TOO_LONG');
-  expect(account.swapOrderHistory?.get(offer.offerId)?.resolves).toHaveLength(0);
 });
 
 test('terminal event consumption removes the canonical hashlock note', () => {
@@ -374,49 +288,7 @@ test('certified proposal frames index nested HTLC descriptions without terminal 
   expect(proposedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
 });
 
-test('decode validation rejects oversized swap history, resolve history, and HTLC notes', () => {
-  const account = makeAccount();
-  account.swapClosedOrders = new Map(Array.from(
-    { length: LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY + 1 },
-    (_, index) => {
-      const offer = makeOffer(index);
-      return [offer.offerId, {
-        ...offer,
-        originalGiveAmount: offer.giveAmount,
-        originalWantAmount: offer.wantAmount,
-        cancelRequested: false,
-        lastUpdatedHeight: offer.createdHeight,
-        resolves: [],
-      }];
-    },
-  ));
-  expect(() => validateAccountReplica(account, 'oversizedSwapHistory')).toThrow(
-    'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
-  );
-
-  const oversizedResolves = makeAccount();
-  const offer = makeOffer(0);
-  oversizedResolves.swapOrderHistory?.set(offer.offerId, {
-    offerId: offer.offerId,
-    ...getStaticSwapTokenDimensions(offer.giveTokenId, offer.wantTokenId),
-    giveTokenId: offer.giveTokenId,
-    giveAmount: offer.giveAmount,
-    originalGiveAmount: offer.giveAmount,
-    wantTokenId: offer.wantTokenId,
-    wantAmount: offer.wantAmount,
-    originalWantAmount: offer.wantAmount,
-    createdHeight: offer.createdHeight,
-    cancelRequested: false,
-    lastUpdatedHeight: offer.createdHeight,
-    resolves: Array.from(
-      { length: LIMITS.MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER + 1 },
-      (_, index) => ({ fillRatio: index, cancelRemainder: false, height: index }),
-    ),
-  });
-  expect(() => validateAccountReplica(oversizedResolves, 'oversizedSwapResolves')).toThrow(
-    'ACCOUNT_SWAP_RESOLVE_HISTORY_LIMIT_EXCEEDED',
-  );
-
+test('decode validation rejects oversized HTLC notes', () => {
   const replica = makeReplica();
   replica.htlcNotes = new Map(Array.from(
     { length: LIMITS.MAX_ENTITY_HTLC_NOTES + 1 },

@@ -14,7 +14,7 @@ import {
 import { accountInputProposal } from '../flush';
 import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { resolveSameHeightIncomingFrame } from './collision';
-import { buildDuplicateCommittedFrameAck, describeAccountState } from './replay';
+import { buildDuplicateCommittedAckFrame, describeAccountState } from './replay';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, accountInputDisputeRequired, rejectAccountPeerInput } from '../result';
 import { timePerfPhase } from '../../../support/performance/profile';
@@ -93,7 +93,7 @@ const handleStaleIncomingFrame = async (
   if (Number(receivedFrame.height) >= Number(account.currentHeight ?? 0)) {
     return undefined;
   }
-  const duplicateAck = await buildDuplicateCommittedFrameAck(
+  const duplicateAck = await buildDuplicateCommittedAckFrame(
     account,
     input,
     events,
