@@ -72,9 +72,10 @@ const createWorkspace = (
     forWrite(accountId): AccountReplica {
       const existing = working.get(accountId);
       if (existing) return existing;
+      const initial = initialAccounts.get(accountId);
       const committed = worker.accounts.get(accountId)
-        ?? (initialAccounts.has(accountId)
-          ? hydrateWorkerGenesisAccount(worker, accountId, initialAccounts.get(accountId)!)
+        ?? (initial !== undefined
+          ? hydrateWorkerGenesisAccount(worker, accountId, initial)
           : undefined);
       if (!committed) throw new Error(`TS_ACCOUNT_WORKER_ACCOUNT_MISSING:${accountId}`);
       const fork = forkAccountReplicaShell(committed);
