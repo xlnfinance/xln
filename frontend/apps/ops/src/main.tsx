@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { OpsApp } from './ops-app';
 import { startOpsHealthRuntime } from './ops-health-runtime';
+import { startOpsHltRuntime } from './ops-hlt-runtime';
 import { opsPageMetadata, resolveOpsPage } from './ops-model';
 
 const rootElement = document.getElementById('root');
@@ -16,6 +17,7 @@ document.title = metadata.title;
 description.content = metadata.description;
 
 if (page.kind === 'health') startOpsHealthRuntime();
+if (page.kind === 'hlt') startOpsHltRuntime();
 
 createRoot(rootElement).render(
   <StrictMode>

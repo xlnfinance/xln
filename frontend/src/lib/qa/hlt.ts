@@ -6,8 +6,8 @@ import type {
   HltReplayCard,
   HltReplayTrialCard,
   HltSwapCard,
-} from '@xln/core/qa/hlt/hlt-dashboard-preview';
-import { rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+} from '../../../../core/qa/hlt/hlt-dashboard-preview';
+import { rejectExtraKeys, requireUnknownRecord } from '../utils/boundary';
 
 export type HltPerfRowView = {
   runtime: string;

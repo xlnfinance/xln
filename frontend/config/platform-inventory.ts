@@ -251,6 +251,25 @@ export const PLATFORM_INVENTORY = [
     evidence: ['tests/frontend/ops/frontend-ops-health.test.ts'],
   },
   {
+    id: 'ops-hlt-browser-boundary',
+    owner: 'ops',
+    workPackage: 'WP7',
+    status: 'implemented',
+    interfaces: ['route'],
+    sources: [
+      'frontend/src/lib/qa/hlt.ts',
+      'frontend/apps/ops/src/ops-hlt-model.ts',
+      'frontend/apps/ops/src/ops-hlt-source.ts',
+      'frontend/apps/ops/src/ops-hlt-runtime.ts',
+    ],
+    consumers: [
+      'frontend/apps/ops/src/ops-hlt-controls.tsx',
+      'frontend/apps/ops/src/ops-hlt-progress.tsx',
+      'frontend/apps/ops/src/ops-hlt.tsx',
+    ],
+    evidence: ['tests/frontend/ops/frontend-ops-hlt.test.ts'],
+  },
+  {
     id: 'ops-workspace-registries',
     owner: 'ops',
     workPackage: 'WP7',

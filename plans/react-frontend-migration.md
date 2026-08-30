@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH IN PROGRESS; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + HLT IN PROGRESS; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -998,7 +998,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH READINESS IMPLEMENTED; QA/HLT AND WORKSPACE REMAIN`
+**Status:** `IN PROGRESS — REACT HEALTH + HLT IMPLEMENTED; QA COCKPIT AND WORKSPACE REMAIN`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1016,9 +1016,19 @@ projection tests pass 27 tests with 358 expectations. Ops local TypeScript and
 unsafe-type checks pass; the isolated ops and canonical Svelte production
 builds pass; browser evidence covers live READY, refresh controls, stale FAIL,
 and 390x844, 1366x900, and 1920x1080 viewports without horizontal overflow.
-The four-app candidate assembles as
-`sha256-92e955a86cee014fde832aa8828c96a46b1afba99bc4dc9e4521de720bad3a66`
-with 305 files. QA/HLT, event feeds, bootstrap detail, runs, scenarios, AI,
+The `/qa/hlt` slice now owns the complete HLT operator flow: canonical preview
+math, exact record/replay/abort requests, strict snapshot decoding, active-run
+polling, teardown, run diagnostics, process profiles, payment/swap results, and
+the authoritative TPS ledger. It is loaded as a separate React chunk so health
+does not pay for HLT controls or chart code. Thirteen focused HLT and health
+tests pass with 62 expectations; ops local checks and the isolated production
+build pass. The exact built artifact resolves the real read-only HLT endpoint
+with zero console warnings/errors and no horizontal overflow at 393x852,
+1280x800, and 1600x900 viewports. Mutation wiring is verified by exact request
+tests; the browser preview deliberately did not start or abort a live public
+run. The four-app candidate assembles as
+`sha256-f8f47b5083dc11bd0f63d882ae74d2633e57bcb301169f0ccbafd39a28be951e`
+with 307 files. QA cockpit, event feeds, bootstrap detail, runs, scenarios, AI,
 embed, and workspace tools remain on their canonical Svelte owners.
 
 **Done:** ops routes and operator flows pass focused checks with correct cleanup
@@ -1103,8 +1113,8 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Execute WP7 route-by-route, starting with ops health and QA, while preserving
-   the typed workspace and scenario registries captured by WP0.
+1. Continue WP7 route-by-route with the QA cockpit, while preserving the typed
+   workspace and scenario registries captured by WP0.
 2. Execute WP8 against the versioned candidate: PWA install/update, native and
    packaged consumers, deployment selection, and rollback remain deliberately
    separate from production activation.

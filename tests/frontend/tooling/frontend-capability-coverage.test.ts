@@ -219,13 +219,18 @@ describe('frontend capability inventory', () => {
     expect(docs?.behavior).toContain('deterministic docs and llms outputs');
   });
 
-  test('records the partial React ops health migration without claiming QA or HLT completion', () => {
+  test('records the partial React ops migration without claiming QA cockpit completion', () => {
     const opsHealth = CAPABILITIES.find(({ id }) => id === 'ops-health-and-qa');
     expect(opsHealth?.status).toBe('in_progress');
     expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-health.tsx');
+    expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-hlt.tsx');
     expect(opsHealth?.currentSources).toContain('frontend/src/lib/health/rpcHealth.ts');
+    expect(opsHealth?.currentSources).toContain('frontend/src/lib/qa/hlt.ts');
     expect(opsHealth?.behavior).toContain(
       'React-owned live health and RPC readiness with bounded retry, refresh, stale evidence, and teardown',
+    );
+    expect(opsHealth?.behavior).toContain(
+      'React-owned canonical HLT preview, record/replay/abort controls, active-run polling, and authoritative progress evidence',
     );
   });
 });
