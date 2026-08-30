@@ -3,7 +3,7 @@
  * Each peer is exactly one canonical AccountReplica plus Hanko signing state:
  * no peer RuntimeReplica processing, zero peer EntityReplicas. Peer replies run
  * the production boundary (applyAccountInput -> draft hashes ->
- * attachAccountDraftHankosAsEntity, as in benchmark/bench-account-inputs).
+ * attachAccountDraftHankosAsEntity through the canonical replay fixture path).
  */
 
 import { applyAccountInput, proposeAccountFrame } from '../../../../../account/consensus';

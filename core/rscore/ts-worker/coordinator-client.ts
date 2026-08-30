@@ -168,6 +168,9 @@ export const parseWorkerPhaseResult = (
     result.workerIndex !== expectedWorkerIndex
     || !Array.isArray(result.effects)
     || !Array.isArray(result.subroots)
+    || (result.postAccounts !== undefined && !Array.isArray(result.postAccounts))
+    || (result.checkpointChanges !== undefined
+      && !Array.isArray(result.checkpointChanges.accounts))
     || !Number.isSafeInteger(result.operations)
     || !Number.isSafeInteger(result.elapsedUs)
     || !Number.isFinite(result.heapUsedBytes)

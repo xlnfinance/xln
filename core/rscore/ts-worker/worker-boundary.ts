@@ -90,6 +90,10 @@ const decodeInboundPayload = (
   input: Record<string, unknown>,
 ): TsAccountWorkerInboundPayload => {
   const frameId = requireString(input['frameId'], 'TS_ACCOUNT_WORKER_INBOUND_FRAME');
+  const restorePrevious = requireBoolean(
+    input['restorePrevious'],
+    'TS_ACCOUNT_WORKER_INBOUND_RESTORE_PREVIOUS',
+  );
   const entityTimestamp = requireInteger(input['entityTimestamp'], 'TS_ACCOUNT_WORKER_INBOUND_TIMESTAMP');
   const finalizedJHeight = requireInteger(input['finalizedJHeight'], 'TS_ACCOUNT_WORKER_INBOUND_JHEIGHT');
   const inputs = requireArray(input['inputs'], 'TS_ACCOUNT_WORKER_INBOUND_INPUTS').map((entry, index) => {
@@ -109,7 +113,7 @@ const decodeInboundPayload = (
       input: peerInput,
     };
   });
-  return { phase: 'inbound', frameId, entityTimestamp, finalizedJHeight, inputs };
+  return { phase: 'inbound', frameId, restorePrevious, entityTimestamp, finalizedJHeight, inputs };
 };
 
 const decodeOutboundPayload = (
@@ -151,6 +155,10 @@ const decodeOutboundPayload = (
   return {
     phase: 'outbound',
     frameId: requireString(input['frameId'], 'TS_ACCOUNT_WORKER_OUTBOUND_FRAME'),
+    restorePrevious: requireBoolean(
+      input['restorePrevious'],
+      'TS_ACCOUNT_WORKER_OUTBOUND_RESTORE_PREVIOUS',
+    ),
     timestamp: requireInteger(input['timestamp'], 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP'),
     jHeight: requireInteger(input['jHeight'], 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT'),
     txs,

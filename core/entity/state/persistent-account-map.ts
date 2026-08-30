@@ -279,6 +279,11 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
     return this.#values.nodeCommitmentAtPath(prefix);
   }
 
+  /** Canonical Entity Account-leaf value digest already sealed by this map. */
+  valueHashAt(entityId: string): string | undefined {
+    return this.#values.valueHashAt(entityId);
+  }
+
   /**
    * Accounts whose leaf moved between two committed versions of this map, in
    * O(changed) rather than O(accounts): the persistent tree shares untouched

@@ -29,6 +29,8 @@ export type RadixValueLeaf<K, V> = {
   readonly keyBytes: Uint8Array;
   readonly path: readonly number[];
   readonly value: V;
+  /** Derived RAM cache of options.valueHash(value); never serialized. */
+  valueHash?: string;
   hash?: string;
 };
 

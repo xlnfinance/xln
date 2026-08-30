@@ -11,9 +11,11 @@ import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
 import {
   collectWorkerCheckpoint,
+  collectWorkerPostAccounts,
   computeWorkerShardCommitment,
   createWorkerConsensusContext,
   initializeWorkerState,
+  prepareWorkerAttempt,
   workerHeapUsedBytes,
   type TsAccountWorkerState,
 } from './worker-state';
@@ -166,6 +168,7 @@ const publishWorkspace = (
     mutations.push({ kind: 'put', key: accountId, value: account });
     touchedShards.add(shardId);
     worker.checkpointAccountIds.add(accountId);
+    worker.frameTouchedAccountIds.add(accountId);
   }
   worker.accounts = worker.accounts.foldDirty(mutations);
   return [...touchedShards]
@@ -184,10 +187,14 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   let proposalUs = 0;
   let effects: TsAccountWorkerEffect[];
   if (input.phase === 'inbound') {
+    prepareWorkerAttempt(worker, input.restorePrevious);
+    worker.inboundPrepared = true;
     const transitionStartedAt = getPerfMs();
     effects = await applyInbound(worker, input, workspace);
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
   } else {
+    if (!worker.inboundPrepared) prepareWorkerAttempt(worker, input.restorePrevious);
+    worker.inboundPrepared = false;
     const transitionStartedAt = getPerfMs();
     const admissions = await applyOutboundTxs(
       createWorkerConsensusContext(worker, input.timestamp, input.jHeight, worker.jClaimNodes),
@@ -213,12 +220,16 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   const checkpointChanges = input.phase === 'outbound' && input.checkpointDue
     ? collectWorkerCheckpoint(worker)
     : undefined;
+  const postAccounts = input.phase === 'outbound'
+    ? collectWorkerPostAccounts(worker)
+    : undefined;
   const checkpointUs = Math.round((getPerfMs() - checkpointStartedAt) * 1_000);
   const cpu = readThreadCpuUsage(cpuStartedAt);
   return {
     workerIndex: worker.workerIndex,
     effects: effects.sort((left, right) => left.order - right.order),
     subroots,
+    ...(postAccounts ? { postAccounts } : {}),
     ...(checkpointChanges ? { checkpointChanges } : {}),
     operations: effects.length,
     elapsedUs: Math.round((getPerfMs() - startedAt) * 1_000),

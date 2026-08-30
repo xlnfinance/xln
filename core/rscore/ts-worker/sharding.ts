@@ -153,6 +153,29 @@ export class TsAccountCanonicalRoot {
     return this.#root;
   }
 
+  snapshot(): readonly Readonly<{
+    shardId: number;
+    node: PersistentRadixNodeCommitment;
+  }>[] {
+    return [...this.#shards]
+      .sort(([left], [right]) => left - right)
+      .map(([shardId, node]) => ({
+        shardId,
+        node: { kind: node.kind, path: [...node.path], hash: node.hash },
+      }));
+  }
+
+  restore(snapshot: readonly Readonly<{
+    shardId: number;
+    node: PersistentRadixNodeCommitment;
+  }>[]): void {
+    this.#shards.clear();
+    this.#shardNodes.clear();
+    this.#tree = null;
+    this.#root = EMPTY_RADIX_MERKLE_ROOT;
+    if (snapshot.length > 0) this.update(snapshot);
+  }
+
   update(changes: readonly Readonly<{
     shardId: number;
     node: PersistentRadixNodeCommitment | null;

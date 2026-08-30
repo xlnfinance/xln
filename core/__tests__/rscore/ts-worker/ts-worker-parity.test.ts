@@ -7,7 +7,6 @@ import { computeEntityAccountValueHash } from '../../../entity/consensus/state-r
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
-import { projectPortableAccountDoc } from '../../../storage/read/projections';
 import { makeAccount } from '../../helpers/cross-j';
 import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -273,12 +272,16 @@ const runCoordinator = async (
   });
   const inbound = await coordinator.applyAccountInputs({
     frameId: 'parity-frame-1',
+    expectedAccountsRoot: coordinator.accountsRoot,
     entityTimestamp: 1_000,
     finalizedJHeight: 0,
     inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
   });
   if (inbound.checkpointChanges !== undefined) {
     throw new Error('PARITY_INBOUND_CHECKPOINT_LEAKED');
+  }
+  if (inbound.postAccounts !== undefined) {
+    throw new Error('PARITY_INBOUND_POST_ACCOUNTS_LEAKED');
   }
   const outbound = await coordinator.proposeAccountFrames({
     frameId: 'parity-frame-1',
@@ -292,6 +295,9 @@ const runCoordinator = async (
   // changed shard subroots, and metrics.
   if (outbound.checkpointChanges !== undefined) {
     throw new Error('PARITY_CHECKPOINT_LEAKED_ON_NORMAL_FRAME');
+  }
+  if (outbound.postAccounts?.length !== ids.length) {
+    throw new Error(`PARITY_POST_ACCOUNT_ARITY:${outbound.postAccounts?.length ?? -1}:${ids.length}`);
   }
   return { inbound, outbound };
 };
@@ -334,6 +340,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const initialRoot = coordinator.accountsRoot;
     await coordinator.applyAccountInputs({
       frameId: 'fail-stop-frame',
+      expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000,
       finalizedJHeight: 0,
       inputs: [],
@@ -352,6 +359,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(coordinator.accountsRoot).toBe(initialRoot);
     await expect(coordinator.applyAccountInputs({
       frameId: 'after-fatal',
+      expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 2_000,
       finalizedJHeight: 0,
       inputs: [],
@@ -463,7 +471,8 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
     });
     const first = await coordinator.applyAccountInputs({
-      frameId: 'duplicate-frame-1', entityTimestamp: 1_000, finalizedJHeight: 0,
+      frameId: 'duplicate-frame-1', expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000, finalizedJHeight: 0,
       inputs: [{ accountId, input }],
     });
     await coordinator.proposeAccountFrames({
@@ -472,7 +481,8 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const firstRoot = coordinator.accountsRoot;
     const second = await coordinator.applyAccountInputs({
-      frameId: 'duplicate-frame-2', entityTimestamp: 2_000, finalizedJHeight: 0,
+      frameId: 'duplicate-frame-2', expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 2_000, finalizedJHeight: 0,
       inputs: [{ accountId, input }],
     });
     await coordinator.proposeAccountFrames({
@@ -484,7 +494,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(coordinator.accountsRoot).toBe(firstRoot);
   });
 
-  test('Account documents cross IPC only at the configured checkpoint cadence', async () => {
+  test('outbound returns only touched post-Accounts; checkpoints retain the dirty cadence', async () => {
     const accounts = new Map(ids.map(accountId => [
       accountId,
       parityAccount(accountId, inboundAccountIds.includes(accountId)),
@@ -498,6 +508,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.applyAccountInputs({
       frameId: 'parity-checkpoint-1',
+      expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000,
       finalizedJHeight: 0,
       inputs: [],
@@ -511,18 +522,11 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       checkpointDue: false,
     });
     expect(normal.checkpointChanges).toBeUndefined();
-    const encodedEffects = encodeCanonicalConsensusBytes(normal.effects);
-    // Returning the resident replicas would cost at least one portable
-    // document per Account per frame; the actual effects batch is a small
-    // fraction of that, proving replicas are not shipped back per frame.
-    const portableDocsBytes = ids.reduce((sum, accountId) =>
-      sum + encodeCanonicalConsensusBytes(
-        projectPortableAccountDoc(accounts.get(accountId) as AccountReplica),
-      ).byteLength, 0);
-    expect(encodedEffects.byteLength).toBeLessThan(portableDocsBytes);
+    expect(normal.postAccounts?.map(row => row.accountId)).toEqual([...ids].sort());
 
     await coordinator.applyAccountInputs({
       frameId: 'parity-checkpoint-2',
+      expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 2_000,
       finalizedJHeight: 0,
       inputs: [],
@@ -536,6 +540,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       checkpointDue: true,
     });
     expect(checkpoint.checkpointChanges?.accounts).toHaveLength(COUNT);
+    expect(checkpoint.postAccounts).toEqual([]);
     expect(checkpoint.accountsRoot).toBe(normal.accountsRoot);
   });
 });

@@ -16,6 +16,7 @@ type AggregateOptions = Readonly<{
   }>[];
   logicalShardToWorker: readonly number[];
   checkpointDue: boolean;
+  includePostAccounts: boolean;
   expectedEffects: number;
   rootTree: TsAccountCanonicalRoot;
   dispatchMs: number;
@@ -29,6 +30,7 @@ export const aggregateWorkerPhaseResults = (
   const subroots = new Map<number, TsAccountWorkerSubroot>();
   const metrics: TsAccountWorkerPhaseMetrics[] = [];
   const checkpointAccounts = new Map<string, Record<string, unknown>>();
+  const postAccounts = new Map<string, Readonly<{ account: Record<string, unknown>; entityAccountLeaf: string }>>();
   for (const { workerIndex, response } of options.responses) {
     const result = parseWorkerPhaseResult(response.value, workerIndex);
     effects.push(...result.effects);
@@ -43,6 +45,20 @@ export const aggregateWorkerPhaseResults = (
     }
     if (options.checkpointDue !== (result.checkpointChanges !== undefined)) {
       throw new Error(`TS_ACCOUNT_WORKER_CHECKPOINT_RESPONSE_MISMATCH:${workerIndex}`);
+    }
+    if (options.includePostAccounts !== (result.postAccounts !== undefined)) {
+      throw new Error(`TS_ACCOUNT_WORKER_POST_ACCOUNTS_RESPONSE_MISMATCH:${workerIndex}`);
+    }
+    if (result.postAccounts) {
+      for (const change of result.postAccounts) {
+        if (postAccounts.has(change.accountId)) {
+          throw new Error(`TS_ACCOUNT_WORKER_POST_ACCOUNT_DUPLICATE:${change.accountId}`);
+        }
+        postAccounts.set(change.accountId, {
+          account: change.account,
+          entityAccountLeaf: change.entityAccountLeaf,
+        });
+      }
     }
     if (result.checkpointChanges) {
       for (const change of result.checkpointChanges.accounts) {
@@ -93,6 +109,13 @@ export const aggregateWorkerPhaseResults = (
     accountsRoot: options.rootTree.root,
     effects: effects.sort((left, right) => left.order - right.order),
     changedSubroots,
+    ...(options.includePostAccounts
+      ? {
+          postAccounts: [...postAccounts]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([accountId, value]) => ({ accountId, ...value })),
+        }
+      : {}),
     ...(checkpointChanges ? { checkpointChanges } : {}),
     workers: metrics.sort((left, right) => left.workerIndex - right.workerIndex),
     ipc: {

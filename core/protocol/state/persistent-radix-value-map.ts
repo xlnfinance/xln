@@ -459,6 +459,21 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     return getLeaf(this.#root, radixPathSlots(keyBytes, this.#options.radix), keyBytes) !== undefined;
   }
 
+  /** Exact committed value digest, reusing the leaf seal's RAM cache. */
+  valueHashAt(key: K): string | undefined {
+    if (this.#options.commitment === false) {
+      throw new Error('PERSISTENT_RADIX_COMMITMENT_DISABLED');
+    }
+    const keyBytes = this.#options.keyBytes(key);
+    const leaf = getLeaf(this.#root, radixPathSlots(keyBytes, this.#options.radix), keyBytes);
+    if (!leaf) return undefined;
+    if (leaf.valueHash === undefined) {
+      this.#stats.valueHashes += 1;
+      leaf.valueHash = this.#options.valueHash(leaf.value);
+    }
+    return leaf.valueHash;
+  }
+
   encodeKey(key: K): Uint8Array {
     const keyBytes = Uint8Array.from(this.#options.keyBytes(key));
     if (keyBytes.length === 0) throw new Error('PERSISTENT_RADIX_KEY_EMPTY');

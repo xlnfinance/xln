@@ -215,8 +215,11 @@ export const sealRadixNode = <K, V>(
   }
   if (node.hash !== undefined) return node.hash;
   if (node.kind === 'leaf') {
-    stats.valueHashes += 1;
-    const digest = options.valueHash(node.value);
+    if (node.valueHash === undefined) {
+      stats.valueHashes += 1;
+      node.valueHash = options.valueHash(node.value);
+    }
+    const digest = node.valueHash;
     stats.leafHashes += 1;
     node.hash = computeRadixMerkleLeafHash(node.keyBytes, hexToBytes(digest));
     return node.hash;

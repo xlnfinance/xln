@@ -25,6 +25,7 @@ export type TsAccountWorkerOptions = Readonly<{
 
 export type TsApplyAccountInputsRequest = Readonly<{
   frameId: string;
+  expectedAccountsRoot: string;
   entityTimestamp: number;
   finalizedJHeight: number;
   inputs: readonly Readonly<{
@@ -80,6 +81,13 @@ export type TsAccountWorkerCheckpointChanges = Readonly<{
   accounts: readonly TsAccountWorkerCheckpointAccountChange[];
 }>;
 
+/** Final touched Account values for one completed inbound→outbound Entity stage. */
+export type TsAccountWorkerPostAccount = Readonly<{
+  accountId: string;
+  account: Record<string, unknown>;
+  entityAccountLeaf: string;
+}>;
+
 export type TsAccountWorkerPhaseMetrics = Readonly<{
   workerIndex: number;
   operations: number;
@@ -107,6 +115,8 @@ export type TsAccountWorkerBatchResult = Readonly<{
   accountsRoot: string;
   effects: readonly TsAccountWorkerEffect[];
   changedSubroots: readonly TsAccountWorkerSubroot[];
+  /** Outbound only; inbound never copies Account documents back to the coordinator. */
+  postAccounts?: readonly TsAccountWorkerPostAccount[];
   checkpointChanges?: TsAccountWorkerCheckpointChanges;
   workers: readonly TsAccountWorkerPhaseMetrics[];
   ipc: Readonly<{
@@ -151,6 +161,7 @@ export type TsAccountWorkerInitPayload = Readonly<{
 export type TsAccountWorkerInboundPayload = Readonly<{
   phase: 'inbound';
   frameId: string;
+  restorePrevious: boolean;
   entityTimestamp: number;
   finalizedJHeight: number;
   inputs: readonly Readonly<{
@@ -163,6 +174,7 @@ export type TsAccountWorkerInboundPayload = Readonly<{
 export type TsAccountWorkerOutboundPayload = Readonly<{
   phase: 'outbound';
   frameId: string;
+  restorePrevious: boolean;
   timestamp: number;
   jHeight: number;
   txs: readonly Readonly<{
@@ -185,6 +197,7 @@ export type TsAccountWorkerPhaseResult = Readonly<{
   workerIndex: number;
   effects: readonly TsAccountWorkerEffect[];
   subroots: readonly TsAccountWorkerSubroot[];
+  postAccounts?: readonly TsAccountWorkerPostAccount[];
   checkpointChanges?: TsAccountWorkerCheckpointChanges;
   operations: number;
   elapsedUs: number;
