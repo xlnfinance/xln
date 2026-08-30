@@ -11,7 +11,6 @@ import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from '
 import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
 import {
-  collectWorkerCheckpoint,
   collectWorkerPostAccounts,
   computeWorkerShardCommitment,
   createWorkerConsensusContext,
@@ -175,7 +174,6 @@ const publishWorkspace = (
     const shardId = tsAccountLogicalShard(accountId);
     mutations.push({ kind: 'put', key: accountId, value: account });
     touchedShards.add(shardId);
-    worker.checkpointAccountIds.add(accountId);
     worker.frameTouchedAccountIds.add(accountId);
   }
   worker.accounts = worker.accounts.foldDirty(mutations);
@@ -230,14 +228,11 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   const rootStartedAt = getPerfMs();
   const subroots = publishWorkspace(worker, workspace);
   const rootUs = Math.round((getPerfMs() - rootStartedAt) * 1_000);
-  const checkpointStartedAt = getPerfMs();
-  const checkpointChanges = input.phase === 'outbound' && input.checkpointDue
-    ? collectWorkerCheckpoint(worker)
-    : undefined;
+  const materializeStartedAt = getPerfMs();
   const postAccounts = input.phase === 'outbound'
     ? collectWorkerPostAccounts(worker)
     : undefined;
-  const checkpointUs = Math.round((getPerfMs() - checkpointStartedAt) * 1_000);
+  const materializeUs = Math.round((getPerfMs() - materializeStartedAt) * 1_000);
   const cpu = readThreadCpuUsage(cpuStartedAt);
   const shardRows = new Map<number, number>();
   const operationAccountIds = input.phase === 'inbound'
@@ -252,13 +247,12 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     effects: effects.sort((left, right) => left.order - right.order),
     subroots,
     ...(postAccounts ? { postAccounts } : {}),
-    ...(checkpointChanges ? { checkpointChanges } : {}),
     operations: effects.length,
     shardRows: [...shardRows].sort(([left], [right]) => left - right),
     operationsProfile: diffOpCounters(operationsBefore),
     elapsedUs: Math.round((getPerfMs() - startedAt) * 1_000),
     heapUsedBytes: workerHeapUsedBytes(),
-    timings: { transitionUs, proposalUs, rootUs, checkpointUs },
+    timings: { transitionUs, proposalUs, rootUs, materializeUs },
     threadCpuUserUs: cpu.user,
     threadCpuSystemUs: cpu.system,
   };

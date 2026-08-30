@@ -3,7 +3,6 @@ import { getPerfMs } from '../../support/time';
 import { TsAccountCanonicalRoot, tsAccountWorkerForShard } from './sharding';
 import type {
   TsAccountWorkerBatchResult,
-  TsAccountWorkerCheckpointChanges,
   TsAccountWorkerEffect,
   TsAccountWorkerPhaseMetrics,
   TsAccountWorkerSubroot,
@@ -15,7 +14,6 @@ type AggregateOptions = Readonly<{
     response: WorkerRequestResult;
   }>[];
   logicalShardToWorker: readonly number[];
-  checkpointDue: boolean;
   includePostAccounts: boolean;
   expectedEffects: number;
   rootTree: TsAccountCanonicalRoot;
@@ -29,7 +27,6 @@ export const aggregateWorkerPhaseResults = (
   const effects: TsAccountWorkerEffect[] = [];
   const subroots = new Map<number, TsAccountWorkerSubroot>();
   const metrics: TsAccountWorkerPhaseMetrics[] = [];
-  const checkpointAccounts = new Map<string, Record<string, unknown>>();
   const postAccounts = new Map<string, Readonly<{ account: Record<string, unknown>; entityAccountLeaf: string }>>();
   for (const { workerIndex, response } of options.responses) {
     const result = parseWorkerPhaseResult(response.value, workerIndex);
@@ -43,9 +40,6 @@ export const aggregateWorkerPhaseResults = (
       }
       subroots.set(subroot.shardId, subroot);
     }
-    if (options.checkpointDue !== (result.checkpointChanges !== undefined)) {
-      throw new Error(`TS_ACCOUNT_WORKER_CHECKPOINT_RESPONSE_MISMATCH:${workerIndex}`);
-    }
     if (options.includePostAccounts !== (result.postAccounts !== undefined)) {
       throw new Error(`TS_ACCOUNT_WORKER_POST_ACCOUNTS_RESPONSE_MISMATCH:${workerIndex}`);
     }
@@ -58,14 +52,6 @@ export const aggregateWorkerPhaseResults = (
           account: change.account,
           entityAccountLeaf: change.entityAccountLeaf,
         });
-      }
-    }
-    if (result.checkpointChanges) {
-      for (const change of result.checkpointChanges.accounts) {
-        if (checkpointAccounts.has(change.accountId)) {
-          throw new Error(`TS_ACCOUNT_WORKER_CHECKPOINT_ACCOUNT_DUPLICATE:${change.accountId}`);
-        }
-        checkpointAccounts.set(change.accountId, change.account);
       }
     }
     const workMs = result.elapsedUs / 1_000;
@@ -85,7 +71,7 @@ export const aggregateWorkerPhaseResults = (
       transitionMs: result.timings.transitionUs / 1_000,
       proposalMs: result.timings.proposalUs / 1_000,
       rootMs: result.timings.rootUs / 1_000,
-      checkpointMs: result.timings.checkpointUs / 1_000,
+      materializeMs: result.timings.materializeUs / 1_000,
       workerEncodeMs: response.workerEncodeMs,
       threadCpuUserMs: result.threadCpuUserUs / 1_000,
       threadCpuSystemMs: result.threadCpuSystemUs / 1_000,
@@ -100,13 +86,6 @@ export const aggregateWorkerPhaseResults = (
   const changedSubroots: TsAccountWorkerSubroot[] = [...subroots.values()]
     .sort((left, right) => left.shardId - right.shardId);
   options.rootTree.update(changedSubroots);
-  const checkpointChanges: TsAccountWorkerCheckpointChanges | undefined = options.checkpointDue
-    ? {
-        accounts: [...checkpointAccounts]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([accountId, account]) => ({ accountId, account })),
-      }
-    : undefined;
   return {
     accountsRoot: options.rootTree.root,
     effects: effects.sort((left, right) => left.order - right.order),
@@ -118,7 +97,6 @@ export const aggregateWorkerPhaseResults = (
             .map(([accountId, value]) => ({ accountId, ...value })),
         }
       : {}),
-    ...(checkpointChanges ? { checkpointChanges } : {}),
     workers: metrics.sort((left, right) => left.workerIndex - right.workerIndex),
     ipc: {
       requestBytes: metrics.reduce((sum, metric) => sum + metric.requestBytes, 0),

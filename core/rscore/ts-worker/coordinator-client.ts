@@ -174,8 +174,6 @@ export const parseWorkerPhaseResult = (
     || !Array.isArray(result.effects)
     || !Array.isArray(result.subroots)
     || (result.postAccounts !== undefined && !Array.isArray(result.postAccounts))
-    || (result.checkpointChanges !== undefined
-      && !Array.isArray(result.checkpointChanges.accounts))
     || !Number.isSafeInteger(result.operations)
     || !Array.isArray(result.shardRows)
     || result.operationsProfile === null

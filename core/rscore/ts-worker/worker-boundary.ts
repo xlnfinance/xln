@@ -179,7 +179,6 @@ const decodeOutboundPayload = (
     jHeight: requireInteger(input['jHeight'], 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT'),
     txs,
     proposals,
-    checkpointDue: requireBoolean(input['checkpointDue'], 'TS_ACCOUNT_WORKER_OUTBOUND_CHECKPOINT'),
   };
 };
 

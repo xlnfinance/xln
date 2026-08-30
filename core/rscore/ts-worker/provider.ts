@@ -22,6 +22,7 @@ import type {
 } from '../authority/entity-stage';
 import type { AccountAuthorityInputRequest } from '../../account/consensus/context';
 import { safeStringify } from '../../protocol/serialization';
+import type { OpCounterSnapshot } from '../../support/performance/op-counters';
 import { TsAccountWorkerCoordinator } from './coordinator';
 import type {
   TsAccountWorkerBatchResult,
@@ -35,7 +36,7 @@ type WorkerTotals = {
   transitionMs: number;
   proposalMs: number;
   rootMs: number;
-  checkpointMs: number;
+  materializeMs: number;
   encodeMs: number;
   decodeMs: number;
   workerEncodeMs: number;
@@ -67,6 +68,7 @@ export type TsAccountWorkerTelemetry = Readonly<{
   rowsPerShard: readonly (readonly [shardId: number, rows: number])[];
   touchedShards: number;
   utilization: number;
+  workerOperations: OpCounterSnapshot;
 }>;
 
 const emptyWorkerTotals = (): WorkerTotals => ({
@@ -75,7 +77,7 @@ const emptyWorkerTotals = (): WorkerTotals => ({
   transitionMs: 0,
   proposalMs: 0,
   rootMs: 0,
-  checkpointMs: 0,
+  materializeMs: 0,
   encodeMs: 0,
   decodeMs: 0,
   workerEncodeMs: 0,
@@ -90,7 +92,7 @@ const emptyPhaseTotals = (): PhaseTotals => ({
 });
 
 const WORKER_TOTAL_KEYS: readonly (keyof WorkerTotals)[] = [
-  'operations', 'workMs', 'transitionMs', 'proposalMs', 'rootMs', 'checkpointMs',
+  'operations', 'workMs', 'transitionMs', 'proposalMs', 'rootMs', 'materializeMs',
   'encodeMs', 'decodeMs', 'workerEncodeMs', 'threadCpuUserMs', 'threadCpuSystemMs',
   'requestBytes', 'responseBytes',
 ];
@@ -166,6 +168,7 @@ export class TsAccountWorkerAuthority {
   };
   readonly #workers = new Map<number, WorkerTotals>();
   readonly #rowsPerShard = new Map<number, number>();
+  readonly #workerOperations: Record<string, { calls: number; bytes: number; durationUs: number }> = {};
   readonly provider: AccountAuthorityEntityStageProvider;
 
   constructor(env: RuntimeReplica, workerCount: number) {
@@ -199,7 +202,7 @@ export class TsAccountWorkerAuthority {
         transitionMs: metric.transitionMs,
         proposalMs: metric.proposalMs,
         rootMs: metric.rootMs,
-        checkpointMs: metric.checkpointMs,
+        materializeMs: metric.materializeMs,
         encodeMs: metric.encodeMs,
         decodeMs: metric.decodeMs,
         workerEncodeMs: metric.workerEncodeMs,
@@ -213,6 +216,13 @@ export class TsAccountWorkerAuthority {
       this.#workers.set(metric.workerIndex, worker);
       for (const [shardId, rows] of metric.shardRows) {
         this.#rowsPerShard.set(shardId, (this.#rowsPerShard.get(shardId) ?? 0) + rows);
+      }
+      for (const [name, counter] of Object.entries(metric.operationsProfile)) {
+        const aggregate = this.#workerOperations[name] ?? { calls: 0, bytes: 0, durationUs: 0 };
+        aggregate.calls += counter.calls;
+        aggregate.bytes += counter.bytes;
+        aggregate.durationUs += counter.durationUs;
+        this.#workerOperations[name] = aggregate;
       }
     }
   }
@@ -289,7 +299,6 @@ export class TsAccountWorkerAuthority {
         return { accountId: normalize(request.account.proofHeader.toEntity), txs: request.input.txs };
       }),
       proposalAccountIds: batch.proposals.map(request => normalize(request.account.proofHeader.toEntity)),
-      checkpointDue: false,
     });
     this.#recordPhase('proposal', result);
     for (const row of result.postAccounts ?? []) replacePostAccount(ownerEntityId, batch, row);
@@ -352,6 +361,9 @@ export class TsAccountWorkerAuthority {
       utilization: waveWallMs === 0
         ? 0
         : perWorker.reduce((sum, row) => sum + row.workMs, 0) / (this.#workerCount * waveWallMs),
+      workerOperations: Object.fromEntries(Object.entries(this.#workerOperations)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, counter]) => [name, { ...counter }])),
     };
   }
 }

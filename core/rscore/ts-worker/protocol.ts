@@ -46,7 +46,6 @@ export type TsProposeAccountFramesRequest = Readonly<{
     txs: readonly AccountTx[];
   }>[];
   proposalAccountIds: readonly string[];
-  checkpointDue: boolean;
 }>;
 
 export type TsAccountWorkerEffect =
@@ -74,16 +73,6 @@ export type TsAccountWorkerSubroot = Readonly<{
   node: PersistentRadixNodeCommitment | null;
 }>;
 
-/** Portable dirty Account document. Present only on an explicitly due checkpoint. */
-type TsAccountWorkerCheckpointAccountChange = Readonly<{
-  accountId: string;
-  account: Record<string, unknown>;
-}>;
-
-export type TsAccountWorkerCheckpointChanges = Readonly<{
-  accounts: readonly TsAccountWorkerCheckpointAccountChange[];
-}>;
-
 /** Final touched Account values for one completed inbound→outbound Entity stage. */
 export type TsAccountWorkerPostAccount = Readonly<{
   accountId: string;
@@ -108,7 +97,7 @@ export type TsAccountWorkerPhaseMetrics = Readonly<{
   transitionMs: number;
   proposalMs: number;
   rootMs: number;
-  checkpointMs: number;
+  materializeMs: number;
   workerEncodeMs: number;
   threadCpuUserMs: number;
   threadCpuSystemMs: number;
@@ -123,7 +112,6 @@ export type TsAccountWorkerBatchResult = Readonly<{
   changedSubroots: readonly TsAccountWorkerSubroot[];
   /** Outbound only; inbound never copies Account documents back to the coordinator. */
   postAccounts?: readonly TsAccountWorkerPostAccount[];
-  checkpointChanges?: TsAccountWorkerCheckpointChanges;
   workers: readonly TsAccountWorkerPhaseMetrics[];
   ipc: Readonly<{
     requestBytes: number;
@@ -193,7 +181,6 @@ export type TsAccountWorkerOutboundPayload = Readonly<{
     order: number;
     accountId: string;
   }>[];
-  checkpointDue: boolean;
 }>;
 
 export type TsAccountWorkerPhasePayload =
@@ -205,7 +192,6 @@ export type TsAccountWorkerPhaseResult = Readonly<{
   effects: readonly TsAccountWorkerEffect[];
   subroots: readonly TsAccountWorkerSubroot[];
   postAccounts?: readonly TsAccountWorkerPostAccount[];
-  checkpointChanges?: TsAccountWorkerCheckpointChanges;
   operations: number;
   shardRows: readonly (readonly [shardId: number, rows: number])[];
   operationsProfile: OpCounterSnapshot;
@@ -215,7 +201,7 @@ export type TsAccountWorkerPhaseResult = Readonly<{
     transitionUs: number;
     proposalUs: number;
     rootUs: number;
-    checkpointUs: number;
+    materializeUs: number;
   }>;
   threadCpuUserUs: number;
   threadCpuSystemUs: number;

@@ -24,7 +24,6 @@ import {
   tsAccountLogicalShardPath,
 } from './sharding';
 import type {
-  TsAccountWorkerCheckpointChanges,
   TsAccountWorkerInitPayload,
   TsAccountWorkerInitResult,
   TsAccountWorkerPostAccount,
@@ -40,10 +39,8 @@ export type TsAccountWorkerState = {
   readonly jReplicas: Map<string, JReplica>;
   readonly jClaimNodes: Map<string, AccountJClaimNode>;
   readonly settlementBoardAuthorities: Map<string, string>;
-  readonly checkpointAccountIds: Set<string>;
   readonly frameTouchedAccountIds: Set<string>;
   candidateBaseAccounts: PersistentEntityAccountMap | null;
-  candidateBaseCheckpointAccountIds: Set<string> | null;
   inboundPrepared: boolean;
 };
 
@@ -154,10 +151,8 @@ export const initializeWorkerState = (
     settlementBoardAuthorities: new Map(
       input.settlementBoardAuthorities.map(([entityId, boardHash]) => [entityId.toLowerCase(), boardHash]),
     ),
-    checkpointAccountIds: new Set(),
     frameTouchedAccountIds: new Set(),
     candidateBaseAccounts: null,
-    candidateBaseCheckpointAccountIds: null,
     inboundPrepared: false,
   };
   return {
@@ -176,17 +171,12 @@ export const prepareWorkerAttempt = (
   restorePrevious: boolean,
 ): void => {
   if (restorePrevious) {
-    if (worker.candidateBaseAccounts === null || worker.candidateBaseCheckpointAccountIds === null) {
+    if (worker.candidateBaseAccounts === null) {
       throw new Error(`TS_ACCOUNT_WORKER_RESTORE_BASE_MISSING:${worker.workerIndex}`);
     }
     worker.accounts = worker.candidateBaseAccounts;
-    worker.checkpointAccountIds.clear();
-    for (const accountId of worker.candidateBaseCheckpointAccountIds) {
-      worker.checkpointAccountIds.add(accountId);
-    }
   } else {
     worker.candidateBaseAccounts = worker.accounts;
-    worker.candidateBaseCheckpointAccountIds = new Set(worker.checkpointAccountIds);
   }
   worker.frameTouchedAccountIds.clear();
 };
@@ -216,18 +206,6 @@ export const createWorkerConsensusContext = (
   resolveSettlementBoardAuthority: async (sourceEntityId, certifiedBoardHash) =>
     certifiedBoardHash ?? worker.settlementBoardAuthorities.get(sourceEntityId.toLowerCase()),
 });
-
-export const collectWorkerCheckpoint = (
-  worker: TsAccountWorkerState,
-): TsAccountWorkerCheckpointChanges => {
-  const accounts = [...worker.checkpointAccountIds].sort().map(accountId => {
-    const account = worker.accounts.get(accountId);
-    if (!account) throw new Error(`TS_ACCOUNT_WORKER_CHECKPOINT_ACCOUNT_MISSING:${accountId}`);
-    return { accountId, account: projectPortableAccountDoc(account) };
-  });
-  worker.checkpointAccountIds.clear();
-  return { accounts };
-};
 
 export const collectWorkerPostAccounts = (
   worker: TsAccountWorkerState,

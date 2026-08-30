@@ -278,9 +278,6 @@ const runCoordinator = async (
     finalizedJHeight: 0,
     inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
   });
-  if (inbound.checkpointChanges !== undefined) {
-    throw new Error('PARITY_INBOUND_CHECKPOINT_LEAKED');
-  }
   if (inbound.postAccounts !== undefined) {
     throw new Error('PARITY_INBOUND_POST_ACCOUNTS_LEAKED');
   }
@@ -290,13 +287,7 @@ const runCoordinator = async (
     jHeight: 0,
     txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
     proposalAccountIds: ids,
-    checkpointDue: false,
   });
-  // Normal frames must not return Account replicas: only ordered effects,
-  // changed shard subroots, and metrics.
-  if (outbound.checkpointChanges !== undefined) {
-    throw new Error('PARITY_CHECKPOINT_LEAKED_ON_NORMAL_FRAME');
-  }
   if (outbound.postAccounts?.length !== ids.length) {
     throw new Error(`PARITY_POST_ACCOUNT_ARITY:${outbound.postAccounts?.length ?? -1}:${ids.length}`);
   }
@@ -355,7 +346,6 @@ describe('TS Account worker engine parity with canonical sequential transitions'
         { accountId: missingId, txs: [paymentTx(missingId, 1n)] },
       ],
       proposalAccountIds: [validId],
-      checkpointDue: false,
     })).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
     expect(coordinator.accountsRoot).toBe(initialRoot);
     await expect(coordinator.applyAccountInputs({
@@ -478,7 +468,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.proposeAccountFrames({
       frameId: 'duplicate-frame-1', timestamp: 1_000, jHeight: 0,
-      txs: [], proposalAccountIds: [], checkpointDue: false,
+      txs: [], proposalAccountIds: [],
     });
     const firstRoot = coordinator.accountsRoot;
     const second = await coordinator.applyAccountInputs({
@@ -488,7 +478,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.proposeAccountFrames({
       frameId: 'duplicate-frame-2', timestamp: 2_000, jHeight: 0,
-      txs: [], proposalAccountIds: [], checkpointDue: false,
+      txs: [], proposalAccountIds: [],
     });
     expect(first.effects).toHaveLength(1);
     expect(second.effects).toHaveLength(1);
@@ -518,7 +508,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'genesis-frame', timestamp: 1_000, jHeight: 0,
-      txs: [], proposalAccountIds: [], checkpointDue: false,
+      txs: [], proposalAccountIds: [],
     });
     const sequential = parityAccount(accountId, true);
     const workerStub = {
@@ -556,7 +546,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const abandoned = await coordinator.proposeAccountFrames({
       frameId: 'retry-attempt-1', timestamp: 1_000, jHeight: 0,
       txs: [{ accountId, txs: [paymentTx(accountId, 1n)] }],
-      proposalAccountIds: [accountId], checkpointDue: false,
+      proposalAccountIds: [accountId],
     });
     expect(abandoned.accountsRoot).not.toBe(parentRoot);
 
@@ -567,7 +557,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const retry = await coordinator.proposeAccountFrames({
       frameId: 'retry-attempt-2', timestamp: 1_000, jHeight: 0,
       txs: [{ accountId, txs: [paymentTx(accountId, 2n)] }],
-      proposalAccountIds: [accountId], checkpointDue: false,
+      proposalAccountIds: [accountId],
     });
     const baseline = await runCoordinator(
       [accountId],
@@ -579,7 +569,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(digest(retry.effects)).toBe(digest(baseline.outbound.effects));
   });
 
-  test('outbound returns only touched post-Accounts; checkpoints retain the dirty cadence', async () => {
+  test('outbound returns only touched post-Accounts without a duplicate checkpoint channel', async () => {
     const accounts = new Map(ids.map(accountId => [
       accountId,
       parityAccount(accountId, inboundAccountIds.includes(accountId)),
@@ -604,9 +594,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       jHeight: 0,
       txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
       proposalAccountIds: ids,
-      checkpointDue: false,
     });
-    expect(normal.checkpointChanges).toBeUndefined();
     expect(normal.postAccounts?.map(row => row.accountId)).toEqual([...ids].sort());
 
     await coordinator.applyAccountInputs({
@@ -616,17 +604,15 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       finalizedJHeight: 0,
       inputs: [],
     });
-    const checkpoint = await coordinator.proposeAccountFrames({
+    const idle = await coordinator.proposeAccountFrames({
       frameId: 'parity-checkpoint-2',
       timestamp: 2_000,
       jHeight: 0,
       txs: [],
       proposalAccountIds: [],
-      checkpointDue: true,
     });
-    expect(checkpoint.checkpointChanges?.accounts).toHaveLength(COUNT);
-    expect(checkpoint.postAccounts).toEqual([]);
-    expect(checkpoint.accountsRoot).toBe(normal.accountsRoot);
+    expect(idle.postAccounts).toEqual([]);
+    expect(idle.accountsRoot).toBe(normal.accountsRoot);
   });
 });
 

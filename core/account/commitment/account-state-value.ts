@@ -5,6 +5,8 @@
 import { ethers } from 'ethers';
 import { utf8Bytes } from '../../protocol/crypto/keccak-text';
 import { compareStableText } from '../../protocol/serialization';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 
 type RlpNode = string | RlpNode[];
 
@@ -382,5 +384,13 @@ const writeAccountStateValue = (w: RlpWriter, value: unknown): void => {
   });
 };
 
-export const encodeAccountStateValue = (value: unknown): Uint8Array => encodeStandalone(value);
-
+export const encodeAccountStateValue = (value: unknown): Uint8Array => {
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const bytes = encodeStandalone(value);
+  countOp(
+    'account.canonical.encode',
+    bytes.byteLength,
+    OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+  );
+  return bytes;
+};

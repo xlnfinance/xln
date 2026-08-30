@@ -42,7 +42,6 @@ export class TsAccountWorkerCoordinator {
   readonly #workerCount: number;
   readonly #logicalShardToWorker: readonly number[];
   readonly #rootTree: TsAccountCanonicalRoot;
-  readonly #dirtyWorkerIndexes = new Set<number>();
   readonly #openFrameWorkerIndexes = new Set<number>();
   readonly #attemptTouchedWorkerIndexes = new Set<number>();
   readonly #candidateWorkerIndexes = new Set<number>();
@@ -186,7 +185,6 @@ export class TsAccountWorkerCoordinator {
 
   async #runPhase(
     dispatches: readonly PhaseDispatch[],
-    checkpointDue: boolean,
     includePostAccounts: boolean,
     expectedEffects: number,
   ): Promise<TsAccountWorkerBatchResult> {
@@ -205,7 +203,6 @@ export class TsAccountWorkerCoordinator {
       return aggregateWorkerPhaseResults({
         responses,
         logicalShardToWorker: this.#logicalShardToWorker,
-        checkpointDue,
         includePostAccounts,
         expectedEffects,
         rootTree: this.#rootTree,
@@ -292,10 +289,9 @@ export class TsAccountWorkerCoordinator {
           },
         };
       });
-    const result = await this.#runPhase(dispatches, false, false, input.inputs.length);
+    const result = await this.#runPhase(dispatches, false, input.inputs.length);
     for (const [workerIndex, inputs] of buckets.entries()) {
       if (inputs.length === 0) continue;
-      this.#dirtyWorkerIndexes.add(workerIndex);
       this.#openFrameWorkerIndexes.add(workerIndex);
       this.#attemptTouchedWorkerIndexes.add(workerIndex);
     }
@@ -311,9 +307,6 @@ export class TsAccountWorkerCoordinator {
     this.#assertUsable();
     if (this.#openFrameId !== frameId) {
       throw new Error(`TS_ACCOUNT_WORKER_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
-    }
-    if (typeof input.checkpointDue !== 'boolean') {
-      throw new Error('TS_ACCOUNT_WORKER_OUTBOUND_CHECKPOINT_INVALID');
     }
     const txBuckets = Array.from({ length: this.#workerCount }, () =>
       [] as Array<{ order: number; accountId: string; txs: typeof input.txs[number]['txs'] }>);
@@ -355,9 +348,7 @@ export class TsAccountWorkerCoordinator {
         }
         return txs.length > 0 || proposalsForWorker.length > 0;
       });
-    const selectedWorkerIndexes = [...new Set(input.checkpointDue
-      ? [...this.#dirtyWorkerIndexes, ...this.#openFrameWorkerIndexes, ...activeWorkerIndexes]
-      : [...this.#openFrameWorkerIndexes, ...activeWorkerIndexes])]
+    const selectedWorkerIndexes = [...new Set([...this.#openFrameWorkerIndexes, ...activeWorkerIndexes])]
       .sort((left, right) => left - right);
     const dispatches: PhaseDispatch[] = selectedWorkerIndexes.map(workerIndex => {
       const txs = txBuckets[workerIndex];
@@ -375,21 +366,15 @@ export class TsAccountWorkerCoordinator {
           jHeight: input.jHeight,
           txs,
           proposals: proposalsForWorker,
-          checkpointDue: input.checkpointDue,
         },
       };
     });
     const result = await this.#runPhase(
       dispatches,
-      input.checkpointDue,
       true,
       input.txs.length + input.proposalAccountIds.length,
     );
-    for (const workerIndex of activeWorkerIndexes) this.#dirtyWorkerIndexes.add(workerIndex);
     for (const workerIndex of activeWorkerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
-    if (input.checkpointDue) {
-      for (const workerIndex of selectedWorkerIndexes) this.#dirtyWorkerIndexes.delete(workerIndex);
-    }
     this.#openFrameWorkerIndexes.clear();
     this.#candidateWorkerIndexes.clear();
     for (const workerIndex of this.#attemptTouchedWorkerIndexes) {
