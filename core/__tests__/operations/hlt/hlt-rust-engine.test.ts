@@ -11,6 +11,7 @@ import {
   assertRustLiveMixedCardinality,
   assertRustLivePaymentCardinality,
   diffRustH1EconomicMetrics,
+  isRustLiveMixedTpsAuthority,
   parseHltEngineSelection,
   type RustH1Metrics,
   type RustAccountPhaseMetric,
@@ -131,6 +132,8 @@ test('Rust live TPS authority rejects smoke-sized populations and rates', () => 
 });
 
 test('Rust mixed authority forbids repeated operations per user', () => {
+  expect(isRustLiveMixedTpsAuthority({ users: 10, ratePerUser: 1, durationSeconds: 1 })).toBe(false);
+  expect(isRustLiveMixedTpsAuthority({ users: 5_000, ratePerUser: 1, durationSeconds: 20 })).toBe(true);
   expect(assertRustLiveMixedCardinality({ users: 5_000, ratePerUser: 1, durationSeconds: 20 }))
     .toBeUndefined();
   expect(() => assertRustLiveMixedCardinality({ users: 5_000, ratePerUser: 2, durationSeconds: 20 }))

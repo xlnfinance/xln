@@ -7,7 +7,6 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import {
-  assertRustLiveMixedCardinality,
   assertRustLivePaymentCardinality,
   parseHltEngineSelection,
 } from './rust/rust-h1';
@@ -40,9 +39,7 @@ if (selection.engine === 'rust') {
   const submittedPayments = offeredPayments * rustDurationSeconds;
   if (!Number.isSafeInteger(rustRatePerUser) || rustRatePerUser < 1) throw new Error(`HLT_RATE_PER_USER_INVALID:${rustRatePerUser}`);
   if (!Number.isSafeInteger(rustDurationSeconds) || rustDurationSeconds < 1) throw new Error(`HLT_DURATION_INVALID:${rustDurationSeconds}`);
-  if (workload === 'mixed') {
-    assertRustLiveMixedCardinality({ users, ratePerUser: rustRatePerUser, durationSeconds: rustDurationSeconds });
-  } else {
+  if (workload !== 'mixed') {
     assertRustLivePaymentCardinality({
       users,
       payments: submittedPayments,
@@ -90,7 +87,7 @@ const smoke = spawnSync(process.execPath, ['core/scripts/operations/production/l
 });
 if (smoke.status !== 0) throw new Error(`HLT_BUILD_SMOKE_FAILED:${String(smoke.status)}`);
 
-const reportPath = selection.engine === 'rust' && workload === 'mixed'
+const reportPath = selection.engine === 'rust'
   ? join(workDir, 'hlt-rust-h1-live.json')
   : workload === 'payments'
   ? join(workDir, 'hlt-payment-load-report.json')

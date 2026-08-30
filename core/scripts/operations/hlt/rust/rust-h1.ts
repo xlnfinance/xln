@@ -53,10 +53,7 @@ export const assertRustLiveMixedCardinality = (counts: Readonly<{
   ratePerUser: number;
   durationSeconds: number;
 }>): void => {
-  if (
-    !Number.isSafeInteger(counts.users) || counts.users < 5_000 || counts.users % 2 !== 0 ||
-    counts.ratePerUser !== 1 || counts.durationSeconds !== 20
-  ) {
+  if (!isRustLiveMixedTpsAuthority(counts)) {
     throw new Error(
       `HLT_RUST_MIXED_CARDINALITY_INVALID:users=${counts.users}:` +
       `ratePerUser=${counts.ratePerUser}:duration=${counts.durationSeconds}:` +
@@ -64,6 +61,18 @@ export const assertRustLiveMixedCardinality = (counts: Readonly<{
     );
   }
 };
+
+/**
+ * Classification only: a smaller run still executes the complete production
+ * path, but must never expose a rate that can be mistaken for HLT authority.
+ */
+export const isRustLiveMixedTpsAuthority = (counts: Readonly<{
+  users: number;
+  ratePerUser: number;
+  durationSeconds: number;
+}>): boolean =>
+  Number.isSafeInteger(counts.users) && counts.users >= 5_000 && counts.users % 2 === 0 &&
+  counts.ratePerUser === 1 && counts.durationSeconds === 20;
 
 export const parseHltEngineSelection = (env: Record<string, string | undefined>): HltEngineSelection => {
   const engineRaw = String(env['XLN_HLT_ENGINE'] || 'ts').trim();

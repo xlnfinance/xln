@@ -78,8 +78,8 @@ import {
   materializeH1CollateralEvidence,
 } from './worker-authority-evidence';
 import {
-  assertRustLiveMixedCardinality,
   attachRustH1,
+  isRustLiveMixedTpsAuthority,
   parseHltEngineSelection,
   type RustH1Handle,
   type RustH1Metrics,
@@ -273,15 +273,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     console.log(`[load] balanced exchange ${safeStringify(prepared.distribution)}`);
     const users: LaneRuntime[] = [...prepared.traderRuntimes];
     const offeredWindowMs = args.rounds * args.cadenceMs;
-    if (selection.engine === 'rust') {
-      const durationSeconds = offeredWindowMs / 1_000;
-      const ratePerUser = 1_000 / args.cadenceMs;
-      assertRustLiveMixedCardinality({
-        users: users.length,
-        ratePerUser,
-        durationSeconds,
-      });
-    }
+    const rustTpsAuthority = selection.engine === 'rust' && isRustLiveMixedTpsAuthority({
+      users: users.length,
+      ratePerUser: 1_000 / args.cadenceMs,
+      durationSeconds: offeredWindowMs / 1_000,
+    });
     const economicPrepareStartedAt = performance.now();
     const economicPreparePhase = (name: string): void => console.log(
       `[load] economic-prepare phase=${name} elapsedMs=${Math.ceil(performance.now() - economicPrepareStartedAt)}`,
@@ -458,7 +454,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       });
       if (economicTelemetry) clearInterval(economicTelemetry);
       const finalElapsedMs = rustSettlement.fullySettledElapsedMs;
-      const paymentReport = decodeLoadPaymentReport({
+      const paymentReport = rustTpsAuthority ? decodeLoadPaymentReport({
         schema: 'xln-hlt-payment-load-v1',
         mode: 'payments',
         runId: basename(args.workDir),
@@ -504,8 +500,10 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           canonicalStateHash: rustSettlement.metrics.postStateHash,
         },
         environment: collectHltEnvironmentManifest(),
-      });
-      persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
+      }) : null;
+      if (paymentReport !== null) {
+        persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
+      }
       const [, laneIo, lanePaymentLedgers] = await Promise.all([
         assertHltHubProcessIsolation(args, [hubLabel], [hubLabel]),
         assertLaneHostSocketCounterCoverage(users),
@@ -558,10 +556,16 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       if (expectedSubmittedOffers !== swapProposalLedger.rejectedAtAccount + acceptedTerminal) {
         throw new Error('HLT_MIXED_SUBMITTED_SWAP_PARTITION');
       }
-      const swapOrderTps = expectedSubmittedOffers * 1_000 / finalElapsedMs;
+      const rateEvidence = paymentReport === null ? {} : {
+        swapOrderTps: expectedSubmittedOffers * 1_000 / finalElapsedMs,
+        deliveredTps: paymentReport.deliveredTps,
+        matchedTps: matchedEconomicSwaps * 1_000 / rustSettlement.matchedElapsedMs,
+      };
       const live = {
         engine: 'rust',
         workload: 'mixed',
+        evidence: paymentReport === null ? 'functional-parity' : 'tps-authority',
+        completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
         users: users.length,
         perUser: { payments: args.rounds, swapOrders: args.rounds },
         submittedPayments,
@@ -574,13 +578,17 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         restingSwapOrders: restingOfferIds.length,
         swapProposalRejectionCodes: swapProposalLedger.rejectionCodes,
         repeatedSwapProposalObservations: swapProposalLedger.repeatedObservations,
-        swapOrderTps,
         offeredWindowMs,
         deliveredElapsedMs: finalElapsedMs,
-        deliveredTps: paymentReport.deliveredTps,
         matchedElapsedMs: rustSettlement.matchedElapsedMs,
-        matchedTps: matchedEconomicSwaps * 1_000 / rustSettlement.matchedElapsedMs,
         fullySettledElapsedMs: finalElapsedMs,
+        walBytesBefore,
+        walBytesAfter: directoryBytes(walPath),
+        hubDurableBefore,
+        hubDurableAfter: {
+          height: rustSettlement.metrics.height,
+          canonicalStateHash: rustSettlement.metrics.postStateHash,
+        },
         workers: requireRustH1().ready.workers,
         metricsBefore: rustMetricsBefore,
         metrics: rustSettlement.metrics,
@@ -588,6 +596,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         paymentOperationLedger,
         laneQuiescence: rustSettlement.laneQuiescence,
         laneIo,
+        ...rateEvidence,
       };
       writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify(live, 2)}\n`);
       console.log(`[load] rust-mixed verdict ${safeStringify({
@@ -596,9 +605,8 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         swaps: live.matchedEconomicSwaps,
         rejected: live.rejectedSwapOrdersAtAccount + live.rejectedSwapOrdersAtOrderbook,
         resting: live.restingSwapOrders,
-        swapOrderTps: live.swapOrderTps,
-        deliveredTps: live.deliveredTps,
-        matchedTps: live.matchedTps,
+        evidence: live.evidence,
+        ...rateEvidence,
       })}`);
       return;
     }
