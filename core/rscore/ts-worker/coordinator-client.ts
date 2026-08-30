@@ -129,6 +129,11 @@ export class TsAccountWorkerClient {
     }
     this.#worker.terminate();
   }
+
+  /** Fail-stop the mailbox immediately; process teardown owns Bun Worker termination. */
+  poison(error: Error): void {
+    this.#retire(error);
+  }
 }
 
 export const requireWorkerInteger = (value: number, code: string): number => {

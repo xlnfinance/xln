@@ -149,6 +149,27 @@ export const publishAccountOverlay = (
   return live;
 };
 
+/** Replace one authority-owned live replica, including its consensus envelope. */
+export const replaceAccountReplica = (
+  live: AccountReplica,
+  prepared: AccountReplica,
+): AccountReplica => {
+  for (const key of Object.keys(prepared) as (keyof AccountReplica)[]) {
+    const value = prepared[key];
+    const applied = value === undefined
+      ? Reflect.deleteProperty(live, key)
+      : Reflect.set(live, key, value);
+    if (!applied) throw new Error(`ACCOUNT_REPLICA_REPLACE_FAILED:${String(key)}`);
+  }
+  for (const key of Object.keys(live) as (keyof AccountReplica)[]) {
+    if (Object.hasOwn(prepared, key)) continue;
+    if (!Reflect.deleteProperty(live, key)) {
+      throw new Error(`ACCOUNT_REPLICA_REPLACE_FAILED:${String(key)}`);
+    }
+  }
+  return live;
+};
+
 /** Consume the overlay and fold it into `live`. Proposal hashing must not call this. */
 export const publishAccountTransition = (
   live: AccountReplica,

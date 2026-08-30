@@ -55,6 +55,7 @@ import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profi
 import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
 import { assertCompleteHltAuthorityEvidence } from './authority-evidence';
+import { TsAccountWorkerAuthority } from '../../../../rscore/ts-worker';
 
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
@@ -277,6 +278,14 @@ const frameProfileEnabled = process.argv.includes('--frame-profile');
 const recoveryVerifyEnabled = !process.argv.includes('--no-verify');
 const completeAuthorityEvidenceRequired = process.argv.includes('--require-complete-authority-evidence');
 const rustAccountAuthorityRequired = process.argv.includes('--require-rust-account-authority');
+const tsAccountWorkersRaw = optionalArgument('ts-account-workers');
+const tsAccountWorkers = tsAccountWorkersRaw === null ? null : Number(tsAccountWorkersRaw);
+if (tsAccountWorkers !== null && (
+  !Number.isSafeInteger(tsAccountWorkers) || tsAccountWorkers < 1 || tsAccountWorkers > 64
+)) throw new Error(`HLT_REPLAY_TS_ACCOUNT_WORKERS_INVALID:${tsAccountWorkersRaw}`);
+if (tsAccountWorkers !== null && rustAccountAuthorityRequired) {
+  throw new Error('HLT_REPLAY_ACCOUNT_AUTHORITY_EXCLUSIVE');
+}
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
 if (completeAuthorityEvidenceRequired) assertCompleteHltAuthorityEvidence(artifact.authorityEvidence);
@@ -384,6 +393,13 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
     targetHeight: artifact.recording.baseHeight,
     readOnly: true,
   });
+  const tsWorkerAuthority = tsAccountWorkers === null
+    ? null
+    : new TsAccountWorkerAuthority(env, tsAccountWorkers);
+  if (tsWorkerAuthority !== null) {
+    env.accountAuthorityExecutionMode = 'cutover';
+    env.accountAuthorityEntityStageProvider = tsWorkerAuthority.provider;
+  }
   const authoritySelectedForRuntime = authorityDriverEnabled({ runtimeId: env.runtimeId });
   if (rustAccountAuthorityRequired && !authoritySelectedForRuntime) {
     throw new Error('HLT_REPLAY_RSCORE_AUTHORITY_REQUIRED');
@@ -474,6 +490,16 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
         `HLT_REPLAY_RSCORE_NOT_EXCLUSIVE:${safeStringify(authorityExecution)}`,
       );
     }
+    if (
+      tsWorkerAuthority !== null
+      && (authorityExecution.authoritativeOperations < 1
+        || authorityExecution.typescriptApplyAccountInput !== 0
+        || authorityExecution.typescriptProposeAccountFrame !== 0)
+    ) {
+      throw new Error(
+        `HLT_REPLAY_TS_WORKER_NOT_EXCLUSIVE:${safeStringify(authorityExecution)}`,
+      );
+    }
     const operations = diffOpCounters(operationsBefore);
     return {
       offeredEntityInputsPerSecond: offeredEntityInputsPerSecond > 0 ? offeredEntityInputsPerSecond : null,
@@ -508,6 +534,7 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
       perf: snapshotPerfPhases(),
     };
   } finally {
+    await tsWorkerAuthority?.close();
     await closeRuntimeDb(env);
     await closeInfraDb(env);
   }
@@ -555,6 +582,9 @@ const report = {
   recordingManifestHash: artifact.recording.manifestHash,
   authorityExpectations: artifact.authorityEvidence.expectations,
   mode,
+  accountAuthority: tsAccountWorkers === null
+    ? (rustAccountAuthorityRequired ? 'rust' : 'typescript-sequential')
+    : `typescript-workers:${tsAccountWorkers}`,
   ...(artifact.source.workload === 'payments'
     ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }
     : {}),

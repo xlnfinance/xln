@@ -3,6 +3,7 @@ import {
   validateMapInstance,
 } from '../../protocol/boundary/validation-primitives';
 import { PersistentEntityAccountMap } from '../state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../state/persistent-collection-map';
 
 const ENTITY_ID_PATTERN = /^0x[0-9a-f]{64}$/;
 
@@ -77,6 +78,12 @@ export const validateEntityAccountMetadata = (
   const accounts: ReadonlyMap<unknown, unknown> = rawAccounts instanceof PersistentEntityAccountMap
     ? rawAccounts
     : validateMapInstance(rawAccounts, `${context}.accounts`);
+  const validateCollectionMap = (
+    value: unknown,
+    field: string,
+  ): ReadonlyMap<unknown, unknown> => value instanceof PersistentEntityCollectionMap
+    ? value
+    : validateMapInstance(value, `${context}.${field}`);
   const validateAccountKey = (rawAccountId: unknown, field: string): string => {
     const accountId = String(rawAccountId ?? '');
     if (!/^0x[0-9a-f]{64}$/.test(accountId) || accountId !== rawAccountId) {
@@ -93,9 +100,9 @@ export const validateEntityAccountMetadata = (
   };
 
   if (entity['deferredAccountProposals'] !== undefined) {
-    const deferred = validateMapInstance(
+    const deferred = validateCollectionMap(
       entity['deferredAccountProposals'],
-      `${context}.deferredAccountProposals`,
+      'deferredAccountProposals',
     );
     for (const [rawAccountId, rawWorkspaceHash] of deferred) {
       validateAccountKey(rawAccountId, 'deferredAccountProposals');
@@ -112,9 +119,9 @@ export const validateEntityAccountMetadata = (
   }
 
   if (entity['settlementContinuations'] === undefined) return;
-  const continuations = validateMapInstance(
+  const continuations = validateCollectionMap(
     entity['settlementContinuations'],
-    `${context}.settlementContinuations`,
+    'settlementContinuations',
   );
   for (const [rawAccountId, rawContinuation] of continuations) {
     validateAccountKey(rawAccountId, 'settlementContinuations');

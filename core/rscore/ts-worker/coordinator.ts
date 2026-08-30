@@ -179,7 +179,7 @@ export class TsAccountWorkerCoordinator {
     const cause = asWorkerError(error);
     if (!this.#fatal) {
       this.#fatal = new Error(`TS_ACCOUNT_WORKER_COORDINATOR_FATAL:${cause.message}`, { cause });
-      for (const client of this.#clients) client.terminate();
+      for (const client of this.#clients) client.poison(this.#fatal);
     }
     return this.#fatal;
   }

@@ -494,6 +494,46 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(coordinator.accountsRoot).toBe(firstRoot);
   });
 
+  test('Entity fitting retry restores the exact expected parent root', async () => {
+    const accountId = `0x321${'a'.repeat(61)}`;
+    const coordinator = await TsAccountWorkerCoordinator.create({
+      ownerEntityId: OWNER,
+      workerCount: 2,
+      logicalShardToWorker: Array.from({ length: 4096 }, (_, shardId) => shardId % 2),
+      accounts: new Map([[accountId, parityAccount(accountId)]]),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    const parentRoot = coordinator.accountsRoot;
+    await coordinator.applyAccountInputs({
+      frameId: 'retry-attempt-1', expectedAccountsRoot: parentRoot,
+      entityTimestamp: 1_000, finalizedJHeight: 0, inputs: [],
+    });
+    const abandoned = await coordinator.proposeAccountFrames({
+      frameId: 'retry-attempt-1', timestamp: 1_000, jHeight: 0,
+      txs: [{ accountId, txs: [paymentTx(accountId, 1n)] }],
+      proposalAccountIds: [accountId], checkpointDue: false,
+    });
+    expect(abandoned.accountsRoot).not.toBe(parentRoot);
+
+    await coordinator.applyAccountInputs({
+      frameId: 'retry-attempt-2', expectedAccountsRoot: parentRoot,
+      entityTimestamp: 1_000, finalizedJHeight: 0, inputs: [],
+    });
+    const retry = await coordinator.proposeAccountFrames({
+      frameId: 'retry-attempt-2', timestamp: 1_000, jHeight: 0,
+      txs: [{ accountId, txs: [paymentTx(accountId, 2n)] }],
+      proposalAccountIds: [accountId], checkpointDue: false,
+    });
+    const baseline = await runCoordinator(
+      [accountId],
+      [[paymentTx(accountId, 2n)]],
+      [],
+      1,
+    );
+    expect(retry.accountsRoot).toBe(baseline.outbound.accountsRoot);
+    expect(digest(retry.effects)).toBe(digest(baseline.outbound.effects));
+  });
+
   test('outbound returns only touched post-Accounts; checkpoints retain the dirty cadence', async () => {
     const accounts = new Map(ids.map(accountId => [
       accountId,
