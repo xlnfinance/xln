@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   COPY_GENERATED_INPUTS,
@@ -6,6 +9,8 @@ import {
   PREPARED_GENERATED_INPUTS,
 } from '../../../frontend/config/generated-inputs';
 import { SURFACE_IDS } from '../../../frontend/config/surfaces';
+
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 describe('frontend generated input ownership', () => {
   test('uses one owner and output namespace per generated input family', () => {
@@ -25,6 +30,11 @@ describe('frontend generated input ownership', () => {
     for (const input of GENERATED_INPUTS) {
       expect(input.sourcePaths.length).toBeGreaterThan(0);
       expect(input.sourcePaths.every((sourcePath) => sourcePath.length > 0)).toBe(true);
+      for (const sourcePath of input.sourcePaths) {
+        if (!existsSync(join(REPOSITORY_ROOT, sourcePath))) {
+          throw new Error(`GENERATED_INPUT_SOURCE_INVENTORY_MISSING:${input.id}:${sourcePath}`);
+        }
+      }
     }
   });
 
@@ -46,6 +56,7 @@ describe('frontend generated input ownership', () => {
       'docs-catalog',
       'site-public-static',
       'wallet-pwa-static',
+      'wallet-runtime-bundle',
       'wallet-browser-assets',
       'ops-comparative-results',
       'ops-scenario-assets',

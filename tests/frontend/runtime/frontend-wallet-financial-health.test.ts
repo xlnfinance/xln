@@ -239,7 +239,7 @@ describe('React wallet financial health projection', () => {
     expect(source).toContain('beforeHeight: this.historyCursors[this.historyPage] ?? height + 1');
     expect(source).toContain('RuntimeQueryObserver');
     expect(source).toContain('this.observer?.destroy()');
-    expect(source).toContain('this.adapter?.disconnect()');
+    expect(source).toContain('this.releaseAdapter?.()');
     expect(source).toContain('this.started = false');
     expect(boundary).toContain('adapter.disconnect()');
     expect(view).toContain('useSyncExternalStore');

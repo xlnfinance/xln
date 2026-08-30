@@ -2,10 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import { safeStringify } from '../../../core/protocol/serialization';
 import {
   COPY_GENERATED_INPUTS,
+  PREPARED_GENERATED_INPUTS,
   type CopyGeneratedInputDefinition,
 } from '../../../frontend/config/generated-inputs';
 import { SURFACE_IDS, type SurfaceId } from '../../../frontend/config/surfaces';
@@ -16,6 +18,13 @@ import {
 import { prepareGeneratedInputs } from '../../../frontend/scripts/generated-inputs';
 
 const temporaryRoots: string[] = [];
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+const runtimeInputDefinition = () => {
+  const definition = PREPARED_GENERATED_INPUTS.find(({ id }) => id === 'wallet-runtime-bundle');
+  if (definition === undefined) throw new Error('TEST_RUNTIME_INPUT_DEFINITION_MISSING');
+  return definition;
+};
 
 const planTestCandidate = (frontendRoot: string) =>
   planCandidateRelease(frontendRoot, COPY_GENERATED_INPUTS);
@@ -129,6 +138,24 @@ describe('React candidate release assembly', () => {
     expect(manifest).toEqual(first.manifest);
     expect(await readFile(join(first.releaseDirectory, 'apps/site/index.html'), 'utf8')).toContain('/assets/site/');
     expect(await readFile(join(frontendRoot, 'build', 'sentinel.txt'), 'utf8')).toBe('svelte-canonical\n');
+  });
+
+  test('assembles the canonical Runtime bundle as a validated wallet input', async () => {
+    const frontendRoot = await createFrontendRoot();
+    await writeCompleteArtifacts(frontendRoot);
+    const runtimeDefinition = runtimeInputDefinition();
+    await prepareGeneratedInputs(REPOSITORY_ROOT, frontendRoot, ['wallet'], [runtimeDefinition]);
+
+    const release = await assembleCandidateRelease(
+      frontendRoot,
+      [...COPY_GENERATED_INPUTS, runtimeDefinition],
+    );
+    const runtimeInput = release.manifest.generatedInputs.find(({ id }) => id === 'wallet-runtime-bundle');
+    const runtimeBundle = await readFile(join(release.releaseDirectory, 'runtime.js'));
+
+    expect(runtimeInput).toMatchObject({ owner: 'wallet', files: ['runtime.js'] });
+    expect(release.manifest.files.some(({ path }) => path === 'runtime.js')).toBe(true);
+    expect(runtimeBundle.byteLength).toBeGreaterThan(1_000_000);
   });
 
   test('changes the release identity when an artifact changes', async () => {

@@ -132,22 +132,31 @@ function cleanDir(pathname) {
   ensureDir(pathname);
 }
 
-function copyContracts(requireAllSources) {
+function copyBundledContract(file, destPath) {
+  const bundledPath = fromFrontend(file.dest);
+  if (!existsSync(bundledPath) || statSync(bundledPath).size === 0) {
+    throw new Error(`CONTRACT_STATIC_MISSING:${bundledPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
+  }
+  ensureDir(dirname(destPath));
+  if (resolve(bundledPath) !== resolve(destPath)) copyFileSync(bundledPath, destPath);
+  console.log(`[static] using bundled ${file.dest}`);
+}
+
+function copyContracts(requireAllSources, bundledOnly = false) {
   for (const file of files) {
     const srcPath = fromFrontend(file.src);
     const destPath = fromStatic(file.dest.replace(/^static\//, ''));
+
+    if (bundledOnly) {
+      copyBundledContract(file, destPath);
+      continue;
+    }
 
     if (!existsSync(srcPath)) {
       if (requireAllSources) {
         throw new Error(`CONTRACT_SOURCE_REQUIRED:${srcPath}. Build every contract before verifying bundled artifacts.`);
       }
-      const bundledPath = fromFrontend(file.dest);
-      if (!existsSync(bundledPath) || statSync(bundledPath).size === 0) {
-        throw new Error(`CONTRACT_STATIC_MISSING:${bundledPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
-      }
-      ensureDir(dirname(destPath));
-      if (resolve(bundledPath) !== resolve(destPath)) copyFileSync(bundledPath, destPath);
-      console.log(`[static] using bundled ${file.dest}; source artifact is not present`);
+      copyBundledContract(file, destPath);
       continue;
     }
 
@@ -432,17 +441,19 @@ function generateLlmsStaticFiles() {
 const contractsOnly = process.argv.includes('--contracts-only');
 const docsOnly = process.argv.includes('--docs-only');
 const walletOnly = process.argv.includes('--wallet-only');
+const bundledContracts = process.argv.includes('--bundled-contracts');
 const skipLlms = process.argv.includes('--skip-llms');
 const requireAllContractSources = process.argv.includes('--require-all-contract-sources');
 
 if ([contractsOnly, docsOnly, walletOnly].filter(Boolean).length > 1) {
   throw new Error('STATIC_COPY_SCOPE_CONFLICT');
 }
+if (bundledContracts && !walletOnly) throw new Error('STATIC_BUNDLED_CONTRACTS_SCOPE_INVALID');
 if (docsOnly) {
   copyDocsAndManifest();
   if (!skipLlms) generateLlmsStaticFiles();
 } else if (walletOnly) {
-  copyContracts(requireAllContractSources);
+  copyContracts(requireAllContractSources, bundledContracts);
   buildBrainvaultWorker();
 } else {
   copyContracts(requireAllContractSources);

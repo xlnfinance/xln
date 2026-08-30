@@ -75,6 +75,7 @@ export class WalletMarketSource {
   private readonly listeners = new Set<() => void>();
   private snapshot: WalletMarketSourceSnapshot;
   private adapter: RuntimeAdapter | null = null;
+  private releaseAdapter: (() => void) | null = null;
   private dependencies: WalletRuntimeReadDependencies | null = null;
   private marketMath: WalletMarketMath | null = null;
   private observer: RuntimeQueryObserver<WalletMarketProjection> | null = null;
@@ -92,10 +93,10 @@ export class WalletMarketSource {
 
   constructor(private readonly config: RuntimeAdapterStorageSnapshot) {
     this.snapshot = {
-      status: config.mode === 'remote' ? 'connecting' : 'unavailable',
+      status: 'connecting',
       message: config.mode === 'remote'
         ? 'Connecting to the selected Runtime…'
-        : 'Markets require a connected Runtime. The React embedded Runtime boot flow is not active yet.',
+        : 'Starting the local Runtime…',
       projection: null,
       command: idleCommand(),
     };
@@ -111,19 +112,22 @@ export class WalletMarketSource {
   readonly start = async (): Promise<void> => {
     if (this.started) return;
     this.started = true;
-    if (this.config.mode !== 'remote') return;
     const generation = ++this.generation;
-    this.patch({ status: 'connecting', message: 'Connecting to the selected Runtime…' });
+    this.patch({
+      status: 'connecting',
+      message: this.config.mode === 'remote' ? 'Connecting to the selected Runtime…' : 'Starting the local Runtime…',
+    });
     try {
       const [dependencies, marketMath] = await Promise.all([
         loadWalletRuntimeReadDependencies(this.config),
         loadWalletMarketMath(),
       ]);
       if (!this.isCurrent(generation)) {
-        dependencies.adapter.disconnect();
+        dependencies.release();
         return;
       }
       this.adapter = dependencies.adapter;
+      this.releaseAdapter = dependencies.release;
       this.dependencies = dependencies;
       this.marketMath = marketMath;
       this.installObserver(dependencies);
@@ -404,7 +408,8 @@ export class WalletMarketSource {
     for (const teardown of this.teardowns.splice(0)) teardown();
     this.observer?.destroy();
     this.observer = null;
-    this.adapter?.disconnect();
+    this.releaseAdapter?.();
+    this.releaseAdapter = null;
     this.adapter = null;
     this.dependencies = null;
     this.marketMath = null;

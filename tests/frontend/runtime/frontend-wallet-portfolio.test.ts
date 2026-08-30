@@ -147,7 +147,7 @@ describe('React wallet assets and accounts projection', () => {
     expect(boundary).toContain('catch (error: unknown)');
     expect(boundary).toContain('adapter.disconnect()');
     expect(source).toContain('this.observer?.destroy()');
-    expect(source).toContain('this.adapter?.disconnect()');
+    expect(source).toContain('this.releaseAdapter?.()');
     expect(source).toContain('this.started = false');
     expect(source).toContain("snapshot.status === 'error' && this.adapter?.status === 'error'");
     expect(view).toContain('useSyncExternalStore');

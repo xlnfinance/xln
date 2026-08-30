@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   COPY_GENERATED_INPUTS,
+  PREPARED_GENERATED_INPUTS,
   type CommandGeneratedInputDefinition,
   type CopyGeneratedInputDefinition,
 } from '../../../frontend/config/generated-inputs';
@@ -240,6 +241,82 @@ describe('frontend generated input preparation', () => {
     )).toBe('protocol');
   });
 
+  test('supports a command that writes one declared output file', async () => {
+    const { repositoryRoot, frontendRoot } = await createWorkspace();
+    const command: CommandGeneratedInputDefinition = {
+      id: 'file-command-fixture',
+      owner: 'wallet',
+      sourcePaths: ['fixture'],
+      outputNamespace: 'file-command-fixture',
+      producer: {
+        kind: 'command',
+        argv: ['bun', '-e', [
+          "const output = process.env['TEST_OUTPUT']",
+          "if (!output) throw new Error('TEST_OUTPUT_MISSING')",
+          "await Bun.write(output, 'runtime')",
+        ].join(';')],
+        outputEnvironment: 'TEST_OUTPUT',
+        outputPath: 'runtime.js',
+        environment: {},
+        copies: [],
+        outputRoutes: [{ kind: 'exact', pathname: '/runtime.js' }],
+      },
+    };
+
+    const manifest = await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['wallet'], [command]);
+
+    expect(manifest[0]?.files).toEqual([expect.objectContaining({
+      destinationPath: 'runtime.js',
+      sourcePath: 'command:file-command-fixture',
+      size: 7,
+    })]);
+    expect(await readFile(join(frontendRoot, '.artifacts/public/wallet/runtime.js'), 'utf8')).toBe('runtime');
+  });
+
+  test('builds the canonical Runtime browser bundle as a deterministic wallet input', async () => {
+    const { frontendRoot } = await createWorkspace();
+    const runtimeDefinition = PREPARED_GENERATED_INPUTS.find(({ id }) => id === 'wallet-runtime-bundle');
+    if (runtimeDefinition === undefined) throw new Error('TEST_RUNTIME_INPUT_DEFINITION_MISSING');
+
+    const first = await prepareGeneratedInputs(
+      REPOSITORY_ROOT,
+      frontendRoot,
+      ['wallet'],
+      [runtimeDefinition],
+    );
+    const second = await prepareGeneratedInputs(
+      REPOSITORY_ROOT,
+      frontendRoot,
+      ['wallet'],
+      [runtimeDefinition],
+    );
+    const publicBundle = await readFile(join(frontendRoot, '.artifacts/public/wallet/runtime.js'));
+
+    expect(second).toEqual(first);
+    expect(first[0]?.files).toEqual([expect.objectContaining({
+      destinationPath: 'runtime.js',
+      sourcePath: 'command:wallet-runtime-bundle',
+    })]);
+    expect(first[0]?.files[0]?.size).toBeGreaterThan(1_000_000);
+    expect(publicBundle.byteLength).toBe(first[0]?.files[0]?.size);
+  });
+
+  test('prepares the canonical docs catalog without a retired docs-static source', async () => {
+    const { frontendRoot } = await createWorkspace();
+    const docsDefinition = PREPARED_GENERATED_INPUTS.find(({ id }) => id === 'docs-catalog');
+    if (docsDefinition === undefined) throw new Error('TEST_DOCS_INPUT_DEFINITION_MISSING');
+
+    const first = await prepareGeneratedInputs(REPOSITORY_ROOT, frontendRoot, ['docs'], [docsDefinition]);
+    const second = await prepareGeneratedInputs(REPOSITORY_ROOT, frontendRoot, ['docs'], [docsDefinition]);
+    const paths = first[0]?.files.map(({ destinationPath }) => destinationPath) ?? [];
+
+    expect(second).toEqual(first);
+    expect(paths.length).toBeGreaterThan(200);
+    expect(paths).toContain('docs-catalog/manifest.json');
+    expect(paths).toContain('llms.txt');
+    expect(paths.some((pathname) => pathname.startsWith('docs-static/'))).toBe(false);
+  });
+
   test('keeps the legacy docs generator isolated and accepts a deterministic timestamp', async () => {
     const { frontendRoot } = await createWorkspace();
     const outputRoot = join(frontendRoot, 'docs-generator-output');
@@ -280,6 +357,7 @@ describe('frontend generated input preparation', () => {
         'bun',
         'frontend/copy-static-files.js',
         '--wallet-only',
+        '--bundled-contracts',
       ], {
         cwd: REPOSITORY_ROOT,
         env: { ...process.env, XLN_STATIC_DIR: outputRoot },

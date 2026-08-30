@@ -241,7 +241,7 @@ describe('React wallet markets', () => {
     expect(source).toContain('client.readActivity');
     expect(source).toContain('prepareWalletPaymentCommand');
     expect(source).toContain('executeWalletPaymentCommand');
-    expect(source).toContain('this.adapter?.disconnect()');
+    expect(source).toContain('this.releaseAdapter?.()');
     expect(source).toContain('Do not submit a second command');
     expect(source).toContain("this.requireNoPendingCommand('WALLET_MARKET_PAIR_CHANGE_PENDING_COMMAND')");
     expect(view).toContain('useSyncExternalStore');

@@ -559,7 +559,6 @@ const RUNTIME_FILES = {
     'core/__tests__/runtime/ingress/runtime-ingress-timestamp.test.ts',
     'core/__tests__/jurisdiction/batches/j-batch-reserve-availability.test.ts',
     'core/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
-    'core/__tests__/protocol/codec/serialization-utils.test.ts',
     'core/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   ],
   frontend: [],

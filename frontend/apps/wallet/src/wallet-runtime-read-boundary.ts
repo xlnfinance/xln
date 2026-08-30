@@ -6,9 +6,11 @@ import type {
 import type { RuntimeAdapterStorageSnapshot } from '../../../packages/browser/src/runtime-adapter-session';
 import { RuntimeQueryClient } from '../../../packages/runtime-client/src/runtime-query-client';
 import type { WalletPortfolioMath } from './wallet-portfolio-model';
+import { startWalletEmbeddedRuntime } from './wallet-embedded-runtime';
 
 export type WalletRuntimeReadDependencies = Readonly<{
   adapter: RuntimeAdapter;
+  release: () => void;
   math: WalletPortfolioMath & {
     parseTokenAmount: (tokenId: number, amount: string) => bigint;
   };
@@ -77,10 +79,31 @@ export const loadWalletRuntimeReadDependencies = async (
   // Install the canonical browser process surface before loading any protocol
   // module that reads it during module initialization.
   await import('../../../../core/support/process/runtime-process.ts');
-  const [remote, account, financial, journal] = await Promise.all([
-    import('../../../../core/api/runtime-adapter/remote.ts'),
+  const mathPromise = Promise.all([
     import('../../../../core/account/utils.ts'),
     import('../../../../core/account/financial-utils.ts'),
+  ]);
+  if (config.mode !== 'remote') {
+    const [adapter, [account, financial]] = await Promise.all([
+      startWalletEmbeddedRuntime(),
+      mathPromise,
+    ]);
+    return {
+      adapter,
+      release: () => {},
+      math: {
+        deriveDelta: (delta, isLeft) => account.deriveDelta(delta, isLeft),
+        formatTokenAmount: financial.formatTokenAmount,
+        getTokenInfo: account.getTokenInfo,
+        isLeftEntity: account.isLeftEntity,
+        parseTokenAmount: financial.parseTokenAmount,
+      },
+    };
+  }
+
+  const [remote, [account, financial], journal] = await Promise.all([
+    import('../../../../core/api/runtime-adapter/remote.ts'),
+    mathPromise,
     import('../../../src/lib/stores/commands/runtimeCommandJournalKeyring.ts'),
   ]);
   const adapter = new remote.RemoteRuntimeAdapter();
@@ -95,6 +118,7 @@ export const loadWalletRuntimeReadDependencies = async (
   }
   return {
     adapter,
+    release: () => { adapter.disconnect(); },
     math: {
       deriveDelta: (delta, isLeft) => account.deriveDelta(delta, isLeft),
       formatTokenAmount: financial.formatTokenAmount,

@@ -261,7 +261,7 @@ describe('React wallet payments', () => {
     expect(source).toContain('prepareWalletPaymentCommand');
     expect(source).toContain('executeWalletPaymentCommand');
     expect(source).toContain('Do not submit a second command');
-    expect(source).toContain('this.adapter?.disconnect()');
+    expect(source).toContain('this.releaseAdapter?.()');
     expect(command).toContain('resolveRemoteRuntimeCommandIntent');
     expect(command).toContain('commandId: command.commandId');
     expect(command).toContain('commandSequence: command.commandSequence');

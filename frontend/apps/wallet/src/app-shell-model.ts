@@ -1,4 +1,5 @@
 import type { RuntimeAdapterStorageSnapshot } from '../../../packages/browser/src/runtime-adapter-session';
+import type { WalletEmbeddedRuntimeSessionSnapshot } from '../../../packages/browser/src/wallet-embedded-runtime-session';
 
 export const WALLET_APP_LINKS = [
   { href: '/app', label: 'Overview', view: 'overview' },
@@ -28,25 +29,50 @@ export const resolveWalletAppView = (search: string, hash = ''): WalletAppView =
 };
 
 export type WalletRuntimeSummary = Readonly<{
-  modeLabel: 'Local Runtime unavailable' | 'Remote Runtime';
+  modeLabel: 'Local Runtime starting' | 'Local Runtime' | 'Local Runtime standby' | 'Local Runtime error' | 'Remote Runtime';
   endpointLabel: string;
-  authorityLabel: 'Embedded boot pending' | 'Admin session' | 'Authority required';
+  authorityLabel: 'Local owner' | 'Inactive tab' | 'Runtime booting' | 'Runtime failed' | 'Admin session' | 'Authority required';
   browserLabel: 'Online' | 'Offline';
-  state: 'local-unavailable' | 'remote-ready' | 'remote-blocked';
+  state: 'local-loading' | 'local-ready' | 'local-standby' | 'local-error' | 'remote-ready' | 'remote-blocked';
+  message: string;
 }>;
+
+const embeddedRuntimeSummary = (
+  snapshot: WalletEmbeddedRuntimeSessionSnapshot,
+  browserLabel: 'Online' | 'Offline',
+): WalletRuntimeSummary => {
+  if (snapshot.status === 'ready') return {
+    modeLabel: 'Local Runtime',
+    endpointLabel: `${snapshot.runtimeId.slice(0, 12) || 'embedded'} · H${snapshot.height}`,
+    authorityLabel: 'Local owner',
+    browserLabel,
+    state: 'local-ready',
+    message: '',
+  };
+  if (snapshot.status === 'standby') return {
+    modeLabel: 'Local Runtime standby', endpointLabel: 'Owned by another tab',
+    authorityLabel: 'Inactive tab', browserLabel, state: 'local-standby', message: snapshot.message,
+  };
+  if (snapshot.status === 'error') return {
+    modeLabel: 'Local Runtime error', endpointLabel: 'Boot failed',
+    authorityLabel: 'Runtime failed', browserLabel, state: 'local-error', message: snapshot.message,
+  };
+  return {
+    modeLabel: 'Local Runtime starting', endpointLabel: 'Starting…',
+    authorityLabel: 'Runtime booting', browserLabel, state: 'local-loading', message: snapshot.message,
+  };
+};
 
 export const resolveWalletRuntimeSummary = (
   snapshot: RuntimeAdapterStorageSnapshot,
   browserOnline: boolean,
+  embedded: WalletEmbeddedRuntimeSessionSnapshot = {
+    status: 'idle', runtimeId: '', height: 0, message: 'Local Runtime has not started.',
+  },
 ): WalletRuntimeSummary => {
+  const browserLabel = browserOnline ? 'Online' : 'Offline';
   if (snapshot.mode !== 'remote') {
-    return {
-      modeLabel: 'Local Runtime unavailable',
-      endpointLabel: 'Not started',
-      authorityLabel: 'Embedded boot pending',
-      browserLabel: browserOnline ? 'Online' : 'Offline',
-      state: 'local-unavailable',
-    };
+    return embeddedRuntimeSummary(embedded, browserLabel);
   }
 
   const wsUrl = snapshot.wsUrl?.trim() || 'Endpoint missing';
@@ -55,7 +81,8 @@ export const resolveWalletRuntimeSummary = (
     modeLabel: 'Remote Runtime',
     endpointLabel: wsUrl,
     authorityLabel: hasAdminSession ? 'Admin session' : 'Authority required',
-    browserLabel: browserOnline ? 'Online' : 'Offline',
+    browserLabel,
     state: hasAdminSession && wsUrl !== 'Endpoint missing' ? 'remote-ready' : 'remote-blocked',
+    message: '',
   };
 };

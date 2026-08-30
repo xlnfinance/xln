@@ -1,42 +1,23 @@
 import { writable } from 'svelte/store';
 import type { XLNModule } from '@xln/core/api/public/runtime-module';
 import { isXLNModuleLoaded } from '@xln/core/api/public/runtime-module-guard';
+import { createBrowserRuntimeModuleLoader } from '../../../../packages/browser/src/runtime-module-loader';
 import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
 import '$lib/utils/runtime/wireDebug';
 
 let XLN: XLNModule | null = null;
-let xlnLoadPromise: Promise<XLNModule> | null = null;
+
+const runtimeLoader = createBrowserRuntimeModuleLoader<XLNModule>({
+	validate: isXLNModuleLoaded,
+	readSchemaVersion: runtime => (runtime as XLNModule & { RUNTIME_SCHEMA_VERSION?: number }).RUNTIME_SCHEMA_VERSION,
+});
 
 export const xlnInstance = writable<XLNModule | null>(null);
 registerDebugSurface('instance', () => XLN);
 
 export async function getXLN(): Promise<XLNModule> {
 	if (XLN) return XLN;
-	if (xlnLoadPromise) return xlnLoadPromise;
-
-	xlnLoadPromise = (async () => {
-		// Cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
-		const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-		const loaded: unknown = await import(/* @vite-ignore */ runtimeUrl);
-		if (!isXLNModuleLoaded(loaded)) {
-			throw new Error('RUNTIME_API_MISMATCH: runtime.js is missing required bootstrap exports');
-		}
-		const runtimeMeta = loaded as XLNModule & { RUNTIME_SCHEMA_VERSION?: number };
-		const loadedSchema = Number(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? NaN);
-		if (!Number.isFinite(loadedSchema) || loadedSchema < 1) {
-			throw new Error(
-				`RUNTIME_VERSION_MISMATCH: invalid runtime schema=${String(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
-			);
-		}
-		XLN = loaded;
-		xlnInstance.set(XLN);
-		return XLN;
-	})();
-
-	try {
-		return await xlnLoadPromise;
-	} catch (err) {
-		xlnLoadPromise = null;
-		throw err;
-	}
+	XLN = await runtimeLoader.load();
+	xlnInstance.set(XLN);
+	return XLN;
 }

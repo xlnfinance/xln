@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — SITE/DOCS COMPLETE; WALLET TESTNET, PWA INPUTS, AND CLIENT BOUNDARIES IMPLEMENTED`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 OPS MIGRATION NEXT; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -207,7 +207,7 @@ describe technical order only.
 
 ### WP0 — Discover the live baseline
 
-**Status:** `IN PROGRESS — ROUTE, CAPABILITY, AND GENERATED-INPUT OWNERSHIP SEEDED`
+**Status:** `DONE — LIVE OWNERSHIP, PLATFORM INTERFACES, CONSUMERS, AND CHECKS INVENTORIED`
 
 - Inventory routes, edge exclusions, static assets, generated inputs, storage,
   workers, native/PWA consumers, tests, and major capability registries.
@@ -219,6 +219,20 @@ describe technical order only.
 
 **Done:** touched areas have clear owners and known behavior references; open
 questions are recorded without blocking unrelated work.
+
+The typed baseline now covers route and edge ownership, capability registries,
+deterministic generated/static inputs, browser storage families, tab
+coordination, Workers, service workers, native and packaged consumers,
+workspace registries, release consumers, and verification commands. Every
+record names live source, consumer, and evidence paths; deferred concerns are
+owned explicitly by WP7, WP8, or WP9. The current measured baseline is 25 site,
+5 docs, 58 wallet, and 1 ops React source files; 25 browser-boundary, 17
+Runtime-client, and 3 shared-UI source files; 156 retained Svelte components;
+20 retained Svelte page routes; and 164 frontend test files, including 20
+frontend-tooling files. Scoped check, prepare, build, assembly, and gateway
+commands are recorded in the live package scripts rather than duplicated here.
+The final canonical frontend check reports zero Svelte errors and zero warnings;
+the four React local checks also pass.
 
 ### WP1 — Add scoped tooling and React roots
 
@@ -236,7 +250,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `IN PROGRESS — DOCS, WALLET PWA/BROWSER, AND OPS CATALOG INPUTS ASSEMBLED`
+**Status:** `DONE — ROUTING, GATEWAY, ALL GENERATED INPUTS, AND VERSIONED ASSEMBLY VERIFIED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -247,6 +261,19 @@ candidate output cannot overwrite `frontend/build`.
 
 **Done:** development routing and candidate assembly cover the four apps without
 shadowing edge/API routes or changing canonical production selection.
+
+All seven generated-input families now have concrete deterministic producers.
+The canonical Runtime browser build publishes a 6,063,783-byte `/runtime.js`
+with SHA-256 `33234b94dbbb0e4f84ba789a60c285862c073704996fa7e09c8f1029a35de51b`;
+wallet contract inputs use source-controlled bundled artifacts rather than
+optional local compiler output. The docs producer no longer requires the
+retired `docs-static` tree or a deleted serialization test. Same-origin HTTP,
+edge precedence, redirects, per-app HMR WebSockets, exact output-route checks,
+manifest validation, corruption detection, and destination collisions pass
+focused tests. All four apps build and the candidate assembles without touching
+`frontend/build` as release
+`sha256-f25b8454817b2dcaa66fd613eacf615724f16074a373ae07044bec75abf3a5a1`
+with 305 validated files.
 
 ### WP3 — Migrate site
 
@@ -287,8 +314,8 @@ HTTP 503 before recovering. The four-app candidate assembles as
 `sha256-420fba14d39f37003d5ebef852baf83dd1ca1044ab5337a489d77906aa2f3d67`
 with 351 files. The site-only typecheck still reaches unrelated core unused
 import, `.ts` extension, and proof-builder type blockers, and the legacy Svelte
-workspace check reports 30 existing errors in 16 unrelated files; the route
-build and focused source checks are green. The required root gate passes all 26
+workspace check at that checkpoint reported 30 errors in 16 unrelated files;
+the route build and focused source checks are green. The required root gate passes all 26
 BrainVault checks before the existing contract-sync environment stops at
 Hardhat `HH19` under unsupported Node 25.
 
@@ -323,8 +350,8 @@ document widths. Normal flows have zero console errors or warnings; the
 injected failure emits only its expected HTTP 503 before recovery. The
 four-app candidate assembles as
 `sha256-795c0b047b60b813a17bcf4ce229c985b5d0b68d7a9d61ca7cd5e72c3a7ce924`
-with 351 files. The legacy Svelte workspace still reports 30 existing errors
-and one warning in 16 unrelated files, with no docs diagnostics. The required
+with 351 files. At that checkpoint the legacy Svelte workspace reported 30
+errors and one warning in 16 unrelated files, with no docs diagnostics. The required
 root gate passes all 26 BrainVault checks before the existing contract-sync
 environment stops at Hardhat `HH19` under unsupported Node 25.
 
@@ -333,7 +360,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, ACTIVATION, QUERY, OBSERVER, CATCH-UP, VIEW-SELECTION, VIEW-REFRESH, VIEW-STATE, VIEW-PROJECTIONS, VIEW-LOADER, VIEW-PUBLICATION, AND VIEW-MODEL BOUNDARIES SHARED`
+**Status:** `DONE — SHARED BOUNDARIES AND REACT EMBEDDED RUNTIME BOOT VERIFIED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -540,6 +567,36 @@ effects through injected callbacks. Ten direct tests cover live, historical,
 disconnected, error, invalidated, target-changed, and overlapping refreshes;
 per-caller results; and thin Svelte wiring. The wallet local check covers 441
 files with zero unsafe-type findings.
+
+The final `packages/browser` slice owns the same-origin versioned Runtime module
+loader, one document-scoped embedded Runtime session, and the injected shutdown
+sequence. The React adapter restores the canonical persisted Runtime inputs,
+boots through the public Runtime module API, exposes the same typed RuntimeView
+reads and commands as remote mode, and quiesces ingress, accepted work, the
+Runtime loop, transport, and persistence in their required order. Both React
+and Svelte delegate module loading and Runtime suspension to these boundaries.
+React initializes the session once per document, subscribes through stable
+external-store snapshots, conditionally loads the 4.00 kB bootstrap chunk, and
+gates every financial surface when another tab owns the Runtime.
+
+Boundary evidence covers all 42 shared modules (25 browser and 17
+Runtime-client): every module is in the typed ownership inventory, both the
+legacy Svelte tree and React apps are live consumers of both packages, and the
+packages remain independent from application entry points. Boundary policy
+tests prove there are no Runtime, Entity, Account, consensus, or persistence
+implementation imports; the only core import is public remote-Runtime
+configuration. Runtime-client contains no storage, Worker, service-worker,
+BroadcastChannel, or Web Lock effects and neither package contains Account
+transition or bilateral credit-field implementations. The final affected batch
+passes 110 tests with 1,016 assertions; the complete tooling suite passes 94
+tests with 846 assertions; and the React local check covers 512 files with zero
+unsafe-type findings. All four React builds and the canonical Svelte production
+build pass. The exact 305-file candidate boots the real `/runtime.js`, reads an
+empty committed H0 portfolio, and transfers ownership between tabs without
+stale financial content. Mobile, laptop, and wide browser evidence has zero
+console errors or warnings. The root gate passes all 26 BrainVault/runtime tests
+with 100156 expectations before the existing contract-sync environment stops at
+Hardhat `HH19` under Node 24.18.0.
 
 ### WP6 — Migrate wallet by flow
 
@@ -863,11 +920,11 @@ same-identity retry, both activity filters, and logical Runtime timestamps at
 gate passes all 26 BrainVault/runtime tests with 100156 expectations before the
 existing contract-sync environment stops because Hardhat rejects Node 25.6.1.
 
-The final WP6 audit now maps all 30 named flow requirements to nine concrete
-React surfaces or an explicit cross-work-package dependency. Twenty-seven are
-implemented in WP6; embedded Runtime boot remains with WP5 until the canonical
-browser bundle builds, while irreversible wallet creation/onboarding and full
-durable recovery remain with WP9 parity. The same typed inventory keeps the
+The final WP6 audit now maps all 30 named flow requirements to ten concrete
+React surfaces or an explicit cross-work-package dependency. Twenty-eight are
+implemented across WP5 and WP6, including canonical embedded Runtime boot;
+irreversible wallet creation/onboarding and full durable recovery remain with
+WP9 parity. The same typed inventory keeps the
 retained `/address` route, external-wallet provider/native integration, and
 canonical cutover visibly assigned to WP9, WP8, and WP10 rather than claiming
 them as React behavior. Three focused audit tests validate every route, source,
@@ -1016,11 +1073,11 @@ any mismatch. Never compile on production.
 ## Done criteria
 
 - [x] Four independent React/Vite/TypeScript application roots exist.
-- [ ] Every retained browser route and capability has one application owner.
+- [x] Every retained browser route and capability has one application owner.
 - [ ] Each app checks, tests, builds, and runs targeted browser flows without
       building unrelated apps.
-- [ ] Shared packages preserve storage/lifecycle and Runtime-client boundaries.
-- [ ] Generated inputs have deterministic producers and collision-free outputs.
+- [x] Shared packages preserve storage/lifecycle and Runtime-client boundaries.
+- [x] Generated inputs have deterministic producers and collision-free outputs.
 - [ ] Same-origin routing, redirects, proxies, assets, CSP, storage, PWA, deep
       links, native consumers, activation, and rollback are proven.
 - [ ] Existing behavior tests were preserved or replaced with equivalent
@@ -1032,13 +1089,24 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Restore the canonical Runtime browser build in a Runtime-authorized change,
-   then promote `wallet-runtime-bundle` from deferred input. The current build
-   fails because `core/runtime/frame/assertions.ts` imports the non-exported
-   `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
-   the other wallet or ops input families.
-2. Close the typed WP6 audit deferrals only in their owning work packages.
-   WP5 restores the canonical browser Runtime bundle; WP8 owns the external
+1. Execute WP7 route-by-route, starting with ops health and QA, while preserving
+   the typed workspace and scenario registries captured by WP0.
+2. Execute WP8 against the versioned candidate: PWA install/update, native and
+   packaged consumers, deployment selection, and rollback remain deliberately
+   separate from production activation.
+3. Close WP9 parity only after site, docs, wallet, and ops are complete, then
+   request explicit WP10 cutover authority and prepare the upstream PR.
+4. Keep WP11 as a separately authorized production operation using immutable
+   prebuilt artifacts.
+
+## WP5 closure record
+
+1. The canonical Runtime browser build is restored without a Runtime change,
+   and `wallet-runtime-bundle` is a deterministic candidate input. The earlier
+   `computeFrameHash` blocker was stale because the symbol is exported.
+2. Close the remaining typed WP6 audit deferrals only in their owning work
+   packages. WP5 restored and now consumes the canonical browser Runtime bundle;
+   WP8 owns the external
    provider/native boundary; WP9 owns irreversible wallet creation, full
    durable recovery, `/address`, and retained-capability parity; WP10 owns the
    authorized canonical cutover. Keep Runtime projections in shared client
@@ -1098,14 +1166,13 @@ any mismatch. Never compile on production.
    atomic commit, and recovery-label decisions are shared while shard bytes,
    cryptography, zeroization, persistence, navigation, and UI publication
    remain concrete.
-   The existing Svelte shell retains concrete lifecycle effects. Latest-read
-   Runtime query subscriptions expose stable external-store snapshots while
-   concrete source wiring, core result typing, and live RuntimeView publication
-   remain with the canonical Svelte adapter until a complete React consumer
-   exists.
-3. Wire PWA/native consumers to the assembled candidate after the React
-   `/app` boot flow exists; wallet static/PWA input ownership is ready and does
-   not require production activation.
+   The existing Svelte shell retains its concrete lifecycle effects during
+   coexistence. The React wallet is now a complete consumer of the shared
+   loader, tab-ownership, suspension, Runtime query, and stable external-store
+   snapshot boundaries without importing transition logic.
+3. WP8 wires PWA/native consumers to the assembled candidate; the React `/app`
+   boot flow and wallet static/PWA input ownership are verified and do not
+   require production activation.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are
    checked in. The generated catalog currently records an empty media inventory
    and never publishes the 46 TypeScript scenario files.

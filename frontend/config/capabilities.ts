@@ -104,6 +104,7 @@ export const CAPABILITIES = [
     routes: ['/app', '/testnet'],
     currentSources: [
       'frontend/packages/browser/src/active-tab-lock.ts',
+      'frontend/packages/browser/src/wallet-runtime-suspension.ts',
       'frontend/packages/browser/src/browser-runtime-reset.ts',
       'frontend/packages/browser/src/hard-reset-request.ts',
       'frontend/src/lib/utils/control/resetEverything.ts',
@@ -122,6 +123,8 @@ export const CAPABILITIES = [
     routes: ['/app'],
     currentSources: [
       'frontend/packages/browser/src/runtime-adapter-session.ts',
+      'frontend/packages/browser/src/runtime-module-loader.ts',
+      'frontend/packages/browser/src/wallet-embedded-runtime-session.ts',
       'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
       'frontend/packages/runtime-client/src/runtime-handle.ts',
       'frontend/packages/runtime-client/src/remote-runtime-request.ts',
@@ -139,6 +142,9 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/ws-url.ts',
       'frontend/apps/wallet/src/app-shell.tsx',
       'frontend/apps/wallet/src/app-shell-model.ts',
+      'frontend/apps/wallet/src/wallet-embedded-runtime-adapter.ts',
+      'frontend/apps/wallet/src/wallet-embedded-runtime-bootstrap.ts',
+      'frontend/apps/wallet/src/wallet-embedded-runtime.ts',
       'frontend/apps/wallet/src/identity-onboarding.tsx',
       'frontend/apps/wallet/src/identity-onboarding-model.ts',
       'frontend/apps/wallet/src/identity-recovery.tsx',
@@ -216,6 +222,7 @@ export const CAPABILITIES = [
     currentSources: [
       'frontend/src/lib/components/Entity/swap',
       'frontend/packages/runtime-client/src/payment-command.ts',
+      'frontend/packages/runtime-client/src/payment-command-types.ts',
       'frontend/apps/wallet/src/wallet-payments.tsx',
       'frontend/apps/wallet/src/wallet-payment-source.ts',
       'frontend/apps/wallet/src/wallet-payment-operations-model.ts',

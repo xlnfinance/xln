@@ -55,6 +55,7 @@ export class WalletFinancialHealthSource {
   private readonly listeners = new Set<() => void>();
   private snapshot: WalletFinancialHealthSourceSnapshot;
   private adapter: RuntimeAdapter | null = null;
+  private releaseAdapter: (() => void) | null = null;
   private observer: RuntimeQueryObserver<WalletFinancialHealthProjection> | null = null;
   private observerTeardown: (() => void) | null = null;
   private generation = 0;
@@ -65,13 +66,11 @@ export class WalletFinancialHealthSource {
   private historyPage = 0;
 
   constructor(private readonly config: RuntimeAdapterStorageSnapshot) {
-    this.snapshot = config.mode === 'remote'
-      ? { status: 'connecting', message: 'Connecting to the selected Runtime…', projection: null }
-      : {
-        status: 'unavailable',
-        message: 'Financial health requires a connected Runtime. The React embedded Runtime boot flow is not active yet.',
-        projection: null,
-      };
+    this.snapshot = {
+      status: 'connecting',
+      message: config.mode === 'remote' ? 'Connecting to the selected Runtime…' : 'Starting the local Runtime…',
+      projection: null,
+    };
   }
 
   readonly getSnapshot = (): WalletFinancialHealthSourceSnapshot => this.snapshot;
@@ -84,16 +83,20 @@ export class WalletFinancialHealthSource {
   readonly start = async (): Promise<void> => {
     if (this.started) return;
     this.started = true;
-    if (this.config.mode !== 'remote') return;
     const generation = ++this.generation;
-    this.publish({ status: 'connecting', message: 'Connecting to the selected Runtime…', projection: null });
+    this.publish({
+      status: 'connecting',
+      message: this.config.mode === 'remote' ? 'Connecting to the selected Runtime…' : 'Starting the local Runtime…',
+      projection: null,
+    });
     try {
       const dependencies = await loadWalletRuntimeReadDependencies(this.config);
       if (!this.isCurrent(generation)) {
-        dependencies.adapter.disconnect();
+        dependencies.release();
         return;
       }
       this.adapter = dependencies.adapter;
+      this.releaseAdapter = dependencies.release;
       this.installObserver(dependencies.adapter, dependencies.math);
     } catch (error: unknown) {
       if (!this.isCurrent(generation)) return;
@@ -210,7 +213,8 @@ export class WalletFinancialHealthSource {
     this.observerTeardown = null;
     this.observer?.destroy();
     this.observer = null;
-    this.adapter?.disconnect();
+    this.releaseAdapter?.();
+    this.releaseAdapter = null;
     this.adapter = null;
   }
 

@@ -67,6 +67,7 @@ export class WalletPaymentSource {
   private readonly listeners = new Set<() => void>();
   private snapshot: WalletPaymentSourceSnapshot;
   private adapter: RuntimeAdapter | null = null;
+  private releaseAdapter: (() => void) | null = null;
   private math: WalletPaymentMath | null = null;
   private observer: RuntimeQueryObserver<WalletPaymentProjection> | null = null;
   private teardowns: Array<() => void> = [];
@@ -80,10 +81,10 @@ export class WalletPaymentSource {
 
   constructor(private readonly config: RuntimeAdapterStorageSnapshot) {
     this.snapshot = {
-      status: config.mode === 'remote' ? 'connecting' : 'unavailable',
+      status: 'connecting',
       message: config.mode === 'remote'
         ? 'Connecting to the selected Runtime…'
-        : 'Payments require a connected Runtime. The React embedded Runtime boot flow is not active yet.',
+        : 'Starting the local Runtime…',
       projection: null,
       quote: idleQuote(),
       command: idleCommand(),
@@ -100,16 +101,19 @@ export class WalletPaymentSource {
   readonly start = async (): Promise<void> => {
     if (this.started) return;
     this.started = true;
-    if (this.config.mode !== 'remote') return;
     const generation = ++this.generation;
-    this.patch({ status: 'connecting', message: 'Connecting to the selected Runtime…' });
+    this.patch({
+      status: 'connecting',
+      message: this.config.mode === 'remote' ? 'Connecting to the selected Runtime…' : 'Starting the local Runtime…',
+    });
     try {
       const dependencies = await loadWalletRuntimeReadDependencies(this.config);
       if (!this.isCurrent(generation)) {
-        dependencies.adapter.disconnect();
+        dependencies.release();
         return;
       }
       this.adapter = dependencies.adapter;
+      this.releaseAdapter = dependencies.release;
       this.math = dependencies.math;
       this.installObserver(dependencies.adapter, dependencies.math);
     } catch (error: unknown) {
@@ -363,7 +367,8 @@ export class WalletPaymentSource {
     for (const teardown of this.teardowns.splice(0)) teardown();
     this.observer?.destroy();
     this.observer = null;
-    this.adapter?.disconnect();
+    this.releaseAdapter?.();
+    this.releaseAdapter = null;
     this.adapter = null;
     this.math = null;
   }

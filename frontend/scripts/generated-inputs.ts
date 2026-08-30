@@ -120,12 +120,15 @@ const runGeneratedCommand = async (
   definition: CommandGeneratedInputDefinition,
 ): Promise<void> => {
   await mkdir(payloadRoot, { recursive: true });
+  const { outputPath } = definition.producer;
+  if (outputPath !== undefined) assertGeneratedInputRelativePath(outputPath, 'OUTPUT_PATH');
+  const commandOutput = outputPath === undefined ? payloadRoot : join(payloadRoot, outputPath);
   const child = Bun.spawn([...definition.producer.argv], {
     cwd: repositoryRoot,
     env: {
       ...process.env,
       ...definition.producer.environment,
-      [definition.producer.outputEnvironment]: payloadRoot,
+      [definition.producer.outputEnvironment]: commandOutput,
     },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -189,7 +192,7 @@ const prepareOne = async (
 
 const publishDevelopmentPublicDirectory = async (
   frontendRoot: string,
-  owner: Exclude<GeneratedInputOwner, 'assembly'>,
+  owner: GeneratedInputOwner,
   definitions: readonly PreparedGeneratedInputDefinition[],
 ): Promise<void> => {
   const publicRoot = join(frontendRoot, '.artifacts', 'public');
@@ -227,8 +230,7 @@ export const prepareGeneratedInputs = async (
   if (new Set(ids).size !== ids.length) throw new Error('GENERATED_INPUT_DEFINITION_DUPLICATE');
   const manifests: PreparedGeneratedInputManifest[] = [];
   for (const definition of selected) manifests.push(await prepareOne(repositoryRoot, frontendRoot, definition));
-  const surfaceOwners = [...new Set(selected.map(({ owner }) => owner))]
-    .filter((owner): owner is Exclude<GeneratedInputOwner, 'assembly'> => owner !== 'assembly');
+  const surfaceOwners = [...new Set(selected.map(({ owner }) => owner))];
   for (const owner of surfaceOwners) {
     await publishDevelopmentPublicDirectory(
       frontendRoot,

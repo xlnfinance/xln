@@ -12,7 +12,7 @@ export type WalletFlowAuditEntry = Readonly<{
 
 export type WalletFlowDeferral = Readonly<{
   id: string;
-  destination: 'WP5' | 'WP8' | 'WP9' | 'WP10';
+  destination: 'WP8' | 'WP9' | 'WP10';
   evidenceSource: string;
   evidenceMarker: string;
   reason: string;
@@ -26,6 +26,26 @@ export type WalletRequirementAudit = Readonly<{
 }>;
 
 export const WALLET_FLOW_AUDIT = [
+  {
+    id: 'embedded-runtime-boot',
+    pathname: '/app',
+    search: '',
+    page: 'app',
+    view: 'overview',
+    sources: [
+      'frontend/packages/browser/src/runtime-module-loader.ts',
+      'frontend/packages/browser/src/wallet-embedded-runtime-session.ts',
+      'frontend/packages/browser/src/wallet-runtime-suspension.ts',
+      'frontend/apps/wallet/src/wallet-embedded-runtime-adapter.ts',
+      'frontend/apps/wallet/src/wallet-embedded-runtime-bootstrap.ts',
+      'frontend/apps/wallet/src/wallet-embedded-runtime.ts',
+    ],
+    tests: [
+      'tests/frontend/runtime/runtime-module-loader.test.ts',
+      'tests/frontend/runtime/wallet-embedded-runtime-session.test.ts',
+      'tests/frontend/runtime/wallet-runtime-suspension.test.ts',
+    ],
+  },
   {
     id: 'testnet-launcher',
     pathname: '/testnet',
@@ -146,13 +166,6 @@ export const WALLET_FLOW_AUDIT = [
 
 export const WALLET_FLOW_DEFERRALS = [
   {
-    id: 'embedded-runtime-boot',
-    destination: 'WP5',
-    evidenceSource: 'frontend/apps/wallet/src/wallet-payment-source.ts',
-    evidenceMarker: 'The React embedded Runtime boot flow is not active yet.',
-    reason: 'The canonical browser Runtime bundle must be restored before React can own embedded activation.',
-  },
-  {
     id: 'wallet-creation-and-onboarding',
     destination: 'WP9',
     evidenceSource: 'frontend/apps/wallet/src/identity-recovery.tsx',
@@ -190,7 +203,7 @@ export const WALLET_FLOW_DEFERRALS = [
 ] as const satisfies readonly WalletFlowDeferral[];
 
 export const WALLET_REQUIREMENT_AUDIT = [
-  { id: 'boot', group: 1, disposition: 'deferred', evidenceId: 'embedded-runtime-boot' },
+  { id: 'boot', group: 1, disposition: 'implemented', evidenceId: 'embedded-runtime-boot' },
   { id: 'shell', group: 1, disposition: 'implemented', evidenceId: 'runtime-overview-shell' },
   { id: 'identity', group: 1, disposition: 'implemented', evidenceId: 'identity-entry-and-rehearsal' },
   { id: 'onboarding', group: 1, disposition: 'deferred', evidenceId: 'wallet-creation-and-onboarding' },

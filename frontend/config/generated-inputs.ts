@@ -1,6 +1,6 @@
 import type { RouteRule, SurfaceId } from './surfaces';
 
-export type GeneratedInputOwner = SurfaceId | 'assembly';
+export type GeneratedInputOwner = SurfaceId;
 
 export type GeneratedInputCopy = Readonly<{
   sourcePath: string;
@@ -26,22 +26,16 @@ export type CommandGeneratedInputDefinition = GeneratedInputBase & Readonly<{
     kind: 'command';
     argv: readonly string[];
     outputEnvironment: string;
+    outputPath?: string;
     environment: Readonly<Record<string, string>>;
     copies: readonly GeneratedInputCopy[];
     outputRoutes: readonly RouteRule[];
   }>;
 }>;
 
-type DeferredGeneratedInputDefinition = GeneratedInputBase & Readonly<{
-  producer: Readonly<{
-    kind: 'deferred';
-  }>;
-}>;
-
 export type GeneratedInputDefinition =
   | CopyGeneratedInputDefinition
-  | CommandGeneratedInputDefinition
-  | DeferredGeneratedInputDefinition;
+  | CommandGeneratedInputDefinition;
 
 export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
   {
@@ -50,7 +44,6 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
     sourcePaths: [
       'frontend/copy-static-files.js',
       'frontend/docs-catalog.js',
-      'frontend/static/docs-static',
       'scripts/debug/gpt.cjs',
       'docs',
     ],
@@ -63,13 +56,9 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
         GIT_COMMIT: 'candidate',
         XLN_GENERATED_AT: '1970-01-01T00:00:00.000Z',
       },
-      copies: [{
-        sourcePath: 'frontend/static/docs-static',
-        destinationPath: 'docs-static',
-      }],
+      copies: [],
       outputRoutes: [
         { kind: 'prefix', pathname: '/docs-catalog' },
-        { kind: 'prefix', pathname: '/docs-static' },
         { kind: 'stem', pathname: '/llms' },
       ],
     },
@@ -136,7 +125,15 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
       'core/api/public',
     ],
     outputNamespace: 'wallet-runtime-bundle',
-    producer: { kind: 'deferred' },
+    producer: {
+      kind: 'command',
+      argv: ['bash', 'scripts/build-runtime.sh'],
+      outputEnvironment: 'XLN_RUNTIME_BUNDLE_OUT',
+      outputPath: 'runtime.js',
+      environment: {},
+      copies: [],
+      outputRoutes: [{ kind: 'exact', pathname: '/runtime.js' }],
+    },
   },
   {
     id: 'wallet-browser-assets',
@@ -145,12 +142,11 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
       'frontend/copy-static-files.js',
       'frontend/static/contracts',
       'brainvault',
-      'jurisdictions/artifacts',
     ],
     outputNamespace: 'wallet-browser-assets',
     producer: {
       kind: 'command',
-      argv: ['bun', 'frontend/copy-static-files.js', '--wallet-only'],
+      argv: ['bun', 'frontend/copy-static-files.js', '--wallet-only', '--bundled-contracts'],
       outputEnvironment: 'XLN_STATIC_DIR',
       environment: {},
       copies: [],
@@ -190,13 +186,6 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
       outputRoutes: [{ kind: 'exact', pathname: '/scenarios/catalog.json' }],
     },
   },
-  {
-    id: 'release-assembly',
-    owner: 'assembly',
-    sourcePaths: ['frontend/config/surfaces.ts'],
-    outputNamespace: 'release-manifest',
-    producer: { kind: 'deferred' },
-  },
 ] as const;
 
 export const isCopyGeneratedInput = (
@@ -209,15 +198,9 @@ export const isCommandGeneratedInput = (
   input: GeneratedInputDefinition,
 ): input is CommandGeneratedInputDefinition => input.producer.kind === 'command';
 
-export type PreparedGeneratedInputDefinition =
-  | CopyGeneratedInputDefinition
-  | CommandGeneratedInputDefinition;
+export type PreparedGeneratedInputDefinition = GeneratedInputDefinition;
 
-export const isPreparedGeneratedInput = (
-  input: GeneratedInputDefinition,
-): input is PreparedGeneratedInputDefinition => input.producer.kind !== 'deferred';
-
-export const PREPARED_GENERATED_INPUTS = GENERATED_INPUTS.filter(isPreparedGeneratedInput);
+export const PREPARED_GENERATED_INPUTS = GENERATED_INPUTS;
 
 export const hasPreparedGeneratedInputs = (surfaceId: SurfaceId): boolean =>
   PREPARED_GENERATED_INPUTS.some(({ owner }) => owner === surfaceId);
