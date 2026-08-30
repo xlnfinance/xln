@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 OPS MIGRATION NEXT; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH IN PROGRESS; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -998,7 +998,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `READY AFTER OPS ROOT AND REQUIRED BOUNDARIES`
+**Status:** `IN PROGRESS — REACT HEALTH READINESS IMPLEMENTED; QA/HLT AND WORKSPACE REMAIN`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1006,6 +1006,20 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
   solvency, Time Machine, and render/worker teardown.
 - Preserve real controls and data; do not replace working operator functions
   with static placeholders.
+
+The first React ops slice owns `/health` route resolution, strict decoding of
+the real `/api/health` projection, bounded `/rpc` readiness probes, parallel
+refresh, stale-evidence retention, explicit unavailable states, and pagehide
+teardown. Its operator ledger renders readiness, process, owner, and storage
+evidence without synthetic fallback data. Focused health, RPC, and shared QA
+projection tests pass 27 tests with 358 expectations. Ops local TypeScript and
+unsafe-type checks pass; the isolated ops and canonical Svelte production
+builds pass; browser evidence covers live READY, refresh controls, stale FAIL,
+and 390x844, 1366x900, and 1920x1080 viewports without horizontal overflow.
+The four-app candidate assembles as
+`sha256-92e955a86cee014fde832aa8828c96a46b1afba99bc4dc9e4521de720bad3a66`
+with 305 files. QA/HLT, event feeds, bootstrap detail, runs, scenarios, AI,
+embed, and workspace tools remain on their canonical Svelte owners.
 
 **Done:** ops routes and operator flows pass focused checks with correct cleanup
 and authority behavior.

@@ -100,4 +100,4 @@ export async function probeRpcHealth(options: RpcHealthProbeOptions = {}): Promi
 
   return last;
 }
-import { isUnknownRecord, readJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord, readJsonUnknown } from '../utils/boundary';

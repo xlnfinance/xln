@@ -54,6 +54,7 @@ describe('frontend capability inventory', () => {
       'wallet-finance',
       'wallet-payments-and-markets',
       'wallet-native-and-offline',
+      'ops-health-and-qa',
     ].includes(id)).every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
@@ -216,5 +217,15 @@ describe('frontend capability inventory', () => {
     expect(docs?.currentSources).toContain('frontend/apps/docs/src/docs-app.tsx');
     expect(docs?.behavior).toContain('catalog navigation and search');
     expect(docs?.behavior).toContain('deterministic docs and llms outputs');
+  });
+
+  test('records the partial React ops health migration without claiming QA or HLT completion', () => {
+    const opsHealth = CAPABILITIES.find(({ id }) => id === 'ops-health-and-qa');
+    expect(opsHealth?.status).toBe('in_progress');
+    expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-health.tsx');
+    expect(opsHealth?.currentSources).toContain('frontend/src/lib/health/rpcHealth.ts');
+    expect(opsHealth?.behavior).toContain(
+      'React-owned live health and RPC readiness with bounded retry, refresh, stale evidence, and teardown',
+    );
   });
 });

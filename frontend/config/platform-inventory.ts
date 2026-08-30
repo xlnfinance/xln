@@ -236,6 +236,21 @@ export const PLATFORM_INVENTORY = [
     ],
   },
   {
+    id: 'ops-health-browser-boundary',
+    owner: 'ops',
+    workPackage: 'WP7',
+    status: 'implemented',
+    interfaces: ['route'],
+    sources: [
+      'frontend/src/lib/health/adminHealth.ts',
+      'frontend/src/lib/health/rpcHealth.ts',
+      'frontend/apps/ops/src/ops-health-source.ts',
+      'frontend/apps/ops/src/ops-health-runtime.ts',
+    ],
+    consumers: ['frontend/apps/ops/src/ops-health.tsx'],
+    evidence: ['tests/frontend/ops/frontend-ops-health.test.ts'],
+  },
+  {
     id: 'ops-workspace-registries',
     owner: 'ops',
     workPackage: 'WP7',
