@@ -1,2 +1,5 @@
 export { TsAccountWorkerCoordinator } from './coordinator';
-export { TsAccountWorkerAuthority } from './provider';
+export {
+  TsAccountWorkerAuthority,
+  type TsAccountWorkerTelemetry,
+} from './provider';

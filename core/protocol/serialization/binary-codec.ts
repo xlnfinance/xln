@@ -1,4 +1,6 @@
 import { Packr, addExtension } from 'msgpackr';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 
 /** The only durable/wire payload format: canonical value-only MessagePack. */
 export const XLN_BINARY_MSGPACK_MAGIC = 0x03;
@@ -313,11 +315,19 @@ export const encodeBinaryPayloadWithCanonical = (
  * rejected rather than preserved, so a hash never silently covers a missing
  * field. No framing magic: the bytes are an input to keccak, not a payload.
  */
-export const encodeCanonicalConsensusBytes = (value: unknown): Uint8Array =>
+export const encodeCanonicalConsensusBytes = (value: unknown): Uint8Array => {
   // Canonicalization already walks every node. Project hex scalars during
   // that same walk, then pack directly; the old path walked and cloned the
   // complete canonical tree a second time in `projectBinaryValue`.
-  asBytes(msgpackCodec.pack(canonicalize(value, '$', new Set(), false, false, true)));
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const bytes = asBytes(msgpackCodec.pack(canonicalize(value, '$', new Set(), false, false, true)));
+  countOp(
+    'canonical.encode',
+    bytes.byteLength,
+    OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+  );
+  return bytes;
+};
 
 export const compareCanonicalConsensusValues = (left: unknown, right: unknown): number =>
   compareBytes(encodeCanonicalConsensusBytes(left), encodeCanonicalConsensusBytes(right));

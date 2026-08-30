@@ -62,6 +62,29 @@ export const requireWorkerAccount = (
   return accountId;
 };
 
+export const requireWorkerOwnedAccountId = (
+  worker: TsAccountWorkerState,
+  accountIdInput: string,
+): string => {
+  const accountId = normalizeTsWorkerAccountId(accountIdInput);
+  const shardId = tsAccountLogicalShard(accountId);
+  if (!worker.ownedShardIds.has(shardId)) {
+    throw new Error(`TS_ACCOUNT_WORKER_OWNERSHIP_MISMATCH:${worker.workerIndex}:${accountId}`);
+  }
+  return accountId;
+};
+
+export const hydrateWorkerGenesisAccount = (
+  worker: TsAccountWorkerState,
+  accountId: string,
+  portable: Record<string, unknown>,
+): AccountReplica => hydrateAccountDocFromStorage(assertStorageAccountDocBinding(
+  validateStorageAccountDocValue(portable),
+  worker.ownerEntityId,
+  accountId,
+  'ts-account-worker-genesis',
+));
+
 export const computeWorkerShardCommitment = (
   worker: TsAccountWorkerState,
   shardId: number,

@@ -89,6 +89,8 @@ export const aggregateWorkerPhaseResults = (
       workerEncodeMs: response.workerEncodeMs,
       threadCpuUserMs: result.threadCpuUserUs / 1_000,
       threadCpuSystemMs: result.threadCpuSystemUs / 1_000,
+      shardRows: result.shardRows,
+      operationsProfile: result.operationsProfile,
     });
   }
   if (effects.length !== options.expectedEffects) {

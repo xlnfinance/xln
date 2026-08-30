@@ -250,7 +250,12 @@ export class TsAccountWorkerCoordinator {
     this.#openFrameWorkerIndexes.clear();
     this.#attemptTouchedWorkerIndexes.clear();
     const buckets = Array.from({ length: this.#workerCount }, () =>
-      [] as Array<{ order: number; accountId: string; input: typeof input.inputs[number]['input'] }>);
+      [] as Array<{
+        order: number;
+        accountId: string;
+        input: typeof input.inputs[number]['input'];
+        initialAccount?: Record<string, unknown>;
+      }>);
     input.inputs.forEach((item, order) => {
       const accountId = normalizeTsWorkerAccountId(item.accountId);
       const workerIndex = tsAccountWorkerForShard(
@@ -259,7 +264,12 @@ export class TsAccountWorkerCoordinator {
       );
       const bucket = buckets[workerIndex];
       if (bucket === undefined) throw new Error(`TS_ACCOUNT_WORKER_INBOUND_BUCKET_MISSING:${workerIndex}`);
-      bucket.push({ order, accountId, input: item.input });
+      bucket.push({
+        order,
+        accountId,
+        input: item.input,
+        ...(item.initialAccount === undefined ? {} : { initialAccount: item.initialAccount }),
+      });
     });
     const dispatchWorkerIndexes = new Set(buckets.flatMap((inputs, workerIndex) =>
       inputs.length === 0 ? [] : [workerIndex]));

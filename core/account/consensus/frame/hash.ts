@@ -8,6 +8,8 @@ import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 import { LIMITS } from '../../../config/constants';
 import { accountTxWithoutPostCommitHankos } from '../../settlement/witness-projection';
 import { policyVersionOutOfRangeError } from '../../tx/admission-policy';
+import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
+import { getPerfMs } from '../../../support/time';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could
@@ -110,7 +112,8 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
 };
 
 const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
-  return computeCanonicalMerkleRoot('account.frame', [
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const hash = computeCanonicalMerkleRoot('account.frame', [
     ['transition', {
       height: frame.height,
       timestamp: frame.timestamp,
@@ -120,6 +123,12 @@ const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
     ['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],
     ['accountStateRoot', frame.accountStateRoot],
   ], 'integrity');
+  countOp(
+    'account.frame.hash',
+    0,
+    OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+  );
+  return hash;
 };
 
 /** Verify the signed frame envelope; J-finality may advance newer live state. */

@@ -19,6 +19,7 @@ import { signEntityHashes } from '../../../hanko/signing';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { createEmptyEnv } from '../../../runtime';
 import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { projectPortableAccountDoc } from '../../../storage/read/projections';
 
 /**
  * L2 parity: the worker-thread Account engine must be byte-identical to the
@@ -492,6 +493,50 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(first.effects).toHaveLength(1);
     expect(second.effects).toHaveLength(1);
     expect(coordinator.accountsRoot).toBe(firstRoot);
+  });
+
+  test('inbound genesis installs the canonical Account shell on its owning worker', async () => {
+    const input = (await fixtureInboundInputs())[0];
+    if (!input) throw new Error('PARITY_GENESIS_INPUT_MISSING');
+    const accountId = input.fromEntityId;
+    const initialAccount = parityAccount(accountId, true);
+    const coordinator = await TsAccountWorkerCoordinator.create({
+      ownerEntityId: OWNER,
+      workerCount: 4,
+      logicalShardToWorker: Array.from({ length: 4096 }, (_, shardId) => shardId % 4),
+      accounts: new Map(),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    const inbound = await coordinator.applyAccountInputs({
+      frameId: 'genesis-frame', expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000, finalizedJHeight: 0,
+      inputs: [{
+        accountId,
+        input,
+        initialAccount: projectPortableAccountDoc(initialAccount),
+      }],
+    });
+    const outbound = await coordinator.proposeAccountFrames({
+      frameId: 'genesis-frame', timestamp: 1_000, jHeight: 0,
+      txs: [], proposalAccountIds: [], checkpointDue: false,
+    });
+    const sequential = parityAccount(accountId, true);
+    const workerStub = {
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+      jClaimNodes: new Map(), settlementBoardAuthorities: new Map(),
+    } as unknown as TsAccountWorkerState;
+    const context = createWorkerConsensusContext(workerStub, 1_000, 0, workerStub.jClaimNodes);
+    const expected = await applyAccountInput(context, sequential, input, {
+      entityTimestamp: 1_000, finalizedJHeight: 0,
+      owningEntityIsHub: false, verifyHanko: context.verifyHanko,
+    });
+    expect(digest(inbound.effects)).toBe(digest([{
+      phase: 'inbound', order: 0, accountId, result: expected,
+    }]));
+    expect(outbound.accountsRoot).toBe(PersistentEntityAccountMap.fromEntries(
+      [[accountId, sequential]], OWNER, computeEntityAccountValueHash,
+    ).rootHash());
+    expect(outbound.postAccounts?.map(row => row.accountId)).toEqual([accountId]);
   });
 
   test('Entity fitting retry restores the exact expected parent root', async () => {

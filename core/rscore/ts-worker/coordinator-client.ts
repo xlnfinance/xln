@@ -177,6 +177,10 @@ export const parseWorkerPhaseResult = (
     || (result.checkpointChanges !== undefined
       && !Array.isArray(result.checkpointChanges.accounts))
     || !Number.isSafeInteger(result.operations)
+    || !Array.isArray(result.shardRows)
+    || result.operationsProfile === null
+    || typeof result.operationsProfile !== 'object'
+    || Array.isArray(result.operationsProfile)
     || !Number.isSafeInteger(result.elapsedUs)
     || !Number.isFinite(result.heapUsedBytes)
     || !Number.isSafeInteger(result.threadCpuUserUs)
@@ -184,5 +188,12 @@ export const parseWorkerPhaseResult = (
     || result.timings === null
     || typeof result.timings !== 'object'
   ) throw new Error(`TS_ACCOUNT_WORKER_PHASE_RESULT_SHAPE:${expectedWorkerIndex}`);
+  for (const row of result.shardRows) {
+    if (!Array.isArray(row) || row.length !== 2
+      || !Number.isSafeInteger(row[0]) || row[0] < 0 || row[0] >= 4096
+      || !Number.isSafeInteger(row[1]) || row[1] < 1) {
+      throw new Error(`TS_ACCOUNT_WORKER_PHASE_SHARD_ROWS:${expectedWorkerIndex}`);
+    }
+  }
   return result;
 };

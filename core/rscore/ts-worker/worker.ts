@@ -6,6 +6,7 @@ import type { HandleAccountInputResult } from '../../account/consensus/types';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import type { AccountReplica } from '../../types/account';
 import { getPerfMs } from '../../support/time';
+import { diffOpCounters, snapshotOpCounters } from '../../support/performance/op-counters';
 import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from './codec';
 import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
@@ -15,6 +16,7 @@ import {
   computeWorkerShardCommitment,
   createWorkerConsensusContext,
   initializeWorkerState,
+  hydrateWorkerGenesisAccount,
   prepareWorkerAttempt,
   workerHeapUsedBytes,
   type TsAccountWorkerState,
@@ -59,7 +61,10 @@ const readThreadCpuUsage = (previous?: ThreadCpuUsage): ThreadCpuUsage => {
   return candidate.threadCpuUsage(previous);
 };
 
-const createWorkspace = (worker: TsAccountWorkerState): PhaseWorkspace => {
+const createWorkspace = (
+  worker: TsAccountWorkerState,
+  initialAccounts: ReadonlyMap<string, Record<string, unknown>> = new Map(),
+): PhaseWorkspace => {
   const working = new Map<string, AccountReplica>();
   const touched = new Set<string>();
   return {
@@ -68,7 +73,10 @@ const createWorkspace = (worker: TsAccountWorkerState): PhaseWorkspace => {
     forWrite(accountId): AccountReplica {
       const existing = working.get(accountId);
       if (existing) return existing;
-      const committed = worker.accounts.get(accountId);
+      const committed = worker.accounts.get(accountId)
+        ?? (initialAccounts.has(accountId)
+          ? hydrateWorkerGenesisAccount(worker, accountId, initialAccounts.get(accountId)!)
+          : undefined);
       if (!committed) throw new Error(`TS_ACCOUNT_WORKER_ACCOUNT_MISSING:${accountId}`);
       const fork = forkAccountReplicaShell(committed);
       working.set(accountId, fork);
@@ -181,8 +189,14 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   if (!worker) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
   const input = decodeWorkerPhasePayload(worker, value);
   const startedAt = getPerfMs();
+  const operationsBefore = snapshotOpCounters();
   const cpuStartedAt = readThreadCpuUsage();
-  const workspace = createWorkspace(worker);
+  const initialAccounts = input.phase === 'inbound'
+    ? new Map(input.inputs.flatMap(row => row.initialAccount === undefined
+      ? []
+      : [[row.accountId, row.initialAccount] as const]))
+    : new Map<string, Record<string, unknown>>();
+  const workspace = createWorkspace(worker, initialAccounts);
   let transitionUs = 0;
   let proposalUs = 0;
   let effects: TsAccountWorkerEffect[];
@@ -225,6 +239,14 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     : undefined;
   const checkpointUs = Math.round((getPerfMs() - checkpointStartedAt) * 1_000);
   const cpu = readThreadCpuUsage(cpuStartedAt);
+  const shardRows = new Map<number, number>();
+  const operationAccountIds = input.phase === 'inbound'
+    ? input.inputs.map(row => row.accountId)
+    : [...input.txs.map(row => row.accountId), ...input.proposals.map(row => row.accountId)];
+  for (const accountId of operationAccountIds) {
+    const shardId = tsAccountLogicalShard(accountId);
+    shardRows.set(shardId, (shardRows.get(shardId) ?? 0) + 1);
+  }
   return {
     workerIndex: worker.workerIndex,
     effects: effects.sort((left, right) => left.order - right.order),
@@ -232,6 +254,8 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     ...(postAccounts ? { postAccounts } : {}),
     ...(checkpointChanges ? { checkpointChanges } : {}),
     operations: effects.length,
+    shardRows: [...shardRows].sort(([left], [right]) => left - right),
+    operationsProfile: diffOpCounters(operationsBefore),
     elapsedUs: Math.round((getPerfMs() - startedAt) * 1_000),
     heapUsedBytes: workerHeapUsedBytes(),
     timings: { transitionUs, proposalUs, rootUs, checkpointUs },

@@ -10,6 +10,7 @@ import type {
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
 import type { PersistentRadixNodeCommitment } from '../../protocol/state/persistent-radix-value-map';
+import type { OpCounterSnapshot } from '../../support/performance/op-counters';
 
 export type TsAccountWorkerOptions = Readonly<{
   ownerEntityId: string;
@@ -31,6 +32,8 @@ export type TsApplyAccountInputsRequest = Readonly<{
   inputs: readonly Readonly<{
     accountId: string;
     input: AccountPeerInput;
+    /** Canonical Entity-created shell for an inbound Account genesis. */
+    initialAccount?: Record<string, unknown>;
   }>[];
 }>;
 
@@ -109,6 +112,9 @@ export type TsAccountWorkerPhaseMetrics = Readonly<{
   workerEncodeMs: number;
   threadCpuUserMs: number;
   threadCpuSystemMs: number;
+  /** Ordered transition rows executed in each touched logical shard. */
+  shardRows: readonly (readonly [shardId: number, rows: number])[];
+  operationsProfile: OpCounterSnapshot;
 }>;
 
 export type TsAccountWorkerBatchResult = Readonly<{
@@ -168,6 +174,7 @@ export type TsAccountWorkerInboundPayload = Readonly<{
     order: number;
     accountId: string;
     input: AccountPeerInput;
+    initialAccount?: Record<string, unknown>;
   }>[];
 }>;
 
@@ -200,6 +207,8 @@ export type TsAccountWorkerPhaseResult = Readonly<{
   postAccounts?: readonly TsAccountWorkerPostAccount[];
   checkpointChanges?: TsAccountWorkerCheckpointChanges;
   operations: number;
+  shardRows: readonly (readonly [shardId: number, rows: number])[];
+  operationsProfile: OpCounterSnapshot;
   elapsedUs: number;
   heapUsedBytes: number;
   timings: Readonly<{

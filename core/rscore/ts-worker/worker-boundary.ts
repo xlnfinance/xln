@@ -3,7 +3,11 @@ import { decodeAccountPeerInput } from '../../account/validation/input-validatio
 import { parseAccountJClaimNode } from '../../account/j-claims/j-claim-codec';
 import { validateJReplicas } from '../../storage/wal/runtime-machine-schema/j';
 import { normalizeTsWorkerAccountId } from './sharding';
-import { requireWorkerAccount, type TsAccountWorkerState } from './worker-state';
+import {
+  requireWorkerAccount,
+  requireWorkerOwnedAccountId,
+  type TsAccountWorkerState,
+} from './worker-state';
 import type {
   TsAccountWorkerInboundPayload,
   TsAccountWorkerInitPayload,
@@ -98,10 +102,19 @@ const decodeInboundPayload = (
   const finalizedJHeight = requireInteger(input['finalizedJHeight'], 'TS_ACCOUNT_WORKER_INBOUND_JHEIGHT');
   const inputs = requireArray(input['inputs'], 'TS_ACCOUNT_WORKER_INBOUND_INPUTS').map((entry, index) => {
     const row = requireRecord(entry, `TS_ACCOUNT_WORKER_INBOUND_${index}`);
-    const accountId = requireWorkerAccount(
-      worker,
-      requireString(row['accountId'], `TS_ACCOUNT_WORKER_INBOUND_${index}_ACCOUNT`),
-    );
+    const rawInitialAccount = row['initialAccount'];
+    const accountId = rawInitialAccount === undefined
+      ? requireWorkerAccount(
+          worker,
+          requireString(row['accountId'], `TS_ACCOUNT_WORKER_INBOUND_${index}_ACCOUNT`),
+        )
+      : requireWorkerOwnedAccountId(
+          worker,
+          requireString(row['accountId'], `TS_ACCOUNT_WORKER_INBOUND_${index}_ACCOUNT`),
+        );
+    if (rawInitialAccount !== undefined && worker.accounts.has(accountId)) {
+      throw new Error(`TS_ACCOUNT_WORKER_INBOUND_GENESIS_EXISTS:${accountId}`);
+    }
     const peerInput = decodeAccountPeerInput(row['input'], `TS_ACCOUNT_WORKER_INBOUND_${index}_INPUT`);
     if (
       peerInput.fromEntityId.toLowerCase() !== accountId
@@ -111,6 +124,9 @@ const decodeInboundPayload = (
       order: requireInteger(row['order'], `TS_ACCOUNT_WORKER_INBOUND_${index}_ORDER`),
       accountId,
       input: peerInput,
+      ...(rawInitialAccount === undefined
+        ? {}
+        : { initialAccount: requireRecord(rawInitialAccount, `TS_ACCOUNT_WORKER_INBOUND_${index}_GENESIS`) }),
     };
   });
   return { phase: 'inbound', frameId, restorePrevious, entityTimestamp, finalizedJHeight, inputs };

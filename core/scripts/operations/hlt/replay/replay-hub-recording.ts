@@ -55,7 +55,10 @@ import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profi
 import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
 import { assertCompleteHltAuthorityEvidence } from './authority-evidence';
-import { TsAccountWorkerAuthority } from '../../../../rscore/ts-worker';
+import {
+  TsAccountWorkerAuthority,
+  type TsAccountWorkerTelemetry,
+} from '../../../../rscore/ts-worker';
 
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
@@ -195,6 +198,7 @@ type ReplayTrial = Readonly<{
   frameProfile?: readonly ReplayFrameProfile[];
   operations: OpCounterSnapshot;
   perf: ReturnType<typeof snapshotPerfPhases>;
+  accountWorkerTelemetry?: TsAccountWorkerTelemetry;
 }>;
 
 const amplificationTotals = (operations: OpCounterSnapshot): ReplayAmplificationTotals => ({
@@ -501,6 +505,7 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
       );
     }
     const operations = diffOpCounters(operationsBefore);
+    const accountWorkerTelemetry = await tsWorkerAuthority?.telemetry();
     return {
       offeredEntityInputsPerSecond: offeredEntityInputsPerSecond > 0 ? offeredEntityInputsPerSecond : null,
       frames: artifact.totals.runtimeFrames,
@@ -532,6 +537,7 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
       ...(frameProfileEnabled ? { frameProfile } : {}),
       operations,
       perf: snapshotPerfPhases(),
+      ...(accountWorkerTelemetry === undefined ? {} : { accountWorkerTelemetry }),
     };
   } finally {
     await tsWorkerAuthority?.close();
