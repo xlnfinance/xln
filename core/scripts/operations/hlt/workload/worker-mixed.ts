@@ -87,6 +87,7 @@ import {
 import {
   connectRustH1,
   readRustH1LoadBook,
+  rustH1SessionPopulationReady,
   waitForRustMixedSettlement,
 } from '../rust/rust-h1-settlement';
 import type { HltPaymentOperationLedgerSnapshot } from '../../../../support/performance/account-delivery-trace';
@@ -170,6 +171,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
   const authorityEvidence = hltAuthorityEvidenceEnabled();
   let prepared: PreparedParallelSameLoad | null = null;
   let rustH1: RustH1Handle | null = null;
+  let rustExistingOpenSessions: number | null = null;
   const requireRustH1 = (): RustH1Handle => {
     if (rustH1 === null) throw new Error('HLT_RUST_NATIVE_AUTHORITY_NOT_STARTED');
     return rustH1;
@@ -219,6 +221,12 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           provisionPopulation: async (runtimes, receiveWindows, faucetAmounts) => {
             const current = requireRustH1();
             const expectedRuntimeId = current.ready.runtimeId;
+            const existingMetrics = await waitForRustMetrics(
+              current,
+              () => true,
+              'HLT_RUST_PRE_POPULATION_METRICS_MISSING',
+            );
+            rustExistingOpenSessions = existingMetrics.openSessions;
             await current.stop();
             rustH1 = await connectRustH1({
               portBase: args.portBase,
@@ -316,7 +324,15 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       if (!authorityEvidence) await exportReplayBaseSnapshotIfConfigured(requireHub());
     }
     const rustMetricsBefore: RustH1Metrics | null = rustH1
-      ? await waitForRustMetrics(rustH1, () => true, 'HLT_RUST_MIXED_METRICS_BASELINE_MISSING')
+      ? await waitForRustMetrics(
+          rustH1,
+          metrics => rustExistingOpenSessions !== null && rustH1SessionPopulationReady(
+            metrics.openSessions,
+            rustExistingOpenSessions,
+            users.length,
+          ),
+          'HLT_RUST_MIXED_METRICS_BASELINE_MISSING',
+        )
       : null;
     economicPreparePhase('metrics-baseline');
     if (rustH1 && rustMetricsBefore === null) throw new Error('HLT_RUST_MIXED_METRICS_BASELINE_MISSING');

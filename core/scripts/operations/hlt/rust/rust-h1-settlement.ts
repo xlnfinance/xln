@@ -30,6 +30,13 @@ export const rustH1SessionPopulationIntact = (
   loadUsers: number,
 ): boolean => current === baseline && current >= loadUsers;
 
+/** Wait for telemetry to observe every newly connected load Runtime exactly once. */
+export const rustH1SessionPopulationReady = (
+  current: number,
+  existing: number,
+  loadUsers: number,
+): boolean => current === existing + loadUsers;
+
 /** Read the same bounded market projection used by TS clients, directly from native H1. */
 export const readRustH1LoadBook = async (options: Readonly<{
   portBase: number;

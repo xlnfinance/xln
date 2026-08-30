@@ -19,6 +19,7 @@ import {
 import {
   decodeNativeProfileResponse,
   rustH1SessionPopulationIntact,
+  rustH1SessionPopulationReady,
 } from '../../../scripts/operations/hlt/rust/rust-h1-settlement';
 import { hltLanePortsPerSlot } from '../../../scripts/operations/hlt/lanes/lane-port-capacity';
 
@@ -88,6 +89,8 @@ test('engine selection defaults to ts/smoke and rejects unknown values', () => {
 });
 
 test('mixed Rust drain retains baseline peers in addition to all load users', () => {
+  expect(rustH1SessionPopulationReady(5_001, 1, 5_000)).toBe(true);
+  expect(rustH1SessionPopulationReady(5_000, 1, 5_000)).toBe(false);
   expect(rustH1SessionPopulationIntact(5_001, 5_001, 5_000)).toBe(true);
   expect(rustH1SessionPopulationIntact(5_000, 5_001, 5_000)).toBe(false);
   expect(rustH1SessionPopulationIntact(5_001, 5_001, 5_002)).toBe(false);

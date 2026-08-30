@@ -70,7 +70,11 @@ import {
   type RustH1Handle,
   type RustH1Metrics,
 } from '../rust/rust-h1';
-import { connectRustH1, waitForRustPaymentSettlement } from '../rust/rust-h1-settlement';
+import {
+  connectRustH1,
+  rustH1SessionPopulationReady,
+  waitForRustPaymentSettlement,
+} from '../rust/rust-h1-settlement';
 import type {
   AccountDeliveryHop,
   HltPaymentOperationLedgerSnapshot,
@@ -589,6 +593,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       ? { height: initialRustMetrics.height, canonicalStateHash: initialRustMetrics.postStateHash }
       : decodeLoadFrame(await readWithRateLimitRetry<unknown>(requireHub(), 'frame/latest'));
     let rustSetupHeight: number | null = null;
+    const rustExistingOpenSessions = initialRustMetrics?.openSessions ?? null;
     if (selection.engine === 'rust') {
       const expectedRuntimeId = rustH1!.ready.runtimeId;
       await rustH1!.stop();
@@ -679,13 +684,31 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       if (rustSetupHeight === null) throw new Error('HLT_RUST_FINANCIAL_SETUP_HEIGHT_MISSING');
       const baselineDeadline = Date.now() + 1_000;
       while (
-        (rustMetricsBefore === null || rustMetricsBefore.height < rustSetupHeight) &&
+        (
+          rustMetricsBefore === null ||
+          rustMetricsBefore.height < rustSetupHeight ||
+          rustExistingOpenSessions === null ||
+          !rustH1SessionPopulationReady(
+            rustMetricsBefore.openSessions,
+            rustExistingOpenSessions,
+            users.length,
+          )
+        ) &&
         Date.now() < baselineDeadline
       ) {
         await sleep(20);
         rustMetricsBefore = rustH1.metrics();
       }
-      if (rustMetricsBefore === null || rustMetricsBefore.height < rustSetupHeight) {
+      if (
+        rustMetricsBefore === null ||
+        rustMetricsBefore.height < rustSetupHeight ||
+        rustExistingOpenSessions === null ||
+        !rustH1SessionPopulationReady(
+          rustMetricsBefore.openSessions,
+          rustExistingOpenSessions,
+          users.length,
+        )
+      ) {
         throw new Error(`HLT_RUST_ECONOMIC_METRICS_BASELINE_MISSING:${String(rustSetupHeight)}`);
       }
     }
