@@ -58,8 +58,7 @@ pub use entity_context_json::{
     CanonicalEntityInfraMaterializer, EntityContextJsonError, EntityInfraMaterializeRequest,
     EntityInfraMaterializer, FreshEntityContextError, InboundHtlcInfrastructure,
     MaterializedEntityInfraContext, canonical_swap_market_policy,
-    decode_entity_deterministic_context, entity_context_policy_from_checkpoint,
-    materialize_fresh_entity_context,
+    decode_entity_deterministic_context,
 };
 pub use entity_frame::{EntityFrameError, fit_entity_account_input_prefix};
 pub use j_import::{

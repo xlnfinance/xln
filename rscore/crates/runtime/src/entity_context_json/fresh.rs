@@ -8,7 +8,6 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use num_bigint::BigInt;
-use serde_json::Value;
 use thiserror::Error;
 use x25519_dalek::{PublicKey, StaticSecret};
 use xln_rscore_batch::AccountInputRow;
@@ -18,7 +17,6 @@ use xln_rscore_entity_kernel::{
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use self::htlc::{canonical_entry, collect_inputs, materialize_inbound_htlc_context};
-use super::decode_entity_deterministic_policy;
 
 use crate::processor::EntityRouteTable;
 use crate::transport::InboundSessionTable;
@@ -254,27 +252,21 @@ impl InboundHtlcInfrastructure {
 /// Canonical direct-payment/same-J/J-event materializer. HTLC work is rejected
 /// until profile, liveness, encryption and onion inputs are installed here;
 /// it must never silently execute with an empty context.
+#[derive(Default)]
 pub struct CanonicalEntityInfraMaterializer {
-    policy: DeterministicContext,
     inbound_htlc: Option<InboundHtlcInfrastructure>,
     paybook_reachability: Option<(EntityRouteTable, InboundSessionTable)>,
 }
 
 impl CanonicalEntityInfraMaterializer {
-    pub fn new(policy: Value) -> Result<Self, FreshEntityContextError> {
-        Ok(Self {
-            policy: decode_entity_deterministic_policy(&policy)?,
-            inbound_htlc: None,
-            paybook_reachability: None,
-        })
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn with_inbound_htlc(
-        policy: Value,
         infrastructure: InboundHtlcInfrastructure,
     ) -> Result<Self, FreshEntityContextError> {
         Ok(Self {
-            policy: decode_entity_deterministic_policy(&policy)?,
             inbound_htlc: Some(infrastructure.validate()?),
             paybook_reachability: None,
         })
@@ -294,8 +286,7 @@ impl EntityInfraMaterializer for CanonicalEntityInfraMaterializer {
         &mut self,
         request: EntityInfraMaterializeRequest<'_>,
     ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
-        materialize_fresh_entity_context_from_policy(
-            &self.policy,
+        materialize_fresh_entity_context(
             self.inbound_htlc.as_ref(),
             self.paybook_reachability.as_ref(),
             request,
@@ -312,21 +303,12 @@ fn needs_originated_htlc(request: &EntityInfraMaterializeRequest<'_>) -> bool {
 
 /// Build the exact empty-infrastructure Entity context used by TypeScript for
 /// direct payments, same-J swaps, J-events and ordinary Account ACK traffic.
-pub fn materialize_fresh_entity_context(
-    policy: &Value,
-    inbound_htlc: Option<&InboundHtlcInfrastructure>,
-    request: EntityInfraMaterializeRequest<'_>,
-) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
-    let policy = decode_entity_deterministic_policy(policy)?;
-    materialize_fresh_entity_context_from_policy(&policy, inbound_htlc, None, request)
-}
-
-fn materialize_fresh_entity_context_from_policy(
-    policy: &DeterministicContext,
+fn materialize_fresh_entity_context(
     inbound_htlc: Option<&InboundHtlcInfrastructure>,
     paybook_reachability: Option<&(EntityRouteTable, InboundSessionTable)>,
-    mut request: EntityInfraMaterializeRequest<'_>,
+    request: EntityInfraMaterializeRequest<'_>,
 ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
+    let mut request = request;
     let total_started = Instant::now();
     let account_rows = request.account_inputs.len();
     let local_txs = request.local_financial_txs.len();
@@ -431,10 +413,10 @@ fn materialize_fresh_entity_context_from_policy(
     ]);
     let canonical_done = total_started.elapsed();
     let execution = DeterministicContext {
-        minimum_trade_size: policy.minimum_trade_size.clone(),
-        swap_taker_fee_bps: policy.swap_taker_fee_bps,
-        jurisdiction_id: policy.jurisdiction_id.clone(),
-        pair_policies: policy.pair_policies.clone(),
+        minimum_trade_size: BigInt::from(0),
+        swap_taker_fee_bps: 0,
+        jurisdiction_id: None,
+        pair_policies: std::collections::BTreeMap::new(),
         prepared_htlcs,
         originated_htlcs: std::collections::BTreeMap::new(),
     };

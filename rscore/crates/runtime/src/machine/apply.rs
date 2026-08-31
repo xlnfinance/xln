@@ -25,6 +25,7 @@ use xln_rscore_entity_kernel::{
 };
 use xln_rscore_protocol::CanonicalValue;
 
+use crate::entity_context_json::apply_entity_state_policy;
 use crate::{
     EntityInfraMaterializeRequest, EntityInfraMaterializer, MaterializedEntityInfraContext,
 };
@@ -314,6 +315,8 @@ impl AccountInputOutcomeProfile {
 fn profile_account_input_outcomes(
     runtime_height: u64,
     entity_height: u64,
+    finalized_j_height: u64,
+    accounts_root: [u8; 32],
     inputs: &[ProfileAccountInputKind],
     results: &[xln_rscore_batch::AccountInputResult],
 ) {
@@ -332,9 +335,11 @@ fn profile_account_input_outcomes(
         }
     }
     eprintln!(
-        "RSCORE_ACCOUNT_INPUT_OUTCOMES runtimeHeight={} entityHeight={} inputs={} results={} pairingMismatch={} ack={} ackFrameWithAck={} ackFrameWithoutAck={} inputOther={} ackCommitted={} ackStale={} ackRejected={} frameCommitted={} frameDuplicate={} frameCollision={} frameStale={} frameRejected={} forceAckTrue={} forceAckFalse={} forceAckNone={} outcomeOther={}",
+        "RSCORE_ACCOUNT_INPUT_OUTCOMES runtimeHeight={} entityHeight={} finalizedJHeight={} accountsRoot={} inputs={} results={} pairingMismatch={} ack={} ackFrameWithAck={} ackFrameWithoutAck={} inputOther={} ackCommitted={} ackStale={} ackRejected={} frameCommitted={} frameDuplicate={} frameCollision={} frameStale={} frameRejected={} forceAckTrue={} forceAckFalse={} forceAckNone={} outcomeOther={}",
         runtime_height,
         entity_height,
+        finalized_j_height,
+        render_word(&accounts_root),
         inputs.len(),
         results.len(),
         inputs.len().abs_diff(results.len()),
@@ -646,13 +651,6 @@ fn account_commit_evidence(
     evidence
 }
 
-fn validate_frame_context(
-    replica: &RuntimeReplica,
-    input: &RuntimeInput,
-) -> Result<(), RuntimeMachineError> {
-    validate_selected_context(replica, &input.frame)
-}
-
 fn validate_selected_context(
     replica: &RuntimeReplica,
     frame: &RuntimeFrameContext,
@@ -670,6 +668,18 @@ fn validate_selected_context(
         });
     }
     Ok(())
+}
+
+/// The finalized J height is committed by the selected Runtime transactions,
+/// not supplied by the live service or replay driver. Deriving it here keeps
+/// Account clocks identical when the same WAL input is replayed after restart.
+fn derive_selected_finalized_j_height(previous: u64, runtime_txs: &[super::RuntimeTx]) -> u64 {
+    runtime_txs.iter().fold(previous, |height, tx| match tx {
+        super::RuntimeTx::ObserveJRange(observation) => {
+            height.max(observation.scanned_through_height)
+        }
+        _ => height,
+    })
 }
 
 fn internal_wake(
@@ -1610,7 +1620,6 @@ fn apply_runtime_inner(
     mut input: RuntimeInput,
     mut materializer: Option<&mut dyn EntityInfraMaterializer>,
 ) -> Result<RuntimeApplyResult, RuntimeMachineError> {
-    validate_frame_context(&replica, &input)?;
     for entity_input in &input.entity_inputs {
         let Some((_, slot)) =
             replica.entity_slot(entity_input.entity_id(), entity_input.signer_id())
@@ -1631,15 +1640,24 @@ fn apply_runtime_inner(
         .iter()
         .map(|(key, state)| (key.clone(), state.entity.height))
         .collect();
-    let selected = select_runtime_frame(
+    let mut selected = select_runtime_frame(
         &mut replica.mempool,
         replica.limits,
         &entity_heights,
         input.frame.clone(),
     )?;
-    let selected_context = selected
+    let mut selected_context = selected
         .as_ref()
         .map_or_else(|| input.frame.clone(), |selected| selected.frame.clone());
+    selected_context.finalized_j_height = derive_selected_finalized_j_height(
+        replica.state.finalized_j_height,
+        selected
+            .as_ref()
+            .map_or(&[][..], |selected| selected.runtime_txs.as_slice()),
+    );
+    if let Some(selected) = &mut selected {
+        selected.frame.finalized_j_height = selected_context.finalized_j_height;
+    }
     validate_selected_context(&replica, &selected_context)?;
 
     let mut wakes = Vec::new();
@@ -2148,7 +2166,7 @@ fn apply_entity_group(
     enqueue_proposer_materializations(&mut slot, proposer_runtime_seed)?;
 
     let mut entity_mempool = std::mem::take(&mut slot.replica.entity_mempool);
-    let (selected_count, context) = match materializer.as_deref_mut() {
+    let (selected_count, mut context) = match materializer.as_deref_mut() {
         Some(materializer) => {
             let (count, materialized) = fit_live_entity_prefix(
                 &mut slot,
@@ -2309,23 +2327,37 @@ fn apply_entity_group(
         .iter()
         .find(|section| section.field == "orderbookExt")
         .map(|section| section.digest.clone());
+    apply_entity_state_policy(
+        &mut context.execution,
+        &slot.state,
+        slot.replica
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction
+            .as_ref(),
+    )
+    .map_err(|error| RuntimeMachineError::EntityContextMaterialization(error.to_string()))?;
     let mut core = apply_resident_entity_round_core(
         &mut slot.replica.accounts,
         slot.state.entity,
         request,
         &context.execution,
     )?;
+    let accounts_root = core.outbound.accounts_root;
     if let Some(inputs) = profiled_account_inputs.as_deref() {
         profile_account_input_outcomes(
             runtime_height,
             next_entity_height,
+            frame.finalized_j_height,
+            accounts_root,
             inputs,
             &core.inbound.applied,
         );
     }
     core.state.entity_command_nonces = selected.command_nonces;
     let account_commits = account_commit_evidence(group.entity_id, &core.inbound.applied);
-    let accounts_root = core.outbound.accounts_root;
     let account_count = slot.replica.accounts.account_count();
     let post_authority = resolve_board_handover_authority(
         &slot.replica.entity_consensus.state.authority,
@@ -3557,7 +3589,9 @@ mod tests {
             entity_inputs: Vec::new(),
             frame: RuntimeFrameContext {
                 timestamp: 1_001,
-                finalized_j_height: 36,
+                // Replay has only the prior committed Runtime height here;
+                // ObserveJRange is the canonical source for this frame.
+                finalized_j_height: 0,
                 hub_rebalance_has_pending_work: false,
                 entity_contexts: std::collections::BTreeMap::from([(
                     key.clone(),
@@ -3623,7 +3657,7 @@ mod tests {
                 entity_inputs: Vec::new(),
                 frame: RuntimeFrameContext {
                     timestamp: 1_002,
-                    finalized_j_height: 37,
+                    finalized_j_height: 36,
                     hub_rebalance_has_pending_work: false,
                     entity_contexts: std::collections::BTreeMap::from([(
                         key.clone(),

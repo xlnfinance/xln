@@ -373,7 +373,6 @@ pub fn replay_runtime_wal(
     }
     .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_DECODE:{error}"))?;
     let owner = decoded.entity_snapshot.entity_id.to_ascii_lowercase();
-    let context_policy = decoded.entity_context_policy.clone();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RUNTIME_REPLAY_RESTORE:{error}"))?;
     if let (Some(origin), Some(source_frame_hash)) = (migration_origin, source_checkpoint_hash) {
@@ -481,7 +480,6 @@ pub fn replay_runtime_wal(
         let (decoded_tx, decoded_rx) = std::sync::mpsc::sync_channel::<
             Result<(ConcreteWalSource, DecodedRuntimeWalFrame), String>,
         >(PIPELINE_DEPTH);
-        let context_policy = &context_policy;
         scope.spawn(move || {
             while let Ok(raw) = raw_rx.recv() {
                 let height = raw.height();
@@ -491,7 +489,7 @@ pub fn replay_runtime_wal(
                         // The decoded frame context's finalized_j_height is a
                         // pass-through copy; the consumer overwrites it with
                         // the live replica value before applying.
-                        decode_concrete_runtime_wal_frame(&source, context_policy, 0, false)
+                        decode_concrete_runtime_wal_frame(&source, 0, false)
                             .map(|decoded| (source, decoded))
                             .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))
                     });
@@ -522,12 +520,6 @@ pub fn replay_runtime_wal(
                 send_raw(next_read)?;
                 next_read += 1;
             }
-            let finalized_j_height = processor
-                .replica()
-                .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
-                .state
-                .finalized_j_height;
-            decoded.input.frame.finalized_j_height = finalized_j_height;
             expectations.assert_timestamp(height, decoded.timestamp)?;
             if let Some(expected_root) = expectations.expected_runtime_state_hash(height)? {
                 let source_root = decoded

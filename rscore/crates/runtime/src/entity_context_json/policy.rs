@@ -1,41 +1,18 @@
-//! Checkpoint-side mirror of `core/rscore/entity/round-wire.ts` pair policy.
+//! Canonical Entity-state policy used by every live and replayed Entity frame.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
-use serde_json::{Map, Number, Value};
+use num_bigint::BigInt;
 use xln_rscore_engine::{SwapMarketPolicy, SwapToken};
 use xln_rscore_entity_kernel::{
-    PairDimensions, canonical_pair_orientation, canonical_pair_policy, canonical_token_decimals,
-    is_canonical_liquid_token,
+    DeterministicContext, PairPolicy, canonical_pair_orientation, canonical_pair_policy,
+    canonical_token_decimals, is_canonical_liquid_token,
 };
+use xln_rscore_protocol::CanonicalValue;
+
+use crate::RuntimeEntityState;
 
 use super::EntityContextJsonError;
-
-fn object<'a>(
-    value: &'a Value,
-    path: &str,
-) -> Result<&'a Map<String, Value>, EntityContextJsonError> {
-    value
-        .as_object()
-        .ok_or_else(|| EntityContextJsonError::InvalidType(path.into()))
-}
-
-fn required<'a>(
-    value: &'a Map<String, Value>,
-    field: &str,
-    path: &str,
-) -> Result<&'a Value, EntityContextJsonError> {
-    value
-        .get(field)
-        .ok_or_else(|| EntityContextJsonError::MissingField(format!("{path}.{field}")))
-}
-
-fn safe_u64(value: &Value, path: &str) -> Result<u64, EntityContextJsonError> {
-    value
-        .as_u64()
-        .filter(|value| *value <= 9_007_199_254_740_991)
-        .ok_or_else(|| EntityContextJsonError::InvalidValue(path.into()))
-}
 
 fn pair_tokens(pair: &str) -> Result<(u32, u32), EntityContextJsonError> {
     let Some((left, right)) = pair.split_once('/') else {
@@ -79,149 +56,107 @@ pub fn canonical_swap_market_policy() -> SwapMarketPolicy {
     SwapMarketPolicy::new(tokens, steps)
 }
 
-fn pair_policy(
-    pair: &str,
-    dimensions: &Map<String, Value>,
-) -> Result<Value, EntityContextJsonError> {
-    let (left, right) = pair_tokens(pair)?;
-    let (base, quote) = canonical_pair_orientation(left, right);
-    let base_decimals = safe_u64(
-        required(dimensions, "baseTokenDecimals", "pairDimensions")?,
-        "pairDimensions.baseTokenDecimals",
-    )?;
-    let quote_decimals = safe_u64(
-        required(dimensions, "quoteTokenDecimals", "pairDimensions")?,
-        "pairDimensions.quoteTokenDecimals",
-    )?;
-    let (policy, _) = canonical_pair_policy(
-        base,
-        quote,
-        PairDimensions {
-            base_token_decimals: u32::try_from(base_decimals)
-                .map_err(|_| EntityContextJsonError::InvalidValue("baseTokenDecimals".into()))?,
-            quote_token_decimals: u32::try_from(quote_decimals)
-                .map_err(|_| EntityContextJsonError::InvalidValue("quoteTokenDecimals".into()))?,
-        },
-    );
-    Ok(Value::Array(vec![
-        Value::String(pair.into()),
-        Value::Number(Number::from(policy.price_step_ticks)),
-        Value::Number(Number::from(policy.book_bucket_width_ticks)),
-        Value::String(policy.mid_price_ticks.to_string()),
-    ]))
-}
-
-fn pair_policies(core: &Map<String, Value>) -> Result<Vec<Value>, EntityContextJsonError> {
-    // TS `entityDeterministicContextWire` emits an empty pair vector until
-    // `initOrderbookExt` installs the optional orderbook state.
-    let Some(dimensions) = core.get("orderbookPairDimensions") else {
-        return Ok(Vec::new());
-    };
-    let tagged = object(dimensions, "state.core.orderbookPairDimensions")?;
-    if required(tagged, "__xlnType", "orderbookPairDimensions")?.as_str() != Some("Map") {
-        return Err(EntityContextJsonError::InvalidValue(
-            "state.core.orderbookPairDimensions.__xlnType".into(),
+fn canonical_field<'a>(
+    value: &'a CanonicalValue,
+    field: &str,
+) -> Result<&'a CanonicalValue, EntityContextJsonError> {
+    let CanonicalValue::Object(fields) = value else {
+        return Err(EntityContextJsonError::InvalidType(
+            "state.core.hubRebalanceConfig".into(),
         ));
-    }
-    let rows = required(tagged, "value", "orderbookPairDimensions")?
-        .as_array()
-        .ok_or_else(|| {
-            EntityContextJsonError::InvalidType("orderbookPairDimensions.value".into())
-        })?;
-    let mut seen = BTreeSet::new();
-    let mut policies = Vec::with_capacity(rows.len());
-    for (index, row) in rows.iter().enumerate() {
-        let row = row.as_array().filter(|row| row.len() == 2).ok_or_else(|| {
-            EntityContextJsonError::InvalidValue(format!("orderbookPairDimensions.value[{index}]"))
-        })?;
-        let pair = row[0]
-            .as_str()
-            .ok_or_else(|| EntityContextJsonError::InvalidType(format!("pairId[{index}]")))?;
-        if !seen.insert(pair) {
-            return Err(EntityContextJsonError::DuplicatePair(pair.into()));
+    };
+    fields
+        .iter()
+        .find_map(|(name, value)| (name == field).then_some(value))
+        .ok_or_else(|| EntityContextJsonError::MissingField(format!("hubRebalanceConfig.{field}")))
+}
+
+/// Replace only policy fields with values derived from the current committed
+/// Entity state. Per-frame prepared/originated HTLC entries remain bound to
+/// the authenticated Entity context that supplied them.
+pub(crate) fn apply_entity_state_policy(
+    context: &mut DeterministicContext,
+    state: &RuntimeEntityState,
+    jurisdiction: Option<&CanonicalValue>,
+) -> Result<(), EntityContextJsonError> {
+    let swap_taker_fee_bps = match state.entity.hub_rebalance_config.as_ref() {
+        Some(config) => {
+            let CanonicalValue::Number(value) = canonical_field(config, "swapTakerFeeBps")? else {
+                return Err(EntityContextJsonError::InvalidType(
+                    "hubRebalanceConfig.swapTakerFeeBps".into(),
+                ));
+            };
+            value
+                .as_str()
+                .parse::<u16>()
+                .ok()
+                .filter(|fee| *fee <= 10_000)
+                .ok_or_else(|| {
+                    EntityContextJsonError::InvalidValue(
+                        "hubRebalanceConfig.swapTakerFeeBps".into(),
+                    )
+                })?
         }
-        policies.push(pair_policy(
-            pair,
-            object(&row[1], &format!("pairDimensions[{pair}]"))?,
-        )?);
-    }
-    policies.sort_by(|left, right| left[0].as_str().cmp(&right[0].as_str()));
-    Ok(policies)
-}
-
-fn swap_taker_fee(core: &Map<String, Value>) -> Result<u64, EntityContextJsonError> {
-    let Some(value) = core.get("hubRebalanceConfig") else {
-        return Ok(0);
+        None => 0,
     };
-    let rebalance = object(value, "state.core.hubRebalanceConfig")?;
-    let fee = safe_u64(
-        required(rebalance, "swapTakerFeeBps", "hubRebalanceConfig")?,
-        "hubRebalanceConfig.swapTakerFeeBps",
-    )?;
-    if fee <= 10_000 {
-        Ok(fee)
-    } else {
-        Err(EntityContextJsonError::InvalidValue(
-            "hubRebalanceConfig.swapTakerFeeBps".into(),
-        ))
-    }
-}
+    let minimum_trade_size = state.entity.orderbook_metadata.as_ref().map_or_else(
+        || BigInt::from(0),
+        |metadata| metadata.hub_profile.min_trade_size.clone(),
+    );
+    let pair_policies = state
+        .entity
+        .orderbook
+        .as_ref()
+        .map(|orderbook| {
+            orderbook
+                .pair_dimensions
+                .iter()
+                .map(|(pair, dimensions)| {
+                    let (left, right) = pair_tokens(pair)?;
+                    let (base, quote) = canonical_pair_orientation(left, right);
+                    let (policy, _) = canonical_pair_policy(base, quote, *dimensions);
+                    Ok((pair.clone(), policy))
+                })
+                .collect::<Result<BTreeMap<String, PairPolicy>, EntityContextJsonError>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
 
-/// Derive the deterministic market policy from the same certified Entity
-/// fields consumed by TypeScript's `entityDeterministicContextWire`.
-pub(crate) fn entity_context_policy_from_core(
-    core: &Value,
-    active_jurisdiction: Option<&Value>,
-) -> Result<Value, EntityContextJsonError> {
-    let core = object(core, "state.core")?;
-    // `orderbookExt` is optional in canonical TS state. Before its init tx,
-    // the deterministic context is minTradeSize=0 and has no pair policies.
-    let minimum_trade_size = match core.get("orderbookHubProfile") {
-        Some(value) => required(
-            object(value, "state.core.orderbookHubProfile")?,
-            "minTradeSize",
-            "orderbookHubProfile",
-        )?
-        .clone(),
-        None => Value::Object(Map::from_iter([
-            ("__xlnType".into(), Value::String("BigInt".into())),
-            ("value".into(), Value::String("0".into())),
-        ])),
-    };
-    let fee = swap_taker_fee(core)?;
-    let jurisdiction = match active_jurisdiction {
-        Some(Value::String(value)) if !value.is_empty() => Value::String(value.clone()),
-        Some(Value::Null) | None => Value::Null,
+    let jurisdiction_id = match jurisdiction {
+        Some(CanonicalValue::Object(fields)) => match fields
+            .iter()
+            .find_map(|(name, value)| (name == "name").then_some(value))
+        {
+            Some(CanonicalValue::String(name)) if !name.is_empty() => Some(name.clone()),
+            Some(_) => {
+                return Err(EntityContextJsonError::InvalidType(
+                    "entity.config.jurisdiction.name".into(),
+                ));
+            }
+            None => None,
+        },
         Some(_) => {
             return Err(EntityContextJsonError::InvalidType(
-                "activeJurisdiction".into(),
+                "entity.config.jurisdiction".into(),
             ));
         }
+        None => None,
     };
-    Ok(Value::Object(Map::from_iter([
-        ("minimumTradeSize".into(), minimum_trade_size),
-        ("swapTakerFeeBps".into(), Value::Number(Number::from(fee))),
-        ("jurisdictionId".into(), jurisdiction),
-        ("pairPolicies".into(), Value::Array(pair_policies(core)?)),
-    ])))
-}
 
-pub fn entity_context_policy_from_checkpoint(
-    replica: &Value,
-    active_jurisdiction: Option<&Value>,
-) -> Result<Value, EntityContextJsonError> {
-    let state = object(
-        required(object(replica, "replica")?, "state", "replica")?,
-        "state",
-    )?;
-    entity_context_policy_from_core(required(state, "core", "state")?, active_jurisdiction)
+    context.minimum_trade_size = minimum_trade_size;
+    context.swap_taker_fee_bps = swap_taker_fee_bps;
+    context.jurisdiction_id = jurisdiction_id;
+    context.pair_policies = pair_policies;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use xln_rscore_entity_kernel::{DeterministicContext, EntityStateSlice};
+    use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
-    use super::{canonical_swap_market_policy, entity_context_policy_from_core};
+    use super::{apply_entity_state_policy, canonical_swap_market_policy};
+    use crate::RuntimeEntityState;
 
     #[test]
     fn canonical_swap_market_digest_matches_typescript_registry() {
@@ -232,64 +167,26 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_core_projects_the_typescript_context_policy_golden() {
-        let entity = format!("0x{}", "11".repeat(32));
-        let core = json!({
-            "orderbookHubProfile": {
-                "minTradeSize": { "__xlnType": "BigInt", "value": "250" },
-            },
-            "hubRebalanceConfig": { "swapTakerFeeBps": 37 },
-            "orderbookPairDimensions": {
-                "__xlnType": "Map",
-                "value": [["1/2", {
-                    "baseTokenDecimals": 18,
-                    "quoteTokenDecimals": 6,
-                }]],
-            },
-        });
-        assert_eq!(
-            entity_context_policy_from_core(&core, Some(&json!(entity))).expect("policy"),
-            json!({
-                "minimumTradeSize": { "__xlnType": "BigInt", "value": "250" },
-                "swapTakerFeeBps": 37,
-                "jurisdictionId": entity,
-                "pairPolicies": [["1/2", 1, 10_000, "25000000"]],
-            }),
-        );
-    }
+    fn committed_entity_state_replaces_stale_checkpoint_policy() {
+        let mut entity = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 0);
+        entity.hub_rebalance_config = Some(CanonicalValue::Object(vec![(
+            "swapTakerFeeBps".into(),
+            CanonicalValue::Number(CanonicalNumber::from_u16(37)),
+        )]));
+        let state = RuntimeEntityState {
+            accounts_root: [0; 32],
+            entity,
+        };
+        let jurisdiction = CanonicalValue::Object(vec![(
+            "name".into(),
+            CanonicalValue::String("Testnet".into()),
+        )]);
+        let mut context = DeterministicContext::hlt_default();
 
-    #[test]
-    fn absent_hub_rebalance_config_projects_the_typescript_zero_fee() {
-        let core = json!({
-            "orderbookHubProfile": {
-                "minTradeSize": { "__xlnType": "BigInt", "value": "0" },
-            },
-            "orderbookPairDimensions": {
-                "__xlnType": "Map",
-                "value": [],
-            },
-        });
-        assert_eq!(
-            entity_context_policy_from_core(&core, None).expect("policy"),
-            json!({
-                "minimumTradeSize": { "__xlnType": "BigInt", "value": "0" },
-                "swapTakerFeeBps": 0,
-                "jurisdictionId": null,
-                "pairPolicies": [],
-            }),
-        );
-    }
+        apply_entity_state_policy(&mut context, &state, Some(&jurisdiction)).expect("state policy");
 
-    #[test]
-    fn absent_orderbook_projects_the_typescript_pre_init_policy() {
-        assert_eq!(
-            entity_context_policy_from_core(&json!({}), None).expect("pre-init policy"),
-            json!({
-                "minimumTradeSize": { "__xlnType": "BigInt", "value": "0" },
-                "swapTakerFeeBps": 0,
-                "jurisdictionId": null,
-                "pairPolicies": [],
-            }),
-        );
+        assert_eq!(context.swap_taker_fee_bps, 37);
+        assert_eq!(context.jurisdiction_id.as_deref(), Some("Testnet"));
+        assert!(context.pair_policies.is_empty());
     }
 }

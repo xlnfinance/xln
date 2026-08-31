@@ -172,14 +172,12 @@ test('Rust H1 genesis is explicit native machine configuration, not imported sta
     minFrameDelayMs: 5,
   }) as {
     machine: { runtimeId: string; activeJurisdiction: string; jReplicas: unknown[] };
-    entityContextPolicy: { pairPolicies: unknown[] };
     entityProfile: { name: string; isHub: boolean };
   };
   expect(genesis.machine.runtimeId).toBe(address('1'));
   expect(genesis.machine.activeJurisdiction).toBe('Testnet');
   expect(genesis.machine.jReplicas).toHaveLength(1);
   expect(safeStringify(genesis.machine.jReplicas)).toContain('tokenRegistry');
-  expect(genesis.entityContextPolicy.pairPolicies).toHaveLength(3);
   expect(genesis.entityProfile).toMatchObject({ name: 'H1', isHub: true });
   expect(safeStringify(genesis)).not.toContain('checkpoint');
   expect(safeStringify(genesis)).not.toContain('import');

@@ -3,10 +3,10 @@
 use serde_json::{Map, Value};
 use thiserror::Error;
 
+use crate::entity_context_json::decode_entity_frame_context;
 use crate::{
     RuntimeEntityFrameContext, RuntimeEntityInput, RuntimeEntityKey, RuntimeFrameContext,
     RuntimeInput, RuntimeMempool, RuntimeTx, canonical_value_from_tagged_json,
-    decode_entity_deterministic_context,
 };
 
 use super::{ConcreteWalSource, DecodedRuntimeWalFrame};
@@ -329,7 +329,6 @@ fn expected_entity_root(frame: &Value) -> Result<Option<[u8; 32]>, ConcreteWalDe
 /// native transitions exist; they are never carried through as opaque state.
 pub fn decode_concrete_runtime_wal_frame(
     source: &ConcreteWalSource,
-    context_policy: &Value,
     finalized_j_height: u64,
     hub_rebalance_has_pending_work: bool,
 ) -> Result<DecodedRuntimeWalFrame, ConcreteWalDecodeError> {
@@ -412,7 +411,7 @@ pub fn decode_concrete_runtime_wal_frame(
             )));
         }
         let decoded = RuntimeEntityFrameContext {
-            execution: decode_entity_deterministic_context(context_policy, &context.value)
+            execution: decode_entity_frame_context(&context.value)
                 .map_err(|error| invalid(format!("ENTITY_CONTEXT:{height}:{error}")))?,
             canonical: canonical_value_from_tagged_json(&context.value)
                 .map_err(|error| invalid(format!("ENTITY_CONTEXT_VALUE:{height}:{error}")))?,

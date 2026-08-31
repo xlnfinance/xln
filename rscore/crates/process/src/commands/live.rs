@@ -1144,7 +1144,6 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     let profile_routing_fee_ppm = ready.htlc_routing_fee_ppm;
     let profile_routing_base_fee = ready.htlc_routing_base_fee.clone();
     let materializer = CanonicalEntityInfraMaterializer::with_inbound_htlc(
-        ready.entity_context_policy,
         xln_rscore_runtime::InboundHtlcInfrastructure {
             entity_encryption_public_key,
             entity_encryption_private_key,

@@ -16,10 +16,9 @@ mod policy;
 pub use fresh::{
     CanonicalEntityInfraMaterializer, EntityInfraMaterializeRequest, EntityInfraMaterializer,
     FreshEntityContextError, InboundHtlcInfrastructure, MaterializedEntityInfraContext,
-    materialize_fresh_entity_context,
 };
-pub(crate) use policy::entity_context_policy_from_core;
-pub use policy::{canonical_swap_market_policy, entity_context_policy_from_checkpoint};
+pub(crate) use policy::apply_entity_state_policy;
+pub use policy::canonical_swap_market_policy;
 
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -56,6 +55,23 @@ pub fn decode_entity_deterministic_context(
     decoded.prepared_htlcs = prepared_htlcs;
     decoded.originated_htlcs = originated_htlcs;
     Ok(decoded)
+}
+
+/// Decode only per-frame prepared context from WAL. Financial policy is not
+/// stored beside the frame: `apply_entity_group` derives it from the current
+/// committed Entity state immediately before execution.
+pub(crate) fn decode_entity_frame_context(
+    context: &Value,
+) -> Result<DeterministicContext, EntityContextJsonError> {
+    let (prepared_htlcs, originated_htlcs) = prepared_context(context)?;
+    Ok(DeterministicContext {
+        minimum_trade_size: BigInt::from(0),
+        swap_taker_fee_bps: 0,
+        jurisdiction_id: None,
+        pair_policies: BTreeMap::new(),
+        prepared_htlcs,
+        originated_htlcs,
+    })
 }
 
 /// Decode the immutable policy once when the live materializer is created.

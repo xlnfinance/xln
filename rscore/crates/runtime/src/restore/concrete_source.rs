@@ -425,13 +425,8 @@ mod tests {
         .expect("verified WAL source");
         assert_eq!(crate::storage::native::runtime_frame_validation_count(), 1);
 
-        let decoded = crate::restore::decode_concrete_runtime_wal_frame(
-            &source,
-            &serde_json::json!({}),
-            0,
-            false,
-        )
-        .expect("decode cached verified frame");
+        let decoded = crate::restore::decode_concrete_runtime_wal_frame(&source, 0, false)
+            .expect("decode cached verified frame");
         assert_eq!(decoded.height, checkpoint.height);
         assert_eq!(decoded.expected_frame_hash, source.validated().frame_hash);
         assert_eq!(crate::storage::native::runtime_frame_validation_count(), 1);

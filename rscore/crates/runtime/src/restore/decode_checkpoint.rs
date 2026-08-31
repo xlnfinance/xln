@@ -9,10 +9,7 @@ use thiserror::Error;
 use xln_rscore_crypto::{address_of_private_key, derive_signer_key};
 use xln_rscore_engine::{BoardDelays, SwapMarketPolicy};
 
-use crate::{
-    RuntimeDurableEnvelope, RuntimeDurableEnvelopeError, RuntimeLimits,
-    entity_context_json::entity_context_policy_from_core,
-};
+use crate::{RuntimeDurableEnvelope, RuntimeDurableEnvelopeError, RuntimeLimits};
 
 use super::concrete_source::{verified_checkpoint_frame, verify_checkpoint_source};
 use super::{
@@ -334,10 +331,6 @@ fn decode_checkpoint(
     let restored_orderbook_accounts = restore_orderbook_accounts(&account_rows);
     let core = object(&graph.core, "entity.core")?;
     let (htlc_routing_fee_ppm, htlc_routing_base_fee) = htlc_infrastructure_state(core)?;
-    let active_jurisdiction = machine
-        .as_object()
-        .and_then(|value| value.get("activeJurisdiction"));
-    let entity_context_policy = entity_context_policy_from_core(&graph.core, active_jurisdiction)?;
     let orderbook = hydrate_orderbook_graph(
         &source.state_rows,
         &owner,
@@ -399,7 +392,6 @@ fn decode_checkpoint(
         entity_consensus,
         entity_signer,
         certified_board_registry,
-        entity_context_policy,
         htlc_routing_fee_ppm,
         htlc_routing_base_fee,
         replica_metadata: metadata.value,

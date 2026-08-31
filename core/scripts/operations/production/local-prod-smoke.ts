@@ -569,6 +569,28 @@ const readRustH1AuthorityHead = (): RustAuthorityHead => {
   return { height, runtimeFrameHash, accountsRoot };
 };
 
+const quiesceRuntime = (port: number, label: string): void => {
+  const maxMs = 5_000;
+  const result = spawnSync('curl', [
+    '-sS', '--max-time', '5', '-X', 'POST',
+    `http://127.0.0.1:${String(port)}/api/control/core/quiesce`,
+  ], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    timeout: maxMs + 500,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `${label}_QUIESCE_FAILED:status=${String(result.status)}:` +
+      `${result.error?.message ?? String(result.stderr || '').trim()}`,
+    );
+  }
+  const payload = JSON.parse(String(result.stdout || '')) as Record<string, unknown>;
+  if (payload['ok'] !== true) {
+    throw new Error(`${label}_QUIESCE_REJECTED:${JSON.stringify(payload)}`);
+  }
+};
+
 const waitForRustH1AuthorityHead = async (): Promise<RustAuthorityHead> => {
   const deadline = Date.now() + 10_000;
   let lastError = 'RUST_H1_AUTHORITY_NOT_READY';
@@ -583,12 +605,36 @@ const waitForRustH1AuthorityHead = async (): Promise<RustAuthorityHead> => {
   throw new Error(lastError);
 };
 
+const waitForStableRustH1AuthorityHead = async (): Promise<RustAuthorityHead> => {
+  const deadline = Date.now() + 5_000;
+  let previous: RustAuthorityHead | null = null;
+  let stableSamples = 0;
+  while (Date.now() < deadline) {
+    const current = readRustH1AuthorityHead();
+    if (
+      previous?.height === current.height &&
+      previous.runtimeFrameHash === current.runtimeFrameHash &&
+      previous.accountsRoot === current.accountsRoot
+    ) {
+      stableSamples += 1;
+      if (stableSamples === 2) return current;
+    } else {
+      stableSamples = 0;
+    }
+    previous = current;
+    await sleep(100);
+  }
+  throw new Error('RUST_H1_AUTHORITY_HEAD_NOT_STABLE');
+};
+
 const runAuthorityCheckpointRestart = async (): Promise<void> => {
   const configured = String(process.env['XLN_LOCAL_PROD_SMOKE_AUTHORITY_RESTART'] ?? '').trim();
   if (!configured) return;
   if (configured !== '1') throw new Error(`LOCAL_PROD_SMOKE_AUTHORITY_RESTART_INVALID:${configured}`);
   if (process.env['XLN_HLT_ENGINE'] === 'rust') {
-    const before = readRustH1AuthorityHead();
+    if (hltWorkloadMode !== 'payments') quiesceRuntime(marketMakerApiPort, 'MARKET_MAKER');
+    const before = await waitForStableRustH1AuthorityHead();
+    quiesceRuntime(nodePortBase, 'RUST_H1_AUTHORITY');
     recordStage('rscore-authority-restart:start', before);
     const processIds = await restartManaged('server');
     const restored = await waitForRustH1AuthorityHead();

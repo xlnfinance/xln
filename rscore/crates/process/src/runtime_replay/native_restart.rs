@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use num_bigint::BigInt;
-use serde_json::Value;
 use xln_rscore_engine::BoardDelays;
 use xln_rscore_runtime::processor::EntityRouteTable;
 use xln_rscore_runtime::restore::{
@@ -26,10 +25,6 @@ pub struct NativeRuntimeReady {
     /// Restore-only diagnostics. They never enter Runtime state or storage.
     pub restore_elapsed: Duration,
     pub restored_wal_frames: usize,
-    /// Static policy derived from the authenticated Entity checkpoint. It is
-    /// used only to materialize each signed Entity context; financial state
-    /// itself remains inside the resident replica and path-keyed checkpoint.
-    pub entity_context_policy: Value,
     pub htlc_routing_fee_ppm: u32,
     pub htlc_routing_base_fee: BigInt,
 }
@@ -124,7 +119,6 @@ fn restore_native_runtime(
     }
     .map_err(|error| format!("RRS_NATIVE_RESTART_CHECKPOINT:{error}"))?;
     let checkpoint_period_frames = decoded.limits.checkpoint_period_frames;
-    let entity_context_policy = decoded.entity_context_policy.clone();
     let htlc_routing_fee_ppm = decoded.htlc_routing_fee_ppm;
     let htlc_routing_base_fee = decoded.htlc_routing_base_fee.clone();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
@@ -139,13 +133,8 @@ fn restore_native_runtime(
     let restored_wal_frames = sources.wal.len();
     for source in sources.wal {
         let finalized_j_height = restored.replica.state.finalized_j_height;
-        let frame = decode_concrete_runtime_wal_frame(
-            &source,
-            &entity_context_policy,
-            finalized_j_height,
-            false,
-        )
-        .map_err(|error| format!("RRS_NATIVE_RESTART_WAL:{}:{error}", source.height()))?;
+        let frame = decode_concrete_runtime_wal_frame(&source, finalized_j_height, false)
+            .map_err(|error| format!("RRS_NATIVE_RESTART_WAL:{}:{error}", source.height()))?;
         reconcile_runtime_input_with_resident_queue(&frame.input, &mut restored.replica.mempool);
         restored = replay_decoded_runtime_wal(restored, vec![frame])
             .map_err(|error| format!("RRS_NATIVE_RESTART_APPLY:{}:{error}", source.height()))?;
@@ -178,7 +167,6 @@ fn restore_native_runtime(
         processor,
         restore_elapsed: restore_started.elapsed(),
         restored_wal_frames,
-        entity_context_policy,
         htlc_routing_fee_ppm,
         htlc_routing_base_fee,
     })

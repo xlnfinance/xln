@@ -41,10 +41,6 @@ pub struct DecodedRuntimeCheckpoint {
     /// Exact Entity-certified peer board registry restored from path-keyed
     /// 0x2a rows and bound to `entity_snapshot.certifiedBoardState`.
     pub certified_board_registry: CertifiedBoardRegistry,
-    /// Exact static Entity execution policy projected once from the
-    /// authenticated checkpoint graph. WAL replay combines it only with each
-    /// frame's independently authenticated prepared-context rows.
-    pub entity_context_policy: Value,
     /// Exact public HTLC fee policy projected from authenticated Entity state.
     /// The Entity encryption public key stays in `entity_snapshot`; the
     /// private key and liveness remain operator/network infrastructure.

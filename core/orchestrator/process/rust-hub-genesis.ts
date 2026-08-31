@@ -1,10 +1,4 @@
-import {
-  getSwapPairOrientation,
-  getSwapPairPolicyForDimensions,
-  getTokenInfo,
-} from '../../account/utils';
 import { requireBoundaryRecord } from '../../protocol/boundary-validation';
-import { HUB_DEFAULT_MIN_TRADE_SIZE, HUB_DEFAULT_SUPPORTED_PAIRS } from '../mesh/mesh-common';
 import {
   parseShardJurisdictions,
   requirePersistedTokenRegistry,
@@ -42,21 +36,6 @@ const resolveRpcUrl = (raw: unknown, rpcUrls: Readonly<Record<number, string>>):
   if (!resolved) throw new Error(`RUST_HUB_GENESIS_RPC_MISSING:${String(index)}`);
   new URL(resolved);
   return resolved;
-};
-
-const pairPolicy = (pairId: string): readonly [string, number, number, string] => {
-  const match = /^(\d+)\/(\d+)$/.exec(pairId);
-  if (!match) throw new Error(`RUST_HUB_GENESIS_PAIR_INVALID:${pairId}`);
-  const tokenA = Number(match[1]);
-  const tokenB = Number(match[2]);
-  const { baseTokenId, quoteTokenId } = getSwapPairOrientation(tokenA, tokenB);
-  const policy = getSwapPairPolicyForDimensions(
-    baseTokenId,
-    quoteTokenId,
-    getTokenInfo(baseTokenId).decimals,
-    getTokenInfo(quoteTokenId).decimals,
-  );
-  return [pairId, policy.priceStepTicks, policy.bookBucketWidthTicks, policy.mmMidPriceTicks.toString()];
 };
 
 export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<string, unknown> => {
@@ -156,12 +135,6 @@ export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<st
         primaryValue['blockTimeMs'],
         `RUST_HUB_GENESIS_BLOCK_TIME:${primaryKey}`,
       ),
-    },
-    entityContextPolicy: {
-      minimumTradeSize: { __xlnType: 'BigInt', value: HUB_DEFAULT_MIN_TRADE_SIZE.toString() },
-      swapTakerFeeBps: 1,
-      jurisdictionId: primaryName,
-      pairPolicies: HUB_DEFAULT_SUPPORTED_PAIRS.map(pairPolicy),
     },
     entityProfile: {
       name,

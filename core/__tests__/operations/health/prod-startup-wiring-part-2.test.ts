@@ -229,6 +229,16 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('restored.canonicalStateHash !== before.canonicalStateHash');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_AUTHORITY_CHECKPOINT_DIVERGED');
     expect(smoke).toContain('HLT_RSCORE_RESTART_CHECKPOINT_OK');
+    const rustRestart = smoke.indexOf("if (process.env['XLN_HLT_ENGINE'] === 'rust') {");
+    const marketMakerQuiesce = smoke.indexOf('quiesceRuntime(marketMakerApiPort', rustRestart);
+    const authorityQuiesce = smoke.indexOf('quiesceRuntime(nodePortBase', rustRestart);
+    const frozenHead = smoke.indexOf('const before = await waitForStableRustH1AuthorityHead()', rustRestart);
+    expect(rustRestart).toBeGreaterThan(0);
+    expect(marketMakerQuiesce).toBeGreaterThan(rustRestart);
+    expect(frozenHead).toBeGreaterThan(marketMakerQuiesce);
+    expect(authorityQuiesce).toBeGreaterThan(frozenHead);
+    expect(smoke).toContain('restored.runtimeFrameHash !== before.runtimeFrameHash');
+    expect(smoke).toContain('restored.accountsRoot !== before.accountsRoot');
   });
 
   test('isolated e2e outer timeout exceeds every declared Playwright test timeout', () => {

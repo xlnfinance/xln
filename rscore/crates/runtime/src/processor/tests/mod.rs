@@ -471,15 +471,7 @@ fn local_prepare_dispute_freezes_the_existing_account_in_its_durable_runtime_fra
     let mut service = ResidentRuntimeService::new(
         processor,
         ingress,
-        Box::new(
-            CanonicalEntityInfraMaterializer::new(json!({
-                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-                "swapTakerFeeBps": 0,
-                "jurisdictionId": null,
-                "pairPolicies": [],
-            }))
-            .expect("local prepare materializer"),
-        ),
+        Box::new(CanonicalEntityInfraMaterializer::new()),
     )
     .expect("local prepare service");
 
@@ -608,13 +600,7 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("durable processor");
-    let mut materializer = CanonicalEntityInfraMaterializer::new(json!({
-        "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-        "swapTakerFeeBps": 0,
-        "jurisdictionId": null,
-        "pairPolicies": []
-    }))
-    .expect("valid materializer policy");
+    let mut materializer = CanonicalEntityInfraMaterializer::new();
     let mut report = processor
         .process_live(input, &mut materializer)
         .expect("selected context then fsynced Runtime frame");
@@ -665,15 +651,7 @@ fn two_authenticated_socket_messages_coalesce_into_one_durable_runtime_frame() {
     let mut service = ResidentRuntimeService::new(
         target_processor,
         ingress,
-        Box::new(
-            CanonicalEntityInfraMaterializer::new(json!({
-                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-                "swapTakerFeeBps": 0,
-                "jurisdictionId": null,
-                "pairPolicies": []
-            }))
-            .expect("valid materializer policy"),
-        ),
+        Box::new(CanonicalEntityInfraMaterializer::new()),
     )
     .expect("single live service");
     assert_eq!(service.runtime_id(), target_runtime_id);
@@ -870,15 +848,7 @@ fn live_service_resends_the_durable_outbox_before_accepting_input() {
     let mut service = ResidentRuntimeService::new(
         processor,
         ingress,
-        Box::new(
-            CanonicalEntityInfraMaterializer::new(json!({
-                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-                "swapTakerFeeBps": 0,
-                "jurisdictionId": null,
-                "pairPolicies": []
-            }))
-            .expect("valid materializer policy"),
-        ),
+        Box::new(CanonicalEntityInfraMaterializer::new()),
     )
     .expect("startup resend before ready");
     server.wait_for_rows(1);
@@ -960,15 +930,7 @@ fn restart_stages_inbound_only_outbox_without_blocking_new_input() {
     let mut service = ResidentRuntimeService::new(
         processor,
         ingress,
-        Box::new(
-            CanonicalEntityInfraMaterializer::new(json!({
-                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
-                "swapTakerFeeBps": 0,
-                "jurisdictionId": null,
-                "pairPolicies": []
-            }))
-            .expect("valid materializer policy"),
-        ),
+        Box::new(CanonicalEntityInfraMaterializer::new()),
     )
     .expect("restart without dialing the user");
     assert!(!service.processor().has_pending_publication());

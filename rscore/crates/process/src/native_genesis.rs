@@ -36,7 +36,6 @@ pub struct NativeGenesisConfig {
     pub timestamp: u64,
     pub machine: Value,
     pub entity_authority_jurisdiction: Option<CanonicalValue>,
-    pub entity_context_policy: Value,
     pub entity_profile: EntityProfile,
     pub entity_encryption_public_key: [u8; 32],
     pub htlc_routing_fee_ppm: u32,
@@ -60,7 +59,6 @@ impl NativeGenesisConfig {
                 "timestamp",
                 "machine",
                 "entityAuthorityJurisdiction",
-                "entityContextPolicy",
                 "entityProfile",
                 "entityEncryptionPublicKey",
                 "htlcRoutingFeePpm",
@@ -78,7 +76,6 @@ impl NativeGenesisConfig {
                         .map_err(|error| format!("RRS_NATIVE_GENESIS_JURISDICTION:{error}"))?,
                 ),
             };
-        let entity_context_policy = required(root, "entityContextPolicy", "ROOT")?.clone();
         let entity_profile = decode_entity_profile(required(root, "entityProfile", "ROOT")?)?;
         let entity_encryption_public_key = decode_hex32(
             required(root, "entityEncryptionPublicKey", "ROOT")?,
@@ -98,7 +95,6 @@ impl NativeGenesisConfig {
             timestamp,
             machine,
             entity_authority_jurisdiction,
-            entity_context_policy,
             entity_profile,
             entity_encryption_public_key,
             htlc_routing_fee_ppm,
@@ -377,7 +373,6 @@ pub fn create_native_genesis_runtime_processor(
         processor,
         restore_elapsed: started.elapsed(),
         restored_wal_frames: 0,
-        entity_context_policy: genesis.entity_context_policy,
         htlc_routing_fee_ppm: genesis.htlc_routing_fee_ppm,
         htlc_routing_base_fee: genesis.htlc_routing_base_fee,
     })
@@ -403,7 +398,6 @@ mod tests {
             "timestamp": 0,
             "machine": {},
             "entityAuthorityJurisdiction": null,
-            "entityContextPolicy": {},
             "entityProfile": {
                 "name": "H1",
                 "isHub": true,
