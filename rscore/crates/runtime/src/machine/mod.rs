@@ -20,9 +20,8 @@ pub(crate) use types::materialization_due;
 pub use types::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
     RewindJHistory, RuntimeAdapterCommandMarker, RuntimeApplyResult, RuntimeEntityFrameContext,
-    RuntimeEntityInit, RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs,
-    RuntimeEntityReplica, RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext,
-    RuntimeFrameTouches, RuntimeInput, RuntimeLimits, RuntimeLiveInput, RuntimeMachineError,
-    RuntimeMempool, RuntimeOutputs, RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx,
-    RuntimeWake,
+    RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs, RuntimeEntityReplica,
+    RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
+    RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeOutputs,
+    RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx, RuntimeWake,
 };

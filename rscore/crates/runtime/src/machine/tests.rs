@@ -17,10 +17,9 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::{EntityInfraMaterializeRequest, materialize_fresh_entity_context};
 
 use super::{
-    RuntimeEntityInit, RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityState,
-    RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeMachineError, RuntimeMempool,
-    RuntimeReplica, RuntimeState, RuntimeTx, apply_runtime, materialization_due,
-    select_runtime_frame,
+    RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityState, RuntimeFrameContext, RuntimeInput,
+    RuntimeLimits, RuntimeMachineError, RuntimeMempool, RuntimeReplica, RuntimeState, RuntimeTx,
+    apply_runtime, materialization_due, select_runtime_frame,
 };
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
@@ -68,133 +67,6 @@ pub(super) fn entity_signer_id() -> String {
         value.push_str(&format!("{byte:02x}"));
     }
     value
-}
-
-fn empty_entity_slot(
-    signer_label: &str,
-) -> Result<(RuntimeEntityKey, RuntimeEntityState, RuntimeEntityInit), RuntimeMachineError> {
-    let identity = fixture(SigningIdentity::lazy_from_seed(
-        SEED,
-        signer_label,
-        1,
-        1,
-        BoardDelays::default(),
-    ));
-    let entity_id = *identity.entity_id();
-    let signer_key = fixture(derive_signer_key(SEED, signer_label));
-    let signer_id = hex32_address(fixture(
-        address_of_private_key(&signer_key).ok_or("signer address"),
-    ));
-    let accounts = ResidentConsensusEngine::restore(
-        EngineGeneration::from_bytes([signer_label.len() as u8; 8]),
-        1,
-        0,
-        signer_key,
-        signer_id.clone(),
-        Arc::new(SwapMarketPolicy::default()),
-        Vec::new(),
-    )
-    .map_err(|error| {
-        RuntimeMachineError::Entity(xln_rscore_entity_kernel::ResidentEntityError::Account(
-            error,
-        ))
-    })?;
-    let accounts_root = accounts.accounts_root();
-    let entity = EntityStateSlice::empty(hex32(entity_id), 100);
-    let authority = EntityFrameAuthority {
-        config: EntityConsensusConfig {
-            mode: ConsensusMode::ProposerBased,
-            threshold: 1,
-            validators: vec![signer_id.clone()],
-            shares: BTreeMap::from([(signer_id.clone(), 1)]),
-            jurisdiction: None,
-        },
-        leader_state: EntityLeaderState {
-            active_validator_id: signer_id.clone(),
-            view: 0,
-            changed_at_height: 0,
-        },
-    };
-    let entity_consensus = ResidentEntityConsensusReplica {
-        state: EntityConsensusState {
-            sections: Vec::new(),
-            authority,
-        },
-        certified_frame_head: None,
-    };
-    let entity_signer = fixture(EntitySingleSigner::from_key(
-        signer_key,
-        &signer_id,
-        &entity.entity_id,
-        1,
-        1,
-        BoardDelays::default(),
-    ));
-    let key = RuntimeEntityKey::new(entity_id, &signer_id)?;
-    Ok((
-        key,
-        RuntimeEntityState {
-            accounts_root,
-            entity,
-        },
-        RuntimeEntityInit {
-            entity_id,
-            signer_id,
-            accounts,
-            entity_consensus,
-            entity_signer,
-            protocol_fingerprint: [0x44; 32],
-        },
-    ))
-}
-
-fn hex32_address(bytes: [u8; 20]) -> String {
-    let mut value = String::from("0x");
-    for byte in bytes {
-        value.push_str(&format!("{byte:02x}"));
-    }
-    value
-}
-
-#[test]
-fn runtime_constructor_requires_one_live_slot_per_committed_entity() {
-    let (first_key, first_state, first) = fixture(empty_entity_slot("entity-a"));
-    let (second_key, second_state, _second) = fixture(empty_entity_slot("entity-b"));
-    let incomplete = RuntimeReplica::new(
-        RuntimeState {
-            height: 0,
-            timestamp: 100,
-            finalized_j_height: 0,
-            e_replicas: BTreeMap::from([(first_key, first_state), (second_key, second_state)]),
-        },
-        crate::processor::RuntimeDurableEnvelope::fixture(),
-        vec![first],
-        SEED.to_string(),
-        RuntimeLimits::hlt(),
-    );
-    assert!(matches!(
-        incomplete,
-        Err(RuntimeMachineError::EntityStateMap(detail)) if detail == "SLOT_COUNT:1:2"
-    ));
-
-    let (first_key, first_state, first) = fixture(empty_entity_slot("entity-a"));
-    let (second_key, second_state, second) = fixture(empty_entity_slot("entity-b"));
-    let complete_state = RuntimeState {
-        height: 0,
-        timestamp: 100,
-        finalized_j_height: 0,
-        e_replicas: BTreeMap::from([(first_key, first_state), (second_key, second_state)]),
-    };
-    let replica = RuntimeReplica::new(
-        complete_state,
-        crate::processor::RuntimeDurableEnvelope::fixture(),
-        vec![first, second],
-        SEED.to_string(),
-        RuntimeLimits::hlt(),
-    )
-    .expect("complete multi-Entity Runtime");
-    assert_eq!(replica.e_replicas.len(), 2);
-    assert_eq!(replica.state.e_replicas.len(), 2);
 }
 
 pub(crate) fn replica(limits: RuntimeLimits) -> Result<RuntimeReplica, RuntimeMachineError> {
@@ -290,14 +162,12 @@ pub(crate) fn replica_with_deltas(
             )]),
         },
         crate::processor::RuntimeDurableEnvelope::fixture(),
-        vec![super::RuntimeEntityInit {
-            entity_id: owner,
-            signer_id: entity_signer_id,
-            accounts,
-            entity_consensus,
-            entity_signer,
-            protocol_fingerprint: [0; 32],
-        }],
+        owner,
+        entity_signer_id,
+        accounts,
+        entity_consensus,
+        entity_signer,
+        [0; 32],
         SEED.to_string(),
         limits,
     )

@@ -33,8 +33,6 @@ fn profile_entity_context() -> bool {
 
 #[derive(Debug, Error)]
 pub enum FreshEntityContextError {
-    #[error("RRS_FRESH_CONTEXT_ENTITY_POLICY_MISSING:{0}")]
-    EntityPolicyMissing(String),
     #[error("RRS_FRESH_CONTEXT_HEIGHT_OVERFLOW")]
     HeightOverflow,
     #[error("RRS_FRESH_CONTEXT_HEIGHT_UNSAFE:{0}")]
@@ -260,65 +258,6 @@ pub struct CanonicalEntityInfraMaterializer {
     policy: DeterministicContext,
     inbound_htlc: Option<InboundHtlcInfrastructure>,
     paybook_reachability: Option<(EntityRouteTable, InboundSessionTable)>,
-}
-
-/// One canonical live context materializer per local Entity, selected by the
-/// committed Entity id already present in the Runtime apply request.  This is
-/// process configuration only: no policy or key is copied into Runtime state,
-/// and replay still consumes the exact context committed in each frame.
-pub struct CanonicalMultiEntityInfraMaterializer {
-    by_entity: BTreeMap<String, CanonicalEntityInfraMaterializer>,
-}
-
-impl CanonicalMultiEntityInfraMaterializer {
-    pub fn new(
-        entries: impl IntoIterator<Item = (String, Value, InboundHtlcInfrastructure)>,
-    ) -> Result<Self, FreshEntityContextError> {
-        let mut by_entity = BTreeMap::new();
-        for (entity_id, policy, infrastructure) in entries {
-            let entity_id = entity_id.trim().to_ascii_lowercase();
-            if entity_id.is_empty()
-                || by_entity
-                    .insert(
-                        entity_id.clone(),
-                        CanonicalEntityInfraMaterializer::with_inbound_htlc(
-                            policy,
-                            infrastructure,
-                        )?,
-                    )
-                    .is_some()
-            {
-                return Err(FreshEntityContextError::EntityPolicyMissing(entity_id));
-            }
-        }
-        if by_entity.is_empty() {
-            return Err(FreshEntityContextError::EntityPolicyMissing(String::new()));
-        }
-        Ok(Self { by_entity })
-    }
-}
-
-impl EntityInfraMaterializer for CanonicalMultiEntityInfraMaterializer {
-    fn set_paybook_reachability(
-        &mut self,
-        routes: EntityRouteTable,
-        sessions: InboundSessionTable,
-    ) {
-        for materializer in self.by_entity.values_mut() {
-            materializer.set_paybook_reachability(routes.clone(), sessions.clone());
-        }
-    }
-
-    fn materialize(
-        &mut self,
-        request: EntityInfraMaterializeRequest<'_>,
-    ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
-        let entity_id = request.state.entity.entity_id.trim().to_ascii_lowercase();
-        self.by_entity
-            .get_mut(&entity_id)
-            .ok_or(FreshEntityContextError::EntityPolicyMissing(entity_id))?
-            .materialize(request)
-    }
 }
 
 impl CanonicalEntityInfraMaterializer {
@@ -547,59 +486,6 @@ mod tests {
             }
             .validate(),
             Err(FreshEntityContextError::HtlcInfrastructureInvalid(_))
-        ));
-    }
-
-    #[test]
-    fn multi_entity_materializer_requires_unique_complete_entity_keys() {
-        let infrastructure = |byte: u8| {
-            let private_key = [byte; 32];
-            InboundHtlcInfrastructure {
-                entity_encryption_public_key: *PublicKey::from(&StaticSecret::from(private_key))
-                    .as_bytes(),
-                entity_encryption_private_key: private_key,
-                routing_fee_ppm: 1,
-                routing_base_fee: BigInt::from(0),
-            }
-        };
-        let policy = || {
-            json!({
-                "minimumTradeSize": {"__xlnType":"BigInt","value":"1"},
-                "swapTakerFeeBps": 1,
-                "jurisdictionId": "test",
-                "pairPolicies": [],
-            })
-        };
-        let materializer = CanonicalMultiEntityInfraMaterializer::new([
-            (
-                format!("0x{}", "11".repeat(32)),
-                policy(),
-                infrastructure(1),
-            ),
-            (
-                format!("0x{}", "22".repeat(32)),
-                policy(),
-                infrastructure(2),
-            ),
-        ])
-        .expect("two Entity policies");
-        assert_eq!(materializer.by_entity.len(), 2);
-
-        let duplicate = CanonicalMultiEntityInfraMaterializer::new([
-            (
-                format!("0x{}", "11".repeat(32)),
-                policy(),
-                infrastructure(1),
-            ),
-            (
-                format!("0x{}", "11".repeat(32)),
-                policy(),
-                infrastructure(2),
-            ),
-        ]);
-        assert!(matches!(
-            duplicate,
-            Err(FreshEntityContextError::EntityPolicyMissing(_))
         ));
     }
 

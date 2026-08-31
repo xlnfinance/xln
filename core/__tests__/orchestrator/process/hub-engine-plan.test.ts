@@ -151,8 +151,7 @@ test('Rust H1 genesis is explicit native machine configuration, not imported sta
   const genesis = buildRustHubGenesisConfig({
     name: 'H1',
     runtimeId: address('1'),
-    primaryEntitySignerLabel: 'hub-1',
-    entityEncryptionPublicKeys: { Testnet: `0x${'22'.repeat(32)}` },
+    entityEncryptionPublicKey: `0x${'22'.repeat(32)}`,
     jurisdictionsJson: safeStringify({
       jurisdictions: {
         arrakis: {
@@ -173,62 +172,15 @@ test('Rust H1 genesis is explicit native machine configuration, not imported sta
     minFrameDelayMs: 5,
   }) as {
     machine: { runtimeId: string; activeJurisdiction: string; jReplicas: unknown[] };
-    entities: Array<{
-      signerLabel: string;
-      primary: boolean;
-      contextPolicy: { pairPolicies: unknown[] };
-      profile: { name: string; isHub: boolean };
-    }>;
+    entityContextPolicy: { pairPolicies: unknown[] };
+    entityProfile: { name: string; isHub: boolean };
   };
   expect(genesis.machine.runtimeId).toBe(address('1'));
   expect(genesis.machine.activeJurisdiction).toBe('Testnet');
   expect(genesis.machine.jReplicas).toHaveLength(1);
   expect(safeStringify(genesis.machine.jReplicas)).toContain('tokenRegistry');
-  expect(genesis.entities).toHaveLength(1);
-  expect(genesis.entities[0]?.signerLabel).toBe('hub-1');
-  expect(genesis.entities[0]?.primary).toBe(true);
-  expect(genesis.entities[0]?.contextPolicy.pairPolicies).toHaveLength(3);
-  expect(genesis.entities[0]?.profile).toMatchObject({ name: 'H1', isHub: true });
+  expect(genesis.entityContextPolicy.pairPolicies).toHaveLength(3);
+  expect(genesis.entityProfile).toMatchObject({ name: 'H1', isHub: true });
   expect(safeStringify(genesis)).not.toContain('checkpoint');
   expect(safeStringify(genesis)).not.toContain('import');
-});
-
-test('Rust H1 genesis creates one canonical Entity per active jurisdiction', () => {
-  const address = (byte: string): string => `0x${byte.repeat(40)}`;
-  const jurisdiction = (name: string, chainId: number, rpc: string, primary: boolean) => ({
-    name, primary, status: 'active', chainId, rpc, blockTimeMs: 10_000,
-    entityProviderDeploymentBlock: 3,
-    contracts: {
-      account: address('3'), depository: address('4'),
-      entityProvider: address('5'), deltaTransformer: address('6'),
-    },
-    tokenRegistry: [{
-      symbol: 'USDC', name: 'USD Coin', address: address('7'), decimals: 6,
-      tokenId: 1, tokenType: 0, externalTokenId: '0',
-    }],
-  });
-  const genesis = buildRustHubGenesisConfig({
-    name: 'H1',
-    runtimeId: address('1'),
-    primaryEntitySignerLabel: 'hub-1',
-    entityEncryptionPublicKeys: {
-      Testnet: `0x${'22'.repeat(32)}`,
-      Sibling: `0x${'33'.repeat(32)}`,
-    },
-    jurisdictionsJson: safeStringify({
-      jurisdictions: {
-        arrakis: jurisdiction('Testnet', 31337, '/rpc', true),
-        sibling: jurisdiction('Sibling', 31338, '/rpc2', false),
-      },
-    }),
-    rpcUrls: {
-      1: 'http://127.0.0.1:8545',
-      2: 'http://127.0.0.1:8546',
-    },
-    minFrameDelayMs: 0,
-  }) as { entities: Array<{ signerLabel: string; primary: boolean }> };
-  expect(genesis.entities).toEqual([
-    expect.objectContaining({ signerLabel: 'hub-1', primary: true }),
-    expect.objectContaining({ signerLabel: 'hub-1:Sibling', primary: false }),
-  ]);
 });
