@@ -13,7 +13,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use xln_rscore_protocol::{
     CanonicalNumber, CanonicalValue, PersistentNodeChanges, PersistentNodeRecord,
-    PersistentRadixMap, encode_account_state_value, encode_raw_text_key,
+    PersistentRadixMap, RlpWriter, encode_account_state_value, encode_raw_text_key,
+    write_account_state_value,
 };
 
 use crate::state::delta::MAX_ACCOUNT_TOKEN_ROWS;
@@ -1193,8 +1194,16 @@ fn delta_digest(delta: &Delta) -> Result<[u8; 32], StateError> {
 }
 
 fn canonical_digest(value: CanonicalValue) -> Result<[u8; 32], StateError> {
-    let bytes = encode_account_state_leaf(&value)?;
-    Ok(Sha256::digest(bytes).into())
+    // This is the mutation-side leaf commitment used by every Account radix
+    // section. The legacy allocating encoder built and recopied one Vec per
+    // nested scalar before hashing it. The canonical streaming writer emits
+    // the exact same RLP bytes into one buffer; keep the size admission here
+    // so switching encoders cannot weaken the Account leaf bound.
+    let mut writer = RlpWriter::with_capacity(256);
+    write_account_state_value(&mut writer, &value)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))?;
+    validate_account_state_leaf_size(writer.as_slice().len())?;
+    Ok(Sha256::digest(writer.as_slice()).into())
 }
 
 pub(crate) fn encode_account_state_leaf(value: &CanonicalValue) -> Result<Vec<u8>, StateError> {
@@ -1256,8 +1265,9 @@ fn decode_token_radix_key(key: &[u8]) -> Result<TokenId, StateError> {
 
 #[cfg(test)]
 mod leaf_limit_tests {
-    use super::{MAX_ACCOUNT_STATE_LEAF_BYTES, encode_account_state_leaf};
+    use super::{MAX_ACCOUNT_STATE_LEAF_BYTES, canonical_digest, encode_account_state_leaf};
     use crate::StateError;
+    use sha2::{Digest, Sha256};
     use xln_rscore_protocol::{CanonicalValue, encode_account_state_value};
 
     fn encoded_string_with_size(target: usize) -> CanonicalValue {
@@ -1285,6 +1295,19 @@ mod leaf_limit_tests {
                 actual: 10_001,
                 maximum: 10_000,
             })
+        );
+    }
+
+    #[test]
+    fn streaming_leaf_digest_matches_canonical_allocating_bytes() {
+        let value = CanonicalValue::Object(vec![
+            ("amount".into(), CanonicalValue::BigInt(42.into())),
+            ("kind".into(), CanonicalValue::String("payment".into())),
+        ]);
+        let bytes = encode_account_state_leaf(&value).expect("canonical bytes");
+        assert_eq!(
+            canonical_digest(value).expect("streaming digest"),
+            <[u8; 32]>::from(Sha256::digest(bytes)),
         );
     }
 }
