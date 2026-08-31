@@ -19,9 +19,9 @@ use xln_rscore_entity_kernel::{
     build_collective_entity_command, build_proposer_materializations,
     build_required_j_prefix_certificate, certify_entity_transition,
     collect_due_scheduled_wake_jobs, current_entity_command_board_hash, decode_local_entity_tx,
-    measure_entity_frame_tx_bytes, measure_entity_frame_wire, normalize_entity_command_nonce_board,
-    proposer_materialization_account_view_requests, proposer_materialization_key,
-    resolve_board_handover_authority, sign_j_event_range,
+    encode_entity_frame_context, measure_entity_frame_tx_bytes, measure_entity_frame_wire,
+    normalize_entity_command_nonce_board, proposer_materialization_account_view_requests,
+    proposer_materialization_key, resolve_board_handover_authority, sign_j_event_range,
 };
 use xln_rscore_protocol::CanonicalValue;
 
@@ -1039,7 +1039,7 @@ fn measure_prepared_entity_prefix(
     slot: &EntityApplySlot,
     frame: &RuntimeFrameContext,
     prepared: &PreparedEntityPrefix<'_>,
-    entity_context: &CanonicalValue,
+    entity_context_bytes: &[u8],
     j_prefix_certificate: Option<&CanonicalValue>,
 ) -> Result<xln_rscore_entity_kernel::EntityFrameWireMeasure, RuntimeMachineError> {
     const DUMMY_ROOT: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -1068,7 +1068,7 @@ fn measure_prepared_entity_prefix(
         entity_id: &slot.state.entity.entity_id,
         state_root: DUMMY_ROOT,
         authority_root: DUMMY_ROOT,
-        entity_context,
+        entity_context_bytes,
         j_prefix_certificate,
     })
     .map_err(EntityTransitionError::from)
@@ -1269,10 +1269,13 @@ fn fit_replay_entity_prefix(
     frame: &RuntimeFrameContext,
     entity_context: &CanonicalValue,
     j_prefix_certificate: Option<&CanonicalValue>,
-) -> Result<usize, RuntimeMachineError> {
+) -> Result<(usize, Vec<u8>), RuntimeMachineError> {
     let (mut candidate, required) = replay_compatible_prefix(work, entity_context)?;
+    let entity_context_bytes = encode_entity_frame_context(entity_context)
+        .map_err(EntityTransitionError::from)
+        .map_err(RuntimeMachineError::from)?;
     if work.is_empty() {
-        return Ok(0);
+        return Ok((0, entity_context_bytes));
     }
     if candidate == 0 {
         return Err(RuntimeMachineError::HeadWireUnfittable {
@@ -1286,7 +1289,7 @@ fn fit_replay_entity_prefix(
             slot,
             frame,
             &prepared,
-            entity_context,
+            &entity_context_bytes,
             j_prefix_certificate,
         )?;
         if measured.total_bytes <= MAX_ENTITY_PROPOSAL_WIRE_BYTES
@@ -1298,7 +1301,7 @@ fn fit_replay_entity_prefix(
                     limit: required,
                 });
             }
-            return Ok(candidate);
+            return Ok((candidate, entity_context_bytes));
         }
         let ratio = (MAX_ENTITY_PROPOSAL_WIRE_BYTES as f64 / measured.total_bytes as f64)
             .min(MAX_ENTITY_FRAME_TX_BYTES as f64 / measured.tx_bytes.max(1) as f64);
@@ -1323,7 +1326,7 @@ fn fit_live_entity_prefix(
     frame: &RuntimeFrameContext,
     materializer: &mut dyn EntityInfraMaterializer,
     j_prefix_certificate: Option<&CanonicalValue>,
-) -> Result<(usize, MaterializedEntityInfraContext), RuntimeMachineError> {
+) -> Result<(usize, MaterializedEntityInfraContext, Vec<u8>), RuntimeMachineError> {
     let fit_started = Instant::now();
     let prepare_started = Instant::now();
     let mut prepared = prepare_entity_prefix(slot, work.iter(), Some(MAX_ENTITY_FRAME_TX_BYTES))?;
@@ -1346,11 +1349,14 @@ fn fit_live_entity_prefix(
     for _ in 0..16 {
         attempts += 1;
         let measure_started = Instant::now();
+        let entity_context_bytes = encode_entity_frame_context(&materialized.canonical)
+            .map_err(EntityTransitionError::from)
+            .map_err(RuntimeMachineError::from)?;
         let measured = measure_prepared_entity_prefix(
             slot,
             frame,
             &prepared,
-            &materialized.canonical,
+            &entity_context_bytes,
             j_prefix_certificate,
         )?;
         measure_elapsed = measure_elapsed.saturating_add(measure_started.elapsed());
@@ -1376,7 +1382,7 @@ fn fit_live_entity_prefix(
                     measured.total_bytes,
                 );
             }
-            return Ok((candidate, materialized));
+            return Ok((candidate, materialized, entity_context_bytes));
         }
         if candidate <= 1 {
             return Err(RuntimeMachineError::HeadWireUnfittable {
@@ -2166,9 +2172,9 @@ fn apply_entity_group(
     enqueue_proposer_materializations(&mut slot, proposer_runtime_seed)?;
 
     let mut entity_mempool = std::mem::take(&mut slot.replica.entity_mempool);
-    let (selected_count, mut context) = match materializer.as_deref_mut() {
+    let (selected_count, mut context, entity_context_bytes) = match materializer.as_deref_mut() {
         Some(materializer) => {
-            let (count, materialized) = fit_live_entity_prefix(
+            let (count, materialized, entity_context_bytes) = fit_live_entity_prefix(
                 &mut slot,
                 &entity_mempool,
                 frame,
@@ -2181,6 +2187,7 @@ fn apply_entity_group(
                     execution: materialized.execution,
                     canonical: materialized.canonical,
                 },
+                entity_context_bytes,
             )
         }
         None => {
@@ -2194,7 +2201,7 @@ fn apply_entity_group(
                         render_word(&group.entity_id)
                     ))
                 })?;
-            let count = fit_replay_entity_prefix(
+            let (count, entity_context_bytes) = fit_replay_entity_prefix(
                 &slot,
                 &entity_mempool,
                 frame,
@@ -2210,7 +2217,7 @@ fn apply_entity_group(
                         "ENTITY_REPLAY_CONTEXT_CONSUME".into(),
                     )
                 })?;
-            (count, context)
+            (count, context, entity_context_bytes)
         }
     };
     let selected = take_entity_prefix(&slot, &mut entity_mempool, selected_count)?;
@@ -2401,6 +2408,7 @@ fn apply_entity_group(
             txs: selected.txs,
             events: std::mem::take(&mut core.entity_frame_events),
             entity_context: &context.canonical,
+            entity_context_bytes,
             j_prefix_certificate: fit_j_prefix_certificate,
             post_authority,
             secondary_hashes: std::mem::take(&mut core.secondary_hashes),
@@ -3195,8 +3203,9 @@ mod tests {
                 }]),
             )]),
         };
-        let selected = fit_replay_entity_prefix(&slot, &work, &frame, &canonical_context, None)
-            .expect("bounded prefix");
+        let (selected, _) =
+            fit_replay_entity_prefix(&slot, &work, &frame, &canonical_context, None)
+                .expect("bounded prefix");
         assert_eq!(selected, 1);
         assert_eq!(
             prepare_entity_prefix(&slot, work.iter(), Some(super::MAX_ENTITY_FRAME_TX_BYTES),)

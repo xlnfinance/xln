@@ -107,7 +107,6 @@ type RuntimeIngressDecision =
 const collectRuntimeIngress = async (
   env: RuntimeReplica,
   inputs: EntityInput[] | undefined,
-  runtimeDelay: number,
   profile: RuntimeProcessProfile,
   deps: RuntimeProcessDeps,
 ): Promise<RuntimeIngressDecision> => {
@@ -139,7 +138,7 @@ const collectRuntimeIngress = async (
 
   if (!loop.hasRuntimeWork(env)) return { ready: false, outcome: 'no-work' };
   const gateTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
-  if (!loop.isRuntimeFrameReady(env, gateTimestamp, runtimeDelay)) {
+  if (!loop.isRuntimeFrameReady(env, gateTimestamp)) {
     return { ready: false, outcome: 'not-ready' };
   }
   profile.mark('frameReady');
@@ -641,12 +640,11 @@ const applyAndCommitRuntimeFrame = async (
 export const createRuntimeProcessor = (deps: RuntimeProcessDeps) => (
   env: RuntimeReplica,
   inputs?: EntityInput[],
-  runtimeDelay = 0,
 ): Promise<RuntimeReplica> => {
   const runtimeScope = String(env.runtimeId ?? env.dbNamespace ?? 'unknown').trim().toLowerCase();
   return runWithOpScopes(
     ['frame', `runtime:${runtimeScope || 'unknown'}`],
-    () => processRuntimeFrameOnce(deps, env, inputs, runtimeDelay),
+    () => processRuntimeFrameOnce(deps, env, inputs),
   );
 };
 
@@ -654,7 +652,6 @@ const processRuntimeFrameOnce = async (
   deps: RuntimeProcessDeps,
   env: RuntimeReplica,
   inputs: EntityInput[] | undefined,
-  runtimeDelay: number,
 ): Promise<RuntimeReplica> => {
   const liveEnv = env;
   deps.loop.ensureRuntimeConfig(env);
@@ -674,12 +671,11 @@ const processRuntimeFrameOnce = async (
       env,
       undefined,
       processState,
-      runtimeDelay,
       profile,
       {
         attachEventEmitters: deps.attachEventEmitters,
-        collectIngress: (target, queued, _state, delay, processProfile) =>
-          collectRuntimeIngress(target, queued, delay, processProfile, deps),
+        collectIngress: (target, queued, _state, processProfile) =>
+          collectRuntimeIngress(target, queued, processProfile, deps),
       },
     );
     if (!started.ready) return env;

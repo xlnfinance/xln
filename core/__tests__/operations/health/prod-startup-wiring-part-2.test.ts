@@ -12,8 +12,7 @@ import {
   applyHubRuntimeFrameDelay,
   buildHubChildProcessEnv,
   buildHubEngineArgs,
-  DEFAULT_HUB_RUNTIME_FRAME_PERIOD_MS,
-  readHubSteadyRuntimeFramePeriodMs,
+  resolveHubRuntimeFrameDelayMs,
 } from '../../../orchestrator/process/hub-runtime-env';
 import { buildRuntimeChildGcEnv } from '../../../support/process/runtime-gc-env';
 
@@ -75,31 +74,25 @@ describe('production startup wiring', () => {
     });
   });
 
-  test('Hub child drains by default and activates an explicit steady start period after bootstrap', () => {
+  test('Hub child uses one Runtime frame delay from genesis through steady load', () => {
     const orchestrator = readOrchestratorSource();
     const inherited = applyHubRuntimeFrameDelay({
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20',
       XLN_UNRELATED_SETTING: 'kept',
     }, undefined);
-    expect(inherited['XLN_RUNTIME_MIN_FRAME_DELAY_MS']).toBe('0');
-    expect(inherited['XLN_HUB_STEADY_FRAME_PERIOD_MS']).toBe(
-      String(DEFAULT_HUB_RUNTIME_FRAME_PERIOD_MS),
-    );
+    expect(inherited['XLN_RUNTIME_MIN_FRAME_DELAY_MS']).toBe('20');
     expect(inherited['XLN_UNRELATED_SETTING']).toBe('kept');
     expect(applyHubRuntimeFrameDelay(inherited, '100')).toMatchObject({
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
-      XLN_HUB_STEADY_FRAME_PERIOD_MS: '100',
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '100',
       XLN_UNRELATED_SETTING: 'kept',
     });
     expect(applyHubRuntimeFrameDelay(inherited, '0')).toMatchObject({
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
-      XLN_HUB_STEADY_FRAME_PERIOD_MS: '0',
       XLN_UNRELATED_SETTING: 'kept',
     });
-    expect(readHubSteadyRuntimeFramePeriodMs(inherited)).toBe(0);
-    expect(() => readHubSteadyRuntimeFramePeriodMs({
-      XLN_HUB_STEADY_FRAME_PERIOD_MS: '-1',
-    })).toThrow('HUB_STEADY_FRAME_PERIOD_MS_INVALID:-1');
+    expect(resolveHubRuntimeFrameDelayMs({}, undefined)).toBe(0);
+    expect(() => resolveHubRuntimeFrameDelayMs({}, '-1'))
+      .toThrow('RUNTIME_MIN_FRAME_DELAY_MS_INVALID:-1');
     expect(orchestrator).toContain('env: sanitizeChildProcessEnv(buildHubChildProcessEnv({');
     expect(buildHubEngineArgs('h1', {
       XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
@@ -137,8 +130,7 @@ describe('production startup wiring', () => {
       XLN_RSCORE_PROFILE_PROJECTION: '1',
       XLN_HLT_ENGINE: 'rust',
       XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
-      XLN_HUB_STEADY_FRAME_PERIOD_MS: '25',
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '25',
     });
   });
 

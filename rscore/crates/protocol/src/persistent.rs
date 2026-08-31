@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+#[cfg(test)]
+use crate::persistent_node::hash_materialization;
 use crate::persistent_node::{
     Node, NodeRef, delete_node, ensure_root_branch, make_branch, make_leaf, node_hash, node_path,
     path_slots, put_node, replace_leaf_value, validate_child_edge,
@@ -135,6 +137,13 @@ pub struct SlotOutcome<V> {
     deleted: usize,
 }
 
+#[cfg(test)]
+impl<V> SlotOutcome<V> {
+    pub(crate) fn hash_materialization(&self) -> (usize, usize) {
+        self.child.as_ref().map_or((0, 0), hash_materialization)
+    }
+}
+
 /// The canonical Patricia subtree for one exact three-nibble prefix.
 ///
 /// A resident worker keeps this value between waves. Its nodes retain their
@@ -227,8 +236,9 @@ impl<V: Clone> SlotWork<V> {
         self.mutations.len()
     }
 
-    /// Fold this slot's leaves into its subtree, and hash the result while it
-    /// is still on this core — hashing is the expensive half.
+    /// Fold this slot's leaves into its subtree without materializing hashes.
+    /// The canonical root/descriptor/checkpoint projection owns that demand;
+    /// `Node` caches it in `OnceLock`, so a later consumer pays exactly once.
     pub fn apply(self) -> Result<SlotOutcome<V>, PersistentRadixMapError> {
         let mut child = self.child;
         let mut inserted = 0;
@@ -249,9 +259,6 @@ impl<V: Clone> SlotWork<V> {
                     deleted += usize::from(removed);
                 }
             }
-        }
-        if let Some(node) = child.as_ref() {
-            node_hash(node);
         }
         Ok(SlotOutcome {
             child,
@@ -351,6 +358,11 @@ impl<V: Clone> PersistentRadixShard<V> {
             root: self.child.as_ref().map(subtree_root),
             len: self.len,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hash_materialization(&self) -> (usize, usize) {
+        self.child.as_ref().map_or((0, 0), hash_materialization)
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<&V>, PersistentRadixMapError> {
@@ -1331,6 +1343,11 @@ impl<V: Clone> PersistentRadixMap<V> {
 
     pub fn root_hash(&self) -> [u8; 32] {
         self.root.as_ref().map_or(EMPTY_RADIX_ROOT, node_hash)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hash_materialization(&self) -> (usize, usize) {
+        self.root.as_ref().map_or((0, 0), hash_materialization)
     }
 
     /// Structural statistics: (branch nodes, leaves, max branch depth from the

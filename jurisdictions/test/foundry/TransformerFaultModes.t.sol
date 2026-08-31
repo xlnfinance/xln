@@ -2,10 +2,10 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import "../../../contracts/Account.sol";
-import "../../../contracts/DeltaTransformer.sol";
-import "../../../contracts/Types.sol";
-import "../../../contracts/mocks/TransformerLivenessHarness.sol";
+import "../../contracts/Account.sol";
+import "../../contracts/DeltaTransformer.sol";
+import "../../contracts/Types.sol";
+import "../../contracts/mocks/TransformerLivenessHarness.sol";
 import {SettlementDeltasHarness} from "./helpers/SettlementDeltasHarness.sol";
 
 /// @notice C4 hardening wave 2 (c4-adversary A4): the adversarial fault modes

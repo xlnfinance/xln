@@ -412,7 +412,7 @@ mod tests {
     use super::super::authority::{ConsensusMode, EntityConsensusConfig, EntityLeaderState};
     use super::super::catalog::EntityTxKind;
     use super::super::encoding::{number, object, text};
-    use super::super::frame::{CanonicalEntityTx, EntityFrameEvent};
+    use super::super::frame::{CanonicalEntityTx, EntityFrameEvent, encode_entity_frame_context};
     use super::*;
 
     fn authority() -> EntityFrameAuthority {
@@ -482,6 +482,7 @@ mod tests {
                 entity_id: entity.into(),
                 state_root: format!("0x{}", "11".repeat(32)),
                 authority_root: authority_root.clone(),
+                entity_context_bytes: encode_entity_frame_context(&context).expect("context bytes"),
                 entity_context: context,
                 j_prefix_certificate: None,
             },
@@ -539,6 +540,7 @@ mod tests {
             entity_id: entity.into(),
             state_root: state_root.clone(),
             authority_root: authority_root.clone(),
+            entity_context_bytes: encode_entity_frame_context(&context).expect("context bytes"),
             entity_context: context.clone(),
             j_prefix_certificate: None,
         };

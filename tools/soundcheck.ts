@@ -2,6 +2,8 @@
 
 type Gate = { name: string; command: string[] };
 
+const MAX_CONCURRENT_GATES = 4;
+
 const json = process.argv.includes('--json');
 const unknownArgs = process.argv.slice(2).filter(argument => argument !== '--json');
 if (unknownArgs.length > 0) {
@@ -26,39 +28,73 @@ const gates: Gate[] = [
   { name: 'nested-hash-coverage', command: ['bun', 'run', 'check:nested-hash-coverage'] },
 ];
 
-const runGate = async (gate: Gate) => {
-  const startedAt = performance.now();
-  const child = Bun.spawn(gate.command, {
-    cwd: process.cwd(),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [status, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  return {
-    name: gate.name,
-    ok: status === 0,
-    durationMs: Math.round(performance.now() - startedAt),
-    output: `${stdout}${stderr}`.trim(),
-  };
+type Result = Readonly<{
+  name: string;
+  ok: boolean;
+  durationMs: number;
+  output: string;
+}>;
+
+const active = new Set<ReturnType<typeof Bun.spawn>>();
+const results: Result[] = [];
+let nextIndex = 0;
+let stopped = false;
+
+const stopChildren = (): void => {
+  stopped = true;
+  for (const child of active) child.kill('SIGTERM');
 };
 
-// Every member is read-only and independent. Keep declaration-order reporting,
-// but use the Mac Studio cores instead of serially paying ten process startups.
-const results = await Promise.all(gates.map(runGate));
+process.on('SIGINT', stopChildren);
+process.on('SIGTERM', stopChildren);
 
-const ok = results.every(result => result.ok);
+const runLane = async (): Promise<void> => {
+  while (!stopped && nextIndex < gates.length) {
+    const gate = gates[nextIndex++];
+    if (!gate) break;
+    const startedAt = performance.now();
+    const child = Bun.spawn(gate.command, {
+      cwd: process.cwd(),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    active.add(child);
+    const [status, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    active.delete(child);
+    results.push({
+      name: gate.name,
+      ok: status === 0,
+      durationMs: Math.round(performance.now() - startedAt),
+      output: `${stdout}${stderr}`.trim(),
+    });
+    if (status !== 0) stopChildren();
+  }
+};
+
+// Every member is read-only and independent. Four lanes keep the host below
+// the saturation point where Bun Worker tests can miss their own deadlines.
+await Promise.all(Array.from(
+  { length: Math.min(MAX_CONCURRENT_GATES, gates.length) },
+  runLane,
+));
+
+const orderedResults = gates.flatMap(gate => {
+  const result = results.find(candidate => candidate.name === gate.name);
+  return result ? [result] : [];
+});
+const ok = orderedResults.length === gates.length && orderedResults.every(result => result.ok);
 if (json) {
-  console.log(JSON.stringify({ schema: 'xln-soundcheck-v2', ok, results }, null, 2));
+  console.log(JSON.stringify({ schema: 'xln-soundcheck-v2', ok, results: orderedResults }, null, 2));
 } else {
-  for (const result of results) {
+  for (const result of orderedResults) {
     console.log(`${result.ok ? 'PASS' : 'FAIL'} ${result.name} ${result.durationMs}ms`);
     if (!result.ok && result.output) console.error(result.output);
   }
-  console.log(`SOUNDCHECK_${ok ? 'OK' : 'FAILED'} gates=${results.length}`);
+  console.log(`SOUNDCHECK_${ok ? 'OK' : 'FAILED'} gates=${orderedResults.length}`);
 }
 
 process.exit(ok ? 0 : 1);

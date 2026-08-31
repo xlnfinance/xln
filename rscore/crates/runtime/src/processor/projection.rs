@@ -252,7 +252,10 @@ pub(crate) fn project_durable_frame(
         return Err(RuntimeFrameProjectionError::RuntimeOnlyShape);
     }
     let mut entity_commitments = Vec::with_capacity(entity_frame_count);
-    let mut frame_events = Vec::new();
+    // Production only reports the event cardinality. The owned vector is a
+    // replay-only oracle input; cloning every event into it in live H1 was
+    // pure data movement that could not affect the committed frame.
+    let mut frame_events = capture_replay_diagnostics.then(Vec::new);
     let mut final_output_indexes = BTreeMap::<RuntimeEntityKey, usize>::new();
     for (index, output) in result.outputs.entities.iter().enumerate() {
         final_output_indexes.insert(output_key(output), index);
@@ -262,7 +265,9 @@ pub(crate) fn project_durable_frame(
         if final_output_indexes.get(&key) == Some(&index) {
             assert_certified_result(&result, output)?;
         }
-        frame_events.extend(output.entity_frame_events.iter().cloned());
+        if let Some(events) = frame_events.as_mut() {
+            events.extend(output.entity_frame_events.iter().cloned());
+        }
         entity_commitments.push(super::RuntimeDurableEntityCommitment {
             entity_id: output.entity_id,
             certified_frame_hash: parse_digest(&output.entity_frame_hash)?,
@@ -272,58 +277,89 @@ pub(crate) fn project_durable_frame(
         });
     }
     let shape_done = prelude_started.elapsed();
-    let entity_event_count = u64::try_from(frame_events.len())
-        .map_err(|_| RuntimeFrameProjectionError::EventCount(frame_events.len()))?;
-    let events_parity_digest = if capture_replay_diagnostics {
-        xln_rscore_entity_kernel::compute_entity_events_parity_digest(&frame_events)?
-    } else {
-        [0; 32]
-    };
+    let entity_event_count_usize =
+        result
+            .outputs
+            .entities
+            .iter()
+            .try_fold(0_usize, |count, output| {
+                count.checked_add(output.entity_frame_events.len()).ok_or(
+                    RuntimeFrameProjectionError::EventCount(output.entity_frame_events.len()),
+                )
+            })?;
+    let entity_event_count = u64::try_from(entity_event_count_usize)
+        .map_err(|_| RuntimeFrameProjectionError::EventCount(entity_event_count_usize))?;
+    let events_parity_digest = frame_events.as_ref().map_or(Ok([0; 32]), |events| {
+        xln_rscore_entity_kernel::compute_entity_events_parity_digest(events)
+    })?;
     let event_digest_done = prelude_started.elapsed();
-    let entity_events = result
+    let entity_effect_count_usize =
+        result
+            .outputs
+            .entities
+            .iter()
+            .try_fold(0_usize, |count, output| {
+                count.checked_add(output.entity_events.len()).ok_or(
+                    RuntimeFrameProjectionError::EntityEffectCount(output.entity_events.len()),
+                )
+            })?;
+    let entity_effect_count = u64::try_from(entity_effect_count_usize)
+        .map_err(|_| RuntimeFrameProjectionError::EntityEffectCount(entity_effect_count_usize))?;
+    let entity_events = capture_replay_diagnostics.then(|| {
+        result
+            .outputs
+            .entities
+            .iter()
+            .flat_map(|output| output.entity_events.iter().cloned())
+            .collect::<Vec<_>>()
+    });
+    let entity_effects_parity_digest = entity_events.as_ref().map_or(Ok([0; 32]), |events| {
+        xln_rscore_entity_kernel::compute_entity_effects_parity_digest(events)
+    })?;
+    let effect_digest_done = prelude_started.elapsed();
+    let (accepted_payments, completed_payments, matched_swaps) = result
         .outputs
         .entities
         .iter()
-        .flat_map(|output| output.entity_events.iter().cloned())
-        .collect::<Vec<_>>();
-    let entity_effect_count = u64::try_from(entity_events.len())
-        .map_err(|_| RuntimeFrameProjectionError::EntityEffectCount(entity_events.len()))?;
-    let entity_effects_parity_digest = if capture_replay_diagnostics {
-        xln_rscore_entity_kernel::compute_entity_effects_parity_digest(&entity_events)?
-    } else {
-        [0; 32]
-    };
-    let effect_digest_done = prelude_started.elapsed();
-    let (accepted_payments, completed_payments, matched_swaps) = entity_events.iter().try_fold(
-        (0_usize, 0_usize, 0_u64),
-        |counts, event| -> Result<_, RuntimeFrameProjectionError> {
-            let (accepted, completed, matched) = counts;
-            match event {
-                xln_rscore_entity_kernel::EntityKernelOutput::HtlcForwardAccepted { .. } => Ok((
-                    accepted.checked_add(1).ok_or(
-                        RuntimeFrameProjectionError::EntityEffectCount(entity_events.len()),
-                    )?,
-                    completed,
-                    matched,
-                )),
-                xln_rscore_entity_kernel::EntityKernelOutput::HtlcReceived { .. } => Ok((
-                    accepted,
-                    completed.checked_add(1).ok_or(
-                        RuntimeFrameProjectionError::EntityEffectCount(entity_events.len()),
-                    )?,
-                    matched,
-                )),
-                xln_rscore_entity_kernel::EntityKernelOutput::SwapMatched { count, .. } => Ok((
-                    accepted,
-                    completed,
-                    matched
-                        .checked_add(*count)
-                        .ok_or(RuntimeFrameProjectionError::SwapCount(*count))?,
-                )),
-                _ => Ok((accepted, completed, matched)),
-            }
-        },
-    )?;
+        .flat_map(|output| output.entity_events.iter())
+        .try_fold(
+            (0_usize, 0_usize, 0_u64),
+            |counts, event| -> Result<_, RuntimeFrameProjectionError> {
+                let (accepted, completed, matched) = counts;
+                match event {
+                    xln_rscore_entity_kernel::EntityKernelOutput::HtlcForwardAccepted {
+                        ..
+                    } => Ok((
+                        accepted.checked_add(1).ok_or(
+                            RuntimeFrameProjectionError::EntityEffectCount(
+                                entity_effect_count_usize,
+                            ),
+                        )?,
+                        completed,
+                        matched,
+                    )),
+                    xln_rscore_entity_kernel::EntityKernelOutput::HtlcReceived { .. } => Ok((
+                        accepted,
+                        completed.checked_add(1).ok_or(
+                            RuntimeFrameProjectionError::EntityEffectCount(
+                                entity_effect_count_usize,
+                            ),
+                        )?,
+                        matched,
+                    )),
+                    xln_rscore_entity_kernel::EntityKernelOutput::SwapMatched { count, .. } => {
+                        Ok((
+                            accepted,
+                            completed,
+                            matched
+                                .checked_add(*count)
+                                .ok_or(RuntimeFrameProjectionError::SwapCount(*count))?,
+                        ))
+                    }
+                    _ => Ok((accepted, completed, matched)),
+                }
+            },
+        )?;
     let matched_swaps = usize::try_from(matched_swaps)
         .map_err(|_| RuntimeFrameProjectionError::SwapCount(matched_swaps))?;
     let count_done = prelude_started.elapsed();

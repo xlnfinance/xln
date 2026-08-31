@@ -34,6 +34,7 @@ pub use consensus::incoming::apply::{
     apply_board_hanko_refresh, apply_incoming_ack, apply_incoming_ack_frame,
     apply_incoming_ack_frame_with_authority, apply_incoming_ack_with_authority,
     apply_incoming_frame, apply_incoming_frame_with_authority, apply_standalone_dispute,
+    classify_incoming_frame_without_mutation,
 };
 pub use consensus::incoming::types::{
     AccountInputEnvelope, AccountInputEnvelopeRejection, AckFrameOutcome, AckFramePhase,

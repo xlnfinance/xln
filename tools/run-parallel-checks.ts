@@ -5,7 +5,11 @@ if (gateNames.length === 0 || gateNames.some(name => !/^[a-z0-9:-]+$/.test(name)
   throw new Error('PARALLEL_CHECK_GATE_NAMES_INVALID');
 }
 
-const MAX_CONCURRENT_GATES = 8;
+// This runner is nested (`check` -> `check:src` -> heavyweight Rust/TS
+// parity). Two lanes keep the aggregate fan-out bounded; four outer lanes
+// multiplied into enough compilers/workers to make otherwise sub-second Bun
+// worker tests miss their own five-second fail-stop deadline.
+const MAX_CONCURRENT_GATES = 2;
 const active = new Set<ReturnType<typeof Bun.spawn>>();
 let stopped = false;
 

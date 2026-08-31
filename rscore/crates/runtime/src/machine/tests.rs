@@ -837,7 +837,7 @@ fn entity_fifo_defers_only_whole_inputs() -> Result<(), RuntimeMachineError> {
 }
 
 #[test]
-fn deferred_rows_share_the_latest_runtime_context() -> Result<(), RuntimeMachineError> {
+fn deferred_rows_share_the_latest_runtime_timestamp() -> Result<(), RuntimeMachineError> {
     let limits = RuntimeLimits {
         max_entity_inputs_per_frame: 1,
         checkpoint_period_frames: 0,
@@ -849,7 +849,9 @@ fn deferred_rows_share_the_latest_runtime_context() -> Result<(), RuntimeMachine
     )?;
     let second = apply_runtime(first.replica, frame_at(900, 9, vec![entity_input(11)]))?;
     assert_eq!(second.replica.state.timestamp, 900);
-    assert_eq!(second.replica.state.finalized_j_height, 9);
+    // The driver-supplied frame context cannot advance finalized J height;
+    // only a selected ObserveJRange RuntimeTx can do that.
+    assert_eq!(second.replica.state.finalized_j_height, 0);
     assert_eq!(second.replica.mempool.entity_input_count(), 1);
     let pending = second
         .replica
@@ -867,7 +869,7 @@ fn deferred_rows_share_the_latest_runtime_context() -> Result<(), RuntimeMachine
     );
     let third = apply_runtime(second.replica, frame_at(1_000, 9, Vec::new()))?;
     assert_eq!(third.replica.state.timestamp, 1_000);
-    assert_eq!(third.replica.state.finalized_j_height, 9);
+    assert_eq!(third.replica.state.finalized_j_height, 0);
     assert_eq!(
         third
             .applied_input

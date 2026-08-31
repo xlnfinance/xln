@@ -23,7 +23,11 @@ import {
   type ChildFailureObservation,
 } from '../child-recovery-policy';
 import { attachManagedChildFatalIpc, type ManagedChildFatalReport } from '../managed-child-fatal-ipc';
-import { buildHubChildProcessEnv, buildHubEngineArgs } from '../hub-runtime-env';
+import {
+  buildHubChildProcessEnv,
+  buildHubEngineArgs,
+  resolveHubRuntimeFrameDelayMs,
+} from '../hub-runtime-env';
 import { buildRustHubProcessPlan, parseRustHubStatus } from '../hub-engine-plan';
 import { buildRustHubGenesisConfig } from '../rust-hub-genesis';
 import { createManagedRuntimeLeaseManager } from '../managed-runtime-leases';
@@ -126,7 +130,10 @@ const buildRustHubInvocation = (
     ),
     jurisdictionsJson: readFileSync(deps.shardJurisdictionsPath, 'utf8'),
     rpcUrls: deps.args.rpcUrls,
-    minFrameDelayMs: Math.max(0, Number(process.env['XLN_HUB_MIN_FRAME_DELAY_MS'] || '0')),
+    minFrameDelayMs: resolveHubRuntimeFrameDelayMs(
+      process.env,
+      process.env['XLN_HUB_MIN_FRAME_DELAY_MS'],
+    ),
   });
   writeFileSync(genesisFile, `${safeStringify(genesis)}\n`, { mode: 0o600 });
   const plan = buildRustHubProcessPlan({

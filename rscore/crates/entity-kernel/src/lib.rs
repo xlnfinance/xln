@@ -79,8 +79,8 @@ pub use consensus::{
     build_entity_hash_manifest, build_required_j_prefix_certificate, certify_entity_transition,
     certify_single_signer_entity_frame, compute_entity_consensus_root,
     compute_entity_events_parity_digest, compute_entity_frame_hash, compute_entity_section_digest,
-    is_entity_owned_consensus_field, measure_entity_frame_tx_bytes, measure_entity_frame_wire,
-    project_entity_consensus_sections, sign_j_event_range,
+    encode_entity_frame_context, is_entity_owned_consensus_field, measure_entity_frame_tx_bytes,
+    measure_entity_frame_wire, project_entity_consensus_sections, sign_j_event_range,
 };
 pub use cross_j::{
     CrossJurisdictionAccountViewRequest, CrossJurisdictionApplyResult,

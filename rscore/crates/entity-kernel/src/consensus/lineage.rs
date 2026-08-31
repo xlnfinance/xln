@@ -77,6 +77,7 @@ pub fn build_certified_entity_frame_link(
         state_root: &frame.state_root,
         authority_root: &frame.authority_root,
         entity_context: &frame.entity_context,
+        entity_context_bytes: None,
         j_prefix_certificate: frame.j_prefix_certificate.as_ref(),
     })?;
     if recomputed != frame.hash {

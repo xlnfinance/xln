@@ -146,6 +146,9 @@ pub struct EntityTransitionCertificationRequest<'a> {
     pub txs: Vec<CanonicalEntityTx>,
     pub events: Vec<EntityFrameEvent>,
     pub entity_context: &'a CanonicalValue,
+    /// Exact bytes already used by Runtime wire fitting. Certification hashes
+    /// them directly instead of encoding the same large context again.
+    pub entity_context_bytes: Vec<u8>,
     /// Exact certificate selected and signed against the pre-transition J
     /// anchor. Runtime also derived the frame's `j_event` transaction from the
     /// same range value. Certification commits these bytes verbatim instead of
@@ -398,6 +401,7 @@ pub fn certify_entity_transition(
         state_root: state_root.clone(),
         authority_root: authority_root.clone(),
         entity_context: request.entity_context.clone(),
+        entity_context_bytes: request.entity_context_bytes,
         j_prefix_certificate,
     };
     let mut certified = certify_single_signer_entity_frame(
@@ -504,6 +508,7 @@ mod tests {
     use super::super::authority::{ConsensusMode, EntityConsensusConfig, EntityLeaderState};
     use super::super::catalog::EntityTxKind;
     use super::super::encoding::{number, object, text};
+    use super::super::frame::encode_entity_frame_context;
     use super::*;
 
     fn authority() -> EntityFrameAuthority {
@@ -627,6 +632,7 @@ mod tests {
                 txs: vec![tx],
                 events: vec![],
                 entity_context: &context,
+                entity_context_bytes: encode_entity_frame_context(&context).expect("context bytes"),
                 j_prefix_certificate: None,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
@@ -669,6 +675,7 @@ mod tests {
                 txs: vec![],
                 events: vec![],
                 entity_context: &context,
+                entity_context_bytes: encode_entity_frame_context(&context).expect("context bytes"),
                 j_prefix_certificate: None,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),

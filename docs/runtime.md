@@ -295,6 +295,16 @@ unavoidable and profiling proves its cost acceptable.
 
 The production Runtime has one ordered WAL and one bounded committer queue.
 
+Live scheduling has one canonical `runtimeConfig.minFrameDelayMs`: the minimum start-to-start
+interval between produced Runtime frames. It is the only batching delay. Socket,
+Account, Entity, WAL and publication layers must not add private coalescing
+windows. The Runtime records the process-local start instant, commits the frame,
+then sleeps only `delay - elapsed` when that remainder is positive; `0` starts
+the next ready frame immediately. This wall-clock instant is never persisted:
+the WAL is the only recovery authority. Replay is always unpaced and never reads
+this live setting. HLT evidence records the exact interval beside worker count
+and offered load.
+
 - Frame `N` becomes the in-memory head only after all three stages and its seal.
 - The committer appends and fsyncs frame `N` in order.
 - The Runtime may compute frame `N+1` from the sealed in-memory head while the
@@ -465,3 +475,24 @@ Independent Entity-local transitions are a natural future parallelism
 dimension. Cross-Entity and cross-jurisdiction cohort validation remains owned
 by Runtime and must preserve the same final positional ordering and atomic
 Runtime commitment.
+
+## 14. Deferred scenario evidence
+
+A complex scenario that is useful but outside the current release priority may
+remain as an explicitly opt-in test set instead of blocking every hot-path
+iteration. Deferral is evidence triage, not a production workaround:
+
+- keep the scenario and its assertions intact; do not weaken them or add a
+  production conditional that makes them pass;
+- record the exact failing invariant, why it is currently non-blocking, the
+  owning subsystem and the command that reproduces it;
+- exclude the set only from the default fast gate and run it as a separate
+  focused campaign when that subsystem becomes the active milestone;
+- never defer compilation, payment, same-chain swap, canonical WAL/recovery,
+  Runtime/Entity/Account root parity or the production Rust H1 launch path;
+- a deferred failure must not be reported as green or as completed parity.
+
+The current dispute-restart recovery campaign is such an opt-in set. Its known
+failure is duplicate `scheduledWake` application during replay: the wake stored
+in the WAL and the same wake derived from Crontab must be coalesced into one
+canonical transition before this campaign can become a required gate.

@@ -18,10 +18,10 @@ use xln_rscore_engine::{
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
-    ProposalRow, UpstreamHtlcResolutionRow, active, apply_one, build_signing_identity,
-    force_ack_directive, inbound_genesis_account, leaf_root, outbound_ack_input, proposable,
-    proposal_row, restore_checkpoint_account, restore_seed_account, state_error,
-    validate_genesis_seed, verdict_commits_genesis,
+    ProposalRow, UpstreamHtlcResolutionRow, active, apply_one, apply_one_without_mutation,
+    build_signing_identity, force_ack_directive, inbound_genesis_account, leaf_root,
+    outbound_ack_input, proposable, proposal_row, restore_checkpoint_account, restore_seed_account,
+    state_error, validate_genesis_seed, verdict_commits_genesis,
 };
 use crate::parallel::{ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
@@ -42,6 +42,43 @@ struct InboundOutcome {
     leaf: [u8; 32],
     created_checkpoint: Option<AccountCheckpointRows>,
     proposable: bool,
+}
+
+/// Borrow the resident head until an Account transition can actually mutate.
+/// This keeps duplicate/stale/rejected inputs from deep-cloning the replica,
+/// while preserving the existing owned candidate for rollback and Put.
+enum CloneOnMutation<'a, T> {
+    Borrowed(&'a T),
+    Owned(T),
+}
+
+impl<'a, T> CloneOnMutation<'a, T> {
+    fn as_ref(&self) -> &T {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value,
+        }
+    }
+
+    fn make_mut(&mut self) -> &mut T
+    where
+        T: Clone,
+    {
+        if let Self::Borrowed(value) = self {
+            *self = Self::Owned((*value).clone());
+        }
+        match self {
+            Self::Borrowed(_) => unreachable!("borrowed candidate was promoted"),
+            Self::Owned(value) => value,
+        }
+    }
+
+    fn into_owned(self) -> Option<T> {
+        match self {
+            Self::Borrowed(_) => None,
+            Self::Owned(value) => Some(value),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1200,7 +1237,7 @@ impl ResidentConsensusEngine {
                             detail: "POLICY_FOR_EXISTING".to_string(),
                         });
                     }
-                    account.clone()
+                    CloneOnMutation::Borrowed(account)
                 }
                 None => {
                     let first = work.rows.first().ok_or(BatchError::InboundGenesis {
@@ -1226,10 +1263,15 @@ impl ResidentConsensusEngine {
                             detail: "POLICY_NOT_FIRST_ONLY".to_string(),
                         });
                     }
-                    inbound_genesis_account(account_id, owner, &first.input, policy)?
+                    CloneOnMutation::Owned(inbound_genesis_account(
+                        account_id,
+                        owner,
+                        &first.input,
+                        policy,
+                    )?)
                 }
             };
-            assert_account_owner(account_id, &account, owner)?;
+            assert_account_owner(account_id, account.as_ref(), owner)?;
             let mut applied = Vec::with_capacity(work.rows.len());
             let mut created_checkpoint = None;
             let mut changed = false;
@@ -1237,18 +1279,28 @@ impl ResidentConsensusEngine {
                 let authority = row.certified_board_authority.certified()?;
                 let local_authority = row.local_certified_board_authority.certified()?;
                 let pure_ack = matches!(&row.input.kind, crate::AccountInputKind::Ack(_));
-                let (verdict, row_changed) = apply_one(
+                let security = xln_rscore_engine::IncomingFrameSecurityContext {
+                    clock,
+                    peer_certified_board_authority: authority,
+                    local_certified_board_authority: local_authority,
+                };
+                let (verdict, row_changed) = match apply_one_without_mutation(
                     account_id,
-                    &mut account,
+                    account.as_ref(),
                     &worker_identity,
-                    row.input,
-                    xln_rscore_engine::IncomingFrameSecurityContext {
-                        clock,
-                        peer_certified_board_authority: authority,
-                        local_certified_board_authority: local_authority,
-                    },
-                    &market,
-                );
+                    &row.input,
+                    security,
+                ) {
+                    Some(verdict) => (verdict, false),
+                    None => apply_one(
+                        account_id,
+                        account.make_mut(),
+                        &worker_identity,
+                        row.input,
+                        security,
+                        &market,
+                    ),
+                };
                 if created && row_index == 0 && !verdict_commits_genesis(&verdict) {
                     return Err(BatchError::InboundGenesis {
                         account_id,
@@ -1256,9 +1308,9 @@ impl ResidentConsensusEngine {
                     });
                 }
                 if created && row_index == 0 {
-                    let genesis_leaf = leaf_root(account_id, &account)?;
+                    let genesis_leaf = leaf_root(account_id, account.as_ref())?;
                     created_checkpoint = Some(
-                        account_rows(account_id, &account, None, genesis_leaf, &signer_id)
+                        account_rows(account_id, account.as_ref(), None, genesis_leaf, &signer_id)
                             .map_err(|error| state_error(account_id, &error))?,
                     );
                 }
@@ -1271,7 +1323,7 @@ impl ResidentConsensusEngine {
                 });
             }
             let leaf = if need_accounts_root || created {
-                leaf_root(account_id, &account)?
+                leaf_root(account_id, account.as_ref())?
             } else {
                 // The resident Entity path consumes only the touched Account
                 // id before outbound. Its final leaf is sealed once after all
@@ -1282,16 +1334,26 @@ impl ResidentConsensusEngine {
                 applied,
                 leaf,
                 created_checkpoint,
-                proposable: proposable(&account)?,
+                proposable: proposable(account.as_ref())?,
             };
             if changed && !need_accounts_root && !created {
                 Ok(ResidentAccountAction::PutUnsealed {
-                    value: account,
+                    value: account
+                        .into_owned()
+                        .ok_or_else(|| BatchError::AccountsTree {
+                            account_id,
+                            detail: "ACCOUNT_CHANGED_WITHOUT_CANDIDATE".to_string(),
+                        })?,
                     result,
                 })
             } else if changed {
                 Ok(ResidentAccountAction::Put {
-                    value: account,
+                    value: account
+                        .into_owned()
+                        .ok_or_else(|| BatchError::AccountsTree {
+                            account_id,
+                            detail: "ACCOUNT_CHANGED_WITHOUT_CANDIDATE".to_string(),
+                        })?,
                     value_digest: leaf,
                     result,
                 })
@@ -2196,4 +2258,46 @@ fn root_hex(bytes: [u8; 32]) -> String {
         text.push(HEX[usize::from(byte & 0x0f)] as char);
     }
     text
+}
+
+#[cfg(test)]
+mod clone_on_mutation_tests {
+    use super::CloneOnMutation;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CloneProbe {
+        value: u64,
+        clones: Arc<AtomicUsize>,
+    }
+
+    impl Clone for CloneProbe {
+        fn clone(&self) -> Self {
+            self.clones.fetch_add(1, Ordering::Relaxed);
+            Self {
+                value: self.value,
+                clones: Arc::clone(&self.clones),
+            }
+        }
+    }
+
+    #[test]
+    fn borrowed_candidate_clones_only_when_mutation_is_requested() {
+        let clones = Arc::new(AtomicUsize::new(0));
+        let resident = CloneProbe {
+            value: 7,
+            clones: Arc::clone(&clones),
+        };
+        let candidate = CloneOnMutation::Borrowed(&resident);
+
+        // Read-only classification and Keep consume only the borrowed head.
+        assert_eq!(candidate.as_ref().value, 7);
+        assert!(candidate.into_owned().is_none());
+        assert_eq!(clones.load(Ordering::Relaxed), 0);
+
+        let mut candidate = CloneOnMutation::Borrowed(&resident);
+        candidate.make_mut().value = 8;
+        assert_eq!(candidate.as_ref().value, 8);
+        assert_eq!(clones.load(Ordering::Relaxed), 1);
+    }
 }

@@ -36,6 +36,7 @@ import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
 import { hltLanePortsPerSlot } from '../hlt/lanes/lane-port-capacity';
 import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
+import { safeStringify } from '../../../protocol/serialization';
 import { assertRustHubBinaryFresh } from '../../../orchestrator/process/hub-engine-plan';
 import {
   decodeLoadFrame,
@@ -587,7 +588,7 @@ const quiesceRuntime = (port: number, label: string): void => {
   }
   const payload = JSON.parse(String(result.stdout || '')) as Record<string, unknown>;
   if (payload['ok'] !== true) {
-    throw new Error(`${label}_QUIESCE_REJECTED:${JSON.stringify(payload)}`);
+    throw new Error(`${label}_QUIESCE_REJECTED:${safeStringify(payload)}`);
   }
 };
 
@@ -645,7 +646,7 @@ const runAuthorityCheckpointRestart = async (): Promise<void> => {
     ) {
       throw new Error(
         `LOCAL_PROD_SMOKE_RUST_AUTHORITY_CHECKPOINT_DIVERGED:` +
-        `${JSON.stringify(before)}:${JSON.stringify(restored)}`,
+        `${safeStringify(before)}:${safeStringify(restored)}`,
       );
     }
     recordStage('rscore-authority-restart:complete', { processIds, before, restored });

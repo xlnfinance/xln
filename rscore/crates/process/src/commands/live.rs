@@ -899,6 +899,8 @@ fn http_snapshot(
             "apiUrl": format!("http://{api_address}"),
             "directWsUrl": format!("ws://{}/ws", service.local_address()),
             "workers": entity_replica.accounts.worker_count(),
+            "minFrameDelayMs": service.min_frame_delay_ms()
+                .map_err(|error| format!("RRS_RUNTIME_FRAME_INTERVAL:{error}"))?,
             "height": replica.state.height,
             "runtimeFrameHash": digest_hex(&replica.durable.prev_frame_hash()),
             "accountsRoot": digest_hex(&entity_state.accounts_root),
@@ -1178,16 +1180,20 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
         .replica()
         .map_err(|error| format!("RRS_RUNTIME_FATAL:{error}"))?;
     let (restored_entity, _) = entity_slot(restored, &primary_entity_key)?;
+    let min_frame_delay_ms = service
+        .min_frame_delay_ms()
+        .map_err(|error| format!("RRS_RUNTIME_FRAME_INTERVAL:{error}"))?;
     println!(
         concat!(
             "{{\"status\":\"ready\",\"runtimeId\":\"{}\",\"listen\":\"{}\",",
-            "\"workers\":{},\"height\":{},\"runtimeFrameHash\":\"{}\",",
+            "\"workers\":{},\"minFrameDelayMs\":{},\"height\":{},\"runtimeFrameHash\":\"{}\",",
             "\"accountsRoot\":\"{}\",\"restoredFrames\":{},",
             "\"restoreMicros\":{}}}"
         ),
         service.runtime_id(),
         service.local_address(),
         workers,
+        min_frame_delay_ms,
         restored.state.height,
         digest_hex(&restored.durable.prev_frame_hash()),
         digest_hex(&restored_entity.accounts_root),
@@ -1371,9 +1377,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             .as_ref()
             .map(|(_, _, committed)| committed.clone());
         let report = match local_apply {
-            Some((_, entity_inputs, _)) => {
-                service.process_local_entity_inputs_at(entity_inputs, wall_clock_ms()?)
-            }
+            Some((_, entity_inputs, _)) => service.process_local_entity_inputs(entity_inputs),
             None => service.process_next(wait),
         }
         .map_err(|error| format!("RRS_RUNTIME_FATAL:{error}"))?;

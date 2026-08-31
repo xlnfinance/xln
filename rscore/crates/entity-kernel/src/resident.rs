@@ -28,7 +28,7 @@ use crate::commitment::compute_commitments;
 use crate::frame_tx_effects::{apply_account_tx_hooks, apply_committed_frame_hooks};
 use crate::kernel::apply_entity_transitions;
 use crate::local_financial::LocalAccountFinancialView;
-use crate::paybook::{PaybookChanges, build_paybook_mutation, paybook_entry, terminate_route};
+use crate::paybook::{PaybookChanges, paybook_entry, terminate_route};
 use crate::scheduler_runtime::validate_scheduled_wake;
 use crate::{
     AccountProposalWork, CommittedAccountTransition, CrontabExecutionContext, DeterministicContext,
@@ -44,12 +44,19 @@ fn profile_resident_round() -> bool {
     *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
 }
 
-fn report_resident_round_profile(phases: [u128; 11], total: u128) {
+fn report_resident_round_profile(
+    phases: [u128; 11],
+    total: u128,
+    account_ranges: usize,
+    local_operations: usize,
+    failed_followups: usize,
+    deferred_settlement_hankos: usize,
+) {
     if !profile_resident_round() {
         return;
     }
     eprintln!(
-        "RSCORE_ENTITY_PHASE inbound={} commits={} entityApply={} paybookCommit={} jIngress={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={}",
+        "RSCORE_ENTITY_PHASE inbound={} commits={} entityApply={} paybookCommit={} jIngress={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={} accountRanges={} localOperations={} failedFollowups={} deferredSettlementHankos={}",
         phases[0],
         phases[1],
         phases[2],
@@ -62,6 +69,10 @@ fn report_resident_round_profile(phases: [u128; 11], total: u128) {
         phases[9],
         phases[10],
         total,
+        account_ranges,
+        local_operations,
+        failed_followups,
+        deferred_settlement_hankos,
     );
 }
 
@@ -70,10 +81,11 @@ fn commit_paybook_changes(
     state: &mut EntityStateSlice,
     changes: PaybookChanges,
 ) -> Result<(), ResidentEntityError> {
-    let mutations = accounts
-        .map_entity_stage_ordered(changes.into_pending(), build_paybook_mutation)?
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
+    // Build the final canonical mutations once, then pay exactly one worker
+    // barrier for independent Patricia slots. Dispatching per-entry encoding
+    // and slot folding as separate stages made w4 slower while preserving the
+    // same bytes and root.
+    let mutations = changes.into_mutations()?;
     let updated: Result<_, PersistentRadixBatchError<BatchError>> = state
         .paybook
         .entries
@@ -1413,6 +1425,11 @@ pub fn apply_resident_entity_round_core(
         .map(Some)
         .collect::<Vec<_>>();
     let operations = std::mem::take(&mut request.operations);
+    let account_ranges = operations
+        .iter()
+        .filter(|operation| matches!(operation, ResidentEntityOperation::AccountRange { .. }))
+        .count();
+    let local_operations = operations.len().saturating_sub(account_ranges);
     let mut inbound = EntityRoundResult::default();
     let mut inbound_started = false;
     let mut inbound_micros = 0_u128;
@@ -1848,6 +1865,7 @@ pub fn apply_resident_entity_round_core(
     })?;
     let failed_routes_started = Instant::now();
     let followups = failed_proposal_followups(&mut kernel.state, &prepared, &mut kernel.outputs)?;
+    let failed_followups = followups.len();
     let failed_routes_micros = failed_routes_started.elapsed().as_micros();
     let outbound = accounts.finish_entity_outbound(prepared, followups)?;
     let outbound_micros = phase_started.elapsed().as_micros();
@@ -1902,6 +1920,10 @@ pub fn apply_resident_entity_round_core(
             finalize_micros,
         ],
         total_started.elapsed().as_micros(),
+        account_ranges,
+        local_operations,
+        failed_followups,
+        pending_settlement_hankos.len(),
     );
     Ok(ResidentEntityCoreResult {
         state: kernel.state,

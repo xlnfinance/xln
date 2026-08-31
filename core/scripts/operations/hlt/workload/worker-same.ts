@@ -195,6 +195,7 @@ const runRustSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> =>
         canonicalStateHash: settlement.metrics.postStateHash,
       },
       workers: requireRustH1().ready.workers,
+      minFrameDelayMs: requireRustH1().ready.minFrameDelayMs,
       metricsBefore,
       metrics: settlement.metrics,
       economicPhaseMetrics: settlement.economicPhaseMetrics,

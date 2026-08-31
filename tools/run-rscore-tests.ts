@@ -4,7 +4,10 @@ import { availableParallelism } from 'node:os';
 
 const ROOT = import.meta.dir + '/..';
 const MANIFEST = ROOT + '/rscore/Cargo.toml';
-const concurrency = Math.max(1, availableParallelism());
+// Test binaries are internally small but collectively allocation-heavy. Using
+// every host CPU here competes with the sibling source gates and makes the
+// mandatory 30-second check slower and flaky on an otherwise idle Mac Studio.
+const concurrency = Math.max(1, Math.min(8, availableParallelism()));
 const active = new Set<ReturnType<typeof Bun.spawn>>();
 
 const stopChildren = (): void => {

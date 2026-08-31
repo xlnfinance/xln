@@ -484,6 +484,7 @@ mod tests {
             state_root: &state_root,
             authority_root: &authority_root,
             entity_context: &context,
+            entity_context_bytes: None,
             j_prefix_certificate: None,
         })
         .expect("frame hash");

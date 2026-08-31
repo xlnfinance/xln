@@ -31,17 +31,12 @@ use super::{DurableRuntimeProcessor, DurableRuntimeProcessorError, RuntimeProces
 
 const TIMESTAMP_DRIFT_MS: u64 = 30_000;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
-/// One bounded collection window per Runtime frame. At the 10k-op/s target a
-/// 2ms quiet-gap policy fragmented one economic burst into 10-60-row frames,
-/// repeating projection/WAL/publication hundreds of times and starving the
-/// shard workers. Ten milliseconds still bounds admission latency while
-/// yielding roughly 100 independent Account inputs per steady target wave.
-// Bound queue coalescing without delaying the dependent Account ACK/proposal
-// chain. A measured 100 ms trial reduced w1 843.99 -> 786.84 pay/s and made
-// w4 slower than w1 (770.03 pay/s): protocol feedback latency dominated any
-// batching gain. Frame-size telemetry owns any future change to this value.
-const INBOUND_COALESCE_WINDOW: Duration = Duration::from_millis(10);
 
+fn remaining_frame_delay(delay: Duration, started: Option<Instant>, now: Instant) -> Duration {
+    started
+        .map(|started| delay.saturating_sub(now.saturating_duration_since(started)))
+        .unwrap_or_default()
+}
 /// Owns the authenticated socket queue, the one durable Runtime writer and
 /// the Entity infrastructure materializer. Transport threads can only enqueue;
 /// this object is the sole mutation path into R/E/A state.
@@ -59,6 +54,10 @@ pub struct ResidentRuntimeService {
     deferred_publication: DeferredPublicationTelemetry,
     j_submit_operator_key: Option<[u8; 32]>,
     j_watchers: VecDeque<LiveJWatcher>,
+    /// Process-local scheduler state. Persisting wall-clock progress would add
+    /// a second recovery authority beside the WAL; only Runtime config belongs
+    /// in durable state.
+    last_live_frame_started_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -155,6 +154,7 @@ impl ResidentRuntimeService {
             deferred_publication,
             j_submit_operator_key: None,
             j_watchers,
+            last_live_frame_started_at: None,
         };
         if !recover_pending_j_actions(service.processor.replica()?)?.is_empty() {
             return Err(ResidentRuntimeServiceError::JSubmit(
@@ -211,6 +211,7 @@ impl ResidentRuntimeService {
             deferred_publication,
             j_submit_operator_key: None,
             j_watchers,
+            last_live_frame_started_at: None,
         })
     }
 
@@ -224,6 +225,17 @@ impl ResidentRuntimeService {
 
     pub fn runtime_id(&self) -> &str {
         self.ingress.runtime_id()
+    }
+
+    pub fn min_frame_delay_ms(&self) -> Result<u64, ResidentRuntimeServiceError> {
+        self.processor
+            .replica()?
+            .durable
+            .runtime_config()
+            .min_frame_delay_ms
+            .ok_or(ResidentRuntimeServiceError::RuntimeConfig(
+                "minFrameDelayMs missing",
+            ))
     }
 
     pub fn ingress_metrics(&self) -> DirectRuntimeIngressMetrics {
@@ -299,13 +311,17 @@ impl ResidentRuntimeService {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<RuntimeProcessReport>, ResidentRuntimeServiceError> {
+        let available = self.available_frame_inputs()?;
+        self.collect_inbound_until_frame_slot(timeout, available)?;
+        let frame_started = Instant::now();
         if let Some(report) = self.poll_and_commit_j_watcher()? {
+            self.note_live_frame(frame_started, true);
             return Ok(Some(report));
         }
-        let available = self.available_frame_inputs()?;
-        self.take_inbound_if_idle(timeout, available)?;
         let (entity_inputs, queued_at) = self.take_frame_inbound()?;
-        self.process_entity_inputs_at(entity_inputs, queued_at, wall_clock_ms()?)
+        let report = self.process_entity_inputs_at(entity_inputs, queued_at, wall_clock_ms()?)?;
+        self.note_live_frame(frame_started, report.is_some());
+        Ok(report)
     }
 
     fn poll_and_commit_j_watcher(
@@ -360,23 +376,19 @@ impl ResidentRuntimeService {
         Ok(Some(report))
     }
 
-    fn take_inbound_if_idle(
+    fn collect_inbound_until_frame_slot(
         &mut self,
         timeout: Duration,
         available: usize,
     ) -> Result<(), ResidentRuntimeServiceError> {
-        let first_arrived = if self.held_inbound.is_empty() {
-            match self.recv_inbound_batch(timeout)? {
-                Some(batch) => {
-                    self.held_inbound.push_back(batch);
-                    true
-                }
-                None => false,
-            }
-        } else {
-            false
-        };
-        let deadline = first_arrived.then(|| Instant::now() + INBOUND_COALESCE_WINDOW);
+        let now = Instant::now();
+        let cadence_wait = self.remaining_live_frame_delay(now)?;
+        let first_wait = timeout.max(cadence_wait);
+        if self.held_inbound.is_empty()
+            && let Some(batch) = self.recv_inbound_batch(first_wait)?
+        {
+            self.held_inbound.push_back(batch);
+        }
         let mut held_inputs = self
             .held_inbound
             .iter()
@@ -389,18 +401,14 @@ impl ResidentRuntimeService {
                 held_inputs = held_inputs.saturating_add(batch.entity_inputs.len());
                 self.held_inbound.push_back(batch);
             }
-            if !first_arrived || held_inputs >= available {
-                break;
-            }
-            let remaining = deadline
-                .expect("first-arrival deadline")
-                .saturating_duration_since(Instant::now());
+            let remaining = self.remaining_live_frame_delay(Instant::now())?;
             if remaining.is_zero() {
                 break;
             }
-            // Hold the bounded window through transient gaps between reactor
-            // groups. A quiet-gap policy ended the frame at the first 2ms
-            // scheduling hole and paid another full WAL cycle immediately.
+            if held_inputs >= available {
+                std::thread::sleep(remaining);
+                continue;
+            }
             let Some(batch) = self.recv_inbound_batch(remaining)? else {
                 break;
             };
@@ -408,6 +416,35 @@ impl ResidentRuntimeService {
             self.held_inbound.push_back(batch);
         }
         Ok(())
+    }
+
+    fn remaining_live_frame_delay(
+        &self,
+        now: Instant,
+    ) -> Result<Duration, ResidentRuntimeServiceError> {
+        // One formula owns live cadence: Runtime frames start at least the
+        // committed delay apart. Frame work consumes that budget, so only the
+        // remainder is slept. Completion timestamps, socket quiet gaps and
+        // durable timer fields would each create a competing batching policy.
+        Ok(remaining_frame_delay(
+            Duration::from_millis(self.min_frame_delay_ms()?),
+            self.last_live_frame_started_at,
+            now,
+        ))
+    }
+
+    fn wait_for_live_frame_slot(&self) -> Result<(), ResidentRuntimeServiceError> {
+        let remaining = self.remaining_live_frame_delay(Instant::now())?;
+        if !remaining.is_zero() {
+            std::thread::sleep(remaining);
+        }
+        Ok(())
+    }
+
+    fn note_live_frame(&mut self, started: Instant, produced: bool) {
+        if produced {
+            self.last_live_frame_started_at = Some(started);
+        }
     }
 
     fn recv_inbound_batch(
@@ -493,6 +530,19 @@ impl ResidentRuntimeService {
     /// reducer -> WAL fsync -> publication path as authenticated socket
     /// ingress. The process-local result remains transient; command ids are
     /// never copied into Runtime state or storage.
+    pub fn process_local_entity_inputs(
+        &mut self,
+        entity_inputs: Vec<RuntimeEntityInput>,
+    ) -> Result<Option<RuntimeProcessReport>, ResidentRuntimeServiceError> {
+        self.wait_for_live_frame_slot()?;
+        let frame_started = Instant::now();
+        let report = self.process_entity_inputs_at(entity_inputs, None, wall_clock_ms()?)?;
+        self.note_live_frame(frame_started, report.is_some());
+        Ok(report)
+    }
+
+    /// Unpaced deterministic seam. Replay and tests supply the exact external
+    /// timestamp and must never inherit live wall-clock scheduling.
     pub fn process_local_entity_inputs_at(
         &mut self,
         entity_inputs: Vec<RuntimeEntityInput>,
@@ -1737,6 +1787,8 @@ pub enum ResidentRuntimeServiceError {
     ClockAhead { previous: u64, now: u64 },
     #[error("RRS_LIVE_J_HEIGHT_REGRESSION:previous={previous}:next={next}")]
     JHeightRegression { previous: u64, next: u64 },
+    #[error("RRS_LIVE_RUNTIME_CONFIG:{0}")]
+    RuntimeConfig(&'static str),
     #[error("{0}")]
     Processor(Box<DurableRuntimeProcessorError>),
     #[error(transparent)]
@@ -1787,6 +1839,35 @@ mod tests {
         assert_eq!(queued_at, Some(120));
         assert_eq!(held.len(), 1);
         assert_eq!(held.front().map(|batch| batch.entity_inputs.len()), Some(6));
+    }
+
+    #[test]
+    fn live_frame_delay_is_one_start_to_start_remainder() {
+        let started = Instant::now();
+        assert_eq!(
+            remaining_frame_delay(
+                Duration::from_millis(100),
+                Some(started),
+                started + Duration::from_millis(75),
+            ),
+            Duration::from_millis(25),
+        );
+        assert_eq!(
+            remaining_frame_delay(
+                Duration::from_millis(100),
+                Some(started),
+                started + Duration::from_millis(125),
+            ),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            remaining_frame_delay(Duration::ZERO, Some(started), started),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            remaining_frame_delay(Duration::from_millis(100), None, started),
+            Duration::ZERO,
+        );
     }
 
     #[test]

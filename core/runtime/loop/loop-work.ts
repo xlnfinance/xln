@@ -309,10 +309,9 @@ export const generateHookPings = (
 export const isRuntimeFrameReady = (
   env: RuntimeReplica,
   now: number,
-  overrideDelayMs?: number,
 ): boolean => {
   if (env.scenarioMode) return true;
-  const periodMs = getRuntimeFramePeriodMs(env, overrideDelayMs);
+  const periodMs = getRuntimeFramePeriodMs(env);
   if (periodMs <= 0) return true;
   const lastFrameStartedAt = ensureRuntimeInfrastructure(env).lastFrameStartedAt;
   if (
@@ -325,20 +324,17 @@ export const isRuntimeFrameReady = (
   return Math.max(0, now - lastFrameStartedAt) >= periodMs;
 };
 
-export const getRuntimeFramePeriodMs = (
-  env: RuntimeReplica,
-  overrideDelayMs?: number,
-): number => {
+export const getRuntimeFramePeriodMs = (env: RuntimeReplica): number => {
   if (env.scenarioMode) return 0;
-  const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
-  return Number.isFinite(rawDelayMs) && rawDelayMs > 0 ? Math.floor(rawDelayMs) : 0;
+  const rawDelayMs = ensureRuntimeConfig(env).minFrameDelayMs;
+  if (typeof rawDelayMs !== 'number' || !Number.isSafeInteger(rawDelayMs) || rawDelayMs < 0) {
+    throw new Error(`RUNTIME_MIN_FRAME_DELAY_MS_INVALID:${String(rawDelayMs)}`);
+  }
+  return rawDelayMs;
 };
 
-export const getRemainingRuntimeFrameDelayMs = (
-  env: RuntimeReplica,
-  overrideDelayMs?: number,
-): number => {
-  const periodMs = getRuntimeFramePeriodMs(env, overrideDelayMs);
+export const getRemainingRuntimeFrameDelayMs = (env: RuntimeReplica): number => {
+  const periodMs = getRuntimeFramePeriodMs(env);
   if (periodMs <= 0) return 0;
   const lastFrameStartedAt = ensureRuntimeInfrastructure(env).lastFrameStartedAt;
   if (

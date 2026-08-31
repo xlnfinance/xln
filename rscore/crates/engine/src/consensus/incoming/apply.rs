@@ -538,66 +538,20 @@ pub fn apply_incoming_frame_with_authority(
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     security: IncomingFrameSecurityContext<'_>,
 ) -> Result<IncomingOutcome, StateError> {
+    if let Some(outcome) =
+        classify_incoming_frame_without_mutation(account, identity, envelope, &incoming, security)?
+    {
+        return Ok(outcome);
+    }
     let clock = security.clock;
     let peer_authority = security.peer_certified_board_authority;
-    let local_authority = security.local_certified_board_authority;
-    if let Err(error) = validate_account_input_envelope(account, envelope) {
-        return Ok(rejected(error.to_string()));
-    }
-    if let Some(authority) = peer_authority {
-        authority.assert_entity(&envelope.from_entity_id)?;
-    }
     let IncomingFrame {
         frame,
         state_hash,
         frame_hanko,
         dispute,
     } = incoming;
-    if let Some(dispute) = dispute.as_ref()
-        && let Err(error) = validate_counterparty_dispute_shape(dispute)
-    {
-        return Ok(rejected(error.to_string()));
-    }
-
-    // At-least-once replay is classified from the exact signed hash before
-    // obsolete certificate material is inspected. TypeScript rebuilds an ACK
-    // for an exact-current retry and ignores an older ancestor even when the
-    // old proposal no longer carries a usable frame Hanko. Equal-height hash
-    // conflicts deliberately fall through: they are not stale traffic.
     let current_height = account.current_height();
-    if frame.height == current_height
-        && account
-            .current()
-            .is_some_and(|committed| committed.state_hash == state_hash)
-    {
-        let ack_hanko = reusable_duplicate_ack_hanko(
-            account.local_committed_frame_hanko(),
-            account.replica().owner().as_bytes(),
-            identity,
-            &state_hash,
-            frame.height,
-            clock,
-            local_authority,
-        )?;
-        return Ok(IncomingOutcome::Duplicate {
-            height: frame.height,
-            state_hash,
-            ack_hanko,
-            // A re-sent acknowledgement carries the proof the original one
-            // did, which the account still holds.
-            ack_dispute: account
-                .outbound_ack()
-                .filter(|ack| ack.height == frame.height)
-                .and_then(|ack| ack.dispute.clone())
-                .map(Box::new),
-        });
-    }
-    if frame.height < current_height {
-        return Ok(IncomingOutcome::Stale {
-            height: frame.height,
-            current_height,
-        });
-    }
 
     let Some(frame_hanko) = frame_hanko else {
         return Ok(rejected("ACCOUNT_INPUT_FRAME_HANKO_MISSING"));
@@ -849,6 +803,73 @@ pub fn apply_incoming_frame_with_authority(
             committed_via_new_frame: true,
         }),
     })
+}
+
+/// Classify proposal outcomes which provably cannot mutate Account state.
+///
+/// The resident forest calls this before creating a copy-on-write candidate,
+/// and the canonical apply entrypoint calls the same function before its
+/// mutating path. Keeping one classifier prevents the optimization from
+/// becoming a second Account formula.
+pub fn classify_incoming_frame_without_mutation(
+    account: &AccountConsensus,
+    identity: &SigningIdentity,
+    envelope: &AccountInputEnvelope,
+    incoming: &IncomingFrame,
+    security: IncomingFrameSecurityContext<'_>,
+) -> Result<Option<IncomingOutcome>, StateError> {
+    if let Err(error) = validate_account_input_envelope(account, envelope) {
+        return Ok(Some(rejected(error.to_string())));
+    }
+    if let Some(authority) = security.peer_certified_board_authority {
+        authority.assert_entity(&envelope.from_entity_id)?;
+    }
+    if let Some(dispute) = incoming.dispute.as_ref()
+        && let Err(error) = validate_counterparty_dispute_shape(dispute)
+    {
+        return Ok(Some(rejected(error.to_string())));
+    }
+
+    // At-least-once replay is classified from the exact signed hash before
+    // obsolete certificate material is inspected. TypeScript rebuilds an ACK
+    // for an exact-current retry and ignores an older ancestor even when the
+    // old proposal no longer carries a usable frame Hanko. Equal-height hash
+    // conflicts deliberately fall through: they are not stale traffic.
+    let current_height = account.current_height();
+    if incoming.frame.height == current_height
+        && account
+            .current()
+            .is_some_and(|committed| committed.state_hash == incoming.state_hash)
+    {
+        let ack_hanko = reusable_duplicate_ack_hanko(
+            account.local_committed_frame_hanko(),
+            account.replica().owner().as_bytes(),
+            identity,
+            &incoming.state_hash,
+            incoming.frame.height,
+            security.clock,
+            security.local_certified_board_authority,
+        )?;
+        return Ok(Some(IncomingOutcome::Duplicate {
+            height: incoming.frame.height,
+            state_hash: incoming.state_hash,
+            ack_hanko,
+            // A re-sent acknowledgement carries the proof the original one
+            // did, which the account still holds.
+            ack_dispute: account
+                .outbound_ack()
+                .filter(|ack| ack.height == incoming.frame.height)
+                .and_then(|ack| ack.dispute.clone())
+                .map(Box::new),
+        }));
+    }
+    if incoming.frame.height < current_height {
+        return Ok(Some(IncomingOutcome::Stale {
+            height: incoming.frame.height,
+            current_height,
+        }));
+    }
+    Ok(None)
 }
 
 /// Apply the peer's ack of our pending frame.

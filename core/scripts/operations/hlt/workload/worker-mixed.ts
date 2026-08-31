@@ -598,6 +598,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           canonicalStateHash: rustSettlement.metrics.postStateHash,
         },
         workers: requireRustH1().ready.workers,
+        minFrameDelayMs: requireRustH1().ready.minFrameDelayMs,
         metricsBefore: rustMetricsBefore,
         metrics: rustSettlement.metrics,
         economicPhaseMetrics: rustSettlement.economicPhaseMetrics,

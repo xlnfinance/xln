@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import "../../../contracts/HashLadder.sol";
-import "../../../contracts/mocks/TransformerLivenessHarness.sol";
+import "../../contracts/HashLadder.sol";
+import "../../contracts/mocks/TransformerLivenessHarness.sol";
 import {SettlementDeltasHarness} from "./helpers/SettlementDeltasHarness.sol";
 
 /// @notice Small sign-free lemmas for Halmos over the REAL production

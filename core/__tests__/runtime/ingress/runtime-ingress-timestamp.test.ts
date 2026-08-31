@@ -847,6 +847,12 @@ describe('runtime ingress timestamp', () => {
     const cadenceBaseline = Date.now();
     env.infrastructure.lastFrameStartedAt = cadenceBaseline;
 
+    // Direct callers and the background loop must read the same committed
+    // Runtime setting. A process argument here used to override it with zero,
+    // creating a second scheduling policy and bypassing batching.
+    await processRuntime(env);
+    expect(env.state.eReplicas.get(`${delayedEntityId}:${delayedSignerId}`)).toBeUndefined();
+
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
       await sleep(20);
@@ -870,6 +876,13 @@ describe('runtime ingress timestamp', () => {
 
     expect(getRemainingRuntimeFrameDelayMs(env)).toBe(0);
     expect(isRuntimeFrameReady(env, Date.now())).toBe(true);
+  });
+
+  test('runtime frame cadence rejects a checkpoint without its canonical delay', () => {
+    const env = createIsolatedEnv('runtime-frame-delay-missing');
+    env.runtimeConfig = { loopIntervalMs: 1 };
+    expect(() => getRemainingRuntimeFrameDelayMs(env))
+      .toThrow('RUNTIME_MIN_FRAME_DELAY_MS_INVALID:undefined');
   });
 
   test('runtime loop starts jurisdiction watchers exactly once per replica', async () => {

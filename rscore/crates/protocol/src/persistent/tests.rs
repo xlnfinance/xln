@@ -204,6 +204,94 @@ fn two_level_batch_matches_serial_with_compressed_children() {
 }
 
 #[test]
+fn slot_mutation_defers_hashing_until_canonical_root_or_descriptor_demand() {
+    use std::cell::Cell;
+
+    let base = PersistentRadixMap::empty()
+        .updated(vec![0x12, 0x34], digest(1), digest(1))
+        .expect("first base leaf")
+        .updated(vec![0x12, 0x56], digest(2), digest(2))
+        .expect("second base leaf")
+        .updated(vec![0xab, 0xcd], digest(3), digest(3))
+        .expect("third base leaf");
+    base.root_hash();
+
+    let mutations = vec![
+        PersistentRadixMutation::Put {
+            key: vec![0x12, 0x34],
+            value: digest(11),
+            value_digest: digest(11),
+        },
+        PersistentRadixMutation::Put {
+            key: vec![0xfe, 0xdc],
+            value: digest(12),
+            value_digest: digest(12),
+        },
+        PersistentRadixMutation::Remove {
+            key: vec![0xab, 0xcd],
+        },
+    ];
+    let lazy_slot_count = Cell::new(0_usize);
+    let lazy_nonempty_slot_count = Cell::new(0_usize);
+    let lazy = base
+        .mutated_batch_two_levels(mutations, |slots| {
+            slots.map(|slot| {
+                let has_work = slot.has_work();
+                let outcome = slot.apply();
+                if has_work {
+                    let (nodes, materialized) = outcome
+                        .as_ref()
+                        .expect("active slot mutation")
+                        .hash_materialization();
+                    if nodes > 0 {
+                        assert!(nodes > materialized);
+                        lazy_nonempty_slot_count.set(lazy_nonempty_slot_count.get() + 1);
+                    }
+                    lazy_slot_count.set(lazy_slot_count.get() + 1);
+                }
+                outcome
+            })
+        })
+        .expect("lazy slot mutation");
+    assert_eq!(lazy_slot_count.get(), 3);
+    assert_eq!(lazy_nonempty_slot_count.get(), 2);
+    let (nodes_before_root, materialized_before_root) = lazy.hash_materialization();
+    assert!(nodes_before_root > materialized_before_root);
+
+    let expected = base
+        .removed(&[0xab, 0xcd])
+        .expect("serial remove")
+        .updated(vec![0x12, 0x34], digest(11), digest(11))
+        .expect("serial replacement")
+        .updated(vec![0xfe, 0xdc], digest(12), digest(12))
+        .expect("serial insertion");
+    let expected_root = expected.root_hash();
+    assert_eq!(lazy.root_hash(), expected_root);
+    assert_eq!(
+        lazy.hash_materialization(),
+        (nodes_before_root, nodes_before_root)
+    );
+    assert_eq!(lazy.node_records(), expected.node_records());
+    assert_eq!(
+        lazy.node_changes_since(&base),
+        expected.node_changes_since(&base)
+    );
+
+    let shard_key = account_key(0x123, 7);
+    let shard = PersistentRadixShard::empty(0x123)
+        .expect("empty shard")
+        .updated(shard_key.clone(), digest(21), digest(21))
+        .expect("lazy shard mutation");
+    assert_eq!(shard.hash_materialization(), (1, 0));
+    let descriptor = shard.descriptor();
+    assert_eq!(
+        descriptor.root().expect("descriptor root").hash(),
+        shard.root_hash().unwrap()
+    );
+    assert_eq!(shard.hash_materialization(), (1, 1));
+}
+
+#[test]
 fn two_level_batch_matches_serial_for_large_replacements_and_inserts() {
     let mut base = PersistentRadixMap::empty();
     for index in 0_u16..768 {

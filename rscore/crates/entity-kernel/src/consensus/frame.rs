@@ -285,7 +285,7 @@ pub fn compute_entity_events_parity_digest(
     Ok(digest.finalize().into())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct EntityFrameBody<'a> {
     pub parent_frame_hash: &'a str,
     pub height: u64,
@@ -296,6 +296,9 @@ pub struct EntityFrameBody<'a> {
     pub state_root: &'a str,
     pub authority_root: &'a str,
     pub entity_context: &'a CanonicalValue,
+    /// Optional pre-encoded canonical context. Production certification sets
+    /// this after wire fitting; replay/lineage verification encodes on demand.
+    pub entity_context_bytes: Option<&'a [u8]>,
     pub j_prefix_certificate: Option<&'a CanonicalValue>,
 }
 
@@ -313,6 +316,10 @@ pub struct EntityFrameDraft {
     pub state_root: String,
     pub authority_root: String,
     pub entity_context: CanonicalValue,
+    /// Exact canonical bytes already measured during Runtime prefix fitting.
+    /// This is transient proof material, not a second persisted context: the
+    /// certified frame still owns only `entity_context`.
+    pub entity_context_bytes: Vec<u8>,
     pub j_prefix_certificate: Option<CanonicalValue>,
 }
 
@@ -328,6 +335,7 @@ impl EntityFrameDraft {
             state_root: &self.state_root,
             authority_root: &self.authority_root,
             entity_context: &self.entity_context,
+            entity_context_bytes: Some(&self.entity_context_bytes),
             j_prefix_certificate: self.j_prefix_certificate.as_ref(),
         }
     }
@@ -344,7 +352,8 @@ pub struct EntityFrameWireMeasureBody<'a> {
     pub entity_id: &'a str,
     pub state_root: &'a str,
     pub authority_root: &'a str,
-    pub entity_context: &'a CanonicalValue,
+    /// Canonical Entity context bytes produced by `encode_entity_frame_context`.
+    pub entity_context_bytes: &'a [u8],
     pub j_prefix_certificate: Option<&'a CanonicalValue>,
 }
 
@@ -367,14 +376,13 @@ fn encode_entity_frame_wire<'a>(
     entity_id: &str,
     state_root: &str,
     authority_root: &str,
-    entity_context: &CanonicalValue,
+    entity_context_bytes: &[u8],
     j_prefix_certificate: Option<&CanonicalValue>,
 ) -> Result<(Vec<u8>, EntityFrameWireMeasure), EntityFrameError> {
     let state_root = canonical_root("stateRoot", state_root)?;
     let authority_root = canonical_root("authorityRoot", authority_root)?;
     let tx_count = u64::try_from(txs.len()).map_err(|_| EntityFrameError::TxPreimageTooLarge)?;
-    let context = binary_payload(entity_context)?;
-    let context_digest = hex_digest(&Sha256::digest(&context));
+    let context_digest = hex_digest(&Sha256::digest(entity_context_bytes));
     let events = events_value(events);
     let event_bytes = if events == CanonicalValue::Array(Vec::new()) {
         0
@@ -409,7 +417,7 @@ fn encode_entity_frame_wire<'a>(
     ]);
     let encoded_header = binary_payload(&header)?;
     let header_bytes = encoded_header.len();
-    let context_bytes = context.len();
+    let context_bytes = entity_context_bytes.len();
     let total_bytes = header_bytes
         .checked_add(context_bytes)
         .and_then(|value| value.checked_add(tx_bytes))
@@ -426,6 +434,15 @@ fn encode_entity_frame_wire<'a>(
     ))
 }
 
+/// Encode the committed Entity context once at the Runtime boundary. Prefix
+/// fitting and frame certification consume these exact bytes; callers cannot
+/// accidentally substitute JSON or another local wire representation.
+pub fn encode_entity_frame_context(
+    entity_context: &CanonicalValue,
+) -> Result<Vec<u8>, EntityFrameError> {
+    Ok(binary_payload(entity_context)?)
+}
+
 pub fn measure_entity_frame_wire(
     body: &EntityFrameWireMeasureBody<'_>,
 ) -> Result<EntityFrameWireMeasure, EntityFrameError> {
@@ -434,7 +451,7 @@ pub fn measure_entity_frame_wire(
     let authority_root = canonical_root("authorityRoot", body.authority_root)?;
     let tx_count =
         u64::try_from(body.txs.len()).map_err(|_| EntityFrameError::TxPreimageTooLarge)?;
-    let context_bytes = binary_payload(body.entity_context)?;
+    let context_bytes = body.entity_context_bytes.len();
     let events = events_value(body.events);
     let event_bytes = if events == CanonicalValue::Array(Vec::new()) {
         0
@@ -476,13 +493,13 @@ pub fn measure_entity_frame_wire(
     ]);
     let header_bytes = binary_payload(&header)?.len();
     let total_bytes = header_bytes
-        .checked_add(context_bytes.len())
+        .checked_add(context_bytes)
         .and_then(|value| value.checked_add(tx_bytes))
         .ok_or(EntityFrameError::TxPreimageTooLarge)?;
     Ok(EntityFrameWireMeasure {
         total_bytes,
         tx_bytes,
-        context_bytes: context_bytes.len(),
+        context_bytes,
         event_bytes,
         header_bytes,
     })
@@ -495,6 +512,14 @@ pub fn compute_entity_frame_hash(body: &EntityFrameBody<'_>) -> Result<String, E
 pub fn compute_entity_frame_hash_with_measure(
     body: &EntityFrameBody<'_>,
 ) -> Result<(String, EntityFrameWireMeasure), EntityFrameError> {
+    let encoded_context;
+    let context_bytes = match body.entity_context_bytes {
+        Some(bytes) => bytes,
+        None => {
+            encoded_context = encode_entity_frame_context(body.entity_context)?;
+            &encoded_context
+        }
+    };
     let (encoded_header, measure) = encode_entity_frame_wire(
         body.parent_frame_hash,
         body.height,
@@ -504,7 +529,7 @@ pub fn compute_entity_frame_hash_with_measure(
         body.entity_id,
         body.state_root,
         body.authority_root,
-        body.entity_context,
+        context_bytes,
         body.j_prefix_certificate,
     )?;
     if measure.total_bytes > MAX_ENTITY_FRAME_BYTES {
@@ -589,6 +614,7 @@ mod tests {
             state_root: &format!("0x{}", "11".repeat(32)),
             authority_root: "0xedc4ddb8ec2d8f0a4e4c83dc91d1c51c16e828fa4bea0a914b64fd57a4bbc704",
             entity_context: &context,
+            entity_context_bytes: None,
             j_prefix_certificate: None,
         })
         .expect("frame hash");
@@ -621,6 +647,8 @@ mod tests {
         let txs = [&first, &second];
         let first_bytes = measure_entity_frame_tx_bytes(&first).expect("first bytes");
         let second_bytes = measure_entity_frame_tx_bytes(&second).expect("second bytes");
+        let context_bytes = encode_entity_frame_context(&CanonicalValue::Object(Vec::new()))
+            .expect("context bytes");
         let measured = measure_entity_frame_wire(&EntityFrameWireMeasureBody {
             parent_frame_hash: "genesis",
             height: 1,
@@ -630,7 +658,7 @@ mod tests {
             entity_id: &format!("0x{}", "22".repeat(32)),
             state_root: &format!("0x{}", "11".repeat(32)),
             authority_root: &format!("0x{}", "33".repeat(32)),
-            entity_context: &CanonicalValue::Object(Vec::new()),
+            entity_context_bytes: &context_bytes,
             j_prefix_certificate: None,
         })
         .expect("wire measure");
@@ -648,6 +676,7 @@ mod tests {
                 .expect("second tx");
         let txs = [&first, &second];
         let context = object(vec![("peerAssertions", CanonicalValue::Array(Vec::new()))]);
+        let context_bytes = encode_entity_frame_context(&context).expect("context bytes");
         let body = EntityFrameWireMeasureBody {
             parent_frame_hash: "genesis",
             height: 1,
@@ -659,7 +688,7 @@ mod tests {
             entity_id: &format!("0x{}", "22".repeat(32)),
             state_root: &format!("0x{}", "11".repeat(32)),
             authority_root: &format!("0x{}", "33".repeat(32)),
-            entity_context: &context,
+            entity_context_bytes: &context_bytes,
             j_prefix_certificate: None,
         };
         let measured = measure_entity_frame_wire(&body).expect("size-only measure");
@@ -672,10 +701,33 @@ mod tests {
             body.entity_id,
             body.state_root,
             body.authority_root,
-            body.entity_context,
+            body.entity_context_bytes,
             body.j_prefix_certificate,
         )
         .expect("hashing encoder");
         assert_eq!(measured, encoded);
+
+        let owned_txs = vec![first.clone(), second.clone()];
+        let preencoded = EntityFrameBody {
+            parent_frame_hash: body.parent_frame_hash,
+            height: body.height,
+            timestamp: body.timestamp,
+            txs: &owned_txs,
+            events: body.events,
+            entity_id: body.entity_id,
+            state_root: body.state_root,
+            authority_root: body.authority_root,
+            entity_context: &context,
+            entity_context_bytes: Some(&context_bytes),
+            j_prefix_certificate: body.j_prefix_certificate,
+        };
+        let fallback = EntityFrameBody {
+            entity_context_bytes: None,
+            ..preencoded
+        };
+        assert_eq!(
+            compute_entity_frame_hash_with_measure(&preencoded).expect("preencoded hash"),
+            compute_entity_frame_hash_with_measure(&fallback).expect("fallback hash"),
+        );
     }
 }

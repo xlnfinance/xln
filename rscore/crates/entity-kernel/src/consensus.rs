@@ -187,6 +187,7 @@ pub use production::{
     ResidentEntityConsensusReplica, build_certified_entity_frame_link, build_entity_hash_manifest,
     build_required_j_prefix_certificate, certify_entity_transition,
     certify_single_signer_entity_frame, compute_entity_events_parity_digest,
-    compute_entity_frame_hash, is_entity_owned_consensus_field, measure_entity_frame_tx_bytes,
-    measure_entity_frame_wire, project_entity_consensus_sections, sign_j_event_range,
+    compute_entity_frame_hash, encode_entity_frame_context, is_entity_owned_consensus_field,
+    measure_entity_frame_tx_bytes, measure_entity_frame_wire, project_entity_consensus_sections,
+    sign_j_event_range,
 };

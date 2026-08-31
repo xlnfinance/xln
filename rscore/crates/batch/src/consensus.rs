@@ -16,6 +16,7 @@ use xln_rscore_engine::{
     SigningIdentity, StandaloneInputOutcome, StateError, apply_board_hanko_refresh,
     apply_incoming_ack_frame_with_authority, apply_incoming_ack_with_authority,
     apply_incoming_frame_with_authority, apply_standalone_dispute, canonical_tx_digest,
+    classify_incoming_frame_without_mutation,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -515,29 +516,14 @@ pub(crate) fn apply_one(
     security: IncomingFrameSecurityContext<'_>,
     swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
 ) -> (AccountInputVerdict, bool) {
+    if let Some(verdict) =
+        apply_one_without_mutation(account_id, account, identity, &input, security)
+    {
+        return (verdict, false);
+    }
     let clock = security.clock;
     let peer_authority = security.peer_certified_board_authority;
     let local_authority = security.local_certified_board_authority;
-    if account_id.as_bytes() != &input.envelope.from_entity_id {
-        return (
-            AccountInputVerdict::Failed("ACCOUNT_INPUT_ACCOUNT_ID_MISMATCH".to_string()),
-            false,
-        );
-    }
-    if !account.accepts_external_input() {
-        // TypeScript drops frozen AccountInput before ACK/replay or board
-        // verification can mutate the Account. J finality remains available
-        // through the separate Entity-owned envelope-update path.
-        return (
-            AccountInputVerdict::Failed("ACCOUNT_INPUT_STATUS_FROZEN".to_string()),
-            false,
-        );
-    }
-    if let Some(authority) = peer_authority
-        && let Err(error) = authority.assert_entity(&input.envelope.from_entity_id)
-    {
-        return (AccountInputVerdict::Failed(error.to_string()), false);
-    }
     let verdict = match input.kind {
         AccountInputKind::Ack(ack) => {
             match apply_incoming_ack_with_authority(
@@ -606,6 +592,52 @@ pub(crate) fn apply_one(
     };
     let changed = verdict_changes_account(&verdict);
     (verdict, changed)
+}
+
+/// Return only outcomes which are guaranteed not to mutate Account state.
+///
+/// The resident path uses this against its borrowed head before allocating a
+/// mutable candidate. `apply_one` calls the same classifier, so the fast path
+/// cannot drift into an alternate replay/rejection formula.
+pub(crate) fn apply_one_without_mutation(
+    account_id: AccountId,
+    account: &AccountConsensus,
+    identity: &SigningIdentity,
+    input: &AccountInput,
+    security: IncomingFrameSecurityContext<'_>,
+) -> Option<AccountInputVerdict> {
+    if account_id.as_bytes() != &input.envelope.from_entity_id {
+        return Some(AccountInputVerdict::Failed(
+            "ACCOUNT_INPUT_ACCOUNT_ID_MISMATCH".to_string(),
+        ));
+    }
+    if !account.accepts_external_input() {
+        // TypeScript drops frozen AccountInput before ACK/replay or board
+        // verification can mutate the Account. J finality remains available
+        // through the separate Entity-owned envelope-update path.
+        return Some(AccountInputVerdict::Failed(
+            "ACCOUNT_INPUT_STATUS_FROZEN".to_string(),
+        ));
+    }
+    if let Some(authority) = security.peer_certified_board_authority
+        && let Err(error) = authority.assert_entity(&input.envelope.from_entity_id)
+    {
+        return Some(AccountInputVerdict::Failed(error.to_string()));
+    }
+    let AccountInputKind::AckFrame { ack: None, frame } = &input.kind else {
+        return None;
+    };
+    match classify_incoming_frame_without_mutation(
+        account,
+        identity,
+        &input.envelope,
+        frame,
+        security,
+    ) {
+        Ok(Some(outcome)) => Some(incoming_verdict(outcome)),
+        Ok(None) => None,
+        Err(error) => Some(AccountInputVerdict::Failed(error.to_string())),
+    }
 }
 
 fn standalone_dispute_verdict(outcome: StandaloneInputOutcome) -> AccountInputVerdict {

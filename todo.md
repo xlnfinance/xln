@@ -3,6 +3,43 @@
 This is the only live TODO/NEXT file. It is a fail-closed release status, not a
 product backlog; long-term work belongs in `docs/roadmap.md`.
 
+## Active Rust H1 milestone — 2026-08-31
+
+- Remove avoidable Account-input/outbox data movement. Current 1000-user,
+  five-second profile moves 52.3 MB of Runtime inputs and 45.5 MB of outbox;
+  31.0 MB of the outbox is repeated frame/dispute Hanko material.
+- Explain and reduce the `w1 -> w4` full-flow gap. Current diagnostic Account
+  work improves 2.55x per Account input, while end-to-end drain improves only
+  1.27x because W4 seals 51 Runtime frames / 14,655 Account inputs while W1
+  seals 21 / 10,526 for the same 5,000 payments. The Account outcome trace has
+  zero `FrameDuplicate`; isolate Account-frame fragmentation/bundling rather
+  than misclassifying the ledger's repeated appearances as duplicate apply.
+- Collapse the production Entity plan to the canonical three stages. Today an
+  interleaved local transaction can split one frame into multiple
+  `AccountRange` worker visits; the target is one Account ingress batch, one
+  Entity financial batch, and one Account proposal batch.
+- Collapse `commit_paybook_changes` from two shared-pool dispatches into one
+  `256 shard -> changes[]` dispatch. Current code first maps every change into
+  a mutation and then wakes the pool again for active radix slots; measured
+  Paybook commit wall is 45 ms at W1 versus 168 ms at W4 for the same payment
+  smoke, proving coordination overhead instead of scaling.
+- Remove the two conditional post-proposal Account continuations from the
+  normal architecture: failed-forward compensation must be decided before
+  Paybook emits proposal work, and locally-produced settlement Hankos must be
+  attached at publication instead of mutating the Account candidate after
+  Entity certification.
+- Remove derived Runtime-frame touch lists from the canonical WAL format once
+  the TS storage/UI readers derive their views from canonical input/output
+  rows; do not retain both representations.
+- Eliminate duplicate EntityInput encoding: admission currently encodes the
+  complete input only to measure it, then Runtime projection encodes it again
+  inside the frame. One canonical byte representation must cross both steps.
+- Run fresh, sequential Rust H1 payment saturation evidence at 5,000 users for
+  20 seconds with W1 and W4, then run the same-chain swap gate. Report only
+  committed operations with zero pending Account ACKs and zero transport loss.
+- Run `bun run check`, checkpoint the coherent change on `main`, and push only
+  after the focused Rust parity tests and live H1 gates are green.
+
 ## Current candidate — 2026-08-14
 
 - Branch: `main` (the only writable release worktree).

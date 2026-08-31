@@ -55,10 +55,9 @@ let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
 export const processRuntime = async (
   env: RuntimeReplica,
   inputs?: EntityInput[],
-  runtimeDelay = 0,
 ): Promise<RuntimeReplica> => {
   if (!processRuntimeImpl) throw new Error('RUNTIME_PROCESSOR_NOT_INITIALIZED');
-  return processRuntimeImpl(env, inputs, runtimeDelay);
+  return processRuntimeImpl(env, inputs);
 };
 
 // Runtime execution state lives on RuntimeReplica. This module owns the canonical
@@ -66,7 +65,7 @@ export const processRuntime = async (
 
 const runtimeLoopApi = createRuntimeLoopApi({
   notifyEnvChange: env => notifyRuntimeStateChanged(env),
-  processRuntime: (env, inputs, runtimeDelay) => processRuntime(env, inputs, runtimeDelay),
+  processRuntime: (env, inputs) => processRuntime(env, inputs),
   waitForRuntimeProcessingIdle: (env, timeoutMs) => waitForRuntimeProcessingIdle(env, timeoutMs),
   runtimeInputHasQueuedWork: input => runtimeInputHasQueuedWork(input),
 });

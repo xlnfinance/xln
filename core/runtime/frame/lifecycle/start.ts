@@ -11,7 +11,6 @@ export type RuntimeFrameStartDeps = {
     env: RuntimeReplica,
     inputs: EntityInput[] | undefined,
     state: RuntimeLifecycleState,
-    runtimeDelay: number,
     profile: RuntimeProcessProfile,
   ): Promise<{ ready: true } | { ready: false; outcome: string }>;
 };
@@ -39,7 +38,6 @@ export const startRuntimeFrame = async (
   env: RuntimeReplica,
   inputs: EntityInput[] | undefined,
   state: RuntimeLifecycleState,
-  runtimeDelay: number,
   profile: RuntimeProcessProfile,
   deps: RuntimeFrameStartDeps,
 ): Promise<RuntimeFrameStart> => {
@@ -53,7 +51,7 @@ export const startRuntimeFrame = async (
   if (!env.emit) deps.attachEventEmitters(env);
   await stopAtDebugFrame(env);
 
-  const ingress = await deps.collectIngress(env, inputs, state, runtimeDelay, profile);
+  const ingress = await deps.collectIngress(env, inputs, state, profile);
   if (!ingress.ready) profile.outcome = ingress.outcome;
   return {
     ready: ingress.ready,

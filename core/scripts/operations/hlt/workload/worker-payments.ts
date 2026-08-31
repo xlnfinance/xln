@@ -1057,6 +1057,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         deliveredElapsedMs,
         hostAcceptedElapsedMs,
         workers: rustH1.ready.workers,
+        minFrameDelayMs: rustH1.ready.minFrameDelayMs,
         metrics: rustSettlement.metrics,
         economicPhaseMetrics: rustSettlement.economicPhaseMetrics,
         workerExecution,
@@ -1153,8 +1154,9 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       );
     } else {
       console.log(
-        `[load] SMOKE_ONLY_NOT_TPS_EVIDENCE users=${lanes} payments=${submittedPayments} ` +
-        `offeredPerSecond=${offeredPaymentRate} diagnosticDeliveredPerSecond=${report!.deliveredTps.toFixed(1)}`,
+        `[load] SMOKE_ONLY_NOT_TPS_EVIDENCE users=${lanes} ` +
+        `submitted=${submittedPayments} delivered=${deliveredPayments} ` +
+        `windowMs=${args.rounds * args.cadenceMs}`,
       );
     }
   } catch (error) {

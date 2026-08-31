@@ -191,6 +191,7 @@ export type RustH1Ready = Readonly<{
   signerId: string;
   listen: string;
   workers: number;
+  minFrameDelayMs: number;
   height: number;
   runtimeFrameHash: string;
   accountsRoot: string;
@@ -731,6 +732,7 @@ export const attachRustH1 = async (apiBaseUrl: string): Promise<RustH1Handle> =>
   const runtimeId = String(info['runtimeId'] || '').trim().toLowerCase();
   const directWsUrl = String(info['directWsUrl'] || '').trim();
   const workers = Number(info['workers']);
+  const minFrameDelayMs = Number(info['minFrameDelayMs']);
   const height = Number(info['height']);
   const runtimeFrameHash = String(info['runtimeFrameHash'] || '');
   const accountsRoot = String(info['accountsRoot'] || '');
@@ -757,6 +759,7 @@ export const attachRustH1 = async (apiBaseUrl: string): Promise<RustH1Handle> =>
     signerId.length === 0 ||
     !/^ws:\/\//.test(directWsUrl) ||
     !Number.isSafeInteger(workers) || workers < 1 ||
+    !Number.isSafeInteger(minFrameDelayMs) || minFrameDelayMs < 0 || minFrameDelayMs > 10_000 ||
     !Number.isSafeInteger(height) || height < 0 ||
     !/^0x[0-9a-f]{64}$/.test(runtimeFrameHash) ||
     !/^0x[0-9a-f]{64}$/.test(accountsRoot) ||
@@ -787,7 +790,7 @@ export const attachRustH1 = async (apiBaseUrl: string): Promise<RustH1Handle> =>
   return {
     ready: {
       runtimeId, entityId, signerId, listen, workers, height,
-      runtimeFrameHash, accountsRoot, orderbookMinTradeSize,
+      minFrameDelayMs, runtimeFrameHash, accountsRoot, orderbookMinTradeSize,
     },
     pid: null,
     errorTail: () => lastError,

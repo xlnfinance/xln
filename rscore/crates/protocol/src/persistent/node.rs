@@ -144,6 +144,20 @@ pub(super) fn node_hash<V>(node: &NodeRef<V>) -> [u8; 32] {
     }
 }
 
+#[cfg(test)]
+pub(super) fn hash_materialization<V>(node: &NodeRef<V>) -> (usize, usize) {
+    match &**node {
+        Node::Leaf { hash, .. } => (1, usize::from(hash.get().is_some())),
+        Node::Branch { children, hash, .. } => children.iter().flatten().fold(
+            (1, usize::from(hash.get().is_some())),
+            |(nodes, materialized), child| {
+                let (child_nodes, child_materialized) = hash_materialization(child);
+                (nodes + child_nodes, materialized + child_materialized)
+            },
+        ),
+    }
+}
+
 pub(super) fn edge_hash<V>(parent_path: &[u8], child: &NodeRef<V>) -> [u8; 32] {
     let hash = node_hash(child);
     match &**child {
