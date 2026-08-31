@@ -16,6 +16,7 @@ type Manifest = Readonly<{
   runtimeSeedFile: string;
   runtimeSignerLabel: string;
   entitySignerLabel: string;
+  minFrameDelayMs: number;
 }>;
 
 const requiredPath = (value: unknown, field: string): string => {
@@ -28,6 +29,10 @@ const requiredPath = (value: unknown, field: string): string => {
 const readManifest = (path: string): Manifest => {
   const value = safeParse(readFileSync(path, 'utf8')) as Record<string, unknown>;
   if (value['format'] !== 'xln-native-replay-v1') throw new Error('NATIVE_REPLAY_V1_FORMAT');
+  const minFrameDelayMs = Number(value['minFrameDelayMs']);
+  if (!Number.isSafeInteger(minFrameDelayMs) || minFrameDelayMs < 0) {
+    throw new Error('NATIVE_REPLAY_V1_MIN_FRAME_DELAY');
+  }
   return {
     format: value['format'],
     sourceNativeDb: requiredPath(value['sourceNativeDb'], 'sourceNativeDb'),
@@ -35,6 +40,7 @@ const readManifest = (path: string): Manifest => {
     runtimeSeedFile: requiredPath(value['runtimeSeedFile'], 'runtimeSeedFile'),
     runtimeSignerLabel: String(value['runtimeSignerLabel'] ?? ''),
     entitySignerLabel: String(value['entitySignerLabel'] ?? ''),
+    minFrameDelayMs,
   };
 };
 
@@ -83,6 +89,7 @@ const output = resolve(String(
 writeFileSync(output, `${safeStringify({
   format: 'xln-native-replay-v1-result',
   manifest: manifestPath,
+  minFrameDelayMs: manifest.minFrameDelayMs,
   exactFields,
   results,
 })}\n`);

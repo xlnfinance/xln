@@ -46,6 +46,7 @@ writeFileSync(manifestPath, `${safeStringify({
   entitySignerLabel: 'h1-hub',
   users: report['users'],
   payments: report['submittedPayments'],
+  minFrameDelayMs: report['minFrameDelayMs'],
   sourceRuntimeFrames: metrics['totalFrames'],
   sourceEntityInputs: metrics['totalRuntimeEntityInputs'],
   sourceAccountInputs: metrics['totalAccountInputs'],
