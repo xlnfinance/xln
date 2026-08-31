@@ -398,21 +398,12 @@ export const runRustH1DisputeSmoke = async (options: Readonly<{
     metrics => metrics.height >= frozen.runtimeHeight,
     'HLT_RUST_DISPUTE_PREPARE_METRICS_MISSING',
   );
-  await options.rust.submitLocalEntityInputs(
-    `hlt-dispute-broadcast-${counterpartyEntityId.slice(-8)}-${frozen.runtimeHeight}`,
-    [{
-      entityId: hubEntityId,
-      signerId: options.rust.ready.signerId,
-      entityTxs: [{ type: 'j_broadcast', data: {} }],
-    }],
-  );
-  const observed = await waitForObservedDispute({
-    apiBaseUrl: options.apiBaseUrl,
-    rust: options.rust,
-    hubEntityId,
-    counterpartyEntityId,
-    tokenId: options.tokenId,
-  });
+  // Exercise the actual race the freeze must close: the counterparty still
+  // considers its Account active and sends ordinary business work after H1
+  // has frozen locally, but before DisputeStarted reaches the counterparty's
+  // J watcher. Once that event is observed the counterparty correctly rejects
+  // a new local htlcPayment before it can produce an AccountInput, so testing
+  // after broadcast only kills the user Runtime and never reaches H1.
   await queueLaneRuntimeInputWave(0, [{ lane: options.lane, input: options.businessInput }], {
     waitForCommit: true,
   });
@@ -429,6 +420,21 @@ export const runRustH1DisputeSmoke = async (options: Readonly<{
     counterpartyEntityId,
     options.tokenId,
   );
+  await options.rust.submitLocalEntityInputs(
+    `hlt-dispute-broadcast-${counterpartyEntityId.slice(-8)}-${frozen.runtimeHeight}`,
+    [{
+      entityId: hubEntityId,
+      signerId: options.rust.ready.signerId,
+      entityTxs: [{ type: 'j_broadcast', data: {} }],
+    }],
+  );
+  const observed = await waitForObservedDispute({
+    apiBaseUrl: options.apiBaseUrl,
+    rust: options.rust,
+    hubEntityId,
+    counterpartyEntityId,
+    tokenId: options.tokenId,
+  });
   assertRustH1DisputeFreeze(before, frozen, observed, afterBusinessInput);
   await waitForCounterpartyDispute(
     options.lane,
