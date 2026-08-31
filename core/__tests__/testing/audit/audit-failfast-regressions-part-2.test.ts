@@ -393,7 +393,7 @@ const setSyntheticPendingAccountProposal = (
   };
   account.pendingFrame = pendingFrame;
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
@@ -1047,7 +1047,7 @@ describe('audit fail-fast regressions', () => {
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [invalidFrame.stateHash]);
     if (!frameHanko) throw new Error('SIGNED_INVALID_FRAME_HANKO_MISSING');
     const accountInput: AccountInput = {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: structuredClone(receiver.state.domain),
@@ -1141,7 +1141,7 @@ describe('audit fail-fast regressions', () => {
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [staleFrame.stateHash]);
     if (!frameHanko) throw new Error('SIGNED_STALE_SETTLEMENT_FRAME_HANKO_MISSING');
     const accountInput: AccountInput = {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: structuredClone(receiver.state.domain),

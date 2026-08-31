@@ -1,4 +1,3 @@
-use xln_rscore_batch::{AccountAdmissionResult, AccountAdmissionVerdict};
 use xln_rscore_engine::AccountTx;
 use xln_rscore_protocol::JS_MAX_SAFE_INTEGER;
 
@@ -64,45 +63,20 @@ fn apply_admitted_tx(
     Ok(())
 }
 
-/// Mirror tx-effects.ts only for rows the Account machine actually admitted.
-/// Operation indices bind each verdict to its input work item; no positional
-/// guess survives a rejected or reordered result.
-pub(crate) fn apply_admitted_account_hooks(
+/// Mirror tx-effects.ts after the Account proposal stage succeeds. Admission
+/// is atomic: any failed `admit_txs` aborts the whole round, so carrying a
+/// second success verdict vector merely restated the control flow.
+pub(crate) fn apply_account_tx_hooks(
     state: &mut EntityStateSlice,
     work: &[AccountProposalWork],
-    admissions: &[AccountAdmissionResult],
 ) -> Result<(), EntityKernelError> {
-    if admissions.len() < work.len() {
-        return Err(EntityKernelError::htlc("ACCOUNT_ADMISSION_RESULT_MISSING"));
-    }
     let mut frame = state
         .crontab
         .as_ref()
         .map(|_| ScheduledHookFrame::default());
-    for (index, item) in work.iter().enumerate() {
-        let row = &admissions[index];
-        let expected_index = u64::try_from(index)
-            .map_err(|_| EntityKernelError::htlc("ACCOUNT_ADMISSION_INDEX_OVERFLOW"))?;
-        let expected_account = item
-            .account_id
-            .strip_prefix("0x")
-            .unwrap_or(&item.account_id);
-        let actual_account = row.account_id.to_string();
-        if row.operation_index != expected_index || actual_account != expected_account {
-            return Err(EntityKernelError::htlc(
-                "ACCOUNT_ADMISSION_BINDING_MISMATCH",
-            ));
-        }
-        match &row.verdict {
-            AccountAdmissionVerdict::Admitted { count } if *count == item.txs.len() => {
-                for tx in &item.txs {
-                    apply_admitted_tx(frame.as_mut(), &item.account_id, tx)?;
-                }
-            }
-            AccountAdmissionVerdict::Admitted { .. } => {
-                return Err(EntityKernelError::htlc("ACCOUNT_ADMISSION_COUNT_MISMATCH"));
-            }
-            AccountAdmissionVerdict::Rejected { .. } => {}
+    for item in work {
+        for tx in &item.txs {
+            apply_admitted_tx(frame.as_mut(), &item.account_id, tx)?;
         }
     }
     match (frame, state.crontab.as_mut()) {

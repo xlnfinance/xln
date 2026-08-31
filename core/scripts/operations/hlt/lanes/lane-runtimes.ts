@@ -78,8 +78,9 @@ const postHostRuntimeInputBatch = async (
   host: LaneRuntimeHostIngress,
   wave: number,
   entries: ReadonlyArray<Readonly<{ runtimeId: string; input: RuntimeInput }>>,
+  waitForCommit: boolean,
 ): Promise<void> => {
-  const payload = { wave, entries };
+  const payload = { wave, entries, waitForCommit };
   const body = serializeTaggedJson(payload);
   const controller = new AbortController();
   // An open-loop command submitted near second 20 may receive its process-local
@@ -140,8 +141,8 @@ const postHostRuntimeInputBatch = async (
   }
 };
 
-/** Keep setup admission bounded independently of users per OS host. */
-export const HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES = 50;
+/** Bound setup work per event-loop turn; each chunk returns after commit. */
+export const HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES = 10;
 
 export const requireConnectedLaneRuntime = (lane: LaneRuntime): ConnectedRuntime => {
   if (!lane.runtime) throw new Error(`HLT_LANE_CONTROL_NOT_CONNECTED:${lane.laneKey}`);
@@ -152,7 +153,10 @@ export const requireConnectedLaneRuntime = (lane: LaneRuntime): ConnectedRuntime
 export const queueLaneRuntimeInputWave = async (
   wave: number,
   submissions: readonly LaneRuntimeInputSubmission[],
-  options: Readonly<{ maxEntriesPerHostRequest?: number }> = {},
+  options: Readonly<{
+    maxEntriesPerHostRequest?: number;
+    waitForCommit?: boolean;
+  }> = {},
 ): Promise<void> => {
   if (!Number.isSafeInteger(wave) || wave < 0) throw new Error(`HLT_RUNTIME_INPUT_WAVE_INVALID:${wave}`);
   if (submissions.length < 1) throw new Error('HLT_RUNTIME_INPUT_WAVE_EMPTY');
@@ -190,9 +194,62 @@ export const queueLaneRuntimeInputWave = async (
     );
     group.host.sequence.nextWave += chunks.length;
     for (const chunk of chunks) {
-      await postHostRuntimeInputBatch(group.host, chunk.wave, chunk.entries);
+      await postHostRuntimeInputBatch(
+        group.host,
+        chunk.wave,
+        chunk.entries,
+        options.waitForCommit === true,
+      );
     }
   }));
+};
+
+/** Enable the production Jurisdiction watcher for one sovereign Runtime. */
+export const startLaneJurisdictionWatcher = async (lane: LaneRuntime): Promise<void> => {
+  const response = await fetch(`${lane.hostIngress.baseUrl}/api/hlt/jurisdiction-watcher-start`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${lane.hostIngress.authKey}`,
+      'content-type': 'application/json',
+    },
+    body: serializeTaggedJson({ runtimeId: lane.runtimeId }),
+  });
+  const payload = requireBoundaryRecord(
+    deserializeTaggedJson(await response.text()),
+    'HLT_LANE_JURISDICTION_WATCHER_RESPONSE_INVALID',
+  );
+  if (!response.ok || payload['ok'] !== true) {
+    throw new Error(
+      `HLT_LANE_JURISDICTION_WATCHER_REJECTED:${response.status}:` +
+      `${String(payload['error'] ?? 'unknown')}`,
+    );
+  }
+};
+
+/** Read diagnostic Account rows already produced by the bounded host scan. */
+export const readLaneAccountDetails = async (
+  lane: LaneRuntime,
+  hubRuntimeId: string,
+): Promise<readonly unknown[]> => {
+  const response = await fetch(`${lane.hostIngress.baseUrl}/api/hlt/quiescence`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${lane.hostIngress.authKey}`,
+      'content-type': 'application/json',
+    },
+    body: serializeTaggedJson({ hubRuntimeId, runtimeIds: [lane.runtimeId] }),
+  });
+  const payload = requireBoundaryRecord(
+    deserializeTaggedJson(await response.text()),
+    'HLT_LANE_ACCOUNT_DETAILS_RESPONSE_INVALID',
+  );
+  if (!response.ok || payload['ok'] !== true) {
+    throw new Error(`HLT_LANE_ACCOUNT_DETAILS_REJECTED:${response.status}`);
+  }
+  const details = payload['details'];
+  if (details === undefined) return [];
+  if (!Array.isArray(details)) throw new Error('HLT_LANE_ACCOUNT_DETAILS_INVALID');
+  return details;
 };
 
 /** Commit the imported user Entity and configure every sovereign Runtime with
@@ -938,6 +995,7 @@ const spawnSovereignRuntimeHost = async (options: {
     ['core/scripts/operations/hlt/lanes/sovereign-runtime-host.ts', '--first-port', String(firstPort)],
     {
       XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
+      XLN_PORT_BASE: String(options.portBase),
       XLN_DB_PATH: join(dbRoot, 'db'),
       XLN_RDB_ROOT: dbRoot,
       // Load users are ephemeral traffic generators. Only the Hub under test
@@ -953,6 +1011,10 @@ const spawnSovereignRuntimeHost = async (options: {
       XLN_HLT_TRACE_LANE_PROGRESS:
         process.env['XLN_HLT_TRACE_LANE_PROGRESS'] === '1' && options.laneIndex === 0 ? '1' : '0',
       XLN_HLT_LANE_PERSISTENCE: '0',
+      // The process already shards sovereign Runtime instances across fixed
+      // OS workers. A second 8-thread Account pool per Runtime would create up
+      // to 8,000 workers at 1,000 users and stalls bootstrap before live load.
+      XLN_TS_ACCOUNT_WORKERS: '0',
       XLN_HLT_PER_RUNTIME_CONTROL: options.connectRuntimeAdapters ? '1' : '0',
       XLN_STORAGE_WAL_SYNC: '0',
       ...(process.env['XLN_P2P_DELIVERY_TRACE'] === '1' ? { XLN_P2P_DELIVERY_TRACE: '1' } : {}),

@@ -71,6 +71,10 @@ export type ProposalProfile = {
 
 const noProfile: ProposalProfile = { startedAt: 0, checkpoints: {}, checkpoint: () => undefined };
 
+const markProposalPhase = (env: EntityRuntimeContext, phase: string): void => {
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = phase;
+};
+
 const replayPreparedFrameForRelay = async (
   env: EntityRuntimeContext,
   replica: EntityReplica,
@@ -383,6 +387,7 @@ const fitAndApplyEntityProposal = async (
     : { ...workingReplica, state: withBoardAuthority(workingReplica.state, authorityConfig) };
   const leader = getReplicaProposalLeader(authorityReplica);
   assertProposalPrefix(env, authorityReplica, selection, leader.view);
+  markProposalPhase(env, 'apply.entity.proposal.wire-fit');
   const fitted = await fitEntityProposalToWireBudget({
     env,
     replica: workingReplica,
@@ -400,7 +405,9 @@ const fitAndApplyEntityProposal = async (
   profile.checkpoint('wireFit');
   // Hanko recovery for the candidate set started at proposal start; the
   // synchronous verifiers below hit the memo once it lands.
+  markProposalPhase(env, 'apply.entity.proposal.hanko-prime');
   await (context.hankoPriming ?? primeProposalHankos(selection.proposalTxs));
+  markProposalPhase(env, 'apply.entity.proposal.frame-apply');
   const applied = await applyEntityFrame(
     env,
     workingReplica.state,
@@ -430,10 +437,12 @@ const certifyEntityProposal = async (
   const { txs, entityContext, applied, leader, jPrefixCertificate } = prepared;
   const height = workingReplica.state.height + 1;
   const timestamp = env.state.timestamp;
+  markProposalPhase(env, 'apply.entity.proposal.state');
   const state = buildProposalState(env, workingReplica, applied.newState, txs, height, timestamp, leader.view);
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
   profile.checkpoint('proposalState');
   const earlySignatures = startEarlyManifestSignatures(env, workingReplica, applied.collectedHashes);
+  markProposalPhase(env, 'apply.entity.proposal.state-root');
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
   profile.checkpoint('stateRoot');
   const authority = buildEntityFrameAuthority(state);
@@ -470,6 +479,7 @@ const certifyEntityProposal = async (
       : txs.length < 32 ? '8-31' : txs.length < 128 ? '32-127' : '128+'
   }`);
   profile.checkpoint('wireEstimate');
+  markProposalPhase(env, 'apply.entity.proposal.manifest-sign');
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign, earlySignatures);
   profile.checkpoint('manifestSignatures');
   const localCommitHankos = selection.isSingleSigner
@@ -633,6 +643,10 @@ export const startEntityProposalIfReady = async (
   const priorState = workingReplica.state;
   // Pool work for the whole candidate set starts now and overlaps selection,
   // fitting and context materialization on the main thread.
+  markProposalPhase(
+    context.env,
+    `apply.entity.proposal.prime:${selection.proposalTxs.map(tx => tx.type).join('+') || 'empty'}`,
+  );
   startInboundLayerPriming({
     state: workingReplica.state,
     proposalTxs: selection.proposalTxs,
@@ -640,6 +654,7 @@ export const startEntityProposalIfReady = async (
     entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(context.env, workingReplica.entityId),
   });
   context.hankoPriming = primeProposalHankos(selection.proposalTxs);
+  markProposalPhase(context.env, 'apply.entity.proposal.build');
   const certified = await buildEntityProposalEvictingRejected(context, selection, profile);
   if (!certified) return null;
   const { frame } = certified;
@@ -649,6 +664,7 @@ export const startEntityProposalIfReady = async (
     // Retired validators of a board handover remain full-state observers:
     // deliver the certified transition to the old board, never authority.
     const handoverConfig = getBoardHandoverFrameConfig(context.env, priorState, frame.txs);
+    markProposalPhase(context.env, 'apply.entity.proposal.finalize');
     const result = await finalizeCommitNotification(context, frame, candidate, frame.collectedSigs ?? new Map(), {
       localProposal: true,
       ...(certified.localCommitHankos ? { localCommitHankos: certified.localCommitHankos } : {}),

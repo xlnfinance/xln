@@ -1,4 +1,4 @@
-import type { AccountPeerInput } from '../../../../types/account';
+import type { AccountInput } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
@@ -11,7 +11,7 @@ import type { ApplyEntityTxOptions } from '../../apply';
 import type { AccountConsensusContext } from '../../../../account/consensus/context';
 import { cumulativeMarksToPhases } from '../../../../support/performance/profile';
 import { getPerfMs } from '../../../../support/time';
-import { AccountPeerEvidenceError } from '../../../../account/input/peer-rejection';
+import { AccountInputEvidenceError } from '../../../../account/input/input-rejection';
 import { resolveInboundAccount } from './inbound-account';
 import { rejectFrozenAccountInput } from './frozen-input';
 import type { CommittedAccountEffects } from './committed-input';
@@ -100,7 +100,7 @@ type AccountInputProfileScope = Readonly<{
 
 const createAccountInputProfileScope = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
 ): AccountInputProfileScope => {
   const startedAt = getPerfMs();
   const marks: Record<string, number> = {};
@@ -133,7 +133,7 @@ type PreparedEntityAccountInputResult =
   | Readonly<{ kind: 'ready'; prepared: PreparedEntityAccountInput }>;
 
 const logIncomingAccountInput = (
-  input: AccountPeerInput,
+  input: AccountInput,
   incomingAck: unknown,
   incomingProposal: unknown,
 ): void => {
@@ -156,7 +156,7 @@ type PreparedInboundResolution = ReturnType<typeof resolveInboundAccount> & Read
 
 const resolvePreparedInboundAccount = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   accountConsensusContext: AccountConsensusContext,
   hasAck: boolean,
   hasProposal: boolean,
@@ -186,14 +186,14 @@ const resolvePreparedInboundAccount = (
       preparedByAuthority: false,
     };
   } catch (error) {
-    if (!(error instanceof AccountPeerEvidenceError)) throw error;
+    if (!(error instanceof AccountInputEvidenceError)) throw error;
     const dump = safeStringify({
       input,
       entityId: state.entityId,
       entityHeight: state.height,
       rejection: { code: error.code, message: error.message },
     });
-    accountHandlerLog.error('input.peer_evidence_rejected', {
+    accountHandlerLog.error('input.evidence_rejected', {
       code: error.code,
       from: shortId(input.fromEntityId),
       error: error.message,
@@ -202,14 +202,14 @@ const resolvePreparedInboundAccount = (
     addMessage(state, `❌ Rejected account input: ${error.message}`);
     throw haltRuntimeFailure(
       'FRAME_CONSENSUS_FAILED',
-      `ACCOUNT_PEER_EVIDENCE_REJECTED:${error.code}:${error.message}:dump=${dump}`,
+      `ACCOUNT_INPUT_EVIDENCE_REJECTED:${error.code}:${error.message}:dump=${dump}`,
     );
   }
 };
 
 const prepareAccountInputToEntity = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   options: ApplyEntityTxOptions | undefined,
@@ -290,7 +290,7 @@ const finishPreparedAccountInput = async (
 
 const applyAccountInputPhases = async (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   options: ApplyEntityTxOptions | undefined,
@@ -317,7 +317,7 @@ const applyAccountInputPhases = async (
 
 const logAccountInputProfile = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   outcome: string,
   startedAt: number,
   marks: Record<string, number>,
@@ -338,7 +338,7 @@ const logAccountInputProfile = (
 
 export async function applyAccountInputToEntity(
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   options?: ApplyEntityTxOptions,

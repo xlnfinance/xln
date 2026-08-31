@@ -1362,7 +1362,7 @@ type HubMeshInputPlan = {
   creditInputs: EntityInput[];
 };
 
-const planSupportPeerInputs = (
+const planSupportAccountSetupInputs = (
   env: RuntimeReplica,
   owner: Pick<
     HubBootstrapEntry,
@@ -1411,7 +1411,7 @@ const planSupportPeerInputs = (
   return { openInputs: [], creditInputs };
 };
 
-const planHubPeerInputs = (
+const planHubAccountSetupInputs = (
   env: RuntimeReplica,
   bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
   peers: VisibleHubProfile[],
@@ -1510,9 +1510,9 @@ const planMeshBootstrapInputs = (
 ): HubMeshInputPlan => {
   const visibleProfiles = env.gossip?.getProfiles?.() || [];
   const plans = [
-    planHubPeerInputs(env, bootstrap, peers),
+    planHubAccountSetupInputs(env, bootstrap, peers),
     ...hubBootstraps.map(owner =>
-      planSupportPeerInputs(
+      planSupportAccountSetupInputs(
         env,
         owner,
         supportPeerIdentities,

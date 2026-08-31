@@ -90,7 +90,14 @@ const decodeSettlementSamples = (
   const delivered = samples.find(sample => sample.completedPayments === submitted && sample.paybookOpen === 0);
   const final = samples.at(-1)!;
   if (
-    ingress?.elapsedMs !== hubIngressElapsedMs || !delivered || delivered.elapsedMs > deliveredElapsedMs ||
+    // Samples are periodic observations. A single poll can observe both the
+    // final acceptance and final completion, while the native Runtime exposes
+    // their two exact commit timestamps separately. In that case the sample is
+    // correctly timestamped at completion and must only be after ingress.
+    // Requiring equality rejected a fully settled run whose authoritative
+    // counters and native timestamps were otherwise internally consistent.
+    !ingress || ingress.elapsedMs < hubIngressElapsedMs ||
+    !delivered || delivered.elapsedMs > deliveredElapsedMs ||
     final.elapsedMs !== deliveredElapsedMs ||
     final.acceptedPayments !== submitted || final.completedPayments !== submitted || final.paybookOpen !== 0
   ) throw new Error('HLT_PAYMENT_REPORT_SAMPLE_TERMINAL_INVALID');

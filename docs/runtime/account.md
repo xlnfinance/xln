@@ -23,4 +23,4 @@ The A-machine is bilateral state between two entities. `leftEntity` is always th
 
 ## Invariant
 
-The receiver validates against local entity time and finalized J-height where financial enforcement windows matter. Peer-controlled frame time is ordering metadata, not authority over local deadlines.
+The receiver validates against local entity time and finalized J-height where financial enforcement windows matter. Counterparty-controlled frame time is ordering metadata, not authority over local deadlines.

@@ -47,7 +47,7 @@ import { safeStringify } from '../../../core/protocol/serialization';
 import type {
   AccountFrame,
   AccountOutput,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
   AccountTx,
   SwapOffer,
@@ -587,8 +587,8 @@ const committedHtlcFrame: AccountFrame = {
   byLeft: false,
   deltas: [],
 };
-const paybookInput: AccountPeerInput = {
-  kind: 'frame',
+const paybookInput: AccountInput = {
+  kind: 'ack_frame',
   fromEntityId: MAKER,
   toEntityId: HUB,
   domain: {
@@ -727,7 +727,7 @@ const finalFrame: AccountFrame = {
   accountTxs: [finalInboundHtlc],
   stateHash: `0x${'71'.repeat(32)}`,
 };
-const finalInput: AccountPeerInput = {
+const finalInput: AccountInput = {
   ...paybookInput,
   proposal: { frame: finalFrame },
 };

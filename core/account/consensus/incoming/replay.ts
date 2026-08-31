@@ -2,7 +2,7 @@ import type {
   AccountDisputeHanko,
   AccountFrame,
   AccountAckFrame,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
 } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
@@ -29,7 +29,7 @@ export type AccountInputHeightNormalization =
   | { ok: false; message: string };
 
 export const normalizeAccountInputHeight = (
-  input: AccountPeerInput,
+  input: AccountInput,
 ): AccountInputHeightNormalization => {
   const referenceHeight = accountInputReferenceHeight(input);
   const normalizedInputHeight = referenceHeight === undefined || referenceHeight === null
@@ -45,7 +45,7 @@ export const normalizeAccountInputHeight = (
 };
 
 export const getDisputeHankoShapeError = (
-  input: AccountPeerInput,
+  input: AccountInput,
 ): string | undefined => {
   const disputeHankos = [
     accountInputAck(input)?.disputeHanko,
@@ -87,7 +87,7 @@ export type AccountInputReplayClassification = {
 
 export const classifyAccountInputReplay = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
 ): AccountInputReplayClassification => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
@@ -123,7 +123,7 @@ const sameAccountFrameHash = (left: string | undefined, right: string | undefine
   && left.toLowerCase() === right.toLowerCase();
 
 const applyDuplicateAck = (
-  response: AccountPeerInput,
+  response: AccountInput,
   events: string[],
 ): HandleAccountInputResult => accountInputApplied({
   response: structuredClone(response),
@@ -192,15 +192,15 @@ const requireCurrentFrameHanko = async (
 
 const cacheAckOnlyResponse = (
   account: AccountReplica,
-  pendingResponse: AccountPeerInput,
-  input: AccountPeerInput,
+  pendingResponse: AccountInput,
+  input: AccountInput,
   receivedHeight: number,
-): Extract<AccountPeerInput, { kind: 'ack' }> => {
+): Extract<AccountInput, { kind: 'ack' }> => {
   const pendingAck = accountInputAck(pendingResponse);
   if (!pendingAck) {
     throw new Error(`DUPLICATE_ACK_PENDING_RESPONSE_MISSING_ACK:${receivedHeight}`);
   }
-  const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
+  const response: Extract<AccountInput, { kind: 'ack' }> = {
     kind: 'ack',
     fromEntityId: pendingResponse.fromEntityId,
     toEntityId: pendingResponse.toEntityId,
@@ -231,7 +231,7 @@ const reusableCertifiedAckHanko = (account: AccountReplica): AccountDisputeHanko
 
 const rebuildDuplicateCommittedAckFrame = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   frameHash: string,
   receivedHeight: number,
   events: string[],
@@ -244,7 +244,7 @@ const rebuildDuplicateCommittedAckFrame = async (
     securityContext,
   );
   const disputeHanko = reusableCertifiedAckHanko(account);
-  const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
+  const response: Extract<AccountInput, { kind: 'ack' }> = {
     kind: 'ack',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
@@ -282,7 +282,7 @@ const isDuplicateAckTarget = (
 
 const reuseLastOutboundDuplicateAck = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedHeight: number,
   events: string[],
   securityContext: AccountInputSecurityContext,
@@ -316,7 +316,7 @@ const reuseLastOutboundDuplicateAck = async (
 
 export const buildDuplicateCommittedAckFrame = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   events: string[],
   replayCurrentHeight: number,
   receivedFrame: AccountFrame,
@@ -404,7 +404,7 @@ export const buildDuplicateCommittedAckFrame = async (
 
 export const handleReplayOrObsoleteAccountInput = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   replay: AccountInputReplayClassification,
   events: string[],
   securityContext: AccountInputSecurityContext,

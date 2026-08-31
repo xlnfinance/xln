@@ -2,13 +2,13 @@ use std::fmt;
 
 use crate::{AccountConsensus, AccountDisputeConfig, AccountDomain, AccountFrame, WatchSeed};
 
-/// The exact common fields carried by every bilateral Account peer input.
+/// The exact common fields carried by every bilateral Account input.
 ///
 /// `watch_seed` deliberately preserves presence. Existing accounts accept an
 /// omitted seed, but a present seed must match; silently filling an omitted
 /// value would change the Entity-owned input envelope.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AccountPeerEnvelope {
+pub struct AccountInputEnvelope {
     pub from_entity_id: [u8; 32],
     pub to_entity_id: [u8; 32],
     pub domain: AccountDomain,
@@ -88,7 +88,7 @@ pub enum AckFrameOutcome {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PeerEnvelopeRejection {
+pub enum AccountInputEnvelopeRejection {
     Owner,
     Parties,
     Domain,
@@ -96,7 +96,7 @@ pub enum PeerEnvelopeRejection {
     WatchSeed,
 }
 
-impl fmt::Display for PeerEnvelopeRejection {
+impl fmt::Display for AccountInputEnvelopeRejection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Owner => "ACCOUNT_INPUT_OWNER_MISMATCH",
@@ -113,31 +113,31 @@ impl fmt::Display for PeerEnvelopeRejection {
 /// This runs before authentication, replay, or consensus coordination can
 /// mutate the Account. The Account-map key is owned by the parent batch layer
 /// and is checked there against `from_entity_id`.
-pub fn validate_peer_envelope(
+pub fn validate_account_input_envelope(
     account: &AccountConsensus,
-    envelope: &AccountPeerEnvelope,
-) -> Result<(), PeerEnvelopeRejection> {
+    envelope: &AccountInputEnvelope,
+) -> Result<(), AccountInputEnvelopeRejection> {
     let replica = account.replica();
     if replica.owner().as_bytes() != &envelope.to_entity_id {
-        return Err(PeerEnvelopeRejection::Owner);
+        return Err(AccountInputEnvelopeRejection::Owner);
     }
     if replica.counterparty().as_bytes() != &envelope.from_entity_id {
-        return Err(PeerEnvelopeRejection::Parties);
+        return Err(AccountInputEnvelopeRejection::Parties);
     }
     let state = replica.state();
     let identity = state.identity();
     if identity.domain() != &envelope.domain {
-        return Err(PeerEnvelopeRejection::Domain);
+        return Err(AccountInputEnvelopeRejection::Domain);
     }
     if state.dispute_config() != envelope.dispute_config {
-        return Err(PeerEnvelopeRejection::DisputeConfig);
+        return Err(AccountInputEnvelopeRejection::DisputeConfig);
     }
     if envelope
         .watch_seed
         .as_ref()
         .is_some_and(|seed| seed != identity.watch_seed())
     {
-        return Err(PeerEnvelopeRejection::WatchSeed);
+        return Err(AccountInputEnvelopeRejection::WatchSeed);
     }
     Ok(())
 }

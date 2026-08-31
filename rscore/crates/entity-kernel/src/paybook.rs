@@ -33,6 +33,8 @@ pub(crate) struct PaybookChanges {
     pending: BTreeMap<Vec<u8>, Option<PaybookEntry>>,
 }
 
+pub(crate) type PendingPaybookMutation = (Vec<u8>, Option<PaybookEntry>);
+
 impl PaybookChanges {
     pub(crate) fn mutation_count(&self) -> usize {
         self.pending.len()
@@ -75,20 +77,17 @@ impl PaybookChanges {
     pub(crate) fn into_mutations(
         self,
     ) -> Result<Vec<PersistentRadixMutation<PaybookEntry>>, EntityKernelError> {
-        self.pending
+        self.into_pending()
             .into_iter()
-            .map(|(key, entry)| match entry {
-                Some(entry) => {
-                    let value = canonical_paybook_entry(&entry)?;
-                    Ok(PersistentRadixMutation::Put {
-                        key,
-                        value_digest: consensus_digest_bytes(&value)?,
-                        value: entry,
-                    })
-                }
-                None => Ok(PersistentRadixMutation::Remove { key }),
-            })
+            .map(build_paybook_mutation)
             .collect()
+    }
+
+    /// Move the final frame-local values out in canonical key order. Resident
+    /// production maps the independent encode+digest work over the shared CPU
+    /// pool; the sequential oracle below calls the exact same builder.
+    pub(crate) fn into_pending(self) -> Vec<PendingPaybookMutation> {
+        self.pending.into_iter().collect()
     }
 
     pub(crate) fn commit_sequential(
@@ -102,6 +101,22 @@ impl PaybookChanges {
             .mutated_batch_two_levels(mutations, |slots| slots.map(SlotWork::apply))
             .map_err(paybook_error)?;
         Ok(())
+    }
+}
+
+pub(crate) fn build_paybook_mutation(
+    (key, entry): PendingPaybookMutation,
+) -> Result<PersistentRadixMutation<PaybookEntry>, EntityKernelError> {
+    match entry {
+        Some(entry) => {
+            let value = canonical_paybook_entry(&entry)?;
+            Ok(PersistentRadixMutation::Put {
+                key,
+                value_digest: consensus_digest_bytes(&value)?,
+                value: entry,
+            })
+        }
+        None => Ok(PersistentRadixMutation::Remove { key }),
     }
 }
 

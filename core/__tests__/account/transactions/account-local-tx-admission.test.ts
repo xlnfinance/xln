@@ -64,7 +64,7 @@ describe('account mempool multiplicity', () => {
       .toThrow('DISPUTE_STARTER_NOT_A_PARTY');
   });
 
-  test('enqueues local transactions without a peer envelope', async () => {
+  test('enqueues local transactions without an Account input envelope', async () => {
     const account = accountWithPending(PAYMENT);
 
     const input = { kind: 'enqueue' as const, txs: [structuredClone(PAYMENT)] };

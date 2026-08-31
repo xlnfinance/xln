@@ -99,7 +99,6 @@ pub(super) fn collect_inputs(
     let mut output = Vec::new();
     for row in request.account_inputs {
         match &row.input.kind {
-            AccountInputKind::Frame(frame) => collect_frame(row, frame, &mut output),
             AccountInputKind::AckFrame { frame, .. } => collect_frame(row, frame, &mut output),
             AccountInputKind::Ack(_)
             | AccountInputKind::Dispute(_)
@@ -362,9 +361,9 @@ mod tests {
     use super::*;
     use crate::canonical_value_from_tagged_json;
     use serde_json::json;
-    use xln_rscore_batch::{AccountPeerInput, PeerBoardAuthority};
+    use xln_rscore_batch::{AccountInput, AccountInputBoardAuthority};
     use xln_rscore_engine::{
-        AccountDisputeConfig, AccountDomain, AccountFrame, AccountPeerEnvelope, DepositoryAddress,
+        AccountDisputeConfig, AccountDomain, AccountFrame, AccountInputEnvelope, DepositoryAddress,
         HtlcHashlock, HtlcLockTx, WatchSeed,
     };
 
@@ -403,10 +402,10 @@ mod tests {
             operation_index: 0,
             account_id: AccountId::from_bytes(from_entity_id),
             genesis_policy: None,
-            certified_board_authority: PeerBoardAuthority::Lazy,
-            local_certified_board_authority: PeerBoardAuthority::Lazy,
-            input: AccountPeerInput {
-                envelope: AccountPeerEnvelope {
+            certified_board_authority: AccountInputBoardAuthority::Lazy,
+            local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+            input: AccountInput {
+                envelope: AccountInputEnvelope {
                     from_entity_id,
                     to_entity_id,
                     domain: AccountDomain::new(
@@ -420,7 +419,10 @@ mod tests {
                         WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
                     ),
                 },
-                kind: AccountInputKind::Frame(Box::new(frame)),
+                kind: AccountInputKind::AckFrame {
+                    ack: None,
+                    frame: Box::new(frame),
+                },
             },
         }
     }
@@ -429,7 +431,7 @@ mod tests {
     fn production_extraction_matches_the_typescript_inbound_final_golden() {
         let row = golden_row();
         let mut inputs = Vec::new();
-        let AccountInputKind::Frame(frame) = &row.input.kind else {
+        let AccountInputKind::AckFrame { ack: None, frame } = &row.input.kind else {
             panic!("fixture frame")
         };
         collect_frame(&row, frame, &mut inputs);

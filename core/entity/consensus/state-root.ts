@@ -11,7 +11,7 @@ import type {
   AccountBoardHankoRefresh,
   AccountDisputeHanko,
   AccountFrame,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
   AccountState,
   AccountTx,
@@ -339,7 +339,7 @@ const compactBoardHankoRefresh = (boardHankoRefresh: AccountBoardHankoRefresh): 
   ...(boardHankoRefresh.disputeHanko ? { disputeHanko: compactDisputeHanko(boardHankoRefresh.disputeHanko) } : {}),
 });
 
-const compactAccountInputBinding = (input: AccountPeerInput): Record<string, unknown> => {
+const compactAccountInputBinding = (input: AccountInput): Record<string, unknown> => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
   const disputeHanko = input.kind === 'dispute' ? accountInputDisputeHanko(input) : undefined;
@@ -394,7 +394,7 @@ const mempoolRoot = (mempool: readonly AccountTx[], cold: boolean): string => {
 // missed on every projection. The binding is a pure function of the few
 // fields below; key the memo on them and the projected object stays stable
 // (which is what keeps the leaf preimage memo hitting).
-const inputBindingKey = (input: AccountPeerInput): string => {
+const inputBindingKey = (input: AccountInput): string => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
   const disputeHanko = input.kind === 'dispute' ? accountInputDisputeHanko(input) : undefined;
@@ -408,7 +408,7 @@ const inputBindingKey = (input: AccountPeerInput): string => {
     `|${boardHankoRefresh ? `${boardHankoRefresh.height}:${boardHankoRefresh.frameHash}:${boardHankoRefresh.boardActivationJHeight}:${boardHankoRefresh.boardActivationLogIndex}:${hankoKey(boardHankoRefresh.disputeHanko)}` : ''}`;
 };
 const inputBindingMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
-const compactAccountInputBindingMemo = (input: AccountPeerInput): Record<string, unknown> => {
+const compactAccountInputBindingMemo = (input: AccountInput): Record<string, unknown> => {
   const key = inputBindingKey(input);
   const hit = inputBindingMemos.get(key);
   if (hit) return hit;

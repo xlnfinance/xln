@@ -17,7 +17,7 @@ pub(crate) fn account_rows(
     encode::account_rows(value, carry_envelope)
 }
 
-/// Optional exact checkpoint manifest piggybacked on AccountOutbound.
+/// Optional exact checkpoint manifest returned by a canonical authority boundary.
 ///
 /// The first token names the incremental write (`base -> revision`); the
 /// second is what a later cold `RestoreExact` must reproduce after those rows

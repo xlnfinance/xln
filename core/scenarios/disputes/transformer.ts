@@ -43,7 +43,7 @@ const DETERMINISTIC_DISPUTE_START_UNIX = 4_102_445_800;
 type Registered = { id: string; signer: string; name: string };
 type DecodedArguments = { fillRatios: bigint[]; secrets: string[]; pulls: string[] };
 type AccountAckInput = Extract<AccountInput, { kind: 'ack' }>;
-type AccountProposalInput = Extract<AccountInput, { kind: 'frame' } | { kind: 'ack_frame' }>;
+type AccountProposalInput = Extract<AccountInput, { kind: 'ack_frame' }>;
 
 const requireRegistered = (value: Registered | undefined, name: string): Registered => {
   if (!value) throw new Error(`DISPUTE_TRANSFORMER_MISSING_ENTITY:${name}`);
@@ -109,7 +109,7 @@ const findSwapProposal = (
   offerId: string,
 ): AccountProposalInput | undefined => {
   for (const tx of txs ?? []) {
-    if (tx.type === 'accountInput' && (tx.data.kind === 'frame' || tx.data.kind === 'ack_frame')) {
+    if (tx.type === 'accountInput' && tx.data.kind === 'ack_frame') {
       const matchesParticipants = tx.data.fromEntityId === fromEntityId && tx.data.toEntityId === toEntityId;
       const containsOffer = tx.data.proposal.frame.accountTxs.some((accountTx) =>
         accountTx.type === 'swap_offer' && accountTx.data.offerId === offerId

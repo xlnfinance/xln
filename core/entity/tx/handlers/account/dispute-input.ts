@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountInputDisputeRequired } from '../../../../account/consensus/types';
@@ -11,7 +11,7 @@ import { hasInboundPayment } from '../../../paybook/views';
 type UnsafeFrameContext = {
   env: EntityRuntimeContext;
   state: EntityState;
-  input: AccountPeerInput;
+  input: AccountInput;
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;

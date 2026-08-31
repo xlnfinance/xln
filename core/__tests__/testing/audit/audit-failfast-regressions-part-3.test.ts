@@ -389,7 +389,7 @@ const setSyntheticPendingAccountProposal = (
   };
   account.pendingFrame = pendingFrame;
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),

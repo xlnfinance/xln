@@ -22,7 +22,7 @@ const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x9b55ab751f698879e3215f49008d58305333e69
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
 // Intentional testnet reset: the canonical Entity frame commits the exact infra context,
 // while Entity state commits its shared encryption public key.
-const ENTITY_FRAME_GOLDEN_HASH = '0x6c145c7ba53b115383a46279c19d65feb067497bde1ccc7c4d131090ee942cbe';
+const ENTITY_FRAME_GOLDEN_HASH = '0xbf89526cad961e2b2800ac3d78101b0b35c790b65a02f3a7834397afda12d8d0';
 
 const makeEntityContextFixture = (): EntityInfraContext => ({
   version: 1,
@@ -142,7 +142,7 @@ describe('frame hash golden fixtures', () => {
     const txs: EntityTx[] = [{
       type: 'accountInput',
       data: {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: `0x${'bb'.repeat(32)}`,
         toEntityId: `0x${'aa'.repeat(32)}`,
         proposal: { frame: peerFrame, frameHanko: '0xpeer-frame' },
@@ -161,7 +161,7 @@ describe('frame hash golden fixtures', () => {
     );
     const changed = structuredClone(txs);
     const changedInput = changed[0];
-    if (changedInput?.type !== 'accountInput' || changedInput.data.kind !== 'frame') {
+    if (changedInput?.type !== 'accountInput' || changedInput.data.kind !== 'ack_frame') {
       throw new Error('EXTERNAL_SETTLEMENT_HANKO_FIXTURE_INVALID');
     }
     const hankoTx = changedInput.data.proposal.frame.accountTxs[0];
@@ -179,7 +179,7 @@ describe('frame hash golden fixtures', () => {
     const entityTxs: EntityTx[] = [{
       type: 'accountInput',
       data: {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: `0x${'aa'.repeat(32)}`,
         toEntityId: `0x${'bb'.repeat(32)}`,
         proposal: { frame: accountFrame, frameHanko: '0x1234' },
@@ -200,9 +200,9 @@ describe('frame hash golden fixtures', () => {
     );
     expect(frameHash).toBe(ENTITY_FRAME_GOLDEN_HASH);
 
-    const changedPeerInput = structuredClone(entityTxs);
-    const changed = changedPeerInput[0];
-    if (changed?.type !== 'accountInput' || changed.data.kind !== 'frame') {
+    const changedAccountInput = structuredClone(entityTxs);
+    const changed = changedAccountInput[0];
+    if (changed?.type !== 'accountInput' || changed.data.kind !== 'ack_frame') {
       throw new Error('ENTITY_PEER_HANKO_FIXTURE_INVALID');
     }
     changed.data.proposal.frameHanko = '0x5678';
@@ -210,7 +210,7 @@ describe('frame hash golden fixtures', () => {
       `0x${'22'.repeat(32)}`,
       4,
       1_700_000_000_456,
-      changedPeerInput,
+      changedAccountInput,
       [],
       entityState.entityId,
       ENTITY_STATE_ROOT_GOLDEN_HASH,

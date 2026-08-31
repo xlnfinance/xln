@@ -32,7 +32,7 @@ describe('hlt payment population', () => {
     const accountInput = (fromEntityId: string, toEntityId: string, stateHash: string) => ({
       type: 'accountInput' as const,
       data: {
-        kind: 'frame' as const,
+        kind: 'ack_frame' as const,
         fromEntityId,
         toEntityId,
         proposal: {
@@ -493,6 +493,21 @@ describe('hlt payment report boundary', () => {
       index === 2 ? { ...sample, completedPayments: 99 } : sample);
     expect(() => decodeLoadPaymentReport({ ...report, settlementSamples: regressed }))
       .toThrow('HLT_PAYMENT_REPORT_SAMPLE_SEQUENCE_INVALID:2');
+  });
+
+  test('one metrics poll may observe final acceptance and completion together', () => {
+    const coalesced = {
+      ...report,
+      hubIngressElapsedMs: 25,
+      deliveredElapsedMs: 30,
+      settlementSamples: [
+        { elapsedMs: 5, runtimeHeight: 12, acceptedPayments: 0, completedPayments: 0, paybookOpen: 0 },
+        { elapsedMs: 30, runtimeHeight: 40, acceptedPayments: 320, completedPayments: 320, paybookOpen: 0 },
+      ],
+    };
+    expect(decodeLoadPaymentReport(coalesced).settlementSamples).toHaveLength(2);
+    expect(() => decodeLoadPaymentReport({ ...coalesced, hubIngressElapsedMs: 31 }))
+      .toThrow('HLT_PAYMENT_REPORT_SAMPLE_TERMINAL_INVALID');
   });
 
   test('a non-decimal amount is rejected', () => {

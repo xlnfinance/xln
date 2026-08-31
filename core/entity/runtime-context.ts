@@ -5,8 +5,9 @@ import type { LogCategory } from '../types/logging';
 import type { EntityReplica, EntityState } from './types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { AccountAuthorityExecutionScope } from '../account/consensus/context';
-import type { AccountPeerInput, AccountReplica } from '../types/account';
+import type { AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
+import type { HankoString } from '../types/hanko';
 
 export type AccountAuthorityFrameBeginRequest = Readonly<{
   ownerEntityId: string;
@@ -17,7 +18,7 @@ export type AccountAuthorityFrameBeginRequest = Readonly<{
   entityTxs: readonly EntityTx[];
   accounts: ReadonlyMap<string, AccountReplica>;
   accountForWrite(accountId: string): AccountReplica | undefined;
-  createInboundAccount(input: AccountPeerInput): Readonly<{
+  createInboundAccount(input: AccountInput): Readonly<{
     account: AccountReplica;
     deltaTransformer: string;
   }>;
@@ -35,11 +36,28 @@ export type AccountAuthorityFrameOutboundRequest = Readonly<{
   jHeight: number;
 }>;
 
+export type AccountAuthorityCommittedHanko = Readonly<{
+  hash: string;
+  hanko: HankoString;
+  type: 'accountFrame' | 'dispute' | 'settlement';
+  entityHeight: number;
+  createdAt: number;
+}>;
+
+export type AccountAuthorityCommittedHankosRequest = Readonly<{
+  ownerEntityId: string;
+  entityState: EntityState;
+  entityHeight: number;
+  touchedAccountIds: readonly string[];
+  hankos: ReadonlyMap<string, AccountAuthorityCommittedHanko>;
+}>;
+
 /** Narrow child-machine capability; lifecycle ownership remains in Runtime. */
 export interface AccountAuthorityEntityStageCapability extends AccountAuthorityExecutionScope {
   beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void>;
   prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
   finishEntityAccountFrame(): void;
+  installCommittedAccountHankos(request: AccountAuthorityCommittedHankosRequest): Promise<void>;
 }
 
 /**
@@ -73,6 +91,8 @@ export interface EntityRuntimeContext {
     entityConsensusStateWarningBytes?: number;
   } | undefined;
   infrastructure?: {
+    /** Current process-local Runtime frame phase; diagnostics only. */
+    runtimeFramePhase?: string | null;
     /** Entity-wide encryption secrets keyed by canonical entityId. */
     entityEncryptionPrivateKeys?: Map<string, string>;
     entityEncryptionSeeds?: Map<string, string>;

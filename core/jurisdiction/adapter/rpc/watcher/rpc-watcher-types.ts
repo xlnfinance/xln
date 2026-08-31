@@ -28,6 +28,7 @@ export type RpcWatcherServices = {
   provider: ethers.JsonRpcProvider;
   chainId: number;
   rpcUrl?: string;
+  watchPollMs?: number;
   depositoryAddress: string;
   entityProviderAddress: string;
   getDepository(): Depository;

@@ -182,6 +182,7 @@ fn rejects_wrong_magic_trailing_bytes_and_wrong_arities() {
 
 #[test]
 fn rejects_unknown_tags_and_wrong_fixed_width_identifiers() {
+    assert_eq!(OpTag::try_from(26), Err(AbiError::UnknownOpTag(26)));
     let encoded = encode_envelope(&sample_envelope()).expect("encode");
     let limits = AbiLimits::default();
     let mut parser = parser_after_prefix(&encoded, &limits);

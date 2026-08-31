@@ -12,10 +12,10 @@
  *   Rust `AccountConsensus::admit_txs` returns
  *        `Err(StateError::PolicyVersionOutOfRange)` /
  *        `Err(StateError::UnsupportedFrameTx(kind))`, mempool unchanged.
- * - incoming peer frame:
- *   TS   preflight returns a typed peer rejection
- *        `ACCOUNT_PEER_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` /
- *        `ACCOUNT_PEER_FRAME_TX_OUT_OF_PROFILE` (message names the kind),
+ * - incoming counterparty frame:
+ *   TS   preflight returns a typed Account input rejection
+ *        `ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` /
+ *        `ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE` (message names the kind),
  *        before signature work, replay, or mutation.
  *   Rust `apply_incoming_frame` returns `Rejected` whose reason carries
  *        `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
@@ -240,12 +240,12 @@ describe('FX-2 lending and reserve kinds are out of profile', () => {
   });
 });
 
-describe('incoming peer frames reject before replay', () => {
+describe('incoming counterparty frames reject before replay', () => {
   const buildFrameInput = (
     account: AccountReplica,
     tx: AccountTx,
     stateHash: string,
-  ): Extract<AccountInput, { kind: 'frame' }> => {
+  ): Extract<AccountInput, { kind: 'ack_frame' }> => {
     const env = createEmptyEnv('fx-admission-incoming');
     const frame = {
       height: 1,
@@ -259,7 +259,7 @@ describe('incoming peer frames reject before replay', () => {
       byLeft: false,
     };
     return {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
@@ -285,7 +285,7 @@ describe('incoming peer frames reject before replay', () => {
 
     const result = await applyAccountInput(context, account, frame);
 
-    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_PEER_FRAME_TX_OUT_OF_PROFILE');
+    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE');
     expect(result.ok).toBe(false);
     expect(accountInputFailureMessage(result)).toContain('ACCOUNT_TX_KIND_OUT_OF_PROFILE:lending_fund');
     expect(account.currentHeight).toBe(0);
@@ -314,7 +314,7 @@ describe('incoming peer frames reject before replay', () => {
     const result = await applyAccountInput(context, account, input);
 
     expect(accountInputPeerRejectionCode(result))
-      .toBe('ACCOUNT_PEER_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE');
+      .toBe('ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE');
     expect(result.ok).toBe(false);
     expect(account.currentHeight).toBe(0);
     expect(safeStringify(account)).toBe(before);

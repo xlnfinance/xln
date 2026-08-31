@@ -80,7 +80,7 @@ import {
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { LIMITS } from '../../config/constants';
-import type { AccountInput, AccountPeerInput, AccountReplica, AccountTx } from '../../types/account';
+import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { RuntimeReplica } from '../../runtime/types';
 import { installJurisdictions, makeAccount, makeJurisdiction, makeState } from '../helpers/cross-j';
 import {
@@ -145,7 +145,7 @@ type SideRecord = Readonly<{
 }>;
 
 type AckDraft = Readonly<{
-  accountInput: AccountPeerInput;
+  accountInput: AccountInput;
   hashesToSign: readonly AccountConsensusHashToSign[];
 }>;
 
@@ -256,7 +256,7 @@ class BilateralHarness {
         if (account) account.currentDisputeProofHanko = ack.disputeHanko.hanko;
       }
     }
-    if (input.kind === 'frame' || input.kind === 'ack_frame') {
+    if (input.kind === 'ack_frame') {
       const proposal = input.proposal;
       proposal.frameHanko = proposal.frameHanko ?? requireWitness(proposal.frame.stateHash);
       if (account) account.currentFrameHanko = proposal.frameHanko;

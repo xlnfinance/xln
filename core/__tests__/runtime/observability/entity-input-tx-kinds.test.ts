@@ -24,7 +24,7 @@ test('FRAME_LOG histogram splits raw AccountInput kinds from Entity transactions
   } as EntityTx;
   const proposal = {
     type: 'accountInput',
-    data: { kind: 'frame', fromEntityId: entityId, toEntityId: entityId, proposal: { frame: { height: 2 } } },
+    data: { kind: 'ack_frame', fromEntityId: entityId, toEntityId: entityId, proposal: { frame: { height: 2 } } },
   } as EntityTx;
   const counted = countEntityInputTxKinds([
     input(fromA, [ack, proposal]),

@@ -263,7 +263,7 @@ pub(crate) fn verify_counterparty_dispute_with_authority(
 ///
 /// Stale/duplicate delivery may skip an obsolete Hanko under the canonical
 /// replay policy, but it still may not smuggle a different Account-bound hash
-/// into the exact peer envelope.
+/// into the exact Account input envelope.
 pub(crate) fn validate_counterparty_dispute_hash(
     replica: &AccountReplica,
     expected_counterparty: &[u8; 32],

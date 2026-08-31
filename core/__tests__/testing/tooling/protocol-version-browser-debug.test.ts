@@ -13,7 +13,7 @@ import {
 import { decodeBinaryPayload, encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 
 describe('global network protocol version', () => {
-  test('adds version 1 to every serialized peer envelope', () => {
+  test('adds version 1 to every serialized Account input envelope', () => {
     const encoded = serializeWsMessage({ type: 'ping' });
 
     expect(decodeBinaryPayload(encoded)).toEqual({ type: 'ping', v: 1 });

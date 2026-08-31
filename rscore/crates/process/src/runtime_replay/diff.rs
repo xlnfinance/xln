@@ -146,7 +146,7 @@ fn account_commit_value(commit: &AccountCommitEvidence) -> Value {
             Value::String(
                 match commit.source {
                     AccountCommitSource::AckCommit => "ackCommit",
-                    AccountCommitSource::PeerCommit => "peerCommit",
+                    AccountCommitSource::CounterpartyCommit => "counterpartyCommit",
                 }
                 .into(),
             ),

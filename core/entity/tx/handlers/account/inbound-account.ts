@@ -1,5 +1,5 @@
 import { normalizeEntityRef } from '../../account-key';
-import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../../types/account';
 import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 import type { EntityState } from '../../../types';
 import {
@@ -20,9 +20,9 @@ import {
 } from '../../../../account/consensus/flush';
 import { getAccountInputEnvelopeError } from '../../../../account/input';
 import {
-  AccountPeerEvidenceError,
-  type AccountPeerRejectionCode,
-} from '../../../../account/input/peer-rejection';
+  AccountInputEvidenceError,
+  type AccountInputRejectionCode,
+} from '../../../../account/input/input-rejection';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
@@ -30,8 +30,8 @@ import { isLeftEntity } from '../../../id';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
-const rejectPeerInput = (code: AccountPeerRejectionCode, reason: string): never => {
-  throw new AccountPeerEvidenceError(code, reason);
+const rejectAccountInput = (code: AccountInputRejectionCode, reason: string): never => {
+  throw new AccountInputEvidenceError(code, reason);
 };
 
 export type InboundAccountResolution = {
@@ -50,17 +50,17 @@ const findAccountKey = (
 
 const assertAccountInputParticipants = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
 ): string => {
   if (normalizeEntityRef(input.toEntityId) !== normalizeEntityRef(state.entityId)) {
-    return rejectPeerInput(
-      'ACCOUNT_PEER_PARTY_MISMATCH',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_PARTY_MISMATCH',
       `ACCOUNT_INPUT_WRONG_TARGET: expected=${shortId(state.entityId)} got=${shortId(input.toEntityId)}`,
     );
   }
   if (normalizeEntityRef(input.fromEntityId) === normalizeEntityRef(state.entityId)) {
-    return rejectPeerInput(
-      'ACCOUNT_PEER_PARTY_MISMATCH',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_PARTY_MISMATCH',
       `ACCOUNT_INPUT_SELF_SENDER: entity=${shortId(state.entityId)}`,
     );
   }
@@ -69,12 +69,12 @@ const assertAccountInputParticipants = (
 
 const resolveInboundAccountDomain = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   counterpartyId: string,
 ): AccountReplica['state']['domain'] => {
   if (input.domain === undefined) {
-    return rejectPeerInput(
-      'ACCOUNT_PEER_DOMAIN_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_DOMAIN_INVALID',
       `ACCOUNT_INPUT_DOMAIN_REQUIRED:${counterpartyId}`,
     );
   }
@@ -82,8 +82,8 @@ const resolveInboundAccountDomain = (
   try {
     domain = normalizeAccountStateDomain(input.domain, 'ACCOUNT_INPUT_DOMAIN');
   } catch {
-    return rejectPeerInput(
-      'ACCOUNT_PEER_DOMAIN_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_DOMAIN_INVALID',
       `ACCOUNT_INPUT_DOMAIN_INVALID:${counterpartyId}`,
     );
   }
@@ -92,8 +92,8 @@ const resolveInboundAccountDomain = (
     throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${shortId(state.entityId)}`);
   }
   if (!sameAccountStateDomain(domain, accountStateDomainFromJurisdiction(jurisdiction))) {
-    return rejectPeerInput(
-      'ACCOUNT_PEER_DOMAIN_MISMATCH',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_DOMAIN_MISMATCH',
       `ACCOUNT_INPUT_DOMAIN_MISMATCH:${counterpartyId}`,
     );
   }
@@ -102,13 +102,13 @@ const resolveInboundAccountDomain = (
 
 const assertUnknownAccountGenesis = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   counterpartyId: string,
   hasAck: boolean,
   hasProposal: boolean,
 ): void => {
   const runtimeKind = (input as { kind?: unknown }).kind;
-  if (!['frame', 'ack', 'ack_frame', 'dispute', 'board_hanko_refresh'].includes(String(runtimeKind))) {
+  if (!['ack', 'ack_frame', 'dispute', 'board_hanko_refresh'].includes(String(runtimeKind))) {
     const error =
       `ACCOUNT_GENESIS_FRAME_REQUIRED: entity=${shortId(state.entityId)} ` +
       `counterparty=${shortId(counterpartyId)} inputHeight=0`;
@@ -119,10 +119,10 @@ const assertUnknownAccountGenesis = (
     const code = input.kind === 'board_hanko_refresh'
       ? 'ACCOUNT_BOARD_HANKO_REFRESH_UNKNOWN_ACCOUNT'
       : 'ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT';
-    return rejectPeerInput(
+    return rejectAccountInput(
       input.kind === 'board_hanko_refresh'
-        ? 'ACCOUNT_PEER_BOARD_HANKO_REFRESH_INVALID'
-        : 'ACCOUNT_PEER_ACK_UNMATCHED',
+        ? 'ACCOUNT_INPUT_BOARD_HANKO_REFRESH_INVALID'
+        : 'ACCOUNT_INPUT_ACK_UNMATCHED',
       `${code}: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`,
     );
   }
@@ -132,7 +132,7 @@ const assertUnknownAccountGenesis = (
   const error =
     `${code}: entity=${shortId(state.entityId)} ` +
     `counterparty=${shortId(counterpartyId)} inputHeight=${incomingFrameHeight}`;
-  return rejectPeerInput('ACCOUNT_PEER_FRAME_CHAIN_INVALID', error);
+  return rejectAccountInput('ACCOUNT_INPUT_FRAME_CHAIN_INVALID', error);
 };
 
 const createInboundAccountState = (
@@ -207,7 +207,7 @@ const createInboundAccountState = (
 
 export const resolveInboundAccount = (
   state: EntityState,
-  input: AccountPeerInput,
+  input: AccountInput,
   hasAck: boolean,
   hasProposal: boolean,
   authorityPrepared = false,
@@ -218,15 +218,15 @@ export const resolveInboundAccount = (
   if (existing) {
     if (!authorityPrepared) {
       const envelopeError = getAccountInputEnvelopeError(existing.state, input);
-      if (envelopeError) return rejectPeerInput(envelopeError.code, envelopeError.reason);
+      if (envelopeError) return rejectAccountInput(envelopeError.code, envelopeError.reason);
     }
     return { account: existing, counterpartyId, createdAccount: false };
   }
   assertUnknownAccountGenesis(state, input, counterpartyId, hasAck, hasProposal);
   const domain = resolveInboundAccountDomain(state, input, counterpartyId);
   if (!isAccountWatchSeed(input.watchSeed)) {
-    return rejectPeerInput(
-      'ACCOUNT_PEER_WATCH_SEED_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_WATCH_SEED_INVALID',
       `ACCOUNT_INPUT:ACCOUNT_WATCH_SEED_INVALID:${counterpartyId}`,
     );
   }

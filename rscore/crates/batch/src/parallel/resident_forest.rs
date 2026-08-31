@@ -73,6 +73,11 @@ struct WorkerMutationBatch<T> {
     phase: u64,
     mode: WorkerPhase,
     reconcile: Vec<usize>,
+    /// Shards whose commitment is required at this phase boundary. Mutation
+    /// and commitment are deliberately separate: inbound phases leave this
+    /// empty, while the final outbound phase seals the union of all shards
+    /// touched anywhere in the Entity frame.
+    describe: Vec<usize>,
     shards: Vec<ShardMutationBatch<T>>,
     control: Arc<PhaseControl>,
     allow_change: bool,
@@ -96,8 +101,9 @@ struct WorkerMutationReply<R> {
     barrier_wait: Duration,
     /// Rollback/commit bookkeeping after every active worker reached the barrier.
     finish_wall: Duration,
-    /// Resident shard value clones performed during head reconciliation.
-    value_clones: u64,
+    /// Persistent shard-root handle clones during head reconciliation. These
+    /// are O(1) Arc-root snapshots, not cloned Account values or bytes.
+    shard_handle_clones: u64,
 }
 
 /// Stable observability label for one resident phase. Never participates in
@@ -140,7 +146,7 @@ pub struct AccountPhaseMetric {
     pub touched_rows: u64,
     pub touched_shards: u64,
     pub workers_with_work: u64,
-    pub value_clones: u64,
+    pub shard_handle_clones: u64,
     pub candidate_base_reads: u64,
     pub continuation_rounds: u64,
     pub restart_rounds: u64,
@@ -164,7 +170,7 @@ impl AccountPhaseMetric {
             touched_rows: 0,
             touched_shards: 0,
             workers_with_work: 0,
-            value_clones: 0,
+            shard_handle_clones: 0,
             candidate_base_reads: 0,
             continuation_rounds: 0,
             restart_rounds: 0,
@@ -228,6 +234,13 @@ struct PendingCheckpoint {
 /// The only choices an Account operation can make about its resident value.
 pub(crate) enum ResidentAccountAction<V, R> {
     Keep(R),
+    /// Replace an existing resident value without deriving its commitment.
+    /// This is valid only inside an unsealed Entity frame; a later outbound
+    /// seal must replace the placeholder digest before any root is requested.
+    PutUnsealed {
+        value: V,
+        result: R,
+    },
     Put {
         value: V,
         value_digest: [u8; 32],
@@ -240,6 +253,15 @@ pub(crate) struct ResidentAccountBatch<R> {
     pub(crate) revision: u64,
     pub(crate) accounts_root: [u8; 32],
     /// `(account, post-phase leaf digest, result)` in exact input order.
+    pub(crate) rows: Vec<(AccountId, [u8; 32], R)>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ResidentUnsealedAccountBatch<R> {
+    pub(crate) revision: u64,
+    /// `(account, stored leaf digest, result)` in exact input order. The
+    /// digest is not a post-phase commitment for changed rows; callers of the
+    /// unsealed path must request the final Account root after proposals.
     pub(crate) rows: Vec<(AccountId, [u8; 32], R)>,
 }
 
@@ -531,7 +553,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
     where
         T: Send + 'static,
         R: Send + 'static,
-        F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
             + Send
             + Sync
             + 'static,
@@ -553,9 +579,12 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             },
             worker_batches,
             reconcile,
+            inbound_shards.clone(),
             apply,
-            start_revision,
-            checkpoint_ack,
+            PhaseStart {
+                revision: start_revision,
+                checkpoint_ack,
+            },
         )?;
         let fold_started = Instant::now();
         if matches!(head, ReconcileHead::Candidate) {
@@ -617,6 +646,141 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         Ok(batch)
     }
 
+    /// Start one Entity frame without materializing any Account shard root.
+    /// The final outbound phase seals every shard touched by this and any
+    /// continuation call. This mirrors the canonical TypeScript worker path:
+    /// `needShardRoot=false` for ingress, `true` for proposals.
+    pub(crate) fn apply_inbound_unsealed<T, R, F>(
+        &mut self,
+        expected_root: [u8; 32],
+        entries: Vec<(AccountId, T)>,
+        apply: F,
+    ) -> Result<ResidentUnsealedAccountBatch<R>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let pending_checkpoint = self.pending_checkpoint;
+        let checkpoint_ack =
+            pending_checkpoint.is_some_and(|pending| pending.accounts_root == expected_root);
+        let (head, start_revision) = self.reconcile_head(expected_root)?;
+        let reconcile = self
+            .inbound_shards
+            .union(&self.candidate_shards)
+            .copied()
+            .collect();
+        let (worker_batches, inbound_shards) = self.worker_batches(entries)?;
+        let (reply, inbound_revision) = self.run_phase(
+            WorkerPhase::Inbound {
+                head,
+                checkpoint_ack,
+            },
+            worker_batches,
+            reconcile,
+            BTreeSet::new(),
+            apply,
+            PhaseStart {
+                revision: start_revision,
+                checkpoint_ack,
+            },
+        )?;
+        if matches!(head, ReconcileHead::Candidate) {
+            let candidate = self
+                .candidate_top
+                .as_ref()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            self.base_top
+                .apply_sparse_overlay(candidate)
+                .map_err(|error| forest_error(zero_account(), error))?;
+        }
+        if !matches!(head, ReconcileHead::Inbound) {
+            self.base_revision = start_revision;
+        }
+        self.inbound_top = None;
+        self.inbound_revision = Some(inbound_revision);
+        self.candidate_top = None;
+        self.candidate_revision = None;
+        if matches!(head, ReconcileHead::Inbound) {
+            self.inbound_shards.extend(inbound_shards);
+        } else {
+            self.inbound_shards = inbound_shards;
+        }
+        self.candidate_shards.clear();
+        if checkpoint_ack {
+            self.checkpoint_revision = pending_checkpoint
+                .ok_or(BatchError::EntityRoundMissing)?
+                .revision;
+        }
+        if pending_checkpoint.is_some() {
+            self.pending_checkpoint = None;
+        }
+        Ok(ResidentUnsealedAccountBatch {
+            revision: inbound_revision,
+            rows: reply
+                .rows
+                .into_iter()
+                .map(|(_, account_id, digest, row)| (account_id, digest, row))
+                .collect(),
+        })
+    }
+
+    /// Continue the open unsealed inbound state after interleaved Entity work.
+    /// No expected root is needed because this is one in-process Entity frame.
+    pub(crate) fn apply_inbound_continue_unsealed<T, R, F>(
+        &mut self,
+        entries: Vec<(AccountId, T)>,
+        apply: F,
+    ) -> Result<ResidentUnsealedAccountBatch<R>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let start_revision = self
+            .inbound_revision
+            .ok_or(BatchError::EntityRoundMissing)?;
+        let (worker_batches, inbound_shards) = self.worker_batches(entries)?;
+        let (reply, inbound_revision) = self.run_phase(
+            WorkerPhase::Inbound {
+                head: ReconcileHead::Inbound,
+                checkpoint_ack: false,
+            },
+            worker_batches,
+            BTreeSet::new(),
+            BTreeSet::new(),
+            apply,
+            PhaseStart {
+                revision: start_revision,
+                checkpoint_ack: false,
+            },
+        )?;
+        self.inbound_revision = Some(inbound_revision);
+        self.inbound_shards.extend(inbound_shards);
+        Ok(ResidentUnsealedAccountBatch {
+            revision: inbound_revision,
+            rows: reply
+                .rows
+                .into_iter()
+                .map(|(_, account_id, digest, row)| (account_id, digest, row))
+                .collect(),
+        })
+    }
+
     /// Apply all proposals from the immutable post-inbound snapshots in one
     /// worker join. Repeating this call never stacks on the prior candidate.
     pub(crate) fn apply_outbound<T, R, F>(
@@ -627,7 +791,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
     where
         T: Send + 'static,
         R: Send + 'static,
-        F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
             + Send
             + Sync
             + 'static,
@@ -646,7 +814,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
     where
         T: Send + 'static,
         R: Send + 'static,
-        F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
             + Send
             + Sync
             + 'static,
@@ -667,7 +839,10 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         R: Send + 'static,
         F: Fn(AccountId, &V, Option<&V>, T) -> Result<R, BatchError> + Send + Sync + 'static,
     {
-        if self.inbound_top.is_none() {
+        // An unsealed inbound phase intentionally has no top-level
+        // commitment yet, but its worker-resident values are already the
+        // authoritative candidate for same-frame Entity point reads.
+        if self.inbound_revision.is_none() {
             return Err(BatchError::EntityRoundMissing);
         }
         let (lanes, _) = self.worker_batches(entries)?;
@@ -832,7 +1007,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
     where
         T: Send + 'static,
         R: Send + 'static,
-        F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
             + Send
             + Sync
             + 'static,
@@ -858,13 +1037,21 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         // Restarting a fresh outbound candidate after this round already built
         // one is the explicit restart path back to the inbound head.
         let restart_round = !continue_candidate && self.candidate_revision.is_some();
+        let describe = if continue_candidate {
+            touched.clone()
+        } else {
+            self.inbound_shards.union(&touched).copied().collect()
+        };
         let (reply, candidate_revision) = self.run_phase(
             mode,
             worker_batches,
             reconcile,
+            describe,
             apply,
-            start_revision,
-            false,
+            PhaseStart {
+                revision: start_revision,
+                checkpoint_ack: false,
+            },
         )?;
         let fold_started = Instant::now();
         let candidate_top = if continue_candidate {
@@ -874,13 +1061,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                 .ok_or(BatchError::EntityRoundMissing)?;
             self.base_top
                 .sparse_overlay_owned(parent, reply.descriptors)
-        } else {
-            let parent = self
-                .inbound_top
-                .as_ref()
-                .ok_or(BatchError::EntityRoundMissing)?;
+        } else if let Some(parent) = self.inbound_top.as_ref() {
             self.base_top
                 .sparse_overlay(Some(parent), reply.descriptors)
+        } else {
+            self.base_top.sparse_overlay(None, reply.descriptors)
         }
         .map_err(|error| forest_error(zero_account(), error))?;
         let kind = phase_kind(mode);
@@ -915,18 +1100,26 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         mode: WorkerPhase,
         worker_batches: Vec<Vec<ShardMutationBatch<T>>>,
         reconcile: BTreeSet<usize>,
+        describe: BTreeSet<usize>,
         apply: F,
-        start_revision: u64,
-        checkpoint_ack: bool,
+        start: PhaseStart,
     ) -> Result<(WorkerMutationReply<R>, u64), BatchError>
     where
         T: Send + 'static,
         R: Send + 'static,
-        F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>
+        F: for<'a> Fn(
+                AccountId,
+                Option<&'a V>,
+                T,
+            ) -> Result<ResidentAccountAction<V, R>, BatchError>
             + Send
             + Sync
             + 'static,
     {
+        let PhaseStart {
+            revision: start_revision,
+            checkpoint_ack,
+        } = start;
         let phase_started = Instant::now();
         let kind = phase_kind(mode);
         let workers_with_batches = worker_batches
@@ -938,14 +1131,20 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         for shard in reconcile {
             reconcile_by_worker[self.plan.worker(shard)].push(shard);
         }
+        let mut describe_by_worker = empty_lanes(self.workers.worker_count());
+        for shard in describe {
+            describe_by_worker[self.plan.worker(shard)].push(shard);
+        }
         let checkpoint_workers = checkpoint_ack.then(|| self.checkpoint_workers.clone());
         let active_workers = worker_batches
             .iter()
             .zip(&reconcile_by_worker)
+            .zip(&describe_by_worker)
             .enumerate()
-            .map(|(worker, (shards, reconcile))| {
+            .map(|(worker, ((shards, reconcile), describe))| {
                 !shards.is_empty()
                     || !reconcile.is_empty()
+                    || !describe.is_empty()
                     || checkpoint_workers
                         .as_ref()
                         .is_some_and(|workers| workers.contains(&worker))
@@ -956,8 +1155,9 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         let lanes = worker_batches
             .into_iter()
             .zip(reconcile_by_worker)
+            .zip(describe_by_worker)
             .zip(active_workers)
-            .map(|((shards, reconcile), active)| {
+            .map(|(((shards, reconcile), describe), active)| {
                 if !active {
                     Vec::new()
                 } else {
@@ -965,6 +1165,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                         allow_change: start_revision < u64::MAX,
                         control: Arc::clone(&control),
                         reconcile,
+                        describe,
                         shards,
                         mode,
                         phase,
@@ -981,7 +1182,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         let mut worker_phase_span_max = 0_u64;
         let mut barrier_wait_sum = 0_u64;
         let mut barrier_wait_max = 0_u64;
-        let mut value_clones = 0_u64;
+        let mut shard_handle_clones = 0_u64;
         for lane in &replies {
             for reply in lane.iter().flatten() {
                 worker_samples += 1;
@@ -995,7 +1196,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                     work.saturating_add(wait)
                         .saturating_add(duration_nanos(reply.finish_wall)),
                 );
-                value_clones = value_clones.saturating_add(reply.value_clones);
+                shard_handle_clones = shard_handle_clones.saturating_add(reply.shard_handle_clones);
             }
         }
         let reply = collect_worker_replies(replies)?;
@@ -1052,11 +1253,13 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         totals.workers_with_work = totals
             .workers_with_work
             .saturating_add(workers_with_batches as u64);
-        totals.value_clones = totals.value_clones.saturating_add(value_clones);
+        totals.shard_handle_clones = totals
+            .shard_handle_clones
+            .saturating_add(shard_handle_clones);
         if matches!(kind, AccountPhaseKind::OutboundContinue) {
             totals.continuation_rounds += 1;
         }
-        let revision = next_revision(start_revision, !reply.descriptors.is_empty())?;
+        let revision = next_revision(start_revision, !reply.changed.is_empty())?;
         Ok((reply, revision))
     }
 
@@ -1209,6 +1412,21 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
 
 type WorkerMutationBatches<T> = (Vec<Vec<ShardMutationBatch<T>>>, BTreeSet<usize>);
 
+#[derive(Clone, Copy)]
+struct PhaseStart {
+    revision: u64,
+    checkpoint_ack: bool,
+}
+
+struct WorkerPhaseApply<'a, T> {
+    mode: WorkerPhase,
+    reconcile: &'a [usize],
+    describe: &'a [usize],
+    mutation_shards: &'a BTreeSet<usize>,
+    batches: Vec<ShardMutationBatch<T>>,
+    allow_change: bool,
+}
+
 fn run_worker_phase<V, T, R, F>(
     state: &mut ResidentWorkerState<V>,
     batch: WorkerMutationBatch<T>,
@@ -1216,12 +1434,13 @@ fn run_worker_phase<V, T, R, F>(
 ) -> Result<WorkerMutationReply<R>, BatchError>
 where
     V: Clone,
-    F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
+    F: for<'a> Fn(AccountId, Option<&'a V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
 {
     let WorkerMutationBatch {
         phase,
         mode,
         reconcile,
+        describe,
         shards,
         control,
         allow_change,
@@ -1251,6 +1470,7 @@ where
         .iter()
         .copied()
         .chain(mutation_shards.iter().copied())
+        .chain(describe.iter().copied())
         .chain(checkpoint_shards)
         .collect::<BTreeSet<_>>();
     let work_started = Instant::now();
@@ -1258,11 +1478,14 @@ where
     let result = match snapshot {
         Ok(()) => apply_worker_phase(
             state,
-            mode,
-            &reconcile,
-            &mutation_shards,
-            shards,
-            allow_change,
+            WorkerPhaseApply {
+                mode,
+                reconcile: &reconcile,
+                describe: &describe,
+                mutation_shards: &mutation_shards,
+                batches: shards,
+                allow_change,
+            },
             apply,
         ),
         Err(error) => Err(error),
@@ -1297,18 +1520,22 @@ where
 
 fn apply_worker_phase<V, T, R, F>(
     state: &mut ResidentWorkerState<V>,
-    mode: WorkerPhase,
-    reconcile: &[usize],
-    mutation_shards: &BTreeSet<usize>,
-    batches: Vec<ShardMutationBatch<T>>,
-    allow_change: bool,
+    work: WorkerPhaseApply<'_, T>,
     apply: &F,
 ) -> Result<WorkerMutationReply<R>, BatchError>
 where
     V: Clone,
-    F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
+    F: for<'a> Fn(AccountId, Option<&'a V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
 {
-    let mut value_clones = 0_u64;
+    let WorkerPhaseApply {
+        mode,
+        reconcile,
+        describe,
+        mutation_shards,
+        batches,
+        allow_change,
+    } = work;
+    let mut shard_handle_clones = 0_u64;
     match mode {
         WorkerPhase::Inbound {
             head,
@@ -1319,7 +1546,7 @@ where
             reconcile,
             mutation_shards,
             checkpoint_ack,
-            &mut value_clones,
+            &mut shard_handle_clones,
         )?,
         WorkerPhase::OutboundReset => prepare_worker_outbound(state, reconcile, mutation_shards)?,
         WorkerPhase::OutboundContinue => {}
@@ -1333,10 +1560,16 @@ where
         work_wall: Duration::ZERO,
         barrier_wait: Duration::ZERO,
         finish_wall: Duration::ZERO,
-        value_clones,
+        shard_handle_clones,
     };
     for batch in batches {
         mutate_shard(state, mode, batch, allow_change, apply, &mut reply)?;
+    }
+    for shard in describe {
+        let resident = resident_shard_mut(state, *shard)?;
+        reply
+            .descriptors
+            .push(phase_shard(resident, mode)?.descriptor());
     }
     Ok(reply)
 }
@@ -1347,7 +1580,7 @@ fn reconcile_worker_head<V: Clone>(
     reconcile: &[usize],
     mutation_shards: &BTreeSet<usize>,
     checkpoint_ack: bool,
-    value_clones: &mut u64,
+    shard_handle_clones: &mut u64,
 ) -> Result<(), BatchError> {
     let checkpoint_shards = if checkpoint_ack {
         state
@@ -1374,7 +1607,7 @@ fn reconcile_worker_head<V: Clone>(
                 // one shallow radix clone for its new overlay.
                 resident.candidate = None;
                 resident.inbound = if mutation_shards.contains(&shard) {
-                    *value_clones += 1;
+                    *shard_handle_clones += 1;
                     Some(resident.base.clone())
                 } else {
                     None
@@ -1387,7 +1620,7 @@ fn reconcile_worker_head<V: Clone>(
                     .or_else(|| resident.inbound.take());
                 if let Some(promoted) = promoted {
                     if mutation_shards.contains(&shard) {
-                        *value_clones += 1;
+                        *shard_handle_clones += 1;
                         resident.base = promoted.clone();
                         resident.inbound = Some(promoted);
                     } else {
@@ -1395,7 +1628,7 @@ fn reconcile_worker_head<V: Clone>(
                         resident.inbound = None;
                     }
                 } else if mutation_shards.contains(&shard) {
-                    *value_clones += 1;
+                    *shard_handle_clones += 1;
                     resident.inbound = Some(resident.base.clone());
                 } else {
                     resident.inbound = None;
@@ -1404,7 +1637,7 @@ fn reconcile_worker_head<V: Clone>(
             ReconcileHead::Inbound => {
                 resident.candidate = None;
                 if mutation_shards.contains(&shard) && resident.inbound.is_none() {
-                    *value_clones += 1;
+                    *shard_handle_clones += 1;
                     resident.inbound = Some(resident.base.clone());
                 }
             }
@@ -1413,7 +1646,7 @@ fn reconcile_worker_head<V: Clone>(
     if checkpoint_ack {
         for shard in checkpoint_shards {
             let resident = resident_shard_mut(state, shard)?;
-            *value_clones += 1;
+            *shard_handle_clones += 1;
             resident.checkpoint = resident.base.clone();
         }
         state.checkpoint_dirty.clear();
@@ -1449,7 +1682,7 @@ fn mutate_shard<V, T, R, F>(
 ) -> Result<(), BatchError>
 where
     V: Clone,
-    F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
+    F: for<'a> Fn(AccountId, Option<&'a V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
 {
     let started = Instant::now();
     let items = batch.entries.len();
@@ -1460,7 +1693,7 @@ where
             .get_with_digest(account_id.as_bytes())
             .map_err(|error| forest_error(account_id, error))?;
         let stored_digest = current.as_ref().map(|(_, digest)| *digest);
-        let current = current.map(|(value, _)| value.clone());
+        let current = current.map(|(value, _)| value);
         match apply(account_id, current, payload)? {
             ResidentAccountAction::Keep(result) => {
                 // A kept row must name an existing resident value; a missing
@@ -1507,15 +1740,26 @@ where
                     .rows
                     .push((position, account_id, value_digest, result));
             }
+            ResidentAccountAction::PutUnsealed { value, result } => {
+                if !allow_change {
+                    return Err(BatchError::RevisionOverflow);
+                }
+                let value_digest =
+                    stored_digest.ok_or(BatchError::CandidateAccountNotFound(account_id))?;
+                let updated = phase_shard(resident, mode)?
+                    .replaced_value(account_id.as_bytes().to_vec(), value, value_digest)
+                    .map_err(|error| forest_error(account_id, error))?;
+                *phase_shard_mut(resident, mode)? = updated;
+                changed_in_shard += 1;
+                reply.changed.push(account_id);
+                reply
+                    .rows
+                    .push((position, account_id, value_digest, result));
+            }
         }
     }
     let work_elapsed = started.elapsed();
     let fold_started = Instant::now();
-    if changed_in_shard > 0 {
-        reply
-            .descriptors
-            .push(phase_shard(resident, mode)?.descriptor());
-    }
     reply.metrics.push(ShardPhaseMetric {
         shard: batch.shard,
         items,
@@ -1770,7 +2014,7 @@ fn collect_worker_replies<R>(
         work_wall: Duration::ZERO,
         barrier_wait: Duration::ZERO,
         finish_wall: Duration::ZERO,
-        value_clones: 0,
+        shard_handle_clones: 0,
     };
     let mut first_error = None;
     for mut lane in replies {
@@ -1914,9 +2158,12 @@ fn root_hex(root: [u8; 32]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use xln_rscore_protocol::{PersistentRadixMap, PersistentRadixOverlayWork};
 
-    use super::{ResidentAccountAction, ResidentAccountForest};
+    use super::{AccountPhaseKind, ResidentAccountAction, ResidentAccountForest};
     use crate::{AccountId, BatchError};
 
     fn account(shard: usize, suffix: u8) -> AccountId {
@@ -1948,7 +2195,7 @@ mod tests {
 
     fn put(
         _account_id: AccountId,
-        _current: Option<u64>,
+        _current: Option<&u64>,
         value: u64,
     ) -> Result<ResidentAccountAction<u64, u64>, BatchError> {
         Ok(ResidentAccountAction::Put {
@@ -1966,6 +2213,51 @@ mod tests {
                 .expect("serial seed");
         }
         map
+    }
+
+    struct CloneProbe {
+        value: u64,
+        clones: Arc<AtomicUsize>,
+    }
+
+    impl Clone for CloneProbe {
+        fn clone(&self) -> Self {
+            self.clones.fetch_add(1, Ordering::Relaxed);
+            Self {
+                value: self.value,
+                clones: Arc::clone(&self.clones),
+            }
+        }
+    }
+
+    #[test]
+    fn kept_account_does_not_clone_the_resident_value() {
+        let account_id = account(0x123, 0);
+        let clones = Arc::new(AtomicUsize::new(0));
+        let mut forest = ResidentAccountForest::restore(
+            2,
+            7,
+            vec![(
+                account_id,
+                CloneProbe {
+                    value: 10,
+                    clones: Arc::clone(&clones),
+                },
+                digest(10),
+            )],
+        )
+        .expect("restore");
+        let root = forest.accounts_root();
+        let before = clones.load(Ordering::Relaxed);
+
+        forest
+            .apply_inbound(root, vec![(account_id, ())], |_account_id, current, ()| {
+                assert_eq!(current.map(|value| value.value), Some(10));
+                Ok::<_, BatchError>(ResidentAccountAction::<CloneProbe, ()>::Keep(()))
+            })
+            .expect("keep");
+
+        assert_eq!(clones.load(Ordering::Relaxed), before);
     }
 
     #[test]
@@ -2123,7 +2415,7 @@ mod tests {
             .expect("accept candidate");
         let probe = forest
             .apply_outbound(vec![(account(0x123, 0), ())], |_account_id, current, ()| {
-                let value = current.ok_or(BatchError::EmptyBatch)?;
+                let value = *current.ok_or(BatchError::EmptyBatch)?;
                 Ok(ResidentAccountAction::Keep(value))
             })
             .expect("probe accepted base");
@@ -2154,7 +2446,7 @@ mod tests {
             .expect("rollback candidate");
         let probe = forest
             .apply_outbound(vec![(account(0x123, 0), ())], |_account_id, current, ()| {
-                let value = current.ok_or(BatchError::EmptyBatch)?;
+                let value = *current.ok_or(BatchError::EmptyBatch)?;
                 Ok(ResidentAccountAction::Keep(value))
             })
             .expect("probe rolled back base");
@@ -2231,8 +2523,8 @@ mod tests {
         forest
             .apply_inbound(base, vec![(account(0x456, 0), 20)], put)
             .expect("inbound");
-        let propose = |account_id, current: Option<u64>, increment| {
-            let value = current.ok_or(BatchError::EmptyBatch)? + increment;
+        let propose = |account_id, current: Option<&u64>, increment| {
+            let value = *current.ok_or(BatchError::EmptyBatch)? + increment;
             put(account_id, current, value)
         };
         let first = forest
@@ -2335,7 +2627,7 @@ mod tests {
         );
         // The base stays resident; one shallow radix-handle clone seeds the
         // inbound overlay for the touched shard.
-        assert_eq!(inbound.value_clones, 1);
+        assert_eq!(inbound.shard_handle_clones, 1);
         assert_eq!(outbound_reset.invocations, 2);
         assert_eq!(outbound_reset.restart_rounds, 1);
         assert_eq!(outbound_reset.touched_rows, 2);
@@ -2386,6 +2678,38 @@ mod tests {
                 root_folds: 1,
             }
         );
+    }
+
+    #[test]
+    fn unsealed_inbound_defers_all_shard_and_top_commitment_until_outbound() {
+        let initial = seeds(&[0x123]);
+        let mut serial = serial_map(&initial);
+        let mut forest = ResidentAccountForest::restore(4, 1, initial).expect("restore");
+        let root = forest.accounts_root();
+        let inbound = forest
+            .apply_inbound_unsealed(root, vec![(account(0x123, 0), 20)], put)
+            .expect("unsealed inbound");
+        assert_eq!(inbound.rows, vec![(account(0x123, 0), digest(20), 20)]);
+        assert_eq!(forest.active_overlay_dirty_len(), 0);
+        let inbound_metric = forest
+            .phase_metrics()
+            .into_iter()
+            .find(|metric| metric.kind == AccountPhaseKind::Inbound)
+            .expect("inbound metric");
+        assert_eq!(inbound_metric.coordinator_fold_nanos, 0);
+
+        let outbound = forest
+            .apply_outbound(
+                Vec::<(AccountId, ())>::new(),
+                |_account_id, _current, ()| {
+                    Ok::<_, BatchError>(ResidentAccountAction::<u64, ()>::Keep(()))
+                },
+            )
+            .expect("final seal");
+        serial = serial
+            .updated(account(0x123, 0).as_bytes().to_vec(), 20, digest(20))
+            .expect("serial inbound");
+        assert_eq!(outbound.accounts_root, serial.root_hash());
     }
 
     #[test]
@@ -2440,7 +2764,7 @@ mod tests {
             .expect("open round");
         let batch = forest
             .apply_outbound(vec![(account_id, ())], move |_account_id, current, ()| {
-                assert_eq!(current.as_deref(), Some("before"));
+                assert_eq!(current.map(String::as_str), Some("before"));
                 Ok(ResidentAccountAction::Put {
                     value: "after".to_string(),
                     value_digest: committed,

@@ -11,7 +11,7 @@
  * >=1,000 Runtime frames and >=1,000 payments. `--allow-smoke` is parity-only
  * and is deliberately labelled as a diagnostic, never TPS evidence.
  * Args: --paths-json <fixture.paths.json> [--max-seconds <20>] [--allow-smoke]
- * Runs w=1/2/4/8 sequentially against independent native DBs inside one
+ * Runs w=1/4 by default, sequentially against independent native DBs inside one
  * 20-second process budget, with exact digest equality assertion.
  */
 
@@ -95,6 +95,10 @@ type BenchResult = {
   engineMs: number;
   applyMs: number;
   projectionMs: number;
+  storageMs: number;
+  publicationMs: number;
+  accountInputsPerSecond: number;
+  runtimeFramesPerSecond: number;
   avgCpuCores: number;
   peakRssMiB: number;
   peakThreads: number;
@@ -237,6 +241,10 @@ const runReplay = async (
     engineMs: Number(data['engineMs'] ?? 0),
     applyMs: Number(data['applyMs'] ?? 0),
     projectionMs: Number(data['projectionMs'] ?? 0),
+    storageMs: Number(data['storageMs'] ?? 0),
+    publicationMs: Number(data['publicationMs'] ?? 0),
+    accountInputsPerSecond: Number(data['ingress'] ?? 0) * 1_000 / elapsedMs,
+    runtimeFramesPerSecond: Number(data['frames'] ?? 0) * 1_000 / elapsedMs,
     avgCpuCores: avgCores,
     peakRssMiB: peakRss,
     peakThreads,
@@ -258,6 +266,20 @@ const requiredArg = (name: string): string => {
   const idx = process.argv.indexOf(`--${name}`);
   if (idx < 0) throw new Error(`MISSING:--${name}`);
   return process.argv[idx + 1]!;
+};
+
+const workerCounts = (): number[] => {
+  const raw = process.argv.includes('--workers')
+    ? process.argv[process.argv.indexOf('--workers') + 1]
+    : '1,4';
+  if (!raw) throw new Error('MISSING:--workers');
+  const parsed = raw.split(',').map(value => Number(value.trim()));
+  if (
+    parsed.length === 0
+    || new Set(parsed).size !== parsed.length
+    || parsed.some(value => !Number.isSafeInteger(value) || value < 1 || value > 256)
+  ) throw new Error(`REPLAY_WORKERS_INVALID:${raw}`);
+  return parsed;
 };
 
 if (import.meta.main) {
@@ -286,7 +308,8 @@ if (import.meta.main) {
 
   const deadline = performance.now() + maxSec * 1_000;
   const results: BenchResult[] = [];
-  for (const workers of [1, 2, 4, 8]) {
+  const selectedWorkers = workerCounts();
+  for (const workers of selectedWorkers) {
     const remainingSeconds = (deadline - performance.now()) / 1_000;
     if (remainingSeconds <= 0) {
       results.push({ workers, ok: false, elapsedMs: 0, error: `global-timeout=${maxSec}s` } as BenchResult);
@@ -334,19 +357,18 @@ if (import.meta.main) {
       );
     }
   } else {
-    console.log(' w  elapsedMs  speedup  payments engineMs  applyMs   avgCpu  peakRSS  threads  effCores  in+e');
+    console.log(' w  elapsedMs  speedup  accountIn/s  frames/s  engineMs  applyMs  storageMs  avgCpu  in+e');
     for (const r of results) {
       console.log(
         `${String(r.workers).padStart(2)}  ` +
         `${String(Math.round(r.elapsedMs)).padStart(8)}  ` +
         `${(scalingBaseline.elapsedMs / r.elapsedMs).toFixed(2).padStart(7)}  ` +
-        `${String(r.payments).padStart(8)}  ` +
+        `${r.accountInputsPerSecond.toFixed(0).padStart(11)}  ` +
+        `${r.runtimeFramesPerSecond.toFixed(1).padStart(8)}  ` +
         `${Math.round(r.engineMs).toString().padStart(8)}  ` +
         `${Math.round(r.applyMs).toString().padStart(7)}  ` +
+        `${Math.round(r.storageMs).toString().padStart(9)}  ` +
         `${r.avgCpuCores.toFixed(2).padStart(6)}  ` +
-        `${Math.round(r.peakRssMiB).toString().padStart(5)}M  ` +
-        `${String(r.peakThreads).padStart(7)}  ` +
-        `${r.effectiveCores.toFixed(2).padStart(8)}  ` +
         `${r.ingress}+${r.egress}`,
       );
     }
@@ -380,7 +402,7 @@ if (import.meta.main) {
     result.payments === baseline.payments &&
     result.frames === baseline.frames &&
     result.accountsRoot === baseline.accountsRoot);
-  console.log(`\nDIGEST_EQUALITY w=1/2/4/8: ${same ? 'OK' : 'MISMATCH'}`);
+  console.log(`\nDIGEST_EQUALITY ${selectedWorkers.map(value => `w=${value}`).join('/')}: ${same ? 'OK' : 'MISMATCH'}`);
   if (!same) {
     for (const result of results) {
       console.error(

@@ -4,7 +4,7 @@ export const accountInputAck = (input: AccountInput): AccountAckFrame | undefine
   input.kind === 'ack' || input.kind === 'ack_frame' ? input.ack : undefined;
 
 export const accountInputProposal = (input: AccountInput): AccountFrameProposal | undefined =>
-  input.kind === 'frame' || input.kind === 'ack_frame' ? input.proposal : undefined;
+  input.kind === 'ack_frame' ? input.proposal : undefined;
 
 export const accountInputDisputeHanko = (input: AccountInput): AccountDisputeHanko | undefined =>
   input.kind === 'dispute'

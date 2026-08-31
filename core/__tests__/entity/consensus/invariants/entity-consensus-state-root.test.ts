@@ -503,7 +503,7 @@ test('Entity consensus root commits peer Hankos while own post-quorum subsets st
       ]);
     account.pendingFrame = pendingFrame;
     account.pendingAccountInput = {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: entityId,
         toEntityId: counterpartyId,
         domain: account.state.domain,
@@ -600,7 +600,7 @@ test('Entity account leaf binds frame hashes and money roots, not frame bodies',
   account.currentFrame = hashedFrame(frameHash, 'A'.repeat(8_192));
   account.pendingFrame = hashedFrame(frameHash, 'A'.repeat(8_192));
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: entityId,
     toEntityId: counterpartyId,
     domain: account.state.domain,
@@ -612,7 +612,7 @@ test('Entity account leaf binds frame hashes and money roots, not frame bodies',
   account.currentFrame = hashedFrame(frameHash, 'B'.repeat(8_192));
   account.pendingFrame = hashedFrame(frameHash, 'B'.repeat(8_192));
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: entityId,
     toEntityId: counterpartyId,
     domain: account.state.domain,

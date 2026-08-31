@@ -7,6 +7,7 @@ import { countOp } from '../support/performance/op-counters';
 import type { ConsensusConfig, EntityState } from '../entity/types';
 import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { HankoBoardDelays, HankoEnvelope, HankoString } from '../types/hanko';
+import type { CertifiedBoardRecord } from '../types/entity-board-registry';
 import { ethers } from 'ethers';
 import { cachedChecksumAddress, toLowerAddressOrNull } from '../protocol/crypto/address-cache';
 import { encodeBoard, hashBoard } from '../entity/factory';
@@ -584,6 +585,18 @@ export async function verifyHankoForHash(
     allowPreviousBoard?: boolean;
     /** Exact Entity-certified registry root for consensus verification. */
     observerState?: EntityState;
+    /** Compact record resolved from that exact root before isolate dispatch. */
+    certifiedBoardRecord?: Readonly<Pick<
+      CertifiedBoardRecord,
+      | 'entityId'
+      | 'boardHash'
+      | 'previousBoardHash'
+      | 'previousBoardValidUntil'
+      | 'activatedAtJHeight'
+      | 'logIndex'
+    >>;
+    /** Parent Entity clock paired with `certifiedBoardRecord`. */
+    observerTimestamp?: number;
   },
 ): Promise<{ valid: boolean; entityId: string | null }> {
   countOp('hanko.verifyHankoForHash');
@@ -591,6 +604,10 @@ export async function verifyHankoForHash(
     const expectedTarget = encodeQuorumEntityId(expectedEntityId);
     const certifiedRegisteredBoardHash = authority?.registeredBoardHash?.trim().toLowerCase() || null;
     const resolveAuthorityRecord = (entityId: string) => {
+      const dispatched = authority?.certifiedBoardRecord;
+      if (dispatched) {
+        return dispatched.entityId.toLowerCase() === entityId.toLowerCase() ? dispatched : null;
+      }
       if (!env) return null;
       return authority?.observerState
         ? resolveObserverCertifiedBoardRecord(
@@ -600,7 +617,7 @@ export async function verifyHankoForHash(
           )
         : resolveUniqueCertifiedRegisteredBoardRecord(env, entityId);
     };
-    if (certifiedRegisteredBoardHash && env) {
+    if (certifiedRegisteredBoardHash && (env || authority?.certifiedBoardRecord)) {
       const record = resolveAuthorityRecord(expectedEntityId);
       if (!record || record.boardHash !== certifiedRegisteredBoardHash) {
         throw new CertifiedBoardAuthorityError(
@@ -611,6 +628,8 @@ export async function verifyHankoForHash(
     }
     const entityTimestampSeconds = authority?.observerState
       ? unixMsToUnixSFloor(toUnixMs(authority.observerState.timestamp))
+      : authority?.observerTimestamp !== undefined
+        ? unixMsToUnixSFloor(toUnixMs(authority.observerTimestamp))
       : env
         ? unixMsToUnixSFloor(toUnixMs(env.state.timestamp))
         : 0;
@@ -619,7 +638,6 @@ export async function verifyHankoForHash(
       digest: hash,
       expectedTargetEntityId: expectedTarget,
       validateBoardAuthority: (entityId, reconstructedBoardHash) => {
-      if (!env) return false;
       const record = resolveAuthorityRecord(entityId);
       if (!record) return false;
       if (entityId === expectedTarget && certifiedRegisteredBoardHash && record.boardHash !== certifiedRegisteredBoardHash) {

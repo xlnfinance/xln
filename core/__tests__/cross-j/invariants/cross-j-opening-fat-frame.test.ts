@@ -140,7 +140,7 @@ const mirroredFatFrameInputs = (
     entityTxs: [{
       type: 'accountInput',
       data: {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: sourceHub,
         toEntityId: sourceUser,
         domain: { chainId: 1, depositoryAddress: addr('d1') },
@@ -172,7 +172,7 @@ const mirroredFatFrameInputs = (
     entityTxs: [{
       type: 'accountInput',
       data: {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: targetHub,
         toEntityId: targetUser,
         domain: { chainId: 2, depositoryAddress: addr('d2') },

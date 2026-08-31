@@ -4,13 +4,15 @@ use std::sync::Arc;
 
 use num_bigint::BigInt;
 use xln_rscore_batch::{
-    AccountEnvelopeUpdate, AccountId, AccountSeed, EngineGeneration, EntityInboundRequest,
-    EntityOutboundRequest, FailedHtlcFollowup, ResidentConsensusEngine,
+    AccountEnvelopeUpdate, AccountId, AccountInputBoardAuthority, AccountInputRow,
+    AccountInputVerdict, AccountSeed, CertifiedSettlementHankoDraft, EngineGeneration,
+    EntityInboundRequest, EntityOutboundRequest, FailedHtlcFollowup, PendingSettlementHankoDraft,
+    ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity, AccountReplica,
     AccountState, AccountTx, DepositoryAddress, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
-    HtlcResolveTx, TokenId, WatchSeed,
+    HtlcResolveTx, SettlementHankoDraft, TokenId, WatchSeed,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -91,14 +93,13 @@ fn outbound_request(
 ) -> EntityOutboundRequest {
     EntityOutboundRequest {
         owner_entity_id: owner,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
         envelope_updates: Vec::new(),
-        admits: vec![(account_id, txs)],
-        propose: vec![account_id],
-        materialize: Vec::new(),
+        unsigned_settlement_txs: Vec::new(),
+        proposal_work: vec![(account_id, txs, false)],
         checkpoint_due: false,
         post_accounts: true,
     }
@@ -107,14 +108,13 @@ fn outbound_request(
 fn empty_checkpoint_request(owner: [u8; 32]) -> EntityOutboundRequest {
     EntityOutboundRequest {
         owner_entity_id: owner,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
         envelope_updates: Vec::new(),
-        admits: Vec::new(),
-        propose: Vec::new(),
-        materialize: Vec::new(),
+        unsigned_settlement_txs: Vec::new(),
+        proposal_work: Vec::new(),
         checkpoint_due: true,
         post_accounts: false,
     }
@@ -165,7 +165,7 @@ fn entity_owned_rebalance_policy_updates_the_resident_leaf_and_checkpoint_body()
     let result = engine
         .entity_outbound(EntityOutboundRequest {
             owner_entity_id: pair.payer_entity,
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             timestamp: TIMESTAMP,
             j_height: 100,
             creates: Vec::new(),
@@ -176,9 +176,8 @@ fn entity_owned_rebalance_policy_updates_the_resident_leaf_and_checkpoint_body()
                     policy: policy.clone(),
                 }],
             )],
-            admits: Vec::new(),
-            propose: Vec::new(),
-            materialize: vec![pair.payer_account],
+            unsigned_settlement_txs: Vec::new(),
+            proposal_work: vec![(pair.payer_account, Vec::new(), false)],
             checkpoint_due: false,
             post_accounts: true,
         })
@@ -188,6 +187,107 @@ fn entity_owned_rebalance_policy_updates_the_resident_leaf_and_checkpoint_body()
         row.header.envelope.rebalance_shadow_policy_rows(),
         [(1, policy)]
     );
+}
+
+#[test]
+fn prepared_account_ignores_a_signed_peer_frame_before_replay_or_commit() {
+    let (payer_seed, pair) = funded_seed();
+    let (left, right) = if pair.payer < pair.payee {
+        (pair.payer.clone(), pair.payee.clone())
+    } else {
+        (pair.payee.clone(), pair.payer.clone())
+    };
+    let payee_seed = AccountSeed {
+        account_id: pair.payee_account,
+        replica: AccountReplica::new(pair.payee.clone(), fixture::account_state(&left, &right))
+            .expect("payee replica"),
+        consensus: None,
+    };
+    let mut payer = resident(1, "payer-0", REVISION, fixture::market(), vec![payer_seed]);
+    let mut payee = resident(1, "payee-0", REVISION, fixture::market(), vec![payee_seed]);
+
+    enter_resident(&mut payer, pair.payer_entity);
+    let pending = payer
+        .entity_outbound(outbound_request(
+            pair.payer_entity,
+            pair.payer_account,
+            fixture::payment(&pair, 25).1,
+        ))
+        .expect("payer pending frame");
+    assert!(pending.proposals[0].proposed.is_some());
+
+    enter_resident(&mut payee, pair.payee_entity);
+    let signed_peer = payee
+        .entity_outbound(outbound_request(
+            pair.payee_entity,
+            pair.payee_account,
+            vec![AccountTx::DirectPayment {
+                token_id: TokenId::new(1).expect("token"),
+                amount: BigInt::from(17),
+                route: vec![pair.payer.to_string()],
+                description: None,
+                from_entity_id: pair.payee.to_string(),
+                to_entity_id: pair.payer.to_string(),
+                delivery_mode: xln_rscore_engine::DeliveryMode::Direct,
+                trusted_gateway_entity_id: None,
+            }],
+        ))
+        .expect("signed peer frame")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|proposal| proposal.outbound_input)
+        .expect("peer AccountInput");
+
+    enter_resident(&mut payer, pair.payer_entity);
+    let frozen = payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: pair.payer_entity,
+            local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            envelope_updates: vec![(
+                pair.payer_account,
+                vec![AccountEnvelopeUpdate::ReplaceDisputeLifecycle {
+                    status: "dispute_preparing".into(),
+                    dispute_prepare: Some(CanonicalValue::Object(Vec::new())),
+                    active_dispute: None,
+                }],
+            )],
+            unsigned_settlement_txs: Vec::new(),
+            proposal_work: Vec::new(),
+            checkpoint_due: false,
+            post_accounts: true,
+        })
+        .expect("freeze payer account");
+    let frozen_account = &frozen.post_accounts[0];
+    assert!(frozen_account.consensus.pending.is_none());
+    assert!(frozen_account.consensus.current.is_none());
+    let frozen_root = frozen.accounts_root;
+
+    let ignored = payer
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: pair.payer_entity,
+            expected_accounts_root: frozen_root,
+            clock: fixture::clock(TIMESTAMP),
+            rows: vec![AccountInputRow {
+                operation_index: 0,
+                account_id: pair.payer_account,
+                genesis_policy: None,
+                certified_board_authority: AccountInputBoardAuthority::Lazy,
+                local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+                input: signed_peer,
+            }],
+            post_accounts: false,
+        })
+        .expect("frozen peer input is a no-op");
+
+    assert_eq!(ignored.accounts_root, frozen_root);
+    assert!(matches!(
+        ignored.applied[0].verdict,
+        AccountInputVerdict::Failed(ref reason) if reason == "ACCOUNT_INPUT_STATUS_FROZEN"
+    ));
 }
 
 #[test]
@@ -287,12 +387,13 @@ fn failed_htlc_uses_one_exact_continuation_and_matches_workers() {
         let prepared = engine
             .prepare_entity_outbound(EntityOutboundRequest {
                 owner_entity_id: owner,
-                local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+                local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
                 timestamp: TIMESTAMP,
                 j_height: 100,
                 creates: Vec::new(),
                 envelope_updates: Vec::new(),
-                admits: vec![(
+                unsigned_settlement_txs: Vec::new(),
+                proposal_work: vec![(
                     downstream,
                     vec![AccountTx::HtlcLock(HtlcLockTx {
                         lock_id: hashlock_text.clone(),
@@ -304,9 +405,8 @@ fn failed_htlc_uses_one_exact_continuation_and_matches_workers() {
                         delivery_mode: None,
                         envelope: None,
                     })],
+                    false,
                 )],
-                propose: vec![downstream],
-                materialize: Vec::new(),
                 checkpoint_due: false,
                 post_accounts: true,
             })
@@ -390,12 +490,13 @@ fn independent_failed_forwards_use_frontier_barriers_and_match_1_and_8_workers()
         .collect::<Vec<_>>();
     let request = || EntityOutboundRequest {
         owner_entity_id: owner,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
         envelope_updates: Vec::new(),
-        admits: ORDER
+        unsigned_settlement_txs: Vec::new(),
+        proposal_work: ORDER
             .iter()
             .map(|index| {
                 (
@@ -404,11 +505,10 @@ fn independent_failed_forwards_use_frontier_barriers_and_match_1_and_8_workers()
                         down_locks[*index].clone(),
                         hashlocks[*index].clone(),
                     )],
+                    false,
                 )
             })
             .collect(),
-        propose: propose.clone(),
-        materialize: Vec::new(),
         checkpoint_due: false,
         post_accounts: true,
     };
@@ -500,15 +600,17 @@ fn proposed_inbound_waits_for_outbound_resolution_and_matches_1_and_8_workers() 
     let seeds = vec![down_seed, up_seed];
     let request = || EntityOutboundRequest {
         owner_entity_id: owner,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: Vec::new(),
         envelope_updates: Vec::new(),
-        admits: vec![
+        unsigned_settlement_txs: Vec::new(),
+        proposal_work: vec![
             (
                 downstream,
                 vec![expired_forward_lock(down_lock.clone(), hashlock.clone())],
+                false,
             ),
             (
                 upstream,
@@ -516,10 +618,9 @@ fn proposed_inbound_waits_for_outbound_resolution_and_matches_1_and_8_workers() 
                     token_id: TokenId::new(1).expect("token"),
                     amount: BigInt::from(123),
                 }],
+                false,
             ),
         ],
-        propose: vec![downstream, upstream],
-        materialize: Vec::new(),
         checkpoint_due: false,
         post_accounts: true,
     };
@@ -631,6 +732,88 @@ fn resident_result_is_root_identical_with_1_2_4_8_16_workers() {
 }
 
 #[test]
+fn unsigned_settlement_transition_is_sealed_before_certified_hankos_attach() {
+    let (seed, pair) = funded_seed();
+    let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);
+    enter_resident(&mut engine, pair.payer_entity);
+    let prior_root = engine.accounts_root();
+    let unsigned = AccountTx::SettleTransition {
+        data: CanonicalValue::Object(vec![
+            ("kind".into(), CanonicalValue::String("hanko".into())),
+            (
+                "settlementHash".into(),
+                CanonicalValue::String(format!("0x{}", "11".repeat(32))),
+            ),
+            (
+                "postProof".into(),
+                CanonicalValue::Object(vec![(
+                    "disputeHash".into(),
+                    CanonicalValue::String(format!("0x{}", "22".repeat(32))),
+                )]),
+            ),
+        ]),
+    };
+    let draft = SettlementHankoDraft {
+        tx: unsigned.clone(),
+        settlement_hash: Some([0x11; 32]),
+        dispute_hash: [0x22; 32],
+        settlement_nonce: 1,
+        proof_nonce: 2,
+    };
+    let result = engine
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: pair.payer_entity,
+            local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            envelope_updates: Vec::new(),
+            unsigned_settlement_txs: vec![(pair.payer_account, unsigned)],
+            proposal_work: Vec::new(),
+            checkpoint_due: false,
+            post_accounts: false,
+        })
+        .expect("pre-certification Account stage");
+    assert!(
+        result.proposals.is_empty(),
+        "unsigned transition cannot be sent"
+    );
+    assert_ne!(
+        result.accounts_root, prior_root,
+        "unsigned tx is committed once"
+    );
+    assert_eq!(
+        engine
+            .account_status(pair.payer_account, Vec::new())
+            .expect("status")
+            .expect("account")
+            .mempool_len,
+        1,
+    );
+
+    engine
+        .attach_certified_settlement_hankos(vec![CertifiedSettlementHankoDraft {
+            pending: PendingSettlementHankoDraft {
+                account_id: pair.payer_account,
+                draft,
+            },
+            settlement_hanko: Some(vec![0x31, 0x32]),
+            dispute_hanko: vec![0x41, 0x42],
+        }])
+        .expect("attach manifest witnesses");
+    assert_eq!(engine.accounts_root(), result.accounts_root);
+    assert_eq!(
+        engine
+            .account_status(pair.payer_account, Vec::new())
+            .expect("status")
+            .expect("account")
+            .mempool_len,
+        1,
+        "witness attachment replaces rather than appends",
+    );
+}
+
+#[test]
 fn failed_outbound_restores_the_exact_post_inbound_head() {
     let (seed, pair) = funded_seed();
     let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);
@@ -645,14 +828,16 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
     assert_eq!(owner, pair.payer_entity);
     let error = match engine.entity_outbound(EntityOutboundRequest {
         owner_entity_id: pair.payer_entity,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: vec![created],
         envelope_updates: Vec::new(),
-        admits: vec![(pair.payer_account, fixture::payment(&pair, 25).1)],
-        propose: Vec::new(),
-        materialize: vec![AccountId::from_bytes([0xfe; 32])],
+        unsigned_settlement_txs: Vec::new(),
+        proposal_work: vec![
+            (pair.payer_account, fixture::payment(&pair, 25).1, false),
+            (AccountId::from_bytes([0xfe; 32]), Vec::new(), false),
+        ],
         checkpoint_due: false,
         post_accounts: false,
     }) {

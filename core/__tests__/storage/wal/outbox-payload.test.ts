@@ -137,7 +137,7 @@ describe('path-keyed Runtime outbox rows', () => {
       entityTxs: [{
         type: 'accountInput',
         data: {
-          kind: 'frame',
+          kind: 'ack_frame',
           fromEntityId: ENTITY_ID,
           toEntityId: `0x${'44'.repeat(32)}`,
           domain: { chainId: 31337, depositoryAddress: `0x${'55'.repeat(20)}` },

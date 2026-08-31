@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use crate::scheduler::{
-    CrontabState, CrontabTaskMethod, ScheduledHook, ScheduledHookKind, cancel_hook,
+    CrontabState, CrontabTaskMethod, ScheduledHook, ScheduledHookKind, cancel_hook, schedule_hook,
 };
-use crate::{CanonicalEntityTx, EntityTxKind};
+use crate::{CanonicalEntityTx, EntityTxKind, JBatch, JBatchState};
 
 pub const MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS: usize = 1_000;
 
@@ -62,6 +62,10 @@ pub enum SchedulerCommand {
     ProcessHtlcTimeouts {
         expired_locks: Vec<(String, String)>,
     },
+    AutoFinalizeDispute {
+        counterparty_entity_id: String,
+    },
+    BroadcastQueuedDisputeFinalization,
     HubRebalance,
 }
 
@@ -235,6 +239,47 @@ fn unsupported_hook(hook: &ScheduledHook, kind: &'static str) -> SchedulerError 
     }
 }
 
+fn object_bool(value: &CanonicalValue, field: &str) -> Option<bool> {
+    let CanonicalValue::Object(fields) = value else {
+        return None;
+    };
+    fields.iter().find_map(|(name, value)| {
+        (name == field)
+            .then_some(value)
+            .and_then(|value| match value {
+                CanonicalValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+    })
+}
+
+fn object_u64(value: &CanonicalValue, field: &str) -> Option<u64> {
+    let CanonicalValue::Object(fields) = value else {
+        return None;
+    };
+    fields.iter().find_map(|(name, value)| {
+        (name == field)
+            .then_some(value)
+            .and_then(|value| match value {
+                CanonicalValue::Number(value) => value.as_str().parse().ok(),
+                _ => None,
+            })
+    })
+}
+
+fn batch_has_dispute_finalization(batch: &JBatch, counterparty: &str) -> bool {
+    let Ok(bytes) = hex::decode(counterparty.strip_prefix("0x").unwrap_or(counterparty)) else {
+        return false;
+    };
+    let Ok(counterparty) = <[u8; 32]>::try_from(bytes.as_slice()) else {
+        return false;
+    };
+    batch
+        .dispute_finalizations
+        .iter()
+        .any(|row| row.counterentity == counterparty)
+}
+
 /// Execute one signed scheduled wake atomically.
 ///
 /// A clone is mutated and returned only on success. In particular, a due
@@ -248,6 +293,9 @@ pub fn execute_crontab(
     hub_rebalance_has_pending_work: bool,
     active_htlc_locks: &BTreeSet<(String, String)>,
     secret_acks_requiring_dispute: &BTreeSet<String>,
+    dispute_views: &BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
+    j_batch_state: Option<&JBatchState>,
+    dispute_auto_finalize: bool,
 ) -> Result<SchedulerExecution, SchedulerError> {
     validate_scheduled_wake(wake, expected_proposer_signer_id, now)?;
     let mut next = state.clone();
@@ -258,8 +306,16 @@ pub fn execute_crontab(
             .then_with(|| left.id.cmp(&right.id))
     });
 
+    for hook in &due_hooks {
+        cancel_hook(&mut next, &hook.id).map_err(|error| SchedulerError::HookCommitment {
+            detail: error.to_string(),
+        })?;
+    }
+
     let mut expired_locks = Vec::new();
     let mut force_hub_rebalance = false;
+    let mut dispute_finalize_planned = false;
+    let mut commands = Vec::new();
     for hook in &due_hooks {
         match &hook.kind {
             ScheduledHookKind::HtlcTimeout {
@@ -288,8 +344,90 @@ pub fn execute_crontab(
             }
             // TypeScript intentionally treats these two legacy hooks as no-op.
             ScheduledHookKind::SettlementWindow | ScheduledHookKind::Watchdog => {}
-            ScheduledHookKind::DisputeDeadline { .. } => {
-                return Err(unsupported_hook(hook, "dispute_deadline"));
+            ScheduledHookKind::DisputeDeadline { account_id } => {
+                let Some(active) = dispute_views
+                    .get(account_id)
+                    .and_then(|view| view.active_dispute.as_ref())
+                else {
+                    continue;
+                };
+                if !dispute_auto_finalize {
+                    continue;
+                }
+                let retry_after = if object_bool(active, "observedOnChain") != Some(true) {
+                    Some(5_000)
+                } else {
+                    let timeout = object_u64(active, "disputeTimeout").unwrap_or(0);
+                    (timeout == 0 || now / 1_000 < timeout).then_some(1_000)
+                };
+                if let Some(delay) = retry_after {
+                    schedule_hook(
+                        &mut next,
+                        ScheduledHook {
+                            id: hook.id.clone(),
+                            trigger_at: now.checked_add(delay).ok_or(
+                                SchedulerError::TimestampOverflow {
+                                    method: "disputeDeadline",
+                                },
+                            )?,
+                            kind: hook.kind.clone(),
+                        },
+                    )
+                    .map_err(|error| SchedulerError::HookCommitment {
+                        detail: error.to_string(),
+                    })?;
+                    continue;
+                }
+                let sent = j_batch_state.and_then(|state| state.sent_batch.as_ref());
+                if sent.is_some() {
+                    schedule_hook(
+                        &mut next,
+                        ScheduledHook {
+                            id: hook.id.clone(),
+                            trigger_at: now.checked_add(1_000).ok_or(
+                                SchedulerError::TimestampOverflow {
+                                    method: "disputeDeadline",
+                                },
+                            )?,
+                            kind: hook.kind.clone(),
+                        },
+                    )
+                    .map_err(|error| SchedulerError::HookCommitment {
+                        detail: error.to_string(),
+                    })?;
+                    continue;
+                }
+                let queued = j_batch_state.is_some_and(|state| {
+                    batch_has_dispute_finalization(&state.batch, account_id)
+                        || state
+                            .recovery_batches
+                            .iter()
+                            .any(|batch| batch_has_dispute_finalization(batch, account_id))
+                });
+                if queued {
+                    commands.push(SchedulerCommand::BroadcastQueuedDisputeFinalization);
+                } else if dispute_finalize_planned {
+                    schedule_hook(
+                        &mut next,
+                        ScheduledHook {
+                            id: hook.id.clone(),
+                            trigger_at: now.checked_add(1).ok_or(
+                                SchedulerError::TimestampOverflow {
+                                    method: "disputeDeadline",
+                                },
+                            )?,
+                            kind: hook.kind.clone(),
+                        },
+                    )
+                    .map_err(|error| SchedulerError::HookCommitment {
+                        detail: error.to_string(),
+                    })?;
+                } else {
+                    dispute_finalize_planned = true;
+                    commands.push(SchedulerCommand::AutoFinalizeDispute {
+                        counterparty_entity_id: account_id.clone(),
+                    });
+                }
             }
             ScheduledHookKind::CrossJOrderbookSweep { .. } => {
                 return Err(unsupported_hook(hook, "cross_j_orderbook_sweep"));
@@ -306,12 +444,6 @@ pub fn execute_crontab(
         }
     }
 
-    for hook in &due_hooks {
-        cancel_hook(&mut next, &hook.id).map_err(|error| SchedulerError::HookCommitment {
-            detail: error.to_string(),
-        })?;
-    }
-    let mut commands = Vec::new();
     if !expired_locks.is_empty() {
         commands.push(SchedulerCommand::ProcessHtlcTimeouts { expired_locks });
     }
@@ -375,6 +507,46 @@ mod tests {
         }
     }
 
+    fn dispute_view(
+        observed_on_chain: bool,
+        dispute_timeout: u64,
+    ) -> xln_rscore_batch::ResidentAccountDisputeView {
+        xln_rscore_batch::ResidentAccountDisputeView {
+            status: "disputed".into(),
+            dispute_prepare: None,
+            active_dispute: Some(CanonicalValue::Object(vec![
+                (
+                    "observedOnChain".into(),
+                    CanonicalValue::Bool(observed_on_chain),
+                ),
+                (
+                    "disputeTimeout".into(),
+                    CanonicalValue::Number(
+                        CanonicalNumber::try_from_u64(dispute_timeout).expect("timeout"),
+                    ),
+                ),
+            ])),
+            local_dispute: None,
+            counterparty_dispute: None,
+            proof_body: Ok(xln_rscore_engine::DisputeProofBody {
+                watch_seed: [0; 32],
+                left_response_seconds: 0,
+                right_response_seconds: 0,
+                offdeltas: Vec::new(),
+                token_ids: Vec::new(),
+                transformers: Vec::new(),
+            }),
+            j_nonce: 0,
+            owner_is_left: true,
+            delta_transformer: None,
+            payment_hashlocks: Vec::new(),
+            pull_ids: Vec::new(),
+            pull_count: 0,
+            swap_offers: Vec::new(),
+            pending_swap_fill_ratios: BTreeMap::new(),
+        }
+    }
+
     #[test]
     fn recomputes_and_drains_all_due_hooks_not_only_diagnostic_prefix() {
         let mut state = state();
@@ -398,6 +570,9 @@ mod tests {
                 ("account-b".to_string(), "b".to_string()),
             ]),
             &BTreeSet::new(),
+            &BTreeMap::new(),
+            None,
+            true,
         )
         .expect("execution");
         assert!(result.crontab.hooks.is_empty());
@@ -413,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_hook_does_not_consume_any_hook() {
+    fn stale_dispute_deadline_is_consumed_without_an_active_dispute() {
         let mut state = state();
         add_hook(
             &mut state,
@@ -426,7 +601,7 @@ mod tests {
             },
         );
         let jobs = collect_due_scheduled_wake_jobs(&state, 10, false).expect("due jobs");
-        let error = execute_crontab(
+        let result = execute_crontab(
             &state,
             &wake(jobs),
             "hub",
@@ -434,10 +609,74 @@ mod tests {
             false,
             &BTreeSet::new(),
             &BTreeSet::new(),
+            &BTreeMap::new(),
+            None,
+            true,
         )
-        .expect_err("unsupported dispute");
-        assert!(matches!(error, SchedulerError::UnsupportedHook { .. }));
-        assert!(state.hooks.contains_key("dispute:x"));
+        .expect("stale dispute hook");
+        assert!(result.commands.is_empty());
+        assert!(!result.crontab.hooks.contains_key("dispute:x"));
+    }
+
+    #[test]
+    fn dispute_deadline_retries_then_queues_canonical_finalize() {
+        let mut state = state();
+        add_hook(
+            &mut state,
+            ScheduledHook {
+                id: "dispute-deadline:peer".into(),
+                trigger_at: 1_000,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: "peer".into(),
+                },
+            },
+        );
+        let jobs = collect_due_scheduled_wake_jobs(&state, 1_000, false).expect("due jobs");
+        let waiting = execute_crontab(
+            &state,
+            &wake(jobs),
+            "hub",
+            1_000,
+            false,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &BTreeMap::from([("peer".into(), dispute_view(false, 9))]),
+            None,
+            true,
+        )
+        .expect("waiting deadline");
+        assert!(waiting.commands.is_empty());
+        assert_eq!(
+            waiting
+                .crontab
+                .hooks
+                .iter()
+                .find(|(_, hook)| hook.id == "dispute-deadline:peer")
+                .map(|(_, hook)| hook.trigger_at),
+            Some(6_000),
+        );
+
+        let jobs = collect_due_scheduled_wake_jobs(&state, 10_000, false).expect("due jobs");
+        let ready = execute_crontab(
+            &state,
+            &wake(jobs),
+            "hub",
+            10_000,
+            false,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &BTreeMap::from([("peer".into(), dispute_view(true, 9))]),
+            None,
+            true,
+        )
+        .expect("ready deadline");
+        assert_eq!(
+            ready.commands,
+            vec![SchedulerCommand::AutoFinalizeDispute {
+                counterparty_entity_id: "peer".into(),
+            }]
+        );
+        assert!(!ready.crontab.hooks.contains_key("dispute-deadline:peer"));
     }
 
     #[test]
@@ -463,6 +702,9 @@ mod tests {
             true,
             &BTreeSet::new(),
             &BTreeSet::new(),
+            &BTreeMap::new(),
+            None,
+            true,
         )
         .expect("execution");
         assert_eq!(result.commands, vec![SchedulerCommand::HubRebalance]);
@@ -495,6 +737,9 @@ mod tests {
             false,
             &BTreeSet::new(),
             &BTreeSet::new(),
+            &BTreeMap::new(),
+            None,
+            true,
         )
         .expect_err("forged signer");
         assert_eq!(error, SchedulerError::ProposerMismatch);

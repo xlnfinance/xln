@@ -192,7 +192,10 @@ export const spawnParallelLoadLanes = async (options: {
       runtimeTxs: buildLaneImports([lane.identity]),
       entityInputs: buildLaneProfileInputs([lane.identity]),
     },
-  })), { maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES });
+  })), {
+    maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES,
+    waitForCommit: true,
+  });
   console.log(
     `[load] population-phase=bootstrap-input-acked users=${runtimes.length} ` +
     `elapsedMs=${Math.ceil(performance.now() - spawnStartedAt)}`,
@@ -307,7 +310,10 @@ export const setupParallelLoadTraderPopulation = async (options: {
         runtimeTxs: buildLaneImports([lane.identity]),
         entityInputs: buildLaneProfileInputs([lane.identity]),
       },
-    })), { maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES });
+    })), {
+      maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES,
+      waitForCommit: true,
+    });
     if (options.provisionPopulation) {
       await options.provisionPopulation(runtimes, options.receiveWindows, options.faucetAmounts);
     } else {
@@ -478,7 +484,10 @@ const prepareLoadPopulationNetwork = async (options: {
       runtimeTxs: buildLaneImports([lane.identity]),
       entityInputs: buildLaneProfileInputs([lane.identity]),
     },
-  })), { maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES });
+  })), {
+    maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES,
+    waitForCommit: true,
+  });
   phase('bootstrap-input-acked');
   await connectLoadPopulationNetwork(options, setupStartedAt);
 };
@@ -543,7 +552,10 @@ const provisionLoadPopulationFinancial = async (options: Readonly<{
         entry.faucetAmount ?? HLT_FAUCET_AMOUNT,
       ),
     },
-  })), { maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES });
+  })), {
+    maxEntriesPerHostRequest: HLT_SETUP_RUNTIME_INPUT_CHUNK_ENTRIES,
+    waitForCommit: true,
+  });
   phase('account-open-input-acked');
 
   await waitForLaneFinancialReadiness(population.map(entry => ({

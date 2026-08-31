@@ -504,6 +504,8 @@ interface RuntimeInfrastructure {
   maxEntityInputsPerFrame?: number;
   maxEntityTxsPerFrame?: number;
   processingPromise?: Promise<void> | null;
+  /** Current process-local Runtime frame phase; diagnostics only, never committed or persisted. */
+  runtimeFramePhase?: string | null;
   /** Writer-preference gate: queued financial frames cannot be starved by new API readers. */
   queuedFrameWriters?: number;
   frameWritersDrained?: Promise<void> | null;
@@ -683,9 +685,9 @@ export interface RuntimeReplica {
   accountAuthorityFrameId?: string | null | undefined;
   /** Detached/read-only replicas never arm or mutate authority sessions. */
   accountAuthoritySuppressed?: boolean | undefined;
-  /** Explicit pre-TS lifecycle mode; absent keeps the canonical TS path. */
-  accountAuthorityExecutionMode?: 'pre-ts-observe' | 'cutover' | undefined;
-  /** Injected lifecycle only; production leaves this absent until result ABI cutover. */
+  /** Canonical Account authority is installed before the first Runtime frame. */
+  accountAuthorityExecutionMode?: 'cutover' | undefined;
+  /** Process-local Account executor; never part of Runtime state or WAL. */
   accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */
   accountAuthorityEntityStage?: import('../entity/runtime-context').AccountAuthorityEntityStageCapability | undefined;

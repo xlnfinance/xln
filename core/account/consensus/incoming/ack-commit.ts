@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountOutput, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountFrame, AccountOutput, AccountInput, AccountReplica } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
@@ -15,7 +15,7 @@ import {
   type ValidatedCounterpartyDisputeHanko,
 } from '../dispute/hanko';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
-import { accountInputApplied, rejectAccountPeerInput } from '../result';
+import { accountInputApplied, rejectAccountInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
 import { preparedCommitKey, takePreparedProposalCommit } from '../proposal/prepared-commit';
 import { noteAccountFrameForShadow, shadowPreFrameState } from '../../../rscore/shadow-hook';
@@ -60,7 +60,7 @@ const verifyPendingAckCertificate = async (
   if (hankoError) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID', hankoError, events),
+      result: rejectAccountInput('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID', hankoError, events),
     };
   }
 
@@ -72,8 +72,8 @@ const verifyPendingAckCertificate = async (
   ) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+      result: rejectAccountInput(
+        'ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID',
         `ACK frameHash mismatch: got ${String(ack.frameHash)}, expected ${frameHash}`,
         events,
       ),
@@ -82,8 +82,8 @@ const verifyPendingAckCertificate = async (
   if (!ack.frameHanko) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+      result: rejectAccountInput(
+        'ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID',
         'Missing ACK hanko',
         events,
       ),
@@ -115,8 +115,8 @@ const verifyPendingAckCertificate = async (
   if (!verified.valid) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+      result: rejectAccountInput(
+        'ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID',
         'Invalid ACK hanko signature',
         events,
       ),
@@ -128,8 +128,8 @@ const verifyPendingAckCertificate = async (
   ) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+      result: rejectAccountInput(
+        'ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID',
         `ACK hanko entityId mismatch: got ${verified.entityId?.slice(-4)}, ` +
           `expected ${expectedEntity.slice(-4)}`,
         events,
@@ -213,7 +213,7 @@ const applyPendingFrameTransactions = async (
 
 const installPendingFrameCommit = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   pendingFrame: AccountFrame,
   ack: AccountAckFrame,
   ackHanko: string,
@@ -253,7 +253,7 @@ const installPendingFrameCommit = (
 
 const queuePostAckWork = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   committedHeight: number,
   securityContext: AccountInputSecurityContext,
   candidateEffects: AccountOutput[],
@@ -276,7 +276,7 @@ const queuePostAckWork = async (
 export const handlePendingAckFrame = async (
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   ackHeight: number | undefined,
   validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],

@@ -155,9 +155,10 @@ if [[ "${XLN_HLT_H1_ONLY:-0}" == "1" ]]; then
     echo "XLN_HLT_H1_ONLY_REQUIRES_XLN_HUB_COUNT_1" >&2
     exit 1
   fi
-  # Mixed HLT needs MM only to seed the users before TS H1 hands authority to
-  # Rust. The measured balanced user/user window has no MM economic leg.
-  if [[ "${XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE:-}" == "mixed" ]]; then
+  # Same-chain and mixed HLTs need the real MM to seed the canonical book.
+  # Payments have no orderbook dependency and keep the smaller H1-only stack.
+  if [[ "${XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE:-}" == "same" ||
+        "${XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE:-}" == "mixed" ]]; then
     ORCHESTRATOR_ARGS+=(--mm)
   fi
 else

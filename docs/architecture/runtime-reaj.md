@@ -15,13 +15,12 @@ Execution flow:
 1. External action enters as `RuntimeInput`.
 2. Runtime routes `EntityInput` to the target entity replica.
 3. Entity applies `EntityTx`. Its `accountInput` variant carries the exact
-   child `AccountPeerInput`; Entity-owned financial transactions create local
-   `AccountInput.txs`.
-4. The Account machine applies one `AccountInput` union. The local `txs`
-   branch carries `AccountTx[]` for a future Account frame; peer
-   `frame/ack/frame_ack/dispute/board_hanko_refresh/settle` branches carry bilateral
-   consensus evidence. Every branch enters the same `applyAccountInput`
-   boundary.
+   child `AccountInput`; Entity-owned financial transactions create a local
+   `AccountTx[]` admission instead of fabricating another input type.
+4. The Account machine applies `AccountInput` variants
+   `frame/ack/ack_frame/dispute/board_hanko_refresh`. Local AccountTx admission
+   and finalized jurisdiction evidence enter the same `applyAccountInput`
+   transition but never enter the `EntityTx.accountInput` wire branch.
 5. Entity queues J batches for jurisdiction settlement.
 6. J events are observed, authenticated, and folded back into entity/account state.
 

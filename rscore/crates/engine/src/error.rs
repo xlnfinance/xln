@@ -57,14 +57,14 @@ pub enum StateError {
     TransitionFailed(String),
     #[error("ACCOUNT_SIGNING:{0}")]
     Signing(String),
-    #[error("ACCOUNT_PEER_FRAME_HANKO_INVALID:{0}")]
+    #[error("ACCOUNT_INPUT_FRAME_HANKO_INVALID:{0}")]
     FrameHankoInvalid(String),
-    #[error("ACCOUNT_PEER_DISPUTE_HANKO_INVALID:{0}")]
+    #[error("ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:{0}")]
     DisputeHankoInvalid(String),
     #[error("ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE")]
     BoardAuthorityUnavailable,
     #[error("ACCOUNT_BOARD_AUTHORITY_PEER_MISMATCH:expected={expected}:resolved={resolved}")]
-    BoardAuthorityPeerMismatch { expected: String, resolved: String },
+    BoardAuthorityCounterpartyMismatch { expected: String, resolved: String },
     #[error("ACCOUNT_FRAME_TX_UNSUPPORTED:{0}")]
     UnsupportedFrameTx(&'static str),
     /// FX-1 (proofs/fixes.md D2): `RebalancePolicy.policyVersion` outside the

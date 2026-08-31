@@ -70,6 +70,7 @@ export async function createRpcAdapter(
     provider,
     chainId: config.chainId,
     ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
+    ...(config.watchPollMs === undefined ? {} : { watchPollMs: config.watchPollMs }),
     get depositoryAddress() { return stack.addresses.depository; },
     get entityProviderAddress() { return stack.addresses.entityProvider; },
     getDepository: () => stack.depository,

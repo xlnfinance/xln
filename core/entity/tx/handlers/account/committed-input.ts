@@ -1,6 +1,6 @@
 import type {
   AccountOutput,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
   AccountSwapOfferSnapshot,
   AccountTx,
@@ -72,13 +72,13 @@ export type CommittedAccountEffects = {
 export type AccountInputFlushWork = Readonly<{
   force: boolean;
   /** Exact response emitted by the Account machine; never reconstructed by Entity. */
-  response?: AccountPeerInput;
+  response?: AccountInput;
 }>;
 
 type SuccessfulAccountInputContext = {
   env: EntityRuntimeContext;
   state: EntityState;
-  input: AccountPeerInput;
+  input: AccountInput;
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;

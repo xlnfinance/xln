@@ -1,5 +1,5 @@
 import type { JurisdictionEventData } from './jurisdiction-events';
-import type { AccountPeerInput, AccountState, AccountStateDomain, SettlementOp } from './account';
+import type { AccountInput, AccountState, AccountStateDomain, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './finance/lending';
 import type { ProposalAction } from '../entity/types';
@@ -164,8 +164,8 @@ type EntityTxPayload =
     }
   | {
       type: 'accountInput';
-      /** Exact peer consensus input committed by the parent Entity frame. */
-      data: AccountPeerInput;
+      /** Exact child Account input committed by the parent Entity frame. */
+      data: AccountInput;
     }
   | {
       type: 'openAccount';

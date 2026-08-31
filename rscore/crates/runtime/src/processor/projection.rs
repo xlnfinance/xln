@@ -79,7 +79,6 @@ fn zero_fill_swap_cancels(outputs: &[LocalEntityOutput]) -> usize {
         .flat_map(|output| output.entity_txs.iter())
         .flat_map(|tx| match tx {
             LocalEntityOutputTx::AccountInput(input) => match &input.kind {
-                AccountInputKind::Frame(frame) => frame.frame.txs.iter(),
                 AccountInputKind::AckFrame { frame, .. } => frame.frame.txs.iter(),
                 AccountInputKind::Ack(_)
                 | AccountInputKind::Dispute(_)
@@ -103,7 +102,6 @@ fn zero_fill_swap_cancels(outputs: &[LocalEntityOutput]) -> usize {
 #[derive(Default)]
 struct LocalOutputMeasure {
     account_inputs: usize,
-    frame_inputs: usize,
     ack_inputs: usize,
     ack_frame_inputs: usize,
     frame_txs: usize,
@@ -116,7 +114,6 @@ struct LocalOutputMeasure {
 impl LocalOutputMeasure {
     fn add_assign(&mut self, other: &Self) {
         self.account_inputs += other.account_inputs;
-        self.frame_inputs += other.frame_inputs;
         self.ack_inputs += other.ack_inputs;
         self.ack_frame_inputs += other.ack_frame_inputs;
         self.frame_txs += other.frame_txs;
@@ -165,12 +162,6 @@ fn measure_local_outputs(outputs: &[LocalEntityOutput]) -> LocalOutputMeasure {
     {
         measure.account_inputs += 1;
         match &input.kind {
-            AccountInputKind::Frame(frame) => {
-                measure.frame_inputs += 1;
-                measure.frame_txs += frame.frame.txs.len();
-                measure_hanko(&mut measure, frame.frame_hanko.as_ref(), false);
-                measure_dispute(&mut measure, frame.dispute.as_ref());
-            }
             AccountInputKind::Ack(ack) => {
                 measure.ack_inputs += 1;
                 measure_hanko(&mut measure, ack.frame_hanko.as_ref(), false);
@@ -179,9 +170,16 @@ fn measure_local_outputs(outputs: &[LocalEntityOutput]) -> LocalOutputMeasure {
             AccountInputKind::AckFrame { ack, frame } => {
                 measure.ack_frame_inputs += 1;
                 measure.frame_txs += frame.frame.txs.len();
-                measure_hanko(&mut measure, ack.frame_hanko.as_ref(), false);
+                measure_hanko(
+                    &mut measure,
+                    ack.as_ref().and_then(|ack| ack.frame_hanko.as_ref()),
+                    false,
+                );
                 measure_hanko(&mut measure, frame.frame_hanko.as_ref(), false);
-                measure_dispute(&mut measure, ack.dispute.as_ref());
+                measure_dispute(
+                    &mut measure,
+                    ack.as_ref().and_then(|ack| ack.dispute.as_ref()),
+                );
                 measure_dispute(&mut measure, frame.dispute.as_ref());
             }
             AccountInputKind::Dispute(dispute) => {
@@ -585,7 +583,7 @@ pub(crate) fn project_durable_frame(
             .unwrap_or_default();
         let output_bytes = encoded.commit.outputs.iter().map(Vec::len).sum::<usize>();
         eprintln!(
-            "RSCORE_PROJECTION_PHASE h={} prelude_shape={} events_digest={} effects_digest={} effect_counts={} local_outputs={} bind_outputs={} continuations={} input={input_micros} machine={} meta={} context={} checkpoint_canonical={} encode={} total={total} input_bytes={canonical_input_bytes} checkpoint_rows={checkpoint_rows} checkpoint_bytes={checkpoint_bytes} frame_bytes={} output_bytes={output_bytes} output_account_inputs={} output_frames={} output_acks={} output_ack_frames={} output_frame_txs={} output_frame_hankos={} output_frame_hanko_bytes={} output_dispute_hankos={} output_dispute_hanko_bytes={}",
+            "RSCORE_PROJECTION_PHASE h={} prelude_shape={} events_digest={} effects_digest={} effect_counts={} local_outputs={} bind_outputs={} continuations={} input={input_micros} machine={} meta={} context={} checkpoint_canonical={} encode={} total={total} input_bytes={canonical_input_bytes} checkpoint_rows={checkpoint_rows} checkpoint_bytes={checkpoint_bytes} frame_bytes={} output_bytes={output_bytes} output_account_inputs={} output_acks={} output_ack_frames={} output_frame_txs={} output_frame_hankos={} output_frame_hanko_bytes={} output_dispute_hankos={} output_dispute_hanko_bytes={}",
             result.replica.state.height,
             shape_done.as_micros(),
             event_digest_done.saturating_sub(shape_done).as_micros(),
@@ -603,7 +601,6 @@ pub(crate) fn project_durable_frame(
             projection_encode.as_micros(),
             encoded.commit.frame_bytes.len(),
             output_measure.account_inputs,
-            output_measure.frame_inputs,
             output_measure.ack_inputs,
             output_measure.ack_frame_inputs,
             output_measure.frame_txs,

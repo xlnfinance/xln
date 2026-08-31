@@ -36,7 +36,7 @@ import { buffersEqual, compareStableText } from '../../protocol/serialization';
 import type {
   AccountDisputeHanko,
   AccountFrame,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
   AccountState,
 } from '../../types/account';
@@ -175,7 +175,7 @@ const addPriorWitness = (
 const addPriorInputWitnesses = (
   frameWitnesses: Map<string, HankoString>,
   disputeWitnesses: Map<string, HankoString>,
-  input: AccountPeerInput | undefined,
+  input: AccountInput | undefined,
 ): void => {
   if (input === undefined) return;
   const ack = accountInputAck(input);
@@ -307,7 +307,7 @@ const ackInput = (
   seed: RscoreAccountStateSeed,
   witnesses: LocalWitnessResolver,
   ack: RscoreOutboundAck,
-): Extract<AccountPeerInput, { kind: 'ack' }> => {
+): Extract<AccountInput, { kind: 'ack' }> => {
   const prefix = `account:${seed.accountId.slice(-8)}`;
   const frameHanko = witnesses.frame(ack.frameHash, `${prefix}:ack:${ack.height}`);
   return {
@@ -332,7 +332,7 @@ const pendingInput = (
   seed: RscoreAccountStateSeed,
   witnesses: LocalWitnessResolver,
   pending: NonNullable<RscoreResolvedAccountRow['decoded']['consensus']['pending']>,
-): Extract<AccountPeerInput, { kind: 'frame' | 'ack_frame' }> => {
+): Extract<AccountInput, { kind: 'ack_frame' }> => {
   const prefix = `account:${seed.accountId.slice(-8)}`;
   const frameHanko = witnesses.frame(
     pending.frame.stateHash,
@@ -359,7 +359,7 @@ const pendingInput = (
     watchSeed: seed.watchSeed,
     proposal,
   };
-  if (pending.bundledAck === undefined) return { kind: 'frame', ...common };
+  if (pending.bundledAck === undefined) return { kind: 'ack_frame', ...common };
   return {
     kind: 'ack_frame',
     ...common,

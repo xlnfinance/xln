@@ -55,14 +55,8 @@ pub enum Command {
     Shutdown,
     /// Every retired authority candidate/checkpoint command collapses to one
     /// loud rejection. Keeping decoded payloads here would retain a second,
-    /// unused authority protocol beside the resident two-call path.
+    /// unused authority protocol beside the resident EntityRound path.
     AuthorityTwoCallOnly,
-    AccountInbound {
-        request: Box<xln_rscore_batch::EntityInboundRequest>,
-    },
-    AccountOutbound {
-        request: Box<xln_rscore_batch::EntityOutboundRequest>,
-    },
     BootstrapEntity {
         snapshot: Box<xln_rscore_entity_kernel::EntityStateSnapshot>,
     },
@@ -98,8 +92,6 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         | OpTag::SealAccountWave
         | OpTag::GetCheckpointChanges
         | OpTag::CommitCheckpoint => Ok(Command::AuthorityTwoCallOnly),
-        OpTag::AccountInbound => decode_account_inbound(payload),
-        OpTag::AccountOutbound => decode_account_outbound(payload),
         OpTag::BootstrapEntity => decode_bootstrap_entity(payload),
         OpTag::EntityRound => decode_entity_round(payload),
         OpTag::RestoreExact => decode_restore_exact(payload),
@@ -116,7 +108,7 @@ fn decode_bootstrap_entity(fields: &[AbiValue]) -> Result<Command, ProcessError>
 
 fn decode_entity_round(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 7, "entityRound")?;
-    let inbound = decode_account_inbound_request(tuple(&fields[0])?)?;
+    let inbound = decode_account_ingress_request(tuple(&fields[0])?)?;
     let operations = (!inbound.rows.is_empty())
         .then_some(
             xln_rscore_entity_kernel::ResidentEntityOperation::AccountRange {
@@ -129,7 +121,7 @@ fn decode_entity_round(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     Ok(Command::EntityRound {
         request: Box::new(xln_rscore_entity_kernel::ResidentEntityRequest {
             inbound,
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: js_number(&fields[1], "entityHeight")?,
             outbound_timestamp: js_number(&fields[2], "outboundTimestamp")?,
             outbound_j_height: js_number(&fields[3], "outboundJHeight")?,
@@ -242,7 +234,7 @@ pub(crate) fn decode_input_row(
     value: &AbiValue,
 ) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
     let fields = exact(tuple(value)?, 5, "accountInput")?;
-    let input = decode_peer_input(&fields[2])?;
+    let input = decode_account_input(&fields[2])?;
     let peer_entity_id = input.envelope.from_entity_id;
     let local_entity_id = input.envelope.to_entity_id;
     let authorities = exact(tuple(&fields[4])?, 2, "accountBoardAuthorities")?;
@@ -268,12 +260,12 @@ fn decode_board_authority(
     value: &AbiValue,
     entity_id: [u8; 32],
     label: &'static str,
-) -> Result<xln_rscore_batch::PeerBoardAuthority, ProcessError> {
+) -> Result<xln_rscore_batch::AccountInputBoardAuthority, ProcessError> {
     if matches!(value, AbiValue::Nil) {
-        return Ok(xln_rscore_batch::PeerBoardAuthority::Lazy);
+        return Ok(xln_rscore_batch::AccountInputBoardAuthority::Lazy);
     }
     let fields = exact(tuple(value)?, 5, label)?;
-    Ok(xln_rscore_batch::PeerBoardAuthority::Certified(
+    Ok(xln_rscore_batch::AccountInputBoardAuthority::Certified(
         xln_rscore_engine::CertifiedBoardAuthority {
             entity_id,
             registered_board_hash: fixed_bytes(&fields[0], "registeredBoardHash")?,
@@ -316,16 +308,16 @@ fn decode_entity_account_genesis_policy(
     }))
 }
 
-fn decode_peer_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountPeerInput, ProcessError> {
-    let fields = exact(tuple(value)?, 6, "accountPeerEnvelope")?;
-    let domain = exact(tuple(&fields[2])?, 2, "accountPeerDomain")?;
-    let dispute = exact(tuple(&fields[3])?, 2, "accountPeerDisputeConfig")?;
+fn decode_account_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountInput, ProcessError> {
+    let fields = exact(tuple(value)?, 6, "accountInputEnvelope")?;
+    let domain = exact(tuple(&fields[2])?, 2, "accountInputDomain")?;
+    let dispute = exact(tuple(&fields[3])?, 2, "accountInputDisputeConfig")?;
     let watch_seed = match &fields[4] {
         AbiValue::Nil => None,
         value => Some(WatchSeed::parse(&hex_fixed(value, "watchSeed", 32)?)?),
     };
-    Ok(xln_rscore_batch::AccountPeerInput {
-        envelope: xln_rscore_engine::AccountPeerEnvelope {
+    Ok(xln_rscore_batch::AccountInput {
+        envelope: xln_rscore_engine::AccountInputEnvelope {
             from_entity_id: fixed_bytes(&fields[0], "fromEntityId")?,
             to_entity_id: fixed_bytes(&fields[1], "toEntityId")?,
             domain: AccountDomain::new(
@@ -342,17 +334,10 @@ fn decode_peer_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountPeerIn
     })
 }
 
-/// One Entity input's inbound half: owner, receiver clock, arrivals.
-fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    Ok(Command::AccountInbound {
-        request: Box::new(decode_account_inbound_request(fields)?),
-    })
-}
-
-fn decode_account_inbound_request(
+fn decode_account_ingress_request(
     fields: &[AbiValue],
 ) -> Result<xln_rscore_batch::EntityInboundRequest, ProcessError> {
-    let fields = exact(fields, 5, "accountInbound")?;
+    let fields = exact(fields, 5, "accountIngress")?;
     let rows = tuple(&fields[3])?;
     if rows.len() > MAX_WAVE_OP_ROWS {
         return Err(ProcessError::Expected("waveOpRows"));
@@ -373,76 +358,25 @@ fn decode_account_inbound_request(
     })
 }
 
-/// One Entity input's outbound half: creates, admissions, proposal worklist.
-fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 9, "accountOutbound")?;
-    let creates = tuple(&fields[3])?;
-    let admits = tuple(&fields[4])?;
-    let propose = tuple(&fields[5])?;
-    let materialize = tuple(&fields[6])?;
-    if creates.len() + admits.len() + propose.len() + materialize.len() > MAX_WAVE_OP_ROWS {
-        return Err(ProcessError::Expected("waveOpRows"));
-    }
-    Ok(Command::AccountOutbound {
-        request: Box::new(xln_rscore_batch::EntityOutboundRequest {
-            owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-            timestamp: js_number(&fields[1], "timestamp")?,
-            j_height: js_number(&fields[2], "jHeight")?,
-            creates: creates
-                .iter()
-                .map(decode_seed_account)
-                .collect::<Result<_, _>>()?,
-            envelope_updates: Vec::new(),
-            admits: admits
-                .iter()
-                .map(|value| {
-                    let row = exact(tuple(value)?, 2, "accountAdmit")?;
-                    Ok((
-                        AccountId::from_bytes(fixed_bytes(&row[0], "accountId")?),
-                        tuple(&row[1])?
-                            .iter()
-                            .map(decode_tx)
-                            .collect::<Result<Vec<_>, _>>()?,
-                    ))
-                })
-                .collect::<Result<_, ProcessError>>()?,
-            propose: propose
-                .iter()
-                .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
-                .collect::<Result<_, ProcessError>>()?,
-            materialize: materialize
-                .iter()
-                .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
-                .collect::<Result<_, ProcessError>>()?,
-            post_accounts: strict_boolean(&fields[7], "postAccounts")?,
-            checkpoint_due: strict_boolean(&fields[8], "checkpointDue")?,
-        }),
-    })
-}
-
 fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputKind, ProcessError> {
     let fields = tuple(value)?;
     let tag = fields.first().ok_or(ProcessError::Expected("inputTag"))?;
     match integer(tag)? {
         0 => {
-            let fields = exact(fields, 2, "accountFrameInput")?;
-            Ok(xln_rscore_batch::AccountInputKind::Frame(Box::new(
-                decode_incoming_frame(&fields[1])?,
-            )))
+            let fields = exact(fields, 3, "accountAckFrameInput")?;
+            Ok(xln_rscore_batch::AccountInputKind::AckFrame {
+                ack: match &fields[1] {
+                    AbiValue::Nil => None,
+                    value => Some(decode_incoming_ack(value)?),
+                },
+                frame: Box::new(decode_incoming_frame(&fields[2])?),
+            })
         }
         1 => {
             let fields = exact(fields, 2, "accountAckInput")?;
             Ok(xln_rscore_batch::AccountInputKind::Ack(
                 decode_incoming_ack(&fields[1])?,
             ))
-        }
-        2 => {
-            let fields = exact(fields, 3, "accountAckFrameInput")?;
-            Ok(xln_rscore_batch::AccountInputKind::AckFrame {
-                ack: decode_incoming_ack(&fields[1])?,
-                frame: Box::new(decode_incoming_frame(&fields[2])?),
-            })
         }
         value => Err(ProcessError::Tag {
             field: "accountInput",

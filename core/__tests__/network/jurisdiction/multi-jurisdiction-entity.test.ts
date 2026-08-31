@@ -469,7 +469,7 @@ describe('multi-jurisdiction entity binding', () => {
     const result = await applyEntityTx(env, findState(env, entityB)!, {
       type: 'accountInput',
       data: {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: entityA,
         toEntityId: entityB,
         domain: accountStateDomainFromJurisdiction(j1),
@@ -510,7 +510,7 @@ describe('multi-jurisdiction entity binding', () => {
     const result = await applyEntityTx(env, findState(env, entityA)!, {
       type: 'accountInput',
       data: {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: entityB,
         toEntityId: entityA,
         domain: accountStateDomainFromJurisdiction(j1),

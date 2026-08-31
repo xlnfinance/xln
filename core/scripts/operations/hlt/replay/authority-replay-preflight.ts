@@ -21,7 +21,7 @@ import {
   restoreEnvFromRecoveryBundles,
 } from '../../../../runtime';
 import type { RuntimeRecoveryBundleV1 } from '../../../../storage/recovery/bundle/types';
-import type { AccountPeerInput } from '../../../../types/account';
+import type { AccountInput } from '../../../../types/account';
 import type { EntityInput } from '../../../../entity/types';
 import { readHltHubRecording } from './recording';
 
@@ -44,7 +44,7 @@ type InboundGenesisCandidate = Readonly<{
   inputIndex: number;
   txIndex: number;
   entityInput: EntityInput;
-  input: AccountPeerInput;
+  input: AccountInput;
 }>;
 
 const normalizeId = (value: string): string => value.trim().toLowerCase();

@@ -30,11 +30,10 @@ pub use checkpoint_wire::{
     encode_canonical_value, encode_delta, encode_j_claim_node, encode_jurisdiction_event,
 };
 pub use consensus::{
-    AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
-    AccountInputRow, AccountInputVerdict, AccountPeerInput, AccountResponseDirective,
+    AccountAdmissionResult, AccountAdmissionVerdict, AccountInput, AccountInputBoardAuthority,
+    AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict,
     CertifiedBoardAuthorityResolver, DroppedRow, FailedHtlcLockRow, LocalGenesisSeedParams,
-    PeerBoardAuthority, ProposalRow, ProposedRow, UpstreamHtlcResolutionRow,
-    build_local_genesis_seed,
+    ProposalRow, ProposedRow, UpstreamHtlcResolutionRow, build_local_genesis_seed,
 };
 pub use error::BatchError;
 pub use parallel::{AccountPhaseKind, AccountPhaseMetric, AccountShardMetric};

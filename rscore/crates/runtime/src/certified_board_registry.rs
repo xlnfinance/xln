@@ -1,12 +1,12 @@
 //! Restored Entity-certified board authority used by Account verification.
 //!
-//! The registry is built only from the Entity checkpoint graph. Peer input
+//! The registry is built only from the Entity checkpoint graph. Account input
 //! bytes never select or supply a board, and a missing exact record means the
 //! peer is a lazy Entity rather than an implicit compatibility fallback.
 
 use std::collections::BTreeMap;
 
-use xln_rscore_batch::{BatchError, CertifiedBoardAuthorityResolver, PeerBoardAuthority};
+use xln_rscore_batch::{AccountInputBoardAuthority, BatchError, CertifiedBoardAuthorityResolver};
 use xln_rscore_engine::CertifiedBoardAuthority;
 
 #[derive(Clone, Debug, Default)]
@@ -88,10 +88,10 @@ impl CertifiedBoardAuthorityResolver for CertifiedBoardRegistry {
     fn resolve_certified_board(
         &self,
         peer_entity_id: &[u8; 32],
-    ) -> Result<PeerBoardAuthority, Self::Error> {
+    ) -> Result<AccountInputBoardAuthority, Self::Error> {
         Ok(match self.authorities.get(peer_entity_id) {
-            Some(authority) => PeerBoardAuthority::Certified(*authority),
-            None => PeerBoardAuthority::Lazy,
+            Some(authority) => AccountInputBoardAuthority::Certified(*authority),
+            None => AccountInputBoardAuthority::Lazy,
         })
     }
 }

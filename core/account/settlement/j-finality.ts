@@ -1,4 +1,4 @@
-import type { AccountExternalFinalityInput, AccountReplica } from '../../types/account';
+import type { AccountFinality, AccountReplica } from '../../types/account';
 import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
@@ -12,7 +12,7 @@ export type AccountDisputeFinalityResult = {
 };
 
 type DisputeStartedFinality = Extract<
-  AccountExternalFinalityInput['finality'],
+  AccountFinality['finality'],
   { kind: 'dispute_started' }
 >;
 

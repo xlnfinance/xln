@@ -1,10 +1,10 @@
-import type { AccountExternalFinalityInput, AccountPeerInput, AccountState } from '../types/account';
-import type { AccountPeerRejectionCode } from './input/peer-rejection';
+import type { AccountFinality, AccountInput, AccountState } from '../types/account';
+import type { AccountInputRejectionCode } from './input/input-rejection';
 import { isAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 import { canonicalAccountDisputeConfig } from './config/dispute-config';
 
 export type AccountInputEnvelopeError = Readonly<{
-  code: AccountPeerRejectionCode;
+  code: AccountInputRejectionCode;
   reason: string;
 }>;
 
@@ -13,7 +13,7 @@ export const createAccountDisputeFinalityInput = (
   owningEntityId: string,
   finalizedJNonce: number,
   finalizedTokenIds: number[],
-): AccountExternalFinalityInput => {
+): AccountFinality => {
   if (
     owningEntityId !== account.leftEntity &&
     owningEntityId !== account.rightEntity
@@ -41,10 +41,10 @@ export const createAccountDisputeStartedInput = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'disputeConfig'>,
   owningEntityId: string,
   finality: Extract<
-    AccountExternalFinalityInput['finality'],
+    AccountFinality['finality'],
     { kind: 'dispute_started' }
   >,
-): AccountExternalFinalityInput => {
+): AccountFinality => {
   if (
     owningEntityId !== account.leftEntity &&
     owningEntityId !== account.rightEntity
@@ -67,7 +67,7 @@ export const createAccountDisputeStartedInput = (
 /** Validate the common envelope before any Account variant can mutate state. */
 export const getAccountInputEnvelopeError = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed' | 'disputeConfig'>,
-  input: AccountExternalFinalityInput | AccountPeerInput,
+  input: AccountFinality | AccountInput,
 ): AccountInputEnvelopeError | undefined => {
   if (
     !input.domain ||
@@ -75,7 +75,7 @@ export const getAccountInputEnvelopeError = (
     typeof input.domain.depositoryAddress !== 'string'
   ) {
     return {
-      code: 'ACCOUNT_PEER_DOMAIN_INVALID',
+      code: 'ACCOUNT_INPUT_DOMAIN_INVALID',
       reason: `ACCOUNT_INPUT_DOMAIN_INVALID:${input.fromEntityId}`,
     };
   }
@@ -84,7 +84,7 @@ export const getAccountInputEnvelopeError = (
     inputDisputeConfig = canonicalAccountDisputeConfig(input.disputeConfig);
   } catch {
     return {
-      code: 'ACCOUNT_PEER_DISPUTE_CONFIG_INVALID',
+      code: 'ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID',
       reason: `ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID:${input.fromEntityId}`,
     };
   }
@@ -94,7 +94,7 @@ export const getAccountInputEnvelopeError = (
     inputDisputeConfig.rightResponseSeconds !== accountDisputeConfig.rightResponseSeconds
   ) {
     return {
-      code: 'ACCOUNT_PEER_DISPUTE_CONFIG_MISMATCH',
+      code: 'ACCOUNT_INPUT_DISPUTE_CONFIG_MISMATCH',
       reason: `ACCOUNT_INPUT_DISPUTE_CONFIG_MISMATCH:${input.fromEntityId}`,
     };
   }
@@ -107,7 +107,7 @@ export const getAccountInputEnvelopeError = (
     !((from === left && to === right) || (from === right && to === left))
   ) {
     return {
-      code: 'ACCOUNT_PEER_PARTY_MISMATCH',
+      code: 'ACCOUNT_INPUT_PARTY_MISMATCH',
       reason: `ACCOUNT_INPUT_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
     };
   }
@@ -117,13 +117,13 @@ export const getAccountInputEnvelopeError = (
       account.domain.depositoryAddress.toLowerCase()
   ) {
     return {
-      code: 'ACCOUNT_PEER_DOMAIN_MISMATCH',
+      code: 'ACCOUNT_INPUT_DOMAIN_MISMATCH',
       reason: `ACCOUNT_INPUT_DOMAIN_MISMATCH:${input.fromEntityId}`,
     };
   }
   if (input.watchSeed !== undefined && !isAccountWatchSeed(input.watchSeed)) {
     return {
-      code: 'ACCOUNT_PEER_WATCH_SEED_INVALID',
+      code: 'ACCOUNT_INPUT_WATCH_SEED_INVALID',
       reason: `ACCOUNT_INPUT:ACCOUNT_WATCH_SEED_INVALID:${input.fromEntityId}`,
     };
   }
@@ -132,7 +132,7 @@ export const getAccountInputEnvelopeError = (
     input.watchSeed.toLowerCase() !== account.watchSeed.toLowerCase()
   ) {
     return {
-      code: 'ACCOUNT_PEER_WATCH_SEED_MISMATCH',
+      code: 'ACCOUNT_INPUT_WATCH_SEED_MISMATCH',
       reason: `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`,
     };
   }

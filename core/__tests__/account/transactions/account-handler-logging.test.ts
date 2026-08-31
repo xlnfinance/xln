@@ -8,6 +8,7 @@ import { applyAccountInputToEntity } from '../../../entity/tx/handlers/account/i
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
+import type { AccountInput } from '../../../types/account';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
@@ -109,4 +110,34 @@ test('account input without frame or settlement action fails fast', async () => 
     if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
     else process.env['XLN_LOG_SCOPES'] = previousScopes;
   }
+});
+
+test('unknown Account rejects the retired standalone frame input', async () => {
+  const env = createEmptyEnv('account-input-standalone-frame-failfast');
+  env.runtimeSeed = 'account-input-standalone-frame-failfast-seed';
+  env.runtimeId = `0x${'33'.repeat(20)}`;
+  const state = makeEntityState();
+  const watchSeed = deriveAccountWatchSeed({
+    runtimeSeed: env.runtimeSeed,
+    runtimeId: env.runtimeId,
+    entityId,
+    counterpartyId,
+  });
+  const retired = {
+    kind: 'frame',
+    fromEntityId: counterpartyId,
+    toEntityId: entityId,
+    watchSeed,
+    domain: {
+      chainId: jurisdiction.chainId!,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
+  } as unknown as AccountInput;
+
+  await expect(applyAccountInputToEntity(
+    state,
+    retired,
+    env,
+    createAccountConsensusContext(env),
+  )).rejects.toThrow('ACCOUNT_GENESIS_FRAME_REQUIRED');
 });

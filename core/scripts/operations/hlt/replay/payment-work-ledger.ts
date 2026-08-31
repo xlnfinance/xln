@@ -70,7 +70,7 @@ const inspectInputs = (
       if (tx.type !== 'accountInput') continue;
       ledger.accountInputs += 1;
       bump(ledger.accountInputKinds, tx.data.kind);
-      if (tx.data.kind !== 'frame' && tx.data.kind !== 'ack_frame') continue;
+      if (tx.data.kind !== 'ack_frame') continue;
       const from = tx.data.fromEntityId.toLowerCase();
       const to = tx.data.toEntityId.toLowerCase();
       const leg = accountLeg(from, to);

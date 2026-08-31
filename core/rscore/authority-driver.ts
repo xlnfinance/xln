@@ -2,16 +2,15 @@
  * The Rust engine as the authority for one Entity's accounts, inside a real
  * Runtime frame.
  *
- * This is the canonical Account transition owner. Entity hands it raw peer
- * inputs once, then admissions/proposal selection once; TypeScript does not
- * execute Account transitions on this path. The engine keeps the candidate
- * private until the Runtime WAL is durable, and every checked disagreement
- * halts rather than repairing or falling back.
+ * This is the canonical Account transition owner. Entity hands the complete
+ * Runtime-frame work to one resident EntityRound; TypeScript does not execute
+ * Account transitions on this path. The engine keeps the candidate private
+ * until the Runtime WAL is durable, and every checked disagreement halts
+ * rather than repairing or falling back.
  *
  * Order inside a frame, and the reason for it:
  *
- *   inbound visit      — apply all peer inputs and return typed child effects
- *   outbound visit     — admit/propose and return final Account materialization
+ *   EntityRound        — Account inputs, Entity work, Account proposals
  *   parity             — verify commitments and typed effects at the boundary
  *   Runtime WAL fsync  — TypeScript's own record becomes durable
  *
@@ -30,14 +29,13 @@ import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import {
-  authorityPeerInputRow,
+  authorityAccountInputRow,
   buildAuthorityWave,
   type AuthorityCertifiedBoard,
   type AuthorityWave,
 } from './authority-wave';
 import {
   accountConsensusWire,
-  accountTxWire,
   accountEnvelopeWire,
   accountSeedWire,
   hexToWireBytes,
@@ -46,7 +44,6 @@ import {
   swapMarketPolicyWire,
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
-import type { Wave } from './wave-decode';
 import {
   RSCORE_PROCESS_ABI_VERSION,
   RSCORE_PROCESS_PROFILE,
@@ -63,7 +60,7 @@ import {
 } from './checkpoint/checkpoint-wire';
 import { decodeRscoreAccountRestoreRow } from './checkpoint/checkpoint-restore';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
-import type { AccountPeerInput, AccountReplica, AccountTx } from '../types/account';
+import type { AccountInput, AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 import { DEFAULT_MATERIALIZE_PERIOD_FRAMES } from '../storage/keys';
@@ -794,53 +791,6 @@ const openEntityInputCandidate = (
 };
 
 /**
- * Hand this Entity input's arrivals to the engine in one call.
- *
- * The frame knows every account input it carries before it dispatches any of
- * them, so they cross together. A later rejection selects the base root on the
- * next useful call; acceptance selects this attempt's candidate root.
- */
-const handAccountInbound = async (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-  expectedAccountsRoot: string,
-  clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
-  rows: readonly RscoreWireValue[],
-): Promise<Wave | null> => {
-  if (!authorityDriverEnabled(env)) return null;
-  const owner = ownerEntityId.trim().toLowerCase();
-  const frame = candidateForOwner(env, owner);
-  if (frame === undefined) return null;
-  if (frame.session.entityResident) {
-    return halt('ACCOUNT_INBOUND_CALLED_FOR_RESIDENT_ENTITY', { owner });
-  }
-  openEntityInputCandidate(frame, owner, expectedAccountsRoot);
-  const startedMs = performance.now();
-  const wave = await frame.session.client.accountInbound({
-    ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_OWNER'),
-    expectedAccountsRoot: hexToWireBytes(
-      expectedAccountsRoot,
-      32,
-      'AUTHORITY_EXPECTED_ACCOUNTS_ROOT',
-    ),
-    entityTimestamp: clock.entityTimestamp,
-    finalizedJHeight: clock.finalizedJHeight,
-    rows,
-    postAccounts: false,
-  });
-  report.waves += 1;
-  report.inboundRounds += 1;
-  report.engineMicros += wave.engineMicros;
-  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
-  report.inputsApplied += wave.applied.length;
-  for (const created of wave.createdAccounts) {
-    frame.candidateAccounts.add(created.accountId);
-  }
-  frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
-  return wave;
-};
-
-/**
  * One process crossing for Account inbound, Entity pay/orderbook work and
  * Account outbound. TypeScript may execute the same Entity logic as an oracle,
  * but the outbound phase consumes this cached result and performs no IPC.
@@ -856,8 +806,8 @@ export const runAuthorityCutoverEntityBatch = async (
     finalizedJHeight: number;
     inputs: readonly Readonly<{
       accountId: string;
-      input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'ack_frame' }>;
-      peerBoardAuthority?: AuthorityCertifiedBoard;
+      input: Extract<AccountInput, { kind: 'ack' | 'ack_frame' }>;
+      counterpartyBoardAuthority?: AuthorityCertifiedBoard;
       localBoardAuthority?: AuthorityCertifiedBoard;
       genesisPolicy?: Readonly<{
         expectedDomain: AccountReplica['state']['domain'];
@@ -898,12 +848,12 @@ export const runAuthorityCutoverEntityBatch = async (
     });
   }
   openEntityInputCandidate(frame, owner, request.expectedAccountsRoot);
-  const rows = request.inputs.map((entry, index) => authorityPeerInputRow(
+  const rows = request.inputs.map((entry, index) => authorityAccountInputRow(
     index,
     entry.accountId,
-    { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
+    { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityAccountInputRow>[2],
     entry.genesisPolicy,
-    entry.peerBoardAuthority,
+    entry.counterpartyBoardAuthority,
     entry.localBoardAuthority,
   ));
   const startedMs = performance.now();
@@ -973,104 +923,6 @@ export const authorityCutoverEntityRound = (
   return frame.entityRound;
 };
 
-/** One IPC visit for every peer arrival carried by one Entity frame. */
-export const runAuthorityCutoverInboundBatch = async (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-  expectedAccountsRoot: string,
-  clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
-  inputs: readonly Readonly<{
-    accountId: string;
-    input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'ack_frame' }>;
-    peerBoardAuthority?: AuthorityCertifiedBoard;
-    localBoardAuthority?: AuthorityCertifiedBoard;
-    genesisPolicy?: Readonly<{
-      expectedDomain: AccountReplica['state']['domain'];
-      shadowPolicyRoot: string;
-      shadowPolicyRows: readonly (readonly [number, unknown])[];
-      deltaTransformer: string;
-      publicPinned: false;
-    }>;
-  }>[],
-): Promise<Wave | null> => {
-  const rows = inputs.map((entry, index) => authorityPeerInputRow(
-    index,
-    entry.accountId,
-    { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
-    entry.genesisPolicy,
-    entry.peerBoardAuthority,
-    entry.localBoardAuthority,
-  ));
-  return handAccountInbound(env, ownerEntityId, expectedAccountsRoot, clock, rows);
-};
-
-/** One IPC visit for every admission and proposal of one Entity frame. */
-export const runAuthorityCutoverOutboundBatch = async (
-  env: RuntimeReplica,
-  request: Readonly<{
-    ownerEntityId: string;
-    admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
-    propose: readonly string[];
-    materialize: readonly string[];
-    timestamp: number;
-    jHeight: number;
-    checkpointDue: boolean;
-  }>,
-): Promise<Wave | null> => {
-  if (!authorityDriverEnabled(env)) return null;
-  const owner = request.ownerEntityId.trim().toLowerCase();
-  const frame = candidateForOwner(env, owner);
-  if (frame === undefined) return null;
-  if (frame.session.entityResident) {
-    return halt('ACCOUNT_OUTBOUND_CALLED_FOR_RESIDENT_ENTITY', { owner });
-  }
-  if (frame.entityInput === null) {
-    return halt('OUTBOUND_WITHOUT_INBOUND', { owner });
-  }
-  const startedMs = performance.now();
-  const wave = await frame.session.client.accountOutbound({
-    ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_OWNER'),
-    timestamp: request.timestamp,
-    jHeight: request.jHeight,
-    creates: [],
-    admits: request.admits.map(row => [
-      hexToWireBytes(row.accountId, 32, 'AUTHORITY_ACCOUNT'),
-      row.txs.map(accountTxRow),
-    ]),
-    propose: request.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
-    materialize: request.materialize.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
-    postAccounts: true,
-    checkpointDue: request.checkpointDue,
-  });
-  if (request.checkpointDue !== (wave.checkpoint !== null)) {
-    return halt('OUTBOUND_CHECKPOINT_PRESENCE', {
-      owner,
-      requested: request.checkpointDue,
-      received: wave.checkpoint !== null,
-    });
-  }
-  if (wave.checkpoint !== null) {
-    const checkpointRoot = `0x${Buffer.from(wave.checkpoint.restoreToken[2]).toString('hex')}`
-      .toLowerCase();
-    assertRscoreCheckpointCandidate(wave.checkpoint, {
-      revision: wave.revision,
-      accountsRoot: wave.accountsRoot,
-      // The Entity candidate has not been published into env.state yet.
-      // New inbound H0 accounts already exist in Rust and in this frame's
-      // membership set, while accountsOf(env) still names the parent forest.
-      accountCount: frame.candidateAccounts.size,
-    });
-    frame.checkpoints.set(checkpointRoot, wave.checkpoint);
-  }
-  report.waves += 1;
-  report.outboundRounds += 1;
-  report.engineMicros += wave.engineMicros;
-  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
-  report.framesProposed += wave.proposals.filter(row => row.frame !== null).length;
-  frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
-  return wave;
-};
-
 /** Close the Entity bookkeeping marker; Rust already owns the new state. */
 export const acceptAuthorityEntityStage = async (
   env: RuntimeReplica,
@@ -1128,14 +980,6 @@ const requireOpenEntityInput = (
     return halt('ENTITY_INPUT_HANDLE_STALE', { owner: handle.ownerEntityId });
   }
   return frame;
-};
-
-/** One queued transaction as the engine reads it. */
-const accountTxRow = (tx: AccountTx): RscoreWireValue => {
-  if (tx.type === 'settle_transition') {
-    return halt('PROPOSABILITY_SETTLEMENT_UNREPRESENTED', { kind: tx.type });
-  }
-  return accountTxWire(tx) ?? halt('ACCOUNT_TX_OUTSIDE_PROFILE', { kind: tx.type });
 };
 
 /** Nothing to seal: the accounts already moved in their owning subsystem. */

@@ -1,4 +1,4 @@
-import { decodeAccountPeerInput } from '../../account/validation/input-validation';
+import { decodeAccountInput } from '../../account/validation/input-validation';
 import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../auth/authorization';
 import { validateConsensusConfig } from '../consensus/config-validation';
@@ -177,7 +177,7 @@ function assertEntityTxRecord(
   else if (type === 'runtimeOutput') validateRuntimeOutput(tx['data'], `${code}_DATA`, depth);
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
   else if (type === 'htlcPayment') validatePreparedHtlcPayment(tx['data'], `${code}_DATA`);
-  else if (type === 'accountInput') decodeAccountPeerInput(tx['data'], `${code}_DATA`);
+  else if (type === 'accountInput') decodeAccountInput(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionClear') validateCrossJClearMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionSwap') validateCrossJMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'chat' || type === 'vote') validateSimpleIdentityTx(type, tx['data'], `${code}_DATA`);

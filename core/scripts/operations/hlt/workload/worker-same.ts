@@ -1,7 +1,7 @@
 /** Same-j production workload and durable economic completion report. */
 
 import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../settlement';
 import { waitForFullySettledEvidence } from '../settlement-reader';
 import {
+  assertLaneHostSocketCounterCoverage,
   requireConnectedLaneRuntime,
   resetLaneHostOpCounters,
   stopLaneRuntimes,
@@ -36,11 +37,188 @@ import {
   persistReport,
   readLoadBook,
   resetHltProcessOpCounters,
+  assertHltHubProcessIsolation,
   resolveWalPath,
+  PRODUCTION_SWAP_LOAD_PAIR_ID,
   type WorkerArgs,
 } from '../worker-runtime';
+import {
+  attachRustH1,
+  classifyRustLiveSameRun,
+  parseHltEngineSelection,
+  rustLiveSameRateEvidence,
+  type RustH1Handle,
+} from '../rust/rust-h1';
+import {
+  createRustSameLoadNativeAuthority,
+  readRustH1LoadBook,
+  rustH1SessionPopulationReady,
+  waitForRustH1Metrics,
+  waitForRustSameSettlement,
+} from '../rust/rust-h1-settlement';
+import { waitForHltEconomicStartGate } from './worker-payments';
 
-export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
+const runRustSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
+  const plan = args.plan;
+  if (!plan) throw new Error('HLT_RUST_SAME_PLAN_REQUIRED');
+  const hubLabel = plan.economy.hubLabels[0] ?? 'H1';
+  if (plan.economy.hubLabels.length !== 1 || hubLabel !== 'H1') {
+    throw new Error('HLT_RUST_SAME_REQUIRES_SINGLE_H1');
+  }
+  let rustH1: RustH1Handle | null = await attachRustH1(
+    `http://127.0.0.1:${String(args.portBase + 10)}`,
+  );
+  let existingOpenSessions: number | null = null;
+  let preparedParallel: PreparedParallelSameLoad | null = null;
+  const requireRustH1 = (): RustH1Handle => {
+    if (rustH1 === null) throw new Error('HLT_RUST_NATIVE_AUTHORITY_NOT_STARTED');
+    return rustH1;
+  };
+  try {
+    const hubIdentity = {
+      entityId: requireRustH1().ready.entityId,
+      signerId: requireRustH1().ready.signerId,
+    };
+    const setupBook = await readRustH1LoadBook({
+      portBase: args.portBase,
+      entityId: hubIdentity.entityId,
+      pairId: PRODUCTION_SWAP_LOAD_PAIR_ID,
+    });
+    const nativeAuthority = createRustSameLoadNativeAuthority({
+      portBase: args.portBase,
+      hubIdentity,
+      requireRust: requireRustH1,
+      replaceRust: next => { rustH1 = next; },
+      observeExistingOpenSessions: count => { existingOpenSessions = count; },
+    });
+    preparedParallel = await prepareParallelSameLoad({
+      workDir: args.workDir,
+      portBase: args.portBase,
+      hubIdentity,
+      initialBook: setupBook,
+      minimumTradeSize: requireRustH1().ready.orderbookMinTradeSize,
+      swapsPerRound: args.swaps,
+      rounds: args.rounds,
+      lanes: args.lanes,
+      laneOffset: args.laneOffset,
+      execution: 'peer',
+      compactSettlement: true,
+      nativeAuthority,
+    });
+    const users = [...preparedParallel.traderRuntimes];
+    if (users.length !== plan.totalUserRuntimes) {
+      throw new Error(`HLT_RUST_SAME_USER_CARDINALITY:${users.length}:${plan.totalUserRuntimes}`);
+    }
+    await resetLaneHostOpCounters(users);
+    const metricsBefore = await waitForRustH1Metrics(
+      requireRustH1(),
+      metrics => existingOpenSessions !== null && rustH1SessionPopulationReady(
+        metrics.openSessions,
+        existingOpenSessions,
+        users.length,
+      ),
+      'HLT_RUST_SAME_METRICS_BASELINE_MISSING',
+    );
+    if (metricsBefore.orderbookTradeCount !== preparedParallel.setupTradeCount) {
+      throw new Error(
+        `PRODUCTION_SWAP_LOAD_SETUP_TRADE_COUNT_MISMATCH:` +
+        `${metricsBefore.orderbookTradeCount}:${preparedParallel.setupTradeCount}`,
+      );
+    }
+    const hubDurableBefore = {
+      height: metricsBefore.height,
+      canonicalStateHash: metricsBefore.postStateHash,
+    };
+    const walPath = join(args.workDir, 'prod-mesh', hubLabel.toLowerCase(), 'rscore-native');
+    const walBytesBefore = directoryBytes(walPath);
+    const driverRssBefore = process.memoryUsage().rss;
+    for (const lane of users) {
+      if (lane.runtime) disconnectRuntimeControl(lane.runtime);
+    }
+    await waitForHltEconomicStartGate();
+    const startedAt = performance.now();
+    const submitted = await submitPreparedParallelSameLoad({
+      hubIdentity,
+      swapsPerRound: args.swaps,
+      rounds: args.rounds,
+      cadenceMs: args.cadenceMs,
+      prepared: preparedParallel,
+    });
+    const expectedSubmittedOffers = preparedParallel.distribution.submittedOffers;
+    const expectedMatchedSwaps = preparedParallel.distribution.matchedTrades;
+    const settlement = await waitForRustSameSettlement({
+      rust: requireRustH1(),
+      lanes: users,
+      expectedMatchedSwaps,
+      economicStartedAt: startedAt,
+      metricsBefore,
+    });
+    const matchedEconomicSwaps = settlement.metrics.matchedSwaps - metricsBefore.matchedSwaps;
+    const evidence = classifyRustLiveSameRun({
+      users: users.length,
+      orders: expectedSubmittedOffers,
+      offeredOrdersPerSecond: plan.offeredOrderRatePerSecond,
+      durationSeconds: plan.economy.durationSeconds,
+    });
+    const rateEvidence = rustLiveSameRateEvidence(evidence, {
+      offeredOrdersPerSecond: plan.offeredOrderRatePerSecond,
+      matchedEconomicSwaps,
+      matchedElapsedMs: settlement.matchedElapsedMs,
+      fullySettledElapsedMs: settlement.fullySettledElapsedMs,
+    });
+    const [hubIo, laneIo] = await Promise.all([
+      assertHltHubProcessIsolation(args, [hubLabel], [hubLabel]),
+      assertLaneHostSocketCounterCoverage(users),
+    ]);
+    const live = {
+      engine: 'rust',
+      workload: 'same',
+      evidence,
+      completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
+      users: users.length,
+      perUser: { swapOrders: args.rounds },
+      submittedSwapOrders: expectedSubmittedOffers,
+      processedSwapOrders: expectedSubmittedOffers,
+      matchedEconomicSwaps,
+      offeredWindowMs: args.rounds * args.cadenceMs,
+      matchedElapsedMs: settlement.matchedElapsedMs,
+      fullySettledElapsedMs: settlement.fullySettledElapsedMs,
+      enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
+      commandObservedElapsedMs: submitted.commandObservedElapsedMs,
+      walBytesBefore,
+      walBytesAfter: directoryBytes(walPath),
+      driverRssBefore,
+      driverRssAfter: process.memoryUsage().rss,
+      hubDurableBefore,
+      hubDurableAfter: {
+        height: settlement.metrics.height,
+        canonicalStateHash: settlement.metrics.postStateHash,
+      },
+      workers: requireRustH1().ready.workers,
+      metricsBefore,
+      metrics: settlement.metrics,
+      economicPhaseMetrics: settlement.economicPhaseMetrics,
+      laneQuiescence: settlement.laneQuiescence,
+      hubIo,
+      laneIo,
+      environment: collectHltEnvironmentManifest(),
+      ...rateEvidence,
+    };
+    writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify(live, 2)}\n`);
+    console.log(`[load] rust-same verdict ${safeStringify({
+      users: live.users,
+      submitted: live.submittedSwapOrders,
+      matched: live.matchedEconomicSwaps,
+      evidence: live.evidence,
+      ...rateEvidence,
+    })}`);
+  } finally {
+    if (preparedParallel) await stopLaneRuntimes(preparedParallel.traderRuntimes);
+    if (rustH1) await rustH1.stop();
+  }
+};
+
+const runTypescriptSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
   const manifestPath = join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json');
   const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown);
   // The mesh always boots H1..H3 and MM; an economy names which of them this
@@ -194,4 +372,11 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
     hub.adapter.disconnect();
     marketMaker.adapter.disconnect();
   }
+};
+
+export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
+  const selection = parseHltEngineSelection(process.env);
+  return selection.engine === 'rust'
+    ? runRustSameProductionSwapLoad(args)
+    : runTypescriptSameProductionSwapLoad(args);
 };

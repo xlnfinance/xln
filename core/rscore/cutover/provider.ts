@@ -26,11 +26,8 @@ import type {
 } from '../authority/entity-stage';
 import {
   authorityCutoverEntityRound,
-  authorityDriverEnabled,
   entityAuthorityDriverEnabled,
   runAuthorityCutoverEntityBatch,
-  runAuthorityCutoverInboundBatch,
-  runAuthorityCutoverOutboundBatch,
 } from '../authority-driver';
 import type { RscoreAccountMaterializerBinding } from '../checkpoint/account-materializer';
 import type { AuthorityCertifiedBoard } from '../authority-wave';
@@ -66,10 +63,8 @@ const bindingFor = (
 const accountIdOf = (account: AccountReplica): string =>
   String(account.proofHeader?.toEntity ?? '').trim().toLowerCase();
 
-const peerOf = (input: AccountInput, accountId: string): string =>
-  input.kind === 'enqueue' || input.kind === 'external_finality'
-    ? accountId
-    : String(input.fromEntityId ?? accountId).trim().toLowerCase();
+const inputSenderOf = (input: AccountInput, accountId: string): string =>
+  String(input.fromEntityId ?? accountId).trim().toLowerCase();
 
 const certifiedBoardAuthorityFor = (
   env: RuntimeReplica,
@@ -103,7 +98,7 @@ const executeInboundBatch = async (
       });
     }
     const input = request.input;
-    if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'ack_frame') {
+    if (input.kind !== 'ack' && input.kind !== 'ack_frame') {
       return halt('INBOUND_BATCH_KIND', { account: accountId, kind: input.kind });
     }
     return { request, accountId, input, operationIndex };
@@ -118,45 +113,31 @@ const executeInboundBatch = async (
     batch.ownerEntityId,
   );
   const inputs = requests.map(({ request, accountId, input }) => {
-    const peerBoardAuthority = certifiedBoardAuthorityFor(env, batch.entityState, input.fromEntityId);
+    const counterpartyBoardAuthority = certifiedBoardAuthorityFor(env, batch.entityState, input.fromEntityId);
     return {
       accountId,
       input,
-      ...(peerBoardAuthority === undefined ? {} : { peerBoardAuthority }),
+      ...(counterpartyBoardAuthority === undefined ? {} : { counterpartyBoardAuthority }),
       ...(localBoardAuthority === undefined ? {} : { localBoardAuthority }),
       ...(request.genesisPolicy === undefined
         ? {}
         : { genesisPolicy: request.genesisPolicy }),
     };
   });
-  const fused = entityAuthorityDriverEnabled(env);
-  if (fused) {
-    const unsupported = batch.unsupportedEntityTxTypes;
-    if (unsupported.length > 0) {
-      return halt('ENTITY_ROUND_TX_OUTSIDE_PROFILE', { unsupported });
-    }
+  const unsupported = batch.unsupportedEntityTxTypes;
+  if (unsupported.length > 0) {
+    return halt('ENTITY_ROUND_TX_OUTSIDE_PROFILE', { unsupported });
   }
-  const entityRound = fused
-    ? await runAuthorityCutoverEntityBatch(env, {
-        ownerEntityId: batch.ownerEntityId,
-        expectedAccountsRoot: batch.expectedAccountsRoot,
-        entityState: batch.entityState,
-        entityContext: batch.entityContext,
-        entityTimestamp: clock.entityTimestamp,
-        finalizedJHeight: clock.finalizedJHeight,
-        inputs,
-      })
-    : null;
-  const wave = entityRound?.inbound ?? await runAuthorityCutoverInboundBatch(
-    env,
-    batch.ownerEntityId,
-    batch.expectedAccountsRoot,
-    {
-      entityTimestamp: clock.entityTimestamp,
-      finalizedJHeight: clock.finalizedJHeight,
-    },
+  const entityRound = await runAuthorityCutoverEntityBatch(env, {
+    ownerEntityId: batch.ownerEntityId,
+    expectedAccountsRoot: batch.expectedAccountsRoot,
+    entityState: batch.entityState,
+    entityContext: batch.entityContext,
+    entityTimestamp: clock.entityTimestamp,
+    finalizedJHeight: clock.finalizedJHeight,
     inputs,
-  );
+  });
+  const wave = entityRound?.inbound ?? null;
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const waveIndex = indexInboundWave(full.wave);
   const genesisIds = new Set(requests
@@ -188,7 +169,7 @@ const executeInboundBatch = async (
         binding,
         account: effectPriors.get(operationIndex) ?? actualRequest.account,
         accountId,
-        fromEntityId: peerOf(input, accountId),
+        fromEntityId: inputSenderOf(input, accountId),
         operationIndex,
       },
       { wave: slice, row: null },
@@ -314,22 +295,8 @@ const executeOutboundBatch = async (
     request,
     accountId: accountIdOf(request.account),
   }));
-  const timestamp = proposals[0]?.request.timestamp
-    ?? batch.admissions[0]?.entityTimestamp
-    ?? env.state.timestamp;
-  const jHeight = proposals[0]?.request.jHeight
-    ?? batch.admissions[0]?.finalizedJHeight
-    ?? 0;
   const entityRound = authorityCutoverEntityRound(env, batch.ownerEntityId);
-  const wave = entityRound?.outbound ?? await runAuthorityCutoverOutboundBatch(env, {
-      ownerEntityId: batch.ownerEntityId,
-      admits,
-      propose: proposals.map(row => row.accountId),
-      materialize: batch.materializeAccountIds,
-      timestamp,
-      jHeight,
-      checkpointDue: env.accountAuthorityCheckpointDue === true,
-    });
+  const wave = entityRound?.outbound ?? null;
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const postAccountById = new Map(full.wave.postAccounts.map(row => [row.accountId, row]));
   if (postAccountById.size !== full.wave.postAccounts.length) {
@@ -408,14 +375,13 @@ const executeOutboundBatch = async (
 const createAuthorityCutoverProvider = (
   env: RuntimeReplica,
 ): AccountAuthorityEntityStageProvider => ({
-  beginEntityStage: () => halt('STAGE_BEGIN_UNREACHABLE'),
   executeAccountInboundBatch: batch => executeInboundBatch(env, batch),
   executeAccountOutboundBatch: batch => executeOutboundBatch(env, batch),
 });
 
 /** Idempotent: one Runtime installs one executor, before its first frame. */
 export const installAuthorityCutover = (env: RuntimeReplica): void => {
-  if (!authorityCutoverEnabled() || !authorityDriverEnabled(env)) return;
+  if (!authorityCutoverEnabled() || !entityAuthorityDriverEnabled(env)) return;
   if (env.accountAuthorityExecutionMode !== undefined) return;
   env.accountAuthorityExecutionMode = 'cutover';
   env.accountAuthorityEntityStageProvider = createAuthorityCutoverProvider(env);

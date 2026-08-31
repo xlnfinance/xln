@@ -417,9 +417,11 @@ pub fn replay_runtime_wal(
         native_database,
         NativeStorageConfig {
             checkpoint_period_frames,
-            // Replay's native DB is derived output: a crash means rerun, so
-            // per-frame fsync buys nothing and costs a full disk barrier.
-            durable_fsync: false,
+            // Production-shaped replay measures the exact H1 durability path,
+            // including the disk barrier. The database is disposable, but
+            // disabling fsync would hide the serial WAL/storage cost that the
+            // benchmark exists to attribute.
+            durable_fsync: true,
         },
     )
     .map_err(|error| format!("RUNTIME_REPLAY_NATIVE_STORE:{error}"))?;

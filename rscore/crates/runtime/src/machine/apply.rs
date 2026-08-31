@@ -483,7 +483,7 @@ fn collect_account_commit_evidence(
         } => evidence.push(AccountCommitEvidence {
             entity_id,
             account_id,
-            source: AccountCommitSource::PeerCommit,
+            source: AccountCommitSource::CounterpartyCommit,
             frame_height: *height,
             state_hash: *state_hash,
             account_state_root: committed_frame.frame.account_state_root,
@@ -2270,7 +2270,7 @@ fn apply_entity_group(
         .collect::<Result<Vec<_>, RuntimeMachineError>>()?;
     slot.replica
         .accounts
-        .admit_certified_settlement_hankos(certified_settlement_hankos)?;
+        .attach_certified_settlement_hankos(certified_settlement_hankos)?;
     let prepared_j = crate::j_submit::prepare_certified_entity_j_intents(
         &core.state,
         &mut slot.replica.replica_metadata,
@@ -3138,7 +3138,7 @@ mod tests {
                 operation_index: 0,
                 account_id,
                 verdict,
-                response: xln_rscore_batch::AccountResponseDirective::Preserve,
+                force_ack: None,
             }],
         );
 
@@ -3146,7 +3146,7 @@ mod tests {
         assert_eq!(evidence[0].source, AccountCommitSource::AckCommit);
         assert_eq!(evidence[0].frame_height, 7);
         assert_eq!(evidence[0].account_state_root, [0x71; 32]);
-        assert_eq!(evidence[1].source, AccountCommitSource::PeerCommit);
+        assert_eq!(evidence[1].source, AccountCommitSource::CounterpartyCommit);
         assert_eq!(evidence[1].frame_height, 8);
         assert_eq!(evidence[1].account_state_root, [0x81; 32]);
     }

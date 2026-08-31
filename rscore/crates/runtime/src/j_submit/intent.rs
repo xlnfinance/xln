@@ -187,6 +187,10 @@ pub fn prepare_certified_entity_j_intents(
                     state.height,
                     state.timestamp,
                 )?;
+                println!(
+                    "RSCORE_J_BATCH_INTENT:batch={}:nonce={}:generation={}",
+                    hash, entity_nonce, batch_generation
+                );
                 prepared.retries.push(RetryJSubmitData {
                     entity_id: state.entity_id.clone(),
                     signer_id: local_signer_id.to_string(),

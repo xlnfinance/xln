@@ -5,7 +5,7 @@ import { isLeftEntity } from '../../utils';
 import { accountInputAck, accountInputProposal } from '../flush';
 import { prependUniqueMempoolTxs } from '../helpers';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
-import { accountInputApplied, rejectAccountPeerInput } from '../result';
+import { accountInputApplied, rejectAccountInput } from '../result';
 import { countOp } from '../../../support/performance/op-counters';
 import { computeFrameHash } from '../frame/hash';
 
@@ -88,8 +88,8 @@ export const handleUnmatchedAck = (
         ...(committedFrames.length > 0 && { committedFrames }),
       });
     }
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_ACK_UNMATCHED',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_ACK_UNMATCHED',
       `Unmatched ACK with pending frame: ` +
         `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
         `pending=${pending} ` +
@@ -130,8 +130,8 @@ export const handleUnmatchedAck = (
       ...(committedFrames.length > 0 && { committedFrames }),
     });
   }
-  return rejectAccountPeerInput(
-    'ACCOUNT_PEER_ACK_UNMATCHED',
+  return rejectAccountInput(
+    'ACCOUNT_INPUT_ACK_UNMATCHED',
     `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} ` + `pending=${String(pending)}`,
     events,
   );

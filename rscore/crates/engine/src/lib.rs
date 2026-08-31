@@ -26,7 +26,7 @@ pub use consensus::context::{AccountExecutionContext, SettlementExecutionContext
 pub use consensus::frame::hash::{
     AccountFrame, GENESIS_PREV_FRAME_HASH, MAX_POLICY_VERSION, canonical_tx_digest,
     canonical_tx_value, is_frame_hashable, parse_root_hex,
-    unsupported_kind as unsupported_frame_tx_kind,
+    unsupported_kind as unsupported_frame_tx_kind, wire_tx_value,
 };
 pub use consensus::incoming::apply::{
     AckOutcome, CommittedFrameEvidence, HtlcEvidenceSecret, IncomingDeadlineViolation,
@@ -36,8 +36,9 @@ pub use consensus::incoming::apply::{
     apply_incoming_frame, apply_incoming_frame_with_authority, apply_standalone_dispute,
 };
 pub use consensus::incoming::types::{
-    AccountPeerEnvelope, AckFrameOutcome, AckFramePhase, BoardHankoRefreshInput, IncomingAck,
-    IncomingFrame, PeerEnvelopeRejection, StandaloneInputOutcome, validate_peer_envelope,
+    AccountInputEnvelope, AccountInputEnvelopeRejection, AckFrameOutcome, AckFramePhase,
+    BoardHankoRefreshInput, IncomingAck, IncomingFrame, StandaloneInputOutcome,
+    validate_account_input_envelope,
 };
 pub use consensus::proposal::propose::{
     Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,

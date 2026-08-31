@@ -15,7 +15,7 @@ import {
   resetAuthorityRecordForTests,
 } from '../../../rscore/authority-wave';
 import { accountEnvelopeWire } from '../../../rscore/shadow-wire';
-import type { AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../types/account';
 import { createTestJReplica } from '../../helpers/j-replica';
 
 const OWNER = `0x${'aa'.repeat(32)}`;
@@ -141,13 +141,13 @@ describe('authority Account creation collection', () => {
     expect(leafFields).toContain('shadow');
   });
 
-  test('inbound H0 is Create immediately before its peer Input', async () => {
+  test('inbound H0 is Create immediately before its Account input', async () => {
     const state = makeState();
     const { env, accountContext } = makeContext();
     beginAuthorityFrame(FRAME_ID);
     noteAuthorityEntityClock(FRAME_ID, OWNER, 'enforce', env.state.timestamp, 0);
-    const input: AccountPeerInput = {
-      kind: 'frame',
+    const input: AccountInput = {
+      kind: 'ack_frame',
       fromEntityId: PEER,
       toEntityId: OWNER,
       domain: {
@@ -171,7 +171,7 @@ describe('authority Account creation collection', () => {
     };
 
     await expect(applyAccountInputToEntity(state, input, env, accountContext))
-      .rejects.toThrow('ACCOUNT_PEER_INPUT_REJECTED:ACCOUNT_PEER_FRAME_HANKO_INVALID');
+      .rejects.toThrow('ACCOUNT_INPUT_INPUT_REJECTED:ACCOUNT_INPUT_FRAME_HANKO_INVALID');
     const wave = buildAuthorityWave(FRAME_ID);
     if (wave.kind !== 'wave') throw new Error(`TEST_WAVE_REQUIRED:${wave.kind}`);
     const entity = wave.entities[0];
@@ -192,7 +192,7 @@ describe('authority Account creation collection', () => {
         accountId: PEER,
         resultKind: 'applied',
         expectedVerdict: {
-          kind: 'peer',
+          kind: 'input',
           outcome: 'rejected',
           committedFrames: [],
           responseAckHanko: null,
@@ -205,7 +205,7 @@ describe('authority Account creation collection', () => {
       arrivalIndex: 1,
       ownerEntityId: OWNER,
       accountId: PEER,
-      kind: 'frame',
+      kind: 'ack_frame',
     }]);
   });
 

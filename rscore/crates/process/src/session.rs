@@ -238,51 +238,10 @@ impl ProcessSession {
             } => self.load(revision, accounts, import_existing),
             Command::AuthorityTwoCallOnly => Err(ProcessError::AuthorityTwoCallOnly),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
-            Command::AccountInbound { request } => self.account_inbound(*request),
-            Command::AccountOutbound { request } => self.account_outbound(*request),
             Command::BootstrapEntity { snapshot } => self.bootstrap_entity(*snapshot),
             Command::EntityRound { request, context } => self.entity_round(*request, *context),
             Command::Shutdown => self.shutdown(),
         }
-    }
-
-    /// One Entity input's inbound half. Nothing is staged: the accounts move
-    /// when the Entity says they move, and the reply is what happened.
-    fn account_inbound(
-        &mut self,
-        request: xln_rscore_batch::EntityInboundRequest,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.entity_state.is_some() {
-            return Err(ProcessError::EntityModeOnly);
-        }
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let started = std::time::Instant::now();
-        let result = engine.entity_inbound(request)?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = self.encode_resident_round_after_mutation(&result, engine_micros)?;
-        Ok((response, false))
-    }
-
-    /// One Entity input's outbound half.
-    fn account_outbound(
-        &mut self,
-        request: xln_rscore_batch::EntityOutboundRequest,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.entity_state.is_some() {
-            return Err(ProcessError::EntityModeOnly);
-        }
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let started = std::time::Instant::now();
-        let result = engine.entity_outbound(request)?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = self.encode_resident_round_after_mutation(&result, engine_micros)?;
-        Ok((response, false))
     }
 
     fn bootstrap_entity(
@@ -376,26 +335,6 @@ impl ProcessSession {
         });
         self.entity_state = Some(head);
         Ok((response, false))
-    }
-
-    /// Both resident visits mutate an internal base/candidate head before the
-    /// reply exists. If encoding fails, the parent never observed that head;
-    /// continuing would let a later root assertion reconcile state that was
-    /// never durably recorded. Checkpoint export is non-acknowledging, but its
-    /// pending root is likewise invisible unless this reply is encoded, so any
-    /// post-mutation encoding failure remains process-fatal.
-    fn encode_resident_round_after_mutation(
-        &mut self,
-        result: &xln_rscore_batch::EntityRoundResult,
-        engine_micros: u64,
-    ) -> Result<xln_rscore_abi::BodyTuple, ProcessError> {
-        match wire_encode::round(result, engine_micros) {
-            Ok(response) => Ok(response),
-            Err(error) => {
-                self.stopped = true;
-                Err(error)
-            }
-        }
     }
 
     fn load(

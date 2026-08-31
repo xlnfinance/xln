@@ -1,0 +1,1930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XLN Runtime Floorplan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* ─────────────────────────────────────────────────────────────
+   XLN Runtime Floorplan — one committed visual world: a silicon
+   die read left to right, with a logic-analyzer strip beneath it.
+   Deliberately single-theme; every color is painted explicitly.
+   ───────────────────────────────────────────────────────────── */
+:root{
+  --ink:#06080c;
+  --panel:#0a0e15;
+  --panel-2:#0d131c;
+  --line:#18202c;
+  --line-2:#232f40;
+  --fg:#dde5f0;
+  --fg-dim:#93a2b6;
+  --fg-mute:#5f6d80;
+
+  --copper:#c8783c;
+  --copper-dim:#7c4a24;
+
+  --acct:#37d6c9;
+  --pay:#ff77b0;
+  --book:#a97bff;
+  --cron:#59b0ff;
+  --seal:#f2c94c;
+  --durable:#49d17f;
+  --net:#5b8cff;
+  --bad:#ff5a4f;
+
+  --r:3px;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --display:"Archivo","IBM Plex Sans",-apple-system,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--ink);
+  color:var(--fg);
+  font-family:var(--sans);
+  font-size:14px;
+  line-height:1.55;
+  min-height:100%;
+  background-image:
+    radial-gradient(1200px 620px at 16% -12%, rgba(200,120,60,.065), transparent 62%),
+    radial-gradient(900px 520px at 94% -4%, rgba(55,214,201,.045), transparent 62%);
+}
+.wrap{max-width:1580px;margin:0 auto;padding:22px 20px 56px}
+
+/* ── header ─────────────────────────────────────────────── */
+.top{
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px 26px;
+  padding-bottom:15px;margin-bottom:17px;border-bottom:1px solid var(--line);
+}
+.brand{display:flex;flex-direction:column;gap:5px;flex:1 1 430px;min-width:min(100%,430px)}
+h1{
+  font-family:var(--display);font-weight:700;font-size:clamp(21px,2.5vw,31px);
+  letter-spacing:-.025em;line-height:1.06;text-wrap:balance;
+}
+h1 .dim{color:var(--copper)}
+.thesis{color:var(--fg-dim);font-size:13.5px;max-width:66ch}
+.thesis code{font-family:var(--mono);font-size:12px;color:var(--acct)}
+.topctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* ── controls ───────────────────────────────────────────── */
+button{
+  font-family:var(--sans);font-size:12px;font-weight:600;color:var(--fg);
+  background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);
+  padding:7px 12px;cursor:pointer;letter-spacing:.02em;
+  transition:border-color .14s ease,background .14s ease,color .14s ease;
+}
+button:hover{border-color:var(--copper);background:#12191f}
+button:focus-visible{outline:2px solid var(--acct);outline-offset:2px}
+button.on{border-color:var(--copper);color:#ffd9b0;background:#171009}
+button.danger:hover{border-color:var(--bad);color:#ffb6b0}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent;padding:7px 11px}
+.seg button+button{border-left:1px solid var(--line-2)}
+.seg button.on{background:#171009}
+
+/* ── layout ─────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:244px minmax(0,1fr) 296px;gap:15px;align-items:start}
+@media (max-width:1280px){ .grid{grid-template-columns:234px minmax(0,1fr)} .rail{grid-column:1/-1} }
+@media (max-width:880px){ .grid{grid-template-columns:minmax(0,1fr)} }
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:13px 13px 15px}
+.card+.card{margin-top:13px}
+.eyebrow{
+  font-size:10px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--fg-mute);display:flex;align-items:center;gap:8px;margin-bottom:11px;
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
+.eyebrow .tag{color:var(--copper);letter-spacing:.1em}
+
+.ctl{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
+.ctl:last-child{margin-bottom:0}
+.ctl .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ctl label{font-size:11.5px;font-weight:500;color:var(--fg-dim)}
+.ctl .val{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums}
+.ctl .hint{font-size:10.5px;color:var(--fg-mute);line-height:1.42}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;cursor:pointer}
+input[type=range]:focus-visible{outline:2px solid var(--acct);outline-offset:3px;border-radius:2px}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:var(--line-2);border-radius:2px}
+input[type=range]::-moz-range-track{height:3px;background:var(--line-2);border-radius:2px}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:13px;height:13px;margin-top:-5px;border-radius:50%;
+  background:var(--copper);border:2px solid #1b1209;box-shadow:0 0 0 1px var(--copper-dim);
+}
+input[type=range]::-moz-range-thumb{
+  width:13px;height:13px;border-radius:50%;background:var(--copper);
+  border:2px solid #1b1209;box-shadow:0 0 0 1px var(--copper-dim);
+}
+
+/* ── canvases ───────────────────────────────────────────── */
+canvas{display:block;width:100%;border-radius:4px}
+#hero{height:700px;background:#070a0f}
+#tl{height:150px;background:#070a0f}
+@media (max-width:760px){ #hero{height:530px} }
+
+.legend{display:flex;flex-wrap:wrap;gap:5px 15px;margin-top:10px;font-size:10.5px;color:var(--fg-dim)}
+.legend b{display:inline-flex;align-items:center;gap:5px;font-weight:500}
+.sw{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+/* ── rail ───────────────────────────────────────────────── */
+.fold{display:flex;flex-direction:column;gap:5px}
+.foldrow{display:flex;align-items:center;gap:7px}
+.foldrow .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-mute);width:72px;flex:none}
+.foldrow .h{
+  font-family:var(--mono);font-size:11px;color:var(--fg-dim);background:var(--panel-2);
+  border:1px solid var(--line);border-radius:2px;padding:2px 6px;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.foldrow.up .h{color:var(--seal);border-color:#3a3117}
+.foldarrow{color:var(--fg-mute);font-size:10px;text-align:center;line-height:1;margin:-1px 0}
+
+.tape{display:grid;grid-template-columns:repeat(16,1fr);gap:3px;margin-bottom:9px}
+.blk{height:26px;border-radius:2px;background:#0f151d;border:1px solid var(--line);position:relative;overflow:hidden}
+.blk.sealed{border-color:#4a3d16;background:#181305}
+.blk.sealed::after{content:"";position:absolute;inset:0;background:var(--seal);opacity:.20}
+.blk.durable{border-color:#1d5334;background:#0a1a10}
+.blk.durable::after{content:"";position:absolute;inset:0;background:var(--durable);opacity:.28}
+.blk.head{box-shadow:0 0 0 1px var(--copper) inset}
+.blk .fs{position:absolute;left:0;bottom:0;top:0;background:var(--durable);opacity:.5;width:0}
+
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:3px 0}
+.kv .k{color:var(--fg-mute)}
+.kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg)}
+.kv .v.good{color:var(--durable)} .kv .v.warn{color:var(--seal)} .kv .v.bad{color:var(--bad)}
+
+.peers{display:flex;gap:6px;margin-top:9px}
+.peer{flex:1;border:1px solid var(--line);border-radius:3px;background:var(--panel-2);padding:6px 5px;text-align:center;transition:border-color .2s ease,background .2s ease}
+.peer.hit{border-color:var(--net);background:#0b1220}
+.peer .n{font-family:var(--mono);font-size:10.5px;color:var(--net)}
+.peer .c{font-family:var(--mono);font-size:11px;color:var(--fg-dim);font-variant-numeric:tabular-nums}
+.gate{display:flex;align-items:center;gap:8px;margin:10px 0 2px;padding:7px 9px;border:1px dashed var(--line-2);border-radius:3px;font-size:11px;color:var(--fg-mute);transition:border-color .2s ease,color .2s ease}
+.gate.open{border-color:#1d5334;color:var(--durable);border-style:solid}
+.gate .dot{width:7px;height:7px;border-radius:50%;background:var(--fg-mute);transition:background .2s ease}
+.gate.open .dot{background:var(--durable)}
+
+/* ── metrics ────────────────────────────────────────────── */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:5px;overflow:hidden;margin-top:15px}
+.m{background:var(--panel);padding:11px 13px 12px}
+.m .k{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-mute)}
+.m .v{font-family:var(--mono);font-size:19px;font-weight:500;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.1;transition:color .3s ease}
+.m .u{font-size:11px;color:var(--fg-mute);margin-left:3px}
+.m .s{font-size:10.5px;color:var(--fg-mute);margin-top:2px;font-family:var(--mono)}
+
+/* ── notes ──────────────────────────────────────────────── */
+.notes{margin-top:22px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(252px,1fr))}
+.note{border-left:2px solid var(--line-2);padding:2px 0 2px 12px}
+.note h3{font-family:var(--display);font-size:13px;font-weight:600;margin-bottom:4px}
+.note p{font-size:12.5px;color:var(--fg-dim);line-height:1.55}
+.note code{font-family:var(--mono);font-size:11.5px;color:var(--copper)}
+.note.a{border-color:var(--acct)} .note.b{border-color:var(--book)}
+.note.c{border-color:var(--seal)} .note.d{border-color:var(--durable)} .note.e{border-color:var(--bad)}
+
+.poison{display:none;margin-top:14px;border:1px solid var(--bad);border-radius:5px;background:#170a09;padding:12px 14px}
+.poison.on{display:block}
+.poison h3{font-family:var(--display);font-size:14px;color:var(--bad);margin-bottom:4px}
+.poison p{font-size:12.5px;color:#e8b6b1;max-width:80ch}
+.poison code{font-family:var(--mono);font-size:11.5px}
+
+footer{margin-top:28px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--fg-mute);display:flex;flex-wrap:wrap;gap:6px 18px}
+footer code{font-family:var(--mono)}
+
+@media (prefers-reduced-motion:reduce){ *{transition-duration:.01ms !important} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <h1>Runtime <span class="dim">floorplan</span> — one frame, three stages, N&nbsp;workers</h1>
+      <p class="thesis">
+        Every Account input carries an id. Its first 12 bits pick one of 4096 logical shards; the shard picks
+        a worker and keeps it for the life of the process. Watch inputs land, re-bucket at each barrier into
+        Paybook and Orderbook, come back into the same workers as proposals, seal one root, hit the disk, and
+        only then reach the network. <code>docs/runtime.md</code>
+      </p>
+    </div>
+    <div class="topctl">
+      <div class="seg" role="group" aria-label="Engine">
+        <button id="engRust" class="on" type="button">Rust</button>
+        <button id="engTs" type="button">TypeScript</button>
+      </div>
+      <button id="play" type="button" class="on">Pause</button>
+      <button id="step" type="button">Step frame</button>
+      <button id="reseed" type="button">Reseed</button>
+      <button id="kill" type="button" class="danger">Fail the WAL</button>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <!-- ── LEFT ────────────────────────────────────────── -->
+    <aside>
+      <section class="card">
+        <div class="eyebrow">Workload <span class="tag">offered</span></div>
+
+        <div class="ctl">
+          <div class="row"><label for="cPay">Random payments</label><span class="val" id="vPay">—</span></div>
+          <input type="range" autocomplete="off" id="cPay" min="1" max="100" value="40">
+          <div class="hint">HTLC legs keyed by hashlock. One Paybook shard owns the whole lifecycle.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cSwap">Swaps</label><span class="val" id="vSwap">—</span></div>
+          <input type="range" autocomplete="off" id="cSwap" min="1" max="100" value="12">
+          <div class="hint">Each fill settles on two Accounts when it comes back through stage 3.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cHot">Hot pair share</label><span class="val" id="vHot">—</span></div>
+          <input type="range" autocomplete="off" id="cHot" min="0" max="100" value="15">
+          <div class="hint">Share of swaps landing on one trading pair. A pair is one Orderbook shard, owned by one worker, and matched strictly in price-time order — so raising this pushes the swaps into a single lane while the other workers stand at the barrier. This is the parallelism ceiling no core count can lift.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cAcc">Accounts</label><span class="val" id="vAcc">—</span></div>
+          <input type="range" autocomplete="off" id="cAcc" min="1" max="100" value="62">
+          <div class="hint">4096 logical shards exist regardless. With few accounts, some workers own nothing this frame.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cSkew">Account skew</label><span class="val" id="vSkew">—</span></div>
+          <input type="range" autocomplete="off" id="cSkew" min="0" max="100" value="20">
+          <div class="hint">Zipf-ish concentration on the busiest accounts.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="eyebrow">Machine <span class="tag">operational</span></div>
+
+        <div class="ctl">
+          <div class="row"><label for="cW">Hub workers</label><span class="val" id="vW">—</span></div>
+          <input type="range" autocomplete="off" id="cW" min="1" max="16" value="6">
+          <div class="hint">Operational parameter. Not a protocol parameter — the bytes never move.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cBatch">Frame input budget</label><span class="val" id="vBatch">—</span></div>
+          <input type="range" autocomplete="off" id="cBatch" min="1" max="100" value="66">
+          <div class="hint">How many accepted inputs the coordinator freezes into one frame — across all accounts. At most one AccountInput per accountId: a second one for the same account waits for the next frame, because its counterparty cannot send again before the ACK.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cSpine">Coordinator work / tx</label><span class="val" id="vSpine">—</span></div>
+          <input type="range" autocomplete="off" id="cSpine" min="0" max="100" value="55">
+          <div class="hint">The Amdahl dial. Anything the coordinator does per transaction is work no worker can take.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cFsync">WAL fsync</label><span class="val" id="vFsync">—</span></div>
+          <input type="range" autocomplete="off" id="cFsync" min="0" max="100" value="47">
+          <div class="hint">Speculative depth is 1: frame N+1 computes, but cannot seal until N is durable.</div>
+        </div>
+
+        <div class="ctl">
+          <div class="row"><label for="cSlow">Slow motion</label><span class="val" id="vSlow">—</span></div>
+          <input type="range" autocomplete="off" id="cSlow" min="1" max="100" value="38">
+          <div class="hint">Wall-clock dilation only. Every readout is in simulated time.</div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ── CENTER ──────────────────────────────────────── -->
+    <main>
+      <section class="card">
+        <div class="eyebrow">Ingress → shard map → shared CPU pool → seal → disk → network</div>
+        <canvas id="hero"></canvas>
+        <div class="legend">
+          <b><i class="sw" style="background:#c8783c"></i>Copper = the coordinator: bucket, join, re-bucket, seal</b>
+          <b><i class="sw" style="background:#37d6c9"></i>Account shards</b>
+          <b><i class="sw" style="background:#ff77b0"></i>Paybook</b>
+          <b><i class="sw" style="background:#a97bff"></i>Orderbook</b>
+          <b><i class="sw" style="background:#ffe9c0"></i>The followed payment</b>
+          <b><i class="sw" style="background:#1a1114;border-left:2px solid #7a3129"></i>Gap to the JOIN line = barrier wait</b>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="eyebrow">Frame timeline <span class="tag">pool utilisation · committer</span></div>
+        <canvas id="tl"></canvas>
+        <div class="legend">
+          <b>Upper band — share of the pool actually busy, per stage.</b>
+          <b><i class="sw" style="background:#f2c94c"></i>Coordinator seal</b>
+          <b><i class="sw" style="background:#49d17f"></i>fsync</b>
+          <b><i class="sw" style="background:#ff5a4f"></i>Seal blocked on WAL</b>
+        </div>
+      </section>
+
+      <div class="metrics">
+        <div class="m"><div class="k">Completed</div><div class="v" id="mOps">0<span class="u">/s</span></div><div class="s" id="mOpsSub">payments + swaps</div></div>
+        <div class="m"><div class="k">Refused</div><div class="v" id="mRej">0<span class="u">/s</span></div><div class="s" id="mRejSub">offered beyond capacity</div></div>
+        <div class="m"><div class="k">Frames</div><div class="v" id="mFps">0<span class="u">/s</span></div><div class="s" id="mFrame">— ms / frame</div></div>
+        <div class="m"><div class="k">Pool utilisation</div><div class="v" id="mUtil">0<span class="u">%</span></div><div class="s">Σ busy / (W × wall)</div></div>
+        <div class="m"><div class="k">Barrier waste</div><div class="v" id="mWaste">0<span class="u">%</span></div><div class="s">idle behind the straggler</div></div>
+        <div class="m"><div class="k">Mempool</div><div class="v" id="mQ">0<span class="u">%</span></div><div class="s" id="mQSub">— of — inputs</div></div>
+        <div class="m"><div class="k">Durable height</div><div class="v" id="mH">0</div><div class="s" id="mHSub">outbox rows published</div></div>
+      </div>
+    </main>
+
+    <!-- ── RIGHT ───────────────────────────────────────── -->
+    <aside class="rail">
+      <section class="card">
+        <div class="eyebrow">Frame seal <span class="tag">root fold</span></div>
+        <div class="fold">
+          <div class="foldrow"><span class="k">accounts</span><span class="h" id="rA">—</span></div>
+          <div class="foldrow"><span class="k">paybook</span><span class="h" id="rP">—</span></div>
+          <div class="foldrow"><span class="k">orderbook</span><span class="h" id="rO">—</span></div>
+          <div class="foldrow"><span class="k">crontab</span><span class="h" id="rC">—</span></div>
+          <div class="foldarrow">↓ canonical Patricia positions ↓</div>
+          <div class="foldrow up"><span class="k">entity</span><span class="h" id="rE">—</span></div>
+          <div class="foldrow up"><span class="k">runtime</span><span class="h" id="rR">—</span></div>
+          <div class="foldrow up"><span class="k">frame</span><span class="h" id="rF">—</span></div>
+        </div>
+        <div class="kv" style="margin-top:9px"><span class="k">dirty shards sealed</span><span class="v" id="kDirty">0</span></div>
+        <div class="kv"><span class="k">nodes hashed</span><span class="v" id="kNodes">0</span></div>
+        <div class="kv"><span class="k">roots recomputed for clean subtrees</span><span class="v good">0</span></div>
+        <div class="eyebrow" style="margin:14px 0 8px">Durability <span class="tag">depth &#8804; 1</span></div>
+        <div class="kv"><span class="k">sealed, not durable</span><span class="v" id="kSnd">0 / 1</span></div>
+        <div class="kv"><span class="k">fsync</span><span class="v" id="kFs">&#8212; ms</span></div>
+        <div class="kv"><span class="k">coordinator blocked on WAL</span><span class="v" id="kBlk">0%</span></div>
+        <div class="kv"><span class="k">outbox rows published</span><span class="v" id="kRows">0</span></div>
+        <div class="kv"><span class="k">published before fsync</span><span class="v good">never</span></div>
+      </section>
+
+    </aside>
+  </div>
+
+  <div class="poison" id="poison">
+    <h3>Runtime poisoned — WAL write failed at frame <span id="poisonH">—</span></h3>
+    <p>
+      Frame N was not published. Speculative frame N+1 is discarded, later frames are not attempted, and apply
+      is never retried against uncertain in-memory state. Recovery starts from the last durable authority: one
+      canonical checkpoint plus the ordered Runtime WAL, replayed through the same production transitions.
+      <code>Reseed</code> restarts the machine.
+    </p>
+  </div>
+
+  <div class="notes">
+    <div class="note a">
+      <h3>One pool, every shard family</h3>
+      <p>Each worker permanently owns a slice of Account, Paybook, Orderbook and Crontab shards — the four
+      dots beside its label. Separate per-module pools are forbidden precisely because they idle: a Paybook
+      pool would sleep through both Account stages.</p>
+    </div>
+    <div class="note b">
+      <h3>The barrier is a re-bucketing</h3>
+      <p>At <code>JOIN 1</code> the Account effects are re-keyed by hashlock and pair and land in whichever
+      worker owns that book shard — the chords drawn across the lanes. At <code>JOIN 2</code> the intents are
+      re-keyed by accountId and come back into the workers as stage-3 proposals.</p>
+    </div>
+    <div class="note c">
+      <h3>Mutation is not commitment</h3>
+      <p>Stages 1–3 invalidate paths; they never hash them. Only the seal asks for roots, and only for
+      distinct invalid nodes — <code>O(dirty)</code>, never <code>O(state)</code>. Clean subtrees reuse their
+      cached commitment, which is why that third counter stays at zero.</p>
+    </div>
+    <div class="note e">
+      <h3>Refusal beats an unbounded queue</h3>
+      <p>The mempool is finite and lives only in RAM — it is Replica state, never committed state. Offer more than the pool can finish and the
+      Runtime refuses the excess at the door rather than growing latency without limit. Drop the worker count
+      while the load is high and watch the refusal rate become the whole story.</p>
+    </div>
+    <div class="note d">
+      <h3>Durability is a gate, not a hint</h3>
+      <p>The committer is the only other thread, and it is I/O-bound by definition. The outbox opens after
+      fsync returns, never before. Raise the fsync slider and the WAL becomes the wall — visible as red
+      blocking segments, not as lost frames.</p>
+    </div>
+  </div>
+
+  <footer>
+    <span>Model of <code>docs/runtime.md</code> §2–§7, §13.</span>
+    <span>Shard keys: first 12 bits of <code>accountId</code> · first byte of <code>hashlock</code> · pair key.</span>
+    <span>Cost constants are illustrative, calibrated so <code>w1</code> lands near the measured 10k-account replay.</span>
+    <span id="seedOut">seed —</span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════
+   1. Deterministic pseudo-randomness. The runtime is deterministic;
+      so is this picture. Same seed, same run.
+   ═══════════════════════════════════════════════════════════════════ */
+let SEED = 0x5eed1a7e;
+let rngState = SEED;
+const rnd = () => {
+  rngState |= 0; rngState = (rngState + 0x6D2B79F5) | 0;
+  let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const hash32 = (i, salt) => {
+  let h = Math.imul(i ^ salt, 0x9E3779B1);
+  h ^= h >>> 15; h = Math.imul(h, 0x85EBCA6B);
+  h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35);
+  return (h ^ (h >>> 16)) >>> 0;
+};
+const hex8 = n => n.toString(16).padStart(8, "0");
+const hexn = (n, w) => n.toString(16).padStart(w, "0");
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => t * t * (3 - 2 * t);
+
+/* ═══════════════════════════════════════════════════════════════════
+   2. Configuration
+   ═══════════════════════════════════════════════════════════════════ */
+const CFG = {
+  workers: 6, accounts: 125, skew: 0.20,
+  payRate: 40, swapRate: 12, hotPair: 0.15,
+  batch: 16, spineUs: 2.0, fsyncUs: 900, slowmo: 2,
+  wantWorkers: 6, engine: "rust", running: true,
+};
+const BUFFER_FRAMES = 6;          // mempool depth, in frames' worth of inputs
+const frameDeadline = () => {
+  // A frame seals on a full batch, or after the time that batch would take to
+  // arrive. Low offered load therefore still produces whole, legible frames.
+  const rate = Math.max(1, CFG.payRate + CFG.swapRate);
+  return clamp((CFG.batch / rate) * 1e6, 2000, 3e6);
+};
+
+/* Illustrative per-item CPU costs in microseconds. Calibrated so a single
+   worker lands near the measured 10k-account replay figure; the shape of
+   the curve, not the absolute number, is what this picture is about. */
+const COST = {
+  s1Input: 24,     // decode-checked apply + peer signature + leaf digest
+  s2Pay: 10,       // one Paybook point operation
+  s2Swap: 26,      // price-time walk inside one pair
+  s2Cron: 8,
+  s3Proposal: 42,  // build the pending Account frame + ECDSA
+  coordFixed: 400, // frame metadata, fold orchestration, one hash, one signature
+};
+const ENGINE = { rust: { w: 1, c: 1 }, ts: { w: 3.2, c: 2.4 } };
+const NODES = 12;
+/* The durability chain is strictly sequential and lives on the same simulated
+   clock as the pool, so a slow-motion change stretches all three phases alike. */
+const WAL = { appendUs: 260, releaseUs: 620 };
+const PAIRS = ["ETH/USDT"];
+const PAIR_MID = [3184];
+/* Paybook lifecycle, straight out of paybook.rs: a lock creates the entry and
+   an htlc-timeout hook; the revealed secret moves the pending fee into
+   fees_earned and arms an htlc-secret-ack hook; when both legs settle the
+   route terminates and both hooks are cancelled. */
+const HTLC_TIMEOUT_US = 26000, SECRET_ACK_US = 9000;
+const PEER_NAMES = Array.from({ length: NODES }, (_, i) => "0x" + hex8(hash32(i + 1, 0xbeef)).slice(0, 4));
+
+/* ═══════════════════════════════════════════════════════════════════
+   3. State
+   ═══════════════════════════════════════════════════════════════════ */
+const S = {
+  clock: 0, frameId: 1, lastFrameEnd: 0,
+  mem: [], arr: { pay: 0, swap: 0 },     // accepted-input mempool, Replica state only
+  ent: { pay: new Map(), order: [], book: new Map(), cron: [], ghost: [], fees: 0, fills: 0 },
+  hlSeq: 1,
+  rejected: 0, rejWindow: 0, accWindow: 0, winStart: 0,
+  frame: null, lastFrame: null, pendingSeal: false,
+  committer: { phase: "idle", t0: 0, height: 0, sealed: null },
+  tape: [], rows: 0, peers: new Array(NODES).fill(0), publishFlash: -1e9,
+  records: [], chips: [], chords: [], packets: [],
+  poisoned: false, poisonAt: 0, killArmed: false,
+  lastSealClock: null,
+  ema: { ops: 0, cap: 0, rej: 0, fps: 0, util: 0, waste: 0, frameUs: 4000, blocked: 0, window: 12000 },
+  roots: { a: "", p: "", o: "", c: "", e: "", r: "", f: "" },
+  dirty: 0, nodes: 0, laneOwn: [], deferred: 0,
+};
+const memCap = () => Math.max(32, Math.round(CFG.batch * BUFFER_FRAMES));
+const queued = () => S.mem.length;
+
+function accountIndex() {
+  return Math.floor(Math.pow(rnd(), 1 + CFG.skew * 7) * CFG.accounts);
+}
+const accountWord = idx => hash32(idx, 0x1a2b3c);   // 32 bits ≙ the first 4 bytes
+const accountShard = word => word >>> 20;           // first 12 bits → 0..4095
+const workerOf = shard => shard % CFG.workers;
+
+function recomputeOwnership() {
+  const W = CFG.workers;
+  S.laneOwn = Array.from({ length: W }, (_, w) => {
+    const a = Math.floor((4096 - w + W - 1) / W);
+    const p = Math.floor((256 - w + W - 1) / W);
+    return [a, p, p, p];
+  });
+}
+
+/* ── One frame, planned in full ───────────────────────────────────── */
+function planFrame() {
+  // The pool is resident: a worker-count change takes effect at a frame
+  // boundary, never inside one. Bytes are unaffected either way.
+  if (CFG.wantWorkers !== CFG.workers) { CFG.workers = CFG.wantWorkers; recomputeOwnership(); }
+  const W = CFG.workers, em = ENGINE[CFG.engine];
+  /* Freeze the frame's input in arrival order. One accountId contributes at
+     most one AccountInput per frame: its counterparty cannot send a second
+     bilateral frame before the ACK, so a same-account arrival waits. */
+  const seen = new Set(), picked = [], held = [];
+  let dedup = 0;
+  for (const it of S.mem) {
+    if (picked.length < CFG.batch && !seen.has(it.idx)) { seen.add(it.idx); picked.push(it); }
+    else { if (seen.has(it.idx)) dedup++; held.push(it); }
+  }
+  const take = picked.length;
+  if (take <= 0) return null;
+  S.mem = held;
+  S.deferred = dedup;
+
+  let nPay = 0, nSwap = 0;
+  for (const it of picked) { if (it.isSwap) nSwap++; else nPay++; }
+
+  const s1 = new Float64Array(W), s2 = new Float64Array(W), s3 = new Float64Array(W);
+  const s2kind = Array.from({ length: W }, () => ({ pay: 0, book: 0, cron: 0 }));
+  const items = new Int32Array(W), items2 = new Int32Array(W), items3 = new Int32Array(W);
+  const outIntents = new Int32Array(W);      // intents each stage-2 lane produced
+  const touchedA = new Set(), touchedP = new Set(), touchedO = new Set();
+  const route1 = [], route2 = [];          // sampled re-bucketing at JOIN 1 and JOIN 2
+
+  /* Per-worker shard ledgers. A lane's bar is not one block of work: it is the
+     shards that lane owns, laid end to end. One hot shard is one long block,
+     and no worker count can split it. */
+  const sh1 = Array.from({ length: W }, () => new Map());
+  const sh2 = Array.from({ length: W }, () => new Map());
+  const sh3 = Array.from({ length: W }, () => new Map());
+  const bump = (m, key, cost, kind, tag) => {
+    const e = m.get(key);
+    if (e) { e.cost += cost; e.n++; } else m.set(key, { key, cost, n: 1, kind, tag });
+  };
+
+  /* Stage 2 is not a cost model: it is the Entity's own tables changing.
+     Every proposal below has a row behind it. */
+  const rows = { pay: [], book: [], cron: [] };
+  const outAccts = [];
+  /* One payment per frame is followed end to end so the picture has a thread
+     to pull: same input, same worker, same Paybook row, same proposal, same
+     WAL block, same peer. */
+  const trIx = picked.findIndex(x => !x.isSwap);
+  const traceAt = trIx >= 0 ? trIx : 0;
+  let trace = null, pi = 0;
+  let nProp = 0;
+  const props3 = Array.from({ length: W }, () => []);
+  const proposal = (accIdx, srcW, txName, tr) => {
+    const t = accountShard(accountWord(accIdx));
+    const tw = workerOf(t);
+    s3[tw] += COST.s3Proposal * em.w; items3[tw]++; touchedA.add(t); nProp++;
+    bump(sh3[tw], t, COST.s3Proposal * em.w, "acct", "0x" + hexn(t, 3));
+    if (route2.length < 14 && rnd() < 0.12) route2.push({ a: srcW, b: tw, k: "acct" });
+    outAccts.push(accIdx);
+    if (srcW >= 0 && srcW < W) outIntents[srcW]++;
+    props3[tw].push({ tx: txName, sh: t });
+    if (tr && trace) trace.props.push({ sh: t, w: tw, acc: accIdx });
+  };
+
+  for (const it of picked) {
+    const isSwap = it.isSwap, idx = it.idx;
+    const shard = accountShard(accountWord(idx));
+    const w = workerOf(shard);
+    const isTrace = pi++ === traceAt;
+    if (isTrace) trace = { acc: shard, w0: w, props: [], node: nodeOf(hopOf(idx)) };
+    s1[w] += COST.s1Input * em.w; items[w]++; touchedA.add(shard);
+    bump(sh1[w], shard, COST.s1Input * em.w, "acct", "0x" + hexn(shard, 3));
+
+    if (!isSwap) {
+      const known = (it.hl !== null && it.hl !== undefined) ? S.ent.pay.get(it.hl) : null;
+      if (known) {
+        const pw = known.w;
+        s2[pw] += COST.s2Pay * em.w; s2kind[pw].pay += COST.s2Pay * em.w; items2[pw]++;
+        touchedP.add(known.sh);
+        bump(sh2[pw], known.sh, COST.s2Pay * em.w, "pay", tagHl(known.hl));
+        if (route1.length < 14 && rnd() < 0.2) route1.push({ a: w, b: pw, k: "pay" });
+        known.touched = S.frameId;
+        if (known.stage === "locked") {
+          // revealed_secret_followup: fee is earned, the secret-ack hook is armed
+          known.stage = "secret";
+          S.ent.fees += known.fee;
+          cancelHook(known.hl, "timeout");
+          pushHook(known.hl, "ack", S.clock + SECRET_ACK_US, pw);
+          rows.pay.push({ w: pw, hl: known.hl, act: "secret", note: "+" + known.fee });
+          if (isTrace) { trace.hl = known.hl; trace.sh1 = known.sh; trace.w1 = pw; }
+          proposal(known.inIdx, pw, "HtlcResolve", isTrace);
+        } else {
+          // committed_htlc_resolve: both legs settled, the route terminates
+          rows.pay.push({ w: pw, hl: known.hl, act: "settled" });
+          if (isTrace) { trace.hl = known.hl; trace.sh1 = known.sh; trace.w1 = pw; }
+          proposal(known.inIdx, pw, "SettleTransition", isTrace);
+          proposal(known.outIdx, pw, "SettleTransition");
+          killRoute(known, "settled");
+        }
+      } else {
+        const hlv = it.newHl !== undefined && it.newHl !== null
+          ? it.newHl : (hash32(idx * 977 + S.frameId, 0x5eed) >>> 16);
+        const sh = hlv >>> 8, pw = sh % W;
+        s2[pw] += COST.s2Pay * em.w; s2kind[pw].pay += COST.s2Pay * em.w; items2[pw]++;
+        touchedP.add(sh);
+        bump(sh2[pw], sh, COST.s2Pay * em.w, "pay", tagHl(hlv));
+        if (route1.length < 14 && rnd() < 0.2) route1.push({ a: w, b: pw, k: "pay" });
+        const out = hopOf(idx);
+        const ent = {
+          hl: hlv, sh, w: pw, stage: "locked", touched: S.frameId,
+          inIdx: idx, outIdx: out, amt: 10 + Math.floor(rnd() * 90),
+          fee: 1 + Math.floor(rnd() * 4), due: S.clock + HTLC_TIMEOUT_US,
+        };
+        S.ent.pay.set(hlv, ent); S.ent.order.push(hlv);
+        pushHook(hlv, "timeout", ent.due, pw);
+        rows.pay.push({ w: pw, hl: hlv, act: "lock" });
+        if (isTrace) { trace.hl = hlv; trace.sh1 = sh; trace.w1 = pw; }
+        proposal(out, pw, "HtlcLock", isTrace);       // the forward leg to the next hop
+      }
+    } else {
+      const bk = bookOf(it.pairIx, W), ow = bk.w;
+      s2[ow] += COST.s2Swap * em.w; s2kind[ow].book += COST.s2Swap * em.w; items2[ow]++;
+      touchedO.add(bk.sh);
+      bump(sh2[ow], bk.sh, COST.s2Swap * em.w, "book", bk.name);
+      if (route1.length < 14 && rnd() < 0.2) route1.push({ a: w, b: ow, k: "book" });
+      bk.touched = S.frameId;
+
+      const px = bk.mid + it.off;
+      const same = it.buy ? bk.bids : bk.asks;
+      const opp = it.buy ? bk.asks : bk.bids;
+      const best = opp.length ? opp[0] : null;
+      if (best && (it.buy ? px >= best.px : px <= best.px)) {
+        bk.last = best.px; bk.trades++; S.ent.fills++;
+        best.qty -= Math.min(best.qty, it.qty);
+        const maker = best.idx;
+        if (best.qty <= 0) opp.shift();
+        rows.book.push({ w: ow, pair: bk.name, act: "fill", px: bk.last });
+        if (isTrace) { trace.pair = bk.name; trace.sh1 = bk.sh; trace.w1 = ow; }
+        proposal(maker, ow, "SwapResolve", isTrace);  // one fill settles on two Accounts
+        proposal(idx, ow, "SwapResolve");
+      } else {
+        same.push({ px, qty: it.qty, idx });
+        same.sort((a, b) => it.buy ? b.px - a.px : a.px - b.px);
+        while (same.length > 6) same.pop();
+        rows.book.push({ w: ow, pair: bk.name, act: "rest", px });
+        if (isTrace) { trace.pair = bk.name; trace.sh1 = bk.sh; trace.w1 = ow; }
+      }
+    }
+  }
+
+  /* Crontab reads its due range only — and every hook in it was armed by a
+     Paybook row earlier in this picture. */
+  let nCron = 0;
+  for (let i = S.ent.cron.length - 1; i >= 0; i--) {
+    const hk = S.ent.cron[i];
+    if (hk.due > S.clock) continue;
+    S.ent.cron.splice(i, 1);
+    const e = S.ent.pay.get(hk.hl);
+    if (!e) continue;
+    const cw = hk.w % W;
+    s2[cw] += COST.s2Cron * em.w; s2kind[cw].cron += COST.s2Cron * em.w; items2[cw]++; nCron++;
+    bump(sh2[cw], 4096 + (hk.hl & 255), COST.s2Cron * em.w, "cron",
+      hk.kind === "ack" ? "ack" : "timeout");
+    rows.cron.push({ w: cw, hl: hk.hl, act: hk.kind === "ack" ? "ack timeout" : "htlc timeout" });
+    proposal(e.inIdx, cw, "HtlcResolve");
+    killRoute(e, hk.kind === "ack" ? "ack lost" : "timed out");
+  }
+
+  const join = a => { let m = 0; for (let i = 0; i < W; i++) if (a[i] > m) m = a[i]; return m; };
+  const sum = a => { let s = 0; for (let i = 0; i < W; i++) s += a[i]; return s; };
+  const j1 = join(s1), j2 = join(s2), j3 = join(s3);
+  const coord = (COST.coordFixed + CFG.spineUs * (nPay + nSwap)) * em.c;
+  const dirty = touchedA.size + touchedP.size + touchedO.size + (nCron ? 1 : 0);
+
+  return {
+    id: S.frameId, W, nPay, nSwap, nCron, take: nPay + nSwap,
+    lanes: [s1, s2, s3], s2kind, items, items2, items3, outIntents, joins: [j1, j2, j3], coord,
+    nEffects: nPay + nSwap, nIntents: nProp, rows,
+    busy: sum(s1) + sum(s2) + sum(s3),
+    stageWall: j1 + j2 + j3, total: j1 + j2 + j3 + coord,
+    dirty, nodes: dirty * 3 + 12,
+    route1, route2, seg: 0, elapsed: 0, t0: S.clock, walWait: 0,
+    shards: [sh1, sh2, sh3].map(arr => arr.map(m => [...m.values()].sort((a, b) => b.cost - a.cost))),
+    trace, outAccts, props3,
+  };
+}
+
+function freshRoots(f) {
+  const r = n => "0x" + hex8(hash32(f.id * 7919 + n, 0xa5a5)) + hex8(hash32(f.id * 104729 + n, 0x5a5a));
+  S.roots = { a: r(1), p: r(2), o: r(3), c: r(4), e: r(5), r: r(6), f: r(7) };
+  S.dirty = f.dirty; S.nodes = f.nodes;
+}
+
+/* ── Cross-lane chords: what a JOIN actually does ─────────────────── */
+function spawnChords(list) {
+  const now = performance.now();
+  for (const r of list) {
+    if (r.a === r.b) continue;                 // one worker: nothing crosses
+    S.chords.push({ a: r.a, b: r.b, k: r.k, t0: now, dur: 620 + rnd() * 260 });
+  }
+  while (S.chords.length > 40) S.chords.shift();
+}
+
+/* ── Advance the machine by dt simulated microseconds ─────────────── */
+/* append → fsync → release, one after the other. Nothing reaches the network
+   until the disk has confirmed, and the picture is allowed to show only one
+   of the three at a time. */
+const walBusy = () => S.committer.phase === "append" || S.committer.phase === "fsync";
+const walPhaseEnd = () => {
+  const c = S.committer;
+  if (c.phase === "append") return c.t0 + WAL.appendUs;
+  if (c.phase === "fsync") return c.t0 + CFG.fsyncUs;
+  if (c.phase === "release") return c.t0 + WAL.releaseUs;
+  return -1;
+};
+function stepCommitter() {
+  const c = S.committer;
+  if (c.phase === "idle") return;
+  const el = S.clock - c.t0;
+  if (c.phase === "append") {
+    if (el >= WAL.appendUs) { c.phase = "fsync"; c.t0 = S.clock; }
+  } else if (c.phase === "fsync") {
+    if (el >= CFG.fsyncUs) {                       // the disk has confirmed
+      const blk = S.tape.find(b => b.h === c.sealed.id);
+      if (blk) blk.state = "durable";
+      c.height = c.sealed.id;
+      c.phase = "release"; c.t0 = S.clock;         // only now may the valve open
+    }
+  } else if (c.phase === "release") {
+    if (el >= WAL.releaseUs) {
+      const acc = c.sealed.outAccts || [];
+      S.rows += acc.length;
+      for (const a of acc) S.peers[nodeOf(a)]++;
+      c.phase = "idle"; c.sealed = null;
+    }
+  }
+}
+
+const hopOf = idx => (idx * 7 + 3) % Math.max(1, CFG.accounts);
+const nodeOf = idx => hash32(idx, 0x1234) % NODES;   // the peer that owns the other side
+const tagHl = v => "0x" + hexn(v, 4);
+const pushHook = (hl, kind, due, w) => S.ent.cron.push({ hl, kind, due, w });
+function cancelHook(hl, kind) {
+  for (let i = S.ent.cron.length - 1; i >= 0; i--) {
+    const hk = S.ent.cron[i];
+    if (hk.hl === hl && hk.kind === kind) S.ent.cron.splice(i, 1);
+  }
+}
+function killRoute(e, act) {               // terminate_route: entry gone, both hooks cancelled
+  S.ent.ghost.push({ hl: e.hl, w: e.w, act: act || "settled", at: S.frameId });
+  while (S.ent.ghost.length > 24) S.ent.ghost.shift();
+  S.ent.pay.delete(e.hl);
+  const ix = S.ent.order.indexOf(e.hl);
+  if (ix >= 0) S.ent.order.splice(ix, 1);
+  cancelHook(e.hl, "timeout"); cancelHook(e.hl, "ack");
+}
+function bookOf(pairIx, W) {
+  const name = PAIRS[pairIx % PAIRS.length];
+  let b = S.ent.book.get(name);
+  if (!b) {
+    b = { name, sh: hash32(pairIx, 0x7733) >>> 24, bids: [], asks: [],
+          mid: PAIR_MID[pairIx % PAIR_MID.length], last: PAIR_MID[pairIx % PAIR_MID.length],
+          trades: 0, touched: -1 };
+    S.ent.book.set(name, b);
+  }
+  b.w = b.sh % W;
+  return b;
+}
+/* An input is either brand new work or a message about work already on the
+   books. Nothing in this picture appears without a row behind it. */
+function makeInput(isSwap) {
+  const idx = accountIndex();
+  if (isSwap) {
+    return { idx, isSwap: true,
+      pairIx: 0,
+      buy: rnd() < .5, off: Math.floor(rnd() * 7) - 3, qty: 1 + Math.floor(rnd() * 4) };
+  }
+  const open = S.ent.order;
+  const p = clamp(open.length / (open.length + 5), 0.08, 0.8);
+  if (open.length && rnd() < p) {
+    const hl = open[Math.floor(rnd() * open.length)];
+    if (S.ent.pay.has(hl)) return { idx, isSwap: false, hl };
+  }
+  return { idx, isSwap: false, hl: null, newHl: (hash32(S.hlSeq++, 0x5eed) >>> 16) };
+}
+
+function admit(dt) {
+  const secs = dt / 1e6;
+  S.arr.pay += CFG.payRate * secs;
+  S.arr.swap += CFG.swapRate * secs;
+  const cap = memCap();
+  let guard = 0;
+  while ((S.arr.pay >= 1 || S.arr.swap >= 1) && guard++ < 4096) {
+    const canSwap = S.arr.swap >= 1;
+    const isSwap = canSwap && (S.arr.pay < 1 ||
+      rnd() < CFG.swapRate / Math.max(1e-9, CFG.payRate + CFG.swapRate));
+    if (isSwap) S.arr.swap -= 1; else S.arr.pay -= 1;
+    // The mempool is bounded: the excess is refused at the door, never queued forever.
+    if (S.mem.length >= cap) { S.rejected++; S.rejWindow++; continue; }
+    S.mem.push(makeInput(isSwap));
+    S.accWindow++;
+  }
+}
+
+function advance(dt) {
+  if (S.poisoned) return;
+  admit(dt);
+
+  // Refusal / acceptance rates over a sliding simulated window.
+  if (S.clock - S.winStart > 20000) {
+    const span = (S.clock - S.winStart) / 1e6;
+    S.ema.rej = lerp(S.ema.rej, S.rejWindow / span, 0.3);
+    S.rejWindow = 0; S.accWindow = 0; S.winStart = S.clock;
+  }
+
+  let guard = 0;
+  while (dt > 1e-9 && guard++ < 2048) {
+    stepCommitter();
+
+    if (!S.frame && !S.pendingSeal) {
+      const q = queued();
+      const waited = S.clock - S.lastFrameEnd;
+      const deadline = frameDeadline();
+      const ready = q >= CFG.batch || (q >= 1 && waited >= deadline);
+      const f = ready ? planFrame() : null;
+      if (!f) {
+        let step = dt;
+        const cd = walPhaseEnd();
+        if (cd >= 0) step = Math.min(step, Math.max(0, cd - S.clock));
+        if (q >= 1) step = Math.min(step, Math.max(0, deadline - waited));
+        if (step <= 0) { S.clock += 1; dt -= 1; continue; }
+        S.clock += step; dt -= step;
+        continue;
+      }
+      S.frame = f;
+    }
+
+    if (S.pendingSeal) {
+      // Speculative depth 1: N+1 computes, but may not seal until N is durable.
+      if (walBusy()) {
+        const wait = Math.min(dt, Math.max(0, walPhaseEnd() - S.clock));
+        if (wait <= 0) { S.clock += 1; dt -= 1; continue; }
+        S.clock += wait; dt -= wait;
+        if (S.frame) S.frame.walWait += wait;
+        continue;
+      }
+      sealFrame();
+      continue;
+    }
+
+    const f = S.frame;
+    const dur = f.seg < 3 ? f.joins[f.seg] : f.coord;
+    const left = dur - f.elapsed;
+    const step = Math.min(dt, Math.max(left, 0));
+    f.elapsed += step; S.clock += step; dt -= step;
+    if (f.elapsed + 1e-9 >= dur) {
+      if (f.seg === 0) spawnChords(f.route1);   // JOIN 1 → Paybook / Orderbook / Crontab
+      if (f.seg === 1) spawnChords(f.route2);   // JOIN 2 → back into the Account workers
+      f.seg++; f.elapsed = 0;
+      if (f.seg > 3) S.pendingSeal = true;
+    }
+  }
+}
+
+function sealFrame() {
+  const f = S.frame;
+  f.wall = f.total + f.walWait;
+  freshRoots(f);
+  S.tape.push({ h: f.id, state: "sealed" });
+  while (S.tape.length > 16) S.tape.shift();
+  S.committer.sealed = f;
+  S.committer.phase = "append";
+  S.committer.t0 = S.clock;
+
+  const cadence = Math.max(1, S.clock - (S.lastSealClock === null ? S.clock - f.wall : S.lastSealClock));
+  S.lastSealClock = S.clock;
+  const delivered = f.take / (cadence / 1e6);
+  const capacity = f.take / (f.wall / 1e6);
+  S.ema.ops = S.ema.ops ? lerp(S.ema.ops, delivered, 0.18) : delivered;
+  S.ema.cap = S.ema.cap ? lerp(S.ema.cap, capacity, 0.18) : capacity;
+  S.ema.fps = S.ema.fps ? lerp(S.ema.fps, 1e6 / cadence, 0.18) : 1e6 / cadence;
+  const util = f.busy / (f.W * Math.max(1, f.stageWall + f.coord));
+  const waste = Math.max(0, 1 - f.busy / (f.W * Math.max(1, f.stageWall)));
+  S.ema.util = lerp(S.ema.util, util, 0.14);
+  S.ema.waste = lerp(S.ema.waste, waste, 0.14);
+  S.ema.frameUs = lerp(S.ema.frameUs, f.wall, 0.14);
+  S.ema.blocked = lerp(S.ema.blocked, f.walWait / Math.max(1, f.wall), 0.14);
+
+  S.records.push({
+    t0: f.t0, id: f.id, wall: f.wall,
+    segs: f.joins.map((j, i) => {
+      let busy = 0; for (let w = 0; w < f.W; w++) busy += f.lanes[i][w];
+      return { dur: j, util: busy / (f.W * Math.max(1, j)), stage: i };
+    }),
+    coord: f.coord, walWait: f.walWait,
+    fsyncFrom: S.clock + WAL.appendUs, fsyncTo: S.clock + WAL.appendUs + CFG.fsyncUs,
+  });
+  while (S.records.length > 260) S.records.shift();
+
+  S.lastFrame = f;
+  S.frameId++; S.frame = null; S.pendingSeal = false; S.lastFrameEnd = S.clock;
+  if (S.killArmed) { S.poisoned = true; S.poisonAt = f.id; S.killArmed = false; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   4. Ingress chips — a readable sample, never one chip per input
+   ═══════════════════════════════════════════════════════════════════ */
+const CHIP_ROWS = 9;
+let chipAcc = 0, chipRow = 0;
+function spawnChips(dtReal) {
+  const rate = CFG.payRate + CFG.swapRate;
+  if (rate <= 0 || S.poisoned) return;
+  const visual = Math.min(rate, 14);      // one chip per input while that is followable
+  chipAcc += visual * dtReal;
+  const perChip = Math.max(1, Math.round(rate / visual));
+  const full = queued() >= memCap() - 1;
+  const busy = new Set(S.chips.filter(c => c.t < 0.55).map(c => c.row));
+  while (chipAcc >= 1 && S.chips.length < 10) {
+    chipAcc -= 1;
+    const isSwap = rnd() < CFG.swapRate / Math.max(1, rate);
+    const idx = accountIndex();
+    const word = accountWord(idx);
+    const shard = accountShard(word);
+    const refusedShare = S.ema.rej / Math.max(1, S.ema.rej + (S.ema.ops || 1));
+    S.chips.push({
+      word, shard, w: workerOf(shard), isSwap, n: perChip,
+      refused: full && rnd() < clamp(refusedShare, 0.15, 0.95),
+      t: 0, row: chipRow % CHIP_ROWS,
+    });
+    let guard2 = 0;
+    while (busy.has(chipRow % CHIP_ROWS) && guard2++ < CHIP_ROWS) chipRow++;
+    S.chips[S.chips.length - 1].row = chipRow % CHIP_ROWS;
+    busy.add(chipRow % CHIP_ROWS);
+    chipRow++;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   5. Rendering
+   ═══════════════════════════════════════════════════════════════════ */
+const C = {
+  acct: "#37d6c9", pay: "#ff77b0", book: "#a97bff", cron: "#59b0ff",
+  seal: "#f2c94c", durable: "#49d17f", net: "#5b8cff", bad: "#ff5a4f",
+  copper: "#c8783c", fg: "#dde5f0", dim: "#93a2b6", mute: "#5f6d80", line: "#18202c",
+};
+const STAGE_C = [C.acct, C.pay, "#2c8f88"];
+const KIND_C = { pay: C.pay, book: C.book, cron: C.cron, acct: C.acct };
+
+function fitCanvas(cv) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = cv.getBoundingClientRect();
+  const w = Math.max(320, Math.floor(r.width)), h = Math.floor(r.height);
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+function label(ctx, text, x, y, color, size, space) {
+  ctx.font = '600 ' + (size || 9.5) + 'px "IBM Plex Sans", sans-serif';
+  ctx.letterSpacing = (space === undefined ? 1.4 : space) + "px";
+  ctx.fillStyle = color; ctx.fillText(text, x, y);
+  ctx.letterSpacing = "0px";
+}
+
+/* ── hero: one frame as a grid — workers (rows) × phases (columns) ──
+   Copper columns are the coordinator. Each one gathers what the workers
+   produced, re-keys it, and fans it back out to the worker that owns the
+   target shard. Horizontal lanes are the resident workers; the same lanes
+   are visited three times, which is the whole point.                   */
+const heroCv = document.getElementById("hero");
+
+function vlabel(ctx, text, x, y, color, size) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(-Math.PI / 2);
+  ctx.font = '600 ' + (size || 9) + 'px "IBM Plex Sans", sans-serif';
+  ctx.letterSpacing = "1.3px"; ctx.fillStyle = color;
+  ctx.textAlign = "center"; ctx.fillText(text, 0, 0);
+  ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+  ctx.restore();
+}
+function fanPath(ctx, x0, y0, x1, y1) {
+  const dx = (x1 - x0) * 0.58;
+  ctx.moveTo(x0, y0);
+  ctx.bezierCurveTo(x0 + dx, y0, x1 - dx, y1, x1, y1);
+}
+function fanAt(t, x0, y0, x1, y1) {
+  const dx = (x1 - x0) * 0.58, mt = 1 - t;
+  const cx1 = x0 + dx, cx2 = x1 - dx;
+  return [
+    mt * mt * mt * x0 + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * x1,
+    mt * mt * mt * y0 + 3 * mt * mt * t * y0 + 3 * mt * t * t * y1 + t * t * t * y1,
+  ];
+}
+
+function drawHero(dtReal) {
+  const { ctx, w, h } = fitCanvas(heroCv);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#070a0f"; ctx.fillRect(0, 0, w, h);
+  ctx.textBaseline = "alphabetic";
+
+  const W = CFG.workers;
+  const f = S.frame || S.lastFrame;
+  const idle = !S.frame;
+  const stageDur = f ? (f.seg < 3 ? f.joins[f.seg] : f.coord) : 0;
+  const el = f ? f.elapsed : 0;
+
+  /* ── geometry ── */
+  const DECK_H = 156;   // the durability deck is part of the same machine
+  const ingW = Math.min(148, Math.max(92, w * 0.125));
+  const bucketW = clamp(w * 0.03, 26, 44);
+  const joinW = clamp(w * 0.05, 46, 76);    // a JOIN holds the results it collects
+  const gateW = joinW;                       // kept for the coordinator spine maths
+  const sealW = clamp(w * 0.034, 30, 44);
+  const gx0 = ingW + 4;
+  const bandTotal = Math.max(120, w - gx0 - bucketW - 3 * joinW - sealW - 8);
+  const b = [bandTotal * 0.24, bandTotal * 0.50, bandTotal * 0.26];
+
+  const colX = [];
+  let cx = gx0;
+  colX.push(cx); cx += bucketW; // 0 coordinator: select + bucket by accountId
+  colX.push(cx); cx += b[0];    // 1 stage 1
+  colX.push(cx); cx += joinW;   // 2 JOIN 1 — collects effects
+  colX.push(cx); cx += b[1];    // 3 stage 2 — Paybook over Orderbook
+  colX.push(cx); cx += joinW;   // 4 JOIN 2 — collects intents
+  colX.push(cx); cx += b[2];    // 5 stage 3
+  colX.push(cx); cx += joinW;   // 6 JOIN 3 — collects proposals
+  colX.push(cx);                // 7 seal
+  const gridR = colX[7] + sealW;
+  const colW = [bucketW, b[0], joinW, b[1], joinW, b[2], joinW, sealW];
+
+  const headY = 30;
+  const gridTop = headY + 14, gridBot = h - DECK_H - 10;
+  const laneH = clamp((gridBot - gridTop) / W, 11, 58);
+  const gridH = laneH * W;
+  const gTop = gridTop + (gridBot - gridTop - gridH) / 2;
+  const gMid = gTop + gridH / 2;
+  const laneY = i => gTop + i * laneH;
+  const laneMid = i => laneY(i) + laneH / 2;
+  const rowH = Math.max(4, laneH - clamp(laneH * .22, 2, 7));
+
+  /* ── package ── */
+  roundRect(ctx, gx0 - 6, gTop - 9, gridR - gx0 + 12, gridH + 18, 6);
+  ctx.fillStyle = "#080c12"; ctx.fill();
+  ctx.strokeStyle = "#2a1b0e"; ctx.lineWidth = 3; ctx.stroke();
+  ctx.strokeStyle = C.copper; ctx.lineWidth = 1; ctx.globalAlpha = .4; ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  /* ── lanes ── */
+  for (let i = 0; i < W; i++) {
+    ctx.fillStyle = i % 2 ? "#0a0f16" : "#0b1119";
+    ctx.fillRect(gx0, laneY(i) + (laneH - rowH) / 2, gridR - gx0, rowH);
+    ctx.font = '500 ' + (laneH > 15 ? 11 : 9) + 'px "IBM Plex Mono", monospace';
+    ctx.fillStyle = C.dim; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText("w" + i, gx0 - 10, laneMid(i));
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  }
+
+  /* ── the machine, as the code actually runs it ─────────────────────
+     Stage 1 and Stage 3 are worker lanes. Between them stand JOINs, and a
+     JOIN is not a line: it is the place the results are collected. Each
+     worker owns a slot there, and its slot fills as that worker works. The
+     shutter on the far side stays down until every slot is in — that is the
+     barrier — and then the whole collection drops through, re-keyed.     */
+  const KIND = { input: C.acct, effect: C.pay, intent: "#2c8f88", proposal: C.seal };
+  const tr = f && f.trace;
+  const TRACE_C = "#ffe9c0";
+  function traceBox(x, y, w2, h2) {
+    ctx.strokeStyle = TRACE_C; ctx.lineWidth = 1.4; ctx.globalAlpha = .95;
+    ctx.strokeRect(x + .5, y + .5, Math.max(2, w2) - 1, h2 - 1);
+    ctx.globalAlpha = 1;
+  }
+  const laneProg = st => i => {
+    if (!f) return 0;
+    const own = f.lanes[st][i];
+    return f.seg > st ? 1 : f.seg === st ? (own > 0 ? clamp(el / own, 0, 1) : 1) : 0;
+  };
+  const laneDone = st => {
+    if (!f) return 0;
+    let n = 0;
+    for (let i = 0; i < W; i++) if (laneProg(st)(i) >= 1) n++;
+    return n;
+  };
+  const totalOut = (st, i) => !f ? 0
+    : st === 0 ? f.items[i] : st === 1 ? f.outIntents[i] : f.items3[i];
+  const collected = (st, i) => Math.round(totalOut(st, i) * laneProg(st)(i));
+
+  const PS = 7, PG = 2;
+  function pile(x, y, w2, h2, n, color) {
+    if (n <= 0) return;
+    const cols = Math.max(1, Math.floor((w2 + PG) / (PS + PG)));
+    const rowsN = Math.max(1, Math.floor((h2 + PG) / (PS + PG)));
+    const capN = cols * rowsN;
+    const show = Math.min(n, n > capN ? capN - 1 : capN);
+    ctx.fillStyle = color; ctx.globalAlpha = .95;
+    for (let k = 0; k < show; k++) {
+      ctx.fillRect(x + (k % cols) * (PS + PG), y + Math.floor(k / cols) * (PS + PG), PS, PS);
+    }
+    ctx.globalAlpha = 1;
+    if (n > capN) {
+      ctx.font = '600 8px "IBM Plex Mono", monospace';
+      ctx.fillStyle = color; ctx.textAlign = "right";
+      ctx.fillText("+" + (n - show), x + w2, y + h2 - 1);
+      ctx.textAlign = "left";
+    }
+  }
+
+  /* ── the Entity's live tables ── */
+  const fid = f ? f.id : -1;
+  const acts = { pay: new Map(), book: new Map() };
+  if (f && f.rows) {
+    for (const r of f.rows.pay) acts.pay.set(r.hl, r);
+    for (const r of f.rows.book) acts.book.set(r.pair, r);
+    for (const r of f.rows.cron) acts.pay.set(r.hl, r);
+  }
+  const payRows = [];
+  for (const g of S.ent.ghost) {
+    if (g.at === fid) payRows.push({ hl: g.hl, w: g.w, stage: "gone", touched: fid, ghost: g.act });
+  }
+  for (const e of S.ent.pay.values()) payRows.push(e);
+  payRows.sort((a, c) => (c.touched === fid) - (a.touched === fid) || a.hl - c.hl);
+  const book = S.ent.book.get(PAIRS[0]);
+
+  /* ══ stage 1 and stage 3: worker lanes ══ */
+  const STAGE = [
+    { ci: 1, wid: b[0], stage: 0, inK: "input", head: "2 · STAGE 1 — ACCOUNT INPUTS APPLIED" },
+    { ci: 5, wid: b[2], stage: 2, inK: "intent", head: "6 · STAGE 3 — ACCOUNT TX → PROPOSALS" },
+  ];
+  for (const bd of STAGE) {
+    const x0 = colX[bd.ci], bw = bd.wid;
+    const live = f && f.seg === bd.stage, done = f && f.seg > bd.stage;
+    ctx.font = '600 8.5px "IBM Plex Sans", sans-serif'; ctx.letterSpacing = "1.2px";
+    ctx.fillStyle = live ? KIND[bd.inK] : done ? "#4d5c6e" : "#333f4e";
+    const htw = ctx.measureText(bd.head).width;
+    ctx.fillText(htw < bw - 6 ? bd.head : bd.head.split(" — ")[0], x0 + 2, headY - 4);
+    ctx.letterSpacing = "0px";
+
+    const boxW = clamp(bw * 0.17, 22, 54);
+    const workX = x0 + boxW + 5, workW = Math.max(30, bw - boxW - 7);
+
+    for (let i = 0; i < W; i++) {
+      const y = laneY(i) + (laneH - rowH) / 2;
+      if (!f) continue;
+      const own = f.lanes[bd.stage][i], join = f.joins[bd.stage];
+      const prog = laneProg(bd.stage)(i);
+      const nIn = bd.stage === 0 ? f.items[i] : f.items3[i];
+
+      if (!(live || done)) { ctx.fillStyle = "#0b1017"; ctx.fillRect(x0, y, bw, rowH); continue; }
+
+      ctx.fillStyle = "#080d14"; ctx.fillRect(x0, y, boxW, rowH);
+      ctx.strokeStyle = "#18212d"; ctx.lineWidth = 1;
+      ctx.strokeRect(x0 + .5, y + .5, boxW - 1, rowH - 1);
+      pile(x0 + 3, y + 3, boxW - 6, rowH - 6, Math.round(nIn * (1 - prog)), KIND[bd.inK]);
+
+      ctx.fillStyle = "#090e16"; ctx.fillRect(workX, y, workW, rowH);
+      const wfull = join > 0 ? (own / join) * workW : 0;
+
+      if (bd.stage === 2 && rowH >= 24) {
+        // the actual AccountTx this lane is signing, by name
+        const list = f.props3[i] || [];
+        const shownN = Math.round(list.length * prog);
+        const maxL = Math.max(1, Math.floor((rowH - 2) / 11));
+        ctx.font = '400 9px "IBM Plex Mono", monospace';
+        for (let r = 0; r < Math.min(maxL, shownN); r++) {
+          const it3 = list[r], ry = y + 1 + r * 11;
+          ctx.fillStyle = "#101820"; ctx.fillRect(workX + 2, ry, workW - 4, 9);
+          ctx.fillStyle = C.seal; ctx.globalAlpha = .8;
+          ctx.fillRect(workX + 2, ry, 2, 9); ctx.globalAlpha = 1;
+          ctx.fillStyle = "#cddaea";
+          ctx.fillText(it3.tx, workX + 8, ry + 7.5);
+          ctx.fillStyle = "#66788c"; ctx.textAlign = "right";
+          ctx.fillText("→ 0x" + hexn(it3.sh, 3), workX + workW - 4, ry + 7.5);
+          ctx.textAlign = "left";
+          if (tr && tr.props.some(pp => pp.sh === it3.sh)) traceBox(workX + 2, ry, workW - 4, 9);
+        }
+        if (shownN > maxL) {
+          ctx.font = '400 8px "IBM Plex Mono", monospace'; ctx.fillStyle = "#4a5768";
+          ctx.textAlign = "right";
+          ctx.fillText("+" + (shownN - maxL), workX + workW - 4, y + rowH - 2);
+          ctx.textAlign = "left";
+        }
+      } else {
+        const segs = (f.shards && f.shards[bd.stage][i]) || [];
+        let acc = 0;
+        for (const sg of segs) {
+          const sx = workX + (acc / join) * workW, sw = (sg.cost / join) * workW;
+          const vis = clamp((own * prog - acc) / Math.max(1e-9, sg.cost), 0, 1);
+          acc += sg.cost;
+          if (vis <= 0 || sw < .35) continue;
+          const wv = Math.max(.8, sw * vis - (sw > 4 ? 1.2 : 0));
+          ctx.fillStyle = KIND[bd.inK]; ctx.globalAlpha = .92;
+          ctx.fillRect(sx, y, wv, rowH); ctx.globalAlpha = 1;
+          if (tr && bd.stage === 0 && sg.key === tr.acc) traceBox(sx, y, wv, rowH);
+        }
+      }
+      if (prog >= 1 && wfull < workW - 1) {
+        ctx.fillStyle = "#170f12"; ctx.fillRect(workX + wfull, y, workW - wfull, rowH);
+        ctx.fillStyle = "#7a3129"; ctx.fillRect(workX + wfull, y, 1.5, rowH);
+      }
+    }
+  }
+
+  /* ══ stage 2: the two Entity books, whole ══ */
+  {
+    const x0 = colX[3], bw = b[1];
+    const live = f && f.seg === 1, done = f && f.seg > 1;
+    ctx.font = '600 8.5px "IBM Plex Sans", sans-serif'; ctx.letterSpacing = "1.2px";
+    ctx.fillStyle = live ? C.pay : done ? "#4d5c6e" : "#333f4e";
+    ctx.fillText("4 · STAGE 2 — THE ENTITY BOOKS", x0 + 2, headY - 4);
+    ctx.letterSpacing = "0px";
+
+    const half = gridH / 2;
+    ctx.fillStyle = "#090e16"; ctx.fillRect(x0, gTop, bw, gridH);
+    ctx.strokeStyle = "#1a2430"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x0, gTop + half); ctx.lineTo(x0 + bw, gTop + half); ctx.stroke();
+
+    // ── Paybook, keyed by hashlock ──
+    label(ctx, "PAYBOOK · keyed by hashlock", x0 + 4, gTop + 10, C.pay, 8);
+    ctx.font = '400 9px "IBM Plex Mono", monospace';
+    const prH = 12, prMax = Math.max(1, Math.floor((half - 18) / prH));
+    for (let r = 0; r < prMax; r++) {
+      const ry = gTop + 15 + r * prH, e = payRows[r];
+      if (!e) { ctx.fillStyle = "#0a0f17"; ctx.fillRect(x0 + 4, ry, bw - 8, prH - 2); continue; }
+      const liveR = e.touched === fid;
+      ctx.fillStyle = liveR ? "#171f2b" : "#0a0f17";
+      ctx.fillRect(x0 + 4, ry, bw - 8, prH - 2);
+      ctx.fillStyle = C.pay; ctx.globalAlpha = liveR ? 1 : .35;
+      ctx.fillRect(x0 + 4, ry, 2, prH - 2); ctx.globalAlpha = 1;
+      ctx.fillStyle = "#54657a"; ctx.fillText("w" + e.w, x0 + 10, ry + prH - 4);
+      ctx.fillStyle = liveR ? "#dbe6f2" : "#75879b";
+      ctx.fillText(tagHl(e.hl), x0 + 34, ry + prH - 4);
+      const a = acts.pay.get(e.hl);
+      const state = e.ghost ? e.ghost
+        : a ? (a.act === "secret" ? "secret " + a.note : a.act)
+        : e.stage === "locked" ? "locked" : "ack wait";
+      ctx.fillStyle = e.ghost ? C.durable : liveR ? C.pay : "#4d5b6c";
+      ctx.fillText(state, x0 + 88, ry + prH - 4);
+      if (e.amt) {
+        ctx.fillStyle = "#4d5b6c"; ctx.textAlign = "right";
+        ctx.fillText(e.amt + " → w" + (e.outIdx % Math.max(1, W)), x0 + bw - 8, ry + prH - 4);
+        ctx.textAlign = "left";
+      }
+      if (tr && e.hl === tr.hl) traceBox(x0 + 4, ry, bw - 8, prH - 2);
+    }
+    if (payRows.length > prMax) {
+      ctx.font = '400 8px "IBM Plex Mono", monospace'; ctx.fillStyle = "#44515f";
+      ctx.textAlign = "right";
+      ctx.fillText("+" + (payRows.length - prMax) + " rows", x0 + bw - 8, gTop + half - 4);
+      ctx.textAlign = "left";
+    }
+
+    // ── Orderbook: one pair, one sequential price-time domain ──
+    const oy = gTop + half;
+    label(ctx, "ORDERBOOK · ETH/USDT", x0 + 4, oy + 12, C.book, 8);
+    if (book) {
+      const act = acts.book.get(book.name);
+      ctx.font = '400 9px "IBM Plex Mono", monospace';
+      ctx.fillStyle = "#54657a";
+      ctx.textAlign = "right";
+      ctx.fillText("one shard · owner w" + book.w, x0 + bw - 6, oy + 12);
+      ctx.textAlign = "left";
+      const lvlH = 12, side = Math.max(1, Math.floor((half - 40) / 2 / lvlH));
+      const asks = book.asks.slice(0, side).reverse();
+      const bids = book.bids.slice(0, side);
+      const drawLvl = (lv, ry, isAsk) => {
+        const cc = isAsk ? "#ff7a6a" : "#5ad18a";
+        ctx.fillStyle = "#0a0f17"; ctx.fillRect(x0 + 4, ry, bw - 8, lvlH - 2);
+        const depth = clamp(lv.qty / 6, .06, 1) * (bw - 12);
+        ctx.fillStyle = cc; ctx.globalAlpha = .16;
+        ctx.fillRect(isAsk ? x0 + bw - 4 - depth : x0 + 4, ry, depth, lvlH - 2);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = cc;
+        ctx.fillText(isAsk ? "ask" : "bid", x0 + 10, ry + lvlH - 4);
+        ctx.fillStyle = "#cddaea";
+        ctx.fillText(String(lv.px), x0 + 42, ry + lvlH - 4);
+        ctx.fillStyle = "#5f7186"; ctx.textAlign = "right";
+        ctx.fillText(lv.qty + " lots", x0 + bw - 8, ry + lvlH - 4);
+        ctx.textAlign = "left";
+      };
+      let ry = oy + 18;
+      for (const lv of asks) { drawLvl(lv, ry, true); ry += lvlH; }
+      ctx.fillStyle = act ? "#1a1f14" : "#0d1219";
+      ctx.fillRect(x0 + 4, ry, bw - 8, lvlH + 1);
+      ctx.fillStyle = act ? C.seal : "#6d7f93";
+      ctx.fillText(act ? (act.act === "fill" ? "FILL at " + act.px : "rest " + act.px)
+                       : "last " + book.last, x0 + 10, ry + lvlH - 3);
+      ctx.fillStyle = "#54657a"; ctx.textAlign = "right";
+      ctx.fillText(book.trades + " trades", x0 + bw - 8, ry + lvlH - 3);
+      ctx.textAlign = "left";
+      if (tr && tr.pair) traceBox(x0 + 4, ry, bw - 8, lvlH + 1);
+      ry += lvlH + 3;
+      for (const lv of bids) { drawLvl(lv, ry, false); ry += lvlH; }
+    }
+  }
+
+  /* ══ the JOINs: where results are collected, and what holds them ══ */
+  const JOINS = [
+    { ci: 2, num: "3", name: "JOIN 1", stage: 0, kind: "effect", key: "re-key: hashlock / pair" },
+    { ci: 4, num: "5", name: "JOIN 2", stage: 1, kind: "intent", key: "re-key: accountId" },
+    { ci: 6, num: "7", name: "JOIN 3", stage: 2, kind: "proposal", key: "seal" },
+  ];
+  for (const j of JOINS) {
+    const x = colX[j.ci], open = f ? f.seg > j.stage : false;
+    const ready = f ? laneDone(j.stage) : 0;
+    const justOpened = f && f.seg === j.stage + 1 && el < f.joins[Math.min(j.stage + 1, 2)] * .22;
+
+    ctx.fillStyle = open ? "#0c1017" : "#120f0e";
+    ctx.fillRect(x, gTop - 4, joinW, gridH + 8);
+
+    for (let i = 0; i < W; i++) {                       // one slot per worker
+      const y = laneY(i) + (laneH - rowH) / 2;
+      const n = collected(j.stage, i), full = laneProg(j.stage)(i) >= 1;
+      ctx.fillStyle = "#080d14"; ctx.fillRect(x + 16, y, joinW - 23, rowH);
+      ctx.strokeStyle = full ? KIND[j.kind] : "#1b2531";
+      ctx.globalAlpha = full ? .55 : 1; ctx.lineWidth = 1;
+      ctx.strokeRect(x + 16.5, y + .5, joinW - 24, rowH - 1); ctx.globalAlpha = 1;
+      pile(x + 19, y + 3, joinW - 29, rowH - 6, n, KIND[j.kind]);
+    }
+
+    const sx2 = x + joinW - 3.5;                        // the shutter, on the way out
+    const gap = open ? gridH * .5 : 0;
+    ctx.fillStyle = justOpened ? "#ffd9b0" : open ? C.copper : "#9c5340";
+    ctx.fillRect(sx2 - 1.5, gTop - 4, 3, (gridH + 8) / 2 - gap / 2);
+    ctx.fillRect(sx2 - 1.5, gTop - 4 + (gridH + 8) / 2 + gap / 2, 3, (gridH + 8) / 2 - gap / 2);
+    if (!open) {
+      ctx.fillStyle = "#5a3125";
+      for (let yy = gTop + 4; yy < gTop + gridH; yy += 11) ctx.fillRect(sx2 - 5, yy, 10, 1.5);
+    } else {
+      ctx.strokeStyle = justOpened ? "#ffd9b0" : "#3a3021";
+      ctx.lineWidth = 1; ctx.globalAlpha = justOpened ? .85 : .4;
+      ctx.beginPath();
+      for (let i = 0; i < W; i++) fanPath(ctx, sx2, gMid, x + joinW + b[j.stage === 2 ? 2 : (j.stage === 0 ? 1 : 2)] * 0, laneMid(i));
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    const litc = justOpened ? "#ffd9b0" : open ? C.copper : "#d08a6f";
+    vlabel(ctx, j.num + " · " + j.name, x + 10, gMid, litc, 9);
+    ctx.textAlign = "center";
+    ctx.font = '400 8px "IBM Plex Mono", monospace';
+    ctx.fillStyle = open ? "#5b6a7c" : C.bad;
+    ctx.fillText(open ? "open" : "shut · " + ready + "/" + W,
+      x + (joinW - 6) / 2, gTop + gridH + 12);
+    const totalN = !f ? 0 : (j.stage === 0 ? f.nEffects : f.nIntents);
+    let haveN = 0;
+    if (f) for (let i = 0; i < W; i++) haveN += collected(j.stage, i);
+    ctx.font = '500 9px "IBM Plex Mono", monospace';
+    ctx.fillStyle = open ? "#9fb0c2" : "#7a8b9d";
+    ctx.fillText(haveN + " / " + totalN + " " + j.kind + "s", x + (joinW - 6) / 2, gTop + gridH + 24);
+    ctx.textAlign = "left";
+  }
+
+  /* ── the coordinator's bucket column ── */
+  {
+    const x = colX[0], sp = x + bucketW / 2;
+    ctx.fillStyle = "#140f09"; ctx.fillRect(x, gTop - 4, bucketW, gridH + 8);
+    ctx.strokeStyle = C.copper; ctx.lineWidth = 1.6; ctx.globalAlpha = .85;
+    ctx.beginPath(); ctx.moveTo(sp, gTop); ctx.lineTo(sp, gTop + gridH); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#40311f"; ctx.lineWidth = 1; ctx.globalAlpha = .5;
+    ctx.beginPath();
+    for (let i = 0; i < W; i++) fanPath(ctx, sp, gMid, x + bucketW, laneMid(i));
+    ctx.stroke(); ctx.globalAlpha = 1;
+    vlabel(ctx, "1 · BUCKET", sp, gMid, C.copper, 9);
+    ctx.textAlign = "center";
+    ctx.font = '400 8px "IBM Plex Mono", monospace'; ctx.fillStyle = "#5b6a7c";
+    ctx.fillText("accountId", sp, gTop + gridH + 12);
+    ctx.font = '500 9px "IBM Plex Mono", monospace'; ctx.fillStyle = "#9fb0c2";
+    ctx.fillText(f ? String(f.take) : "", sp, gTop + gridH + 24);
+    ctx.textAlign = "left";
+  }
+
+  /* ── seal ── */
+  const sx = colX[7];
+  const sealing = f && f.seg === 3;
+  ctx.fillStyle = sealing ? "#1b1608" : "#0b1017";
+  ctx.fillRect(sx, gTop - 4, sealW, gridH + 8);
+  if (sealing && stageDur > 0) {
+    const p = clamp(el / stageDur, 0, 1);
+    ctx.fillStyle = C.seal; ctx.globalAlpha = .28;
+    ctx.fillRect(sx, gTop + gridH - gridH * p - 4, sealW, gridH * p + 8);
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = sealing ? C.seal : "#3f4c5c";
+  ctx.fillRect(sx, gTop - 4, 1.2, gridH + 8);
+  vlabel(ctx, "8 · SEAL", sx + sealW / 2, gMid, sealing ? C.seal : "#3f4c5c", 9);
+
+  /* ── the followed payment: one thread through the whole machine ──
+     Same input, same worker, same Paybook row, same proposal, same peer. It is
+     drawn only as far as the frame has actually got. */
+  if (tr) {
+    const spn = gi => gi === 0 ? colX[0] + bucketW / 2 : colX[gi * 2] + joinW - 4;
+    const lane = wi => laneMid(Math.min(wi === undefined ? 0 : wi, W - 1));
+    const path = [[spn(0), gMid], [colX[1], lane(tr.w0)],
+                  [colX[1] + b[0], lane(tr.w0)], [spn(1), gMid]];
+    if (f.seg >= 1 && tr.w1 !== undefined) {
+      path.push([colX[3], lane(tr.w1)], [colX[3] + b[1], lane(tr.w1)], [spn(2), gMid]);
+    }
+    if (f.seg >= 2 && tr.props.length) {
+      path.push([colX[5], lane(tr.props[0].w)], [colX[5] + b[2], lane(tr.props[0].w)], [spn(3), gMid]);
+    }
+    if (f.seg >= 3) path.push([colX[7] + sealW / 2, gMid]);
+
+    ctx.strokeStyle = TRACE_C; ctx.lineWidth = 1.5; ctx.globalAlpha = idle ? .4 : .92;
+    ctx.beginPath();
+    for (let k = 1; k < path.length; k++) {
+      const [ax, ay] = path[k - 1], [bx2, by] = path[k];
+      if (Math.abs(by - ay) < 0.5) { ctx.moveTo(ax, ay); ctx.lineTo(bx2, by); }
+      else fanPath(ctx, ax, ay, bx2, by);
+    }
+    ctx.stroke();
+    ctx.fillStyle = TRACE_C;
+    for (const [px, py] of path) { ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    S.traceCaption = "following " + (tr.hl !== undefined ? tagHl(tr.hl) : (tr.pair || ""));
+  }
+
+  /* between frames the last frame stays on screen, dimmed, so the machine is
+     never blank and the wait itself is visible. */
+  if (idle && f) {
+    ctx.fillStyle = "rgba(7,10,15,0.55)";
+    ctx.fillRect(gx0 - 6, gTop - 9, gridR - gx0 + 12, gridH + 18);
+  }
+
+  /* ── ingress: every input flies into the coordinator first ── */
+  const rowsTop = gTop, rowsBot = gTop + gridH;
+  const rowY = r => rowsTop + 8 + r * ((rowsBot - rowsTop - 16) / (CHIP_ROWS - 1));
+  const coordSpine = gx0 + gateW / 2;
+  label(ctx, "INGRESS", 4, headY, C.mute, 8.5);
+
+  for (let i = S.chips.length - 1; i >= 0; i--) {
+    const c = S.chips[i];
+    c.t += dtReal * 0.40;
+    if (c.t > 1.3) { S.chips.splice(i, 1); continue; }
+    const y0 = rowY(c.row);
+    let x, y = y0, a = 1, mode = 0;   // 0 raw id · 1 decoded by the coordinator · 2 refused
+
+    const laneYc = laneMid(Math.min(c.w, W - 1));
+    if (c.refused) {
+      mode = 2;
+      const t = clamp(c.t / 0.62, 0, 1);
+      x = lerp(4, gx0 - 34, ease(Math.min(t * 1.7, 1)));
+      if (t > 0.6) { x -= (t - 0.6) * 130; y += (t - 0.6) * (t - 0.6) * 1000; a = 1 - (t - 0.6) / 0.4; }
+      if (a <= .02) { S.chips.splice(i, 1); continue; }
+    } else if (c.t < 0.5) {
+      // 1) into the coordinator, converging on its spine
+      const t = ease(c.t / 0.5);
+      x = lerp(4, coordSpine - 8, t);
+      y = lerp(y0, gMid, t * t);
+    } else {
+      // 2) out along the scatter curve to the worker that owns the shard
+      const t = clamp((c.t - 0.5) / 0.6, 0, 1);
+      mode = 1;
+      const p = fanAt(ease(t), coordSpine, gMid, colX[1], laneYc);
+      x = p[0]; y = p[1];
+      a = 1 - clamp((t - 0.6) / 0.4, 0, 1);
+    }
+
+    if (mode === 1) {           // the coordinator has resolved the shard: light its route
+      ctx.strokeStyle = C.copper; ctx.lineWidth = 1.2;
+      ctx.globalAlpha = a * .45;
+      ctx.beginPath();
+      fanPath(ctx, coordSpine, gMid, colX[1], laneYc);
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    const col = mode === 2 ? C.bad : c.isSwap ? C.book : C.acct;
+    const text = mode === 2 ? "0x" + hex8(c.word) + "  refused" : "0x" + hex8(c.word);
+    ctx.globalAlpha = a;
+    ctx.font = '500 10.5px "IBM Plex Mono", monospace';
+    const tw = ctx.measureText(text).width;
+    const bx = x;
+    ctx.fillStyle = mode === 2 ? "#1a0c0b" : "#0c1219";
+    void mode;
+    roundRect(ctx, bx, y - 8, tw + 13, 16, 2); ctx.fill();
+    ctx.strokeStyle = col; ctx.globalAlpha = a * .6; ctx.lineWidth = 1; ctx.stroke();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = col; ctx.fillRect(bx + 3, y - 3.5, 3, 7);
+    ctx.fillStyle = mode === 2 ? "#f3b1ab" : "#c9d6e4";
+    ctx.fillText(text, bx + 9, y + 3.5);
+    if (c.n > 1 && mode === 0 && c.t < 0.34) {
+      ctx.font = '400 9px "IBM Plex Mono", monospace';
+      ctx.fillStyle = C.mute; ctx.fillText("×" + c.n, bx + tw + 17, y + 3.5);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ── admission buffer ── */
+  const fillp = clamp(queued() / memCap(), 0, 1);
+  const gy = rowsBot + 6, gw = ingW - 24;
+  ctx.fillStyle = "#0d131c"; roundRect(ctx, 4, gy, gw, 7, 2); ctx.fill();
+  ctx.fillStyle = fillp > .97 ? C.bad : fillp > .7 ? C.seal : C.acct;
+  ctx.globalAlpha = .85; roundRect(ctx, 4, gy, Math.max(2, gw * fillp), 7, 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.font = '400 9.5px "IBM Plex Mono", monospace'; ctx.fillStyle = C.mute;
+  ctx.fillText("mempool " + queued() + " / " + memCap(), 4, gy + 19);
+  if (tr && S.traceCaption) {
+    ctx.font = '500 9.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = TRACE_C;
+    ctx.fillText(S.traceCaption, 4, gy + 34);
+  }
+
+  /* ── durability deck ───────────────────────────────────────────────
+     Strictly one thing at a time. The sealed frame first travels down into the
+     log (append), then the head block fills while the disk works (fsync), and
+     only when the disk confirms does the valve open and the frame leave for
+     the network (release). The three never overlap for one frame.        */
+  const gridBottom = gTop + gridH;
+  const bw = clamp((gridR - gx0) / 24, 14, 30), bgap = 3, bn = 16;
+  const walH = 24, walTop = h - 128;
+  const sealMid = colX[7] + sealW / 2;
+  const walRight = clamp(sealMid + bw / 2, gx0 + bn * (bw + bgap), gridR);
+  const blockX = k => walRight - bw - (bn - 1 - k) * (bw + bgap);   // k = bn-1 is the head
+  const headX = blockX(bn - 1) + bw / 2;
+  const headTape = S.tape.length ? S.tape[S.tape.length - 1] : null;
+
+  const ph = S.committer.phase, pel = S.clock - S.committer.t0;
+  const appending = ph === "append", fsyncing = ph === "fsync", releasing = ph === "release";
+  const appendP = appending ? clamp(pel / WAL.appendUs, 0, 1) : 0;
+  const fsyncP = fsyncing ? clamp(pel / CFG.fsyncUs, 0, 1) : 0;
+  const releaseP = releasing ? clamp(pel / WAL.releaseUs, 0, 1) : 0;
+  const durableHead = !!headTape && headTape.state === "durable";
+  const valveOpen = releasing || (ph === "idle" && durableHead);
+
+  /* 1. append — the conductor out of the seal column, carrying the frame */
+  const railY = walTop - 14;
+  ctx.strokeStyle = appending ? C.seal : "#2b2718";
+  ctx.lineWidth = 2; ctx.globalAlpha = appending ? 1 : .75;
+  ctx.beginPath();
+  ctx.moveTo(sealMid, gridBottom + 16);
+  ctx.lineTo(sealMid, railY);
+  ctx.lineTo(headX, railY);
+  ctx.lineTo(headX, walTop);
+  ctx.stroke(); ctx.globalAlpha = 1;
+
+  label(ctx, "DURABLE WAL — ORDERED, DEPTH ≤ 1", gx0, railY - 2, C.mute, 8.5);
+
+  if (appending) {
+    const legDown = railY - (gridBottom + 16);
+    const legAcross = Math.abs(headX - sealMid);
+    const d = ease(appendP) * (legDown + legAcross + 14);
+    let px, py;
+    if (d < legDown) { px = sealMid; py = gridBottom + 16 + d; }
+    else if (d < legDown + legAcross) { px = sealMid + Math.sign(headX - sealMid) * (d - legDown); py = railY; }
+    else { px = headX; py = railY + (d - legDown - legAcross); }
+    ctx.fillStyle = C.seal; ctx.globalAlpha = .95;
+    roundRect(ctx, px - 7, py - 3.5, 14, 7, 2); ctx.fill(); ctx.globalAlpha = 1;
+  }
+
+  /* 2. the log; the newest block sits directly under the seal column */
+  for (let k = 0; k < bn; k++) {
+    const bx = blockX(k);
+    if (bx < 2) continue;
+    const rec = S.tape[S.tape.length - 1 - (bn - 1 - k)];
+    const isHead = k === bn - 1 && !!rec;
+    const waiting = isHead && appending;          // the row has not landed yet
+    const writing = isHead && fsyncing;           // the disk is working on it
+
+    ctx.fillStyle = !rec ? "#0b1018" : waiting ? "#0e1219"
+      : writing ? "#1d1606" : rec.state === "durable" ? "#0d2417" : "#1d1606";
+    roundRect(ctx, bx, walTop, bw, walH, 2); ctx.fill();
+
+    if (rec && !waiting && !writing) {
+      ctx.fillStyle = rec.state === "durable" ? C.durable : C.seal;
+      ctx.globalAlpha = .34; roundRect(ctx, bx, walTop, bw, walH, 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    if (writing) {                                 // gold fill = fsync progress
+      ctx.fillStyle = C.seal; ctx.globalAlpha = .2;
+      roundRect(ctx, bx, walTop, bw, walH, 2); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.save(); roundRect(ctx, bx, walTop, bw, walH, 2); ctx.clip();
+      ctx.fillStyle = C.seal; ctx.globalAlpha = .85;
+      ctx.fillRect(bx, walTop, bw * fsyncP, walH);
+      ctx.globalAlpha = 1; ctx.restore();
+    }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = !rec ? "#161e29" : waiting ? "#5a4a18" : writing ? C.seal
+      : rec.state === "durable" ? "#22623f" : "#5a4a18";
+    roundRect(ctx, bx, walTop, bw, walH, 2); ctx.stroke();
+    if (isHead) {
+      ctx.strokeStyle = (waiting || writing) ? C.seal : C.durable; ctx.lineWidth = 1.4;
+      ctx.globalAlpha = waiting ? .45 : 1;
+      roundRect(ctx, bx - 2, walTop - 2, bw + 4, walH + 4, 3); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.font = '400 9px "IBM Plex Mono", monospace';
+  ctx.fillStyle = (appending || fsyncing) ? C.seal : C.durable; ctx.textAlign = "right";
+  ctx.fillText(
+    appending ? "append → wal  ·  frame " + (S.committer.sealed ? S.committer.sealed.id : "")
+    : fsyncing ? "fsync " + Math.round(fsyncP * 100) + "%  ·  " + (CFG.fsyncUs / 1000).toFixed(2) + " ms"
+    : releasing ? "durable  ·  releasing outbox"
+    : "height " + S.committer.height + "  ·  durable",
+    walRight, walTop + walH + 13);
+  ctx.textAlign = "left";
+
+  /* 3. the valve: shut until the disk confirms */
+  const vy = walTop + walH + 22;
+  ctx.strokeStyle = valveOpen ? C.durable : (appending || fsyncing) ? "#4a3a18" : "#2a2222";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(headX, walTop + walH + 2); ctx.lineTo(headX, vy - 5); ctx.stroke();
+  ctx.fillStyle = valveOpen ? C.durable : "#151b22";
+  ctx.strokeStyle = valveOpen ? C.durable : (appending || fsyncing) ? C.seal : "#4a3230";
+  ctx.beginPath(); ctx.arc(headX, vy, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  if (!valveOpen) {
+    ctx.strokeStyle = (appending || fsyncing) ? C.seal : C.bad; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(headX - 3.4, vy - 3.4); ctx.lineTo(headX + 3.4, vy + 3.4); ctx.stroke();
+  }
+
+  /* 4. release — the whole frame leaves for every peer at once */
+  const nodeW = clamp((gridR - gx0 - (NODES - 1) * 5) / NODES, 34, 78);
+  const nodeH = 22, nodeTop = h - 40;
+  const nodeX = k => gx0 + k * (nodeW + 5);
+  const arrivedAt = k => releasing && clamp((releaseP - k * 0.018) / 0.72, 0, 1) >= 1;
+
+  for (let k = 0; k < NODES; k++) {
+    const cxn = nodeX(k) + nodeW / 2;
+    const t = releasing ? clamp((releaseP - k * 0.018) / 0.72, 0, 1) : 0;
+    ctx.strokeStyle = releasing ? C.net : valveOpen ? "#1c4a30" : "#141c26";
+    ctx.lineWidth = releasing ? 1.4 : 1;
+    ctx.globalAlpha = releasing ? .3 + .55 * Math.sin(Math.PI * t) : .45;
+    ctx.beginPath(); fanPath(ctx, headX, vy + 5, cxn, nodeTop); ctx.stroke();
+    ctx.globalAlpha = 1;
+    if (releasing && t > 0 && t < 1) {
+      const [px, py] = fanAt(ease(t), headX, vy + 5, cxn, nodeTop);
+      ctx.fillStyle = C.net;
+      roundRect(ctx, px - 5, py - 2.5, 10, 5, 2); ctx.fill();
+    }
+  }
+  label(ctx, "NETWORK OUTBOX — FLAT, ORDERED, RELEASED ONLY AFTER FSYNC", gx0, nodeTop - 30, C.mute, 8.5);
+
+  const trNode = S.committer.sealed && S.committer.sealed.trace
+    ? S.committer.sealed.trace.node : -1;
+  for (let k = 0; k < NODES; k++) {
+    const nx = nodeX(k), arrived = arrivedAt(k);
+    ctx.fillStyle = arrived ? "#0c1a2e" : "#0b1119";
+    roundRect(ctx, nx, nodeTop, nodeW, nodeH, 3); ctx.fill();
+    ctx.strokeStyle = k === trNode ? TRACE_C : arrived ? C.net : "#1b2431";
+    ctx.lineWidth = k === trNode ? 1.4 : 1;
+    roundRect(ctx, nx, nodeTop, nodeW, nodeH, 3); ctx.stroke();
+    ctx.font = '500 9.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = arrived ? "#a9c8ff" : "#5f7186";
+    ctx.textAlign = "center";
+    ctx.fillText(PEER_NAMES[k], nx + nodeW / 2, nodeTop + 10);
+    ctx.font = '400 8.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = arrived ? C.net : "#3f4c5c";
+    ctx.fillText(fmt(S.peers[k]), nx + nodeW / 2, nodeTop + 19);
+    ctx.textAlign = "left";
+  }
+}
+
+/* ── timeline ─────────────────────────────────────────────────────── */
+const tlCv = document.getElementById("tl");
+function drawTimeline() {
+  const { ctx, w, h } = fitCanvas(tlCv);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#070a0f"; ctx.fillRect(0, 0, w, h);
+  ctx.textBaseline = "alphabetic";
+
+  const poolTop = 17, poolH = h - 60, walTop = h - 33, walH = 15;
+  // Quantised, smoothed window so the strip never jitters between frames.
+  const want = clamp((S.ema.frameUs || 4000) * 9, 1500, 900000);
+  const stepped = Math.pow(2, Math.round(Math.log2(want) * 2) / 2);
+  S.ema.window = lerp(S.ema.window || stepped, stepped, 0.06);
+  const windowUs = S.ema.window;
+  const now = S.clock;
+  const x = t => w - ((now - t) / windowUs) * w;
+
+  ctx.strokeStyle = "#0f1720"; ctx.lineWidth = 1;
+  for (let i = 1; i < 5; i++) {
+    const yy = Math.round(poolTop + (poolH * i) / 5) + .5;
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(w, yy); ctx.stroke();
+  }
+
+  const drawFrame = (segs, coord, walWait, t0, fsFrom, fsTo) => {
+    let t = t0;
+    for (const s of segs) {
+      const x0 = x(t), x1 = x(t + s.dur);
+      if (x1 > -2) {
+        const bh = Math.max(1.5, poolH * clamp(s.util, 0, 1));
+        ctx.fillStyle = ["#0d2422", "#241320", "#0d2422"][s.stage];
+        ctx.fillRect(x0, poolTop, Math.max(0.7, x1 - x0), poolH);
+        ctx.fillStyle = STAGE_C[s.stage]; ctx.globalAlpha = .82;
+        ctx.fillRect(x0, poolTop + poolH - bh, Math.max(0.7, x1 - x0), bh);
+        ctx.globalAlpha = 1;
+      }
+      t += s.dur;
+    }
+    if (coord > 0) {
+      const x0 = x(t), x1 = x(t + coord);
+      ctx.fillStyle = C.seal; ctx.globalAlpha = .75;
+      ctx.fillRect(x0, poolTop, Math.max(0.7, x1 - x0), poolH); ctx.globalAlpha = 1;
+      t += coord;
+    }
+    if (walWait > 0.5) {
+      const x0 = x(t), x1 = x(t + walWait);
+      ctx.fillStyle = C.bad; ctx.globalAlpha = .5;
+      ctx.fillRect(x0, poolTop, Math.max(0.7, x1 - x0), poolH); ctx.globalAlpha = 1;
+    }
+    if (fsFrom != null) {
+      const x0 = x(fsFrom), x1 = x(fsTo);
+      ctx.fillStyle = C.durable; ctx.globalAlpha = .7;
+      ctx.fillRect(x0, walTop, Math.max(1, x1 - x0), walH); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.net; ctx.fillRect(x1 - 1, walTop - 3, 2, walH + 6);
+    }
+  };
+
+  for (const r of S.records) {
+    if (x(r.t0 + r.wall) < -6) continue;
+    drawFrame(r.segs, r.coord, r.walWait, r.t0, r.fsyncFrom, r.fsyncTo);
+  }
+  const f = S.frame;
+  if (f) {
+    const segs = [];
+    for (let i = 0; i <= Math.min(f.seg, 2); i++) {
+      const dur = i < f.seg ? f.joins[i] : f.elapsed;
+      let busy = 0; for (let k = 0; k < f.W; k++) busy += Math.min(f.lanes[i][k], dur);
+      segs.push({ dur, util: busy / (f.W * Math.max(1, dur)), stage: i });
+    }
+    drawFrame(segs, f.seg === 3 ? f.elapsed : 0, f.walWait, f.t0, null, null);
+  }
+  if (S.committer.phase === "fsync") {
+    const x0 = x(S.committer.t0), x1 = x(Math.min(now, S.committer.t0 + CFG.fsyncUs));
+    ctx.fillStyle = C.durable; ctx.globalAlpha = .4;
+    ctx.fillRect(x0, walTop, Math.max(1, x1 - x0), walH); ctx.globalAlpha = 1;
+  }
+
+  label(ctx, "POOL", 4, 11, C.mute, 8.5);
+  label(ctx, "COMMITTER", 4, walTop - 5, C.mute, 8.5);
+  ctx.font = '400 9.5px "IBM Plex Mono", monospace';
+  ctx.fillStyle = C.mute; ctx.textAlign = "right";
+  ctx.fillText((windowUs / 1000).toFixed(1) + " ms window", w - 4, 11);
+  ctx.textAlign = "left";
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   6. DOM readouts
+   ═══════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const fmt = (n, d) => {
+  if (!isFinite(n) || n < 0) return "0";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 10000) return Math.round(n / 1000) + "k";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return n.toFixed(d === undefined ? 0 : d);
+};
+let lastDom = 0;
+function drawDom(nowReal) {
+  if (nowReal - lastDom < 200) return;          // calm, unhurried readouts
+  lastDom = nowReal;
+
+  $("mOps").innerHTML = fmt(S.ema.ops) + '<span class="u">/s</span>';
+  $("mOpsSub").textContent = "capacity \u2248 " + fmt(S.ema.cap) + "/s";
+  const rej = S.ema.rej;
+  $("mRej").innerHTML = fmt(rej) + '<span class="u">/s</span>';
+  $("mRej").style.color = rej > 1 ? C.bad : C.fg;
+  const rejPct = rej / Math.max(1, rej + S.ema.ops);
+  $("mRejSub").textContent = rej > 1 ? Math.round(rejPct * 100) + "% of offered load" : "mempool has room";
+
+  $("mFps").innerHTML = fmt(S.ema.fps, 1) + '<span class="u">/s</span>';
+  $("mFrame").textContent = (S.ema.frameUs / 1000).toFixed(2) + " ms / frame";
+
+  const util = Math.round(S.ema.util * 100), waste = Math.round(S.ema.waste * 100);
+  $("mUtil").innerHTML = util + '<span class="u">%</span>';
+  $("mUtil").style.color = util > 65 ? C.durable : util > 35 ? C.seal : C.bad;
+  $("mWaste").innerHTML = waste + '<span class="u">%</span>';
+  $("mWaste").style.color = waste > 45 ? C.bad : waste > 22 ? C.seal : C.fg;
+
+  const q = queued(), cap = memCap();
+  const qp = Math.round((q / cap) * 100);
+  $("mQ").innerHTML = qp + '<span class="u">%</span>';
+  $("mQ").style.color = qp > 97 ? C.bad : qp > 70 ? C.seal : C.fg;
+  $("mQSub").textContent = fmt(q) + " of " + fmt(cap) + " inputs"
+    + (S.deferred ? "  ·  " + S.deferred + " same-account deferred" : "");
+
+  $("vW").textContent = CFG.wantWorkers + (CFG.wantWorkers === 1 ? " worker" : " workers")
+    + (CFG.wantWorkers !== CFG.workers ? " › next frame" : "");
+  $("mH").textContent = fmt(S.committer.height);
+  $("mHSub").textContent = fmt(S.rows) + " outbox rows";
+
+  $("rA").textContent = S.roots.a || "—"; $("rP").textContent = S.roots.p || "—";
+  $("rO").textContent = S.roots.o || "—"; $("rC").textContent = S.roots.c || "—";
+  $("rE").textContent = S.roots.e || "—"; $("rR").textContent = S.roots.r || "—";
+  $("rF").textContent = S.roots.f || "—";
+  $("kDirty").textContent = fmt(S.dirty); $("kNodes").textContent = fmt(S.nodes);
+
+  $("kSnd").textContent = (walBusy() ? 1 : 0) + " / 1";
+  $("kFs").textContent = (CFG.fsyncUs / 1000).toFixed(2) + " ms";
+  const blk = Math.round((S.ema.blocked || 0) * 100);
+  $("kBlk").textContent = blk + "%";
+  $("kBlk").className = "v " + (blk > 25 ? "bad" : blk > 8 ? "warn" : "");
+  $("kRows").textContent = fmt(S.rows);
+  $("poison").classList.toggle("on", S.poisoned);
+  if (S.poisoned) $("poisonH").textContent = S.poisonAt;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   7. Loop
+   ═══════════════════════════════════════════════════════════════════ */
+let prev = performance.now(), lastTick = prev, rafPending = false;
+function tick(now) {
+  rafPending = false;
+  // Cap generously: some hosts throttle rAF, and a small cap would silently
+  // starve the simulation instead of just dropping frames.
+  const dtReal = Math.min((now - prev) / 1000, 0.25);
+  prev = now; lastTick = now;
+  if (CFG.running && !S.poisoned) {
+    advance((dtReal / CFG.slowmo) * 1e6);
+    spawnChips(dtReal);
+  }
+  drawHero(CFG.running ? dtReal : 0);
+  drawTimeline();
+  drawDom(now);
+  schedule();
+}
+function schedule() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(tick);
+}
+// Some embedders throttle or suspend rAF entirely; keep the machine moving.
+setInterval(() => { const n = performance.now(); if (n - lastTick > 400) tick(n); }, 300);
+
+/* ═══════════════════════════════════════════════════════════════════
+   8. Controls
+   ═══════════════════════════════════════════════════════════════════ */
+const expScale = (v, lo, hi) => lo * Math.pow(hi / lo, v / 100);
+function bind(id, out, apply, show) {
+  const el = $(id);
+  const run = () => { apply(+el.value); $(out).textContent = show(); };
+  el.addEventListener("input", run);
+  run();
+}
+bind("cPay", "vPay", v => CFG.payRate = v, () => CFG.payRate + "/s");
+bind("cSwap", "vSwap", v => CFG.swapRate = v, () => CFG.swapRate + "/s");
+bind("cHot", "vHot", v => CFG.hotPair = v / 100, () => Math.round(CFG.hotPair * 100) + "%");
+bind("cAcc", "vAcc", v => CFG.accounts = Math.max(1, Math.round(expScale(v, 1, 1000))),
+  () => CFG.accounts + (CFG.accounts === 1 ? " account" : " accounts"));
+bind("cSkew", "vSkew", v => CFG.skew = v / 100, () => CFG.skew.toFixed(2));
+bind("cW", "vW", v => { CFG.wantWorkers = v; if (!S.frame) { CFG.workers = v; recomputeOwnership(); } },
+  () => CFG.wantWorkers + (CFG.wantWorkers === 1 ? " worker" : " workers")
+        + (CFG.wantWorkers !== CFG.workers ? " ›" : ""));
+bind("cBatch", "vBatch", v => CFG.batch = Math.max(1, Math.round(expScale(v, 1, 64))),
+  () => CFG.batch + (CFG.batch === 1 ? " input max" : " inputs max"));
+bind("cSpine", "vSpine", v => CFG.spineUs = +expScale(Math.max(v, 1), 0.05, 40).toFixed(2),
+  () => CFG.spineUs.toFixed(2) + " µs");
+bind("cFsync", "vFsync", v => CFG.fsyncUs = v === 0 ? 0 : Math.round(expScale(v, 40, 30000)),
+  () => CFG.fsyncUs === 0 ? "none (unsafe)" : (CFG.fsyncUs / 1000).toFixed(2) + " ms");
+bind("cSlow", "vSlow", v => CFG.slowmo = +expScale(v, 0.2, 200).toFixed(3),
+  () => CFG.slowmo < 0.95 ? "\u00d7 " + (1 / CFG.slowmo).toFixed(1) + " fast"
+      : CFG.slowmo < 1.06 ? "realtime"
+      : "1 : " + (CFG.slowmo < 10 ? CFG.slowmo.toFixed(1) : Math.round(CFG.slowmo)));
+
+$("play").addEventListener("click", () => {
+  CFG.running = !CFG.running;
+  $("play").textContent = CFG.running ? "Pause" : "Play";
+  $("play").classList.toggle("on", CFG.running);
+});
+$("step").addEventListener("click", () => {
+  CFG.running = false;
+  $("play").textContent = "Play"; $("play").classList.remove("on");
+  const target = S.frameId;
+  let guard = 0;
+  while (S.frameId === target && guard++ < 6000 && !S.poisoned) advance(200);
+});
+$("kill").addEventListener("click", () => { S.killArmed = true; });
+$("reseed").addEventListener("click", () => reset((Math.random() * 4294967295) >>> 0));
+$("engRust").addEventListener("click", () => setEngine("rust"));
+$("engTs").addEventListener("click", () => setEngine("ts"));
+function setEngine(e) {
+  CFG.engine = e;
+  $("engRust").classList.toggle("on", e === "rust");
+  $("engTs").classList.toggle("on", e === "ts");
+}
+document.addEventListener("keydown", ev => {
+  if (ev.target instanceof HTMLInputElement) return;
+  if (ev.code === "Space") { ev.preventDefault(); $("play").click(); }
+  if (ev.key === "s" || ev.key === "S") $("step").click();
+});
+
+function reset(seed) {
+  SEED = seed >>> 0; rngState = SEED;
+  S.clock = 0; S.frameId = 1; S.lastFrameEnd = 0;
+  S.mem = []; S.arr = { pay: 0, swap: 0 };
+  S.ent = { pay: new Map(), order: [], book: new Map(), cron: [], ghost: [], fees: 0, fills: 0 };
+  S.hlSeq = 1;
+  S.rejected = 0; S.rejWindow = 0; S.accWindow = 0; S.winStart = 0;
+  S.frame = null; S.lastFrame = null; S.pendingSeal = false;
+  S.committer = { phase: "idle", t0: 0, height: 0, sealed: null };
+  S.tape = []; S.rows = 0; S.peers = new Array(NODES).fill(0); S.publishFlash = -1e9;
+  S.records = []; S.chips = []; S.chords = []; S.packets = [];
+  S.poisoned = false; S.killArmed = false;
+  S.lastSealClock = null;
+  S.ema = { ops: 0, cap: 0, rej: 0, fps: 0, util: 0, waste: 0, frameUs: 4000, blocked: 0, window: 12000 };
+  S.roots = { a: "", p: "", o: "", c: "", e: "", r: "", f: "" };
+  S.dirty = 0; S.nodes = 0;
+  $("seedOut").textContent = "seed 0x" + hex8(SEED) + " — deterministic";
+}
+
+recomputeOwnership();
+reset(SEED);
+new ResizeObserver(() => { drawHero(0); drawTimeline(); }).observe(document.body);
+schedule();
+</script>
+</body>
+</html>

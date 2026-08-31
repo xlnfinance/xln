@@ -12,6 +12,7 @@ import {
   captureAuthorityWave,
 } from '../../../rscore/authority-driver';
 import { installAuthorityCutover } from '../../../rscore/cutover/provider';
+import { installTsAccountWorkerAuthority } from '../../../rscore/ts-worker/provider';
 import { createStructuredLogger } from '../../../support/logger';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -70,6 +71,10 @@ type ApplyProfiler = {
   finish(env: RuntimeReplica, result: AppliedRuntimeInput, runtimeTxs: RuntimeTx[]): void;
 };
 
+const markRuntimeApplyPhase = (env: RuntimeReplica, phase: string): void => {
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = phase;
+};
+
 const createApplyProfiler = (): ApplyProfiler => {
   const start = getPerfMs();
   const marks: Record<string, number> = {};
@@ -106,6 +111,7 @@ const applyRuntimeTransactions = async (
 ): Promise<JInput[]> => {
   const jOutbox: JInput[] = [];
   for (const runtimeTx of runtimeTxs) {
+    markRuntimeApplyPhase(env, `apply.runtime-tx:${runtimeTx.type}`);
     jOutbox.push(...await applyRuntimeTx(env, runtimeTx, { isReplay }));
   }
   return jOutbox;
@@ -146,6 +152,7 @@ const applyRuntimeEntityBatch = async (
   deps: RuntimeInputReducerDeps,
   profile: ApplyProfiler,
 ): Promise<{ prepared: PreparedAtomicCrossJ; batch: AppliedEntityBatch }> => {
+  markRuntimeApplyPhase(env, 'apply.runtime-txs');
   const runtimeJOutbox = await applyRuntimeTransactions(
     env,
     ingress.runtimeTxs,
@@ -155,12 +162,14 @@ const applyRuntimeEntityBatch = async (
 
   const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
   const routingDeps = deps.getRoutingDeps();
+  markRuntimeApplyPhase(env, 'apply.atomic-admission');
   const prepared = admitAtomicCrossJAccountInputs(
     env,
     mergedInputs,
     isReplay,
   );
   profile.mark('atomicCrossJAdmission');
+  markRuntimeApplyPhase(env, 'apply.entity-inputs');
   const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
     isReplay,
     routingDeps,
@@ -254,7 +263,10 @@ const applyRuntimeInputPhases = async (
     // Before anything of this frame is applied: the authoritative engine has
     // to start where TypeScript starts, not where it ends up.
     installAuthorityCutover(env);
+    installTsAccountWorkerAuthority(env);
+    markRuntimeApplyPhase(env, 'apply.authority-arm');
     await armAuthorityWave(env);
+    markRuntimeApplyPhase(env, 'apply.merge');
     const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
     const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
       hasVerifiedEntityCommitPrecertificate(env, input));
@@ -275,6 +287,7 @@ const applyRuntimeInputPhases = async (
       batch,
       profile,
     );
+    markRuntimeApplyPhase(env, 'apply.authority-capture');
     // The authoritative engine is handed this frame after the Runtime's own
     // record of it is durable, which is outside this function — so the raw
     // wave is taken here, while the collector still holds it.

@@ -295,7 +295,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     }, 'ACCOUNT_INPUT_WAL')).toThrow('ACCOUNT_INPUT_WAL_DATA_KIND_INVALID:enqueue');
   });
 
-  test('exactly decodes persisted Account peer inputs before restore', () => {
+  test('exactly decodes persisted Account inputs before restore', () => {
     const base = {
       kind: 'ack',
       fromEntityId: entityId,

@@ -16,6 +16,7 @@ type AggregateOptions = Readonly<{
   logicalShardToWorker: readonly number[];
   includePostAccounts: boolean;
   expectedEffects: number;
+  needShardRoot: boolean;
   rootTree: TsAccountCanonicalRoot;
   dispatchMs: number;
   joinMs: number;
@@ -32,6 +33,9 @@ export const aggregateWorkerPhaseResults = (
     const result = parseWorkerPhaseResult(response.value, workerIndex);
     effects.push(...result.effects);
     for (const subroot of result.subroots) {
+      if (!options.needShardRoot) {
+        throw new Error(`TS_ACCOUNT_WORKER_UNREQUESTED_SUBROOT:${workerIndex}:${subroot.shardId}`);
+      }
       if (tsAccountWorkerForShard(subroot.shardId, options.logicalShardToWorker) !== workerIndex) {
         throw new Error(`TS_ACCOUNT_WORKER_PHASE_SUBROOT_OWNER:${workerIndex}:${subroot.shardId}`);
       }
@@ -85,9 +89,9 @@ export const aggregateWorkerPhaseResults = (
   const foldStart = getPerfMs();
   const changedSubroots: TsAccountWorkerSubroot[] = [...subroots.values()]
     .sort((left, right) => left.shardId - right.shardId);
-  options.rootTree.update(changedSubroots);
+  if (options.needShardRoot) options.rootTree.update(changedSubroots);
   return {
-    accountsRoot: options.rootTree.root,
+    ...(options.needShardRoot ? { accountsRoot: options.rootTree.root } : {}),
     effects: effects.sort((left, right) => left.order - right.order),
     changedSubroots,
     ...(options.includePostAccounts

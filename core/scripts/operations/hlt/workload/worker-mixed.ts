@@ -36,7 +36,6 @@ import {
   cancelPreparedRestingTail,
   submitPreparedParallelSameLoad,
   type PreparedParallelSameLoad,
-  type SameLoadNativeAuthority,
 } from './worker-same-lanes';
 import { assertBalancedExchangeDistribution } from './worker-same-plan';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
@@ -72,7 +71,6 @@ import {
   waitForRoutableReceivers,
 } from './worker-payments';
 import type { LaneRuntime } from '../lanes/lane-runtimes';
-import { provisionParallelLoadTraderAccounts } from '../lanes/worker-lanes';
 import {
   hltAuthorityEvidenceEnabled,
   materializeH1CollateralEvidence,
@@ -81,16 +79,19 @@ import {
   attachRustH1,
   isRustLiveMixedTpsAuthority,
   parseHltEngineSelection,
+  summarizeRustH1WorkerExecution,
   type RustH1Handle,
   type RustH1Metrics,
 } from '../rust/rust-h1';
 import {
-  connectRustH1,
+  createRustSameLoadNativeAuthority,
   readRustH1LoadBook,
   rustH1SessionPopulationReady,
+  waitForRustH1Metrics,
   waitForRustMixedSettlement,
 } from '../rust/rust-h1-settlement';
 import type { HltPaymentOperationLedgerSnapshot } from '../../../../support/performance/account-delivery-trace';
+import { hltWorkloadFingerprint } from './workload-fingerprint';
 
 type HltSwapTerminalLedger = Readonly<{
   accepted: number;
@@ -109,16 +110,29 @@ const assertCompleteUserSwapProposalLedger = (
   const deferred = snapshots.flatMap(snapshot => [...snapshot.deferredOfferIds]);
   const all = [...accepted, ...rejected, ...deferred];
   const unique = new Set(all);
+  const missing = [...expectedOfferIds].filter(offerId => !unique.has(offerId));
+  const unexpected = [...unique].filter(offerId => !expectedOfferIds.has(offerId));
+  const repeated = [...new Set(all.filter((offerId, index) => all.indexOf(offerId) !== index))];
   if (
     unique.size !== all.length || unique.size !== expectedOfferIds.size ||
-    [...unique].some(offerId => !expectedOfferIds.has(offerId)) ||
-    [...expectedOfferIds].some(offerId => !unique.has(offerId))
+    unexpected.length > 0 || missing.length > 0
   ) throw new Error(`HLT_SWAP_PROPOSAL_LEDGER_COVERAGE:${safeStringify({
     expected: expectedOfferIds.size,
     accepted: accepted.length,
     rejected: rejected.length,
     deferred: deferred.length,
     unique: unique.size,
+    missingCount: missing.length,
+    missingSample: missing.slice(0, 20),
+    unexpectedCount: unexpected.length,
+    unexpectedSample: unexpected.slice(0, 20),
+    repeatedCount: repeated.length,
+    repeatedSample: repeated.slice(0, 20),
+    hosts: Object.fromEntries(Object.entries(ledgers).map(([host, ledger]) => [host, {
+      accepted: ledger.swapProposals.acceptedOfferIds.length,
+      rejected: ledger.swapProposals.rejectedOfferIds.length,
+      deferred: ledger.swapProposals.deferredOfferIds.length,
+    }])),
   })}`);
   if (deferred.length > 0) {
     throw new Error(`HLT_SWAP_PROPOSAL_LEDGER_DEFERRED_AFTER_DRAIN:${deferred.length}`);
@@ -138,20 +152,6 @@ const assertCompleteUserSwapProposalLedger = (
     repeatedObservations: snapshots.reduce((sum, snapshot) => sum + snapshot.repeatedObservations, 0),
     rejectionCodes,
   };
-};
-
-const waitForRustMetrics = async (
-  rust: RustH1Handle,
-  predicate: (metrics: RustH1Metrics) => boolean,
-  code: string,
-): Promise<RustH1Metrics> => {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() <= deadline) {
-    const metrics = rust.metrics();
-    if (metrics && predicate(metrics)) return metrics;
-    await new Promise(resolve => setTimeout(resolve, 20));
-  }
-  throw new Error(`${code}:${safeStringify(rust.metrics())}:${rust.errorTail()}`);
 };
 
 export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> => {
@@ -216,46 +216,14 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       throw new Error('HLT_RUST_AUTHORITY_EVIDENCE_REQUIRES_NATIVE_MATERIALIZER');
     }
     if (authorityEvidence) await exportReplayBaseSnapshotIfConfigured(requireHub());
-    const nativeAuthority: SameLoadNativeAuthority | undefined = selection.engine === 'rust'
-      ? {
-          provisionPopulation: async (runtimes, receiveWindows, faucetAmounts) => {
-            const current = requireRustH1();
-            const expectedRuntimeId = current.ready.runtimeId;
-            const existingMetrics = await waitForRustMetrics(
-              current,
-              () => true,
-              'HLT_RUST_PRE_POPULATION_METRICS_MISSING',
-            );
-            rustExistingOpenSessions = existingMetrics.openSessions;
-            await current.stop();
-            rustH1 = await connectRustH1({
-              portBase: args.portBase,
-              lanes: runtimes,
-              expectedRuntimeId,
-              expectedEntityId: hubIdentity.entityId,
-            });
-            await provisionParallelLoadTraderAccounts({
-              hubIdentity,
-              runtimes,
-              receiveWindows,
-              ...(faucetAmounts === undefined ? {} : { faucetAmounts }),
-              commitHubInput: async (commandId, input) => {
-                if (input.runtimeTxs.length !== 0) {
-                  throw new Error(`HLT_RUST_LOCAL_RUNTIME_TXS_FORBIDDEN:${commandId}`);
-                }
-                await rustH1!.submitLocalEntityInputs(commandId, input.entityInputs);
-              },
-            });
-          },
-          readTradeCheckpoint: async () => {
-            if (!rustH1) throw new Error('HLT_RUST_NATIVE_AUTHORITY_NOT_STARTED');
-            const metrics = await waitForRustMetrics(rustH1, () => true, 'HLT_RUST_SETUP_METRICS_MISSING');
-            return {
-              tradeCount: metrics.orderbookTradeCount,
-              matchedSwaps: metrics.matchedSwaps,
-            };
-          },
-        }
+    const nativeAuthority = selection.engine === 'rust'
+      ? createRustSameLoadNativeAuthority({
+          portBase: args.portBase,
+          hubIdentity,
+          requireRust: requireRustH1,
+          replaceRust: next => { rustH1 = next; },
+          observeExistingOpenSessions: count => { rustExistingOpenSessions = count; },
+        })
       : undefined;
     prepared = await prepareParallelSameLoad({
       workDir: args.workDir,
@@ -280,6 +248,15 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     assertBalancedExchangeDistribution(prepared.distribution);
     console.log(`[load] balanced exchange ${safeStringify(prepared.distribution)}`);
     const users: LaneRuntime[] = [...prepared.traderRuntimes];
+    const workloadFingerprint = hltWorkloadFingerprint('mixed', {
+      users: users.map(lane => lane.identity.entityId),
+      rounds: args.rounds,
+      cadenceMs: args.cadenceMs,
+      amountMin: amountRange.min.toString(),
+      amountMax: amountRange.max.toString(),
+      pairId: PRODUCTION_SWAP_LOAD_PAIR_ID,
+      distribution: prepared.distribution,
+    });
     const offeredWindowMs = args.rounds * args.cadenceMs;
     const rustTpsAuthority = selection.engine === 'rust' && isRustLiveMixedTpsAuthority({
       users: users.length,
@@ -324,7 +301,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       if (!authorityEvidence) await exportReplayBaseSnapshotIfConfigured(requireHub());
     }
     const rustMetricsBefore: RustH1Metrics | null = rustH1
-      ? await waitForRustMetrics(
+      ? await waitForRustH1Metrics(
           rustH1,
           metrics => rustExistingOpenSessions !== null && rustH1SessionPopulationReady(
             metrics.openSessions,
@@ -384,13 +361,21 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       console.log(`[load] rust-economic ${safeStringify({
         elapsedMs: Math.ceil(performance.now() - startedAt),
         height: metrics.height,
+        frames: metrics.totalFrames - rustMetricsBefore.totalFrames,
         accepted: metrics.acceptedPayments - rustMetricsBefore.acceptedPayments,
         completed: metrics.completedPayments - rustMetricsBefore.completedPayments,
         matched: metrics.matchedSwaps - rustMetricsBefore.matchedSwaps,
         zeroFillSwapCancels:
           metrics.zeroFillSwapCancels - rustMetricsBefore.zeroFillSwapCancels,
         openSwapOffers: metrics.openSwapOffers - rustMetricsBefore.openSwapOffers,
+        runtimeEntityInputs:
+          metrics.totalRuntimeEntityInputs - rustMetricsBefore.totalRuntimeEntityInputs,
         accountInputs: metrics.totalAccountInputs - rustMetricsBefore.totalAccountInputs,
+        canonicalInputBytes:
+          metrics.totalCanonicalInputBytes - rustMetricsBefore.totalCanonicalInputBytes,
+        entityTxsSelected:
+          metrics.totalEntityTxsSelected - rustMetricsBefore.totalEntityTxsSelected,
+        entityTxsPending: metrics.entityTxsPending,
         applyMicros: metrics.totalApplyMicros - rustMetricsBefore.totalApplyMicros,
         projectionMicros: metrics.totalProjectionMicros - rustMetricsBefore.totalProjectionMicros,
         projectionInputMicros:
@@ -423,6 +408,8 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           metrics.accountTouchedShards - rustMetricsBefore.accountTouchedShards,
         workerItems: metrics.workerItems.map((value, index) =>
           value - (rustMetricsBefore.workerItems[index] ?? 0)),
+        workerNanos: metrics.workerNanos.map((value, index) =>
+          value - (rustMetricsBefore.workerNanos[index] ?? 0)),
         entityWorkerItems: metrics.entityWorkerItems.map((value, index) =>
           value - (rustMetricsBefore.entityWorkerItems[index] ?? 0)),
         entityWorkerNanos: metrics.entityWorkerNanos.map((value, index) =>
@@ -577,6 +564,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         deliveredTps: paymentReport.deliveredTps,
         matchedTps: matchedEconomicSwaps * 1_000 / rustSettlement.matchedElapsedMs,
       };
+      const workerExecution = summarizeRustH1WorkerExecution(
+        rustSettlement.economicPhaseMetrics,
+        requireRustH1().ready.workers,
+        submittedPayments + expectedSubmittedOffers,
+      );
       const live = {
         engine: 'rust',
         workload: 'mixed',
@@ -609,6 +601,8 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         metricsBefore: rustMetricsBefore,
         metrics: rustSettlement.metrics,
         economicPhaseMetrics: rustSettlement.economicPhaseMetrics,
+        workerExecution,
+        workloadFingerprint,
         paymentOperationLedger,
         laneQuiescence: rustSettlement.laneQuiescence,
         laneIo,

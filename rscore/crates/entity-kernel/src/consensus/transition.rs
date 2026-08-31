@@ -155,7 +155,7 @@ pub struct EntityTransitionCertificationRequest<'a> {
     pub secondary_hashes: Vec<HashToSign>,
     pub presigned_manifest: PresignedManifest,
     /// Raw Account outputs in their exact relative Entity-output order.
-    pub account_outputs: Vec<xln_rscore_batch::AccountPeerInput>,
+    pub account_outputs: Vec<xln_rscore_batch::AccountInput>,
     /// Already-authorized non-Account Entity outputs in exact transition
     /// order. They occupy the leading output slots; Account Hankos are
     /// attached only to the later Account outputs.

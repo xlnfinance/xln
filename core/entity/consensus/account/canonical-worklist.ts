@@ -31,7 +31,7 @@ export const markProposableAccount = (
 };
 
 /**
- * Ordered peer inputs may supersede an earlier obligation in the same Entity
+ * Ordered Account inputs may supersede an earlier obligation in the same Entity
  * frame. In particular, a pure ACK commits our pending proposal and must clear
  * `force` so the final flush cannot create an ACK loop.
  */

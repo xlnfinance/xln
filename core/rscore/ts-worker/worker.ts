@@ -7,6 +7,7 @@ import { forkAccountReplicaShell } from '../../account/state/account-replica-she
 import type { AccountReplica } from '../../types/account';
 import { getPerfMs } from '../../support/time';
 import { diffOpCounters, snapshotOpCounters } from '../../support/performance/op-counters';
+import { safeStringify } from '../../protocol/serialization';
 import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from './codec';
 import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
@@ -15,6 +16,7 @@ import {
   computeWorkerShardCommitment,
   createWorkerConsensusContext,
   initializeWorkerState,
+  installWorkerCommittedHankos,
   hydrateWorkerGenesisAccount,
   prepareWorkerAttempt,
   workerHeapUsedBytes,
@@ -25,6 +27,7 @@ import type {
   TsAccountWorkerInboundPayload,
   TsAccountWorkerOutboundPayload,
   TsAccountWorkerPhaseResult,
+  TsAccountWorkerPhasePayload,
   TsAccountWorkerRequestEnvelope,
   TsAccountWorkerResponseEnvelope,
   TsAccountWorkerSubroot,
@@ -48,14 +51,14 @@ const requestDecoder = new TsAccountWorkerTransferDecoder();
 const responseEncoder = new TsAccountWorkerTransferEncoder();
 
 type ThreadCpuUsage = Readonly<{ user: number; system: number }>;
-type BunThreadCpuProcess = typeof process & {
+type ThreadCpuProcess = Readonly<{
   threadCpuUsage(previous?: ThreadCpuUsage): ThreadCpuUsage;
-};
+}>;
 
 const readThreadCpuUsage = (previous?: ThreadCpuUsage): ThreadCpuUsage => {
-  const candidate = process as Partial<BunThreadCpuProcess>;
-  if (typeof candidate.threadCpuUsage !== 'function') {
-    throw new Error('TS_ACCOUNT_WORKER_THREAD_CPU_USAGE_UNAVAILABLE');
+  const candidate = Reflect.get(globalThis, 'process') as Partial<ThreadCpuProcess> | undefined;
+  if (!candidate || typeof candidate.threadCpuUsage !== 'function') {
+    return { user: 0, system: 0 };
   }
   return candidate.threadCpuUsage(previous);
 };
@@ -97,16 +100,38 @@ const assertNoWorkerJClaimChanges = (result: HandleAccountInputResult): void => 
   }
 };
 
+const phaseCertifiedBoards = (
+  input: TsAccountWorkerPhasePayload,
+): ReadonlyMap<string, NonNullable<typeof input.localBoardAuthority>> => {
+  const boards = new Map<string, NonNullable<typeof input.localBoardAuthority>>();
+  const add = (board: typeof input.localBoardAuthority): void => {
+    if (!board) return;
+    const previous = boards.get(board.entityId);
+    if (previous && safeStringify(previous) !== safeStringify(board)) {
+      throw new Error(`TS_ACCOUNT_WORKER_CERTIFIED_BOARD_CONFLICT:${board.entityId}`);
+    }
+    boards.set(board.entityId, board);
+  };
+  add(input.localBoardAuthority);
+  const rows = input.phase === 'inbound'
+    ? input.inputs
+    : [...input.txs, ...input.proposals];
+  for (const row of rows) add(row.counterpartyBoardAuthority);
+  return boards;
+};
+
 const applyInbound = async (
   worker: TsAccountWorkerState,
   input: TsAccountWorkerInboundPayload,
   workspace: PhaseWorkspace,
+  certifiedBoards: ReturnType<typeof phaseCertifiedBoards>,
 ): Promise<TsAccountWorkerEffect[]> => {
   const context = createWorkerConsensusContext(
     worker,
     input.entityTimestamp,
     input.finalizedJHeight,
     worker.jClaimNodes,
+    certifiedBoards,
   );
   const ordered = [...input.inputs].sort((left, right) => left.order - right.order);
   const effects: TsAccountWorkerEffect[] = [];
@@ -116,6 +141,15 @@ const applyInbound = async (
       finalizedJHeight: input.finalizedJHeight,
       owningEntityIsHub: false,
       verifyHanko: context.verifyHanko,
+      ...(item.counterpartyBoardAuthority
+        ? {
+            counterpartyCertifiedBoard: {
+              boardHash: item.counterpartyBoardAuthority.boardHash,
+              activatedAtJHeight: item.counterpartyBoardAuthority.activatedAtJHeight,
+              logIndex: item.counterpartyBoardAuthority.logIndex,
+            },
+          }
+        : {}),
     });
     assertNoWorkerJClaimChanges(result);
     effects.push({ phase: 'inbound', order: item.order, accountId: item.accountId, result });
@@ -164,21 +198,23 @@ const applyOutboundProposals = async (
 const publishWorkspace = (
   worker: TsAccountWorkerState,
   workspace: PhaseWorkspace,
+  needShardRoot: boolean,
 ): TsAccountWorkerSubroot[] => {
-  const touchedShards = new Set<number>();
   const mutations: Array<Readonly<{ kind: 'put'; key: string; value: AccountReplica }>> = [];
   for (const accountId of [...workspace.touched].sort()) {
     const account = workspace.working.get(accountId);
     if (account === undefined) {
       throw new Error(`TS_ACCOUNT_WORKER_TOUCHED_ACCOUNT_MISSING:${accountId}`);
     }
-    const shardId = tsAccountLogicalShard(accountId);
     mutations.push({ kind: 'put', key: accountId, value: account });
-    touchedShards.add(shardId);
     worker.frameTouchedAccountIds.add(accountId);
   }
   worker.accounts = worker.accounts.foldDirty(mutations);
-  return [...touchedShards]
+  if (!needShardRoot) return [];
+  // Inbound deliberately defers sealing. The final Account visit therefore
+  // seals the union of every Account touched anywhere in this Entity frame,
+  // including shards with no Stage-3 transaction or proposal of their own.
+  return [...new Set([...worker.frameTouchedAccountIds].map(tsAccountLogicalShard))]
     .sort((left, right) => left - right)
     .map(shardId => computeWorkerShardCommitment(worker, shardId));
 };
@@ -194,8 +230,11 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     ? new Map(input.inputs.flatMap(row => row.initialAccount === undefined
       ? []
       : [[row.accountId, row.initialAccount] as const]))
-    : new Map<string, Record<string, unknown>>();
+    : new Map(input.txs.flatMap(row => row.initialAccount === undefined
+      ? []
+      : [[row.accountId, row.initialAccount] as const]));
   const workspace = createWorkspace(worker, initialAccounts);
+  const certifiedBoards = phaseCertifiedBoards(input);
   let transitionUs = 0;
   let proposalUs = 0;
   let effects: TsAccountWorkerEffect[];
@@ -203,31 +242,43 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     prepareWorkerAttempt(worker, input.restorePrevious);
     worker.inboundPrepared = true;
     const transitionStartedAt = getPerfMs();
-    effects = await applyInbound(worker, input, workspace);
+    effects = await applyInbound(worker, input, workspace, certifiedBoards);
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
   } else {
-    if (!worker.inboundPrepared) prepareWorkerAttempt(worker, input.restorePrevious);
-    worker.inboundPrepared = false;
+    if (input.continuation) {
+      if (!worker.inboundPrepared) {
+        prepareWorkerAttempt(worker, false);
+        worker.inboundPrepared = true;
+      }
+    } else if (!worker.inboundPrepared) {
+      prepareWorkerAttempt(worker, input.restorePrevious);
+      worker.inboundPrepared = true;
+    }
     const transitionStartedAt = getPerfMs();
     const admissions = await applyOutboundTxs(
-      createWorkerConsensusContext(worker, input.timestamp, input.jHeight, worker.jClaimNodes),
+      createWorkerConsensusContext(
+        worker, input.timestamp, input.jHeight, worker.jClaimNodes, certifiedBoards,
+      ),
       input,
       workspace,
     );
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
     const proposalStartedAt = getPerfMs();
     const proposals = await applyOutboundProposals(
-      createWorkerConsensusContext(worker, input.timestamp, input.jHeight, worker.jClaimNodes),
+      createWorkerConsensusContext(
+        worker, input.timestamp, input.jHeight, worker.jClaimNodes, certifiedBoards,
+      ),
       input,
       workspace,
     );
     proposalUs = Math.round((getPerfMs() - proposalStartedAt) * 1_000);
     effects = [...admissions, ...proposals];
+    if (input.continuation) worker.inboundPrepared = false;
   }
   // Publish only after this worker completed every canonical transition. If a
   // sibling fails, the coordinator becomes permanently fatal and kills all isolates.
   const rootStartedAt = getPerfMs();
-  const subroots = publishWorkspace(worker, workspace);
+  const subroots = publishWorkspace(worker, workspace, input.needShardRoot);
   const rootUs = Math.round((getPerfMs() - rootStartedAt) * 1_000);
   const materializeStartedAt = getPerfMs();
   const postAccounts = input.phase === 'outbound'
@@ -295,6 +346,15 @@ scope.onmessage = event => {
         postResult(request.requestId, initialized.result);
       } else if (request.kind === 'phase') {
         postResult(request.requestId, await processPhase(decoded));
+      } else if (request.kind === 'install_hankos') {
+        if (state === null) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
+        postResult(
+          request.requestId,
+          installWorkerCommittedHankos(
+            state,
+            decoded as import('./protocol').TsAccountWorkerInstallHankosPayload,
+          ),
+        );
       } else {
         throw new Error(`TS_ACCOUNT_WORKER_REQUEST_UNKNOWN:${String(request.kind)}`);
       }

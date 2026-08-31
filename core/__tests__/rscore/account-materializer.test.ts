@@ -433,7 +433,7 @@ const pendingDisputeReplica = (
   };
   account.pendingFrame = frame;
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: OWNER,
     toEntityId: PEER,
     domain: { ...account.state.domain },
@@ -724,6 +724,8 @@ describe('rscore Account materializer', () => {
     expect(materialized.hashesToSign).toEqual([]);
     expect(materialized.account.currentFrameHanko).toBe('0xc1c1');
     expect(materialized.account.currentDisputeProofHanko).toBe('0xd2d2');
+    expect(materialized.account.pendingAccountInput?.kind).toBe('ack_frame');
+    expect(materialized.account.pendingAccountInput?.ack).toBeUndefined();
     expect(materialized.account.pendingAccountInput?.proposal.frameHanko).toBe('0xc1c1');
     expect(materialized.account.pendingAccountInput?.proposal.disputeHanko?.hanko).toBe('0xd2d2');
   });

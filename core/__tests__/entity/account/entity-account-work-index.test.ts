@@ -66,7 +66,7 @@ describe('Entity Account work indexes', () => {
     };
     account.pendingFrame = pendingFrame;
     account.pendingAccountInput = {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: self,
       toEntityId: counterparty,
       domain: account.state.domain,

@@ -4,7 +4,7 @@ import { safeStringify } from "../../../../protocol/serialization";
 import { parseProfile } from "../../../../entity/profile";
 import { decodeMarketSnapshotPayload } from "../../../../network/relay/market/wire";
 import type { LoadBookSnapshot } from "../boundary/worker-book-boundary";
-import type { HubSettlementCounters } from "../boundary/worker-boundary";
+import type { HubSettlementCounters, LoadIdentity } from "../boundary/worker-boundary";
 import type { PaymentSettlementSample } from "../boundary/worker-payment-boundary";
 import {
   configureLanePopulationP2P,
@@ -14,6 +14,8 @@ import {
   type LaneQuiescence,
   type LaneRuntime,
 } from "../lanes/lane-runtimes";
+import { provisionParallelLoadTraderAccounts } from "../lanes/worker-lanes";
+import type { SameLoadNativeAuthority } from "../workload/worker-same-lanes";
 import {
   attachRustH1,
   diffRustH1EconomicMetrics,
@@ -36,6 +38,75 @@ export const rustH1SessionPopulationReady = (
   existing: number,
   loadUsers: number,
 ): boolean => current === existing + loadUsers;
+
+export const waitForRustH1Metrics = async (
+  rust: RustH1Handle,
+  predicate: (metrics: RustH1Metrics) => boolean,
+  code: string,
+): Promise<RustH1Metrics> => {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() <= deadline) {
+    const metrics = rust.metrics();
+    if (metrics && predicate(metrics)) return metrics;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error(`${code}:${safeStringify(rust.metrics())}:${rust.errorTail()}`);
+};
+
+/**
+ * One native population adapter shared by the pure same-chain and mixed HLTs.
+ * It only connects sovereign Runtimes and admits canonical EntityInputs; swap
+ * planning and matching remain solely in prepareParallelSameLoad and H1.
+ */
+export const createRustSameLoadNativeAuthority = (options: Readonly<{
+  portBase: number;
+  hubIdentity: LoadIdentity;
+  requireRust: () => RustH1Handle;
+  replaceRust: (rust: RustH1Handle) => void;
+  observeExistingOpenSessions: (count: number) => void;
+}>): SameLoadNativeAuthority => ({
+  provisionPopulation: async (runtimes, receiveWindows, faucetAmounts) => {
+    const current = options.requireRust();
+    const expectedRuntimeId = current.ready.runtimeId;
+    const existingMetrics = await waitForRustH1Metrics(
+      current,
+      () => true,
+      'HLT_RUST_PRE_POPULATION_METRICS_MISSING',
+    );
+    options.observeExistingOpenSessions(existingMetrics.openSessions);
+    await current.stop();
+    const connected = await connectRustH1({
+      portBase: options.portBase,
+      lanes: runtimes,
+      expectedRuntimeId,
+      expectedEntityId: options.hubIdentity.entityId,
+    });
+    options.replaceRust(connected);
+    await provisionParallelLoadTraderAccounts({
+      hubIdentity: options.hubIdentity,
+      runtimes,
+      receiveWindows,
+      ...(faucetAmounts === undefined ? {} : { faucetAmounts }),
+      commitHubInput: async (commandId, input) => {
+        if (input.runtimeTxs.length !== 0) {
+          throw new Error(`HLT_RUST_LOCAL_RUNTIME_TXS_FORBIDDEN:${commandId}`);
+        }
+        await options.requireRust().submitLocalEntityInputs(commandId, input.entityInputs);
+      },
+    });
+  },
+  readTradeCheckpoint: async () => {
+    const metrics = await waitForRustH1Metrics(
+      options.requireRust(),
+      () => true,
+      'HLT_RUST_SETUP_METRICS_MISSING',
+    );
+    return {
+      tradeCount: metrics.orderbookTradeCount,
+      matchedSwaps: metrics.matchedSwaps,
+    };
+  },
+});
 
 /** Read the same bounded market projection used by TS clients, directly from native H1. */
 export const readRustH1LoadBook = async (options: Readonly<{
@@ -276,6 +347,7 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
   lanes: readonly LaneRuntime[];
   expectedPayments: number;
   expectedMatchedSwaps: number;
+  requireExpectedMatchedSwaps?: boolean;
   economicStartedAt: number;
   metricsBefore: RustH1Metrics;
 }>): Promise<RustMixedSettlement> => {
@@ -308,6 +380,7 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
       if (
         accepted === options.expectedPayments &&
         completed === options.expectedPayments &&
+        (!options.requireExpectedMatchedSwaps || matched === options.expectedMatchedSwaps) &&
         matched === trades &&
         metrics.paybookOpen === options.metricsBefore.paybookOpen &&
         metrics.openBookOrders === metrics.openSwapOffers &&
@@ -347,13 +420,17 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
           stable.entityTxsPending !== 0 || stable.outboxRowsPending !== 0 ||
           stable.outboxBytesPending !== 0
         ) continue;
-        const deliveredElapsedMs = elapsed(stable.lastCompletedAtUnixMicros, 'lastCompletedAtUnixMicros');
         const matchedElapsedMs = elapsed(stable.lastMatchedAtUnixMicros, 'lastMatchedAtUnixMicros');
+        const deliveredElapsedMs = options.expectedPayments === 0
+          ? matchedElapsedMs
+          : elapsed(stable.lastCompletedAtUnixMicros, 'lastCompletedAtUnixMicros');
         return {
           metrics: stable,
           economicPhaseMetrics: diffRustH1EconomicMetrics(options.metricsBefore, stable),
           laneQuiescence,
-          hubIngressElapsedMs: elapsed(stable.lastAcceptedAtUnixMicros, 'lastAcceptedAtUnixMicros'),
+          hubIngressElapsedMs: options.expectedPayments === 0
+            ? matchedElapsedMs
+            : elapsed(stable.lastAcceptedAtUnixMicros, 'lastAcceptedAtUnixMicros'),
           deliveredElapsedMs,
           matchedElapsedMs,
           fullySettledElapsedMs: Math.max(
@@ -371,4 +448,41 @@ export const waitForRustMixedSettlement = async (options: Readonly<{
     metrics: options.rust.metrics(),
     laneQuiescence,
   })}`);
+};
+
+/** Exact all-matched same-chain drain over the shared native economic gate. */
+export const waitForRustSameSettlement = async (options: Readonly<{
+  rust: RustH1Handle;
+  lanes: readonly LaneRuntime[];
+  expectedMatchedSwaps: number;
+  economicStartedAt: number;
+  metricsBefore: RustH1Metrics;
+}>): Promise<RustMixedSettlement> => {
+  const settlement = await waitForRustMixedSettlement({
+    ...options,
+    expectedPayments: 0,
+    requireExpectedMatchedSwaps: true,
+  });
+  const matched = settlement.metrics.matchedSwaps - options.metricsBefore.matchedSwaps;
+  const trades = settlement.metrics.orderbookTradeCount - options.metricsBefore.orderbookTradeCount;
+  const zeroFillCancels = settlement.metrics.zeroFillSwapCancels - options.metricsBefore.zeroFillSwapCancels;
+  if (
+    matched !== options.expectedMatchedSwaps ||
+    trades !== options.expectedMatchedSwaps ||
+    zeroFillCancels !== 0 ||
+    settlement.metrics.openSwapOffers !== options.metricsBefore.openSwapOffers ||
+    settlement.metrics.resolvingSwapOffers !== options.metricsBefore.resolvingSwapOffers
+  ) {
+    throw new Error(`HLT_RUST_SAME_TERMINAL_PARTITION_INVALID:${safeStringify({
+      expectedMatchedSwaps: options.expectedMatchedSwaps,
+      matched,
+      trades,
+      zeroFillCancels,
+      openSwapOffersBefore: options.metricsBefore.openSwapOffers,
+      openSwapOffersAfter: settlement.metrics.openSwapOffers,
+      resolvingSwapOffersBefore: options.metricsBefore.resolvingSwapOffers,
+      resolvingSwapOffersAfter: settlement.metrics.resolvingSwapOffers,
+    })}`);
+  }
+  return settlement;
 };

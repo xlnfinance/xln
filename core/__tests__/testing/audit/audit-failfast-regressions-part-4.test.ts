@@ -388,7 +388,7 @@ const setSyntheticPendingAccountProposal = (
   };
   account.pendingFrame = pendingFrame;
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
@@ -1147,7 +1147,7 @@ describe('audit fail-fast regressions', () => {
     const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.state.timestamp);
 
     expect(isProposedAccountFrame(result)).toBe(true);
-    expect(result.accountInput?.kind === 'frame' ? result.accountInput.proposal.disputeHanko : undefined).toEqual({
+    expect(result.accountInput?.kind === 'ack_frame' ? result.accountInput.proposal.disputeHanko : undefined).toEqual({
       hanko: '0xcafe',
       hash: accountMachine.currentDisputeHash,
       proofBodyHash: accountMachine.currentDisputeProofBodyHash,
@@ -1182,7 +1182,7 @@ describe('audit fail-fast regressions', () => {
     const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.state.timestamp);
 
     expect(isProposedAccountFrame(result)).toBe(true);
-    expect(result.accountInput?.kind === 'frame' ? result.accountInput.proposal.disputeHanko : undefined).toMatchObject({
+    expect(result.accountInput?.kind === 'ack_frame' ? result.accountInput.proposal.disputeHanko : undefined).toMatchObject({
       proofBodyHash: proof.proofBodyHash,
       proofNonce: 9,
     });
@@ -1449,7 +1449,7 @@ describe('audit fail-fast regressions', () => {
     accountMachine.currentFrame = committedFrame;
     accountMachine.pendingFrame = pendingFrame;
     accountMachine.pendingAccountInput = {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: replica.entityId,
       toEntityId: counterpartyId,
       domain: structuredClone(accountMachine.state.domain),
@@ -1460,7 +1460,7 @@ describe('audit fail-fast regressions', () => {
       decodeValidatedBuffer(encodeBuffer(persistedAccount), validateStorageAccountDocValue),
     );
     const corruptFrameBinding = projectAccountDoc(accountMachine);
-    if (!corruptFrameBinding.pendingAccountInput || corruptFrameBinding.pendingAccountInput.kind !== 'frame') {
+    if (!corruptFrameBinding.pendingAccountInput || corruptFrameBinding.pendingAccountInput.kind !== 'ack_frame') {
       throw new Error('TEST_PENDING_ACCOUNT_INPUT_REQUIRED');
     }
     corruptFrameBinding.pendingAccountInput.proposal.frame.stateHash = `0x${'ff'.repeat(32)}`;
@@ -1534,7 +1534,7 @@ describe('audit fail-fast regressions', () => {
     };
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
@@ -1704,7 +1704,7 @@ describe('audit fail-fast regressions', () => {
     delete accountMachine.lastOutboundAckFrame;
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
@@ -1753,7 +1753,7 @@ describe('audit fail-fast regressions', () => {
     delete accountMachine.lastOutboundAckFrame;
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
@@ -1894,7 +1894,7 @@ describe('audit fail-fast regressions', () => {
     const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [maliciousFrame.stateHash]);
 
     const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: { ...receiverAccount.state.domain },
@@ -1956,7 +1956,7 @@ describe('audit fail-fast regressions', () => {
     const [newDisputeHanko] = await signEntityHashes(env, left.entityId, left.signerId, [poisonedHash]);
 
     const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: { ...receiverAccount.state.domain },
@@ -2042,10 +2042,10 @@ describe('audit fail-fast regressions', () => {
 
     const leftProposal = await proposeAccountFrame(createAccountConsensusContext(env), leftAccount, env.state.timestamp);
     const rightProposal = await proposeAccountFrame(createAccountConsensusContext(env), rightAccount, env.state.timestamp);
-    if (!isProposedAccountFrame(leftProposal) || leftProposal.accountInput.kind !== 'frame') {
+    if (!isProposedAccountFrame(leftProposal) || leftProposal.accountInput.kind !== 'ack_frame') {
       throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${proposeAccountFrameMessage(leftProposal) ?? 'missing frame'}`);
     }
-    if (!isProposedAccountFrame(rightProposal) || rightProposal.accountInput.kind !== 'frame') {
+    if (!isProposedAccountFrame(rightProposal) || rightProposal.accountInput.kind !== 'ack_frame') {
       throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${proposeAccountFrameMessage(rightProposal) ?? 'missing frame'}`);
     }
     const hankoAttachedLeftProposal = await attachAccountDraftHankosAsEntity(
@@ -2143,7 +2143,7 @@ describe('audit fail-fast regressions', () => {
     if (
       !isProposedAccountFrame(rightProposal) ||
       !rightProposal.accountInput ||
-      rightProposal.accountInput.kind !== 'frame' ||
+      rightProposal.accountInput.kind !== 'ack_frame' ||
       !rightProposal.accountInput.proposal.disputeHanko
     ) {
       throw new Error(`RIGHT_NONCE_COLLISION_PROPOSAL_FAILED:${proposeAccountFrameMessage(rightProposal) ?? 'missing signed proof'}`);
@@ -2245,7 +2245,7 @@ describe('audit fail-fast regressions', () => {
       createAccountConsensusContext(env),
       receiver,
       {
-        kind: 'frame',
+        kind: 'ack_frame',
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
         domain: { ...receiver.state.domain },

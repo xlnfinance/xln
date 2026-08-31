@@ -114,7 +114,7 @@ const installPendingFrame = (account: AccountReplica): void => {
   };
 };
 
-describe('typed Account peer rejection', () => {
+describe('typed Account input rejection', () => {
   test('closed unions structurally separate rejection from success payloads', () => {
     const covered = fintsPositiveAccountConsensusResult();
     expect(covered.applied.ok).toBe(true);
@@ -132,32 +132,32 @@ describe('typed Account peer rejection', () => {
   });
 
   test('bad domain, party, watch seed, and height are typed no-mutation rejections', async () => {
-    const env = createEmptyEnv('account-peer-boundary-rejection');
+    const env = createEmptyEnv('account-input-boundary-rejection');
     env.quietRuntimeLogs = true;
     const cases: Array<{
       code: string;
       mutate(input: Extract<AccountInput, { kind: 'ack' }>): void;
     }> = [
       {
-        code: 'ACCOUNT_PEER_DOMAIN_MISMATCH',
+        code: 'ACCOUNT_INPUT_DOMAIN_MISMATCH',
         mutate: input => {
           input.domain.chainId += 1;
         },
       },
       {
-        code: 'ACCOUNT_PEER_PARTY_MISMATCH',
+        code: 'ACCOUNT_INPUT_PARTY_MISMATCH',
         mutate: input => {
           input.toEntityId = input.fromEntityId;
         },
       },
       {
-        code: 'ACCOUNT_PEER_WATCH_SEED_INVALID',
+        code: 'ACCOUNT_INPUT_WATCH_SEED_INVALID',
         mutate: input => {
           input.watchSeed = 'not-a-watch-seed';
         },
       },
       {
-        code: 'ACCOUNT_PEER_HEIGHT_INVALID',
+        code: 'ACCOUNT_INPUT_HEIGHT_INVALID',
         mutate: input => {
           input.ack.height = Number.NaN;
         },
@@ -183,7 +183,7 @@ describe('typed Account peer rejection', () => {
   });
 
   test('bad ACK certificate is rejected, then the honest ACK commits', async () => {
-    const env = createEmptyEnv('account-peer-ack-rejection');
+    const env = createEmptyEnv('account-input-ack-rejection');
     env.quietRuntimeLogs = true;
     const account = createAccount();
     installPendingFrame(account);
@@ -195,7 +195,7 @@ describe('typed Account peer rejection', () => {
     const before = safeStringify(account);
 
     const rejected = await applyAccountInput(invalidContext, account, input);
-    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID');
+    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID');
     expect(rejected.ok).toBe(false);
     expect('response' in rejected).toBe(false);
     expect(safeStringify(account)).toBe(before);
@@ -269,14 +269,14 @@ describe('typed Account peer rejection', () => {
       (previousBoardValidUntil + 1) * 1_000,
     ]) {
       const expired = await applyAt(timestamp);
-      expect(accountInputPeerRejectionCode(expired.result)).toBe('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID');
+      expect(accountInputPeerRejectionCode(expired.result)).toBe('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID');
       expect(expired.account.currentHeight).toBe(0);
       expect(expired.account.pendingFrame?.height).toBe(1);
     }
   });
 
   test('bad frame certificate is a typed no-mutation rejection', async () => {
-    const env = createEmptyEnv('account-peer-frame-rejection');
+    const env = createEmptyEnv('account-input-frame-rejection');
     env.quietRuntimeLogs = true;
     const account = createAccount();
     const frame = {
@@ -291,8 +291,8 @@ describe('typed Account peer rejection', () => {
       byLeft: false,
     };
     frame.stateHash = computeFrameHash(frame);
-    const input: Extract<AccountInput, { kind: 'frame' }> = {
-      kind: 'frame',
+    const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      kind: 'ack_frame',
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
@@ -305,14 +305,14 @@ describe('typed Account peer rejection', () => {
 
     const rejected = await applyAccountInput(context, account, input);
 
-    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
+    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_INPUT_FRAME_HANKO_INVALID');
     expect(rejected.ok).toBe(false);
     expect('committedFrames' in rejected).toBe(false);
     expect(safeStringify(account)).toBe(before);
   });
 
   test('stolen Account body with a valid Hanko is a typed hash rejection, not a dispute', async () => {
-    const env = createEmptyEnv('account-peer-frame-hash-rejection');
+    const env = createEmptyEnv('account-input-frame-hash-rejection');
     env.quietRuntimeLogs = true;
     const account = createAccount();
     const frame = {
@@ -328,8 +328,8 @@ describe('typed Account peer rejection', () => {
     };
     frame.stateHash = computeFrameHash(frame);
     frame.accountTxs = [{ type: 'set_credit_limit', data: { tokenId: 1, amount: 1n } }];
-    const input: Extract<AccountInput, { kind: 'frame' }> = {
-      kind: 'frame',
+    const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      kind: 'ack_frame',
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
@@ -345,14 +345,14 @@ describe('typed Account peer rejection', () => {
 
     const rejected = await applyAccountInput(context, account, input);
 
-    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_PEER_FRAME_HASH_INVALID');
+    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_INPUT_FRAME_HASH_INVALID');
     expect(rejected.ok).toBe(false);
     expect('disputeRequired' in rejected).toBe(false);
     expect(safeStringify(account)).toBe(before);
   });
 
-  test('fresh peer frames always reject previous-board authority', async () => {
-    const env = createEmptyEnv('account-peer-current-board-only');
+  test('fresh counterparty frames always reject previous-board authority', async () => {
+    const env = createEmptyEnv('account-input-current-board-only');
     env.quietRuntimeLogs = true;
     const account = createAccount();
     const frame = {
@@ -367,8 +367,8 @@ describe('typed Account peer rejection', () => {
       byLeft: false,
     };
     frame.stateHash = computeFrameHash(frame);
-    const input: Extract<AccountInput, { kind: 'frame' }> = {
-      kind: 'frame',
+    const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      kind: 'ack_frame',
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
@@ -387,7 +387,7 @@ describe('typed Account peer rejection', () => {
 
     const result = await applyAccountInput(context, account, input);
 
-    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
+    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_INPUT_FRAME_HANKO_INVALID');
     expect(observedAuthorities).toEqual([{ allowPreviousBoard: false }]);
   });
 
@@ -435,8 +435,8 @@ describe('typed Account peer rejection', () => {
         byLeft: false,
       };
       frame.stateHash = computeFrameHash(frame);
-      const input: Extract<AccountInput, { kind: 'frame' }> = {
-        kind: 'frame',
+      const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+        kind: 'ack_frame',
         fromEntityId: candidate.account.proofHeader.toEntity,
         toEntityId: candidate.account.proofHeader.fromEntity,
         domain: { ...candidate.account.state.domain },
@@ -445,7 +445,7 @@ describe('typed Account peer rejection', () => {
         proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
       };
       const context = withVerifier(
-        createAccountConsensusContext(createEmptyEnv(`account-peer-${candidate.name}`)),
+        createAccountConsensusContext(createEmptyEnv(`account-input-${candidate.name}`)),
         async (_hanko, _hash, expectedEntityId) => ({ valid: true, entityId: expectedEntityId }),
       );
       const before = safeStringify(candidate.account);
@@ -462,8 +462,8 @@ describe('typed Account peer rejection', () => {
     }
   });
 
-  test('local verifier failure is never downgraded to a peer rejection', async () => {
-    const env = createEmptyEnv('account-peer-local-verifier-fatal');
+  test('local verifier failure is never downgraded to an Account input rejection', async () => {
+    const env = createEmptyEnv('account-input-local-verifier-fatal');
     env.quietRuntimeLogs = true;
     const account = createAccount();
     const frame = {
@@ -479,8 +479,8 @@ describe('typed Account peer rejection', () => {
     };
     frame.stateHash = computeFrameHash(frame);
     const proofBodyHash = `0x${'aa'.repeat(32)}`;
-    const input: Extract<AccountInput, { kind: 'frame' }> = {
-      kind: 'frame',
+    const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      kind: 'ack_frame',
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
@@ -507,7 +507,7 @@ describe('typed Account peer rejection', () => {
 });
 
 test('authenticated Runtime Account poison halts loudly without mutating the live replica', async () => {
-  const fixture = createEntityProposalFixture('account-peer-runtime-continuation', 1n);
+  const fixture = createEntityProposalFixture('account-input-runtime-continuation', 1n);
   const target = fixture.createValidator('1');
   const peerEntity = `0x${'77'.repeat(32)}`;
   const account = createAccount(fixture.entityId, peerEntity);
@@ -541,7 +541,7 @@ test('authenticated Runtime Account poison halts loudly without mutating the liv
     [],
     { isReplay: false, routingDeps },
   )).rejects.toThrow(
-    'ACCOUNT_PEER_EVIDENCE_REJECTED:ACCOUNT_PEER_WATCH_SEED_INVALID',
+    'ACCOUNT_INPUT_EVIDENCE_REJECTED:ACCOUNT_INPUT_WATCH_SEED_INVALID',
   );
   expect(
     target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.accounts.get(peerEntity)

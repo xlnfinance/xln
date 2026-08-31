@@ -1,12 +1,12 @@
-import type { AccountPeerInput, AccountReplica, AccountTx } from '../../types/account';
+import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import { safeStringify } from '../../protocol/serialization';
 
-const accountInputAck = (input: AccountPeerInput) =>
+const accountInputAck = (input: AccountInput) =>
   input.kind === 'ack' || input.kind === 'ack_frame' ? input.ack : undefined;
 
-const accountInputProposal = (input: AccountPeerInput) =>
-  input.kind === 'frame' || input.kind === 'ack_frame' ? input.proposal : undefined;
+const accountInputProposal = (input: AccountInput) =>
+  input.kind === 'ack_frame' ? input.proposal : undefined;
 
 export type AccountDeliveryHop =
   | 'committed-output'
@@ -90,13 +90,13 @@ const swapProposalOutcomes = new Map<string, Readonly<{
 }>>();
 let repeatedSwapProposalObservations = 0;
 
-const accountLeg = (input: AccountPeerInput): string => {
+const accountLeg = (input: AccountInput): string => {
   const left = input.fromEntityId.toLowerCase();
   const right = input.toEntityId.toLowerCase();
   return left < right ? `${left}|${right}` : `${right}|${left}`;
 };
 
-const proposalPaymentOperations = (input: AccountPeerInput): PaymentOperation[] => {
+const proposalPaymentOperations = (input: AccountInput): PaymentOperation[] => {
   const proposal = accountInputProposal(input);
   if (!proposal) return [];
   const leg = accountLeg(input);
@@ -112,14 +112,14 @@ const proposalPaymentOperations = (input: AccountPeerInput): PaymentOperation[] 
   return operations;
 };
 
-const proposalFrameKey = (input: AccountPeerInput): string | null => {
+const proposalFrameKey = (input: AccountInput): string | null => {
   const proposal = accountInputProposal(input);
   return proposal
     ? `${accountLeg(input)}|${proposal.frame.height}|${proposal.frame.stateHash}`
     : null;
 };
 
-const ackFrameKey = (input: AccountPeerInput): string | null => {
+const ackFrameKey = (input: AccountInput): string | null => {
   const ack = accountInputAck(input);
   return ack ? `${accountLeg(input)}|${ack.height}|${ack.frameHash}` : null;
 };
@@ -128,7 +128,7 @@ const ackFrameKey = (input: AccountPeerInput): string | null => {
  * with the proposal already emitted by this same sovereign Runtime. This map
  * is process-RAM telemetry only; it is never part of protocol or storage. */
 const framedPaymentOperations = (
-  input: AccountPeerInput,
+  input: AccountInput,
   includeProposalFrame: boolean,
   includeAcknowledgedFrame: boolean,
 ): FramedPaymentOperation[] => {
@@ -180,7 +180,7 @@ const incrementOutcome = (stage: MutablePaymentLedgerStage, key: string, count =
 
 const recordPaymentLedger = (
   hop: AccountDeliveryHop,
-  inputs: readonly AccountPeerInput[],
+  inputs: readonly AccountInput[],
   fields: Readonly<Record<string, unknown>>,
 ): void => {
   if (!ledgerEnabled()) return;
@@ -192,6 +192,12 @@ const recordPaymentLedger = (
     hop === 'runtime-mempool' || hop === 'account-apply-start' || hop === 'account-apply-done';
   for (const input of inputs) {
     incrementOutcome(stage, `input:${input.kind}`);
+    if (input.kind === 'ack_frame') {
+      incrementOutcome(
+        stage,
+        input.ack === undefined ? 'ack_frame:without-ack' : 'ack_frame:with-ack',
+      );
+    }
     const ack = accountInputAck(input);
     if (ack) {
       incrementOutcome(
@@ -302,7 +308,7 @@ export const traceHltSwapProposalOutcomes = (
   });
 };
 
-const accountInputRow = (input: AccountPeerInput): Record<string, unknown> => {
+const accountInputRow = (input: AccountInput): Record<string, unknown> => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
   return {
@@ -316,7 +322,7 @@ const accountInputRow = (input: AccountPeerInput): Record<string, unknown> => {
   };
 };
 
-const envelopeAccountInputs = (envelope: RuntimeEntityInputsEnvelope): AccountPeerInput[] =>
+const envelopeAccountInputs = (envelope: RuntimeEntityInputsEnvelope): AccountInput[] =>
   envelope.entityInputs.flatMap(entityInput =>
     (entityInput.entityTxs ?? []).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []));
 
@@ -346,7 +352,7 @@ export const traceAccountDeliveryHop = (
 
 export const traceAccountApplyHop = (
   hop: 'account-apply-start' | 'account-apply-done',
-  input: AccountPeerInput,
+  input: AccountInput,
   fields: Record<string, unknown> = {},
 ): void => {
   recordPaymentLedger(hop, [input], fields);
@@ -365,7 +371,7 @@ export const traceAccountFlushHop = (
   entityId: string,
   accountKey: string,
   account: AccountReplica,
-  requiredResponse: AccountPeerInput | undefined,
+  requiredResponse: AccountInput | undefined,
   fields: Record<string, unknown> = {},
 ): void => {
   if (!traceEnabled()) return;

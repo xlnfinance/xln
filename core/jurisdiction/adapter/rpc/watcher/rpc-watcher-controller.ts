@@ -31,6 +31,14 @@ const emitWatcherDebug = (
   });
 };
 
+export const resolveRpcWatcherPollMs = (configured: number | undefined): number => {
+  if (configured === undefined) return BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    throw new Error(`J_WATCHER_POLL_INTERVAL_INVALID:${String(configured)}`);
+  }
+  return configured;
+};
+
 const createWatcherSession = (
   env: RuntimeReplica,
   generation: number,
@@ -52,7 +60,7 @@ const createWatcherSession = (
     interval: null,
     manualPolling: env.scenarioMode === true,
     confirmationDepth: services.resolveFinalityDepth(env.scenarioMode === true),
-    pollMs: BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS,
+    pollMs: resolveRpcWatcherPollMs(services.watchPollMs),
     lastSyncedBlock: Math.max(0, startBlock - 1),
     scanProgress: { scannedThroughHeight: 0, replicaScannedThrough: {} },
     pendingBlocks: new Map(),

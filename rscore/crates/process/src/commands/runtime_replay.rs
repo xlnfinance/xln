@@ -173,7 +173,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                 "touchedRows": metric.touched_rows,
                 "touchedShards": metric.touched_shards,
                 "workersWithWork": metric.workers_with_work,
-                "valueClones": metric.value_clones,
+                "shardHandleClones": metric.shard_handle_clones,
                 "candidateBaseReads": metric.candidate_base_reads,
                 "continuationRounds": metric.continuation_rounds,
                 "restartRounds": metric.restart_rounds,

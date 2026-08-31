@@ -4,6 +4,8 @@ import {
   J_WATCHER_IDLE_CANONICAL_AUDIT_MS,
   shouldAuditCanonicalWatcherState,
 } from '../../../jurisdiction/adapter/watcher/observe/watcher-poll-policy';
+import { resolveRpcWatcherPollMs } from '../../../jurisdiction/adapter/rpc/watcher/rpc-watcher-controller';
+import { BLOCKCHAIN } from '../../../config/constants';
 
 const idle = {
   currentHead: 42,
@@ -36,5 +38,17 @@ describe('J watcher idle canonical audit policy', () => {
       ...idle,
       nowMs: idle.lastAuditAtMs + J_WATCHER_IDLE_CANONICAL_AUDIT_MS,
     })).toBe(true);
+  });
+});
+
+describe('RPC watcher poll interval', () => {
+  test('uses the adapter override instead of silently falling back to five seconds', () => {
+    expect(resolveRpcWatcherPollMs(300)).toBe(300);
+    expect(resolveRpcWatcherPollMs(undefined)).toBe(BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS);
+  });
+
+  test('rejects invalid configured intervals', () => {
+    expect(() => resolveRpcWatcherPollMs(0)).toThrow('J_WATCHER_POLL_INTERVAL_INVALID:0');
+    expect(() => resolveRpcWatcherPollMs(1.5)).toThrow('J_WATCHER_POLL_INTERVAL_INVALID:1.5');
   });
 });

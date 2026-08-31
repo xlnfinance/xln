@@ -35,8 +35,7 @@ RuntimeInput
               │
               ▼
             AccountInput
-              ├─ txs(AccountTx[])       local future-frame admission
-              └─ AccountPeerInput       signed bilateral evidence
+              └─ frame | ack | ack_frame | dispute | board_hanko_refresh
                     │
                     ▼
                  AccountFrame
@@ -48,10 +47,10 @@ RuntimeInput
 RuntimeFrame → WAL → external delivery
 ```
 
-An `EntityTx` is not an `AccountTx`. It may deterministically produce a local
-`AccountInput { kind: 'txs' }`, or it may carry one exact peer
-`AccountPeerInput` as `EntityTx.accountInput`. Both branches enter
-`applyAccountInput`; neither bypasses the Account machine.
+An `EntityTx` is not an `AccountTx`. It may deterministically produce local
+`AccountTx[]` admission, or it may carry one exact `AccountInput` as
+`EntityTx.accountInput`. Both enter `applyAccountInput`; neither bypasses the
+Account machine, and only the latter is an Account input on the wire.
 
 ## Direct payment
 

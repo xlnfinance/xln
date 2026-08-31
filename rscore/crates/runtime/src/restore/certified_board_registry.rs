@@ -585,7 +585,7 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xln_rscore_batch::{CertifiedBoardAuthorityResolver, PeerBoardAuthority};
+    use xln_rscore_batch::{AccountInputBoardAuthority, CertifiedBoardAuthorityResolver};
 
     fn word_text(byte: u8) -> String {
         format!("0x{}", hex(&[byte; 32]))
@@ -684,7 +684,7 @@ mod tests {
             registry
                 .resolve_certified_board(&[0x22; 32])
                 .expect("resolved"),
-            PeerBoardAuthority::Certified(authority)
+            AccountInputBoardAuthority::Certified(authority)
                 if authority.entity_id == [0x22; 32]
                     && authority.registered_board_hash == [0x33; 32]
                     && authority.previous_board_hash == [0x44; 32]
@@ -696,7 +696,7 @@ mod tests {
             registry
                 .resolve_certified_board(&[0xfe; 32])
                 .expect("authenticated absence"),
-            PeerBoardAuthority::Lazy,
+            AccountInputBoardAuthority::Lazy,
         );
     }
 
@@ -740,10 +740,10 @@ mod tests {
     fn hydrated_checkpoint_registry_installed_on_runtime_accepts_registered_board_frame() {
         use num_bigint::BigInt;
         use std::sync::Arc;
-        use xln_rscore_batch::{AccountId, AccountInputKind, AccountInputRow, AccountPeerInput};
+        use xln_rscore_batch::{AccountId, AccountInput, AccountInputKind, AccountInputRow};
         use xln_rscore_engine::{
             AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity,
-            AccountPeerEnvelope, AccountReplica, AccountState, AccountTx, BoardDelays,
+            AccountInputEnvelope, AccountReplica, AccountState, AccountTx, BoardDelays,
             DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingFrame, ProposalOutcome,
             SigningIdentity, SwapMarketPolicy, TokenId, WatchSeed, propose_account_frame,
         };
@@ -873,10 +873,10 @@ mod tests {
             operation_index: 77,
             account_id,
             genesis_policy: None,
-            certified_board_authority: PeerBoardAuthority::Unresolved,
-            local_certified_board_authority: PeerBoardAuthority::Unresolved,
-            input: AccountPeerInput {
-                envelope: AccountPeerEnvelope {
+            certified_board_authority: AccountInputBoardAuthority::Unresolved,
+            local_certified_board_authority: AccountInputBoardAuthority::Unresolved,
+            input: AccountInput {
+                envelope: AccountInputEnvelope {
                     from_entity_id: peer_entity_id,
                     to_entity_id: owner_entity_id,
                     domain: AccountDomain::new(
@@ -890,7 +890,10 @@ mod tests {
                         WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
                     ),
                 },
-                kind: AccountInputKind::Frame(Box::new(incoming)),
+                kind: AccountInputKind::AckFrame {
+                    ack: None,
+                    frame: Box::new(incoming),
+                },
             },
         };
         let input = crate::RuntimeInput {

@@ -456,7 +456,7 @@ fn validate_materialize_input(input: &HtlcMaterializeInput) -> Result<(), Prepar
 }
 
 /// Authenticate and decode the selected inbound layers without consulting
-/// Account state. Peer-controlled ciphertext failures become one rejected
+/// Account state. Counterparty-controlled ciphertext failures become one rejected
 /// row; local key provisioning remains a fatal infrastructure error.
 pub fn decrypt_htlc_materialize_inputs(
     inputs: Vec<HtlcMaterializeInput>,

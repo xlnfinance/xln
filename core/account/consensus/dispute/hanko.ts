@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../types/account';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { safeStringify } from '../../../protocol/serialization';
 import { shortId } from '../../../support/logger';
@@ -9,7 +9,7 @@ import {
   accountInputProposal,
 } from '../flush';
 import { getAccountStateDomain } from '../helpers';
-import { AccountPeerEvidenceError } from '../../input/peer-rejection';
+import { AccountInputEvidenceError } from '../../input/input-rejection';
 
 export type ValidatedCounterpartyDisputeHanko = {
   hanko: string;
@@ -55,7 +55,7 @@ export const replaceLocalDisputeDraft = (
  */
 export const validateCounterpartyDisputeHanko = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   disputeHanko: ReturnType<typeof accountInputDisputeHanko>,
   context: string,
   securityContext: AccountInputSecurityContext,
@@ -63,8 +63,8 @@ export const validateCounterpartyDisputeHanko = async (
 ): Promise<ValidatedCounterpartyDisputeHanko | undefined> => {
   if (!disputeHanko) return undefined;
   if (!disputeHanko.hanko) {
-    throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+    throw new AccountInputEvidenceError(
+      'ACCOUNT_INPUT_DISPUTE_HANKO_INVALID',
       `${context}:DISPUTE_HANKO_HANKO_MISSING`,
     );
   }
@@ -75,8 +75,8 @@ export const validateCounterpartyDisputeHanko = async (
     || disputeHanko.proofNonce < 0
     || typeof disputeHanko.proposerIsLeft !== 'boolean'
   ) {
-    throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+    throw new AccountInputEvidenceError(
+      'ACCOUNT_INPUT_DISPUTE_HANKO_INVALID',
       `${context}:DISPUTE_HANKO_SHAPE_INVALID`,
     );
   }
@@ -89,8 +89,8 @@ export const validateCounterpartyDisputeHanko = async (
     disputeHanko.proposerIsLeft,
   );
   if (String(disputeHanko.hash).toLowerCase() !== expectedHash.toLowerCase()) {
-    throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+    throw new AccountInputEvidenceError(
+      'ACCOUNT_INPUT_DISPUTE_HANKO_INVALID',
       `${context}:DISPUTE_HANKO_HASH_MISMATCH:${safeStringify({
         kind: input.kind,
         currentHeight: account.currentHeight,
@@ -120,8 +120,8 @@ export const validateCounterpartyDisputeHanko = async (
     },
   );
   if (!valid) {
-    throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+    throw new AccountInputEvidenceError(
+      'ACCOUNT_INPUT_DISPUTE_HANKO_INVALID',
       `${context}:DISPUTE_HANKO_HANKO_INVALID`,
     );
   }

@@ -1075,7 +1075,7 @@ pub struct RuntimeTouchedAccount {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountCommitSource {
     AckCommit,
-    PeerCommit,
+    CounterpartyCommit,
 }
 
 /// Exact compact evidence for one Account frame that became committed.

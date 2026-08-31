@@ -401,7 +401,7 @@ const setSyntheticPendingAccountProposal = (
   };
   account.pendingFrame = pendingFrame;
   account.pendingAccountInput = {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
@@ -822,7 +822,7 @@ describe('audit fail-fast regressions', () => {
     }
     const leftInput = await attachAccountDraftHankosAsEntity(env, left.entityId, left.signerId, leftProposal);
     const rightInput = await attachAccountDraftHankosAsEntity(env, right.entityId, right.signerId, rightProposal);
-    if (leftInput.kind !== 'frame') throw new Error('LEFT_SIMULTANEOUS_FRAME_REQUIRED');
+    if (leftInput.kind !== 'ack_frame') throw new Error('LEFT_SIMULTANEOUS_ACK_FRAME_REQUIRED');
     // This collision begins after LEFT has already emitted its signed proposal.
     // Persist the same witnesses that Entity finalization would attach before
     // the peer's competing frame can arrive.

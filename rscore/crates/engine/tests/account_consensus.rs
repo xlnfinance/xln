@@ -4,14 +4,16 @@
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope,
-    AccountReplica, AccountState, AccountTx, AckFrameOutcome, BoardDelays, BoardHankoRefreshInput,
-    CertifiedBoardAuthority, CounterpartyDispute, DeliveryMode, Delta, DepositoryAddress,
-    DisputeDraft, EntityId, IncomingAck, IncomingFrame, IncomingOutcome, ProposalOutcome,
-    ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity, StandaloneInputOutcome,
-    TokenId, WatchSeed, apply_board_hanko_refresh, apply_incoming_ack as apply_exact_incoming_ack,
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountInputEnvelope,
+    AccountReplica, AccountSettledEvent, AccountState, AccountTx, AckFrameOutcome, BoardDelays,
+    BoardHankoRefreshInput, CanonicalValue, CertifiedBoardAuthority, CounterpartyDispute,
+    DeliveryMode, Delta, DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame,
+    IncomingOutcome, JEventClaimTx, JEventMetadata, JurisdictionEvent, ProposalOutcome,
+    ProposedFrame, ReceiverClock, RolledBackProposal, SettlementHankoDraft, SigningIdentity,
+    StandaloneInputOutcome, TokenId, WatchSeed, apply_board_hanko_refresh,
+    apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, apply_standalone_dispute,
-    dispute_proof_hash, propose_account_frame,
+    canonical_tx_value, dispute_proof_hash, propose_account_frame,
 };
 use xln_rscore_hanko::{
     BoardMember, SemanticClaim, build_single_signer_hanko, hash_hanko_board_claim,
@@ -129,6 +131,58 @@ fn payment(from: &EntityId, to: &EntityId, amount: i64) -> AccountTx {
     }
 }
 
+fn swap_resolve_evidence() -> AccountTx {
+    AccountTx::SwapResolve {
+        offer_id: "evidence-offer".into(),
+        fill_ratio: 0,
+        fill_numerator: None,
+        fill_denominator: None,
+        cancel_remainder: true,
+        comment: None,
+        fee_token_id: None,
+        fee_amount: None,
+        execution_give_amount: None,
+        execution_want_amount: None,
+        resting_give_token_id: None,
+        resting_want_token_id: None,
+        resting_price_ticks: None,
+        resting_give_amount: None,
+        resting_want_amount: None,
+        resting_quantized_give: None,
+        resting_quantized_want: None,
+    }
+}
+
+fn cross_pull_close_evidence(with_proof: bool) -> AccountTx {
+    let mut fields = vec![("binary".into(), CanonicalValue::String("0x".into()))];
+    if with_proof {
+        fields.push(("proof".into(), CanonicalValue::Object(Vec::new())));
+    }
+    AccountTx::CrossPullClose {
+        data: CanonicalValue::Object(fields),
+    }
+}
+
+fn deferred_j_claim(left: &EntityId, right: &EntityId) -> AccountTx {
+    AccountTx::JEventClaim(JEventClaimTx {
+        j_height: 8,
+        j_block_hash: [0x88; 32],
+        events: vec![JurisdictionEvent::AccountSettled(AccountSettledEvent {
+            metadata: JEventMetadata::default(),
+            left_entity: left.clone(),
+            right_entity: right.clone(),
+            token_id: TokenId::new(1).expect("token"),
+            left_reserve: BigInt::from(0),
+            right_reserve: BigInt::from(0),
+            collateral: BigInt::from(1),
+            ondelta: BigInt::from(0),
+            nonce: 0,
+        })],
+        left_proof: None,
+        right_proof: None,
+    })
+}
+
 fn incoming_of(
     frame: &xln_rscore_engine::AccountFrame,
     state_hash: [u8; 32],
@@ -142,9 +196,9 @@ fn incoming_of(
     }
 }
 
-fn envelope(account: &AccountConsensus, from_entity_id: &[u8; 32]) -> AccountPeerEnvelope {
+fn envelope(account: &AccountConsensus, from_entity_id: &[u8; 32]) -> AccountInputEnvelope {
     let state = account.replica().state();
-    AccountPeerEnvelope {
+    AccountInputEnvelope {
         from_entity_id: *from_entity_id,
         to_entity_id: *account.replica().owner().as_bytes(),
         domain: state.identity().domain().clone(),
@@ -317,6 +371,132 @@ fn a_signed_frame_commits_on_both_sides() {
             .offdelta(),
         &BigInt::from(-25),
     );
+}
+
+#[test]
+fn dispute_preparation_discards_pending_and_retains_only_canonical_deferred_work() {
+    let (mut left, right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit pending payment");
+    assert!(matches!(
+        propose_account_frame(
+            &mut left.account,
+            &left.identity,
+            CLOCK.entity_timestamp,
+            CLOCK.finalized_j_height,
+            &market(),
+        )
+        .expect("propose pending payment"),
+        ProposalOutcome::Proposed(_)
+    ));
+    assert!(left.account.pending().is_some());
+
+    left.account
+        .admit_txs(
+            vec![
+                AccountTx::AddDelta {
+                    token_id: TokenId::new(2).expect("token"),
+                },
+                deferred_j_claim(&left.entity_id, &right.entity_id),
+                swap_resolve_evidence(),
+                cross_pull_close_evidence(true),
+                cross_pull_close_evidence(false),
+            ],
+            "test",
+        )
+        .expect("admit queued freeze rows");
+    left.account
+        .replace_entity_dispute_lifecycle(
+            "dispute_preparing",
+            Some(CanonicalValue::Object(Vec::new())),
+            None,
+        )
+        .expect("prepare dispute");
+
+    assert!(left.account.pending().is_none());
+    assert!(!left.account.accepts_external_input());
+    assert_eq!(
+        left.account
+            .mempool()
+            .iter()
+            .map(AccountTx::wire_name)
+            .collect::<Vec<_>>(),
+        vec!["j_event_claim", "swap_resolve", "cross_pull_close"]
+    );
+}
+
+#[test]
+fn direct_disputed_transition_freezes_zero_cooldown_prepare_without_retaining_work() {
+    let (mut left, right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit pending payment");
+    assert!(matches!(
+        propose_account_frame(
+            &mut left.account,
+            &left.identity,
+            CLOCK.entity_timestamp,
+            CLOCK.finalized_j_height,
+            &market(),
+        )
+        .expect("propose pending payment"),
+        ProposalOutcome::Proposed(_)
+    ));
+    left.account
+        .admit_txs(
+            vec![
+                deferred_j_claim(&left.entity_id, &right.entity_id),
+                swap_resolve_evidence(),
+            ],
+            "test",
+        )
+        .expect("admit work before zero-cooldown start");
+
+    left.account
+        .replace_entity_dispute_lifecycle("disputed", None, None)
+        .expect("direct disputed lifecycle");
+
+    assert!(left.account.pending().is_none());
+    assert!(left.account.mempool().is_empty());
+    assert!(!left.account.accepts_external_input());
+}
+
+#[test]
+fn disputed_metadata_update_preserves_work_accumulated_after_initial_freeze() {
+    let (mut left, right) = parties();
+    left.account
+        .replace_entity_dispute_lifecycle(
+            "disputed",
+            None,
+            Some(CanonicalValue::Object(Vec::new())),
+        )
+        .expect("initial dispute start");
+    left.account
+        .admit_txs(
+            vec![
+                payment(&left.entity_id, &right.entity_id, 25),
+                swap_resolve_evidence(),
+                cross_pull_close_evidence(true),
+            ],
+            "test",
+        )
+        .expect("admit post-freeze work");
+    let before = left.account.mempool().to_vec();
+
+    left.account
+        .replace_entity_dispute_lifecycle(
+            "disputed",
+            None,
+            Some(CanonicalValue::Object(vec![(
+                "finalizeQueued".into(),
+                CanonicalValue::Bool(true),
+            )])),
+        )
+        .expect("metadata-only disputed update");
+
+    assert_eq!(left.account.mempool(), before);
+    assert!(!left.account.accepts_external_input());
 }
 
 /// Match `core/account/consensus/proposal/admission.ts`: an Entity whose
@@ -511,11 +691,11 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
         forged,
         &market(),
     )
-    .expect("wrong signer is peer rejection, not engine failure");
+    .expect("wrong signer is Account input rejection, not engine failure");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
-            if reason.starts_with("ACCOUNT_PEER_FRAME_HANKO_INVALID")
+            if reason.starts_with("ACCOUNT_INPUT_FRAME_HANKO_INVALID")
     ));
     assert_eq!(right.account.current_height(), 0);
 
@@ -535,7 +715,7 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
     let IncomingOutcome::Rejected { reason } = outcome else {
         panic!("expected a rejection, got {outcome:?}");
     };
-    assert_eq!(reason, "ACCOUNT_PEER_FRAME_HASH_MISMATCH");
+    assert_eq!(reason, "ACCOUNT_INPUT_FRAME_HASH_MISMATCH");
     assert_eq!(right.account.current_height(), 0);
 }
 
@@ -931,7 +1111,7 @@ fn ack_frame_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
     assert!(matches!(
         *frame,
         IncomingOutcome::Rejected { ref reason }
-            if reason.starts_with("ACCOUNT_PEER_FRAME_PREV_MISMATCH")
+            if reason.starts_with("ACCOUNT_INPUT_FRAME_PREV_MISMATCH")
     ));
     assert_eq!(left.account.current_height(), 1);
     assert!(left.account.pending().is_none());
@@ -979,7 +1159,7 @@ fn a_frame_from_the_future_is_refused() {
         panic!("expected a rejection, got {outcome:?}");
     };
     assert!(
-        reason.starts_with("ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew"),
+        reason.starts_with("ACCOUNT_INPUT_FRAME_STRUCTURE_INVALID:skew"),
         "{reason}"
     );
     assert_eq!(right.account.current_height(), 0);
@@ -1147,7 +1327,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     assert!(matches!(
         conflict,
         IncomingOutcome::Rejected { reason }
-            if reason == "ACCOUNT_PEER_FRAME_HASH_MISMATCH"
+            if reason == "ACCOUNT_INPUT_FRAME_HASH_MISMATCH"
     ));
     assert_eq!(right.account.current_height(), 2);
 }
@@ -2203,11 +2383,11 @@ fn a_forged_or_retargeted_dispute_hanko_is_refused_before_frame_replay() {
         wrong_signer,
         &market(),
     )
-    .expect("foreign dispute signer is a peer rejection");
+    .expect("foreign dispute signer is an Account input rejection");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
-            if reason.starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
+            if reason.starts_with("ACCOUNT_INPUT_DISPUTE_HANKO_INVALID")
     ));
     assert_eq!(right.account.current_height(), 0);
 
@@ -2222,11 +2402,11 @@ fn a_forged_or_retargeted_dispute_hanko_is_refused_before_frame_replay() {
         wrong_role,
         &market(),
     )
-    .expect("retargeted role is a peer rejection");
+    .expect("retargeted role is an Account input rejection");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
-            if reason.starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
+            if reason.starts_with("ACCOUNT_INPUT_DISPUTE_HANKO_INVALID")
                 || reason == "ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE"
     ));
     assert_eq!(right.account.current_height(), 0);
@@ -2341,12 +2521,12 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
         incoming,
         &market(),
     )
-    .expect("unsafe nonce is a peer rejection");
+    .expect("unsafe nonce is an Account input rejection");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
             if reason
-                == "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:PROOF_NONCE:9007199254740992"
+                == "ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:SHAPE_INVALID:PROOF_NONCE:9007199254740992"
     ));
     assert_eq!(right.account.current_height(), 0);
 }
@@ -2410,11 +2590,11 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
         malformed,
         &market(),
     )
-    .expect("empty witness is a peer rejection before replay classification");
+    .expect("empty witness is an Account input rejection before replay classification");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
-            if reason == "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:HANKO_MISSING"
+            if reason == "ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:SHAPE_INVALID:HANKO_MISSING"
     ));
 
     let mut duplicate = incoming_with_dispute(&proposed, &left.identity);
@@ -2491,11 +2671,11 @@ fn exact_dispute_hash_is_account_bound_before_mutation() {
         incoming,
         &market(),
     )
-    .expect("wrong wire hash is a peer rejection, not an engine failure");
+    .expect("wrong wire hash is an Account input rejection, not an engine failure");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
-            if reason == "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:HASH_MISMATCH"
+            if reason == "ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:HASH_MISMATCH"
     ));
     assert_eq!(right.account.current_height(), 0);
     assert_eq!(
@@ -2650,11 +2830,11 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
             dispute: None,
         },
     )
-    .expect("bad active ACK certificate is a peer rejection");
+    .expect("bad active ACK certificate is an Account input rejection");
     assert!(matches!(
         invalid_active,
         xln_rscore_engine::AckOutcome::Rejected { reason }
-            if reason.starts_with("ACCOUNT_PEER_FRAME_HANKO_INVALID")
+            if reason.starts_with("ACCOUNT_INPUT_FRAME_HANKO_INVALID")
     ));
     assert_eq!(
         left.account.entity_account_leaf().expect("left leaf"),
@@ -2695,11 +2875,11 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
             dispute: None,
         },
     )
-    .expect("unmatched future ACK is a peer rejection");
+    .expect("unmatched future ACK is an Account input rejection");
     assert!(matches!(
         future,
         xln_rscore_engine::AckOutcome::Rejected { reason }
-            if reason == "ACCOUNT_PEER_ACK_UNMATCHED:3:none"
+            if reason == "ACCOUNT_INPUT_ACK_UNMATCHED:3:none"
     ));
     assert_eq!(
         right.account.entity_account_leaf().expect("right leaf"),
@@ -2709,4 +2889,56 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
 
 fn market() -> std::sync::Arc<xln_rscore_engine::SwapMarketPolicy> {
     std::sync::Arc::default()
+}
+
+#[test]
+fn certified_settlement_hankos_replace_the_pre_admitted_unsigned_tx() {
+    let (mut left, _) = parties();
+    let unsigned = AccountTx::SettleTransition {
+        data: CanonicalValue::Object(vec![
+            ("kind".into(), CanonicalValue::String("hanko".into())),
+            (
+                "settlementHash".into(),
+                CanonicalValue::String(format!("0x{}", "11".repeat(32))),
+            ),
+            (
+                "postProof".into(),
+                CanonicalValue::Object(vec![(
+                    "disputeHash".into(),
+                    CanonicalValue::String(format!("0x{}", "22".repeat(32))),
+                )]),
+            ),
+        ]),
+    };
+    let draft = SettlementHankoDraft {
+        tx: unsigned.clone(),
+        settlement_hash: Some([0x11; 32]),
+        dispute_hash: [0x22; 32],
+        settlement_nonce: 1,
+        proof_nonce: 2,
+    };
+    left.account
+        .admit_txs(vec![unsigned.clone()], "settlement-unsigned-test")
+        .expect("pre-admit unsigned transition");
+    let before = left.account.entity_account_leaf().expect("unsigned leaf");
+
+    left.account
+        .attach_certified_settlement_hanko(draft, Some(&[0x31, 0x32]), &[0x41, 0x42])
+        .expect("attach certified witnesses");
+
+    assert_eq!(left.account.mempool().len(), 1, "one canonical transition");
+    assert_ne!(
+        left.account.mempool()[0],
+        unsigned,
+        "witness bytes attached"
+    );
+    assert_eq!(
+        canonical_tx_value(&left.account.mempool()[0]).expect("signed canonical tx"),
+        canonical_tx_value(&unsigned).expect("unsigned canonical tx"),
+    );
+    assert_eq!(
+        left.account.entity_account_leaf().expect("signed leaf"),
+        before,
+        "post-certification witness attachment must not move Account leaf",
+    );
 }

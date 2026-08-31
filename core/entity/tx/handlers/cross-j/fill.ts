@@ -203,12 +203,12 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
 
   const fillAck = buildFillAckData(route, entityTx.data);
   if (!route.targetPull) throw haltRuntimeFailure("CROSS_J_TARGET_PULL_MISSING", `CROSS_J_TARGET_PULL_MISSING:${orderId}`);
-  const accountPeer = role === 'source'
+  const accountCounterparty = role === 'source'
     ? route.source.entityId
     : route.target.counterpartyEntityId;
-  const accountId = findAccountKey(newState, accountPeer);
+  const accountId = findAccountKey(newState, accountCounterparty);
   if (!accountId) {
-    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE", `CROSS_J_FILL_NOTICE_${role.toUpperCase()}_ACCOUNT_MISSING: order=${orderId} peer=${accountPeer}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE", `CROSS_J_FILL_NOTICE_${role.toUpperCase()}_ACCOUNT_MISSING: order=${orderId} counterparty=${accountCounterparty}`);
   }
 
   accountTxs.push({

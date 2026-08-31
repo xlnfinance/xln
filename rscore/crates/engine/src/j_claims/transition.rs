@@ -164,6 +164,7 @@ pub(crate) fn plan_local_claim(
     queued: &[QueuedClaimWitness],
     tx: &JEventClaimTx,
     store: &JClaimStore,
+    owner_side: Side,
 ) -> Result<LocalClaimPlan, StateError> {
     let events = canonical_events(&tx.events)?;
     let records = build_records(identity, tx, &events)?;
@@ -177,7 +178,14 @@ pub(crate) fn plan_local_claim(
             continue;
         };
         if same_record(&actual, expected) {
-            return Ok(LocalClaimPlan::Duplicate);
+            // A matching member on our side is an idempotent retry. A
+            // matching member on the peer side is the first half of the
+            // required 2-of-2 observation, so our claim must still be
+            // admitted to close bilateral finality.
+            if side == owner_side {
+                return Ok(LocalClaimPlan::Duplicate);
+            }
+            continue;
         }
         return Ok(LocalClaimPlan::Conflict(
             ValidationRejection::JEventClaimConflict {

@@ -1,8 +1,8 @@
-import type { AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../types/account';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { accountInputBoardHankoRefresh } from '../flush';
 import type { HandleAccountInputResult } from '../types';
-import { accountInputApplied, rejectAccountPeerEvidenceError, rejectAccountPeerInput } from '../result';
+import { accountInputApplied, rejectAccountInputEvidenceError, rejectAccountInput } from '../result';
 import {
   type ValidatedCounterpartyDisputeHanko,
   validateCounterpartyDisputeHanko,
@@ -22,7 +22,7 @@ const rejectBoardHankoRefresh = (
   error: string,
   events: string[],
 ): HandleAccountInputResult =>
-  rejectAccountPeerInput('ACCOUNT_PEER_BOARD_HANKO_REFRESH_INVALID', error, events);
+  rejectAccountInput('ACCOUNT_INPUT_BOARD_HANKO_REFRESH_INVALID', error, events);
 
 type BoardHankoRefreshActivation = Pick<
   ValidatedBoardHankoRefreshMetadata,
@@ -122,7 +122,7 @@ const validateBoardHankoRefreshFrame = (
 
 const validateBoardHankoRefreshMetadata = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   boardHankoRefresh: BoardHankoRefreshPayload,
   securityContext: AccountInputSecurityContext,
   events: string[],
@@ -151,7 +151,7 @@ const validateBoardHankoRefreshMetadata = (
 
 const verifyBoardHankoRefreshWitnesses = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   boardHankoRefresh: BoardHankoRefreshPayload,
   metadata: ValidatedBoardHankoRefreshMetadata,
   securityContext: AccountInputSecurityContext,
@@ -207,13 +207,13 @@ const verifyBoardHankoRefreshWitnesses = async (
     );
     return verifiedDispute ? { verifiedDispute } : {};
   } catch (error) {
-    return rejectAccountPeerEvidenceError(error, events);
+    return rejectAccountInputEvidenceError(error, events);
   }
 };
 
 export const handleBoardHankoRefresh = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | undefined> => {
   const boardHankoRefresh = accountInputBoardHankoRefresh(input);

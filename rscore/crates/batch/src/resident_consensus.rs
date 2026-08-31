@@ -18,10 +18,10 @@ use xln_rscore_engine::{
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
-    ProposalRow, UpstreamHtlcResolutionRow, account_response_directive, active, apply_one,
-    build_signing_identity, inbound_genesis_account, leaf_root, proposable, proposal_row,
-    restore_checkpoint_account, restore_seed_account, state_error, validate_genesis_seed,
-    verdict_commits_genesis,
+    ProposalRow, UpstreamHtlcResolutionRow, active, apply_one, build_signing_identity,
+    force_ack_directive, inbound_genesis_account, leaf_root, outbound_ack_input, proposable,
+    proposal_row, restore_checkpoint_account, restore_seed_account, state_error,
+    validate_genesis_seed, verdict_commits_genesis,
 };
 use crate::parallel::{ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
@@ -49,7 +49,12 @@ struct OutboundWork {
     create: Option<AccountSeed>,
     envelope_updates: Vec<crate::AccountEnvelopeUpdate>,
     txs: Option<Vec<AccountTx>>,
-    propose: bool,
+    /// This Account belongs to the one final proposal-stage worklist. The
+    /// worker derives whether to emit ACK, ACK+proposal, proposal, or nothing.
+    finish: bool,
+    /// Same-round response obligation only. It is never Account state.
+    force_ack: bool,
+    seal: bool,
 }
 
 struct OutboundOutcome {
@@ -219,7 +224,13 @@ pub struct CertifiedSettlementHankoDraft {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountStatusView {
+    pub status: String,
     pub active: bool,
+    pub dispute_observed_on_chain: bool,
+    pub dispute_observed_block_number: Option<u64>,
+    pub settlement_workspace_hash: Option<String>,
+    pub settlement_workspace_status: Option<String>,
+    pub j_nonce: u64,
     pub current_height: u64,
     pub pending_frame_height: Option<u64>,
     pub mempool_len: usize,
@@ -968,7 +979,7 @@ impl ResidentConsensusEngine {
     /// the now-complete Hanko transitions to the existing outbound candidate.
     /// Account tx hashing excludes these post-commit witnesses, so every leaf
     /// and the already-certified accounts root remain byte-identical.
-    pub fn admit_certified_settlement_hankos(
+    pub fn attach_certified_settlement_hankos(
         &mut self,
         drafts: Vec<CertifiedSettlementHankoDraft>,
     ) -> Result<(), BatchError> {
@@ -985,11 +996,12 @@ impl ResidentConsensusEngine {
                 .map(|draft| (draft.pending.account_id, draft))
                 .collect(),
             |account_id, current, certified| {
-                let mut account =
-                    current.ok_or(BatchError::CandidateAccountNotFound(account_id))?;
+                let mut account = current
+                    .ok_or(BatchError::CandidateAccountNotFound(account_id))?
+                    .clone();
                 let before = leaf_root(account_id, &account)?;
                 account
-                    .admit_certified_settlement_hanko(
+                    .attach_certified_settlement_hanko(
                         certified.pending.draft,
                         certified.settlement_hanko.as_deref(),
                         &certified.dispute_hanko,
@@ -1029,17 +1041,45 @@ impl ResidentConsensusEngine {
         let mut rows =
             self.forest
                 .read_head(vec![(account_id, token_ids)], |_, account, token_ids| {
-                    let active = match account
-                        .replica()
-                        .envelope()
-                        .fields()
-                        .iter()
-                        .find(|(name, _)| name == "status")
-                        .map(|(_, value)| value)
-                    {
-                        None => true,
-                        Some(CanonicalValue::String(value)) => value == "active",
-                        Some(_) => false,
+                    let envelope = account.replica().envelope();
+                    let field = |wanted: &str| {
+                        envelope
+                            .fields()
+                            .iter()
+                            .find_map(|(name, value)| (name == wanted).then_some(value))
+                    };
+                    let status = match field("status") {
+                        None => "active".to_string(),
+                        Some(CanonicalValue::String(value)) => value.clone(),
+                        Some(_) => "invalid".to_string(),
+                    };
+                    let active_dispute = match field("activeDispute") {
+                        Some(CanonicalValue::Object(fields)) => Some(fields),
+                        _ => None,
+                    };
+                    let dispute_field = |wanted: &str| {
+                        active_dispute.and_then(|fields| {
+                            fields
+                                .iter()
+                                .find_map(|(name, value)| (name == wanted).then_some(value))
+                        })
+                    };
+                    let settlement_workspace =
+                        match account.replica().state().settlement_workspace() {
+                            Some(CanonicalValue::Object(fields)) => Some(fields),
+                            _ => None,
+                        };
+                    let settlement_text = |wanted: &str| {
+                        settlement_workspace.and_then(|fields| {
+                            fields.iter().find_map(|(name, value)| {
+                                (name == wanted)
+                                    .then_some(value)
+                                    .and_then(|value| match value {
+                                        CanonicalValue::String(value) => Some(value.clone()),
+                                        _ => None,
+                                    })
+                            })
+                        })
                     };
                     let owner_side = account.replica().owner_side();
                     let mut tokens = BTreeMap::new();
@@ -1057,7 +1097,19 @@ impl ResidentConsensusEngine {
                         tokens.insert(token_id, delta);
                     }
                     Ok(ResidentAccountStatusView {
-                        active,
+                        active: status == "active",
+                        status,
+                        dispute_observed_on_chain: matches!(
+                            dispute_field("observedOnChain"),
+                            Some(CanonicalValue::Bool(true))
+                        ),
+                        dispute_observed_block_number: match dispute_field("observedBlockNumber") {
+                            Some(CanonicalValue::Number(value)) => value.as_str().parse().ok(),
+                            _ => None,
+                        },
+                        settlement_workspace_hash: settlement_text("workspaceHash"),
+                        settlement_workspace_status: settlement_text("status"),
+                        j_nonce: account.replica().state().j_nonce(),
                         current_height: account.current_height(),
                         pending_frame_height: account.pending().map(|pending| pending.frame.height),
                         mempool_len: account.mempool().len(),
@@ -1083,15 +1135,45 @@ impl ResidentConsensusEngine {
         &mut self,
         request: EntityInboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
+        self.entity_inbound_inner(request, false, true)
+    }
+
+    /// Resident Entity-frame ingress. Intermediate Account commitments are
+    /// intentionally not requested; the final proposal phase seals the union
+    /// of all dirty Account shards once.
+    pub fn entity_inbound_unsealed(
+        &mut self,
+        request: EntityInboundRequest,
+        continue_inbound: bool,
+    ) -> Result<EntityRoundResult, BatchError> {
+        self.entity_inbound_inner(request, continue_inbound, false)
+    }
+
+    fn entity_inbound_inner(
+        &mut self,
+        request: EntityInboundRequest,
+        continue_inbound: bool,
+        need_accounts_root: bool,
+    ) -> Result<EntityRoundResult, BatchError> {
         if request.post_accounts {
             return Err(BatchError::EntityInboundPostAccounts);
         }
-        let uses_candidate = self
-            .forest
-            .expected_uses_candidate(request.expected_accounts_root)?;
-        if uses_candidate && self.candidate_proposable.is_none() {
-            return Err(BatchError::EntityRoundMissing);
-        }
+        let uses_candidate = if continue_inbound {
+            if self.inbound_proposable.is_none()
+                || self.round_owner != Some(request.owner_entity_id)
+            {
+                return Err(BatchError::EntityRoundMissing);
+            }
+            false
+        } else {
+            let uses_candidate = self
+                .forest
+                .expected_uses_candidate(request.expected_accounts_root)?;
+            if uses_candidate && self.candidate_proposable.is_none() {
+                return Err(BatchError::EntityRoundMissing);
+            }
+            uses_candidate
+        };
         validate_operation_indices(&request.rows)?;
         let applied_count = request.rows.len();
         let mut grouped = BTreeMap::<AccountId, Vec<AccountInputRow>>::new();
@@ -1108,112 +1190,141 @@ impl ResidentConsensusEngine {
         let market = Arc::clone(&self.swap_market);
         let signer_id = Arc::clone(&self.signer_id);
         let clock = request.clock;
-        let batch = self.forest.apply_inbound(
-            request.expected_accounts_root,
-            entries,
-            move |account_id, current, work| {
-                let created = current.is_none();
-                let mut account =
-                    match current {
-                        Some(account) => {
-                            if work.rows.iter().any(|row| row.genesis_policy.is_some()) {
-                                return Err(BatchError::InboundGenesis {
-                                    account_id,
-                                    detail: "POLICY_FOR_EXISTING".to_string(),
-                                });
-                            }
-                            account
-                        }
-                        None => {
-                            let first = work.rows.first().ok_or(BatchError::InboundGenesis {
-                                account_id,
-                                detail: "INPUT_REQUIRED".to_string(),
-                            })?;
-                            let policy = first.genesis_policy.as_ref().ok_or(
-                                BatchError::InboundGenesis {
-                                    account_id,
-                                    detail: "POLICY_REQUIRED".to_string(),
-                                },
-                            )?;
-                            if work
-                                .rows
-                                .iter()
-                                .skip(1)
-                                .any(|row| row.genesis_policy.is_some())
-                            {
-                                return Err(BatchError::InboundGenesis {
-                                    account_id,
-                                    detail: "POLICY_NOT_FIRST_ONLY".to_string(),
-                                });
-                            }
-                            inbound_genesis_account(account_id, owner, &first.input, policy)?
-                        }
-                    };
-                assert_account_owner(account_id, &account, owner)?;
-                let mut applied = Vec::with_capacity(work.rows.len());
-                let mut created_checkpoint = None;
-                let mut changed = false;
-                for (row_index, row) in work.rows.into_iter().enumerate() {
-                    let authority = row.certified_board_authority.certified()?;
-                    let local_authority = row.local_certified_board_authority.certified()?;
-                    let pure_ack = matches!(&row.input.kind, crate::AccountInputKind::Ack(_));
-                    let (verdict, row_changed) = apply_one(
-                        account_id,
-                        &mut account,
-                        &worker_identity,
-                        row.input,
-                        xln_rscore_engine::IncomingFrameSecurityContext {
-                            clock,
-                            peer_certified_board_authority: authority,
-                            local_certified_board_authority: local_authority,
-                        },
-                        &market,
-                    );
-                    if created && row_index == 0 && !verdict_commits_genesis(&verdict) {
+        let apply = move |account_id, current: Option<&AccountConsensus>, work: InboundWork| {
+            let created = current.is_none();
+            let mut account = match current {
+                Some(account) => {
+                    if work.rows.iter().any(|row| row.genesis_policy.is_some()) {
                         return Err(BatchError::InboundGenesis {
                             account_id,
-                            detail: format!("H1_NOT_COMMITTED:{verdict:?}"),
+                            detail: "POLICY_FOR_EXISTING".to_string(),
                         });
                     }
-                    if created && row_index == 0 {
-                        let genesis_leaf = leaf_root(account_id, &account)?;
-                        created_checkpoint = Some(
-                            account_rows(account_id, &account, None, genesis_leaf, &signer_id)
-                                .map_err(|error| state_error(account_id, &error))?,
-                        );
-                    }
-                    changed |= row_changed;
-                    let response =
-                        account_response_directive(account_id, &account, pure_ack, &verdict)?;
-                    applied.push(AccountInputResult {
-                        operation_index: row.operation_index,
+                    account.clone()
+                }
+                None => {
+                    let first = work.rows.first().ok_or(BatchError::InboundGenesis {
                         account_id,
-                        verdict,
-                        response,
+                        detail: "INPUT_REQUIRED".to_string(),
+                    })?;
+                    let policy =
+                        first
+                            .genesis_policy
+                            .as_ref()
+                            .ok_or(BatchError::InboundGenesis {
+                                account_id,
+                                detail: "POLICY_REQUIRED".to_string(),
+                            })?;
+                    if work
+                        .rows
+                        .iter()
+                        .skip(1)
+                        .any(|row| row.genesis_policy.is_some())
+                    {
+                        return Err(BatchError::InboundGenesis {
+                            account_id,
+                            detail: "POLICY_NOT_FIRST_ONLY".to_string(),
+                        });
+                    }
+                    inbound_genesis_account(account_id, owner, &first.input, policy)?
+                }
+            };
+            assert_account_owner(account_id, &account, owner)?;
+            let mut applied = Vec::with_capacity(work.rows.len());
+            let mut created_checkpoint = None;
+            let mut changed = false;
+            for (row_index, row) in work.rows.into_iter().enumerate() {
+                let authority = row.certified_board_authority.certified()?;
+                let local_authority = row.local_certified_board_authority.certified()?;
+                let pure_ack = matches!(&row.input.kind, crate::AccountInputKind::Ack(_));
+                let (verdict, row_changed) = apply_one(
+                    account_id,
+                    &mut account,
+                    &worker_identity,
+                    row.input,
+                    xln_rscore_engine::IncomingFrameSecurityContext {
+                        clock,
+                        peer_certified_board_authority: authority,
+                        local_certified_board_authority: local_authority,
+                    },
+                    &market,
+                );
+                if created && row_index == 0 && !verdict_commits_genesis(&verdict) {
+                    return Err(BatchError::InboundGenesis {
+                        account_id,
+                        detail: format!("H1_NOT_COMMITTED:{verdict:?}"),
                     });
                 }
-                let leaf = leaf_root(account_id, &account)?;
-                let result = InboundOutcome {
-                    applied,
-                    leaf,
-                    created_checkpoint,
-                    proposable: proposable(&account)?,
-                };
-                if changed {
-                    Ok(ResidentAccountAction::Put {
-                        value: account,
-                        value_digest: leaf,
-                        result,
-                    })
-                } else {
-                    Ok(ResidentAccountAction::Keep(result))
+                if created && row_index == 0 {
+                    let genesis_leaf = leaf_root(account_id, &account)?;
+                    created_checkpoint = Some(
+                        account_rows(account_id, &account, None, genesis_leaf, &signer_id)
+                            .map_err(|error| state_error(account_id, &error))?,
+                    );
                 }
-            },
-        )?;
+                changed |= row_changed;
+                applied.push(AccountInputResult {
+                    operation_index: row.operation_index,
+                    account_id,
+                    force_ack: force_ack_directive(pure_ack, &verdict),
+                    verdict,
+                });
+            }
+            let leaf = if need_accounts_root || created {
+                leaf_root(account_id, &account)?
+            } else {
+                // The resident Entity path consumes only the touched Account
+                // id before outbound. Its final leaf is sealed once after all
+                // Entity-derived proposals have run.
+                [0; 32]
+            };
+            let result = InboundOutcome {
+                applied,
+                leaf,
+                created_checkpoint,
+                proposable: proposable(&account)?,
+            };
+            if changed && !need_accounts_root && !created {
+                Ok(ResidentAccountAction::PutUnsealed {
+                    value: account,
+                    result,
+                })
+            } else if changed {
+                Ok(ResidentAccountAction::Put {
+                    value: account,
+                    value_digest: leaf,
+                    result,
+                })
+            } else {
+                Ok(ResidentAccountAction::Keep(result))
+            }
+        };
+        let (batch_revision, batch_accounts_root, batch_rows) = if need_accounts_root {
+            let batch =
+                self.forest
+                    .apply_inbound(request.expected_accounts_root, entries, apply)?;
+            (batch.revision, Some(batch.accounts_root), batch.rows)
+        } else if continue_inbound {
+            let batch = self
+                .forest
+                .apply_inbound_continue_unsealed(entries, apply)?;
+            (batch.revision, None, batch.rows)
+        } else {
+            let batch = self.forest.apply_inbound_unsealed(
+                request.expected_accounts_root,
+                entries,
+                apply,
+            )?;
+            (batch.revision, None, batch.rows)
+        };
         // The parent named the candidate (or the base) and the workers already
         // reconciled to it, so promotion is a move: one clone seeds the new
         // inbound worklist instead of the previous clone-clone-move dance.
-        let mut inbound_proposable = if uses_candidate {
+        let mut inbound_proposable = if continue_inbound {
+            self.inbound_proposable
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else if uses_candidate {
             let promoted = self
                 .candidate_proposable
                 .take()
@@ -1228,15 +1339,18 @@ impl ResidentConsensusEngine {
             self.base_proposable.clone()
         };
         let mut result = EntityRoundResult {
-            revision: batch.revision,
-            accounts_root: batch.accounts_root,
+            revision: batch_revision,
+            // Unsealed callers must never consume this pre-round root as a
+            // post-ingress commitment. It exists only because the public
+            // round result remains shared with the sealed direct API.
+            accounts_root: batch_accounts_root.unwrap_or(request.expected_accounts_root),
             ..EntityRoundResult::default()
         };
         let mut created_any = false;
         let mut applied_by_position = std::iter::repeat_with(|| None)
             .take(applied_count)
             .collect::<Vec<Option<AccountInputResult>>>();
-        for (account_id, _leaf, outcome) in batch.rows {
+        for (account_id, _leaf, outcome) in batch_rows {
             set_proposable(&mut inbound_proposable, account_id, outcome.proposable);
             for applied in outcome.applied {
                 let index = usize::try_from(applied.operation_index).map_err(|_| {
@@ -1327,9 +1441,9 @@ impl ResidentConsensusEngine {
         }
         let (identity, identity_is_new) =
             self.identity_candidate(owner, !request.creates.is_empty())?;
-        let original_admissions = admission_results(&request.admits);
+        let original_admissions = admission_results(&request.proposal_work);
         let create_entries = create_work(&request.creates)?;
-        let (fast_entries, named) = outbound_work(&mut request)?;
+        let (fast_entries, named, proposal_order) = outbound_work(&mut request)?;
 
         let mut round_leafs = BTreeMap::new();
         if !create_entries.is_empty() {
@@ -1354,7 +1468,7 @@ impl ResidentConsensusEngine {
             local_board_authority,
             &mut round_leafs,
         )?;
-        let proposals = proposals_from(&mut fast.rows, &request.propose)?;
+        let proposals = proposals_from(&mut fast.rows, &proposal_order);
         Ok(PreparedEntityOutbound {
             owner,
             identity,
@@ -1459,7 +1573,9 @@ impl ResidentConsensusEngine {
                             create: None,
                             envelope_updates: Vec::new(),
                             txs: grouped.remove(account_id),
-                            propose: true,
+                            finish: true,
+                            force_ack: false,
+                            seal: true,
                         },
                     )
                 })
@@ -1474,7 +1590,7 @@ impl ResidentConsensusEngine {
                 prepared.local_board_authority,
                 &mut prepared.round_leafs,
             )?;
-            let continued = proposals_from(&mut batch.rows, &follow_order)?;
+            let continued = proposals_from(&mut batch.rows, &follow_order);
             if let Some((proposal, failed)) = continued.iter().find_map(|proposal| {
                 proposal
                     .failed_htlc_locks
@@ -1582,9 +1698,10 @@ impl ResidentConsensusEngine {
             local_board_authority,
             swap_market: Arc::clone(&self.swap_market),
         };
-        let apply = move |account_id, current, work: OutboundWork| {
-            apply_outbound_work(account_id, current, work, &context)
-        };
+        let apply =
+            move |account_id: AccountId, current: Option<&AccountConsensus>, work: OutboundWork| {
+                apply_outbound_work(account_id, current, work, &context)
+            };
         // Continuation owns the candidate set: on any error this round the
         // caller resets to the inbound snapshot anyway, so moving instead of
         // cloning cannot leave a live set behind. The inbound set itself must
@@ -1738,14 +1855,14 @@ struct OutboundApplyContext {
 
 fn apply_outbound_work(
     account_id: AccountId,
-    current: Option<AccountConsensus>,
+    current: Option<&AccountConsensus>,
     work: OutboundWork,
     context: &OutboundApplyContext,
 ) -> Result<ResidentAccountAction<AccountConsensus, OutboundOutcome>, BatchError> {
     let mut changed = false;
     let mut account = match (current, work.create) {
         (Some(_), Some(_)) => return Err(BatchError::WaveCreateExisting(account_id)),
-        (Some(account), None) => account,
+        (Some(account), None) => account.clone(),
         (None, Some(seed)) => {
             changed = true;
             validate_genesis_seed(context.owner, &seed)?
@@ -1814,27 +1931,54 @@ fn apply_outbound_work(
             }
         }
     }
-    let proposal = if work.propose {
-        if proposable(&account)? {
-            let outcome = propose_account_frame(
-                &mut account,
-                &context.identity,
-                context.timestamp,
-                context.j_height,
-                &context.swap_market,
-            )
-            .map_err(|error| state_error(account_id, &error))?;
-            changed = true;
-            Some(proposal_row(account_id, outcome, &account)?)
-        } else {
-            Some(ProposalRow {
-                account_id,
-                outbound_input: None,
-                proposed: None,
-                dropped: Vec::new(),
-                failed_htlc_locks: Vec::new(),
-            })
+    let proposal = if work.finish && proposable(&account)? {
+        let outcome = propose_account_frame(
+            &mut account,
+            &context.identity,
+            context.timestamp,
+            context.j_height,
+            &context.swap_market,
+        )
+        .map_err(|error| state_error(account_id, &error))?;
+        changed = true;
+        let mut row = proposal_row(account_id, outcome, &account)?;
+        if work.force_ack && row.outbound_input.is_none() {
+            row.outbound_input =
+                Some(
+                    outbound_ack_input(&account).ok_or_else(|| BatchError::AccountsTree {
+                        account_id,
+                        detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
+                    })?,
+                );
         }
+        if work.force_ack
+            && !row.outbound_input.as_ref().is_some_and(|input| {
+                matches!(
+                    &input.kind,
+                    crate::AccountInputKind::Ack(_)
+                        | crate::AccountInputKind::AckFrame { ack: Some(_), .. }
+                )
+            })
+        {
+            return Err(BatchError::AccountsTree {
+                account_id,
+                detail: "ACCOUNT_FORCE_ACK_NOT_BUNDLED".to_string(),
+            });
+        }
+        Some(row)
+    } else if work.force_ack {
+        Some(ProposalRow {
+            account_id,
+            outbound_input: Some(outbound_ack_input(&account).ok_or_else(|| {
+                BatchError::AccountsTree {
+                    account_id,
+                    detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
+                }
+            })?),
+            proposed: None,
+            dropped: Vec::new(),
+            failed_htlc_locks: Vec::new(),
+        })
     } else {
         None
     };
@@ -1842,7 +1986,7 @@ fn apply_outbound_work(
         proposal,
         proposable: proposable(&account)?,
     };
-    if changed {
+    if changed || work.seal {
         let leaf = leaf_root(account_id, &account)?;
         Ok(ResidentAccountAction::Put {
             value: account,
@@ -1854,11 +1998,12 @@ fn apply_outbound_work(
     }
 }
 
-fn admission_results(admits: &[(AccountId, Vec<AccountTx>)]) -> Vec<AccountAdmissionResult> {
+fn admission_results(admits: &[(AccountId, Vec<AccountTx>, bool)]) -> Vec<AccountAdmissionResult> {
     admits
         .iter()
+        .filter(|(_, txs, _)| !txs.is_empty())
         .enumerate()
-        .map(|(index, (account_id, txs))| AccountAdmissionResult {
+        .map(|(index, (account_id, txs, _))| AccountAdmissionResult {
             operation_index: index as u64,
             account_id: *account_id,
             verdict: AccountAdmissionVerdict::Admitted { count: txs.len() },
@@ -1899,14 +2044,20 @@ fn create_work(creates: &[AccountSeed]) -> Result<Vec<(AccountId, OutboundWork)>
                 create: Some(seed.clone()),
                 envelope_updates: Vec::new(),
                 txs: None,
-                propose: false,
+                finish: false,
+                force_ack: false,
+                seal: true,
             },
         ));
     }
     Ok(work)
 }
 
-type OutboundWorkSet = (Vec<(AccountId, OutboundWork)>, BTreeSet<AccountId>);
+type OutboundWorkSet = (
+    Vec<(AccountId, OutboundWork)>,
+    BTreeSet<AccountId>,
+    Vec<AccountId>,
+);
 
 fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet, BatchError> {
     let mut grouped = BTreeMap::<AccountId, OutboundWork>::new();
@@ -1917,17 +2068,60 @@ fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet,
                 create: None,
                 envelope_updates: Vec::new(),
                 txs: None,
-                propose: false,
+                finish: false,
+                force_ack: false,
+                seal: true,
             },
         );
     }
-    for (account_id, txs) in std::mem::take(&mut request.admits) {
+    let mut selected = BTreeSet::new();
+    for (account_id, tx) in std::mem::take(&mut request.unsigned_settlement_txs) {
+        if !selected.insert(account_id) {
+            return Err(BatchError::DuplicateAccount(account_id));
+        }
+        grouped
+            .entry(account_id)
+            .or_insert(OutboundWork {
+                create: None,
+                envelope_updates: Vec::new(),
+                txs: Some(Vec::new()),
+                finish: false,
+                force_ack: false,
+                seal: true,
+            })
+            .txs
+            .get_or_insert_with(Vec::new)
+            .push(tx);
+    }
+    let unsigned_accounts = selected.clone();
+    let mut proposal_order = Vec::with_capacity(request.proposal_work.len());
+    for (account_id, txs, force_ack) in std::mem::take(&mut request.proposal_work) {
+        if !selected.insert(account_id) {
+            // A same-round ACK obligation may target the Account whose
+            // settlement transition is waiting for this Entity frame's
+            // manifest Hanko. Merge only that empty response directive; a
+            // second financial admission remains a hard duplicate.
+            if !unsigned_accounts.contains(&account_id) || !txs.is_empty() {
+                return Err(BatchError::DuplicateAccount(account_id));
+            }
+            proposal_order.push(account_id);
+            grouped
+                .get_mut(&account_id)
+                .expect("unsigned settlement row exists")
+                .force_ack |= force_ack;
+            continue;
+        }
+        proposal_order.push(account_id);
         let work = grouped.entry(account_id).or_insert(OutboundWork {
             create: None,
             envelope_updates: Vec::new(),
             txs: Some(Vec::new()),
-            propose: false,
+            finish: true,
+            force_ack,
+            seal: true,
         });
+        work.finish = true;
+        work.force_ack |= force_ack;
         work.txs.get_or_insert_with(Vec::new).extend(txs);
     }
     for (account_id, updates) in std::mem::take(&mut request.envelope_updates) {
@@ -1937,43 +2131,21 @@ fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet,
                 create: None,
                 envelope_updates: Vec::new(),
                 txs: None,
-                propose: false,
+                finish: false,
+                force_ack: false,
+                seal: true,
             })
             .envelope_updates
             .extend(updates);
     }
-    let mut selected = BTreeSet::new();
-    for account_id in &request.propose {
-        if !selected.insert(*account_id) {
-            return Err(BatchError::DuplicateAccount(*account_id));
-        }
-        grouped
-            .entry(*account_id)
-            .or_insert(OutboundWork {
-                create: None,
-                envelope_updates: Vec::new(),
-                txs: None,
-                propose: false,
-            })
-            .propose = true;
-    }
-    for account_id in &request.materialize {
-        grouped.entry(*account_id).or_insert(OutboundWork {
-            create: None,
-            envelope_updates: Vec::new(),
-            txs: None,
-            propose: false,
-        });
-    }
-    let mut named = grouped.keys().copied().collect::<BTreeSet<_>>();
-    named.extend(request.materialize.iter().copied());
-    Ok((grouped.into_iter().collect(), named))
+    let named = grouped.keys().copied().collect::<BTreeSet<_>>();
+    Ok((grouped.into_iter().collect(), named, proposal_order))
 }
 
 fn proposals_from(
     rows: &mut [(AccountId, [u8; 32], OutboundOutcome)],
     order: &[AccountId],
-) -> Result<Vec<ProposalRow>, BatchError> {
+) -> Vec<ProposalRow> {
     let mut by_account = rows
         .iter_mut()
         .filter_map(|(account_id, _, outcome)| {
@@ -1982,14 +2154,7 @@ fn proposals_from(
         .collect::<BTreeMap<_, _>>();
     order
         .iter()
-        .map(|account_id| {
-            by_account
-                .remove(account_id)
-                .ok_or(BatchError::AccountNotFound {
-                    input_index: 0,
-                    account_id: *account_id,
-                })
-        })
+        .filter_map(|account_id| by_account.remove(account_id))
         .collect()
 }
 

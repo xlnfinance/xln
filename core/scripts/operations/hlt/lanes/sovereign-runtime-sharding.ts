@@ -3,7 +3,7 @@
 // direct socket; it is not a one-shot client. Keeping 200 such Runtime loops on
 // one event loop starves that same worker's authenticated batch endpoint.
 export const SOVEREIGN_RUNTIMES_PER_WORKER = (() => {
-  const raw = process.env['XLN_HLT_RUNTIMES_PER_WORKER'] ?? '100';
+  const raw = process.env['XLN_HLT_RUNTIMES_PER_WORKER'] ?? '25';
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1 || value > 1_000) {
     throw new Error(`HLT_RUNTIMES_PER_WORKER_INVALID:${raw}`);
@@ -38,9 +38,12 @@ export const decodeSovereignRuntimeSeeds = (encoded: string | undefined): string
   }
   const bytes = Buffer.from(value, 'base64');
   if (
-    bytes.toString('base64') !== value || bytes.length < SEED_BYTES ||
-    bytes.length > 1_000 * SEED_BYTES || bytes.length % SEED_BYTES !== 0
-  ) throw new Error('HLT_SOVEREIGN_HOST_LANE_SEEDS_INVALID');
+    bytes.toString('base64') !== value ||
+    bytes.length < SEED_BYTES ||
+    bytes.length > 1_000 * SEED_BYTES ||
+    bytes.length % SEED_BYTES !== 0
+  )
+    throw new Error('HLT_SOVEREIGN_HOST_LANE_SEEDS_INVALID');
   return Array.from({ length: bytes.length / SEED_BYTES }, (_, index) =>
     bytes.subarray(index * SEED_BYTES, (index + 1) * SEED_BYTES).toString('hex'),
   );

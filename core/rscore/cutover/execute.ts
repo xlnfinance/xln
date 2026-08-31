@@ -2,10 +2,10 @@
  * Publish one Account result from a bulk Rust round.
  *
  * This is the cutover boundary. TypeScript does not execute the transition:
- * it names every inbound operation in one visit and every admission/proposal
- * in a second visit. Inbound returns only verdicts, events and effects. The
- * second visit returns the exact final post-state rows once; those rebuild the
- * Entity's Account read models after all same-frame Entity work has run.
+ * one resident EntityRound applies Account inputs, Entity financial work and
+ * Account proposals. Its cached result carries the exact final post-state rows
+ * once; those rebuild the Entity's Account read models after all same-frame
+ * Entity work has run.
  *
  * Anything the profile cannot express refuses loudly. A cutover that guessed
  * would sign a frame nobody executed.
@@ -17,7 +17,7 @@ import {
   accountInputDisputeRequired,
   proposeAccountFrameIdle,
   proposeAccountFrameProposed,
-  rejectAccountPeerInput,
+  rejectAccountInput,
 } from '../../account/consensus/result';
 import type {
   AccountCommittedFrame,
@@ -162,7 +162,7 @@ const appliedFromCommit = (
 ) => cutoverAccountEffects(prior, ownerEntityId, accountId, outputs);
 
 /**
- * The exact event strings TypeScript publishes for one peer input.
+ * The exact event strings TypeScript publishes for one Account input.
  *
  * The Entity frame hashes these, so the cutover cannot approximate them. It
  * is checked against TypeScript's own list on every parity run, which is the
@@ -239,10 +239,10 @@ const standaloneInputResult = (
   publishPostState: boolean,
 ): HandleAccountInputResult | null => {
   if (verdict.kind === 'disputeRejected') {
-    return rejectAccountPeerInput('ACCOUNT_PEER_DISPUTE_HANKO_INVALID', verdict.reason, []);
+    return rejectAccountInput('ACCOUNT_INPUT_DISPUTE_HANKO_INVALID', verdict.reason, []);
   }
   if (verdict.kind === 'boardHankoRefreshRejected') {
-    return rejectAccountPeerInput('ACCOUNT_PEER_BOARD_HANKO_REFRESH_INVALID', verdict.reason, []);
+    return rejectAccountInput('ACCOUNT_INPUT_BOARD_HANKO_REFRESH_INVALID', verdict.reason, []);
   }
   if (verdict.kind !== 'disputeApplied' && verdict.kind !== 'boardHankoRefreshApplied') return null;
   if (publishPostState) materializeCutoverAccount(request, requireRow(result, request.accountId));

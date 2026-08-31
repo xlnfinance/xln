@@ -1,7 +1,7 @@
 import type {
   AccountFrame,
   AccountOutput,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
   AccountTx,
   HtlcLock,
@@ -35,7 +35,7 @@ type HtlcFollowupContext = {
   env: EntityRuntimeContext;
   state: EntityState;
   newState: EntityState;
-  input: AccountPeerInput;
+  input: AccountInput;
   account: AccountReplica;
   outputs: EntityInput[];
   accountTxs: AccountTxTarget[];

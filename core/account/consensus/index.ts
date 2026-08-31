@@ -12,10 +12,11 @@ import {
 import type {
   AccountReplica,
   AccountDisputeHanko,
+  AccountTxBatch,
+  AccountFinality,
   AccountFrame,
   AccountInput,
   AccountOutput,
-  AccountPeerInput,
   AccountState,
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
@@ -99,8 +100,8 @@ import {
   accountInputTxRejected,
   accountInputValidationRejected,
   isProposedAccountFrame,
-  rejectAccountPeerEvidenceError,
-  rejectAccountPeerInput,
+  rejectAccountInputEvidenceError,
+  rejectAccountInput,
 } from './result';
 import { timePerfPhase } from '../../support/performance/profile';
 import { countOp } from '../../support/performance/op-counters';
@@ -173,13 +174,13 @@ async function verifySenderFrameHash(
 ): Promise<HandleAccountInputResult | undefined> {
   if (HEAVY_LOGS) accountLog.debug('frame.hash.verify_start', { height: receivedFrame.height });
   try {
-    assertAccountFrameHash(receivedFrame, 'ACCOUNT_PEER_FRAME_HASH_INVALID');
+    assertAccountFrameHash(receivedFrame, 'ACCOUNT_INPUT_FRAME_HASH_INVALID');
   } catch {
     accountLog.warn('frame.hash_mismatch', {
       claimed: shortHash(receivedFrame.stateHash),
     });
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_HASH_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_HASH_INVALID',
       'Frame hash verification failed - claimed stateHash is not the merkle of this body',
       events,
     );
@@ -228,7 +229,7 @@ const collectIncomingOkOutcome = (
 const replayIncomingFrameOnClone = async (
   context: AccountConsensusContext,
   clonedMachine: AccountDraftReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   frameJHeight: number,
@@ -308,7 +309,7 @@ const validateIncomingCommittedState = (
   return accountInputValidationRejected('Bilateral account state root mismatch', events);
 };
 
-const logAcceptedIncomingFrame = (input: AccountPeerInput, frame: AccountFrame): void => {
+const logAcceptedIncomingFrame = (input: AccountInput, frame: AccountFrame): void => {
   accountLog.debug('frame.accept', {
     height: frame.height,
     from: shortId(input.fromEntityId),
@@ -331,7 +332,7 @@ const getIncomingFrameDisputeHankoError = (
 async function validateIncomingFrameOnDraft(
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   frameJHeight: number,
@@ -432,7 +433,7 @@ async function commitIncomingFrameOnRealState(
   runtimeId: string | undefined,
   accountAuthorityFrameId: string | null | undefined,
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   validation: IncomingFrameValidation,
@@ -508,7 +509,7 @@ async function commitIncomingFrameOnRealState(
     proposerIsLeft,
     committedViaNewFrame: true,
   });
-  accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
+  accountLog.debug('frame.indexed', { source: 'counterpartyCommit', height: receivedFrame.height });
 
   events.push(...validation.processEvents);
   events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
@@ -565,11 +566,11 @@ const noteCommittedIncomingFrameForShadow = (value: Readonly<{
 };
 
 type IncomingAckFrameMaterial = {
-  response: Extract<AccountPeerInput, { kind: 'ack' }>;
+  response: Extract<AccountInput, { kind: 'ack' }>;
   outboundAck: {
     height: number;
     counterpartyEntityId: string;
-    response: Extract<AccountPeerInput, { kind: 'ack' }>;
+    response: Extract<AccountInput, { kind: 'ack' }>;
   };
   ackDisputeHash?: string;
   ackProofBodyHash: string;
@@ -615,7 +616,7 @@ const selectAckDisputeHanko = (
 
 async function buildIncomingAckFrameMaterial(
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
@@ -657,7 +658,7 @@ async function buildIncomingAckFrameMaterial(
     proposerIsLeft,
   );
 
-  const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
+  const response: Extract<AccountInput, { kind: 'ack' }> = {
     kind: 'ack',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
@@ -701,9 +702,9 @@ function storeAckDisputeState(account: AccountReplica, material: IncomingAckFram
 }
 
 function buildIncomingFrameReturnPayload(
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
-  response: Extract<AccountPeerInput, { kind: 'ack' }>,
+  response: Extract<AccountInput, { kind: 'ack' }>,
   validation: IncomingFrameValidation,
   proposeResult: ProposeAccountFrameResult | undefined,
   ackDisputeHash: string | undefined,
@@ -767,7 +768,7 @@ function buildIncomingFrameReturnPayload(
 
 async function buildAckResponseForIncomingFrame(
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   validation: IncomingFrameValidation,
@@ -810,12 +811,12 @@ async function buildAckResponseForIncomingFrame(
 
 const classifyIncomingValidationFailure = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   result: HandleAccountInputResult,
 ): IncomingFrameResult => {
   if (result.ok) return { kind: 'return', result };
-  if (result.disposition === 'rejected' && result.rejection.kind === 'peer') {
+  if (result.disposition === 'rejected' && result.rejection.kind === 'input') {
     return { kind: 'return', result };
   }
   const txRejection = result.disposition === 'rejected' && result.rejection.kind === 'tx'
@@ -829,8 +830,8 @@ const classifyIncomingValidationFailure = (
     });
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_HANKO',
+      result: rejectAccountInput(
+        'ACCOUNT_INPUT_FRAME_STALE_SETTLEMENT_HANKO',
         failureMessage || 'Stale settlement Hanko rejected',
         result.events,
       ),
@@ -859,7 +860,7 @@ const classifyIncomingValidationFailure = (
 async function handleIncomingAccountFrame(
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
   validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
@@ -949,7 +950,7 @@ async function handleIncomingAccountFrame(
 type AccountInputSession = {
   context: AccountConsensusContext;
   account: AccountReplica;
-  input: AccountPeerInput;
+  input: AccountInput;
   securityContext: AccountInputSecurityContext;
   normalizedInputHeight: number;
   replay: ReturnType<typeof classifyAccountInputReplay>;
@@ -960,10 +961,10 @@ type AccountInputSession = {
   candidateEffects: AccountOutput[];
 };
 
-const createPeerAccountInputSession = (
+const createAccountInputSession = (
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   securityContext: AccountInputSecurityContext,
   normalizedInputHeight: number,
   replay: ReturnType<typeof classifyAccountInputReplay>,
@@ -1022,7 +1023,7 @@ const handleAccountAckPhase = async (
   } catch (error) {
     return {
       kind: 'return',
-      result: rejectAccountPeerEvidenceError(error, events),
+      result: rejectAccountInputEvidenceError(error, events),
     };
   }
   const { ackHeight } = resolveAccountAckTarget(account, input, normalizedInputHeight);
@@ -1055,7 +1056,7 @@ const handleAccountAckPhase = async (
 
 const handleStandaloneDispute = async (
   account: AccountReplica,
-  input: Extract<AccountPeerInput, { kind: 'dispute' }>,
+  input: Extract<AccountInput, { kind: 'dispute' }>,
   securityContext: AccountInputSecurityContext,
   events: string[],
 ): Promise<HandleAccountInputResult> => {
@@ -1075,8 +1076,8 @@ const handleStandaloneDispute = async (
       disputeHanko,
     );
     if (hankoError) {
-      return rejectAccountPeerInput(
-        'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+      return rejectAccountInput(
+        'ACCOUNT_INPUT_DISPUTE_HANKO_INVALID',
         hankoError,
         events,
       );
@@ -1084,7 +1085,7 @@ const handleStandaloneDispute = async (
     storeCounterpartyDisputeHanko(account, disputeHanko);
     return accountInputApplied({ events });
   } catch (error) {
-    return rejectAccountPeerEvidenceError(error, events);
+    return rejectAccountInputEvidenceError(error, events);
   }
 };
 
@@ -1115,7 +1116,7 @@ const handleAccountProposalPhase = async (
       securityContext,
     );
   } catch (error) {
-    return rejectAccountPeerEvidenceError(error, events);
+    return rejectAccountInputEvidenceError(error, events);
   }
   const incoming = await handleIncomingAccountFrame(
     context,
@@ -1160,7 +1161,7 @@ const resolveAccountInputSecurityContext = (
 
 const applyExternalFinalityInput = (
   account: AccountReplica,
-  input: Extract<AccountInput, { kind: 'external_finality' }>,
+  input: AccountFinality,
 ): HandleAccountInputResult => {
   if (input.finality.kind === 'dispute_started') {
     applyAccountDisputeStarted(account, input.finality);
@@ -1180,7 +1181,7 @@ const applyExternalFinalityInput = (
 export async function applyAccountInput(
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountInput | AccountTxBatch | AccountFinality,
   providedSecurityContext?: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> {
   const authorityScope = context.accountAuthorityExecutionScope;
@@ -1216,28 +1217,28 @@ export async function applyAccountInput(
       if (input.kind === 'external_finality') {
         return accountInputValidationRejected(envelopeError.reason, []);
       }
-      return rejectAccountPeerInput(envelopeError.code, envelopeError.reason, []);
+      return rejectAccountInput(envelopeError.code, envelopeError.reason, []);
     }
     if (input.kind === 'external_finality') {
       return applyExternalFinalityInput(account, input);
     }
-    return applyPeerAccountInput(context, account, input, providedSecurityContext);
+    return applyAccountConsensusInput(context, account, input, providedSecurityContext);
   })();
   noteAuthorityAccountInputResult(recorded, result);
   return result;
 }
 
-const rejectMalformedPeerHanko = (
-  input: AccountPeerInput,
+const rejectMalformedAccountHanko = (
+  input: AccountInput,
   events: string[],
 ): HandleAccountInputResult | undefined => {
   const shapeError = getDisputeHankoShapeError(input);
   return shapeError
-    ? rejectAccountPeerInput('ACCOUNT_PEER_HANKO_SHAPE_INVALID', shapeError, events)
+    ? rejectAccountInput('ACCOUNT_INPUT_HANKO_SHAPE_INVALID', shapeError, events)
     : undefined;
 };
 
-const applyPeerAccountInput = async (
+const applyAccountConsensusInput = async (
   context: AccountConsensusContext,
   account: AccountReplica,
   input: Exclude<AccountInput, { kind: 'enqueue' | 'external_finality' }>,
@@ -1255,18 +1256,18 @@ const applyPeerAccountInput = async (
   );
   if (input.kind === 'dispute') {
     const events: string[] = [];
-    const shapeRejection = rejectMalformedPeerHanko(input, events);
+    const shapeRejection = rejectMalformedAccountHanko(input, events);
     if (shapeRejection) return shapeRejection;
     // A standalone dispute witness is sequenced by its signed proof nonce, not
     // by an Account frame height. Route it before frame-height normalization so
-    // adversarial peer evidence can only be accepted or rejected, never turn a
+    // adversarial Account input evidence can only be accepted or rejected, never turn a
     // valid heightless protocol lane into a local-bug Runtime halt.
     return handleStandaloneDispute(account, input, securityContext, events);
   }
   const heightNormalization = normalizeAccountInputHeight(input);
   if (!heightNormalization.ok) {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_HEIGHT_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_HEIGHT_INVALID',
       heightNormalization.message,
       [],
     );
@@ -1276,11 +1277,11 @@ const applyPeerAccountInput = async (
     throw new Error('ACCOUNT_INPUT_HEIGHT_NORMALIZATION_INVARIANT');
   }
   const events: string[] = [];
-  const shapeRejection = rejectMalformedPeerHanko(input, events);
+  const shapeRejection = rejectMalformedAccountHanko(input, events);
   if (shapeRejection) return shapeRejection;
   const boardHankoRefresh = await handleBoardHankoRefresh(account, input, securityContext);
   if (boardHankoRefresh) {
-    const session = createPeerAccountInputSession(
+    const session = createAccountInputSession(
       context,
       account,
       input,
@@ -1300,7 +1301,7 @@ const applyPeerAccountInput = async (
     securityContext,
   );
   if (replayGateResult) return replayGateResult;
-  const session = createPeerAccountInputSession(
+  const session = createAccountInputSession(
     context,
     account,
     input,
@@ -1310,12 +1311,12 @@ const applyPeerAccountInput = async (
     events,
   );
   const ack = await timePerfPhase(
-    'account.peer.ackPhase',
+    'account.input.ackPhase',
     () => handleAccountAckPhase(session),
   );
   if (ack.kind === 'return') return finishAccountInput(session, ack.result);
   const proposalResult = await timePerfPhase(
-    'account.peer.proposalPhase',
+    'account.input.proposalPhase',
     () => handleAccountProposalPhase(session, ack.ackProcessed),
   );
   if (proposalResult) return finishAccountInput(session, proposalResult);

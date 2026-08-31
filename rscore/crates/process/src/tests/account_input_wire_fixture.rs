@@ -60,7 +60,7 @@ pub(super) fn peer_row(kind: AbiValue) -> AbiValue {
 }
 
 pub(super) fn ack_frame_row() -> AbiValue {
-    peer_row(tuple(vec![AbiValue::Integer(2), ack(), proposal()]))
+    peer_row(tuple(vec![AbiValue::Integer(0), ack(), proposal()]))
 }
 
 pub(super) fn at<'a>(value: &'a AbiValue, path: &[usize]) -> &'a AbiValue {

@@ -36,6 +36,10 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// repeating projection/WAL/publication hundreds of times and starving the
 /// shard workers. Ten milliseconds still bounds admission latency while
 /// yielding roughly 100 independent Account inputs per steady target wave.
+// Bound queue coalescing without delaying the dependent Account ACK/proposal
+// chain. A measured 100 ms trial reduced w1 843.99 -> 786.84 pay/s and made
+// w4 slower than w1 (770.03 pay/s): protocol feedback latency dominated any
+// batching gain. Frame-size telemetry owns any future change to this value.
 const INBOUND_COALESCE_WINDOW: Duration = Duration::from_millis(10);
 
 /// Owns the authenticated socket queue, the one durable Runtime writer and
@@ -550,6 +554,10 @@ impl ResidentRuntimeService {
                     })?;
                     let result =
                         submit_committed_attempt(self.processor.replica()?, operator_key, &attempt);
+                    println!(
+                        "RSCORE_J_SUBMIT_RESULT:batch={}:attempt={}:outcome={:?}",
+                        attempt.batch_hash, attempt.attempt_number, result.outcome
+                    );
                     self.pending_runtime_txs
                         .push_back(RuntimeTx::RecordJSubmitResult(result));
                 }

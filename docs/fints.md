@@ -58,7 +58,7 @@ Each transition MUST behave as a pure machine:
 | Value | Bilateral `accountStateRoot` | Parent Entity commitment | Runtime-only |
 |---|---:|---:|---:|
 | `AccountState` financial fields | yes | through the Account root/frame | no |
-| `pendingFrame`, peer input, ACK/resend coordination | no | yes, as Account replica envelope | no |
+| `pendingFrame`, Account input, ACK/resend coordination | no | yes, as Account replica envelope | no |
 | transport sockets, retry timers, WAL handles | no | no | yes |
 
 A field may move between these columns only as an explicit protocol migration.
@@ -238,13 +238,14 @@ Do not flatten Account input into "just transactions". Preserve three modes:
 
 | Mode | Producer | Bilateral Hanko required |
 |---|---|---:|
-| local `txs` | owning Entity | no, until proposed as a peer frame |
-| peer `frame` / `ack` | bilateral counterparty | yes |
+| local `AccountTx[]` | owning Entity | no, until included in an `ack_frame` proposal |
+| network `AccountInput` (`ack` / `ack_frame`) | bilateral counterparty | yes |
 | `external_finality` | authenticated Jurisdiction event | no; peer veto is forbidden |
 
 The decoder and phase views MUST make the selected mode explicit and reject
 illegal mixtures. A finality event is authority from Jurisdiction, not an
-unsigned peer transaction.
+unsigned network transaction. A standalone `AccountInput.kind = "frame"` is
+forbidden; `ack_frame` is the proposal-carrying superset.
 
 ## 5. Brands and units
 
@@ -428,7 +429,7 @@ type FailureDisposition =
 2. **Retry/defer**: a known temporary condition occurred before commit. Return a
    typed reason with bounded retry policy.
 3. **Dispute**: authenticated signed evidence cannot be safely discarded or
-   replayed as an ordinary peer input. Persist the exact evidence and start the
+   replayed as an ordinary Account input. Persist the exact evidence and start the
    canonical on-chain dispute path. Clock mismatch alone is never this case.
 4. **Halt Runtime**: invariant violation, storage corruption, replay divergence,
    impossible authority state, or unknown exception.
@@ -527,7 +528,7 @@ retry results and never reach this boundary.
 
 - Threshold-one Entity application mutates the owned live candidate path.
 - Multi-signer application isolates a candidate until certification succeeds.
-- A throw on the threshold-one path is not a discardable malformed peer input:
+- A throw on the threshold-one path is not a discardable malformed Account input:
   abort publication, preserve WAL authority, and halt the affected Runtime.
 - Tests MUST cover both modes and prove identical committed bytes/effects for
   equivalent certified inputs.
@@ -864,7 +865,7 @@ explicitly approved protocol change:
 - differential replay diverges;
 - a previously rejected malformed input becomes accepted;
 - a fatal invariant becomes a soft success;
-- a peer rejection becomes Runtime halt or automatic dispute;
+- an Account input rejection becomes Runtime halt or automatic dispute;
 - a local candidate publishes an effect before WAL commit;
 - a new cast or suppression is needed to make the type compile;
 - TS5 and TS7 disagree;
@@ -883,7 +884,7 @@ failed milestone with aliases or fallback readers.
 - [ ] Every switch is exhaustive.
 - [ ] Every brand is minted only by its owner.
 - [ ] No `Partial`, cast, or suppression bypasses construction.
-- [ ] Fatal invariants cannot become peer rejections or successful no-ops.
+- [ ] Fatal invariants cannot become Account input rejections or successful no-ops.
 
 ### Determinism and bytes
 

@@ -247,7 +247,7 @@ describe('runtime activity history', () => {
           entityTxs: [{
             type: 'accountInput',
             data: {
-              kind: 'frame',
+              kind: 'ack_frame',
               fromEntityId: alice,
               toEntityId: hub,
               proposal: {

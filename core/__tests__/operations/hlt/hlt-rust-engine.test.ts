@@ -10,9 +10,14 @@ import {
   HLT_PROFILE_PLAN,
   assertRustLiveMixedCardinality,
   assertRustLivePaymentCardinality,
+  classifyRustLivePaymentRun,
+  classifyRustLiveSameRun,
   diffRustH1EconomicMetrics,
   isRustLiveMixedTpsAuthority,
   parseHltEngineSelection,
+  rustLivePaymentRateEvidence,
+  rustLiveSameRateEvidence,
+  summarizeRustH1WorkerExecution,
   type RustH1Metrics,
   type RustAccountPhaseMetric,
 } from '../../../scripts/operations/hlt/rust/rust-h1';
@@ -22,6 +27,7 @@ import {
   rustH1SessionPopulationReady,
 } from '../../../scripts/operations/hlt/rust/rust-h1-settlement';
 import { hltLanePortsPerSlot } from '../../../scripts/operations/hlt/lanes/lane-port-capacity';
+import { hltWorkloadFingerprint } from '../../../scripts/operations/hlt/workload/workload-fingerprint';
 
 const accountPhase = (
   kind: RustAccountPhaseMetric['kind'],
@@ -40,7 +46,7 @@ const accountPhase = (
   touchedRows: value,
   touchedShards: value,
   workersWithWork: value,
-  valueClones: value,
+  shardHandleClones: value,
   candidateBaseReads: value,
   continuationRounds: value,
   restartRounds: value,
@@ -58,6 +64,7 @@ const rustMetrics = (overrides: Partial<RustH1Metrics> = {}): RustH1Metrics => (
   totalFrames: 0, totalOutputsPublished: 0, totalEnvelopesPublished: 0,
   totalApplyMicros: 0, totalProjectionMicros: 0, totalStorageMicros: 0,
   totalPublicationMicros: 0, totalRuntimeEntityInputs: 0, totalAccountInputs: 0,
+  runtimeEntityInputFrameBuckets: [0, 0, 0, 0, 0, 0, 0],
   totalCanonicalInputBytes: 0, totalEntityTxsSelected: 0, entityTxsPending: 0,
   totalProjectionInputMicros: 0,
   totalProjectionMachineMicros: 0, totalProjectionMetaMicros: 0,
@@ -69,6 +76,7 @@ const rustMetrics = (overrides: Partial<RustH1Metrics> = {}): RustH1Metrics => (
   accountWorkerBarrierWaitSumMicros: 0,
   accountWorkerBarrierWaitMaxMicros: 0, accountWorkersWithWork: 0,
   accountTouchedShards: 0, activeShards: 0, workerItems: [0, 0], workerNanos: [0, 0],
+  workerFoldLeaves: [0, 0], workerFoldNanos: [0, 0],
   entityWorkerItems: [0, 0], entityWorkerNanos: [0, 0],
   accountPhaseMetrics: [
     accountPhase('inbound'),
@@ -134,6 +142,61 @@ test('Rust live TPS authority rejects smoke-sized populations and rates', () => 
     .toBeUndefined();
 });
 
+test('Rust H1 permits only the exact 1,000-user five-second functional smoke below TPS authority', () => {
+  const smoke = { users: 1_000, payments: 5_000, offeredPerSecond: 1_000, durationSeconds: 5 };
+  expect(classifyRustLivePaymentRun(smoke)).toBe('functional-smoke');
+  expect(rustLivePaymentRateEvidence('functional-smoke', {
+    offeredPerSecond: 1_000,
+    deliveredPayments: 5_000,
+    deliveredElapsedMs: 6_000,
+  })).toEqual({});
+  expect(() => classifyRustLivePaymentRun({ ...smoke, users: 999 }))
+    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
+  expect(() => classifyRustLivePaymentRun({ ...smoke, durationSeconds: 4, payments: 4_000 }))
+    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
+  expect(classifyRustLivePaymentRun({
+    users: 1_000,
+    payments: 20_000,
+    offeredPerSecond: 1_000,
+    durationSeconds: 20,
+  })).toBe('tps-authority');
+  expect(rustLivePaymentRateEvidence('tps-authority', {
+    offeredPerSecond: 1_000,
+    deliveredPayments: 20_000,
+    deliveredElapsedMs: 20_000,
+  })).toEqual({ offeredPaymentRate: 1_000, deliveredTps: 1_000 });
+});
+
+test('Rust same-chain five-second smoke exposes counts but no rate fields', () => {
+  const smoke = {
+    users: 1_000,
+    orders: 5_000,
+    offeredOrdersPerSecond: 1_000,
+    durationSeconds: 5,
+  };
+  expect(classifyRustLiveSameRun(smoke)).toBe('functional-smoke');
+  expect(rustLiveSameRateEvidence('functional-smoke', {
+    offeredOrdersPerSecond: 1_000,
+    matchedEconomicSwaps: 2_500,
+    matchedElapsedMs: 5_500,
+    fullySettledElapsedMs: 6_000,
+  })).toEqual({});
+  expect(() => classifyRustLiveSameRun({ ...smoke, users: 998, orders: 4_990 }))
+    .toThrow('HLT_RUST_SAME_CARDINALITY_INVALID');
+  expect(classifyRustLiveSameRun({
+    users: 1_000,
+    orders: 20_000,
+    offeredOrdersPerSecond: 1_000,
+    durationSeconds: 20,
+  })).toBe('tps-authority');
+  expect(rustLiveSameRateEvidence('tps-authority', {
+    offeredOrdersPerSecond: 1_000,
+    matchedEconomicSwaps: 10_000,
+    matchedElapsedMs: 20_000,
+    fullySettledElapsedMs: 25_000,
+  })).toEqual({ offeredOrderRate: 1_000, matchedTps: 500, fullySettledTps: 400 });
+});
+
 test('Rust mixed authority forbids repeated operations per user', () => {
   expect(isRustLiveMixedTpsAuthority({ users: 10, ratePerUser: 1, durationSeconds: 1 })).toBe(false);
   expect(isRustLiveMixedTpsAuthority({ users: 5_000, ratePerUser: 1, durationSeconds: 20 })).toBe(true);
@@ -151,9 +214,11 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
   const before = rustMetrics({
     totalFrames: 10, totalApplyMicros: 100, accountCoordinatorWallMicros: 50,
     totalRuntimeEntityInputs: 20, totalAccountInputs: 40, totalCanonicalInputBytes: 4_000,
+    runtimeEntityInputFrameBuckets: [0, 1, 2, 3, 4, 0, 0],
     totalEntityTxsSelected: 60, entityTxsPending: 0, zeroFillSwapCancels: 3,
     accountWorkerWorkSumMicros: 40, accountTouchedShards: 8,
     workerItems: [100, 100], workerNanos: [1_000, 1_100],
+    workerFoldLeaves: [10, 11], workerFoldNanos: [100, 110],
     entityWorkerItems: [20, 20], entityWorkerNanos: [200, 210],
     accountPhaseMetrics: [accountPhase('inbound', 1), accountPhase('outboundReset'), accountPhase('outboundContinue')],
   });
@@ -162,6 +227,7 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
     totalApplyMicros: 260, totalProjectionMicros: 30, totalStorageMicros: 40,
     totalPublicationMicros: 20, accountCoordinatorWallMicros: 150,
     totalRuntimeEntityInputs: 28, totalAccountInputs: 56, totalCanonicalInputBytes: 5_600,
+    runtimeEntityInputFrameBuckets: [0, 2, 3, 4, 5, 0, 0],
     totalEntityTxsSelected: 84, entityTxsPending: 0, zeroFillSwapCancels: 5,
     totalProjectionInputMicros: 2, totalProjectionMachineMicros: 3,
     totalProjectionMetaMicros: 4, totalProjectionContextMicros: 5,
@@ -169,13 +235,16 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
     accountCoordinatorFoldMicros: 10, accountWorkerWorkSumMicros: 120,
     accountWorkerBarrierWaitSumMicros: 12, accountTouchedShards: 24,
     workerItems: [106, 105], workerNanos: [1_600, 1_650],
+    workerFoldLeaves: [14, 16], workerFoldNanos: [160, 170],
     entityWorkerItems: [24, 23], entityWorkerNanos: [260, 255],
     accountPhaseMetrics: [accountPhase('inbound', 4), accountPhase('outboundReset', 2), accountPhase('outboundContinue', 1)],
   });
-  expect(diffRustH1EconomicMetrics(before, after)).toEqual({
+  const economic = diffRustH1EconomicMetrics(before, after);
+  expect(economic).toEqual({
     frames: 4, outputsPublished: 8, envelopesPublished: 4,
     applyMicros: 160, projectionMicros: 30, storageMicros: 40, publicationMicros: 20,
     runtimeEntityInputs: 8, accountInputs: 16, canonicalInputBytes: 1_600,
+    runtimeEntityInputFrameBuckets: [0, 1, 1, 1, 1, 0, 0],
     entityTxsSelected: 24, entityTxsPending: 0, zeroFillSwapCancels: 2,
     projectionInputMicros: 2, projectionMachineMicros: 3, projectionMetaMicros: 4,
     projectionContextMicros: 5, projectionCheckpointMicros: 6, projectionEncodeMicros: 10,
@@ -185,11 +254,33 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
     accountWorkerBarrierWaitSumMicros: 12,
     accountTouchedShards: 16, workersWithWork: 2,
     workerItems: [6, 5], workerNanos: [600, 550],
+    workerFoldLeaves: [4, 5], workerFoldNanos: [60, 60],
     entityWorkerItems: [4, 3], entityWorkerNanos: [60, 45],
     accountPhaseMetrics: [accountPhase('inbound', 3), accountPhase('outboundReset', 2), accountPhase('outboundContinue', 1)],
   });
   expect(() => diffRustH1EconomicMetrics(after, before))
     .toThrow('HLT_RUST_H1_WORKER_METRIC_REGRESSION');
+  expect(summarizeRustH1WorkerExecution(economic, 2, 4)).toMatchObject({
+    configuredWorkers: 2,
+    activeAccountWorkers: 2,
+    activeEntityWorkers: 2,
+    frames: 4,
+    framesPerMillionOperations: 1_000_000,
+    accountInputsPerMillionOperations: 4_000_000,
+    canonicalInputBytesPerOperation: 400,
+    minWorkerItems: 5,
+    maxWorkerItems: 6,
+  });
+  expect(() => summarizeRustH1WorkerExecution(economic, 3, 4))
+    .toThrow('HLT_RUST_H1_WORKER_COVERAGE_CARDINALITY');
+});
+
+test('worker-count A/B requires one deterministic workload fingerprint', () => {
+  const workload = { users: ['entity-a', 'entity-b'], rounds: 20, cadenceMs: 1_000 };
+  const fingerprint = hltWorkloadFingerprint('payments', workload);
+  expect(fingerprint).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(hltWorkloadFingerprint('payments', workload)).toBe(fingerprint);
+  expect(hltWorkloadFingerprint('payments', { ...workload, rounds: 21 })).not.toBe(fingerprint);
 });
 
 /**

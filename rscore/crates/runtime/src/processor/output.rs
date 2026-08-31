@@ -7,9 +7,9 @@
 use num_bigint::BigInt;
 use serde_json::{Map, Number, Value};
 use thiserror::Error;
-use xln_rscore_batch::{AccountInputKind, AccountPeerInput};
+use xln_rscore_batch::{AccountInput, AccountInputKind};
 use xln_rscore_engine::{
-    AccountFrame, CounterpartyDispute, IncomingAck, IncomingFrame, StateError, canonical_tx_value,
+    AccountFrame, CounterpartyDispute, IncomingAck, IncomingFrame, StateError, wire_tx_value,
 };
 use xln_rscore_entity_kernel::{EntityOutputError, LocalEntityOutput, LocalEntityOutputTx};
 use xln_rscore_protocol::CanonicalValue;
@@ -135,7 +135,7 @@ pub(crate) fn encode_local_entity_output(
     ]))
 }
 
-fn encode_account_input(input: &AccountPeerInput) -> Result<Value, EntityOutputEncodingError> {
+fn encode_account_input(input: &AccountInput) -> Result<Value, EntityOutputEncodingError> {
     let envelope = &input.envelope;
     let mut fields = Map::from_iter([
         (
@@ -181,17 +181,15 @@ fn encode_account_input(input: &AccountPeerInput) -> Result<Value, EntityOutputE
         fields.insert("watchSeed".into(), Value::String(seed.as_hex()));
     }
     match &input.kind {
-        AccountInputKind::Frame(frame) => {
-            fields.insert("kind".into(), Value::String("frame".into()));
-            fields.insert("proposal".into(), encode_proposal(frame)?);
-        }
         AccountInputKind::Ack(ack) => {
             fields.insert("kind".into(), Value::String("ack".into()));
             fields.insert("ack".into(), encode_ack(ack)?);
         }
         AccountInputKind::AckFrame { ack, frame } => {
             fields.insert("kind".into(), Value::String("ack_frame".into()));
-            fields.insert("ack".into(), encode_ack(ack)?);
+            if let Some(ack) = ack {
+                fields.insert("ack".into(), encode_ack(ack)?);
+            }
             fields.insert("proposal".into(), encode_proposal(frame)?);
         }
         AccountInputKind::Dispute(dispute) => {
@@ -298,7 +296,7 @@ fn encode_frame(frame: &IncomingFrame) -> Result<Value, EntityOutputEncodingErro
             Value::Array(
                 txs.iter()
                     .map(|tx| {
-                        canonical_tx_value(tx)
+                        wire_tx_value(tx)
                             .map_err(EntityOutputEncodingError::from)
                             .and_then(canonical_json)
                     })
@@ -451,7 +449,7 @@ mod tests {
     use serde_json::json;
     use xln_rscore_batch::AccountInputKind;
     use xln_rscore_engine::{
-        AccountDisputeConfig, AccountDomain, AccountPeerEnvelope, DepositoryAddress, IncomingAck,
+        AccountDisputeConfig, AccountDomain, AccountInputEnvelope, DepositoryAddress, IncomingAck,
     };
 
     use super::*;
@@ -460,9 +458,9 @@ mod tests {
         hex(&[byte; 32])
     }
 
-    fn ack_input() -> AccountPeerInput {
-        AccountPeerInput {
-            envelope: AccountPeerEnvelope {
+    fn ack_input() -> AccountInput {
+        AccountInput {
+            envelope: AccountInputEnvelope {
                 from_entity_id: [0x11; 32],
                 to_entity_id: [0x22; 32],
                 domain: AccountDomain::new(
@@ -505,6 +503,48 @@ mod tests {
             }
             _ => panic!("ack output required"),
         }
+    }
+
+    #[test]
+    fn settlement_post_commit_hankos_survive_account_output_encoding() {
+        let tx = xln_rscore_engine::AccountTx::SettleTransition {
+            data: CanonicalValue::Object(vec![
+                ("kind".into(), CanonicalValue::String("hanko".into())),
+                (
+                    "settlementHanko".into(),
+                    CanonicalValue::String("0x1234".into()),
+                ),
+                (
+                    "postProof".into(),
+                    CanonicalValue::Object(vec![(
+                        "hanko".into(),
+                        CanonicalValue::String("0xabcd".into()),
+                    )]),
+                ),
+            ]),
+        };
+        let encoded = encode_frame(&IncomingFrame {
+            frame: AccountFrame {
+                height: 1,
+                timestamp: 2,
+                j_height: 3,
+                txs: vec![tx],
+                prev_frame_hash: "genesis".into(),
+                account_state_root: [0x44; 32],
+            },
+            state_hash: [0x55; 32],
+            frame_hanko: Some(vec![0x66]),
+            dispute: None,
+        })
+        .expect("encode settlement proposal");
+        assert_eq!(
+            encoded["accountTxs"][0]["data"]["settlementHanko"],
+            "0x1234"
+        );
+        assert_eq!(
+            encoded["accountTxs"][0]["data"]["postProof"]["hanko"],
+            "0xabcd"
+        );
     }
 
     #[test]

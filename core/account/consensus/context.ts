@@ -1,4 +1,9 @@
-import type { AccountInput, AccountReplica } from '../../types/account';
+import type {
+  AccountTxBatch,
+  AccountFinality,
+  AccountInput,
+  AccountReplica,
+} from '../../types/account';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from './types';
 import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
@@ -41,7 +46,7 @@ export type AccountAuthorityExecutionScope = Readonly<{
 export type AccountAuthorityInputRequest = Readonly<{
   collectorFrameId: string;
   account: AccountReplica;
-  input: AccountInput;
+  input: AccountInput | AccountTxBatch | AccountFinality;
   entityTimestamp: number;
   finalizedJHeight: number;
 }>;
@@ -77,7 +82,7 @@ export type AccountConsensusContext = Readonly<{
   /** Ephemeral pre-TypeScript authority hook; absent on the canonical TS path. */
   accountAuthorityExecutionScope?: AccountAuthorityExecutionScope;
   /**
-   * The clock of the Entity frame this Account work belongs to. Peer inputs
+   * The clock of the Entity frame this Account work belongs to. Account inputs
    * carry their own copy in their security context; a local admission carries
    * none, and one Entity input must not straddle two clocks.
    */

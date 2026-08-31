@@ -1,5 +1,5 @@
 import type {
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
   AccountTx,
 } from '../../types/account';
@@ -11,6 +11,12 @@ import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
 import type { PersistentRadixNodeCommitment } from '../../protocol/state/persistent-radix-value-map';
 import type { OpCounterSnapshot } from '../../support/performance/op-counters';
+import type { AccountAuthorityCommittedHanko } from '../../entity/runtime-context';
+import type { AuthorityCertifiedBoard } from '../authority-wave';
+
+export type TsAccountWorkerCertifiedBoard = AuthorityCertifiedBoard & Readonly<{
+  entityId: string;
+}>;
 
 export type TsAccountWorkerOptions = Readonly<{
   ownerEntityId: string;
@@ -29,11 +35,13 @@ export type TsApplyAccountInputsRequest = Readonly<{
   expectedAccountsRoot: string;
   entityTimestamp: number;
   finalizedJHeight: number;
+  localBoardAuthority?: TsAccountWorkerCertifiedBoard;
   inputs: readonly Readonly<{
     accountId: string;
-    input: AccountPeerInput;
+    input: AccountInput;
     /** Canonical Entity-created shell for an inbound Account genesis. */
     initialAccount?: Record<string, unknown>;
+    counterpartyBoardAuthority?: TsAccountWorkerCertifiedBoard;
   }>[];
 }>;
 
@@ -41,11 +49,18 @@ export type TsProposeAccountFramesRequest = Readonly<{
   frameId: string;
   timestamp: number;
   jHeight: number;
+  localBoardAuthority?: TsAccountWorkerCertifiedBoard;
   txs: readonly Readonly<{
     accountId: string;
     txs: readonly AccountTx[];
+    /** Canonical local H=0 shell for an Account created in this EntityFrame. */
+    initialAccount?: Record<string, unknown>;
+    counterpartyBoardAuthority?: TsAccountWorkerCertifiedBoard;
   }>[];
-  proposalAccountIds: readonly string[];
+  proposals: readonly Readonly<{
+    accountId: string;
+    counterpartyBoardAuthority?: TsAccountWorkerCertifiedBoard;
+  }>[];
 }>;
 
 export type TsAccountWorkerEffect =
@@ -107,7 +122,8 @@ export type TsAccountWorkerPhaseMetrics = Readonly<{
 }>;
 
 export type TsAccountWorkerBatchResult = Readonly<{
-  accountsRoot: string;
+  /** Absent when this intermediate phase deliberately did not seal roots. */
+  accountsRoot?: string;
   effects: readonly TsAccountWorkerEffect[];
   changedSubroots: readonly TsAccountWorkerSubroot[];
   /** Outbound only; inbound never copies Account documents back to the coordinator. */
@@ -154,38 +170,67 @@ export type TsAccountWorkerInitPayload = Readonly<{
 
 export type TsAccountWorkerInboundPayload = Readonly<{
   phase: 'inbound';
+  /** Seal dirty Account shard paths only when the caller consumes the root. */
+  needShardRoot: boolean;
   frameId: string;
   restorePrevious: boolean;
   entityTimestamp: number;
   finalizedJHeight: number;
+  localBoardAuthority?: TsAccountWorkerCertifiedBoard;
   inputs: readonly Readonly<{
     order: number;
     accountId: string;
-    input: AccountPeerInput;
+    input: AccountInput;
     initialAccount?: Record<string, unknown>;
+    counterpartyBoardAuthority?: TsAccountWorkerCertifiedBoard;
   }>[];
 }>;
 
 export type TsAccountWorkerOutboundPayload = Readonly<{
   phase: 'outbound';
+  /** Final Account visit requests the one frame-boundary shard seal. */
+  needShardRoot: boolean;
+  /** Rust-compatible second visit only for genuine failed-HTLC resolutions. */
+  continuation: boolean;
   frameId: string;
   restorePrevious: boolean;
   timestamp: number;
   jHeight: number;
+  localBoardAuthority?: TsAccountWorkerCertifiedBoard;
   txs: readonly Readonly<{
     order: number;
     accountId: string;
     txs: readonly AccountTx[];
+    initialAccount?: Record<string, unknown>;
+    counterpartyBoardAuthority?: TsAccountWorkerCertifiedBoard;
   }>[];
   proposals: readonly Readonly<{
     order: number;
     accountId: string;
+    counterpartyBoardAuthority?: TsAccountWorkerCertifiedBoard;
   }>[];
 }>;
 
 export type TsAccountWorkerPhasePayload =
   | TsAccountWorkerInboundPayload
   | TsAccountWorkerOutboundPayload;
+
+export type TsAccountWorkerCommittedHankoRow = Readonly<{
+  accountId: string;
+  hankos: readonly AccountAuthorityCommittedHanko[];
+}>;
+
+export type TsAccountWorkerInstallHankosPayload = Readonly<{
+  entityHeight: number;
+  rows: readonly TsAccountWorkerCommittedHankoRow[];
+}>;
+
+export type TsAccountWorkerInstallHankosResult = Readonly<{
+  workerIndex: number;
+  accounts: number;
+  attached: number;
+  accountsRoot: string;
+}>;
 
 export type TsAccountWorkerPhaseResult = Readonly<{
   workerIndex: number;
@@ -216,7 +261,7 @@ export type TsAccountWorkerInitResult = Readonly<{
 
 export type TsAccountWorkerRequestEnvelope = Readonly<{
   requestId: number;
-  kind: 'init' | 'phase';
+  kind: 'init' | 'phase' | 'install_hankos';
   payload: ArrayBuffer;
 }>;
 

@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { HankoString } from '../../../types/hanko';
@@ -26,6 +26,13 @@ export type HankoWitnessEntry = {
   entityHeight: number;
   createdAt: number;
 };
+
+export type AccountHankoWitnessState = Pick<EntityState, 'entityId' | 'accounts'>;
+
+export type AccountHankoWitnessRequirement = Readonly<{
+  hash: string;
+  type: Extract<HankoWitnessEntry['type'], 'accountFrame' | 'dispute' | 'settlement'>;
+}>;
 
 const requireReachableWitness = (
   witness: Map<string, HankoWitnessEntry>,
@@ -137,10 +144,16 @@ const requireDraftWitness = (
   throw new Error(`HANKO_DRAFT_WITNESS_MISSING:hash=${hash}:type=${type}:entityHeight=${entityHeight}`);
 };
 
-const getOutboundAccount = (state: EntityState | undefined, input: AccountPeerInput): AccountReplica | undefined =>
+const getOutboundAccount = (
+  state: AccountHankoWitnessState | undefined,
+  input: AccountInput,
+): AccountReplica | undefined =>
   state?.accounts.get(input.toEntityId);
 
-const getAckFrameHash = (state: EntityState | undefined, input: AccountPeerInput): string | undefined => {
+const getAckFrameHash = (
+  state: AccountHankoWitnessState | undefined,
+  input: AccountInput,
+): string | undefined => {
   const ack = accountInputAck(input);
   if (!ack) return undefined;
   if (typeof ack.frameHash !== 'string' || ack.frameHash.trim().length === 0) {
@@ -171,8 +184,8 @@ const attachDisputeHanko = (
 };
 
 const attachAccountInputHankos = (
-  input: AccountPeerInput,
-  state: EntityState | undefined,
+  input: AccountInput,
+  state: AccountHankoWitnessState | undefined,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
   persistAccountWitness: boolean,
@@ -242,7 +255,7 @@ const attachAccountInputHankos = (
 const attachSettlementAccountTxHankos = (
   tx: AccountTx,
   account: AccountReplica,
-  state: EntityState,
+  state: AccountHankoWitnessState,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
 ): number => {
@@ -279,7 +292,7 @@ const attachSettlementAccountTxHankos = (
 
 const attachSettlementAccountMempoolHankos = (
   account: AccountReplica,
-  state: EntityState,
+  state: AccountHankoWitnessState,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
 ): number => {
@@ -307,7 +320,7 @@ const attachSettlementAccountMempoolHankos = (
 export const accountTxAwaitsPostCommitHanko = (
   tx: AccountTx,
   account: AccountReplica,
-  state: EntityState,
+  state: AccountHankoWitnessState,
 ): boolean => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') return false;
   if (!tx.data.postProof.hanko) return true;
@@ -324,7 +337,7 @@ export const attachHankoWitnessToOutputs = (
   jOutputs: JInput[],
   hankoWitness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
-  state?: EntityState,
+  state?: AccountHankoWitnessState,
 ): number => {
   let attachedCount = 0;
 
@@ -393,7 +406,7 @@ export const attachHankoWitnessToOutputs = (
 };
 
 export const attachHankoWitnessesToState = (
-  state: EntityState,
+  state: AccountHankoWitnessState,
   hankoWitness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
   touchedAccountIds: readonly string[],
@@ -435,6 +448,56 @@ export const attachHankoWitnessesToState = (
     // has committed the same authorization.
   }
   return attached;
+};
+
+const addAccountHankoRequirement = (
+  requirements: Map<string, AccountHankoWitnessRequirement['type']>,
+  hash: string | undefined,
+  type: AccountHankoWitnessRequirement['type'],
+): void => {
+  if (!hash) return;
+  const existing = requirements.get(hash);
+  if (existing !== undefined && existing !== type) {
+    throw new Error(`ACCOUNT_HANKO_WITNESS_TYPE_CONFLICT:${hash}:${existing}:${type}`);
+  }
+  requirements.set(hash, type);
+};
+
+const addAccountInputWitnessRequirements = (
+  requirements: Map<string, AccountHankoWitnessRequirement['type']>,
+  input: AccountInput,
+): void => {
+  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
+  addAccountHankoRequirement(requirements, boardHankoRefresh?.frameHash, 'accountFrame');
+  addAccountHankoRequirement(requirements, ack?.frameHash, 'accountFrame');
+  addAccountHankoRequirement(requirements, proposal?.frame.stateHash, 'accountFrame');
+  for (const dispute of [
+    boardHankoRefresh?.disputeHanko,
+    ack?.disputeHanko,
+    proposal?.disputeHanko,
+    accountInputDisputeHanko(input),
+  ]) addAccountHankoRequirement(requirements, dispute?.hash, 'dispute');
+};
+
+/** Exact post-commit witnesses referenced by one resident Account envelope. */
+export const accountHankoWitnessRequirements = (
+  account: AccountReplica,
+): readonly AccountHankoWitnessRequirement[] => {
+  const requirements = new Map<string, AccountHankoWitnessRequirement['type']>();
+  if (account.lastOutboundAckFrame) {
+    addAccountInputWitnessRequirements(requirements, account.lastOutboundAckFrame.response);
+  }
+  if (account.pendingAccountInput) {
+    addAccountInputWitnessRequirements(requirements, account.pendingAccountInput);
+  }
+  for (const tx of account.mempool) {
+    if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') continue;
+    addAccountHankoRequirement(requirements, tx.data.postProof.disputeHash, 'dispute');
+    addAccountHankoRequirement(requirements, tx.data.settlementHash, 'settlement');
+  }
+  return [...requirements].map(([hash, type]) => ({ hash, type }));
 };
 
 export const buildEntityHashesToSign = (

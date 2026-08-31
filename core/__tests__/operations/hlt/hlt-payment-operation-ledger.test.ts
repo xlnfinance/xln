@@ -6,15 +6,15 @@ import {
   traceAccountApplyHop,
   traceHltSwapProposalOutcomes,
 } from '../../../support/performance/account-delivery-trace';
-import type { AccountPeerInput, AccountTx } from '../../../types/account';
+import type { AccountInput, AccountTx } from '../../../types/account';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
 const LOCK_ID = `0x${'33'.repeat(32)}`;
 const HASHLOCK = `0x${'44'.repeat(32)}`;
 
-const input = (height: number, tx: AccountTx): Extract<AccountPeerInput, { kind: 'frame' }> => ({
-  kind: 'frame',
+const input = (height: number, tx: AccountTx): Extract<AccountInput, { kind: 'ack_frame' }> => ({
+  kind: 'ack_frame',
   fromEntityId: LEFT,
   toEntityId: RIGHT,
   domain: { chainId: 31_337, depositoryAddress: `0x${'55'.repeat(20)}` },
@@ -58,7 +58,7 @@ test('RAM-only payment ledger distinguishes unique legs from exact replay', () =
     type: 'htlc_resolve',
     data: { lockId: LOCK_ID, outcome: 'error', reason: 'test' },
   });
-  const ack = (proposal: Extract<AccountPeerInput, { kind: 'frame' }>): AccountPeerInput => ({
+  const ack = (proposal: Extract<AccountInput, { kind: 'ack_frame' }>): AccountInput => ({
     kind: 'ack',
     fromEntityId: RIGHT,
     toEntityId: LEFT,

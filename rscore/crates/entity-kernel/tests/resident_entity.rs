@@ -4,17 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use xln_rscore_batch::{
-    AccountId, AccountInputKind, AccountInputRow, AccountPeerInput, AccountSeed, EngineGeneration,
+    AccountId, AccountInput, AccountInputKind, AccountInputRow, AccountSeed, EngineGeneration,
     EntityAccountGenesisPolicy, EntityInboundRequest, ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountExecutionContext,
-    AccountIdentity, AccountPeerEnvelope, AccountReplica, AccountSettledEvent, AccountState,
-    AccountTx, AccountVerdict, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
-    DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, IncomingFrame,
-    JEventClaimTx, JEventMetadata, JurisdictionEvent, OpaqueHtlcCiphertext, ProposalOutcome,
-    ReceiverClock, ReserveUpdatedEvent, SequentialAccountEngine, SigningIdentity, TokenId,
-    WatchSeed, derive_signer_key, propose_account_frame,
+    AccountIdentity, AccountInputEnvelope, AccountReplica, AccountSettledEvent, AccountState,
+    AccountTx, AccountVerdict, AckFrameOutcome, BoardDelays, CounterpartyDispute, DeliveryMode,
+    Delta, DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, IncomingAck,
+    IncomingFrame, IncomingOutcome, JEventClaimTx, JEventMetadata, JurisdictionEvent,
+    OpaqueHtlcCiphertext, ProposalOutcome, ReceiverClock, ReserveUpdatedEvent,
+    SequentialAccountEngine, SigningIdentity, TokenId, WatchSeed, apply_incoming_ack_frame,
+    apply_incoming_frame, derive_signer_key, propose_account_frame,
 };
 use xln_rscore_entity_kernel::{
     AdmittedLocalEntityTx, ConsensusMode, CrontabState, DeterministicContext,
@@ -166,10 +167,10 @@ fn peer_proposal(
         operation_index,
         account_id,
         genesis_policy: None,
-        certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-        input: AccountPeerInput {
-            envelope: AccountPeerEnvelope {
+        certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+        input: AccountInput {
+            envelope: AccountInputEnvelope {
                 from_entity_id: *peer.as_bytes(),
                 to_entity_id: *hub.as_bytes(),
                 domain: domain(),
@@ -178,12 +179,15 @@ fn peer_proposal(
                     WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
                 ),
             },
-            kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                frame: proposed.frame,
-                state_hash: proposed.state_hash,
-                frame_hanko: Some(proposed.hanko),
-                dispute: None,
-            })),
+            kind: AccountInputKind::AckFrame {
+                ack: None,
+                frame: Box::new(IncomingFrame {
+                    frame: proposed.frame,
+                    state_hash: proposed.state_hash,
+                    frame_hanko: Some(proposed.hanko),
+                    dispute: None,
+                }),
+            },
         },
     };
     (seed, row, peer)
@@ -293,10 +297,11 @@ fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
                         delta_transformer: transformer,
                         public_pinned: false,
                     }),
-                    certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-                    local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-                    input: AccountPeerInput {
-                        envelope: AccountPeerEnvelope {
+                    certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    local_certified_board_authority:
+                        xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    input: AccountInput {
+                        envelope: AccountInputEnvelope {
                             from_entity_id: *peer.as_bytes(),
                             to_entity_id: *hub.as_bytes(),
                             domain: domain(),
@@ -307,17 +312,20 @@ fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
                                     .expect("watch seed"),
                             ),
                         },
-                        kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                            frame: proposed.frame,
-                            state_hash: proposed.state_hash,
-                            frame_hanko: Some(proposed.hanko),
-                            dispute,
-                        })),
+                        kind: AccountInputKind::AckFrame {
+                            ack: None,
+                            frame: Box::new(IncomingFrame {
+                                frame: proposed.frame,
+                                state_hash: proposed.state_hash,
+                                frame_hanko: Some(proposed.hanko),
+                                dispute,
+                            }),
+                        },
                     },
                 }],
                 post_accounts: false,
             },
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 100,
@@ -378,9 +386,344 @@ fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
         .expect("hub ACK plus proposal");
     assert!(matches!(
         &outbound.kind,
-        AccountInputKind::AckFrame { ack, frame }
+        AccountInputKind::AckFrame { ack: Some(ack), frame }
             if ack.height == 1 && frame.frame.height == 2
     ));
+    assert_eq!(
+        result.inbound.applied[0].force_ack,
+        Some(true),
+        "the accepted proposal must transiently force the ACK that the Account worker bundles",
+    );
+}
+
+#[test]
+fn accepted_and_duplicate_account_proposals_force_the_same_pure_ack() {
+    let hub_identity = identity("force-ack-hub");
+    let hub = entity(&hub_identity);
+    let (seed, row, peer) = peer_proposal(
+        "force-ack-peer",
+        &hub,
+        0,
+        AccountTx::SetCreditLimit {
+            token_id: TokenId::new(1).expect("token"),
+            amount: BigInt::from(123),
+        },
+    );
+    let account_id = seed.account_id;
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x5a; 8]),
+        4,
+        0,
+        derive_signer_key(SEED, "force-ack-hub").expect("hub key"),
+        "force-ack-hub".to_string(),
+        support::market(),
+        vec![seed],
+    )
+    .expect("resident accounts");
+    let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+    state.known_accounts.insert(peer.to_string());
+
+    let run = |accounts: &mut ResidentConsensusEngine,
+               state: EntityStateSlice,
+               row: AccountInputRow,
+               entity_height: u64| {
+        let expected_accounts_root = accounts.accounts_root();
+        apply_resident_entity_round(
+            accounts,
+            state,
+            ResidentEntityRequest {
+                inbound: EntityInboundRequest {
+                    owner_entity_id: *hub.as_bytes(),
+                    expected_accounts_root,
+                    clock: ReceiverClock {
+                        entity_timestamp: TIMESTAMP + entity_height,
+                        finalized_j_height: 100,
+                    },
+                    rows: vec![row],
+                    post_accounts: false,
+                },
+                local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                entity_height,
+                outbound_timestamp: TIMESTAMP + entity_height,
+                outbound_j_height: 100,
+                checkpoint_due: false,
+                post_accounts: false,
+                runtime_seed: None,
+                scheduled_wake: None,
+                expected_proposer_signer_id: "force-ack-hub".to_string(),
+                hub_rebalance_has_pending_work: false,
+                finalized_j_events: None,
+                entity_authority: None,
+                local_account_genesis_policy: None,
+                operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
+            },
+            &DeterministicContext::hlt_default(),
+        )
+        .expect("resident force-ACK round")
+    };
+
+    let accepted = run(&mut accounts, state, row.clone(), 1);
+    assert_eq!(accepted.inbound.applied[0].force_ack, Some(true));
+    assert!(matches!(
+        accepted.inbound.applied[0].verdict,
+        xln_rscore_batch::AccountInputVerdict::FrameCommitted { height: 1, .. }
+    ));
+    assert_eq!(accepted.outbound.proposals.len(), 1);
+    assert_eq!(accepted.outbound.proposals[0].account_id, account_id);
+    let accepted_ack = accepted.outbound.proposals[0]
+        .outbound_input
+        .as_ref()
+        .expect("accepted proposal ACK");
+    assert!(matches!(
+        &accepted_ack.kind,
+        AccountInputKind::Ack(ack) if ack.height == 1
+    ));
+
+    let duplicate = run(&mut accounts, accepted.state, row, 2);
+    assert_eq!(duplicate.inbound.applied[0].force_ack, Some(true));
+    assert!(matches!(
+        duplicate.inbound.applied[0].verdict,
+        xln_rscore_batch::AccountInputVerdict::FrameDuplicate { height: 1, .. }
+    ));
+    assert_eq!(duplicate.outbound.proposals.len(), 1);
+    let duplicate_ack = duplicate.outbound.proposals[0]
+        .outbound_input
+        .as_ref()
+        .expect("duplicate proposal ACK");
+    assert!(matches!(
+        &duplicate_ack.kind,
+        AccountInputKind::Ack(ack) if ack.height == 1
+    ));
+    assert_eq!(
+        duplicate_ack.envelope, accepted_ack.envelope,
+        "a duplicate must be re-ACKed from the same canonical Account envelope",
+    );
+}
+
+#[test]
+fn later_pure_ack_clears_earlier_duplicate_force_in_one_inbound_batch() {
+    let hub_identity = identity("cancel-force-hub");
+    let peer_identity = identity("cancel-force-peer");
+    let hub = entity(&hub_identity);
+    let peer = entity(&peer_identity);
+    let account_id = AccountId::from_bytes(*peer.as_bytes());
+    let state = account_state(&hub, &peer);
+    let mut hub_account = AccountConsensus::new(
+        AccountReplica::new(hub.clone(), state.clone()).expect("hub replica"),
+    );
+    let mut peer_account =
+        AccountConsensus::new(AccountReplica::new(peer.clone(), state).expect("peer replica"));
+    let envelope = |from: &EntityId, to: &EntityId| AccountInputEnvelope {
+        from_entity_id: *from.as_bytes(),
+        to_entity_id: *to.as_bytes(),
+        domain: domain(),
+        dispute_config: AccountDisputeConfig::new(10, 10).expect("dispute config"),
+        watch_seed: Some(WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed")),
+    };
+
+    peer_account
+        .admit_txs(
+            vec![AccountTx::SetCreditLimit {
+                token_id: TokenId::new(1).expect("token"),
+                amount: BigInt::from(111),
+            }],
+            "force-cancel-peer",
+        )
+        .expect("peer admission");
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut peer_account,
+        &peer_identity,
+        TIMESTAMP,
+        100,
+        &support::market(),
+    )
+    .expect("peer proposal") else {
+        panic!("peer must propose")
+    };
+    let first = *first;
+    assert!(matches!(
+        apply_incoming_frame(
+            &mut hub_account,
+            &hub_identity,
+            &envelope(&peer, &hub),
+            ReceiverClock {
+                entity_timestamp: TIMESTAMP,
+                finalized_j_height: 100,
+            },
+            IncomingFrame {
+                frame: first.frame.clone(),
+                state_hash: first.state_hash,
+                frame_hanko: Some(first.hanko.clone()),
+                dispute: None,
+            },
+            &support::market(),
+        )
+        .expect("hub accepts first"),
+        IncomingOutcome::Committed { height: 1, .. }
+    ));
+
+    hub_account
+        .admit_txs(
+            vec![AccountTx::SetCreditLimit {
+                token_id: TokenId::new(1).expect("token"),
+                amount: BigInt::from(222),
+            }],
+            "force-cancel-hub",
+        )
+        .expect("hub admission");
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut hub_account,
+        &hub_identity,
+        TIMESTAMP + 1,
+        100,
+        &support::market(),
+    )
+    .expect("hub proposal") else {
+        panic!("hub must propose")
+    };
+    let second = *second;
+    let bundled_ack = second.bundled_ack.clone().expect("H=1 bundled ACK");
+    assert!(bundled_ack.dispute.is_none() && second.dispute.is_none());
+    let peer_result = apply_incoming_ack_frame(
+        &mut peer_account,
+        &peer_identity,
+        &envelope(&hub, &peer),
+        ReceiverClock {
+            entity_timestamp: TIMESTAMP + 1,
+            finalized_j_height: 100,
+        },
+        IncomingAck {
+            height: bundled_ack.height,
+            frame_hash: bundled_ack.frame_hash,
+            frame_hanko: Some(bundled_ack.frame_hanko),
+            dispute: None,
+        },
+        IncomingFrame {
+            frame: second.frame.clone(),
+            state_hash: second.state_hash,
+            frame_hanko: Some(second.hanko.clone()),
+            dispute: None,
+        },
+        &support::market(),
+    )
+    .expect("peer accepts ACK plus H=2");
+    let AckFrameOutcome::Applied { frame, .. } = peer_result else {
+        panic!("peer must apply ACK plus H=2")
+    };
+    let IncomingOutcome::Committed {
+        height: 2,
+        ack_hanko,
+        ..
+    } = *frame
+    else {
+        panic!("peer must commit H=2")
+    };
+
+    let seed = AccountSeed {
+        account_id,
+        replica: hub_account.replica().clone(),
+        consensus: Some(hub_account.consensus_snapshot()),
+    };
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x5b; 8]),
+        4,
+        0,
+        derive_signer_key(SEED, "cancel-force-hub").expect("hub key"),
+        "cancel-force-hub".to_string(),
+        support::market(),
+        vec![seed],
+    )
+    .expect("resident pending hub account");
+    let mut entity_state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP + 2);
+    entity_state.known_accounts.insert(peer.to_string());
+    let expected_accounts_root = accounts.accounts_root();
+    let result = apply_resident_entity_round(
+        &mut accounts,
+        entity_state,
+        ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root,
+                clock: ReceiverClock {
+                    entity_timestamp: TIMESTAMP + 2,
+                    finalized_j_height: 100,
+                },
+                rows: vec![
+                    AccountInputRow {
+                        operation_index: 0,
+                        account_id,
+                        genesis_policy: None,
+                        certified_board_authority:
+                            xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                        local_certified_board_authority:
+                            xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                        input: AccountInput {
+                            envelope: envelope(&peer, &hub),
+                            kind: AccountInputKind::AckFrame {
+                                ack: None,
+                                frame: Box::new(IncomingFrame {
+                                    frame: first.frame,
+                                    state_hash: first.state_hash,
+                                    frame_hanko: None,
+                                    dispute: None,
+                                }),
+                            },
+                        },
+                    },
+                    AccountInputRow {
+                        operation_index: 1,
+                        account_id,
+                        genesis_policy: None,
+                        certified_board_authority:
+                            xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                        local_certified_board_authority:
+                            xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                        input: AccountInput {
+                            envelope: envelope(&peer, &hub),
+                            kind: AccountInputKind::Ack(IncomingAck {
+                                height: 2,
+                                frame_hash: second.state_hash,
+                                frame_hanko: Some(ack_hanko),
+                                dispute: None,
+                            }),
+                        },
+                    },
+                ],
+                post_accounts: false,
+            },
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: TIMESTAMP + 2,
+            outbound_j_height: 100,
+            checkpoint_due: false,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            expected_proposer_signer_id: "cancel-force-hub".to_string(),
+            hub_rebalance_has_pending_work: false,
+            finalized_j_events: None,
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 2 }],
+        },
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("duplicate then pure ACK round");
+
+    assert_eq!(result.inbound.applied[0].force_ack, Some(true));
+    assert_eq!(result.inbound.applied[1].force_ack, Some(false));
+    assert!(matches!(
+        result.inbound.applied[0].verdict,
+        xln_rscore_batch::AccountInputVerdict::FrameDuplicate { height: 1, .. }
+    ));
+    assert!(matches!(
+        result.inbound.applied[1].verdict,
+        xln_rscore_batch::AccountInputVerdict::AckCommitted { height: 2, .. }
+    ));
+    assert!(
+        result.outbound.proposals.is_empty(),
+        "the later pure ACK cancels the earlier duplicate force in the same batch",
+    );
 }
 
 #[test]
@@ -461,7 +804,7 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 43,
@@ -534,7 +877,10 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
         .outbound_input
         .as_ref()
         .expect("one outbound Account input");
-    assert!(matches!(&proposed.kind, AccountInputKind::Frame(_)));
+    assert!(matches!(
+        &proposed.kind,
+        AccountInputKind::AckFrame { ack: None, .. }
+    ));
 }
 
 #[test]
@@ -602,7 +948,7 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 100,
@@ -757,10 +1103,10 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
             operation_index: 0,
             account_id: payer_id,
             genesis_policy: None,
-            certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
-            input: AccountPeerInput {
-                envelope: AccountPeerEnvelope {
+            certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            input: AccountInput {
+                envelope: AccountInputEnvelope {
                     from_entity_id: *payer.as_bytes(),
                     to_entity_id: *hub.as_bytes(),
                     domain: domain(),
@@ -769,12 +1115,15 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
                         WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
                     ),
                 },
-                kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                    frame: proposed.frame,
-                    state_hash: proposed.state_hash,
-                    frame_hanko: Some(proposed.hanko),
-                    dispute: None,
-                })),
+                kind: AccountInputKind::AckFrame {
+                    ack: None,
+                    frame: Box::new(IncomingFrame {
+                        frame: proposed.frame,
+                        state_hash: proposed.state_hash,
+                        frame_hanko: Some(proposed.hanko),
+                        dispute: None,
+                    }),
+                },
             },
         }],
         post_accounts: false,
@@ -786,7 +1135,7 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
         state,
         ResidentEntityRequest {
             inbound,
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 100,
@@ -902,7 +1251,7 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                     rows: rows.clone(),
                     post_accounts: false,
                 },
-                local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+                local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
                 entity_height: 1,
                 outbound_timestamp: TIMESTAMP,
                 outbound_j_height: 100,
@@ -1025,7 +1374,7 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: due_at,
             outbound_j_height: 100,
@@ -1112,7 +1461,7 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
                 rows: Vec::new(),
                 post_accounts: false,
             },
-            local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
             entity_height: 1,
             outbound_timestamp: 200,
             outbound_j_height: 0,

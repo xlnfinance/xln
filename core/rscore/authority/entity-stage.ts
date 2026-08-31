@@ -6,10 +6,11 @@ import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
 } from '../../account/consensus/types';
-import type { AccountInput } from '../../types/account';
+import type { AccountTxBatch, AccountInput } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import type {
   AccountAuthorityFrameBeginRequest,
+  AccountAuthorityCommittedHankosRequest,
   AccountAuthorityFrameOutboundRequest,
   AccountAuthorityEntityStageCapability,
   EntityRuntimeContext,
@@ -18,8 +19,6 @@ import { accountInputApplied } from '../../account/consensus/result';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
-
-type AccountAuthorityExecutionMode = 'pre-ts-observe' | 'cutover';
 
 type TypeScriptAccountExecutionCounts = Readonly<{
   applyAccountInput: number;
@@ -30,36 +29,16 @@ export type AccountAuthorityEntityOccurrence =
   | Readonly<{ kind: 'runtime-input'; inputIndex: number }>
   | Readonly<{ kind: 'local-event'; ordinal: number }>;
 
-type AccountAuthorityEntityStageBegin = Readonly<{
-  ownerEntityId: string;
-  unsupportedEntityTxTypes: readonly EntityTx['type'][];
-  occurrence: AccountAuthorityEntityOccurrence;
-  trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
-  deferProposal: boolean;
-  requiredEntityTxIndex?: number;
-  firstOperation: Readonly<{
-    kind: 'applyAccountInput' | 'proposeAccountFrame';
-    accountId: string;
-  }>;
-}>;
-
-type AccountAuthorityEntitySavepoint = Readonly<{
-  discard(): Promise<void>;
-}>;
-
-/**
- * Runtime-injected bridge. Production leaves it absent until the Rust result
- * ABI can replace TypeScript execution; tests can exercise lifecycle without
- * pretending that a financial cutover already exists.
- */
 export type AccountAuthorityEntityStageProvider = Readonly<{
-  beginEntityStage(input: AccountAuthorityEntityStageBegin): Promise<AccountAuthorityEntitySavepoint>;
-  executeAccountInboundBatch?(
+  executeAccountInboundBatch(
     input: AccountAuthorityEntityBatchInbound,
   ): Promise<readonly ((request: AccountAuthorityInputRequest) => HandleAccountInputResult)[]>;
-  executeAccountOutboundBatch?(
+  executeAccountOutboundBatch(
     input: AccountAuthorityEntityBatchOutbound,
   ): Promise<AccountAuthorityPreparedOutbound>;
+  installCommittedAccountHankos?(
+    input: AccountAuthorityCommittedHankosRequest,
+  ): Promise<void>;
 }>;
 
 type AccountAuthorityPreparedOutbound = Readonly<{
@@ -69,7 +48,7 @@ type AccountAuthorityPreparedOutbound = Readonly<{
   }>[];
   generatedAdmissions: readonly Readonly<{
     accountId: string;
-    input: Extract<AccountInput, { kind: 'enqueue' }>;
+    input: AccountTxBatch;
     result: HandleAccountInputResult;
   }>[];
 }>;
@@ -114,7 +93,6 @@ export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent &
 }>;
 
 interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
-  readonly mode: AccountAuthorityExecutionMode;
   readonly ownerEntityId: string;
   typeScriptExecutionCounts(): TypeScriptAccountExecutionCounts;
   authoritativeExecutionCount(): number;
@@ -122,7 +100,6 @@ interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapabil
 }
 
 export type AccountAuthorityEntityStageOptions = Readonly<{
-  mode: AccountAuthorityExecutionMode;
   ownerEntityId: string;
   provider: AccountAuthorityEntityStageProvider;
   occurrence: AccountAuthorityEntityOccurrence;
@@ -132,7 +109,7 @@ export type AccountAuthorityEntityStageOptions = Readonly<{
 }>;
 
 export type AccountAuthorityEntityStageConfiguration = Readonly<{
-  accountAuthorityExecutionMode?: AccountAuthorityExecutionMode | undefined;
+  accountAuthorityExecutionMode?: 'cutover' | undefined;
   accountAuthorityEntityStageProvider?: AccountAuthorityEntityStageProvider | undefined;
 }>;
 
@@ -147,16 +124,10 @@ export type AccountAuthorityEntityTransition = Readonly<{
 export const resolveAccountAuthorityEntityStageOptions = (
   configuration: AccountAuthorityEntityStageConfiguration,
   transition: AccountAuthorityEntityTransition,
-  migrationRecorderEnabled: boolean,
+  _migrationRecorderEnabled: boolean,
 ): AccountAuthorityEntityStageOptions | null => {
   const mode = configuration.accountAuthorityExecutionMode;
   const provider = configuration.accountAuthorityEntityStageProvider;
-  // Observation and the parity recorder are two answers to the same
-  // question and must not both run. Cutover is the opposite case: the
-  // recorder is how the engine receives the raw inputs it executes.
-  if (mode === 'pre-ts-observe' && migrationRecorderEnabled) {
-    throw new Error(`ACCOUNT_AUTHORITY_MODE_CONFLICT:${mode}:post-ts-migration`);
-  }
   if (mode !== undefined && provider === undefined) {
     throw new Error(`ACCOUNT_AUTHORITY_ENTITY_STAGE_PROVIDER_REQUIRED:${mode}`);
   }
@@ -169,7 +140,6 @@ export const resolveAccountAuthorityEntityStageOptions = (
     throw new Error(`ACCOUNT_AUTHORITY_ENTITY_OCCURRENCE_REQUIRED:${mode}`);
   }
   return {
-    mode,
     ownerEntityId: transition.ownerEntityId,
     provider,
     occurrence,
@@ -225,14 +195,10 @@ const assertNoTypeScriptAccountExecution = (
 };
 
 class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
-  readonly mode: AccountAuthorityExecutionMode;
   readonly ownerEntityId: string;
   private readonly options: AccountAuthorityEntityStageOptions;
   private readonly occurrence: AccountAuthorityEntityOccurrence;
   private unsupportedEntityTxTypes: EntityTx['type'][] | null = null;
-  private beginPromise: Promise<AccountAuthorityEntitySavepoint> | null = null;
-  private savepoint: AccountAuthorityEntitySavepoint | null = null;
-  private beginFailed = false;
   private discarded = false;
   private applyAccountInputCount = 0;
   private proposeAccountFrameCount = 0;
@@ -252,7 +218,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   constructor(options: AccountAuthorityEntityStageOptions) {
     assertOccurrence(options.occurrence);
     this.options = options;
-    this.mode = options.mode;
     this.ownerEntityId = normalizeEntityId(options.ownerEntityId);
     this.occurrence = options.occurrence.kind === 'runtime-input'
       ? { kind: 'runtime-input', inputIndex: options.occurrence.inputIndex }
@@ -278,16 +243,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     };
   }
 
-  private requireBatchProvider<K extends 'executeAccountInboundBatch' | 'executeAccountOutboundBatch'>(
-    key: K,
-  ): NonNullable<AccountAuthorityEntityStageProvider[K]> {
-    const value = this.options.provider[key];
-    if (value === undefined) {
-      throw new Error(`ACCOUNT_AUTHORITY_BATCH_EXECUTOR_REQUIRED:${key}:${this.ownerEntityId}`);
-    }
-    return value as NonNullable<AccountAuthorityEntityStageProvider[K]>;
-  }
-
   async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
     if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
       throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
@@ -295,7 +250,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.unsupportedEntityTxTypes = [...new Set(request.entityTxs
       .map(tx => tx.type)
       .filter(type => type !== 'accountInput'))].sort();
-    if (this.mode !== 'cutover') return;
     // Entity fitting may reject one transaction after an isolated apply and
     // rebuild the proposal. A retry is a new attempt against the same parent
     // head, not a third Account phase. Rust reconciles its held path-copy
@@ -356,7 +310,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         },
       };
     });
-    const run = this.requireBatchProvider('executeAccountInboundBatch');
+    const run = this.options.provider.executeAccountInboundBatch;
     const materializers = [...await run.call(this.options.provider, {
       ...this.parentOf(),
       expectedAccountsRoot: request.expectedAccountsRoot,
@@ -379,7 +333,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 
   async prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void> {
-    if (this.mode !== 'cutover') return;
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_DUPLICATE:${this.ownerEntityId}`);
     if (this.inboundCursor !== this.inboundRequests.length) {
@@ -401,7 +354,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         selectionIsWholeMempool: true,
       };
     });
-    const run = this.requireBatchProvider('executeAccountOutboundBatch');
+    const run = this.options.provider.executeAccountOutboundBatch;
     const materializeAccountIds = [...new Set(this.inboundRequests.map(request =>
       normalizeEntityId(request.account.proofHeader.toEntity)))];
     const prepared = await run.call(this.options.provider, {
@@ -470,7 +423,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 
   finishEntityAccountFrame(): void {
-    if (this.mode !== 'cutover') return;
     if (!this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_NOT_PREPARED:${this.ownerEntityId}`);
     if (this.proposalCursor !== this.proposalResults.length) {
       throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_UNCONSUMED:${this.proposalCursor}:${this.proposalResults.length}`);
@@ -482,16 +434,23 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     }
   }
 
+  async installCommittedAccountHankos(request: AccountAuthorityCommittedHankosRequest): Promise<void> {
+    if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
+      throw new Error(
+        `ACCOUNT_AUTHORITY_COMMITTED_HANKO_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`,
+      );
+    }
+    await this.options.provider.installCommittedAccountHankos?.(request);
+  }
+
   async beforeTypeScriptAccountExecution(
     kind: 'applyAccountInput' | 'proposeAccountFrame',
-    accountId: string,
+    _accountId: string,
   ): Promise<void> {
     if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
     if (this.unsupportedEntityTxTypes === null) {
       throw new Error(`ACCOUNT_AUTHORITY_ENTITY_FRAME_REQUIRED:${this.ownerEntityId}`);
     }
-    if (this.beginPromise === null) this.openObservationStage(kind, accountId);
-    await this.beginPromise;
     if (kind === 'applyAccountInput') {
       this.applyAccountInputCount += 1;
       executionLedger.typescriptApplyAccountInput += 1;
@@ -499,30 +458,10 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       this.proposeAccountFrameCount += 1;
       executionLedger.typescriptProposeAccountFrame += 1;
     }
-    if (this.mode === 'cutover') assertNoTypeScriptAccountExecution(this);
-  }
-
-  private openObservationStage(
-    kind: 'applyAccountInput' | 'proposeAccountFrame',
-    accountId: string,
-  ): void {
-    if (this.unsupportedEntityTxTypes === null) {
-      throw new Error(`ACCOUNT_AUTHORITY_ENTITY_FRAME_REQUIRED:${this.ownerEntityId}`);
-    }
-    this.beginPromise = this.options.provider.beginEntityStage({
-      ...this.parentOf(),
-      firstOperation: { kind, accountId: normalizeEntityId(accountId) },
-    }).then(opened => {
-      this.savepoint = opened;
-      return opened;
-    }, error => {
-      this.beginFailed = true;
-      throw error;
-    });
+    assertNoTypeScriptAccountExecution(this);
   }
 
   async executeAccountInput(request: AccountAuthorityInputRequest): Promise<HandleAccountInputResult | null> {
-    if (this.mode !== 'cutover') return null;
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (request.input.kind === 'enqueue') {
       if (this.frameOutboundPrepared) {
@@ -616,7 +555,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   async executeAccountProposal(
     request: AccountAuthorityProposalRequest,
   ): Promise<ProposeAccountFrameResult | null> {
-    if (this.mode !== 'cutover') return null;
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (!this.frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_BEFORE_OUTBOUND');
     // Rust consumes the whole resident mempool and returns its rejected rows.
@@ -658,12 +596,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   async discard(): Promise<void> {
     if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARD_DUPLICATE');
     this.discarded = true;
-    if (this.mode === 'cutover' || this.beginPromise === null || this.beginFailed) return;
-    await this.beginPromise;
-    if (this.savepoint === null) {
-      throw new Error(`ACCOUNT_AUTHORITY_ENTITY_SAVEPOINT_MISSING:${this.ownerEntityId}`);
-    }
-    await this.savepoint.discard();
   }
 }
 

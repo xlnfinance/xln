@@ -163,7 +163,7 @@ const countEntityInputEnvelopeKinds = (
 ): void => {
   let entityTxs = 0;
   let accountInputs = 0;
-  let accountFrames = 0;
+  let accountProposals = 0;
   let ackFrames = 0;
   let acks = 0;
   let htlcLocks = 0;
@@ -177,8 +177,10 @@ const countEntityInputEnvelopeKinds = (
       if (tx.type !== 'accountInput') continue;
       accountInputs += 1;
       countOp(`${prefix}.accountInput.${tx.data.kind}`);
-      if (tx.data.kind === 'frame') accountFrames += 1;
-      else if (tx.data.kind === 'ack_frame') ackFrames += 1;
+      if (tx.data.kind === 'ack_frame') {
+        accountProposals += 1;
+        if (tx.data.ack) ackFrames += 1;
+      }
       else if (tx.data.kind === 'ack') acks += 1;
       for (const accountTx of accountInputProposal(tx.data)?.frame.accountTxs ?? []) {
         countOp(`${prefix}.accountTx.${accountTx.type}`);
@@ -193,7 +195,7 @@ const countEntityInputEnvelopeKinds = (
     entityInputs: envelope.entityInputs.length,
     entityTxs,
     accountInputs,
-    accountFrames,
+    accountProposals,
     ackFrames,
     acks,
     htlcLocks,

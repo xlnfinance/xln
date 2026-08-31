@@ -1,6 +1,6 @@
 /**
  * FX-3 (proofs/fixes.md, decision D4): the four mandatory j-claim vectors —
- * committed conflict, two conflicts in one batch, exact duplicate, stale
+ * committed conflict, two conflicts in one batch, side-aware duplicate, stale
  * admitted claim after an incoming frame — over a real two-replica bilateral
  * Account driven by the production consensus functions.
  *
@@ -30,7 +30,6 @@ import { isLeftEntity } from '../../../account/utils';
 import { createEmptyEnv } from '../../../runtime';
 import type {
   AccountInput,
-  AccountPeerInput,
   AccountReplica,
   AccountTx,
 } from '../../../types/account';
@@ -63,7 +62,7 @@ class VectorHarness {
   readonly sides: Record<Side, SideRecord>;
   readonly proposals: Partial<Record<Side, AccountInput>> = {};
   readonly ackDrafts: Partial<Record<Side, {
-    accountInput: AccountPeerInput;
+    accountInput: AccountInput;
     hashesToSign: readonly AccountConsensusHashToSign[];
   }>> = {};
   private readonly witnesses: Record<Side, Map<string, string>> = {
@@ -127,14 +126,14 @@ class VectorHarness {
   private attachHankos(side: Side, input: AccountInput): AccountInput {
     const signed = structuredClone(input);
     const attach = (value: AccountInput): void => {
-      if (value.kind === 'ack' || value.kind === 'ack_frame') {
+      if (value.kind === 'ack' || (value.kind === 'ack_frame' && value.ack)) {
         value.ack.frameHanko = value.ack.frameHanko ?? this.requireWitness(side, value.ack.frameHash);
         if (value.ack.disputeHanko) {
           value.ack.disputeHanko.hanko = value.ack.disputeHanko.hanko
             ?? this.requireWitness(side, value.ack.disputeHanko.hash);
         }
       }
-      if (value.kind === 'frame' || value.kind === 'ack_frame') {
+      if (value.kind === 'ack_frame') {
         value.proposal.frameHanko = value.proposal.frameHanko
           ?? this.requireWitness(side, value.proposal.frame.stateHash);
         if (value.proposal.disputeHanko) {
@@ -382,14 +381,14 @@ describe('FX-3 j-claim admission vectors (proofs/fixes.md D4)', () => {
     expect(staleHarness.mempoolTypes('alpha')).toEqual([]);
   });
 
-  test('(c) exact duplicate is idempotent against committed and queued evidence, and never double-records', async () => {
+  test('(c) matching peer evidence admits our second vote while own queued evidence deduplicates', async () => {
     const harness = new VectorHarness();
     await setupCommittedPeerClaim(harness, 5, 0x77);
     const committedDuplicate = await harness.admitClaim('alpha', 5, 0x77);
     expect(committedDuplicate.ok).toBe(true);
-    expect(committedDuplicate.ok && committedDuplicate.admittedAccountTxCount).toBe(0);
+    expect(committedDuplicate.ok && committedDuplicate.admittedAccountTxCount).toBe(1);
     expect(committedDuplicate.ok && committedDuplicate.admissionRejections).toBeUndefined();
-    expect(harness.mempoolTypes('alpha')).toEqual([]);
+    expect(harness.mempoolTypes('alpha')).toEqual(['j_event_claim']);
 
     const queuedHarness = new VectorHarness();
     const first = await queuedHarness.admitClaim('alpha', 7, 0x11);

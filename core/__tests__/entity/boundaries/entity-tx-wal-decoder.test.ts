@@ -19,7 +19,7 @@ describe('persisted EntityTx decoder', () => {
     )).toThrow('WAL_J_EVENT_DATA_FIELDS');
 
     expect(() => validateEntityTx(
-      { type: 'accountInput', data: { kind: 'frame' } },
+      { type: 'accountInput', data: { kind: 'ack_frame' } },
       'WAL_ACCOUNT_INPUT',
     )).toThrow('WAL_ACCOUNT_INPUT_DATA_FROM_ENTITY_ID');
 

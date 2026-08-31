@@ -21,8 +21,8 @@ use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
 use crate::{AccountExecutionContext, AccountOutput, Side};
 
 use super::types::{
-    AccountPeerEnvelope, AckFrameOutcome, AckFramePhase, BoardHankoRefreshInput, IncomingAck,
-    IncomingFrame, StandaloneInputOutcome, validate_peer_envelope,
+    AccountInputEnvelope, AckFrameOutcome, AckFramePhase, BoardHankoRefreshInput, IncomingAck,
+    IncomingFrame, StandaloneInputOutcome, validate_account_input_envelope,
 };
 
 use super::deadline::incoming_deadline_violation;
@@ -240,12 +240,12 @@ fn standalone_rejected(reason: impl Into<String>) -> StandaloneInputOutcome {
 /// frame height is introduced solely to fit the frame/ACK reducer.
 pub fn apply_standalone_dispute(
     account: &mut AccountConsensus,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     clock: ReceiverClock,
     dispute: crate::CounterpartyDispute,
     authority: Option<&CertifiedBoardAuthority>,
 ) -> Result<StandaloneInputOutcome, StateError> {
-    if let Err(error) = validate_peer_envelope(account, envelope) {
+    if let Err(error) = validate_account_input_envelope(account, envelope) {
         return Ok(standalone_rejected(error.to_string()));
     }
     if let Some(authority) = authority {
@@ -370,12 +370,12 @@ fn refresh_metadata(
 /// manufacturing a new Account frame or changing bilateral money.
 pub fn apply_board_hanko_refresh(
     account: &mut AccountConsensus,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     clock: ReceiverClock,
     input: BoardHankoRefreshInput,
     authority: Option<&CertifiedBoardAuthority>,
 ) -> Result<StandaloneInputOutcome, StateError> {
-    if let Err(error) = validate_peer_envelope(account, envelope) {
+    if let Err(error) = validate_account_input_envelope(account, envelope) {
         return Ok(standalone_rejected(error.to_string()));
     }
     let Some(authority) = authority else {
@@ -509,7 +509,7 @@ pub fn apply_board_hanko_refresh(
 pub fn apply_incoming_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     clock: ReceiverClock,
     incoming: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
@@ -533,7 +533,7 @@ pub fn apply_incoming_frame(
 pub fn apply_incoming_frame_with_authority(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     incoming: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     security: IncomingFrameSecurityContext<'_>,
@@ -541,7 +541,7 @@ pub fn apply_incoming_frame_with_authority(
     let clock = security.clock;
     let peer_authority = security.peer_certified_board_authority;
     let local_authority = security.local_certified_board_authority;
-    if let Err(error) = validate_peer_envelope(account, envelope) {
+    if let Err(error) = validate_account_input_envelope(account, envelope) {
         return Ok(rejected(error.to_string()));
     }
     if let Some(authority) = peer_authority {
@@ -600,7 +600,7 @@ pub fn apply_incoming_frame_with_authority(
     }
 
     let Some(frame_hanko) = frame_hanko else {
-        return Ok(rejected("ACCOUNT_PEER_FRAME_HANKO_MISSING"));
+        return Ok(rejected("ACCOUNT_INPUT_FRAME_HANKO_MISSING"));
     };
     if let Some(dispute) = dispute.as_ref()
         && let Err(error) =
@@ -623,11 +623,11 @@ pub fn apply_incoming_frame_with_authority(
         Err(error) => return Ok(rejected(error.to_string())),
     };
     if received_hash != state_hash {
-        return Ok(rejected("ACCOUNT_PEER_FRAME_HASH_MISMATCH"));
+        return Ok(rejected("ACCOUNT_INPUT_FRAME_HASH_MISMATCH"));
     }
     if frame.txs.len() > MAX_ACCOUNT_FRAME_TXS {
         return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:txs:{}",
+            "ACCOUNT_INPUT_FRAME_STRUCTURE_INVALID:txs:{}",
             frame.txs.len()
         )));
     }
@@ -637,7 +637,7 @@ pub fn apply_incoming_frame_with_authority(
             .saturating_add(MAX_FRAME_FUTURE_SKEW_MS)
     {
         return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew:{}",
+            "ACCOUNT_INPUT_FRAME_STRUCTURE_INVALID:skew:{}",
             frame.timestamp - clock.entity_timestamp
         )));
     }
@@ -659,13 +659,13 @@ pub fn apply_incoming_frame_with_authority(
 
     if frame.height != current_height + 1 {
         return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_HEIGHT_GAP:{}:{current_height}",
+            "ACCOUNT_INPUT_FRAME_HEIGHT_GAP:{}:{current_height}",
             frame.height
         )));
     }
     if frame.prev_frame_hash != account.prev_frame_hash() {
         return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_PREV_MISMATCH:{}",
+            "ACCOUNT_INPUT_FRAME_PREV_MISMATCH:{}",
             frame.prev_frame_hash
         )));
     }
@@ -707,7 +707,7 @@ pub fn apply_incoming_frame_with_authority(
         }
         if account.last_rollback_frame_hash() == Some(&state_hash) {
             return Ok(rejected(format!(
-                "ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE:{}",
+                "ACCOUNT_INPUT_FRAME_ROLLBACK_DUPLICATE:{}",
                 frame.height
             )));
         }
@@ -746,17 +746,17 @@ pub fn apply_incoming_frame_with_authority(
         // The peer signed this transaction into the frame, so a rejection is a
         // disagreement about the whole frame, never a dropped transaction.
         return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_TX_REJECTED:{}:{:?}",
+            "ACCOUNT_INPUT_FRAME_TX_REJECTED:{}:{:?}",
             first.index, first.rejection
         )));
     }
     if applied != frame.txs {
-        return Ok(rejected("ACCOUNT_PEER_FRAME_TX_COUNT_MISMATCH"));
+        return Ok(rejected("ACCOUNT_INPUT_FRAME_TX_COUNT_MISMATCH"));
     }
 
     let account_state_root = candidate.refresh_account_state_root()?;
     if account_state_root != frame.account_state_root {
-        return Ok(rejected("ACCOUNT_PEER_FRAME_STATE_ROOT_MISMATCH"));
+        return Ok(rejected("ACCOUNT_INPUT_FRAME_STATE_ROOT_MISMATCH"));
     }
     let expected_proof_body_hash = candidate
         .delta_transformer()
@@ -854,7 +854,7 @@ pub fn apply_incoming_frame_with_authority(
 /// Apply the peer's ack of our pending frame.
 pub fn apply_incoming_ack(
     account: &mut AccountConsensus,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     incoming: IncomingAck,
 ) -> Result<AckOutcome, StateError> {
     apply_incoming_ack_with_authority(
@@ -875,12 +875,12 @@ pub fn apply_incoming_ack(
 /// current-board-only verifier above.
 pub fn apply_incoming_ack_with_authority(
     account: &mut AccountConsensus,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     clock: ReceiverClock,
     incoming: IncomingAck,
     authority: Option<&CertifiedBoardAuthority>,
 ) -> Result<AckOutcome, StateError> {
-    if let Err(error) = validate_peer_envelope(account, envelope) {
+    if let Err(error) = validate_account_input_envelope(account, envelope) {
         return Ok(AckOutcome::Rejected {
             reason: error.to_string(),
         });
@@ -942,7 +942,7 @@ pub fn apply_incoming_ack_with_authority(
             return Ok(AckOutcome::Stale { height });
         }
         return Ok(AckOutcome::Rejected {
-            reason: format!("ACCOUNT_PEER_ACK_UNMATCHED:{height}:none"),
+            reason: format!("ACCOUNT_INPUT_ACK_UNMATCHED:{height}:none"),
         });
     };
     if height != pending_height {
@@ -950,13 +950,13 @@ pub fn apply_incoming_ack_with_authority(
             return Ok(AckOutcome::Stale { height });
         }
         return Ok(AckOutcome::Rejected {
-            reason: format!("ACCOUNT_PEER_ACK_UNMATCHED:{height}:{pending_height}"),
+            reason: format!("ACCOUNT_INPUT_ACK_UNMATCHED:{height}:{pending_height}"),
         });
     }
 
     let Some(frame_hanko) = frame_hanko.filter(|hanko| !hanko.is_empty()) else {
         return Ok(AckOutcome::Rejected {
-            reason: "ACCOUNT_PEER_ACK_HANKO_MISSING".to_string(),
+            reason: "ACCOUNT_INPUT_ACK_HANKO_MISSING".to_string(),
         });
     };
     let pending = account.pending().ok_or_else(|| {
@@ -972,7 +972,7 @@ pub fn apply_incoming_ack_with_authority(
     }
     if pending.state_hash != frame_hash {
         return Ok(AckOutcome::Rejected {
-            reason: "ACCOUNT_PEER_ACK_HASH_MISMATCH".to_string(),
+            reason: "ACCOUNT_INPUT_ACK_HASH_MISMATCH".to_string(),
         });
     }
     if let Err(error) = verify_ack_hanko_with_authority(
@@ -1031,7 +1031,7 @@ pub fn apply_incoming_ack_with_authority(
 pub fn apply_incoming_ack_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     clock: ReceiverClock,
     ack: IncomingAck,
     frame: IncomingFrame,
@@ -1055,7 +1055,7 @@ pub fn apply_incoming_ack_frame(
 pub fn apply_incoming_ack_frame_with_authority(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    envelope: &AccountPeerEnvelope,
+    envelope: &AccountInputEnvelope,
     ack: IncomingAck,
     frame: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
@@ -1311,7 +1311,7 @@ mod authority_tests {
                 &registered_entity,
                 Some(&wrong_peer),
             ),
-            Err(StateError::BoardAuthorityPeerMismatch { .. }),
+            Err(StateError::BoardAuthorityCounterpartyMismatch { .. }),
         ));
     }
 

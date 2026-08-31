@@ -5,7 +5,7 @@ import { removeCommittedTxsFromMempool, txFingerprint } from '../../../protocol/
 const accountInput = (accountTxs: unknown[]) => ({
   type: 'accountInput',
   data: {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: `0x${'11'.repeat(32)}`,
     toEntityId: `0x${'22'.repeat(32)}`,
     proposal: {

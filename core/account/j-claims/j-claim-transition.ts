@@ -147,6 +147,7 @@ export const planAccountJClaimLocalAdmission = (
   tx: ClaimTx,
   store: AccountJClaimNodeStore,
   domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,
+  localIsLeft: boolean,
 ): AccountJClaimLocalAdmissionPlan => {
   const events = canonicalEvents(tx.data.events);
   const eventsHash = canonicalJurisdictionEventsHash(events);
@@ -160,7 +161,11 @@ export const planAccountJClaimLocalAdmission = (
     );
     if (result.status !== 'member') continue;
     if (result.record.jBlockHash === record.jBlockHash && result.record.eventsHash === record.eventsHash) {
-      return { verdict: 'duplicate' };
+      // The same observation on our side is a duplicate. The same observation
+      // on the peer side is the first half of the required 2-of-2 agreement:
+      // admitting our side is what closes bilateral finality.
+      if ((side === 'left') === localIsLeft) return { verdict: 'duplicate' };
+      continue;
     }
     return {
       verdict: 'conflict',

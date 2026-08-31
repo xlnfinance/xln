@@ -15,12 +15,12 @@
  *
  * The counters it also keeps are the evidence behind the wave's shape: that a
  * Runtime frame carries one clock per Entity per role, and that admissions and
- * peer inputs interleave (measured: 10 of 40 same-jurisdiction swap frames).
+ * Account inputs interleave (measured: 10 of 40 same-jurisdiction swap frames).
  */
 
 import { createStructuredLogger } from '../support/logger';
 import {
-  accountPeerFrameWire,
+  accountInputFrameWire,
   accountTxWire,
   accountEnvelopeWire,
   accountSeedWire,
@@ -37,9 +37,10 @@ import type {
   AccountDisputeHanko,
   AccountFrame,
   AccountAckFrame,
+  AccountTxBatch,
+  AccountFinality,
   AccountFrameProposal,
   AccountInput,
-  AccountPeerInput,
   AccountReplica,
   AccountTx,
 } from '../types/account';
@@ -50,26 +51,25 @@ import type {
   ProposeAccountFrameResult,
 } from '../account/consensus/types';
 import { safeStringify } from '../protocol/serialization';
-import { decodeAccountPeerInput } from '../account/validation/input-validation';
+import { decodeAccountInput } from '../account/validation/input-validation';
 import type { CertifiedBoardRecord } from '../types/entity-board-registry';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
-type RawAccountInputKind = 'create' | 'enqueue' | 'frame' | 'ack' | 'ack_frame' | 'dispute'
+type RawAccountInputKind = 'create' | 'enqueue' | 'ack' | 'ack_frame' | 'dispute'
   | 'external_finality' | 'other';
 
-type AuthorityPeerInput = Extract<
-  AccountPeerInput,
-  { kind: 'frame' | 'ack' | 'ack_frame' }
+type AuthorityAccountInput = Extract<
+  AccountInput,
+  { kind: 'ack' | 'ack_frame' }
 >;
 
 /** What arrived for one account, as the engine would be handed it. */
 type RecordedPayload =
   | { kind: 'create'; seed: RscoreWireValue }
   | { kind: 'admit'; txs: readonly AccountTx[] }
-  | { kind: 'frame'; input: Extract<AccountPeerInput, { kind: 'frame' }> }
-  | { kind: 'ack'; input: Extract<AccountPeerInput, { kind: 'ack' }> }
-  | { kind: 'ack_frame'; input: Extract<AccountPeerInput, { kind: 'ack_frame' }> }
+  | { kind: 'ack'; input: Extract<AccountInput, { kind: 'ack' }> }
+  | { kind: 'ack_frame'; input: Extract<AccountInput, { kind: 'ack_frame' }> }
   /** Inputs no wave can carry: they are counted, and the frame is not driven. */
   | { kind: 'unsupported'; reason: string };
 
@@ -90,7 +90,7 @@ type AuthorityExpectedOperationVerdict =
   | Readonly<{ kind: 'create' }>
   | Readonly<{ kind: 'admission'; admittedCount: number }>
   | Readonly<{
-      kind: 'peer';
+      kind: 'input';
       outcome: 'applied' | 'rejected' | 'dispute';
       /** Exact Account certificate evidence, in ACK-then-frame order. */
       committedFrames: readonly Readonly<{
@@ -185,9 +185,9 @@ let frameSequence = 0;
 let report = {
   frames: 0,
   inputs: 0,
-  /** Frames where a peer input for an account preceded an admission to it. */
+  /** Frames where an Account input for an account preceded an admission to it. */
   framesWithInterleavedAccount: 0,
-  /** Accounts whose admissions did not all precede their peer inputs. */
+  /** Accounts whose admissions did not all precede their Account inputs. */
   interleavedAccounts: 0,
   /** Inputs seen with no proof header to name the two parties from. */
   skippedNoHeader: 0,
@@ -217,12 +217,13 @@ let report = {
   byKind: {} as Record<string, number>,
 };
 
-const classify = (input: AccountInput): RawAccountInputKind => {
+const classify = (
+  input: AccountInput | AccountTxBatch | AccountFinality,
+): RawAccountInputKind => {
   switch (input.kind) {
     case 'enqueue': return 'enqueue';
     case 'external_finality': return 'external_finality';
     case 'dispute': return 'dispute';
-    case 'frame': return 'frame';
     case 'ack': return 'ack';
     case 'ack_frame': return 'ack_frame';
     case 'board_hanko_refresh': return 'other';
@@ -238,7 +239,7 @@ export const noteRawAccountInput = (
   /** From the caller's own consensus context, never from module state. */
   frameId: string | null | undefined,
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountInput | AccountTxBatch | AccountFinality,
 ): AuthorityRecordedAccountInput | null => {
   if (!authorityRecordEnabled()) return null;
   // `null` is an explicit detached/read-only scope. It is not a gap and must
@@ -278,7 +279,7 @@ const responseAckHanko = (result: HandleAccountInputResult): string | null => {
   if (!result.ok || result.response === undefined) return null;
   const response = result.response;
   if (response.kind !== 'ack' && response.kind !== 'ack_frame') return null;
-  return response.ack.frameHanko ?? null;
+  return response.ack?.frameHanko ?? null;
 };
 
 /**
@@ -313,7 +314,7 @@ export const noteAuthorityAccountInputResult = (
     throw new Error(`AUTHORITY_ACCOUNT_RESULT_KIND:${payload.kind}`);
   }
   recorded.row.expectedVerdict = {
-    kind: 'peer',
+    kind: 'input',
     outcome: result.ok ? 'applied' : result.disposition,
     committedFrames: result.ok
       ? (result.committedFrames ?? []).map(committed => ({
@@ -327,7 +328,7 @@ export const noteAuthorityAccountInputResult = (
 };
 
 /**
- * Record the exact H=0 replica before its first admission or peer input.
+ * Record the exact H=0 replica before its first admission or Account input.
  *
  * Create is a candidate operation, not a recovery seed: consensus is null,
  * the complete Entity envelope is present, and the replica must still be a
@@ -386,17 +387,17 @@ export const noteAuthorityAccountCreate = (
 };
 
 /**
- * Preserve one canonical peer envelope as one authority operation. A
+ * Preserve one canonical Account input envelope as one authority operation. A
  * `ack_frame` still has ACK-before-proposal semantics, but the order lives
  * inside its composite kind instead of inventing two arrivals and two result
  * rows for the one AccountInput TypeScript received.
  */
-const payloadsOf = (input: AccountInput): RecordedPayload[] => {
+const payloadsOf = (
+  input: AccountInput | AccountTxBatch | AccountFinality,
+): RecordedPayload[] => {
   switch (input.kind) {
     case 'enqueue':
       return [{ kind: 'admit', txs: input.txs }];
-    case 'frame':
-      return [{ kind: 'frame', input }];
     case 'ack':
       return [{ kind: 'ack', input }];
     case 'ack_frame':
@@ -486,7 +487,7 @@ export const noteAuthorityAccountProposalResult = (
   let frame: AccountFrame | null = null;
   if (result.outcome === 'proposed') {
     const outbound = result.accountInput;
-    if (outbound.kind !== 'frame' && outbound.kind !== 'ack_frame') {
+    if (outbound.kind !== 'ack_frame') {
       throw new Error(`RSCORE_AUTHORITY_PROPOSAL_INPUT_KIND:${outbound.kind}`);
     }
     frame = outbound.proposal.frame;
@@ -564,7 +565,7 @@ export const runAuthorityFrameScope = async <T>(
 /**
  * Runtime frame boundary. Answers the question the wave protocol depends on:
  * within one Runtime frame, does every admission to an account precede every
- * peer input to that same account? If not, a wave that admits first and
+ * Account input to that same account? If not, a wave that admits first and
  * applies second is not replaying what TypeScript did, and the two engines
  * would build different frames out of identical inputs.
  */
@@ -580,7 +581,7 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   if (frame.length === 0) return;
   report.frames += 1;
   report.inputs += frame.length;
-  const seenPeerInput = new Set<string>();
+  const seenAccountInput = new Set<string>();
   const interleaved = new Set<string>();
   const owners = new Set<string>();
   for (const row of frame) {
@@ -588,10 +589,10 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
     owners.add(row.ownerEntityId);
     report.byKind[row.kind] = (report.byKind[row.kind] ?? 0) + 1;
     if (row.kind === 'create' || row.kind === 'enqueue') {
-      if (seenPeerInput.has(key)) interleaved.add(key);
+      if (seenAccountInput.has(key)) interleaved.add(key);
       continue;
     }
-    seenPeerInput.add(key);
+    seenAccountInput.add(key);
   }
   if (owners.size > 1) report.framesWithMultipleOwners += 1;
   report.maxOwnersPerFrame = Math.max(report.maxOwnersPerFrame, owners.size);
@@ -655,7 +656,7 @@ type AuthorityWaveInput = {
   arrivalIndex: number;
   ownerEntityId: string;
   accountId: string;
-  kind: AuthorityPeerInput['kind'];
+  kind: AuthorityAccountInput['kind'];
 };
 
 export type AuthorityWave =
@@ -825,12 +826,12 @@ const buildAuthorityOwnerWave = (
       operationIndex += 1;
       continue;
     }
-    if (expectations === 'required' && row.expectedVerdict?.kind !== 'peer') {
-      return { kind: 'ineligible', reason: `result:peer:${row.ownerEntityId}/${row.accountId}` };
+    if (expectations === 'required' && row.expectedVerdict?.kind !== 'input') {
+      return { kind: 'ineligible', reason: `result:input:${row.ownerEntityId}/${row.accountId}` };
     }
     let encoded: RscoreWireValue;
     try {
-      encoded = authorityPeerInputRow(operationIndex, row.accountId, payload);
+      encoded = authorityAccountInputRow(operationIndex, row.accountId, payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { kind: 'ineligible', reason: `input:${message}` };
@@ -1009,7 +1010,7 @@ const soleClock = (
 
 /**
  * One arrival as the engine reads it: its index, the account it moves, and
- * the exact envelope the peer sent.
+ * the exact Account input envelope the counterparty sent.
  */
 export type AuthorityCertifiedBoard = Readonly<Pick<
   CertifiedBoardRecord,
@@ -1022,7 +1023,7 @@ export type AuthorityCertifiedBoard = Readonly<Pick<
 
 const authorityBoardWire = (
   authority: AuthorityCertifiedBoard | undefined,
-  role: 'PEER' | 'LOCAL',
+  role: 'COUNTERPARTY' | 'LOCAL',
 ): RscoreWireValue => {
   if (authority === undefined) return null;
   for (const [field, value] of [
@@ -1043,10 +1044,10 @@ const authorityBoardWire = (
   ];
 };
 
-export const authorityPeerInputRow = (
+export const authorityAccountInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
-  payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' | 'ack_frame' }>,
+  payload: Extract<RecordedPayload, { kind: 'ack' | 'ack_frame' }>,
   genesisPolicy?: Readonly<{
     expectedDomain: Readonly<{ chainId: number; depositoryAddress: string }>;
     shadowPolicyRoot: string;
@@ -1054,22 +1055,21 @@ export const authorityPeerInputRow = (
     deltaTransformer: string;
     publicPinned: false;
   }>,
-  peerBoardAuthority?: AuthorityCertifiedBoard,
+  counterpartyBoardAuthority?: AuthorityCertifiedBoard,
   localBoardAuthority?: AuthorityCertifiedBoard,
 ): RscoreWireValue => {
   const accountId = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_ACCOUNT_ID');
-  const decoded = decodeAccountPeerInput(payload.input, 'RSCORE_AUTHORITY_PEER_INPUT');
+  const decoded = decodeAccountInput(payload.input, 'RSCORE_AUTHORITY_ACCOUNT_INPUT');
   if (decoded.kind !== payload.kind) {
-    throw new Error(`RSCORE_AUTHORITY_PEER_KIND_CHANGED:${payload.kind}:${decoded.kind}`);
+    throw new Error(`RSCORE_AUTHORITY_ACCOUNT_KIND_CHANGED:${payload.kind}:${decoded.kind}`);
   }
   switch (decoded.kind) {
-    case 'frame':
     case 'ack':
     case 'ack_frame':
       return [
         operationIndex,
         accountId,
-        peerEnvelopeWire(decoded),
+        accountInputEnvelopeWire(decoded),
         genesisPolicy === undefined
           ? null
           : [
@@ -1090,7 +1090,7 @@ export const authorityPeerInputRow = (
               genesisPolicy.publicPinned,
             ],
         [
-          authorityBoardWire(peerBoardAuthority, 'PEER'),
+          authorityBoardWire(counterpartyBoardAuthority, 'COUNTERPARTY'),
           authorityBoardWire(localBoardAuthority, 'LOCAL'),
         ],
       ];
@@ -1098,11 +1098,11 @@ export const authorityPeerInputRow = (
 };
 
 /**
- * Exact canonical Account peer envelope. Identity, jurisdiction, timeout and
+ * Exact canonical Account input envelope. Identity, jurisdiction, timeout and
  * watch-seed values come from the received input itself; the local Account is
  * only the row address and must never be used to fill a missing peer value.
  */
-const peerEnvelopeWire = (input: AuthorityPeerInput): RscoreWireValue => [
+const accountInputEnvelopeWire = (input: AuthorityAccountInput): RscoreWireValue => [
   hexToWireBytes(input.fromEntityId, 32, 'AUTHORITY_FROM_ENTITY'),
   hexToWireBytes(input.toEntityId, 32, 'AUTHORITY_TO_ENTITY'),
   [
@@ -1116,36 +1116,38 @@ const peerEnvelopeWire = (input: AuthorityPeerInput): RscoreWireValue => [
   input.watchSeed === undefined
     ? null
     : hexToWireBytes(input.watchSeed, 32, 'AUTHORITY_WATCH_SEED'),
-  peerKindWire(input),
+  accountInputKindWire(input),
 ];
 
-/** Tags 0/1/2 are Frame/Ack/AckFrame; composite order is ACK then proposal. */
-const peerKindWire = (input: AuthorityPeerInput): RscoreWireValue => {
+/** Exactly two wire kinds: tag 0 is ack_frame with an optional ACK; tag 1 is ack. */
+const accountInputKindWire = (input: AuthorityAccountInput): RscoreWireValue => {
   switch (input.kind) {
-    case 'frame':
-      return [0, peerProposalWire(input.proposal)];
     case 'ack':
-      return [1, peerAckWire(input.ack)];
+      return [1, accountAckWire(input.ack)];
     case 'ack_frame':
-      return [2, peerAckWire(input.ack), peerProposalWire(input.proposal)];
+      return [
+        0,
+        input.ack === undefined ? null : accountAckWire(input.ack),
+        accountProposalWire(input.proposal),
+      ];
   }
 };
 
-const peerProposalWire = (proposal: AccountFrameProposal): RscoreWireValue => [
-  accountPeerFrameWire(proposal.frame),
+const accountProposalWire = (proposal: AccountFrameProposal): RscoreWireValue => [
+  accountInputFrameWire(proposal.frame),
   optionalHankoWire(proposal.frameHanko),
-  peerDisputeWire(proposal.disputeHanko),
+  accountDisputeWire(proposal.disputeHanko),
 ];
 
-const peerAckWire = (ack: AccountAckFrame): RscoreWireValue => [
+const accountAckWire = (ack: AccountAckFrame): RscoreWireValue => [
   ack.height,
   hexToWireBytes(ack.frameHash, 32, 'AUTHORITY_ACK_FRAME_HASH'),
   optionalHankoWire(ack.frameHanko),
-  peerDisputeWire(ack.disputeHanko),
+  accountDisputeWire(ack.disputeHanko),
 ];
 
 /** The supplied dispute hash is signed evidence; Rust must recompute and compare it. */
-const peerDisputeWire = (dispute: AccountDisputeHanko | undefined): RscoreWireValue =>
+const accountDisputeWire = (dispute: AccountDisputeHanko | undefined): RscoreWireValue =>
   (dispute === undefined ? null : [
     optionalHankoWire(dispute.hanko),
     hexToWireBytes(dispute.hash, 32, 'AUTHORITY_PEER_DISPUTE_HASH'),

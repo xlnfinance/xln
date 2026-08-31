@@ -11,15 +11,15 @@
  */
 import { copyAccountDisputeConfig, copyAccountStateDomain } from '../../protocol/state/account-input-clone';
 import type { AccountConsensusHashToSign } from '../../account/consensus/types';
-import type { AccountDisputeHanko, AccountPeerInput, AccountReplica } from '../../types/account';
+import type { AccountDisputeHanko, AccountInput, AccountReplica } from '../../types/account';
 import type { WaveDisputeDraft } from '../wave-decode';
 
-/** The envelope every peer input repeats, as this Account already holds it. */
+/** The envelope every Account input repeats, as this Account already holds it. */
 export type CutoverEnvelope = Readonly<{
   fromEntityId: string;
   toEntityId: string;
-  domain: AccountPeerInput['domain'];
-  disputeConfig: AccountPeerInput['disputeConfig'];
+  domain: AccountInput['domain'];
+  disputeConfig: AccountInput['disputeConfig'];
   watchSeed?: string;
 }>;
 
@@ -49,7 +49,7 @@ export const cutoverAck = (
   height: number,
   frameHash: string,
   dispute: WaveDisputeDraft | null,
-): Extract<AccountPeerInput, { kind: 'ack' }> => ({
+): Extract<AccountInput, { kind: 'ack' }> => ({
   kind: 'ack',
   ...envelope,
   ack: {

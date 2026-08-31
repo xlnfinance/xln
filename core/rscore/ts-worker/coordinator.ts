@@ -1,4 +1,5 @@
 import { projectPortableAccountDoc } from '../../storage/read/projections';
+import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';
 import {
   createBalancedTsAccountShardAssignment,
   normalizeTsWorkerAccountId,
@@ -12,7 +13,10 @@ import type {
   TsApplyAccountInputsRequest,
   TsProposeAccountFramesRequest,
   TsAccountWorkerBatchResult,
+  TsAccountWorkerCommittedHankoRow,
   TsAccountWorkerInitialization,
+  TsAccountWorkerInstallHankosPayload,
+  TsAccountWorkerInstallHankosResult,
   TsAccountWorkerInitPayload,
   TsAccountWorkerOptions,
   TsAccountWorkerPhasePayload,
@@ -97,7 +101,13 @@ export class TsAccountWorkerCoordinator {
     const common = {
       ownerEntityId,
       workerCount,
-      jReplicas: [...(options.jReplicas ?? new Map())],
+      // Worker consensus needs the same replayable jurisdiction projection as
+      // Runtime WAL. Live adapter-only fields must never leak across this pure
+      // state-machine boundary.
+      jReplicas: [...(options.jReplicas ?? new Map())].map(([name, replica]) => [
+        name,
+        buildCanonicalJReplicaSnapshot(replica),
+      ] as const),
       jClaimNodes: [...(options.jClaimNodes ?? new Map())],
       settlementBoardAuthorities: [...(options.settlementBoardAuthorities ?? new Map())],
     } as const;
@@ -162,6 +172,54 @@ export class TsAccountWorkerCoordinator {
     return this.#rootTree.root;
   }
 
+  /** Install post-Entity-quorum proof bytes without reopening financial state. */
+  async installCommittedAccountHankos(
+    input: TsAccountWorkerInstallHankosPayload,
+  ): Promise<readonly TsAccountWorkerInstallHankosResult[]> {
+    requireWorkerInteger(input.entityHeight, 'TS_ACCOUNT_WORKER_HANKO_HEIGHT_INVALID');
+    this.#assertUsable();
+    if (this.#openFrameId !== null) {
+      throw new Error(`TS_ACCOUNT_WORKER_HANKO_FRAME_OPEN:${this.#openFrameId}`);
+    }
+    const buckets = Array.from(
+      { length: this.#workerCount },
+      () => [] as TsAccountWorkerCommittedHankoRow[],
+    );
+    for (const row of input.rows) {
+      const accountId = normalizeTsWorkerAccountId(row.accountId);
+      const workerIndex = tsAccountWorkerForShard(
+        tsAccountLogicalShard(accountId),
+        this.#logicalShardToWorker,
+      );
+      const bucket = buckets[workerIndex];
+      if (!bucket) throw new Error(`TS_ACCOUNT_WORKER_HANKO_BUCKET_MISSING:${workerIndex}`);
+      bucket.push({ accountId, hankos: row.hankos });
+    }
+    this.#inFlight = true;
+    try {
+      return await Promise.all(buckets.flatMap((rows, workerIndex) => {
+        if (rows.length === 0) return [];
+        const client = this.#clients[workerIndex];
+        if (!client) throw new Error(`TS_ACCOUNT_WORKER_HANKO_CLIENT_MISSING:${workerIndex}`);
+        return [client.request('install_hankos', { entityHeight: input.entityHeight, rows }).then(response => {
+          const result = response.value as TsAccountWorkerInstallHankosResult;
+          if (
+            result?.workerIndex !== workerIndex
+            || !Number.isSafeInteger(result.accounts)
+            || result.accounts !== rows.length
+            || !Number.isSafeInteger(result.attached)
+            || typeof result.accountsRoot !== 'string'
+          ) throw new Error(`TS_ACCOUNT_WORKER_HANKO_RESULT_INVALID:${workerIndex}`);
+          return result;
+        })];
+      }));
+    } catch (error) {
+      throw this.#poison(error);
+    } finally {
+      this.#inFlight = false;
+    }
+  }
+
   /** Explicit owner shutdown for bounded diagnostics and process teardown. */
   close(): void {
     if (this.#inFlight) throw new Error('TS_ACCOUNT_WORKER_COORDINATOR_CLOSE_IN_FLIGHT');
@@ -187,6 +245,7 @@ export class TsAccountWorkerCoordinator {
     dispatches: readonly PhaseDispatch[],
     includePostAccounts: boolean,
     expectedEffects: number,
+    needShardRoot: boolean,
   ): Promise<TsAccountWorkerBatchResult> {
     this.#assertUsable();
     this.#inFlight = true;
@@ -205,6 +264,7 @@ export class TsAccountWorkerCoordinator {
         logicalShardToWorker: this.#logicalShardToWorker,
         includePostAccounts,
         expectedEffects,
+        needShardRoot,
         rootTree: this.#rootTree,
         dispatchMs: dispatchedAt - dispatchStartedAt,
         joinMs: joinedAt - dispatchedAt,
@@ -252,6 +312,7 @@ export class TsAccountWorkerCoordinator {
         accountId: string;
         input: typeof input.inputs[number]['input'];
         initialAccount?: Record<string, unknown>;
+        counterpartyBoardAuthority?: NonNullable<typeof input.inputs[number]['counterpartyBoardAuthority']>;
       }>);
     input.inputs.forEach((item, order) => {
       const accountId = normalizeTsWorkerAccountId(item.accountId);
@@ -265,6 +326,7 @@ export class TsAccountWorkerCoordinator {
         order,
         accountId,
         input: item.input,
+        ...(item.counterpartyBoardAuthority ? { counterpartyBoardAuthority: item.counterpartyBoardAuthority } : {}),
         ...(item.initialAccount === undefined ? {} : { initialAccount: item.initialAccount }),
       });
     });
@@ -281,15 +343,17 @@ export class TsAccountWorkerCoordinator {
           workerIndex,
           payload: {
             phase: 'inbound',
+            needShardRoot: false,
             frameId,
             restorePrevious,
             entityTimestamp: input.entityTimestamp,
             finalizedJHeight: input.finalizedJHeight,
+            ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
             inputs,
           },
         };
       });
-    const result = await this.#runPhase(dispatches, false, input.inputs.length);
+    const result = await this.#runPhase(dispatches, false, input.inputs.length, false);
     for (const [workerIndex, inputs] of buckets.entries()) {
       if (inputs.length === 0) continue;
       this.#openFrameWorkerIndexes.add(workerIndex);
@@ -300,7 +364,7 @@ export class TsAccountWorkerCoordinator {
   }
 
   /** Outbound Account proposal stage after Entity-owned work has completed. */
-  async proposeAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
+  async prepareAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
     const frameId = requireWorkerFrameId(input.frameId);
     requireWorkerInteger(input.timestamp, 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP_INVALID');
     requireWorkerInteger(input.jHeight, 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT_INVALID');
@@ -309,7 +373,13 @@ export class TsAccountWorkerCoordinator {
       throw new Error(`TS_ACCOUNT_WORKER_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
     }
     const txBuckets = Array.from({ length: this.#workerCount }, () =>
-      [] as Array<{ order: number; accountId: string; txs: typeof input.txs[number]['txs'] }>);
+      [] as Array<{
+        order: number;
+        accountId: string;
+        txs: typeof input.txs[number]['txs'];
+        initialAccount?: Record<string, unknown>;
+        counterpartyBoardAuthority?: NonNullable<typeof input.txs[number]['counterpartyBoardAuthority']>;
+      }>);
     input.txs.forEach((item, order) => {
       const accountId = normalizeTsWorkerAccountId(item.accountId);
       const workerIndex = tsAccountWorkerForShard(
@@ -318,17 +388,28 @@ export class TsAccountWorkerCoordinator {
       );
       const bucket = txBuckets[workerIndex];
       if (bucket === undefined) throw new Error(`TS_ACCOUNT_WORKER_TX_BUCKET_MISSING:${workerIndex}`);
-      bucket.push({ order, accountId, txs: item.txs });
+      bucket.push({
+        order, accountId, txs: item.txs,
+        ...(item.initialAccount === undefined ? {} : { initialAccount: item.initialAccount }),
+        ...(item.counterpartyBoardAuthority ? { counterpartyBoardAuthority: item.counterpartyBoardAuthority } : {}),
+      });
     });
-    const proposals = input.proposalAccountIds.map((accountIdInput, index) => ({
+    const proposals = input.proposals.map((item, index) => ({
       order: input.txs.length + index,
-      accountId: normalizeTsWorkerAccountId(accountIdInput),
+      accountId: normalizeTsWorkerAccountId(item.accountId),
+      ...(item.counterpartyBoardAuthority ? { counterpartyBoardAuthority: item.counterpartyBoardAuthority } : {}),
     }));
     if (new Set(proposals.map(proposal => proposal.accountId)).size !== proposals.length) {
       throw new Error('TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_DUPLICATE');
     }
     const proposalBuckets = Array.from({ length: this.#workerCount }, () =>
-      [] as Array<{ order: number; accountId: string }>);
+      [] as Array<{
+        order: number;
+        accountId: string;
+        counterpartyBoardAuthority?: NonNullable<
+          typeof input.proposals[number]['counterpartyBoardAuthority']
+        >;
+      }>);
     for (const proposal of proposals) {
       const workerIndex = tsAccountWorkerForShard(
         tsAccountLogicalShard(proposal.accountId),
@@ -360,10 +441,13 @@ export class TsAccountWorkerCoordinator {
         workerIndex,
         payload: {
           phase: 'outbound',
+          needShardRoot: true,
+          continuation: false,
           frameId,
           restorePrevious: this.#openFrameRestorePrevious,
           timestamp: input.timestamp,
           jHeight: input.jHeight,
+          ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
           txs,
           proposals: proposalsForWorker,
         },
@@ -372,9 +456,95 @@ export class TsAccountWorkerCoordinator {
     const result = await this.#runPhase(
       dispatches,
       true,
-      input.txs.length + input.proposalAccountIds.length,
+      input.txs.length + input.proposals.length,
+      true,
     );
     for (const workerIndex of activeWorkerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
+    return result;
+  }
+
+  /** Canonical outbound with no generated continuation rows. */
+  async proposeAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
+    const result = await this.prepareAccountFrames(input);
+    await this.finishAccountFrames({ ...input, txs: [], proposals: [] });
+    return result;
+  }
+
+  /** One Rust-compatible continuation for genuine failed HTLC proposal followups. */
+  async finishAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult | undefined> {
+    const frameId = requireWorkerFrameId(input.frameId);
+    requireWorkerInteger(input.timestamp, 'TS_ACCOUNT_WORKER_CONTINUATION_TIMESTAMP_INVALID');
+    requireWorkerInteger(input.jHeight, 'TS_ACCOUNT_WORKER_CONTINUATION_JHEIGHT_INVALID');
+    this.#assertUsable();
+    if (this.#openFrameId !== frameId) {
+      throw new Error(`TS_ACCOUNT_WORKER_CONTINUATION_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
+    }
+    const txBuckets = Array.from({ length: this.#workerCount }, () =>
+      [] as Array<{
+        order: number;
+        accountId: string;
+        txs: typeof input.txs[number]['txs'];
+        counterpartyBoardAuthority?: NonNullable<typeof input.txs[number]['counterpartyBoardAuthority']>;
+      }>);
+    input.txs.forEach((item, order) => {
+      const accountId = normalizeTsWorkerAccountId(item.accountId);
+      const workerIndex = tsAccountWorkerForShard(
+        tsAccountLogicalShard(accountId),
+        this.#logicalShardToWorker,
+      );
+      const bucket = txBuckets[workerIndex];
+      if (!bucket) throw new Error(`TS_ACCOUNT_WORKER_CONTINUATION_TX_BUCKET:${workerIndex}`);
+      bucket.push({
+        order, accountId, txs: item.txs,
+        ...(item.counterpartyBoardAuthority ? { counterpartyBoardAuthority: item.counterpartyBoardAuthority } : {}),
+      });
+    });
+    const proposals = input.proposals.map((item, index) => ({
+      order: input.txs.length + index,
+      accountId: normalizeTsWorkerAccountId(item.accountId),
+      ...(item.counterpartyBoardAuthority ? { counterpartyBoardAuthority: item.counterpartyBoardAuthority } : {}),
+    }));
+    if (new Set(proposals.map(row => row.accountId)).size !== proposals.length) {
+      throw new Error('TS_ACCOUNT_WORKER_CONTINUATION_PROPOSAL_DUPLICATE');
+    }
+    const proposalBuckets = Array.from({ length: this.#workerCount }, () =>
+      [] as typeof proposals);
+    for (const proposal of proposals) {
+      const workerIndex = tsAccountWorkerForShard(
+        tsAccountLogicalShard(proposal.accountId),
+        this.#logicalShardToWorker,
+      );
+      const bucket = proposalBuckets[workerIndex];
+      if (!bucket) throw new Error(`TS_ACCOUNT_WORKER_CONTINUATION_PROPOSAL_BUCKET:${workerIndex}`);
+      bucket.push(proposal);
+    }
+    const workerIndexes = this.#clients
+      .map((_client, workerIndex) => workerIndex)
+      .filter(workerIndex => (txBuckets[workerIndex]?.length ?? 0) > 0
+        || (proposalBuckets[workerIndex]?.length ?? 0) > 0);
+    const dispatches: PhaseDispatch[] = workerIndexes.map(workerIndex => {
+      const txs = txBuckets[workerIndex];
+      const proposalsForWorker = proposalBuckets[workerIndex];
+      if (!txs || !proposalsForWorker) {
+        throw new Error(`TS_ACCOUNT_WORKER_CONTINUATION_BUCKET_MISSING:${workerIndex}`);
+      }
+      return { workerIndex, payload: {
+        phase: 'outbound',
+        needShardRoot: true,
+        continuation: true,
+        frameId,
+        restorePrevious: false,
+        timestamp: input.timestamp,
+        jHeight: input.jHeight,
+        ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
+        txs,
+        proposals: proposalsForWorker,
+      } };
+    });
+    const result = dispatches.length === 0
+      ? undefined
+      : await this.#runPhase(dispatches, true, input.txs.length + input.proposals.length, true);
+    for (const workerIndex of workerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
     this.#openFrameWorkerIndexes.clear();
     this.#candidateWorkerIndexes.clear();
     for (const workerIndex of this.#attemptTouchedWorkerIndexes) {

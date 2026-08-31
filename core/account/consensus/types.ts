@@ -1,9 +1,9 @@
-import type { AccountFrame, AccountPeerInput, AccountTx , AccountOutput } from '../../types/account';
+import type { AccountFrame, AccountInput, AccountTx , AccountOutput } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../settlement/j-finality';
 import type { AccountTxRejection } from '../tx/apply-types';
-import type { AccountPeerRejectionCode } from '../input/peer-rejection';
+import type { AccountInputRejectionCode } from '../input/input-rejection';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -48,7 +48,7 @@ export type AccountInputDisputeRequired = Readonly<{
 }>;
 
 export type HandleAccountInputRejection =
-  | Readonly<{ kind: 'peer'; code: AccountPeerRejectionCode; message: string }>
+  | Readonly<{ kind: 'input'; code: AccountInputRejectionCode; message: string }>
   | Readonly<{ kind: 'tx'; tx: AccountTxRejection; message: string }>
   | Readonly<{ kind: 'validation'; message: string }>;
 
@@ -81,7 +81,7 @@ export type HandleAccountInputApplied = Readonly<AccountConsensusOkEffects & {
   admissionRejections?: readonly AccountAdmissionRejection[];
   externalFinality?: AccountDisputeFinalityResult;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
-  response?: AccountPeerInput;
+  response?: AccountInput;
   approvalNeeded?: AccountTx;
   timedOutHashlocks?: string[];
   committedFrames?: AccountCommittedFrame[];
@@ -123,7 +123,7 @@ export type ProposeAccountFrameProposed = Readonly<AccountConsensusOkEffects & P
   ok: true;
   outcome: 'proposed';
   accountChanged: true;
-  accountInput: AccountPeerInput;
+  accountInput: AccountInput;
   failedHtlcLocks?: AccountFailedHtlcLock[];
 }>;
 

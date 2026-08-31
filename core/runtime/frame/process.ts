@@ -190,15 +190,17 @@ const recordRuntimeFrameIngress = (
   queuedAt: number | undefined,
 ): void => {
   let entityTxs = 0;
-  let accountFrames = 0;
+  let accountProposals = 0;
   let ackFrames = 0;
   let acks = 0;
   for (const input of runtimeInput.entityInputs) {
     for (const tx of input.entityTxs ?? []) {
       entityTxs += 1;
       if (tx.type !== 'accountInput') continue;
-      if (tx.data.kind === 'frame') accountFrames += 1;
-      else if (tx.data.kind === 'ack_frame') ackFrames += 1;
+      if (tx.data.kind === 'ack_frame') {
+        accountProposals += 1;
+        if (tx.data.ack) ackFrames += 1;
+      }
       else if (tx.data.kind === 'ack') acks += 1;
     }
   }
@@ -208,7 +210,7 @@ const recordRuntimeFrameIngress = (
     queuedAt: queuedAt ?? -1,
     entityInputs: runtimeInput.entityInputs.length,
     entityTxs,
-    accountFrames,
+    accountProposals,
     ackFrames,
     acks,
   });
@@ -520,6 +522,7 @@ const applyAndCommitRuntimeFrame = async (
   started: RuntimeFrameStart,
   deps: RuntimeProcessDeps,
 ): Promise<{ env: RuntimeReplica; staleWriterStopped: boolean }> => {
+  ensureRuntimeInfrastructure(liveEnv).runtimeFramePhase = 'candidate.open';
   const candidate = openRuntimeFrameCandidate(
     liveEnv,
     processState,
@@ -549,8 +552,11 @@ const applyAndCommitRuntimeFrame = async (
     state = rollback.state;
     return rollback.error;
   };
+  candidate.state.runtimeFramePhase = 'candidate.mutate';
   beginRuntimeFrameMutation(candidate, frame, deps);
+  candidate.state.runtimeFramePhase = 'apply';
   const applied = await applyRuntimeFrameCandidate(env, state, candidate, frame, profile, deps);
+  candidate.state.runtimeFramePhase = 'outputs.plan';
   const routing = deps.getRuntimeOutputRoutingDeps();
   const outputPlan = planRuntimeFrameOutputs(
     env,
@@ -567,7 +573,9 @@ const applyAndCommitRuntimeFrame = async (
   // The authoritative engine reaches its own result before either record is
   // durable. Rust retains only a persistent base pointer; the next parent root
   // selects the accepted answer. A failed durable write is fail-stop.
+  candidate.state.runtimeFramePhase = 'authority.settle';
   await assertAuthorityFrameSettled(env);
+  candidate.state.runtimeFramePhase = 'commit.prepare';
   const frameAdvanced = prepareRuntimeFrameCommit(
     env,
     liveEnv,
@@ -576,6 +584,7 @@ const applyAndCommitRuntimeFrame = async (
     frame,
     profile,
   );
+  candidate.state.runtimeFramePhase = 'commit.storage';
   const commit = await commitRuntimeFrame(env, liveEnv, frame, profile, {
     frameAdvanced,
     frameHeightBeforeTick: started.frameHeightBeforeTick,
@@ -587,8 +596,10 @@ const applyAndCommitRuntimeFrame = async (
     await failStopAuthorityFrame(env);
     return commit;
   }
+  candidate.state.runtimeFramePhase = 'commit.empty-close';
   await closeEmptyAuthorityFrameWithoutWal(env, frameAdvanced);
 
+  candidate.state.runtimeFramePhase = 'effects.post-commit';
   await runCommittedRuntimeEffects(
     commit.env,
     {
@@ -633,12 +644,14 @@ const processRuntimeFrameOnce = async (
   const liveEnv = env;
   deps.loop.ensureRuntimeConfig(env);
   const processState = ensureRuntimeInfrastructure(env);
+  processState.runtimeFramePhase = 'writer.wait';
   assertRuntimeWriterAcceptingIngress(processState);
   if (inputs?.length) {
     const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
     deps.loop.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
   }
   const releaseProcessLock = await acquireRuntimeFrameWriter(processState);
+  processState.runtimeFramePhase = 'frame.start';
   const profile = createRuntimeProcessProfile(liveEnv, deps.loop.getRuntimeWorkReason(env));
   const frame = createFrameExecutionState();
   try {
@@ -687,6 +700,7 @@ const processRuntimeFrameOnce = async (
     profile.outcome = 'input-discarded';
     return liveEnv;
   } finally {
+    processState.runtimeFramePhase = null;
     finishRuntimeFrame(env, liveEnv, processState, profile, releaseProcessLock);
   }
 };

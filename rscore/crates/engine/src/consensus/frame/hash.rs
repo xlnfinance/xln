@@ -92,12 +92,25 @@ impl AccountFrame {
 /// Canonical `{type, data}` of one transaction, the form the frame hash
 /// commits.
 ///
-/// Parity target: `canonicalAccountTxForFrameHash` in the same TypeScript
-/// file, which hashes `tx.data` as the runtime built it. Optional fields are
-/// omitted, never encoded as null: TypeScript drops `undefined` object entries
-/// before hashing. A transaction the engine does not model natively is an
-/// error, never a silently different hash.
+/// Parity target: `canonicalAccountTxForFrameHash` in TypeScript. Optional
+/// fields are omitted, never encoded as null. Settlement Hankos are delivery
+/// witnesses attached after the Entity frame certifies their digests, so the
+/// Account frame hash deliberately excludes only those two byte strings.
 pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> {
+    projected_tx_value(tx, false)
+}
+
+/// Exact AccountTx carried on the wire. Unlike `canonical_tx_value`, this
+/// retains post-commit settlement witnesses; receivers need those bytes to
+/// authenticate the otherwise-identical transaction committed by the frame.
+pub fn wire_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> {
+    projected_tx_value(tx, true)
+}
+
+fn projected_tx_value(
+    tx: &AccountTx,
+    include_post_commit_witnesses: bool,
+) -> Result<CanonicalValue, StateError> {
     let (kind, data) = match tx {
         AccountTx::JEventClaim(tx) => {
             let events_hash = crate::canonical_events_hash(&tx.events)?;
@@ -427,9 +440,14 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             };
             (kind, canonical_object_fields(data, kind)?)
         }
-        AccountTx::SettleTransition { data } => {
-            ("settle_transition", unsigned_settlement_fields(data)?)
-        }
+        AccountTx::SettleTransition { data } => (
+            "settle_transition",
+            if include_post_commit_witnesses {
+                canonical_object_fields(data, "settle_transition")?
+            } else {
+                unsigned_settlement_fields(data)?
+            },
+        ),
         AccountTx::SwapOffer {
             offer_id,
             give_token_id,

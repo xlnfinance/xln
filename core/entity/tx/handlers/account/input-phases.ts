@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountConsensusContext } from '../../../../account/consensus/context';
@@ -44,7 +44,7 @@ export type AccountInputPhaseContext = {
   env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   state: EntityState;
-  input: AccountPeerInput;
+  input: AccountInput;
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
@@ -55,7 +55,7 @@ export type AccountInputPhaseContext = {
 
 export type AccountConsensusOutcome = {
   forceAccountFlush?: boolean;
-  forcedAccountInput?: AccountPeerInput;
+  forcedAccountInput?: AccountInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   terminalResult?: AccountHandlerResult;
 };
@@ -155,7 +155,7 @@ const finishRejectedAccountInput = (
   result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { disposition: 'rejected' }>,
 ): AccountConsensusOutcome => {
   const { state, input } = context;
-  if (result.rejection.kind === 'peer') {
+  if (result.rejection.kind === 'input') {
     const dump = safeStringify({
       input,
       account: context.account,
@@ -163,7 +163,7 @@ const finishRejectedAccountInput = (
       entityHeight: state.height,
       rejection: result.rejection,
     });
-    accountHandlerLog.error('frame.peer_rejected', {
+    accountHandlerLog.error('frame.input_rejected', {
       from: shortId(input.fromEntityId),
       code: accountInputPeerRejectionCode(result),
       error: result.rejection.message,
@@ -172,7 +172,7 @@ const finishRejectedAccountInput = (
     addMessage(state, `❌ Rejected account frame: ${result.rejection.message}`);
     throw haltRuntimeFailure(
       'FRAME_CONSENSUS_FAILED',
-      `ACCOUNT_PEER_INPUT_REJECTED:${result.rejection.code}:` +
+      `ACCOUNT_INPUT_INPUT_REJECTED:${result.rejection.code}:` +
         `${result.rejection.message}:dump=${dump}`,
     );
   }

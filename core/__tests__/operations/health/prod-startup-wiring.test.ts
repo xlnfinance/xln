@@ -843,7 +843,7 @@ describe('production startup wiring', () => {
     );
     expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
     expect(hubNode).toContain('if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;');
-    expect(hubNode).toContain('...hubBootstraps.map(owner =>\n      planSupportPeerInputs(');
+    expect(hubNode).toContain('...hubBootstraps.map(owner =>\n      planSupportAccountSetupInputs(');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
     expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");

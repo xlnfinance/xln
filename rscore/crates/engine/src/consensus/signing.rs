@@ -32,7 +32,7 @@ pub struct CertifiedBoardAuthority {
 impl CertifiedBoardAuthority {
     pub fn assert_entity(&self, expected_entity_id: &[u8; 32]) -> Result<(), StateError> {
         if &self.entity_id != expected_entity_id {
-            return Err(StateError::BoardAuthorityPeerMismatch {
+            return Err(StateError::BoardAuthorityCounterpartyMismatch {
                 expected: render_word(expected_entity_id),
                 resolved: render_word(&self.entity_id),
             });

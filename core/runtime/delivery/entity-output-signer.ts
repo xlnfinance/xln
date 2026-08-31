@@ -1,7 +1,7 @@
 import { resolveCertifiedAccountCounterpartyProposer } from '../delivery/topology/account-counterparty-route';
 import { getLocalSignerPrivateKey } from '../../account/crypto';
 import { getEntityLeaderState, isEntityActiveLeader } from '../../entity/consensus/leader';
-import type { AccountPeerInput } from '../../types/account';
+import type { AccountInput } from '../../types/account';
 import type { EntityOutput, EntityReplica } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
@@ -118,13 +118,13 @@ export const resolveEntityProposerId = (env: RuntimeReplica, entityId: string, c
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
 };
 
-const nestedAccountInputs = (txs: readonly EntityTx[]): AccountPeerInput[] =>
-  txs.flatMap((tx): AccountPeerInput[] => {
+const nestedAccountInputs = (txs: readonly EntityTx[]): AccountInput[] =>
+  txs.flatMap((tx): AccountInput[] => {
     if (tx.type === 'accountInput') return [tx.data];
     return [];
   });
 
-const entityOutputAccountInput = (output: EntityOutput): AccountPeerInput | null => {
+const entityOutputAccountInput = (output: EntityOutput): AccountInput | null => {
   const inputs = output.entityTxs ? nestedAccountInputs(output.entityTxs) : [];
   if (inputs.length > 1) {
     throw new Error(

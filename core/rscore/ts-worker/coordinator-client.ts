@@ -39,13 +39,10 @@ export class TsAccountWorkerClient {
 
   constructor(workerIndex: number) {
     this.#workerIndex = workerIndex;
-    this.#worker = new Worker(new URL('./worker.ts', import.meta.url), {
-      env: {
-        ...process.env,
-        XLN_CRYPTO_POOL_WORKERS: '0',
-        XLN_CRYPTO_SIGN_WORKERS: '0',
-      },
-    } as WorkerOptions);
+    // Crypto lanes already refuse to spawn from a worker isolate. Keeping the
+    // constructor Web Worker-compatible also avoids copying the entire process
+    // environment into every long-lived Account owner.
+    this.#worker = new Worker(new URL('./worker.ts', import.meta.url));
     this.#worker.onmessage = event => this.#handleResponse(event.data as TsAccountWorkerResponseEnvelope);
     this.#worker.onerror = event => this.#retire(new Error(
       `TS_ACCOUNT_WORKER_ERROR:${workerIndex}:${event.message}:${event.filename}:${event.lineno}:${event.colno}`,

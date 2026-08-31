@@ -1,6 +1,6 @@
 import { appendAccountMempoolTxs } from './mempool';
 import { txFingerprint } from '../../protocol/state/tx-multiset';
-import type { AccountEnqueueInput, AccountReplica, AccountTx } from '../../types/account';
+import type { AccountTxBatch, AccountReplica, AccountTx } from '../../types/account';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 import type {
   AccountAdmissionRejection,
@@ -11,6 +11,7 @@ import { assertAccountTxsAdmissible } from '../tx/admission-policy';
 import { ACCOUNT_TX_REJECTION_CODES } from '../tx/apply-types';
 import { getAccountStateDomain } from '../consensus/helpers';
 import { planAccountJClaimLocalAdmission } from '../j-claims/j-claim-transition';
+import { isLeftEntity } from '../../protocol/identity/entity-id';
 
 type LocalAdmissionPlan = {
   admitted: AccountTx[];
@@ -58,6 +59,7 @@ const planLocalAccountTxAdmission = (
         tx,
         jClaimNodeStore,
         domain,
+        isLeftEntity(account.proofHeader.fromEntity, account.proofHeader.toEntity),
       );
       if (plan.verdict === 'duplicate') continue;
       if (plan.verdict === 'conflict') {
@@ -98,7 +100,7 @@ export const admitLocalAccountTx = (
 /** Apply the local-only branch of the canonical AccountInput boundary. */
 export const applyAccountEnqueue = (
   account: AccountReplica,
-  input: AccountEnqueueInput,
+  input: AccountTxBatch,
   jClaimNodeStore: AccountJClaimNodeStore,
 ): HandleAccountInputResult => {
   // FX-1/FX-2 admission gate: an out-of-range policyVersion or an

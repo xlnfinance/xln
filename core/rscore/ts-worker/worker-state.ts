@@ -23,9 +23,17 @@ import {
   tsAccountLogicalShard,
   tsAccountLogicalShardPath,
 } from './sharding';
+import { attachHankoWitnessesToState } from '../../entity/consensus/input/hanko-witness';
+import {
+  commitEntityAccountCandidate,
+  createEntityAccountCandidateMap,
+} from '../../entity/state/candidate-map';
 import type {
+  TsAccountWorkerInstallHankosPayload,
+  TsAccountWorkerInstallHankosResult,
   TsAccountWorkerInitPayload,
   TsAccountWorkerInitResult,
+  TsAccountWorkerCertifiedBoard,
   TsAccountWorkerPostAccount,
   TsAccountWorkerSubroot,
 } from './protocol';
@@ -44,7 +52,13 @@ export type TsAccountWorkerState = {
   inboundPrepared: boolean;
 };
 
-export const workerHeapUsedBytes = (): number => process.memoryUsage().heapUsed;
+export const workerHeapUsedBytes = (): number => {
+  const runtimeProcess = Reflect.get(globalThis, 'process') as
+    | { memoryUsage?: () => { heapUsed: number } }
+    | undefined;
+  const heapUsed = runtimeProcess?.memoryUsage?.().heapUsed;
+  return typeof heapUsed === 'number' && Number.isFinite(heapUsed) ? heapUsed : 0;
+};
 
 export const requireWorkerAccount = (
   worker: TsAccountWorkerState,
@@ -186,6 +200,7 @@ export const createWorkerConsensusContext = (
   timestamp: number,
   finalizedJHeight: number,
   jClaimNodeStore: AccountJClaimNodeStore,
+  certifiedBoards: ReadonlyMap<string, TsAccountWorkerCertifiedBoard> = new Map(),
 ): AccountConsensusContext => ({
   runtimeTimestamp: timestamp,
   accountAuthorityFrameId: null,
@@ -195,13 +210,14 @@ export const createWorkerConsensusContext = (
   jReplicas: worker.jReplicas,
   jClaimNodeStore,
   verifyHanko: async (hanko, hash, expectedEntityId, authority) => {
-    // Rotated boards require the exact parent Entity-certified registry view.
-    // Until that compact view has a canonical interface, halt instead of
-    // silently turning a valid peer frame into a worker-only rejection.
-    if (authority?.registeredBoardHash) {
-      throw new Error('TS_ACCOUNT_WORKER_CERTIFIED_BOARD_CONTEXT_REQUIRED');
+    const certifiedBoardRecord = certifiedBoards.get(expectedEntityId.toLowerCase());
+    if (authority?.registeredBoardHash && !certifiedBoardRecord) {
+      throw new Error(`TS_ACCOUNT_WORKER_CERTIFIED_BOARD_CONTEXT_REQUIRED:${expectedEntityId}`);
     }
-    return verifyHankoForHash(hanko, hash, expectedEntityId, undefined, authority);
+    return verifyHankoForHash(hanko, hash, expectedEntityId, undefined, {
+      ...authority,
+      ...(certifiedBoardRecord ? { certifiedBoardRecord, observerTimestamp: timestamp } : {}),
+    });
   },
   resolveSettlementBoardAuthority: async (sourceEntityId, certifiedBoardHash) =>
     certifiedBoardHash ?? worker.settlementBoardAuthorities.get(sourceEntityId.toLowerCase()),
@@ -221,4 +237,64 @@ export const collectWorkerPostAccounts = (
   });
   worker.frameTouchedAccountIds.clear();
   return accounts;
+};
+
+export const installWorkerCommittedHankos = (
+  worker: TsAccountWorkerState,
+  input: TsAccountWorkerInstallHankosPayload,
+): TsAccountWorkerInstallHankosResult => {
+  if (!Number.isSafeInteger(input.entityHeight) || input.entityHeight < 1) {
+    throw new Error(`TS_ACCOUNT_WORKER_HANKO_HEIGHT_INVALID:${input.entityHeight}`);
+  }
+  const accountIds: string[] = [];
+  const seenAccounts = new Set<string>();
+  const witnesses = new Map<string, import('../../entity/consensus/input/hanko-witness').HankoWitnessEntry>();
+  for (const row of input.rows) {
+    const accountId = requireWorkerAccount(worker, row.accountId);
+    if (seenAccounts.has(accountId)) {
+      throw new Error(`TS_ACCOUNT_WORKER_HANKO_ACCOUNT_DUPLICATE:${accountId}`);
+    }
+    seenAccounts.add(accountId);
+    accountIds.push(accountId);
+    for (const witness of row.hankos) {
+      if (
+        witness.entityHeight !== input.entityHeight
+        || witness.hash.length === 0
+        || witness.hanko.length === 0
+        || !Number.isSafeInteger(witness.createdAt)
+        || witness.createdAt < 0
+      ) {
+        throw new Error(`TS_ACCOUNT_WORKER_HANKO_INVALID:${accountId}:${witness.hash}`);
+      }
+      const existing = witnesses.get(witness.hash);
+      if (existing && (
+        existing.hanko !== witness.hanko
+        || existing.type !== witness.type
+        || existing.entityHeight !== witness.entityHeight
+        || existing.createdAt !== witness.createdAt
+      )) {
+        throw new Error(`TS_ACCOUNT_WORKER_HANKO_CONFLICT:${witness.hash}`);
+      }
+      witnesses.set(witness.hash, {
+        hanko: witness.hanko,
+        type: witness.type,
+        entityHeight: witness.entityHeight,
+        createdAt: witness.createdAt,
+      });
+    }
+  }
+  const beforeRoot = worker.accounts.rootHash();
+  const candidateAccounts = createEntityAccountCandidateMap(worker.accounts);
+  const attached = attachHankoWitnessesToState(
+    { entityId: worker.ownerEntityId, accounts: candidateAccounts },
+    witnesses,
+    input.entityHeight,
+    accountIds,
+  );
+  worker.accounts = commitEntityAccountCandidate(candidateAccounts);
+  const accountsRoot = worker.accounts.rootHash();
+  if (accountsRoot !== beforeRoot) {
+    throw new Error(`TS_ACCOUNT_WORKER_HANKO_ROOT_CHANGED:${beforeRoot}:${accountsRoot}`);
+  }
+  return { workerIndex: worker.workerIndex, accounts: accountIds.length, attached, accountsRoot };
 };

@@ -48,7 +48,7 @@ describe('frozen Account input severity', () => {
 
   test('keeps pre-finality and non-ACK frozen traffic at error severity', () => {
     expect(frozenAccountInputLogLevel(account(false), input('ack_frame'))).toBe('error');
-    expect(frozenAccountInputLogLevel(account(true), input('frame'))).toBe('error');
-    expect(frozenAccountInputLogLevel(account(true), input('proposal'))).toBe('error');
+    expect(frozenAccountInputLogLevel(account(true), input('dispute'))).toBe('error');
+    expect(frozenAccountInputLogLevel(account(true), input('board_hanko_refresh'))).toBe('error');
   });
 });

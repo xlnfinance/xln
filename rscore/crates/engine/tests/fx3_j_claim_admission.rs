@@ -1,5 +1,5 @@
 //! FX-3 (proofs/fixes.md, decision D4): the four mandatory j-claim vectors —
-//! committed conflict, two conflicts in one batch, exact duplicate, and a
+//! committed conflict, two conflicts in one batch, side-aware duplicate, and a
 //! stale admitted claim after an incoming frame — driven through the real
 //! bilateral consensus functions of this engine.
 //!
@@ -12,7 +12,7 @@
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope,
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountInputEnvelope,
     AccountRejection, AccountReplica, AccountSettledEvent, AccountState, AccountTx, BoardDelays,
     DepositoryAddress, Disposition, EntityId, IncomingFrame, IncomingOutcome, JEventClaimTx,
     JEventMetadata, JurisdictionEvent, ProposalOutcome, ProposedFrame, ReceiverClock,
@@ -155,9 +155,9 @@ fn survivor_row() -> AccountTx {
     }
 }
 
-fn envelope(account: &AccountConsensus, from_entity_id: &[u8; 32]) -> AccountPeerEnvelope {
+fn envelope(account: &AccountConsensus, from_entity_id: &[u8; 32]) -> AccountInputEnvelope {
     let state = account.replica().state();
-    AccountPeerEnvelope {
+    AccountInputEnvelope {
         from_entity_id: *from_entity_id,
         to_entity_id: *account.replica().owner().as_bytes(),
         domain: state.identity().domain().clone(),
@@ -335,21 +335,21 @@ fn b_two_conflicts_one_batch_both_dropped_window_survives() {
     assert!(left.account.mempool().is_empty());
 }
 
-/// (c) An exact (jHeight, jBlockHash, eventsHash) duplicate is idempotent at
-/// admission — against committed evidence and against an earlier queued claim
-/// — and the proposal never records it twice.
+/// (c) Matching evidence committed by the peer admits our second vote, while
+/// matching evidence already queued by us remains idempotent.
 #[test]
 fn c_exact_duplicate_is_idempotent_everywhere() {
-    // Committed duplicate: the peer's exact claim bytes re-observed locally.
+    // The peer's exact claim is not our duplicate: admitting our matching side
+    // is what allows the bilateral claim to finalize.
     let mut left = committed_right_claim_state();
     let summary = left
         .account
         .admit_txs(vec![raw_claim(5, 0x77, 3)], "fx3:c-committed")
         .expect("duplicate is data, never an abort");
-    assert_eq!(summary.admitted, 0);
-    assert_eq!(summary.duplicates, 1);
+    assert_eq!(summary.admitted, 1);
+    assert_eq!(summary.duplicates, 0);
     assert!(summary.rejections.is_empty());
-    assert!(left.account.mempool().is_empty());
+    assert_eq!(left.account.mempool().len(), 1);
 
     // Queued duplicate: the same claim admitted twice in a row.
     let (mut left, _right) = parties();

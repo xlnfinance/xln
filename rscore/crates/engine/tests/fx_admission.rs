@@ -11,8 +11,8 @@
 //!   reason carries `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
 //!   `ACCOUNT_FRAME_TX_UNSUPPORTED:<kind>` (refused by `AccountFrame::hash`);
 //!   TypeScript preflight returns peer codes
-//!   `ACCOUNT_PEER_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` /
-//!   `ACCOUNT_PEER_FRAME_TX_OUT_OF_PROFILE` before replay.
+//!   `ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` /
+//!   `ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE` before replay.
 //! - boundary accept (policyVersion 0 and MAX): both engines admit; the
 //!   golden `matches_typescript_rebalance_policy_bytes_and_hashes` in
 //!   consensus/frame/hash.rs already pins MAX hashing identically.
@@ -241,11 +241,11 @@ fn incoming_from_left(
     left: &Party,
     right: &Party,
     tx: AccountTx,
-) -> (xln_rscore_engine::AccountPeerEnvelope, IncomingFrame) {
+) -> (xln_rscore_engine::AccountInputEnvelope, IncomingFrame) {
     let state = right.account.replica().state();
     let (frame, claimed_digest) = unhashable_incoming(right, tx);
     (
-        xln_rscore_engine::AccountPeerEnvelope {
+        xln_rscore_engine::AccountInputEnvelope {
             from_entity_id: *left.identity.entity_id(),
             to_entity_id: *right.account.replica().owner().as_bytes(),
             domain: state.identity().domain().clone(),
@@ -370,7 +370,7 @@ fn an_incoming_frame_with_a_supported_kind_reaches_hash_binding() {
         let IncomingOutcome::Rejected { reason } = outcome else {
             panic!("{kind} must reach hash binding, got {outcome:?}");
         };
-        assert_eq!(reason, "ACCOUNT_PEER_FRAME_HASH_MISMATCH", "{kind}");
+        assert_eq!(reason, "ACCOUNT_INPUT_FRAME_HASH_MISMATCH", "{kind}");
         assert_eq!(right.account.current_height(), 0);
     }
 }

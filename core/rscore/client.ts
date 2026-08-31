@@ -29,7 +29,6 @@ import {
   unpackWireValueAt,
   type RscoreWireValue,
 } from './process-wire-value';
-import { decodeWave, type Wave } from './wave-decode';
 import { decodeEntityRound, type RscoreEntityRound } from './entity/round-wire';
 import { RscoreResponseFrameQueue } from './process/response-frame-queue';
 export { packWireValue, unpackWireValue } from './process-wire-value';
@@ -79,17 +78,15 @@ const RSCORE_ABI_VERSION = 1;
 // 13: every parent Entity input owns an abortable Account savepoint. Apply and
 // Propose are bound to its content-derived key; Seal cannot cross an open
 // stage, and accept/rollback advance the explicit accepted-stage ordinal.
-// 14: peer inputs carry the exact Account envelope plus the closed
+// 14: Account inputs carry the exact Account envelope plus the closed
 // Frame/Ack/AckFrame shapes. AckFrame is one ACK-first operation and returns
 // one ordered composite row; its valid ACK survives a rejected proposal.
 // 21: inbound-first Account genesis carries trusted Entity policy and returns
 // its exact H=1 materialization separately from the final touched rows.
-// 22: AccountOutbound carries checkpointDue and its reply carries exact
-// worker-resident checkpoint rows separately from temporary read-model rows.
-// 23: that reply carries one optional exact incremental checkpoint manifest;
-// the next inbound root implicitly accepts or rejects its pending baseline.
+// 23: a resident round reply carries one optional exact incremental checkpoint
+// manifest; the next input root selects or rejects its pending baseline.
 // 24: swap-offer removal carries the maker side observed by the Account
-// transition, so the two-call parent never needs a stale Account read model.
+// transition, so Entity never needs a stale Account read model.
 // 25: AccountSettled J-claim bodies, witnesses and typed finality output.
 // 26: exact checkpoints persist the J-claim Patricia nodes needed to prove
 // non-empty accumulator roots after a process restart.
@@ -100,7 +97,7 @@ const RSCORE_ABI_VERSION = 1;
 // 30: exact checkpoints retain the J-claim Patricia node store.
 // 31: Entity snapshots carry crontab state and PreparedFinal descriptions.
 // 32: incoming verdicts carry an explicit signed DisputeRequired outcome.
-// 33: Entity snapshots carry reserves, and peer verdicts carry standalone
+// 33: Entity snapshots carry reserves, and Account input verdicts carry standalone
 // dispute / board-Hanko-refresh results without aliasing frame verdict tags.
 // 34: Account frames no longer duplicate deltas or proposer side.
 // 35: Account input rows carry full peer/local certified-board authority.
@@ -131,8 +128,6 @@ export const RSCORE_OP = {
   removeAccounts: 16,
   readAccountEnvelope: 18,
   restoreExact: 21,
-  accountInbound: 25,
-  accountOutbound: 26,
   bootstrapEntity: 27,
   entityRound: 28,
 } as const;
@@ -555,14 +550,6 @@ export class RscoreProcessClient {
     return error;
   }
 
-  #decodeAuthorityWave(value: unknown): Wave {
-    try {
-      return decodeWave(value);
-    } catch (cause) {
-      throw this.#poisonAuthority(cause);
-    }
-  }
-
   /**
    * `authority` turns this session into one that owns its accounts: it signs
    * with the key it is given and returns signed frames. Without it the session
@@ -593,69 +580,6 @@ export class RscoreProcessClient {
         ? await this.#requestOwnedNow(RSCORE_OP.hello, payload)
         : await this.#authorityRequestOwnedNow(RSCORE_OP.hello, payload);
       return response.result;
-    });
-  }
-
-  /**
-   * One Entity input's inbound half: everything that arrived from peers.
-   *
-   * The whole arrival list crosses once. The engine shards it by account
-   * across its pool, applies each account's rows in the order they arrived,
-   * and answers with what happened — not with the accounts themselves.
-   */
-  async accountInbound(wave: Readonly<{
-    ownerEntityId: Uint8Array;
-    expectedAccountsRoot: Uint8Array;
-    entityTimestamp: number;
-    finalizedJHeight: number;
-    rows: readonly RscoreWireValue[];
-    postAccounts: boolean;
-  }>): Promise<Wave> {
-    const payload = ownWirePayload([
-      Buffer.from(wave.ownerEntityId),
-      Buffer.from(wave.expectedAccountsRoot),
-      [wave.entityTimestamp, wave.finalizedJHeight],
-      [...wave.rows],
-      wave.postAccounts,
-    ]);
-    return this.#withRequestTurn(async () => {
-      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.accountInbound, payload);
-      return this.#decodeAuthorityWave(response.result);
-    });
-  }
-
-  /**
-   * One Entity input's outbound half: what its own logic decided to send.
-   *
-   * Accounts opened by this input, the transactions it queued, and the
-   * accounts that should now propose, all in one call. The reply is what to
-   * put on the wire.
-   */
-  async accountOutbound(wave: Readonly<{
-    ownerEntityId: Uint8Array;
-    timestamp: number;
-    jHeight: number;
-    creates: readonly RscoreWireValue[];
-    admits: readonly RscoreWireValue[];
-    propose: readonly RscoreWireValue[];
-    materialize: readonly RscoreWireValue[];
-    postAccounts: boolean;
-    checkpointDue: boolean;
-  }>): Promise<Wave> {
-    const payload = ownWirePayload([
-      Buffer.from(wave.ownerEntityId),
-      wave.timestamp,
-      wave.jHeight,
-      [...wave.creates],
-      [...wave.admits],
-      [...wave.propose],
-      [...wave.materialize],
-      wave.postAccounts,
-      wave.checkpointDue,
-    ]);
-    return this.#withRequestTurn(async () => {
-      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.accountOutbound, payload);
-      return this.#decodeAuthorityWave(response.result);
     });
   }
 

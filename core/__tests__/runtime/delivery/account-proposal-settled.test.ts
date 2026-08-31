@@ -78,7 +78,7 @@ describe('account proposal outbox settlement', () => {
     const env = withAccount(live);
     const proposal = accountFrame(12, `0x${'12'.repeat(32)}`);
     const output = routedAccountInput(live, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: FROM,
       toEntityId: TO,
       domain: { ...live.state.domain },
@@ -94,7 +94,7 @@ describe('account proposal outbox settlement', () => {
     const live = makeAccount(FROM, TO);
     const proposal = accountFrame(12, `0x${'12'.repeat(32)}`);
     const output = routedAccountInput(live, {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: FROM,
       toEntityId: TO,
       domain: { ...live.state.domain },

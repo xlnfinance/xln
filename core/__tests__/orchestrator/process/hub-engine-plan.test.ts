@@ -62,6 +62,17 @@ test('dev lets Cargo verify native H1 before orchestration inside one bounded pr
   expect(preflight).toContain('assertRustHubBinaryFresh(repositoryRoot)');
 });
 
+test('live Rust H1 smoke rejects a stale production binary', () => {
+  const smoke = readFileSync(
+    join(import.meta.dir, '../../../scripts/operations/production/local-prod-smoke.ts'),
+    'utf8',
+  );
+  expect(smoke).toContain("if (process.env['XLN_HLT_ENGINE'] === 'rust')");
+  expect(smoke).toContain(
+    "assertRustHubBinaryFresh(repoRoot, process.env['XLN_RSCORE_BINARY'])",
+  );
+});
+
 test('Rust H1 process plan has no TS bootstrap/import/handoff path', () => {
   const root = mkdtempSync(join(tmpdir(), 'xln-rust-h1-plan-'));
   const binary = join(root, 'xlnrs');

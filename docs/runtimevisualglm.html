@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>xln · runtime visualizer</title>
+<style>
+  :root {
+    --bg: #07070c; --panel: #0e0e17; --border: #26263a; --fg: #e6e6f0; --dim: #8b8ba7;
+    --accent: #8b5cf6; --pink: #ec4899; --cyan: #22d3ee; --amber: #f59e0b; --green: #10b981;
+    --red: #ef4444; --mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--fg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    background: radial-gradient(1100px 500px at 60% -10%, rgba(139,92,246,.09), transparent 60%), var(--bg);
+  }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.2rem; padding: .9rem 1.4rem .5rem; }
+  h1 { font-size: 1.25rem; letter-spacing: -.02em; font-family: var(--mono); color: var(--fg); }
+  h1 em { font-style: normal; color: var(--dim); font-size: .85rem; }
+  .stagebar { display: flex; gap: .3rem; align-items: center; margin-left: auto; flex-wrap: wrap; }
+  .pill {
+    font-family: var(--mono); font-size: .64rem; padding: .15rem .48rem;
+    border: 1px solid var(--border); border-radius: 999px; color: var(--dim); background: #0b0b13;
+    transition: all .12s; white-space: nowrap;
+  }
+  .pill.on { color: #fff; border-color: var(--accent); background: rgba(139,92,246,.22); }
+  .pill.join.on { border-color: #fb923c; background: rgba(251,146,60,.16); }
+  .parity {
+    font-family: var(--mono); font-size: .64rem; color: var(--green);
+    border: 1px solid rgba(16,185,129,.35); background: rgba(16,185,129,.08);
+    padding: .15rem .55rem; border-radius: 999px; white-space: nowrap;
+  }
+  .deck {
+    display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: stretch;
+    padding: .5rem 1.4rem .65rem; border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border); background: rgba(10,10,18,.72);
+    position: sticky; top: 0; z-index: 5; backdrop-filter: blur(8px);
+  }
+  .ctl { display: flex; flex-direction: column; gap: .14rem; min-width: 138px; }
+  .ctl label { font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); display: flex; justify-content: space-between; gap: .5rem; }
+  .ctl label output { color: var(--fg); font-family: var(--mono); }
+  .ctl input[type=range] { width: 100%; accent-color: var(--accent); height: 18px; cursor: pointer; }
+  .btns { display: flex; flex-wrap: wrap; gap: .35rem; align-content: center; }
+  .btn {
+    font-size: .66rem; font-family: var(--mono); padding: .28rem .56rem; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px; background: #12121d; color: var(--fg); transition: all .15s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.active { border-color: var(--pink); background: rgba(236,72,153,.18); }
+  .btn.preset { border-style: dashed; }
+  .wrap { padding: .7rem 1.4rem 0; }
+  .canvasbox { position: relative; width: 100%; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 12px; border: 1px solid var(--border); }
+  .toasts { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); display: flex; flex-direction: column; gap: .3rem; align-items: center; pointer-events: none; z-index: 3; }
+  .toast {
+    font-family: var(--mono); font-size: .68rem; padding: .26rem .8rem; border-radius: 999px;
+    background: rgba(10,10,18,.92); border: 1px solid var(--accent); box-shadow: 0 0 14px rgba(139,92,246,.3);
+    animation: tIn .2s ease-out;
+  }
+  .toast.ok { border-color: var(--green); }
+  @keyframes tIn { from { opacity: 0; transform: translateY(-6px);} to { opacity: 1; transform: none;} }
+  .metrics { display: flex; flex-wrap: wrap; gap: .5rem; padding: .6rem 1.4rem 1.5rem; }
+  .m { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: .4rem .78rem; min-width: 102px; flex: 1 1 auto; }
+  .m .k { font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .m .v { font-family: var(--mono); font-size: .98rem; margin-top: .1rem; }
+  .m .v small { font-size: .6rem; color: var(--dim); }
+  .m.hero { flex: 2.2 1 180px; border-color: rgba(139,92,246,.5); background: linear-gradient(135deg, rgba(139,92,246,.14), rgba(236,72,153,.08)); }
+  .m.hero .v { font-size: 1.5rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--pink)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .m .v.warn { color: var(--amber); } .m .v.bad { color: var(--red); }
+  @media (max-width: 760px) { header { padding: .7rem .9rem .4rem; } .deck, .wrap, .metrics { padding-left: .9rem; padding-right: .9rem; } .ctl { min-width: 118px; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>xln runtime <em>· one shared pool · 3 stages · 3 JOINs</em></h1>
+  <div class="stagebar" id="stagebar">
+    <span class="pill" data-ph="s1">S1</span>
+    <span class="pill join" data-ph="j1">JOIN 1</span>
+    <span class="pill" data-ph="s2">S2</span>
+    <span class="pill join" data-ph="j2">JOIN 2</span>
+    <span class="pill" data-ph="s3">S3</span>
+    <span class="pill join" data-ph="j3">JOIN 3</span>
+    <span class="pill" data-ph="seal">SEAL</span>
+    <span class="parity" id="parity">TS ≡ RS ✓</span>
+  </div>
+</header>
+
+<div class="deck" id="deck"></div>
+
+<div class="wrap">
+  <div class="canvasbox">
+    <canvas id="cv"></canvas>
+    <div class="toasts" id="toasts"></div>
+  </div>
+</div>
+
+<div class="metrics" id="metrics">
+  <div class="m hero"><div class="k">Committed throughput</div><div class="v" id="mTps">0 <small>ops/s</small></div></div>
+  <div class="m"><div class="k">Payments / s</div><div class="v" id="mPay">0</div></div>
+  <div class="m"><div class="k">Swaps / s</div><div class="v" id="mSwap">0</div></div>
+  <div class="m"><div class="k">Frames / s</div><div class="v" id="mFrames">0</div></div>
+  <div class="m"><div class="k">Frame №</div><div class="v" id="mFrame">0</div></div>
+  <div class="m"><div class="k">Queue</div><div class="v" id="mQueue">0</div></div>
+  <div class="m"><div class="k">WAL not durable</div><div class="v" id="mWal">0<small>/1</small></div></div>
+  <div class="m"><div class="k">Outbox / s</div><div class="v" id="mOut">0</div></div>
+  <div class="m"><div class="k">Worker util</div><div class="v" id="mUtil">0%</div></div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================================
+   xln runtime — swimlane frame matrix (docs/runtime.md).
+   Rows = workers, aligned across STAGE 1 | JOIN | STAGE 2 | JOIN | STAGE 3 | JOIN | SEAL.
+   Bar width = work. Gap to the JOIN line = barrier wait. Copper = coordinator.
+   WAL = countable ordered cells. Outbox = flat address chips released after fsync.
+   UI-only simulation: randomness allowed (visualization, not state).
+   ========================================================================== */
+
+const LW = 1680, LH = 970;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+function resize() {
+  const box = cv.parentElement.getBoundingClientRect();
+  cv.width = Math.round(box.width * dpr);
+  cv.height = Math.round(box.width * (LH / LW) * dpr);
+  cv.style.height = (box.width * (LH / LW)) + 'px';
+}
+window.addEventListener('resize', resize);
+
+const C = {
+  bg: '#07070c', fg: '#e6e6f0', dim: '#8b8ba7', faint: '#55556e',
+  accent: '#8b5cf6', pink: '#ec4899', cyan: '#22d3ee', amber: '#f59e0b',
+  green: '#10b981', red: '#ef4444', violet: '#a78bfa', copper: '#fb923c',
+  book: '#8b5cf6', cron: '#60a5fa', teal: '#2dd4bf', gold: '#fde047',
+};
+const MONO = "ui-monospace,'SF Mono',Menlo,monospace";
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+const hex2 = b => b.toString(16).padStart(2, '0');
+const fmtK = n => n >= 10000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : Math.round(n).toLocaleString('en');
+function rootOf(frame) {
+  let h = 0x9e3779b9 ^ (frame * 0x85ebca6b);
+  for (let i = 0; i < 4; i++) h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) ^ (frame + i * 0x27d4eb2f);
+  let s = '';
+  for (let i = 0; i < 5; i++) { h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35); s += hex2((h >>> 8) & 0xff); }
+  return s;
+}
+function label(txt, x, y, o = {}) {
+  ctx.font = `${o.w || ''}${o.size || 11}px ${MONO}`;
+  ctx.fillStyle = o.color || C.dim; ctx.textAlign = o.align || 'left'; ctx.textBaseline = o.base || 'alphabetic';
+  ctx.fillText(txt, x, y);
+}
+function hexA(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* ---------------- geometry ---------------- */
+const G = {
+  breadcrumbY: 78,
+  ribbonY: 118,
+  admitY: 158, admitH: 64,
+  matrixY: 246, matrixH: 420,          // rows live here
+  railX: 118, railEnd: 1560,
+  cols: { s1: [130, 470], j1: 482, s2: [494, 830], j2: 842, s3: [854, 1190], j3: 1202, sealed: [1214, 1330] },
+  walY: 706, walH: 66,
+  outY: 800, outH: 96,
+  legendY: 928,
+};
+
+/* ---------------- simulation ---------------- */
+const MAX_ADMIT = 520;
+const S = {
+  speed: 0.5, paused: false, hotPair: false, traceNext: false,
+  payRate: 40, swapRate: 15, population: 200, W: 8,
+  frame: 0, phase: 'idle', phaseT: 0,
+  cur: null, prev: null,
+  queue: [], spawnAcc: { pay: 0, swap: 0 }, ackSched: [],
+  accounts: [], lanesU: new Float32Array(32),
+  wal: [], sealedNotDurable: 0, outbox: [], packets: [],
+  root: ',,,,,,,,,,,,', rootFlash: 0,
+  ema: { pay: 0, swap: 0, frames: 0, out: 0, util: 0 },
+  outAcc: 0, frameAcc: 0, payAcc: 0, swapAcc: 0,
+  trace: null, simS: 0,
+};
+const HOT_SLOT = 0x2a;
+
+function genAccounts() {
+  const n = Math.max(1, Math.min(S.population, 4096));
+  S.accounts = Array.from({ length: n }, () => { const b = new Uint8Array(4); crypto.getRandomValues(b); return b; });
+}
+genAccounts();
+const shardOf = a => ((a[0] << 4) | (a[1] >> 4)) & 0xfff;
+const hexId = a => Array.from(a, hex2).join('');
+const laneOf = it => it.shard % S.W;
+
+function spawnInput(kind, acct) {
+  const a = acct || S.accounts[(Math.random() * S.accounts.length) | 0];
+  const it = {
+    kind, acct: a, shard: shardOf(a),
+    cost: kind === 'swap' ? .5 : kind === 'ack' ? .12 : kind === 'dispute' ? 1 : .3,
+  };
+  S.queue.push(it);
+  if (S.traceNext && kind === 'pay') {
+    S.traceNext = false;
+    S.trace = { id: hexId(a), it, lane: it.shard % S.W, done: false };
+    toast(`tracing pay 0x${hexId(a)} → shard #${it.shard} → lane w${it.shard % S.W}`, '');
+  }
+}
+
+function beginFrame() {
+  const admitted = S.queue.splice(0, Math.min(S.queue.length, MAX_ADMIT));
+  if (!admitted.length) { S.phase = 'idle'; return; }
+  const cur = { items: admitted, lanes: {}, pay: 0, swap: 0, n: admitted.length };
+  const hotLane = HOT_SLOT % S.W;
+  const L = w => cur.lanes[w] || (cur.lanes[w] = { s1: 0, s2: 0, s3: 0, pb: 0, ob: 0, cr: 0, n: 0 });
+  for (const it of admitted) {
+    const l = L(laneOf(it));
+    l.s1 += it.cost; l.s3 += it.cost * .7; l.n++;
+    if (it.kind === 'swap') { l.s2 += it.cost; l.ob += it.cost; }
+    else { l.s2 += it.cost * .5; l.pb += it.cost * .5; }
+    if (S.hotPair && it.kind === 'swap' && Math.random() < .72) { const h = L(hotLane); h.s2 += .4; h.ob += .4; }
+    if (it.kind === 'pay') cur.pay++; else if (it.kind === 'swap') cur.swap++;
+  }
+  for (const w of Object.keys(cur.lanes)) cur.lanes[w].cr = Math.random() * .3;
+  cur.max1 = Math.max(.001, ...Object.values(cur.lanes).map(l => l.s1));
+  cur.max2 = Math.max(.001, ...Object.values(cur.lanes).map(l => l.s2));
+  cur.max3 = Math.max(.001, ...Object.values(cur.lanes).map(l => l.s3));
+  cur.dur = [26 + cur.max1 * 25, 14, 30 + cur.max2 * 25, 14, 26 + cur.max3 * 25, 14, 18];
+  cur.phaseI = 0; cur.phaseT = 0;
+  cur.inChips = [];   // incoming account chips threaded into rows
+  const seen = new Map();
+  for (const it of admitted.slice(0, 10)) {
+    const id = hexId(it.acct); const e = seen.get(id) || { id, n: 0, lane: laneOf(it), kind: it.kind, traced: it === (S.trace && S.trace.it) };
+    e.n++; seen.set(id, e);
+  }
+  cur.inChips = [...seen.values()];
+  S.cur = cur; S.phase = 's1'; S.phaseT = 0;
+}
+
+function sealFrame() {
+  const cur = S.cur;
+  S.frame++;
+  S.frameAcc++; S.payAcc += cur.pay; S.swapAcc += cur.swap;
+  S.root = rootOf(S.frame); S.rootFlash = 1;
+  S.sealedNotDurable = Math.min(1, S.sealedNotDurable + 1);
+  S.wal.unshift({ n: S.frame, left: rand(90, 160), durable: false, pubs: 0 });
+  if (S.wal.length > 26) S.wal.pop();
+  if (S.trace && !S.trace.done && cur.items.includes(S.trace.it)) {
+    toast(`pay 0x${S.trace.id} sealed in frame #${S.frame} → WAL`, '');
+  }
+  const nAck = Math.min(6, Math.ceil((cur.pay + cur.swap) / 20));
+  for (let i = 0; i < nAck; i++) {
+    const it = cur.items[(Math.random() * cur.items.length) | 0];
+    S.ackSched.push({ t: S.simS + rand(.2, .8), acct: it.acct });
+  }
+  S.prev = cur; S.cur = null;
+}
+
+const PHASES = ['s1', 'j1', 's2', 'j2', 's3', 'j3', 'seal'];
+
+function advanceSim(ms) {
+  S.simS += ms / 1000;
+  S.spawnAcc.pay += S.payRate * ms / 1000;
+  S.spawnAcc.swap += S.swapRate * ms / 1000;
+  while (S.spawnAcc.pay >= 1) { spawnInput('pay'); S.spawnAcc.pay--; }
+  while (S.spawnAcc.swap >= 1) { spawnInput('swap'); S.spawnAcc.swap--; }
+  if (Math.random() < S.payRate * ms / 1000 * .002) spawnInput('dispute');
+  for (let i = S.ackSched.length - 1; i >= 0; i--) {
+    if (S.ackSched[i].t <= S.simS) { spawnInput('ack', S.ackSched[i].acct); S.ackSched.splice(i, 1); }
+  }
+  if (S.phase === 'idle') { if (S.queue.length) beginFrame(); }
+  else if (S.cur) {
+    S.phaseT += ms;
+    const cur = S.cur;
+    while (S.cur && S.phaseT >= cur.dur[cur.phaseI]) {
+      S.phaseT -= cur.dur[cur.phaseI];
+      cur.phaseI++;
+      if (cur.phaseI >= PHASES.length) {
+        sealFrame();
+        if (S.queue.length) beginFrame(); else S.phase = 'idle';
+        break;
+      }
+      S.phase = PHASES[cur.phaseI];
+    }
+  }
+  for (let i = S.wal.length - 1; i >= 0; i--) {
+    const w = S.wal[i];
+    if (!w.durable && w.left > 0) {
+      w.left -= ms;
+      if (w.left <= 0) {
+        w.durable = true; S.sealedNotDurable = Math.max(0, S.sealedNotDurable - 1);
+        w.pubs = 2 + ((Math.random() * 4) | 0); S.outAcc += w.pubs;
+        for (let k = 0; k < w.pubs; k++) {
+          S.outbox.unshift({ addr: hexId(S.accounts[(Math.random() * S.accounts.length) | 0]).slice(0, 4), h: w.n });
+          if (S.packets.length < 40) S.packets.push({ t: 0, dur: rand(.6, 1.1), chip: k, color: [C.cyan, C.violet, C.green][(Math.random() * 3) | 0] });
+        }
+        if (S.outbox.length > 12) S.outbox.length = 12;
+        if (S.trace && !S.trace.done) {
+          S.trace.done = true;
+          toast(`frame #${w.n} durable ✓ → outbox published · pay 0x${S.trace.id} delivered`, 'ok');
+          setTimeout(() => { if (S.trace && S.trace.done) S.trace = null; }, 900);
+        }
+      }
+    }
+  }
+  const busy = S.phase !== 'idle' && S.phase[0] === 's' ? 1 : 0;
+  for (let w = 0; w < S.W; w++) {
+    const active = busy && S.cur && S.cur.lanes[w] ? 1 : (busy ? .1 : 0);
+    S.lanesU[w] += (active - S.lanesU[w]) * Math.min(1, ms / 260);
+  }
+}
+
+/* ---------------- drawing ---------------- */
+function bar(x, y, w, h, r) {
+  r = Math.min(r, h / 2, w / 2 || r);
+  if (w <= 0) return;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
+}
+
+const BREADCRUMB = ['INGRESS', 'SHARD MAP', 'SHARED CPU POOL', 'SEAL', 'DISK', 'NETWORK'];
+function phaseToCrumb() {
+  return S.phase === 'idle' ? 0 :
+    S.phase === 's1' ? 1 :
+    (S.phase === 's2' || S.phase === 'j1' || S.phase === 'j2' || S.phase === 's3' || S.phase === 'j3') ? 2 :
+    3;
+}
+function drawBreadcrumb() {
+  ctx.letterSpacing = '2px';
+  let x = 40;
+  const active = phaseToCrumb();
+  const walActive = S.wal.some(w => !w.durable);
+  BREADCRUMB.forEach((s, i) => {
+    const on = i === active || (i === 4 && walActive) || (i === 5 && S.phase !== 'idle');
+    label(s, x, G.breadcrumbY, { size: 12, color: on ? C.copper : C.faint, w: on ? 'bold ' : '' });
+    x += ctx.measureText(s).width + 14;
+    if (i < BREADCRUMB.length - 1) { label('▸', x, G.breadcrumbY, { size: 11, color: C.faint }); x += 20; }
+  });
+  ctx.letterSpacing = '0px';
+  label(`frame #${S.frame} · root 0x${S.root.slice(0, 10)}`, G.railEnd, G.breadcrumbY, { size: 11, align: 'right', color: S.rootFlash > .05 ? C.pink : C.dim });
+}
+
+function ribbonText() {
+  const cur = S.cur;
+  if (S.phase === 'idle') return { t: `BETWEEN FRAMES — SELECTING NEXT BATCH · ${S.queue.length} QUEUED`, c: C.copper };
+  if (S.phase === 's1') return { t: `STAGE 1 · ACCOUNT INPUTS — BUCKET BY accountId → ${Object.keys(cur.lanes).length}/${S.W} LANES`, c: C.cyan };
+  if (S.phase === 'j1') return { t: `JOIN 1 · BARRIER — GAP TO THE LINE = WAIT`, c: C.copper };
+  if (S.phase === 's2') return { t: `STAGE 2 · PAYBOOK + ORDERBOOK + CRONTAB — BY hashlock / pair`, c: C.violet };
+  if (S.phase === 'j2') return { t: `JOIN 2 · BARRIER — S3 NEEDS S2 OUTPUTS`, c: C.copper };
+  if (S.phase === 's3') return { t: `STAGE 3 · PROPOSALS — ${cur.n} ROWS`, c: C.teal };
+  if (S.phase === 'j3') return { t: `JOIN 3 · BARRIER — THEN SEAL`, c: C.copper };
+  return { t: `SEAL · FOLD DIRTY ROOTS → ENTITY → RUNTIME → WAL`, c: C.accent };
+}
+function drawRibbon() {
+  const r = ribbonText();
+  ctx.letterSpacing = '3px';
+  const half = 460;
+  ctx.strokeStyle = hexA(r.c, .5); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(LW / 2 - half - 16, G.ribbonY - 5); ctx.lineTo(LW / 2 + half + 16, G.ribbonY - 5); ctx.stroke();
+  label(r.t, LW / 2, G.ribbonY, { size: 13, color: r.c, align: 'center', w: 'bold ' });
+  ctx.letterSpacing = '0px';
+  const fs = S.wal.find(w => !w.durable);
+  label(fs ? `FSYNC #${fs.n} · ${Math.max(0, fs.left).toFixed(0)}ms` : `DURABLE ✓ depth 0/1`,
+    G.railEnd, G.ribbonY, { size: 10.5, align: 'right', color: fs ? C.amber : C.green });
+}
+
+function rowY(w) { const h = G.matrixH / S.W; return G.matrixY + 26 + w * h; }
+function rowH() { return G.matrixH / S.W; }
+
+function drawAdmission() {
+  const cur = S.cur;
+  label('ADMISSION', 40, G.admitY, { size: 10, color: C.dim });
+  // incoming account chips threaded into rows
+  const chips = cur ? cur.inChips : [];
+  chips.forEach((e, i) => {
+    const x = 40 + i * 118, y = G.admitY + 12 + (i % 2) * 26;
+    const col = e.kind === 'swap' ? C.violet : e.kind === 'ack' ? C.green : e.kind === 'dispute' ? C.red : C.cyan;
+    const traced = e.traced || (S.trace && S.trace.id === e.id);
+    ctx.fillStyle = 'rgba(10,10,16,.95)'; ctx.strokeStyle = traced ? C.gold : hexA(col, .8); ctx.lineWidth = traced ? 2 : 1.1;
+    bar(x, y, 104, 20, 5); ctx.fill(); ctx.stroke();
+    label(`0x${e.id.slice(0, 8)} ×${e.n}`, x + 8, y + 14, { size: 9.5, color: traced ? C.gold : col });
+    // copper arc: account → its worker row
+    const ry = rowY(e.lane) + rowH() / 2;
+    const on = S.phase === 's1';
+    ctx.strokeStyle = hexA(C.copper, on ? .55 : .18); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 52, y + 22);
+    ctx.quadraticCurveTo(x + 52 + (G.railX - x - 52) * .4, ry, G.railX - 4, ry);
+    ctx.stroke();
+  });
+  if (!chips.length) label(`${S.queue.length} queued`, 40, G.admitY + 26, { size: 10, color: C.faint });
+  // admission buffer
+  const bx = 1180, bw = 300;
+  label(`admission buffer`, bx, G.admitY - 2, { size: 9.5, color: C.dim });
+  const frac = clamp(S.queue.length / 200, 0, 1);
+  ctx.fillStyle = '#161624'; ctx.fillRect(bx, G.admitY + 8, bw, 10);
+  ctx.fillStyle = frac > .8 ? C.red : frac > .5 ? C.amber : C.green;
+  ctx.fillRect(bx, G.admitY + 8, bw * frac, 10);
+  label(`${Math.round(frac * 100)}% · ${S.queue.length} in mempool`, bx, G.admitY + 32, { size: 9.5, color: frac > .8 ? C.red : C.dim });
+  if (frac > .8) label('backpressure: offered > hub capacity', bx, G.admitY + 48, { size: 9.5, color: C.red });
+}
+
+function drawMatrix() {
+  const cur = S.cur, prev = S.prev;
+  const live = cur || prev;
+  // stage headers
+  label('STAGE 1', G.cols.s1[0] + 6, G.matrixY + 2, { size: 12, w: 'bold ', color: C.cyan });
+  label('by accountId', G.cols.s1[1], G.matrixY + 2, { size: 9.5, align: 'right', color: C.faint });
+  label('STAGE 2', G.cols.s2[0] + 6, G.matrixY + 2, { size: 12, w: 'bold ', color: C.violet });
+  label('by hashlock / pair', G.cols.s2[1], G.matrixY + 2, { size: 9.5, align: 'right', color: C.faint });
+  if (S.hotPair) label('HOT PAIR — one sequential price-time domain', G.cols.s2[0] + 6, G.matrixY + 16, { size: 9, color: C.red });
+  label('STAGE 3', G.cols.s3[0] + 6, G.matrixY + 2, { size: 12, w: 'bold ', color: C.teal });
+  label('proposals', G.cols.s3[1], G.matrixY + 2, { size: 9.5, align: 'right', color: C.faint });
+  label('SEALED', G.cols.sealed[0] + 6, G.matrixY + 2, { size: 12, w: 'bold ', color: C.green });
+  // JOIN rules
+  for (const [x, name] of [[G.cols.j1, 'JOIN 1'], [G.cols.j2, 'JOIN 2'], [G.cols.j3, 'JOIN 3']]) {
+    const active = S.phase === 'j' + name[5];
+    ctx.strokeStyle = hexA(C.copper, active ? .95 : .4); ctx.lineWidth = active ? 2.5 : 1.5;
+    ctx.beginPath(); ctx.moveTo(x, G.matrixY + 20); ctx.lineTo(x, G.matrixY + G.matrixH); ctx.stroke();
+    ctx.save(); ctx.translate(x - 5, G.matrixY + 96); ctx.rotate(-Math.PI / 2);
+    label(name, 0, 0, { size: 10, color: active ? C.copper : C.faint, w: 'bold ' });
+    ctx.restore();
+    if (active) {
+      const p = .5 + .5 * Math.sin(performance.now() / 90);
+      ctx.strokeStyle = hexA(C.copper, .25 + .4 * p); ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(x, G.matrixY + 20); ctx.lineTo(x, G.matrixY + G.matrixH); ctx.stroke();
+    }
+  }
+  // faint column baselines
+  for (const [a, b] of [G.cols.s1, G.cols.s2, G.cols.s3]) {
+    ctx.strokeStyle = 'rgba(120,120,160,.08)';
+    ctx.strokeRect(a, G.matrixY + 22, b - a, G.matrixH - 26);
+  }
+  const h = rowH(), bh = Math.min(16, h - 5);
+  for (let w = 0; w < S.W; w++) {
+    const y = rowY(w) + (h - bh) / 2;
+    const on = S.phase !== 'idle';
+    label(`w${w}`, G.railX - 10, rowY(w) + h / 2 + 3, { size: Math.min(10, 7 + h / 6), align: 'right', color: C.fg });
+    label(`${Math.round(S.lanesU[w] * 100)}%`, G.railEnd, rowY(w) + h / 2 + 3, { size: 9, align: 'right', color: C.dim });
+    const lane = live && live.lanes[w];
+    if (!lane) continue;
+    const tracedLane = S.trace && !S.trace.done && S.trace.lane === w;
+    const dim = cur ? 1 : .45; // previous frame dims between frames
+    const prog = stage => cur ? {
+      s1: cur.phaseI >= 1 ? 1 : cur.phaseI === 0 ? clamp(S.phaseT / (cur.dur[0] * lane.s1 / cur.max1), 0, 1) : 0,
+      s2: cur.phaseI >= 3 ? 1 : cur.phaseI === 2 ? clamp(S.phaseT / (cur.dur[2] * lane.s2 / cur.max2), 0, 1) : 0,
+      s3: cur.phaseI >= 5 ? 1 : cur.phaseI === 4 ? clamp(S.phaseT / (cur.dur[4] * lane.s3 / cur.max3), 0, 1) : 0,
+    }[stage] : 1;
+    // STAGE 1 bar: width = work, fills until this lane's own finish; rest = gap to JOIN
+    const col1 = G.cols.s1[1] - G.cols.s1[0] - 14;
+    const w1 = col1 * (lane.s1 / live.max1) * prog('s1') * dim;
+    ctx.fillStyle = hexA(C.cyan, .75 * dim);
+    bar(G.cols.s1[0] + 4, y, w1, bh, 4);
+    if (lane.n && prog('s1') >= 1) label(`${lane.n}`, G.cols.s1[0] + 8 + w1, y + bh - 3, { size: 8.5, color: hexA(C.cyan, dim) });
+    // barrier wait annotation: gap between bar end and JOIN line
+    const gapX = G.cols.s1[0] + 4 + col1 * (lane.s1 / live.max1);
+    if (S.phase === 'j1' && gapX < G.cols.j1 - 8) {
+      ctx.fillStyle = hexA(C.copper, .25);
+      ctx.fillRect(gapX, y, G.cols.j1 - 6 - gapX, bh);
+    }
+    // STAGE 2 segmented bar: paybook | orderbook | crontab
+    const col2 = G.cols.s2[1] - G.cols.s2[0] - 14;
+    const p2 = prog('s2');
+    const segs = [
+      ['pb', lane.pb, C.pink], ['ob', lane.ob, S.hotPair && w === HOT_SLOT % S.W ? C.red : C.book], ['cr', lane.cr, C.cron],
+    ];
+    let sx = G.cols.s2[0] + 4;
+    const tot2 = lane.pb + lane.ob + lane.cr || 1;
+    for (const [, val, col] of segs) {
+      const sw = col2 * (lane.s2 / live.max2) * (val / tot2) * p2 * dim;
+      ctx.fillStyle = hexA(col, .8 * dim);
+      bar(sx, y, sw, bh, 3);
+      sx += sw;
+    }
+    if (p2 >= 1 && lane.s2 > .1) label(`${lane.s2.toFixed(1)}`, sx + 2, y + bh - 3, { size: 8.5, color: hexA(C.violet, dim) });
+    if (S.phase === 'j2') {
+      const gx = G.cols.s2[0] + 4 + col2 * (lane.s2 / live.max2);
+      if (gx < G.cols.j2 - 8) { ctx.fillStyle = hexA(C.copper, .2); ctx.fillRect(gx, y, G.cols.j2 - 6 - gx, bh); }
+    }
+    // STAGE 3 bar
+    const col3 = G.cols.s3[1] - G.cols.s3[0] - 14;
+    const w3 = col3 * (lane.s3 / live.max3) * prog('s3') * dim;
+    ctx.fillStyle = hexA(C.teal, .8 * dim);
+    bar(G.cols.s3[0] + 4, y, w3, bh, 4);
+    if (S.phase === 'j3') {
+      const gx = G.cols.s3[0] + 4 + col3 * (lane.s3 / live.max3);
+      if (gx < G.cols.j3 - 8) { ctx.fillStyle = hexA(C.copper, .2); ctx.fillRect(gx, y, G.cols.j3 - 6 - gx, bh); }
+    }
+    // traced lane outline
+    if (tracedLane && cur) {
+      ctx.strokeStyle = C.gold; ctx.lineWidth = 1.5;
+      ctx.strokeRect(G.cols.s1[0] + 2, y - 2, G.cols.sealed[1] - G.cols.s1[0] - 4, bh + 4);
+    }
+    // sealed cell
+    const sealed = (cur && cur.phaseI >= 6) || (!cur && prev);
+    ctx.fillStyle = sealed && lane.s3 > 0 ? hexA(C.green, .85) : 'rgba(120,120,160,.07)';
+    bar(G.cols.sealed[0] + 4, y, 60, bh, 4);
+    if (sealed && lane.s3 > 0) label('✓', G.cols.sealed[0] + 28, y + bh - 3.5, { size: 10, color: '#032b18', align: 'center' });
+  }
+  // footer totals
+  const proposals = live ? Object.values(live.lanes).reduce((a, l) => a + l.n, 0) : 0;
+  label(`${proposals} proposals`, G.cols.sealed[0] + 4, G.matrixY + G.matrixH + 14, { size: 9.5, color: C.green });
+  label('bar width = work · gap to JOIN line = barrier wait', G.cols.s3[0] + 4, G.matrixY + G.matrixH + 14, { size: 9.5, color: C.faint });
+}
+
+function walTipX() { return 130 + Math.min(S.wal.length, 26) * 0 + 40; }
+function drawWal() {
+  label('DURABLE WAL — ORDERED · DEPTH ≤ 1', 40, G.walY, { size: 11, color: C.dim, w: 'bold ' });
+  const x0 = 130, cw = 26, gap = 5;
+  for (let i = 0; i < Math.min(26, S.wal.length); i++) {
+    const f = S.wal[i];
+    const x = x0 + i * (cw + gap);
+    if (f.durable) ctx.fillStyle = hexA(C.green, .8);
+    else {
+      ctx.fillStyle = hexA('#20203a', 1);
+      bar(x, G.walY + 12, cw, 22, 4); ctx.fill();
+      ctx.fillStyle = hexA(C.amber, .9);
+      bar(x, G.walY + 12, cw * clamp(1 - f.left / 150, .06, 1), 22, 4); ctx.fill();
+      label(`#${f.n}`, x + 3, G.walY + 28, { size: 8, color: '#1c1206' });
+      continue;
+    }
+    bar(x, G.walY + 12, cw, 22, 4); ctx.fill();
+    label(`#${f.n}`, x + 3, G.walY + 28, { size: 8, color: '#032b18' });
+  }
+  const tip = S.wal[0];
+  label(tip ? (tip.durable ? `height #${tip.n} · durable ✓` : `fsync #${tip.n} · outbox holds`) : 'empty',
+    G.railEnd, G.walY + 28, { size: 10.5, align: 'right', color: tip && tip.durable ? C.green : C.amber });
+  label('speculative N+1 computes while N fsyncs', G.railEnd, G.walY + 10, { size: 9.5, align: 'right', color: C.faint });
+}
+
+function drawOutbox(dt) {
+  label('NETWORK OUTBOX — FLAT · ORDERED · RELEASED ONLY AFTER FSYNC', 40, G.outY, { size: 11, color: C.dim, w: 'bold ' });
+  const y = G.outY + 16, cw = 116, gap = 10;
+  for (let i = 0; i < S.outbox.length; i++) {
+    const e = S.outbox[i];
+    const x = 130 + i * (cw + gap);
+    ctx.fillStyle = 'rgba(10,10,16,.95)'; ctx.strokeStyle = hexA(C.cyan, .45); ctx.lineWidth = 1;
+    bar(x, y, cw, 26, 5); ctx.fill(); ctx.stroke();
+    label(`0x${e.addr}  #${e.h}`, x + 8, y + 17, { size: 9.5, color: C.cyan });
+    // fan-out curve from WAL durable tip to this chip
+    ctx.strokeStyle = hexA(C.green, .18); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(160, G.walY + 40);
+    ctx.quadraticCurveTo(x + 40, (G.walY + G.outY) / 2 + 20, x + 20, y); ctx.stroke();
+  }
+  if (!S.outbox.length) label('waiting for first durable frame…', 130, y + 17, { size: 10, color: C.faint });
+  for (let i = S.packets.length - 1; i >= 0; i--) {
+    const p = S.packets[i];
+    p.t += dt / p.dur;
+    if (p.t >= 1 || p.chip >= S.outbox.length) { S.packets.splice(i, 1); continue; }
+    const x = 130 + p.chip * (cw + gap) + 20;
+    const t = p.t, px = lerp(160, x, t), py = lerp(G.walY + 40, y, t) - Math.sin(Math.PI * t) * 24;
+    ctx.fillStyle = p.color; ctx.fillRect(px - 3, py - 3, 6, 6);
+  }
+}
+
+function drawLegend() {
+  const items = [
+    ['pay', C.cyan], ['swap', C.violet], ['ack', C.green], ['dispute', C.red],
+    ['paybook', C.pink], ['orderbook', C.book], ['crontab', C.cron], ['proposals', C.teal],
+    ['copper = coordinator: bucket · join · re-bucket · seal', C.copper],
+    ['gap to JOIN line = barrier wait', C.copper],
+  ];
+  let x = 40;
+  for (const [txt, col] of items) {
+    ctx.fillStyle = col; ctx.fillRect(x, G.legendY - 8, 9, 9);
+    label(txt, x + 14, G.legendY, { size: 9.5, color: C.dim });
+    x += 24 + txt.length * 5.6;
+  }
+}
+
+/* ---------------- DOM ---------------- */
+const $ = id => document.getElementById(id);
+const pills = [...document.querySelectorAll('#stagebar .pill')];
+function syncDom() {
+  pills.forEach(p => p.classList.toggle('on', p.dataset.ph === S.phase));
+  $('parity').textContent = `TS 0x${S.root.slice(0, 8)} ≡ RS 0x${S.root.slice(0, 8)} ✓`;
+  $('mTps').innerHTML = `${fmtK(S.ema.pay + S.ema.swap)} <small>ops/s committed</small>`;
+  $('mPay').textContent = fmtK(S.ema.pay);
+  $('mSwap').textContent = fmtK(S.ema.swap);
+  $('mFrames').textContent = fmtK(S.ema.frames);
+  $('mFrame').textContent = '#' + S.frame;
+  const q = S.queue.length, qe = $('mQueue');
+  qe.textContent = q; qe.className = 'v' + (q > 300 ? ' bad' : q > 120 ? ' warn' : '');
+  $('mWal').innerHTML = `${S.sealedNotDurable}<small>/1</small>`;
+  $('mOut').textContent = fmtK(S.ema.out);
+  let u = 0; for (let w = 0; w < S.W; w++) u += S.lanesU[w];
+  $('mUtil').textContent = Math.round(u * 100 / Math.max(1, S.W)) + '%';
+}
+function toast(msg, cls) {
+  const t = document.createElement('div'); t.className = 'toast ' + (cls || ''); t.textContent = msg;
+  $('toasts').append(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .4s'; }, 2600);
+  setTimeout(() => t.remove(), 3100);
+}
+
+/* ---------------- controls ---------------- */
+function slider(parent, { name, min, max, step, value, fmt, oninput }) {
+  const d = document.createElement('div'); d.className = 'ctl';
+  const lab = document.createElement('label'); const out = document.createElement('output');
+  lab.append(name, out);
+  const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = value;
+  const sync = () => out.textContent = fmt(+inp.value);
+  inp.addEventListener('input', () => { sync(); oninput(+inp.value); });
+  sync(); d.append(lab, inp); parent.append(d);
+  return { set: v => { inp.value = v; sync(); } };
+}
+function toggle(parent, name, fn) {
+  const b = document.createElement('button');
+  b.className = 'btn'; b.textContent = name;
+  b.addEventListener('click', () => { const on = !b.classList.contains('active'); b.classList.toggle('active', on); fn(on); });
+  parent.append(b); return b;
+}
+const deck = $('deck');
+const slPay = slider(deck, { name: 'payments / s', min: 1, max: 100, step: 1, value: S.payRate, fmt: v => '' + v, oninput: v => S.payRate = v });
+const slSwap = slider(deck, { name: 'swaps / s', min: 1, max: 100, step: 1, value: S.swapRate, fmt: v => '' + v, oninput: v => S.swapRate = v });
+const slPop = slider(deck, { name: 'accounts', min: 1, max: 1000, step: 1, value: S.population, fmt: v => '' + v, oninput: v => { S.population = v; genAccounts(); } });
+const slW = slider(deck, { name: 'hub workers', min: 1, max: 32, step: 1, value: S.W, fmt: v => 'w' + v, oninput: v => { S.W = v; } });
+// log-scale speed slider: 0.01× … 2× (fine control in the slow range)
+const speedFromPos = p => 0.01 * Math.pow(200, p);
+const posFromSpeed = s => Math.log(clamp(s, .01, 2) / .01) / Math.log(200);
+const slSpeed = slider(deck, {
+  name: 'speed', min: 0, max: 1, step: .005, value: posFromSpeed(S.speed),
+  fmt: p => speedFromPos(p).toFixed(2) + '×', oninput: p => { S.speed = speedFromPos(p); },
+});
+const btns = document.createElement('div'); btns.className = 'btns'; deck.append(btns);
+let pauseBtn;
+pauseBtn = toggle(btns, 'pause', on => { S.paused = on; pauseBtn.textContent = on ? 'resume' : 'pause'; pauseBtn.classList.toggle('active', on); });
+toggle(btns, 'hot pair', on => S.hotPair = on);
+toggle(btns, 'trace a payment', on => { if (on) S.traceNext = true; });
+const presets = document.createElement('div'); presets.className = 'btns'; deck.append(presets);
+function preset(name, fn) { const b = document.createElement('button'); b.className = 'btn preset'; b.textContent = name; b.addEventListener('click', fn); presets.append(b); }
+preset('calm', () => setAll({ pay: 12, swap: 4, pop: 50, W: 4 }));
+preset('busy', () => setAll({ pay: 80, swap: 30, pop: 1000, W: 8 }));
+preset('1 worker', () => setAll({ pay: 60, swap: 20, pop: 300, W: 1 }));
+preset('32 workers', () => setAll({ pay: 60, swap: 20, pop: 300, W: 32 }));
+preset('hot pair', () => { setAll({ pay: 10, swap: 60, pop: 200, W: 8 }); S.hotPair = true; });
+function setAll({ pay, swap, pop, W }) {
+  S.payRate = pay; S.swapRate = swap; S.population = pop; S.W = W;
+  slPay.set(pay); slSwap.set(swap); slPop.set(pop); slW.set(W); genAccounts();
+}
+(function applyHash() {
+  const p = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const num = (k, d) => p.has(k) ? +p.get(k) : d;
+  setAll({ pay: num('pay', S.payRate), swap: num('swap', S.swapRate), pop: num('pop', S.population), W: num('w', S.W) });
+  if (p.has('speed')) { const v = clamp(+p.get('speed'), .01, 2); S.speed = v; slSpeed.set(posFromSpeed(v)); }
+  S.hotPair = p.get('hotpair') === '1';
+})();
+window.xlnvis = { S, setAll };
+
+/* ---------------- main loop ---------------- */
+let last = performance.now(), emaT = 0, domT = 0, lastRender = 0;
+function tick(now) {
+  const dtReal = Math.min(.35, (now - last) / 1000); last = now;
+  if (!S.paused) {
+    let simMs = dtReal * 1000 * S.speed;
+    while (simMs > 0) { const step = Math.min(simMs, 16); advanceSim(step); simMs -= step; }
+    emaT += dtReal * S.speed;
+    if (emaT >= .35) {
+      const s = emaT; emaT = 0;
+      S.ema.pay += (S.payAcc / s - S.ema.pay) * .5; S.payAcc = 0;
+      S.ema.swap += (S.swapAcc / s - S.ema.swap) * .5; S.swapAcc = 0;
+      S.ema.frames += (S.frameAcc / s - S.ema.frames) * .5; S.frameAcc = 0;
+      S.ema.out += (S.outAcc / s - S.ema.out) * .5; S.outAcc = 0;
+      let u = 0; for (let w = 0; w < S.W; w++) u += S.lanesU[w];
+      S.ema.util += (u - S.ema.util) * .5;
+    }
+    S.rootFlash = Math.max(0, S.rootFlash - dtReal * 2.5);
+  }
+  if (now - lastRender >= 31) {
+    lastRender = now;
+    const scale = cv.width / LW / dpr;
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, LW, LH);
+    drawBreadcrumb();
+    drawRibbon();
+    drawAdmission();
+    drawMatrix();
+    drawWal();
+    drawOutbox(dtReal);
+    drawLegend();
+  }
+  domT += dtReal;
+  if (domT > .12) { domT = 0; syncDom(); }
+  requestAnimationFrame(tick);
+}
+window.addEventListener('error', e => toast('⚠ ' + e.message, 'ok'));
+resize();
+requestAnimationFrame(tick);
+toast('one row = one worker · bars grow through stages · gap to copper line = barrier wait', '');
+</script>
+</body>
+</html>

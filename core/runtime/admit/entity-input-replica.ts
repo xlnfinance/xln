@@ -292,6 +292,7 @@ export const applyEntityInputToReplica = async (
     authority.migrationRecordingEnabled,
     async () => {
       const applyStartedAt = getPerfMs();
+      if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.transition';
       const applied = await executeNormalizedEntityInput(
         env,
         entityReplica,
@@ -310,6 +311,7 @@ export const applyEntityInputToReplica = async (
         ? { ...applied.workingReplica, state: applied.newState }
         : entityReplica;
       const routeOutputsStartedAt = getPerfMs();
+      if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.route-outputs';
       const outputs = await routeEntityOutputs(
         env,
         nextReplica,

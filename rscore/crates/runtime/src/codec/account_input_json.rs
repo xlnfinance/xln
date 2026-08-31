@@ -9,9 +9,9 @@
 use num_bigint::BigInt;
 use serde_json::{Map, Value};
 use thiserror::Error;
-use xln_rscore_batch::{AccountId, AccountInputKind, AccountInputRow, AccountPeerInput};
+use xln_rscore_batch::{AccountId, AccountInput, AccountInputKind, AccountInputRow};
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountFrame, AccountPeerEnvelope, AccountSettledEvent,
+    AccountDisputeConfig, AccountDomain, AccountFrame, AccountInputEnvelope, AccountSettledEvent,
     AccountTx, BoardHankoRefreshInput, CounterpartyDispute, DeliveryMode, DepositoryAddress,
     EntityId, HtlcDeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
     IncomingAck, IncomingFrame, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
@@ -2115,7 +2115,7 @@ fn decode_dispute_config(
     .map_err(|error| invalid(operation_index, path, error.to_string()))
 }
 
-/// Decode one Account peer input (`EntityTx.data`) for a known owning Entity.
+/// Decode one Account input (`EntityTx.data`) for a known owning Entity.
 pub fn decode_account_input_row(
     owner_entity_id: &str,
     operation_index: u64,
@@ -2129,17 +2129,6 @@ pub fn decode_account_input_row(
         "accountInput.kind",
     )?;
     let (required, optional): (&[&str], &[&str]) = match kind.as_str() {
-        "frame" => (
-            &[
-                "fromEntityId",
-                "toEntityId",
-                "domain",
-                "disputeConfig",
-                "kind",
-                "proposal",
-            ],
-            &["watchSeed"],
-        ),
         "ack" => (
             &[
                 "fromEntityId",
@@ -2158,10 +2147,9 @@ pub fn decode_account_input_row(
                 "domain",
                 "disputeConfig",
                 "kind",
-                "ack",
                 "proposal",
             ],
-            &["watchSeed"],
+            &["watchSeed", "ack"],
         ),
         "dispute" => (
             &[
@@ -2235,7 +2223,7 @@ pub fn decode_account_input_row(
         ));
     }
     let account_id = AccountId::from_bytes(*from.as_bytes());
-    let envelope = AccountPeerEnvelope {
+    let envelope = AccountInputEnvelope {
         from_entity_id: *from.as_bytes(),
         to_entity_id: *to.as_bytes(),
         domain: decode_domain(
@@ -2259,22 +2247,16 @@ pub fn decode_account_input_row(
             .transpose()?,
     };
     let kind = match kind.as_str() {
-        "frame" => AccountInputKind::Frame(Box::new(decode_proposal(
-            field(input, "proposal", operation_index, path)?,
-            operation_index,
-            "accountInput.proposal",
-        )?)),
         "ack" => AccountInputKind::Ack(decode_ack(
             field(input, "ack", operation_index, path)?,
             operation_index,
             "accountInput.ack",
         )?),
         "ack_frame" => AccountInputKind::AckFrame {
-            ack: decode_ack(
-                field(input, "ack", operation_index, path)?,
-                operation_index,
-                "accountInput.ack",
-            )?,
+            ack: input
+                .get("ack")
+                .map(|value| decode_ack(value, operation_index, "accountInput.ack"))
+                .transpose()?,
             frame: Box::new(decode_proposal(
                 field(input, "proposal", operation_index, path)?,
                 operation_index,
@@ -2303,12 +2285,12 @@ pub fn decode_account_input_row(
         operation_index,
         account_id,
         genesis_policy: None,
-        // Peer bytes cannot prove that a peer is unregistered. Parent Entity
+        // AccountInput bytes cannot prove that a peer is unregistered. Parent Entity
         // must resolve this row from its certified board registry before the
         // Account reducer may execute it.
-        certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Unresolved,
-        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Unresolved,
-        input: AccountPeerInput { envelope, kind },
+        certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Unresolved,
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Unresolved,
+        input: AccountInput { envelope, kind },
     })
 }
 
@@ -2438,7 +2420,7 @@ mod tests {
             if kind == "ack" || kind == "ack_frame" {
                 row.insert("ack".to_string(), ack());
             }
-            if kind == "frame" || kind == "ack_frame" {
+            if kind == "ack_frame" {
                 row.insert("proposal".to_string(), proposal());
             }
         }
@@ -2470,12 +2452,47 @@ mod tests {
         assert_eq!(row.account_id.as_bytes(), &expected_account_id);
         match row.input.kind {
             AccountInputKind::AckFrame { ack, frame } => {
-                assert_eq!(ack.height, 1);
+                assert_eq!(ack.as_ref().map(|ack| ack.height), Some(1));
                 assert_eq!(frame.frame.txs.len(), 1);
                 assert!(matches!(frame.frame.txs[0], AccountTx::HtlcLock(_)));
             }
             other => panic!("wrong kind: {other:?}"),
         }
+    }
+
+    #[test]
+    fn ack_frame_without_ack_decodes_as_proposal_only() {
+        let owner = id("11");
+        let counterparty = id("22");
+        let mut value = entity_tx(&owner, &counterparty, "ack_frame");
+        if let Some(data) = value.get_mut("data").and_then(Value::as_object_mut) {
+            data.remove("ack");
+        }
+        let decoded = decode_entity_account_input_row(&owner, 8, &value);
+        let row = match decoded {
+            Ok(row) => row,
+            Err(error) => panic!("decode failed: {error}"),
+        };
+        match row.input.kind {
+            AccountInputKind::AckFrame { ack, .. } => assert!(ack.is_none()),
+            other => panic!("wrong kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn standalone_frame_kind_is_rejected() {
+        let owner = id("11");
+        let counterparty = id("22");
+        let error = match decode_entity_account_input_row(
+            &owner,
+            9,
+            &entity_tx(&owner, &counterparty, "frame"),
+        ) {
+            Ok(_) => panic!("standalone frame unexpectedly decoded"),
+            Err(error) => error,
+        };
+        assert_eq!(error.path, "accountInput.kind");
+        assert_eq!(error.reason, "INPUT_KIND_UNSUPPORTED:frame");
     }
 
     #[test]
@@ -2492,7 +2509,7 @@ mod tests {
             &[
                 entity_tx(&owner, &counterparty, "ack"),
                 malformed,
-                entity_tx(&owner, &counterparty, "frame"),
+                entity_tx(&owner, &counterparty, "ack_frame"),
             ],
         );
         assert!(rows[0].as_ref().is_ok_and(|row| row.operation_index == 40));
@@ -2517,7 +2534,7 @@ mod tests {
             decode_account_input_row(&owner, 12, &dispute_input).expect("standalone dispute row");
         assert!(matches!(
             dispute_row.certified_board_authority,
-            xln_rscore_batch::PeerBoardAuthority::Unresolved
+            xln_rscore_batch::AccountInputBoardAuthority::Unresolved
         ));
         assert!(matches!(
             dispute_row.input.kind,

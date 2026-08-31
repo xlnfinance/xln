@@ -540,7 +540,7 @@ describe('direct runtime websocket route', () => {
     expect(received).toBe(0);
   });
 
-  test('surfaces an authenticated peer rejection without replying with another error', async () => {
+  test('surfaces an authenticated Account input rejection without replying with another error', async () => {
     const serverSeed = 'direct-route-server-peer-rejection';
     const clientSeed = 'direct-route-client-peer-rejection';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();

@@ -387,6 +387,7 @@ fn native_account_status(
         "hubEntityId": hub_entity_id_text,
         "counterpartyEntityId": counterparty_text,
         "hasAccount": status.is_some(),
+        "status": status.as_ref().map_or("missing", |status| status.status.as_str()),
         "ready": status.as_ref().is_some_and(|status| {
             status.active
                 && status.current_height > 0
@@ -396,6 +397,11 @@ fn native_account_status(
         "currentHeight": status.as_ref().map_or(0, |status| status.current_height),
         "pendingFrameHeight": status.as_ref().and_then(|status| status.pending_frame_height),
         "mempool": status.as_ref().map_or(0, |status| status.mempool_len),
+        "disputeObservedOnChain": status.as_ref().is_some_and(|status| status.dispute_observed_on_chain),
+        "disputeObservedBlockNumber": status.as_ref().and_then(|status| status.dispute_observed_block_number),
+        "settlementWorkspaceHash": status.as_ref().and_then(|status| status.settlement_workspace_hash.as_deref()),
+        "settlementWorkspaceStatus": status.as_ref().and_then(|status| status.settlement_workspace_status.as_deref()),
+        "jNonce": status.as_ref().map_or(0, |status| status.j_nonce),
         "tokens": tokens,
         "runtime": {
             "height": height,
@@ -1165,6 +1171,11 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     let mut total_storage_micros = 0_u128;
     let mut total_publication_micros = 0_u128;
     let mut total_runtime_entity_inputs = 0_u64;
+    // Cumulative frame-size histogram. The HLT diffs this at the economic
+    // boundary, so worker-count A/B runs prove whether faster workers merely
+    // seal more small Runtime frames. Buckets: 0, 1, 2..7, 8..31, 32..127,
+    // 128..511, 512+ EntityInputs. Diagnostics only; never enters consensus.
+    let mut runtime_entity_input_frame_buckets = [0_u64; 7];
     let mut total_account_inputs = 0_u64;
     let mut total_canonical_input_bytes = 0_u64;
     let mut total_entity_txs_selected = 0_u64;
@@ -1394,6 +1405,17 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                 u64::try_from(report.runtime_entity_inputs)
                     .map_err(|_| "RRS_RUNTIME_METRIC_OVERFLOW:runtimeEntityInputs".to_string())?,
             );
+            let frame_bucket = match report.runtime_entity_inputs {
+                0 => 0,
+                1 => 1,
+                2..=7 => 2,
+                8..=31 => 3,
+                32..=127 => 4,
+                128..=511 => 5,
+                _ => 6,
+            };
+            runtime_entity_input_frame_buckets[frame_bucket] =
+                runtime_entity_input_frame_buckets[frame_bucket].saturating_add(1);
             total_account_inputs = total_account_inputs.saturating_add(
                 u64::try_from(report.account_inputs)
                     .map_err(|_| "RRS_RUNTIME_METRIC_OVERFLOW:accountInputs".to_string())?,
@@ -1551,6 +1573,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             }
             let mut worker_items = vec![0_u64; entity_replica.accounts.worker_count()];
             let mut worker_nanos = vec![0_u64; entity_replica.accounts.worker_count()];
+            let mut worker_fold_leaves = vec![0_u64; entity_replica.accounts.worker_count()];
+            let mut worker_fold_nanos = vec![0_u64; entity_replica.accounts.worker_count()];
             let mut window_worker_items = vec![0_u64; entity_replica.accounts.worker_count()];
             let mut window_worker_nanos = vec![0_u64; entity_replica.accounts.worker_count()];
             let mut active_shards = 0_u64;
@@ -1572,6 +1596,10 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                 worker_nanos[worker] = worker_nanos[worker]
                     .saturating_add(metric.work_nanos)
                     .saturating_add(metric.fold_nanos);
+                worker_fold_leaves[worker] =
+                    worker_fold_leaves[worker].saturating_add(metric.fold_leaves);
+                worker_fold_nanos[worker] =
+                    worker_fold_nanos[worker].saturating_add(metric.fold_nanos);
                 window_worker_items[worker] =
                     window_worker_items[worker].saturating_add(work_items);
                 window_worker_nanos[worker] = window_worker_nanos[worker]
@@ -1720,6 +1748,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                 &mut metric_object,
                 serde_json::json!({
                     "totalRuntimeEntityInputs": total_runtime_entity_inputs,
+                    "runtimeEntityInputFrameBuckets": runtime_entity_input_frame_buckets,
                     "totalAccountInputs": total_account_inputs,
                     "totalCanonicalInputBytes": total_canonical_input_bytes,
                     "totalEntityTxsSelected": total_entity_txs_selected,
@@ -1750,6 +1779,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                     "activeShards": active_shards,
                     "workerItems": worker_items,
                     "workerNanos": worker_nanos,
+                    "workerFoldLeaves": worker_fold_leaves,
+                    "workerFoldNanos": worker_fold_nanos,
                     "entityWorkerItems": entity_worker_items,
                     "entityWorkerNanos": entity_worker_nanos,
                     "accountPhaseMetrics": phase_metrics.iter().map(|metric| serde_json::json!({
@@ -1770,7 +1801,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                         "touchedRows": metric.touched_rows,
                         "touchedShards": metric.touched_shards,
                         "workersWithWork": metric.workers_with_work,
-                        "valueClones": metric.value_clones,
+                        "shardHandleClones": metric.shard_handle_clones,
                         "candidateBaseReads": metric.candidate_base_reads,
                         "continuationRounds": metric.continuation_rounds,
                         "restartRounds": metric.restart_rounds,

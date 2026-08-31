@@ -1,5 +1,5 @@
-import type { AccountPeerRejectionCode } from '../input/peer-rejection';
-import { AccountPeerEvidenceError } from '../input/peer-rejection';
+import type { AccountInputRejectionCode } from '../input/input-rejection';
+import { AccountInputEvidenceError } from '../input/input-rejection';
 import type { AccountTxRejection } from '../tx/apply-types';
 import type {
   HandleAccountInputApplied,
@@ -28,19 +28,19 @@ const accountInputRejected = (
   events,
 });
 
-export const rejectAccountPeerInput = (
-  code: AccountPeerRejectionCode,
+export const rejectAccountInput = (
+  code: AccountInputRejectionCode,
   reason: string,
   events: string[],
 ): HandleAccountInputRejected =>
-  accountInputRejected({ kind: 'peer', code, message: reason }, events);
+  accountInputRejected({ kind: 'input', code, message: reason }, events);
 
-export const rejectAccountPeerEvidenceError = (
+export const rejectAccountInputEvidenceError = (
   error: unknown,
   events: string[],
 ): HandleAccountInputRejected => {
-  if (!(error instanceof AccountPeerEvidenceError)) throw error;
-  return rejectAccountPeerInput(error.code, error.message, events);
+  if (!(error instanceof AccountInputEvidenceError)) throw error;
+  return rejectAccountInput(error.code, error.message, events);
 };
 
 export const accountInputTxRejected = (
@@ -112,8 +112,8 @@ export const proposeAccountFrameMessage = (result: ProposeAccountFrameResult): s
 
 export const accountInputPeerRejectionCode = (
   result: HandleAccountInputResult,
-): AccountPeerRejectionCode | undefined => {
-  if (result.ok || result.disposition !== 'rejected' || result.rejection.kind !== 'peer') {
+): AccountInputRejectionCode | undefined => {
+  if (result.ok || result.disposition !== 'rejected' || result.rejection.kind !== 'input') {
     return undefined;
   }
   return result.rejection.code;

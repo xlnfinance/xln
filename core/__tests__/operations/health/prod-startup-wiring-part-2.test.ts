@@ -1392,17 +1392,17 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const tokenIdsForHubJurisdiction = (');
     expect(hubNode).toContain('const tokenCatalogForHubJurisdiction = (');
 
-    const planSupportStart = hubNode.indexOf('const planSupportPeerInputs = (');
-    const planHubStart = hubNode.indexOf('const planHubPeerInputs = (', planSupportStart);
+    const planSupportStart = hubNode.indexOf('const planSupportAccountSetupInputs = (');
+    const planHubStart = hubNode.indexOf('const planHubAccountSetupInputs = (', planSupportStart);
     expect(planSupportStart).toBeGreaterThan(0);
     expect(planHubStart).toBeGreaterThan(planSupportStart);
-    const planSupportPeerInputs = hubNode.slice(planSupportStart, planHubStart);
-    expect(planSupportPeerInputs).toContain('const tokenIds = tokenIdsForHubJurisdiction(owner);');
-    expect(planSupportPeerInputs).toContain('if (!account || !canWrite) continue;');
-    expect(planSupportPeerInputs).toContain('const missingTokenIds = tokenIds.filter(');
-    expect(planSupportPeerInputs).toContain('entityTxs: missingTokenIds.map(tokenId => ({');
-    expect(planSupportPeerInputs).toContain('return { openInputs: [], creditInputs };');
-    expect(planSupportPeerInputs).not.toContain('DEFAULT_ACCOUNT_TOKEN_IDS');
+    const planSupportAccountSetupInputs = hubNode.slice(planSupportStart, planHubStart);
+    expect(planSupportAccountSetupInputs).toContain('const tokenIds = tokenIdsForHubJurisdiction(owner);');
+    expect(planSupportAccountSetupInputs).toContain('if (!account || !canWrite) continue;');
+    expect(planSupportAccountSetupInputs).toContain('const missingTokenIds = tokenIds.filter(');
+    expect(planSupportAccountSetupInputs).toContain('entityTxs: missingTokenIds.map(tokenId => ({');
+    expect(planSupportAccountSetupInputs).toContain('return { openInputs: [], creditInputs };');
+    expect(planSupportAccountSetupInputs).not.toContain('DEFAULT_ACCOUNT_TOKEN_IDS');
 
     const reserveStart = hubNode.indexOf('const getReserveHealth = (');
     const supportPeerReserveEnd = hubNode.indexOf('const getEntityJurisdictionName = (');

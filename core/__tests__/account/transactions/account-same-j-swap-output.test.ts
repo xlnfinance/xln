@@ -49,6 +49,7 @@ const expectedSnapshot = (
     createdHeight: offer.createdHeight,
     quantizedGive: offer.quantizedGive,
     quantizedWant: offer.quantizedWant,
+    accountOutputVerified: true,
   };
 };
 

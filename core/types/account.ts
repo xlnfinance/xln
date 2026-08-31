@@ -184,7 +184,7 @@ export interface AccountReplica {
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
   /** Exact signed proposal evidence awaiting the counterparty ACK. */
-  pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'ack_frame' }>;
+  pendingAccountInput?: Extract<AccountInput, { kind: 'ack_frame' }>;
   lastOutboundAckFrame?: {
     height: number;
     counterpartyEntityId: string;
@@ -344,11 +344,11 @@ export type RuntimeOverlayRecord =
   | { family: 'account'; entityId: string; counterpartyId: string }
   | { family: 'book'; entityId: string; pairId: string; deleted?: boolean };
 
-type AccountInputBase = {
+type AccountInputEnvelope = {
   fromEntityId: string;
   toEntityId: string;
   domain: AccountStateDomain;
-  /** Exact bilateral seconds clock; required on every peer envelope. */
+  /** Exact bilateral seconds clock; required on every routed Account input. */
   disputeConfig: AccountState['disputeConfig'];
   watchSeed?: string;
 };
@@ -397,7 +397,7 @@ export type AccountFrameProposal = {
 // and propose the next frame. Each state epoch carries its own frame Hanko and
 // optional dispute Hanko. Sharing one Hanko across ACK + proposal is invalid
 // because the two parts commit different account states.
-export type AccountEnqueueInput = {
+export type AccountTxBatch = {
   /** Local Entity command. It never crosses an Entity or transport boundary. */
   kind: 'enqueue';
   txs: AccountTx[];
@@ -406,11 +406,11 @@ export type AccountEnqueueInput = {
 /**
  * Finalized jurisdiction consensus routed by the owning Entity machine.
  *
- * This input is derived from an authenticated J event already committed by
+ * This command is derived from an authenticated J event already committed by
  * the parent Entity frame. It applies immediately: requiring a bilateral ACK
- * would let either peer veto a final on-chain result.
+ * would let either counterparty veto a final on-chain result.
  */
-export type AccountExternalFinalityInput = AccountInputBase & {
+export type AccountFinality = AccountInputEnvelope & {
   kind: 'external_finality';
   finality:
     | {
@@ -437,34 +437,25 @@ export type AccountExternalFinalityInput = AccountInputBase & {
       };
 };
 
-export type AccountPeerInput =
-  | (AccountInputBase & {
-      kind: 'frame';
-      proposal: AccountFrameProposal;
-    })
-  | (AccountInputBase & {
+/** Exact child input carried by Entity and applied by the Account replica. */
+export type AccountInput =
+  | (AccountInputEnvelope & {
       kind: 'ack';
       ack: AccountAckFrame;
     })
-  | (AccountInputBase & {
+  | (AccountInputEnvelope & {
       kind: 'ack_frame';
-      ack: AccountAckFrame;
+      ack?: AccountAckFrame;
       proposal: AccountFrameProposal;
     })
-  | (AccountInputBase & {
+  | (AccountInputEnvelope & {
       kind: 'dispute';
       disputeHanko: AccountDisputeHanko;
     })
-  | (AccountInputBase & {
+  | (AccountInputEnvelope & {
       kind: 'board_hanko_refresh';
       boardHankoRefresh: AccountBoardHankoRefresh;
     });
-
-/** Every command accepted by an Account replica enters this one boundary. */
-export type AccountInput =
-  | AccountEnqueueInput
-  | AccountExternalFinalityInput
-  | AccountPeerInput;
 
 /**
  * Complete same-jurisdiction resting-offer projection returned to Entity.

@@ -63,10 +63,13 @@ import {
   paymentTotalForSender,
 } from './worker-payments-plan';
 import { buildPacedOperationSchedule } from './operation-pacer';
+import { hltWorkloadFingerprint } from './workload-fingerprint';
 import {
   attachRustH1,
-  assertRustLivePaymentCardinality,
+  classifyRustLivePaymentRun,
   parseHltEngineSelection,
+  rustLivePaymentRateEvidence,
+  summarizeRustH1WorkerExecution,
   type RustH1Handle,
   type RustH1Metrics,
 } from '../rust/rust-h1';
@@ -75,6 +78,11 @@ import {
   rustH1SessionPopulationReady,
   waitForRustPaymentSettlement,
 } from '../rust/rust-h1-settlement';
+import { runRustH1DisputeSmoke } from '../rust/rust-h1-dispute-smoke';
+import {
+  runRustH1AccountSettlementSmoke,
+  shouldRunRustH1AccountSettlementSmoke,
+} from '../rust/rust-h1-account-settlement-smoke';
 import type {
   AccountDeliveryHop,
   HltPaymentOperationLedgerSnapshot,
@@ -93,6 +101,31 @@ export const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
 const DELIVERY_TIMEOUT_MS = 20_000;
 
+export const shouldRunRustH1DisputeSmoke = (options: Readonly<{
+  requested: string | undefined;
+  engine: 'ts' | 'rust';
+  evidence: 'functional-smoke' | 'tps-authority' | null;
+  users: number;
+  payments: number;
+  offeredPerSecond: number;
+  durationSeconds: number;
+}>): boolean => {
+  if (options.requested === undefined || options.requested === '' || options.requested === '0') {
+    return false;
+  }
+  if (options.requested !== '1') {
+    throw new Error(`HLT_RUST_DISPUTE_SMOKE_FLAG_INVALID:${options.requested}`);
+  }
+  if (
+    options.engine !== 'rust' || options.evidence !== 'functional-smoke' ||
+    options.users !== 1_000 || options.payments !== 5_000 ||
+    options.offeredPerSecond !== 1_000 || options.durationSeconds !== 5
+  ) {
+    throw new Error('HLT_RUST_DISPUTE_SMOKE_REQUIRES_EXACT_FUNCTIONAL_SMOKE');
+  }
+  return true;
+};
+
 type MergedPaymentLedgerStage = Readonly<{
   firstAtUnixMs: number;
   lastAtUnixMs: number;
@@ -100,6 +133,7 @@ type MergedPaymentLedgerStage = Readonly<{
   repeatedFrames: number;
   operationAppearances: number;
   repeatedOperationEvents: number;
+  outcomes: Readonly<Record<string, number>>;
   lockIds: ReadonlySet<string>;
   lockLegs: ReadonlySet<string>;
   resolveIds: ReadonlySet<string>;
@@ -114,6 +148,12 @@ const mergePaymentLedgerStage = (
   const stages = snapshots.flatMap(snapshot => snapshot.stages[hop] ? [snapshot.stages[hop]] : []);
   const union = (field: 'lockIds' | 'lockLegs' | 'resolveIds' | 'resolveLegs' | 'hashlocks') =>
     new Set(stages.flatMap(stage => [...stage[field]]));
+  const outcomes = stages.reduce((merged, stage) => {
+    for (const [outcome, count] of Object.entries(stage.outcomes)) {
+      merged[outcome] = (merged[outcome] ?? 0) + count;
+    }
+    return merged;
+  }, {} as Record<string, number>);
   return {
     firstAtUnixMs: stages.length > 0 ? Math.min(...stages.map(stage => stage.firstAtUnixMs)) : 0,
     lastAtUnixMs: stages.length > 0 ? Math.max(...stages.map(stage => stage.lastAtUnixMs)) : 0,
@@ -121,6 +161,7 @@ const mergePaymentLedgerStage = (
     repeatedFrames: stages.reduce((sum, stage) => sum + stage.repeatedFrames, 0),
     operationAppearances: stages.reduce((sum, stage) => sum + stage.operationAppearances, 0),
     repeatedOperationEvents: stages.reduce((sum, stage) => sum + stage.repeatedOperationEvents, 0),
+    outcomes,
     lockIds: union('lockIds'),
     lockLegs: union('lockLegs'),
     resolveIds: union('resolveIds'),
@@ -170,6 +211,14 @@ export const assertCompleteUserPaymentLedger = (
     repeatedFrames: stages[hop].repeatedFrames,
     operationAppearances: stages[hop].operationAppearances,
     repeatedOperationEvents: stages[hop].repeatedOperationEvents,
+    inputAcks: stages[hop].outcomes['input:ack'] ?? 0,
+    inputAckFrames: stages[hop].outcomes['input:ack_frame'] ?? 0,
+    inputAckFramesWithAck: stages[hop].outcomes['ack_frame:with-ack'] ?? 0,
+    inputAckFramesWithoutAck: stages[hop].outcomes['ack_frame:without-ack'] ?? 0,
+    inputDisputes: stages[hop].outcomes['input:dispute'] ?? 0,
+    inputBoardHankoRefreshes: stages[hop].outcomes['input:board_hanko_refresh'] ?? 0,
+    matchedAckFrames: stages[hop].outcomes['ack:matched-frame'] ?? 0,
+    unmatchedAckFrames: stages[hop].outcomes['ack:unmatched-frame'] ?? 0,
     uniqueLockIds: stages[hop].lockIds.size,
     uniqueLockLegs: stages[hop].lockLegs.size,
     uniqueResolveIds: stages[hop].resolveIds.size,
@@ -533,14 +582,16 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     }
     const submittedPayments = lanes * args.rounds;
     const offeredPaymentRate = Math.round(lanes * 1_000 / args.cadenceMs);
+    const rustPaymentEvidence = selection.engine === 'rust'
+      ? classifyRustLivePaymentRun({
+          users: lanes,
+          payments: submittedPayments,
+          offeredPerSecond: offeredPaymentRate,
+          durationSeconds: args.plan?.economy.durationSeconds ?? 0,
+        })
+      : null;
     if (selection.engine === 'rust') {
       if (hubLabels.length !== 1 || hubLabel !== 'H1') throw new Error('HLT_RUST_LIVE_REQUIRES_SINGLE_H1');
-      assertRustLivePaymentCardinality({
-        users: lanes,
-        payments: submittedPayments,
-        offeredPerSecond: offeredPaymentRate,
-        durationSeconds: args.plan?.economy.durationSeconds ?? 0,
-      });
     }
     // One population per hub, offset so lane identities and ports never
     // overlap. Built together: a shard provisioned first would otherwise sit
@@ -583,6 +634,13 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     }));
     shards.push(...built);
     users = built.flatMap(shard => shard.users);
+    const workloadFingerprint = hltWorkloadFingerprint('payments', {
+      users: users.map(lane => lane.identity.entityId),
+      rounds: args.rounds,
+      cadenceMs: args.cadenceMs,
+      amountMin: amountRange.min.toString(),
+      amountMax: amountRange.max.toString(),
+    });
 
     if (selection.engine === 'ts') await stopHltHubBackgroundIo(args, hubLabels);
     const initialRustMetrics = rustH1?.metrics() ?? null;
@@ -925,7 +983,8 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       ? { ...tsHubIo, H1: { native: rustSettlement.metrics } }
       : tsHubIo;
     console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo, phaseTimeline })}`);
-    const report = decodeLoadPaymentReport({
+    const environment = collectHltEnvironmentManifest();
+    const reportInput = {
       schema: 'xln-hlt-payment-load-v1',
       mode: 'payments',
       runId: basename(args.workDir),
@@ -967,47 +1026,135 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
             canonicalStateHash: rustSettlement.metrics.postStateHash,
           }
         : decodeLoadFrame(await readWithRateLimitRetry<unknown>(requireHub(), 'frame/latest')),
-      environment: collectHltEnvironmentManifest(),
-    });
-    persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
+      environment,
+    } as const;
+    // A five-second smoke proves the full production path and zero-loss drain,
+    // but must not create the rate-bearing load report consumed by dashboards.
+    const report = rustPaymentEvidence === 'functional-smoke'
+      ? null
+      : decodeLoadPaymentReport(reportInput);
+    if (report) {
+      persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
+    }
     if (rustH1 && rustSettlement) {
+      const workerExecution = summarizeRustH1WorkerExecution(
+        rustSettlement.economicPhaseMetrics,
+        rustH1.ready.workers,
+        deliveredPayments,
+      );
+      const rateEvidence = rustLivePaymentRateEvidence(rustPaymentEvidence!, {
+        offeredPerSecond: offeredPaymentRate,
+        deliveredPayments,
+        deliveredElapsedMs,
+      });
       writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify({
         engine: 'rust',
+        evidence: rustPaymentEvidence,
         users: lanes,
         submittedPayments,
-        deliveredPayments: report.deliveredPayments,
-        offeredPaymentRate,
-        deliveredElapsedMs: report.deliveredElapsedMs,
-        deliveredTps: report.deliveredTps,
+        deliveredPayments,
+        offeredWindowMs: args.rounds * args.cadenceMs,
+        deliveredElapsedMs,
         hostAcceptedElapsedMs,
         workers: rustH1.ready.workers,
         metrics: rustSettlement.metrics,
         economicPhaseMetrics: rustSettlement.economicPhaseMetrics,
+        workerExecution,
+        workloadFingerprint,
         laneQuiescence: rustSettlement.laneQuiescence,
         paymentOperationLedger,
         phaseTimeline,
+        ...rateEvidence,
       }, 2)}\n`);
       if (process.env['XLN_RSCORE_PROFILE_ENTITY'] === '1') {
         writeFileSync(join(args.workDir, 'rscore-entity-profile.log'), rustH1.errorTail());
       }
     }
-    const authoritativeCardinality = lanes >= 1_000 && submittedPayments >= 1_000 && offeredPaymentRate >= 1_000;
-    if (authoritativeCardinality) {
+    const disputeSmoke = shouldRunRustH1DisputeSmoke({
+      requested: process.env['XLN_HLT_DISPUTE_SMOKE'],
+      engine: selection.engine,
+      evidence: rustPaymentEvidence,
+      users: lanes,
+      payments: submittedPayments,
+      offeredPerSecond: offeredPaymentRate,
+      durationSeconds: args.plan?.economy.durationSeconds ?? 0,
+    });
+    if (disputeSmoke) {
+      if (!rustH1) throw new Error('HLT_RUST_DISPUTE_SMOKE_H1_MISSING');
+      const lane = users[0];
+      const receiver = users[1];
+      if (!lane || !receiver) throw new Error('HLT_RUST_DISPUTE_SMOKE_LANES_MISSING');
+      const entityInput = buildRoundPayment(
+        lane.identity,
+        rustH1.ready.entityId,
+        receiver.identity,
+        0,
+        args.rounds,
+        amountRange,
+      );
+      const result = await runRustH1DisputeSmoke({
+        apiBaseUrl: `http://127.0.0.1:${String(args.portBase + 10)}`,
+        rust: rustH1,
+        lane,
+        businessInput: { runtimeTxs: [], entityInputs: [entityInput] },
+        tokenId: PAYMENT_TOKEN_ID,
+      });
+      writeFileSync(
+        join(args.workDir, 'hlt-rust-h1-dispute-smoke.json'),
+        `${safeStringify(result, 2)}\n`,
+      );
+    }
+    if (shouldRunRustH1AccountSettlementSmoke({
+      requested: process.env['XLN_HLT_ACCOUNT_SETTLEMENT_SMOKE'],
+      engine: selection.engine,
+      evidence: rustPaymentEvidence,
+      users: lanes,
+      payments: submittedPayments,
+      offeredPerSecond: offeredPaymentRate,
+      durationSeconds: args.plan?.economy.durationSeconds ?? 0,
+    })) {
+      if (!rustH1) throw new Error('HLT_RUST_ACCOUNT_SETTLEMENT_SMOKE_H1_MISSING');
+      // Dispute smoke owns user 0. Keep settlement on an independent Account
+      // so both production lifecycle gates can run in one H1 process.
+      const counterparty = users[1];
+      if (!counterparty) throw new Error('HLT_RUST_ACCOUNT_SETTLEMENT_SMOKE_LANE_MISSING');
+      const result = await runRustH1AccountSettlementSmoke({
+        apiBaseUrl: `http://127.0.0.1:${String(args.portBase + 10)}`,
+        rust: rustH1,
+        counterpartyLane: counterparty,
+        tokenId: PAYMENT_TOKEN_ID,
+      });
+      writeFileSync(
+        join(args.workDir, 'hlt-rust-h1-account-settlement-smoke.json'),
+        `${safeStringify(result, 2)}\n`,
+      );
+    }
+    const authoritativeCardinality = rustPaymentEvidence === 'tps-authority' || (
+      rustPaymentEvidence === null &&
+      lanes >= 1_000 && submittedPayments >= 1_000 && offeredPaymentRate >= 1_000
+    );
+    if (authoritativeCardinality && report) {
       publishHltDashboardReport('payment', report);
       publishHltDashboardPerfFromWorkDir(args.workDir);
     }
-    console.log(safeStringify(report));
-    if (authoritativeCardinality) {
+    if (report) console.log(safeStringify(report));
+    if (authoritativeCardinality && report) {
       console.log(
         `[load] verdict deliveredTps=${report.deliveredTps.toFixed(1)} ` +
         `${isProductionEquivalentHltEnvironment(report.environment) ? 'production-equivalent' : 'DIAGNOSTIC (isolated/fast environment)'} ` +
         `lanePersistence=${report.environment.lanePersistence} laneNice=${report.environment.laneNice} ` +
         `hubWalSync=${report.environment.hubWalSync}`,
       );
+    } else if (rustPaymentEvidence === 'functional-smoke') {
+      console.log(
+        `[load] RUST_H1_FUNCTIONAL_SMOKE_COMPLETE users=${lanes} ` +
+        `submitted=${submittedPayments} delivered=${deliveredPayments} ` +
+        `windowMs=${args.rounds * args.cadenceMs} elapsedMs=${deliveredElapsedMs}`,
+      );
     } else {
       console.log(
         `[load] SMOKE_ONLY_NOT_TPS_EVIDENCE users=${lanes} payments=${submittedPayments} ` +
-        `offeredPerSecond=${offeredPaymentRate} diagnosticDeliveredPerSecond=${report.deliveredTps.toFixed(1)}`,
+        `offeredPerSecond=${offeredPaymentRate} diagnosticDeliveredPerSecond=${report!.deliveredTps.toFixed(1)}`,
       );
     }
   } catch (error) {

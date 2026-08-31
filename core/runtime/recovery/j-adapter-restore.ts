@@ -166,6 +166,9 @@ export const ensureLiveJAdapterForReplica = async (
     if (!rpcUrl) return null;
     adapterConfig.rpcUrl = rpcUrl;
     adapterConfig.fromReplica = jReplica;
+    if (Number.isSafeInteger(jReplica.blockDelayMs) && jReplica.blockDelayMs > 0) {
+      adapterConfig.watchPollMs = jReplica.blockDelayMs;
+    }
   } else if (env.browserVMState !== undefined) {
     adapterConfig.browserVMState = env.browserVMState;
   }

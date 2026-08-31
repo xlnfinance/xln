@@ -416,7 +416,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         {
           type: 'accountInput',
           data: {
-            kind: 'frame',
+            kind: 'ack_frame',
             fromEntityId,
             toEntityId: entityId,
             domain: account.state.domain,

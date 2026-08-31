@@ -400,6 +400,18 @@ fn prior_submit_state(replica: &RuntimeEntityReplica) -> Option<&Map<String, Val
         .as_object()
 }
 
+fn submit_state_matches_retry(
+    state: &Map<String, Value>,
+    retry: &RetryJSubmitData,
+) -> Result<bool, JSubmitLifecycleError> {
+    Ok(
+        normalize(&string(state, "jurisdictionName")?) == normalize(&retry.jurisdiction_name)
+            && normalize(&string(state, "batchHash")?) == normalize(&retry.batch_hash)
+            && field_u64(state, "entityNonce")? == retry.entity_nonce
+            && field_u64(state, "batchGeneration")? == retry.batch_generation,
+    )
+}
+
 fn field_u64(
     object: &Map<String, Value>,
     field: &'static str,
@@ -454,12 +466,38 @@ pub fn apply_j_submit_retry(
         {
             sent.clone()
         }
-        _ => return Ok(None),
+        _ => {
+            println!(
+                "RSCORE_J_RETRY_SKIPPED:sent-batch-mismatch:batch={}:nonce={}:generation={}",
+                normalize(&retry.batch_hash),
+                retry.entity_nonce,
+                retry.batch_generation
+            );
+            return Ok(None);
+        }
     };
-    if sent.terminal_failure.is_some() || pending_has_identity(replica, retry)? {
+    if sent.terminal_failure.is_some() {
+        println!(
+            "RSCORE_J_RETRY_SKIPPED:terminal-failure:batch={}",
+            normalize(&retry.batch_hash)
+        );
         return Ok(None);
     }
-    let previous = prior_submit_state(entity_replica).cloned();
+    if pending_has_identity(replica, retry)? {
+        println!(
+            "RSCORE_J_RETRY_SKIPPED:pending-attempt:batch={}",
+            normalize(&retry.batch_hash)
+        );
+        return Ok(None);
+    }
+    // Retry/result state belongs to one exact sealed batch. Carrying a prior
+    // batch's `reconciled`, terminal failure, attempt count or retry deadline
+    // into a new batch permanently blocks or delays otherwise valid J work.
+    let prior = prior_submit_state(entity_replica).cloned();
+    let previous = match prior.as_ref() {
+        Some(state) if submit_state_matches_retry(state, retry)? => Some(state.clone()),
+        _ => None,
+    };
     if previous
         .as_ref()
         .and_then(|v| v.get("terminalFailure"))
@@ -470,6 +508,10 @@ pub fn apply_j_submit_retry(
             .and_then(Value::as_str)
             == Some("reconciled")
     {
+        println!(
+            "RSCORE_J_RETRY_SKIPPED:prior-terminal:batch={}",
+            normalize(&retry.batch_hash)
+        );
         return Ok(None);
     }
     if let Some(previous) = &previous {
@@ -479,6 +521,12 @@ pub fn apply_j_submit_retry(
             && previous.get("lastResultOutcome").and_then(Value::as_str) != Some("eventBarrier")
             && current_timestamp < last.saturating_add(RETRY_MS)
         {
+            println!(
+                "RSCORE_J_RETRY_SKIPPED:retry-window:batch={}:remainingMs={}",
+                normalize(&retry.batch_hash),
+                last.saturating_add(RETRY_MS)
+                    .saturating_sub(current_timestamp)
+            );
             return Ok(None);
         }
     }
@@ -524,7 +572,17 @@ pub fn apply_j_submit_retry(
     }
     infrastructure_pending_mut(&mut replica.durable)?.push(attempt_value(&attempt)?);
     replica.durable.invalidate_infrastructure_digest();
-    let mut state = previous.unwrap_or_default();
+    let mut state = previous.unwrap_or_else(|| {
+        let mut next = Map::new();
+        if let Some(prior) = prior {
+            for field in ["resultFingerprints", "resultFingerprintOrder"] {
+                if let Some(value) = prior.get(field) {
+                    next.insert(field.into(), value.clone());
+                }
+            }
+        }
+        next
+    });
     state.insert(
         "jurisdictionName".into(),
         Value::String(retry.jurisdiction_name.clone()),
@@ -553,6 +611,10 @@ pub fn apply_j_submit_retry(
         .entity_slot_mut(&entity_id, &retry.signer_id)
         .ok_or_else(|| error("LOCAL_REPLICA_MISSING"))?;
     metadata_object(entity_replica)?.insert("jSubmitState".into(), Value::Object(state));
+    println!(
+        "RSCORE_J_RETRY_ADMITTED:batch={}:nonce={}:generation={}:attempt={}",
+        attempt.batch_hash, retry.entity_nonce, retry.batch_generation, attempt_number
+    );
     Ok(Some(attempt))
 }
 
@@ -1114,6 +1176,106 @@ mod tests {
         assert_eq!(
             build_j_submit_attempt_id(&retry, 3).unwrap(),
             "0x2047f3483d082addbfc82718bafd220064fe1eb431f39e4f0337456aaec37889"
+        );
+    }
+
+    #[test]
+    fn reconciled_previous_batch_does_not_block_next_batch() {
+        use xln_rscore_entity_kernel::{JBatch, JBatchState, JBatchStatus, SentJBatch};
+
+        let mut replica = crate::machine::tests::replica(crate::RuntimeLimits::default())
+            .expect("runtime replica");
+        let entity_key = replica
+            .e_replicas
+            .keys()
+            .next()
+            .expect("entity key")
+            .clone();
+        let entity_id = entity_key.entity_id;
+        let signer_id = entity_key.signer_id;
+        let batch = JBatch::default();
+        let encoded_batch = encode_j_batch(&batch).expect("encode batch");
+        let batch_hash = [0x44; 32];
+        let retry = RetryJSubmitData {
+            entity_id: hex(&entity_id),
+            signer_id: signer_id.clone(),
+            jurisdiction_name: "SimNet".into(),
+            batch_hash: hex(&batch_hash),
+            entity_nonce: 8,
+            batch_generation: 2,
+            fee_overrides: None,
+        };
+        let (entity_state, entity_replica) = replica
+            .entity_slot_mut(&entity_id, &signer_id)
+            .expect("entity slot");
+        entity_state.entity.j_batch_state = Some(JBatchState {
+            broadcast_count: retry.batch_generation,
+            status: JBatchStatus::Sent,
+            sent_batch: Some(SentJBatch {
+                batch,
+                batch_hash,
+                encoded_batch,
+                entity_nonce: retry.entity_nonce,
+                first_submitted_at: 100,
+                last_submitted_at: 100,
+                submit_attempts: 1,
+                fee_overrides: None,
+                transaction_hash: None,
+                last_failure: None,
+                terminal_failure: None,
+            }),
+            ..JBatchState::default()
+        });
+        entity_replica.replica_metadata = json!({
+            "entityId": retry.entity_id,
+            "signerId": retry.signer_id,
+            "isProposer": true,
+            "hankoWitness": {
+                "__xlnType": "Map",
+                "value": [[retry.batch_hash, {
+                    "hanko": "0xaa",
+                    "type": "jBatch",
+                    "entityHeight": 1,
+                    "createdAt": 100
+                }]]
+            },
+            "jSubmitState": {
+                "jurisdictionName": "SimNet",
+                "batchHash": hex(&[0x33; 32]),
+                "entityNonce": 7,
+                "batchGeneration": 1,
+                "submitAttempts": 9,
+                "lastSubmittedAt": 100,
+                "lastResultOutcome": "reconciled",
+                "terminalFailure": {"stale": true},
+                "resultFingerprints": {"old-attempt": "old-fingerprint"},
+                "resultFingerprintOrder": ["old-attempt"]
+            }
+        });
+
+        let attempt = apply_j_submit_retry(&mut replica, &retry, 101)
+            .expect("retry")
+            .expect("new batch attempt");
+        assert_eq!(attempt.attempt_number, 1);
+        assert_eq!(attempt.batch_hash, retry.batch_hash);
+        let (_, entity_replica) = replica
+            .entity_slot(&entity_id, &signer_id)
+            .expect("updated entity slot");
+        let submit_state = prior_submit_state(entity_replica).expect("submit state");
+        assert_eq!(submit_state.get("lastResultOutcome"), None);
+        assert_eq!(submit_state.get("terminalFailure"), None);
+        assert_eq!(
+            submit_state.get("resultFingerprintOrder"),
+            Some(&json!(["old-attempt"]))
+        );
+        assert_eq!(
+            submit_state.get("resultFingerprints"),
+            Some(&json!({"old-attempt": "old-fingerprint"}))
+        );
+        assert_eq!(
+            decode_pending_j_submit_attempts(replica.durable.infrastructure())
+                .expect("pending attempts"),
+            vec![attempt]
         );
     }
 }

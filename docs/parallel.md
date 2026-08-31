@@ -103,7 +103,7 @@ user runtimes keep the in-process path. Off ⇒ byte-identical behaviour.
 1. Main selects the frame txs (wire fit) and groups `accountInput` txs by shard.
 2. Main → shard: `{frameHeight, frameTimestamp, entityContext (htlc prepared
    entries for that shard's accounts), inputs: AccountInput[] (msgpack bytes)}`.
-3. Shard applies each input exactly as `applyPeerAccountInput` does today,
+3. Shard applies each input exactly as `applyAccountConsensusInput` does today,
    proposes the next outbound frame, signs frame + dispute Hankos (keys derived in
    the worker from the runtime seed), seals the shell.
 4. Shard → main (bytes): per touched account `{counterpartyId, leafHash
@@ -164,7 +164,7 @@ shard that owns the key range. No per-frame node traffic.
   the recorded frames; that is the determinism oracle.
 - No wall clock in shards; frame timestamp comes from main.
 - Rejections: a shard returns typed rejections; main applies the same
-  `rejectAccountPeerInput` path so ledger/incident bytes match.
+  `rejectAccountInput` path so ledger/incident bytes match.
 
 ### 4.7 Expected result
 Account work (≈1 ms per account-frame) spread over W workers; main keeps

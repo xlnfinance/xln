@@ -87,22 +87,27 @@ EntityInput
 EntityTx
   ├─ Entity-owned operation
   ├─ accountInput
-  │    └─ exact child AccountPeerInput
-  │         └─ frame | ack | frame_ack | dispute | board_hanko_refresh | settle
+  │    └─ exact child AccountInput
+  │         └─ frame | ack | ack_frame | dispute | board_hanko_refresh
   └─ financial intent
-       └─ produces AccountInput.txs(AccountTx[]) locally for a future AccountFrame
+       └─ produces AccountTx[] locally for a future AccountFrame
 ```
 
-The Account entrypoint is one union:
+The Account wire entrypoint is one union:
 
 ```typescript
 type AccountInput =
-  | { kind: 'txs'; txs: AccountTx[] }
-  | AccountPeerInput;
+  | { kind: 'frame'; /* exact proposal */ }
+  | { kind: 'ack'; /* exact acknowledgement */ }
+  | { kind: 'ack_frame'; /* ACK first, then proposal */ }
+  | { kind: 'dispute'; /* exact dispute Hanko */ }
+  | { kind: 'board_hanko_refresh'; /* exact certified refresh */ };
 ```
 
-Every branch enters `applyAccountInput`. The local `txs` branch is never sent
-to a peer. Peer branches preserve their exact signed bilateral payload.
+Every branch enters `applyAccountInput`. Local `AccountTx[]` admission and
+jurisdiction finality use the same transition but are never serialized as an
+`EntityTx.accountInput`. `AccountInput` preserves the exact signed bilateral
+payload.
 
 `*Replica` names live data. `*Machine` names deterministic transition logic or
 its module; it is never a state interface.

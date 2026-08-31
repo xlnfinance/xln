@@ -74,7 +74,7 @@ pub struct EntityOutboundRequest {
     pub owner_entity_id: [u8; 32],
     /// Current local board authority resolved by the parent Entity registry.
     /// `Unresolved` is rejected; this transient fact is never Account state.
-    pub local_certified_board_authority: crate::PeerBoardAuthority,
+    pub local_certified_board_authority: crate::AccountInputBoardAuthority,
     /// The clock this Entity stamps the frames it proposes with.
     pub timestamp: u64,
     pub j_height: u64,
@@ -84,13 +84,17 @@ pub struct EntityOutboundRequest {
     /// in the same candidate as admissions/proposals. They never enter the
     /// bilateral Account frame, but their root is part of the Entity leaf.
     pub envelope_updates: Vec<(AccountId, Vec<AccountEnvelopeUpdate>)>,
-    /// Transactions the Entity's own logic produced, per account.
-    pub admits: Vec<(AccountId, Vec<AccountTx>)>,
-    /// The accounts asked to propose once their transactions are queued.
-    pub propose: Vec<AccountId>,
-    /// Accounts changed on the inbound visit whose final bodies the parent
-    /// needs only after all Entity-derived work has run.
-    pub materialize: Vec<AccountId>,
+    /// Unsigned settlement-Hanko transitions whose hashes are certified by
+    /// this Entity frame. They enter the Account candidate in the same final
+    /// Account stage, but cannot be proposed until certification attaches the
+    /// manifest witnesses. The witness bytes are excluded from the canonical
+    /// AccountTx projection, so that later attachment must not move the leaf.
+    pub unsigned_settlement_txs: Vec<(AccountId, AccountTx)>,
+    /// One canonical final Account-stage worklist. Each Account appears once;
+    /// Entity supplies only its Account transactions. The resident worker
+    /// derives ACK/proposal behavior from the Account state it exclusively
+    /// owns and seals the final leaf after that work.
+    pub proposal_work: Vec<(AccountId, Vec<AccountTx>, bool)>,
     /// Export every Account changed since the previous durable checkpoint.
     /// Export itself is repeatable and non-acknowledging. The next inbound
     /// expected root implicitly advances the worker-local durable baseline

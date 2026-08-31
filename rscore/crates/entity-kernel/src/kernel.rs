@@ -18,11 +18,12 @@ use crate::paybook::{
 };
 use crate::types::{AccountProposalWork, TargetedAccountTx};
 use crate::{
-    DeterministicContext, EntityKernelError, EntityKernelOutput, EntityKernelResult,
-    EntityStateSlice, JurisdictionScope, OrderedAccountCommit, SchedulerCommand,
+    CanonicalEntityTx, DeterministicContext, EntityKernelError, EntityKernelOutput,
+    EntityKernelResult, EntityStateSlice, EntityTxKind, JurisdictionScope, OrderedAccountCommit,
+    SchedulerCommand,
 };
 use crate::{
-    LocalEntityOutput, LocalEntityTx, apply_cross_jurisdiction_entity_txs,
+    LocalEntityOutput, LocalEntityOutputTx, LocalEntityTx, apply_cross_jurisdiction_entity_txs,
     apply_local_entity_control_tx, authorize_runtime_output,
 };
 
@@ -638,10 +639,74 @@ fn append_scheduled_account_txs(
                     )
                 }));
             }
+            SchedulerCommand::AutoFinalizeDispute { .. }
+            | SchedulerCommand::BroadcastQueuedDisputeFinalization => {}
             SchedulerCommand::HubRebalance => {
                 return Err(EntityKernelError::HubRebalanceHandlerMissing);
             }
         }
+    }
+    Ok(())
+}
+
+fn append_scheduled_entity_outputs(
+    state: &EntityStateSlice,
+    commands: &[SchedulerCommand],
+    outputs: &mut Vec<LocalEntityOutput>,
+) -> Result<(), EntityKernelError> {
+    let mut entity_txs = Vec::new();
+    let mut broadcast = false;
+    for command in commands {
+        match command {
+            SchedulerCommand::AutoFinalizeDispute {
+                counterparty_entity_id,
+            } => {
+                entity_txs.push(LocalEntityOutputTx::Projected(
+                    CanonicalEntityTx::from_frame_projection(
+                        EntityTxKind::DisputeFinalize,
+                        CanonicalValue::Object(vec![
+                            (
+                                "counterpartyEntityId".into(),
+                                CanonicalValue::String(counterparty_entity_id.clone()),
+                            ),
+                            (
+                                "description".into(),
+                                CanonicalValue::String("auto-finalize-after-timeout".into()),
+                            ),
+                            ("useOnchainRegistry".into(), CanonicalValue::Bool(true)),
+                        ]),
+                    )
+                    .map_err(|error| {
+                        EntityKernelError::local("scheduledWake", error.to_string())
+                    })?,
+                ));
+                broadcast = true;
+            }
+            SchedulerCommand::BroadcastQueuedDisputeFinalization => broadcast = true,
+            SchedulerCommand::ProcessHtlcTimeouts { .. } | SchedulerCommand::HubRebalance => {}
+        }
+    }
+    if broadcast
+        && !outputs.iter().any(|output| {
+            output.entity_id.eq_ignore_ascii_case(&state.entity_id)
+                && output.entity_txs.iter().any(|tx| {
+                    matches!(tx, LocalEntityOutputTx::Projected(tx) if tx.kind == EntityTxKind::JBroadcast)
+                })
+        })
+    {
+        entity_txs.push(LocalEntityOutputTx::Projected(
+            CanonicalEntityTx::from_frame_projection(
+                EntityTxKind::JBroadcast,
+                CanonicalValue::Object(Vec::new()),
+            )
+            .map_err(|error| EntityKernelError::local("scheduledWake", error.to_string()))?,
+        ));
+    }
+    if !entity_txs.is_empty() {
+        outputs.push(LocalEntityOutput {
+            entity_id: state.entity_id.clone(),
+            entity_txs,
+        });
     }
     Ok(())
 }
@@ -910,6 +975,7 @@ pub(crate) fn apply_entity_transitions(
     let orderbook_elapsed = orderbook_started.elapsed();
     let group_started = Instant::now();
     append_scheduled_account_txs(scheduled_commands, &mut account_txs)?;
+    append_scheduled_entity_outputs(&state, scheduled_commands, &mut routed_entity_outputs)?;
     let account_tx_count = account_txs.len();
     let proposal_work = group_proposal_work(account_txs);
     let group_elapsed = group_started.elapsed();

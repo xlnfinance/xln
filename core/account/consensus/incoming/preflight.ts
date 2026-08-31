@@ -3,20 +3,20 @@
  * replaying any transaction. This phase never mutates live Account state.
  */
 
-import type { AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { getAccountFrameStructuralError } from '../frame/hash';
 import {
   accountTxAdmissionError,
-  accountTxAdmissionPeerCode,
+  accountTxAdmissionInputCode,
 } from '../../tx/admission-policy';
 import { accountInputProposal } from '../flush';
 import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { resolveSameHeightIncomingFrame } from './collision';
 import { buildDuplicateCommittedAckFrame, describeAccountState } from './replay';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
-import { accountInputApplied, accountInputDisputeRequired, rejectAccountPeerInput } from '../result';
+import { accountInputApplied, accountInputDisputeRequired, rejectAccountInput } from '../result';
 import { timePerfPhase } from '../../../support/performance/profile';
 
 const preflightLog = createStructuredLogger('account.preflight');
@@ -34,7 +34,7 @@ export type IncomingFramePreflightResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 const verifyIncomingFrameHanko = async (
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
   securityContext: AccountInputSecurityContext,
@@ -42,8 +42,8 @@ const verifyIncomingFrameHanko = async (
   const proposal = accountInputProposal(input);
   const hankoToVerify = proposal?.frameHanko;
   if (!hankoToVerify) {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_HANKO_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_HANKO_INVALID',
       'SECURITY: Frame must have hanko signature',
       events,
     );
@@ -68,8 +68,8 @@ const verifyIncomingFrameHanko = async (
     ),
   );
   if (!valid || !recoveredEntityId) {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_HANKO_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_HANKO_INVALID',
       `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`,
       events,
     );
@@ -83,7 +83,7 @@ const verifyIncomingFrameHanko = async (
 
 const handleStaleIncomingFrame = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   replayCurrentHeight: number,
   events: string[],
@@ -120,14 +120,14 @@ const handleStaleIncomingFrame = async (
 
 const validateIncomingFrameProposer = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   events: string[],
 ): { proposerIsLeft: boolean } | HandleAccountInputResult => {
   const proposer = input.fromEntityId.toLowerCase();
   const proposerIsLeft = proposer === account.state.leftEntity.toLowerCase();
   if (!proposerIsLeft && proposer !== account.state.rightEntity.toLowerCase()) {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_PROPOSER_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_PROPOSER_INVALID',
       `Frame proposer is not an account party: ` + input.fromEntityId.slice(-8),
       events,
     );
@@ -137,7 +137,7 @@ const validateIncomingFrameProposer = (
 
 const validateIncomingFrameChain = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   normalizedInputHeight: number | undefined,
   securityContext: AccountInputSecurityContext,
@@ -145,8 +145,8 @@ const validateIncomingFrameChain = (
 ): HandleAccountInputResult | undefined => {
   const structureError = getAccountFrameStructuralError(receivedFrame, securityContext.entityTimestamp);
   if (structureError) {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_STRUCTURE_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_STRUCTURE_INVALID',
       `Invalid frame structure: ${structureError}`,
       events,
     );
@@ -178,8 +178,8 @@ const validateIncomingFrameChain = (
       expectedPrevFrameHash: expectedPrevHash,
       account: describeAccountState(account),
     });
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_CHAIN_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_CHAIN_INVALID',
       `Frame chain broken: prevFrameHash mismatch ` +
         `(expected ${expectedPrevHash.slice(0, 16)}..., ` +
         `got ${String(receivedFrame.prevFrameHash).slice(0, 16)}..., ` +
@@ -202,8 +202,8 @@ const validateIncomingFrameChain = (
     expectedHeight,
     receivedHeight: receivedFrame.height,
   });
-  return rejectAccountPeerInput(
-    'ACCOUNT_PEER_FRAME_CHAIN_INVALID',
+  return rejectAccountInput(
+    'ACCOUNT_INPUT_FRAME_CHAIN_INVALID',
     `Frame sequence mismatch: expected ${expectedHeight}, ` + `got ${receivedFrame.height}`,
     events,
   );
@@ -215,14 +215,14 @@ const validateIncomingFrameTxAdmission = (
 ): HandleAccountInputResult | undefined => {
   // FX-1/FX-2 incoming direction: an out-of-profile kind or an out-of-range
   // policyVersion can never become a valid frame regardless of who signed it,
-  // so it is rejected as deterministic peer evidence before any signature
+  // so it is rejected as deterministic Account input evidence before any signature
   // work, replay, or state mutation. The message names the offending kind or
   // version; Rust reaches the same verdict when `AccountFrame::hash` refuses
   // the transaction its canonical form cannot express.
   for (const tx of receivedFrame.accountTxs) {
     const error = accountTxAdmissionError(tx);
     if (error) {
-      return rejectAccountPeerInput(accountTxAdmissionPeerCode(error), error.message, events);
+      return rejectAccountInput(accountTxAdmissionInputCode(error), error.message, events);
     }
   }
   return undefined;
@@ -230,7 +230,7 @@ const validateIncomingFrameTxAdmission = (
 
 const validateIncomingFrameDeadline = (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   receivedFrame: AccountFrame,
   proposerIsLeft: boolean,
   securityContext: AccountInputSecurityContext,
@@ -255,8 +255,8 @@ const validateIncomingFrameDeadline = (
   );
   if (!violation) return undefined;
   if (violation.disposition === 'reject') {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_FRAME_DEADLINE_INVALID',
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_DEADLINE_INVALID',
       violation.reason,
       events,
     );
@@ -280,7 +280,7 @@ const validateIncomingFrameDeadline = (
 
 export const preflightIncomingAccountFrame = async (
   account: AccountReplica,
-  input: AccountPeerInput,
+  input: AccountInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
   events: string[],

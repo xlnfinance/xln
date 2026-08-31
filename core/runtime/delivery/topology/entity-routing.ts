@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountFrame, AccountTx } from '../../../types/account';
+import type { AccountInput, AccountFrame, AccountTx } from '../../../types/account';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -68,7 +68,7 @@ type CrossJAdmissionCandidate = {
   pairKey: string;
   phase: 'proposal' | 'ack';
   leg: 'source' | 'target';
-  accountInput: AccountPeerInput;
+  accountInput: AccountInput;
   frame: AccountFrame;
   pulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   alreadyCommitted: boolean;
@@ -187,13 +187,13 @@ const pairedProgressListsMatch = (
 ): boolean => source.length === target.length && source.every(sourceTx =>
   target.filter(targetTx => crossProgressKey(targetTx.data.fill) === crossProgressKey(sourceTx.data)).length === 1);
 
-const effectiveAccountInputs = (input: RoutedEntityInput): AccountPeerInput[] =>
+const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
   getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
 
 const sourceAdmissionCandidate = (
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountPeerInput,
+  accountInput: AccountInput,
 ): CrossJAdmissionCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
@@ -242,7 +242,7 @@ const findReplicaAccount = (
 const proposalAlreadyCommitted = (
   env: RuntimeReplica,
   input: RoutedEntityInput,
-  accountInput: AccountPeerInput,
+  accountInput: AccountInput,
 ): boolean => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return false;
@@ -255,7 +255,7 @@ const proposalAlreadyCommitted = (
 const targetProposalCandidate = (
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountPeerInput,
+  accountInput: AccountInput,
 ): CrossJAdmissionCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
@@ -375,7 +375,7 @@ type CrossJRejectedAccountInputReason =
 
 type CrossJRejectedAccountInput = {
   inputIndex: number;
-  accountInput: AccountPeerInput;
+  accountInput: AccountInput;
   reason: CrossJRejectedAccountInputReason;
   /** Sub-causes when `reason` is 'candidate-invalid'; empty otherwise. */
   detail: string[];
@@ -402,7 +402,7 @@ type CrossJAdmissionFrameCandidate = {
   pairKey: string;
   originKey: string;
   phase: 'proposal' | 'ack';
-  accountInput: AccountPeerInput;
+  accountInput: AccountInput;
   frame: AccountFrame;
   sourcePulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   targetPulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
@@ -438,7 +438,7 @@ const proposalCandidateInvalidReasons = (
 const buildCrossJProposalFrameCandidate = (
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountPeerInput,
+  accountInput: AccountInput,
 ): CrossJAdmissionFrameCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
@@ -497,7 +497,7 @@ const buildCrossJAckFrameCandidate = (
   env: RuntimeReplica,
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountPeerInput,
+  accountInput: AccountInput,
 ): CrossJAdmissionFrameCandidate | null => {
   const ack = accountInputAck(accountInput);
   if (!ack) return null;
@@ -1096,7 +1096,7 @@ const findInvalidAtomicCrossJIndexes = (
 
 const stripRejectedAccountTxs = (
   input: RoutedEntityInput,
-  rejected: ReadonlySet<AccountPeerInput>,
+  rejected: ReadonlySet<AccountInput>,
 ): RoutedEntityInput | null => {
   const entityTxs: EntityTx[] = [];
   for (const tx of input.entityTxs ?? []) {
@@ -1144,7 +1144,7 @@ const removeRejectedCrossJAccountInputs = (
   inputs: readonly RoutedEntityInput[],
   rejectedLegs: readonly CrossJRejectedAccountInput[],
 ): { inputs: RoutedEntityInput[]; retainedIndexes: number[] } => {
-  const rejectedByInput = new Map<number, Set<AccountPeerInput>>();
+  const rejectedByInput = new Map<number, Set<AccountInput>>();
   for (const candidate of rejectedLegs) {
     const rejected = rejectedByInput.get(candidate.inputIndex) ?? new Set();
     rejected.add(candidate.accountInput);
@@ -1439,7 +1439,7 @@ const validateInboundEntityCommands = (
   let commandState = findInboundTargetReplica(env, input)?.state;
   for (const tx of input.entityTxs ?? []) {
     if (tx.type === 'accountInput') {
-      // AccountPeerInput is the raw cross-runtime protocol input. Runtime routing
+      // AccountInput is the raw cross-runtime protocol input. Runtime routing
       // may batch many independent Account lanes for one target Entity/Runtime;
       // each frame/ACK Hanko is still verified independently by
       // applyAccountInput inside the one target Entity frame.

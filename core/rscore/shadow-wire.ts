@@ -128,7 +128,7 @@ const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRo
 /**
  * One operation of a wave, in the order the authority performed it.
  *
- * Admissions and peer inputs interleave inside a single Runtime frame, and the
+ * Admissions and Account inputs interleave inside a single Runtime frame, and the
  * order is load-bearing: a proposal that loses a height collision returns its
  * transactions to the front of the queue and drops the ones already there, so
  * whether our own admission had landed yet decides what survives.
@@ -539,11 +539,11 @@ const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
  * One received peer frame, exactly as the signed AccountInput carried it.
  *
  * Consensus snapshots bind `stateHash` beside their frame because the engine
- * independently restores that binding. A peer input is different: its frame
+ * independently restores that binding. A Account input is different: its frame
  * itself carries `stateHash`; dropping it would make Rust judge reconstructed
  * data instead of the canonical input.
  */
-export const accountPeerFrameWire = (frame: AccountFrame): RscoreWireValue => [
+export const accountInputFrameWire = (frame: AccountFrame): RscoreWireValue => [
   frame.height,
   frame.timestamp,
   frame.jHeight,

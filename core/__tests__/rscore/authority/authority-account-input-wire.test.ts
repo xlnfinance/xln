@@ -10,7 +10,7 @@ import {
 } from '../../../rscore/authority-wave';
 import type {
   AccountFrame,
-  AccountPeerInput,
+  AccountInput,
   AccountReplica,
 } from '../../../types/account';
 
@@ -54,7 +54,7 @@ const account = (): AccountReplica => ({
 const wireBytes = (value: string): Uint8Array =>
   Uint8Array.from(Buffer.from(value.slice(2), 'hex'));
 
-const build = (inputs: readonly AccountPeerInput[]) => {
+const build = (inputs: readonly AccountInput[]) => {
   beginAuthorityFrame('peer-wire');
   noteAuthorityEntityClock('peer-wire', OWNER, 'enforce', 1_700_000_000_999, 707);
   for (const input of inputs) {
@@ -64,7 +64,7 @@ const build = (inputs: readonly AccountPeerInput[]) => {
   return buildAuthorityWave('peer-wire');
 };
 
-const onlyOperation = (input: AccountPeerInput): unknown[] => {
+const onlyOperation = (input: AccountInput): unknown[] => {
   const wave = build([input]);
   if (wave.kind !== 'wave') throw new Error(`TEST_WAVE_REQUIRED:${wave.kind}`);
   const operation = wave.entities[0]?.ops[0];
@@ -72,7 +72,7 @@ const onlyOperation = (input: AccountPeerInput): unknown[] => {
   return operation;
 };
 
-describe('authority canonical peer wire', () => {
+describe('authority canonical Account input wire', () => {
   beforeEach(() => {
     process.env['XLN_RSCORE_AUTHORITY_RECORD'] = '1';
     resetAuthorityRecordForTests();
@@ -84,7 +84,7 @@ describe('authority canonical peer wire', () => {
   });
 
   test('AckFrame golden keeps every sentinel in one ACK-before-proposal operation', () => {
-    const input: AccountPeerInput = {
+    const input: AccountInput = {
       ...peerBase(),
       kind: 'ack_frame',
       watchSeed: WATCH_SEED,
@@ -126,7 +126,7 @@ describe('authority canonical peer wire', () => {
       accountId: PEER,
       resultKind: 'applied',
       expectedVerdict: {
-        kind: 'peer',
+        kind: 'input',
         outcome: 'applied',
         committedFrames: [],
         responseAckHanko: null,
@@ -145,7 +145,7 @@ describe('authority canonical peer wire', () => {
           [17, 19],
           wireBytes(WATCH_SEED),
           [
-            2,
+            0,
             [
               6,
               wireBytes(ACK_HASH),
@@ -185,20 +185,21 @@ describe('authority canonical peer wire', () => {
     ]]);
   });
 
-  test('Frame and Ack preserve optional absence and presence without reconstruction', () => {
-    const frameInput: AccountPeerInput = {
+  test('AckFrame and Ack preserve optional absence and presence without reconstruction', () => {
+    const frameInput: AccountInput = {
       ...peerBase(),
-      kind: 'frame',
+      kind: 'ack_frame',
       proposal: { frame: frame() },
     };
     const frameEnvelope = (onlyOperation(frameInput)[1] as unknown[])[2] as unknown[];
     const frameKind = frameEnvelope[5] as unknown[];
     expect(frameEnvelope[4]).toBeNull();
     expect(frameKind[0]).toBe(0);
-    expect((frameKind[1] as unknown[]).slice(1)).toEqual([null, null]);
+    expect(frameKind[1]).toBeNull();
+    expect((frameKind[2] as unknown[]).slice(1)).toEqual([null, null]);
 
     resetAuthorityRecordForTests();
-    const ackInput: AccountPeerInput = {
+    const ackInput: AccountInput = {
       ...peerBase(),
       kind: 'ack',
       ack: { height: 6, frameHash: ACK_HASH, frameHanko: ACK_HANKO },
@@ -212,12 +213,12 @@ describe('authority canonical peer wire', () => {
   test('missing jHeight and fromEntityId make the whole wave ineligible', () => {
     const missingJHeight = frame();
     delete (missingJHeight as Partial<AccountFrame>).jHeight;
-    const missingFrameInput: AccountPeerInput = {
+    const missingFrameInput: AccountInput = {
       ...peerBase(),
-      kind: 'frame',
+      kind: 'ack_frame',
       proposal: { frame: missingJHeight },
     };
-    const validAck: AccountPeerInput = {
+    const validAck: AccountInput = {
       ...peerBase(),
       kind: 'ack',
       ack: { height: 6, frameHash: ACK_HASH },
@@ -228,20 +229,20 @@ describe('authority canonical peer wire', () => {
     expect(missingFrameWave.reason).toContain('missing=jHeight');
 
     resetAuthorityRecordForTests();
-    const missingFrom: AccountPeerInput = {
+    const missingFrom: AccountInput = {
       ...peerBase(),
       kind: 'ack',
       ack: { height: 6, frameHash: ACK_HASH },
     };
-    delete (missingFrom as Partial<AccountPeerInput>).fromEntityId;
+    delete (missingFrom as Partial<AccountInput>).fromEntityId;
     const missingFromWave = build([missingFrom]);
     expect(missingFromWave.kind).toBe('ineligible');
     if (missingFromWave.kind !== 'ineligible') throw new Error('TEST_INELIGIBLE_REQUIRED');
-    expect(missingFromWave.reason).toContain('RSCORE_AUTHORITY_PEER_INPUT_FROM_ENTITY_ID');
+    expect(missingFromWave.reason).toContain('RSCORE_AUTHORITY_ACCOUNT_INPUT_FROM_ENTITY_ID');
   });
 
-  test('an unsupported peer variant fails the whole wave', () => {
-    const dispute: AccountPeerInput = {
+  test('an unsupported Account input variant fails the whole wave', () => {
+    const dispute: AccountInput = {
       ...peerBase(),
       kind: 'dispute',
       disputeHanko: {

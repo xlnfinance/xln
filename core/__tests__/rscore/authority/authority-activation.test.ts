@@ -27,7 +27,7 @@ const operation = (
     : describeAuthorityWaveOperation(encoded).resultKind === 'admission'
       ? { kind: 'admission', admittedCount: 0 }
       : {
-          kind: 'peer',
+          kind: 'input',
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,

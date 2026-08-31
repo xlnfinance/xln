@@ -3,7 +3,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Level } from 'level';
 import { readStorageHead } from '../../../storage';
@@ -36,6 +36,7 @@ import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
 import { hltLanePortsPerSlot } from '../hlt/lanes/lane-port-capacity';
 import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
+import { assertRustHubBinaryFresh } from '../../../orchestrator/process/hub-engine-plan';
 import {
   decodeLoadFrame,
   decodeRuntimeManifestEntries,
@@ -158,6 +159,9 @@ type BootstrapMetrics = {
 };
 
 const repoRoot = process.cwd();
+if (process.env['XLN_HLT_ENGINE'] === 'rust') {
+  assertRustHubBinaryFresh(repoRoot, process.env['XLN_RSCORE_BINARY']);
+}
 const PROFILING_ENV_KEYS = [
   'XLN_RUNTIME_PROCESS_PROFILE', 'XLN_RUNTIME_APPLY_PROFILE',
   'XLN_RUNTIME_PROCESS_SLOW_MS', 'XLN_RUNTIME_APPLY_SLOW_MS',
@@ -993,7 +997,9 @@ const healthReady = (health: HealthPayload): boolean => {
       health.system?.relay === true &&
       health.hubMesh?.ok === true &&
       health.bootstrapReserves?.ok === true;
-    return h1Ready && (hltWorkloadMode !== 'mixed' || (
+    // Payment needs only H1. Same-chain and mixed workloads consume the real
+    // market-maker ask, so their economic gate must not open before MM depth.
+    return h1Ready && (hltWorkloadMode === 'payments' || (
       marketMakerDepthReadyForSmoke(health) && Boolean(health.marketMaker?.entityId)
     ));
   }
@@ -1240,6 +1246,12 @@ const main = async (): Promise<void> => {
     mkdirSync(join(workDir, 'core'), { recursive: true });
     writeFileSync(resetMarker, 'local-prod-smoke fresh bootstrap\n');
     recordStage('reset:armed', { resetMarker });
+  }
+  const explicitMeshRootSeed = String(process.env['XLN_MESH_ROOT_SEED'] ?? '').trim();
+  if (explicitMeshRootSeed) {
+    const seedPath = join(workDir, 'secrets', 'mesh-root.seed');
+    mkdirSync(dirname(seedPath), { recursive: true });
+    writeFileSync(seedPath, `${explicitMeshRootSeed}\n`, { mode: 0o600 });
   }
   startManaged('anvil', 'scripts/operations/start-anvil.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),

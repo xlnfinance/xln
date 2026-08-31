@@ -209,7 +209,7 @@ if (!isProposedAccountFrame(proposed)) {
 }
 const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(env, entityId, signerA, proposed);
 account.pendingAccountInput = hankoAttachedProposal;
-if (hankoAttachedProposal.kind !== 'frame') throw new Error('ACCOUNT_J_CRASH_FRAME_PROPOSAL_REQUIRED');
+if (hankoAttachedProposal.kind !== 'ack_frame') throw new Error('ACCOUNT_J_CRASH_ACK_FRAME_PROPOSAL_REQUIRED');
 account.currentFrameHanko = hankoAttachedProposal.proposal.frameHanko;
 account.currentDisputeProofHanko = hankoAttachedProposal.proposal.disputeHanko?.hanko;
 const peerValidation = await applyAccountInput(

@@ -46,6 +46,10 @@ import { getEntityFrameConsensusConfig } from '../authority/board-handover';
 
 export type { EntityInputOutcome } from './types';
 
+const markRuntimeEntityPhase = (env: EntityRuntimeContext, phase: string): void => {
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = phase;
+};
+
 // Perf diagnostics only: explains (input shape, mempool depth) at each proposal
 // so batching regressions are visible from one HLT run's log.
 const ENTITY_PROPOSAL_TRACE = nodeProcess?.env?.['XLN_ENTITY_PROPOSAL_TRACE'] === '1';
@@ -271,6 +275,7 @@ export const applyEntityInput = async (
   const profile = createEntityConsensusProfile();
   const trustedLocalCrossJurisdiction = options.trustedLocalRuntimeProtocol === 'cross-j';
   const accountWorkOnly = options.trustedLocalRuntimeProtocol === 'account-work';
+  markRuntimeEntityPhase(env, 'apply.entity.ingress');
   const ingress = prepareEntityInputIngress(
     env,
     entityReplica,
@@ -285,10 +290,12 @@ export const applyEntityInput = async (
   const { entityOutbox, workingReplica } = phaseContext;
   profile.checkpoint('ingress');
 
+  markRuntimeEntityPhase(env, 'apply.entity.leader-vote');
   const leaderVoteResult = await handleLeaderTimeoutVote(phaseContext);
   if (leaderVoteResult) return leaderVoteResult;
   const jPrefixResult = handleJPrefixAttestations(phaseContext);
   if (jPrefixResult) return jPrefixResult;
+  markRuntimeEntityPhase(env, 'apply.entity.admission');
   const { localCanPropose, trustedLocalEntityTxs } =
     await admitEntityTransactions(
       phaseContext,
@@ -297,6 +304,7 @@ export const applyEntityInput = async (
     );
   profile.checkpoint('admission');
 
+  markRuntimeEntityPhase(env, 'apply.entity.commit-notification');
   const commitNotificationResult = await handleCommitNotification(phaseContext);
   if (commitNotificationResult) return commitNotificationResult;
 
@@ -305,9 +313,11 @@ export const applyEntityInput = async (
     return currentEntityInputResult(phaseContext);
   }
 
+  markRuntimeEntityPhase(env, 'apply.entity.proposal-precommit');
   const proposedFramePrecommitResult = await handleProposedFramePrecommit(phaseContext);
   if (proposedFramePrecommitResult) return proposedFramePrecommitResult;
 
+  markRuntimeEntityPhase(env, 'apply.entity.hash-precommit');
   const hashPrecommitResult = await handleHashPrecommits(phaseContext);
   if (hashPrecommitResult) return hashPrecommitResult;
 
@@ -315,9 +325,11 @@ export const applyEntityInput = async (
     // Commit/proposal notifications above may advance the parent Entity height.
     // Only sign after those terminal paths so this validator never emits a head
     // for a parent that was committed by the same input.
+    markRuntimeEntityPhase(env, 'apply.entity.j-prefix');
     ensureLocalJPrefixAttestation(env, workingReplica, entityOutbox, Boolean(entityInput.jPrefixAttestations));
   }
 
+  markRuntimeEntityPhase(env, 'apply.entity.proposal-select');
   const proposalSelection = await selectEntityProposal(env, workingReplica, {
     localCanPropose,
     trustedLocalCrossJurisdiction,
@@ -327,6 +339,7 @@ export const applyEntityInput = async (
     checkpoint: profile.checkpoint,
   });
   traceEntityProposal(phaseContext, proposalSelection, entityInput, options.deferProposal === true, accountWorkOnly);
+  markRuntimeEntityPhase(env, 'apply.entity.proposal-advance');
   const proposalResult = await advanceEntityProposal(
     phaseContext,
     proposalSelection,

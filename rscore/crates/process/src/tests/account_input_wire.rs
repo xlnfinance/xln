@@ -5,7 +5,7 @@ use xln_rscore_engine::{AccountFrame, AckFramePhase, HtlcEvidenceSecret, SignedI
 use crate::wire_decode::decode_input_row;
 use crate::wire_encode::input_result;
 
-#[path = "peer_wire_fixture.rs"]
+#[path = "account_input_wire_fixture.rs"]
 mod fixture;
 use fixture::*;
 
@@ -51,6 +51,7 @@ fn exact_peer_variants_round_trip_without_losing_received_fields() {
     else {
         panic!("one canonical AckFrame expected")
     };
+    let incoming_ack = incoming_ack.expect("bundled ACK");
     assert_eq!(incoming_ack.height, 42, "ACK is the first composite phase");
     assert_eq!(incoming_ack.frame_hash, [0xbb; 32]);
     assert_eq!(incoming_ack.frame_hanko, None);
@@ -76,11 +77,15 @@ fn exact_peer_variants_round_trip_without_losing_received_fields() {
     assert!(!frame_dispute.proposer_is_left);
 
     assert!(matches!(
-        decode_input_row(&peer_row(tuple(vec![AbiValue::Integer(0), proposal()])))
-            .expect("standalone frame")
-            .input
-            .kind,
-        AccountInputKind::Frame(_)
+        decode_input_row(&peer_row(tuple(vec![
+            AbiValue::Integer(0),
+            AbiValue::Nil,
+            proposal(),
+        ])))
+        .expect("ack_frame without ACK")
+        .input
+        .kind,
+        AccountInputKind::AckFrame { ack: None, .. }
     ));
     assert!(matches!(
         decode_input_row(&peer_row(tuple(vec![AbiValue::Integer(1), ack()])))
@@ -96,14 +101,18 @@ fn exact_peer_variants_round_trip_without_losing_received_fields() {
         AbiValue::Nil,
     );
     let no_optionals = replace_at(
-        &peer_row(tuple(vec![AbiValue::Integer(0), no_optional_proposal])),
+        &peer_row(tuple(vec![
+            AbiValue::Integer(0),
+            AbiValue::Nil,
+            no_optional_proposal,
+        ])),
         &[2, 4],
         AbiValue::Nil,
     );
     let omitted = decode_input_row(&no_optionals).expect("explicit Nil optionals");
     assert_eq!(omitted.input.envelope.watch_seed, None);
-    let AccountInputKind::Frame(frame) = omitted.input.kind else {
-        panic!("standalone frame expected")
+    let AccountInputKind::AckFrame { ack: None, frame } = omitted.input.kind else {
+        panic!("ack_frame without ACK expected")
     };
     assert_eq!(frame.frame_hanko, None);
     assert_eq!(frame.dispute, None);
@@ -160,13 +169,14 @@ fn certified_board_authority_is_typed_local_context() {
         tuple(vec![authority(0xa3, 0xa2), authority(0xb3, 0xb2)]),
     );
     let row = decode_input_row(&value).expect("decode certified board authority");
-    let xln_rscore_batch::PeerBoardAuthority::Certified(authority) = row.certified_board_authority
+    let xln_rscore_batch::AccountInputBoardAuthority::Certified(authority) =
+        row.certified_board_authority
     else {
         panic!("certified board authority")
     };
     assert_eq!(authority.registered_board_hash, [0xa3; 32]);
     assert_eq!(authority.previous_board_hash, [0xa2; 32]);
-    let xln_rscore_batch::PeerBoardAuthority::Certified(local) =
+    let xln_rscore_batch::AccountInputBoardAuthority::Certified(local) =
         row.local_certified_board_authority
     else {
         panic!("local certified board authority")
@@ -262,7 +272,7 @@ fn ack_frame_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
     let result = AccountInputResult {
         operation_index: 17,
         account_id,
-        response: xln_rscore_batch::AccountResponseDirective::Preserve,
+        force_ack: None,
         verdict: AccountInputVerdict::AckFrameApplied {
             ack: Box::new(AccountInputVerdict::AckStale { height: 42 }),
             frame: Box::new(AccountInputVerdict::FrameCollisionIgnored {
@@ -291,7 +301,7 @@ fn ack_frame_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
     let rejected = AccountInputResult {
         operation_index: 18,
         account_id,
-        response: xln_rscore_batch::AccountResponseDirective::Preserve,
+        force_ack: None,
         verdict: AccountInputVerdict::AckFrameRejected {
             phase: AckFramePhase::Frame,
             reason: "proposal rejected".into(),
@@ -310,7 +320,7 @@ fn ack_frame_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
     let wrong_domains = AccountInputResult {
         operation_index: 19,
         account_id,
-        response: xln_rscore_batch::AccountResponseDirective::Preserve,
+        force_ack: None,
         verdict: AccountInputVerdict::AckFrameApplied {
             ack: Box::new(AccountInputVerdict::FrameCollisionIgnored {
                 height: 1,
@@ -327,7 +337,7 @@ fn dispute_required_verdict_carries_exact_secret_and_signed_frame() {
     let result = AccountInputResult {
         operation_index: 20,
         account_id: AccountId::from_bytes([0x11; 32]),
-        response: xln_rscore_batch::AccountResponseDirective::Preserve,
+        force_ack: None,
         verdict: AccountInputVerdict::FrameDisputeRequired {
             reason: "HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT".into(),
             evidence_secrets: vec![HtlcEvidenceSecret {

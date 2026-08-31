@@ -1340,6 +1340,51 @@ describe('registered Entity certified board authority', () => {
     )).valid).toBe(false);
   });
 
+  test('compact certified-board context preserves previous-board grace without Runtime access', async () => {
+    const { profile, localEnv, boardHash: previousBoardHash } = await buildRegisteredProfile();
+    const replica = [...localEnv.state.eReplicas.values()][0];
+    if (!replica) throw new Error('test registered replica missing');
+    const state = replica.state;
+    const currentBoardHash = blockHash('66');
+    const previousBoardValidUntil = 1_700_604_800;
+    installEvents(localEnv, state, [event('BoardActivated', currentBoardHash, {
+      height: 3,
+      previousBoardHash,
+      previousBoardValidUntil,
+    })]);
+    const certifiedBoardRecord = resolveObserverCertifiedBoardRecord(
+      state,
+      getCertifiedBoardNodeStore(localEnv),
+      registeredEntityId,
+    );
+    if (!certifiedBoardRecord) throw new Error('test certified board record missing');
+    const hanko = profile.metadata.profileHanko;
+    if (!hanko) throw new Error('test profile Hanko missing');
+    const profileHash = computeProfileHash(profile);
+    expect((await verifyHankoForHash(
+      hanko,
+      profileHash,
+      registeredEntityId,
+      undefined,
+      {
+        registeredBoardHash: currentBoardHash,
+        certifiedBoardRecord,
+        observerTimestamp: previousBoardValidUntil * 1_000 - 1,
+      },
+    )).valid).toBe(true);
+    expect((await verifyHankoForHash(
+      hanko,
+      profileHash,
+      registeredEntityId,
+      undefined,
+      {
+        registeredBoardHash: currentBoardHash,
+        certifiedBoardRecord,
+        observerTimestamp: previousBoardValidUntil * 1_000,
+      },
+    )).valid).toBe(false);
+  });
+
   test('previous board verifies through nested claims at the exclusive seven-day boundary and survives restore', async () => {
     const { profile, localEnv, boardHash: previousBoardHash, privateKey } = await buildRegisteredProfile();
     const state = [...localEnv.state.eReplicas.values()][0]!.state;

@@ -24,7 +24,7 @@ import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../../../.
 import { attachAccountDraftHankosAsEntity } from '../../../../../qa/account/draft';
 import type { RuntimeEntityInputsEnvelope, RuntimeReplica } from '../../../../../runtime/types';
 import { hexToBytes } from '../../../../../support/bytes/hex-bytes';
-import type { AccountInput, AccountPeerInput, AccountReplica } from '../../../../../types/account';
+import type { AccountInput, AccountReplica } from '../../../../../types/account';
 import type { EntityTx } from '../../../../../types/entity-tx';
 
 type RuntimeApi = typeof import('../../../../../runtime');
@@ -149,10 +149,10 @@ export const createFixturePeerAccounts = (args: Readonly<{
   }
   const mainEntityKey = mainIdentity.entityId.toLowerCase();
 
-  const queue: Array<{ peerKey: string; input: AccountPeerInput }> = [];
+  const queue: Array<{ peerKey: string; input: AccountInput }> = [];
   let replyHeight = 0;
 
-  const enqueueReply = (signed: AccountPeerInput, timestamp: number): void => {
+  const enqueueReply = (signed: AccountInput, timestamp: number): void => {
     if (signed.toEntityId.toLowerCase() !== mainEntityKey) {
       throw new Error(`FIXTURE_PEER_REPLY_TARGET_MISMATCH:${signed.toEntityId}`);
     }
@@ -178,7 +178,7 @@ export const createFixturePeerAccounts = (args: Readonly<{
     const signed = await attachAccountDraftHankosAsEntity(
       peerEnv, peer.identity.entityId, peer.identity.signerId, draft,
     );
-    if (signed.kind !== 'frame' && signed.kind !== 'ack' && signed.kind !== 'ack_frame') {
+    if (signed.kind !== 'ack' && signed.kind !== 'ack_frame') {
       throw new Error(`FIXTURE_PEER_REPLY_KIND_INVALID:${signed.kind}`);
     }
     enqueueReply(signed, timestamp);

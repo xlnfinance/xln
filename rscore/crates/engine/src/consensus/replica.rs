@@ -56,6 +56,40 @@ fn queued_claim_witness(claim: &crate::JEventClaimTx) -> Result<QueuedClaimWitne
     })
 }
 
+fn is_truthy_canonical_value(value: &CanonicalValue) -> bool {
+    match value {
+        CanonicalValue::Null => false,
+        CanonicalValue::Bool(value) => *value,
+        CanonicalValue::Number(value) => value.as_str() != "0" && value.as_str() != "-0",
+        CanonicalValue::BigInt(value) => value != &0.into(),
+        CanonicalValue::String(value) => !value.is_empty(),
+        CanonicalValue::Array(_)
+        | CanonicalValue::Map(_)
+        | CanonicalValue::Set(_)
+        | CanonicalValue::Object(_) => true,
+    }
+}
+
+fn is_dispute_evidence_tx(tx: &AccountTx) -> bool {
+    match tx {
+        AccountTx::SwapResolve { .. } => true,
+        AccountTx::CrossPullClose { data } => {
+            let CanonicalValue::Object(fields) = data else {
+                return false;
+            };
+            let has_binary = fields.iter().any(|(name, value)| {
+                name == "binary" && matches!(value, CanonicalValue::String(_))
+            });
+            let has_proof = fields
+                .iter()
+                .find_map(|(name, value)| (name == "proof").then_some(value))
+                .is_some_and(is_truthy_canonical_value);
+            has_binary && has_proof
+        }
+        _ => false,
+    }
+}
+
 /// FX-3 (proofs/fixes.md, decision D4): one enqueue row rejected at
 /// admission, reported as typed data while the rest of the batch is admitted.
 /// The enqueue counterpart of the proposal path's `DroppedTx`.
@@ -311,11 +345,7 @@ impl AccountConsensus {
         );
         let retain = |tx: &AccountTx| {
             (retain_deferred_claims && matches!(tx, AccountTx::JEventClaim(_)))
-                || (retain_optional_evidence
-                    && matches!(
-                        tx,
-                        AccountTx::SwapResolve { .. } | AccountTx::CrossPullClose { .. }
-                    ))
+                || (retain_optional_evidence && is_dispute_evidence_tx(tx))
         };
         let pending = self
             .pending
@@ -342,10 +372,12 @@ impl AccountConsensus {
         &mut self,
         finality: AccountDisputeStartedFinality,
     ) -> Result<(), StateError> {
-        self.freeze_for_dispute(true)?;
         let j_nonce = self.replica.state().j_nonce().max(finality.j_nonce);
         self.replica.state_mut().set_j_nonce(j_nonce);
-        self.replace_entity_dispute_lifecycle("disputed", None, Some(finality.active_dispute))
+        self.set_entity_dispute_lifecycle("disputed", None, Some(finality.active_dispute))?;
+        // On-chain DisputeStarted keeps optional transformer evidence, but J
+        // claims are no longer deferred once the status is terminal.
+        self.freeze_for_dispute(true)
     }
 
     pub fn apply_entity_dispute_finality(
@@ -377,7 +409,7 @@ impl AccountConsensus {
         self.counterparty_dispute = None;
         self.counterparty_dispute_hash = None;
         self.counterparty_dispute_hanko_digest = None;
-        self.replace_entity_dispute_lifecycle("disputed", None, None)?;
+        self.set_entity_dispute_lifecycle("disputed", None, None)?;
         self.freeze_for_dispute(false)?;
         Ok(AccountDisputeFinalityResult {
             had_active_dispute,
@@ -395,7 +427,7 @@ impl AccountConsensus {
             .map_err(StateError::CheckpointRestore)
     }
 
-    pub fn admit_certified_settlement_hanko(
+    pub fn attach_certified_settlement_hanko(
         &mut self,
         draft: crate::SettlementHankoDraft,
         settlement_hanko: Option<&[u8]>,
@@ -403,12 +435,24 @@ impl AccountConsensus {
     ) -> Result<(), StateError> {
         let tx = crate::attach_settlement_hanko_witnesses(draft, settlement_hanko, dispute_hanko)
             .map_err(StateError::CheckpointRestore)?;
-        let admission = self.admit_txs(vec![tx], "settlement-certified-hanko")?;
-        if admission.admitted != 1 || !admission.rejections.is_empty() {
-            return Err(StateError::CheckpointRestore(
-                "SETTLEMENT_CERTIFIED_HANKO_NOT_ADMITTED".into(),
-            ));
+        let canonical = canonical_tx_value(&tx)?;
+        let mut matched = self
+            .mempool
+            .iter()
+            .enumerate()
+            .filter_map(|(index, queued)| match canonical_tx_value(queued) {
+                Ok(value) if value == canonical => Some(Ok(index)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if matched.len() != 1 {
+            return Err(StateError::CheckpointRestore(format!(
+                "SETTLEMENT_CERTIFIED_HANKO_UNSIGNED_TX_COUNT:{}",
+                matched.len()
+            )));
         }
+        self.mempool[matched.remove(0)] = tx;
         Ok(())
     }
 
@@ -519,6 +563,7 @@ impl AccountConsensus {
                     &queued,
                     claim,
                     self.replica.state().j_claim_store(),
+                    self.replica.owner_side(),
                 )?;
                 match plan {
                     LocalClaimPlan::Admit => {}
@@ -831,11 +876,7 @@ impl AccountConsensus {
         self.counterparty_dispute.as_ref()
     }
 
-    /// Apply the Entity-owned dispute shell atomically to the resident Account.
-    /// These fields are outside the bilateral AccountState, but are committed
-    /// by the parent Entity leaf.  Keeping one typed entry point prevents a
-    /// generic Entity-side field writer from becoming a second Account path.
-    pub fn replace_entity_dispute_lifecycle(
+    fn set_entity_dispute_lifecycle(
         &mut self,
         status: &str,
         dispute_prepare: Option<CanonicalValue>,
@@ -857,6 +898,56 @@ impl AccountConsensus {
             None => self.replica.forget_envelope_field("activeDispute"),
         }
         Ok(())
+    }
+
+    /// Apply the Entity-owned dispute shell atomically to the resident Account.
+    /// These fields are outside the bilateral AccountState, but are committed
+    /// by the parent Entity leaf. Keeping one typed entry point prevents a
+    /// generic Entity-side field writer from becoming a second Account path.
+    pub fn replace_entity_dispute_lifecycle(
+        &mut self,
+        status: &str,
+        dispute_prepare: Option<CanonicalValue>,
+        active_dispute: Option<CanonicalValue>,
+    ) -> Result<(), StateError> {
+        let previous_status = self
+            .replica
+            .envelope()
+            .field("status")
+            .and_then(|value| match value {
+                CanonicalValue::String(value) => Some(value.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "active".into());
+        self.set_entity_dispute_lifecycle(status, dispute_prepare, active_dispute)?;
+        if previous_status == status {
+            // Counter-dispute, hash-recovery and finalize-queued updates only
+            // replace Entity metadata. Re-freezing an already disputed
+            // Account would silently erase transformer evidence accumulated
+            // after the initial freeze.
+            return Ok(());
+        }
+        match status {
+            // prepareDispute installs the preparation shell before it freezes,
+            // so deferred J claims and optional transformer evidence survive.
+            "dispute_preparing" => self.freeze_for_dispute(true),
+            // A zero-cooldown prepare can proceed directly to local start. TS
+            // freezes that terminal transition with no retained queue rows.
+            "disputed" => self.freeze_for_dispute(false),
+            "active" => Ok(()),
+            _ => unreachable!("validated dispute lifecycle status"),
+        }
+    }
+
+    /// Whether ordinary peer AccountInput may enter ACK/replay processing.
+    /// Jurisdiction bookkeeping uses typed Entity-owned lifecycle/finality
+    /// mutations and therefore does not cross this bilateral ingress gate.
+    pub fn accepts_external_input(&self) -> bool {
+        match self.replica.envelope().field("status") {
+            None => true,
+            Some(CanonicalValue::String(status)) => status == "active",
+            Some(_) => false,
+        }
     }
 
     /// Commit one authenticated remote-book removal ACK into the existing

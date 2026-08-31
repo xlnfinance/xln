@@ -8,9 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use xln_rscore_engine::{
-    AccountConsensus, AccountDomain, AccountEnvelope, AccountFrame, AccountIdentity, AccountOutput,
-    AccountPeerEnvelope, AccountReplica, AccountState, AccountTx, AckFrameOutcome, AckFramePhase,
-    AckOutcome, BoardDelays, BoardHankoRefreshInput, CertifiedBoardAuthority,
+    AccountConsensus, AccountDomain, AccountEnvelope, AccountFrame, AccountIdentity,
+    AccountInputEnvelope, AccountOutput, AccountReplica, AccountState, AccountTx, AckFrameOutcome,
+    AckFramePhase, AckOutcome, BoardDelays, BoardHankoRefreshInput, CertifiedBoardAuthority,
     CommittedFrameEvidence, CounterpartyDispute, Disposition, IncomingAck, IncomingFrame,
     IncomingFrameSecurityContext, IncomingOutcome, ProposalOutcome, SignedIncomingFrame,
     SigningIdentity, StandaloneInputOutcome, StateError, apply_board_hanko_refresh,
@@ -22,15 +22,15 @@ use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 use crate::checkpoint::AccountRestore;
 use crate::{AccountId, AccountSeed, BatchError};
 
-/// What arrives for one account. `AckFrame` is one canonical wire input whose
-/// phases execute ACK-first: a valid ACK commits even if the bundled frame is
-/// rejected, matching the TypeScript bilateral machine.
+/// What arrives for one account. `AckFrame` is the only proposal-carrying
+/// input. Its ACK is optional; when present, the two phases execute ACK-first:
+/// a valid ACK commits even if the bundled proposal is rejected, matching the
+/// TypeScript bilateral machine.
 #[derive(Clone, Debug)]
 pub enum AccountInputKind {
-    Frame(Box<IncomingFrame>),
     Ack(IncomingAck),
     AckFrame {
-        ack: IncomingAck,
+        ack: Option<IncomingAck>,
         frame: Box<IncomingFrame>,
     },
     Dispute(CounterpartyDispute),
@@ -38,8 +38,8 @@ pub enum AccountInputKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct AccountPeerInput {
-    pub envelope: AccountPeerEnvelope,
+pub struct AccountInput {
+    pub envelope: AccountInputEnvelope,
     pub kind: AccountInputKind,
 }
 
@@ -51,29 +51,29 @@ pub struct AccountInputRow {
     /// H=1 proposal for an Account absent from the resident forest.
     pub genesis_policy: Option<crate::EntityAccountGenesisPolicy>,
     /// Exact current board hash certified by the parent Entity for the peer.
-    /// It is local verification context, never copied from the peer envelope.
-    pub certified_board_authority: PeerBoardAuthority,
+    /// It is local verification context, never copied from the Account input envelope.
+    pub certified_board_authority: AccountInputBoardAuthority,
     /// Exact current/previous board record certified by the parent Entity for
     /// the Account owner. Duplicate-frame ACK reuse authenticates this local
     /// historical Hanko independently of the peer authority above.
-    pub local_certified_board_authority: PeerBoardAuthority,
-    pub input: AccountPeerInput,
+    pub local_certified_board_authority: AccountInputBoardAuthority,
+    pub input: AccountInput,
 }
 
-/// Parent-resolved board authority for one untrusted peer input.
+/// Parent-resolved board authority for one untrusted Account input.
 ///
 /// `Unresolved` is deliberately distinct from `Lazy`: absence in peer bytes
 /// proves nothing about registration. Only the parent Entity registry may
 /// turn it into `Lazy` or `Certified`, and Account execution fails loudly if
 /// that resolution step was skipped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PeerBoardAuthority {
+pub enum AccountInputBoardAuthority {
     Unresolved,
     Lazy,
     Certified(CertifiedBoardAuthority),
 }
 
-impl PeerBoardAuthority {
+impl AccountInputBoardAuthority {
     pub(crate) fn certified(&self) -> Result<Option<&CertifiedBoardAuthority>, BatchError> {
         match self {
             Self::Unresolved => Err(BatchError::BoardAuthorityUnresolved),
@@ -84,7 +84,7 @@ impl PeerBoardAuthority {
 }
 
 /// Parent Entity authority lookup. Implementations resolve only from the
-/// Entity-certified registry keyed by the peer; peer AccountInput bytes never
+/// Entity-certified registry keyed by the peer; AccountInput bytes never
 /// participate in this decision.
 pub trait CertifiedBoardAuthorityResolver {
     type Error;
@@ -92,7 +92,7 @@ pub trait CertifiedBoardAuthorityResolver {
     fn resolve_certified_board(
         &self,
         peer_entity_id: &[u8; 32],
-    ) -> Result<PeerBoardAuthority, Self::Error>;
+    ) -> Result<AccountInputBoardAuthority, Self::Error>;
 }
 
 impl AccountInputRow {
@@ -195,24 +195,11 @@ pub struct AccountInputResult {
     pub operation_index: u64,
     pub account_id: AccountId,
     pub verdict: AccountInputVerdict,
-    /// Exact transient Entity flush instruction produced by this Account
-    /// transition. It is deliberately not encoded as result evidence or
-    /// stored: the parent either bundles these bytes into a same-round frame
-    /// or publishes them as the Account response after Runtime WAL commit.
-    pub response: AccountResponseDirective,
-}
-
-#[derive(Clone, Debug)]
-pub enum AccountResponseDirective {
-    /// This input neither creates nor cancels an earlier response in the same
-    /// Entity batch. Stale and rejected traffic must not erase a prior ACK.
-    Preserve,
-    /// A pure ACK committed our pending frame, so an earlier forced response
-    /// for this Account in the same Entity batch is no longer current.
-    Clear,
-    /// Exact Account-authored response bytes. The Entity may only attach a
-    /// new proposal around this ACK; it must never reconstruct the response.
-    Force(Box<AccountPeerInput>),
+    /// Transient same-round response control. `Some(true)` forces the ACK
+    /// produced by an accepted/duplicate proposal, `Some(false)` cancels an
+    /// earlier force after our pending frame was ACKed, and `None` preserves
+    /// the earlier decision. No ACK bytes or durable state live here.
+    pub force_ack: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -239,7 +226,7 @@ pub struct ProposalRow {
     /// Exact Entity-local AccountInput authored by Account consensus. Runtime
     /// may add only the destination signer/runtime route; it must never
     /// reconstruct domain, dispute config, watch seed, ACK or proposal bytes.
-    pub outbound_input: Option<AccountPeerInput>,
+    pub outbound_input: Option<AccountInput>,
     /// The signed frame, absent when nothing survived the window.
     ///
     /// It carries no outputs: what the frame produced is released with the
@@ -288,9 +275,7 @@ impl ProposalRow {
     /// Borrow the exact frame carried to the counterparty.
     pub fn incoming_ref(&self) -> Option<&xln_rscore_engine::IncomingFrame> {
         match &self.outbound_input.as_ref()?.kind {
-            AccountInputKind::Frame(frame) | AccountInputKind::AckFrame { frame, .. } => {
-                Some(frame)
-            }
+            AccountInputKind::AckFrame { frame, .. } => Some(frame),
             AccountInputKind::Ack(_)
             | AccountInputKind::Dispute(_)
             | AccountInputKind::BoardHankoRefresh(_) => None,
@@ -386,9 +371,9 @@ fn dropped_rows(
         .collect()
 }
 
-fn outgoing_envelope(account: &AccountConsensus) -> AccountPeerEnvelope {
+fn outgoing_envelope(account: &AccountConsensus) -> AccountInputEnvelope {
     let replica = account.replica();
-    AccountPeerEnvelope {
+    AccountInputEnvelope {
         from_entity_id: *replica.owner().as_bytes(),
         to_entity_id: *replica.counterparty().as_bytes(),
         domain: replica.state().identity().domain().clone(),
@@ -416,7 +401,7 @@ fn outgoing_account_input(
     hanko: Vec<u8>,
     dispute: Option<&xln_rscore_engine::DisputeDraft>,
     bundled_ack: Option<&xln_rscore_engine::OutboundAck>,
-) -> AccountPeerInput {
+) -> AccountInput {
     let envelope = outgoing_envelope(account);
     let frame = IncomingFrame {
         frame,
@@ -426,109 +411,51 @@ fn outgoing_account_input(
     };
     let kind = match bundled_ack {
         Some(ack) => AccountInputKind::AckFrame {
-            ack: IncomingAck {
+            ack: Some(IncomingAck {
                 height: ack.height,
                 frame_hash: ack.frame_hash,
                 frame_hanko: Some(ack.frame_hanko.clone()),
                 dispute: ack.dispute.as_ref().map(dispute_input),
-            },
+            }),
             frame: Box::new(frame),
         },
-        None => AccountInputKind::Frame(Box::new(frame)),
+        None => AccountInputKind::AckFrame {
+            ack: None,
+            frame: Box::new(frame),
+        },
     };
-    AccountPeerInput { envelope, kind }
+    AccountInput { envelope, kind }
 }
 
-fn response_ack(verdict: &AccountInputVerdict) -> Option<IncomingAck> {
-    match verdict {
-        AccountInputVerdict::FrameCommitted {
-            height,
-            state_hash,
-            ack_hanko,
-            ack_dispute,
-            ..
-        }
-        | AccountInputVerdict::FrameDuplicate {
-            height,
-            state_hash,
-            ack_hanko,
-            ack_dispute,
-        } => Some(IncomingAck {
-            height: *height,
-            frame_hash: *state_hash,
-            frame_hanko: Some(ack_hanko.clone()),
-            dispute: ack_dispute.as_ref().map(dispute_input),
+pub(crate) fn outbound_ack_input(account: &AccountConsensus) -> Option<AccountInput> {
+    account.outbound_ack().map(|ack| AccountInput {
+        envelope: outgoing_envelope(account),
+        kind: AccountInputKind::Ack(IncomingAck {
+            height: ack.height,
+            frame_hash: ack.frame_hash,
+            frame_hanko: Some(ack.frame_hanko.clone()),
+            dispute: ack.dispute.as_ref().map(dispute_input),
         }),
-        AccountInputVerdict::AckFrameApplied { frame, .. } => response_ack(frame),
-        _ => None,
-    }
+    })
 }
 
-fn same_dispute_binding(
-    expected: &Option<xln_rscore_engine::CounterpartyDispute>,
-    stored: &Option<xln_rscore_engine::DisputeDraft>,
-) -> bool {
-    match (expected, stored) {
-        (None, None) => true,
-        (Some(expected), Some(stored)) => {
-            expected.hash == stored.hash
-                && expected.proof_body_hash == stored.proof_body_hash
-                && expected.nonce == stored.nonce
-                && expected.proposer_is_left == stored.proposer_is_left
-                && expected
-                    .hanko
-                    .as_ref()
-                    .is_none_or(|hanko| stored.hanko.as_ref() == Some(hanko))
+pub(crate) fn force_ack_directive(pure_ack: bool, verdict: &AccountInputVerdict) -> Option<bool> {
+    let requires_ack = match verdict {
+        AccountInputVerdict::FrameCommitted { .. } | AccountInputVerdict::FrameDuplicate { .. } => {
+            true
+        }
+        AccountInputVerdict::AckFrameApplied { frame, .. } => {
+            force_ack_directive(false, frame).unwrap_or(false)
         }
         _ => false,
+    };
+    if requires_ack {
+        Some(true)
+    } else if pure_ack && matches!(verdict, AccountInputVerdict::AckCommitted { .. }) {
+        Some(false)
+    } else {
+        None
     }
-}
-
-pub(crate) fn account_response_directive(
-    account_id: AccountId,
-    account: &AccountConsensus,
-    pure_ack: bool,
-    verdict: &AccountInputVerdict,
-) -> Result<AccountResponseDirective, BatchError> {
-    if let Some(expected) = response_ack(verdict) {
-        // The Account resident is the sole source after local certification:
-        // it contains the same ACK binding plus the freshly attached dispute
-        // Hanko. Rebuilding from the pre-attach verdict creates two bytewise
-        // representations of one required response and breaks AckFrame
-        // bundling during inbound genesis.
-        let stored = account
-            .outbound_ack()
-            .ok_or_else(|| BatchError::AccountsTree {
-                account_id,
-                detail: "ACCOUNT_ACK_STATE:MISSING".to_string(),
-            })?;
-        if stored.height != expected.height
-            || stored.frame_hash != expected.frame_hash
-            || expected.frame_hanko.as_deref() != Some(stored.frame_hanko.as_slice())
-            || !same_dispute_binding(&expected.dispute, &stored.dispute)
-        {
-            return Err(BatchError::AccountsTree {
-                account_id,
-                detail: "ACCOUNT_ACK_STATE:BINDING_MISMATCH".to_string(),
-            });
-        }
-        let ack = IncomingAck {
-            height: stored.height,
-            frame_hash: stored.frame_hash,
-            frame_hanko: Some(stored.frame_hanko.clone()),
-            dispute: stored.dispute.as_ref().map(dispute_input),
-        };
-        return Ok(AccountResponseDirective::Force(Box::new(
-            AccountPeerInput {
-                envelope: outgoing_envelope(account),
-                kind: AccountInputKind::Ack(ack),
-            },
-        )));
-    }
-    if pure_ack && matches!(verdict, AccountInputVerdict::AckCommitted { .. }) {
-        return Ok(AccountResponseDirective::Clear);
-    }
-    Ok(AccountResponseDirective::Preserve)
 }
 
 pub(crate) fn proposal_row(
@@ -584,7 +511,7 @@ pub(crate) fn apply_one(
     account_id: AccountId,
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    input: AccountPeerInput,
+    input: AccountInput,
     security: IncomingFrameSecurityContext<'_>,
     swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
 ) -> (AccountInputVerdict, bool) {
@@ -597,14 +524,51 @@ pub(crate) fn apply_one(
             false,
         );
     }
+    if !account.accepts_external_input() {
+        // TypeScript drops frozen AccountInput before ACK/replay or board
+        // verification can mutate the Account. J finality remains available
+        // through the separate Entity-owned envelope-update path.
+        return (
+            AccountInputVerdict::Failed("ACCOUNT_INPUT_STATUS_FROZEN".to_string()),
+            false,
+        );
+    }
     if let Some(authority) = peer_authority
         && let Err(error) = authority.assert_entity(&input.envelope.from_entity_id)
     {
         return (AccountInputVerdict::Failed(error.to_string()), false);
     }
     let verdict = match input.kind {
-        AccountInputKind::Frame(frame) => {
-            match apply_incoming_frame_with_authority(
+        AccountInputKind::Ack(ack) => {
+            match apply_incoming_ack_with_authority(
+                account,
+                &input.envelope,
+                clock,
+                ack,
+                peer_authority,
+            ) {
+                Ok(outcome) => ack_verdict(outcome),
+                Err(error) => AccountInputVerdict::Failed(error.to_string()),
+            }
+        }
+        AccountInputKind::AckFrame { ack, frame } => match ack {
+            Some(ack) => match apply_incoming_ack_frame_with_authority(
+                account,
+                identity,
+                &input.envelope,
+                ack,
+                *frame,
+                swap_market,
+                IncomingFrameSecurityContext {
+                    clock,
+                    peer_certified_board_authority: peer_authority,
+                    local_certified_board_authority: local_authority,
+                },
+            ) {
+                Ok(outcome) => ack_frame_verdict(outcome),
+                Err(error) => AccountInputVerdict::Failed(error.to_string()),
+            },
+            None => match apply_incoming_frame_with_authority(
                 account,
                 identity,
                 &input.envelope,
@@ -618,35 +582,7 @@ pub(crate) fn apply_one(
             ) {
                 Ok(outcome) => incoming_verdict(outcome),
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
-            }
-        }
-        AccountInputKind::Ack(ack) => {
-            match apply_incoming_ack_with_authority(
-                account,
-                &input.envelope,
-                clock,
-                ack,
-                peer_authority,
-            ) {
-                Ok(outcome) => ack_verdict(outcome),
-                Err(error) => AccountInputVerdict::Failed(error.to_string()),
-            }
-        }
-        AccountInputKind::AckFrame { ack, frame } => match apply_incoming_ack_frame_with_authority(
-            account,
-            identity,
-            &input.envelope,
-            ack,
-            *frame,
-            swap_market,
-            IncomingFrameSecurityContext {
-                clock,
-                peer_certified_board_authority: peer_authority,
-                local_certified_board_authority: local_authority,
             },
-        ) {
-            Ok(outcome) => ack_frame_verdict(outcome),
-            Err(error) => AccountInputVerdict::Failed(error.to_string()),
         },
         AccountInputKind::Dispute(dispute) => {
             match apply_standalone_dispute(account, &input.envelope, clock, dispute, peer_authority)
@@ -1339,7 +1275,7 @@ pub(crate) fn restore_checkpoint_account(
 pub(crate) fn inbound_genesis_account(
     account_id: AccountId,
     owner_entity_id: [u8; 32],
-    input: &AccountPeerInput,
+    input: &AccountInput,
     policy: &crate::EntityAccountGenesisPolicy,
 ) -> Result<AccountConsensus, BatchError> {
     if policy.public_pinned {
@@ -1371,9 +1307,7 @@ pub(crate) fn inbound_genesis_account(
         });
     };
     let frame_height = match &input.kind {
-        AccountInputKind::Frame(frame) | AccountInputKind::AckFrame { frame, .. } => {
-            frame.frame.height
-        }
+        AccountInputKind::AckFrame { frame, .. } => frame.frame.height,
         AccountInputKind::Ack(_)
         | AccountInputKind::Dispute(_)
         | AccountInputKind::BoardHankoRefresh(_) => {

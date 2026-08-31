@@ -2,6 +2,8 @@ import type {
   AccountDisputeHanko,
   AccountFrame,
   AccountAckFrame,
+  AccountTxBatch,
+  AccountFinality,
   AccountFrameProposal,
   AccountInput,
   AccountState,
@@ -48,8 +50,12 @@ const cloneFrameProposal = (proposal: AccountFrameProposal): AccountFrameProposa
   ...(proposal.disputeHanko ? { disputeHanko: cloneDisputeHanko(proposal.disputeHanko) } : {}),
 });
 
-export function cloneIsolatedAccountInput<T extends AccountInput>(input: T): T;
-export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
+export function cloneIsolatedAccountInput<
+  T extends AccountInput | AccountTxBatch | AccountFinality,
+>(input: T): T;
+export function cloneIsolatedAccountInput(
+  input: AccountInput | AccountTxBatch | AccountFinality,
+): AccountInput | AccountTxBatch | AccountFinality {
   if (input.kind === 'enqueue') {
     return { kind: 'enqueue', txs: input.txs.map(cloneIsolatedAccountTx) };
   }
@@ -73,15 +79,13 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
               }
             : { ...input.finality },
       };
-    case 'frame':
-      return { ...base, kind: input.kind, proposal: cloneFrameProposal(input.proposal) };
     case 'ack':
       return { ...base, kind: input.kind, ack: cloneAckFrame(input.ack) };
     case 'ack_frame':
       return {
         ...base,
         kind: input.kind,
-        ack: cloneAckFrame(input.ack),
+        ...(input.ack === undefined ? {} : { ack: cloneAckFrame(input.ack) }),
         proposal: cloneFrameProposal(input.proposal),
       };
     case 'dispute':

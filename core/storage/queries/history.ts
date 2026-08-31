@@ -5,7 +5,7 @@ import {
 import { findAccountByCounterparty } from '../../account/state/account-lookup';
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica, RoutedEntityInput } from '../../runtime/types';
-import type { AccountFrame, AccountPeerInput, AccountTx } from '../../types/account';
+import type { AccountFrame, AccountInput, AccountTx } from '../../types/account';
 import type { FrameLogEntry } from '../../types/logging';
 import type {
   PersistedActivityJournal,
@@ -64,7 +64,7 @@ type PersistedAccountFrameRecord = Readonly<{
   entityId: string;
   counterpartyId: string;
   accountHeight: number;
-  source: 'ackCommit' | 'peerCommit';
+  source: 'ackCommit' | 'counterpartyCommit';
   frame: AccountFrame;
   runtimeHeight: number;
   timestamp: number;
@@ -72,8 +72,8 @@ type PersistedAccountFrameRecord = Readonly<{
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
-const peerInputMatchesAccount = (
-  input: AccountPeerInput,
+const accountInputMatchesAccount = (
+  input: AccountInput,
   entityId: string,
   counterpartyId: string,
 ): boolean => {
@@ -84,13 +84,13 @@ const peerInputMatchesAccount = (
   return (from === owner && to === peer) || (from === peer && to === owner);
 };
 
-const proposalOf = (input: AccountPeerInput): AccountFrame | null =>
-  input.kind === 'frame' || input.kind === 'ack_frame'
+const proposalOf = (input: AccountInput): AccountFrame | null =>
+  input.kind === 'ack_frame'
     ? input.proposal.frame
     : null;
 
-const accountInputsOf = (envelopes: readonly RoutedEntityInput[]): AccountPeerInput[] => {
-  const inputs: AccountPeerInput[] = [];
+const accountInputsOf = (envelopes: readonly RoutedEntityInput[]): AccountInput[] => {
+  const inputs: AccountInput[] = [];
   for (const envelope of envelopes) {
     for (const tx of envelope.entityTxs ?? []) {
       if (tx.type === 'accountInput') inputs.push(tx.data);
@@ -131,7 +131,7 @@ const readAccountFrameHistoryRecords = async (
       ...accountInputsOf(payloads.runtimeOutputs ?? []),
     ];
     for (const input of inputs) {
-      if (!peerInputMatchesAccount(input, entityId, counterpartyId)) continue;
+      if (!accountInputMatchesAccount(input, entityId, counterpartyId)) continue;
       const frame = proposalOf(input);
       if (!frame || frame.height > maxAccountHeight) continue;
       const identity = `${frame.height}:${frame.stateHash}`;
@@ -142,7 +142,7 @@ const readAccountFrameHistoryRecords = async (
         entityId: normalize(entityId),
         counterpartyId: normalize(counterpartyId),
         accountHeight: frame.height,
-        source: normalize(input.fromEntityId) === normalize(entityId) ? 'ackCommit' : 'peerCommit',
+        source: normalize(input.fromEntityId) === normalize(entityId) ? 'ackCommit' : 'counterpartyCommit',
         frame: structuredClone(frame),
         runtimeHeight,
         timestamp: runtimeFrame.timestamp,

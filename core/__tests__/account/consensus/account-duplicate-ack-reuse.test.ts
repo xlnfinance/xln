@@ -4,7 +4,7 @@ import { buildDuplicateCommittedAckFrame } from '../../../account/consensus/inco
 import type { AccountInputSecurityContext } from '../../../account/consensus/dispute/deadline-policy';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import type { AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
 
 const LEFT = `0x${'11'.repeat(32)}`;
@@ -56,8 +56,8 @@ const account = (): AccountReplica => ({
   },
 });
 
-const duplicateInput = (current: AccountReplica): Extract<AccountPeerInput, { kind: 'frame' }> => ({
-  kind: 'frame',
+const duplicateInput = (current: AccountReplica): Extract<AccountInput, { kind: 'ack_frame' }> => ({
+  kind: 'ack_frame',
   fromEntityId: RIGHT,
   toEntityId: LEFT,
   domain: { ...current.state.domain },

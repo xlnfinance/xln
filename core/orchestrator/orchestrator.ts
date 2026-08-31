@@ -946,7 +946,42 @@ const creditGrantedByNativeHub = (
   return row ? BigInt(row.hubGranted) : 0n;
 };
 
-const fundNativeH1BootstrapReserves = async (entityId: string): Promise<void> => {
+const fundLocalJOperator = async (
+  rpcUrl: string,
+  chainId: number,
+  signerId: string,
+): Promise<void> => {
+  if (chainId !== 31_337 && chainId !== 31_338) return;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2_000);
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: safeStringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'anvil_setBalance',
+        params: [signerId, '0x8ac7230489e80000'],
+      }),
+      signal: controller.signal,
+    });
+    const payload = requireBoundaryRecord(
+      await response.json(),
+      'RUST_HUB_J_OPERATOR_FUND_RESPONSE',
+    );
+    if (!response.ok || payload['error'] !== undefined || payload['result'] !== null) {
+      throw new Error(`RUST_HUB_J_OPERATOR_FUND_FAILED:${safeStringify(payload)}`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const fundNativeH1BootstrapReserves = async (
+  entityId: string,
+  signerId: string,
+): Promise<void> => {
   const startedAt = Date.now();
   const primary = resolveMeshJurisdictionConfig(args.rpcUrl);
   const jurisdictions = [primary, ...resolveSecondaryJurisdictions(primary.rpc)];
@@ -977,6 +1012,7 @@ const fundNativeH1BootstrapReserves = async (entityId: string): Promise<void> =>
   for (const { jurisdiction, entityIds } of targets) {
     if (entityIds.length === 0) continue;
     const rpcUrl = resolveLocalMarketMakerRpcUrl(jurisdiction.rpc);
+    await fundLocalJOperator(rpcUrl, jurisdiction.chainId, signerId);
     const adapter: JAdapter = await createJAdapter({
       mode: 'rpc',
       chainId: jurisdiction.chainId,
@@ -1070,7 +1106,7 @@ const driveNativeH1Bootstrap = async (
     elapsedMs: Date.now() - bootstrapStartedAt,
     entityId,
   });
-  await fundNativeH1BootstrapReserves(entityId);
+  await fundNativeH1BootstrapReserves(entityId, signerId);
   logNativeH1Bootstrap('bootstrap_reserves_funded', {
     elapsedMs: Date.now() - bootstrapStartedAt,
     entityId,

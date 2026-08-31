@@ -10,6 +10,24 @@ export type HltProfile = (typeof HLT_PROFILES)[number];
 
 export type HltEngineSelection = Readonly<{ engine: HltEngine; profile: HltProfile }>;
 
+export type RustLivePaymentCounts = Readonly<{
+  users: number;
+  payments: number;
+  offeredPerSecond: number;
+  durationSeconds: number;
+}>;
+
+export type RustLivePaymentEvidence = 'functional-smoke' | 'tps-authority';
+
+export type RustLiveSameCounts = Readonly<{
+  users: number;
+  orders: number;
+  offeredOrdersPerSecond: number;
+  durationSeconds: number;
+}>;
+
+export type RustLiveSameEvidence = 'functional-smoke' | 'tps-authority';
+
 /**
  * Live TPS authority (docs/fints/AGENTS): one sovereign H1 run,
  * deliveredPayments/deliveredElapsed. medium = the canonical 1,000 user
@@ -23,22 +41,20 @@ export const HLT_PROFILE_PLAN: Readonly<Record<HltProfile, Readonly<{
   heavy: { users: 10_000, runtimesPerProcess: 200 },
 };
 
-export const assertRustLivePaymentCardinality = (counts: Readonly<{
-  users: number;
-  payments: number;
-  offeredPerSecond: number;
-  durationSeconds: number;
-}>): void => {
+const isRustLivePaymentTpsAuthority = (counts: RustLivePaymentCounts): boolean =>
+  Number.isSafeInteger(counts.users) &&
+  Number.isSafeInteger(counts.payments) &&
+  Number.isSafeInteger(counts.offeredPerSecond) &&
+  Number.isSafeInteger(counts.durationSeconds) &&
+  counts.users >= 1_000 &&
+  counts.payments >= 1_000 &&
+  counts.offeredPerSecond >= 1_000 &&
+  counts.durationSeconds === 20 &&
+  counts.payments === counts.offeredPerSecond * counts.durationSeconds;
+
+export const assertRustLivePaymentCardinality = (counts: RustLivePaymentCounts): void => {
   if (
-    !Number.isSafeInteger(counts.users) ||
-    !Number.isSafeInteger(counts.payments) ||
-    !Number.isSafeInteger(counts.offeredPerSecond) ||
-    !Number.isSafeInteger(counts.durationSeconds) ||
-    counts.users < 1_000 ||
-    counts.payments < 1_000 ||
-    counts.offeredPerSecond < 1_000 ||
-    counts.durationSeconds !== 20 ||
-    counts.payments !== counts.offeredPerSecond * counts.durationSeconds
+    !isRustLivePaymentTpsAuthority(counts)
   ) {
     throw new Error(
       `HLT_RUST_LIVE_CARDINALITY_TOO_SMALL:users=${counts.users}:` +
@@ -47,6 +63,89 @@ export const assertRustLivePaymentCardinality = (counts: Readonly<{
     );
   }
 };
+
+const isRustLivePaymentSmoke = (counts: RustLivePaymentCounts): boolean =>
+  counts.users === 1_000 &&
+  counts.payments === 5_000 &&
+  counts.offeredPerSecond === 1_000 &&
+  counts.durationSeconds === 5;
+
+/**
+ * The only short Rust H1 run is a cardinality-real five-second smoke. It uses
+ * the production path but is deliberately not accepted by the TPS gate.
+ */
+export const classifyRustLivePaymentRun = (
+  counts: RustLivePaymentCounts,
+): RustLivePaymentEvidence => {
+  if (isRustLivePaymentSmoke(counts)) return 'functional-smoke';
+  assertRustLivePaymentCardinality(counts);
+  return 'tps-authority';
+};
+
+/** Result rates exist only for the exact 20-second TPS authority. */
+export const rustLivePaymentRateEvidence = (
+  evidence: RustLivePaymentEvidence,
+  counts: Readonly<{ offeredPerSecond: number; deliveredPayments: number; deliveredElapsedMs: number }>,
+): Readonly<{ offeredPaymentRate: number; deliveredTps: number }> | Readonly<Record<never, never>> =>
+  evidence === 'tps-authority'
+    ? {
+        offeredPaymentRate: counts.offeredPerSecond,
+        deliveredTps: counts.deliveredPayments * 1_000 / counts.deliveredElapsedMs,
+      }
+    : {};
+
+const isRustLiveSameTpsAuthority = (counts: RustLiveSameCounts): boolean =>
+  Number.isSafeInteger(counts.users) &&
+  Number.isSafeInteger(counts.orders) &&
+  Number.isSafeInteger(counts.offeredOrdersPerSecond) &&
+  Number.isSafeInteger(counts.durationSeconds) &&
+  counts.users >= 1_000 &&
+  counts.users % 2 === 0 &&
+  counts.orders >= 1_000 &&
+  counts.offeredOrdersPerSecond >= 1_000 &&
+  counts.durationSeconds === 20 &&
+  counts.orders === counts.offeredOrdersPerSecond * counts.durationSeconds;
+
+const isRustLiveSameSmoke = (counts: RustLiveSameCounts): boolean =>
+  counts.users === 1_000 &&
+  counts.orders === 5_000 &&
+  counts.offeredOrdersPerSecond === 1_000 &&
+  counts.durationSeconds === 5;
+
+/** Same-chain functional smoke is real production execution but never TPS evidence. */
+export const classifyRustLiveSameRun = (
+  counts: RustLiveSameCounts,
+): RustLiveSameEvidence => {
+  if (isRustLiveSameSmoke(counts)) return 'functional-smoke';
+  if (!isRustLiveSameTpsAuthority(counts)) {
+    throw new Error(
+      `HLT_RUST_SAME_CARDINALITY_INVALID:users=${counts.users}:orders=${counts.orders}:` +
+      `offered=${counts.offeredOrdersPerSecond}:duration=${counts.durationSeconds}:requiredDuration=20`,
+    );
+  }
+  return 'tps-authority';
+};
+
+/** Rate fields are absent from the five-second functional smoke by construction. */
+export const rustLiveSameRateEvidence = (
+  evidence: RustLiveSameEvidence,
+  counts: Readonly<{
+    offeredOrdersPerSecond: number;
+    matchedEconomicSwaps: number;
+    matchedElapsedMs: number;
+    fullySettledElapsedMs: number;
+  }>,
+): Readonly<{
+  offeredOrderRate: number;
+  matchedTps: number;
+  fullySettledTps: number;
+}> | Readonly<Record<never, never>> => evidence === 'tps-authority'
+  ? {
+      offeredOrderRate: counts.offeredOrdersPerSecond,
+      matchedTps: counts.matchedEconomicSwaps * 1_000 / counts.matchedElapsedMs,
+      fullySettledTps: counts.matchedEconomicSwaps * 1_000 / counts.fullySettledElapsedMs,
+    }
+  : {};
 
 export const assertRustLiveMixedCardinality = (counts: Readonly<{
   users: number;
@@ -149,6 +248,8 @@ export type RustH1Metrics = Readonly<{
   totalStorageMicros: number;
   totalPublicationMicros: number;
   totalRuntimeEntityInputs: number;
+  /** Frame counts for EntityInput cardinalities: 0,1,2..7,8..31,32..127,128..511,512+. */
+  runtimeEntityInputFrameBuckets: readonly number[];
   totalAccountInputs: number;
   totalCanonicalInputBytes: number;
   totalEntityTxsSelected: number;
@@ -173,6 +274,8 @@ export type RustH1Metrics = Readonly<{
   activeShards: number;
   workerItems: readonly number[];
   workerNanos: readonly number[];
+  workerFoldLeaves: readonly number[];
+  workerFoldNanos: readonly number[];
   entityWorkerItems: readonly number[];
   entityWorkerNanos: readonly number[];
   accountPhaseMetrics: readonly RustAccountPhaseMetric[];
@@ -192,7 +295,7 @@ export type RustAccountPhaseMetric = Readonly<{
   touchedRows: number;
   touchedShards: number;
   workersWithWork: number;
-  valueClones: number;
+  shardHandleClones: number;
   candidateBaseReads: number;
   continuationRounds: number;
   restartRounds: number;
@@ -207,6 +310,8 @@ export type RustH1EconomicPhaseMetrics = Readonly<{
   storageMicros: number;
   publicationMicros: number;
   runtimeEntityInputs: number;
+  /** Economic-window delta of RustH1Metrics.runtimeEntityInputFrameBuckets. */
+  runtimeEntityInputFrameBuckets: readonly number[];
   accountInputs: number;
   canonicalInputBytes: number;
   entityTxsSelected: number;
@@ -229,6 +334,8 @@ export type RustH1EconomicPhaseMetrics = Readonly<{
   workersWithWork: number;
   workerItems: readonly number[];
   workerNanos: readonly number[];
+  workerFoldLeaves: readonly number[];
+  workerFoldNanos: readonly number[];
   entityWorkerItems: readonly number[];
   entityWorkerNanos: readonly number[];
   accountPhaseMetrics: readonly RustAccountPhaseMetric[];
@@ -250,14 +357,18 @@ export const diffRustH1EconomicMetrics = (
     before.workerItems.length !== after.workerItems.length ||
     before.workerNanos.length !== after.workerNanos.length ||
     after.workerItems.length !== after.workerNanos.length ||
+    before.workerFoldLeaves.length !== after.workerFoldLeaves.length ||
+    before.workerFoldNanos.length !== after.workerFoldNanos.length ||
     before.entityWorkerItems.length !== after.entityWorkerItems.length ||
     before.entityWorkerNanos.length !== after.entityWorkerNanos.length ||
+    after.workerFoldLeaves.length !== after.workerFoldNanos.length ||
     after.entityWorkerItems.length !== after.entityWorkerNanos.length
   ) {
     throw new Error('HLT_RUST_H1_WORKER_METRIC_CARDINALITY_DRIFT');
   }
   const workerDelta = (
-    field: 'workerItems' | 'workerNanos' | 'entityWorkerItems' | 'entityWorkerNanos',
+    field: 'workerItems' | 'workerNanos' | 'workerFoldLeaves' | 'workerFoldNanos' |
+      'entityWorkerItems' | 'entityWorkerNanos',
   ): readonly number[] => after[field].map((value, index) => {
     const start = before[field][index]!;
     if (value < start) throw new Error(`HLT_RUST_H1_WORKER_METRIC_REGRESSION:${field}:${index}`);
@@ -265,8 +376,24 @@ export const diffRustH1EconomicMetrics = (
   });
   const workerItems = workerDelta('workerItems');
   const workerNanos = workerDelta('workerNanos');
+  const workerFoldLeaves = workerDelta('workerFoldLeaves');
+  const workerFoldNanos = workerDelta('workerFoldNanos');
   const entityWorkerItems = workerDelta('entityWorkerItems');
   const entityWorkerNanos = workerDelta('entityWorkerNanos');
+  if (
+    before.runtimeEntityInputFrameBuckets.length !== 7 ||
+    after.runtimeEntityInputFrameBuckets.length !== 7
+  ) throw new Error('HLT_RUST_H1_FRAME_BUCKET_CARDINALITY');
+  const runtimeEntityInputFrameBuckets = after.runtimeEntityInputFrameBuckets.map((value, index) => {
+    const start = before.runtimeEntityInputFrameBuckets[index]!;
+    if (value < start) throw new Error(`HLT_RUST_H1_FRAME_BUCKET_REGRESSION:${index}`);
+    return value - start;
+  });
+  const frames = delta('totalFrames');
+  const bucketedFrames = runtimeEntityInputFrameBuckets.reduce((sum, count) => sum + count, 0);
+  if (bucketedFrames !== frames) {
+    throw new Error(`HLT_RUST_H1_FRAME_BUCKET_COVERAGE:${bucketedFrames}:${frames}`);
+  }
   if (
     before.accountPhaseMetrics.length !== after.accountPhaseMetrics.length ||
     before.accountPhaseMetrics.some((metric, index) => metric.kind !== after.accountPhaseMetrics[index]?.kind)
@@ -275,7 +402,7 @@ export const diffRustH1EconomicMetrics = (
     'invocations', 'coordinatorWallMicros', 'workerSamples', 'workerWorkSumMicros',
     'workerCriticalPathMicros', 'workerPhaseSpanMicros', 'coordinatorDispatchJoinMicros',
     'workerBarrierWaitSumMicros', 'coordinatorFoldMicros', 'touchedRows', 'touchedShards',
-    'workersWithWork', 'valueClones', 'candidateBaseReads', 'continuationRounds', 'restartRounds',
+    'workersWithWork', 'shardHandleClones', 'candidateBaseReads', 'continuationRounds', 'restartRounds',
   ] as const;
   const accountPhaseMetrics = after.accountPhaseMetrics.map((finish, index) => {
     const start = before.accountPhaseMetrics[index]!;
@@ -290,7 +417,7 @@ export const diffRustH1EconomicMetrics = (
     } as RustAccountPhaseMetric;
   });
   return {
-    frames: delta('totalFrames'),
+    frames,
     outputsPublished: delta('totalOutputsPublished'),
     envelopesPublished: delta('totalEnvelopesPublished'),
     applyMicros: delta('totalApplyMicros'),
@@ -298,6 +425,7 @@ export const diffRustH1EconomicMetrics = (
     storageMicros: delta('totalStorageMicros'),
     publicationMicros: delta('totalPublicationMicros'),
     runtimeEntityInputs: delta('totalRuntimeEntityInputs'),
+    runtimeEntityInputFrameBuckets,
     accountInputs: delta('totalAccountInputs'),
     canonicalInputBytes: delta('totalCanonicalInputBytes'),
     entityTxsSelected: delta('totalEntityTxsSelected'),
@@ -320,9 +448,91 @@ export const diffRustH1EconomicMetrics = (
     workersWithWork: workerItems.filter((items, index) => items > 0 || workerNanos[index]! > 0).length,
     workerItems,
     workerNanos,
+    workerFoldLeaves,
+    workerFoldNanos,
     entityWorkerItems,
     entityWorkerNanos,
     accountPhaseMetrics,
+  };
+};
+
+export const summarizeRustH1WorkerExecution = (
+  metrics: RustH1EconomicPhaseMetrics,
+  configuredWorkers: number,
+  economicOperations: number,
+): Readonly<Record<string, number>> => {
+  if (!Number.isSafeInteger(configuredWorkers) || configuredWorkers < 1) {
+    throw new Error(`HLT_RUST_H1_WORKERS_INVALID:${configuredWorkers}`);
+  }
+  if (!Number.isSafeInteger(economicOperations) || economicOperations < 1) {
+    throw new Error(`HLT_RUST_H1_OPERATIONS_INVALID:${economicOperations}`);
+  }
+  if (metrics.runtimeEntityInputFrameBuckets.reduce((sum, count) => sum + count, 0) !== metrics.frames) {
+    throw new Error('HLT_RUST_H1_FRAME_BUCKET_COVERAGE');
+  }
+  if (
+    metrics.workerItems.length !== configuredWorkers ||
+    metrics.workerNanos.length !== configuredWorkers ||
+    metrics.workerFoldLeaves.length !== configuredWorkers ||
+    metrics.workerFoldNanos.length !== configuredWorkers ||
+    metrics.entityWorkerItems.length !== configuredWorkers ||
+    metrics.entityWorkerNanos.length !== configuredWorkers
+  ) {
+    throw new Error(
+      `HLT_RUST_H1_WORKER_COVERAGE_CARDINALITY:${configuredWorkers}:` +
+      `${metrics.workerItems.length}:${metrics.workerNanos.length}:` +
+      `${metrics.workerFoldLeaves.length}:${metrics.workerFoldNanos.length}:` +
+      `${metrics.entityWorkerItems.length}:${metrics.entityWorkerNanos.length}`,
+    );
+  }
+  const activeAccountWorkers = metrics.workerItems.filter((items, index) =>
+    items > 0 && metrics.workerNanos[index]! > 0).length;
+  if (activeAccountWorkers !== configuredWorkers) {
+    throw new Error(`HLT_RUST_H1_ACCOUNT_WORKER_IDLE:${activeAccountWorkers}:${configuredWorkers}`);
+  }
+  const activeEntityWorkers = metrics.entityWorkerItems.filter((items, index) =>
+    items > 0 && metrics.entityWorkerNanos[index]! > 0).length;
+  const minWorkerItems = Math.min(...metrics.workerItems);
+  const maxWorkerItems = Math.max(...metrics.workerItems);
+  const capacityMicros = metrics.accountWorkerPhaseSpanMicros * configuredWorkers;
+  const phase = (kind: RustAccountPhaseMetric['kind']): RustAccountPhaseMetric => {
+    const found = metrics.accountPhaseMetrics.find(metric => metric.kind === kind);
+    if (!found) throw new Error(`HLT_RUST_H1_ACCOUNT_PHASE_MISSING:${kind}`);
+    return found;
+  };
+  const accountRootRequests =
+    phase('outboundReset').invocations + phase('outboundContinue').invocations;
+  return {
+    configuredWorkers,
+    activeAccountWorkers,
+    activeEntityWorkers,
+    frames: metrics.frames,
+    framesPerMillionOperations: Math.round(metrics.frames * 1_000_000 / economicOperations),
+    framesWithZeroEntityInputs: metrics.runtimeEntityInputFrameBuckets[0]!,
+    framesWithOneEntityInput: metrics.runtimeEntityInputFrameBuckets[1]!,
+    framesWithTwoToSevenEntityInputs: metrics.runtimeEntityInputFrameBuckets[2]!,
+    framesWithEightToThirtyOneEntityInputs: metrics.runtimeEntityInputFrameBuckets[3]!,
+    framesWithThirtyTwoToOneTwentySevenEntityInputs: metrics.runtimeEntityInputFrameBuckets[4]!,
+    framesWithOneTwentyEightToFiveElevenEntityInputs: metrics.runtimeEntityInputFrameBuckets[5]!,
+    framesWithAtLeastFiveTwelveEntityInputs: metrics.runtimeEntityInputFrameBuckets[6]!,
+    runtimeEntityInputsPerMillionOperations:
+      Math.round(metrics.runtimeEntityInputs * 1_000_000 / economicOperations),
+    accountInputsPerMillionOperations:
+      Math.round(metrics.accountInputs * 1_000_000 / economicOperations),
+    canonicalInputBytesPerOperation: Math.round(metrics.canonicalInputBytes / economicOperations),
+    accountRootRequests,
+    accountRootRequestsPerMillionOperations:
+      Math.round(accountRootRequests * 1_000_000 / economicOperations),
+    accountFoldLeaves: metrics.workerFoldLeaves.reduce((sum, count) => sum + count, 0),
+    accountFoldMicros: Math.round(
+      metrics.workerFoldNanos.reduce((sum, nanos) => sum + nanos, 0) / 1_000,
+    ),
+    minWorkerItems,
+    maxWorkerItems,
+    workerItemImbalancePpm: Math.round((maxWorkerItems - minWorkerItems) * 1_000_000 / maxWorkerItems),
+    accountWorkerUsefulPpm: capacityMicros === 0
+      ? 0
+      : Math.round(metrics.accountWorkerWorkSumMicros * 1_000_000 / capacityMicros),
   };
 };
 
@@ -402,19 +612,25 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     throw new Error('HLT_RUST_H1_METRIC_INVALID:openSwapOfferIdsTruncated');
   }
   const integerArray = (
-    field: 'workerItems' | 'workerNanos' | 'entityWorkerItems' | 'entityWorkerNanos',
+    field: 'workerItems' | 'workerNanos' | 'entityWorkerItems' | 'entityWorkerNanos' |
+      'workerFoldLeaves' | 'workerFoldNanos' | 'runtimeEntityInputFrameBuckets',
+    expectedLength?: number,
   ): readonly number[] => {
     const raw = record[field];
     if (
       !Array.isArray(raw) || raw.length < 1 || raw.length > 16 ||
+      (expectedLength !== undefined && raw.length !== expectedLength) ||
       raw.some(value => !Number.isSafeInteger(value) || Number(value) < 0)
     ) throw new Error(`HLT_RUST_H1_METRIC_INVALID:${field}:${safeStringify(raw)}`);
     return raw.map(Number);
   };
   const workerItems = integerArray('workerItems');
   const workerNanos = integerArray('workerNanos');
+  const workerFoldLeaves = integerArray('workerFoldLeaves');
+  const workerFoldNanos = integerArray('workerFoldNanos');
   const entityWorkerItems = integerArray('entityWorkerItems');
   const entityWorkerNanos = integerArray('entityWorkerNanos');
+  const runtimeEntityInputFrameBuckets = integerArray('runtimeEntityInputFrameBuckets', 7);
   if (
     workerItems.length !== workerNanos.length ||
     entityWorkerItems.length !== entityWorkerNanos.length ||
@@ -431,7 +647,7 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     'invocations', 'coordinatorWallMicros', 'workerSamples', 'workerWorkSumMicros',
     'workerCriticalPathMicros', 'workerPhaseSpanMicros', 'coordinatorDispatchJoinMicros',
     'workerBarrierWaitSumMicros', 'coordinatorFoldMicros', 'touchedRows', 'touchedShards',
-    'workersWithWork', 'valueClones', 'candidateBaseReads', 'continuationRounds', 'restartRounds',
+    'workersWithWork', 'shardHandleClones', 'candidateBaseReads', 'continuationRounds', 'restartRounds',
   ] as const;
   const accountPhaseMetrics = rawAccountPhases.map((value, index): RustAccountPhaseMetric => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -462,8 +678,11 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     openSwapOfferIdsTruncated,
     workerItems,
     workerNanos,
+    workerFoldLeaves,
+    workerFoldNanos,
     entityWorkerItems,
     entityWorkerNanos,
+    runtimeEntityInputFrameBuckets,
     accountPhaseMetrics,
   } as RustH1Metrics;
 };

@@ -331,7 +331,7 @@ describe('PersistentEntityAccountMap', () => {
       toEntityId: RIGHT,
       domain: { ...shell.state.domain },
       disputeConfig: { ...shell.state.disputeConfig },
-      kind: 'frame',
+      kind: 'ack_frame',
       proposal: { frame: { ...shell.currentFrame, accountTxs: [], deltas: [] } },
     };
     shell.lastOutboundAckFrame = {

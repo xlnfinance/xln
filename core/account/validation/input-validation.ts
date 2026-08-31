@@ -8,7 +8,7 @@ import type {
   AccountDisputeHanko,
   AccountAckFrame,
   AccountFrameProposal,
-  AccountPeerInput,
+  AccountInput,
   AccountStateDomain,
 } from '../../types/account';
 import { decodeAccountFrame } from './frame-validation';
@@ -36,7 +36,7 @@ const decodeAccountDomain = (value: unknown, code: string): AccountStateDomain =
 const decodeAccountDisputeConfig = (
   value: unknown,
   code: string,
-): AccountPeerInput['disputeConfig'] => {
+): AccountInput['disputeConfig'] => {
   const config = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     config,
@@ -149,14 +149,14 @@ const decodeBoardHankoRefresh = (value: unknown, code: string): AccountBoardHank
 };
 
 /**
- * Decode an Account peer message before it can enter Entity replay.
+ * Decode an Account input before it can enter Entity replay.
  *
  * A signed Account frame is still untrusted bytes at a storage or transport
  * boundary. Exact decoding here prevents a valid outer EntityTx tag from
  * smuggling malformed ACK, proposal, dispute, or board-hanko-refresh data into the
  * bilateral reducer.
  */
-export const decodeAccountPeerInput = (value: unknown, code: string): AccountPeerInput => {
+export const decodeAccountInput = (value: unknown, code: string): AccountInput => {
   const input = requireBoundaryRecord(value, code);
   const kind = requireString(input['kind'], `${code}_KIND`);
   const baseKeys = ['kind', 'fromEntityId', 'toEntityId', 'domain', 'disputeConfig'] as const;
@@ -176,23 +176,20 @@ export const decodeAccountPeerInput = (value: unknown, code: string): AccountPee
   };
 
   switch (kind) {
-    case 'frame':
-      requireExactBoundaryKeys(input, [...baseKeys, 'proposal'], optionalBaseKeys, `${code}_FIELDS`);
-      return { ...base, kind, proposal: decodeFrameProposal(input['proposal'], `${code}_PROPOSAL`) };
     case 'ack':
       requireExactBoundaryKeys(input, [...baseKeys, 'ack'], optionalBaseKeys, `${code}_FIELDS`);
       return { ...base, kind, ack: decodeAckFrame(input['ack'], `${code}_ACK`) };
     case 'ack_frame':
       requireExactBoundaryKeys(
         input,
-        [...baseKeys, 'ack', 'proposal'],
-        optionalBaseKeys,
+        [...baseKeys, 'proposal'],
+        [...optionalBaseKeys, 'ack'],
         `${code}_FIELDS`,
       );
       return {
         ...base,
         kind,
-        ack: decodeAckFrame(input['ack'], `${code}_ACK`),
+        ...(input['ack'] === undefined ? {} : { ack: decodeAckFrame(input['ack'], `${code}_ACK`) }),
         proposal: decodeFrameProposal(input['proposal'], `${code}_PROPOSAL`),
       };
     case 'dispute':

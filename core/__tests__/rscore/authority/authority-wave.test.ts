@@ -18,7 +18,6 @@ import { waveCreateOp } from '../../../rscore/shadow-wire';
 import type {
   AccountFrame,
   AccountInput,
-  AccountPeerInput,
   AccountReplica,
   AccountTx,
 } from '../../../types/account';
@@ -64,7 +63,7 @@ const frameOf = (height: number): AccountFrame => ({
   stateHash: `0x${'44'.repeat(32)}`,
 });
 
-const ackFrame = (height: number, fromEntityId = B, toEntityId = A): AccountPeerInput => ({
+const ackFrame = (height: number, fromEntityId = B, toEntityId = A): AccountInput => ({
   kind: 'ack_frame',
   fromEntityId,
   toEntityId,
@@ -218,7 +217,7 @@ describe('authority wave', () => {
         accountId: B,
         resultKind: 'applied',
         expectedVerdict: {
-          kind: 'peer',
+          kind: 'input',
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
@@ -369,7 +368,7 @@ describe('authority wave guards', () => {
         accountId: B,
         resultKind: 'applied',
         expectedVerdict: {
-          kind: 'peer',
+          kind: 'input',
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
@@ -382,7 +381,7 @@ describe('authority wave guards', () => {
         accountId: B,
         resultKind: 'applied',
         expectedVerdict: {
-          kind: 'peer',
+          kind: 'input',
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,

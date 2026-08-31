@@ -7,7 +7,8 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import {
-  assertRustLivePaymentCardinality,
+  classifyRustLivePaymentRun,
+  classifyRustLiveSameRun,
   parseHltEngineSelection,
 } from './rust/rust-h1';
 import { hltLanePortsPerSlot } from './lanes/lane-port-capacity';
@@ -29,7 +30,7 @@ if (authorityEvidence && process.env['XLN_MM_CROSS_J'] !== '0') {
   throw new Error('HLT_AUTHORITY_EVIDENCE_REQUIRES_MM_CROSS_J_DISABLED');
 }
 const selection = parseHltEngineSelection(process.env);
-if (selection.engine === 'rust' && workload !== 'payments' && workload !== 'mixed') {
+if (selection.engine === 'rust' && workload !== 'payments' && workload !== 'same' && workload !== 'mixed') {
   throw new Error(`HLT_RUST_LIVE_WORKLOAD_UNSUPPORTED:${workload}`);
 }
 const rustRatePerUser = Number(process.env['XLN_HLT_RATE_PER_USER'] || '1');
@@ -39,11 +40,18 @@ if (selection.engine === 'rust') {
   const submittedPayments = offeredPayments * rustDurationSeconds;
   if (!Number.isSafeInteger(rustRatePerUser) || rustRatePerUser < 1) throw new Error(`HLT_RATE_PER_USER_INVALID:${rustRatePerUser}`);
   if (!Number.isSafeInteger(rustDurationSeconds) || rustDurationSeconds < 1) throw new Error(`HLT_DURATION_INVALID:${rustDurationSeconds}`);
-  if (workload !== 'mixed') {
-    assertRustLivePaymentCardinality({
+  if (workload === 'payments') {
+    classifyRustLivePaymentRun({
       users,
       payments: submittedPayments,
       offeredPerSecond: offeredPayments,
+      durationSeconds: rustDurationSeconds,
+    });
+  } else if (workload === 'same') {
+    classifyRustLiveSameRun({
+      users,
+      orders: submittedPayments,
+      offeredOrdersPerSecond: offeredPayments,
       durationSeconds: rustDurationSeconds,
     });
   }

@@ -943,7 +943,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         } catch (error) {
           // Structurally paired but cryptographically corrupt AccountInput must
           // fail loud at the native Account verifier and roll back both legs.
-          expect(String(error), corruption.name).toContain('ACCOUNT_PEER_');
+          expect(String(error), corruption.name).toContain('ACCOUNT_INPUT_');
         }
         reducerRejectedProposalPairs += 1;
       }
@@ -1163,7 +1163,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           expect(applied.rejectedAtomicPairs, corruption.name).toHaveLength(1);
           expect(applied.appliedEntityInputs, corruption.name).toEqual([ordinaryHubInput]);
         } catch (error) {
-          expect(String(error), corruption.name).toContain('ACCOUNT_PEER_');
+          expect(String(error), corruption.name).toContain('ACCOUNT_INPUT_');
         }
         reducerRejectedAckPairs += 1;
       }

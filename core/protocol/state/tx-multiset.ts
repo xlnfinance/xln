@@ -69,10 +69,10 @@ const accountInputBodyDigest = (input: object): string => {
 const compactAccountInputFingerprint = (data: unknown): string | undefined => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
   const input = data as CompactAccountInput;
-  if (input.kind !== 'frame' && input.kind !== 'ack_frame' && input.kind !== 'ack') return undefined;
+  if (input.kind !== 'ack_frame' && input.kind !== 'ack') return undefined;
   if (typeof input.fromEntityId !== 'string' || typeof input.toEntityId !== 'string') return undefined;
   const proposal = input.kind === 'ack' ? undefined : input.proposal;
-  const ack = input.kind === 'frame' ? undefined : input.ack;
+  const ack = input.ack;
   const envelope = safeStringify([input.domain ?? null, input.disputeConfig ?? null, input.watchSeed ?? null]);
   return `accountInput:${input.kind}|${input.fromEntityId}|${input.toEntityId}|${envelope}` +
     `|${proposal

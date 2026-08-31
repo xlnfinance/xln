@@ -43,12 +43,14 @@ import {
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   startP2P,
+  startJurisdictionWatchers,
   startRuntimeLoop,
   stopP2PAndWait,
   stopRuntimeLoopAndWait,
   validateRuntimeInputAdmission,
 } from '../../../../runtime';
 import { registerEnvChangeCallback } from '../../../../runtime/loop/loop-environment';
+import { ensureLiveJAdapterForReplica } from '../../../../runtime/recovery/j-adapter-restore';
 import { enqueueRuntimeInput } from '../../../../runtime/mempool/input-queue';
 import { decodeRuntimeInput } from '../../../../runtime/decode';
 import type { RuntimeReplica } from '../../../../runtime/types';
@@ -141,6 +143,16 @@ const resolveHltJurisdiction = (): JReplica => {
   const configured = entries.find(entry => entry.primary === true && entry.status === 'active')
     ?? entries.find(entry => entry.status === 'active');
   if (!configured) throw new Error('HLT_SOVEREIGN_JURISDICTION_ACTIVE_MISSING');
+  const portBase = Number(process.env['XLN_PORT_BASE']);
+  if (configured.rpc.startsWith('/') && (!Number.isSafeInteger(portBase) || portBase < 1)) {
+    throw new Error(`HLT_SOVEREIGN_JURISDICTION_RPC_PORT_BASE_INVALID:${String(portBase)}`);
+  }
+  const rpc = configured.rpc.startsWith('/')
+    ? new URL(configured.rpc, `http://127.0.0.1:${portBase + 4}`).toString()
+    : configured.rpc;
+  if (!URL.canParse(rpc)) {
+    throw new Error(`HLT_SOVEREIGN_JURISDICTION_RPC_INVALID:${configured.rpc}`);
+  }
   return {
     name: configured.name,
     blockNumber: 0n,
@@ -154,8 +166,9 @@ const resolveHltJurisdiction = (): JReplica => {
       ? {}
       : { entityProviderDeploymentBlock: configured.entityProviderDeploymentBlock }),
     contracts: { ...configured.contracts },
-    rpcs: [configured.rpc],
+    rpcs: [rpc],
     chainId: configured.chainId,
+    watcherConfirmationDepth: 0,
   };
 };
 
@@ -179,18 +192,23 @@ const response = (payload: unknown, status = 200): Response =>
 type PendingHostBatch = Readonly<{
   entries: ReadonlyArray<Readonly<{ env: RuntimeReplica; input: ReturnType<typeof decodeRuntimeInput> }>>;
   resolve: (value: Response) => void;
+  waitForCommit: boolean;
   wave: number;
 }>;
 
 const pendingHostBatches = new Map<number, PendingHostBatch>();
 let nextHostBatchWave = 0;
+let drainingHostBatches = false;
 
-const drainHostBatches = (): void => {
-  while (true) {
-    const batch = pendingHostBatches.get(nextHostBatchWave);
-    if (!batch) return;
-    pendingHostBatches.delete(nextHostBatchWave);
-    try {
+const drainHostBatches = async (): Promise<void> => {
+  if (drainingHostBatches) return;
+  drainingHostBatches = true;
+  try {
+    while (true) {
+      const batch = pendingHostBatches.get(nextHostBatchWave);
+      if (!batch) return;
+      pendingHostBatches.delete(nextHostBatchWave);
+      try {
       // Validate the complete host wave before mutating any Runtime queue.
       // Queue acceptance is not a protocol receipt: bilateral Account state
       // and ACK drain remain the only financial completion evidence.
@@ -205,30 +223,90 @@ const drainHostBatches = (): void => {
           );
         }
       }
-      // The authenticated host queue owns these validated bytes now. Return
-      // the ingress result before CPU-heavy sovereign Runtime loops can delay
-      // flushing the HTTP body; committed completion and Account ACK drain,
-      // never this process-local response, remain the financial authority.
-      batch.resolve(response({ ok: true, wave: batch.wave, accepted: batch.entries.length }));
-      setTimeout(() => {
-        try {
+        if (batch.waitForCommit) {
+          // Preparation is explicitly outside the offered window. Limit each
+          // worker to a bounded bootstrap group and do not admit the next group
+          // until these canonical Runtime transitions have committed in RAM.
+          const commitStartedAt = performance.now();
+          const priorHeights = batch.entries.map(entry => Number(entry.env.state.height));
           for (const entry of batch.entries) enqueueRuntimeInput(entry.env, entry.input);
-        } catch (error) {
-          const message = `HLT_HOST_ACCEPTED_BATCH_ENQUEUE_FATAL:wave=${batch.wave}:` +
-            (error instanceof Error ? error.message : String(error));
-          console.error(message);
-          if (isShardWorker) postShardStatus({ type: 'fatal', error: message });
-          void stop(1);
+          const phaseProbe = setTimeout(() => {
+            const phases = new Map<string, number>();
+            for (const entry of batch.entries) {
+              const phase = entry.env.infrastructure?.runtimeFramePhase ?? 'idle';
+              phases.set(phase, (phases.get(phase) ?? 0) + 1);
+            }
+            console.log(
+              `HLT_HOST_SETUP_PHASE wave=${batch.wave} elapsedMs=${Math.ceil(performance.now() - commitStartedAt)} ` +
+              `phases=${safeStringify(Object.fromEntries([...phases].sort()))}`,
+            );
+          }, 3_000);
+          const committed = await Promise.all(batch.entries.map((entry, index) => waitForCommittedCondition(
+            entry.env,
+            () => {
+              return entry.env.infrastructure?.stateMutationInFlight !== true &&
+                Number(entry.env.state.height) > priorHeights[index]!;
+            },
+            20_000,
+          ))).finally(() => clearTimeout(phaseProbe));
+          if (committed.some(value => !value)) {
+            const heights = batch.entries.map((entry, index) => ({
+              runtimeId: entry.env.runtimeId,
+              before: priorHeights[index],
+              after: Number(entry.env.state.height),
+              lifecycle: entry.env.infrastructure?.lifecyclePhase ?? null,
+              loopActive: entry.env.infrastructure?.loopActive ?? null,
+              loopPromise: Boolean(entry.env.infrastructure?.loopPromise),
+              processing: Boolean(entry.env.infrastructure?.processingPromise),
+              phase: entry.env.infrastructure?.runtimeFramePhase ?? null,
+              stateMutationInFlight: entry.env.infrastructure?.stateMutationInFlight ?? false,
+              inFlightEntityInputs: entry.env.infrastructure?.inFlightEntityInputs ?? 0,
+              wakeRequested: entry.env.infrastructure?.wakeRequested ?? null,
+              hasWakeWaiter: Boolean(entry.env.infrastructure?.wakeLoop),
+              watchersPaused: entry.env.infrastructure?.jurisdictionWatchersPaused ?? false,
+              queuedAt: entry.env.runtimeMempool.queuedAt ?? null,
+              runtimeTxs: entry.env.runtimeMempool.runtimeTxs.length,
+              entityInputs: entry.env.runtimeMempool.entityInputs.length,
+              jInputs: entry.env.runtimeMempool.jInputs?.length ?? 0,
+              fatal: entry.env.infrastructure?.fatalDebugPayload ?? null,
+            }));
+            throw new Error(
+              `HLT_HOST_RUNTIME_INPUT_COMMIT_TIMEOUT:wave=${batch.wave}:heights=${safeStringify(heights)}`,
+            );
+          }
+          console.log(
+            `HLT_HOST_SETUP_BATCH_COMMITTED wave=${batch.wave} entries=${batch.entries.length} ` +
+            `elapsedMs=${Math.ceil(performance.now() - commitStartedAt)}`,
+          );
+          batch.resolve(response({ ok: true, wave: batch.wave, accepted: batch.entries.length }));
+        } else {
+          // Offered load measures queue admission separately from financial
+          // completion, which is proven by the Account ledger and ACK drain.
+          batch.resolve(response({ ok: true, wave: batch.wave, accepted: batch.entries.length }));
+          setTimeout(() => {
+            try {
+              for (const entry of batch.entries) enqueueRuntimeInput(entry.env, entry.input);
+            } catch (error) {
+              const message = `HLT_HOST_ACCEPTED_BATCH_ENQUEUE_FATAL:wave=${batch.wave}:` +
+                (error instanceof Error ? error.message : String(error));
+              console.error(message);
+              if (isShardWorker) postShardStatus({ type: 'fatal', error: message });
+              void stop(1);
+            }
+          }, 0);
         }
-      }, 0);
-    } catch (error) {
-      batch.resolve(response({
-        ok: false,
-        wave: batch.wave,
-        error: error instanceof Error ? error.message : String(error),
-      }, 400));
+      } catch (error) {
+        batch.resolve(response({
+          ok: false,
+          wave: batch.wave,
+          error: error instanceof Error ? error.message : String(error),
+        }, 400));
+      }
+      nextHostBatchWave += 1;
     }
-    nextHostBatchWave += 1;
+  } finally {
+    drainingHostBatches = false;
+    if (pendingHostBatches.has(nextHostBatchWave)) void drainHostBatches();
   }
 };
 
@@ -245,11 +323,15 @@ const handleHostRuntimeInputBatch = async (
     );
     requireExactBoundaryKeys(
       root,
-      ['wave', 'entries'],
+      ['wave', 'entries', 'waitForCommit'],
       [],
       'HLT_HOST_RUNTIME_INPUT_BATCH_FIELDS_INVALID',
     );
     const wave = requireBoundaryInteger(root['wave'], 'HLT_HOST_RUNTIME_INPUT_BATCH_WAVE_INVALID');
+    if (typeof root['waitForCommit'] !== 'boolean') {
+      throw new Error('HLT_HOST_RUNTIME_INPUT_BATCH_WAIT_FOR_COMMIT_INVALID');
+    }
+    const waitForCommit = root['waitForCommit'];
     const rawEntries = root['entries'];
     if (!Number.isSafeInteger(wave) || wave < 0) {
       throw new Error(`HLT_HOST_RUNTIME_INPUT_BATCH_WAVE_INVALID:${wave}`);
@@ -291,10 +373,10 @@ const handleHostRuntimeInputBatch = async (
       );
     }
     return await new Promise<Response>(resolve => {
-      pendingHostBatches.set(wave, { entries, resolve, wave });
+      pendingHostBatches.set(wave, { entries, resolve, waitForCommit, wave });
       // A later HTTP request may finish parsing first. Hold it until every
       // earlier wave arrives so each sovereign Runtime sees exact user order.
-      drainHostBatches();
+      void drainHostBatches();
     });
   } catch (error) {
     return response({
@@ -365,7 +447,9 @@ const handleHostReadiness = async (
     const ready = await Promise.all(runtimeIds.map(async runtimeId => {
       const env = runtimes.get(runtimeId);
       if (!env) throw new Error(`HLT_HOST_READINESS_RUNTIME_MISSING:${runtimeId}`);
-      const p2p = startP2P(env);
+      // Population configuration owns transport startup. Readiness only
+      // observes it; restarting 50 transports per poll starves this worker.
+      const p2p = env.infrastructure?.p2p ?? null;
       if (!p2p) return false;
       if (!env.gossip.profiles.has(hubEntityId)) await p2p.admitSharedProfiles([hubProfile]);
       const directReady = p2p.prepareDirectEntityRoutes([hubEntityId]);
@@ -434,13 +518,29 @@ const handleHostPopulationConfigure = async (
     if (missing.length > 0) {
       throw new Error(`HLT_HOST_POPULATION_CONFIGURE_ENTITY_NOT_COMMITTED:${safeStringify(missing)}`);
     }
-    for (const target of targets) {
-      const env = runtimes.get(target.runtimeId)!;
-      startP2P(env, {
-        relayUrls: [],
-        advertiseEntityIds: announceProfiles ? [target.entityId] : [],
-      });
-    }
+    // Start transport in bounded host turns so Bun can flush this response and
+    // continue servicing Runtime frame I/O between groups.
+    let next = 0;
+    const startNext = (): void => {
+      try {
+        const end = Math.min(targets.length, next + 5);
+        for (; next < end; next += 1) {
+          const target = targets[next]!;
+          const env = runtimes.get(target.runtimeId)!;
+          startP2P(env, {
+            relayUrls: [],
+            advertiseEntityIds: announceProfiles ? [target.entityId] : [],
+          });
+        }
+        if (next < targets.length) setTimeout(startNext, 0);
+      } catch (error) {
+        const message = `HLT_HOST_POPULATION_P2P_FATAL:${error instanceof Error ? error.message : String(error)}`;
+        console.error(message);
+        if (isShardWorker) postShardStatus({ type: 'fatal', error: message });
+        void stop(1);
+      }
+    };
+    setTimeout(startNext, 0);
     return response({ ok: true, configured: targets.length });
   } catch (error) {
     return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
@@ -716,21 +816,74 @@ const handleHostQuiescence = async (
       const env = runtimes.get(runtimeId)!;
       return [...env.state.eReplicas.values()].flatMap(entity =>
         [...entity.state.accounts.entries()].flatMap(([counterpartyId, account]) => {
-          if (!account.pendingFrame) return [];
+          if (!account.pendingFrame && !account.activeDispute) return [];
           return [{
             runtimeId,
             entityId: entity.entityId,
             counterpartyId,
             currentHeight: account.currentHeight,
-            pendingFrameHeight: account.pendingFrame.height,
-            pendingFrameStateHash: account.pendingFrame.stateHash,
-            pendingFrameTxTypes: account.pendingFrame.accountTxs.map(tx => tx.type),
+            status: account.status,
+            activeDisputeObservedOnChain: account.activeDispute?.observedOnChain === true,
+            pendingFrameHeight: account.pendingFrame?.height ?? null,
+            pendingFrameStateHash: account.pendingFrame?.stateHash ?? null,
+            pendingFrameTxTypes: account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [],
             pendingInputKind: account.pendingAccountInput?.kind ?? null,
             lastOutboundAckHeight: account.lastOutboundAckFrame?.height ?? null,
+            accountMempoolTxTypes: account.mempool.map(tx =>
+              tx.type === 'settle_transition' ? `${tx.type}:${tx.data.kind}` : tx.type
+            ),
+            settlementWorkspaceStatus: account.state.settlementWorkspace?.status ?? null,
+            settlementHankos: {
+              left: account.state.settlementWorkspace?.leftHanko !== undefined,
+              right: account.state.settlementWorkspace?.rightHanko !== undefined,
+            },
+            postSettlementProofHankos: {
+              left: account.state.settlementWorkspace?.postSettlementDisputeProof?.leftHanko !== undefined,
+              right: account.state.settlementWorkspace?.postSettlementDisputeProof?.rightHanko !== undefined,
+            },
           }];
         }));
     });
     return response({ ok: true, ...totals, ...(details.length > 0 ? { details } : {}) });
+  } catch (error) {
+    return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+};
+
+/** Enable the real production watcher for one sovereign Runtime. Payment-only
+ * HLT keeps the other 999 watchers paused so they cannot stampede one Anvil. */
+const handleHostJurisdictionWatcherStart = async (
+  request: Request,
+  authEnv: RuntimeReplica,
+): Promise<Response> => {
+  const authError = requireDaemonControlAuth(request, authEnv);
+  if (authError) return authError;
+  try {
+    const body = requireBoundaryRecord(
+      await parseTaggedControlBody(request, HLT_HOST_BATCH_MAX_BODY_BYTES),
+      'HLT_HOST_JURISDICTION_WATCHER_START_INVALID',
+    );
+    requireExactBoundaryKeys(
+      body,
+      ['runtimeId'],
+      [],
+      'HLT_HOST_JURISDICTION_WATCHER_START_FIELDS_INVALID',
+    );
+    const runtimeId = String(body['runtimeId'] || '').trim().toLowerCase();
+    const env = runtimes.get(runtimeId);
+    if (!env) throw new Error(`HLT_HOST_JURISDICTION_WATCHER_RUNTIME_UNKNOWN:${runtimeId}`);
+    const jurisdictionName = String(env.activeJurisdiction || '').trim();
+    if (!jurisdictionName) throw new Error('HLT_HOST_JURISDICTION_WATCHER_ACTIVE_J_MISSING');
+    const adapter = await ensureLiveJAdapterForReplica(env, jurisdictionName, {
+      allowBrowserVm: false,
+      attempts: 1,
+      context: `hlt-settlement:${runtimeId}`,
+    });
+    if (!adapter) throw new Error('HLT_HOST_JURISDICTION_WATCHER_ADAPTER_MISSING');
+    (env.infrastructure ??= {}).jurisdictionWatchersPaused = false;
+    startJurisdictionWatchers(env);
+    if (!adapter.isWatching()) throw new Error('HLT_HOST_JURISDICTION_WATCHER_NOT_RUNNING');
+    return response({ ok: true, runtimeId, jurisdictionName });
   } catch (error) {
     return response({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
   }
@@ -938,6 +1091,16 @@ const bootRuntime = async (laneSeed: string, index: number): Promise<void> => {
       enabled: false,
     },
   };
+  // A primary-jurisdiction-only HLT has no user-side J event workload. Starting
+  // one RPC watcher per co-located sovereign Runtime would create 1,000
+  // identical pollers against one local Anvil and starve their Runtime loops.
+  // H1 keeps its production J watcher; cross-j HLT leaves user watchers enabled.
+  if (
+    process.env['XLN_MESH_PRIMARY_JURISDICTION_ONLY'] === '1' &&
+    process.env['XLN_MM_CROSS_J'] === '0'
+  ) {
+    (env.infrastructure ??= {}).jurisdictionWatchersPaused = true;
+  }
   startRuntimeLoop(env, {
     onFatal: async payload => {
       console.error(`HLT_SOVEREIGN_RUNTIME_FATAL ${safeStringify({ runtimeId, payload })}`);
@@ -1105,6 +1268,10 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/hlt/quiescence' && request.method === 'POST') {
         if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
         return handleHostQuiescence(request, env);
+      }
+      if (pathname === '/api/hlt/jurisdiction-watcher-start' && request.method === 'POST') {
+        if (port !== firstPort) return response({ ok: false, error: 'Not found' }, 404);
+        return handleHostJurisdictionWatcherStart(request, env);
       }
       return handleControl(request, env, pathname);
     },

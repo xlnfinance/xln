@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use thiserror::Error;
-use xln_rscore_batch::{AccountInputKind, AccountPeerInput};
+use xln_rscore_batch::{AccountInput, AccountInputKind};
 
 use super::frame::{CanonicalEntityTx, HashType};
 
@@ -22,7 +22,7 @@ pub struct LocalEntityOutput {
 
 #[derive(Clone, Debug)]
 pub enum LocalEntityOutputTx {
-    AccountInput(Box<AccountPeerInput>),
+    AccountInput(Box<AccountInput>),
     /// Canonical Entity transaction routed to a different Runtime. This is
     /// the same `{type,data}` payload committed in the producing Entity frame;
     /// Runtime adds transport routing only after WAL fsync.
@@ -57,7 +57,7 @@ impl LocalEntityOutput {
     }
 
     pub fn account_input(
-        mut input: AccountPeerInput,
+        mut input: AccountInput,
         witnesses: &EntityHankoWitnessMap,
     ) -> Result<Self, EntityOutputError> {
         attach_account_input_hankos(&mut input, witnesses)?;
@@ -192,13 +192,14 @@ fn attach_dispute_hanko(
 }
 
 fn attach_account_input_hankos(
-    input: &mut AccountPeerInput,
+    input: &mut AccountInput,
     witnesses: &EntityHankoWitnessMap,
 ) -> Result<(), EntityOutputError> {
     match &mut input.kind {
-        AccountInputKind::Frame(frame) => attach_frame_hankos(frame, witnesses),
         AccountInputKind::AckFrame { ack, frame } => {
-            attach_ack_hankos(ack, witnesses)?;
+            if let Some(ack) = ack {
+                attach_ack_hankos(ack, witnesses)?;
+            }
             attach_frame_hankos(frame, witnesses)
         }
         AccountInputKind::Ack(ack) => attach_ack_hankos(ack, witnesses),
@@ -237,7 +238,7 @@ fn attach_account_input_hankos(
 mod tests {
     use xln_rscore_batch::AccountInputKind;
     use xln_rscore_engine::{
-        AccountDisputeConfig, AccountDomain, AccountFrame, AccountPeerEnvelope,
+        AccountDisputeConfig, AccountDomain, AccountFrame, AccountInputEnvelope,
         CounterpartyDispute, DepositoryAddress, IncomingFrame, WatchSeed,
     };
 
@@ -249,8 +250,8 @@ mod tests {
         let dispute_hash = [0x22_u8; 32];
         let frame_hanko = vec![0x31, 0x32];
         let dispute_hanko = vec![0x41, 0x42];
-        let input = AccountPeerInput {
-            envelope: AccountPeerEnvelope {
+        let input = AccountInput {
+            envelope: AccountInputEnvelope {
                 from_entity_id: [0xaa; 32],
                 to_entity_id: [0xbb; 32],
                 domain: AccountDomain::new(
@@ -264,25 +265,28 @@ mod tests {
                     WatchSeed::parse(&format!("0x{}", "dd".repeat(32))).expect("watch seed"),
                 ),
             },
-            kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                frame: AccountFrame {
-                    height: 1,
-                    timestamp: 2,
-                    j_height: 3,
-                    txs: Vec::new(),
-                    prev_frame_hash: "genesis".into(),
-                    account_state_root: [0xee; 32],
-                },
-                state_hash: frame_hash,
-                frame_hanko: Some(frame_hanko.clone()),
-                dispute: Some(CounterpartyDispute {
-                    hanko: None,
-                    hash: dispute_hash,
-                    proof_body_hash: [0x23; 32],
-                    nonce: 4,
-                    proposer_is_left: true,
+            kind: AccountInputKind::AckFrame {
+                ack: None,
+                frame: Box::new(IncomingFrame {
+                    frame: AccountFrame {
+                        height: 1,
+                        timestamp: 2,
+                        j_height: 3,
+                        txs: Vec::new(),
+                        prev_frame_hash: "genesis".into(),
+                        account_state_root: [0xee; 32],
+                    },
+                    state_hash: frame_hash,
+                    frame_hanko: Some(frame_hanko.clone()),
+                    dispute: Some(CounterpartyDispute {
+                        hanko: None,
+                        hash: dispute_hash,
+                        proof_body_hash: [0x23; 32],
+                        nonce: 4,
+                        proposer_is_left: true,
+                    }),
                 }),
-            })),
+            },
         };
         let witnesses = EntityHankoWitnessMap::from([
             (
@@ -304,7 +308,7 @@ mod tests {
         let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0] else {
             panic!("account input expected")
         };
-        let AccountInputKind::Frame(frame) = &input.kind else {
+        let AccountInputKind::AckFrame { ack: None, frame } = &input.kind else {
             panic!("frame output");
         };
         assert_eq!(frame.frame_hanko.as_ref(), Some(&vec![0x31, 0x32]));
@@ -321,8 +325,8 @@ mod tests {
     fn account_output_reuses_certified_frame_and_dispute_hankos_without_resigning() {
         let frame_hanko = vec![0x31, 0x32];
         let dispute_hanko = vec![0x41, 0x42];
-        let input = AccountPeerInput {
-            envelope: AccountPeerEnvelope {
+        let input = AccountInput {
+            envelope: AccountInputEnvelope {
                 from_entity_id: [0xaa; 32],
                 to_entity_id: [0xbb; 32],
                 domain: AccountDomain::new(
@@ -334,32 +338,35 @@ mod tests {
                 dispute_config: AccountDisputeConfig::new(10, 20).expect("dispute config"),
                 watch_seed: None,
             },
-            kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                frame: AccountFrame {
-                    height: 1,
-                    timestamp: 2,
-                    j_height: 3,
-                    txs: Vec::new(),
-                    prev_frame_hash: "genesis".into(),
-                    account_state_root: [0xee; 32],
-                },
-                state_hash: [0x11; 32],
-                frame_hanko: Some(frame_hanko.clone()),
-                dispute: Some(CounterpartyDispute {
-                    hanko: Some(dispute_hanko.clone()),
-                    hash: [0x22; 32],
-                    proof_body_hash: [0x23; 32],
-                    nonce: 4,
-                    proposer_is_left: true,
+            kind: AccountInputKind::AckFrame {
+                ack: None,
+                frame: Box::new(IncomingFrame {
+                    frame: AccountFrame {
+                        height: 1,
+                        timestamp: 2,
+                        j_height: 3,
+                        txs: Vec::new(),
+                        prev_frame_hash: "genesis".into(),
+                        account_state_root: [0xee; 32],
+                    },
+                    state_hash: [0x11; 32],
+                    frame_hanko: Some(frame_hanko.clone()),
+                    dispute: Some(CounterpartyDispute {
+                        hanko: Some(dispute_hanko.clone()),
+                        hash: [0x22; 32],
+                        proof_body_hash: [0x23; 32],
+                        nonce: 4,
+                        proposer_is_left: true,
+                    }),
                 }),
-            })),
+            },
         };
         let output = LocalEntityOutput::account_input(input, &EntityHankoWitnessMap::new())
             .expect("historical certified witnesses remain valid");
         let LocalEntityOutputTx::AccountInput(input) = &output.entity_txs[0] else {
             panic!("account input expected")
         };
-        let AccountInputKind::Frame(frame) = &input.kind else {
+        let AccountInputKind::AckFrame { ack: None, frame } = &input.kind else {
             panic!("frame output");
         };
         assert_eq!(frame.frame_hanko.as_ref(), Some(&frame_hanko));

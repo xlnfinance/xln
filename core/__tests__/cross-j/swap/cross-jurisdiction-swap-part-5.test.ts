@@ -264,7 +264,7 @@ describe('cross-jurisdiction target dispute route selection', () => {
       }],
     };
     account.pendingAccountInput = {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: account.proofHeader.fromEntity,
       toEntityId: account.proofHeader.toEntity,
       domain: structuredClone(account.state.domain),

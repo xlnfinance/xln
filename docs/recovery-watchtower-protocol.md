@@ -773,7 +773,7 @@ active backlog.
      `recovery_bundle_response` as live, non-queued messages and fails closed
      when the target runtime is offline.
    - done: `RuntimeWsClient.requestRecoveryBundles()` provides a correlated
-     request/response Promise API with timeout and offline-peer rejection.
+     request/response Promise API with timeout and offline-Account input rejection.
    - done: recovery discovery can wrap explicit runtime websocket peer
      endpoints as `RuntimeRecoveryPeerSource` entries, rejects runtime
      mismatches before socket open, and does not infer `/ws` from stored `/rpc`

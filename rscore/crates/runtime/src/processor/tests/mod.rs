@@ -426,6 +426,140 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
 }
 
 #[test]
+fn local_prepare_dispute_freezes_the_existing_account_in_its_durable_runtime_frame() {
+    let path = path();
+    let _ = std::fs::remove_dir_all(&path);
+    let replica = processor_replica();
+    let key = entity_key(&replica);
+    let owner = entity_state(&replica).entity.entity_id.clone();
+    let peer = format!("0x{}", "ff".repeat(32));
+    let account_id = AccountId::from_bytes(
+        *EntityId::parse(&peer)
+            .expect("fixture peer Entity")
+            .as_bytes(),
+    );
+    let initial_accounts_root = entity_state(&replica).accounts_root;
+    let input = RuntimeEntityInput::decode(json!({
+        "entityId": owner,
+        "signerId": key.signer_id,
+        "entityTxs": [{
+            "type": "prepareDispute",
+            "data": {
+                "counterpartyEntityId": peer,
+                "description": "local durable prepare reproduction",
+                "minCooldownMs": 10,
+            },
+        }],
+    }))
+    .expect("local prepareDispute input");
+    let store = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
+        .expect("local prepare store");
+    let processor = DurableRuntimeProcessor::new(
+        replica,
+        store,
+        EntityRouteTable::new([]).expect("empty routes"),
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("local prepare signer"),
+    )
+    .expect("local prepare processor");
+    let ingress = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        SOURCE_SEED,
+        SOURCE_SIGNER,
+    ))
+    .expect("local prepare ingress");
+    let mut service = ResidentRuntimeService::new(
+        processor,
+        ingress,
+        Box::new(
+            CanonicalEntityInfraMaterializer::new(json!({
+                "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+                "swapTakerFeeBps": 0,
+                "jurisdictionId": null,
+                "pairPolicies": [],
+            }))
+            .expect("local prepare materializer"),
+        ),
+    )
+    .expect("local prepare service");
+
+    assert!(
+        service
+            .account_status(&key, account_id, vec![])
+            .expect("initial Account view")
+            .expect("existing Account")
+            .active,
+        "fixture Account must start active",
+    );
+    let report = service
+        .process_local_entity_inputs_at(vec![input], 200)
+        .expect("local prepareDispute apply")
+        .expect("local prepareDispute Runtime frame");
+    assert_eq!(report.runtime_entity_inputs, 1);
+    assert_eq!(report.entity_txs_selected, 1);
+    assert_eq!(report.entity_txs_pending, 0);
+    let commitments = report.commitments.as_ref().expect("frame commitments");
+    assert_eq!(commitments.height, 1);
+    let committed_accounts_root = commitments
+        .entities
+        .first()
+        .expect("Entity commitment")
+        .accounts_root;
+    assert_eq!(
+        service
+            .sync_committed()
+            .expect("local prepare fsync")
+            .expect("local prepare durable report")
+            .durable_height,
+        Some(1),
+    );
+    let frame_events = service
+        .processor()
+        .replica()
+        .expect("post-commit replica")
+        .e_replicas
+        .get(&key)
+        .expect("post-commit Entity replica")
+        .entity_consensus
+        .certified_frame_head
+        .as_ref()
+        .expect("post-commit Entity frame")
+        .frame
+        .events
+        .clone();
+    assert!(
+        !service
+            .account_status(&key, account_id, vec![])
+            .expect("post-commit Account view")
+            .expect("existing Account after prepare")
+            .active,
+        "prepareDispute must freeze the resident Account; frame events: {frame_events:?}",
+    );
+    assert_ne!(committed_accounts_root, initial_accounts_root);
+    assert_eq!(
+        committed_accounts_root,
+        entity_state(service.processor().replica().expect("post-frame replica")).accounts_root,
+        "the mutated Account root must belong to the same Runtime frame",
+    );
+
+    service.shutdown().expect("local prepare shutdown");
+    drop(service);
+    let mut reopened = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
+        .expect("reopen local prepare store");
+    assert_eq!(
+        reopened
+            .recover()
+            .expect("recover local prepare frame")
+            .checkpoint
+            .as_ref()
+            .map(|row| row.height),
+        Some(1),
+    );
+    drop(reopened);
+    std::fs::remove_dir_all(path).expect("remove local prepare fixture");
+}
+
+#[test]
 fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
     let path = path();
     let _ = std::fs::remove_dir_all(&path);

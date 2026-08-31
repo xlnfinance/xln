@@ -1,5 +1,5 @@
 import type { AccountTx } from '../../types/account';
-import { decodeAccountPeerInput } from '../../account/validation/input-validation';
+import { decodeAccountInput } from '../../account/validation/input-validation';
 import { parseAccountJClaimNode } from '../../account/j-claims/j-claim-codec';
 import { validateJReplicas } from '../../storage/wal/runtime-machine-schema/j';
 import { normalizeTsWorkerAccountId } from './sharding';
@@ -10,6 +10,7 @@ import {
 } from './worker-state';
 import type {
   TsAccountWorkerInboundPayload,
+  TsAccountWorkerCertifiedBoard,
   TsAccountWorkerInitPayload,
   TsAccountWorkerOutboundPayload,
   TsAccountWorkerPhasePayload,
@@ -38,6 +39,28 @@ const requireInteger = (value: unknown, code: string): number => {
 const requireBoolean = (value: unknown, code: string): boolean => {
   if (typeof value !== 'boolean') throw new Error(code);
   return value;
+};
+
+const requireBytes32 = (value: unknown, code: string): string => {
+  const normalized = requireString(value, code).toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(code);
+  return normalized;
+};
+
+const decodeCertifiedBoard = (
+  value: unknown,
+  code: string,
+): TsAccountWorkerCertifiedBoard | undefined => {
+  if (value === undefined) return undefined;
+  const row = requireRecord(value, code);
+  return {
+    entityId: normalizeTsWorkerAccountId(requireString(row['entityId'], `${code}_ENTITY`)),
+    boardHash: requireBytes32(row['boardHash'], `${code}_BOARD_HASH`),
+    previousBoardHash: requireBytes32(row['previousBoardHash'], `${code}_PREVIOUS_BOARD_HASH`),
+    previousBoardValidUntil: requireInteger(row['previousBoardValidUntil'], `${code}_PREVIOUS_VALID_UNTIL`),
+    activatedAtJHeight: requireInteger(row['activatedAtJHeight'], `${code}_ACTIVATED_HEIGHT`),
+    logIndex: requireInteger(row['logIndex'], `${code}_LOG_INDEX`),
+  };
 };
 
 const pairs = (input: Record<string, unknown>, field: string): Array<readonly [unknown, unknown]> =>
@@ -115,35 +138,72 @@ const decodeInboundPayload = (
     if (rawInitialAccount !== undefined && worker.accounts.has(accountId)) {
       throw new Error(`TS_ACCOUNT_WORKER_INBOUND_GENESIS_EXISTS:${accountId}`);
     }
-    const peerInput = decodeAccountPeerInput(row['input'], `TS_ACCOUNT_WORKER_INBOUND_${index}_INPUT`);
+    const accountInput = decodeAccountInput(row['input'], `TS_ACCOUNT_WORKER_INBOUND_${index}_INPUT`);
     if (
-      peerInput.fromEntityId.toLowerCase() !== accountId
-      || peerInput.toEntityId.toLowerCase() !== worker.ownerEntityId
+      accountInput.fromEntityId.toLowerCase() !== accountId
+      || accountInput.toEntityId.toLowerCase() !== worker.ownerEntityId
     ) throw new Error(`TS_ACCOUNT_WORKER_INBOUND_PARTICIPANTS:${accountId}`);
+    const counterpartyBoardAuthority = decodeCertifiedBoard(
+      row['counterpartyBoardAuthority'],
+      `TS_ACCOUNT_WORKER_INBOUND_${index}_COUNTERPARTY_BOARD`,
+    );
+    if (counterpartyBoardAuthority && counterpartyBoardAuthority.entityId !== accountId) {
+      throw new Error(`TS_ACCOUNT_WORKER_INBOUND_${index}_COUNTERPARTY_BOARD_ENTITY`);
+    }
     return {
       order: requireInteger(row['order'], `TS_ACCOUNT_WORKER_INBOUND_${index}_ORDER`),
       accountId,
-      input: peerInput,
+      input: accountInput,
+      ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
       ...(rawInitialAccount === undefined
         ? {}
         : { initialAccount: requireRecord(rawInitialAccount, `TS_ACCOUNT_WORKER_INBOUND_${index}_GENESIS`) }),
-    };
+    } as TsAccountWorkerInboundPayload['inputs'][number];
   });
-  return { phase: 'inbound', frameId, restorePrevious, entityTimestamp, finalizedJHeight, inputs };
+  const localBoardAuthority = decodeCertifiedBoard(
+    input['localBoardAuthority'],
+    'TS_ACCOUNT_WORKER_INBOUND_LOCAL_BOARD',
+  );
+  if (localBoardAuthority && localBoardAuthority.entityId !== worker.ownerEntityId) {
+    throw new Error('TS_ACCOUNT_WORKER_INBOUND_LOCAL_BOARD_ENTITY');
+  }
+  return {
+    phase: 'inbound',
+    needShardRoot: requireBoolean(
+      input['needShardRoot'],
+      'TS_ACCOUNT_WORKER_INBOUND_NEED_SHARD_ROOT',
+    ),
+    frameId, restorePrevious, entityTimestamp, finalizedJHeight, inputs,
+    ...(localBoardAuthority ? { localBoardAuthority } : {}),
+  };
 };
 
 const decodeOutboundPayload = (
   worker: TsAccountWorkerState,
   input: Record<string, unknown>,
 ): TsAccountWorkerOutboundPayload => {
+  const createdAccountIds = new Set<string>();
   const txs = requireArray(input['txs'], 'TS_ACCOUNT_WORKER_OUTBOUND_TXS').map((entry, index) => {
     const row = requireRecord(entry, `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}`);
+    const rawInitialAccount = row['initialAccount'];
+    const accountIdInput = requireString(
+      row['accountId'],
+      `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_ACCOUNT`,
+    );
+    const accountId = rawInitialAccount === undefined
+      ? requireWorkerAccount(worker, accountIdInput)
+      : requireWorkerOwnedAccountId(worker, accountIdInput);
+    if (rawInitialAccount !== undefined) createdAccountIds.add(accountId);
+    const counterpartyBoardAuthority = decodeCertifiedBoard(
+      row['counterpartyBoardAuthority'],
+      `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_COUNTERPARTY_BOARD`,
+    );
+    if (counterpartyBoardAuthority && counterpartyBoardAuthority.entityId !== accountId) {
+      throw new Error(`TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_COUNTERPARTY_BOARD_ENTITY`);
+    }
     return {
       order: requireInteger(row['order'], `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_ORDER`),
-      accountId: requireWorkerAccount(
-        worker,
-        requireString(row['accountId'], `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_ACCOUNT`),
-      ),
+      accountId,
       // These are already-typed Entity-owned Account transactions crossing an
       // internal isolate boundary, not a new protocol admission boundary.
       // Preserve the sequential path exactly: enqueue first, then let the one
@@ -152,24 +212,56 @@ const decodeOutboundPayload = (
         row['txs'],
         `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_VALUE`,
       ) as AccountTx[],
+      ...(rawInitialAccount === undefined
+        ? {}
+        : { initialAccount: requireRecord(rawInitialAccount, `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}_GENESIS`) }),
+      ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
     };
   });
   const proposals = requireArray(input['proposals'], 'TS_ACCOUNT_WORKER_OUTBOUND_PROPOSALS')
     .map((entry, index) => {
       const row = requireRecord(entry, `TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}`);
+      const accountIdInput = requireString(
+        row['accountId'],
+        `TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}_ACCOUNT`,
+      );
+      const normalizedAccountId = normalizeTsWorkerAccountId(accountIdInput);
+      const accountId = createdAccountIds.has(normalizedAccountId)
+        ? requireWorkerOwnedAccountId(worker, normalizedAccountId)
+        : requireWorkerAccount(worker, normalizedAccountId);
+      const counterpartyBoardAuthority = decodeCertifiedBoard(
+        row['counterpartyBoardAuthority'],
+        `TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}_COUNTERPARTY_BOARD`,
+      );
+      if (counterpartyBoardAuthority && counterpartyBoardAuthority.entityId !== accountId) {
+        throw new Error(`TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}_COUNTERPARTY_BOARD_ENTITY`);
+      }
       return {
         order: requireInteger(row['order'], `TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}_ORDER`),
-        accountId: requireWorkerAccount(
-          worker,
-          requireString(row['accountId'], `TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_${index}_ACCOUNT`),
-        ),
+        accountId,
+        ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
       };
     });
   if (new Set(proposals.map(proposal => proposal.accountId)).size !== proposals.length) {
     throw new Error('TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_DUPLICATE');
   }
+  const localBoardAuthority = decodeCertifiedBoard(
+    input['localBoardAuthority'],
+    'TS_ACCOUNT_WORKER_OUTBOUND_LOCAL_BOARD',
+  );
+  if (localBoardAuthority && localBoardAuthority.entityId !== worker.ownerEntityId) {
+    throw new Error('TS_ACCOUNT_WORKER_OUTBOUND_LOCAL_BOARD_ENTITY');
+  }
   return {
     phase: 'outbound',
+    needShardRoot: requireBoolean(
+      input['needShardRoot'],
+      'TS_ACCOUNT_WORKER_OUTBOUND_NEED_SHARD_ROOT',
+    ),
+    continuation: requireBoolean(
+      input['continuation'],
+      'TS_ACCOUNT_WORKER_OUTBOUND_CONTINUATION',
+    ),
     frameId: requireString(input['frameId'], 'TS_ACCOUNT_WORKER_OUTBOUND_FRAME'),
     restorePrevious: requireBoolean(
       input['restorePrevious'],
@@ -177,6 +269,7 @@ const decodeOutboundPayload = (
     ),
     timestamp: requireInteger(input['timestamp'], 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP'),
     jHeight: requireInteger(input['jHeight'], 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT'),
+    ...(localBoardAuthority ? { localBoardAuthority } : {}),
     txs,
     proposals,
   };

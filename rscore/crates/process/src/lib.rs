@@ -97,7 +97,7 @@ pub fn encode_resident_entity_round(
 // 9: authority waves are staged apply/propose rounds, sealed before checkpoint
 // or commit, with candidate-wide operation indices and admission receipts.
 // 10: WaveOp::Create installs a strictly validated genesis Account atomically
-// inside the same staged candidate as its first admission or peer input.
+// inside the same staged candidate as its first admission or Account input.
 // 11: Prepare returns a server-issued 32-byte candidate capability bound to a
 // fresh process incarnation, the complete session identity, request id and
 // monotonic batch candidate id. Every later candidate operation consumes it.
@@ -106,17 +106,15 @@ pub fn encode_resident_entity_round(
 // 13: every parent Entity input owns an idempotent savepoint inside the held
 // Runtime candidate. Apply/Propose are bound to that exact stage key; rejected
 // Entity inputs roll back their Account mutations and operation indices.
-// 14: peer inputs carry the exact canonical envelope and Frame/Ack/AckFrame
+// 14: Account inputs carry the exact canonical envelope and Frame/Ack/AckFrame
 // shapes. AckFrame is one ACK-first operation with one ordered composite
 // result: a valid ACK remains committed if its bundled frame is rejected.
 // 21: an inbound row may carry trusted Entity genesis policy; the round reply
 // has a separate exact H=1 materialization list for authenticated new Accounts.
-// 22: AccountOutbound carries checkpointDue and the same reply carries the
-// worker-resident checkpoint rows separately from temporary read-model rows.
-// 23: that reply carries an optional exact incremental checkpoint manifest;
-// the next inbound root implicitly accepts or rejects its pending baseline.
+// 23: a resident round reply carries an optional exact incremental checkpoint
+// manifest; the next input root selects or rejects its pending baseline.
 // 24: swap-offer removal carries the maker side observed by the Account
-// transition, so the two-call parent never needs a stale Account read model.
+// transition, so Entity never needs a stale Account read model.
 // 25: AccountSettled J-claim bodies, witnesses and typed finality output.
 // 26: exact checkpoints persist the J-claim Patricia nodes needed to prove
 // non-empty accumulator roots after a process restart.
@@ -127,7 +125,7 @@ pub fn encode_resident_entity_round(
 // 30: exact checkpoints retain the J-claim Patricia node store.
 // 31: Entity snapshots carry crontab state and PreparedFinal descriptions.
 // 32: incoming verdicts carry an explicit signed DisputeRequired outcome.
-// 33: Entity snapshots carry reserves, and peer verdicts carry standalone
+// 33: Entity snapshots carry reserves, and Account input verdicts carry standalone
 // dispute / board-Hanko-refresh results without aliasing frame verdict tags.
 // 34: Account frames commit the canonical Account state root instead of
 // duplicating financial deltas or proposer side in every frame body.
@@ -149,7 +147,7 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // cached ACK reuse can verify the exact previous board and expiry.
         // wire=34: Account frames carry neither duplicate financial deltas nor
         // redundant proposer side; replay verifies the committed state root.
-        // wire=33: Entity snapshots carry reserves and Account peer verdicts
+        // wire=33: Entity snapshots carry reserves and Account input verdicts
         // carry standalone dispute / board-Hanko-refresh results.
         // wire=32: a signed incoming Account frame that needs an HTLC dispute
         // is a typed verdict carrying its exact secret evidence and frame.
@@ -163,21 +161,14 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // the removed row is absent from the post-state.
         // wire=27: checkpoint rows are wrapped with exact incremental and
         // restore tokens; Nil means checkpointDue was false.
-        // wire=26: checkpoint cadence is part of AccountOutbound and its
-        // exact worker-resident delta is a separate round-reply field.
         // wire=25: peer rows carry optional Entity-owned genesis policy and
         // replies separate H=1 create materialization from final Account rows.
-        // wire=24: outbound carries the reachable forwarded-HTLC route
+        // wire=24: EntityRound carries the reachable forwarded-HTLC route
         // closure; failed-lock rows bind the lock and exact generated upstream
-        // resolution, so the second visit reaches fixed point without a third
-        // process request.
+        // resolution, so the canonical round reaches its bounded fixed point
+        // without another process request.
         // wire=23: every proposal carries exact failed HTLC lock rows.
-        // wire=22: direct two-visit authority has no rollback savepoint ops;
-        // AccountInbound carries the parent's canonical forest root, which
-        // promotes or drops the prior internal path-copy candidate.
-        // wire=21: AccountOutbound names inbound-touched accounts whose final
-        // bodies are returned only after all Entity-derived work has run.
-        // wire=20: Account peer inputs carry from/to/domain/dispute/watch-seed
+        // wire=20: Account inputs carry from/to/domain/dispute/watch-seed
         // exactly, received frames retain optional Hankos, disputes
         // retain their claimed hash, and AckFrame is one ACK-first result row.
         // wire=19: BeginEntity/FinalizeEntity/DiscardEntity delimit one
@@ -229,8 +220,8 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     };
 
 #[cfg(test)]
-#[path = "tests/peer_wire.rs"]
-mod peer_wire_tests;
+#[path = "tests/account_input_wire.rs"]
+mod account_input_wire_tests;
 #[cfg(test)]
 #[path = "tests/session_authority.rs"]
 mod session_authority_tests;

@@ -44,6 +44,10 @@ const snapshotSameJurisdictionOffer = (
   createdHeight: offer.createdHeight,
   quantizedGive: offer.quantizedGive,
   quantizedWant: offer.quantizedWant,
+  // This marker is created only at the Account-machine output boundary. It
+  // lets Entity consume the exact post-transition snapshot before the worker
+  // materializes that Account shell, matching the Rust authority path.
+  accountOutputVerified: true,
 });
 
 const upsertOutput = (

@@ -139,7 +139,7 @@ const ackFields = (ack: RscoreOutboundAck): Record<string, unknown> => ({
 });
 
 const pendingBinding = (pending: RscorePendingFrame, seed: RscoreAccountStateSeed): Record<string, unknown> => ({
-  kind: pending.bundledAck ? 'ack_frame' : 'frame',
+  kind: 'ack_frame',
   fromEntityId: seed.ownerEntityId,
   toEntityId: seed.accountId,
   proposal: {

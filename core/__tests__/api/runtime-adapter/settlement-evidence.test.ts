@@ -72,7 +72,7 @@ const makeSettlementEnv = (pending = false, stp = false) => {
   if (pending) {
     account.pendingFrame = account.currentFrame;
     account.pendingAccountInput = {
-      kind: 'frame',
+      kind: 'ack_frame',
       fromEntityId: leftId,
       toEntityId: rightId,
       domain: structuredClone(account.state.domain),

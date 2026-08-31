@@ -48,7 +48,7 @@ const assertEntityFeaturePolicy = (tx: EntityTx): void => {
     tx.type === 'crossPullClose' || tx.type.startsWith('crossJurisdiction') ||
     tx.type.startsWith('lending') || tx.type === 'runtimeOutput'
   ) throw new Error(`HLT_AUTHORITY_FEATURE_POLICY_ENTITY_TX_FORBIDDEN:${tx.type}`);
-  if (tx.type === 'accountInput' && (tx.data.kind === 'frame' || tx.data.kind === 'ack_frame')) {
+  if (tx.type === 'accountInput' && tx.data.kind === 'ack_frame') {
     for (const accountTx of tx.data.proposal.frame.accountTxs) assertAccountFeaturePolicy(accountTx);
   }
   for (const nested of nestedEntityTxs(tx)) assertEntityFeaturePolicy(nested);

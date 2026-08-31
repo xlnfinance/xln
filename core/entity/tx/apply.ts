@@ -1,4 +1,4 @@
-import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
+import type { AccountInput, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/machine/input';
@@ -109,11 +109,11 @@ export interface ApplyEntityTxResult {
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
   accountTxs?: AccountTxTarget[];
-  /** Final Channel.ts-style work state for one peer AccountInput. */
+  /** Final Channel.ts-style work state for one AccountInput. */
   accountInputWork?: Readonly<{
     accountId: string;
     force: boolean;
-    response?: AccountPeerInput;
+    response?: AccountInput;
   }>;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   swapOffersCreated?: SwapOfferEvent[];

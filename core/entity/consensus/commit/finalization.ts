@@ -3,6 +3,7 @@ import { logError, shortHash, shortId } from '../../../support/logger';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import type { EntityFrame, EntityCandidate } from '../../types';
 import type { HankoString } from '../../../types/hanko';
+import type { AccountAuthorityCommittedHanko } from '../../runtime-context';
 import { commitEntityFrameCandidateState } from '../../state-clone';
 import {
   verifyHashPrecommitSignatures,
@@ -134,12 +135,12 @@ const buildCommitHankos = async (
   return { accepted: true, hankos };
 };
 
-const attachCommitProofsAndOutputs = (
+const attachCommitProofsAndOutputs = async (
   context: ApplyEntityInputContext,
   frame: EntityFrame,
   execution: EntityCandidate,
   hankos: HankoString[],
-): void => {
+): Promise<void> => {
   const { env, entityOutbox, jOutbox, workingReplica } = context;
   if (!workingReplica.hankoWitness) workingReplica.hankoWitness = new Map();
   execution.hashesToSign.forEach((hashInfo, index) => {
@@ -152,15 +153,16 @@ const attachCommitProofsAndOutputs = (
       createdAt: env.state.timestamp,
     });
   });
+  const touchedAccountIds = touchedAccountIdsForHankoAttachment(
+    execution.state,
+    execution.proposableAccounts,
+    execution.storageChanges,
+  );
   attachHankoWitnessesToState(
     execution.state,
     workingReplica.hankoWitness,
     frame.height,
-    touchedAccountIdsForHankoAttachment(
-      execution.state,
-      execution.proposableAccounts,
-      execution.storageChanges,
-    ),
+    touchedAccountIds,
   );
   attachHankoWitnessToOutputs(
     execution.outputs,
@@ -169,6 +171,24 @@ const attachCommitProofsAndOutputs = (
     frame.height,
     execution.state,
   );
+  const accountHankos = new Map<string, AccountAuthorityCommittedHanko>();
+  for (const [hash, witness] of workingReplica.hankoWitness) {
+    if (witness.type !== 'accountFrame' && witness.type !== 'dispute' && witness.type !== 'settlement') continue;
+    accountHankos.set(hash, {
+      hash,
+      hanko: witness.hanko,
+      type: witness.type,
+      entityHeight: witness.entityHeight,
+      createdAt: witness.createdAt,
+    });
+  }
+  await env.accountAuthorityEntityStage?.installCommittedAccountHankos({
+    ownerEntityId: execution.state.entityId,
+    entityState: execution.state,
+    entityHeight: frame.height,
+    touchedAccountIds,
+    hankos: accountHankos,
+  });
   pruneHankoWitnessToReachableState(
     execution.state,
     workingReplica.hankoWitness,
@@ -272,7 +292,7 @@ export const finalizeCommitNotification = async (
     options.localCommitHankos,
   );
   if (!proof.accepted) return proof.result;
-  attachCommitProofsAndOutputs(context, frame, execution, proof.hankos);
+  await attachCommitProofsAndOutputs(context, frame, execution, proof.hankos);
   installCommittedState(context, frame, execution, proof.hankos);
   // Runtime persists the exact proposer-observed context committed by this
   // frame. A validator must never reconstruct it from its own live gossip.

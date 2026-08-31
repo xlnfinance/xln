@@ -69,7 +69,7 @@ const makeFrame = async (offerId: string): Promise<AccountFrame> => {
 const frameInput = (frame: AccountFrame, frameHanko = '0xframe'): EntityTx => ({
   type: 'accountInput',
   data: {
-    kind: 'frame',
+    kind: 'ack_frame',
     fromEntityId: PEER,
     toEntityId: ENTITY,
     domain: { chainId: 1, depositoryAddress: `0x${'cc'.repeat(20)}` },

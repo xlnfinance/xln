@@ -57,7 +57,7 @@ type PendingAccountSample = Readonly<{
   height: number;
   pendingFrameHash: string;
   pendingFrameTxCount: number;
-  pendingInputKind: 'frame' | 'ack_frame';
+  pendingInputKind: 'ack_frame';
   pendingAckHeight: number | null;
   pendingProposalHeight: number;
   lastOutboundAckHeight: number | null;
@@ -386,7 +386,7 @@ const decodePendingAccountSample = (value: unknown): SettlementEvidenceResponse[
       throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ROLLBACK_HASH_INVALID:${index}`);
     }
     const pendingInputKind = entry['pendingInputKind'];
-    if (pendingInputKind !== 'frame' && pendingInputKind !== 'ack_frame') {
+    if (pendingInputKind !== 'ack_frame') {
       throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_INPUT_KIND_INVALID:${index}`);
     }
     if (typeof entry['localIsLeft'] !== 'boolean') {

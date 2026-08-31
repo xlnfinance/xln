@@ -1,4 +1,4 @@
-import type { AccountPeerRejectionCode } from '../input/peer-rejection';
+import type { AccountInputRejectionCode } from '../input/input-rejection';
 import type { AccountTx } from '../../types/account';
 
 /**
@@ -110,7 +110,7 @@ export const assertAccountTxsAdmissible = (txs: readonly AccountTx[]): void => {
 };
 
 /** Peer-frame counterpart of a local admission violation. */
-export const accountTxAdmissionPeerCode = (error: AccountTxAdmissionError): AccountPeerRejectionCode =>
+export const accountTxAdmissionInputCode = (error: AccountTxAdmissionError): AccountInputRejectionCode =>
   error.code === ACCOUNT_TX_KIND_OUT_OF_PROFILE
-    ? 'ACCOUNT_PEER_FRAME_TX_OUT_OF_PROFILE'
-    : 'ACCOUNT_PEER_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE';
+    ? 'ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE'
+    : 'ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE';

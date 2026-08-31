@@ -262,6 +262,7 @@ export const applyExternalEntityInput = async (
   context: RuntimeEntityInputBatchContext,
   deferProposal = false,
 ): Promise<StagedEntityInput> => {
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.stage';
   const staged = await stageExternalEntityInput(
     env,
     input,
@@ -273,16 +274,19 @@ export const applyExternalEntityInput = async (
   if (isCommittedEntityInput(staged.result.outcome)) {
     // Local commands and remote bytes share one isolated candidate boundary.
     // Expected rejection cannot partially mutate the Runtime-owned Entity State.
+    if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.commit-root';
     commitEntityFrameCandidateState(
       staged.result.nextReplica.state,
       committedEntityStateRoot(staged.result.nextReplica),
     );
   }
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.authority-settle';
   await settleStagedAuthority(
     env,
     staged,
     isCommittedEntityInput(staged.result.outcome),
   );
+  if (env.infrastructure) env.infrastructure.runtimeFramePhase = 'apply.entity.collect';
   collectStagedEntityInput(env, staged, options, context);
   publishStagedEntityNodeChanges(env, [staged]);
   return staged;

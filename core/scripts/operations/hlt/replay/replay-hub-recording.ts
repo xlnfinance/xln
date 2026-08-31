@@ -56,6 +56,7 @@ import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
 import { assertCompleteHltAuthorityEvidence } from './authority-evidence';
 import {
+  canonicalTsAccountWorkerCount,
   TsAccountWorkerAuthority,
   type TsAccountWorkerTelemetry,
 } from '../../../../rscore/ts-worker';
@@ -292,6 +293,11 @@ if (tsAccountWorkers !== null && rustAccountAuthorityRequired) {
 }
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
+const replayTsAccountWorkers = tsAccountWorkers ?? (
+  authorityDriverEnabled({ runtimeId: artifact.recording.runtimeId })
+    ? null
+    : canonicalTsAccountWorkerCount()
+);
 if (completeAuthorityEvidenceRequired) assertCompleteHltAuthorityEvidence(artifact.authorityEvidence);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
 const tail = artifact.recording.bundles.find(bundle => bundle.kind === 'journal_tail');
@@ -397,9 +403,9 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
     targetHeight: artifact.recording.baseHeight,
     readOnly: true,
   });
-  const tsWorkerAuthority = tsAccountWorkers === null
+  const tsWorkerAuthority = replayTsAccountWorkers === null
     ? null
-    : new TsAccountWorkerAuthority(env, tsAccountWorkers);
+    : new TsAccountWorkerAuthority(env, replayTsAccountWorkers);
   if (tsWorkerAuthority !== null) {
     env.accountAuthorityExecutionMode = 'cutover';
     env.accountAuthorityEntityStageProvider = tsWorkerAuthority.provider;
@@ -588,9 +594,9 @@ const report = {
   recordingManifestHash: artifact.recording.manifestHash,
   authorityExpectations: artifact.authorityEvidence.expectations,
   mode,
-  accountAuthority: tsAccountWorkers === null
-    ? (rustAccountAuthorityRequired ? 'rust' : 'typescript-sequential')
-    : `typescript-workers:${tsAccountWorkers}`,
+  accountAuthority: replayTsAccountWorkers === null
+    ? 'rust'
+    : `typescript-workers:${replayTsAccountWorkers}`,
   ...(artifact.source.workload === 'payments'
     ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }
     : {}),
