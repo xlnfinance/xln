@@ -317,7 +317,10 @@ fn create_native_genesis_processor(
         native_database,
         NativeStorageConfig {
             checkpoint_period_frames: limits.checkpoint_period_frames,
-            ..NativeStorageConfig::default()
+            // Replay DBs are disposable derivatives of the immutable source
+            // WAL, so fsync cannot add recovery evidence. Production keeps
+            // one synced WAL boundary before every external publication.
+            durable_fsync: matches!(publication, GenesisPublication::WebSocket),
         },
     )
     .map_err(|error| format!("RRS_NATIVE_GENESIS_OPEN:{error}"))?;
