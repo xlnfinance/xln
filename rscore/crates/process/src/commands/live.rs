@@ -948,6 +948,49 @@ fn extend_json_object(
     Ok(())
 }
 
+fn account_phase_metric_value(
+    metric: &xln_rscore_batch::AccountPhaseMetric,
+) -> Result<Value, String> {
+    let mut object = Map::new();
+    extend_json_object(
+        &mut object,
+        serde_json::json!({
+            "kind": match metric.kind {
+                xln_rscore_batch::AccountPhaseKind::Inbound => "inbound",
+                xln_rscore_batch::AccountPhaseKind::OutboundReset => "outboundReset",
+                xln_rscore_batch::AccountPhaseKind::OutboundContinue => "outboundContinue",
+            },
+            "invocations": metric.invocations,
+            "coordinatorWallMicros": metric.coordinator_wall_nanos / 1_000,
+            "coordinatorPreDispatchMicros": metric.coordinator_pre_dispatch_nanos / 1_000,
+            "runLanesWallMicros": metric.run_lanes_wall_nanos / 1_000,
+            "coordinatorPostJoinMicros": metric.coordinator_post_join_nanos / 1_000,
+            "workerSamples": metric.worker_samples,
+            "workerWorkSumMicros": metric.worker_work_sum_nanos / 1_000,
+            "workerCriticalPathMicros": metric.worker_critical_path_nanos / 1_000,
+            "workerPhaseSpanMicros": metric.worker_phase_span_nanos / 1_000,
+            "coordinatorDispatchJoinMicros": metric.coordinator_dispatch_join_nanos / 1_000,
+            "workerBarrierWaitSumMicros": metric.worker_barrier_wait_sum_nanos / 1_000,
+        }),
+        "accountPhaseTiming",
+    )?;
+    extend_json_object(
+        &mut object,
+        serde_json::json!({
+            "coordinatorFoldMicros": metric.coordinator_fold_nanos / 1_000,
+            "touchedRows": metric.touched_rows,
+            "touchedShards": metric.touched_shards,
+            "workersWithWork": metric.workers_with_work,
+            "shardHandleClones": metric.shard_handle_clones,
+            "candidateBaseReads": metric.candidate_base_reads,
+            "continuationRounds": metric.continuation_rounds,
+            "restartRounds": metric.restart_rounds,
+        }),
+        "accountPhaseWork",
+    )?;
+    Ok(Value::Object(object))
+}
+
 fn optional_url(
     object: &serde_json::Map<String, Value>,
     field: &str,
@@ -1621,6 +1664,18 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                 .iter()
                 .map(|metric| metric.coordinator_wall_nanos)
                 .sum::<u64>();
+            let account_coordinator_pre_dispatch_nanos = phase_metrics
+                .iter()
+                .map(|metric| metric.coordinator_pre_dispatch_nanos)
+                .sum::<u64>();
+            let account_run_lanes_wall_nanos = phase_metrics
+                .iter()
+                .map(|metric| metric.run_lanes_wall_nanos)
+                .sum::<u64>();
+            let account_coordinator_post_join_nanos = phase_metrics
+                .iter()
+                .map(|metric| metric.coordinator_post_join_nanos)
+                .sum::<u64>();
             let account_coordinator_fold_nanos = phase_metrics
                 .iter()
                 .map(|metric| metric.coordinator_fold_nanos)
@@ -1765,6 +1820,19 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             extend_json_object(
                 &mut metric_object,
                 serde_json::json!({
+                    "accountCoordinatorPreDispatchMicros": account_coordinator_pre_dispatch_nanos / 1_000,
+                    "accountRunLanesWallMicros": account_run_lanes_wall_nanos / 1_000,
+                    "accountCoordinatorPostJoinMicros": account_coordinator_post_join_nanos / 1_000,
+                }),
+                "accountPhaseTiming",
+            )?;
+            let account_phase_metrics = phase_metrics
+                .iter()
+                .map(account_phase_metric_value)
+                .collect::<Result<Vec<_>, _>>()?;
+            extend_json_object(
+                &mut metric_object,
+                serde_json::json!({
                     "accountCoordinatorWallMicros": account_coordinator_wall_nanos / 1_000,
                     "accountCoordinatorFoldMicros": account_coordinator_fold_nanos / 1_000,
                     "accountWorkerWorkSumMicros": account_worker_work_sum_nanos / 1_000,
@@ -1783,29 +1851,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                     "workerFoldNanos": worker_fold_nanos,
                     "entityWorkerItems": entity_worker_items,
                     "entityWorkerNanos": entity_worker_nanos,
-                    "accountPhaseMetrics": phase_metrics.iter().map(|metric| serde_json::json!({
-                        "kind": match metric.kind {
-                            xln_rscore_batch::AccountPhaseKind::Inbound => "inbound",
-                            xln_rscore_batch::AccountPhaseKind::OutboundReset => "outboundReset",
-                            xln_rscore_batch::AccountPhaseKind::OutboundContinue => "outboundContinue",
-                        },
-                        "invocations": metric.invocations,
-                        "coordinatorWallMicros": metric.coordinator_wall_nanos / 1_000,
-                        "workerSamples": metric.worker_samples,
-                        "workerWorkSumMicros": metric.worker_work_sum_nanos / 1_000,
-                        "workerCriticalPathMicros": metric.worker_critical_path_nanos / 1_000,
-                        "workerPhaseSpanMicros": metric.worker_phase_span_nanos / 1_000,
-                        "coordinatorDispatchJoinMicros": metric.coordinator_dispatch_join_nanos / 1_000,
-                        "workerBarrierWaitSumMicros": metric.worker_barrier_wait_sum_nanos / 1_000,
-                        "coordinatorFoldMicros": metric.coordinator_fold_nanos / 1_000,
-                        "touchedRows": metric.touched_rows,
-                        "touchedShards": metric.touched_shards,
-                        "workersWithWork": metric.workers_with_work,
-                        "shardHandleClones": metric.shard_handle_clones,
-                        "candidateBaseReads": metric.candidate_base_reads,
-                        "continuationRounds": metric.continuation_rounds,
-                        "restartRounds": metric.restart_rounds,
-                    })).collect::<Vec<_>>(),
+                    "accountPhaseMetrics": account_phase_metrics,
                     "windowRuntimeEntityInputs": window_runtime_entity_inputs,
                     "windowAccountInputs": window_account_inputs,
                     "windowCoordinatorWallMicros": window_coordinator_wall_nanos / 1_000,

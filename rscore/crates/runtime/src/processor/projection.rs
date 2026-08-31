@@ -365,32 +365,68 @@ pub(crate) fn project_durable_frame(
         );
     }
     let local_output_done = prelude_started.elapsed();
-    let mut bound = Vec::with_capacity(local_outputs.len());
-    for (index, (entity_id, signer_id, output)) in local_outputs.into_iter().enumerate() {
-        let key = RuntimeEntityKey {
-            entity_id,
+    let worker_key = local_outputs
+        .first()
+        .map(|(entity_id, signer_id, _)| RuntimeEntityKey {
+            entity_id: *entity_id,
             signer_id: signer_id.clone(),
-        };
-        let entity_id = result
+        });
+    // Resolve every read-only source identity without returning early. The
+    // worker replies remain in dense input order, so collecting their Results
+    // below preserves the serial path's first failing output index exactly.
+    let projection_outputs = local_outputs
+        .into_iter()
+        .enumerate()
+        .map(|(index, (entity_id, signer_id, output))| {
+            let key = RuntimeEntityKey {
+                entity_id,
+                signer_id: signer_id.clone(),
+            };
+            let source_entity_id = result
+                .replica
+                .state
+                .e_replicas
+                .get(&key)
+                .map(|state| state.entity.entity_id.clone());
+            (index, source_entity_id, signer_id, output)
+        })
+        .collect::<Vec<_>>();
+    let bound = if let Some(worker_key) = worker_key {
+        let source_height = result.replica.state.height;
+        let source_timestamp = result.replica.state.timestamp;
+        let routes = routes.clone();
+        result
             .replica
-            .state
             .e_replicas
-            .get(&key)
+            .get_mut(&worker_key)
             .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?
-            .entity
-            .entity_id
-            .clone();
-        let value =
-            super::output::encode_local_entity_output(index, output, &entity_id, &signer_id)?;
-        bound.push(routes.bind_and_encode_one(
-            value,
-            index,
-            result.replica.state.height,
-            result.replica.state.timestamp,
-            &entity_id,
-            &signer_id,
-        )?);
-    }
+            .accounts
+            .map_stateless_ordered(
+                projection_outputs,
+                move |(index, source_entity_id, signer_id, output)| {
+                    let source_entity_id = source_entity_id
+                        .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
+                    let value = super::output::encode_local_entity_output(
+                        index,
+                        output,
+                        &source_entity_id,
+                        &signer_id,
+                    )?;
+                    Ok::<_, RuntimeFrameProjectionError>(routes.bind_and_encode_one(
+                        value,
+                        index,
+                        source_height,
+                        source_timestamp,
+                        &source_entity_id,
+                        &signer_id,
+                    )?)
+                },
+            )?
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
     let bound_outputs = EntityRouteTable::collect_bound(bound);
     let bind_done = prelude_started.elapsed();
     enqueue_local_continuations(

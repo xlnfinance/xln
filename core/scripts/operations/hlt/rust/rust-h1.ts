@@ -261,6 +261,9 @@ export type RustH1Metrics = Readonly<{
   totalProjectionCheckpointMicros: number;
   totalProjectionEncodeMicros: number;
   accountCoordinatorWallMicros: number;
+  accountCoordinatorPreDispatchMicros: number;
+  accountRunLanesWallMicros: number;
+  accountCoordinatorPostJoinMicros: number;
   accountCoordinatorFoldMicros: number;
   accountWorkerWorkSumMicros: number;
   accountWorkerWorkMaxMicros: number;
@@ -285,6 +288,9 @@ export type RustAccountPhaseMetric = Readonly<{
   kind: 'inbound' | 'outboundReset' | 'outboundContinue';
   invocations: number;
   coordinatorWallMicros: number;
+  coordinatorPreDispatchMicros: number;
+  runLanesWallMicros: number;
+  coordinatorPostJoinMicros: number;
   workerSamples: number;
   workerWorkSumMicros: number;
   workerCriticalPathMicros: number;
@@ -324,6 +330,9 @@ export type RustH1EconomicPhaseMetrics = Readonly<{
   projectionCheckpointMicros: number;
   projectionEncodeMicros: number;
   accountCoordinatorWallMicros: number;
+  accountCoordinatorPreDispatchMicros: number;
+  accountRunLanesWallMicros: number;
+  accountCoordinatorPostJoinMicros: number;
   accountCoordinatorFoldMicros: number;
   accountWorkerWorkSumMicros: number;
   accountWorkerCriticalPathMicros: number;
@@ -399,7 +408,8 @@ export const diffRustH1EconomicMetrics = (
     before.accountPhaseMetrics.some((metric, index) => metric.kind !== after.accountPhaseMetrics[index]?.kind)
   ) throw new Error('HLT_RUST_H1_ACCOUNT_PHASE_CARDINALITY_DRIFT');
   const phaseFields = [
-    'invocations', 'coordinatorWallMicros', 'workerSamples', 'workerWorkSumMicros',
+    'invocations', 'coordinatorWallMicros', 'coordinatorPreDispatchMicros',
+    'runLanesWallMicros', 'coordinatorPostJoinMicros', 'workerSamples', 'workerWorkSumMicros',
     'workerCriticalPathMicros', 'workerPhaseSpanMicros', 'coordinatorDispatchJoinMicros',
     'workerBarrierWaitSumMicros', 'coordinatorFoldMicros', 'touchedRows', 'touchedShards',
     'workersWithWork', 'shardHandleClones', 'candidateBaseReads', 'continuationRounds', 'restartRounds',
@@ -438,6 +448,9 @@ export const diffRustH1EconomicMetrics = (
     projectionCheckpointMicros: delta('totalProjectionCheckpointMicros'),
     projectionEncodeMicros: delta('totalProjectionEncodeMicros'),
     accountCoordinatorWallMicros: delta('accountCoordinatorWallMicros'),
+    accountCoordinatorPreDispatchMicros: delta('accountCoordinatorPreDispatchMicros'),
+    accountRunLanesWallMicros: delta('accountRunLanesWallMicros'),
+    accountCoordinatorPostJoinMicros: delta('accountCoordinatorPostJoinMicros'),
     accountCoordinatorFoldMicros: delta('accountCoordinatorFoldMicros'),
     accountWorkerWorkSumMicros: delta('accountWorkerWorkSumMicros'),
     accountWorkerCriticalPathMicros: delta('accountWorkerCriticalPathMicros'),
@@ -566,7 +579,9 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     'matchedSwaps', 'zeroFillSwapCancels', 'paybookOpen', 'orderbookTradeCount', 'openBookOrders',
     'openSwapOffers', 'resolvingSwapOffers', 'lastCompletedAtUnixMicros',
     'lastAcceptedAtUnixMicros', 'lastMatchedAtUnixMicros',
-    'accountCoordinatorWallMicros', 'accountCoordinatorFoldMicros',
+    'accountCoordinatorWallMicros', 'accountCoordinatorPreDispatchMicros',
+    'accountRunLanesWallMicros', 'accountCoordinatorPostJoinMicros',
+    'accountCoordinatorFoldMicros',
     'accountWorkerWorkSumMicros', 'accountWorkerWorkMaxMicros',
     'accountWorkerCriticalPathMicros', 'accountWorkerPhaseSpanMicros',
     'accountCoordinatorDispatchJoinMicros',
@@ -644,7 +659,8 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
   }
   const phaseKinds = ['inbound', 'outboundReset', 'outboundContinue'] as const;
   const phaseFields = [
-    'invocations', 'coordinatorWallMicros', 'workerSamples', 'workerWorkSumMicros',
+    'invocations', 'coordinatorWallMicros', 'coordinatorPreDispatchMicros',
+    'runLanesWallMicros', 'coordinatorPostJoinMicros', 'workerSamples', 'workerWorkSumMicros',
     'workerCriticalPathMicros', 'workerPhaseSpanMicros', 'coordinatorDispatchJoinMicros',
     'workerBarrierWaitSumMicros', 'coordinatorFoldMicros', 'touchedRows', 'touchedShards',
     'workersWithWork', 'shardHandleClones', 'candidateBaseReads', 'continuationRounds', 'restartRounds',

@@ -134,6 +134,9 @@ pub struct AccountPhaseMetric {
     pub kind: AccountPhaseKind,
     pub invocations: u64,
     pub coordinator_wall_nanos: u64,
+    pub coordinator_pre_dispatch_nanos: u64,
+    pub run_lanes_wall_nanos: u64,
+    pub coordinator_post_join_nanos: u64,
     pub worker_samples: u64,
     pub worker_work_sum_nanos: u64,
     pub worker_work_max_nanos: u64,
@@ -158,6 +161,9 @@ impl AccountPhaseMetric {
             kind,
             invocations: 0,
             coordinator_wall_nanos: 0,
+            coordinator_pre_dispatch_nanos: 0,
+            run_lanes_wall_nanos: 0,
+            coordinator_post_join_nanos: 0,
             worker_samples: 0,
             worker_work_sum_nanos: 0,
             worker_work_max_nanos: 0,
@@ -1173,9 +1179,13 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                 }
             })
             .collect();
+        let run_lanes_started = Instant::now();
+        let coordinator_pre_dispatch = run_lanes_started.duration_since(phase_started);
         let replies = self.workers.run_lanes(lanes, move |state, batch| {
             run_worker_phase(state, batch, &apply)
         })?;
+        let post_join_started = Instant::now();
+        let run_lanes_wall = post_join_started.duration_since(run_lanes_started);
         let mut worker_samples = 0_u64;
         let mut worker_work_sum = 0_u64;
         let mut worker_work_max = 0_u64;
@@ -1225,12 +1235,23 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             .map(|metric| metric.shard)
             .collect::<BTreeSet<usize>>()
             .len();
+        let phase_finished = Instant::now();
+        let coordinator_post_join = phase_finished.duration_since(post_join_started);
         let totals = &mut self.phase_totals[kind.index()];
         totals.invocations += 1;
-        let coordinator_wall = duration_nanos(phase_started.elapsed());
+        let coordinator_wall = duration_nanos(phase_finished.duration_since(phase_started));
         totals.coordinator_wall_nanos = totals
             .coordinator_wall_nanos
             .saturating_add(coordinator_wall);
+        totals.coordinator_pre_dispatch_nanos = totals
+            .coordinator_pre_dispatch_nanos
+            .saturating_add(duration_nanos(coordinator_pre_dispatch));
+        totals.run_lanes_wall_nanos = totals
+            .run_lanes_wall_nanos
+            .saturating_add(duration_nanos(run_lanes_wall));
+        totals.coordinator_post_join_nanos = totals
+            .coordinator_post_join_nanos
+            .saturating_add(duration_nanos(coordinator_post_join));
         totals.worker_samples = totals.worker_samples.saturating_add(worker_samples);
         totals.worker_work_sum_nanos = totals.worker_work_sum_nanos.saturating_add(worker_work_sum);
         totals.worker_work_max_nanos = totals.worker_work_max_nanos.max(worker_work_max);
@@ -2619,6 +2640,13 @@ mod tests {
         assert_eq!(inbound.worker_samples, 1);
         assert!(inbound.worker_phase_span_nanos >= inbound.worker_critical_path_nanos);
         assert!(inbound.coordinator_wall_nanos >= inbound.worker_phase_span_nanos);
+        assert_eq!(
+            inbound.coordinator_wall_nanos,
+            inbound
+                .coordinator_pre_dispatch_nanos
+                .saturating_add(inbound.run_lanes_wall_nanos)
+                .saturating_add(inbound.coordinator_post_join_nanos),
+        );
         assert_eq!(
             inbound.coordinator_dispatch_join_nanos,
             inbound
