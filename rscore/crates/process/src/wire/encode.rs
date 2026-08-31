@@ -630,7 +630,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             committed_frame(evidence, *state_hash)?,
             frame_events(events),
         ]),
-        AccountInputVerdict::AckStale { height } => tuple(vec![integer(6), integer(*height)]),
+        AccountInputVerdict::AckAccepted { height } => tuple(vec![integer(6), integer(*height)]),
         AccountInputVerdict::AckRejected { reason } => {
             tuple(vec![integer(7), AbiValue::Text(reason.clone())])
         }
@@ -671,7 +671,7 @@ fn is_ack_verdict(value: &xln_rscore_batch::AccountInputVerdict) -> bool {
     matches!(
         value,
         xln_rscore_batch::AccountInputVerdict::AckCommitted { .. }
-            | xln_rscore_batch::AccountInputVerdict::AckStale { .. }
+            | xln_rscore_batch::AccountInputVerdict::AckAccepted { .. }
             | xln_rscore_batch::AccountInputVerdict::AckRejected { .. }
     )
 }

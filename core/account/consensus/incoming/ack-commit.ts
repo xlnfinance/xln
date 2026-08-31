@@ -42,6 +42,67 @@ type PendingAckCertificateResult =
   }
   | { kind: 'return'; result: HandleAccountInputResult };
 
+type RepeatedAckMaterial =
+  | { ok: true; currentHash: string; frameHanko: string }
+  | { ok: false; error: string };
+
+const repeatedAckMaterial = (
+  account: AccountReplica,
+  ack: AccountAckFrame,
+  dispute: ValidatedCounterpartyDisputeHanko | undefined,
+): RepeatedAckMaterial => {
+  const currentHash = account.currentFrame?.stateHash;
+  if (!currentHash || ack.frameHash.toLowerCase() !== currentHash.toLowerCase()) {
+    return { ok: false, error: 'ACK current frameHash mismatch' };
+  }
+  if (!ack.frameHanko || ack.frameHanko.toLowerCase() !== account.counterpartyFrameHanko?.toLowerCase()) {
+    return { ok: false, error: 'ACK current Hanko conflict' };
+  }
+  if (dispute && (
+    dispute.hanko.toLowerCase() !== account.counterpartyDisputeProofHanko?.toLowerCase()
+    || dispute.hash.toLowerCase() !== account.counterpartyDisputeHash?.toLowerCase()
+    || dispute.proofBodyHash.toLowerCase() !== account.counterpartyDisputeProofBodyHash?.toLowerCase()
+    || dispute.nonce !== account.counterpartyDisputeProofNonce
+    || dispute.proposerIsLeft !== account.counterpartyDisputeProofProposerIsLeft
+  )) return { ok: false, error: 'ACK current dispute Hanko conflict' };
+  return { ok: true, currentHash, frameHanko: ack.frameHanko };
+};
+
+const handleRepeatedCurrentAck = async (
+  account: AccountReplica,
+  input: AccountInput,
+  ack: AccountAckFrame,
+  ackHeight: number | undefined,
+  validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
+  events: string[],
+  securityContext: AccountInputSecurityContext,
+): Promise<PendingAckFrameResult | undefined> => {
+  if (ackHeight !== Number(account.currentHeight ?? 0) || ackHeight <= 0) return undefined;
+  const material = repeatedAckMaterial(account, ack, validatedDisputeHanko);
+  if (!material.ok) return {
+    kind: 'return',
+    result: rejectAccountInput('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID', material.error, events),
+  };
+  const verified = await securityContext.verifyHanko(
+    material.frameHanko,
+    material.currentHash,
+    input.fromEntityId,
+    securityContext.counterpartyCertifiedBoard
+      ? {
+          registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
+          allowPreviousBoard: true,
+        }
+      : { allowPreviousBoard: true },
+  );
+  if (!verified.valid || verified.entityId?.toLowerCase() !== input.fromEntityId.toLowerCase()) {
+    return {
+      kind: 'return',
+      result: rejectAccountInput('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID', 'ACK current Hanko invalid', events),
+    };
+  }
+  return { kind: 'fallthrough' };
+};
+
 const verifyPendingAckCertificate = async (
   account: AccountReplica,
   ack: AccountAckFrame,
@@ -288,6 +349,18 @@ export const handlePendingAckFrame = async (
 ): Promise<PendingAckFrameResult> => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
+  if (ack) {
+    const repeated = await handleRepeatedCurrentAck(
+      account,
+      input,
+      ack,
+      ackHeight,
+      validatedDisputeHanko,
+      events,
+      securityContext,
+    );
+    if (repeated) return repeated;
+  }
   const pendingFrame = account.pendingFrame;
   if (!(pendingFrame && ackHeight === pendingFrame.height && ack)) {
     return { kind: 'not_applicable' };

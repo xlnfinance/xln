@@ -13,6 +13,7 @@ import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundar
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
 import {
   buildRoundPayment,
+  separatePaymentCompletionFromDrain,
   waitForHltEconomicStartGate,
 } from '../../../scripts/operations/hlt/workload/worker-payments';
 import { buildPacedOperationSchedule } from '../../../scripts/operations/hlt/workload/operation-pacer';
@@ -28,6 +29,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 describe('hlt payment population', () => {
+  test('post-completion drain audit never reduces measured payment throughput', () => {
+    expect(separatePaymentCompletionFromDrain(22_311, 23_831)).toEqual({
+      deliveredElapsedMs: 22_311,
+      drainCompleteElapsedMs: 23_831,
+    });
+  });
+
   test('recording cardinality comes from unique two-leg HTLC work, never the faucet', () => {
     const accountInput = (fromEntityId: string, toEntityId: string, stateHash: string) => ({
       type: 'accountInput' as const,

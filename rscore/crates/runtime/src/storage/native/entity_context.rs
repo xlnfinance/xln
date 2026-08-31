@@ -154,7 +154,43 @@ impl EntityContextPayloadRows {
     pub(crate) fn merge(
         parts: impl IntoIterator<Item = Self>,
     ) -> Result<Self, EntityContextPayloadError> {
-        Self::validate(parts.into_iter().flat_map(|part| part.rows).collect())
+        let mut graphs =
+            BTreeMap::<String, (EntityContextPayloadDigest, Vec<EntityContextPayloadRow>)>::new();
+        for part in parts {
+            for (replica_id, digest) in part.frame_refs {
+                if graphs
+                    .insert(replica_id.clone(), (digest, Vec::new()))
+                    .is_some()
+                {
+                    return Err(EntityContextPayloadError::DuplicatePath {
+                        replica: replica_id,
+                        kind: EntityContextPayloadKind::Manifest.label(),
+                        index: 0,
+                    });
+                }
+            }
+            for row in part.rows {
+                graphs
+                    .get_mut(&row.replica_id)
+                    .ok_or_else(|| EntityContextPayloadError::Replica(row.replica_id.clone()))?
+                    .1
+                    .push(row);
+            }
+        }
+        let mut merged = Self::default();
+        for (replica_id, (digest, rows)) in graphs {
+            // Every part can only be constructed by `validate` or `projected`.
+            // Re-decoding and re-hashing its immutable rows here proves the
+            // same closed type twice and dominated live projection CPU.
+            merged.rows.extend(rows);
+            merged.frame_refs.push((replica_id, digest));
+        }
+        #[cfg(any(test, debug_assertions))]
+        {
+            let oracle = Self::validate(merged.rows.clone())?;
+            assert_eq!(merged, oracle, "RSCORE_MERGED_CONTEXT_ROWS_DIVERGED");
+        }
+        Ok(merged)
     }
 
     pub fn validate(rows: Vec<EntityContextPayloadRow>) -> Result<Self, EntityContextPayloadError> {

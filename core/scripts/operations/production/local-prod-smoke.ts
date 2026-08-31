@@ -1470,7 +1470,10 @@ const main = async (): Promise<void> => {
     }
     await runProductionSwapLoadSmoke();
     await runAuthorityCheckpointRestart();
-    console.log('[local-prod-smoke] green h1-live-authority');
+    // This launcher also runs smaller diagnostics. The workload validator is
+    // the sole authority for TPS evidence, so the outer process reports only
+    // that the production path and its drain/restart gates completed.
+    console.log('[local-prod-smoke] green h1-production-path');
     return;
   }
   const marketMakerInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'

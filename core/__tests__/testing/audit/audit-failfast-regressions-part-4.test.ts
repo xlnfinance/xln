@@ -1780,7 +1780,58 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.currentHeight).toBe(10);
   });
 
-  test('applyAccountInput ignores obsolete ACK after dispute freeze clears pending frame', async () => {
+  test('applyAccountInput accepts only the exact authenticated ACK of the current frame', async () => {
+    const seed = 'account-frame-current-ack';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([], left.entityId, right.entityId);
+    accountMachine.currentHeight = 8;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 8,
+      stateHash: `0x${'ef'.repeat(32)}`,
+    };
+    const [peerHanko] = await signEntityHashes(
+      env,
+      right.entityId,
+      right.signerId,
+      [accountMachine.currentFrame.stateHash],
+    );
+    accountMachine.counterpartyFrameHanko = peerHanko;
+
+    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
+      kind: 'ack',
+      fromEntityId: right.entityId,
+      toEntityId: left.entityId,
+      domain: { ...accountMachine.state.domain },
+      ack: { height: 8, frameHash: accountMachine.currentFrame.stateHash, frameHanko: peerHanko },
+      disputeConfig: { ...accountMachine.state.disputeConfig },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.response).toBeUndefined();
+    expect(accountMachine.currentHeight).toBe(8);
+
+    const conflict = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
+      kind: 'ack',
+      fromEntityId: right.entityId,
+      toEntityId: left.entityId,
+      domain: { ...accountMachine.state.domain },
+      ack: {
+        height: 8,
+        frameHash: accountMachine.currentFrame.stateHash,
+        frameHanko: `0x${'12'.repeat(65)}`,
+      },
+      disputeConfig: { ...accountMachine.state.disputeConfig },
+    });
+    expect(conflict.ok).toBe(false);
+    expect(accountMachine.currentHeight).toBe(8);
+  });
+
+  test('applyAccountInput rejects a non-current ACK after dispute freeze clears pending frame', async () => {
     const seed = 'account-frame-frozen-obsolete-ack';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1807,13 +1858,13 @@ describe('audit fail-fast regressions', () => {
       disputeConfig: { ...accountMachine.state.disputeConfig },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(result.response).toBeUndefined();
     expect(accountMachine.currentHeight).toBe(8);
-    expect(result.events.some(event => event.includes('Ignored obsolete ACK for frozen account frame 9'))).toBe(true);
+    expect(result.disposition).toBe('rejected');
   });
 
-  test('applyAccountInput tolerates reordered next ACK before local pending frame install', async () => {
+  test('applyAccountInput rejects an ACK for a frame that was never locally proposed', async () => {
     const seed = 'account-frame-early-next-ack';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1839,11 +1890,11 @@ describe('audit fail-fast regressions', () => {
       disputeConfig: { ...accountMachine.state.disputeConfig },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(result.response).toBeUndefined();
     expect(accountMachine.currentHeight).toBe(19);
     expect(accountMachine.pendingFrame).toBeUndefined();
-    expect(result.events).toContain('Ignored early ACK for frame 20 (current=19, pending=none)');
+    expect(result.disposition).toBe('rejected');
   });
 
   test('applyAccountInput rejects frames whose byLeft does not match the signed proposer', async () => {

@@ -214,6 +214,8 @@ describe('production startup wiring', () => {
 
   test('Rust authority restart proves the exact persisted H1 checkpoint root', () => {
     const smoke = readFileSync(join(repoRoot, 'core/scripts/operations/production/local-prod-smoke.ts'), 'utf8');
+    expect(smoke).toContain('green h1-production-path');
+    expect(smoke).not.toContain('green h1-live-authority');
     expect(smoke).not.toContain("inheritedProcessEnv['XLN_HUB_RSCORE_AUTHORITY_H1'] = '1';");
     expect(smoke).not.toContain("inheritedProcessEnv['XLN_RSCORE_AUTHORITY_CUTOVER'] = '1';");
     expect(smoke).not.toContain('XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES:');

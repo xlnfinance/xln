@@ -81,7 +81,6 @@ export type AccountInputReplayClassification = {
   pendingHeight: number;
   inputHeight: number;
   newFrameHeight: number | undefined;
-  ackIsStale: boolean;
   frameIsStale: boolean;
 };
 
@@ -99,18 +98,11 @@ export const classifyAccountInputReplay = (
   const newFrameHeight = proposal?.frame === undefined || proposal.frame === null
     ? undefined
     : Number(proposal.frame.height);
-  const ackIsStale = Boolean(ack?.frameHanko)
-    && inputHeight > 0
-    && (
-      (pendingHeight > 0 && inputHeight < pendingHeight)
-      || (pendingHeight === 0 && inputHeight <= currentHeight)
-    );
   return {
     currentHeight,
     pendingHeight,
     inputHeight,
     newFrameHeight,
-    ackIsStale,
     // Equal height is a duplicate of the committed frame, not a stale ancestor.
     // Hash mismatch at this height must reach preflight/collision, not silent ignore.
     frameIsStale: newFrameHeight !== undefined && newFrameHeight < currentHeight,
@@ -423,19 +415,6 @@ export const handleReplayOrObsoleteAccountInput = async (
     );
     if (duplicateAck) return duplicateAck;
   }
-  if (
-    replay.ackIsStale
-    && (replay.newFrameHeight === undefined || replay.frameIsStale)
-  ) {
-    replayLog.debug('input.stale_ack_ignored', {
-      currentHeight: replay.currentHeight,
-      pendingHeight: replay.pendingHeight,
-      inputHeight: replay.inputHeight,
-      newFrameHeight: replay.newFrameHeight ?? null,
-      from: shortId(input.fromEntityId),
-    });
-    return accountInputApplied({ events });
-  }
   if (!ack && replay.frameIsStale) {
     replayLog.warn('input.stale_frame_ignored', {
       currentHeight: replay.currentHeight,
@@ -443,24 +422,6 @@ export const handleReplayOrObsoleteAccountInput = async (
       newFrameHeight: replay.newFrameHeight ?? null,
       currentHash: account.currentFrame?.stateHash ?? null,
       receivedHash: proposal?.frame.stateHash ?? null,
-      from: shortId(input.fromEntityId),
-    });
-    return accountInputApplied({ events });
-  }
-  if (
-    ack
-    && !proposal
-    && !account.pendingFrame
-    && (account.status ?? 'active') !== 'active'
-  ) {
-    events.push(
-      `ℹ️ Ignored obsolete ACK for frozen account frame ${String(replay.inputHeight ?? 'none')} ` +
-        `(current=${String(account.currentHeight ?? 0)}, status=${String(account.status)})`,
-    );
-    replayLog.debug('input.frozen_ack_ignored', {
-      currentHeight: replay.currentHeight,
-      inputHeight: replay.inputHeight,
-      status: account.status,
       from: shortId(input.fromEntityId),
     });
     return accountInputApplied({ events });

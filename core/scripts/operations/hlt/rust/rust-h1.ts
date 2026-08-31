@@ -64,22 +64,25 @@ export const assertRustLivePaymentCardinality = (counts: RustLivePaymentCounts):
   }
 };
 
-const isRustLivePaymentSmoke = (counts: RustLivePaymentCounts): boolean =>
-  counts.users === 1_000 &&
-  counts.payments === 5_000 &&
-  counts.offeredPerSecond === 1_000 &&
-  counts.durationSeconds === 5;
+const isRustLivePaymentDiagnostic = (counts: RustLivePaymentCounts): boolean => {
+  const values = [counts.users, counts.payments, counts.offeredPerSecond, counts.durationSeconds];
+  return values.every(value => Number.isSafeInteger(value) && value > 0) &&
+    counts.payments === counts.offeredPerSecond * counts.durationSeconds;
+};
 
 /**
- * The only short Rust H1 run is a cardinality-real five-second smoke. It uses
- * the production path but is deliberately not accepted by the TPS gate.
+ * Any internally consistent smaller run may exercise the production path,
+ * but only the exact authority cardinality is allowed to expose rate fields.
  */
 export const classifyRustLivePaymentRun = (
   counts: RustLivePaymentCounts,
 ): RustLivePaymentEvidence => {
-  if (isRustLivePaymentSmoke(counts)) return 'functional-smoke';
-  assertRustLivePaymentCardinality(counts);
-  return 'tps-authority';
+  if (isRustLivePaymentTpsAuthority(counts)) return 'tps-authority';
+  if (isRustLivePaymentDiagnostic(counts)) return 'functional-smoke';
+  throw new Error(
+    `HLT_RUST_LIVE_COUNTS_INVALID:users=${counts.users}:payments=${counts.payments}:` +
+    `offered=${counts.offeredPerSecond}:duration=${counts.durationSeconds}`,
+  );
 };
 
 /** Result rates exist only for the exact 20-second TPS authority. */

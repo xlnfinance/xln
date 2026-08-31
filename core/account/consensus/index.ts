@@ -1048,7 +1048,6 @@ const handleAccountAckPhase = async (
     normalizedInputHeight,
     ackProcessed,
     events,
-    committedFrames,
     'before_frame',
   );
   return unmatched ? { kind: 'return', result: unmatched } : { kind: 'continue', ackProcessed };
@@ -1134,7 +1133,7 @@ const handleAccountProposalPhase = async (
   );
   if (incoming.kind === 'return') return incoming.result;
   return (
-    handleUnmatchedAck(account, input, normalizedInputHeight, ackProcessed, events, committedFrames, 'after_frame') ??
+    handleUnmatchedAck(account, input, normalizedInputHeight, ackProcessed, events, 'after_frame') ??
     null
   );
 };

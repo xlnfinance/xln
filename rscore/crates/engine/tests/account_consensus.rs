@@ -2533,9 +2533,10 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
 
 /// Empty evidence is malformed before replay classification. Once the witness
 /// has a valid wire shape, at-least-once delivery classifies an obsolete
-/// frame/ACK before cryptographic verification and keeps it a no-op.
+/// duplicate frame before cryptographic verification, while a repeated ACK
+/// still validates its exact current certificate.
 #[test]
-fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
+fn duplicate_frame_skips_obsolete_witness_but_repeated_ack_does_not() {
     let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
@@ -2631,10 +2632,11 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
         &ack_hanko,
         Some(obsolete_dispute),
     )
-    .expect("stale ack ignores obsolete witness");
+    .expect("repeated ack validates its witness");
     assert!(matches!(
         ack,
-        xln_rscore_engine::AckOutcome::Stale { height: 1 }
+        xln_rscore_engine::AckOutcome::Rejected { reason }
+            if reason.starts_with("ACCOUNT_INPUT_DISPUTE_HANKO_INVALID")
     ));
     assert_eq!(
         left.account.entity_account_leaf().expect("left leaf after"),
@@ -2803,8 +2805,31 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
     let pending_hash = left.account.pending().expect("pending second").state_hash;
     let left_envelope = envelope(&left.account, right.identity.entity_id());
 
+    let repeated = apply_exact_incoming_ack(
+        &mut left.account,
+        &left_envelope,
+        IncomingAck {
+            height: 1,
+            frame_hash: first.state_hash,
+            frame_hanko: Some(ack_hanko.clone()),
+            dispute: None,
+        },
+    )
+    .expect("exact current ACK is accepted without touching the pending frame");
+    assert!(matches!(
+        repeated,
+        xln_rscore_engine::AckOutcome::Accepted { height: 1 }
+    ));
+    assert_eq!(
+        left.account
+            .pending()
+            .expect("pending survives repeat")
+            .state_hash,
+        pending_hash,
+    );
+
     for frame_hanko in [None, Some(vec![0])] {
-        let stale = apply_exact_incoming_ack(
+        let repeated = apply_exact_incoming_ack(
             &mut left.account,
             &left_envelope,
             IncomingAck {
@@ -2814,10 +2839,10 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
                 dispute: None,
             },
         )
-        .expect("old ACK is a no-op even when its certificate is obsolete");
+        .expect("a non-current ACK is rejected");
         assert!(matches!(
-            stale,
-            xln_rscore_engine::AckOutcome::Stale { height: 1 }
+            repeated,
+            xln_rscore_engine::AckOutcome::Rejected { .. }
         ));
     }
     let invalid_active = apply_exact_incoming_ack(
@@ -2848,7 +2873,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
     let right_leaf = right.account.entity_account_leaf().expect("right leaf");
     let right_envelope = envelope(&right.account, left.identity.entity_id());
     for (height, frame_hanko) in [(1, None), (2, Some(vec![0]))] {
-        let early_or_stale = apply_exact_incoming_ack(
+        let invalid = apply_exact_incoming_ack(
             &mut right.account,
             &right_envelope,
             IncomingAck {
@@ -2858,11 +2883,10 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
                 dispute: None,
             },
         )
-        .expect("no-pending stale/early ACK is a no-op");
+        .expect("only an exact authenticated current ACK is a no-op");
         assert!(matches!(
-            early_or_stale,
-            xln_rscore_engine::AckOutcome::Stale { height: outcome_height }
-                if outcome_height == height
+            invalid,
+            xln_rscore_engine::AckOutcome::Rejected { .. }
         ));
     }
     let future = apply_exact_incoming_ack(

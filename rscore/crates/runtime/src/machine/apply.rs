@@ -227,7 +227,7 @@ struct AccountInputOutcomeProfile {
     ack_frame_with_ack: usize,
     ack_frame_without_ack: usize,
     ack_committed: usize,
-    ack_stale: usize,
+    ack_accepted: usize,
     ack_rejected: usize,
     frame_committed: usize,
     frame_duplicate: usize,
@@ -264,7 +264,7 @@ impl AccountInputOutcomeProfile {
     fn observe_ack(&mut self, verdict: &AccountInputVerdict) {
         match verdict {
             AccountInputVerdict::AckCommitted { .. } => self.ack_committed += 1,
-            AccountInputVerdict::AckStale { .. } => self.ack_stale += 1,
+            AccountInputVerdict::AckAccepted { .. } => self.ack_accepted += 1,
             AccountInputVerdict::AckRejected { .. } => self.ack_rejected += 1,
             _ => self.outcome_other += 1,
         }
@@ -335,7 +335,7 @@ fn profile_account_input_outcomes(
         }
     }
     eprintln!(
-        "RSCORE_ACCOUNT_INPUT_OUTCOMES runtimeHeight={} entityHeight={} finalizedJHeight={} accountsRoot={} inputs={} results={} pairingMismatch={} ack={} ackFrameWithAck={} ackFrameWithoutAck={} inputOther={} ackCommitted={} ackStale={} ackRejected={} frameCommitted={} frameDuplicate={} frameCollision={} frameStale={} frameRejected={} forceAckTrue={} forceAckFalse={} forceAckNone={} outcomeOther={}",
+        "RSCORE_ACCOUNT_INPUT_OUTCOMES runtimeHeight={} entityHeight={} finalizedJHeight={} accountsRoot={} inputs={} results={} pairingMismatch={} ack={} ackFrameWithAck={} ackFrameWithoutAck={} inputOther={} ackCommitted={} ackAccepted={} ackRejected={} frameCommitted={} frameDuplicate={} frameCollision={} frameStale={} frameRejected={} forceAckTrue={} forceAckFalse={} forceAckNone={} outcomeOther={}",
         runtime_height,
         entity_height,
         finalized_j_height,
@@ -348,7 +348,7 @@ fn profile_account_input_outcomes(
         profile.ack_frame_without_ack,
         profile.input_other,
         profile.ack_committed,
-        profile.ack_stale,
+        profile.ack_accepted,
         profile.ack_rejected,
         profile.frame_committed,
         profile.frame_duplicate,
@@ -3153,13 +3153,13 @@ mod tests {
         profile.observe_outcome(
             ProfileAccountInputKind::AckFrameWithAck,
             &AccountInputVerdict::AckFrameApplied {
-                ack: Box::new(AccountInputVerdict::AckStale { height: 7 }),
+                ack: Box::new(AccountInputVerdict::AckAccepted { height: 7 }),
                 frame: Box::new(duplicate()),
             },
         );
         assert_eq!(profile.ack_frame_without_ack, 1);
         assert_eq!(profile.ack_frame_with_ack, 1);
-        assert_eq!(profile.ack_stale, 1);
+        assert_eq!(profile.ack_accepted, 1);
         assert_eq!(profile.frame_duplicate, 2);
         assert_eq!(profile.outcome_other, 0);
     }

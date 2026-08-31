@@ -479,6 +479,10 @@ impl AccountConsensus {
         self.local_committed_frame_hanko.as_deref()
     }
 
+    pub(crate) fn counterparty_committed_frame_hanko(&self) -> Option<&[u8]> {
+        self.counterparty_frame_hanko.as_deref()
+    }
+
     pub fn current_height(&self) -> u64 {
         self.current.as_ref().map_or(0, |frame| frame.frame.height)
     }

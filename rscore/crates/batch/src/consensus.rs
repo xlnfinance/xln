@@ -162,7 +162,7 @@ pub enum AccountInputVerdict {
         events: Vec<String>,
         committed_frame: Box<CommittedFrameEvidence>,
     },
-    AckStale {
+    AckAccepted {
         height: u64,
     },
     AckRejected {
@@ -732,7 +732,7 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
             events,
             committed_frame,
         },
-        AckOutcome::Stale { height } => AccountInputVerdict::AckStale { height },
+        AckOutcome::Accepted { height } => AccountInputVerdict::AckAccepted { height },
         AckOutcome::Rejected { reason } => AccountInputVerdict::AckRejected { reason },
     }
 }
@@ -763,7 +763,7 @@ fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
         | AccountInputVerdict::FrameStale { .. }
         | AccountInputVerdict::FrameDisputeRequired { .. }
         | AccountInputVerdict::FrameRejected { .. }
-        | AccountInputVerdict::AckStale { .. }
+        | AccountInputVerdict::AckAccepted { .. }
         | AccountInputVerdict::AckRejected { .. }
         | AccountInputVerdict::AckFrameRejected { .. }
         | AccountInputVerdict::DisputeRejected { .. }
@@ -783,7 +783,7 @@ pub(crate) fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
         | AccountInputVerdict::FrameDisputeRequired { .. }
         | AccountInputVerdict::FrameRejected { .. }
         | AccountInputVerdict::AckCommitted { .. }
-        | AccountInputVerdict::AckStale { .. }
+        | AccountInputVerdict::AckAccepted { .. }
         | AccountInputVerdict::AckRejected { .. }
         | AccountInputVerdict::AckFrameRejected { .. }
         | AccountInputVerdict::DisputeApplied

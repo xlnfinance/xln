@@ -62,7 +62,6 @@ export const handleUnmatchedAck = (
   normalizedInputHeight: number | undefined,
   ackProcessed: boolean,
   events: string[],
-  committedFrames: AccountCommittedFrame[],
   phase: 'before_frame' | 'after_frame',
 ): HandleAccountInputResult | undefined => {
   const ack = accountInputAck(input);
@@ -74,20 +73,6 @@ export const handleUnmatchedAck = (
       return undefined;
     }
     const pending = account.pendingFrame.height;
-    const stale =
-      normalizedInputHeight !== undefined &&
-      normalizedInputHeight > 0 &&
-      normalizedInputHeight <= Number(account.currentHeight ?? 0);
-    if (stale) {
-      events.push(
-        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} ` +
-          `(current=${String(account.currentHeight ?? 0)}, pending=${pending})`,
-      );
-      return accountInputApplied({
-        events,
-        ...(committedFrames.length > 0 && { committedFrames }),
-      });
-    }
     return rejectAccountInput(
       'ACCOUNT_INPUT_ACK_UNMATCHED',
       `Unmatched ACK with pending frame: ` +
@@ -100,36 +85,6 @@ export const handleUnmatchedAck = (
 
   if (proposal) return undefined;
   const pending = account.pendingFrame?.height ?? 'none';
-  const stale =
-    normalizedInputHeight !== undefined &&
-    normalizedInputHeight > 0 &&
-    normalizedInputHeight <= Number(account.currentHeight ?? 0);
-  if (stale) {
-    events.push(
-      `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} ` +
-        `(current=${String(account.currentHeight ?? 0)}, pending=${String(pending)})`,
-    );
-    return accountInputApplied({
-      events,
-      ...(committedFrames.length > 0 && { committedFrames }),
-    });
-  }
-  const earlyNextAck =
-    normalizedInputHeight !== undefined &&
-    normalizedInputHeight === Number(account.currentHeight ?? 0) + 1 &&
-    !account.pendingFrame;
-  if (earlyNextAck) {
-    // A pure ACK cannot advance without its pending frame. The original
-    // proposal remains the only proposal delivery; do not synthesize another.
-    events.push(
-      `Ignored early ACK for frame ${String(normalizedInputHeight)} ` +
-        `(current=${String(account.currentHeight ?? 0)}, pending=none)`,
-    );
-    return accountInputApplied({
-      events,
-      ...(committedFrames.length > 0 && { committedFrames }),
-    });
-  }
   return rejectAccountInput(
     'ACCOUNT_INPUT_ACK_UNMATCHED',
     `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} ` + `pending=${String(pending)}`,

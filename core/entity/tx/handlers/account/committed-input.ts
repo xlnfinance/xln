@@ -532,9 +532,9 @@ export const applySuccessfulAccountInput = async (
 
   if (!result.response) {
     // Only the pure ACK that actually commits our pending frame may clear a
-    // previous forced response in this Entity batch. Stale/duplicate no-op
-    // ACKs preserve it; otherwise [duplicate frame, stale ACK] loses the exact
-    // re-answer and deadlocks the bilateral lane.
+    // previous forced response in this Entity batch. Exact repeated ACKs
+    // preserve it; otherwise a duplicate frame can lose the required
+    // re-answer and deadlock the bilateral lane.
     const committedOurPending = !accountInputProposal(input)
       && (result.committedFrames ?? []).some(frame => !frame.committedViaNewFrame);
     return committedOurPending ? { force: false } : undefined;

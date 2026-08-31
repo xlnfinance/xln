@@ -147,7 +147,7 @@ test('Rust live TPS authority rejects smoke-sized populations and rates', () => 
     .toBeUndefined();
 });
 
-test('Rust H1 permits only the exact 1,000-user five-second functional smoke below TPS authority', () => {
+test('Rust H1 permits smaller diagnostics but never exposes rate fields for them', () => {
   const smoke = { users: 1_000, payments: 5_000, offeredPerSecond: 1_000, durationSeconds: 5 };
   expect(classifyRustLivePaymentRun(smoke)).toBe('functional-smoke');
   expect(rustLivePaymentRateEvidence('functional-smoke', {
@@ -155,10 +155,15 @@ test('Rust H1 permits only the exact 1,000-user five-second functional smoke bel
     deliveredPayments: 5_000,
     deliveredElapsedMs: 6_000,
   })).toEqual({});
-  expect(() => classifyRustLivePaymentRun({ ...smoke, users: 999 }))
-    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
-  expect(() => classifyRustLivePaymentRun({ ...smoke, durationSeconds: 4, payments: 4_000 }))
-    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
+  expect(classifyRustLivePaymentRun({ ...smoke, users: 999 })).toBe('functional-smoke');
+  expect(classifyRustLivePaymentRun({
+    users: 100,
+    payments: 2_000,
+    offeredPerSecond: 100,
+    durationSeconds: 20,
+  })).toBe('functional-smoke');
+  expect(() => classifyRustLivePaymentRun({ ...smoke, durationSeconds: 4 }))
+    .toThrow('HLT_RUST_LIVE_COUNTS_INVALID');
   expect(classifyRustLivePaymentRun({
     users: 1_000,
     payments: 20_000,

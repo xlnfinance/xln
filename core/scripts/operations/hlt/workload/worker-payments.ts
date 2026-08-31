@@ -477,6 +477,14 @@ export const waitForHubSettlement = async (
   );
 };
 
+export const separatePaymentCompletionFromDrain = (
+  deliveredElapsedMs: number,
+  observedDrainElapsedMs: number,
+): Readonly<{ deliveredElapsedMs: number; drainCompleteElapsedMs: number }> => ({
+  deliveredElapsedMs,
+  drainCompleteElapsedMs: Math.max(deliveredElapsedMs, observedDrainElapsedMs),
+});
+
 /**
  * One hub and the users that pay through it.
  *
@@ -939,7 +947,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       acceptedPayments: settlements.reduce((sum, row) => sum + row.counters.acceptedPayments, 0),
     };
     const hubIngressElapsedMs = Math.max(...settlements.map(row => row.hubIngressElapsedMs));
-    let deliveredElapsedMs = Math.max(...settlements.map(row => row.deliveredElapsedMs));
+    const deliveredElapsedMs = Math.max(...settlements.map(row => row.deliveredElapsedMs));
     const paymentSettlement = {
       settlementSamples: mergeSettlementSamples(settlements.map(row => row.settlementSamples)),
     };
@@ -957,15 +965,14 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     if (deliveredPayments !== submittedPayments) {
       throw new Error(`HLT_PAYMENT_DELIVERED_LEDGER_MISMATCH:${String(deliveredPayments)}:${submittedPayments}`);
     }
-    deliveredElapsedMs = Math.max(deliveredElapsedMs, Math.ceil(performance.now() - startedAt));
+    // Payment TPS ends at the committed H1 completion counter. The later
+    // ledger/ACK audit remains mandatory, but is a drain gate, not execution.
+    const { drainCompleteElapsedMs } = separatePaymentCompletionFromDrain(
+      deliveredElapsedMs,
+      Math.ceil(performance.now() - startedAt),
+    );
     const terminalSettlementSample = paymentSettlement.settlementSamples.at(-1);
     if (!terminalSettlementSample) throw new Error('HLT_PAYMENT_SETTLEMENT_SAMPLE_MISSING');
-    if (terminalSettlementSample.elapsedMs < deliveredElapsedMs) {
-      paymentSettlement.settlementSamples = [
-        ...paymentSettlement.settlementSamples,
-        { ...terminalSettlementSample, elapsedMs: deliveredElapsedMs },
-      ];
-    }
     const phaseTimeline = rustSettlement ? {
       hostAcceptedElapsedMs,
       hubLastAcceptedOffsetMs: Math.max(
@@ -977,8 +984,8 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         Math.round(rustSettlement.metrics.lastCompletedAtUnixMicros / 1_000 - economicStartedAtUnixMs),
       ),
       userStages: paymentOperationLedger,
-      drainCompleteOffsetMs: deliveredElapsedMs,
-    } : { hostAcceptedElapsedMs, userStages: paymentOperationLedger, drainCompleteOffsetMs: deliveredElapsedMs };
+      drainCompleteOffsetMs: drainCompleteElapsedMs,
+    } : { hostAcceptedElapsedMs, userStages: paymentOperationLedger, drainCompleteOffsetMs: drainCompleteElapsedMs };
     const hubIo = rustSettlement
       ? { ...tsHubIo, H1: { native: rustSettlement.metrics } }
       : tsHubIo;
@@ -1028,11 +1035,11 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         : decodeLoadFrame(await readWithRateLimitRetry<unknown>(requireHub(), 'frame/latest')),
       environment,
     } as const;
-    // A five-second smoke proves the full production path and zero-loss drain,
-    // but must not create the rate-bearing load report consumed by dashboards.
-    const report = rustPaymentEvidence === 'functional-smoke'
-      ? null
-      : decodeLoadPaymentReport(reportInput);
+    // Diagnostics run the exact production path, but only the authority
+    // cardinality may create the rate-bearing dashboard report.
+    const report = rustPaymentEvidence === 'tps-authority'
+      ? decodeLoadPaymentReport(reportInput)
+      : null;
     if (report) {
       persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
     }

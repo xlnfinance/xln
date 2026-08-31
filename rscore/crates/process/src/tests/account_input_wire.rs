@@ -274,7 +274,7 @@ fn ack_frame_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         account_id,
         force_ack: None,
         verdict: AccountInputVerdict::AckFrameApplied {
-            ack: Box::new(AccountInputVerdict::AckStale { height: 42 }),
+            ack: Box::new(AccountInputVerdict::AckAccepted { height: 42 }),
             frame: Box::new(AccountInputVerdict::FrameCollisionIgnored {
                 height: 43,
                 queued: 0,
@@ -326,7 +326,7 @@ fn ack_frame_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
                 height: 1,
                 queued: 0,
             }),
-            frame: Box::new(AccountInputVerdict::AckStale { height: 1 }),
+            frame: Box::new(AccountInputVerdict::AckAccepted { height: 1 }),
         },
     };
     assert!(input_result(&wrong_domains).is_err());

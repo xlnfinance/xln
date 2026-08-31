@@ -168,12 +168,13 @@ pub enum AckOutcome {
         /// Canonical acknowledgement event. Transaction handler events were
         /// speculative and are not replayed into the ACK's Entity frame.
         events: Vec<String>,
-        /// Boxed: an ACK outcome is mostly the tiny stale/rejected cases, and
+        /// Boxed: an ACK outcome is mostly the tiny accepted/rejected cases, and
         /// the committed frame is the only large thing in the enum.
         committed_frame: Box<CommittedFrameEvidence>,
     },
-    /// Nothing is pending at that height any more — a retransmitted ack.
-    Stale {
+    /// Exact authenticated acknowledgement of the committed head. It is
+    /// accepted as a no-op because the frame is already committed.
+    Accepted {
         height: u64,
     },
     Rejected {
@@ -921,22 +922,6 @@ pub fn apply_incoming_ack_with_authority(
         return Ok(ack_rejected(error.to_string()));
     }
 
-    let current_height = account.current_height();
-    let pending_height = account.pending().map(|pending| pending.frame.height);
-    let has_certificate = frame_hanko.as_ref().is_some_and(|hanko| !hanko.is_empty());
-    let replay_is_stale = height > 0
-        && match pending_height {
-            Some(pending_height) => height < pending_height,
-            None => height <= current_height,
-        };
-    // TypeScript's first replay gate uses certificate *presence*, not
-    // validity. A non-empty obsolete Hanko may be unverifiable after board
-    // rotation and still remains an at-least-once no-op. Shape-invalid dispute
-    // evidence was rejected above; its obsolete signature/hash are skipped.
-    if has_certificate && replay_is_stale {
-        return Ok(AckOutcome::Stale { height });
-    }
-
     if let Some(dispute) = dispute.as_ref() {
         if let Err(error) =
             validate_counterparty_dispute_hash(account.replica(), &envelope.from_entity_id, dispute)
@@ -955,21 +940,45 @@ pub fn apply_incoming_ack_with_authority(
         }
     }
 
-    let Some(pending_height) = pending_height else {
-        // Without the pending proposal, neither an old ACK nor the next ACK
-        // can advance state. The next height is an ordinary early delivery;
-        // anything beyond it is unmatched future traffic and must stay loud.
-        if height > 0 && height <= current_height.saturating_add(1) {
-            return Ok(AckOutcome::Stale { height });
+    let current_height = account.current_height();
+    let pending_height = account.pending().map(|pending| pending.frame.height);
+    if height == current_height && height > 0 {
+        let Some(current) = account.current() else {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_CURRENT_FRAME_MISSING"));
+        };
+        if frame_hash != current.state_hash {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_HASH_MISMATCH"));
         }
+        let Some(frame_hanko) = frame_hanko.filter(|hanko| !hanko.is_empty()) else {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_HANKO_MISSING"));
+        };
+        if account.counterparty_committed_frame_hanko() != Some(frame_hanko.as_slice()) {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_HANKO_CONFLICT"));
+        }
+        if dispute
+            .as_ref()
+            .is_some_and(|incoming| account.counterparty_dispute() != Some(incoming))
+        {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_DISPUTE_HANKO_CONFLICT"));
+        }
+        if let Err(error) = verify_ack_hanko_with_authority(
+            &frame_hanko,
+            &frame_hash,
+            &envelope.from_entity_id,
+            authority,
+            clock.entity_timestamp,
+        ) {
+            return Ok(ack_rejected(error.to_string()));
+        }
+        return Ok(AckOutcome::Accepted { height });
+    }
+
+    let Some(pending_height) = pending_height else {
         return Ok(AckOutcome::Rejected {
             reason: format!("ACCOUNT_INPUT_ACK_UNMATCHED:{height}:none"),
         });
     };
     if height != pending_height {
-        if height > 0 && height <= current_height {
-            return Ok(AckOutcome::Stale { height });
-        }
         return Ok(AckOutcome::Rejected {
             reason: format!("ACCOUNT_INPUT_ACK_UNMATCHED:{height}:{pending_height}"),
         });

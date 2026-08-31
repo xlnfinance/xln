@@ -416,4 +416,24 @@ mod tests {
         assert_eq!(merged.frame_refs()[0].0, format!("{replica}:46"));
         assert_eq!(merged.frame_refs()[1].0, format!("{replica}:47"));
     }
+
+    #[test]
+    fn merge_rejects_the_same_validated_context_twice() {
+        let entity = format!("0x{}", "55".repeat(32));
+        let signer = format!("0x{}", "66".repeat(20));
+        let replica = format!("{entity}:{signer}");
+        let canonical = crate::canonical_value_from_tagged_json(&json!({
+            "version":1,"proposerReplicaId":replica,"entityId":entity,
+            "proposerSignerId":signer,"parentFrameHash":"genesis","height":1,
+            "gossipProfiles":[],"peerAssertions":[],
+            "htlc":{"version":1,"entries":[],"originated":[]}
+        }))
+        .expect("context");
+        let rows = prepare_entity_context_rows(&replica, &canonical).expect("rows");
+
+        assert!(matches!(
+            EntityContextPayloadRows::merge([rows.clone(), rows]),
+            Err(EntityContextPayloadError::DuplicatePath { .. })
+        ));
+    }
 }
