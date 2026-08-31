@@ -282,6 +282,11 @@ const stageBudgetsMs = {
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 type RestartProcessIds = Readonly<{ before: number; after: number }>;
+type RustAuthorityHead = Readonly<{
+  height: number;
+  runtimeFrameHash: string;
+  accountsRoot: string;
+}>;
 
 /**
  * Population flags for HLT. When `XLN_HLT_USERS` is set the run is described as
@@ -546,10 +551,65 @@ const readH1AuthorityFrame = async (height: number | 'latest'): Promise<LoadFram
   }
 };
 
+const readRustH1AuthorityHead = (): RustAuthorityHead => {
+  const info = fetchJsonWithCurl<Record<string, unknown>>(
+    `http://127.0.0.1:${String(nodePortBase)}/api/info`,
+    2_000,
+    'RUST_H1_AUTHORITY_HEAD',
+  );
+  const height = Number(info['height']);
+  const runtimeFrameHash = String(info['runtimeFrameHash'] ?? '');
+  const accountsRoot = String(info['accountsRoot'] ?? '');
+  if (!Number.isSafeInteger(height) || height < 1) {
+    throw new Error(`RUST_H1_AUTHORITY_HEIGHT_INVALID:${String(info['height'])}`);
+  }
+  if (!isHash64(runtimeFrameHash) || !isHash64(accountsRoot)) {
+    throw new Error(`RUST_H1_AUTHORITY_ROOT_INVALID:${runtimeFrameHash}:${accountsRoot}`);
+  }
+  return { height, runtimeFrameHash, accountsRoot };
+};
+
+const waitForRustH1AuthorityHead = async (): Promise<RustAuthorityHead> => {
+  const deadline = Date.now() + 10_000;
+  let lastError = 'RUST_H1_AUTHORITY_NOT_READY';
+  while (Date.now() < deadline) {
+    try {
+      return readRustH1AuthorityHead();
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await sleep(100);
+  }
+  throw new Error(lastError);
+};
+
 const runAuthorityCheckpointRestart = async (): Promise<void> => {
   const configured = String(process.env['XLN_LOCAL_PROD_SMOKE_AUTHORITY_RESTART'] ?? '').trim();
   if (!configured) return;
   if (configured !== '1') throw new Error(`LOCAL_PROD_SMOKE_AUTHORITY_RESTART_INVALID:${configured}`);
+  if (process.env['XLN_HLT_ENGINE'] === 'rust') {
+    const before = readRustH1AuthorityHead();
+    recordStage('rscore-authority-restart:start', before);
+    const processIds = await restartManaged('server');
+    const restored = await waitForRustH1AuthorityHead();
+    if (
+      restored.height !== before.height ||
+      restored.runtimeFrameHash !== before.runtimeFrameHash ||
+      restored.accountsRoot !== before.accountsRoot
+    ) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_RUST_AUTHORITY_CHECKPOINT_DIVERGED:` +
+        `${JSON.stringify(before)}:${JSON.stringify(restored)}`,
+      );
+    }
+    recordStage('rscore-authority-restart:complete', { processIds, before, restored });
+    console.log(
+      `HLT_RSCORE_RESTART_CHECKPOINT_OK beforePid=${processIds.before} ` +
+      `afterPid=${processIds.after} height=${before.height} ` +
+      `root=${before.runtimeFrameHash}`,
+    );
+    return;
+  }
   const before = await readH1AuthorityFrame('latest');
   recordStage('rscore-authority-restart:start', before);
   const processIds = await restartManaged('server');
@@ -1362,6 +1422,7 @@ const main = async (): Promise<void> => {
       throw new Error('LOCAL_PROD_SMOKE_H1_ONLY_REQUIRES_LIVE_WORKLOAD');
     }
     await runProductionSwapLoadSmoke();
+    await runAuthorityCheckpointRestart();
     console.log('[local-prod-smoke] green h1-live-authority');
     return;
   }
