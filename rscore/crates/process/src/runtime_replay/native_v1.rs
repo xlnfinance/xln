@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
+use xln_rscore_runtime::DurableRuntimeProcessor;
 use xln_rscore_runtime::decode_storage_payload;
 use xln_rscore_runtime::processor::{EntityRoute, EntityRouteTable};
 use xln_rscore_runtime::restore::{
@@ -99,6 +100,74 @@ fn replay_routes(
     .map_err(|error| format!("NATIVE_REPLAY_ROUTES:{error}"))
 }
 
+fn replay_frame(
+    source: &mut NativeRuntimeStore,
+    processor: &mut DurableRuntimeProcessor,
+    height: u64,
+    metrics: &mut NativeV1ReplayMetrics,
+    transcript: &mut Sha256,
+) -> Result<(), String> {
+    let source_frame = source
+        .read_durable_frame(height)
+        .map_err(|error| format!("NATIVE_REPLAY_SOURCE:{height}:{error}"))?;
+    let source_frame = concrete_wal_source_from_native(source_frame)
+        .map_err(|error| format!("NATIVE_REPLAY_SOURCE:{height}:{error}"))?;
+    let finalized_j_height = processor
+        .replica()
+        .map_err(|error| format!("NATIVE_REPLAY_REPLICA:{height}:{error}"))?
+        .state
+        .finalized_j_height;
+    let decoded = decode_concrete_runtime_wal_frame(&source_frame, finalized_j_height, false)
+        .map_err(|error| format!("NATIVE_REPLAY_DECODE:{height}:{error}"))?;
+    metrics.direct_payments = metrics
+        .direct_payments
+        .checked_add(direct_payment_count(&decoded.input)?)
+        .ok_or_else(|| "NATIVE_REPLAY_COUNT:directPayments".to_string())?;
+    processor
+        .reconcile_exact_replay_input(&decoded.input)
+        .map_err(|error| format!("NATIVE_REPLAY_RECONCILE:{height}:{error}"))?;
+    let report = processor
+        .process(decoded.input)
+        .map_err(|error| format!("NATIVE_REPLAY_PROCESS:{height}:{error}"))?;
+    let commitments = report
+        .commitments
+        .as_ref()
+        .ok_or_else(|| format!("NATIVE_REPLAY_COMMITMENTS:{height}"))?;
+    assert_source_commitments(height, &source_frame, commitments)?;
+    transcript.update(height.to_be_bytes());
+    transcript.update(commitments.runtime_frame_hash);
+    transcript.update(commitments.post_state_hash);
+    transcript.update(commitments.events_parity_digest);
+    transcript.update(commitments.entity_effects_parity_digest);
+    transcript.update(commitments.runtime_outputs_digest);
+    transcript.update((report.runtime_entity_inputs as u64).to_be_bytes());
+    transcript.update((report.account_inputs as u64).to_be_bytes());
+    for entity in &commitments.entities {
+        transcript.update(entity.entity_id);
+        transcript.update(entity.certified_frame_hash);
+        transcript.update(entity.state_root);
+        transcript.update(entity.accounts_root);
+    }
+    add(
+        &mut metrics.entity_inputs,
+        report.runtime_entity_inputs,
+        "entityInputs",
+    )?;
+    add(
+        &mut metrics.account_inputs,
+        report.account_inputs,
+        "accountInputs",
+    )?;
+    add(&mut metrics.outputs, report.outputs_published, "outputs")?;
+    metrics.frames += 1;
+    metrics.apply += report.timings.apply;
+    metrics.projection += report.timings.projection;
+    metrics.storage += report.timings.storage;
+    metrics.publication += report.timings.publication;
+    metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn replay_native_v1(
     source_database: impl AsRef<Path>,
@@ -157,64 +226,13 @@ pub fn replay_native_v1(
     let mut transcript = Sha256::new();
     let started = Instant::now();
     for height in 1..=source_height {
-        let source_frame = source
-            .read_durable_frame(height)
-            .map_err(|error| format!("NATIVE_REPLAY_SOURCE:{height}:{error}"))?;
-        let source_frame = concrete_wal_source_from_native(source_frame)
-            .map_err(|error| format!("NATIVE_REPLAY_SOURCE:{height}:{error}"))?;
-        let finalized_j_height = processor
-            .replica()
-            .map_err(|error| format!("NATIVE_REPLAY_REPLICA:{height}:{error}"))?
-            .state
-            .finalized_j_height;
-        let decoded = decode_concrete_runtime_wal_frame(&source_frame, finalized_j_height, false)
-            .map_err(|error| format!("NATIVE_REPLAY_DECODE:{height}:{error}"))?;
-        metrics.direct_payments = metrics
-            .direct_payments
-            .checked_add(direct_payment_count(&decoded.input)?)
-            .ok_or_else(|| "NATIVE_REPLAY_COUNT:directPayments".to_string())?;
-        processor
-            .reconcile_exact_replay_input(&decoded.input)
-            .map_err(|error| format!("NATIVE_REPLAY_RECONCILE:{height}:{error}"))?;
-        let report = processor
-            .process(decoded.input)
-            .map_err(|error| format!("NATIVE_REPLAY_PROCESS:{height}:{error}"))?;
-        let commitments = report
-            .commitments
-            .as_ref()
-            .ok_or_else(|| format!("NATIVE_REPLAY_COMMITMENTS:{height}"))?;
-        assert_source_commitments(height, &source_frame, commitments)?;
-        transcript.update(height.to_be_bytes());
-        transcript.update(commitments.runtime_frame_hash);
-        transcript.update(commitments.post_state_hash);
-        transcript.update(commitments.events_parity_digest);
-        transcript.update(commitments.entity_effects_parity_digest);
-        transcript.update(commitments.runtime_outputs_digest);
-        transcript.update((report.runtime_entity_inputs as u64).to_be_bytes());
-        transcript.update((report.account_inputs as u64).to_be_bytes());
-        for entity in &commitments.entities {
-            transcript.update(entity.entity_id);
-            transcript.update(entity.certified_frame_hash);
-            transcript.update(entity.state_root);
-            transcript.update(entity.accounts_root);
-        }
-        add(
-            &mut metrics.entity_inputs,
-            report.runtime_entity_inputs,
-            "entityInputs",
+        replay_frame(
+            &mut source,
+            &mut processor,
+            height,
+            &mut metrics,
+            &mut transcript,
         )?;
-        add(
-            &mut metrics.account_inputs,
-            report.account_inputs,
-            "accountInputs",
-        )?;
-        add(&mut metrics.outputs, report.outputs_published, "outputs")?;
-        metrics.frames += 1;
-        metrics.apply += report.timings.apply;
-        metrics.projection += report.timings.projection;
-        metrics.storage += report.timings.storage;
-        metrics.publication += report.timings.publication;
-        metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
     }
     if let Some(final_commit) = processor
         .sync_committed()
