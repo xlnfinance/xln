@@ -168,7 +168,7 @@ fi
 
 echo "[contracts-sync] copying fresh contract artifacts to frontend/static"
 cd "$ROOT_DIR/frontend"
-"$NODE_BIN" copy-static-files.js
+"$NODE_BIN" copy-static-files.js --contracts-only --require-all-contract-sources
 
 echo "[contracts-sync] verifying compiler immutable metadata parity"
 bun "$ROOT_DIR/core/scripts/checks/contracts/check-contract-artifact-immutables.ts"

@@ -19,7 +19,7 @@ import { waitForRustH1Metrics } from './rust-h1-settlement';
 const ENTITY_ID = /^0x[0-9a-f]{64}$/;
 const DISPUTE_COOLDOWN_MS = 0;
 
-export type RustH1DisputeAccountStatus = Readonly<{
+export type RustH1AccountStatus = Readonly<{
   hubEntityId: string;
   counterpartyEntityId: string;
   hasAccount: boolean;
@@ -69,9 +69,9 @@ const boolean = (value: unknown, code: string): boolean => {
 const optionalHeight = (value: unknown, code: string): number | null =>
   value === null ? null : requireBoundaryInteger(value, code, 1);
 
-export const decodeRustH1DisputeAccountStatus = (
+export const decodeRustH1AccountStatus = (
   value: unknown,
-): RustH1DisputeAccountStatus => {
+): RustH1AccountStatus => {
   const row = requireBoundaryRecord(value, 'HLT_RUST_DISPUTE_STATUS_OBJECT');
   requireExactBoundaryKeys(
     row,
@@ -106,7 +106,7 @@ export const decodeRustH1DisputeAccountStatus = (
       if (!['active', 'dispute_preparing', 'disputed'].includes(status)) {
         throw new Error(`HLT_RUST_DISPUTE_LIFECYCLE:${status}`);
       }
-      return status as RustH1DisputeAccountStatus['status'];
+      return status as RustH1AccountStatus['status'];
     })(),
     ready: boolean(row['ready'], 'HLT_RUST_DISPUTE_READY'),
     disputeObservedOnChain: boolean(
@@ -142,16 +142,16 @@ export const readRustH1AccountStatus = async (
   hubEntityId: string,
   counterpartyEntityId: string,
   tokenId: number,
-): Promise<RustH1DisputeAccountStatus> => {
+): Promise<RustH1AccountStatus> => {
   const url = new URL('/api/account/status', `${apiBaseUrl.replace(/\/+$/, '')}/`);
   url.searchParams.set('hubEntityId', hubEntityId);
   url.searchParams.set('counterpartyEntityId', counterpartyEntityId);
   url.searchParams.set('tokenIds', String(tokenId));
-  return decodeRustH1DisputeAccountStatus(await fetchNativeJson(url.toString()));
+  return decodeRustH1AccountStatus(await fetchNativeJson(url.toString()));
 };
 
 const assertIdleAccount = (
-  status: RustH1DisputeAccountStatus,
+  status: RustH1AccountStatus,
   code: string,
 ): void => {
   if (!status.hasAccount || status.currentHeight < 1) throw new Error(`${code}:ACCOUNT_MISSING`);
@@ -160,10 +160,10 @@ const assertIdleAccount = (
 };
 
 export const assertRustH1DisputeFreeze = (
-  before: RustH1DisputeAccountStatus,
-  frozen: RustH1DisputeAccountStatus,
-  observed: RustH1DisputeAccountStatus,
-  afterBusinessInput: RustH1DisputeAccountStatus,
+  before: RustH1AccountStatus,
+  frozen: RustH1AccountStatus,
+  observed: RustH1AccountStatus,
+  afterBusinessInput: RustH1AccountStatus,
 ): void => {
   const identity = `${before.hubEntityId}:${before.counterpartyEntityId}`;
   if (
@@ -208,8 +208,8 @@ export const assertRustH1DisputeFreeze = (
 /** Jurisdiction finality mutates the Account epoch through the canonical
  * external-finality input; it must not synthesize a bilateral AccountFrame. */
 export const assertRustH1DisputeFinalized = (
-  beforeFinality: RustH1DisputeAccountStatus,
-  finalized: RustH1DisputeAccountStatus,
+  beforeFinality: RustH1AccountStatus,
+  finalized: RustH1AccountStatus,
 ): void => {
   assertIdleAccount(finalized, 'HLT_RUST_DISPUTE_FINALIZED');
   if (
@@ -243,9 +243,9 @@ const waitForObservedDispute = async (
     counterpartyEntityId: string;
     tokenId: number;
   }>,
-): Promise<RustH1DisputeAccountStatus> => {
+): Promise<RustH1AccountStatus> => {
   const deadline = Date.now() + 5_000;
-  let latest: RustH1DisputeAccountStatus | null = null;
+  let latest: RustH1AccountStatus | null = null;
   while (Date.now() <= deadline) {
     latest = await readRustH1AccountStatus(
       options.apiBaseUrl,
@@ -325,9 +325,9 @@ const waitForFinalizedDispute = async (
     tokenId: number;
     jNonceBefore: number;
   }>,
-): Promise<RustH1DisputeAccountStatus> => {
+): Promise<RustH1AccountStatus> => {
   const deadline = Date.now() + 5_000;
-  let latest: RustH1DisputeAccountStatus | null = null;
+  let latest: RustH1AccountStatus | null = null;
   while (Date.now() <= deadline) {
     latest = await readRustH1AccountStatus(
       options.apiBaseUrl,

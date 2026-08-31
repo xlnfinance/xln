@@ -2,16 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { getBytes, hexlify } from 'ethers';
 import { x25519 } from '@noble/curves/ed25519.js';
 
-import { deriveSignerKeySync } from '../../../account/crypto';
-import { applyCommittedHtlcLockFollowup } from '../../../entity/tx/handlers/account/committed-htlc-followups';
+import { deriveSignerKeySync } from '../../../../account/crypto';
+import { applyCommittedHtlcLockFollowup } from '../../../../entity/tx/handlers/account/committed-htlc-followups';
 import {
   assertHtlcPreparedInfraContext,
   materializeHtlcPreparedInfraContext,
-} from '../../../entity/paybook/materialize-context';
-import { openWritableEntityAccounts, entity, makeAccount, makeJurisdiction, makeState, secret } from '../../helpers/cross-j';
-import { createOnionEnvelopes } from '../../../protocol/htlc/codec/envelope';
-import { hashHtlcSecret } from '../../../protocol/htlc/utils';
-import type { EntityTx } from '../../../types/entity-tx';
+} from '../../../../entity/paybook/materialize-context';
+import { openWritableEntityAccounts, entity, makeAccount, makeJurisdiction, makeState, secret } from '../../../helpers/cross-j';
+import { createOnionEnvelopes } from '../../../../protocol/htlc/codec/envelope';
+import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
+import type { EntityTx } from '../../../../types/entity-tx';
 
 const x25519Public = (privateKey: string): string => hexlify(x25519.getPublicKey(getBytes(privateKey)));
 

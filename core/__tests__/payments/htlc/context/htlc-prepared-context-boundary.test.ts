@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { validateHtlcPreparedInfraContext } from '../../../entity/paybook/prepared-context-validation';
-import { getEffectiveHtlcFrameTxs } from '../../../entity/paybook/materialize-context';
-import type { EntityTx } from '../../../types/entity-tx';
-import type { EntityState } from '../../../entity/types';
+import { validateHtlcPreparedInfraContext } from '../../../../entity/paybook/prepared-context-validation';
+import { getEffectiveHtlcFrameTxs } from '../../../../entity/paybook/materialize-context';
+import type { EntityTx } from '../../../../types/entity-tx';
+import type { EntityState } from '../../../../entity/types';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const envelope = { version: 'xln:htlc-opaque:aes-gcm' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
@@ -104,13 +104,13 @@ describe('HTLC prepared Entity context boundary', () => {
   });
 
   test('does not spanning-structuredClone the HTLC graph', () => {
-    const source = readFileSync(join(import.meta.dir, '../../../entity/paybook/prepared-context-validation.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../../../entity/paybook/prepared-context-validation.ts'), 'utf8');
     expect(source).toContain('cloneIsolatedProtocolValue(context');
     expect(source).not.toContain('structuredClone(context)');
   });
 
   test('inbound canonicalize decorate-sorts binding keys once', () => {
-    const source = readFileSync(join(import.meta.dir, '../../../entity/paybook/materialize-context.ts'), 'utf8');
+    const source = readFileSync(join(import.meta.dir, '../../../../entity/paybook/materialize-context.ts'), 'utf8');
     expect(source).toContain('const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }))');
     expect(source).toContain('decorated.sort((left, right) => left.key.localeCompare(right.key))');
     expect(source).not.toContain('preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding))');

@@ -1,12 +1,12 @@
-import { parseWorkerPhaseResult, type WorkerRequestResult } from './coordinator-client';
-import { getPerfMs } from '../../support/time';
-import { TsAccountCanonicalRoot, tsAccountWorkerForShard } from './sharding';
+import { parseWorkerPhaseResult, type WorkerRequestResult } from '../coordinator-client';
+import { getPerfMs } from '../../../support/time';
+import { TsAccountCanonicalRoot, tsAccountWorkerForShard } from '../sharding';
 import type {
   TsAccountWorkerBatchResult,
   TsAccountWorkerEffect,
   TsAccountWorkerPhaseMetrics,
   TsAccountWorkerSubroot,
-} from './protocol';
+} from '../protocol';
 
 type AggregateOptions = Readonly<{
   responses: readonly Readonly<{

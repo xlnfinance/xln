@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
-import { safeStringify } from '../../../protocol/serialization';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../../protocol/crypto/p2p-crypto';
+import { safeStringify } from '../../../../protocol/serialization';
 import {
   decodeSovereignRuntimeSeeds,
   encodeSovereignRuntimeSeeds,
-} from '../../../scripts/operations/hlt/lanes/sovereign-runtime-sharding';
+} from '../../../../scripts/operations/hlt/lanes/sovereign-runtime-sharding';
 import {
   HLT_PROFILE_PLAN,
   assertRustLiveMixedCardinality,
@@ -20,14 +20,14 @@ import {
   summarizeRustH1WorkerExecution,
   type RustH1Metrics,
   type RustAccountPhaseMetric,
-} from '../../../scripts/operations/hlt/rust/rust-h1';
+} from '../../../../scripts/operations/hlt/rust/rust-h1';
 import {
   decodeNativeProfileResponse,
   rustH1SessionPopulationIntact,
   rustH1SessionPopulationReady,
-} from '../../../scripts/operations/hlt/rust/rust-h1-settlement';
-import { hltLanePortsPerSlot } from '../../../scripts/operations/hlt/lanes/lane-port-capacity';
-import { hltWorkloadFingerprint } from '../../../scripts/operations/hlt/workload/workload-fingerprint';
+} from '../../../../scripts/operations/hlt/rust/rust-h1-settlement';
+import { hltLanePortsPerSlot } from '../../../../scripts/operations/hlt/lanes/lane-port-capacity';
+import { hltWorkloadFingerprint } from '../../../../scripts/operations/hlt/workload/workload-fingerprint';
 
 const accountPhase = (
   kind: RustAccountPhaseMetric['kind'],

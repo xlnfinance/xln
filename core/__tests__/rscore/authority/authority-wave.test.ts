@@ -225,11 +225,11 @@ describe('authority wave', () => {
         },
       },
     ]);
-    // Wave input tag 1 contains one peer row. Its envelope kind tag 2 carries
-    // ACK at slot 1 and proposal at slot 2, matching TypeScript phase order.
+    // Wave input tag 1 contains one peer row. Canonical input-kind tag 0 is
+    // ack_frame: optional ACK at slot 1, then proposal at slot 2.
     expect(ops[0]?.[0]).toBe(1);
     expect((ops[0]?.[1] as unknown[])[0]).toBe(0);
-    expect((((ops[0]?.[1] as unknown[])[2] as unknown[])[5] as unknown[])[0]).toBe(2);
+    expect((((ops[0]?.[1] as unknown[])[2] as unknown[])[5] as unknown[])[0]).toBe(0);
   });
 
   test('each Entity carries its own clock, and one that never proposed does not', () => {

@@ -28,7 +28,7 @@ import {
   requireWorkerInteger,
   TsAccountWorkerClient,
 } from './coordinator-client';
-import { aggregateWorkerPhaseResults } from './coordinator-result';
+import { aggregateWorkerPhaseResults } from './coordinator/result';
 
 type PhaseDispatch = Readonly<{
   workerIndex: number;

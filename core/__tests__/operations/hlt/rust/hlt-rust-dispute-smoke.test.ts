@@ -3,17 +3,17 @@ import { describe, expect, test } from 'bun:test';
 import {
   assertRustH1DisputeFreeze,
   assertRustH1DisputeFinalized,
-  decodeRustH1DisputeAccountStatus,
-  type RustH1DisputeAccountStatus,
-} from '../../../scripts/operations/hlt/rust/rust-h1-dispute-smoke';
-import { shouldRunRustH1DisputeSmoke } from '../../../scripts/operations/hlt/workload/worker-payments';
+  decodeRustH1AccountStatus,
+  type RustH1AccountStatus,
+} from '../../../../scripts/operations/hlt/rust/rust-h1-dispute-smoke';
+import { shouldRunRustH1DisputeSmoke } from '../../../../scripts/operations/hlt/workload/worker-payments';
 
 const HUB = `0x${'11'.repeat(32)}`;
 const PEER = `0x${'22'.repeat(32)}`;
 
 const status = (
-  overrides: Partial<RustH1DisputeAccountStatus> = {},
-): RustH1DisputeAccountStatus => ({
+  overrides: Partial<RustH1AccountStatus> = {},
+): RustH1AccountStatus => ({
   hubEntityId: HUB,
   counterpartyEntityId: PEER,
   hasAccount: true,
@@ -54,7 +54,7 @@ describe('production Rust H1 dispute smoke boundary', () => {
   });
 
   test('decodes the exact native Account status projection', () => {
-    expect(decodeRustH1DisputeAccountStatus({
+    expect(decodeRustH1AccountStatus({
       success: true,
       hubEntityId: HUB,
       counterpartyEntityId: PEER,
@@ -123,7 +123,7 @@ describe('production Rust H1 dispute smoke boundary', () => {
   });
 
   test('fails closed on extra status fields and identifies the exact broken fence', () => {
-    expect(() => decodeRustH1DisputeAccountStatus({
+    expect(() => decodeRustH1AccountStatus({
       success: true,
       hubEntityId: HUB,
       counterpartyEntityId: PEER,

@@ -191,7 +191,7 @@ describe('nested hash-reachable field coverage', () => {
 });
 
 describe('nested hash coverage gate registration', () => {
-  test('package script and check:src include the AST ratchet exactly once', () => {
+  test('soundcheck includes the AST ratchet exactly once', () => {
     const repoRoot = resolve(import.meta.dir, '../../../../..');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
@@ -199,9 +199,11 @@ describe('nested hash coverage gate registration', () => {
     const script = 'bun core/scripts/checks/fints/check-nested-hash-coverage.ts';
     expect(packageJson.scripts['check:nested-hash-coverage']).toBe(script);
     expect(existsSync(join(repoRoot, 'core/scripts/checks/fints/check-nested-hash-coverage.ts'))).toBe(true);
-    const srcHits = (packageJson.scripts['check:src'] ?? '').split('&&').map(part => part.trim())
-      .filter(part => part === 'bun run check:nested-hash-coverage');
-    expect(srcHits).toEqual(['bun run check:nested-hash-coverage']);
+    const sourceGateNames = (packageJson.scripts['check:src'] ?? '').trim().split(/\s+/).slice(2);
+    expect(sourceGateNames.filter(name => name === 'soundcheck:fast')).toEqual(['soundcheck:fast']);
+    expect(sourceGateNames).not.toContain('check:nested-hash-coverage');
+    const soundcheck = readFileSync(join(repoRoot, 'tools/soundcheck.ts'), 'utf8');
+    expect(soundcheck.match(/check:nested-hash-coverage/g)).toEqual(['check:nested-hash-coverage']);
     expect(NESTED_HASH_COVERAGE.length).toBeGreaterThan(20);
   });
 });

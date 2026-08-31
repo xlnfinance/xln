@@ -9,7 +9,7 @@ import {
 } from '../lanes/lane-runtimes';
 import {
   readRustH1AccountStatus,
-  type RustH1DisputeAccountStatus as RustH1AccountStatus,
+  type RustH1AccountStatus,
 } from './rust-h1-dispute-smoke';
 
 export type RustH1AccountSettlementSmokeResult = Readonly<{

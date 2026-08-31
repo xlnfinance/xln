@@ -514,6 +514,29 @@ const closeEmptyAuthorityFrameWithoutWal = async (
   await failStopAuthorityFrame(env);
 };
 
+const planAppliedRuntimeOutputs = (
+  env: RuntimeReplica,
+  applied: Awaited<ReturnType<typeof applyPreparedRuntimeFrame>>,
+  profile: RuntimeProcessProfile,
+  quietRuntimeLogs: boolean,
+  deps: RuntimeProcessDeps,
+) => {
+  const routing = deps.getRuntimeOutputRoutingDeps();
+  const outputPlan = planRuntimeFrameOutputs(
+    env,
+    applied.entityOutbox,
+    routing,
+    profile,
+    quietRuntimeLogs,
+    {
+      applyOutputPlan: deps.recovery.applyDeterministicRuntimeOutputPlan,
+      generateHookPings: deps.loop.generateHookPings,
+    },
+  );
+  profile.metrics.jOutputs = applied.jOutbox.length;
+  return { routing, outputPlan };
+};
+
 const applyAndCommitRuntimeFrame = async (
   liveEnv: RuntimeReplica,
   processState: RuntimeLifecycleState,
@@ -557,22 +580,14 @@ const applyAndCommitRuntimeFrame = async (
   candidate.state.runtimeFramePhase = 'apply';
   const applied = await applyRuntimeFrameCandidate(env, state, candidate, frame, profile, deps);
   candidate.state.runtimeFramePhase = 'outputs.plan';
-  const routing = deps.getRuntimeOutputRoutingDeps();
-  const outputPlan = planRuntimeFrameOutputs(
+  const { routing, outputPlan } = planAppliedRuntimeOutputs(
     env,
-    applied.entityOutbox,
-    routing,
+    applied,
     profile,
     candidate.quietRuntimeLogs,
-    {
-      applyOutputPlan: deps.recovery.applyDeterministicRuntimeOutputPlan,
-      generateHookPings: deps.loop.generateHookPings,
-    },
+    deps,
   );
-  profile.metrics.jOutputs = applied.jOutbox.length;
-  // The authoritative engine reaches its own result before either record is
-  // durable. Rust retains only a persistent base pointer; the next parent root
-  // selects the accepted answer. A failed durable write is fail-stop.
+  // Rust keeps a persistent base pointer; durable failure remains fail-stop.
   candidate.state.runtimeFramePhase = 'authority.settle';
   await assertAuthorityFrameSettled(env);
   candidate.state.runtimeFramePhase = 'commit.prepare';

@@ -281,7 +281,7 @@ fn prepared_account_ignores_a_signed_peer_frame_before_replay_or_commit() {
             }],
             post_accounts: false,
         })
-        .expect("frozen peer input is a no-op");
+        .expect("frozen Account input is a no-op");
 
     assert_eq!(ignored.accounts_root, frozen_root);
     assert!(matches!(

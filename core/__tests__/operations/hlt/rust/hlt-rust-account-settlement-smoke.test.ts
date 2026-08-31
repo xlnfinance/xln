@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { shouldRunRustH1AccountSettlementSmoke } from '../../../scripts/operations/hlt/rust/rust-h1-account-settlement-smoke';
+import { shouldRunRustH1AccountSettlementSmoke } from '../../../../scripts/operations/hlt/rust/rust-h1-account-settlement-smoke';
 
 describe('production Rust H1 Account settlement smoke boundary', () => {
   test('runs only for the explicit exact 1,000-user five-second Rust smoke', () => {
