@@ -4,9 +4,9 @@ use std::time::Instant;
 
 use sha3::{Digest as _, Keccak256};
 use xln_rscore_batch::{
-    AccountId, AccountInputVerdict, CertifiedBoardAuthorityResolver, CertifiedSettlementHankoDraft,
-    EntityInboundRequest, ReceiverClock, ResidentAccountFinancialViewRequest,
-    ResidentCrossJMaterializationView,
+    AccountId, AccountInputKind, AccountInputVerdict, CertifiedBoardAuthorityResolver,
+    CertifiedSettlementHankoDraft, EntityInboundRequest, ReceiverClock,
+    ResidentAccountFinancialViewRequest, ResidentCrossJMaterializationView,
 };
 use xln_rscore_entity_kernel::{
     CanonicalEntityTx, EntityCommandBoard, EntityCommandDisposition, EntityFrameEvent,
@@ -218,6 +218,143 @@ fn prepare_j_prefix_range(
 fn profile_runtime_apply() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
+}
+
+#[derive(Default)]
+struct AccountInputOutcomeProfile {
+    ack: usize,
+    ack_frame_with_ack: usize,
+    ack_frame_without_ack: usize,
+    ack_committed: usize,
+    ack_stale: usize,
+    ack_rejected: usize,
+    frame_committed: usize,
+    frame_duplicate: usize,
+    frame_collision: usize,
+    frame_stale: usize,
+    frame_rejected: usize,
+    force_ack_true: usize,
+    force_ack_false: usize,
+    force_ack_none: usize,
+    input_other: usize,
+    outcome_other: usize,
+}
+
+#[derive(Clone, Copy)]
+enum ProfileAccountInputKind {
+    Ack,
+    AckFrameWithAck,
+    AckFrameWithoutAck,
+    Other,
+}
+
+impl From<&AccountInputKind> for ProfileAccountInputKind {
+    fn from(kind: &AccountInputKind) -> Self {
+        match kind {
+            AccountInputKind::Ack(_) => Self::Ack,
+            AccountInputKind::AckFrame { ack: Some(_), .. } => Self::AckFrameWithAck,
+            AccountInputKind::AckFrame { ack: None, .. } => Self::AckFrameWithoutAck,
+            AccountInputKind::Dispute(_) | AccountInputKind::BoardHankoRefresh(_) => Self::Other,
+        }
+    }
+}
+
+impl AccountInputOutcomeProfile {
+    fn observe_ack(&mut self, verdict: &AccountInputVerdict) {
+        match verdict {
+            AccountInputVerdict::AckCommitted { .. } => self.ack_committed += 1,
+            AccountInputVerdict::AckStale { .. } => self.ack_stale += 1,
+            AccountInputVerdict::AckRejected { .. } => self.ack_rejected += 1,
+            _ => self.outcome_other += 1,
+        }
+    }
+
+    fn observe_frame(&mut self, verdict: &AccountInputVerdict) {
+        match verdict {
+            AccountInputVerdict::FrameCommitted { .. } => self.frame_committed += 1,
+            AccountInputVerdict::FrameDuplicate { .. } => self.frame_duplicate += 1,
+            AccountInputVerdict::FrameCollisionIgnored { .. } => self.frame_collision += 1,
+            AccountInputVerdict::FrameStale { .. } => self.frame_stale += 1,
+            AccountInputVerdict::FrameRejected { .. } => self.frame_rejected += 1,
+            _ => self.outcome_other += 1,
+        }
+    }
+
+    fn observe_input(&mut self, kind: ProfileAccountInputKind) {
+        match kind {
+            ProfileAccountInputKind::Ack => self.ack += 1,
+            ProfileAccountInputKind::AckFrameWithAck => self.ack_frame_with_ack += 1,
+            ProfileAccountInputKind::AckFrameWithoutAck => self.ack_frame_without_ack += 1,
+            ProfileAccountInputKind::Other => self.input_other += 1,
+        }
+    }
+
+    fn observe_outcome(&mut self, kind: ProfileAccountInputKind, verdict: &AccountInputVerdict) {
+        match (kind, verdict) {
+            (ProfileAccountInputKind::Ack, verdict) => {
+                self.observe_ack(verdict);
+            }
+            (
+                ProfileAccountInputKind::AckFrameWithAck,
+                AccountInputVerdict::AckFrameApplied {
+                    ack: ack_verdict,
+                    frame,
+                },
+            ) => {
+                self.observe_ack(ack_verdict);
+                self.observe_frame(frame);
+            }
+            (ProfileAccountInputKind::AckFrameWithoutAck, verdict) => self.observe_frame(verdict),
+            (ProfileAccountInputKind::AckFrameWithAck, _) => self.outcome_other += 1,
+            _ => self.outcome_other += 1,
+        }
+    }
+}
+
+fn profile_account_input_outcomes(
+    runtime_height: u64,
+    entity_height: u64,
+    inputs: &[ProfileAccountInputKind],
+    results: &[xln_rscore_batch::AccountInputResult],
+) {
+    let mut profile = AccountInputOutcomeProfile::default();
+    for kind in inputs {
+        profile.observe_input(*kind);
+    }
+    for (kind, result) in inputs.iter().zip(results) {
+        profile.observe_outcome(*kind, &result.verdict);
+    }
+    for result in results {
+        match result.force_ack {
+            Some(true) => profile.force_ack_true += 1,
+            Some(false) => profile.force_ack_false += 1,
+            None => profile.force_ack_none += 1,
+        }
+    }
+    eprintln!(
+        "RSCORE_ACCOUNT_INPUT_OUTCOMES runtimeHeight={} entityHeight={} inputs={} results={} pairingMismatch={} ack={} ackFrameWithAck={} ackFrameWithoutAck={} inputOther={} ackCommitted={} ackStale={} ackRejected={} frameCommitted={} frameDuplicate={} frameCollision={} frameStale={} frameRejected={} forceAckTrue={} forceAckFalse={} forceAckNone={} outcomeOther={}",
+        runtime_height,
+        entity_height,
+        inputs.len(),
+        results.len(),
+        inputs.len().abs_diff(results.len()),
+        profile.ack,
+        profile.ack_frame_with_ack,
+        profile.ack_frame_without_ack,
+        profile.input_other,
+        profile.ack_committed,
+        profile.ack_stale,
+        profile.ack_rejected,
+        profile.frame_committed,
+        profile.frame_duplicate,
+        profile.frame_collision,
+        profile.frame_stale,
+        profile.frame_rejected,
+        profile.force_ack_true,
+        profile.force_ack_false,
+        profile.force_ack_none,
+        profile.outcome_other,
+    );
 }
 
 /// Exact `getLocalJPrefixAttestableHeight`/`getValidatorJContiguousThroughHeight`
@@ -2079,6 +2216,11 @@ fn apply_entity_group(
             .as_ref(),
         j_replicas,
     )?;
+    let profiled_account_inputs = profile_runtime_apply().then(|| {
+        rows.iter()
+            .map(|row| ProfileAccountInputKind::from(&row.input.kind))
+            .collect::<Vec<_>>()
+    });
     let needs_local_account_genesis = selected.operations.iter().any(|operation| match operation {
         ResidentEntityOperation::Local(txs) => txs.iter().any(|admitted| {
             matches!(
@@ -2173,6 +2315,14 @@ fn apply_entity_group(
         request,
         &context.execution,
     )?;
+    if let Some(inputs) = profiled_account_inputs.as_deref() {
+        profile_account_input_outcomes(
+            runtime_height,
+            next_entity_height,
+            inputs,
+            &core.inbound.applied,
+        );
+    }
     core.state.entity_command_nonces = selected.command_nonces;
     let account_commits = account_commit_evidence(group.entity_id, &core.inbound.applied);
     let accounts_root = core.outbound.accounts_root;
@@ -2942,10 +3092,37 @@ mod tests {
     };
 
     use super::{
-        AccountCommitSource, AccountId, EntityApplySlot, EntityPendingWork, RuntimeFrameContext,
-        account_commit_evidence, fit_replay_entity_prefix, prepare_entity_prefix,
-        prepare_j_prefix_range, replay_compatible_prefix, take_entity_prefix,
+        AccountCommitSource, AccountId, AccountInputOutcomeProfile, EntityApplySlot,
+        EntityPendingWork, ProfileAccountInputKind, RuntimeFrameContext, account_commit_evidence,
+        fit_replay_entity_prefix, prepare_entity_prefix, prepare_j_prefix_range,
+        replay_compatible_prefix, take_entity_prefix,
     };
+
+    #[test]
+    fn account_profile_counts_direct_and_bundled_replays() {
+        let duplicate = || AccountInputVerdict::FrameDuplicate {
+            height: 7,
+            state_hash: [9; 32],
+            ack_hanko: vec![1],
+            ack_dispute: None,
+        };
+        let mut profile = AccountInputOutcomeProfile::default();
+        profile.observe_input(ProfileAccountInputKind::AckFrameWithoutAck);
+        profile.observe_outcome(ProfileAccountInputKind::AckFrameWithoutAck, &duplicate());
+        profile.observe_input(ProfileAccountInputKind::AckFrameWithAck);
+        profile.observe_outcome(
+            ProfileAccountInputKind::AckFrameWithAck,
+            &AccountInputVerdict::AckFrameApplied {
+                ack: Box::new(AccountInputVerdict::AckStale { height: 7 }),
+                frame: Box::new(duplicate()),
+            },
+        );
+        assert_eq!(profile.ack_frame_without_ack, 1);
+        assert_eq!(profile.ack_frame_with_ack, 1);
+        assert_eq!(profile.ack_stale, 1);
+        assert_eq!(profile.frame_duplicate, 2);
+        assert_eq!(profile.outcome_other, 0);
+    }
 
     #[test]
     fn entity_wire_fit_keeps_exact_fifo_prefix_and_tail() {
