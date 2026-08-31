@@ -75,6 +75,17 @@ pub struct SchedulerExecution {
     pub commands: Vec<SchedulerCommand>,
 }
 
+pub struct CrontabExecutionContext<'a> {
+    pub expected_proposer_signer_id: &'a str,
+    pub now: u64,
+    pub hub_rebalance_has_pending_work: bool,
+    pub active_htlc_locks: &'a BTreeSet<(String, String)>,
+    pub secret_acks_requiring_dispute: &'a BTreeSet<String>,
+    pub dispute_views: &'a BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
+    pub j_batch_state: Option<&'a JBatchState>,
+    pub dispute_auto_finalize: bool,
+}
+
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum SchedulerError {
     #[error("SCHEDULED_WAKE_PROPOSER_MISMATCH")]
@@ -288,15 +299,18 @@ fn batch_has_dispute_finalization(batch: &JBatch, counterparty: &str) -> bool {
 pub fn execute_crontab(
     state: &CrontabState,
     wake: &ScheduledWake,
-    expected_proposer_signer_id: &str,
-    now: u64,
-    hub_rebalance_has_pending_work: bool,
-    active_htlc_locks: &BTreeSet<(String, String)>,
-    secret_acks_requiring_dispute: &BTreeSet<String>,
-    dispute_views: &BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
-    j_batch_state: Option<&JBatchState>,
-    dispute_auto_finalize: bool,
+    context: CrontabExecutionContext<'_>,
 ) -> Result<SchedulerExecution, SchedulerError> {
+    let CrontabExecutionContext {
+        expected_proposer_signer_id,
+        now,
+        hub_rebalance_has_pending_work,
+        active_htlc_locks,
+        secret_acks_requiring_dispute,
+        dispute_views,
+        j_batch_state,
+        dispute_auto_finalize,
+    } = context;
     validate_scheduled_wake(wake, expected_proposer_signer_id, now)?;
     let mut next = state.clone();
     let mut due_hooks = next.hooks.due(now).cloned().collect::<Vec<_>>();
@@ -562,17 +576,19 @@ mod tests {
         let result = execute_crontab(
             &state,
             &wake(vec![jobs[0].clone()]),
-            "HUB",
-            1_000,
-            false,
-            &BTreeSet::from([
-                ("account-a".to_string(), "a".to_string()),
-                ("account-b".to_string(), "b".to_string()),
-            ]),
-            &BTreeSet::new(),
-            &BTreeMap::new(),
-            None,
-            true,
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "HUB",
+                now: 1_000,
+                hub_rebalance_has_pending_work: false,
+                active_htlc_locks: &BTreeSet::from([
+                    ("account-a".to_string(), "a".to_string()),
+                    ("account-b".to_string(), "b".to_string()),
+                ]),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::new(),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
         )
         .expect("execution");
         assert!(result.crontab.hooks.is_empty());
@@ -604,14 +620,16 @@ mod tests {
         let result = execute_crontab(
             &state,
             &wake(jobs),
-            "hub",
-            10,
-            false,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &BTreeMap::new(),
-            None,
-            true,
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 10,
+                hub_rebalance_has_pending_work: false,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::new(),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
         )
         .expect("stale dispute hook");
         assert!(result.commands.is_empty());
@@ -635,14 +653,16 @@ mod tests {
         let waiting = execute_crontab(
             &state,
             &wake(jobs),
-            "hub",
-            1_000,
-            false,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &BTreeMap::from([("peer".into(), dispute_view(false, 9))]),
-            None,
-            true,
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 1_000,
+                hub_rebalance_has_pending_work: false,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::from([("peer".into(), dispute_view(false, 9))]),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
         )
         .expect("waiting deadline");
         assert!(waiting.commands.is_empty());
@@ -660,14 +680,16 @@ mod tests {
         let ready = execute_crontab(
             &state,
             &wake(jobs),
-            "hub",
-            10_000,
-            false,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &BTreeMap::from([("peer".into(), dispute_view(true, 9))]),
-            None,
-            true,
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 10_000,
+                hub_rebalance_has_pending_work: false,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::from([("peer".into(), dispute_view(true, 9))]),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
         )
         .expect("ready deadline");
         assert_eq!(
@@ -697,14 +719,16 @@ mod tests {
         let result = execute_crontab(
             &state,
             &wake(jobs),
-            "hub",
-            1_500,
-            true,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &BTreeMap::new(),
-            None,
-            true,
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 1_500,
+                hub_rebalance_has_pending_work: true,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::new(),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
         )
         .expect("execution");
         assert_eq!(result.commands, vec![SchedulerCommand::HubRebalance]);
@@ -732,14 +756,16 @@ mod tests {
         let error = execute_crontab(
             &state,
             &forged,
-            "hub",
-            1_000,
-            false,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &BTreeMap::new(),
-            None,
-            true,
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 1_000,
+                hub_rebalance_has_pending_work: false,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::new(),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
         )
         .expect_err("forged signer");
         assert_eq!(error, SchedulerError::ProposerMismatch);

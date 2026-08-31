@@ -9,7 +9,7 @@ mod execute;
 
 pub(crate) use execute::validate_scheduled_wake;
 pub use execute::{
-    MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, ScheduledWake, ScheduledWakeJob, ScheduledWakeJobKind,
-    SchedulerCommand, SchedulerError, SchedulerExecution, collect_due_scheduled_wake_jobs,
-    execute_crontab, scheduled_wake_entity_tx,
+    CrontabExecutionContext, MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, ScheduledWake, ScheduledWakeJob,
+    ScheduledWakeJobKind, SchedulerCommand, SchedulerError, SchedulerExecution,
+    collect_due_scheduled_wake_jobs, execute_crontab, scheduled_wake_entity_tx,
 };

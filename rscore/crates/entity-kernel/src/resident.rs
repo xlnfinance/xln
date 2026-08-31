@@ -31,12 +31,12 @@ use crate::local_financial::LocalAccountFinancialView;
 use crate::paybook::{PaybookChanges, build_paybook_mutation, paybook_entry, terminate_route};
 use crate::scheduler_runtime::validate_scheduled_wake;
 use crate::{
-    AccountProposalWork, CommittedAccountTransition, DeterministicContext, EntityFrameEvent,
-    EntityKernelCommitments, EntityKernelError, EntityKernelOutput, EntityStateSlice,
-    FinalizedJEventBatch, HashToSign, HashType, JurisdictionScope, LocalEntityFinancialTx,
-    OrderedAccountCommit, PresignedManifest, PresignedManifestEntry, ScheduledHookKind,
-    ScheduledWake, SchedulerCommand, SchedulerError, apply_finalized_j_event_batches,
-    execute_crontab,
+    AccountProposalWork, CommittedAccountTransition, CrontabExecutionContext, DeterministicContext,
+    EntityFrameEvent, EntityKernelCommitments, EntityKernelError, EntityKernelOutput,
+    EntityStateSlice, FinalizedJEventBatch, HashToSign, HashType, JurisdictionScope,
+    LocalEntityFinancialTx, OrderedAccountCommit, PresignedManifest, PresignedManifestEntry,
+    ScheduledHookKind, ScheduledWake, SchedulerCommand, SchedulerError,
+    apply_finalized_j_event_batches, execute_crontab,
 };
 
 fn profile_resident_round() -> bool {
@@ -1284,23 +1284,25 @@ fn apply_scheduled_wake(
             .as_ref()
             .ok_or(ResidentEntityError::CrontabMissing)?,
         wake,
-        expected_proposer_signer_id,
-        state.timestamp,
-        hub_rebalance_has_pending_work,
-        &active_text,
-        &secret_acks_requiring_dispute,
-        &dispute_views,
-        state.j_batch_state.as_ref(),
-        state
-            .hub_rebalance_config
-            .as_ref()
-            .and_then(|config| match config {
-                CanonicalValue::Object(fields) => fields
-                    .iter()
-                    .find_map(|(name, value)| (name == "disputeAutoFinalizeMode").then_some(value)),
-                _ => None,
-            })
-            .is_none_or(|value| value != &CanonicalValue::String("ignore".into())),
+        CrontabExecutionContext {
+            expected_proposer_signer_id,
+            now: state.timestamp,
+            hub_rebalance_has_pending_work,
+            active_htlc_locks: &active_text,
+            secret_acks_requiring_dispute: &secret_acks_requiring_dispute,
+            dispute_views: &dispute_views,
+            j_batch_state: state.j_batch_state.as_ref(),
+            dispute_auto_finalize: state
+                .hub_rebalance_config
+                .as_ref()
+                .and_then(|config| match config {
+                    CanonicalValue::Object(fields) => fields.iter().find_map(|(name, value)| {
+                        (name == "disputeAutoFinalizeMode").then_some(value)
+                    }),
+                    _ => None,
+                })
+                .is_none_or(|value| value != &CanonicalValue::String("ignore".into())),
+        },
     )?;
     state.crontab = Some(execution.crontab);
     Ok(execution.commands)

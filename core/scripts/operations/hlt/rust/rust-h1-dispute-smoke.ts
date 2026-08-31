@@ -5,6 +5,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../../../protocol/boundary-validation';
+import { safeStringify } from '../../../../protocol/serialization';
 import type { RuntimeInput } from '../../../../runtime/types';
 import {
   queueLaneRuntimeInputWave,
@@ -256,7 +257,7 @@ const waitForObservedDispute = async (
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   throw new Error(
-    `HLT_RUST_DISPUTE_J_EVENT_TIMEOUT:${JSON.stringify(latest)}:${options.rust.errorTail()}`,
+    `HLT_RUST_DISPUTE_J_EVENT_TIMEOUT:${safeStringify(latest)}:${options.rust.errorTail()}`,
   );
 };
 
@@ -278,7 +279,7 @@ const waitForCounterpartyDispute = async (
     if (observed) return;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
-  throw new Error(`HLT_RUST_DISPUTE_COUNTERPARTY_EVENT_TIMEOUT:${JSON.stringify(latest)}`);
+  throw new Error(`HLT_RUST_DISPUTE_COUNTERPARTY_EVENT_TIMEOUT:${safeStringify(latest)}`);
 };
 
 const submitCounterpartyFinalize = async (
@@ -341,7 +342,7 @@ const waitForFinalizedDispute = async (
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   throw new Error(
-    `HLT_RUST_DISPUTE_FINALITY_TIMEOUT:${JSON.stringify(latest)}:${options.rust.errorTail()}`,
+    `HLT_RUST_DISPUTE_FINALITY_TIMEOUT:${safeStringify(latest)}:${options.rust.errorTail()}`,
   );
 };
 

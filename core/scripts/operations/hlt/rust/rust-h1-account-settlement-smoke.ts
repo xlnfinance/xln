@@ -1,5 +1,6 @@
 /** Black-box Account settlement over the canonical production xlnrs path. */
 
+import { safeStringify } from '../../../../protocol/serialization';
 import type { RustLivePaymentEvidence, RustH1Handle } from './rust-h1';
 import {
   readLaneAccountDetails,
@@ -73,7 +74,7 @@ const waitForAccount = async (
     if (options.predicate(latest)) return latest;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
-  throw new Error(`${options.code}:${JSON.stringify(latest)}:${options.rust.errorTail()}`);
+  throw new Error(`${options.code}:${safeStringify(latest)}:${options.rust.errorTail()}`);
 };
 
 export const runRustH1AccountSettlementSmoke = async (options: Readonly<{
@@ -84,7 +85,7 @@ export const runRustH1AccountSettlementSmoke = async (options: Readonly<{
 }>): Promise<RustH1AccountSettlementSmokeResult> => {
   const startedAt = performance.now();
   const stage = (name: string, status?: RustH1AccountStatus): void => {
-    console.log('[load] rust-account-settlement', JSON.stringify({
+    console.log('[load] rust-account-settlement', safeStringify({
       stage: name,
       elapsedMs: Math.ceil(performance.now() - startedAt),
       ...(status ? {
@@ -135,7 +136,7 @@ export const runRustH1AccountSettlementSmoke = async (options: Readonly<{
       status.settlementWorkspaceStatus === 'ready_to_submit',
   });
   stage('proposal-committed', awaiting);
-  console.log('[load] rust-account-settlement-counterparty', JSON.stringify(
+  console.log('[load] rust-account-settlement-counterparty', safeStringify(
     await readCounterpartyPendingDetails(options.counterpartyLane, options.rust.ready.runtimeId),
   ));
   const ready = await waitForAccount({
