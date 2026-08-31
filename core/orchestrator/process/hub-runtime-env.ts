@@ -1,36 +1,16 @@
 import { buildManagedRuntimeChildSecretEnv } from '../../support/process/child-secrets';
 import { buildRuntimeChildGcEnv } from '../../support/process/runtime-gc-env';
+import { resolveRuntimeMinFrameDelayMs } from '../../runtime/config/frame-cadence';
 
 const RUNTIME_FRAME_DELAY_KEY = 'XLN_RUNTIME_MIN_FRAME_DELAY_MS';
-export const DEFAULT_HUB_RUNTIME_FRAME_DELAY_MS = 0;
 
 /**
  * Resolve the one Runtime frame delay before genesis. Bootstrap and steady load
  * must not install different scheduler policies: the committed Runtime config
  * is the sole source read by both TypeScript and Rust.
  */
-export const resolveHubRuntimeFrameDelayMs = (
-  env: NodeJS.ProcessEnv,
-  hubDelayMs?: string,
-): number => {
-  const raw = hubDelayMs
-    ?? env[RUNTIME_FRAME_DELAY_KEY]
-    ?? String(DEFAULT_HUB_RUNTIME_FRAME_DELAY_MS);
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`RUNTIME_MIN_FRAME_DELAY_MS_INVALID:${String(raw)}`);
-  }
-  return value;
-};
-
-export const applyHubRuntimeFrameDelay = (
-  env: NodeJS.ProcessEnv,
-  hubDelayMs: string | undefined,
-): NodeJS.ProcessEnv => {
-  const childEnv = { ...env };
-  childEnv[RUNTIME_FRAME_DELAY_KEY] = String(resolveHubRuntimeFrameDelayMs(env, hubDelayMs));
-  return childEnv;
-};
+export const resolveHubRuntimeFrameDelayMs = (env: NodeJS.ProcessEnv): number =>
+  resolveRuntimeMinFrameDelayMs(env[RUNTIME_FRAME_DELAY_KEY], true);
 
 const HUB_PASSTHROUGH_ENV_KEYS = [
   'XLN_RUNTIME_APPLY_PROFILE',
@@ -65,7 +45,6 @@ type HubChildProcessEnvOptions = Readonly<{
   orchestratorPid: number;
   orchestratorOwnerId: string;
   startupTimeoutMs: number;
-  hubDelayMs: string | undefined;
   sourceEnv?: NodeJS.ProcessEnv;
 }>;
 
@@ -85,6 +64,7 @@ export const buildHubChildProcessEnv = (
     XLN_ORCHESTRATOR_PID: String(options.orchestratorPid),
     XLN_ORCHESTRATOR_OWNER_ID: options.orchestratorOwnerId,
     XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs),
+    XLN_RUNTIME_MIN_FRAME_DELAY_MS: String(resolveHubRuntimeFrameDelayMs(source)),
     XLN_STORAGE_WRITE_TIMEOUT_MS: source['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
     XLN_LOG_LEVEL: source['XLN_HUB_LOG_LEVEL'] ?? source['XLN_LOG_LEVEL'] ?? 'warn',
   };
@@ -106,5 +86,5 @@ export const buildHubChildProcessEnv = (
   for (const key of HUB_PASSTHROUGH_ENV_KEYS) {
     if (source[key]) child[key] = source[key];
   }
-  return applyHubRuntimeFrameDelay(child, options.hubDelayMs);
+  return child;
 };

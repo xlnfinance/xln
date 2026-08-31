@@ -228,14 +228,12 @@ impl ResidentRuntimeService {
     }
 
     pub fn min_frame_delay_ms(&self) -> Result<u64, ResidentRuntimeServiceError> {
-        self.processor
+        Ok(self
+            .processor
             .replica()?
             .durable
             .runtime_config()
-            .min_frame_delay_ms
-            .ok_or(ResidentRuntimeServiceError::RuntimeConfig(
-                "minFrameDelayMs missing",
-            ))
+            .min_frame_delay_ms)
     }
 
     pub fn ingress_metrics(&self) -> DirectRuntimeIngressMetrics {

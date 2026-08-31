@@ -74,9 +74,9 @@ const lockWire = (lock: HtlcLock): RscoreWireValue[] => [
 /**
  * Canonical values on the wire: the same nine-variant model both sides hash
  * (`encodeAccountStateValue` here, `CanonicalValue` in the engine), tagged so
- * the engine can commit sections it never interprets — the mempool in its
- * frame-hash form, hankos, acks, frame bindings — without a Rust type per
- * shape the authority happens to commit.
+ * the engine can commit envelope sections it never interprets without a Rust
+ * type per committed shape. Replica coordination travels separately in the
+ * consensus wire and never enters this canonical leaf value.
  *
  * Numbers travel as the string JavaScript renders: the shortest
  * representation parses back to the identical double, so the engine
@@ -115,15 +115,14 @@ export const canonicalValueWire = (value: unknown, depth = 0): RscoreWireValue =
   throw new Error(`SHADOW_CANONICAL_UNSUPPORTED:${typeof value}`);
 };
 
-/** Fields the engine derives itself; sending them would prove nothing. */
-const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRoot', 'mempoolRoot']);
+/** The one committed leaf field the engine derives from its Account state. */
+const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRoot']);
 
 /**
- * The replica shell the Entity commits around the financial state: its own
- * account-leaf projection minus the two roots the engine derives, plus the
- * mempool in the canonical form the frame hash uses. With it the engine's
- * account tree leaf is the Entity's account leaf, so the two accounts roots
- * are directly comparable.
+ * The committed Entity Account leaf minus the Account state root the engine
+ * derives. The separate consensus row below still carries the full mempool,
+ * proposal, ACK and rollback state needed to continue after cutover; none of
+ * that scheduling state is authenticated by the Entity root.
  */
 /**
  * One operation of a wave, in the order the authority performed it.

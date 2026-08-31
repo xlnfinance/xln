@@ -9,12 +9,15 @@ import { safeStringify } from '../../../protocol/serialization';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
 import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-parallel-isolated';
 import {
-  applyHubRuntimeFrameDelay,
   buildHubChildProcessEnv,
   buildHubEngineArgs,
   resolveHubRuntimeFrameDelayMs,
 } from '../../../orchestrator/process/hub-runtime-env';
 import { buildRuntimeChildGcEnv } from '../../../support/process/runtime-gc-env';
+import {
+  PRODUCTION_RUNTIME_MIN_FRAME_DELAY_MS,
+  resolveRuntimeMinFrameDelayMs,
+} from '../../../runtime/config/frame-cadence';
 
 const repoRoot = process.cwd();
 const readPlatformDeploy = (): string =>
@@ -76,23 +79,19 @@ describe('production startup wiring', () => {
 
   test('Hub child uses one Runtime frame delay from genesis through steady load', () => {
     const orchestrator = readOrchestratorSource();
-    const inherited = applyHubRuntimeFrameDelay({
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20',
-      XLN_UNRELATED_SETTING: 'kept',
-    }, undefined);
-    expect(inherited['XLN_RUNTIME_MIN_FRAME_DELAY_MS']).toBe('20');
-    expect(inherited['XLN_UNRELATED_SETTING']).toBe('kept');
-    expect(applyHubRuntimeFrameDelay(inherited, '100')).toMatchObject({
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '100',
-      XLN_UNRELATED_SETTING: 'kept',
-    });
-    expect(applyHubRuntimeFrameDelay(inherited, '0')).toMatchObject({
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
-      XLN_UNRELATED_SETTING: 'kept',
-    });
-    expect(resolveHubRuntimeFrameDelayMs({}, undefined)).toBe(0);
-    expect(() => resolveHubRuntimeFrameDelayMs({}, '-1'))
+    const replayRecord = readFileSync(join(
+      repoRoot,
+      'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts',
+    ), 'utf8');
+    expect(resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20' })).toBe(20);
+    expect(resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0' })).toBe(0);
+    expect(PRODUCTION_RUNTIME_MIN_FRAME_DELAY_MS).toBe(100);
+    expect(resolveRuntimeMinFrameDelayMs(undefined, false)).toBe(0);
+    expect(resolveHubRuntimeFrameDelayMs({})).toBe(PRODUCTION_RUNTIME_MIN_FRAME_DELAY_MS);
+    expect(() => resolveHubRuntimeFrameDelayMs({ XLN_RUNTIME_MIN_FRAME_DELAY_MS: '-1' }))
       .toThrow('RUNTIME_MIN_FRAME_DELAY_MS_INVALID:-1');
+    expect(orchestrator).not.toContain('XLN_HUB_MIN_FRAME_DELAY_MS');
+    expect(replayRecord).not.toContain('XLN_HUB_MIN_FRAME_DELAY_MS');
     expect(orchestrator).toContain('env: sanitizeChildProcessEnv(buildHubChildProcessEnv({');
     expect(buildHubEngineArgs('h1', {
       XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
@@ -106,8 +105,8 @@ describe('production startup wiring', () => {
       orchestratorPid: 42,
       orchestratorOwnerId: 'owner',
       startupTimeoutMs: 5_000,
-      hubDelayMs: '25',
       sourceEnv: {
+        XLN_RUNTIME_MIN_FRAME_DELAY_MS: '25',
         XLN_HUB_RSCORE_AUTHORITY_H1: '1',
         XLN_RSCORE_BINARY: '/bin/rscore',
         XLN_RSCORE_AUTHORITY_CUTOVER: '1',

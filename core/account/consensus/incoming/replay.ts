@@ -21,6 +21,7 @@ import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied } from '../result';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
+import { computeFrameHash } from '../frame/hash';
 
 const replayLog = createStructuredLogger('account.replay');
 
@@ -113,6 +114,33 @@ const sameAccountFrameHash = (left: string | undefined, right: string | undefine
   typeof left === 'string'
   && typeof right === 'string'
   && left.toLowerCase() === right.toLowerCase();
+
+const requireExactCurrentFrameRetryHanko = (
+  account: AccountReplica,
+  input: AccountInput,
+  receivedFrame: AccountFrame,
+  receivedHeight: number,
+): void => {
+  // Matching a copied stateHash field is insufficient: the retry must carry
+  // the exact frame bytes committed by that hash, not altered fields plus the
+  // old hash. Otherwise the duplicate fast path would bypass frame validation.
+  if (!sameAccountFrameHash(computeFrameHash(receivedFrame), receivedFrame.stateHash)) {
+    throw new Error(`DUPLICATE_FRAME_BYTES_CONFLICT:height=${receivedHeight}`);
+  }
+  const stored = account.counterpartyFrameHanko;
+  if (!stored) {
+    throw new Error(`DUPLICATE_FRAME_COUNTERPARTY_HANKO_MISSING:height=${receivedHeight}`);
+  }
+  const received = accountInputProposal(input)?.frameHanko;
+  if (!received) {
+    throw new Error(`DUPLICATE_FRAME_RETRY_HANKO_MISSING:height=${receivedHeight}`);
+  }
+  // A committed-frame retry is not fresh authority. It is admissible only
+  // when it repeats the peer certificate already stored for these exact bytes.
+  if (received.toLowerCase() !== stored.toLowerCase()) {
+    throw new Error(`DUPLICATE_FRAME_COUNTERPARTY_HANKO_CONFLICT:height=${receivedHeight}`);
+  }
+};
 
 const applyDuplicateAck = (
   response: AccountInput,
@@ -326,6 +354,7 @@ export const buildDuplicateCommittedAckFrame = async (
     });
     return null;
   }
+  requireExactCurrentFrameRetryHanko(account, input, receivedFrame, receivedHeight);
   const pendingResponse = account.pendingAccountInput;
   const pendingAck = pendingResponse
     ? accountInputAck(pendingResponse)

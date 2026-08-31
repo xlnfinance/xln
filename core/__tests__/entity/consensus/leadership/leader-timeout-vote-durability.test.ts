@@ -260,10 +260,10 @@ describe('leader timeout vote durability', () => {
       { runtimeSeed: seed, runtimeId: env.runtimeId },
     )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
 
-    const runtimeStateHashTamper = structuredClone(tailBundle);
-    runtimeStateHashTamper.frames![0]!.runtimeStateHash = `0x${'66'.repeat(32)}`;
+    const canonicalStateHashTamper = structuredClone(tailBundle);
+    canonicalStateHashTamper.frames![0]!.canonicalStateHash = `0x${'66'.repeat(32)}`;
     await expect(restoreEnvFromRecoveryBundles(
-      [snapshotBundle, runtimeStateHashTamper],
+      [snapshotBundle, canonicalStateHashTamper],
       { runtimeSeed: seed, runtimeId: env.runtimeId },
     )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
 

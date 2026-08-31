@@ -10,7 +10,11 @@ import type { Profile } from '../../entity/profile';
 import { buildLocalEntityProfile } from '../../network/p2p/gossip/helper';
 import { normalizeDbNamespace } from '../../storage/runtime-dbs';
 import type { RuntimeReplica } from '../types';
-import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop/loop-environment';
+import {
+  createRuntimeConfig,
+  ENV_REPLAY_MODE_KEY,
+  readRuntimeMetadata,
+} from '../loop/loop-environment';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -104,7 +108,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
       ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
       ...(dbNamespace ? { dbNamespace } : {}),
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
-      runtimeConfig: undefined,
+      runtimeConfig: createRuntimeConfig(),
       infrastructure: undefined,
       gossip,
       networkInbox: [],

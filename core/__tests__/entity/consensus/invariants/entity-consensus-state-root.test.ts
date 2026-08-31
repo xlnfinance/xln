@@ -350,20 +350,47 @@ test('Entity consensus root is insertion-order independent without recursive key
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(mutated));
 });
 
-test('Entity consensus root excludes Account replica mempools', () => {
+test('Entity consensus root excludes all transient Account coordination state', () => {
   const left = baseState();
   const right = baseState();
-  const leftAccount = {
-    ...makeAccountReplica(entityId, counterpartyId),
-    mempool: [],
-  } as never;
-  const rightAccount = {
-    ...makeAccountReplica(entityId, counterpartyId),
-    mempool: [{ type: 'direct_payment', data: { tokenId: 1, amount: 1n } }],
-  } as never;
+  const leftAccount = makeAccountReplica(entityId, counterpartyId);
+  const rightAccount = makeAccountReplica(entityId, counterpartyId);
+  const pendingFrame = hashedFrame(`0x${'ab'.repeat(32)}`, 'transient');
+  rightAccount.mempool = [fatPayment('transient')];
+  rightAccount.pendingFrame = pendingFrame;
+  rightAccount.pendingAccountInput = {
+    kind: 'ack_frame',
+    fromEntityId: entityId,
+    toEntityId: counterpartyId,
+    domain: rightAccount.state.domain,
+    disputeConfig: rightAccount.state.disputeConfig,
+    proposal: { frame: pendingFrame },
+  };
+  rightAccount.lastOutboundAckFrame = {
+    height: 1,
+    counterpartyEntityId: counterpartyId,
+    response: {
+      kind: 'ack',
+      fromEntityId: entityId,
+      toEntityId: counterpartyId,
+      domain: rightAccount.state.domain,
+      disputeConfig: rightAccount.state.disputeConfig,
+      ack: { height: 1, frameHash: pendingFrame.stateHash },
+    },
+  };
+  rightAccount.rollbackCount = 7;
+  rightAccount.lastRollbackFrameHash = `0x${'cd'.repeat(32)}`;
   left.accounts = persistentAccounts([[counterpartyId, leftAccount]]);
   right.accounts = persistentAccounts([[counterpartyId, rightAccount]]);
-  expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
+  const committedRoot = computeCanonicalEntityConsensusStateHash(left);
+  expect(computeCanonicalEntityConsensusStateHash(right)).toBe(committedRoot);
+  expect(computeCanonicalEntityConsensusStateHashCold(right)).toBe(committedRoot);
+
+  // Intentional one-time canonical root delta for this exact fixture:
+  // before removing transient coordination fields the empty replica root was
+  // 0xe5bc124c…; the new canonical root is pinned below as a migration vector.
+  expect(committedRoot).not.toBe('0xe5bc124c7a6d666a66daad268a12cdb2a44f616c3f2cbc07f4c914ac9b553281');
+  expect(committedRoot).toBe('0xbe056e415458d75f06f9677fbe174ea9dc50a7d5d2eb962dbcb38583ef1b9b60');
 
   const disputed = { ...makeAccountReplica(entityId, counterpartyId), status: 'disputed' as const };
   right.accounts = persistentAccounts([[counterpartyId, disputed]]);
@@ -594,31 +621,13 @@ const hashedFrame = (stateHash: string, padding: string) => ({
   byLeft: true,
 });
 
-test('Entity account leaf binds frame hashes and money roots, not frame bodies', () => {
+test('Entity account leaf binds current frame hash and money roots, not frame bodies', () => {
   const frameHash = `0x${'ab'.repeat(32)}`;
   const account = persistentEnvelope(makeAccountReplica(entityId, counterpartyId));
   account.currentFrame = hashedFrame(frameHash, 'A'.repeat(8_192));
-  account.pendingFrame = hashedFrame(frameHash, 'A'.repeat(8_192));
-  account.pendingAccountInput = {
-    kind: 'ack_frame',
-    fromEntityId: entityId,
-    toEntityId: counterpartyId,
-    domain: account.state.domain,
-    disputeConfig: account.state.disputeConfig,
-    proposal: { frame: hashedFrame(frameHash, 'A'.repeat(8_192)) },
-  };
   const before = computeEntityAccountValueHash(account);
 
   account.currentFrame = hashedFrame(frameHash, 'B'.repeat(8_192));
-  account.pendingFrame = hashedFrame(frameHash, 'B'.repeat(8_192));
-  account.pendingAccountInput = {
-    kind: 'ack_frame',
-    fromEntityId: entityId,
-    toEntityId: counterpartyId,
-    domain: account.state.domain,
-    disputeConfig: account.state.disputeConfig,
-    proposal: { frame: hashedFrame(frameHash, 'B'.repeat(8_192)) },
-  };
   expect(computeEntityAccountValueHash(account)).toBe(before);
 
   account.currentFrame = hashedFrame(`0x${'cd'.repeat(32)}`, 'B'.repeat(8_192));
@@ -662,7 +671,6 @@ test('100 fat Account leaves with board Hanko refresh in under 100ms including c
     const counterparty = `0x${index.toString(16).padStart(64, '0')}`;
     const account = persistentEnvelope(makeAccountReplica(entityId, counterparty));
     account.currentFrame = hashedFrame(frameHash, 'A'.repeat(8_192));
-    account.pendingFrame = hashedFrame(frameHash, 'A'.repeat(8_192));
     entries.push([counterparty, account]);
   }
   const fat = baseState();
@@ -678,7 +686,6 @@ test('100 fat Account leaves with board Hanko refresh in under 100ms including c
   thin.accounts = persistentAccounts(entries.map(([counterparty]) => {
     const account = persistentEnvelope(makeAccountReplica(entityId, counterparty));
     account.currentFrame = hashedFrame(frameHash, 'B');
-    account.pendingFrame = hashedFrame(frameHash, 'B');
     return [counterparty, account] as const;
   }));
   expect(computeCanonicalEntityConsensusStateHash(thin)).toBe(first);

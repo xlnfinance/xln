@@ -332,7 +332,6 @@ const publishNewWalBase = async (
     materializedState: true,
     canonicalStateHash: options.canonicalStateHash,
     canonicalEntityHashes: options.canonicalEntityHashes,
-    runtimeStateHash: options.canonicalStateHash,
     runtimeMachineRoot: runtimeMachineGraph.root,
     runtimeOutputCount: outputPayloads.commitment.count,
     runtimeOutputsDigest: outputPayloads.commitment.digest,

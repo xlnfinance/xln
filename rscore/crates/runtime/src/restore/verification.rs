@@ -77,11 +77,6 @@ fn verify_commitments(
             actual.canonical_state_hash,
         ),
         (
-            RestoreBoundary::RuntimeStateHash,
-            expected.runtime_state_hash,
-            actual.runtime_state_hash,
-        ),
-        (
             RestoreBoundary::PostStateHash,
             expected.post_state_hash,
             actual.post_state_hash,

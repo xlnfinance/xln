@@ -488,7 +488,7 @@ describe('runtime recovery tower', () => {
     expect(frame?.runtimeMachine, 'ordinary WAL must not repeat the complete R-machine').toBeUndefined();
     // Ordinary sparse WAL frames carry exact inputs/transport fences plus the
     // replica commitment without paying for a complete state serialization.
-    expect(frame?.runtimeStateHash).toBeUndefined();
+    expect(frame?.canonicalStateHash).toBeUndefined();
     const tailBundle = buildRuntimeRecoveryBundle(env, {
       signers,
       kind: 'journal_tail',

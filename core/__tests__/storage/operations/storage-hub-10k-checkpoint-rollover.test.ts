@@ -170,16 +170,16 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
     const frame20_002 = await readStorageFrameRecord(db, 20_002);
     const frame20_050 = await readStorageFrameRecord(db, 20_050);
     expect(frame19_901?.materializedState).not.toBe(false);
-    expect(frame19_901?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(frame19_901?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(frame19_902?.materializedState).toBe(false);
-    expect(frame19_902?.runtimeStateHash).toBeUndefined();
+    expect(frame19_902?.canonicalStateHash).toBeUndefined();
     expect(frame19_902?.prevFrameHash).toBe(frame19_901?.frameHash);
     expect(frame20_001?.materializedState).not.toBe(false);
-    expect(frame20_001?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(frame20_001?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(frame20_002?.materializedState).toBe(false);
     expect(frame20_002?.prevFrameHash).toBe(frame20_001?.frameHash);
     expect(frame20_050?.materializedState).toBe(false);
-    expect(frame20_050?.runtimeStateHash).toBeUndefined();
+    expect(frame20_050?.canonicalStateHash).toBeUndefined();
 
     const head = await readPersistedStorageHead(env);
     expect(head?.latestHeight).toBe(FINAL_HEIGHT);

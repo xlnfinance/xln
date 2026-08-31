@@ -15,7 +15,7 @@ const journal = (entityTxs: EntityTx[] = []): PersistedFrameJournal => ({
   timestamp: 1_700_000_000_000,
   replicaMetaDigest: `0x${'04'.repeat(32)}`,
   postStateHash: `0x${'05'.repeat(32)}`,
-  runtimeStateHash: `0x${'06'.repeat(32)}`,
+  canonicalStateHash: `0x${'06'.repeat(32)}`,
   runtimeInput: {
     runtimeTxs: [],
     entityInputs: entityTxs.length === 0 ? [] : [{
@@ -35,7 +35,7 @@ describe('HLT Rust Runtime authority evidence', () => {
     const evidence = buildHltAuthorityEvidence([journal()]);
     expect(() => assertCompleteHltAuthorityEvidence(evidence)).not.toThrow();
     expect(Object.hasOwn(evidence, 'economicOperations')).toBe(false);
-    expect(evidence.expectations.runtimeFrames[0]?.runtimeStateHash).toBe(`0x${'06'.repeat(32)}`);
+    expect(evidence.expectations.runtimeFrames[0]?.canonicalStateHash).toBe(`0x${'06'.repeat(32)}`);
     expect(evidence.expectations.effects[0]).toEqual({
       runtimeHeight: 41,
       outputCount: 2,

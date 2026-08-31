@@ -15,23 +15,23 @@ import { computeCanonicalRuntimeStateHash } from '../../../storage/canonical-has
 import { computeStorageFrameHash } from '../../../storage/hashes';
 import type { RuntimeFrame } from '../../../storage/types';
 
+const readyRuntimeMachine = { pendingNetworkOutputs: ['durable-output'] };
+
 const buildReadyFrame = (
   canonicalEntityHashes: NonNullable<RuntimeFrame['canonicalEntityHashes']>,
-  runtimeMachine: Record<string, unknown> = { pendingNetworkOutputs: ['durable-output'] },
+  runtimeMachine: Record<string, unknown> = readyRuntimeMachine,
 ): RuntimeFrame => {
   const frameBase: RuntimeFrame = {
     height: 165,
     timestamp: 1_000,
     replicaMetaDigest: '0xmeta',
     postStateHash: '0xpost-state',
-    stateHash: '0xstate',
+    materializedState: true,
     canonicalEntityHashes,
-    runtimeStateHash: computeCanonicalRuntimeStateHash(165, 1_000, canonicalEntityHashes, runtimeMachine),
+    canonicalStateHash: computeCanonicalRuntimeStateHash(165, 1_000, canonicalEntityHashes, runtimeMachine),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    entityContexts: new Map(),
-    historyRecords: [],
-    activityLogs: [],
-    runtimeMachine,
+    runtimeOutputCount: 0,
+    runtimeOutputsDigest: `0x${'00'.repeat(32)}`,
     touchedEntities: [],
     touchedAccounts: [],
     touchedBookEntities: [],
@@ -50,34 +50,31 @@ test('ready snapshot parity binds Entity state and publishes the durable runtime
   };
   const persistedFrame = buildReadyFrame(canonicalEntityHashes);
 
-  expect(assertMarketMakerReadySnapshotParity(expected, persistedFrame))
-    .toBe(persistedFrame.runtimeStateHash);
+  expect(assertMarketMakerReadySnapshotParity(expected, persistedFrame, readyRuntimeMachine))
+    .toBe(persistedFrame.canonicalStateHash);
   // Runtime output dispatch happens after the frame commit. The live runtime
   // can therefore have a different outbox hash at the same Entity state and
   // height; the ready marker must name the authoritative persisted boundary.
+  const emptyOutboxMachine = { pendingNetworkOutputs: [] };
   expect(assertMarketMakerReadySnapshotParity(expected, buildReadyFrame(
     canonicalEntityHashes,
-    { pendingNetworkOutputs: [] },
-  ))).not.toBe(persistedFrame.runtimeStateHash);
+    emptyOutboxMachine,
+  ), emptyOutboxMachine)).not.toBe(persistedFrame.canonicalStateHash);
 
   const wrongEntities = canonicalEntityHashes.map((entry, index) =>
     index === 0 ? { ...entry, hash: '0xwrong-entity' } : entry);
-  expect(() => assertMarketMakerReadySnapshotParity(expected, buildReadyFrame(wrongEntities)))
+  expect(() => assertMarketMakerReadySnapshotParity(expected, buildReadyFrame(wrongEntities), readyRuntimeMachine))
     .toThrow('MARKET_MAKER_READY_SNAPSHOT_ENTITY_HASH_MISMATCH');
 
-  expect(() => assertMarketMakerReadySnapshotParity(expected, {
-    ...persistedFrame,
-    runtimeMachine: { pendingNetworkOutputs: ['corrupt'] },
-    frameHash: computeStorageFrameHash({
-      ...persistedFrame,
-      runtimeMachine: { pendingNetworkOutputs: ['corrupt'] },
-      frameHash: undefined,
-    }),
-  })).toThrow('MARKET_MAKER_READY_SNAPSHOT_RUNTIME_HASH_MISMATCH');
+  expect(() => assertMarketMakerReadySnapshotParity(
+    expected,
+    persistedFrame,
+    { pendingNetworkOutputs: ['corrupt'] },
+  )).toThrow('MARKET_MAKER_READY_SNAPSHOT_RUNTIME_HASH_MISMATCH');
   expect(() => assertMarketMakerReadySnapshotParity(expected, {
     ...persistedFrame,
     frameHash: '0xcorrupt-frame',
-  })).toThrow('MARKET_MAKER_READY_SNAPSHOT_FRAME_HASH_MISMATCH');
+  }, readyRuntimeMachine)).toThrow('MARKET_MAKER_READY_SNAPSHOT_FRAME_HASH_MISMATCH');
   expect(() => assertMarketMakerReadySnapshotParity(expected, null))
     .toThrow('MARKET_MAKER_READY_SNAPSHOT_FRAME_MISSING');
 });

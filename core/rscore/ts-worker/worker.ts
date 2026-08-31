@@ -35,6 +35,7 @@ import type {
 
 type WorkerScope = {
   postMessage(value: unknown, transfer?: Transferable[]): void;
+  close(): void;
   onmessage: ((event: MessageEvent<TsAccountWorkerRequestEnvelope>) => void) | null;
 };
 
@@ -327,6 +328,10 @@ const postFatal = (requestId: number, error: unknown): void => {
     ...(failure.stack ? { stack: failure.stack } : {}),
   };
   scope.postMessage(response);
+  // A fatal response poisons the coordinator. Closing after enqueueing it
+  // gives the owner a second deterministic rejection signal if Bun loses the
+  // final cross-thread message under contention.
+  scope.close();
 };
 
 scope.onmessage = event => {

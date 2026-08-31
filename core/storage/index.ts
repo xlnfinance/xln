@@ -1221,7 +1221,7 @@ const prepareStorageStateCommitments = async (
     ? buildStorageRuntimeMachineSnapshot(options.env)
     : undefined;
   checkpoint('runtimeMachine');
-  const runtimeStateHashes = canonicalHashDue
+  const canonicalStateHashes = canonicalHashDue
     ? prepareStorageCanonicalStateHashes(
         options.env,
         [],
@@ -1281,7 +1281,7 @@ const prepareStorageStateCommitments = async (
     liveStateGraph,
     runtimeComponentDigests,
     runtimeMachine,
-    runtimeStateHashes,
+    canonicalStateHashes,
     replicaMetaCommitment,
     replicaMetaEntries,
     liveReplicaMetaKeys,
@@ -1346,14 +1346,12 @@ const buildStorageRuntimeFrame = (
       runtimeOutputsDigest: runtimeOutputs.digest,
     }),
     materializedState: shouldMaterialize,
-    ...(commitments.runtimeStateHashes
+    ...(commitments.canonicalStateHashes
       ? {
           canonicalStateHash:
-            commitments.runtimeStateHashes.canonicalStateHash,
+            commitments.canonicalStateHashes.canonicalStateHash,
           canonicalEntityHashes:
-            commitments.runtimeStateHashes.canonicalEntityHashes,
-          runtimeStateHash:
-            commitments.runtimeStateHashes.canonicalStateHash,
+            commitments.canonicalStateHashes.canonicalEntityHashes,
         }
       : {}),
     runtimeInput: appliedRuntimeInput,

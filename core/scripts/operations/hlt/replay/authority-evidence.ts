@@ -11,7 +11,7 @@ export type HltAuthorityExpectations = Readonly<{
     height: number;
     timestamp: number;
     postStateHash: string;
-    runtimeStateHash: string | null;
+    canonicalStateHash: string | null;
   }>[];
   effects: readonly Readonly<{
     runtimeHeight: number;
@@ -73,7 +73,7 @@ export const buildHltAuthorityEvidence = (
         height: frame.height,
         timestamp: frame.timestamp,
         postStateHash: frame.postStateHash,
-        runtimeStateHash: frame.runtimeStateHash ?? null,
+        canonicalStateHash: frame.canonicalStateHash ?? null,
       })),
       effects: frames.map(frame => ({
         runtimeHeight: frame.height,
@@ -94,6 +94,6 @@ export const assertCompleteHltAuthorityEvidence = (evidence: HltAuthorityEvidenc
       `runtime=${runtimeFrames.length}:effects=${effects.length}:entityEffects=${entityEffects.length}`,
     );
   }
-  const missingRoot = runtimeFrames.find(frame => frame.runtimeStateHash === null);
+  const missingRoot = runtimeFrames.find(frame => frame.canonicalStateHash === null);
   if (missingRoot) throw new Error(`HLT_AUTHORITY_EVIDENCE_RUNTIME_ROOT_MISSING:${missingRoot.height}`);
 };

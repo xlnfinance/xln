@@ -8,30 +8,17 @@ import { forgetEngineAccountLeaf } from '../../rscore/cutover/leaf-registry';
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import type {
-  AccountBoardHankoRefresh,
-  AccountDisputeHanko,
   AccountFrame,
-  AccountInput,
   AccountReplica,
   AccountState,
-  AccountTx,
 } from '../../types/account';
 import type { AssertNever, Covered } from '../../types/hash-coverage/coverage';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import {
-  accountInputAck,
-  accountInputBoardHankoRefresh,
-  accountInputDisputeHanko,
-  accountInputProposal,
-} from '../../account/consensus/flush';
-import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
-import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
-  computeCanonicalMerkleRoot,
-  EMPTY_ACCOUNT_STATE_ROOT,
   encodeAccountStateValue,
 } from '../../account/commitment/state-root';
 import { counterpartySettlementHankos } from '../../account/settlement/witness-projection';
@@ -161,9 +148,10 @@ const projectOrderbookConsensusState = (
  * These bilateral fields are already committed by AccountFrame.accountStateRoot.
  * Re-embedding them into the parent Entity root made every hub frame serialize
  * the complete resting-liquidity map twice. The Entity commitment retains the
- * current/pending Account frames (and therefore their roots) plus every local
- * lifecycle field below. A field may be added here only when it is covered by
- * accountStateRootEntries in account/commitment/state-root.ts.
+ * current Account frame (and therefore its root) plus every committed local
+ * lifecycle field below. The pending proposal is replica coordination state.
+ * A field may be added here only when it is covered by accountStateRootEntries
+ * in account/commitment/state-root.ts.
  */
 const ACCOUNT_ROOT_COMMITTED_FIELDS = [
   'domain',
@@ -197,14 +185,8 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
 const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'status',
   'publicPinned',
-  'mempool',
   'currentFrame',
   'currentHeight',
-  'pendingFrame',
-  'pendingAccountInput',
-  'lastOutboundAckFrame',
-  'rollbackCount',
-  'lastRollbackFrameHash',
   'proofHeader',
   'boardHankoRefreshMigration',
   'counterpartyBoardHankoRefresh',
@@ -226,11 +208,20 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
 ] as const satisfies readonly (keyof AccountReplica)[];
 
 /**
- * These witnesses or routes depend on validator-local keys or are attached
- * only after the committed hash exists. Including them would either fork
- * honest validators or create a circular commitment.
+ * Replica-only fields excluded from the committed Entity root. Coordination
+ * state is recovered from WAL; local Hankos are attached after the committed
+ * hash exists and would otherwise make the commitment circular.
  */
-const ACCOUNT_ENTITY_LOCAL_FIELDS = [
+const ACCOUNT_ENTITY_EXCLUDED_FIELDS = [
+  // Coordination state remains in the live Account replica and recovery WAL,
+  // but it is not certified financial state. Committing it here made Entity
+  // roots depend on scheduling, retries, and worker timing.
+  'mempool',
+  'pendingFrame',
+  'pendingAccountInput',
+  'lastOutboundAckFrame',
+  'rollbackCount',
+  'lastRollbackFrameHash',
   'currentFrameHanko',
   'currentDisputeProofHanko',
 ] as const satisfies readonly (keyof AccountReplica)[];
@@ -244,17 +235,13 @@ type CoveredAccountReplica = Covered<AccountReplica,
     keyof AccountReplica,
     | 'state'
     | (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number]
-    | (typeof ACCOUNT_ENTITY_LOCAL_FIELDS)[number]
+    | (typeof ACCOUNT_ENTITY_EXCLUDED_FIELDS)[number]
   >>
 >;
 
 /** Bodies already committed by a child root or frame hash. Copied as hashes below. */
 const ACCOUNT_LEAF_BODY_FIELDS = [
-  'mempool',
   'currentFrame',
-  'pendingFrame',
-  'pendingAccountInput',
-  'lastOutboundAckFrame',
   'pendingWithdrawals',
   'shadow',
 ] as const satisfies readonly (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number][];
@@ -285,14 +272,10 @@ const ACCOUNT_LEAF_BODY_FIELD_SET: ReadonlySet<string> = new Set(ACCOUNT_LEAF_BO
 
 const ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS = [
   'accountStateRoot',
-  'mempoolRoot',
   'currentFrameHash',
-  'pendingFrameHash',
   'counterpartySettlementHankos',
   'pendingWithdrawals',
   'shadow',
-  'pendingAccountInput',
-  'lastOutboundAckFrame',
 ] as const;
 
 const ENTITY_ACCOUNT_LEAF_FIELDS = [
@@ -324,114 +307,6 @@ export const computeEntityAccountLeafDigest = (
   return computeIntegrityDigest(preimage);
 };
 
-const compactDisputeHanko = (disputeHanko: AccountDisputeHanko): Record<string, unknown> => ({
-  hash: disputeHanko.hash,
-  proofBodyHash: disputeHanko.proofBodyHash,
-  proofNonce: disputeHanko.proofNonce,
-  proposerIsLeft: disputeHanko.proposerIsLeft,
-});
-
-const compactBoardHankoRefresh = (boardHankoRefresh: AccountBoardHankoRefresh): Record<string, unknown> => ({
-  height: boardHankoRefresh.height,
-  frameHash: boardHankoRefresh.frameHash,
-  boardActivationJHeight: boardHankoRefresh.boardActivationJHeight,
-  boardActivationLogIndex: boardHankoRefresh.boardActivationLogIndex,
-  ...(boardHankoRefresh.disputeHanko ? { disputeHanko: compactDisputeHanko(boardHankoRefresh.disputeHanko) } : {}),
-});
-
-const compactAccountInputBinding = (input: AccountInput): Record<string, unknown> => {
-  const proposal = accountInputProposal(input);
-  const ack = accountInputAck(input);
-  const disputeHanko = input.kind === 'dispute' ? accountInputDisputeHanko(input) : undefined;
-  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
-  return {
-    kind: input.kind,
-    fromEntityId: input.fromEntityId.toLowerCase(),
-    toEntityId: input.toEntityId.toLowerCase(),
-    ...(proposal
-      ? {
-          proposal: {
-            height: proposal.frame.height,
-            frameHash: proposal.frame.stateHash,
-            ...(proposal.disputeHanko ? { disputeHanko: compactDisputeHanko(proposal.disputeHanko) } : {}),
-          },
-        }
-      : {}),
-    ...(ack
-      ? {
-          ack: {
-            height: ack.height,
-            frameHash: ack.frameHash,
-            ...(ack.disputeHanko ? { disputeHanko: compactDisputeHanko(ack.disputeHanko) } : {}),
-          },
-        }
-      : {}),
-    ...(disputeHanko ? { disputeHanko: compactDisputeHanko(disputeHanko) } : {}),
-    ...(boardHankoRefresh ? { boardHankoRefresh: compactBoardHankoRefresh(boardHankoRefresh) } : {}),
-  };
-};
-
-// Projection memos keyed by source identity. Inputs and ACK records are
-// replaced wholesale when they change (Hankos attached later are not part of
-// the binding); the mempool array is appended in place, so its length joins
-// the key. Fresh projection objects defeated the per-field leaf memo and
-// re-encoded every binding on every root.
-const mempoolRootMemos = new RecencyMemo<readonly AccountTx[], { length: number; root: string }>(4_096);
-const mempoolRoot = (mempool: readonly AccountTx[], cold: boolean): string => {
-  if (mempool.length === 0) return EMPTY_ACCOUNT_STATE_ROOT;
-  const memo = cold ? undefined : mempoolRootMemos.get(mempool);
-  if (memo && memo.length === mempool.length) return memo.root;
-  const root = computeCanonicalMerkleRoot(
-    'entity.account-mempool',
-    mempool.map((tx, index) => [String(index), canonicalAccountTxForFrameHash(tx)] as const),
-    'integrity',
-  );
-  mempoolRootMemos.set(mempool, { length: mempool.length, root });
-  return root;
-};
-
-// Shell forks re-create the input/ACK objects every frame, so identity memos
-// missed on every projection. The binding is a pure function of the few
-// fields below; key the memo on them and the projected object stays stable
-// (which is what keeps the leaf preimage memo hitting).
-const inputBindingKey = (input: AccountInput): string => {
-  const proposal = accountInputProposal(input);
-  const ack = accountInputAck(input);
-  const disputeHanko = input.kind === 'dispute' ? accountInputDisputeHanko(input) : undefined;
-  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
-  const hankoKey = (value: AccountDisputeHanko | undefined): string =>
-    value ? `${value.hash}:${value.proofBodyHash}:${value.proofNonce}:${value.proposerIsLeft}` : '';
-  return `${input.kind}|${input.fromEntityId}|${input.toEntityId}` +
-    `|${proposal ? `${proposal.frame.height}:${proposal.frame.stateHash}:${hankoKey(proposal.disputeHanko)}` : ''}` +
-    `|${ack ? `${ack.height}:${ack.frameHash}:${hankoKey(ack.disputeHanko)}` : ''}` +
-    `|${hankoKey(disputeHanko)}` +
-    `|${boardHankoRefresh ? `${boardHankoRefresh.height}:${boardHankoRefresh.frameHash}:${boardHankoRefresh.boardActivationJHeight}:${boardHankoRefresh.boardActivationLogIndex}:${hankoKey(boardHankoRefresh.disputeHanko)}` : ''}`;
-};
-const inputBindingMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
-const compactAccountInputBindingMemo = (input: AccountInput): Record<string, unknown> => {
-  const key = inputBindingKey(input);
-  const hit = inputBindingMemos.get(key);
-  if (hit) return hit;
-  const binding = compactAccountInputBinding(input);
-  inputBindingMemos.set(key, binding);
-  return binding;
-};
-
-type OutboundAck = NonNullable<AccountReplica['lastOutboundAckFrame']>;
-const outboundAckMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
-const outboundAckBinding = (ack: OutboundAck): Record<string, unknown> => {
-  const key = `${ack.height}|${ack.counterpartyEntityId}|${inputBindingKey(ack.response)}`;
-  const hit = outboundAckMemos.get(key);
-  if (hit) return hit;
-  const binding = {
-    height: ack.height,
-    counterpartyEntityId: ack.counterpartyEntityId.toLowerCase(),
-    response: compactAccountInputBindingMemo(ack.response),
-  };
-  outboundAckMemos.set(key, binding);
-  return binding;
-};
-
 const frameHashBinding = (frame: AccountFrame | undefined): string | undefined =>
   frame ? frame.stateHash : undefined;
 
@@ -453,11 +328,8 @@ const projectAccountConsensusState = (account: CoveredAccountReplica, cold = fal
   projected['accountStateRoot'] = cold
     ? computeAccountStateRootCold(account.state)
     : computeAccountStateRoot(account.state, undefined, 'entityLeaf');
-  projected['mempoolRoot'] = mempoolRoot(account.mempool, cold);
   const currentFrameHash = frameHashBinding(account.currentFrame);
   if (currentFrameHash !== undefined) projected['currentFrameHash'] = currentFrameHash;
-  const pendingFrameHash = frameHashBinding(account.pendingFrame);
-  if (pendingFrameHash !== undefined) projected['pendingFrameHash'] = pendingFrameHash;
   const peerSettlementHankos = counterpartySettlementHankos(
     account.state.settlementWorkspace,
     localIsLeft,
@@ -468,20 +340,6 @@ const projectAccountConsensusState = (account: CoveredAccountReplica, cold = fal
   const envelopeCollections = projectAccountEnvelopeCollections(account, cold);
   projected['pendingWithdrawals'] = envelopeCollections['pendingWithdrawalsRoot'];
   projected['shadow'] = envelopeCollections['shadow'];
-  if (account.pendingAccountInput) {
-    projected['pendingAccountInput'] = cold
-      ? compactAccountInputBinding(account.pendingAccountInput)
-      : compactAccountInputBindingMemo(account.pendingAccountInput);
-  }
-  if (account.lastOutboundAckFrame) {
-    projected['lastOutboundAckFrame'] = cold
-      ? {
-          height: account.lastOutboundAckFrame.height,
-          counterpartyEntityId: account.lastOutboundAckFrame.counterpartyEntityId.toLowerCase(),
-          response: compactAccountInputBinding(account.lastOutboundAckFrame.response),
-        }
-      : outboundAckBinding(account.lastOutboundAckFrame);
-  }
   return projected;
 };
 
@@ -739,9 +597,10 @@ const encodeEntityAccountsSection = (state: EntityState, cold: boolean): Uint8Ar
 /**
  * Entity state is a hierarchy of Merkle roots, not a serialized blob.
  * Scalar sections are SHA-256 committed. The Account section is the in-memory
- * radix-16 tree; each leaf binds child roots (`accountStateRoot`, frame
- * `stateHash`, mempool root, envelope roots) so a dirty Account reseals only
- * its path. Pending/current frames stay certified without re-encoding bodies.
+ * radix-16 tree; each leaf binds child roots (`accountStateRoot`, current frame
+ * `stateHash`, envelope roots) so a dirty Account reseals only its path. Live
+ * proposal/mempool/ACK/rollback coordination is recovered from WAL, never
+ * authenticated as committed Entity state.
  */
 const commitEntityConsensusSections = (
   projected: Record<string, unknown>,

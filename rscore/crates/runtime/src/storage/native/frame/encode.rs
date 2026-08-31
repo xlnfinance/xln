@@ -153,10 +153,6 @@ fn add_optional_fields(
             "canonicalEntityHashes".into(),
             canonical_entity_hashes(&state.entity_hashes)?,
         );
-        fields.insert(
-            "runtimeStateHash".into(),
-            text(format_hash(&state.state_hash)),
-        );
     }
     if let Some(value) = context_refs(entity_contexts.frame_refs())? {
         fields.insert("entityContextRefs".into(), value);

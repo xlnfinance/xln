@@ -343,7 +343,8 @@ const WAVE_PARITY_DOMAIN: &str = "xln.rscore.wave-parity.v2";
 
 /// One attempt to propose: the account, the frame it produced if any, and the
 /// transactions it could not include. An attempt that produced no frame is
-/// still reported — it moved the mempool, and therefore the leaf.
+/// still reported so the parent can retain or retry its local queue; that
+/// queue does not enter the Entity leaf.
 fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::ProcessError> {
     let proposed = match row.proposed.as_ref() {
         None => AbiValue::Nil,

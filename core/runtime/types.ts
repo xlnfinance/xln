@@ -707,9 +707,9 @@ export interface RuntimeReplica {
   runtimeMempool: RuntimeInput;
   /** Process-local accumulated dirty storage keys; never consensus or WAL state. */
   overlay?: Map<string, RuntimeOverlayRecord>;
-  runtimeConfig?: {
+  runtimeConfig: {
     /** Minimum start-to-start period for live Runtime frames; replay/scenarios ignore it. */
-    minFrameDelayMs?: number;
+    minFrameDelayMs: number;
     loopIntervalMs?: number;  // Loop interval for runtime processing
     /** Local operator warning only; never rejects an otherwise valid Entity frame. */
     entityConsensusStateWarningBytes?: number;
@@ -733,7 +733,7 @@ export interface RuntimeReplica {
       canonicalHashPeriodFrames?: number;
       accountMerkleRadix?: 16 | 256;
     };
-  } | undefined;
+  };
   infrastructure?: RuntimeInfrastructure | undefined;
   gossip: GossipLayer;
 

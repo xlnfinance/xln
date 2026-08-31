@@ -374,6 +374,108 @@ fn a_signed_frame_commits_on_both_sides() {
 }
 
 #[test]
+fn transient_coordination_survives_restore_without_moving_the_entity_leaf() {
+    let (mut left, mut right) = parties();
+    let initial_leaf = left.account.entity_account_leaf().expect("initial leaf");
+
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    assert_eq!(left.account.mempool().len(), 1);
+    assert_eq!(
+        left.account.entity_account_leaf().expect("queued leaf"),
+        initial_leaf,
+        "a local mempool must not move the committed Entity root",
+    );
+
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+    assert_eq!(
+        left.account.entity_account_leaf().expect("pending leaf"),
+        initial_leaf,
+        "an unacknowledged proposal must not move the committed Entity root",
+    );
+    let projected = left
+        .account
+        .projected_leaf_fields()
+        .expect("projected fields");
+    for transient in [
+        "rollbackCount",
+        "lastRollbackFrameHash",
+        "pendingFrameHash",
+        "pendingAccountInput",
+        "lastOutboundAckFrame",
+    ] {
+        assert!(
+            projected.iter().all(|(field, _)| field != transient),
+            "transient field leaked into Entity leaf: {transient}",
+        );
+    }
+
+    let mut rollback_snapshot = left.account.consensus_snapshot();
+    rollback_snapshot.rollback_count = 7;
+    rollback_snapshot.last_rollback_frame_hash = Some([0x71; 32]);
+    let restored_pending = AccountConsensus::restore_from_checkpoint(
+        left.account.replica().clone(),
+        rollback_snapshot,
+        &market(),
+    )
+    .expect("restore pending coordination");
+    let restored_snapshot = restored_pending.consensus_snapshot();
+    assert!(restored_snapshot.pending.is_some());
+    assert_eq!(restored_snapshot.rollback_count, 7);
+    assert_eq!(restored_snapshot.last_rollback_frame_hash, Some([0x71; 32]));
+    assert_eq!(
+        restored_pending
+            .entity_account_leaf()
+            .expect("restored pending leaf"),
+        initial_leaf,
+        "recovery-only rollback and pending state must stay outside the root",
+    );
+
+    let IncomingOutcome::Committed { .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone()),
+        &market(),
+    )
+    .expect("commit on receiver") else {
+        panic!("expected commit");
+    };
+    let with_ack_leaf = right
+        .account
+        .entity_account_leaf()
+        .expect("leaf with ACK retry");
+    let mut without_ack_snapshot = right.account.consensus_snapshot();
+    assert!(without_ack_snapshot.last_outbound_ack.is_some());
+    without_ack_snapshot.last_outbound_ack = None;
+    let restored_without_ack = AccountConsensus::restore_from_checkpoint(
+        right.account.replica().clone(),
+        without_ack_snapshot,
+        &market(),
+    )
+    .expect("restore without ACK retry cache");
+    assert_eq!(
+        restored_without_ack
+            .entity_account_leaf()
+            .expect("leaf without ACK retry"),
+        with_ack_leaf,
+        "ACK resend state must not move the committed Entity root",
+    );
+}
+
+#[test]
 fn dispute_preparation_discards_pending_and_retains_only_canonical_deferred_work() {
     let (mut left, right) = parties();
     left.account
@@ -1224,12 +1326,11 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     )
     .expect("ack");
 
-    // The replay key is the exact committed stateHash. A retry at the current
-    // height is re-ACKed before obsolete Hanko or body verification, matching
-    // TypeScript's ACK-loss recovery gate.
+    // The replay key includes the exact peer certificate retained at commit.
+    // The signed stateHash remains authoritative, so unauthenticated body
+    // drift does not mutate state or prevent ACK-loss recovery.
     let leaf_after_first = right.account.entity_account_leaf().expect("leaf");
     let mut duplicate = incoming_of(&first.frame, first.state_hash, first.hanko.clone());
-    duplicate.frame_hanko = None;
     duplicate.frame.account_state_root[0] ^= 0x01;
     let duplicate = apply_incoming_frame(
         &mut right.account,
@@ -1239,7 +1340,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         duplicate,
         &market(),
     )
-    .expect("exact-current retry skips obsolete certificate and body");
+    .expect("exact-current retry retains its certificate");
     let IncomingOutcome::Duplicate {
         height: 1,
         state_hash,
@@ -1379,8 +1480,7 @@ fn duplicate_current_frame_reuses_committed_hanko_while_successor_is_pending() {
     };
     assert_eq!(successor.frame.height, 2);
 
-    let mut retry = incoming_of(&first.frame, first.state_hash, first.hanko);
-    retry.frame_hanko = None;
+    let retry = incoming_of(&first.frame, first.state_hash, first.hanko);
     let IncomingOutcome::Duplicate {
         ack_hanko: retried_ack_hanko,
         ..
@@ -2531,12 +2631,11 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
     assert_eq!(right.account.current_height(), 0);
 }
 
-/// Empty evidence is malformed before replay classification. Once the witness
-/// has a valid wire shape, at-least-once delivery classifies an obsolete
-/// duplicate frame before cryptographic verification, while a repeated ACK
-/// still validates its exact current certificate.
+/// A current-frame retry must carry the exact peer proposal certificate
+/// retained at commit. Missing or substituted bytes are protocol errors,
+/// while the exact retry is a no-op that re-sends the retained local ACK.
 #[test]
-fn duplicate_frame_skips_obsolete_witness_but_repeated_ack_does_not() {
+fn duplicate_current_frame_requires_exact_counterparty_hanko() {
     let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
@@ -2581,38 +2680,80 @@ fn duplicate_frame_skips_obsolete_witness_but_repeated_ack_does_not() {
     .expect("ack");
 
     let right_leaf = right.account.entity_account_leaf().expect("right leaf");
-    let mut malformed = incoming_with_dispute(&proposed, &left.identity);
-    malformed.dispute.as_mut().expect("dispute").hanko = Some(Vec::new());
+    let mut malformed_dispute = incoming_with_dispute(&proposed, &left.identity);
+    malformed_dispute.dispute.as_mut().expect("dispute").hanko = Some(Vec::new());
     let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
         CLOCK,
-        malformed,
+        malformed_dispute,
         &market(),
     )
-    .expect("empty witness is an Account input rejection before replay classification");
+    .expect("malformed dispute remains a typed rejection before replay classification");
     assert!(matches!(
         outcome,
         IncomingOutcome::Rejected { reason }
             if reason == "ACCOUNT_INPUT_DISPUTE_HANKO_INVALID:SHAPE_INVALID:HANKO_MISSING"
     ));
 
-    let mut duplicate = incoming_with_dispute(&proposed, &left.identity);
-    duplicate.dispute.as_mut().expect("dispute").hanko = Some(vec![0]);
+    let mut missing = incoming_with_dispute(&proposed, &left.identity);
+    missing.frame_hanko = None;
     let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
         CLOCK,
-        duplicate,
+        missing,
         &market(),
     )
-    .expect("duplicate ignores obsolete witness");
+    .expect("missing current-frame certificate is a typed rejection");
     assert!(matches!(
         outcome,
-        IncomingOutcome::Duplicate { height: 1, .. }
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_INPUT_FRAME_HANKO_MISSING"
     ));
+
+    let mut substituted = incoming_with_dispute(&proposed, &left.identity);
+    substituted.frame_hanko = Some(
+        right
+            .identity
+            .sign_frame(&proposed.state_hash)
+            .expect("well-formed substitute certificate"),
+    );
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        substituted,
+        &market(),
+    )
+    .expect("substituted current-frame certificate is a typed rejection");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_INPUT_FRAME_HANKO_CONFLICT"
+    ));
+
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_with_dispute(&proposed, &left.identity),
+        &market(),
+    )
+    .expect("exact current-frame retry");
+    let IncomingOutcome::Duplicate {
+        ack_hanko: retried_ack_hanko,
+        height: 1,
+        ..
+    } = outcome
+    else {
+        panic!("expected exact duplicate");
+    };
+    assert_eq!(retried_ack_hanko, ack_hanko);
     assert_eq!(
         right
             .account

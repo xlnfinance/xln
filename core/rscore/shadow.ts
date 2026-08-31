@@ -812,7 +812,7 @@ type ShadowReconciliationMismatch = Readonly<{
   accountId: string;
   /** The financial leaf: identity, dispute config, journal counters, every section. */
   accountStateRoot: Readonly<{ typescript: string; rust: string }>;
-  /** The Entity's own leaf: the whole replica, shell included. */
+  /** The Entity's committed Account leaf; replica coordination is excluded. */
   entityAccountLeaf: Readonly<{ typescript: string; rust: string }>;
   /** Queued transactions on each side, when the shells disagree. */
   mempool: Readonly<{ typescript: string; rust: string }>;

@@ -130,10 +130,7 @@ const buildRustHubInvocation = (
     ),
     jurisdictionsJson: readFileSync(deps.shardJurisdictionsPath, 'utf8'),
     rpcUrls: deps.args.rpcUrls,
-    minFrameDelayMs: resolveHubRuntimeFrameDelayMs(
-      process.env,
-      process.env['XLN_HUB_MIN_FRAME_DELAY_MS'],
-    ),
+    minFrameDelayMs: resolveHubRuntimeFrameDelayMs(process.env),
   });
   writeFileSync(genesisFile, `${safeStringify(genesis)}\n`, { mode: 0o600 });
   const plan = buildRustHubProcessPlan({
@@ -310,7 +307,6 @@ export const createHubSpawner = (deps: HubSpawnerDeps) => async (child: HubChild
       orchestratorPid: process.pid,
       orchestratorOwnerId: deps.orchestratorOwnerId,
       startupTimeoutMs: deps.startupTimeoutMs,
-      hubDelayMs: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'],
     })),
   });
   child.proc = proc;

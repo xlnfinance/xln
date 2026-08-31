@@ -1505,6 +1505,8 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
+    accountMachine.currentFrame.stateHash = computeFrameHash(accountMachine.currentFrame);
+    accountMachine.counterpartyFrameHanko = `0x${'56'.repeat(65)}`;
     const [ackHanko] = await signEntityHashes(
       env,
       left.entityId,
@@ -1541,10 +1543,7 @@ describe('audit fail-fast regressions', () => {
       disputeConfig: { ...accountMachine.state.disputeConfig },
       signerId: right.signerId,
       proposal: {
-        frame: {
-          ...accountMachine.currentFrame,
-          prevFrameHash: `0x${'34'.repeat(32)}`,
-        },
+        frame: { ...accountMachine.currentFrame },
         frameHanko: `0x${'56'.repeat(65)}`,
       },
     });
@@ -1675,6 +1674,8 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
+    accountMachine.currentFrame.stateHash = computeFrameHash(accountMachine.currentFrame);
+    accountMachine.counterpartyFrameHanko = `0x${'78'.repeat(65)}`;
     const [ackHanko] = await signEntityHashes(
       env,
       left.entityId,
@@ -1711,10 +1712,7 @@ describe('audit fail-fast regressions', () => {
       signerId: right.signerId,
       disputeConfig: { ...accountMachine.state.disputeConfig },
       proposal: {
-        frame: {
-          ...accountMachine.currentFrame,
-          prevFrameHash: `0x${'56'.repeat(32)}`,
-        },
+        frame: { ...accountMachine.currentFrame },
         frameHanko: `0x${'78'.repeat(65)}`,
       },
     });
@@ -1743,6 +1741,7 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
+    accountMachine.currentFrame.stateHash = computeFrameHash(accountMachine.currentFrame);
     const [ackHanko] = await signEntityHashes(
       env,
       left.entityId,
@@ -1750,6 +1749,7 @@ describe('audit fail-fast regressions', () => {
       [accountMachine.currentFrame.stateHash],
     );
     accountMachine.currentFrameHanko = ackHanko;
+    accountMachine.counterpartyFrameHanko = `0x${'56'.repeat(65)}`;
     delete accountMachine.lastOutboundAckFrame;
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
@@ -1762,8 +1762,7 @@ describe('audit fail-fast regressions', () => {
       proposal: {
         frame: {
           ...accountMachine.currentFrame,
-          prevFrameHash: `0x${'34'.repeat(32)}`,
-          stateHash: `0x${'EF'.repeat(32)}`,
+          stateHash: `0x${accountMachine.currentFrame.stateHash.slice(2).toUpperCase()}`,
         },
         frameHanko: `0x${'56'.repeat(65)}`,
       },

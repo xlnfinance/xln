@@ -45,10 +45,9 @@ const REQUIRED_FIELDS: [&str; 13] = [
     "touchedBookEntities",
 ];
 
-const OPTIONAL_FIELDS: [&str; 6] = [
+const OPTIONAL_FIELDS: [&str; 5] = [
     "canonicalStateHash",
     "canonicalEntityHashes",
-    "runtimeStateHash",
     "runtimeMachineRoot",
     "accountAuthorityCheckpoints",
     "entityContextRefs",
@@ -141,11 +140,7 @@ fn validate_runtime_input(
 }
 
 fn validate_canonical_roots(frame: &Map<String, Value>) -> Result<(), RuntimeFrameCodecError> {
-    let fields = [
-        "canonicalStateHash",
-        "canonicalEntityHashes",
-        "runtimeStateHash",
-    ];
+    let fields = ["canonicalStateHash", "canonicalEntityHashes"];
     let present = fields.map(|field| frame.contains_key(field));
     if present.iter().any(|value| *value) && present.iter().any(|value| !*value) {
         return Err(RuntimeFrameCodecError::MaterializedRootsRequired);
@@ -158,10 +153,8 @@ fn validate_canonical_roots(frame: &Map<String, Value>) -> Result<(), RuntimeFra
     {
         return Err(RuntimeFrameCodecError::MachineRootRequired);
     }
-    for field in ["canonicalStateHash", "runtimeStateHash"] {
-        if let Some(value) = frame.get(field) {
-            digest(value, field)?;
-        }
+    if let Some(value) = frame.get("canonicalStateHash") {
+        digest(value, "canonicalStateHash")?;
     }
     Ok(())
 }

@@ -235,14 +235,13 @@ describe('storage frame journal retention', () => {
     const first = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
     const middle = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
     const checkpoint = await readStorageFrameRecord(getRuntimeWalDb(env), 3);
-    expect(first?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(middle?.runtimeStateHash).toBeUndefined();
+    expect(first?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(middle?.canonicalStateHash).toBeUndefined();
     expect(middle?.canonicalEntityHashes).toBeUndefined();
     expect(middle?.entityHashes).toBeUndefined();
     expect(middle?.runtimeMachine).toBeUndefined();
     expect(middle?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(checkpoint?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(checkpoint?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(checkpoint?.prevFrameHash).toBe(middle?.frameHash);
     expect((await verifyStorageTailIntegrity(getRuntimeWalDb(env))).checkedFrames).toBe(3);
 
@@ -1081,7 +1080,7 @@ describe('storage frame journal retention', () => {
       )).toBeTruthy();
     }
     expect(journal?.runtimeMachine).toBeUndefined();
-    expect(journal?.runtimeStateHash).toBeUndefined();
+    expect(journal?.canonicalStateHash).toBeUndefined();
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 

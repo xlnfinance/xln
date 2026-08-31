@@ -267,13 +267,12 @@ export const buildDurableRuntimeMachineSnapshot = (
   env: RuntimeReplica,
 ): Record<string, unknown> => {
   const browserVMState = env.browserVMState;
-  const runtimeConfig = env.runtimeConfig;
   const infrastructure = buildDurableRuntimeStateSnapshot(env);
   return {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
     ...(browserVMState ? { browserVMState } : {}),
-    ...(runtimeConfig ? { runtimeConfig } : {}),
+    runtimeConfig: env.runtimeConfig,
     // Runtime-machine storage has one exact shape across TS and Rust. An
     // empty object is meaningful: it proves that no durable infrastructure
     // rows exist, while absence would make the native envelope undecodable.
@@ -446,12 +445,10 @@ export const restoreDurableRuntimeSnapshot = (
   // Runtime mempool is replica-envelope ephemeral state: a restored process
   // starts with an empty input queue and peers resend unframed work.
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-  if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
-    env.runtimeConfig = decodeRuntimeConfig(
-      snapshot['runtimeConfig'],
-      'RUNTIME_SNAPSHOT_RUNTIME_CONFIG',
-    );
-  }
+  env.runtimeConfig = decodeRuntimeConfig(
+    snapshot['runtimeConfig'],
+    'RUNTIME_SNAPSHOT_RUNTIME_CONFIG',
+  );
   const retainedRuntimeState = { ...(env.infrastructure ?? {}) };
   for (const key of DURABLE_RUNTIME_STATE_KEYS) delete retainedRuntimeState[key];
   const restoredRuntimeState = snapshot['infrastructure'] && typeof snapshot['infrastructure'] === 'object'

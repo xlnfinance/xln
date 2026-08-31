@@ -40,7 +40,7 @@ export const buildRecoveryJournalFromStorageFrame = (
   entityContexts: structuredClone(payloads.entityContexts),
   ...(payloads.runtimeOutputs?.length ? { runtimeOutputs: payloads.runtimeOutputs } : {}),
   ...(payloads.runtimeMachine ? { runtimeMachine: payloads.runtimeMachine } : {}),
-  ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
+  ...(frame.canonicalStateHash ? { canonicalStateHash: frame.canonicalStateHash } : {}),
   logs,
 });
 

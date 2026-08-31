@@ -523,7 +523,7 @@ pub fn replay_runtime_wal(
                 next_read += 1;
             }
             expectations.assert_timestamp(height, decoded.timestamp)?;
-            if let Some(expected_root) = expectations.expected_runtime_state_hash(height)? {
+            if let Some(expected_root) = expectations.expected_canonical_state_hash(height)? {
                 let source_root = decoded
                     .canonical_state_hash
                     .ok_or_else(|| format!("RUNTIME_REPLAY_RUNTIME_ROOT_MISSING:{height}"))?;

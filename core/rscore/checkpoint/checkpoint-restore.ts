@@ -13,12 +13,7 @@ import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-bu
 import { computeEntityAccountLeafDigest } from '../../entity/consensus/state-root';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { assertSameRscoreCanonicalValue } from '../canonical-wire';
-import type {
-  RscoreConsensusSeed,
-  RscoreDisputeDraft,
-  RscoreOutboundAck,
-  RscorePendingFrame,
-} from './checkpoint-restore-consensus';
+import type { RscoreConsensusSeed, RscoreDisputeDraft } from './checkpoint-restore-consensus';
 import { decodeRscoreConsensusSeed } from './checkpoint-restore-consensus';
 import { checkpointHex, checkpointRestoreFail } from './checkpoint-restore-read';
 import {
@@ -58,8 +53,6 @@ const DERIVED_CONSENSUS_FIELDS: ReadonlySet<string> = new Set([
   'counterpartyDisputeProofNonce',
   'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeProofHanko',
-  'pendingAccountInput',
-  'lastOutboundAckFrame',
   'proofHeader',
   'currentDisputeHash',
   'currentDisputeProofBodyHash',
@@ -67,10 +60,7 @@ const DERIVED_CONSENSUS_FIELDS: ReadonlySet<string> = new Set([
   'currentDisputeProofProposerIsLeft',
   'counterpartyFrameHanko',
   'currentHeight',
-  'rollbackCount',
   'currentFrameHash',
-  'pendingFrameHash',
-  'lastRollbackFrameHash',
 ]);
 
 const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =>
@@ -125,42 +115,6 @@ const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =
     'integrity',
   );
 
-const disputeBinding = (draft: RscoreDisputeDraft): Record<string, unknown> => ({
-  hash: draft.hash,
-  proofBodyHash: draft.proofBodyHash,
-  proofNonce: draft.nonce,
-  proposerIsLeft: draft.proposerIsLeft,
-});
-
-const ackFields = (ack: RscoreOutboundAck): Record<string, unknown> => ({
-  height: ack.height,
-  frameHash: ack.frameHash,
-  ...(ack.dispute ? { disputeHanko: disputeBinding(ack.dispute) } : {}),
-});
-
-const pendingBinding = (pending: RscorePendingFrame, seed: RscoreAccountStateSeed): Record<string, unknown> => ({
-  kind: 'ack_frame',
-  fromEntityId: seed.ownerEntityId,
-  toEntityId: seed.accountId,
-  proposal: {
-    height: pending.frame.height,
-    frameHash: pending.frame.stateHash,
-    ...(pending.proposalDispute ? { disputeHanko: disputeBinding(pending.proposalDispute) } : {}),
-  },
-  ...(pending.bundledAck ? { ack: ackFields(pending.bundledAck) } : {}),
-});
-
-const outboundAckBinding = (ack: RscoreOutboundAck, seed: RscoreAccountStateSeed): Record<string, unknown> => ({
-  height: ack.height,
-  counterpartyEntityId: seed.accountId,
-  response: {
-    kind: 'ack',
-    fromEntityId: seed.ownerEntityId,
-    toEntityId: seed.accountId,
-    ack: ackFields(ack),
-  },
-});
-
 const expectedDisputeHash = (
   draft: Pick<RscoreDisputeDraft, 'proofBodyHash' | 'nonce' | 'proposerIsLeft'>,
   seed: RscoreAccountStateSeed,
@@ -197,22 +151,17 @@ const computeRestoredEntityLeaf = (
   seed: RscoreAccountStateSeed,
   consensus: RscoreConsensusSeed,
   accountStateRoot: string,
-  mempoolRoot: string,
 ): string => {
   const envelope = seed.envelope ?? checkpointRestoreFail('RESTORE_ENVELOPE_MISSING');
   const projection = Object.fromEntries(
     Object.entries(envelope.fields).filter(([field]) => !DERIVED_CONSENSUS_FIELDS.has(field)),
   );
   projection['currentHeight'] = consensus.currentFrame?.height ?? 0;
-  projection['rollbackCount'] = consensus.rollbackCount;
   // H=0 is represented by an explicit empty frame hash in both the canonical
   // TypeScript AccountReplica and Rust's projected envelope. Omitting the
   // field here would make the offline checkpoint verifier reject a valid
   // freshly-created authority Account—or accept a leaf for a third shape.
   projection['currentFrameHash'] = consensus.currentFrame?.stateHash ?? '';
-  if (consensus.pending) projection['pendingFrameHash'] = consensus.pending.frame.stateHash;
-  if (consensus.lastRollbackFrameHash) projection['lastRollbackFrameHash'] = consensus.lastRollbackFrameHash;
-  if (consensus.pending) projection['pendingAccountInput'] = pendingBinding(consensus.pending, seed);
   if (consensus.dispute) {
     projection['currentDisputeHash'] = consensus.dispute.hash;
     projection['currentDisputeProofBodyHash'] = consensus.dispute.proofBodyHash;
@@ -224,9 +173,6 @@ const computeRestoredEntityLeaf = (
     toEntity: seed.accountId,
     nextProofNonce: consensus.nextProofNonce,
   };
-  if (consensus.lastOutboundAck) {
-    projection['lastOutboundAckFrame'] = outboundAckBinding(consensus.lastOutboundAck, seed);
-  }
   if (consensus.counterpartyDispute) {
     const dispute = consensus.counterpartyDispute;
     projection['counterpartyDisputeHash'] = dispute.hash;
@@ -239,16 +185,14 @@ const computeRestoredEntityLeaf = (
     projection['counterpartyFrameHanko'] = hankoDigest(consensus.counterpartyFrameHanko);
   }
   projection['accountStateRoot'] = accountStateRoot;
-  projection['mempoolRoot'] = mempoolRoot;
   return computeEntityAccountLeafDigest(Object.entries(projection));
 };
 
 /**
- * The mempool commitment the Entity leaf carries.
- *
- * The engine sends the queue twice: once as account txs and once as the
- * canonical values its own leaf hashed. A verifying caller checks the two
- * against each other; a trusting one hashes the queue it was given.
+ * Recovery-wire mempool diagnostic. The queue is sent once as typed Account
+ * transactions and once in canonical frame-hash form, so restore verifies the
+ * two representations agree. Its root is reported for diagnostics only and
+ * never enters the committed Entity leaf.
  */
 const restoredMempoolRoot = (
   stateSeed: RscoreAccountStateSeed,
@@ -327,7 +271,6 @@ export const buildRscoreAccountRestore = (
       stateSeed,
       consensus,
       accountStateRoot,
-      mempoolRoot,
     );
     if (entityAccountLeaf !== storedEntityAccountLeaf) checkpointRestoreFail('ACCOUNT_LEAF_MISMATCH');
   }

@@ -831,17 +831,29 @@ pub fn classify_incoming_frame_without_mutation(
         return Ok(Some(rejected(error.to_string())));
     }
 
-    // At-least-once replay is classified from the exact signed hash before
-    // obsolete certificate material is inspected. TypeScript rebuilds an ACK
-    // for an exact-current retry and ignores an older ancestor even when the
-    // old proposal no longer carries a usable frame Hanko. Equal-height hash
-    // conflicts deliberately fall through: they are not stale traffic.
+    // At-least-once replay may re-ACK only the exact proposal certificate that
+    // originally committed this head. The stored bytes were authenticated at
+    // commit time, so byte equality is sufficient and remains valid across a
+    // later board rotation; accepting a missing or freshly signed substitute
+    // would turn equal (height, hash) into a second source of authority.
+    // Equal-height hash conflicts deliberately fall through to active
+    // validation: they are not stale traffic.
     let current_height = account.current_height();
     if incoming.frame.height == current_height
         && account
             .current()
             .is_some_and(|committed| committed.state_hash == incoming.state_hash)
     {
+        let Some(frame_hanko) = incoming
+            .frame_hanko
+            .as_deref()
+            .filter(|hanko| !hanko.is_empty())
+        else {
+            return Ok(Some(rejected("ACCOUNT_INPUT_FRAME_HANKO_MISSING")));
+        };
+        if account.counterparty_committed_frame_hanko() != Some(frame_hanko) {
+            return Ok(Some(rejected("ACCOUNT_INPUT_FRAME_HANKO_CONFLICT")));
+        }
         let ack_hanko = reusable_duplicate_ack_hanko(
             account.local_committed_frame_hanko(),
             account.replica().owner().as_bytes(),

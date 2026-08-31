@@ -1,9 +1,7 @@
 import type { AccountFrame, AccountOutput, AccountInput, AccountReplica } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
-import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
 import { cloneIsolatedAccountFrame } from '../../../protocol/state/account-input-clone';
-import { getAccountPerspective } from '../../state/perspective';
 import { appendAccountMempoolTxs } from '../../input/mempool';
 import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
@@ -365,12 +363,6 @@ export const handlePendingAckFrame = async (
   if (!(pendingFrame && ackHeight === pendingFrame.height && ack)) {
     return { kind: 'not_applicable' };
   }
-  if (HEAVY_LOGS) {
-    ackLog.debug('input', {
-      from: shortId(input.fromEntityId),
-      to: shortId(input.toEntityId),
-    });
-  }
   const certificate = await verifyPendingAckCertificate(
     account,
     ack,
@@ -386,10 +378,6 @@ export const handlePendingAckFrame = async (
     txs: pendingFrame.accountTxs.map(tx => tx.type),
     state: shortHash(certificate.frameHash),
   });
-  const { counterparty } = getAccountPerspective(
-    account.state,
-    account.proofHeader.fromEntity,
-  );
   await applyPendingFrameTransactions(
     context,
     account,
@@ -399,12 +387,6 @@ export const handlePendingAckFrame = async (
     candidateEffects,
     certificate.frameHash,
   );
-  ackLog.debug('frame.commit.complete', {
-    side: 'proposer',
-    counterparty: shortId(counterparty),
-    height: pendingFrame.height,
-    tokens: account.state.deltas.size,
-  });
   const committedHeight = installPendingFrameCommit(
     account,
     input,

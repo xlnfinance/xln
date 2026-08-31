@@ -51,7 +51,6 @@
       const epochMaxBytes = parseGiB(walEpochGiB, 'WAL epoch limit');
       runtimeFrameEnv.update(env => {
         if (!env) throw new Error('No Runtime is selected');
-        env.runtimeConfig ??= {};
         const storage = { ...(env.runtimeConfig.storage ?? {}) } as Record<string, unknown> &
           NonNullable<NonNullable<RuntimeReplica['runtimeConfig']>['storage']>;
         writeOptional(storage, 'epochMaxBytes', epochMaxBytes);

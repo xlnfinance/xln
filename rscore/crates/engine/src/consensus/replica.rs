@@ -111,9 +111,9 @@ pub struct AccountAdmission {
     pub rejections: Vec<AdmissionRejection>,
 }
 
-/// An acknowledgement this side sent for the counterparty's frame, kept
-/// because the Entity commits it in the account leaf: a proposal built right
-/// after it carries it, and a retry of the ack must be the same bytes.
+/// An acknowledgement this side sent for the counterparty's frame. Recovery
+/// retains the exact bytes because a proposal may carry it and an ACK retry
+/// must be identical; delivery progress does not enter the Entity root.
 ///
 /// Parity target: `lastOutboundAckFrame` and the `ack` half of
 /// `pendingAccountInput` (core/types/account.ts).
@@ -123,14 +123,11 @@ pub struct OutboundAck {
     pub frame_hash: [u8; 32],
     /// The exact frame certificate this side sent to the counterparty.
     ///
-    /// The Entity leaf deliberately commits only the compact ACK binding, not
-    /// these raw bytes. Durable recovery still has to retain the certificate:
-    /// a retry after a crash must resend the original Hanko rather than sign
-    /// historical evidence again.
+    /// Durable recovery retains the certificate so a retry after a crash
+    /// resends the original Hanko rather than signing historical evidence.
     pub frame_hanko: Vec<u8>,
     /// The recovery proof the acknowledgement carried. The counterparty needs
-    /// it to hold the state it just committed, and the leaf commits that it
-    /// was sent.
+    /// it to hold the state it just committed.
     pub dispute: Option<DisputeDraft>,
 }
 
@@ -1212,11 +1209,11 @@ pub struct ConsensusSnapshot {
     pub pending: Option<PendingFrameSnapshot>,
     pub rollback_count: u64,
     pub last_rollback_frame_hash: Option<[u8; 32]>,
-    /// The bilateral certificate for the committed frame. It is committed in
-    /// the account leaf, so losing it across a restart would change the leaf.
+    /// The bilateral certificate for the committed frame. Losing it across a
+    /// restart would prevent authenticated retries and dispute construction.
     pub counterparty_frame_hanko: Option<Vec<u8>>,
-    /// The last acknowledgement this side sent. The leaf commits it until a
-    /// proposal carries it, so a restore that dropped it would change the leaf.
+    /// The last acknowledgement this side sent. Restore keeps it until a
+    /// proposal carries it so delivery remains exactly reproducible.
     pub last_outbound_ack: Option<OutboundAck>,
     /// The recovery proof the account stands behind, and the next nonce it
     /// will spend. A restore that dropped them would sign a proof for a state
@@ -1496,16 +1493,16 @@ fn replay_pending(
 }
 
 impl AccountConsensus {
-    /// The Entity's account leaf for this replica, with everything consensus
-    /// owns derived rather than carried.
+    /// The Entity's account leaf for this replica. Local queue, pending-frame,
+    /// ACK and rollback coordination remain in the checkpoint snapshot but do
+    /// not change the parent root.
     ///
     /// Parity target: `projectAccountConsensusState`
-    /// (core/entity/consensus/state-root.ts). The engine now owns the queue,
-    /// the chain head and the frame in flight, so it projects them itself;
+    /// (core/entity/consensus/state-root.ts). The engine owns the chain head;
     /// fields it does not model yet stay carried on the replica's envelope.
     pub fn entity_account_leaf(&self) -> Result<[u8; 32], StateError> {
         let account_state_root = self.replica.state().payment_profile_account_state_root()?;
-        let envelope = self.projected_envelope()?;
+        let envelope = self.projected_envelope(false)?;
         envelope
             .entity_account_leaf(&account_state_root)
             .map_err(|error| StateError::Envelope(error.to_string()))
@@ -1514,22 +1511,28 @@ impl AccountConsensus {
     /// The exact fields this account commits in the Entity's leaf. Read back
     /// by a runtime that found the leaf disagreeing and needs the field.
     pub fn projected_leaf_fields(&self) -> Result<Vec<(String, CanonicalValue)>, StateError> {
-        Ok(self.projected_envelope()?.fields().to_vec())
+        Ok(self.projected_envelope(false)?.fields().to_vec())
     }
 
     /// Exact shell stored beside a checkpoint. The raw replica envelope is
-    /// only the seed/carried subset; mempool and consensus-owned fields must
-    /// be projected from the live candidate or RestoreExact cannot reproduce
-    /// the Entity leaf that this same Account reports.
+    /// only the seed/carried subset; local queue, retry and rollback fields
+    /// must be projected from live consensus so restart resumes exact bytes.
     pub fn checkpoint_envelope(&self) -> Result<AccountEnvelope, StateError> {
-        self.projected_envelope()
+        self.projected_envelope(true)
     }
 
-    fn projected_envelope(&self) -> Result<AccountEnvelope, StateError> {
-        let mut mempool = Vec::with_capacity(self.mempool.len());
-        for tx in &self.mempool {
-            mempool.push(canonical_tx_value(tx)?);
-        }
+    fn projected_envelope(
+        &self,
+        include_recovery_coordination: bool,
+    ) -> Result<AccountEnvelope, StateError> {
+        let mempool = if include_recovery_coordination {
+            self.mempool
+                .iter()
+                .map(canonical_tx_value)
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
+        };
         let mut fields: Vec<(String, CanonicalValue)> = self
             .replica
             .envelope()
@@ -1539,7 +1542,6 @@ impl AccountConsensus {
             .cloned()
             .collect();
         fields.push(("currentHeight".to_string(), number(self.current_height())?));
-        fields.push(("rollbackCount".to_string(), number(self.rollback_count)?));
         // The TypeScript AccountReplica always has an H=0 currentFrame whose
         // stateHash is the empty string. Absence here would make a freshly
         // created Rust Account occupy a different Entity leaf before its first
@@ -1552,23 +1554,37 @@ impl AccountConsensus {
                     .map_or_else(String::new, |current| hex_prefixed(&current.state_hash)),
             ),
         ));
-        if let Some(pending) = &self.pending {
-            fields.push((
-                "pendingFrameHash".to_string(),
-                CanonicalValue::String(hex_prefixed(&pending.state_hash)),
-            ));
-        }
-        if let Some(hash) = &self.last_rollback_frame_hash {
-            fields.push((
-                "lastRollbackFrameHash".to_string(),
-                CanonicalValue::String(hex_prefixed(hash)),
-            ));
-        }
-        if let Some(pending) = &self.pending {
-            fields.push((
-                "pendingAccountInput".to_string(),
-                self.outbound_proposal_binding(pending)?,
-            ));
+        if include_recovery_coordination {
+            fields.push(("rollbackCount".to_string(), number(self.rollback_count)?));
+            if let Some(pending) = &self.pending {
+                fields.push((
+                    "pendingFrameHash".to_string(),
+                    CanonicalValue::String(hex_prefixed(&pending.state_hash)),
+                ));
+                fields.push((
+                    "pendingAccountInput".to_string(),
+                    self.outbound_proposal_binding(pending)?,
+                ));
+            }
+            if let Some(hash) = &self.last_rollback_frame_hash {
+                fields.push((
+                    "lastRollbackFrameHash".to_string(),
+                    CanonicalValue::String(hex_prefixed(hash)),
+                ));
+            }
+            if let Some(ack) = &self.last_outbound_ack {
+                fields.push((
+                    "lastOutboundAckFrame".to_string(),
+                    CanonicalValue::Object(vec![
+                        ("height".to_string(), number(ack.height)?),
+                        (
+                            "counterpartyEntityId".to_string(),
+                            CanonicalValue::String(self.replica.counterparty().to_string()),
+                        ),
+                        ("response".to_string(), self.ack_binding(ack)?),
+                    ]),
+                ));
+            }
         }
         if let Some(draft) = &self.dispute {
             fields.push((
@@ -1599,19 +1615,6 @@ impl AccountConsensus {
                 ("nextProofNonce".to_string(), number(self.next_proof_nonce)?),
             ]),
         ));
-        if let Some(ack) = &self.last_outbound_ack {
-            fields.push((
-                "lastOutboundAckFrame".to_string(),
-                CanonicalValue::Object(vec![
-                    ("height".to_string(), number(ack.height)?),
-                    (
-                        "counterpartyEntityId".to_string(),
-                        CanonicalValue::String(self.replica.counterparty().to_string()),
-                    ),
-                    ("response".to_string(), self.ack_binding(ack)?),
-                ]),
-            ));
-        }
         if let (Some(dispute), Some(hash)) =
             (&self.counterparty_dispute, &self.counterparty_dispute_hash)
         {
@@ -1656,11 +1659,7 @@ impl AccountConsensus {
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
-    /// The signed proposal still waiting for its ack, as the Entity commits
-    /// it: which message carried it, between whom, and what it binds.
-    ///
-    /// Parity target: `compactAccountInputBinding`
-    /// (core/entity/consensus/state-root.ts) over `pendingAccountInput`.
+    /// Compact proposal material retained only by the recovery envelope.
     fn outbound_proposal_binding(
         &self,
         pending: &PendingFrame,
@@ -1705,8 +1704,7 @@ impl AccountConsensus {
         Ok(CanonicalValue::Object(fields))
     }
 
-    /// The standalone acknowledgement message this side sent, as the Entity
-    /// commits it inside `lastOutboundAckFrame`.
+    /// Compact ACK material retained only by the recovery envelope.
     fn ack_binding(&self, ack: &OutboundAck) -> Result<CanonicalValue, StateError> {
         Ok(CanonicalValue::Object(vec![
             (
@@ -1726,10 +1724,6 @@ impl AccountConsensus {
     }
 }
 
-/// The recovery proof as the leaf commits it: the four fields that identify
-/// which proof, never the signature over it.
-///
-/// Parity target: `compactDisputeHanko` (core/entity/consensus/state-root.ts).
 fn dispute_binding(draft: &DisputeDraft) -> Result<CanonicalValue, StateError> {
     Ok(CanonicalValue::Object(vec![
         (
@@ -1780,9 +1774,9 @@ impl std::fmt::Debug for AccountConsensus {
     }
 }
 
-/// Projection fields the engine derives from its own consensus state. A
-/// carried copy of any of them would let the authority's view of the queue or
-/// the chain head override what this engine actually holds.
+/// Fields the engine owns or intentionally excludes from the Entity leaf. A
+/// carried copy must never override live consensus or reintroduce transient
+/// coordination into the committed projection.
 const DERIVED_CONSENSUS_FIELDS: [&str; 18] = [
     "counterpartyDisputeHash",
     "counterpartyDisputeProofBodyHash",

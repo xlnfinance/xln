@@ -41,12 +41,13 @@ export const decodeRuntimeConfig = (
   // replaying. Retiring it for existing databases is an explicit offline
   // migration, not something a decoder does quietly under a running node.
   // New Runtimes never have it.
-  requireExactBoundaryKeys(config, [], [
-    'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames',
+  requireExactBoundaryKeys(config, ['minFrameDelayMs'], [
+    'loopIntervalMs', 'snapshotIntervalFrames',
     'entityConsensusStateWarningBytes', 'advertiseProfileMirrors', 'performance', 'storage',
   ], `${code}_FIELDS`);
+  requireBoundaryInteger(config['minFrameDelayMs'], `${code}_MINFRAMEDELAYMS`, 0);
   for (const field of [
-    'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames', 'entityConsensusStateWarningBytes',
+    'loopIntervalMs', 'snapshotIntervalFrames', 'entityConsensusStateWarningBytes',
   ]) if (config[field] !== undefined) requireFiniteNumber(config[field], `${code}_${field.toUpperCase()}`, 0);
   if (config['advertiseProfileMirrors'] !== undefined) {
     requireBoolean(config['advertiseProfileMirrors'], `${code}_ADVERTISE_PROFILE_MIRRORS`);
@@ -71,15 +72,15 @@ export const validateDurableRuntimeMachineSnapshot = (
   code: string,
 ): Record<string, unknown> => {
   const snapshot = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(snapshot, ['jReplicas'], [
-    'runtimeId', 'activeJurisdiction', 'browserVMState', 'runtimeConfig', 'infrastructure',
+  requireExactBoundaryKeys(snapshot, ['runtimeConfig', 'jReplicas'], [
+    'runtimeId', 'activeJurisdiction', 'browserVMState', 'infrastructure',
   ], `${code}_FIELDS`);
   if (snapshot['runtimeId'] !== undefined) {
     toRuntimeId(requireString(snapshot['runtimeId'], `${code}_RUNTIME_ID`));
   }
   if (snapshot['activeJurisdiction'] !== undefined) requireString(snapshot['activeJurisdiction'], `${code}_ACTIVE_JURISDICTION`);
   if (snapshot['browserVMState'] !== undefined) validateBrowserVmState(snapshot['browserVMState'], `${code}_BROWSER_VM_STATE`);
-  if (snapshot['runtimeConfig'] !== undefined) decodeRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
+  decodeRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
   if (snapshot['infrastructure'] !== undefined) validateDurableRuntimeState(snapshot['infrastructure'], `${code}_RUNTIME_STATE`);
   validateJReplicas(snapshot['jReplicas'], `${code}_J_REPLICAS`);
   return snapshot;

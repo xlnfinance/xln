@@ -31,7 +31,7 @@ export type RscoreOutboundAck = Readonly<{
   dispute?: RscoreDisputeDraft;
 }>;
 
-export type RscorePendingFrame = Readonly<{
+type RscorePendingFrame = Readonly<{
   frame: AccountFrame;
   hanko: string;
   bundledAck?: RscoreOutboundAck;

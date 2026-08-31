@@ -62,7 +62,7 @@ const STORAGE_CONFIG_FIELDS: [&str; 7] = [
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeOperatorConfig {
     pub loop_interval_ms: Option<u64>,
-    pub min_frame_delay_ms: Option<u64>,
+    pub min_frame_delay_ms: u64,
     /// Import-only compatibility with checkpoints written before the dead
     /// knob was removed. New native Runtimes leave this absent.
     pub snapshot_interval_frames: Option<u64>,
@@ -154,14 +154,12 @@ impl RuntimeOperatorConfig {
     }
 
     pub(crate) fn value(&self) -> Value {
-        let mut output = Map::new();
-        for (field, value) in [
-            ("loopIntervalMs", self.loop_interval_ms),
-            ("minFrameDelayMs", self.min_frame_delay_ms),
-        ] {
-            if let Some(value) = value {
-                output.insert(field.into(), Value::Number(Number::from(value)));
-            }
+        let mut output = Map::from_iter([(
+            "minFrameDelayMs".into(),
+            Value::Number(Number::from(self.min_frame_delay_ms)),
+        )]);
+        if let Some(value) = self.loop_interval_ms {
+            output.insert("loopIntervalMs".into(), Value::Number(Number::from(value)));
         }
         self.insert_optionals(&mut output);
         Value::Object(output)
@@ -418,10 +416,9 @@ fn decode_runtime_config(
     let object = object(value, "runtimeConfig")?;
     exact_fields(
         object,
-        &[],
+        &["minFrameDelayMs"],
         &[
             "loopIntervalMs",
-            "minFrameDelayMs",
             "snapshotIntervalFrames",
             "entityConsensusStateWarningBytes",
             "advertiseProfileMirrors",
@@ -432,7 +429,7 @@ fn decode_runtime_config(
     )?;
     Ok(RuntimeOperatorConfig {
         loop_interval_ms: optional_safe_u64(object, "loopIntervalMs")?,
-        min_frame_delay_ms: optional_safe_u64(object, "minFrameDelayMs")?,
+        min_frame_delay_ms: safe_u64(object, "minFrameDelayMs")?,
         snapshot_interval_frames: optional_safe_u64(object, "snapshotIntervalFrames")?,
         entity_consensus_state_warning_bytes: optional_safe_u64(
             object,
@@ -952,7 +949,7 @@ mod tests {
     #[test]
     fn exact_machine_envelope_decodes_and_advances_only_from_expected_lineage() {
         let mut envelope = RuntimeDurableEnvelope::decode(&fixture(), [1; 32]).expect("envelope");
-        assert_eq!(envelope.runtime_config().min_frame_delay_ms, Some(5));
+        assert_eq!(envelope.runtime_config().min_frame_delay_ms, 5);
         assert_eq!(
             envelope.runtime_config().value(),
             json!({"loopIntervalMs":0,"minFrameDelayMs":5}),
@@ -994,13 +991,14 @@ mod tests {
     }
 
     #[test]
-    fn empty_runtime_config_preserves_exact_absence() {
+    fn runtime_config_without_frame_delay_is_rejected() {
         let mut machine = fixture();
         machine["runtimeConfig"] = json!({});
-        let decoded = RuntimeDurableEnvelope::decode(&machine, [0; 32]).expect("empty config");
-        assert_eq!(decoded.runtime_config().value(), json!({}));
-        assert_eq!(decoded.runtime_config().loop_interval_ms, None);
-        assert_eq!(decoded.runtime_config().min_frame_delay_ms, None);
+        assert!(matches!(
+            RuntimeDurableEnvelope::decode(&machine, [0; 32]),
+            Err(RuntimeDurableEnvelopeError::Missing { field, .. })
+                if field == "minFrameDelayMs"
+        ));
     }
 
     #[test]

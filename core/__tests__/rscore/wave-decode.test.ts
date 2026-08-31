@@ -115,7 +115,6 @@ const entityAccountLeaf = (
   deltasRoot = EMPTY_ACCOUNT_STATE_ROOT,
 ): string => computeEntityAccountLeafDigest(Object.entries({
   currentHeight: 0,
-  rollbackCount: 0,
   currentFrameHash: '',
   proofHeader: {
     fromEntity: hex(32, 0x11),
@@ -123,7 +122,6 @@ const entityAccountLeaf = (
     nextProofNonce: 0,
   },
   accountStateRoot: accountStateRoot(deltasRoot),
-  mempoolRoot: EMPTY_ACCOUNT_STATE_ROOT,
 }));
 
 const rawWave = (): RscoreWireValue[] => {
@@ -621,10 +619,10 @@ describe('rscore staged wave decoder', () => {
   });
 
   test('rejects partial, deleting or unbound post-account snapshots', () => {
-    const resolve = (raw: RscoreWireValue[]): void => {
+    const resolve = (raw: RscoreWireValue[]) => {
       const wave = decodeWave(withParityDigest(raw));
       const post = requiredAt(wave.postAccounts, 0, 'RESOLVE_POST');
-      resolveRscoreWaveAccount(post, null);
+      return resolveRscoreWaveAccount(post, null);
     };
 
     const wrongCount = rawWave();
@@ -665,8 +663,17 @@ describe('rscore staged wave decoder', () => {
       0,
       'CHANGED_CONSENSUS_POST',
     )[11] as RscoreWireValue[];
+    const committedLeaf = `0x${Buffer.from(
+      requiredAt(
+        changedConsensus[5] as RscoreWireValue[][],
+        0,
+        'CHANGED_CONSENSUS_LEAF',
+      )[1] as Uint8Array,
+    ).toString('hex')}`;
     changedConsensusRow[3] = 1;
-    expect(() => resolve(changedConsensus)).toThrow('ACCOUNT_LEAF_MISMATCH');
+    const changedConsensusResolved = resolve(changedConsensus);
+    expect(changedConsensusResolved.entityAccountLeaf).toBe(committedLeaf);
+    expect(changedConsensusResolved.decoded.consensus.rollbackCount).toBe(1);
 
     const reversedParties = rawWave();
     const reversedHeader = requiredAt(

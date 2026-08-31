@@ -110,7 +110,6 @@ fn frame_commitments(frame: &Value) -> Result<RestoreCommitments, RestoreSourceE
     Ok(RestoreCommitments {
         runtime_machine_root: runtime_machine_root(frame)?,
         canonical_state_hash: optional_digest(frame, "canonicalStateHash")?,
-        runtime_state_hash: optional_digest(frame, "runtimeStateHash")?,
         post_state_hash: Some(digest(field(frame, "postStateHash")?, "postStateHash")?),
         entity_state_root: None,
         accounts_root: None,

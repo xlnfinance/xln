@@ -778,9 +778,9 @@ fn unsigned_settlement_transition_is_sealed_before_certified_hankos_attach() {
         result.proposals.is_empty(),
         "unsigned transition cannot be sent"
     );
-    assert_ne!(
+    assert_eq!(
         result.accounts_root, prior_root,
-        "unsigned tx is committed once"
+        "an unsigned local queue entry is recovery state, not Entity state"
     );
     assert_eq!(
         engine
@@ -844,11 +844,14 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
         Ok(_) => panic!("unknown materialization account must fail"),
         Err(error) => error,
     };
-    assert!(matches!(
-        error,
-        xln_rscore_batch::BatchError::AccountNotFound { .. }
-            | xln_rscore_batch::BatchError::CandidateAccountNotFound(_)
-    ));
+    assert!(
+        matches!(
+            error,
+            xln_rscore_batch::BatchError::AccountNotFound { .. }
+                | xln_rscore_batch::BatchError::CandidateAccountNotFound(_)
+        ),
+        "unexpected outbound error: {error:?}"
+    );
     assert_eq!(engine.accounts_root(), root);
     assert_eq!(engine.revision(), revision);
     assert_eq!(engine.account_count(), count);

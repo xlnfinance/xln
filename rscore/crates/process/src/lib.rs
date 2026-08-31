@@ -201,9 +201,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // touching the financial state, so the engine's leaf tracks the
         // Entity's leaf between account frames as well.
         // wire=7: the account seed and every job carry the authority's replica
-        // shell (the Entity account-leaf projection plus the mempool in its
-        // canonical frame-hash form), the engine derives the mempool root and
-        // the Entity account leaf from it, and the summary row reports both.
+        // shell plus the mempool in canonical frame-hash form. The engine
+        // retains coordination for recovery, derives the Entity leaf only
+        // from committed fields, and reports the mempool root diagnostically.
         // wire=6: the seed carries rebalance policy and swap offer rows instead
         // of carried roots, Hello installs the swap market tables, the job
         // context carries the signed frame's J height, and the summary row

@@ -12,7 +12,7 @@ use xln_rscore_runtime::RuntimeDurableCommitments;
 struct RuntimeFrameExpectation {
     timestamp: u64,
     post_state_hash: [u8; 32],
-    runtime_state_hash: Option<[u8; 32]>,
+    canonical_state_hash: Option<[u8; 32]>,
     output_count: u64,
     output_digest: [u8; 32],
 }
@@ -124,9 +124,9 @@ fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpect
         for (index, frame) in frames.iter().enumerate() {
             let path = format!("{bundle_path}.frames[{index}]");
             let height = unsigned(field(frame, "height", &path)?, &format!("{path}.height"))?;
-            let runtime_state_hash = match object(frame, &path)?.get("runtimeStateHash") {
+            let canonical_state_hash = match object(frame, &path)?.get("canonicalStateHash") {
                 None | Some(Value::Null) => None,
-                Some(value) => Some(digest(value, &format!("{path}.runtimeStateHash"))?),
+                Some(value) => Some(digest(value, &format!("{path}.canonicalStateHash"))?),
             };
             let expected = RuntimeFrameExpectation {
                 timestamp: unsigned(
@@ -137,7 +137,7 @@ fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpect
                     field(frame, "postStateHash", &path)?,
                     &format!("{path}.postStateHash"),
                 )?,
-                runtime_state_hash,
+                canonical_state_hash,
                 output_count: unsigned(
                     field(frame, "runtimeOutputCount", &path)?,
                     &format!("{path}.runtimeOutputCount"),
@@ -203,11 +203,11 @@ impl ReplayExpectations {
         }
     }
 
-    pub(super) fn expected_runtime_state_hash(
+    pub(super) fn expected_canonical_state_hash(
         &self,
         height: u64,
     ) -> Result<Option<[u8; 32]>, String> {
-        Ok(self.runtime_frame(height)?.runtime_state_hash)
+        Ok(self.runtime_frame(height)?.canonical_state_hash)
     }
 
     pub(super) fn assert_durable(
@@ -285,7 +285,7 @@ mod tests {
                         "height": 7,
                         "timestamp": 9,
                         "postStateHash": format!("0x{}", "55".repeat(32)),
-                        "runtimeStateHash": null,
+                        "canonicalStateHash": null,
                         "runtimeOutputCount": 0,
                         "runtimeOutputsDigest": format!("0x{}", "66".repeat(32)),
                     }],
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn missing_runtime_evidence_is_loud() {
         let expectations = ReplayExpectations::from_recording(&fixture()).expect("fixture");
-        assert_eq!(expectations.expected_runtime_state_hash(7).unwrap(), None);
+        assert_eq!(expectations.expected_canonical_state_hash(7).unwrap(), None);
         assert!(
             expectations
                 .assert_exact_range(8, 8)

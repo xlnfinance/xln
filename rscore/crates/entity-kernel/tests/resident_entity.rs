@@ -105,6 +105,34 @@ fn account_state(first: &EntityId, second: &EntityId) -> AccountState {
     .expect("account state")
 }
 
+fn assert_live_pending_recovery_state(
+    accounts: &mut ResidentConsensusEngine,
+    account_id: AccountId,
+    expected_txs: &[AccountTx],
+) {
+    let checkpoint = accounts
+        .export_checkpoint()
+        .expect("export live Account recovery envelope");
+    let row = checkpoint
+        .accounts
+        .iter()
+        .find(|row| row.account_id == account_id)
+        .expect("pending Account remains in recovery envelope");
+    assert!(
+        row.consensus.mempool.is_empty(),
+        "proposed transactions moved from mempool into the pending frame",
+    );
+    assert_eq!(
+        row.consensus
+            .pending
+            .as_ref()
+            .expect("live pending frame")
+            .frame
+            .txs,
+        expected_txs.to_vec(),
+    );
+}
+
 fn offer_tx(offer_id: &str, ask: bool) -> AccountTx {
     let base = BigInt::from(10_u8).pow(18);
     let quote = BigInt::from(25_000_000_u64) * BigInt::from(100_u8);
@@ -664,7 +692,10 @@ fn later_pure_ack_clears_earlier_duplicate_force_in_one_inbound_batch() {
                                 frame: Box::new(IncomingFrame {
                                     frame: first.frame,
                                     state_hash: first.state_hash,
-                                    frame_hanko: None,
+                                    // Exact current-frame retry: restore must
+                                    // retain the peer certificate and compare
+                                    // these bytes before forcing an ACK.
+                                    frame_hanko: Some(first.hanko),
                                     dispute: None,
                                 }),
                             },
@@ -871,9 +902,10 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
     .expect("resident J round");
     assert_eq!(result.state.last_finalized_j_height, 43);
     assert_eq!(result.state.reserves.get(&1), Some(&BigInt::from(7)));
-    assert_ne!(result.outbound.accounts_root, before_root);
+    assert_eq!(result.outbound.accounts_root, before_root);
     assert_eq!(result.outbound.proposals.len(), 1);
-    let proposed = result.outbound.proposals[0]
+    let proposal = &result.outbound.proposals[0];
+    let proposed = proposal
         .outbound_input
         .as_ref()
         .expect("one outbound Account input");
@@ -881,6 +913,15 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
         &proposed.kind,
         AccountInputKind::AckFrame { ack: None, .. }
     ));
+    assert_live_pending_recovery_state(
+        &mut accounts,
+        peer_id,
+        &proposal
+            .incoming_ref()
+            .expect("J-event proposal frame")
+            .frame
+            .txs,
+    );
 }
 
 #[test]
@@ -1023,7 +1064,8 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
         .outputs
         .iter()
         .any(|output| matches!(output, EntityKernelOutput::HtlcInitiated { lock_id: id, .. } if id == &lock_id)));
-    assert_ne!(result.outbound.accounts_root, base_root);
+    assert_eq!(result.outbound.accounts_root, base_root);
+    assert_live_pending_recovery_state(&mut accounts, peer_id, &proposal_frame.txs);
 }
 
 #[test]
@@ -1418,7 +1460,16 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
                         if reason.as_deref() == Some("timeout")
                 )
     ));
-    assert_ne!(result.outbound.accounts_root, base_root);
+    assert_eq!(result.outbound.accounts_root, base_root);
+    assert_live_pending_recovery_state(
+        &mut accounts,
+        peer_id,
+        &proposal_row
+            .incoming_ref()
+            .expect("timeout recovery frame")
+            .frame
+            .txs,
+    );
 }
 
 #[test]

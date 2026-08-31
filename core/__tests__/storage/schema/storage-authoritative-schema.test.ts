@@ -126,7 +126,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       materializedState: true,
       canonicalStateHash: hash,
       canonicalEntityHashes: [],
-      runtimeStateHash: hash,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
       entityContexts: new Map([[`0x${'aa'.repeat(32)}:signer-b`, {
         version: 1,
@@ -151,6 +150,25 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       frame,
       validateStorageFrameRecordValue,
     )).rejects.toThrow('STORAGE_FRAME_INVALID_FIELDS');
+  });
+
+  test('rejects the retired runtimeStateHash field instead of accepting a duplicate root', () => {
+    expect(() => validateStorageFrameRecordValue({
+      height: 1,
+      timestamp: 1,
+      prevFrameHash: hash,
+      frameHash: hash,
+      replicaMetaDigest: hash,
+      postStateHash: hash,
+      materializedState: false,
+      runtimeStateHash: hash,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      runtimeOutputCount: 0,
+      runtimeOutputsDigest: hash,
+      touchedEntities: [],
+      touchedAccounts: [],
+      touchedBookEntities: [],
+    })).toThrow('STORAGE_FRAME_INVALID_FIELDS');
   });
 
   test('rejects materialization overlays inside a Runtime WAL frame', () => {
@@ -220,6 +238,15 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     };
     expect(() => validateDurableRuntimeMachineSnapshot(retired, 'RUNTIME_MACHINE'))
       .toThrow('RUNTIME_MACHINE_FIELDS');
+  });
+
+  test('rejects a V1 Runtime machine without its persisted frame cadence', () => {
+    const current = buildDurableRuntimeMachineSnapshot(
+      createEmptyEnv('runtime-machine-missing-frame-cadence'),
+    );
+    delete current['runtimeConfig'];
+    expect(() => validateDurableRuntimeMachineSnapshot(current, 'RUNTIME_MACHINE'))
+      .toThrow('RUNTIME_MACHINE_FIELDS:missing=runtimeConfig:extra=none');
   });
 
   test('rejects a noncanonical RuntimeId before durable snapshot restore', () => {
@@ -392,7 +419,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       materializedState: true,
       canonicalStateHash: hash,
       canonicalEntityHashes: [],
-      runtimeStateHash: hash,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
       runtimeMachineRoot: machineGraph.root,
       runtimeOutputCount: emptyOutputs.count,
@@ -417,6 +443,8 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     const decoded = await readStorageFrameRecord(reopened, 1);
     expect(decoded).not.toBeNull();
     if (!decoded) throw new Error('STORAGE_FRAME_ROUNDTRIP_MISSING');
+    expect(decoded.canonicalStateHash).toBe(hash);
+    expect(Object.hasOwn(decoded, 'runtimeStateHash')).toBe(false);
     const payloads = await readStorageFramePayloads(reopened, decoded);
     await reopened.close();
     expect(computeStorageFrameHash(decoded)).toBe(frame.frameHash);

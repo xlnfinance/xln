@@ -108,7 +108,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     'runtimeOutputCount', 'runtimeOutputsDigest',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'entityContextRefs'], `${code}_FIELDS`);
+  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'entityContextRefs'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -128,9 +128,6 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     if (frame['canonicalStateHash'] === undefined || frame['canonicalEntityHashes'] === undefined) {
       throw new Error(`${code}_MATERIALIZED_CANONICAL_ROOTS_REQUIRED`);
     }
-  }
-  if (frame['runtimeStateHash'] !== undefined) {
-    requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);
   }
   if (frame['accountAuthorityCheckpoints'] !== undefined) {
     frame['accountAuthorityCheckpoints'] = validateRscoreCheckpointRefs(
@@ -177,7 +174,6 @@ const validateOptionalFrameFields = (frame: Record<string, unknown>, code: strin
   const canonicalFields = [
     frame['canonicalStateHash'],
     frame['canonicalEntityHashes'],
-    frame['runtimeStateHash'],
   ];
   if (canonicalFields.some(value => value !== undefined) && canonicalFields.some(value => value === undefined)) {
     throw new Error(`${code}_CANONICAL_CHECKPOINT_INCOMPLETE`);

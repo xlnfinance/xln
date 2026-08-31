@@ -20,6 +20,7 @@ import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { userAutoApprove } from '../../entity/tx/handlers/payments/settle';
+import { createRuntimeConfig } from '../../runtime/loop/loop-environment';
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
@@ -69,6 +70,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
         timestamp: SCENARIO_START_TIMESTAMP,
       },
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
+      runtimeConfig: createRuntimeConfig(),
       gossip: createGossipLayer(),
       log: (msg: string) => console.log(msg),
       info: () => {},

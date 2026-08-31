@@ -90,9 +90,10 @@ const decodeEnvelope = (value: unknown): RscoreAccountEnvelope => {
     return checkpointRestoreFail('ENVELOPE_FIELDS_OBJECT');
   }
   const fields = decoded as Record<string, unknown>;
-  if ('accountStateRoot' in fields || 'mempoolRoot' in fields) {
+  if ('accountStateRoot' in fields) {
     return checkpointRestoreFail('ENVELOPE_DERIVED_FIELD');
   }
+  if ('mempoolRoot' in fields) return checkpointRestoreFail('ENVELOPE_TRANSIENT_FIELD');
   return {
     fields: Object.freeze({ ...fields }),
     canonicalMempool: Object.freeze(

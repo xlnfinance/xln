@@ -589,7 +589,6 @@ const assertMaterializedAccount = (
   const expectedProjection = {
     ...row.decoded.stateSeed.envelope?.fields,
     accountStateRoot: row.decoded.accountStateRoot,
-    mempoolRoot: row.decoded.mempoolRoot,
   };
   const projected = projectEntityAccountLeaf(account);
   requireCanonicalEqual(projected, expectedProjection, 'ENTITY_PROJECTION');

@@ -139,28 +139,15 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
   frame.stateHash = computeFrameHash(frame);
   const peerHanko = '0x010203';
   const ackHanko = '0x040506';
-  const ackBinding = {
-    height: frame.height,
-    counterpartyEntityId: RIGHT,
-    response: {
-      kind: 'ack',
-      fromEntityId: LEFT,
-      toEntityId: RIGHT,
-      ack: { height: frame.height, frameHash: frame.stateHash },
-    },
-  };
   const leaf = computeEntityAccountLeafDigest(
     Object.entries({
       status: 'active',
       publicPinned: true,
       currentHeight: frame.height,
-      rollbackCount: 0,
       currentFrameHash: frame.stateHash,
       proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 7 },
-      lastOutboundAckFrame: ackBinding,
       counterpartyFrameHanko: computeIntegrityDigest(new TextEncoder().encode(peerHanko)),
       accountStateRoot: stateRoot,
-      mempoolRoot: `0x${'00'.repeat(32)}`,
     }),
   );
   const frameWire = [
@@ -267,6 +254,8 @@ describe('rscore checkpoint wire', () => {
     expect(decoded.accountStateRoot).toBe(fixture.stateRoot);
     expect(decoded.entityAccountLeaf).toBe(fixture.leaf);
     expect(decoded.consensus.currentFrame?.stateHash).toBe(fixture.frameHash);
+    expect(decoded.consensus.rollbackCount).toBe(0);
+    expect(decoded.consensus.lastRollbackFrameHash).toBeUndefined();
     expect(decoded.consensus.lastOutboundAck).toEqual({
       height: 3,
       frameHash: fixture.frameHash,

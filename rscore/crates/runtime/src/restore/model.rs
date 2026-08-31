@@ -19,8 +19,6 @@ pub struct RestoreCommitments {
     pub runtime_machine_root: Option<RestoreDigest>,
     /// Independent canonical hash over the full Runtime replica.
     pub canonical_state_hash: Option<RestoreDigest>,
-    /// Sparse replay hash stored on every frame when available.
-    pub runtime_state_hash: Option<RestoreDigest>,
     pub post_state_hash: Option<RestoreDigest>,
     pub entity_state_root: Option<RestoreDigest>,
     pub accounts_root: Option<RestoreDigest>,
@@ -36,7 +34,6 @@ pub struct RestoreCommitments {
 pub enum RestoreBoundary {
     RuntimeMachineRoot,
     CanonicalStateHash,
-    RuntimeStateHash,
     PostStateHash,
     EntityStateRoot,
     AccountsRoot,

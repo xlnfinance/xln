@@ -4,6 +4,7 @@ import {
   isProductionRuntime,
   readRuntimeEnv,
 } from '../../support/process/runtime-process.ts';
+import { resolveRuntimeMinFrameDelayMs } from '../config/frame-cadence.ts';
 import { safeStringify } from '../../protocol/serialization';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
@@ -127,31 +128,29 @@ const readPositiveInteger = (name: string): number | undefined => {
   return value;
 };
 
-const readNonNegativeInteger = (name: string): number | undefined => {
-  const raw = readRuntimeEnv(name);
-  if (raw === undefined) return undefined;
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`RUNTIME_CONFIG_${name.slice(4)}_INVALID:${raw}`);
-  }
-  return value;
-};
-
 /**
  * A Runtime frame costs about the same whether it carries one transaction or a
  * hundred: the fixed apply/commit/persist work dominates the marginal per-tx
  * cost. Holding a frame back therefore buys throughput almost for free, at the
- * price of up to this much added latency per hop. Hubs want a floor here;
- * a single-user wallet wants zero so its own payment is not delayed.
+ * price of up to this much added latency per hop. Every production Runtime uses
+ * the same default; tests and scenarios remain unpaced unless configured.
  */
 const runtimeMinFrameDelayMs = (): number =>
-  readNonNegativeInteger('XLN_RUNTIME_MIN_FRAME_DELAY_MS') ?? 0;
+  resolveRuntimeMinFrameDelayMs(
+    readRuntimeEnv('XLN_RUNTIME_MIN_FRAME_DELAY_MS'),
+    isProductionRuntime,
+  );
+
+/** New replicas persist the resolved cadence before their first frame. */
+export const createRuntimeConfig = (): RuntimeReplica['runtimeConfig'] => ({
+  minFrameDelayMs: runtimeMinFrameDelayMs(),
+  loopIntervalMs: isProductionRuntime ? 25 : 0,
+});
 
 export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']> => {
-  env.runtimeConfig ??= {
-    minFrameDelayMs: runtimeMinFrameDelayMs(),
-    loopIntervalMs: isProductionRuntime ? 25 : 0,
-  };
+  if (!Number.isSafeInteger(env.runtimeConfig.minFrameDelayMs) || env.runtimeConfig.minFrameDelayMs < 0) {
+    throw new Error(`RUNTIME_MIN_FRAME_DELAY_MS_INVALID:${String(env.runtimeConfig.minFrameDelayMs)}`);
+  }
   const epochMaxBytes = readPositiveInteger('XLN_STORAGE_EPOCH_MAX_BYTES');
   if (epochMaxBytes !== undefined && env.runtimeConfig.storage?.epochMaxBytes === undefined) {
     env.runtimeConfig.storage = { ...env.runtimeConfig.storage, epochMaxBytes };

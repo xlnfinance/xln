@@ -47,7 +47,7 @@ export const assertMarketMakerReadySnapshotParity = (
   if (!persistedFrame.frameHash || computeStorageFrameHash(persistedFrame) !== persistedFrame.frameHash) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_FRAME_HASH_MISMATCH:height=${expected.height}`);
   }
-  if (!runtimeMachine || !persistedFrame.runtimeStateHash) {
+  if (!runtimeMachine || !persistedFrame.canonicalStateHash) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_RUNTIME_ORACLE_MISSING:height=${expected.height}`);
   }
   if (!Array.isArray(persistedFrame.canonicalEntityHashes)) {
@@ -59,18 +59,12 @@ export const assertMarketMakerReadySnapshotParity = (
     persistedFrame.canonicalEntityHashes,
     runtimeMachine,
   );
-  if (persistedFrame.runtimeStateHash !== persistedRuntimeStateHash) {
+  if (persistedFrame.canonicalStateHash !== persistedRuntimeStateHash) {
     throw new Error(
       `MARKET_MAKER_READY_SNAPSHOT_RUNTIME_HASH_MISMATCH:` +
-      `height=${expected.height}:stored=${persistedFrame.runtimeStateHash}:` +
+      `height=${expected.height}:stored=${persistedFrame.canonicalStateHash}:` +
       `computed=${persistedRuntimeStateHash}`,
     );
-  }
-  if (
-    persistedFrame.canonicalStateHash !== undefined &&
-    persistedFrame.canonicalStateHash !== persistedFrame.runtimeStateHash
-  ) {
-    throw new Error(`MARKET_MAKER_READY_SNAPSHOT_CANONICAL_HASH_MISMATCH:height=${expected.height}`);
   }
   const persistedEntityStateHash = buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes(
     persistedFrame.canonicalEntityHashes,
@@ -81,7 +75,7 @@ export const assertMarketMakerReadySnapshotParity = (
       `height=${expected.height}:persisted=${persistedEntityStateHash}:ready=${expected.entityStateHash}`,
     );
   }
-  return persistedFrame.runtimeStateHash;
+  return persistedFrame.canonicalStateHash;
 };
 
 type BootstrapHealthLike = {

@@ -127,9 +127,14 @@ export class TsAccountWorkerClient {
     this.#worker.terminate();
   }
 
-  /** Fail-stop the mailbox immediately; process teardown owns Bun Worker termination. */
+  /**
+   * Fail-stop owns the isolate as well as its mailbox. A poisoned coordinator
+   * can never dispatch again, so retaining the Worker only leaks a schedulable
+   * thread and can starve the next Runtime/test pool under aggregate load.
+   */
   poison(error: Error): void {
     this.#retire(error);
+    this.#worker.terminate();
   }
 }
 

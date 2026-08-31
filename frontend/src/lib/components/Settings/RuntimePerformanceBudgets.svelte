@@ -49,7 +49,6 @@
       };
       runtimeFrameEnv.update(env => {
         if (!env) throw new Error('No Runtime is selected');
-        env.runtimeConfig ??= {};
         env.runtimeConfig.performance = Object.fromEntries(
           Object.entries(next).filter((entry): entry is [string, number] => entry[1] !== undefined),
         );

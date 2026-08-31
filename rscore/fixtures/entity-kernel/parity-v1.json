@@ -61,11 +61,11 @@
   "paybookForward": {
     "canonicalEntity": {
       "accountCount": 2,
-      "accountsRoot": "0xa5376bab253cc07ae0eb4afdca837595f146d92e26c6596bbdfde44a0ad1736a",
-      "root": "0x464f5917bacdfd623634e0564a59b9147b0814a2d88e39bf39cf1eaf0172c1af",
+      "accountsRoot": "0x85927db1dd129ec443346886eb070a7337649fd73b475d2a0ce41c04ad550e5b",
+      "root": "0xc85f521d6ee2a2edb91ffb11384dd96dc4042dcef499cbdfbc8f3f020d888bc9",
       "sections": [
         {
-          "digest": "0xbdb11f2fea1e3caf3ef8bf23e8f0b7161471141cede9bbec698f90a04027d4fb",
+          "digest": "0xb21cb53d2bbeadfd742d51bba9af866940fe4400721071bc4629ad7e281493f5",
           "field": "accounts"
         },
         {
@@ -140,11 +140,11 @@
     "bookCommitmentHash": "0x6f30610314bcc9c27be280ba7297635a",
     "canonicalEntity": {
       "accountCount": 2,
-      "accountsRoot": "0x5be8ec778f227f1c0407bc86aac54280299bce44e91d3d035b81b56b0acb6118",
-      "root": "0xbe8f9fd41234ed2610581f369d3460eb58af82a23559dcaa7ddd9165bcbb1d6c",
+      "accountsRoot": "0xffb3118f3c10f3f8aa20f1cb5061dc8907abfedf88724e55e98939e392d85c50",
+      "root": "0xbdf8436c05f1fa3030c01d44e2b757b4a5b9b026fe7ba21d17203e438cc8b44e",
       "sections": [
         {
-          "digest": "0x09f02084693c26073546d39b891d1c7874be7831b19961eaa9d81c3df3d7a71a",
+          "digest": "0x57119c5c60591f043283d4b713cd80598405fa0d85435fceeda73409ebf4eb87",
           "field": "accounts"
         },
         {

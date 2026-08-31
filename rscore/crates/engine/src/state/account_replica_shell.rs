@@ -1,28 +1,25 @@
-//! The replica shell around the financial state: mempool, frame bindings,
-//! hankos, acks — everything the Entity commits in its account leaf but no
-//! account transaction touches.
+//! The replica shell around the financial state. It retains the live/recovery
+//! material an Account needs, but the Entity leaf commits only the classified
+//! durable fields below.
 //!
 //! Parity target: `projectAccountConsensusState` +
 //! `computeEntityAccountLeafDigest` in `core/entity/consensus/state-root.ts`.
-//! The engine derives the two roots it owns (the account state root and the
-//! mempool root) and commits the rest of the projection as the authority
-//! handed it over, so its account tree leaf is the very digest the Entity
-//! machine puts in its accounts map.
+//! The engine derives the bilateral account-state root. Mempool, proposal,
+//! ACK and rollback coordination remain in the replica/checkpoint envelope;
+//! committing them here would make one agreed Account state acquire different
+//! parent roots solely because its two participants are at different delivery
+//! phases.
 
 use sha2::{Digest, Sha256};
 use xln_rscore_protocol::{
     CanonicalNumber, CanonicalValue, PersistentRadixMap, ValueEncodingError,
-    compute_flat_integrity_root, encode_account_state_value,
+    encode_account_state_value,
 };
 
 const ENTITY_ACCOUNT_LEAF_DOMAIN: &[u8] = b"xln.entity.account-leaf.v3";
-const MEMPOOL_NAMESPACE: &str = "entity.account-mempool";
-/// Empty mempool commits the zero root, not the root of an empty list.
-const EMPTY_ROOT: [u8; 32] = [0; 32];
-
 /// Field names the engine derives itself. The authority must not send them:
 /// carrying a derived value would make the comparison agree by construction.
-const DERIVED_FIELDS: [&str; 2] = ["accountStateRoot", "mempoolRoot"];
+const DERIVED_FIELDS: [&str; 1] = ["accountStateRoot"];
 
 /// Every field the Entity's account leaf may contain.
 ///
@@ -32,7 +29,37 @@ const DERIVED_FIELDS: [&str; 2] = ["accountStateRoot", "mempoolRoot"];
 /// both sides for the same reason: a field nobody classified would otherwise
 /// drop silently out of the commitment, and two replicas that differ only in
 /// that field would hash identically.
-const ENTITY_ACCOUNT_LEAF_FIELDS: [&str; 30] = [
+const ENTITY_ACCOUNT_LEAF_FIELDS: [&str; 24] = [
+    "status",
+    "publicPinned",
+    "currentHeight",
+    "proofHeader",
+    "boardHankoRefreshMigration",
+    "counterpartyBoardHankoRefresh",
+    "counterpartyFrameHanko",
+    "counterpartyDisputeProofHanko",
+    "counterpartySettlementHanko",
+    "currentDisputeProofNonce",
+    "currentDisputeProofProposerIsLeft",
+    "currentDisputeProofBodyHash",
+    "currentDisputeHash",
+    "counterpartyDisputeProofNonce",
+    "counterpartyDisputeProofProposerIsLeft",
+    "counterpartyDisputeProofBodyHash",
+    "counterpartyDisputeHash",
+    "disputePrepare",
+    "activeDispute",
+    "accountStateRoot",
+    "currentFrameHash",
+    "counterpartySettlementHankos",
+    "pendingWithdrawals",
+    "shadow",
+];
+
+/// The checkpoint envelope additionally carries local coordination needed to
+/// resume delivery after a crash. These fields are valid durable payload, but
+/// `entity_account_leaf` deliberately filters them out of the parent root.
+const ACCOUNT_ENVELOPE_FIELDS: [&str; 28] = [
     "status",
     "publicPinned",
     "currentHeight",
@@ -54,8 +81,6 @@ const ENTITY_ACCOUNT_LEAF_FIELDS: [&str; 30] = [
     "counterpartyDisputeHash",
     "disputePrepare",
     "activeDispute",
-    "accountStateRoot",
-    "mempoolRoot",
     "currentFrameHash",
     "pendingFrameHash",
     "counterpartySettlementHankos",
@@ -130,7 +155,7 @@ impl AccountEnvelope {
             if DERIVED_FIELDS.contains(&name.as_str()) {
                 return Err(EnvelopeError::DerivedField(name.clone()));
             }
-            if !ENTITY_ACCOUNT_LEAF_FIELDS.contains(&name.as_str()) {
+            if !ACCOUNT_ENVELOPE_FIELDS.contains(&name.as_str()) {
                 return Err(EnvelopeError::UnclassifiedField(name.clone()));
             }
         }
@@ -210,7 +235,7 @@ impl AccountEnvelope {
         if DERIVED_FIELDS.contains(&name.as_str()) {
             return Err(EnvelopeError::DerivedField(name));
         }
-        if !ENTITY_ACCOUNT_LEAF_FIELDS.contains(&name.as_str()) {
+        if !ACCOUNT_ENVELOPE_FIELDS.contains(&name.as_str()) {
             return Err(EnvelopeError::UnclassifiedField(name));
         }
         self.fields.retain(|(field, _)| field != &name);
@@ -347,11 +372,12 @@ impl AccountEnvelope {
         Ok(())
     }
 
-    /// Flat integrity root over the queued txs, keyed by their index — the
-    /// same shape `mempoolRoot` builds on the TypeScript side.
+    /// Diagnostic/recovery root over queued txs. It is deliberately not part
+    /// of the Entity leaf: the queue is local coordination, not committed
+    /// bilateral Account state.
     pub fn mempool_root(&self) -> Result<[u8; 32], EnvelopeError> {
         if self.mempool.is_empty() {
-            return Ok(EMPTY_ROOT);
+            return Ok([0; 32]);
         }
         let entries: Vec<(String, CanonicalValue)> = self
             .mempool
@@ -359,7 +385,10 @@ impl AccountEnvelope {
             .enumerate()
             .map(|(index, value)| (index.to_string(), value.clone()))
             .collect();
-        Ok(compute_flat_integrity_root(MEMPOOL_NAMESPACE, &entries)?)
+        Ok(xln_rscore_protocol::compute_flat_integrity_root(
+            "entity.account-mempool",
+            &entries,
+        )?)
     }
 
     /// The Entity's account leaf: one encode of the sorted projection, one
@@ -368,16 +397,16 @@ impl AccountEnvelope {
         &self,
         account_state_root: &[u8; 32],
     ) -> Result<[u8; 32], EnvelopeError> {
-        let mempool_root = self.mempool_root()?;
-        let mut entries = Vec::with_capacity(self.fields.len() + 2);
-        entries.extend(self.fields.iter().cloned());
+        let mut entries = Vec::with_capacity(self.fields.len() + 1);
+        entries.extend(
+            self.fields
+                .iter()
+                .filter(|(name, _)| ENTITY_ACCOUNT_LEAF_FIELDS.contains(&name.as_str()))
+                .cloned(),
+        );
         entries.push((
             "accountStateRoot".into(),
             CanonicalValue::String(hex_32(account_state_root)),
-        ));
-        entries.push((
-            "mempoolRoot".into(),
-            CanonicalValue::String(hex_32(&mempool_root)),
         ));
         // encode_account_state_value sorts object keys itself (UTF-16 order),
         // exactly as the TypeScript projection does before hashing.

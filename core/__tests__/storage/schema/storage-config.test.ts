@@ -20,7 +20,10 @@ describe('storage config', () => {
     expect(first).toBeGreaterThan(0);
     expect(second).toBe(first);
 
-    env.runtimeConfig = { performance: { maxCloneBytes: first, maxReducerMs: 25 } };
+    env.runtimeConfig = {
+      ...env.runtimeConfig,
+      performance: { maxCloneBytes: first, maxReducerMs: 25 },
+    };
     expect(ensureRuntimeConfig(env).performance).toEqual({
       maxCloneBytes: first,
       maxReducerMs: 25,
@@ -155,4 +158,9 @@ test('a runtime config written before the dead snapshot knob was removed replays
   const snapshot = buildDurableRuntimeMachineSnapshot(env) as Record<string, unknown>;
   const persisted = snapshot['runtimeConfig'] as Record<string, unknown>;
   expect(persisted['snapshotIntervalFrames']).toBe(7);
+});
+
+test('V1 runtime config rejects a missing frame cadence', () => {
+  expect(() => decodeRuntimeConfig({}, 'TEST_RUNTIME_CONFIG'))
+    .toThrow('TEST_RUNTIME_CONFIG_FIELDS:missing=minFrameDelayMs:extra=none');
 });

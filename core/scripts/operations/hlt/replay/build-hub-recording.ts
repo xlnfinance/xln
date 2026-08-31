@@ -101,7 +101,7 @@ try {
     fromHeight: baseHeight + 1,
     toHeight: targetHeight,
     limit: expectedFrames,
-    // Replay proves these checkpoints from runtimeStateHash/postStateHash.
+    // Replay proves these checkpoints from canonicalStateHash/postStateHash.
     // Repeating the full 1000-user Runtime machine in every materialized
     // journal frame makes a bounded 420 MB WAL expand to tens of GB in RAM.
     includeRuntimeMachine: false,

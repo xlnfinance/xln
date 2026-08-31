@@ -1403,8 +1403,9 @@ pub(crate) fn build_signing_identity(
     Ok(identity)
 }
 
-/// The leaf commits the consensus state too, so a queued transaction or a new
-/// frame moves the tree even when the financial root did not change.
+/// The leaf commits agreed Account state plus durable lifecycle authority.
+/// Local queue, pending proposal, ACK retry and rollback coordination stay in
+/// the resident/checkpoint envelope and therefore cannot move this tree.
 pub(crate) fn leaf_root(
     account_id: AccountId,
     account: &AccountConsensus,

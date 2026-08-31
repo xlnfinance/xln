@@ -1,11 +1,9 @@
 //! Generic canonical values on the wire.
 //!
-//! The Entity commits parts of an account replica the engine does not execute
-//! (mempool txs in their frame-hash form, hankos, acks, frame bindings). They
-//! travel as a tagged encoding of the exact value model both sides hash —
-//! `CanonicalValue` here, `encodeAccountStateValue`'s input over there — so
-//! the engine can hash the whole leaf without a per-field Rust type for every
-//! shape the authority may commit.
+//! The wire carries committed Account-envelope fields plus local recovery
+//! coordination (mempool txs, ACKs and frame bindings). `CanonicalValue`
+//! preserves their exact representation without making the recovery-only
+//! subset part of the Entity leaf.
 
 use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;

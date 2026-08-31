@@ -154,8 +154,6 @@ export type RuntimeFrame = {
    */
   canonicalStateHash?: string;
   canonicalEntityHashes?: StorageFrameEntityHash[];
-  /** Sparse canonical Entity + durable R-machine replay oracle. */
-  runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
   /** Replica-id to manifest digest; physical rows are keyed by this frame height + replica path. */
   entityContextRefs?: Map<string, EntityContextPayloadHash>;
@@ -202,7 +200,7 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'runtimeInput'
   | 'runtimeOutputCount'
   | 'runtimeOutputsDigest'
-  | 'runtimeStateHash'
+  | 'canonicalStateHash'
 > & RuntimeFramePayloads & { logs: FrameLogEntry[] };
 
 export type StorageFrameEntityHash = {

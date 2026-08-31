@@ -106,7 +106,6 @@ fn commitments(seed: u8) -> RestoreCommitments {
     RestoreCommitments {
         runtime_machine_root: Some(digest(seed)),
         canonical_state_hash: Some(digest(seed.wrapping_add(1))),
-        runtime_state_hash: Some(digest(seed.wrapping_add(2))),
         post_state_hash: Some(digest(seed.wrapping_add(3))),
         entity_state_root: Some(digest(seed.wrapping_add(4))),
         accounts_root: Some(digest(seed.wrapping_add(5))),
@@ -203,6 +202,25 @@ fn failed_tail_never_mutates_live_state() {
         error,
         ExactRestoreError::CommitmentMismatch {
             boundary: RestoreBoundary::OutputsDigest,
+            ..
+        }
+    ));
+    assert_eq!(original, before);
+}
+
+#[test]
+fn canonical_state_hash_is_the_only_runtime_state_restore_boundary() {
+    let checkpoint_commitments = commitments(10);
+    let mut corrupt = frame(101, 1_001, commitments(20));
+    corrupt.expected.canonical_state_hash = Some(digest(250));
+    let original = live(checkpoint_commitments.clone());
+    let before = original.clone();
+    let error = restore_exact_runtime(&original, &checkpoint(checkpoint_commitments), &[corrupt])
+        .expect_err("canonical state mismatch must fail restore");
+    assert!(matches!(
+        error,
+        ExactRestoreError::CommitmentMismatch {
+            boundary: RestoreBoundary::CanonicalStateHash,
             ..
         }
     ));

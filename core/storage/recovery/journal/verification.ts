@@ -149,10 +149,10 @@ export const verifyRecoveryJournalFrame = (
       `expected=${frame.postStateHash}:actual=${postStateHash}`,
     );
   }
-  if (frame.runtimeStateHash) {
+  if (frame.canonicalStateHash) {
     const stateHash = timePerfPhase('recovery.verify.runtimeState', () =>
       computeCanonicalStateHashFromEnv(env));
-    if (stateHash !== frame.runtimeStateHash) {
+    if (stateHash !== frame.canonicalStateHash) {
       const actualMachine = buildStorageRuntimeMachineSnapshot(env);
       const fields = frame.runtimeMachine
         ? listRecoveryRuntimeMachineMismatchFields(
@@ -162,7 +162,7 @@ export const verifyRecoveryJournalFrame = (
         : ['runtimeMachine'];
       throw new Error(
         `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${height}:` +
-        `expected=${frame.runtimeStateHash}:actual=${stateHash}:` +
+        `expected=${frame.canonicalStateHash}:actual=${stateHash}:` +
         `runtimeMachineDiff=${fields.join(',') || 'none'}`,
       );
     }
