@@ -43,7 +43,8 @@ pub use model::{
     RestoreCommitments, RestoreDigest, RestoreHead,
 };
 pub use native_source::{
-    NativeConcreteRestoreSources, NativeRestoreSourceError, load_native_restore_sources,
+    NativeConcreteRestoreSources, NativeRestoreSourceError, concrete_wal_source_from_native,
+    load_native_restore_sources,
 };
 pub use orchestrator::{
     ExactRestoreError, ExactRestoreTarget, RestoreStage, restore_exact_runtime,

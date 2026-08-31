@@ -1,58 +1,89 @@
 #!/usr/bin/env bun
 
-/** Rust-only Account authority replay against one exact TS H1 recording. */
+/** Replay one immutable production-native V1 fixture with W1 and W4. */
 
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
-import {
-  authorityEvidenceBinary,
-  runAuthorityEvidenceGate,
-} from '../evidence/gate-support';
-import { writeAuthorityReplayPreflight } from '../authority-replay-preflight';
+import { safeParse, safeStringify } from '../../../../../protocol/serialization';
+import { authorityEvidenceBinary } from '../evidence/gate-support';
 
-const recordingRaw = String(process.env['XLN_RSCORE_EVIDENCE_RECORDING'] ?? '').trim();
-if (!recordingRaw) throw new Error('RSCORE_EVIDENCE_RECORDING_MISSING');
-const recording = resolve(recordingRaw);
-const output = resolve(String(
-  process.env['XLN_RSCORE_EVIDENCE_REPLAY_REPORT'] ?? `${recording}.rust-replay.json`,
-));
-const preflightOutput = resolve(String(
-  process.env['XLN_RSCORE_EVIDENCE_PREFLIGHT_REPORT'] ?? `${recording}.rust-preflight.json`,
-));
-const env: NodeJS.ProcessEnv = {
-  ...process.env,
-  XLN_RSCORE_AUTHORITY: '1',
-  XLN_RSCORE_AUTHORITY_CUTOVER: '1',
-  XLN_RSCORE_AUTHORITY_REPLAY: '1',
-  XLN_RSCORE_AUTHORITY_IMPORT: '1',
-  XLN_RSCORE_AUTHORITY_RECORD: '1',
-  XLN_RSCORE_AUTHORITY_WORKERS: '1',
-  XLN_RSCORE_BINARY: authorityEvidenceBinary(),
+type Manifest = Readonly<{
+  format: 'xln-native-replay-v1';
+  sourceNativeDb: string;
+  genesisFile: string;
+  runtimeSeedFile: string;
+  runtimeSignerLabel: string;
+  entitySignerLabel: string;
+}>;
+
+const requiredPath = (value: unknown, field: string): string => {
+  if (typeof value !== 'string' || !value || !existsSync(value)) {
+    throw new Error(`NATIVE_REPLAY_V1_PATH:${field}`);
+  }
+  return resolve(value);
 };
-delete env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
-for (const key of Object.keys(env)) {
-  if (key.startsWith('XLN_RSCORE_SHADOW')) delete env[key];
+
+const readManifest = (path: string): Manifest => {
+  const value = safeParse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  if (value['format'] !== 'xln-native-replay-v1') throw new Error('NATIVE_REPLAY_V1_FORMAT');
+  return {
+    format: value['format'],
+    sourceNativeDb: requiredPath(value['sourceNativeDb'], 'sourceNativeDb'),
+    genesisFile: requiredPath(value['genesisFile'], 'genesisFile'),
+    runtimeSeedFile: requiredPath(value['runtimeSeedFile'], 'runtimeSeedFile'),
+    runtimeSignerLabel: String(value['runtimeSignerLabel'] ?? ''),
+    entitySignerLabel: String(value['entitySignerLabel'] ?? ''),
+  };
+};
+
+const replay = (manifest: Manifest, workers: number): Record<string, unknown> => {
+  const parent = mkdtempSync(join(dirname(manifest.sourceNativeDb), `.native-replay-w${workers}-`));
+  const database = join(parent, 'db');
+  try {
+    const result = spawnSync(authorityEvidenceBinary(), [
+      'native-replay',
+      '--source-native-db', manifest.sourceNativeDb,
+      '--replay-native-db', database,
+      '--genesis-config', manifest.genesisFile,
+      '--runtime-seed-file', manifest.runtimeSeedFile,
+      '--runtime-signer-label', manifest.runtimeSignerLabel,
+      '--entity-signer-label', manifest.entitySignerLabel,
+      '--workers', String(workers),
+    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+    if (result.status !== 0) {
+      throw new Error(`NATIVE_REPLAY_V1_FAILED:w=${workers}:status=${String(result.status)}:${result.stderr.trim()}`);
+    }
+    const line = result.stdout.split('\n').find(candidate => candidate.includes('xlnrs-native-replay-v1'));
+    if (!line) throw new Error(`NATIVE_REPLAY_V1_RESULT_MISSING:w=${workers}`);
+    return safeParse(line) as Record<string, unknown>;
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+};
+
+const manifestRaw = String(process.env['XLN_RSCORE_EVIDENCE_RECORDING'] ?? '').trim();
+if (!manifestRaw) throw new Error('NATIVE_REPLAY_V1_MANIFEST_MISSING');
+const manifestPath = resolve(manifestRaw);
+const manifest = readManifest(manifestPath);
+const results = [replay(manifest, 1), replay(manifest, 4)];
+const exactFields = [
+  'frames', 'entityInputs', 'accountInputs', 'directPayments', 'outputs',
+  'accountsRoot', 'transcriptDigest',
+] as const;
+for (const field of exactFields) {
+  if (results[0]![field] !== results[1]![field]) {
+    throw new Error(`NATIVE_REPLAY_V1_NONDETERMINISTIC:${field}:w1=${String(results[0]![field])}:w4=${String(results[1]![field])}`);
+  }
 }
-
-await writeAuthorityReplayPreflight({
-  recordingPath: recording,
-  outputPath: preflightOutput,
-  ...(process.env['XLN_RSCORE_EVIDENCE_SEED_FILE']
-    ? { seedFile: process.env['XLN_RSCORE_EVIDENCE_SEED_FILE'] }
-    : {}),
-});
-console.log(`HLT_AUTHORITY_RUST_PREFLIGHT_REPORT path=${preflightOutput}`);
-
-runAuthorityEvidenceGate({
-  label: 'HLT_AUTHORITY_RUST_REPLAY_GATE',
-  script: 'core/scripts/operations/hlt/replay/replay-hub-recording.ts',
-  args: [
-    '--recording', recording,
-    '--output', output,
-    '--mode', 'max',
-    '--require-complete-authority-evidence',
-    '--require-rust-account-authority',
-  ],
-  env,
-});
-console.log(`HLT_AUTHORITY_RUST_REPLAY_REPORT path=${output}`);
+const output = resolve(String(
+  process.env['XLN_RSCORE_EVIDENCE_REPLAY_REPORT'] ?? `${manifestPath}.replay.json`,
+));
+writeFileSync(output, `${safeStringify({
+  format: 'xln-native-replay-v1-result',
+  manifest: manifestPath,
+  exactFields,
+  results,
+})}\n`);
+console.log(`HLT_NATIVE_REPLAY_V1_OK path=${output}`);

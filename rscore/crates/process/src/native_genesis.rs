@@ -31,6 +31,13 @@ use xln_rscore_runtime::{
 use crate::PAYMENT_PROFILE_BINDING;
 use crate::native_runtime::NativeRuntimeReady;
 
+#[derive(Clone, Copy)]
+enum GenesisPublication {
+    WebSocket,
+    #[cfg(feature = "bench")]
+    ValidateOnly,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeGenesisConfig {
     pub timestamp: u64,
@@ -255,6 +262,52 @@ pub fn create_native_genesis_runtime_processor(
     workers: usize,
     routes: EntityRouteTable,
 ) -> Result<NativeRuntimeReady, String> {
+    create_native_genesis_processor(
+        native_database,
+        genesis,
+        runtime_seed,
+        runtime_signer_label,
+        entity_signer_label,
+        workers,
+        routes,
+        GenesisPublication::WebSocket,
+    )
+}
+
+#[cfg(feature = "bench")]
+#[allow(clippy::too_many_arguments)]
+pub fn create_native_genesis_replay_processor(
+    native_database: impl AsRef<Path>,
+    genesis: NativeGenesisConfig,
+    runtime_seed: &str,
+    runtime_signer_label: &str,
+    entity_signer_label: &str,
+    workers: usize,
+    routes: EntityRouteTable,
+) -> Result<NativeRuntimeReady, String> {
+    create_native_genesis_processor(
+        native_database,
+        genesis,
+        runtime_seed,
+        runtime_signer_label,
+        entity_signer_label,
+        workers,
+        routes,
+        GenesisPublication::ValidateOnly,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_native_genesis_processor(
+    native_database: impl AsRef<Path>,
+    genesis: NativeGenesisConfig,
+    runtime_seed: &str,
+    runtime_signer_label: &str,
+    entity_signer_label: &str,
+    workers: usize,
+    routes: EntityRouteTable,
+    publication: GenesisPublication,
+) -> Result<NativeRuntimeReady, String> {
     let started = Instant::now();
     if runtime_seed.is_empty() || entity_signer_label.trim().is_empty() || workers == 0 {
         return Err("RRS_NATIVE_GENESIS_ARGUMENTS".into());
@@ -367,8 +420,20 @@ pub fn create_native_genesis_runtime_processor(
     .map_err(|error| format!("RRS_NATIVE_GENESIS_REPLICA:{error}"))?;
     let signer = RuntimeSignerLabel::new(runtime_signer_label)
         .map_err(|error| format!("RRS_NATIVE_GENESIS_RUNTIME_SIGNER:{error}"))?;
-    let processor = DurableRuntimeProcessor::new(replica, store, routes, runtime_seed, signer)
-        .map_err(|error| format!("RRS_NATIVE_GENESIS_PROCESSOR:{error}"))?;
+    let processor = match publication {
+        GenesisPublication::WebSocket => {
+            DurableRuntimeProcessor::new(replica, store, routes, runtime_seed, signer)
+        }
+        #[cfg(feature = "bench")]
+        GenesisPublication::ValidateOnly => DurableRuntimeProcessor::new_replay_validate_only(
+            replica,
+            store,
+            routes,
+            runtime_seed,
+            signer,
+        ),
+    }
+    .map_err(|error| format!("RRS_NATIVE_GENESIS_PROCESSOR:{error}"))?;
     Ok(NativeRuntimeReady {
         processor,
         restore_elapsed: started.elapsed(),

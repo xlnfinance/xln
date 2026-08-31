@@ -8,6 +8,7 @@ const MANIFEST = ROOT + '/rscore/Cargo.toml';
 // every host CPU here competes with the sibling source gates and makes the
 // mandatory 30-second check slower and flaky on an otherwise idle Mac Studio.
 const concurrency = Math.max(1, Math.min(8, availableParallelism()));
+const threadsPerBinary = Math.max(1, Math.min(4, availableParallelism()));
 const active = new Set<ReturnType<typeof Bun.spawn>>();
 
 const stopChildren = (): void => {
@@ -49,7 +50,7 @@ const runLane = async (): Promise<void> => {
   while (nextIndex < executables.length && failures.length === 0) {
     const executable = executables[nextIndex++];
     if (!executable) break;
-    const child = Bun.spawn([executable, '--test-threads=1'], {
+    const child = Bun.spawn([executable, `--test-threads=${String(threadsPerBinary)}`], {
       cwd: ROOT,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -86,4 +87,7 @@ const docs = Bun.spawnSync([
 ], { cwd: ROOT, stdout: 'inherit', stderr: 'inherit' });
 if (docs.exitCode !== 0) process.exit(docs.exitCode);
 
-console.log(`RSCORE_TESTS_OK executables=${executables.length} concurrency=${concurrency}`);
+console.log(
+  `RSCORE_TESTS_OK executables=${executables.length} ` +
+  `concurrency=${concurrency} threadsPerBinary=${threadsPerBinary}`,
+);

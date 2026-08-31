@@ -7,7 +7,9 @@
 
 mod diff;
 mod expectations;
+mod native_v1;
 pub use crate::native_runtime::{NativeRuntimeReady, restore_native_runtime_processor};
+pub use native_v1::{NativeV1ReplayMetrics, replay_native_v1};
 
 use std::collections::BTreeMap;
 use std::path::Path;

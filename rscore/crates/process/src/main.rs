@@ -8,16 +8,16 @@ mod commitment_check;
 mod entity_replay;
 #[path = "commands/live.rs"]
 mod live;
+#[path = "commands/native_replay.rs"]
+mod native_replay;
 #[path = "commands/orderbook_bench.rs"]
 mod orderbook_bench;
-#[path = "commands/runtime_replay.rs"]
-mod runtime_replay;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn usage() -> String {
-    "XLNRS_MODE_REQUIRED:live|replay|entity-replay|import|check|orderbook-bench|stdio".into()
+    "XLNRS_MODE_REQUIRED:live|native-replay|entity-replay|import|check|orderbook-bench|stdio".into()
 }
 
 fn run() -> Result<(), String> {
@@ -26,7 +26,7 @@ fn run() -> Result<(), String> {
     let args = args.collect::<Vec<_>>();
     match mode.as_str() {
         "live" => live::run(args),
-        "replay" => runtime_replay::run(args),
+        "native-replay" => native_replay::run(args),
         "entity-replay" => entity_replay::run(args),
         "import" => checkpoint_import::run(args),
         "check" => commitment_check::run(args),

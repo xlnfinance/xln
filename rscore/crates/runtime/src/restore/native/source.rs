@@ -80,7 +80,7 @@ pub fn load_native_restore_sources(
     let wal = recovery
         .wal_frames
         .into_iter()
-        .map(wal_source)
+        .map(concrete_wal_source_from_native)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(NativeConcreteRestoreSources {
         checkpoint: source,
@@ -88,7 +88,12 @@ pub fn load_native_restore_sources(
     })
 }
 
-fn wal_source(frame: RecoveredWalFrame) -> Result<ConcreteWalSource, NativeRestoreSourceError> {
+/// Convert one already-validated native WAL frame into the concrete source
+/// consumed by restart and replay. This avoids exporting a second recording
+/// format merely to replay a live native database.
+pub fn concrete_wal_source_from_native(
+    frame: RecoveredWalFrame,
+) -> Result<ConcreteWalSource, NativeRestoreSourceError> {
     let contexts = frame.entity_contexts.rebuild_contexts()?;
     let refs = frame
         .entity_contexts

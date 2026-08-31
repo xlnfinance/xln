@@ -46,14 +46,18 @@ console.log(
 );
 
 // The suites read XLN_RSCORE_REQUIRE_BINARY and throw instead of skipping.
-// Bun can starve child-process stdout after the earlier differential corpus
-// has run in the same test worker; its 5s timeout then kills healthy Rust
-// children and cascades across every process test. A fresh Bun worker for the
-// process boundary is deterministic and keeps the whole pair below two seconds.
+// TS worker pools live until their Bun process exits. Mixing them with the
+// differential corpus starves later child-process tests and turns a 96ms test
+// into a timeout. Run pure, worker and Rust-process segments in fresh processes;
+// this is test isolation, not a production execution branch.
 const testFiles = [
   ...testFilesUnder(join(ROOT, 'tests/rscore')),
   ...testFilesUnder(join(ROOT, 'core/__tests__/rscore')),
 ];
 const processSegment = `${sep}rscore${sep}process${sep}`;
-run('bun', ['test', ...testFiles.filter(file => !file.includes(processSegment))]);
+const tsWorkerSegment = `${sep}rscore${sep}ts-worker${sep}`;
+run('bun', ['test', ...testFiles.filter(file => (
+  !file.includes(processSegment) && !file.includes(tsWorkerSegment)
+))]);
+run('bun', ['test', ...testFiles.filter(file => file.includes(tsWorkerSegment))]);
 run('bun', ['test', ...testFiles.filter(file => file.includes(processSegment))]);
