@@ -13,10 +13,17 @@ import {
 type RustHubGenesisInput = Readonly<{
   name: string;
   runtimeId: string;
-  entityEncryptionPublicKey: string;
+  primaryEntitySignerLabel: string;
+  entityEncryptionPublicKeys: Readonly<Record<string, string>>;
   jurisdictionsJson: string;
   rpcUrls: Readonly<Record<number, string>>;
   minFrameDelayMs: number;
+}>;
+
+export type RustHubGenesisEntitySigner = Readonly<{
+  jurisdictionName: string;
+  signerLabel: string;
+  primary: boolean;
 }>;
 
 const requireSafePositive = (value: unknown, code: string): number => {
@@ -59,6 +66,29 @@ const pairPolicy = (pairId: string): readonly [string, number, number, string] =
   return [pairId, policy.priceStepTicks, policy.bookBucketWidthTicks, policy.mmMidPriceTicks.toString()];
 };
 
+export const resolveRustHubGenesisEntitySigners = (
+  jurisdictionsJson: string,
+  primarySignerLabel: string,
+): RustHubGenesisEntitySigner[] => {
+  const label = primarySignerLabel.trim();
+  if (!label) throw new Error('RUST_HUB_GENESIS_PRIMARY_SIGNER_LABEL_INVALID');
+  const payload = parseShardJurisdictions(jurisdictionsJson, 'RUST_HUB_GENESIS_JURISDICTIONS');
+  const configured = Object.entries(payload.jurisdictions ?? {})
+    .filter(([, value]) => String(value['status'] || 'active').trim().toLowerCase() !== 'pending');
+  const primary = configured.find(([, value]) => value['primary'] === true) ?? configured[0];
+  if (!primary) throw new Error('RUST_HUB_GENESIS_PRIMARY_JURISDICTION_MISSING');
+  return configured.map(([key, value]) => {
+    const jurisdictionName = String(value.name || key).trim();
+    if (!jurisdictionName) throw new Error(`RUST_HUB_GENESIS_JURISDICTION_NAME:${key}`);
+    const isPrimary = value === primary[1];
+    return {
+      jurisdictionName,
+      signerLabel: isPrimary ? label : `${label}:${jurisdictionName}`,
+      primary: isPrimary,
+    };
+  });
+};
+
 export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<string, unknown> => {
   const name = input.name.trim();
   if (!name || new TextEncoder().encode(name).byteLength > 256) {
@@ -66,10 +96,6 @@ export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<st
   }
   const runtimeId = input.runtimeId.trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(runtimeId)) throw new Error('RUST_HUB_GENESIS_RUNTIME_ID_INVALID');
-  const entityEncryptionPublicKey = input.entityEncryptionPublicKey.trim().toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(entityEncryptionPublicKey)) {
-    throw new Error('RUST_HUB_GENESIS_ENTITY_KEY_INVALID');
-  }
   if (!Number.isSafeInteger(input.minFrameDelayMs) || input.minFrameDelayMs < 0) {
     throw new Error('RUST_HUB_GENESIS_FRAME_DELAY_INVALID');
   }
@@ -120,11 +146,57 @@ export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<st
   });
   const [primaryKey, primaryValue] = primary;
   const primaryName = String(primaryValue.name || primaryKey).trim();
-  const primaryContracts = requireBoundaryRecord(
-    primaryValue.contracts,
-    `RUST_HUB_GENESIS_CONTRACTS:${primaryKey}`,
+  const signerRows = resolveRustHubGenesisEntitySigners(
+    input.jurisdictionsJson,
+    input.primaryEntitySignerLabel,
   );
-  const primaryRpc = resolveRpcUrl(primaryValue.rpc, input.rpcUrls);
+  const entities = configured.map(([key, value], index) => {
+    const signer = signerRows[index];
+    if (!signer) throw new Error(`RUST_HUB_GENESIS_ENTITY_SIGNER_MISSING:${key}`);
+    const contracts = requireBoundaryRecord(value.contracts, `RUST_HUB_GENESIS_CONTRACTS:${key}`);
+    const encryptionPublicKey = String(
+      input.entityEncryptionPublicKeys[signer.jurisdictionName] || '',
+    ).trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(encryptionPublicKey)) {
+      throw new Error(`RUST_HUB_GENESIS_ENTITY_KEY_INVALID:${signer.jurisdictionName}`);
+    }
+    return {
+      signerLabel: signer.signerLabel,
+      primary: signer.primary,
+      authorityJurisdiction: {
+        name: signer.jurisdictionName,
+        address: resolveRpcUrl(value.rpc, input.rpcUrls),
+        chainId: requireSafePositive(value.chainId, `RUST_HUB_GENESIS_CHAIN_ID:${key}`),
+        depositoryAddress: requireAddress(
+          contracts['depository'],
+          `RUST_HUB_GENESIS_DEPOSITORY:${key}`,
+        ),
+        entityProviderAddress: requireAddress(
+          contracts['entityProvider'],
+          `RUST_HUB_GENESIS_ENTITY_PROVIDER:${key}`,
+        ),
+        blockTimeMs: requireSafePositive(value['blockTimeMs'], `RUST_HUB_GENESIS_BLOCK_TIME:${key}`),
+      },
+      contextPolicy: {
+        minimumTradeSize: { __xlnType: 'BigInt', value: HUB_DEFAULT_MIN_TRADE_SIZE.toString() },
+        swapTakerFeeBps: 1,
+        jurisdictionId: signer.jurisdictionName,
+        pairPolicies: HUB_DEFAULT_SUPPORTED_PAIRS.map(pairPolicy),
+      },
+      profile: {
+        name,
+        isHub: true,
+        entityKind: 'protocol',
+        sectors: ['finance', 'infrastructure'],
+        avatar: '',
+        bio: '',
+        website: '',
+      },
+      encryptionPublicKey,
+      htlcRoutingFeePpm: 1,
+      htlcRoutingBaseFee: '0',
+    };
+  });
   return {
     timestamp: 0,
     machine: {
@@ -140,40 +212,6 @@ export const buildRustHubGenesisConfig = (input: RustHubGenesisInput): Record<st
       },
       jReplicas,
     },
-    entityAuthorityJurisdiction: {
-      name: primaryName,
-      address: primaryRpc,
-      chainId: requireSafePositive(primaryValue.chainId, `RUST_HUB_GENESIS_CHAIN_ID:${primaryKey}`),
-      depositoryAddress: requireAddress(
-        primaryContracts['depository'],
-        `RUST_HUB_GENESIS_DEPOSITORY:${primaryKey}`,
-      ),
-      entityProviderAddress: requireAddress(
-        primaryContracts['entityProvider'],
-        `RUST_HUB_GENESIS_ENTITY_PROVIDER:${primaryKey}`,
-      ),
-      blockTimeMs: requireSafePositive(
-        primaryValue['blockTimeMs'],
-        `RUST_HUB_GENESIS_BLOCK_TIME:${primaryKey}`,
-      ),
-    },
-    entityContextPolicy: {
-      minimumTradeSize: { __xlnType: 'BigInt', value: HUB_DEFAULT_MIN_TRADE_SIZE.toString() },
-      swapTakerFeeBps: 1,
-      jurisdictionId: primaryName,
-      pairPolicies: HUB_DEFAULT_SUPPORTED_PAIRS.map(pairPolicy),
-    },
-    entityProfile: {
-      name,
-      isHub: true,
-      entityKind: 'protocol',
-      sectors: ['finance', 'infrastructure'],
-      avatar: '',
-      bio: '',
-      website: '',
-    },
-    entityEncryptionPublicKey,
-    htlcRoutingFeePpm: 1,
-    htlcRoutingBaseFee: '0',
+    entities,
   };
 };

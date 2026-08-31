@@ -55,11 +55,11 @@ pub use entity_checkpoint::{
     EntityCheckpointError, carried_entity_checkpoint_sections, entity_checkpoint_crontab,
 };
 pub use entity_context_json::{
-    CanonicalEntityInfraMaterializer, EntityContextJsonError, EntityInfraMaterializeRequest,
-    EntityInfraMaterializer, FreshEntityContextError, InboundHtlcInfrastructure,
-    MaterializedEntityInfraContext, canonical_swap_market_policy,
-    decode_entity_deterministic_context, entity_context_policy_from_checkpoint,
-    materialize_fresh_entity_context,
+    CanonicalEntityInfraMaterializer, CanonicalMultiEntityInfraMaterializer,
+    EntityContextJsonError, EntityInfraMaterializeRequest, EntityInfraMaterializer,
+    FreshEntityContextError, InboundHtlcInfrastructure, MaterializedEntityInfraContext,
+    canonical_swap_market_policy, decode_entity_deterministic_context,
+    entity_context_policy_from_checkpoint, materialize_fresh_entity_context,
 };
 pub use entity_frame::{EntityFrameError, fit_entity_account_input_prefix};
 pub use j_import::{
@@ -79,11 +79,11 @@ pub use leveldb::{
 pub use machine::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
     RewindJHistory, RuntimeAdapterCommandMarker, RuntimeApplyResult, RuntimeEntityFrameContext,
-    RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs, RuntimeEntityReplica,
-    RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
-    RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeOutputs,
-    RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx, RuntimeWake,
-    SelectedRuntimeFrame, apply_runtime, apply_runtime_live, enqueue_runtime_input,
+    RuntimeEntityInit, RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs,
+    RuntimeEntityReplica, RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext,
+    RuntimeFrameTouches, RuntimeInput, RuntimeLimits, RuntimeLiveInput, RuntimeMachineError,
+    RuntimeMempool, RuntimeOutputs, RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx,
+    RuntimeWake, SelectedRuntimeFrame, apply_runtime, apply_runtime_live, enqueue_runtime_input,
     select_runtime_frame,
 };
 pub use machine_graph::{RuntimeMachineGraphError, rebuild_runtime_machine_graph};

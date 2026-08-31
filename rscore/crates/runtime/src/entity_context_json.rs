@@ -14,9 +14,9 @@ mod fresh;
 mod policy;
 
 pub use fresh::{
-    CanonicalEntityInfraMaterializer, EntityInfraMaterializeRequest, EntityInfraMaterializer,
-    FreshEntityContextError, InboundHtlcInfrastructure, MaterializedEntityInfraContext,
-    materialize_fresh_entity_context,
+    CanonicalEntityInfraMaterializer, CanonicalMultiEntityInfraMaterializer,
+    EntityInfraMaterializeRequest, EntityInfraMaterializer, FreshEntityContextError,
+    InboundHtlcInfrastructure, MaterializedEntityInfraContext, materialize_fresh_entity_context,
 };
 pub(crate) use policy::entity_context_policy_from_core;
 pub use policy::{canonical_swap_market_policy, entity_context_policy_from_checkpoint};

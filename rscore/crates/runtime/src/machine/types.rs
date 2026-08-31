@@ -746,6 +746,21 @@ pub struct RuntimeEntityReplica {
     pub(crate) entity_mempool: VecDeque<EntityPendingWork>,
 }
 
+/// Complete live machinery for one Entity at Runtime construction/restore.
+///
+/// The committed half remains in `RuntimeState.e_replicas`; this value carries
+/// only the corresponding live transition machinery.  Construction consumes
+/// every slot together so a multi-Entity Runtime cannot start with a committed
+/// Entity that has no executor, or an executor that is absent from state.
+pub struct RuntimeEntityInit {
+    pub entity_id: [u8; 32],
+    pub signer_id: String,
+    pub accounts: ResidentConsensusEngine,
+    pub entity_consensus: ResidentEntityConsensusReplica,
+    pub entity_signer: EntitySingleSigner,
+    pub protocol_fingerprint: [u8; 32],
+}
+
 /// One live Runtime owning a path-keyed cohort of Entity replicas.
 pub struct RuntimeReplica {
     pub state: RuntimeState,
@@ -857,39 +872,46 @@ impl RuntimeEntityReplica {
 }
 
 impl RuntimeReplica {
-    #[allow(clippy::too_many_arguments)] // Genesis/restore supplies one exact initial Entity slot.
     pub fn new(
         state: RuntimeState,
         durable: crate::processor::RuntimeDurableEnvelope,
-        entity_id: [u8; 32],
-        signer_id: String,
-        accounts: ResidentConsensusEngine,
-        entity_consensus: ResidentEntityConsensusReplica,
-        entity_signer: EntitySingleSigner,
-        protocol_fingerprint: [u8; 32],
+        entities: Vec<RuntimeEntityInit>,
         proposer_runtime_seed: String,
         limits: RuntimeLimits,
     ) -> Result<Self, RuntimeMachineError> {
         if proposer_runtime_seed.trim().is_empty() {
             return Err(RuntimeMachineError::RuntimeSeedEmpty);
         }
-        let key = RuntimeEntityKey::new(entity_id, &signer_id)?;
-        let entity_state = state
-            .e_replicas
-            .get(&key)
-            .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
-        let entity = RuntimeEntityReplica::new(
-            entity_state,
-            entity_id,
-            signer_id,
-            accounts,
-            entity_consensus,
-            entity_signer,
-            protocol_fingerprint,
-            state.height,
-        )?;
+        if entities.is_empty() || entities.len() != state.e_replicas.len() {
+            return Err(RuntimeMachineError::EntityStateMap(format!(
+                "SLOT_COUNT:{}:{}",
+                entities.len(),
+                state.e_replicas.len(),
+            )));
+        }
         let mut e_replicas = BTreeMap::new();
-        e_replicas.insert(key, entity);
+        for init in entities {
+            let key = RuntimeEntityKey::new(init.entity_id, &init.signer_id)?;
+            let entity_state = state
+                .e_replicas
+                .get(&key)
+                .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+            let entity = RuntimeEntityReplica::new(
+                entity_state,
+                init.entity_id,
+                init.signer_id,
+                init.accounts,
+                init.entity_consensus,
+                init.entity_signer,
+                init.protocol_fingerprint,
+                state.height,
+            )?;
+            if e_replicas.insert(key, entity).is_some() {
+                return Err(RuntimeMachineError::EntityStateMap(
+                    "DUPLICATE_LIVE_SLOT".into(),
+                ));
+            }
+        }
         Ok(Self {
             state,
             durable,

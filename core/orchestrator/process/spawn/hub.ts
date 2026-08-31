@@ -25,7 +25,10 @@ import {
 import { attachManagedChildFatalIpc, type ManagedChildFatalReport } from '../managed-child-fatal-ipc';
 import { buildHubChildProcessEnv, buildHubEngineArgs } from '../hub-runtime-env';
 import { buildRustHubProcessPlan, parseRustHubStatus } from '../hub-engine-plan';
-import { buildRustHubGenesisConfig } from '../rust-hub-genesis';
+import {
+  buildRustHubGenesisConfig,
+  resolveRustHubGenesisEntitySigners,
+} from '../rust-hub-genesis';
 import { createManagedRuntimeLeaseManager } from '../managed-runtime-leases';
 
 type MarketMakerSupportPeerIdentity = {
@@ -117,14 +120,27 @@ const buildRustHubInvocation = (
     websocketUrl: null,
   }];
   writeFileSync(routesFile, `${safeStringify(routes)}\n`, { mode: 0o600 });
+  const jurisdictionsJson = readFileSync(deps.shardJurisdictionsPath, 'utf8');
+  const entityEncryptionPublicKeys = Object.fromEntries(
+    resolveRustHubGenesisEntitySigners(jurisdictionsJson, child.signerLabel).map(binding => {
+      const identity = deriveManagedEntityIdentity({
+        name: child.name,
+        seed: child.seed,
+        signerLabel: binding.signerLabel,
+      });
+      const privateKey = deriveEntityEncryptionPrivateKey(custodySeed, identity.entityId);
+      return [
+        binding.jurisdictionName,
+        deriveEntityEncryptionPublicKey(privateKey, identity.entityId),
+      ];
+    }),
+  );
   const genesis = buildRustHubGenesisConfig({
     name: child.name,
     runtimeId: deriveSignerAddressSync(child.seed, '1').toLowerCase(),
-    entityEncryptionPublicKey: deriveEntityEncryptionPublicKey(
-      entityEncryptionPrivateKey,
-      rustIdentity.entityId,
-    ),
-    jurisdictionsJson: readFileSync(deps.shardJurisdictionsPath, 'utf8'),
+    primaryEntitySignerLabel: child.signerLabel,
+    entityEncryptionPublicKeys,
+    jurisdictionsJson,
     rpcUrls: deps.args.rpcUrls,
     minFrameDelayMs: Math.max(0, Number(process.env['XLN_HUB_MIN_FRAME_DELAY_MS'] || '0')),
   });
