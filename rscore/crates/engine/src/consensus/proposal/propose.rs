@@ -339,7 +339,7 @@ pub fn propose_account_frame(
     // The returned dispute below remains the pre-attach clone, so Entity keeps
     // the exact same secondary manifest entry and presigned witness.
     if let (Some(dispute), Some(hanko)) = (&proposal_dispute, &dispute_hanko) {
-        account.attach_local_dispute_hanko(dispute.hash, hanko.clone())?;
+        account.attach_locally_signed_dispute_hanko(dispute.hash, hanko.clone())?;
     }
     let bundled_ack = account
         .pending()

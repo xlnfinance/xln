@@ -1139,10 +1139,15 @@ impl AccountConsensus {
         Ok(self.dispute.clone())
     }
 
-    /// Install the exact Hanko produced by the parent Entity manifest.
-    /// Every retained copy of the same outbound proof is updated so later
-    /// resends never re-sign historical evidence.
-    pub fn attach_local_dispute_hanko(
+    /// Retain the exact Hanko returned by `SigningIdentity::sign_frame_with_raw`.
+    ///
+    /// This is deliberately crate-private and accepts only a locally authored
+    /// witness from the two immediate signing call sites. Recovering that
+    /// signature again here repeated a full ECDSA verification without adding
+    /// an authority boundary: untrusted peer Hankos are verified before they
+    /// can reach either caller. The matching draft hash still prevents a
+    /// witness from being attached to another proof.
+    pub(crate) fn attach_locally_signed_dispute_hanko(
         &mut self,
         hash: [u8; 32],
         hanko: Vec<u8>,
@@ -1150,11 +1155,6 @@ impl AccountConsensus {
         if hanko.is_empty() {
             return Err(StateError::Signing("LOCAL_DISPUTE_HANKO_EMPTY".to_string()));
         }
-        crate::consensus::signing::verify_frame_hanko(
-            &hanko,
-            &hash,
-            self.replica.owner().as_bytes(),
-        )?;
         let mut changed = attach_matching_dispute(&mut self.dispute, hash, &hanko)?;
         if let Some(ack) = &mut self.last_outbound_ack {
             changed |= attach_matching_dispute(&mut ack.dispute, hash, &hanko)?;

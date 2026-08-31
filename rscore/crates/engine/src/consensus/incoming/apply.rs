@@ -829,7 +829,7 @@ pub fn apply_incoming_frame_with_authority(
     // The returned draft stays witness-free so Entity certification preserves
     // the same secondary manifest entry and signed bytes.
     if let (Some(dispute), Some(hanko)) = (&ack_dispute, &ack_dispute_hanko) {
-        account.attach_local_dispute_hanko(dispute.hash, hanko.clone())?;
+        account.attach_locally_signed_dispute_hanko(dispute.hash, hanko.clone())?;
     }
     Ok(IncomingOutcome::Committed {
         height: frame.height,
