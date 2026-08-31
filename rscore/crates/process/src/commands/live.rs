@@ -1060,17 +1060,11 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     if args.iter().any(|value| value == "--offline-ts-import") {
         return Err("RRS_RUNTIME_OFFLINE_TS_IMPORT_FORBIDDEN".into());
     }
-    let genesis_path = PathBuf::from(argument(&args, "--genesis-config")?);
-    let genesis = NativeGenesisConfig::read(genesis_path)?;
-    let entity_signer_labels = genesis
-        .entities
-        .iter()
-        .map(|entity| entity.signer_label.clone())
-        .collect::<Vec<_>>();
     let ready = if native_store_is_pristine(&native_database)? {
+        let genesis_path = PathBuf::from(argument(&args, "--genesis-config")?);
         create_native_genesis_runtime_processor(
             native_database,
-            genesis,
+            NativeGenesisConfig::read(genesis_path)?,
             runtime_seed,
             &runtime_signer_label,
             &entity_signer_label,
@@ -1082,7 +1076,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             native_database,
             runtime_seed,
             &runtime_signer_label,
-            entity_signer_labels,
+            &entity_signer_label,
             workers,
             route_table,
             None,
@@ -1104,20 +1098,15 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             .entity
             .entity_encryption_public_key
     };
-    let primary_runtime_entity = ready
-        .entities
-        .iter()
-        .find(|entity| entity.entity_id == primary_entity_id)
-        .ok_or_else(|| "RRS_RUNTIME_PRIMARY_ENTITY_CONFIG_MISSING".to_string())?;
-    let profile_routing_fee_ppm = primary_runtime_entity.htlc_routing_fee_ppm;
-    let profile_routing_base_fee = primary_runtime_entity.htlc_routing_base_fee.clone();
+    let profile_routing_fee_ppm = ready.htlc_routing_fee_ppm;
+    let profile_routing_base_fee = ready.htlc_routing_base_fee.clone();
     let materializer = CanonicalEntityInfraMaterializer::with_inbound_htlc(
-        primary_runtime_entity.entity_context_policy.clone(),
+        ready.entity_context_policy,
         xln_rscore_runtime::InboundHtlcInfrastructure {
             entity_encryption_public_key,
             entity_encryption_private_key,
-            routing_fee_ppm: primary_runtime_entity.htlc_routing_fee_ppm,
-            routing_base_fee: primary_runtime_entity.htlc_routing_base_fee.clone(),
+            routing_fee_ppm: ready.htlc_routing_fee_ppm,
+            routing_base_fee: ready.htlc_routing_base_fee,
         },
     )
     .map_err(|error| format!("RRS_RUNTIME_HTLC_INFRA:{error}"))?;

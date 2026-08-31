@@ -29,7 +29,7 @@ use xln_rscore_runtime::{
 };
 
 use crate::PAYMENT_PROFILE_BINDING;
-use crate::native_runtime::{NativeEntityRuntimeReady, NativeRuntimeReady};
+use crate::native_runtime::NativeRuntimeReady;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeGenesisConfig {
@@ -349,7 +349,7 @@ pub fn create_native_genesis_runtime_processor(
     }
     let mut e_replicas = BTreeMap::new();
     let mut entity_inits = Vec::with_capacity(entities.len());
-    let mut runtime_entities = Vec::with_capacity(entities.len());
+    let mut primary_context = None;
     for config in entities {
         let private_key = derive_signer_key(runtime_seed, &config.signer_label)
             .map_err(|error| format!("RRS_NATIVE_GENESIS_ENTITY_KEY:{error}"))?;
@@ -430,13 +430,16 @@ pub fn create_native_genesis_runtime_processor(
             entity_signer,
             protocol_fingerprint: PAYMENT_PROFILE_BINDING.protocol_fingerprint,
         });
-        runtime_entities.push(NativeEntityRuntimeReady {
-            entity_id,
-            entity_context_policy: config.context_policy,
-            htlc_routing_fee_ppm: config.htlc_routing_fee_ppm,
-            htlc_routing_base_fee: config.htlc_routing_base_fee,
-        });
+        if config.primary {
+            primary_context = Some((
+                config.context_policy,
+                config.htlc_routing_fee_ppm,
+                config.htlc_routing_base_fee,
+            ));
+        }
     }
+    let (entity_context_policy, htlc_routing_fee_ppm, htlc_routing_base_fee) =
+        primary_context.ok_or_else(|| "RRS_NATIVE_GENESIS_PRIMARY_ENTITY_COUNT".to_string())?;
     let replica = RuntimeReplica::new(
         RuntimeState {
             height: 0,
@@ -458,7 +461,9 @@ pub fn create_native_genesis_runtime_processor(
         processor,
         restore_elapsed: started.elapsed(),
         restored_wal_frames: 0,
-        entities: runtime_entities,
+        entity_context_policy,
+        htlc_routing_fee_ppm,
+        htlc_routing_base_fee,
     })
 }
 

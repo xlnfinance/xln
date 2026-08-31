@@ -49,7 +49,7 @@ pub(crate) fn prepare_entity_checkpoint(
         return Err(EntityCheckpointProjectionError::CheckpointBaseIncomplete);
     }
     let retained = if entity_manifest_present {
-        crate::restore::entity_projection_metadata(prior, owner)?
+        crate::restore::entity_projection_metadata(prior)?
     } else {
         EntityCheckpointProjectionMetadata::new(owner, Vec::new(), Vec::new())
     };

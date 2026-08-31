@@ -62,9 +62,8 @@ pub use certified_board_registry::{
     hydrate_certified_board_registry, hydrate_certified_board_state,
 };
 pub use concrete::{
-    ConcreteRestoreError, DecodedRuntimeCheckpoint, DecodedRuntimeEntityCheckpoint,
-    DecodedRuntimeWalFrame, RestoredRuntime, replay_decoded_runtime_wal,
-    restore_decoded_runtime_checkpoint,
+    ConcreteRestoreError, DecodedRuntimeCheckpoint, DecodedRuntimeWalFrame, RestoredRuntime,
+    replay_decoded_runtime_wal, restore_decoded_runtime_checkpoint,
 };
 pub(crate) use concrete_source::VerifiedWalFrame;
 pub use concrete_source::{
@@ -78,9 +77,7 @@ pub use decode_checkpoint::{
 pub use entity_consensus::{EntityConsensusRestoreError, hydrate_entity_consensus};
 pub use entity_frame_head::{EntityFrameHeadRestoreError, decode_certified_entity_frame_head};
 pub(crate) use entity_graph::entity_projection_metadata;
-pub use entity_graph::{
-    EntityGraphRestoreError, HydratedEntityGraph, entity_graph_owners, hydrate_entity_graph,
-};
+pub use entity_graph::{EntityGraphRestoreError, HydratedEntityGraph, hydrate_entity_graph};
 pub use entity_snapshot::{EntitySnapshotRestoreError, entity_snapshot_from_graph};
 pub use orderbook_accounts::{RestoredOrderbookAccounts, restore_orderbook_accounts};
 pub use orderbook_graph::{HydratedOrderbook, OrderbookGraphRestoreError, hydrate_orderbook_graph};

@@ -358,7 +358,7 @@ pub fn replay_runtime_wal(
     assert_checkpoint_runtime_root(&checkpoint_source)?;
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_string(),
-        signer_derivation_labels: vec![entity_signer_label.to_string()],
+        signer_derivation_label: entity_signer_label.to_string(),
         worker_count: workers,
         limits: xln_rscore_runtime::RuntimeLimits::hlt(),
         swap_market: Arc::new(canonical_swap_market_policy()),
@@ -372,12 +372,8 @@ pub fn replay_runtime_wal(
         None => decode_concrete_runtime_checkpoint(checkpoint_source, configuration),
     }
     .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_DECODE:{error}"))?;
-    let primary = decoded
-        .entities
-        .first()
-        .ok_or_else(|| "RUNTIME_REPLAY_CHECKPOINT_ENTITY_MISSING".to_string())?;
-    let owner = primary.entity_snapshot.entity_id.to_ascii_lowercase();
-    let context_policy = primary.entity_context_policy.clone();
+    let owner = decoded.entity_snapshot.entity_id.to_ascii_lowercase();
+    let context_policy = decoded.entity_context_policy.clone();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RUNTIME_REPLAY_RESTORE:{error}"))?;
     if let (Some(origin), Some(source_frame_hash)) = (migration_origin, source_checkpoint_hash) {
@@ -748,7 +744,7 @@ pub fn replay_runtime_wal(
         native_database,
         runtime_seed,
         runtime_signer_label,
-        vec![entity_signer_label.to_string()],
+        entity_signer_label,
         workers,
         restart_routes,
         migration_origin,

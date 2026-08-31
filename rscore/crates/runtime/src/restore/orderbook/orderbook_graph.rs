@@ -467,6 +467,14 @@ pub fn hydrate_orderbook_graph(
     core: &Map<String, Value>,
     accounts: RestoredOrderbookAccounts,
 ) -> Result<Option<HydratedOrderbook>, OrderbookGraphRestoreError> {
+    for key in rows.keys().filter(|key| {
+        key.first()
+            .is_some_and(|tag| [HEADER_TAG, BRANCH_TAG, LEAF_TAG].contains(tag))
+    }) {
+        if key.get(1..33) != Some(owner.as_slice()) {
+            return Err(invalid("FOREIGN_OWNER_ROW"));
+        }
+    }
     let metadata = hydrate_orderbook_metadata(core)?;
     let header_prefix = [vec![HEADER_TAG], owner.to_vec()].concat();
     let headers = rows
@@ -477,7 +485,6 @@ pub fn hydrate_orderbook_graph(
         let has_graph_rows = rows.keys().any(|key| {
             key.first()
                 .is_some_and(|tag| matches!(*tag, BRANCH_TAG | LEAF_TAG))
-                && key.get(1..33) == Some(owner.as_slice())
         });
         if has_graph_rows {
             return Err(invalid("ORPHAN_TREE_ROWS"));
@@ -525,7 +532,6 @@ pub fn hydrate_orderbook_graph(
         .filter(|key| {
             key.first()
                 .is_some_and(|tag| [HEADER_TAG, BRANCH_TAG, LEAF_TAG].contains(tag))
-                && key.get(1..33) == Some(owner.as_slice())
         })
         .cloned()
         .collect::<BTreeSet<_>>();
