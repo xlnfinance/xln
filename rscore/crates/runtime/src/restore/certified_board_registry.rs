@@ -511,7 +511,10 @@ pub fn hydrate_certified_board_state(
 ) -> Result<HydratedCertifiedBoardRegistry, CertifiedBoardRegistryRestoreError> {
     let board_rows = rows
         .iter()
-        .filter(|(key, _)| key.first() == Some(&CERTIFIED_BOARD_TAG))
+        .filter(|(key, _)| {
+            key.first() == Some(&CERTIFIED_BOARD_TAG)
+                && key.get(1..33) == Some(graph.entity_id.as_slice())
+        })
         .collect::<Vec<_>>();
     let Some((stack_key, root)) = parse_state(graph)? else {
         if board_rows.is_empty() {

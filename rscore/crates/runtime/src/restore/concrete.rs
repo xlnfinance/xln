@@ -29,6 +29,12 @@ pub struct DecodedRuntimeCheckpoint {
     pub runtime_timestamp: u64,
     pub durable_envelope: RuntimeDurableEnvelope,
     pub expected_protocol_fingerprint: [u8; 32],
+    pub entities: Vec<DecodedRuntimeEntityCheckpoint>,
+    pub worker_count: usize,
+    pub limits: RuntimeLimits,
+}
+
+pub struct DecodedRuntimeEntityCheckpoint {
     pub stored_accounts: StoredRscoreCheckpoint,
     pub entity_snapshot: EntityStateSnapshot,
     /// Complete live Entity consensus envelope restored from the canonical
@@ -57,8 +63,6 @@ pub struct DecodedRuntimeCheckpoint {
     /// to the canonical 0x26 signer address by checkpoint decoding.
     pub signer_private_key: [u8; 32],
     pub signer_id: String,
-    pub worker_count: usize,
-    pub limits: RuntimeLimits,
     pub swap_market: Arc<SwapMarketPolicy>,
 }
 
@@ -150,11 +154,14 @@ fn parse_hex(value: &str) -> Result<[u8; 32], ConcreteRestoreError> {
     Ok(output)
 }
 
-fn generation(checkpoint: &DecodedRuntimeCheckpoint) -> EngineGeneration {
+fn generation(
+    runtime_height: u64,
+    checkpoint: &DecodedRuntimeEntityCheckpoint,
+) -> EngineGeneration {
     let mut digest = Sha256::new();
     digest.update(b"xln.rscore.runtime.restore.generation.v1");
     digest.update(checkpoint.stored_accounts.owner_entity_id);
-    digest.update(checkpoint.runtime_height.to_be_bytes());
+    digest.update(runtime_height.to_be_bytes());
     digest.update(checkpoint.stored_accounts.revision.to_be_bytes());
     let digest: [u8; 32] = digest.finalize().into();
     let mut generation = [0_u8; 8];
@@ -212,61 +219,89 @@ pub fn restore_decoded_runtime_checkpoint(
             return Err(ConcreteRestoreError::UnsafeNumber { field, value });
         }
     }
-    if checkpoint.signer_id.is_empty() {
-        return Err(ConcreteRestoreError::SignerRequired);
-    }
-    let stored = &checkpoint.stored_accounts;
-    if stored.protocol_fingerprint != checkpoint.expected_protocol_fingerprint {
-        return Err(ConcreteRestoreError::ProtocolFingerprint);
-    }
-    if checkpoint.entity_snapshot.entity_id != hex(&stored.owner_entity_id) {
+    if checkpoint.entities.is_empty() {
         return Err(ConcreteRestoreError::OwnerMismatch);
     }
-    let private_key = checkpoint.signer_private_key;
-    let account_rows = decode_account_rows(&stored.accounts)?;
-    let token = CheckpointToken {
-        base_revision: stored.base_revision,
-        revision: stored.revision,
-        accounts_root: stored.accounts_root,
-        signer_digest: stored.signer_digest,
-        account_count: stored.account_count,
-    };
-    let accounts = ResidentConsensusEngine::restore_exact(
-        generation(&checkpoint),
-        checkpoint.worker_count,
-        private_key,
-        checkpoint.signer_id.clone(),
-        checkpoint.swap_market,
-        token,
-        account_rows,
-    )?;
-    let entity = restore_entity_state(
-        checkpoint.entity_snapshot,
-        stored.accounts_root,
-        stored.account_count,
-    )?;
-    let owned = compute_entity_owned_sections(&entity, stored.accounts_root, stored.account_count)?;
-    let mut entity_consensus = checkpoint.entity_consensus;
-    entity_consensus.state.sections = project_entity_consensus_sections(
-        &entity_consensus.state.sections,
-        owned,
-        &entity_consensus.state.authority,
-    )
-    .map_err(|error| ConcreteRestoreError::EntityManifest(error.to_string()))?;
-    assert_entity_root(
-        &entity_consensus.state.sections,
-        checkpoint.expected_entity_root,
-    )?;
-    let finalized_j_height = entity.last_finalized_j_height;
-    let owner_entity_id = stored.owner_entity_id;
-    let key = crate::RuntimeEntityKey::new(owner_entity_id, &checkpoint.signer_id)?;
-    let e_replicas = std::collections::BTreeMap::from([(
-        key.clone(),
-        crate::RuntimeEntityState {
+    let mut e_replicas = std::collections::BTreeMap::new();
+    let mut entity_inits = Vec::with_capacity(checkpoint.entities.len());
+    let mut restored_envelopes = Vec::with_capacity(checkpoint.entities.len());
+    let mut finalized_j_height = 0;
+    for entity_checkpoint in checkpoint.entities {
+        if entity_checkpoint.signer_id.is_empty() {
+            return Err(ConcreteRestoreError::SignerRequired);
+        }
+        let stored = &entity_checkpoint.stored_accounts;
+        if stored.protocol_fingerprint != checkpoint.expected_protocol_fingerprint {
+            return Err(ConcreteRestoreError::ProtocolFingerprint);
+        }
+        if entity_checkpoint.entity_snapshot.entity_id != hex(&stored.owner_entity_id) {
+            return Err(ConcreteRestoreError::OwnerMismatch);
+        }
+        let account_rows = decode_account_rows(&stored.accounts)?;
+        let token = CheckpointToken {
+            base_revision: stored.base_revision,
+            revision: stored.revision,
             accounts_root: stored.accounts_root,
-            entity,
-        },
-    )]);
+            signer_digest: stored.signer_digest,
+            account_count: stored.account_count,
+        };
+        let accounts = ResidentConsensusEngine::restore_exact(
+            generation(checkpoint.runtime_height, &entity_checkpoint),
+            checkpoint.worker_count,
+            entity_checkpoint.signer_private_key,
+            entity_checkpoint.signer_id.clone(),
+            entity_checkpoint.swap_market,
+            token,
+            account_rows,
+        )?;
+        let entity = restore_entity_state(
+            entity_checkpoint.entity_snapshot,
+            stored.accounts_root,
+            stored.account_count,
+        )?;
+        let owned =
+            compute_entity_owned_sections(&entity, stored.accounts_root, stored.account_count)?;
+        let mut entity_consensus = entity_checkpoint.entity_consensus;
+        entity_consensus.state.sections = project_entity_consensus_sections(
+            &entity_consensus.state.sections,
+            owned,
+            &entity_consensus.state.authority,
+        )
+        .map_err(|error| ConcreteRestoreError::EntityManifest(error.to_string()))?;
+        assert_entity_root(
+            &entity_consensus.state.sections,
+            entity_checkpoint.expected_entity_root,
+        )?;
+        finalized_j_height = finalized_j_height.max(entity.last_finalized_j_height);
+        let owner_entity_id = stored.owner_entity_id;
+        let signer_id = entity_checkpoint.signer_id;
+        let key = crate::RuntimeEntityKey::new(owner_entity_id, &signer_id)?;
+        if e_replicas
+            .insert(
+                key.clone(),
+                crate::RuntimeEntityState {
+                    accounts_root: stored.accounts_root,
+                    entity,
+                },
+            )
+            .is_some()
+        {
+            return Err(ConcreteRestoreError::OwnerMismatch);
+        }
+        entity_inits.push(crate::RuntimeEntityInit {
+            entity_id: owner_entity_id,
+            signer_id,
+            accounts,
+            entity_consensus,
+            entity_signer: entity_checkpoint.entity_signer,
+            protocol_fingerprint: stored.protocol_fingerprint,
+        });
+        restored_envelopes.push((
+            key,
+            entity_checkpoint.certified_board_registry,
+            entity_checkpoint.replica_metadata,
+        ));
+    }
     let mut replica = RuntimeReplica::new(
         RuntimeState {
             height: checkpoint.runtime_height,
@@ -275,23 +310,18 @@ pub fn restore_decoded_runtime_checkpoint(
             e_replicas,
         },
         checkpoint.durable_envelope,
-        vec![crate::RuntimeEntityInit {
-            entity_id: stored.owner_entity_id,
-            signer_id: checkpoint.signer_id,
-            accounts,
-            entity_consensus,
-            entity_signer: checkpoint.entity_signer,
-            protocol_fingerprint: stored.protocol_fingerprint,
-        }],
+        entity_inits,
         checkpoint.runtime_seed,
         checkpoint.limits,
     )?;
-    let live = replica
-        .e_replicas
-        .get_mut(&key)
-        .ok_or(ConcreteRestoreError::OwnerMismatch)?;
-    live.install_certified_board_registry(checkpoint.certified_board_registry);
-    live.install_replica_metadata(checkpoint.replica_metadata)?;
+    for (key, certified_board_registry, replica_metadata) in restored_envelopes {
+        let live = replica
+            .e_replicas
+            .get_mut(&key)
+            .ok_or(ConcreteRestoreError::OwnerMismatch)?;
+        live.install_certified_board_registry(certified_board_registry);
+        live.install_replica_metadata(replica_metadata)?;
+    }
     Ok(RestoredRuntime { replica })
 }
 

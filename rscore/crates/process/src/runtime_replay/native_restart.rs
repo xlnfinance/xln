@@ -29,6 +29,12 @@ pub struct NativeRuntimeReady {
     /// Static policy derived from the authenticated Entity checkpoint. It is
     /// used only to materialize each signed Entity context; financial state
     /// itself remains inside the resident replica and path-keyed checkpoint.
+    pub entities: Vec<NativeEntityRuntimeReady>,
+}
+
+#[derive(Clone, Debug)]
+pub struct NativeEntityRuntimeReady {
+    pub entity_id: [u8; 32],
     pub entity_context_policy: Value,
     pub htlc_routing_fee_ppm: u32,
     pub htlc_routing_base_fee: BigInt,
@@ -46,7 +52,7 @@ pub fn restore_native_runtime_processor(
     native_database: impl AsRef<Path>,
     runtime_seed: &str,
     runtime_signer_label: &str,
-    entity_signer_label: &str,
+    entity_signer_labels: Vec<String>,
     workers: usize,
     routes: EntityRouteTable,
     migration_origin: Option<MigrationOrigin>,
@@ -55,7 +61,7 @@ pub fn restore_native_runtime_processor(
         native_database,
         runtime_seed,
         runtime_signer_label,
-        entity_signer_label,
+        entity_signer_labels,
         workers,
         routes,
         migration_origin,
@@ -69,7 +75,7 @@ pub(crate) fn restore_native_replay_processor(
     native_database: impl AsRef<Path>,
     runtime_seed: &str,
     runtime_signer_label: &str,
-    entity_signer_label: &str,
+    entity_signer_labels: Vec<String>,
     workers: usize,
     routes: EntityRouteTable,
     migration_origin: Option<MigrationOrigin>,
@@ -78,7 +84,7 @@ pub(crate) fn restore_native_replay_processor(
         native_database,
         runtime_seed,
         runtime_signer_label,
-        entity_signer_label,
+        entity_signer_labels,
         workers,
         routes,
         migration_origin,
@@ -91,7 +97,7 @@ fn restore_native_runtime(
     native_database: impl AsRef<Path>,
     runtime_seed: &str,
     runtime_signer_label: &str,
-    entity_signer_label: &str,
+    entity_signer_labels: Vec<String>,
     workers: usize,
     routes: EntityRouteTable,
     migration_origin: Option<MigrationOrigin>,
@@ -109,7 +115,7 @@ fn restore_native_runtime(
     drop(source_store);
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_owned(),
-        signer_derivation_label: entity_signer_label.to_owned(),
+        signer_derivation_labels: entity_signer_labels,
         worker_count: workers,
         limits: RuntimeLimits::hlt(),
         swap_market: Arc::new(canonical_swap_market_policy()),
@@ -124,9 +130,22 @@ fn restore_native_runtime(
     }
     .map_err(|error| format!("RRS_NATIVE_RESTART_CHECKPOINT:{error}"))?;
     let checkpoint_period_frames = decoded.limits.checkpoint_period_frames;
-    let entity_context_policy = decoded.entity_context_policy.clone();
-    let htlc_routing_fee_ppm = decoded.htlc_routing_fee_ppm;
-    let htlc_routing_base_fee = decoded.htlc_routing_base_fee.clone();
+    let entities = decoded
+        .entities
+        .iter()
+        .map(|entity| {
+            Ok(NativeEntityRuntimeReady {
+                entity_id: parse_hex32(&entity.entity_snapshot.entity_id)?,
+                entity_context_policy: entity.entity_context_policy.clone(),
+                htlc_routing_fee_ppm: entity.htlc_routing_fee_ppm,
+                htlc_routing_base_fee: entity.htlc_routing_base_fee.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let entity_context_policy = entities
+        .first()
+        .map(|entity| entity.entity_context_policy.clone())
+        .ok_or_else(|| "RRS_NATIVE_RESTART_ENTITY_MISSING".to_string())?;
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RRS_NATIVE_RESTART_RESTORE:{error}"))?;
     if let (Some(origin), Some(first)) = (migration_origin, sources.wal.first()) {
@@ -178,8 +197,19 @@ fn restore_native_runtime(
         processor,
         restore_elapsed: restore_started.elapsed(),
         restored_wal_frames,
-        entity_context_policy,
-        htlc_routing_fee_ppm,
-        htlc_routing_base_fee,
+        entities,
     })
+}
+
+fn parse_hex32(value: &str) -> Result<[u8; 32], String> {
+    let payload = value
+        .strip_prefix("0x")
+        .filter(|value| value.len() == 64)
+        .ok_or_else(|| format!("RRS_NATIVE_RESTART_ENTITY_ID:{value}"))?;
+    let mut output = [0_u8; 32];
+    for (index, byte) in output.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&payload[index * 2..index * 2 + 2], 16)
+            .map_err(|_| format!("RRS_NATIVE_RESTART_ENTITY_ID:{value}"))?;
+    }
+    Ok(output)
 }

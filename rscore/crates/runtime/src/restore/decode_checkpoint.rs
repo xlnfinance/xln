@@ -17,11 +17,12 @@ use crate::{
 use super::concrete_source::{verified_checkpoint_frame, verify_checkpoint_source};
 use super::{
     AccountWireRestoreError, CertifiedBoardRegistryRestoreError, ConcreteCheckpointSource,
-    ConcreteRestoreSourceError, DecodedRuntimeCheckpoint, EntityConsensusRestoreError,
-    EntityGraphRestoreError, EntitySnapshotRestoreError, OrderbookGraphRestoreError,
-    PathCheckpointRestoreError, decode_account_rows, entity_snapshot_from_graph,
-    hydrate_certified_board_state, hydrate_entity_consensus, hydrate_entity_graph,
-    hydrate_orderbook_graph, restore_orderbook_accounts, restore_path_checkpoint,
+    ConcreteRestoreSourceError, DecodedRuntimeCheckpoint, DecodedRuntimeEntityCheckpoint,
+    EntityConsensusRestoreError, EntityGraphRestoreError, EntitySnapshotRestoreError,
+    OrderbookGraphRestoreError, PathCheckpointRestoreError, decode_account_rows,
+    entity_graph_owners, entity_snapshot_from_graph, hydrate_certified_board_state,
+    hydrate_entity_consensus, hydrate_entity_graph, hydrate_orderbook_graph,
+    restore_orderbook_accounts, restore_path_checkpoint,
 };
 
 pub struct ConcreteCheckpointConfiguration {
@@ -30,7 +31,7 @@ pub struct ConcreteCheckpointConfiguration {
     /// derivation label; deriving from that address silently selects a
     /// different key.  Restore proves this label against canonical 0x26 before
     /// either Entity or Account receives the key.
-    pub signer_derivation_label: String,
+    pub signer_derivation_labels: Vec<String>,
     pub worker_count: usize,
     pub limits: RuntimeLimits,
     pub swap_market: Arc<SwapMarketPolicy>,
@@ -93,24 +94,27 @@ fn hex_bytes(bytes: &[u8]) -> String {
 
 fn derive_bound_signer_key(
     runtime_seed: &str,
-    derivation_label: &str,
+    derivation_labels: &[String],
     expected_signer_id: &str,
 ) -> Result<[u8; 32], ConcreteCheckpointDecodeError> {
-    if derivation_label.trim().is_empty() {
-        return Err(invalid("SIGNER_DERIVATION_LABEL_EMPTY"));
+    let expected = expected_signer_id.trim().to_lowercase();
+    let mut seen = BTreeSet::new();
+    for derivation_label in derivation_labels {
+        if derivation_label.trim().is_empty() || !seen.insert(derivation_label) {
+            return Err(invalid("SIGNER_DERIVATION_LABEL_INVALID"));
+        }
+        let private_key = derive_signer_key(runtime_seed, derivation_label)
+            .map_err(|error| invalid(format!("SIGNER_KEY_DERIVATION:{error}")))?;
+        let address =
+            address_of_private_key(&private_key).ok_or_else(|| invalid("SIGNER_KEY_ADDRESS"))?;
+        if format!("0x{}", hex_bytes(&address)) == expected {
+            return Ok(private_key);
+        }
     }
-    let private_key = derive_signer_key(runtime_seed, derivation_label)
-        .map_err(|error| invalid(format!("SIGNER_KEY_DERIVATION:{error}")))?;
-    let address =
-        address_of_private_key(&private_key).ok_or_else(|| invalid("SIGNER_KEY_ADDRESS"))?;
-    let actual = format!("0x{}", hex_bytes(&address));
-    if actual != expected_signer_id.trim().to_lowercase() {
-        return Err(invalid(format!(
-            "SIGNER_DERIVATION_ADDRESS:expected={}:actual={actual}",
-            expected_signer_id.trim().to_lowercase(),
-        )));
-    }
-    Ok(private_key)
+    Err(invalid(format!(
+        "SIGNER_DERIVATION_ADDRESS:expected={expected}:candidates={}",
+        derivation_labels.len()
+    )))
 }
 
 fn object<'a>(
@@ -136,15 +140,6 @@ fn digest(value: &Value, path: &str) -> Result<[u8; 32], ConcreteCheckpointDecod
     Ok(output)
 }
 
-fn entity_text(owner: &[u8; 32]) -> String {
-    let mut output = String::with_capacity(66);
-    output.push_str("0x");
-    for byte in owner {
-        output.push_str(&format!("{byte:02x}"));
-    }
-    output
-}
-
 fn exact_fields(
     object: &Map<String, Value>,
     expected: &[&str],
@@ -161,33 +156,54 @@ fn exact_fields(
     }
 }
 
-fn expected_entity_root(
+fn expected_entity_roots(
     frame: &Map<String, Value>,
-    owner: &[u8; 32],
-) -> Result<[u8; 32], ConcreteCheckpointDecodeError> {
+) -> Result<std::collections::BTreeMap<[u8; 32], [u8; 32]>, ConcreteCheckpointDecodeError> {
     let rows = frame
         .get("canonicalEntityHashes")
         .and_then(Value::as_array)
         .ok_or_else(|| invalid("CANONICAL_ENTITY_HASHES"))?;
-    if rows.len() != 1 {
-        return Err(invalid(format!("CANONICAL_ENTITY_COUNT:{}", rows.len())));
+    if rows.is_empty() {
+        return Err(invalid("CANONICAL_ENTITY_COUNT:0"));
     }
-    let row = object(&rows[0], "canonicalEntityHashes[0]")?;
-    exact_fields(
-        row,
-        &["entityId", "hash", "cellCount"],
-        "canonicalEntityHashes[0]",
-    )?;
-    if row.get("entityId").and_then(Value::as_str) != Some(entity_text(owner).as_str())
-        || row.get("cellCount").and_then(Value::as_u64).is_none()
-    {
-        return Err(invalid("CANONICAL_ENTITY_OWNER"));
+    let mut roots = std::collections::BTreeMap::new();
+    for (index, value) in rows.iter().enumerate() {
+        let path = format!("canonicalEntityHashes[{index}]");
+        let row = object(value, &path)?;
+        exact_fields(row, &["entityId", "hash", "cellCount"], &path)?;
+        let owner = row
+            .get("entityId")
+            .and_then(Value::as_str)
+            .and_then(|value| value.strip_prefix("0x"))
+            .filter(|value| value.len() == 64)
+            .and_then(|value| {
+                let mut output = [0_u8; 32];
+                output
+                    .iter_mut()
+                    .enumerate()
+                    .try_for_each(|(index, byte)| {
+                        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+                        Some(())
+                    })?;
+                Some(output)
+            })
+            .ok_or_else(|| invalid("CANONICAL_ENTITY_OWNER"))?;
+        if row.get("cellCount").and_then(Value::as_u64).is_none()
+            || roots
+                .insert(
+                    owner,
+                    digest(
+                        row.get("hash")
+                            .ok_or_else(|| invalid("CANONICAL_ENTITY_HASH"))?,
+                        "canonicalEntityHashes.hash",
+                    )?,
+                )
+                .is_some()
+        {
+            return Err(invalid("CANONICAL_ENTITY_OWNER"));
+        }
     }
-    digest(
-        row.get("hash")
-            .ok_or_else(|| invalid("CANONICAL_ENTITY_HASH"))?,
-        "canonicalEntityHashes.hash",
-    )
+    Ok(roots)
 }
 
 fn tagged_bigint(value: &Value, path: &str) -> Result<BigInt, ConcreteCheckpointDecodeError> {
@@ -302,30 +318,50 @@ enum AccountCheckpointBinding {
     OfflineTsImport,
 }
 
-/// Decode every canonical checkpoint graph beside the live process. The
-/// returned value is still inert; `restore_decoded_runtime_checkpoint` is the
-/// single point that installs Account shards and the Entity/Runtime replica.
-fn decode_checkpoint(
-    source: ConcreteCheckpointSource,
-    configuration: ConcreteCheckpointConfiguration,
-    binding: AccountCheckpointBinding,
-) -> Result<DecodedRuntimeCheckpoint, ConcreteCheckpointDecodeError> {
-    let machine = verify_checkpoint_source(&source)?;
-    let (frame_value, validated_frame) = verified_checkpoint_frame(&source)?;
-    let frame = object(&frame_value, "frame")?;
-    let graph = hydrate_entity_graph(&source.state_rows)?;
-    let hydrated_certified_board = hydrate_certified_board_state(&source.state_rows, &graph)?;
-    let owner = graph.entity_id;
-    let (stored_accounts, metadata) = restore_path_checkpoint(&source.state_rows, owner)?;
-    match binding {
-        AccountCheckpointBinding::SignedRuntimeFrame => {
-            verify_native_checkpoint_frame(frame)?;
-        }
-        AccountCheckpointBinding::OfflineTsImport => {
-            verify_offline_import_rows(frame, &source.state_rows, &stored_accounts)?;
+fn entity_jurisdiction<'a>(core: &'a Value, fallback: Option<&'a Value>) -> Option<&'a Value> {
+    core.as_object()
+        .and_then(|core| core.get("config"))
+        .and_then(Value::as_object)
+        .and_then(|config| config.get("jurisdiction"))
+        .and_then(Value::as_object)
+        .and_then(|jurisdiction| jurisdiction.get("name"))
+        .or(fallback)
+}
+
+fn validate_checkpoint_owners(
+    rows: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+    owners: &BTreeSet<[u8; 32]>,
+) -> Result<(), ConcreteCheckpointDecodeError> {
+    for key in rows.keys() {
+        let owner = key
+            .get(1..33)
+            .and_then(|value| <[u8; 32]>::try_from(value).ok())
+            .ok_or_else(|| invalid("STATE_ROW_OWNER"))?;
+        if !owners.contains(&owner) {
+            return Err(invalid(format!(
+                "STATE_ROW_OWNER_ORPHAN:{}",
+                hex_bytes(&owner)
+            )));
         }
     }
-    let expected_entity_root = expected_entity_root(frame, &owner)?;
+    Ok(())
+}
+
+fn decode_entity_checkpoint(
+    source: &ConcreteCheckpointSource,
+    frame: &Map<String, Value>,
+    configuration: &ConcreteCheckpointConfiguration,
+    binding: AccountCheckpointBinding,
+    owner: [u8; 32],
+    expected_entity_root: [u8; 32],
+    active_jurisdiction: Option<&Value>,
+) -> Result<DecodedRuntimeEntityCheckpoint, ConcreteCheckpointDecodeError> {
+    let graph = hydrate_entity_graph(&source.state_rows, owner)?;
+    let hydrated_certified_board = hydrate_certified_board_state(&source.state_rows, &graph)?;
+    let (stored_accounts, metadata) = restore_path_checkpoint(&source.state_rows, owner)?;
+    if matches!(binding, AccountCheckpointBinding::OfflineTsImport) {
+        verify_offline_import_rows(frame, &source.state_rows, &stored_accounts)?;
+    }
     let account_rows = decode_account_rows(&stored_accounts.accounts)?;
     let known_accounts = account_rows
         .iter()
@@ -334,10 +370,10 @@ fn decode_checkpoint(
     let restored_orderbook_accounts = restore_orderbook_accounts(&account_rows);
     let core = object(&graph.core, "entity.core")?;
     let (htlc_routing_fee_ppm, htlc_routing_base_fee) = htlc_infrastructure_state(core)?;
-    let active_jurisdiction = machine
-        .as_object()
-        .and_then(|value| value.get("activeJurisdiction"));
-    let entity_context_policy = entity_context_policy_from_core(&graph.core, active_jurisdiction)?;
+    let entity_context_policy = entity_context_policy_from_core(
+        &graph.core,
+        entity_jurisdiction(&graph.core, active_jurisdiction),
+    )?;
     let orderbook = hydrate_orderbook_graph(
         &source.state_rows,
         &owner,
@@ -355,10 +391,9 @@ fn decode_checkpoint(
         None if hydrated_certified_board.records.is_empty() => {}
         None => return Err(invalid("CERTIFIED_BOARD_RECORDS_WITHOUT_STATE")),
     }
-    let certified_board_registry = hydrated_certified_board.registry;
     let signer_private_key = derive_bound_signer_key(
         &configuration.runtime_seed,
-        &configuration.signer_derivation_label,
+        &configuration.signer_derivation_labels,
         &metadata.signer_id,
     )?;
     let (entity_consensus, entity_signer) = hydrate_entity_consensus(
@@ -367,6 +402,68 @@ fn decode_checkpoint(
         signer_private_key,
         configuration.board_delays,
     )?;
+    Ok(DecodedRuntimeEntityCheckpoint {
+        stored_accounts,
+        entity_snapshot,
+        entity_consensus,
+        entity_signer,
+        certified_board_registry: hydrated_certified_board.registry,
+        entity_context_policy,
+        htlc_routing_fee_ppm,
+        htlc_routing_base_fee,
+        replica_metadata: metadata.value,
+        expected_entity_root,
+        signer_private_key,
+        signer_id: metadata.signer_id,
+        swap_market: Arc::clone(&configuration.swap_market),
+    })
+}
+
+/// Decode every canonical checkpoint graph beside the live process. The
+/// returned value is still inert; `restore_decoded_runtime_checkpoint` is the
+/// single point that installs Account shards and the Entity/Runtime replica.
+fn decode_checkpoint(
+    source: ConcreteCheckpointSource,
+    configuration: ConcreteCheckpointConfiguration,
+    binding: AccountCheckpointBinding,
+) -> Result<DecodedRuntimeCheckpoint, ConcreteCheckpointDecodeError> {
+    let machine = verify_checkpoint_source(&source)?;
+    let (frame_value, validated_frame) = verified_checkpoint_frame(&source)?;
+    let frame = object(&frame_value, "frame")?;
+    match binding {
+        AccountCheckpointBinding::SignedRuntimeFrame => {
+            verify_native_checkpoint_frame(frame)?;
+        }
+        AccountCheckpointBinding::OfflineTsImport => {
+            if entity_graph_owners(&source.state_rows)?.len() != 1 {
+                return Err(invalid("OFFLINE_IMPORT_ENTITY_COUNT"));
+            }
+        }
+    }
+    let owners = entity_graph_owners(&source.state_rows)?;
+    let owner_set = owners.iter().copied().collect::<BTreeSet<_>>();
+    validate_checkpoint_owners(&source.state_rows, &owner_set)?;
+    let expected_roots = expected_entity_roots(frame)?;
+    if expected_roots.keys().copied().collect::<BTreeSet<_>>() != owner_set {
+        return Err(invalid("CANONICAL_ENTITY_OWNER_SET"));
+    }
+    let active_jurisdiction = machine
+        .as_object()
+        .and_then(|value| value.get("activeJurisdiction"));
+    let entities = owners
+        .into_iter()
+        .map(|owner| {
+            decode_entity_checkpoint(
+                &source,
+                frame,
+                &configuration,
+                binding,
+                owner,
+                expected_roots[&owner],
+                active_jurisdiction,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let durable_envelope = RuntimeDurableEnvelope::decode(&machine, validated_frame.frame_hash)?;
     // A same-engine restart retains its operator persistence cadence. During
     // the explicit offline TS -> Rust ownership transfer, the supplied native
@@ -394,21 +491,9 @@ fn decode_checkpoint(
         runtime_timestamp: validated_frame.timestamp,
         durable_envelope,
         expected_protocol_fingerprint: configuration.expected_protocol_fingerprint,
-        stored_accounts,
-        entity_snapshot,
-        entity_consensus,
-        entity_signer,
-        certified_board_registry,
-        entity_context_policy,
-        htlc_routing_fee_ppm,
-        htlc_routing_base_fee,
-        replica_metadata: metadata.value,
-        expected_entity_root,
-        signer_private_key,
-        signer_id: metadata.signer_id,
+        entities,
         worker_count: configuration.worker_count,
         limits,
-        swap_market: configuration.swap_market,
     })
 }
 
@@ -455,10 +540,10 @@ mod tests {
         let owner_address = address_of_private_key(&owner_key).expect("owner address");
         let signer_id = format!("0x{}", hex_bytes(&owner_address));
         assert_eq!(
-            derive_bound_signer_key(seed, "owner", &signer_id).expect("bound owner"),
+            derive_bound_signer_key(seed, &["owner".into()], &signer_id).expect("bound owner"),
             owner_key,
         );
-        let error = derive_bound_signer_key(seed, "wrong-label", &signer_id)
+        let error = derive_bound_signer_key(seed, &["wrong-label".into()], &signer_id)
             .expect_err("wrong label must not bind persisted signer");
         assert!(error.to_string().contains("SIGNER_DERIVATION_ADDRESS"));
     }
@@ -533,6 +618,24 @@ mod tests {
             error
                 .to_string()
                 .contains("NATIVE_ACCOUNT_CHECKPOINT_REF_FORBIDDEN")
+        );
+    }
+
+    #[test]
+    fn checkpoint_owner_gate_rejects_paths_without_an_entity_manifest() {
+        let owner = [0x11; 32];
+        let owners = BTreeSet::from([owner]);
+        let valid =
+            std::collections::BTreeMap::from([([vec![0x17], owner.to_vec()].concat(), Vec::new())]);
+        validate_checkpoint_owners(&valid, &owners).expect("known Entity owner");
+
+        let orphan =
+            std::collections::BTreeMap::from([([vec![0x17], vec![0x99; 32]].concat(), Vec::new())]);
+        assert!(
+            validate_checkpoint_owners(&orphan, &owners)
+                .unwrap_err()
+                .to_string()
+                .contains("STATE_ROW_OWNER_ORPHAN")
         );
     }
 }

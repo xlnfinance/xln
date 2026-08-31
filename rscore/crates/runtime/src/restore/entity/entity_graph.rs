@@ -264,17 +264,14 @@ fn wrap_core(core: Value) -> Value {
 
 fn parse_entity_manifest(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+    entity_id: [u8; 32],
 ) -> Result<ParsedEntityManifest, EntityGraphRestoreError> {
-    let roots = rows
-        .iter()
-        .filter(|(key, _)| key.len() == 33 && key[0] == 0x21)
-        .collect::<Vec<_>>();
-    let [(root_key, root_bytes)] = roots.as_slice() else {
-        return Err(invalid(format!("ROOT_COUNT:{}", roots.len())));
-    };
-    let entity_id: [u8; 32] = root_key[1..]
-        .try_into()
-        .map_err(|_| invalid("ROOT_OWNER"))?;
+    let mut root_key = Vec::with_capacity(33);
+    root_key.push(0x21);
+    root_key.extend_from_slice(&entity_id);
+    let root_bytes = rows
+        .get(&root_key)
+        .ok_or_else(|| invalid(format!("ROOT_MISSING:{}", render_hex(&entity_id))))?;
     let manifest = decode_storage_payload(root_bytes)?;
     let manifest = object(&manifest, "manifest")?;
     exact_fields(manifest, &["schemaVersion", "fields", "trees"], "manifest")?;
@@ -311,11 +308,34 @@ fn parse_entity_manifest(
         return Err(invalid("TREE_DUPLICATE"));
     }
     Ok(ParsedEntityManifest {
-        root_key: (*root_key).clone(),
+        root_key,
         entity_id,
         fields,
         trees,
     })
+}
+
+fn render_hex(value: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+
+    value.iter().fold(String::from("0x"), |mut output, byte| {
+        let _ = write!(output, "{byte:02x}");
+        output
+    })
+}
+
+pub fn entity_graph_owners(
+    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+) -> Result<Vec<[u8; 32]>, EntityGraphRestoreError> {
+    let owners = rows
+        .keys()
+        .filter(|key| key.len() == 33 && key[0] == 0x21)
+        .map(|key| key[1..].try_into().map_err(|_| invalid("ROOT_OWNER")))
+        .collect::<Result<Vec<_>, _>>()?;
+    if owners.is_empty() {
+        return Err(invalid("ROOT_COUNT:0"));
+    }
+    Ok(owners)
 }
 
 /// Read the authenticated projection descriptors from the one canonical
@@ -323,8 +343,9 @@ fn parse_entity_manifest(
 /// metadata copy merely to rewrite the next checkpoint.
 pub(crate) fn entity_projection_metadata(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+    entity_id: [u8; 32],
 ) -> Result<EntityCheckpointProjectionMetadata, EntityGraphRestoreError> {
-    let manifest = parse_entity_manifest(rows)?;
+    let manifest = parse_entity_manifest(rows, entity_id)?;
     Ok(EntityCheckpointProjectionMetadata::new(
         manifest.entity_id,
         manifest.fields,
@@ -334,8 +355,9 @@ pub(crate) fn entity_projection_metadata(
 
 pub fn hydrate_entity_graph(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+    entity_id: [u8; 32],
 ) -> Result<HydratedEntityGraph, EntityGraphRestoreError> {
-    let manifest = parse_entity_manifest(rows)?;
+    let manifest = parse_entity_manifest(rows, entity_id)?;
     let entity_id = manifest.entity_id;
     let fields = manifest.fields;
     let trees = manifest.trees;
@@ -375,7 +397,9 @@ pub fn hydrate_entity_graph(
     }
     let actual_entity_rows = rows
         .keys()
-        .filter(|key| ENTITY_PATH_TAGS.contains(&key[0]))
+        .filter(|key| {
+            ENTITY_PATH_TAGS.contains(&key[0]) && key.get(1..33) == Some(entity_id.as_slice())
+        })
         .cloned()
         .collect::<BTreeSet<_>>();
     if actual_entity_rows != used {

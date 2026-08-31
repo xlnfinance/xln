@@ -409,21 +409,6 @@ pub fn restore_path_checkpoint(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
     owner: [u8; 32],
 ) -> Result<(StoredRscoreCheckpoint, RestoredReplicaMetadata), PathCheckpointRestoreError> {
-    for key in rows.keys().filter(|key| {
-        key.first().is_some_and(|tag| {
-            [
-                ACCOUNT_META_TAG,
-                ACCOUNT_ROW_TAG,
-                ACCOUNT_NODE_TAG,
-                REPLICA_META_TAG,
-            ]
-            .contains(tag)
-        })
-    }) {
-        if key.get(1..33) != Some(owner.as_slice()) {
-            return Err(invalid("FOREIGN_OWNER_ROW"));
-        }
-    }
     let meta = account_meta(rows, owner)?;
     let mut nodes_by_account = BTreeMap::<([u8; 32], u8), Vec<(&Vec<u8>, &Vec<u8>)>>::new();
     for (key, bytes) in owner_rows(rows, ACCOUNT_NODE_TAG, &owner) {
@@ -590,14 +575,13 @@ mod tests {
     }
 
     #[test]
-    fn foreign_account_graph_is_rejected() {
+    fn per_entity_reader_ignores_rows_owned_by_another_entity() {
         let (mut rows, owner) = fixture();
         rows.insert(
             [vec![ACCOUNT_META_TAG], vec![0x99; 32]].concat(),
             vec![0x03, 0xc0],
         );
-        let error = restore_path_checkpoint(&rows, owner).expect_err("foreign owner must fail");
-        assert!(error.to_string().contains("FOREIGN_OWNER_ROW"));
+        restore_path_checkpoint(&rows, owner).expect("global owner gate validates the full graph");
     }
 
     #[test]
