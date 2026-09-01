@@ -311,14 +311,14 @@ fn lifecycle_admission_is_idempotent_across_batch_queue_and_pending_frame() {
         .admit_txs(vec![policy.clone(), policy.clone()], "test")
         .expect("exact lifecycle retry in one batch");
     assert_eq!((batch.admitted, batch.duplicates), (1, 1));
-    assert_eq!(left.account.mempool(), &[policy.clone()]);
+    assert_eq!(left.account.mempool(), std::slice::from_ref(&policy));
 
     let queued = left
         .account
         .admit_txs(vec![policy.clone()], "test")
         .expect("exact queued lifecycle retry");
     assert_eq!((queued.admitted, queued.duplicates), (0, 1));
-    assert_eq!(left.account.mempool(), &[policy.clone()]);
+    assert_eq!(left.account.mempool(), std::slice::from_ref(&policy));
 
     let ProposalOutcome::Proposed(_) = propose_account_frame(
         &mut left.account,

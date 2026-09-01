@@ -946,7 +946,7 @@ mod key_tests {
             .expect("route");
         assert!(route.secret_ack_pending);
         assert_eq!(route.outbound_entity.as_deref(), Some("downstream"));
-        assert!(state.crontab.as_ref().expect("crontab").hooks.len() > 0);
+        assert!(!state.crontab.as_ref().expect("crontab").hooks.is_empty());
     }
 
     #[test]
