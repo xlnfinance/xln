@@ -6,10 +6,32 @@ import {
   type RouteOwner,
   type SurfaceId,
 } from './surfaces';
+import {
+  PREPARED_GENERATED_INPUTS,
+  isCommandGeneratedInput,
+} from './generated-inputs';
 
 export const DEVELOPMENT_GATEWAY_PORT = 8080;
 export const DEVELOPMENT_EDGE_PORT = 8082;
 export const DEVELOPMENT_APP_PREFIX = '/__app' as const;
+
+export const parseDevelopmentPortOffset = (raw: string | undefined): number => {
+  if (raw === undefined) return 0;
+  const offset = Number(raw);
+  if (!Number.isSafeInteger(offset)) throw new Error(`DEVELOPMENT_PORT_OFFSET_INVALID:${raw}`);
+  return offset;
+};
+
+export const resolveDevelopmentSurfacePort = (
+  developmentPort: number,
+  offset: number,
+): number => {
+  const port = developmentPort + offset;
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`DEVELOPMENT_SURFACE_PORT_INVALID:${developmentPort}:${offset}`);
+  }
+  return port;
+};
 
 export const parseDevelopmentGatewayPort = (raw: string | undefined): number => {
   if (raw === undefined) return DEVELOPMENT_GATEWAY_PORT;
@@ -60,6 +82,11 @@ const findSurfaceByAppPrefix = (pathname: string): SurfaceId | undefined =>
     return pathname === prefix || pathname.startsWith(`${prefix}/`);
   })?.id;
 
+const findSurfaceByGeneratedInput = (pathname: string): SurfaceId | undefined =>
+  PREPARED_GENERATED_INPUTS.find((input) =>
+    isCommandGeneratedInput(input) &&
+    input.producer.outputRoutes.some((rule) => matchesRoute(pathname, rule)))?.owner;
+
 const findSurfaceByAsset = (pathname: string): SurfaceId | undefined =>
   SURFACES.find(({ assetDirectory, assetRoutes }) =>
     pathname === `/${assetDirectory}` ||
@@ -97,6 +124,11 @@ export const resolveDevelopmentGatewayRequest = (rawUrl: string): DevelopmentGat
   const appPrefixOwner = findSurfaceByAppPrefix(url.pathname);
   if (appPrefixOwner !== undefined) return { kind: 'proxy', owner: appPrefixOwner, rewrite: 'none' };
 
+  const generatedInputOwner = findSurfaceByGeneratedInput(url.pathname);
+  if (generatedInputOwner !== undefined) {
+    return { kind: 'proxy', owner: generatedInputOwner, rewrite: 'app-base' };
+  }
+
   if (isEdgeRoute(url.pathname)) return { kind: 'proxy', owner: 'edge', rewrite: 'none' };
   const assetOwner = findSurfaceByAsset(url.pathname);
   if (assetOwner !== undefined) return { kind: 'proxy', owner: assetOwner, rewrite: 'app-base' };
@@ -117,10 +149,11 @@ export const rewriteDevelopmentGatewayUrl = (
 
 export const createDevelopmentGatewayTargets = (
   edgeTarget = `http://127.0.0.1:${DEVELOPMENT_EDGE_PORT}`,
+  surfacePortOffset = 0,
 ): Readonly<Record<GatewayProxyOwner, string>> => ({
   edge: edgeTarget,
-  site: `http://127.0.0.1:${SURFACES[0].developmentPort}`,
-  docs: `http://127.0.0.1:${SURFACES[1].developmentPort}`,
-  wallet: `http://127.0.0.1:${SURFACES[2].developmentPort}`,
-  ops: `http://127.0.0.1:${SURFACES[3].developmentPort}`,
+  site: `http://127.0.0.1:${resolveDevelopmentSurfacePort(SURFACES[0].developmentPort, surfacePortOffset)}`,
+  docs: `http://127.0.0.1:${resolveDevelopmentSurfacePort(SURFACES[1].developmentPort, surfacePortOffset)}`,
+  wallet: `http://127.0.0.1:${resolveDevelopmentSurfacePort(SURFACES[2].developmentPort, surfacePortOffset)}`,
+  ops: `http://127.0.0.1:${resolveDevelopmentSurfacePort(SURFACES[3].developmentPort, surfacePortOffset)}`,
 });

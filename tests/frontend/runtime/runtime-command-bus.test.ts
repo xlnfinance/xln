@@ -13,7 +13,7 @@ import {
   type CommandReceipt,
 } from '../../../frontend/src/lib/stores/commands/runtimeCommandBus';
 import { RuntimeAdapterError } from '../../../core/api/runtime-adapter/errors';
-import { listUnresolvedRemoteRuntimeCommandIntents } from '../../../frontend/src/lib/stores/commands/runtimeCommandIntent';
+import { listUnresolvedRemoteRuntimeCommandIntents } from '../../../frontend/packages/browser/src/runtime-command-intent';
 import {
   findCommittedEmbeddedRuntimeInputHeight,
   findPersistedEmbeddedRuntimeInputHeight,
@@ -377,11 +377,11 @@ test('capability-only one-shot response loss is not offered as a retryable payme
 });
 
 test('remote command journal persists protected replayable intents outside localStorage', () => {
-  const intentSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandIntent.ts', 'utf8');
-  const codecSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandIntentCodec.ts', 'utf8');
-  const indexedDbSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandJournalIndexedDb.ts', 'utf8');
-  const keyringSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandJournalKeyring.ts', 'utf8');
-  const storageSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandJournalStorage.ts', 'utf8');
+  const intentSource = readFileSync('frontend/packages/browser/src/runtime-command-intent.ts', 'utf8');
+  const codecSource = readFileSync('frontend/packages/browser/src/runtime-command-intent-codec.ts', 'utf8');
+  const indexedDbSource = readFileSync('frontend/packages/browser/src/runtime-command-journal-indexed-db.ts', 'utf8');
+  const keyringSource = readFileSync('frontend/packages/browser/src/runtime-command-journal-keyring.ts', 'utf8');
+  const storageSource = readFileSync('frontend/packages/browser/src/runtime-command-journal-storage.ts', 'utf8');
   const routeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const journalSource = `${intentSource}\n${codecSource}\n${indexedDbSource}\n${keyringSource}\n${storageSource}`;
 
@@ -392,7 +392,7 @@ test('remote command journal persists protected replayable intents outside local
   expect(indexedDbSource).toContain('db.deleteObjectStore(REMOVED_META_STORE)');
   expect(storageSource).toContain('AES-GCM');
   expect(storageSource).toContain('safeParse');
-  expect(storageSource).toContain("from './runtimeCommandJournalIndexedDb'");
+  expect(storageSource).toContain("from './runtime-command-journal-indexed-db'");
   expect(routeSource).toContain('resumeRemoteRuntimeCommandIntents');
 });
 

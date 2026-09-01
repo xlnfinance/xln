@@ -9,7 +9,7 @@ import {
   titleCaseMarketCapValue,
   type MarketCapControlKey,
   type MarketCapControls,
-} from '$lib/market-cap/market-cap-page-model';
+} from '../../../packages/ui/src/market-cap-page-model';
 
 type SelectOption = Readonly<{ value: string; label: string }>;
 

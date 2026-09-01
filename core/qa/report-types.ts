@@ -1,3 +1,6 @@
+import type { QaCandidateIdentity } from './candidate-types';
+import type { QaSeveritySignal } from './severity';
+
 export type QaSlowStep = {
   label: string;
   ms: number;
@@ -418,18 +421,6 @@ export type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'lo
   browserIssues?: QaBrowserIssue[];
 };
 
-// QA run evidence (per-run artifacts + the history DB) lives under QA_EVIDENCE_ROOT so
-// it can be pinned to a persistent location on prod — outside the git checkout that
-// the canonical platform deploy hard-resets/cleans — while defaulting to local .logs for dev.
-// Curated story screenshots stay tracked in-repo and ship with the code deploy, so
-// their root is intentionally left relative to the checkout.
-const QA_EVIDENCE_ROOT = process.env['QA_EVIDENCE_ROOT']
-  ? resolve(process.env['QA_EVIDENCE_ROOT'])
-  : resolve(process.cwd(), '.logs');
-export const QA_LOGS_ROOT = resolve(QA_EVIDENCE_ROOT, 'e2e-parallel');
-export const QA_STORY_SCREENSHOTS_ROOT = resolve(process.cwd(), 'tests', 'e2e', 'screenshots');
-export const QA_HISTORY_DB_PATH = resolve(QA_EVIDENCE_ROOT, 'qa-history.sqlite');
-
 export type QaHistoryEntry = {
   runId: string;
   createdAt: number;
@@ -529,6 +520,3 @@ export type QaUxReleasePackAudit = {
   missingGroups: string[];
   missingReasons: string[];
 };
-import { resolve } from 'node:path';
-import type { QaCandidateIdentity } from './candidate';
-import type { QaSeveritySignal } from './severity';

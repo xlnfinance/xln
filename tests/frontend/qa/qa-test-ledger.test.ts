@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { QaTestLedgerEntry } from '../../../frontend/src/lib/qa/types';
+import type { QaTestLedgerEntry } from '../../../frontend/packages/runtime-client/src/qa-types';
 import {
   filterQaTestLedger,
   sortQaTestLedger,
   summarizeQaTestLedger,
   type QaTestLedgerSortKey,
-} from '../../../frontend/src/lib/qa/testLedger';
+} from '../../../frontend/packages/runtime-client/src/qa-test-ledger';
 
 const rows: QaTestLedgerEntry[] = [
   {

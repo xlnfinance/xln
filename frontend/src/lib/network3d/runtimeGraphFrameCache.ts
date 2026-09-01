@@ -1,5 +1,5 @@
-import { get, writable } from 'svelte/store';
 import type { RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
+import { createObservableStore } from '$lib/utils/observableStore';
 import type { Runtime } from '$lib/stores/runtimeStore';
 import {
   invalidateNetworkGraphSubscription,
@@ -9,7 +9,7 @@ import {
   type NetworkRuntimeChangeSubscription,
 } from './timeline/networkTimelineLoader';
 
-export const runtimeGraphLiveFrameCache = writable<Map<string, RuntimeAdapterGraphFrame>>(new Map());
+export const runtimeGraphLiveFrameCache = createObservableStore<Map<string, RuntimeAdapterGraphFrame>>(new Map());
 
 const DEFAULT_GRAPH_ATTACH_TIMEOUT_MS = 6_500;
 const DEFAULT_GRAPH_READ_TIMEOUT_MS = 16_000;
@@ -262,7 +262,7 @@ export const clearRuntimeGraphFrameCache = (runtimeId?: string): void => {
     runtimeGraphLiveFrameCache.set(new Map());
     return;
   }
-  const current = get(runtimeGraphLiveFrameCache);
+  const current = runtimeGraphLiveFrameCache.get();
   if (!current.has(normalized)) return;
   const next = new Map(current);
   next.delete(normalized);

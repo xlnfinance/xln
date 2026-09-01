@@ -103,6 +103,7 @@ input { font: inherit; }
 @media (max-width: 760px) {
   .ops-shell { display: block; }
   .ops-rail {
+    position: static;
     z-index: 10;
     grid-template-columns: auto 1fr;
     grid-template-rows: auto auto;
@@ -116,13 +117,14 @@ input { font: inherit; }
   .ops-rail-context { justify-self: end; margin: 0; text-align: right; }
   .ops-nav {
     grid-column: 1 / -1;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.25rem;
     margin: 0.8rem -1rem 0;
     padding: 0 1rem 0.75rem;
-    overflow-x: auto;
+    overflow: visible;
   }
-  .ops-nav a { flex: 0 0 auto; min-height: 2.25rem; padding: 0 0.65rem; font-size: 0.78rem; }
+  .ops-nav a { min-height: 2.25rem; padding: 0 0.25rem; font-size: 0.72rem; text-align: center; }
   .ops-nav i,
   .ops-rail > p { display: none; }
   .ops-canvas { padding: 1.4rem 1rem 2rem; }

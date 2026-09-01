@@ -243,6 +243,7 @@ const ensureScenarioRpcReady = async (rpcUrl: string, expectedChainId: number): 
 export interface ScenarioConfig {
   name: string;
   signerIds: string[];
+  existingEnv?: RuntimeReplica; // Browser recorders retain this exact replica identity.
   mode?: JAdapterMode;       // default: JADAPTER_MODE env var → 'rpc'
   rpcUrl?: string;            // default: ANVIL_RPC env var → 'http://localhost:8545'
   jurisdictionName?: string;  // default: `${name} Demo`
@@ -268,6 +269,25 @@ export interface RegisteredEntity {
   name: string;
   signer: string;
 }
+
+const requireFreshScenarioEnv = (env: RuntimeReplica, name: string): RuntimeReplica => {
+  const runtimeTxs = env.runtimeMempool?.runtimeTxs.length ?? 0;
+  const entityInputs = env.runtimeMempool?.entityInputs.length ?? 0;
+  const queuedOutputs = (env.pendingOutputs?.length ?? 0) + (env.pendingNetworkOutputs?.length ?? 0);
+  const networkInputs = env.networkInbox?.length ?? 0;
+  if (
+    env.state.height !== 0 || env.state.eReplicas.size !== 0 || env.state.jReplicas.size !== 0 ||
+    runtimeTxs !== 0 || entityInputs !== 0 || queuedOutputs !== 0 || networkInputs !== 0
+  ) {
+    throw new Error(
+      `SCENARIO_BOOT_ENV_NOT_FRESH:${name}:height=${env.state.height}` +
+      `:entities=${env.state.eReplicas.size}:jurisdictions=${env.state.jReplicas.size}` +
+      `:runtimeTxs=${runtimeTxs}:entityInputs=${entityInputs}` +
+      `:outputs=${queuedOutputs}:networkInputs=${networkInputs}`,
+    );
+  }
+  return env;
+};
 
 // ============================================================================
 // BOOT
@@ -357,9 +377,11 @@ export async function ensureJAdapter(
 export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBootResult> {
   const { createEmptyEnv } = await import('../../runtime');
 
-  // 1. Create fresh env with deterministic seed
+  // 1. Create a fresh env, or retain the browser recorder's exact trace key.
   const seed = config.seed ?? `${config.name}-scenario-seed`;
-  const env = createEmptyEnv(seed);
+  const env = config.existingEnv
+    ? requireFreshScenarioEnv(config.existingEnv, config.name)
+    : createEmptyEnv(seed);
   env.scenarioMode = true;
   env.state.timestamp = 1;
   setScenarioStorageEnabled(env, config.storageEnabled ?? false);

@@ -38,10 +38,10 @@ let commandDependencies: Promise<CommandDependencies> | null = null;
 
 const loadCommandDependencies = (): Promise<CommandDependencies> => {
   commandDependencies ??= Promise.all([
-    import('../../../src/lib/stores/commands/runtimeCommandIntent.ts'),
-    import('../../../src/lib/stores/commands/runtimeCommandIntentCodec.ts'),
-    import('../../../src/lib/stores/commands/runtimeCommandJournalKeyring.ts'),
-    import('../../../src/lib/utils/runtime/runtimeFailure.ts'),
+    import('../../../packages/browser/src/runtime-command-intent.ts'),
+    import('../../../packages/browser/src/runtime-command-intent-codec.ts'),
+    import('../../../packages/browser/src/runtime-command-journal-keyring.ts'),
+    import('../../../packages/runtime-client/src/runtime-failure.ts'),
   ]).then(([intent, codec, keyring, failure]) => ({
     classify: failure.classifyRuntimeFailure,
     createCommandId: codec.createRuntimeCommandId,

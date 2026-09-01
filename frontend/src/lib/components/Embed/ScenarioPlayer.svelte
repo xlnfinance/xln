@@ -9,93 +9,23 @@
   } from '$lib/stores/xlnStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { errorLog } from '$lib/stores/errorLogStore';
-  import type { RuntimeReplica, EnvSnapshot, XLNModule } from '@xln/core/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
+  import {
+    EMPTY_SCENARIO_VISUAL as emptyVisual,
+    DEFAULT_SCENARIO_ID as defaultScenarioId,
+    SCENARIO_OPTIONS as scenarioOptions,
+    buildScenarioFrameVisual as buildFrameVisual,
+    focusScenarioFrameIndex as focusFrameIndex,
+    formatScenarioBuilderText as formatBuilderText,
+  } from '../../../../packages/runtime-client/src/scenario-player-model';
+  import {
+    formatScenarioError as formatErrorMessage,
+    recordBrowserScenario,
+    stopScenarioPreviewInfra as stopPreviewInfra,
+  } from '../../../../packages/runtime-client/src/scenario-runtime';
 
-  type ScenarioOption = {
-    id: string;
-    runtimeId: string;
-    runner?: string;
-    title: string;
-    description: string;
-    intent: string;
-    tags: string[];
-    focus: string[];
-  };
-
-  type FrameNode = {
-    id: string;
-    label: string;
-    x: number;
-    y: number;
-    isHub: boolean;
-    disputed: boolean;
-    debtCount: number;
-    accountCount: number;
-  };
-
-  type FrameEdge = {
-    key: string;
-    from: FrameNode;
-    to: FrameNode;
-    disputed: boolean;
-  };
-
-  type FrameVisual = {
-    nodes: FrameNode[];
-    edges: FrameEdge[];
-    activeDisputes: number;
-    debtCount: number;
-    accountCount: number;
-    title: string;
-    description: string;
-    collapse: boolean;
-  };
-
-  const scenarioOptions: ScenarioOption[] = [
-    {
-      id: 'hub-collapse',
-      runtimeId: 'dispute-lifecycle',
-      runner: 'disputeLifecycle',
-      title: 'Hub collapse',
-      description: 'Unilateral last-resort dispute: user freezes the hub account, waits timeout, finalizes, then reopens.',
-      intent: 'Watch what happens when the hub stops cooperating.',
-      tags: ['dispute', 'last resort', 'hub'],
-      focus: ['dispute', 'freeze', 'finalize', 'debt', 'reopen'],
-    },
-    {
-      id: 'ahb',
-      runtimeId: 'ahb',
-      runner: 'ahb',
-      title: 'Alice-Hub-Bob Triangle',
-      description: 'Full bilateral flow: reserves, hub routing, collateral, settlements, disputes, and cooperative close.',
-      intent: 'Inspect the full wallet and hub mechanics over time.',
-      tags: ['bilateral', 'routing', 'settlement'],
-      focus: ['Alice', 'Hub', 'Bob', 'payment', 'settlement'],
-    },
-    {
-      id: 'settle',
-      runtimeId: 'settle',
-      runner: 'settle',
-      title: 'Settlement workspace',
-      description: 'Bilateral settlement negotiation: propose, counter, approve, execute, reject.',
-      intent: 'Build and inspect settlement UI narratives quickly.',
-      tags: ['settlement', 'workspace'],
-      focus: ['Settlement', 'propose', 'signed', 'reject'],
-    },
-    {
-      id: 'swap',
-      runtimeId: 'swap',
-      runner: 'swap',
-      title: 'Swap orderbook',
-      description: 'Same-jurisdiction bilateral orderbook with limit orders, fills, holds, and cancel flow.',
-      intent: 'Check how trading state evolves frame by frame.',
-      tags: ['swap', 'orderbook'],
-      focus: ['swap', 'order', 'fill', 'cancel'],
-    },
-  ];
-
-  let selectedScenarioId = scenarioOptions[0]!.id;
-  let selectedScenario = scenarioOptions[0]!;
+  let selectedScenarioId = defaultScenarioId;
+  let selectedScenario = scenarioOptions.find((scenario) => scenario.id === defaultScenarioId)!;
   let frames: EnvSnapshot[] = [];
   let loadedEnv: RuntimeReplica | null = null;
   let currentFrame = 0;
@@ -109,266 +39,16 @@
   let builderInspectText = 'No frame loaded.';
   let diagnosticMessages: string[] = [];
 
-  const emptyVisual: FrameVisual = {
-    nodes: [],
-    edges: [],
-    activeDisputes: 0,
-    debtCount: 0,
-    accountCount: 0,
-    title: '',
-    description: '',
-    collapse: false,
-  };
-
-  $: selectedScenario = scenarioOptions.find((scenario) => scenario.id === selectedScenarioId) || scenarioOptions[0]!;
+  $: selectedScenario = scenarioOptions.find((scenario) => scenario.id === selectedScenarioId)
+    || scenarioOptions.find((scenario) => scenario.id === defaultScenarioId)!;
   $: activeFrame = frames[currentFrame] || null;
   $: visual = activeFrame ? buildFrameVisual(activeFrame, selectedScenario) : emptyVisual;
   $: progressText = frames.length > 0 ? `${currentFrame + 1}/${frames.length}` : '0/0';
   $: builderInspectText = formatBuilderText(activeFrame, visual, selectedScenario, currentFrame, frames.length);
 
-  function mapEntries<T = unknown>(value: unknown): Array<[string, T]> {
-    if (value instanceof Map) return Array.from(value.entries()).map(([key, item]) => [String(key), item as T]);
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return Object.entries(value as Record<string, T>);
-    }
-    return [];
-  }
-
-  function mapSize(value: unknown): number {
-    if (value instanceof Map) return value.size;
-    if (value && typeof value === 'object' && !Array.isArray(value)) return Object.keys(value).length;
-    return 0;
-  }
-
-  function normalizeId(value: unknown): string {
-    return String(value || '').trim().toLowerCase();
-  }
-
-  function asRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-  }
-
-  function formatErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    return String(error);
-  }
-
   function appendDiagnostics(messages: string[]): void {
     if (messages.length === 0) return;
     diagnosticMessages = [...diagnosticMessages, ...messages].slice(-6);
-  }
-
-  function shortId(value: string): string {
-    const id = normalizeId(value);
-    return id.length > 12 ? `${id.slice(0, 6)}...${id.slice(-4)}` : id;
-  }
-
-  function profileName(frame: EnvSnapshot, entityId: string): string {
-    const target = normalizeId(entityId);
-    const profile = (frame.gossip?.profiles || []).find((item) => normalizeId(item.entityId) === target);
-    return String(profile?.name || '').trim() || shortId(entityId);
-  }
-
-  function profileIsHub(frame: EnvSnapshot, entityId: string, displayedName: string): boolean {
-    const target = normalizeId(entityId);
-    const profile = (frame.gossip?.profiles || []).find((item) => normalizeId(item.entityId) === target);
-    return profile?.metadata?.isHub === true || /hub/i.test(displayedName);
-  }
-
-  function countDebts(state: Record<string, unknown>): number {
-    let count = 0;
-    for (const family of ['outDebtsByToken', 'inDebtsByToken']) {
-      for (const [, byDebtId] of mapEntries(state[family])) {
-        count += mapSize(byDebtId);
-      }
-    }
-    return count;
-  }
-
-  function readPosition(replica: Record<string, unknown>, index: number, total: number): { x: number; y: number; raw: boolean } {
-    const state = asRecord(replica['state']);
-    const raw = (replica['position'] || state['position']) as { x?: unknown; y?: unknown } | undefined;
-    const x = Number(raw?.x);
-    const y = Number(raw?.y);
-    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y, raw: true };
-    const angle = total <= 1 ? 0 : (index / total) * Math.PI * 2;
-    return { x: Math.cos(angle) * 40, y: Math.sin(angle) * 24, raw: false };
-  }
-
-  function normalizePositions(nodes: Array<FrameNode & { rawX: number; rawY: number }>): FrameNode[] {
-    if (nodes.length === 0) return [];
-    const xs = nodes.map((node) => node.rawX);
-    const ys = nodes.map((node) => node.rawY);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
-    return nodes.map(({ rawX, rawY, ...node }) => ({
-      ...node,
-      x: 12 + ((rawX - minX) / width) * 76,
-      y: 12 + ((rawY - minY) / height) * 40,
-    }));
-  }
-
-  function frameText(frame: EnvSnapshot): string {
-    return [
-      frame.meta?.title,
-      frame.meta?.subtitle?.title,
-      frame.description,
-      frame.narrative,
-    ].filter(Boolean).join(' ').toLowerCase();
-  }
-
-  function frameMatchesFocus(frame: EnvSnapshot, option: ScenarioOption): boolean {
-    const text = frameText(frame);
-    return option.focus.some((keyword) => text.includes(keyword.toLowerCase()));
-  }
-
-  function buildFrameVisual(frame: EnvSnapshot, option: ScenarioOption): FrameVisual {
-    const rawNodes: Array<FrameNode & { rawX: number; rawY: number }> = [];
-    const nodeById = new Map<string, FrameNode & { rawX: number; rawY: number }>();
-    const replicaEntries = mapEntries<Record<string, unknown>>(frame.state.eReplicas);
-
-    replicaEntries.forEach(([replicaKey, replica], index) => {
-      const state = asRecord(replica['state']);
-      const entityId = normalizeId(replica['entityId'] || state['entityId'] || replicaKey.split(':')[0]);
-      if (!entityId || nodeById.has(entityId)) return;
-      const accounts = mapEntries<Record<string, unknown>>(state['accounts']);
-      const disputed = accounts.some(([, account]) => Boolean(account?.['activeDispute']));
-      const debtCount = countDebts(state);
-      const label = profileName(frame, entityId);
-      const position = readPosition(replica, index, Math.max(1, replicaEntries.length));
-      const node = {
-        id: entityId,
-        label,
-        x: 0,
-        y: 0,
-        rawX: position.x,
-        rawY: position.y,
-        isHub: profileIsHub(frame, entityId, label),
-        disputed,
-        debtCount,
-        accountCount: accounts.length,
-      };
-      nodeById.set(entityId, node);
-      rawNodes.push(node);
-    });
-
-    const nodes = normalizePositions(rawNodes);
-    const normalizedNodeById = new Map(nodes.map((node) => [node.id, node]));
-    const edgeMap = new Map<string, FrameEdge>();
-    let activeDisputes = 0;
-    let debtCount = 0;
-    let accountCount = 0;
-
-    for (const [, replica] of replicaEntries) {
-      const state = asRecord(replica['state']);
-      const sourceId = normalizeId(replica['entityId'] || state['entityId']);
-      if (!sourceId) continue;
-      debtCount += countDebts(state);
-      for (const [counterpartyIdRaw, account] of mapEntries<Record<string, unknown>>(state['accounts'])) {
-        const counterpartyId = normalizeId(counterpartyIdRaw);
-        const from = normalizedNodeById.get(sourceId);
-        const to = normalizedNodeById.get(counterpartyId);
-        if (!from || !to || from.id === to.id) continue;
-        accountCount += 1;
-        const disputed = Boolean(account?.['activeDispute']);
-        if (disputed) activeDisputes += 1;
-        const key = [from.id, to.id].sort().join('|');
-        const existing = edgeMap.get(key);
-        edgeMap.set(key, {
-          key,
-          from,
-          to,
-          disputed: disputed || existing?.disputed === true,
-        });
-      }
-    }
-
-    const title = String(frame.meta?.title || frame.meta?.subtitle?.title || `Frame ${frame.state.height}`);
-    const description = String(frame.description || frame.narrative || option.description);
-    const collapse = option.id === 'hub-collapse' && (
-      activeDisputes > 0 ||
-      debtCount > 0 ||
-      /dispute|finalize|freeze|debt|reopen|non-cooperative/i.test(`${title} ${description}`)
-    );
-
-    return {
-      nodes,
-      edges: Array.from(edgeMap.values()),
-      activeDisputes,
-      debtCount,
-      accountCount,
-      title,
-      description,
-      collapse,
-    };
-  }
-
-  function preparePreviewEnv(env: RuntimeReplica): RuntimeReplica {
-    env.scenarioMode = true;
-    env.scenarioJAdapterMode = 'browservm';
-    env.quietRuntimeLogs = true;
-    env.scenarioLogLevel = 'error';
-    env.state.timestamp = env.state.timestamp || 1;
-    env.runtimeConfig = {
-      ...env.runtimeConfig,
-      storage: {
-        ...env.runtimeConfig?.storage,
-        enabled: false,
-      },
-    };
-    if (env.infrastructure) env.infrastructure.persistencePaused = true;
-    return env;
-  }
-
-  function stopPreviewInfra(env: RuntimeReplica | null, label = 'preview'): string[] {
-    const diagnostics: string[] = [];
-    if (!env) return diagnostics;
-    for (const [, jReplica] of mapEntries<Record<string, unknown>>(env.state.jReplicas)) {
-      const adapter = asRecord(jReplica['jadapter']);
-      try {
-        if (typeof adapter['stopWatching'] === 'function') {
-          (adapter['stopWatching'] as () => void)();
-        }
-      } catch (error) {
-        diagnostics.push(`${label}: failed to stop J-watcher: ${formatErrorMessage(error)}`);
-      }
-    }
-    try {
-      env.infrastructure?.stopLoop?.();
-    } catch (error) {
-      diagnostics.push(`${label}: failed to stop runtime loop: ${formatErrorMessage(error)}`);
-    }
-    if (env.infrastructure) {
-      env.infrastructure.loopActive = false;
-      env.infrastructure.stopLoop = null;
-    }
-    return diagnostics;
-  }
-
-  async function runRuntimeScenario(
-    xln: XLNModule,
-    option: ScenarioOption,
-    env: RuntimeReplica,
-  ): Promise<{ env: RuntimeReplica; frames: EnvSnapshot[] }> {
-    const runtimeAny = xln as XLNModule & {
-      scenarios?: Record<string, (target: RuntimeReplica) => Promise<RuntimeReplica | void>>;
-      getScenario?: (id: string) => { run: (target: RuntimeReplica) => Promise<RuntimeReplica | void> } | undefined;
-      SCENARIOS?: Array<{ id: string; run: (target: RuntimeReplica) => Promise<RuntimeReplica | void> }>;
-    };
-    const runner = option.runner ? runtimeAny.scenarios?.[option.runner] : undefined;
-    if (runner) {
-      return xln.recordRuntimeScenario(env, runner);
-    }
-    const entry = runtimeAny.getScenario?.(option.runtimeId)
-      || runtimeAny.SCENARIOS?.find((scenario) => scenario.id === option.runtimeId);
-    if (!entry) throw new Error(`SCENARIO_NOT_FOUND:${option.runtimeId}`);
-    return xln.recordRuntimeScenario(env, entry.run);
   }
 
   function publishFrame(index: number): void {
@@ -380,16 +60,6 @@
     currentHeight.set(frame.state.height);
     timeOperations.updateMaxTimeIndex();
     timeOperations.goToTimeIndex(index);
-  }
-
-  function focusFrameIndex(option: ScenarioOption, nextFrames: EnvSnapshot[]): number {
-    if (nextFrames.length === 0) return 0;
-    if (option.id === 'hub-collapse') {
-      const collapseFrame = nextFrames.findIndex((frame) => buildFrameVisual(frame, option).collapse);
-      if (collapseFrame >= 0) return collapseFrame;
-    }
-    const found = nextFrames.findIndex((frame) => frameMatchesFocus(frame, option));
-    return found >= 0 ? found : 0;
   }
 
   async function loadScenario(option = selectedScenario): Promise<void> {
@@ -407,9 +77,8 @@
 
     try {
       const xln = await getXLN();
-      const env = preparePreviewEnv(xln.createEmptyEnv(`scenario-preview:${option.id}`));
-      const recording = await runRuntimeScenario(xln, option, env);
-      const resultEnv = preparePreviewEnv(recording.env);
+      const recording = await recordBrowserScenario(xln, option);
+      const resultEnv = recording.env;
       appendDiagnostics(stopPreviewInfra(resultEnv, option.title));
       const nextFrames = recording.frames;
       if (seq !== loadSeq) return;
@@ -483,33 +152,6 @@
       frame: String(currentFrame),
     });
     await goto(`/app?${params.toString()}`);
-  }
-
-  function formatBuilderText(
-    frame: EnvSnapshot | null,
-    frameVisual: FrameVisual,
-    option: ScenarioOption,
-    index: number,
-    totalFrames: number,
-  ): string {
-    if (!frame) return 'No frame loaded.';
-    const inputCount = frame.runtimeInput?.entityInputs?.length ?? 0;
-    const outputCount = frame.runtimeOutputs?.length ?? 0;
-    const logCount = frame.logs?.length ?? 0;
-    return [
-      `scenario=${option.id}`,
-      `runtime=${option.runtimeId}`,
-      `frame=${index + 1}/${totalFrames}`,
-      `height=${frame.state.height}`,
-      `title=${frameVisual.title}`,
-      `inputs=${inputCount}`,
-      `outputs=${outputCount}`,
-      `logs=${logCount}`,
-      `entities=${frameVisual.nodes.length}`,
-      `accounts=${frameVisual.accountCount}`,
-      `activeDisputes=${frameVisual.activeDisputes}`,
-      `debts=${frameVisual.debtCount}`,
-    ].join('\n');
   }
 
   onMount(() => {

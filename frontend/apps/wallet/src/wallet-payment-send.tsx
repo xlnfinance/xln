@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { RuntimePaymentDeliveryMode } from '../../../packages/runtime-client/src/payment-command-types';
 
-import { parseXlnInvoice } from '../../../src/lib/utils/xlnInvoice';
+import { parseXlnInvoice } from '../../../packages/runtime-client/src/xln-invoice';
 import type { WalletPaymentProjection } from './wallet-payment-model';
 import type { WalletPaymentSource, WalletPaymentSourceSnapshot } from './wallet-payment-source';
 

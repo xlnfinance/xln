@@ -9,6 +9,8 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
+import { safeStringify } from '../../../../protocol/serialization';
+
 const [, , input, outputArg] = process.argv;
 if (!input) throw new Error('USAGE: slim-recording.ts <recording.json> [out.json]');
 const output = outputArg ?? input.replace(/\.json$/, '.slim.json');
@@ -40,5 +42,5 @@ const slim = {
       })),
   },
 };
-writeFileSync(output, JSON.stringify(slim));
-console.log(JSON.stringify({ output, bundles: slim.recording.bundles.length }));
+writeFileSync(output, safeStringify(slim));
+console.log(safeStringify({ output, bundles: slim.recording.bundles.length }));

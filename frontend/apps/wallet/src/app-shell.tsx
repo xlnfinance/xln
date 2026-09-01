@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { readRuntimeAdapterStorageSnapshot } from '../../../packages/browser/src/runtime-adapter-session';
 import type { WalletAuthScheme } from '../../../packages/browser/src/wallet-runtime-preferences';
@@ -27,6 +27,11 @@ const readRuntimeConfig = () =>
   readRuntimeAdapterStorageSnapshot({ durable: localStorage, session: sessionStorage });
 
 let runtimeInitializationStarted = false;
+
+const WalletScenarioPreview = lazy(async () => {
+  const module = await import('./wallet-scenario-preview');
+  return { default: module.WalletScenarioPreview };
+});
 
 const initializeEmbeddedRuntimeOnce = (): void => {
   if (runtimeInitializationStarted || readRuntimeConfig().mode === 'remote') return;
@@ -115,7 +120,7 @@ export function WalletAppShell() {
   const runtime = resolveWalletRuntimeSummary(readRuntimeConfig(), navigator.onLine, embedded);
 
   useEffect(() => {
-    initializeEmbeddedRuntimeOnce();
+    if (view !== 'scenario-preview') initializeEmbeddedRuntimeOnce();
     const refreshRuntime = () => setEnvironmentRevision(revision => revision + 1);
     window.addEventListener('storage', refreshRuntime);
     window.addEventListener('online', refreshRuntime);
@@ -125,7 +130,7 @@ export function WalletAppShell() {
       window.removeEventListener('online', refreshRuntime);
       window.removeEventListener('offline', refreshRuntime);
     };
-  }, []);
+  }, [view]);
 
   return (
     <main className={`wallet-shell${usesIdentityAppearance && authScheme === 'light' ? ' is-auth-light' : ''}`}>
@@ -151,7 +156,7 @@ export function WalletAppShell() {
           <span>Wallet</span>
           <span className={`wallet-shell-runtime-state is-${runtime.state}`}>
             <span aria-hidden="true" />
-            {runtime.modeLabel}
+            {view === 'scenario-preview' ? 'Scenario preview' : runtime.modeLabel}
           </span>
         </header>
 
@@ -167,6 +172,7 @@ export function WalletAppShell() {
               {view === 'markets' ? <WalletMarkets /> : null}
               {view === 'settings' ? <WalletSettings onAuthSchemeChange={setAuthScheme} /> : null}
               {view === 'diagnostics' ? <WalletDiagnostics runtime={runtime} /> : null}
+              {view === 'scenario-preview' ? <Suspense fallback={<p>Loading scenario preview…</p>}><WalletScenarioPreview /></Suspense> : null}
               {view === 'overview' ? <WalletOverview runtime={runtime} /> : null}
             </>
           )}

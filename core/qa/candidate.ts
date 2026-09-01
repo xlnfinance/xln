@@ -1,11 +1,8 @@
 import { createHash } from 'node:crypto';
 
-export type QaCandidateIdentity = {
-  candidateId: string;
-  gitHead: string;
-  codeHash: string;
-  gateConfigHash: string;
-};
+import type { QaCandidateIdentity } from './candidate-types';
+
+export type { QaCandidateIdentity } from './candidate-types';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const GIT_HEAD_HEX = /^[0-9a-f]{40,64}$/;

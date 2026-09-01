@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
-import { formatQaBytes } from '../../../src/lib/health/adminHealth';
-import type { RpcHealthProbeResult } from '../../../src/lib/health/rpcHealth';
+import { formatQaBytes } from '../../../packages/runtime-client/src/admin-health';
+import type { RpcHealthProbeResult } from '../../../packages/runtime-client/src/rpc-health';
 import {
   buildOpsHealthMetrics,
   deriveOpsHealthDisplayVerdict,

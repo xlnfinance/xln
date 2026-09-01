@@ -5,6 +5,8 @@ import { createConnection } from 'node:net';
 import {
   createDevelopmentGatewayTargets,
   parseDevelopmentGatewayPort,
+  parseDevelopmentPortOffset,
+  resolveDevelopmentSurfacePort,
   resolveDevelopmentGatewayRequest,
   rewriteDevelopmentGatewayUrl,
   type GatewayProxyOwner,
@@ -135,9 +137,6 @@ describe('React development gateway', () => {
     expect(resolveDevelopmentGatewayRequest('/radapter?ws=forbidden')).toMatchObject({
       kind: 'response', status: 400, body: 'REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN',
     });
-    expect(resolveDevelopmentGatewayRequest('/runtime.js')).toEqual({
-      kind: 'proxy', owner: 'edge', rewrite: 'none',
-    });
     expect(resolveDevelopmentGatewayRequest('/favicon.ico')).toEqual({
       kind: 'proxy', owner: 'edge', rewrite: 'none',
     });
@@ -156,6 +155,12 @@ describe('React development gateway', () => {
     expect(resolveDevelopmentGatewayRequest('/site.webmanifest')).toMatchObject({ owner: 'wallet' });
     expect(resolveDevelopmentGatewayRequest('/push-wake-sw.js')).toMatchObject({ owner: 'wallet' });
     expect(resolveDevelopmentGatewayRequest('/route-mode.js')).toMatchObject({ owner: 'wallet' });
+    expect(resolveDevelopmentGatewayRequest('/runtime.js')).toEqual({
+      kind: 'proxy', owner: 'wallet', rewrite: 'app-base',
+    });
+    expect(resolveDevelopmentGatewayRequest('/scenarios/catalog.json')).toEqual({
+      kind: 'proxy', owner: 'ops', rewrite: 'app-base',
+    });
     expect(resolveDevelopmentGatewayRequest('/__app/wallet/src/main.tsx')).toEqual({
       kind: 'proxy', owner: 'wallet', rewrite: 'none',
     });
@@ -169,6 +174,12 @@ describe('React development gateway', () => {
     expect(getReactPublicDirectory('docs', false)).toBe(false);
     expect(parseDevelopmentGatewayPort('18080')).toBe(18080);
     expect(() => parseDevelopmentGatewayPort('0')).toThrow('DEVELOPMENT_GATEWAY_PORT_INVALID:0');
+    expect(parseDevelopmentPortOffset('12000')).toBe(12_000);
+    expect(resolveDevelopmentSurfacePort(8081, 12_000)).toBe(20_081);
+    expect(() => parseDevelopmentPortOffset('1.5')).toThrow('DEVELOPMENT_PORT_OFFSET_INVALID:1.5');
+    expect(() => resolveDevelopmentSurfacePort(8081, -8081)).toThrow(
+      'DEVELOPMENT_SURFACE_PORT_INVALID:8081:-8081',
+    );
   });
 
   test('streams HTTP requests to the selected upstream and preserves local responses', async () => {
@@ -255,6 +266,7 @@ describe('React development gateway', () => {
       gatewayAware: false,
     });
     expect(createDevelopmentGatewayTargets().edge).toBe('http://127.0.0.1:8082');
+    expect(createDevelopmentGatewayTargets(undefined, 12_000).site).toBe('http://127.0.0.1:20081');
     expect(getDevelopmentExitFailure(true, 'vite-site', 130)).toBeUndefined();
     expect(getDevelopmentExitFailure(false, 'vite-site', 0)?.message).toBe(
       'FRONTEND_DEV_PROCESS_EXITED:vite-site:0',

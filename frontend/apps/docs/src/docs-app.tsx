@@ -9,7 +9,7 @@ import {
   normalizeDocId,
   renderDocsMarkdown,
   type DocsManifest,
-} from '$lib/docs/docs-page-model';
+} from '../../../packages/ui/src/docs-page-model';
 
 import { DocsNavigation } from './docs-navigation';
 import { DocsReader, type DocsDocumentState } from './docs-reader';

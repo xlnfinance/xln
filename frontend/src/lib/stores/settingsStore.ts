@@ -1,4 +1,3 @@
-import { writable, get } from 'svelte/store';
 import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, AccountSkin, AccountBarStyle, UIStyleSettings } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 import {
@@ -9,6 +8,7 @@ import {
   normalizeUiStyle,
 } from '../utils/ui-style';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/runtime/wsUrl';
+import { createObservableStore } from '$lib/utils/observableStore';
 import { errorLog } from './errorLogStore';
 import {
   DEFAULT_XLN_MASCOT_DOCK,
@@ -70,7 +70,7 @@ const defaultSettings: Settings = {
 };
 
 // Settings store
-export const settings = writable<Settings>(defaultSettings);
+export const settings = createObservableStore<Settings>(defaultSettings);
 
 // Storage keys
 const SETTINGS_KEY = 'xln-settings';
@@ -138,7 +138,7 @@ const settingsOperations = {
     try {
       if (typeof localStorage === 'undefined') return;
       
-      const currentSettings = get(settings);
+      const currentSettings = settings.get();
       
       // Save main settings (excluding componentStates)
       const { componentStates, ...mainSettings } = currentSettings;
@@ -157,7 +157,7 @@ const settingsOperations = {
     settings.update(current => ({ ...current, theme }));
     this.saveToStorage();
     applyThemeToDocument(theme);
-    applyUiStyleToDocument(get(settings).uiStyle);
+    applyUiStyleToDocument(settings.get().uiStyle);
   },
 
   setUiStyle(partial: Partial<UIStyleSettings>) {
@@ -166,7 +166,7 @@ const settingsOperations = {
       uiStyle: normalizeUiStyle({ ...current.uiStyle, ...partial }),
     }));
     this.saveToStorage();
-    applyUiStyleToDocument(get(settings).uiStyle);
+    applyUiStyleToDocument(settings.get().uiStyle);
   },
 
   // Update bar color mode
@@ -192,7 +192,7 @@ const settingsOperations = {
 
   // Toggle dropdown mode
   toggleDropdownMode() {
-    const current = get(settings);
+    const current = settings.get();
     this.setDropdownMode(current.dropdownMode === 'signer-first' ? 'entity-first' : 'signer-first');
   },
 
@@ -302,7 +302,7 @@ const settingsOperations = {
 
   // Get component state (expanded/collapsed)
   getComponentState(componentId: string): boolean {
-    const current = get(settings);
+    const current = settings.get();
     if (current.componentStates[componentId] !== undefined) {
       return current.componentStates[componentId];
     }
@@ -350,13 +350,13 @@ const settingsOperations = {
       ...(partial.uiStyle ? { uiStyle: normalizeUiStyle({ ...current.uiStyle, ...partial.uiStyle }) } : {}),
     }));
     this.saveToStorage();
-    const current = get(settings);
+    const current = settings.get();
     if (partial.theme) applyThemeToDocument(current.theme);
     if (partial.uiStyle) applyUiStyleToDocument(current.uiStyle);
   },
 
   exportUiSettingsJson(): string {
-    return JSON.stringify(exportUiSettings(get(settings)), null, 2);
+    return JSON.stringify(exportUiSettings(settings.get()), null, 2);
   },
 
   importUiSettingsJson(raw: string) {
@@ -368,7 +368,7 @@ const settingsOperations = {
       uiStyle: normalizeUiStyle(next.uiStyle ?? current.uiStyle),
     }));
     this.saveToStorage();
-    const current = get(settings);
+    const current = settings.get();
     applyThemeToDocument(current.theme);
     applyUiStyleToDocument(current.uiStyle);
   },
@@ -378,7 +378,7 @@ const settingsOperations = {
     this.loadFromStorage();
 
     // Apply initial theme
-    const current = get(settings);
+    const current = settings.get();
     applyThemeToDocument(current.theme);
     applyUiStyleToDocument(current.uiStyle);
   }

@@ -15,7 +15,7 @@ import {
   type MarketCapControls,
   type MarketCapRanking,
   type MarketCapRequest,
-} from '$lib/market-cap/market-cap-page-model';
+} from '../../../packages/ui/src/market-cap-page-model';
 import { MarketCapBoard } from './market-cap-board';
 import { SiteFooter, SiteShell } from './site-shell';
 

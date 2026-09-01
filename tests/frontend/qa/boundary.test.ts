@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { decodeQaAuthInfo, decodeQaEnvelope, isQaSummary } from '../../../frontend/src/lib/qa/boundary';
+import { decodeQaAuthInfo, decodeQaEnvelope, isQaSummary } from '../../../frontend/packages/runtime-client/src/qa-boundary';
 
 test('QA boundary rejects unknown response keys before UI state is updated', () => {
   expect(() => decodeQaEnvelope({ ok: true, qaAuth: { scope: 'read' }, injected: true }, ['ok', 'qaAuth']),)

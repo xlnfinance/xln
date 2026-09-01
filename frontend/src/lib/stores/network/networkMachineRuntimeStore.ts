@@ -1,4 +1,3 @@
-import { get, writable } from 'svelte/store';
 import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
 import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
 import {
@@ -15,6 +14,7 @@ import {
 import { getXLN } from '../bootstrap/xlnRuntimeLoader';
 import { networkMachineConfig } from './networkMachineStore';
 import { runtimes } from '../runtimeStore';
+import { createObservableStore, readStoreValue } from '$lib/utils/observableStore';
 import type { RuntimeTimelineIndex } from '$lib/network3d/timeline/runtimeGraphTimeline';
 
 export type NetworkMachineRuntimeState = {
@@ -43,7 +43,7 @@ const emptyState = (): NetworkMachineRuntimeState => ({
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
 
-export const networkMachineRuntime = writable<NetworkMachineRuntimeState>(emptyState());
+export const networkMachineRuntime = createObservableStore<NetworkMachineRuntimeState>(emptyState());
 
 export const assertNetworkMachineIsLive = (
   state: Pick<NetworkMachineRuntimeState, 'selectedStep'>,
@@ -54,7 +54,7 @@ export const assertNetworkMachineIsLive = (
 };
 
 const compileCurrent = (indexes: RuntimeTimelineIndex[]): NetworkMachine =>
-  compileNetworkMachine(indexes, get(networkMachineConfig));
+  compileNetworkMachine(indexes, readStoreValue(networkMachineConfig));
 
 let refreshRequestId = 0;
 let selectionRequestId = 0;
@@ -81,7 +81,7 @@ export const networkMachineRuntimeOperations = {
     const requestId = ++refreshRequestId;
     networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null }));
     try {
-      const runtimeMap = get(runtimes);
+      const runtimeMap = readStoreValue(runtimes);
       const sorted = Array.from(runtimeMap.values())
         .sort((left, right) => String(left.id).toLowerCase().localeCompare(String(right.id).toLowerCase()));
       const sources: NetworkTimelineSource[] = [];
@@ -165,7 +165,7 @@ export const networkMachineRuntimeOperations = {
 
   async selectStep(index: number): Promise<NetworkMachineStep> {
     const requestId = ++selectionRequestId;
-    const current = get(networkMachineRuntime);
+    const current = networkMachineRuntime.get();
     const machine = compileCurrent(current.indexes);
     const safeIndex = Math.floor(Number(index));
     const step = machine.steps[safeIndex];
@@ -213,7 +213,7 @@ export const networkMachineRuntimeOperations = {
   },
 
   recompile(): NetworkMachine {
-    const current = get(networkMachineRuntime);
+    const current = networkMachineRuntime.get();
     const machine = compileCurrent(current.indexes);
     networkMachineRuntime.update((state) => ({ ...state, machine }));
     return machine;

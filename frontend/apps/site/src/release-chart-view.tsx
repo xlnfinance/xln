@@ -4,14 +4,14 @@ import {
   RELEASE_METRICS,
   type ReleaseEntry,
   type ReleaseMetricKey,
-} from '$lib/releases/release-catalog';
+} from '../../../packages/ui/src/release-catalog';
 import {
   deriveReleaseChartPath,
   deriveReleaseChartPoints,
   formatReleaseMetric,
   getReleaseMetricValue,
   getReleaseScopes,
-} from '$lib/releases/release-chart';
+} from '../../../packages/ui/src/release-chart';
 
 type ReleaseChartProps = Readonly<{
   releases: readonly ReleaseEntry[];

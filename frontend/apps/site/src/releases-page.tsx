@@ -6,8 +6,8 @@ import {
   type ReleaseEntry,
   type ReleaseManifest,
   type ReleaseMetricKey,
-} from '$lib/releases/release-catalog';
-import { verifyReleaseManifestEntry } from '$lib/releases/release-signature';
+} from '../../../packages/ui/src/release-catalog';
+import { verifyReleaseManifestEntry } from '../../../packages/ui/src/release-signature';
 import { ReleaseChart } from './release-chart-view';
 import { SiteFooter, SiteShell } from './site-shell';
 

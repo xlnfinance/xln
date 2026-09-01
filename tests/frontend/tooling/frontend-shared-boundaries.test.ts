@@ -11,6 +11,23 @@ const PACKAGE_ROOTS = [
   'frontend/packages/browser/src',
   'frontend/packages/runtime-client/src',
 ] as const;
+const ALL_PACKAGE_ROOTS = [...PACKAGE_ROOTS, 'frontend/packages/ui/src'] as const;
+
+const ALLOWED_BROWSER_SAFE_CORE_IMPORTS = [
+  '../../../../core/config/remote-runtime',
+  '@xln/core/api/public/runtime-module',
+  '@xln/core/api/public/runtime-module-guard',
+  '@xln/core/api/runtime-adapter/security/owner-binding',
+  '@xln/core/config/qa',
+  '@xln/core/protocol/serialization',
+  '@xln/core/qa/hlt/hlt-dashboard-preview',
+  '@xln/core/qa/severity',
+  '@xln/core/qa/types',
+  '@xln/core/runtime/decode',
+  // Pure logging type unions (LogLevel/LogCategory/FrameLogEntry, no
+  // implementations) consumed by the shared panel view models.
+  '@xln/core/types/logging',
+] as const;
 
 const walkFiles = async (root: string): Promise<readonly string[]> => {
   const entries = await readdir(join(REPOSITORY_ROOT, root), { withFileTypes: true });
@@ -66,7 +83,7 @@ describe('frontend shared browser and Runtime-client boundaries', () => {
       .filter((specifier) => specifier.includes('/core/'));
     const source = [...sources.values()].join('\n');
 
-    expect([...new Set(coreImports)]).toEqual(['../../../../core/config/remote-runtime']);
+    expect([...new Set(coreImports)].sort()).toEqual([...ALLOWED_BROWSER_SAFE_CORE_IMPORTS].sort());
     for (const forbidden of [
       'applyRuntimeInput',
       'applyEntityInput',
@@ -93,10 +110,21 @@ describe('frontend shared browser and Runtime-client boundaries', () => {
   });
 
   test('keeps shared packages independent from application entry points', async () => {
-    const sources = await readSources(PACKAGE_ROOTS);
+    const sources = await readSources(ALL_PACKAGE_ROOTS);
     const imports = [...sources.values()].flatMap(importSpecifiers);
 
     expect(imports.some((specifier) => specifier.includes('/frontend/apps/'))).toBe(false);
     expect(imports.some((specifier) => specifier.includes('/frontend/src/'))).toBe(false);
+  });
+
+  test('keeps React applications independent from the legacy Svelte source tree', async () => {
+    const sources = await readSources(['frontend/apps']);
+    const imports = [...sources.values()].flatMap(importSpecifiers);
+
+    expect(imports.some((specifier) => specifier.includes('/src/lib/'))).toBe(false);
+    expect(imports.some((specifier) => specifier.startsWith('$lib/'))).toBe(false);
+    expect((await readFile(join(REPOSITORY_ROOT, 'frontend/config/create-react-app-config.ts'), 'utf8'))
+      .includes("'$lib'"))
+      .toBe(false);
   });
 });

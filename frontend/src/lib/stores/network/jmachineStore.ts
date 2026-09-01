@@ -5,10 +5,10 @@
  * @license AGPL-3.0
  */
 
-import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
 import { compareStableText } from '$lib/utils/stableSort';
 import { isUnknownRecord as isRecord, parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+import { createObservableStore } from '$lib/utils/observableStore';
 import { errorLog } from '../errorLogStore';
 
 export interface JMachineConfig {
@@ -203,7 +203,7 @@ const decodePersistedJMachineState = (value: unknown): JMachineStoreState => {
 };
 
 // Main store
-export const jmachineState = writable<JMachineStoreState>(defaultState);
+export const jmachineState = createObservableStore<JMachineStoreState>(defaultState);
 
 // Derived stores
 export const activeJMachine = {
@@ -281,7 +281,7 @@ export const jmachineOperations = {
    * Get config by name
    */
   getByName(name: string): JMachineConfig | undefined {
-    return get(jmachineState).configs.find(c => c.name === name);
+    return jmachineState.get().configs.find(c => c.name === name);
   },
 
   /**
@@ -309,7 +309,7 @@ export const jmachineOperations = {
     try {
       if (typeof localStorage === 'undefined') return;
 
-      const current = get(jmachineState);
+      const current = jmachineState.get();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
     } catch (error) {
       errorLog.log('Failed to save J-Machine configs', 'J-Machine Store', error);

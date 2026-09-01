@@ -12,6 +12,7 @@ import { safeStringify } from '../../core/protocol/serialization';
 import {
   createDevelopmentGatewayTargets,
   parseDevelopmentGatewayPort,
+  parseDevelopmentPortOffset,
   resolveDevelopmentGatewayRequest,
   rewriteDevelopmentGatewayUrl,
   type DevelopmentGatewayDecision,
@@ -146,7 +147,10 @@ export const createDevelopmentGateway = ({ targets }: DevelopmentGatewayOptions)
 
 const run = (): void => {
   const host = process.env['XLN_REACT_GATEWAY_HOST'] ?? '127.0.0.1';
-  const defaults = createDevelopmentGatewayTargets(process.env['XLN_REACT_EDGE_TARGET']);
+  const defaults = createDevelopmentGatewayTargets(
+    process.env['XLN_REACT_EDGE_TARGET'],
+    parseDevelopmentPortOffset(process.env['XLN_REACT_PORT_OFFSET']),
+  );
   const targets: GatewayTargets = {
     edge: defaults.edge,
     site: process.env['XLN_REACT_SITE_TARGET'] ?? defaults.site,

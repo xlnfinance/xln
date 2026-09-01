@@ -10,28 +10,25 @@
   import type { Writable } from 'svelte/store';
   import type { EnvSnapshot } from '@xln/core/api/public/runtime-module';
   import { shortAddress } from '$lib/utils/format';
-  import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
-
-  type DeltaLike = { collateral?: unknown };
-  type AccountLike = {
-    state: { deltas?: ReadonlyMap<unknown, DeltaLike> | Record<string, DeltaLike> };
-  };
-  type EntityStateLike = {
-    height?: number;
-    lastFinalizedJHeight?: number;
-    reserves?: ReadonlyMap<unknown, unknown> | Record<string, unknown>;
-    accounts?: ReadonlyMap<string, AccountLike> | Record<string, AccountLike>;
-    debts?: unknown[];
-  };
-  type ReplicaLike = {
-    signerId?: string;
-    isProposer?: boolean;
-    mempool?: unknown[];
-    state?: EntityStateLike;
-  };
-  type JMachineLike = { blockNumber?: number; entities?: unknown[] };
-  type XlnomyLike = { name: string; jMachine?: JMachineLike };
-  type RuntimeFrameLike = EnvSnapshot;
+  import {
+    RUNTIME_IO_ALL_CATEGORIES as ALL_CATEGORIES,
+    RUNTIME_IO_ALL_LEVELS as ALL_LEVELS,
+    type FrameLogEntry,
+    type LogCategory,
+    type LogLevel,
+    countEntries,
+    filterRuntimeIoLogs,
+    formatBigInt,
+    getGossipProfiles,
+    mapToArray,
+    runtimeIoCategoryIcons as categoryIcons,
+    runtimeIoLevelColors as levelColors,
+    runtimeIoReplicasArray,
+    runtimeIoXlnomiesArray,
+    selectRuntimeIoFrame,
+    sumRuntimeIoCollateral,
+    sumRuntimeIoReserves,
+  } from '../../../../packages/runtime-client/src/runtime-io-panel-view';
 
   // Receive isolated env as prop (passed from View.svelte)
   export let runtimeFrameHistory: Writable<EnvSnapshot[]> | null = null;
@@ -43,8 +40,6 @@
   let showLogs = true;
 
   // Log filtering
-  const ALL_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
-  const ALL_CATEGORIES: LogCategory[] = ['consensus', 'account', 'jurisdiction', 'evm', 'network', 'ui', 'system'];
   let activeLevels: Set<LogLevel> = new Set(['info', 'warn', 'error']);
   let activeCategories: Set<LogCategory> = new Set(ALL_CATEGORIES);
   let logSearchText = '';
@@ -71,46 +66,12 @@
 
   // Get filtered logs
   $: frameLogs = (currentFrame?.logs || []) as FrameLogEntry[];
-  $: filteredLogs = frameLogs.filter(log => {
-    if (!activeLevels.has(log.level)) return false;
-    if (!activeCategories.has(log.category)) return false;
-    if (logSearchText && !log.message.toLowerCase().includes(logSearchText.toLowerCase())) return false;
-    return true;
-  });
-
-  // Log level colors
-  const levelColors: Record<LogLevel, string> = {
-    trace: '#6e7681',
-    debug: '#8b949e',
-    info: '#58a6ff',
-    warn: '#d29922',
-    error: '#f85149'
-  };
-
-  // Category icons
-  const categoryIcons: Record<LogCategory, string> = {
-    consensus: '🔗',
-    account: '🤝',
-    jurisdiction: '⚖️',
-    evm: '⛓️',
-    network: '📡',
-    ui: '🖥️',
-    system: '⚙️'
-  };
+  $: filteredLogs = filterRuntimeIoLogs(frameLogs, activeLevels, activeCategories, logSearchText);
 
   // Get current frame data based on time machine index
-  $: currentFrame = (() => {
-    if (runtimeFrameTimeIndex && runtimeFrameHistory) {
-      const timeIdx = $runtimeFrameTimeIndex;
-      const hist = $runtimeFrameHistory;
-      if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
-        const idx = Math.min(timeIdx, hist.length - 1);
-        return hist[idx];
-      }
-    }
-    // RuntimeReplica has no resident timeline; no selected external frame.
-    return null;
-  })();
+  $: currentFrame = runtimeFrameTimeIndex && runtimeFrameHistory
+    ? selectRuntimeIoFrame($runtimeFrameHistory, $runtimeFrameTimeIndex)
+    : null;
 
   // Toggle replica expansion
   function toggleReplica(entityId: string) {
@@ -122,65 +83,6 @@
     expandedReplicas = expandedReplicas; // trigger reactivity
   }
 
-  // Convert Map to array for display
-  function isReadonlyMap<K, V>(
-    value: ReadonlyMap<K, V> | Record<string, V>,
-  ): value is ReadonlyMap<K, V> {
-    return typeof Reflect.get(value, 'entries') === 'function'
-      && typeof Reflect.get(value, 'values') === 'function'
-      && typeof Reflect.get(value, 'get') === 'function';
-  }
-
-  function mapToArray<T>(map: ReadonlyMap<unknown, T> | Record<string, T> | undefined): Array<[string, T]> {
-    if (!map) return [];
-    if (isReadonlyMap(map)) return Array.from(map.entries()).map(([key, value]) => [String(key), value]);
-    if (typeof map === 'object') return Object.entries(map) as Array<[string, T]>;
-    return [];
-  }
-
-  function valuesOf<T>(source: ReadonlyMap<unknown, T> | Record<string, T> | undefined): T[] {
-    if (!source) return [];
-    if (isReadonlyMap(source)) return Array.from(source.values());
-    return Object.values(source);
-  }
-
-  function toBigIntValue(value: unknown): bigint {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return BigInt(Math.trunc(value));
-    if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
-    return 0n;
-  }
-
-  function getGossipProfiles(frame: RuntimeFrameLike): unknown[] {
-    return frame.gossip?.profiles ?? [];
-  }
-
-  function countEntries(source: unknown): number {
-    if (!source) return 0;
-    if (source instanceof Map) return source.size;
-    if (Array.isArray(source)) return source.length;
-    if (typeof source === 'object') return Object.keys(source as Record<string, unknown>).length;
-    return 0;
-  }
-
-  // Format bigint for display
-  function formatBigInt(val: unknown): string {
-    if (typeof val === 'bigint') return val.toString() + 'n';
-    if (typeof val === 'number') return val.toString();
-    return String(val);
-  }
-
-  // Get replica count
-  $: replicaCount = currentFrame?.state.eReplicas?.size || 0;
-
-  // Get replicas as array
-  $: replicasArray = currentFrame?.state.eReplicas ? mapToArray(currentFrame.state.eReplicas) : [];
-
-  // Get xlnomies (J-Machine state) as array
-  $: xlnomiesArray = (currentFrame?.state.jReplicas
-    ? Array.from(currentFrame.state.jReplicas.values())
-    : []) as XlnomyLike[];
-
   // Toggle xlnomy expansion
   function toggleXlnomy(name: string) {
     if (expandedXlnomies.has(name)) {
@@ -190,6 +92,15 @@
     }
     expandedXlnomies = expandedXlnomies;
   }
+
+  // Get replica count
+  $: replicaCount = currentFrame?.state.eReplicas?.size || 0;
+
+  // Get replicas as array
+  $: replicasArray = runtimeIoReplicasArray(currentFrame);
+
+  // Get xlnomies (J-Machine state) as array
+  $: xlnomiesArray = runtimeIoXlnomiesArray(currentFrame);
 </script>
 
 <div class="runtime-io-panel">
@@ -234,16 +145,8 @@
           <h4>💰 Solvency Check (Conservation Law)</h4>
           <div class="solvency-content">
             {#if currentFrame}
-              {@const totalReserves = valuesOf<ReplicaLike>(currentFrame.state.eReplicas).reduce((sum: bigint, replica) => {
-                const reserves = valuesOf<unknown>(replica.state?.reserves).reduce((s: bigint, amt) => s + toBigIntValue(amt), 0n);
-                return sum + reserves;
-              }, 0n)}
-              {@const totalCollateral = valuesOf<ReplicaLike>(currentFrame.state.eReplicas).reduce((sum: bigint, replica) => {
-                const collateral = valuesOf<AccountLike>(replica.state?.accounts).reduce((s: bigint, acct) => {
-                  return s + valuesOf<DeltaLike>(acct.state.deltas).reduce((cs: bigint, delta) => cs + toBigIntValue(delta.collateral), 0n);
-                }, 0n);
-                return sum + collateral;
-              }, 0n)}
+              {@const totalReserves = sumRuntimeIoReserves(currentFrame)}
+              {@const totalCollateral = sumRuntimeIoCollateral(currentFrame)}
               {@const total = totalReserves + totalCollateral}
               {@const reservesM = Number(totalReserves) / 1e24}
               {@const collateralM = Number(totalCollateral) / 1e24}

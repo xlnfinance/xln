@@ -1,6 +1,6 @@
-import { readJsonUnknown } from '../../../src/lib/utils/boundary';
-import { consumeQaTokenFromUrl, qaFetch } from '../../../src/lib/qa/apiClient';
-import { decodeHltDashboardPayload, type HltDashboardPayload } from '../../../src/lib/qa/hlt';
+import { readJsonUnknown } from '../../../packages/runtime-client/src/boundary';
+import { consumeQaTokenFromUrl, qaFetch } from '../../../packages/browser/src/qa-api-client';
+import { decodeHltDashboardPayload, type HltDashboardPayload } from '../../../packages/runtime-client/src/qa-hlt';
 import type { OpsHltStartRequest } from './ops-hlt-model';
 
 export type OpsHltSourceSnapshot = Readonly<{

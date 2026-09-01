@@ -1,5 +1,5 @@
 import { layoutHltTpsChart } from '../../../../core/qa/hlt/hlt-dashboard-preview';
-import { formatMs, formatTps, type HltDashboardPayload } from '../../../src/lib/qa/hlt';
+import { formatMs, formatTps, type HltDashboardPayload } from '../../../packages/runtime-client/src/qa-hlt';
 
 function PaymentResult({ snapshot }: Readonly<{ snapshot: HltDashboardPayload }>) {
   const payment = snapshot.payment;

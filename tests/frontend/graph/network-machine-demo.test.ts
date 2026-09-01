@@ -21,10 +21,13 @@ describe('network machine demo playback', () => {
 
   test('autoplay is consumed once so a recompile does not restart the demo', () => {
     const store = readFileSync('frontend/src/lib/stores/network/networkMachineDemoStore.ts', 'utf8');
+    const neutral = readFileSync('frontend/packages/runtime-client/src/demo-playback-intent.ts', 'utf8');
     const timeline = readFileSync('frontend/src/lib/view/core/NetworkMachineTimeline.svelte', 'utf8');
 
     expect(store).toContain('consumeAutoplay');
-    expect(store).toContain('requested ? { ...current, autoplay: false } : current');
+    // One-shot semantics live in the shared boundary both frameworks consume.
+    expect(neutral).toContain('if (!snapshot.autoplay) return false;');
+    expect(neutral).toContain("publish({ ...snapshot, autoplay: false });");
     expect(timeline).toContain('networkMachineDemo.consumeAutoplay()');
     expect(timeline).toContain('void selectStep(0).then(() => togglePlayback());');
   });
@@ -48,8 +51,9 @@ describe('network machine demo playback', () => {
   test('the embed route drives playback from the URL and surfaces scenario failures', () => {
     const route = readFileSync('frontend/src/routes/embed/+page.svelte', 'utf8');
 
-    expect(route).toContain("$page.url.searchParams.get('scenario')");
-    expect(route).toContain("$page.url.searchParams.get('autoplay') === '1'");
+    // URL semantics are delegated to the shared boot model, whose exact
+    // parsing rules are pinned by tests/frontend/runtime/embed-boot-model.test.ts.
+    expect(route).toContain('parseEmbedBootRequest($page.url)');
     expect(route).toContain('networkMachineRuntimeOperations.loadScenario');
     // A scenario embed narrates through the Time Machine, so it cannot stay hidden.
     expect(route).toContain('settingsOperations.setShowTimeMachine(true)');

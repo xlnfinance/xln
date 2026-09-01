@@ -1,6 +1,10 @@
 export type OpsPage =
   | Readonly<{ kind: 'health'; pathname: '/health' }>
+  | Readonly<{ kind: 'qa'; pathname: '/qa' }>
   | Readonly<{ kind: 'hlt'; pathname: '/qa/hlt' }>
+  | Readonly<{ kind: 'runs'; pathname: '/runs' }>
+  | Readonly<{ kind: 'scenarios'; pathname: '/scenarios' }>
+  | Readonly<{ kind: 'ai'; pathname: string }>
   | Readonly<{ kind: 'pending'; pathname: string }>;
 
 export const OPS_LINKS = [
@@ -16,8 +20,16 @@ export const OPS_LINKS = [
 export const resolveOpsPage = (pathname: string): OpsPage =>
   pathname === '/health'
     ? { kind: 'health', pathname }
+    : pathname === '/qa'
+      ? { kind: 'qa', pathname }
     : pathname === '/qa/hlt'
       ? { kind: 'hlt', pathname }
+    : pathname === '/runs'
+      ? { kind: 'runs', pathname }
+    : pathname === '/scenarios'
+      ? { kind: 'scenarios', pathname }
+    : pathname === '/ai' || pathname.startsWith('/ai/')
+      ? { kind: 'ai', pathname }
       : { kind: 'pending', pathname };
 
 export const opsPageMetadata = (page: OpsPage): Readonly<{ title: string; description: string }> => {
@@ -31,6 +43,30 @@ export const opsPageMetadata = (page: OpsPage): Readonly<{ title: string; descri
     return {
       title: 'xln HLT Load Stand',
       description: 'Record, replay, and inspect authoritative xln high-load-test evidence.',
+    };
+  }
+  if (page.kind === 'qa') {
+    return {
+      title: 'xln QA Cockpit',
+      description: 'Inspect authoritative xln test runs, browser evidence, artifacts, and controlled recovery.',
+    };
+  }
+  if (page.kind === 'runs') {
+    return {
+      title: 'xln Runs Ledger',
+      description: 'Inspect authoritative xln run evidence across test, benchmark, scenario, and release surfaces.',
+    };
+  }
+  if (page.kind === 'scenarios') {
+    return {
+      title: 'xln Scenario Player',
+      description: 'Run deterministic xln Runtime scenarios and inspect their committed frames.',
+    };
+  }
+  if (page.kind === 'ai') {
+    return {
+      title: 'xln AI Console',
+      description: 'Local AI chat, council deliberation, agent tools, voice, and camera vision for xln operators.',
     };
   }
   return {

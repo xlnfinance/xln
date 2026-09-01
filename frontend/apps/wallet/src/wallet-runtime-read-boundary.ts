@@ -104,7 +104,7 @@ export const loadWalletRuntimeReadDependencies = async (
   const [remote, [account, financial], journal] = await Promise.all([
     import('../../../../core/api/runtime-adapter/remote.ts'),
     mathPromise,
-    import('../../../src/lib/stores/commands/runtimeCommandJournalKeyring.ts'),
+    import('../../../packages/browser/src/runtime-command-journal-keyring.ts'),
   ]);
   const adapter = new remote.RemoteRuntimeAdapter();
   try {

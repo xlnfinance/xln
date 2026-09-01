@@ -1,5 +1,5 @@
-import { probeRpcHealth, type RpcHealthProbeResult } from '../../../src/lib/health/rpcHealth';
-import { readJsonUnknown } from '../../../src/lib/utils/boundary';
+import { probeRpcHealth, type RpcHealthProbeResult } from '../../../packages/runtime-client/src/rpc-health';
+import { readJsonUnknown } from '../../../packages/runtime-client/src/boundary';
 import { decodeOpsHealthEvidence, type OpsHealthEvidence } from './ops-health-model';
 
 export type OpsHealthSourceSnapshot = Readonly<{

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { clearQaToken, qaFetch } from '../../../frontend/src/lib/qa/apiClient';
+import { clearQaToken, qaFetch } from '../../../frontend/packages/browser/src/qa-api-client';
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 

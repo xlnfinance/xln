@@ -508,23 +508,30 @@ fn main() -> Result<(), String> {
             let (orderbook_trade_count, open_book_orders, open_swap_offers, resolving_swap_offers) =
                 match replica.state.entity.orderbook.as_ref() {
                     Some(orderbook) => {
-                        let trade_count = orderbook.books.values().try_fold(0_u64, |total, book| {
-                            total.checked_add(book.trade_count)
-                                .ok_or_else(|| "RRS_RUNTIME_METRIC_OVERFLOW:orderbookTradeCount".to_string())
-                        })?;
-                        let book_orders = orderbook.books.values().try_fold(0_u64, |total, book| {
-                            let count = u64::try_from(book.orders.len())
-                                .map_err(|_| "RRS_RUNTIME_METRIC_OVERFLOW:openBookOrders".to_string())?;
-                            total.checked_add(count)
-                                .ok_or_else(|| "RRS_RUNTIME_METRIC_OVERFLOW:openBookOrders".to_string())
-                        })?;
+                        let trade_count =
+                            orderbook.books.values().try_fold(0_u64, |total, book| {
+                                total.checked_add(book.trade_count).ok_or_else(|| {
+                                    "RRS_RUNTIME_METRIC_OVERFLOW:orderbookTradeCount".to_string()
+                                })
+                            })?;
+                        let book_orders =
+                            orderbook.books.values().try_fold(0_u64, |total, book| {
+                                let count = u64::try_from(book.orders.len()).map_err(|_| {
+                                    "RRS_RUNTIME_METRIC_OVERFLOW:openBookOrders".to_string()
+                                })?;
+                                total.checked_add(count).ok_or_else(|| {
+                                    "RRS_RUNTIME_METRIC_OVERFLOW:openBookOrders".to_string()
+                                })
+                            })?;
                         (
                             trade_count,
                             book_orders,
-                            u64::try_from(orderbook.offers.len())
-                                .map_err(|_| "RRS_RUNTIME_METRIC_OVERFLOW:openSwapOffers".to_string())?,
-                            u64::try_from(orderbook.resolving_offers.len())
-                                .map_err(|_| "RRS_RUNTIME_METRIC_OVERFLOW:resolvingSwapOffers".to_string())?,
+                            u64::try_from(orderbook.offers.len()).map_err(|_| {
+                                "RRS_RUNTIME_METRIC_OVERFLOW:openSwapOffers".to_string()
+                            })?,
+                            u64::try_from(orderbook.resolving_offers.len()).map_err(|_| {
+                                "RRS_RUNTIME_METRIC_OVERFLOW:resolvingSwapOffers".to_string()
+                            })?,
                         )
                     }
                     None => (0, 0, 0, 0),

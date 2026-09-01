@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + HLT IN PROGRESS; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS UNDER WAY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -274,6 +274,14 @@ focused tests. All four apps build and the candidate assembles without touching
 `frontend/build` as release
 `sha256-f25b8454817b2dcaa66fd613eacf615724f16074a373ae07044bec75abf3a5a1`
 with 305 validated files.
+
+Candidate browser verification is now independently wired from the canonical
+Svelte Playwright configuration. `playwright.react.config.ts` boots the four
+React roots behind an isolated same-origin gateway using a deterministic port
+offset, and tests site, docs, wallet, ops, plus the lazy ops HLT chunk at
+390x844, 1366x900, and 1920x1080. The final matrix passes 15/15 with zero page
+or console errors and no horizontal overflow; the existing Svelte `webServer`
+remains unchanged.
 
 ### WP3 — Migrate site
 
@@ -597,6 +605,19 @@ stale financial content. Mobile, laptop, and wide browser evidence has zero
 console errors or warnings. The root gate passes all 26 BrainVault/runtime tests
 with 100156 expectations before the existing contract-sync environment stops at
 Hardhat `HH19` under Node 24.18.0.
+
+Coexistence hardening now makes the package boundary structural instead of
+conventional: React apps have zero imports from `frontend/src` or `$lib`, the
+React Vite configuration no longer defines a `$lib` alias, and shared packages
+have zero imports back into application or legacy-Svelte source trees.
+Framework-neutral docs, releases, reviews, market-cap, onboarding, RCPAN,
+health, QA, invoice, failure, and command-journal modules live under
+`packages/{ui,runtime-client,browser}`; their former Svelte paths are thin
+re-export adapters until authorized cutover. Permanent boundary tests scan all
+apps, packages, and aliases. The final relocation evidence is 109 focused tests
+green, all four local checks green across 577 files with zero unsafe findings,
+all four production builds green, and the 15-case candidate browser matrix
+green at the three mandated viewports.
 
 ### WP6 — Migrate wallet by flow
 
@@ -998,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + HLT IMPLEMENTED; QA COCKPIT AND WORKSPACE REMAIN`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS UNDER WAY`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1026,10 +1047,188 @@ build pass. The exact built artifact resolves the real read-only HLT endpoint
 with zero console warnings/errors and no horizontal overflow at 393x852,
 1280x800, and 1600x900 viewports. Mutation wiring is verified by exact request
 tests; the browser preview deliberately did not start or abort a live public
-run. The four-app candidate assembles as
-`sha256-f8f47b5083dc11bd0f63d882ae74d2633e57bcb301169f0ccbafd39a28be951e`
-with 307 files. QA cockpit, event feeds, bootstrap detail, runs, scenarios, AI,
-embed, and workspace tools remain on their canonical Svelte owners.
+run. The `/qa` slice now owns the operator cockpit: six independent evidence
+reads load in parallel, selected-run detail is the only dependent request,
+authorization is explicit, protected evidence URLs are revoked on teardown,
+and restart, abort, backfill, and retention use the canonical typed
+confirmations. The ledger, system verdict, user-story evidence, scenario video,
+suites, benchmarks, persistent history, and run/shard detail remain data-driven
+and fail loudly when their source is unavailable. Thirty-five focused ops,
+shared-QA, capability, and platform tests pass with 384 expectations; the ops
+check scans 577 files with zero unsafe-type findings. The isolated production
+build emits the QA view as a 52.18 kB route chunk (14.41 kB gzip) and its source
+runtime as 21.18 kB (7.23 kB gzip), leaving the eager shell at 215.12 kB.
+Browser evidence covers the explicit unavailable state at 393x852, 1366x900,
+and 1920x1080 with zero console warnings/errors and no horizontal overflow;
+exact request and populated-data behavior is covered by boundary/action tests
+because no local QA evidence service was active. All four React surface checks
+and production builds pass, the canonical Svelte build passes, and the
+four-app candidate assembles as
+`sha256-28ec3ebbb4b6edbd7aacee02479f27738d5f315242335d81a702518c33f38fa2`
+with 312 files. The required root `bun run check` passes its
+26 BrainVault/startup tests with 100,156 expectations, then stops at the known
+contract-sync environment gate because Node 25.6.1 is outside Hardhat's
+supported runtime.
+
+The `/runs` slice now owns strict `/api/qa/runs?limit=50` decoding, QA-token
+authority, URL-backed selection, filtering, sorting, bounded refresh,
+generation-safe abort, and explicit unavailable evidence. The `/scenarios`
+slice loads the real prepared `/runtime.js`, records externally owned committed
+frame traces, tears down Runtime and jurisdiction watchers, and reconstructs an
+exact wallet preview from only the scenario identity and frame index without
+replacing live wallet state or adding persistence. The development gateway now
+serves declared generated inputs from their prepared owner ahead of SPA
+fallback while production `/runtime.js` remains edge-owned.
+
+The canonical `ahb`, `settle`, `swap`, and hub-collapse runners now retain the
+supplied fresh Runtime and are traceable. The scenario boundary rejects a
+runner that replaces the supplied Runtime, while the shared harness rejects a
+non-fresh supplied replica instead of silently mutating prior state. Two narrow
+core regressions prove exact replica retention and replacement rejection.
+Hub-collapse records 23 real committed frames and reconstructs its final wallet
+preview at frame 23 with two entities; no synthetic history or alternate
+frontend Runtime path was added.
+
+The final affected batch passes 38 tests with 392 assertions; all four React
+local checks scan 588 files with zero unsafe-type findings and all four builds
+pass. Ops emits runs as a 7.34 kB chunk and scenarios as 6.61 kB UI plus
+11.08 kB Runtime-source chunks; wallet preview remains split into 2.24 kB UI
+and 9.63 kB runtime chunks. The candidate matrix passes 21/21 in 29.7 seconds at
+390x844, 1366x900, and 1920x1080 with no page errors or horizontal overflow.
+Ordinary surfaces and scenario execution have zero console errors; the isolated
+runs test asserts the one expected 502 resource error together with the visible
+`OPS_RUNS_HTTP_502` failure state because no QA upstream was active. The
+validated candidate assembles 323 files as
+`sha256-d3588e546b3ca4289e570fb84063b1adab59deb9c40296ed7aaae31209146f31`.
+
+The `/ai` slice now owns the local AI console: strict decoding of every
+consumed AI-server field (null-tolerant MLX slots, extra-field-tolerant by
+recorded decision because ai/server.ts evolves independently), the canonical
+`data: `-line stream parser, council three-stage deliberation messages,
+agent tool-call evidence loops, chat save/load/delete with localStorage pins,
+entity-context handoff consumption with URL/storage cleanup, system-stats
+polling with generation-safe teardown, MLX load/eject control, voice-paste
+config, and the full browser effect boundary (Web Speech wake-word auto-start
+with defensive restart, microphone analyser visualizer, camera vision loop,
+TTS playback, clipboard paste, image drag/drop). Service unavailability is an
+explicit visible banner with retry instead of console-only failures, and the
+2,365-line canonical Svelte page remains untouched as the behavior reference.
+The shared `compareStableText` comparator moved to
+`packages/ui/src/stable-compare.ts` with the Svelte path as a thin re-export
+adapter; the canonical Svelte production build stays green. Thirteen focused
+tests (72 assertions) cover decoding, stream parsing, entity handoff,
+streaming/council/agent sends, pins, vision dedupe, routing, metadata, and
+runtime wiring; the ops check and production build pass with `/ai` split into
+16.24 kB view plus 17.67 kB runtime lazy chunks; and the browser matrix grows
+to 24/24 at 390x844, 1366x900, and 1920x1080 — `/ai` renders its heading,
+visible unavailable-service banner, and a live Playwright-fake-microphone
+`Listening...` session with zero page errors, no horizontal overflow, and only
+the expected refused localhost:3031 connections in the console.
+
+`/embed` is deliberately not claimed by the React candidate yet: the route is
+a thin shell whose entire body is the canonical Svelte workspace
+(`frontend/src/lib/view/View.svelte` → DockRoot → Graph3D, Architect, Runtime
+I/O, console, Time Machine), and the permanent boundary tests forbid React
+imports from `frontend/src`. React `/embed` ownership therefore arrives with
+the workspace-tree migration itself (capability `ops-workspace`, `unstarted`;
+the stale `frontend/src/lib/components/Workspace` source path is corrected to
+the live `View.svelte` route pair). Until then the React pending shell is the
+honest state and the canonical Svelte route keeps serving `/embed`.
+
+The first workspace slice extracts the boot boundary both frameworks will
+consume: `packages/runtime-client/src/embed-boot-model.ts` now owns the exact
+`?scenario` / `?autoplay=1` / `?speed` / `#trail` contract (trim, strict
+autoplay string, the `Number(v || 1) || 1` speed fallback, trail-wins
+precedence, document title, and failure copy) and
+`packages/runtime-client/src/demo-playback-intent.ts` owns the one-shot
+autoplay/speed intent store with value-stable snapshots for
+`useSyncExternalStore`. The canonical Svelte `/embed` route and the
+`networkMachineDemoStore` are now thin facades over these boundaries with
+their public APIs unchanged; five focused model/store tests plus the updated
+demo-pins test (68 assertions across both files) pin the semantics, all four
+React checks and the canonical Svelte production build stay green, and the
+`ops-workspace-boot-boundary` inventory entry records both consumers.
+
+The second workspace slice makes the timeline data layer framework-free:
+`src/lib/utils/observableStore.ts` provides the store contract (synchronous
+current-value emission, set/update/subscribe, one-shot reads) without svelte,
+and both `network3d/runtimeGraphFrameCache.ts` (the only svelte-importing
+network3d file) and `stores/network/networkMachineRuntimeStore.ts` now use it
+— `network3d/**` is 100% svelte-free and the machine-runtime operations keep
+their exact API and pinned source semantics. The canonical Svelte check
+(svelte-check plus vite build) and all four React checks stay green; the
+323-line frame-cache test, the time-machine contract, and two new observable
+L1 tests pass unchanged. A slice-1 regression was caught and fixed by the
+canonical check: the demo-intent store must pass the value to subscribers and
+emit it on subscribe, or svelte `get()` types collapse to `unknown` in
+`NetworkMachineTimeline.svelte`. The whole workspace state layer
+(`network3d/**`, `stores/network/**`, `settingsStore`) is now svelte-free;
+remaining svelte-store usage lives in the store facades the panels still own
+(`xlnStore`, `runtimeStore`, `runtimeViewStore`, `errorLogStore`,
+`toastStore`, `appStateStore`) and in the `.svelte` components themselves.
+
+The third workspace slice completes the store-layer neutralization: every
+remaining `stores/network/` module (`networkMachineStore`,
+`runtimeGraphControlStore`, `routePreviewStore`, `paymentSpotlightStore`,
+`jmachineStore`) and `stores/settingsStore.ts` now use the observable store —
+the whole workspace state layer (`network3d/**` plus all of
+`stores/network/` plus settings) is svelte-free while every public store and
+operations API is unchanged, svelte `get()`/`$` consumers keep working
+against the value-carrying contract, and theme/UI DOM application stays at
+the operations boundary where the UI owns it. The canonical Svelte check
+plus production build is green and the complete 1,102-test frontend tree
+shows an identical 13-failure set with and without this slice — all
+pre-existing collateral from the in-flight `core/scenarios`/entity stream,
+zero regressions.
+
+The first panel slice ports the console panel's logic: the frame-log
+projection (tolerant `logs`/`frameLogs` decode, level normalization,
+`[F<i>]` prefixes, newest-bounded window), level/search filtering,
+copy/download text, level colors, and the whitelist command REPL
+(help/clear/state/entities/inspect/scenario with tab completion) now live in
+`packages/runtime-client/src/console-panel-view.ts`, and the canonical Svelte
+`ConsolePanel.svelte` is a thin consumer with its props, keyboard history,
+debounce, and clipboard effects unchanged. Four focused tests (34 assertions)
+pin the semantics including canonical quirks (unknown `help()` topic lists
+commands; `inspect()` of a missing entity returns a message instead of
+throwing). The unsafe-types gate rejected an early double assertion in favor
+of the shared `isUnknownRecord` boundary guard; canonical check plus build,
+all four React checks, and the full 1,102-test frontend tree (identical
+13-failure pre-existing baseline) are green. RuntimeIOPanel's projection
+helpers follow the same pattern next.
+
+The second panel slice ports the Runtime I/O projections: Map-or-Record
+normalization (`mapToArray`/`valuesOf`/`isReadonlyMap`), tolerant bigint
+display math (`toBigIntValue`/`formatBigInt`), gossip profile and entry
+counting, Time Machine frame selection (negative or absent index selects
+nothing; out-of-range clamps to the newest frame), level/category/search log
+filtering, level colors and category icons, and the reserves/collateral
+conservation sums now live in
+`packages/runtime-client/src/runtime-io-panel-view.ts`. The canonical Svelte
+panel keeps its expansion state, toggles, and markup and delegates every
+projection; the compact-projections-only contract stays pinned by the
+existing source test. Five focused tests (45 assertions across both panel
+view models) cover Map/Record equivalence, bigint coercion, frame selection
+edges, filtering, and the conservation sums over mixed Map/Record frames.
+The boundary gate now allows `@xln/core/types/logging` — a 23-line pure-type
+module — for panel view models; the no-implementation rule is unchanged.
+Canonical check plus build, all four React checks, and the full frontend
+tree (identical 13-failure pre-existing baseline) are green.
+
+Workspace port order recorded from the live tree (View 487 lines, DockRoot
+790, panels 11,630; the data layer — `network3d` minus the frame cache,
+`panelBridge`, `perfMonitor`, `command-palette-view`,
+`paymentTerminalMonitor`, and all of `packages/{browser,runtime-client}` — is
+already framework-neutral): neutralize `runtimeGraphFrameCache` (the only
+Svelte-importing network3d file) and the `networkMachineRuntimeStore` /
+`settingsStore` facades next; port panels bottom-up (Console → RuntimeIO →
+Solvency → diagnostics → Gossip → TimeMachine → Jurisdiction/Settings →
+Architect); wrap `DockviewComponent` for React with layout JSON kept
+compatible; rebuild Graph3DPanel around refs + explicit effects last; and
+treat the 112-file / 43k-line Entity workspace tree behind `entity-panel` and
+the pinned wallet as its own explicitly sized sub-program before any `/embed`
+route flip. `tests/frontend/graph/*`, `time-machine-current-env`, and
+`tests/sites/dockview.spec.ts` are the acceptance contract throughout.
 
 **Done:** ops routes and operator flows pass focused checks with correct cleanup
 and authority behavior.
@@ -1113,14 +1312,22 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue WP7 route-by-route with the QA cockpit, while preserving the typed
-   workspace and scenario registries captured by WP0.
-2. Execute WP8 against the versioned candidate: PWA install/update, native and
+1. Continue WP7 with the workspace port in the recorded order: state layer
+   is now svelte-free — port panels bottom-up next (Console → RuntimeIO →
+   Solvency → diagnostics → Gossip → TimeMachine → Jurisdiction/Settings →
+   Architect), wrap Dockview for React, rebuild Graph3DPanel last, and size
+   the Entity workspace sub-program before flipping the `/embed` route.
+2. Owner to assign: two `network-timeline-source` failures
+   (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
+   round-trip tests) appeared with the in-flight `core/scenarios` runner
+   changes in the working tree and are collateral from that stream, not the
+   frontend migration.
+3. Execute WP8 against the versioned candidate: PWA install/update, native and
    packaged consumers, deployment selection, and rollback remain deliberately
    separate from production activation.
-3. Close WP9 parity only after site, docs, wallet, and ops are complete, then
+4. Close WP9 parity only after site, docs, wallet, and ops are complete, then
    request explicit WP10 cutover authority and prepare the upstream PR.
-4. Keep WP11 as a separately authorized production operation using immutable
+5. Keep WP11 as a separately authorized production operation using immutable
    prebuilt artifacts.
 
 ## WP5 closure record

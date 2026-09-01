@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react';
 
-import type { DocEntry, DocSection, TocHeading } from '$lib/docs/docs-page-model';
+import type { DocEntry, DocSection, TocHeading } from '../../../packages/ui/src/docs-page-model';
 
 export type DocsDocumentState =
   | Readonly<{ status: 'idle' | 'loading' }>

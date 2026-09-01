@@ -1,5 +1,5 @@
-import { writable } from 'svelte/store';
 import type { RuntimeGraphCanonicity } from '$lib/network3d/runtimeGraphProjection';
+import { createObservableStore } from '$lib/utils/observableStore';
 
 const CANONICITY_KEY = 'xln-graph-canonicity';
 const validCanonicity = new Set<RuntimeGraphCanonicity>(['timestamp', 'height', 'left', 'right', 'hub']);
@@ -10,8 +10,8 @@ const initialCanonicity = (): RuntimeGraphCanonicity => {
   return stored && validCanonicity.has(stored) ? stored : 'timestamp';
 };
 
-export const runtimeGraphScope = writable<string>('merged');
-export const runtimeGraphCanonicity = writable<RuntimeGraphCanonicity>(initialCanonicity());
+export const runtimeGraphScope = createObservableStore<string>('merged');
+export const runtimeGraphCanonicity = createObservableStore<RuntimeGraphCanonicity>(initialCanonicity());
 
 export const runtimeGraphControlOperations = {
   setScope(value: string): string {

@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { createObservableStore } from '$lib/utils/observableStore';
 
 interface RoutePreview {
   path: string[];
@@ -6,7 +6,7 @@ interface RoutePreview {
 }
 
 function createRoutePreviewStore() {
-  const { subscribe, set } = writable<RoutePreview | null>(null);
+  const { subscribe, set } = createObservableStore<RoutePreview | null>(null);
 
   return {
     subscribe,

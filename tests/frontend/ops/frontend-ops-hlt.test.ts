@@ -10,7 +10,7 @@ import {
   readOpsHltReplayMode,
 } from '../../../frontend/apps/ops/src/ops-hlt-model';
 import { opsPageMetadata, resolveOpsPage } from '../../../frontend/apps/ops/src/ops-model';
-import { decodeHltDashboardPayload } from '../../../frontend/src/lib/qa/hlt';
+import { decodeHltDashboardPayload } from '../../../frontend/packages/runtime-client/src/qa-hlt';
 
 const HLT_PAYLOAD = {
   ok: true,
@@ -135,11 +135,11 @@ describe('React ops HLT evidence', () => {
     expect(opsHltVerdict(failed)).toEqual({ status: 'FAIL', detail: 'drain gate failed' });
   });
 
-  test('owns the HLT route without claiming the QA cockpit', () => {
+  test('owns both QA routes with distinct React pages', () => {
     const page = resolveOpsPage('/qa/hlt');
     expect(page).toEqual({ kind: 'hlt', pathname: '/qa/hlt' });
     expect(opsPageMetadata(page).title).toBe('xln HLT Load Stand');
-    expect(resolveOpsPage('/qa')).toEqual({ kind: 'pending', pathname: '/qa' });
+    expect(resolveOpsPage('/qa')).toEqual({ kind: 'qa', pathname: '/qa' });
   });
 
   test('wires real HLT endpoints, active-only polling, abort teardown, and a lazy route chunk', async () => {

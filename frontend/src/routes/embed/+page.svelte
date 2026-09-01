@@ -22,43 +22,41 @@
   import { networkMachineRuntimeOperations } from '$lib/stores/network/networkMachineRuntimeStore';
   import { networkMachineDemo } from '$lib/stores/network/networkMachineDemoStore';
   import { decodeNetworkTrailFromHash } from '$lib/network3d/timeline/networkTimelineSource';
+  import { embedBootErrorMessage, embedBootTitle, parseEmbedBootRequest } from '../../../packages/runtime-client/src/embed-boot-model';
 
   let embedMode = true;
   let scenarioError = '';
 
-  $: scenario = $page.url.searchParams.get('scenario')?.trim() ?? '';
-  $: autoplay = $page.url.searchParams.get('autoplay') === '1';
-  $: speed = Number($page.url.searchParams.get('speed') || 1) || 1;
-
-  const trailFromHash = (hash: string): string =>
-    new URLSearchParams(hash.replace(/^#/, '')).get('trail')?.trim() ?? '';
+  // URL semantics (scenario/autoplay/speed, trail-wins precedence) live in the
+  // shared boot model so the React workspace parses the identical contract.
+  $: boot = parseEmbedBootRequest($page.url);
+  $: documentTitle = embedBootTitle(boot);
 
   onMount(() => {
     settingsOperations.initialize();
-    const encodedTrail = trailFromHash($page.url.hash);
-    if (!scenario && !encodedTrail) return;
+    if (boot.kind === 'plain') return;
 
     // The Time Machine is the narration in a demo, so it must be visible.
     settingsOperations.setShowTimeMachine(true);
-    networkMachineDemo.set({ autoplay, speed });
+    networkMachineDemo.set({ autoplay: boot.autoplay, speed: boot.speed });
 
     const fail = (error: unknown): void => {
-      scenarioError = error instanceof Error ? error.message : String(error || 'demo failed');
+      scenarioError = embedBootErrorMessage(error);
     };
 
     // A recorded trail wins: it is exact, and it does not need a runtime to replay.
-    if (encodedTrail) {
-      void decodeNetworkTrailFromHash(encodedTrail)
+    if (boot.kind === 'trail') {
+      void decodeNetworkTrailFromHash(boot.encodedTrail)
         .then((trail) => networkMachineRuntimeOperations.loadTrail(trail))
         .catch(fail);
       return;
     }
-    void networkMachineRuntimeOperations.loadScenario(scenario).catch(fail);
+    void networkMachineRuntimeOperations.loadScenario(boot.scenario).catch(fail);
   });
 </script>
 
 <svelte:head>
-  <title>xln — {scenario ? `${scenario} scenario` : 'Embedded Workspace'}</title>
+  <title>{documentTitle}</title>
 </svelte:head>
 
 {#if scenarioError}

@@ -18,13 +18,10 @@ import {
 import type { QaCandidateIdentity } from './candidate';
 import { assertQaCandidateIdentity } from './candidate';
 import {
-  QA_HISTORY_DB_PATH,
-  QA_LOGS_ROOT,
   QA_PHASE_WATERFALL_BUDGET_MS,
   QA_PHASE_WATERFALL_LABELS,
   QA_PHASE_WATERFALL_ORDER,
   QA_RUN_MANIFEST_VERSION,
-  QA_STORY_SCREENSHOTS_ROOT,
   QA_UX_RELEASE_PACK_MIN_SCREENS,
   QA_UX_RELEASE_REQUIRED_GROUPS,
   type QaArtifact,
@@ -75,8 +72,14 @@ import {
   type QaTestLedgerEntry,
   type QaUxReleasePackAudit,
 } from './report-types';
+import {
+  QA_HISTORY_DB_PATH,
+  QA_LOGS_ROOT,
+  QA_STORY_SCREENSHOTS_ROOT,
+} from './report-paths';
 
 export * from './report-types';
+export * from './report-paths';
 
 export const auditQaUxReleasePack = (stories: QaStoryScreenshot[]): QaUxReleasePackAudit => {
   const curated = stories.filter(story => story.curated);

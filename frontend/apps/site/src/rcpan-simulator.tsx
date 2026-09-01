@@ -1,10 +1,10 @@
 import type { CSSProperties, ChangeEvent } from 'react';
 
-import type { RcpanMicroscopeComparisonFrame, RcpanMicroscopeSystemFrame } from '../../../src/lib/components/Rcpan/microscope/model/microscope-model';
-import type { RcpanMicroscopeControls, RcpanScenarioId } from '../../../src/lib/components/Rcpan/microscope/model/microscope-playground';
-import { RCPAN_SCENARIOS, type RcpanTimelineState } from '../../../src/lib/components/Rcpan/microscope/model/microscope-timeline';
-import { formatUsdMicros } from '../../../src/lib/components/Rcpan/microscope/model/microscope-tokens';
-import type { MicroscopeAccountDisplay, MicroscopeCourtDisplay, MicroscopeNodeDisplay, MicroscopeTokenLane } from '../../../src/lib/components/Rcpan/microscope/model/microscope-visual-types';
+import type { RcpanMicroscopeComparisonFrame, RcpanMicroscopeSystemFrame } from '../../../packages/ui/src/rcpan/microscope-model';
+import type { RcpanMicroscopeControls, RcpanScenarioId } from '../../../packages/ui/src/rcpan/microscope-playground';
+import { RCPAN_SCENARIOS, type RcpanTimelineState } from '../../../packages/ui/src/rcpan/microscope-timeline';
+import { formatUsdMicros } from '../../../packages/ui/src/rcpan/microscope-tokens';
+import type { MicroscopeAccountDisplay, MicroscopeCourtDisplay, MicroscopeNodeDisplay, MicroscopeTokenLane } from '../../../packages/ui/src/rcpan/microscope-visual-types';
 
 type SimulatorProps = Readonly<{
   controls: RcpanMicroscopeControls;

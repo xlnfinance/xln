@@ -4,7 +4,7 @@ import {
   buildWalletPayHref,
   buildXlnInvoiceDeepLink,
   buildXlnInvoiceUri,
-} from '../../../src/lib/utils/xlnInvoice';
+} from '../../../packages/runtime-client/src/xln-invoice';
 import type { WalletPaymentProjection } from './wallet-payment-model';
 import type { WalletPaymentSource } from './wallet-payment-source';
 

@@ -336,6 +336,14 @@ a {
     padding: 3rem 1rem 2rem;
   }
 
+  .wallet-shell:has(.wallet-scenario-preview) {
+    padding-bottom: 0;
+  }
+
+  .wallet-shell:has(.wallet-scenario-preview) .wallet-shell-rail {
+    display: none;
+  }
+
   .wallet-shell-facts dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

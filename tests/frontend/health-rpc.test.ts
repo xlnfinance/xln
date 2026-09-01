@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { probeRpcHealth } from '../../frontend/src/lib/health/rpcHealth';
+import { probeRpcHealth } from '../../frontend/packages/runtime-client/src/rpc-health';
 
 const jsonResponse = (body: unknown, init: ResponseInit = {}): Response =>
   new Response(JSON.stringify(body), {

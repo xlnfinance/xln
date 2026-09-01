@@ -21,6 +21,7 @@
 		"assemble:react": "bun scripts/assemble.ts",
 		"dev:react": "bun scripts/dev.ts",
 		"dev:react:gateway": "bun scripts/run-dev-gateway.ts",
+		"test:react:candidate": "playwright test --config playwright.react.config.ts",
 		"check:unsafe-types": "bun scripts/check-unsafe-types.ts",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e -- playwright test",

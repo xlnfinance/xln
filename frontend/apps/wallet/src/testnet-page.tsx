@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+import { DEMO_ACCOUNTS } from '../../../packages/ui/src/demo-accounts';
 import { resetBrowserRuntimeData } from '../../../packages/browser/src/browser-runtime-reset';
 import { publishBrowserHardResetRequest } from '../../../packages/browser/src/hard-reset-request';
 import { createDemoWalletHref, TESTNET_CARDS } from './testnet-model';

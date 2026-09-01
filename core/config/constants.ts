@@ -11,6 +11,7 @@
 import { readPositiveIntegerEnv } from './environment';
 
 export { REMOTE_RUNTIME } from './remote-runtime';
+export { DISPLAY, QA } from './qa';
 
 // ═══════════════════════════════════════════════════════════════
 // SYSTEM LIMITS
@@ -296,23 +297,6 @@ export const PERFORMANCE = {
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
-// OPERATOR UI / DEBUG DISPLAY
-// ═══════════════════════════════════════════════════════════════
-
-export const DISPLAY = {
-  /** Default compact hash width: first 4 bytes = 8 hex chars, matching Git-style short fingerprints. */
-  SHORT_HASH_BYTES: 4,
-  SHORT_HASH_HEX_CHARS: 8,
-
-  /** Keep endpoint labels compact while still showing both ends of long values. */
-  ENDPOINT_PREFIX_CHARS: 8,
-  ENDPOINT_SUFFIX_CHARS: 4,
-
-  /** Health flow graph preview size. */
-  HEALTH_FLOW_EDGE_LIMIT: 12,
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
 // TIME MACHINE
 // ═══════════════════════════════════════════════════════════════
 
@@ -320,48 +304,6 @@ export const TIME_MACHINE = {
   HASH_HEIGHT_PARAM: 'tmHeight',
   HASH_ENTITY_PARAM: 'tmEntity',
   HASH_RUNTIME_PARAM: 'tmRuntime',
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
-// QA / RELEASE EVIDENCE
-// ═══════════════════════════════════════════════════════════════
-
-export const QA = {
-  RUN_WINDOW_STEP: 80,
-  SHARD_WINDOW_STEP: 80,
-  HISTORY_WINDOW_STEP: 80,
-  LEDGER_WINDOW_STEP: 80,
-  ARTIFACT_WINDOW_STEP: 40,
-  RECENT_TREND_LIMIT: 12,
-  HISTORY_PREVIEW_LIMIT: 12,
-  BROWSER_ISSUE_PREVIEW_LIMIT: 8,
-  STORY_TAG_LIMIT: 12,
-  SHARD_TIMELINE_STEP_LIMIT: 80,
-  SHARD_SLOW_STEP_LIMIT: 12,
-  LOG_TAIL_LINES: 80,
-  BOOTSTRAP_PAIR_PREVIEW_LIMIT: 6,
-  BOOTSTRAP_CROSS_ROUTE_PREVIEW_LIMIT: 8,
-
-  HISTORY_DEFAULT_LIMIT: 120,
-  HISTORY_MAX_LIMIT: 500,
-  HISTORY_BACKFILL_DEFAULT_LIMIT: 500,
-  HISTORY_BACKFILL_MAX_LIMIT: 2_000,
-
-  RETENTION_MIN_DAYS: 30,
-
-  RESTART_CONFIRM: 'RUN',
-  RESTART_ABORT_CONFIRM: 'ABORT_RESTART',
-  HISTORY_BACKFILL_CONFIRM: 'BACKFILL_QA_HISTORY',
-  RETENTION_CONFIRM: 'DELETE_OLDER_THAN_30_DAYS',
-
-  PHASE_BUDGET_MS: {
-    preflight: 1_000,
-    anvilBoot: 5_000,
-    apiBoot: 5_000,
-    apiHealthy: 5_000,
-    viteBoot: 5_000,
-    playwright: 5_000,
-  },
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

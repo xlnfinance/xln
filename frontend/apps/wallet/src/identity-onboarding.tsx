@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 
-import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+import { DEMO_ACCOUNTS } from '../../../packages/ui/src/demo-accounts';
 import {
   resolveWalletIdentityModeNavigation,
   selectWalletIdentityMode,

@@ -12,7 +12,7 @@ import {
   resolveDocLink,
   resolveDocsImageSrc,
   type DocsFetcher,
-} from '../../../frontend/src/lib/docs/docs-page-model';
+} from '../../../frontend/packages/ui/src/docs-page-model';
 
 const ROOT = resolve(import.meta.dir, '../../..');
 
@@ -101,8 +101,8 @@ describe('React docs pilot', () => {
     const reactSource = readFileSync(resolve(ROOT, 'frontend/apps/docs/src/docs-app.tsx'), 'utf8');
     const readerSource = readFileSync(resolve(ROOT, 'frontend/apps/docs/src/docs-reader.tsx'), 'utf8');
     const svelteSource = readFileSync(resolve(ROOT, 'frontend/src/lib/components/Views/DocsView.svelte'), 'utf8');
-    const modelSource = readFileSync(resolve(ROOT, 'frontend/src/lib/docs/docs-page-model.ts'), 'utf8');
-    expect(reactSource).toContain("from '$lib/docs/docs-page-model'");
+    const modelSource = readFileSync(resolve(ROOT, 'frontend/packages/ui/src/docs-page-model.ts'), 'utf8');
+    expect(reactSource).toContain("from '../../../packages/ui/src/docs-page-model'");
     expect(reactSource).toContain('AbortController');
     expect(readerSource).toContain('dangerouslySetInnerHTML');
     expect(svelteSource).toContain("from '$lib/docs/docs-page-model'");

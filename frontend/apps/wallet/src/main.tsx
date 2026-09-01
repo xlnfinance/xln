@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { WalletApp } from './wallet-app';
+import { resolveWalletAppView } from './app-shell-model';
 import { resolveWalletPage, walletPageMetadata } from './wallet-model';
 
 const rootElement = document.getElementById('root');
@@ -13,6 +14,10 @@ const description = document.querySelector<HTMLMetaElement>('meta[name="descript
 if (!description) throw new Error('WALLET_DESCRIPTION_META_MISSING');
 document.title = metadata.title;
 description.content = metadata.description;
+
+if (page.kind === 'app' && resolveWalletAppView(window.location.search, window.location.hash) === 'scenario-preview') {
+  void import('./wallet-scenario-preview-runtime').then(module => module.startWalletScenarioPreviewRuntime());
+}
 
 createRoot(rootElement).render(
   <StrictMode>

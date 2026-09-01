@@ -5,7 +5,7 @@ import {
   type HltDashboardMode,
   type HltDashboardPreview,
 } from '../../../../core/qa/hlt/hlt-dashboard-preview';
-import type { HltDashboardPayload } from '../../../src/lib/qa/hlt';
+import type { HltDashboardPayload } from '../../../packages/runtime-client/src/qa-hlt';
 
 export type OpsHltTab = 'control' | 'progress';
 export type OpsHltPhase = 'build' | 'replay';

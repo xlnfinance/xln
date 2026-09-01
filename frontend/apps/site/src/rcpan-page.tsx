@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { cloneMicroscopeControls, type RcpanMicroscopeControls, type RcpanScenarioId } from '../../../src/lib/components/Rcpan/microscope/model/microscope-playground';
-import { deriveRcpanMicroscopeFrame } from '../../../src/lib/components/Rcpan/microscope/model/microscope-model';
-import { deriveMicroscopeTimeline, phaseStartMs } from '../../../src/lib/components/Rcpan/microscope/model/microscope-timeline';
+import { cloneMicroscopeControls, type RcpanMicroscopeControls, type RcpanScenarioId } from '../../../packages/ui/src/rcpan/microscope-playground';
+import { deriveRcpanMicroscopeFrame } from '../../../packages/ui/src/rcpan/microscope-model';
+import { deriveMicroscopeTimeline, phaseStartMs } from '../../../packages/ui/src/rcpan/microscope-timeline';
 import { RCPAN_COMPARISON_ROWS, RCPAN_SYSTEMS, RCPAN_UPGRADES } from './rcpan-content';
 import { RcpanSimulator } from './rcpan-simulator';
 import { Arrow, SiteFooter, SiteShell } from './site-shell';

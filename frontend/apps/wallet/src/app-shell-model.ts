@@ -15,10 +15,11 @@ export const WALLET_APP_LINKS = [
   { href: '/docs', label: 'Docs', view: null },
 ] as const;
 
-export type WalletAppView = 'overview' | 'portfolio' | 'health' | 'payments' | 'markets' | 'identity' | 'settings' | 'diagnostics';
+export type WalletAppView = 'overview' | 'portfolio' | 'health' | 'payments' | 'markets' | 'identity' | 'settings' | 'diagnostics' | 'scenario-preview';
 
 export const resolveWalletAppView = (search: string, hash = ''): WalletAppView => {
   const params = new URLSearchParams(search);
+  if (params.get('locktest') === '1' && params.get('scenarioPreview') === '1') return 'scenario-preview';
   if (params.get('setup') === '1' || params.has('demo')) return 'identity';
   if (params.get('portfolio') === '1') return 'portfolio';
   if (params.get('health') === '1') return 'health';

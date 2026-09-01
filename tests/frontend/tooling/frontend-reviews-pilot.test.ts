@@ -6,7 +6,7 @@ import {
   getReviewText,
   REVIEW_MODELS,
   REVIEW_PROMPTS,
-} from '../../../frontend/src/lib/reviews/reviews-model';
+} from '../../../frontend/packages/ui/src/reviews-model';
 
 const ROOT = resolve(import.meta.dir, '../../..');
 
@@ -36,7 +36,7 @@ describe('React reviews pilot', () => {
     const reactSource = readFileSync(resolve(ROOT, 'frontend/apps/site/src/reviews-page.tsx'), 'utf8');
     const svelteSource = readFileSync(resolve(ROOT, 'frontend/src/routes/reviews/+page.svelte'), 'utf8');
 
-    expect(reactSource).toContain("from '$lib/reviews/reviews-model'");
+    expect(reactSource).toContain("from '../../../packages/ui/src/reviews-model'");
     expect(reactSource).toContain('aria-live="polite"');
     expect(reactSource).not.toContain('fetch(');
     expect(svelteSource).toContain("from '$lib/reviews/reviews-model'");

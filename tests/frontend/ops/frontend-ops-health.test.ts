@@ -91,9 +91,9 @@ describe('React ops health evidence', () => {
     expect(shortOpsHealthHash('abcdef0123456789-dirty')).toBe('abcdef0123-dirty');
   });
 
-  test('owns only health while other ops routes remain explicit migration candidates', () => {
+  test('owns health while the QA cockpit is routed to its React surface', () => {
     expect(resolveOpsPage('/health')).toEqual({ kind: 'health', pathname: '/health' });
-    expect(resolveOpsPage('/qa')).toEqual({ kind: 'pending', pathname: '/qa' });
+    expect(resolveOpsPage('/qa')).toEqual({ kind: 'qa', pathname: '/qa' });
     expect(resolveOpsPage('/embed')).toEqual({ kind: 'pending', pathname: '/embed' });
   });
 });

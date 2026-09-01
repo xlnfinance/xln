@@ -88,7 +88,7 @@ describe('canonical audit registry', () => {
       'frontend/src/lib/stores/network/paymentSpotlightStore.ts',
       'frontend/src/lib/stores/network/paymentTerminalMonitor.ts',
       'frontend/src/lib/view/View.svelte',
-      'frontend/src/lib/utils/xlnInvoice.ts',
+      'frontend/packages/runtime-client/src/xln-invoice.ts',
     ];
     const tests = [
       'tests/e2e-payment.spec.ts',

@@ -5,18 +5,18 @@ import { resolve } from 'node:path';
 import {
   decodeReleaseManifest,
   decodeReleaseSnapshot,
-} from '../../../frontend/src/lib/releases/release-catalog';
+} from '../../../frontend/packages/ui/src/release-catalog';
 import {
   deriveReleaseChartPath,
   deriveReleaseChartPoints,
   formatReleaseMetric,
   getReleaseScopes,
-} from '../../../frontend/src/lib/releases/release-chart';
+} from '../../../frontend/packages/ui/src/release-chart';
 import {
   verifyReleaseManifestEntry,
   verifyReleaseManifestPolicy,
   verifyReleaseManifestSnapshotBinding,
-} from '../../../frontend/src/lib/releases/release-signature';
+} from '../../../frontend/packages/ui/src/release-signature';
 
 const ROOT = resolve(import.meta.dir, '../../..');
 const readJson = (path: string): unknown => JSON.parse(readFileSync(resolve(ROOT, path), 'utf8')) as unknown;
@@ -61,7 +61,7 @@ describe('React releases pilot', () => {
   test('keeps both frontends on the shared verified and sanitized loaders', () => {
     const reactSource = readFileSync(resolve(ROOT, 'frontend/apps/site/src/releases-page.tsx'), 'utf8');
     const svelteSource = readFileSync(resolve(ROOT, 'frontend/src/lib/components/Releases/ReleasesView.svelte'), 'utf8');
-    const catalogSource = readFileSync(resolve(ROOT, 'frontend/src/lib/releases/release-catalog.ts'), 'utf8');
+    const catalogSource = readFileSync(resolve(ROOT, 'frontend/packages/ui/src/release-catalog.ts'), 'utf8');
 
     expect(reactSource).toContain('fetchVerifiedReleaseManifest');
     expect(reactSource).toContain('fetchReleaseDocument');

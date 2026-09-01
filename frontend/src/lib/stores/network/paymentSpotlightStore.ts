@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { createObservableStore } from '$lib/utils/observableStore';
 
 export type PaymentSpotlight = {
   id: string;
@@ -12,7 +12,7 @@ export type PaymentSpotlight = {
 };
 
 export function createPaymentSpotlightStore() {
-  const { subscribe, set } = writable<PaymentSpotlight | null>(null);
+  const { subscribe, set } = createObservableStore<PaymentSpotlight | null>(null);
   let activeTimer: ReturnType<typeof setTimeout> | null = null;
   let activeSpotlight: PaymentSpotlight | null = null;
 

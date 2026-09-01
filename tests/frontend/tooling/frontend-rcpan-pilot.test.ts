@@ -37,7 +37,7 @@ describe('React RCPAN pilot', () => {
 
   test('consumes the canonical microscope model instead of reproducing account math', async () => {
     const page = await readFile(new URL('frontend/apps/site/src/rcpan-page.tsx', REPOSITORY_ROOT), 'utf8');
-    expect(page).toContain("from '../../../src/lib/components/Rcpan/microscope/model/microscope-model'");
+    expect(page).toContain("from '../../../packages/ui/src/rcpan/microscope-model'");
     expect(page).toContain('deriveRcpanMicroscopeFrame');
     expect(page).not.toContain('deriveDelta');
     expect(page).not.toContain('deriveDisputeTokenFinalization');

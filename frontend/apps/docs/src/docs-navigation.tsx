@@ -1,4 +1,4 @@
-import type { DocSection, DocsManifest, ReadingPath } from '$lib/docs/docs-page-model';
+import type { DocSection, DocsManifest, ReadingPath } from '../../../packages/ui/src/docs-page-model';
 
 type DocsNavigationProps = Readonly<{
   manifest: DocsManifest | null;

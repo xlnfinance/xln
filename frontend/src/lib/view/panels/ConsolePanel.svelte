@@ -1,71 +1,40 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
   import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
+  import {
+    CONSOLE_MAX_LOGS,
+    consoleCommandCompletions,
+    consoleLevelColor,
+    createConsoleCommands,
+    evalConsoleCommand,
+    filterConsoleLogs,
+    formatConsoleLogText,
+    projectConsoleFrameLogs,
+    type ConsoleEntry,
+    type ConsoleFilterLevel,
+  } from '../../../../packages/runtime-client/src/console-panel-view';
 
   // Props for isolated mode (passed from View.svelte)
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]> | undefined = undefined;
   export let runtimeFrameTimeIndex: Writable<number> | undefined = undefined;
 
-  interface ConsoleEntry {
-    id: number;
-    timestamp: string;
-    level: 'debug' | 'log' | 'info' | 'warn' | 'error';
-    message: string;
-    stack: string | undefined;
-  }
-
   let logs: ConsoleEntry[] = [];
-  let logId = 0;
   let autoScroll = true;
-  let filterLevel: 'all' | 'debug' | 'log' | 'warn' | 'error' = 'all';
-  let maxLogs = 500;
+  let filterLevel: ConsoleFilterLevel = 'all';
+  let maxLogs = CONSOLE_MAX_LOGS;
   let scrollContainer: HTMLDivElement;
   let searchText = '';
   let debouncedSearchText = ''; // Debounced version for filtering
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const frameLogsOf = (frame: EnvSnapshot): Array<{ timestamp: number; level: string; message: string }> => {
-    const candidate = 'logs' in frame ? frame.logs : 'frameLogs' in frame ? frame.frameLogs : null;
-    if (!Array.isArray(candidate)) return [];
-    return candidate.flatMap((entry) => {
-      if (!entry || typeof entry !== 'object') return [];
-      const record = entry as Record<string, unknown>;
-      return typeof record['timestamp'] === 'number' && typeof record['level'] === 'string' && typeof record['message'] === 'string'
-        ? [{ timestamp: record['timestamp'], level: record['level'], message: record['message'] }]
-        : [];
-    });
-  };
-
   // Load frame logs from history when timeIndex changes
   function loadFrameLogs() {
     if (!runtimeFrameHistory || !runtimeFrameTimeIndex) return;
     const history = $runtimeFrameHistory;
-    const idx = $runtimeFrameTimeIndex;
-    if (!history || history.length === 0 || idx === undefined) return;
-
-    // Get all frame logs up to current index
-    const allLogs: ConsoleEntry[] = [];
-    const endIdx: number = idx >= 0 ? idx : history.length - 1;
-
-    for (let i = 0; i <= endIdx && i < history.length; i++) {
-      const frame = history[i];
-      if (!frame) continue;
-      const frameLogs = frameLogsOf(frame);
-      for (const flog of frameLogs) {
-        allLogs.push({
-          id: logId++,
-          timestamp: new Date(flog.timestamp).toLocaleTimeString('en-US', {
-            hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
-          }),
-          level: flog.level === 'debug' ? 'debug' : flog.level === 'warn' ? 'warn' : flog.level === 'error' ? 'error' : 'log',
-          message: `[F${i}] ${flog.message}`,
-          stack: undefined
-        });
-      }
-    }
-    logs = allLogs.slice(-maxLogs);
-
+    const timeIndex = $runtimeFrameTimeIndex;
+    if (!history || timeIndex === undefined) return;
+    logs = projectConsoleFrameLogs(history, timeIndex, { maxLogs });
     if (autoScroll && scrollContainer) {
       setTimeout(() => {
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
@@ -88,17 +57,11 @@
   }
 
   function copyToClipboard() {
-    const text = filteredLogs.map(log =>
-      `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.message}`
-    ).join('\n');
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(formatConsoleLogText(filteredLogs));
   }
 
   function downloadLogs() {
-    const text = filteredLogs.map(log =>
-      `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.message}`
-    ).join('\n');
-    const blob = new Blob([text], { type: 'text/plain' });
+    const blob = new Blob([formatConsoleLogText(filteredLogs)], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -115,60 +78,13 @@
     }, 300);
   }
 
-  $: filteredLogs = logs
-    .filter(log => filterLevel === 'all' || log.level === filterLevel)
-    .filter(log => !debouncedSearchText || log.message.toLowerCase().includes(debouncedSearchText.toLowerCase()));
+  $: filteredLogs = filterConsoleLogs(logs, filterLevel, debouncedSearchText);
 
-  // Command executor
-  const commands = {
-    help: (cmd?: string) => {
-      if (cmd && commands[cmd as keyof typeof commands]) {
-        return commandHelp[cmd as keyof typeof commandHelp] || 'No help available';
-      }
-      return `Available commands:\n${Object.keys(commands).map(c => `  ${c}`).join('\n')}\nType help(commandName) for details`;
-    },
-    clear: () => { clearLogs(); return 'Console cleared'; },
-
-    // Runtime inspection
-    state: () => {
-      const env = $runtimeFrameEnv;
-      if (!env) return { entities: 0, height: 0, timestamp: 0 };
-      return {
-        entities: env.state.eReplicas.size,
-        height: env.state.height,
-        timestamp: env.state.timestamp
-      };
-    },
-
-    entities: () => {
-      const env = $runtimeFrameEnv;
-      return env ? Array.from(env.state.eReplicas.keys()) : [];
-    },
-
-    inspect: (entityId: string) => {
-      const env = $runtimeFrameEnv;
-      const replica = env?.state.eReplicas.get(entityId);
-      if (!replica) return `Entity ${entityId} not found`;
-      return replica;
-    },
-
-    // Scenario control
-    scenario: {
-      load: (name: string) => {
-        return `Loading scenario: ${name} (not yet implemented)`;
-      },
-      list: () => ['simnet-grid', 'diamond-dybvig', 'phantom-grid', 'corporate-treasury']
-    }
-  };
-
-  const commandHelp: Record<string, string> = {
-    help: 'help(command?) - Show available commands or help for specific command',
-    clear: 'clear() - Clear console output',
-    state: 'state() - Show current runtime state (entities count, height, timestamp)',
-    entities: 'entities() - List all entity IDs',
-    inspect: 'inspect(entityId) - Show detailed entity state',
-    scenario: 'scenario.load(name) | scenario.list() - Load or list scenarios'
-  };
+  // Command executor over the shared whitelist REPL
+  const commands = createConsoleCommands({
+    readEnv: () => $runtimeFrameEnv,
+    clear: () => clearLogs(),
+  });
 
   function executeCommand(cmd: string) {
     // Add to history
@@ -179,8 +95,7 @@
     console.log(`> ${cmd}`);
 
     try {
-      // Simple parser - support function calls and property access
-      const result = evalCommand(cmd);
+      const result = evalConsoleCommand(commands, cmd);
       if (result !== undefined) {
         console.log(result);
       }
@@ -189,51 +104,6 @@
     }
 
     commandInput = '';
-  }
-
-  function evalCommand(cmd: string): unknown {
-    // Whitelist-based eval - no actual eval()
-    const trimmed = cmd.trim();
-
-    // Handle help() specially
-    if (trimmed.match(/^help\(\s*['"]?(\w+)?['"]?\s*\)$/)) {
-      const match = trimmed.match(/^help\(\s*['"]?(\w+)?['"]?\s*\)$/);
-      return commands.help(match?.[1]);
-    }
-
-    // Handle clear()
-    if (trimmed === 'clear()') {
-      return commands.clear();
-    }
-
-    // Handle state()
-    if (trimmed === 'state()') {
-      return commands.state();
-    }
-
-    // Handle entities()
-    if (trimmed === 'entities()') {
-      return commands.entities();
-    }
-
-    // Handle inspect(entityId)
-    const inspectMatch = trimmed.match(/^inspect\(['"](.+)['"]\)$/);
-    if (inspectMatch && inspectMatch[1]) {
-      return commands.inspect(inspectMatch[1]);
-    }
-
-    // Handle scenario.load(name)
-    const scenarioMatch = trimmed.match(/^scenario\.load\(['"](.+)['"]\)$/);
-    if (scenarioMatch && scenarioMatch[1]) {
-      return commands.scenario.load(scenarioMatch[1]);
-    }
-
-    // Handle scenario.list()
-    if (trimmed === 'scenario.list()') {
-      return commands.scenario.list();
-    }
-
-    throw new Error(`Unknown command: ${trimmed}. Type help() for available commands.`);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -271,24 +141,13 @@
       e.preventDefault();
     } else if (e.key === 'Tab') {
       // Basic autocomplete
-      const partial = commandInput.trim();
-      const matches = Object.keys(commands).filter(c => c.startsWith(partial));
+      const matches = consoleCommandCompletions(commandInput);
       if (matches.length === 1) {
         commandInput = matches[0] + '(';
       } else if (matches.length > 1) {
         console.log(`Suggestions: ${matches.join(', ')}`);
       }
       e.preventDefault();
-    }
-  }
-
-  function getLevelColor(level: ConsoleEntry['level']): string {
-    switch (level) {
-      case 'debug': return '#888';
-      case 'log': return '#ccc';
-      case 'info': return '#4a9eff';
-      case 'warn': return '#ff9800';
-      case 'error': return '#f44336';
     }
   }
 </script>
@@ -322,7 +181,7 @@
 
   <div class="console-logs" bind:this={scrollContainer}>
     {#each filteredLogs as log (log.id)}
-      <div class="log-entry" style="--level-color: {getLevelColor(log.level)}">
+      <div class="log-entry" style="--level-color: {consoleLevelColor(log.level)}">
         <span class="log-timestamp">{log.timestamp}</span>
         <span class="log-level">[{log.level.toUpperCase()}]</span>
         <span class="log-message">{log.message}</span>

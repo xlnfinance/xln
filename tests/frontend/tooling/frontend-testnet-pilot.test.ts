@@ -37,7 +37,7 @@ describe('React wallet testnet pilot', () => {
     const reactSource = readFileSync(resolve(ROOT, 'frontend/apps/wallet/src/testnet-page.tsx'), 'utf8');
     const svelteSource = readFileSync(resolve(ROOT, 'frontend/src/routes/testnet/+page.svelte'), 'utf8');
     const resetSource = readFileSync(resolve(ROOT, 'frontend/src/lib/utils/control/resetEverything.ts'), 'utf8');
-    expect(reactSource).toContain("from '$lib/config/demo-accounts'");
+    expect(reactSource).toContain("from '../../../packages/ui/src/demo-accounts'");
     expect(reactSource).toContain('resetBrowserRuntimeData');
     expect(reactSource).toContain('publishBrowserHardResetRequest');
     expect(reactSource).toContain('They create no wallet');

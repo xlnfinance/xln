@@ -3,7 +3,11 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { UserConfig } from 'vite';
 
-import { parseDevelopmentGatewayPort } from './development-gateway';
+import {
+  parseDevelopmentGatewayPort,
+  parseDevelopmentPortOffset,
+  resolveDevelopmentSurfacePort,
+} from './development-gateway';
 import { hasPreparedGeneratedInputs } from './generated-inputs';
 import { getSurface, type SurfaceId } from './surfaces';
 
@@ -30,6 +34,10 @@ export const getReactPublicDirectory = (
 
 export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfigInput): UserConfig => {
   const surface = getSurface(surfaceId);
+  const developmentPort = resolveDevelopmentSurfacePort(
+    surface.developmentPort,
+    parseDevelopmentPortOffset(process.env['XLN_REACT_PORT_OFFSET']),
+  );
   return {
     root: rootDirectory,
     base: getReactAppBase(surfaceId, USE_DEVELOPMENT_GATEWAY),
@@ -38,20 +46,19 @@ export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfi
     plugins: [react()],
     resolve: {
       alias: {
-        '$lib': resolve(FRONTEND_ROOT, 'src/lib'),
         '@xln/core': resolve(REPOSITORY_ROOT, 'core'),
       },
     },
     cacheDir: resolve(FRONTEND_ROOT, 'node_modules/.vite-react', surfaceId),
     server: {
       host: '127.0.0.1',
-      port: surface.developmentPort,
+      port: developmentPort,
       strictPort: true,
       hmr: {
         path: surface.hmrPath,
         clientPort: USE_DEVELOPMENT_GATEWAY
           ? parseDevelopmentGatewayPort(process.env['XLN_REACT_GATEWAY_PORT'])
-          : surface.developmentPort,
+          : developmentPort,
       },
     },
     build: {

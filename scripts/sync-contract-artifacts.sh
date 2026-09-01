@@ -47,14 +47,14 @@ trap 'exit 143' TERM
 export XLN_TYPECHAIN_OUT_DIR="$TYPECHAIN_BUILD_DIR"
 
 # Hardhat needs a Node runtime, not the Bun one that runs the rest of the repo.
-# Pin the majors Hardhat states support for, but do not refuse a newer runtime:
-# the machine's default Node moves ahead of that list long before Hardhat breaks
-# on it, and a stale ceiling turns `bun run dev` into a hard stop for no reason.
-MIN_NODE_MAJOR=20
-KNOWN_GOOD_NODE_MAJORS="20 22 24"
-
-node_major_of() {
-  "$1" -p "process.versions.node.split('.')[0]" 2>/dev/null || true
+# Hardhat 3 supports Node 22.13+ and subsequent even major releases. Validate
+# that policy directly so an odd default or an older Node 22 cannot slip in,
+# while a newly supported even major does not require another hard-coded list.
+node_supports_hardhat() {
+  "$1" -e '
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    process.exit(major % 2 === 0 && (major > 22 || (major === 22 && minor >= 13)) ? 0 : 1);
+  ' 2>/dev/null
 }
 
 choose_supported_node() {
@@ -64,34 +64,32 @@ choose_supported_node() {
   fi
   candidates+=(
     "$ROOT_DIR/.node/bin/node"
+    "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
     "$HOME/.cache/codex-runtimes/codex-primary-core/dependencies/node/bin/node"
+    "/opt/homebrew/opt/node@26/bin/node"
     "/opt/homebrew/opt/node@24/bin/node"
     "/opt/homebrew/opt/node@22/bin/node"
-    "/opt/homebrew/opt/node@20/bin/node"
     "$(command -v node || true)"
   )
 
-  local candidate major
+  local candidate
   for candidate in "${candidates[@]}"; do
     if [[ -z "$candidate" || ! -x "$candidate" ]]; then
       continue
     fi
-    major="$(node_major_of "$candidate")"
-    if [[ ! "$major" =~ ^[0-9]+$ ]] || (( major < MIN_NODE_MAJOR )); then
-      continue
-    fi
-    if [[ " $KNOWN_GOOD_NODE_MAJORS " == *" $major "* ]]; then
+    if node_supports_hardhat "$candidate"; then
       echo "$candidate"
       return 0
     fi
   done
 
-  echo "[contracts-sync] ERROR: Hardhat needs Node $MIN_NODE_MAJOR or newer. Current node: $(node -v 2>/dev/null || echo missing). Set XLN_NODE_BIN to a supported node binary." >&2
+  echo "[contracts-sync] ERROR: Hardhat 3 needs Node 22.13+ on a supported even major. Current node: $(node -v 2>/dev/null || echo missing). Set XLN_NODE_BIN to a supported node binary." >&2
   return 1
 }
 
 NODE_BIN="$(choose_supported_node)"
 export PATH="$(dirname "$NODE_BIN"):$ROOT_DIR/node_modules/.bin:$HOME/.bun/bin:$PATH"
+echo "[contracts-sync] using Node $("$NODE_BIN" --version) at $NODE_BIN"
 
 echo "[contracts-sync] compiling jurisdictions contracts"
 cd "$ROOT_DIR/jurisdictions"

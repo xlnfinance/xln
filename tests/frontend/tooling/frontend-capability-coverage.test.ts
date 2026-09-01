@@ -55,6 +55,7 @@ describe('frontend capability inventory', () => {
       'wallet-payments-and-markets',
       'wallet-native-and-offline',
       'ops-health-and-qa',
+      'ops-runs-scenarios-and-ai',
     ].includes(id)).every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
@@ -219,18 +220,39 @@ describe('frontend capability inventory', () => {
     expect(docs?.behavior).toContain('deterministic docs and llms outputs');
   });
 
-  test('records the partial React ops migration without claiming QA cockpit completion', () => {
+  test('records the completed React health, QA cockpit, and HLT capability', () => {
     const opsHealth = CAPABILITIES.find(({ id }) => id === 'ops-health-and-qa');
-    expect(opsHealth?.status).toBe('in_progress');
+    expect(opsHealth?.status).toBe('implemented');
     expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-health.tsx');
     expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-hlt.tsx');
-    expect(opsHealth?.currentSources).toContain('frontend/src/lib/health/rpcHealth.ts');
-    expect(opsHealth?.currentSources).toContain('frontend/src/lib/qa/hlt.ts');
+    expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-qa.tsx');
+    expect(opsHealth?.currentSources).toContain('frontend/apps/ops/src/ops-qa-actions.ts');
+    expect(opsHealth?.currentSources).toContain('frontend/packages/runtime-client/src/rpc-health.ts');
+    expect(opsHealth?.currentSources).toContain('frontend/packages/runtime-client/src/qa-hlt.ts');
     expect(opsHealth?.behavior).toContain(
       'React-owned live health and RPC readiness with bounded retry, refresh, stale evidence, and teardown',
     );
     expect(opsHealth?.behavior).toContain(
       'React-owned canonical HLT preview, record/replay/abort controls, active-run polling, and authoritative progress evidence',
+    );
+    expect(opsHealth?.behavior).toContain(
+      'React-owned QA run ledger, verdict, protected artifacts, restart authority, history maintenance, and page teardown',
+    );
+  });
+
+  test('records React runs, scenarios, and the AI console without claiming workspace completion', () => {
+    const capability = CAPABILITIES.find(({ id }) => id === 'ops-runs-scenarios-and-ai');
+    expect(capability?.status).toBe('in_progress');
+    expect(capability?.routes).not.toContain('/embed');
+    expect(capability?.currentSources).toContain('frontend/apps/ops/src/ops-runs.tsx');
+    expect(capability?.currentSources).toContain('frontend/apps/ops/src/ops-scenarios.tsx');
+    expect(capability?.currentSources).toContain('frontend/apps/ops/src/ops-ai.tsx');
+    expect(capability?.currentSources).toContain('frontend/packages/browser/src/runtime-scenario-source.ts');
+    expect(capability?.behavior).toContain(
+      'React-owned deterministic BrowserVM scenario execution, committed-frame playback, and teardown',
+    );
+    expect(capability?.behavior).toContain(
+      'React-owned local AI console: chat, council deliberation, agent tools, voice wake word, camera vision, and MLX model control',
     );
   });
 });

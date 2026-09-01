@@ -1,10 +1,10 @@
-import type { RpcHealthProbeResult } from '../../../src/lib/health/rpcHealth';
+import type { RpcHealthProbeResult } from '../../../packages/runtime-client/src/rpc-health';
 import {
   formatQaBytes,
   normalizeQaAdminHealth,
   type QaAdminHealthSnapshot,
-} from '../../../src/lib/health/adminHealth';
-import { isUnknownRecord } from '../../../src/lib/utils/boundary';
+} from '../../../packages/runtime-client/src/admin-health';
+import { isUnknownRecord } from '../../../packages/runtime-client/src/boundary';
 
 export type OpsHealthEvidence = Readonly<{
   admin: QaAdminHealthSnapshot;

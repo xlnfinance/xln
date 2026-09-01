@@ -1,5 +1,5 @@
 import { BRAINVAULT_V1 } from '../../../../brainvault/primitives/spec.ts';
-import type { DemoAccount } from '$lib/config/demo-accounts';
+import type { DemoAccount } from '../../../packages/ui/src/demo-accounts';
 import type {
   WalletIdentityEntryState,
   WalletIdentityMode,
@@ -8,7 +8,7 @@ import {
   countMnemonicWords,
   hasSupportedMnemonicWordCount,
   normalizeMnemonicPhrase,
-} from '../../../src/lib/components/Views/runtime-creation-model';
+} from '../../../packages/ui/src/runtime-creation-model';
 import {
   evaluateWalletRecoveryRehearsal,
   resetWalletRecoveryRehearsal,
