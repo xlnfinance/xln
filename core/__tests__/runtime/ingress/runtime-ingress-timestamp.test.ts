@@ -4,6 +4,8 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { TIMING } from '../../../config/constants';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import {
   createTestEntityImportRuntimeTx,
   provisionTestEntityEncryptionKey,
@@ -21,7 +23,6 @@ import {
   startRuntimeLoop,
 } from '../../../runtime';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
-import type { AccountState } from '../../../types/account';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
@@ -35,6 +36,7 @@ import {
   getRemainingRuntimeFrameDelayMs,
   isRuntimeFrameReady,
 } from '../../../runtime/loop/loop-work.ts';
+import { makeAccount } from '../../helpers/cross-j';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -106,7 +108,7 @@ const makeReplica = (
         jurisdiction: testJurisdiction(),
       },
       reserves: new Map(),
-      accounts: new Map(),
+      accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
       profile: {
@@ -207,26 +209,41 @@ describe('runtime ingress timestamp', () => {
 
     const replicas = ['cap-1', 'cap-2', 'cap-3'].map((label) => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
+      registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
       env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { entityId, signerId };
     });
     const entityIds = replicas.map(({ entityId }) => entityId);
+    const committedEntityIds: string[][] = [];
+    registerRuntimeFrameCommitCallback(env, frame => {
+      committedEntityIds.push(frame.runtimeInput.entityInputs.map(input => input.entityId));
+    });
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
-      entityInputs: replicas.map(({ entityId, signerId }) => ({ entityId, signerId, entityTxs: [] })),
+      entityInputs: replicas.map(({ entityId, signerId }, index) => ({
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'profile-update' as const,
+          data: { profile: { entityId, name: `cap-${index + 1}` } },
+        }],
+      })),
     });
 
     await processRuntime(env);
+    expect(committedEntityIds.at(-1)).toEqual(entityIds.slice(0, 1));
     expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(1));
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
 
     await processRuntime(env);
+    expect(committedEntityIds.at(-1)).toEqual(entityIds.slice(1, 2));
     expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(2));
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
 
     await processRuntime(env);
+    expect(committedEntityIds.at(-1)).toEqual(entityIds.slice(2, 3));
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
   });
@@ -745,13 +762,17 @@ describe('runtime ingress timestamp', () => {
     const replica = makeReplica(entityId, Date.now());
     replica.state.profile.isHub = false;
     delete replica.state.hubRebalanceConfig;
-    replica.state.accounts.set(counterpartyId, {
-      pendingFrame: {
-        height: 10,
-        timestamp: replica.state.timestamp - 20_000,
-        accountTxs: [],
-      },
-    } as AccountState);
+    const account = makeAccount(entityId, counterpartyId);
+    account.pendingFrame = {
+      height: 10,
+      timestamp: replica.state.timestamp - 20_000,
+      accountTxs: [],
+    };
+    replica.state.accounts = PersistentEntityAccountMap.fromMap(
+      new Map([[counterpartyId, account]]),
+      entityId,
+      computeEntityAccountValueHash,
+    );
 
     expect(entityNeedsPeriodicWake(replica)).toBe(false);
   });

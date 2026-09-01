@@ -488,6 +488,12 @@ const applyRuntimeFrameCandidate = async (
       applyEntityInputFrameCap: deps.loop.applyEntityInputFrameCap,
     },
   );
+  // Frame caps first split the detached ingress into current and deferred
+  // work. Validate that final current frame, otherwise the reducer's prepared
+  // ingress cache can apply the pre-cap batch while the same tail is requeued.
+  candidate.state.runtimeFramePhase = 'candidate.mutate';
+  beginRuntimeFrameMutation(candidate, frame, deps);
+  candidate.state.runtimeFramePhase = 'apply';
   return applyPreparedRuntimeFrame(
     env,
     candidate.runtimeInput,
@@ -574,9 +580,12 @@ const applyAndCommitRuntimeFrame = async (
     state = rollback.state;
     return rollback.error;
   };
-  candidate.state.runtimeFramePhase = 'candidate.mutate';
-  beginRuntimeFrameMutation(candidate, frame, deps);
-  candidate.state.runtimeFramePhase = 'apply';
+  // Preflight the whole accepted ingress before any state mutation so one
+  // malformed tail cannot commit a valid prefix. Frame caps below then split
+  // execution from deferred RAM work and revalidate only the selected frame.
+  candidate.state.runtimeFramePhase = 'candidate.validate';
+  deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput);
+  candidate.state.runtimeFramePhase = 'candidate.prepare';
   const applied = await applyRuntimeFrameCandidate(env, state, candidate, frame, profile, deps);
   candidate.state.runtimeFramePhase = 'outputs.plan';
   const { routing, outputPlan } = planAppliedRuntimeOutputs(
