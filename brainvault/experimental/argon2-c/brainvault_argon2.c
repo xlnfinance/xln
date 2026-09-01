@@ -7,12 +7,10 @@
 
 #include "argon2.h"
 
-#define INPUT_MAGIC 0x31435642u
-#define HEADER_WORDS 5u
+#define INPUT_MAGIC 0x32435642u
+#define HEADER_WORDS 6u
 #define SALT_BYTES 32u
 #define OUTPUT_BYTES 32u
-#define MEMORY_KIB (256u * 1024u)
-#define MEMORY_BYTES ((size_t)MEMORY_KIB * 1024u)
 
 typedef struct {
     uint32_t shard_count;
@@ -20,14 +18,17 @@ typedef struct {
     uint32_t password_len;
     const uint8_t *salts;
     uint8_t *outputs;
+    uint32_t memory_kib;
+    size_t memory_bytes;
     atomic_uint next_index;
     atomic_int error_code;
 } shared_state;
 
 static _Thread_local uint8_t *thread_memory;
+static _Thread_local size_t thread_memory_bytes;
 
 static int reuse_allocate(uint8_t **memory, size_t bytes_to_allocate) {
-    if (thread_memory == NULL || bytes_to_allocate > MEMORY_BYTES) return -1;
+    if (thread_memory == NULL || bytes_to_allocate > thread_memory_bytes) return -1;
     *memory = thread_memory;
     return 0;
 }
@@ -44,10 +45,11 @@ static void secure_zero(void *pointer, size_t length) {
 
 static void *derive_worker(void *opaque) {
     shared_state *shared = (shared_state *)opaque;
-    if (posix_memalign((void **)&thread_memory, 64u, MEMORY_BYTES) != 0) {
+    if (posix_memalign((void **)&thread_memory, 64u, shared->memory_bytes) != 0) {
         atomic_store(&shared->error_code, ARGON2_MEMORY_ALLOCATION_ERROR);
         return NULL;
     }
+    thread_memory_bytes = shared->memory_bytes;
 
     for (;;) {
         uint32_t index = atomic_fetch_add(&shared->next_index, 1u);
@@ -63,7 +65,7 @@ static void *derive_worker(void *opaque) {
         context.salt = (uint8_t *)shared->salts + ((size_t)index * SALT_BYTES);
         context.saltlen = SALT_BYTES;
         context.t_cost = 1u;
-        context.m_cost = MEMORY_KIB;
+        context.m_cost = shared->memory_kib;
         context.lanes = 1u;
         context.threads = 1u;
         context.version = ARGON2_VERSION_13;
@@ -78,9 +80,10 @@ static void *derive_worker(void *opaque) {
         }
     }
 
-    secure_zero(thread_memory, MEMORY_BYTES);
+    secure_zero(thread_memory, thread_memory_bytes);
     free(thread_memory);
     thread_memory = NULL;
+    thread_memory_bytes = 0u;
     return NULL;
 }
 
@@ -95,8 +98,8 @@ static int read_exact(void *buffer, size_t length) {
 
 int main(void) {
     uint8_t header[HEADER_WORDS * sizeof(uint32_t)];
-    uint32_t shard_count, worker_count, password_len, flags;
-    size_t salt_length, output_length;
+    uint32_t shard_count, worker_count, password_len, flags, memory_kib;
+    size_t salt_length, output_length, memory_bytes;
     uint8_t *password = NULL, *salts = NULL, *outputs = NULL;
     pthread_t threads[32];
     shared_state shared;
@@ -109,9 +112,12 @@ int main(void) {
     worker_count = read_u32le(header + 8u);
     password_len = read_u32le(header + 12u);
     flags = read_u32le(header + 16u);
-    if (shard_count == 0u || worker_count == 0u || worker_count > 32u || password_len == 0u || password_len > (1u << 20u)) {
+    memory_kib = read_u32le(header + 20u);
+    if (shard_count == 0u || worker_count == 0u || worker_count > 32u || password_len == 0u ||
+        password_len > (1u << 20u) || memory_kib < 8u || (size_t)memory_kib > SIZE_MAX / 1024u) {
         goto cleanup;
     }
+    memory_bytes = (size_t)memory_kib * 1024u;
     if ((size_t)shard_count > SIZE_MAX / SALT_BYTES || (size_t)shard_count > SIZE_MAX / OUTPUT_BYTES) goto cleanup;
     salt_length = (size_t)shard_count * SALT_BYTES;
     output_length = (size_t)shard_count * OUTPUT_BYTES;
@@ -130,6 +136,8 @@ int main(void) {
     shared.password_len = password_len;
     shared.salts = salts;
     shared.outputs = outputs;
+    shared.memory_kib = memory_kib;
+    shared.memory_bytes = memory_bytes;
     atomic_init(&shared.next_index, 0u);
     atomic_init(&shared.error_code, ARGON2_OK);
 

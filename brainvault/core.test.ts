@@ -10,46 +10,72 @@
 
 import { test, expect } from 'bun:test';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
+import { Worker } from 'node:worker_threads';
 import {
-  createShardSalt, deriveShard, deriveShardWithParams, combineShards, deriveKey,
+  createShardSalt, deriveShard, deriveShardWithParams, combineShards, combineShardsWithParams, deriveKey,
   entropyToMnemonic, deriveEthereumAddress, bytesToHex,
-  deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs,
+  deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs, rootDomain,
 } from './core.ts';
 import { BIP39_ENGLISH } from './bip39-english.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from './primitives/spec.ts';
+import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
+import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
+import {
+  BRAINVAULT_DEFAULT_LEVEL,
+  BRAINVAULT_LEVEL_NAMES,
+  BRAINVAULT_LEVEL_SHARDS,
+  getShardCountForLevel,
+} from './presets.ts';
+import {
+  generateSuggestedPassword,
+  passwordFromIndexes,
+  SUGGESTED_PASSWORD_ALPHABET,
+  SUGGESTED_PASSWORD_BITS,
+  SUGGESTED_PASSWORD_CHARACTERS,
+} from './suggestion.ts';
 
-// Test vectors for v1.0 (simplified: no hashName, direct salt from name)
-// FROZEN - these define wallet compatibility forever
-const VECTORS = [
-  { name: 'alice', passphrase: 'secret123456', shards: 1, expect: {
-    salt0: 'ec290cacd14098d2ee8ff7b8eaaba69904d97cd7720f62eb52cb7b8eac19399f',
-    shard0: 'd7057a04c5441e8246db71a98c94148b6306d810c5a5382ee5d3fd15655927b4',
-    masterKey: '52b33367533012c26bf4660339e9373dca2adc2d4051dbbfff51566aa55f37cf',
-    mnemonic24: 'milk click novel require across cousin good chair street mouse crash movie same daughter air quote total pride crop mention focus sick slice hole',
-    ethAddr: '0x93bAb14eD871462D414a7c0357BF1a76DE741397',
-  }},
-  { name: 'bob', passphrase: 'password123', shards: 1, expect: {
-    salt0: 'ca5c30c09d55f588667c80cac73b4dae612cbc8c32ff444289a364f56f446844',
-    shard0: '7c4bcabead8a1094589bd59fa445285b81aee55d9d49a652a348adbcd325accf',
-    masterKey: '297e86a9fd23b0fd2e59d9111ad666cf82da377730d5326076f20b215a023104',
-    mnemonic24: 'lion shoot refuse toss scissors brass voice blame climb identify surface attack sing topic burden deer captain stone unit hood clarify scatter captain during',
-    ethAddr: '0x4A699A1F4061ceEbC83b9dC14d6A0c33eC3E2327',
-  }},
-  { name: ' alice ', passphrase: ' secret123456 ', shards: 1, expect: {
-    salt0: '77e473889c32e1e8f5defd5441eba3c9807a3c3ec1be9cec82e3028b76f072fc',
-    shard0: 'b38a177e90e56a5d9e7848a3aef3d76a560c8040d0ce2b257792b84a63236318',
-    masterKey: '6156efee5df98ec0f761e31ea389ca91e9fafbfa02da01e84f5b7bb0a8f16616',
-    mnemonic24: 'report hub ranch sword pony motion balance fitness make select fold garden parrot say invite slice clip lumber shoe advice vapor bread fashion input',
-    ethAddr: '0x04F873D11CceAafbe2Aa5B04C8537A7484966507',
-  }},
-  { name: 'test', passphrase: 'secret123', shards: 10, expect: {
-    salt0: '7e95de96d472cbce318d8dcc4976997c388d555027ee086ebdaaab004684efca',
-    shard0: '1c2b3e5bc7647e48477cfaf2b64693e9c5b86bd33835c9d3400f8ef47eddc2fe',
-    masterKey: '2179a82fef1320e04025d0a82fb62ca47f528bda5b707edb6e25cf680d9ae94f',
-    mnemonic24: 'inch museum panther drop celery make town mention hundred sound argue mammal resource kid point veteran asset flame great equal pink pair balcony guide',
-    ethAddr: '0x0b3C4712A9838cB306357c12C12991F9aF83DCD1',
-  }},
-];
+type VectorFile = Readonly<{
+  format: string;
+  specId: string;
+  vectors: ReadonlyArray<{
+    id: string;
+    input: {
+      name: string;
+      nameNfkdUtf8Hex: string;
+      passphrase: string;
+      passphraseNfkdUtf8Hex: string;
+      shardCount: number;
+      factor: number;
+      multiplier: number;
+    };
+    expected: {
+      salt0: string;
+      shard0: string;
+      root: string;
+      mnemonic24: string;
+      ethereumAddress0: string;
+    };
+  }>;
+}>;
+
+const VECTOR_FILE = await Bun.file(`${import.meta.dir}/vectors-v1.json`).json() as VectorFile;
+const VECTORS = VECTOR_FILE.vectors.map(vector => ({
+  name: vector.input.name,
+  passphrase: vector.input.passphrase,
+  shards: vector.input.shardCount,
+  factor: vector.input.factor,
+  normalized: {
+    name: vector.input.nameNfkdUtf8Hex,
+    passphrase: vector.input.passphraseNfkdUtf8Hex,
+  },
+  expect: {
+    salt0: vector.expected.salt0,
+    shard0: vector.expected.shard0,
+    masterKey: vector.expected.root,
+    mnemonic24: vector.expected.mnemonic24,
+    ethAddr: vector.expected.ethereumAddress0,
+  },
+}));
 
 test('embedded BIP39 English wordlist is canonical', () => {
   const canonicalFile = `${BIP39_ENGLISH.join('\n')}\n`;
@@ -62,6 +88,44 @@ test('embedded BIP39 English wordlist is canonical', () => {
   expect(() => ((BIP39_ENGLISH as string[])[0] = 'mutated')).toThrow();
   expect(() => ((BRAINVAULT_V1 as { ARGON_TIME_COST: number }).ARGON_TIME_COST = 2)).toThrow();
   expect(hash).toBe('2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda');
+});
+
+test('external V1 vectors freeze input bytes and spec identity', () => {
+  expect(VECTOR_FILE.format).toBe('brainvault-v1-vectors/1');
+  expect(VECTOR_FILE.specId).toBe(BRAINVAULT_V1_SPEC_ID);
+  for (const vector of VECTORS) {
+    expect(bytesToHex(new TextEncoder().encode(vector.name.normalize('NFKD')))).toBe(vector.normalized.name);
+    expect(bytesToHex(new TextEncoder().encode(vector.passphrase.normalize('NFKD')))).toBe(vector.normalized.passphrase);
+    expect(factorForShardCount(vector.shards)).toBe(vector.factor);
+  }
+});
+
+test('canonical manifest authenticates every listed source and native binary', async () => {
+  const manifest = await Bun.file(`${import.meta.dir}/MANIFEST.sha256`).text();
+  const entries = manifest.trim().split('\n').map(line => {
+    const match = line.match(/^([0-9a-f]{64})  (.+)$/);
+    if (match === null) throw new Error(`BRAINVAULT_MANIFEST_LINE_INVALID:${line}`);
+    return { expected: match[1]!, path: match[2]! };
+  });
+  expect(new Set(entries.map(entry => entry.path)).size).toBe(entries.length);
+  for (const required of [
+    'SPEC-V1.md',
+    'vectors-v1.json',
+    'primitives/spec.ts',
+    'primitives/kdf.ts',
+    'core.ts',
+    'prebuilds/darwin-arm64/brainvault-argon2',
+    'prebuilds/darwin-arm64/brainvault-argon2-rust',
+  ]) {
+    expect(entries.some(entry => entry.path === required)).toBe(true);
+  }
+  for (const entry of entries) {
+    expect(entry.path.startsWith('/')).toBe(false);
+    expect(entry.path.split('/')).not.toContain('..');
+    const bytes = new Uint8Array(await Bun.file(`${import.meta.dir}/${entry.path}`).arrayBuffer());
+    const actual = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+    expect(actual).toBe(entry.expected);
+  }
 });
 
 test('salt is deterministic', async () => {
@@ -90,6 +154,30 @@ test('factor mapping is integer-only and preserves the V1 formula', () => {
   expect(validateInputs('a', 'aaaaaa', Number.NaN).valid).toBe(false);
 });
 
+test('user levels skip 10 shards without renumbering the frozen V1 factor', () => {
+  expect(BRAINVAULT_DEFAULT_LEVEL).toBe(3);
+  expect([...BRAINVAULT_LEVEL_NAMES]).toEqual(['test', 'quick', 'standard', 'strong', 'vault', 'million']);
+  expect([...BRAINVAULT_LEVEL_SHARDS]).toEqual([1, 100, 1_000, 10_000, 100_000, 1_000_000]);
+  for (const [index, shardCount] of BRAINVAULT_LEVEL_SHARDS.entries()) {
+    expect(getShardCountForLevel(index + 1)).toBe(shardCount);
+  }
+  expect(factorForShardCount(getShardCountForLevel(3))).toBe(4);
+  expect(getShardCount(2)).toBe(10);
+  expect(() => getShardCountForLevel(0)).toThrow('BRAINVAULT_LEVEL_INVALID:0');
+  expect(() => getShardCountForLevel(7)).toThrow('BRAINVAULT_LEVEL_INVALID:7');
+});
+
+test('suggested passwords use ten unbiased alphanumeric CSPRNG choices', () => {
+  expect(SUGGESTED_PASSWORD_CHARACTERS).toBe(10);
+  expect(SUGGESTED_PASSWORD_ALPHABET).toBe('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  expect(SUGGESTED_PASSWORD_BITS).toBeCloseTo(59.5419631039, 8);
+  expect(passwordFromIndexes(Array(10).fill(0))).toBe('aaaaaaaaaa');
+  expect(passwordFromIndexes(Array(10).fill(61))).toBe('9999999999');
+  expect(() => passwordFromIndexes(Array(9).fill(0))).toThrow('BRAINVAULT_SUGGESTION_LENGTH_INVALID');
+  expect(() => passwordFromIndexes([...Array(9).fill(0), 62])).toThrow('BRAINVAULT_SUGGESTION_INDEX_INVALID:62');
+  expect(generateSuggestedPassword()).toMatch(/^[a-zA-Z0-9]{10}$/);
+});
+
 test('wallet boundaries fail loudly on malformed bytes', async () => {
   const salt = await createShardSalt('alice', 0, 1);
   await expect(deriveShard('', salt)).rejects.toThrow('BRAINVAULT_PASSPHRASE_INVALID');
@@ -103,6 +191,103 @@ test('wallet boundaries fail loudly on malformed bytes', async () => {
   await expect(combineShards([], 1)).rejects.toThrow('BRAINVAULT_SHARDS_EMPTY');
   await expect(combineShards([new Uint8Array(1)], 1)).rejects.toThrow('BRAINVAULT_SHARD_LENGTH_INVALID:0:1');
   await expect(combineShards([new Uint8Array(32)], Number.NaN)).rejects.toThrow('BRAINVAULT_FACTOR_INVALID:NaN');
+});
+
+test('worker shard collection fails closed on malformed scheduling results', () => {
+  const result = '00'.repeat(32);
+  const slots = createShardSlots(2);
+  expect(acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32)).toBe(1);
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32))
+    .toThrow('BRAINVAULT_WORKER_SHARD_DUPLICATE:1');
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: -1, result }, BRAINVAULT_V1_SPEC_ID, 32))
+    .toThrow('BRAINVAULT_WORKER_SHARD_INDEX_INVALID:-1');
+  expect(() => acceptShard(slots, { specId: 'wrong', shardIndex: 0, result }, BRAINVAULT_V1_SPEC_ID, 32))
+    .toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH:wrong');
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: 0, result: result.slice(2) }, BRAINVAULT_V1_SPEC_ID, 32))
+    .toThrow('BRAINVAULT_WORKER_RESULT_INVALID:0');
+  expect(() => finalizeShards(slots)).toThrow('BRAINVAULT_WORKER_SHARD_MISSING:0');
+});
+
+test('native worker crashes closed on a wrong spec handshake', async () => {
+  const worker = new Worker(`${import.meta.dir}/worker-native.ts`);
+  const error = await new Promise<Error>((resolve, reject) => {
+    worker.once('error', resolve);
+    worker.once('message', () => reject(new Error('worker accepted wrong spec')));
+    worker.postMessage({
+      specId: 'wrong', name: 'alice', passphrase: 'secret123456', shardIndex: 0, shardCount: 1,
+    });
+  });
+  expect(error.message).toContain('BRAINVAULT_WORKER_SPEC_MISMATCH');
+  await worker.terminate();
+});
+
+async function tinyRoot(name: string, passphrase: string, shardCount = 1): Promise<string> {
+  const params = {
+    algId: `${BRAINVAULT_V1.ALG_ID}|test-8kib`,
+    shardMemoryKb: 8,
+    argonTimeCost: 1,
+    argonParallelism: 1,
+    shardOutputBytes: 32,
+  };
+  const shards = await Promise.all(Array.from({ length: shardCount }, async (_, index) => {
+    const salt = await createShardSalt(name, index, shardCount, params.algId);
+    return deriveShardWithParams(passphrase, salt, params);
+  }));
+  return bytesToHex(await combineShardsWithParams(shards, factorForShardCount(shardCount), params));
+}
+
+test('Unicode corpus is byte-exact and NFKD-equivalent where specified', async () => {
+  expect(await tinyRoot('café', 'secrét-password')).toBe(await tinyRoot('cafe\u0301', 'secre\u0301t-password'));
+  const corpus = [
+    ['Case', 'passwordA'],
+    ['case', 'passworda'],
+    [' leading ', ' password '],
+    ['emoji-🧠', 'vault-🔐'],
+    ['nul\0name', 'nul\0password'],
+    ['lone-\ud800', 'lone-\udfff-password'],
+    ['x'.repeat(16_384), 'y'.repeat(16_384)],
+  ] as const;
+  const roots = await Promise.all(corpus.map(([name, passphrase]) => tinyRoot(name, passphrase)));
+  expect(new Set(roots).size).toBe(corpus.length);
+});
+
+test('every semantic input and KDF domain parameter separates the root', async () => {
+  const base = await tinyRoot('alice', 'secret123456');
+  for (const changed of [
+    tinyRoot('Alice', 'secret123456'),
+    tinyRoot(' alice', 'secret123456'),
+    tinyRoot('alice', 'Secret123456'),
+    tinyRoot('alice', ' secret123456'),
+    tinyRoot('alice', 'secret123456', 2),
+  ]) expect(await changed).not.toBe(base);
+
+  const shard = new Uint8Array(32).fill(7);
+  const canonical = bytesToHex(await combineShardsWithParams([shard], 1));
+  const mutations = [
+    combineShardsWithParams([shard], 2),
+    combineShardsWithParams([shard], 1, { algId: `${BRAINVAULT_V1.ALG_ID}|mutated` }),
+    combineShardsWithParams([shard], 1, { shardMemoryKb: BRAINVAULT_V1.SHARD_MEMORY_KB * 2 }),
+    combineShardsWithParams([shard], 1, { argonTimeCost: 2 }),
+    combineShardsWithParams([shard], 1, { argonParallelism: 2 }),
+  ];
+  for (const mutation of mutations) expect(bytesToHex(await mutation)).not.toBe(canonical);
+  expect(rootDomain(1, 1)).toContain('|shards=1|factor=1');
+});
+
+test('completion order is irrelevant but final shard order is canonical', async () => {
+  const source = Array.from({ length: 32 }, (_, index) => new Uint8Array(32).fill(index));
+  const expected = bytesToHex(await combineShards(source, 3));
+  const completionOrder = Array.from({ length: 32 }, (_, index) => (index * 13) % 32);
+  const slots = createShardSlots(32);
+  for (const index of completionOrder) {
+    acceptShard(slots, {
+      specId: BRAINVAULT_V1_SPEC_ID,
+      shardIndex: index,
+      result: bytesToHex(source[index]!),
+    }, BRAINVAULT_V1_SPEC_ID, 32);
+  }
+  expect(bytesToHex(await combineShards(finalizeShards(slots), 3))).toBe(expected);
+  expect(bytesToHex(await combineShards([...source].reverse(), 3))).not.toBe(expected);
 });
 
 test('single shard derivation is deterministic', async () => {
@@ -174,41 +359,167 @@ test('multi-shard derivation is deterministic', async () => {
   expect(ethAddr).toBe(v.expect.ethAddr);
 });
 
-test('CLI produces same results as library', async () => {
-  const { execSync } = await import('child_process');
-
-  const output = execSync('bun cli.ts alice secret123456 1 --w=1', {
-    encoding: 'utf8',
+function runCli(cliArgs: readonly string[], input = '') {
+  return Bun.spawnSync({
+    cmd: ['bun', 'cli.ts', ...cliArgs],
     cwd: import.meta.dir,
+    stdin: Buffer.from(input),
+    stderr: 'pipe',
+    stdout: 'pipe',
   });
+}
 
-  // Extract JSON from output (skip progress bars)
-  const jsonMatch = output.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON in output');
-
-  const json = JSON.parse(jsonMatch[0]);
-  const v = VECTORS[0]!;
-
-  expect(json.ethAddr24).toBe(v.expect.ethAddr);
-  expect(json.mnemonic24).toBe(v.expect.mnemonic24);
-
-  const emptyName = Bun.spawnSync({
-    cmd: ['bun', 'cli.ts', '', 'secret123456', '1', '--w=1'],
+function runCliTty(extraArgs: readonly string[], reveal = false) {
+  const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
+  const script = [
+    'set timeout 10',
+    `spawn ${command}`,
+    'expect "Username: "',
+    'send "alice\\r"',
+    'expect "Password: "',
+    'send "secret123456\\r"',
+    reveal ? 'expect "Repeat the exact password: "' : 'expect "Type reveal"',
+    reveal ? 'send "secret123456\\r"' : 'send "\\r"',
+    'expect eof',
+  ].join('\n');
+  return Bun.spawnSync({
+    cmd: ['expect', '-c', script],
     cwd: import.meta.dir,
     stderr: 'pipe',
     stdout: 'pipe',
   });
-  expect(emptyName.exitCode).toBe(1);
-  expect(emptyName.stderr.toString()).toContain('BRAINVAULT_NAME_INVALID');
+}
 
-  const emptyPassphrase = Bun.spawnSync({
-    cmd: ['bun', 'cli.ts', 'alice', '', '1', '--w=1'],
+function publicSummary(output: string): { fingerprint: string; address: string } {
+  const fingerprint = output.match(/Root fingerprint: ([0-9a-f]{8})/)?.[1];
+  const address = output.match(/First address:\s+(0x[0-9A-Fa-f]{40})/)?.[1];
+  if (fingerprint === undefined || address === undefined) throw new Error(`BRAINVAULT_PUBLIC_SUMMARY_MISSING:${output}`);
+  return { fingerprint, address };
+}
+
+test('CLI keeps secrets off argv and prints only public summary by default', () => {
+  const positional = runCli(['alice', 'secret123456', '1']);
+  expect(positional.exitCode).toBe(1);
+  expect(positional.stderr.toString()).toContain('positional username/password arguments are forbidden');
+
+  const unsafe = runCli(['--unsafe-password', 'secret123456']);
+  expect(unsafe.exitCode).toBe(1);
+  expect(unsafe.stderr.toString()).toContain('password argv is forbidden');
+
+  const launched = runCliTty([]);
+  const output = launched.stdout.toString();
+  const vector = VECTORS[0]!;
+  expect(launched.exitCode).toBe(0);
+  expect(publicSummary(output)).toEqual({ fingerprint: vector.expect.masterKey.slice(0, 8), address: vector.expect.ethAddr });
+  expect(output).not.toContain(vector.expect.mnemonic24);
+  expect(output).not.toContain('Private Key 1:');
+
+  const rawKeyWithoutReveal = runCli(['--show-private-key']);
+  expect(rawKeyWithoutReveal.exitCode).toBe(1);
+  expect(rawKeyWithoutReveal.stderr.toString()).toContain('--show-private-key requires --reveal');
+});
+
+test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocation', () => {
+  const script = [
+    'set timeout 5',
+    'spawn bun cli.ts --shards 1 --workers 1',
+    'expect "Username: "',
+    'send "\\003"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const aborted = Bun.spawnSync({ cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe' });
+  expect(aborted.exitCode).toBe(130);
+  expect(aborted.stdout.toString()).toContain('Exited.');
+
+  const oversized = runCli(['--bench', '--shards', '1', '--workers', '1', '--multiplier', '10000']);
+  expect(oversized.exitCode).toBe(1);
+  expect(oversized.stderr.toString()).toContain('BRAINVAULT_WORKERS_EXCEED_MEMORY_LIMIT');
+});
+
+test('CLI defaults to printable ASCII while preserving explicit Unicode recovery', () => {
+  expect(cliCreationCharacterError('alice', 'secret123456', false)).toBeUndefined();
+  expect(cliCreationCharacterError('café', 'secret123456', false)).toContain('BRAINVAULT_ASCII_CREATION_REQUIRED');
+  expect(cliCreationCharacterError('café', 'secrét-password', true)).toBeUndefined();
+  expect(cliPasswordError('1234567', false)).toContain('BRAINVAULT_PASSPHRASE_TOO_SHORT');
+  expect(cliPasswordError('1234567', true)).toBeUndefined();
+});
+
+test('reveal requires exact password rehearsal before sensitive output', () => {
+  const revealed = runCliTty(['--reveal'], true);
+  const output = revealed.stdout.toString();
+  expect(revealed.exitCode).toBe(0);
+  expect(output).toContain('SENSITIVE OUTPUT');
+  expect(output).toContain(VECTORS[0]!.expect.mnemonic24);
+});
+
+test('CLI benchmark honors inline advanced parameters', () => {
+  const benchmark = Bun.spawnSync({
+    cmd: [
+      'bun', 'cli.ts', '--bench', '--shards', '1', '--multiplier', '2',
+      '--workers', '1', '--engine', 'native',
+    ],
     cwd: import.meta.dir,
     stderr: 'pipe',
     stdout: 'pipe',
   });
-  expect(emptyPassphrase.exitCode).toBe(1);
-  expect(emptyPassphrase.stderr.toString()).toContain('BRAINVAULT_PASSPHRASE_INVALID');
+  const output = benchmark.stdout.toString();
+  expect(benchmark.exitCode).toBe(0);
+  expect(output).toContain('1 shards | factor 1 | multiplier 2 | 1 workers');
+  expect(output).toContain('Native isolated workers');
+  expect(output).toContain('Root[0..4]');
+  expect(output).not.toContain('[1/1] C/NEON');
+});
+
+test('npm launcher preserves the BrainVault v1 CLI entrypoint', () => {
+  const launched = Bun.spawnSync({
+    cmd: ['bun', 'brainvault', '--help'],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+  expect(launched.exitCode).toBe(0);
+  expect(launched.stdout.toString()).toStartWith('BrainVault v1 (bv)');
+});
+
+test('every available wallet engine reproduces the same smoke root', () => {
+  const smoke = runCli(['--smoke', '--workers', '32']);
+  expect(smoke.exitCode).toBe(0);
+  expect(smoke.stdout.toString()).toContain('Root parity: PASS');
+}, 15_000);
+
+test('exact --shards remains distinct from legacy --factor in benchmark parsing', () => {
+  const exact = Bun.spawnSync({
+    cmd: ['bun', 'cli.ts', '--bench', '--shards', '2', '--workers', '1', '--engine', 'native'],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+  expect(exact.exitCode).toBe(0);
+  expect(exact.stdout.toString()).toContain('2 shards | factor 2 | multiplier 1 | 1 workers');
+
+  const level = Bun.spawnSync({
+    cmd: ['bun', 'cli.ts', '--bench', '--level', '1', '--workers', '1', '--engine', 'native'],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+  expect(level.exitCode).toBe(0);
+  expect(level.stdout.toString()).toContain('1 shards | factor 1 | multiplier 1 | 1 workers');
+});
+
+test('custom multiplier preserves final wallet parity across compatible engines', () => {
+  const engines = ['c-neon', 'c-neon-wipe', 'native-direct', 'native-sync', 'native', 'rust', 'rust-no-wipe', 'wasm'];
+  let expected: string | undefined;
+  for (const engine of engines) {
+    const child = runCli(['--bench', '--shards', '1', '--workers', '1', '--multiplier', '2', '--engine', engine]);
+    expect(child.exitCode).toBe(0);
+    const output = child.stdout.toString().match(/Root parity: PASS \(([0-9a-f]{64})\)/)?.[1];
+    expect(output).toBeDefined();
+    expected ??= output;
+    expect(output).toBe(expected);
+  }
 });
 
 console.log('✅ All deterministic tests passed');

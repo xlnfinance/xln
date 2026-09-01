@@ -9,17 +9,19 @@ import {
   createShardSalt,
 } from '../primitives/spec.ts';
 
-parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount }) => {
+parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   if (specId !== BRAINVAULT_V1_SPEC_ID) {
     throw new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(specId)}:${BRAINVAULT_V1_SPEC_ID}`);
   }
   assertBrainVaultName(name);
   assertBrainVaultPassphrase(passphrase);
+  const memoryKb = shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB;
+  const effectiveAlgId = algId ?? BRAINVAULT_V1.ALG_ID;
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
   try {
     const result = new Uint8Array(argon2NativeSync(password, {
-      salt: Buffer.from(await createShardSalt(name, shardIndex, shardCount)),
-      memoryCost: BRAINVAULT_V1.SHARD_MEMORY_KB,
+      salt: Buffer.from(await createShardSalt(name, shardIndex, shardCount, effectiveAlgId)),
+      memoryCost: memoryKb,
       timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
       parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
       outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,

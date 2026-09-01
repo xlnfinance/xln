@@ -9,11 +9,10 @@ use std::sync::{
 };
 use std::thread;
 
-const INPUT_MAGIC: u32 = 0x3143_5642;
-const HEADER_BYTES: usize = 20;
+const INPUT_MAGIC: u32 = 0x3243_5642;
+const HEADER_BYTES: usize = 24;
 const SALT_BYTES: usize = 32;
 const OUTPUT_BYTES: usize = 32;
-const MEMORY_KIB: u64 = 256 * 1024;
 
 fn read_u32le(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().expect("four-byte header field"))
@@ -28,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shard_count = read_u32le(&input[4..8]) as usize;
     let worker_count = read_u32le(&input[8..12]) as usize;
     let password_len = read_u32le(&input[12..16]) as usize;
+    let memory_kib = read_u32le(&input[20..24]) as u64;
     let expected = HEADER_BYTES
         .checked_add(password_len)
         .and_then(|value| value.checked_add(shard_count.checked_mul(SALT_BYTES)?))
@@ -36,6 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || worker_count == 0
         || worker_count > 32
         || password_len == 0
+        || memory_kib < 8
         || input.len() != expected
     {
         return Err("invalid BrainVault native dimensions".into());
@@ -46,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     input.fill(0);
     let next = Arc::new(AtomicU32::new(0));
     let params = Params::builder()
-        .memory(Memory::kib(MEMORY_KIB))
+        .memory(Memory::kib(memory_kib))
         .passes(1)
         .lanes(1)
         .threads(1)

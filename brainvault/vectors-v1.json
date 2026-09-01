@@ -1,0 +1,82 @@
+{
+  "format": "brainvault-v1-vectors/1",
+  "specId": "brainvault/argon2id-sharded/v1.0|argon2id-v19-m262144-t1-p1|out32|nfkd-utf8",
+  "vectors": [
+    {
+      "id": "ascii-alice-1",
+      "input": {
+        "name": "alice",
+        "nameNfkdUtf8Hex": "616c696365",
+        "passphrase": "secret123456",
+        "passphraseNfkdUtf8Hex": "736563726574313233343536",
+        "shardCount": 1,
+        "factor": 1,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "ec290cacd14098d2ee8ff7b8eaaba69904d97cd7720f62eb52cb7b8eac19399f",
+        "shard0": "d7057a04c5441e8246db71a98c94148b6306d810c5a5382ee5d3fd15655927b4",
+        "root": "52b33367533012c26bf4660339e9373dca2adc2d4051dbbfff51566aa55f37cf",
+        "mnemonic24": "milk click novel require across cousin good chair street mouse crash movie same daughter air quote total pride crop mention focus sick slice hole",
+        "ethereumAddress0": "0x93bAb14eD871462D414a7c0357BF1a76DE741397"
+      }
+    },
+    {
+      "id": "ascii-bob-1",
+      "input": {
+        "name": "bob",
+        "nameNfkdUtf8Hex": "626f62",
+        "passphrase": "password123",
+        "passphraseNfkdUtf8Hex": "70617373776f7264313233",
+        "shardCount": 1,
+        "factor": 1,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "ca5c30c09d55f588667c80cac73b4dae612cbc8c32ff444289a364f56f446844",
+        "shard0": "7c4bcabead8a1094589bd59fa445285b81aee55d9d49a652a348adbcd325accf",
+        "root": "297e86a9fd23b0fd2e59d9111ad666cf82da377730d5326076f20b215a023104",
+        "mnemonic24": "lion shoot refuse toss scissors brass voice blame climb identify surface attack sing topic burden deer captain stone unit hood clarify scatter captain during",
+        "ethereumAddress0": "0x4A699A1F4061ceEbC83b9dC14d6A0c33eC3E2327"
+      }
+    },
+    {
+      "id": "significant-whitespace-1",
+      "input": {
+        "name": " alice ",
+        "nameNfkdUtf8Hex": "20616c69636520",
+        "passphrase": " secret123456 ",
+        "passphraseNfkdUtf8Hex": "2073656372657431323334353620",
+        "shardCount": 1,
+        "factor": 1,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "77e473889c32e1e8f5defd5441eba3c9807a3c3ec1be9cec82e3028b76f072fc",
+        "shard0": "b38a177e90e56a5d9e7848a3aef3d76a560c8040d0ce2b257792b84a63236318",
+        "root": "6156efee5df98ec0f761e31ea389ca91e9fafbfa02da01e84f5b7bb0a8f16616",
+        "mnemonic24": "report hub ranch sword pony motion balance fitness make select fold garden parrot say invite slice clip lumber shoe advice vapor bread fashion input",
+        "ethereumAddress0": "0x04F873D11CceAafbe2Aa5B04C8537A7484966507"
+      }
+    },
+    {
+      "id": "legacy-factor-2-ten-shards",
+      "input": {
+        "name": "test",
+        "nameNfkdUtf8Hex": "74657374",
+        "passphrase": "secret123",
+        "passphraseNfkdUtf8Hex": "736563726574313233",
+        "shardCount": 10,
+        "factor": 2,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "7e95de96d472cbce318d8dcc4976997c388d555027ee086ebdaaab004684efca",
+        "shard0": "1c2b3e5bc7647e48477cfaf2b64693e9c5b86bd33835c9d3400f8ef47eddc2fe",
+        "root": "2179a82fef1320e04025d0a82fb62ca47f528bda5b707edb6e25cf680d9ae94f",
+        "mnemonic24": "inch museum panther drop celery make town mention hundred sound argue mammal resource kid point veteran asset flame great equal pink pair balcony guide",
+        "ethereumAddress0": "0x0b3C4712A9838cB306357c12C12991F9aF83DCD1"
+      }
+    }
+  ]
+}

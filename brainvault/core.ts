@@ -1,5 +1,5 @@
 /**
- * BrainVault v1.0 - Memory-Hard Brain Wallet
+ * BrainVault v1 - Memory-Hard Brain Wallet
  *
  * Problem: Traditional mnemonics require secure storage (paper/hardware wallet).
  * Solution: Derive wallet from memorable (name + passphrase + shard count).
@@ -20,17 +20,18 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { HDNodeWallet } from 'ethers';
 import { BIP39_ENGLISH } from './bip39-english.ts';
 import { hexToBytes } from './primitives/encoding.ts';
-import { resolveKdfParams } from './primitives/kdf.ts';
-import type { BrainvaultKdfParams } from './primitives/kdf.ts';
 import { BRAINVAULT_V1 } from './primitives/spec.ts';
 
 export { bytesToHex, hexToBytes } from './primitives/encoding.ts';
 export { deriveShard, deriveShardWithParams } from './primitives/kdf.ts';
 export type { BrainvaultKdfParams } from './primitives/kdf.ts';
 export { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
+export { combineShards, combineShardsWithParams, rootDomain, rootFingerprint } from './canonical.ts';
 
 /**
- * Calculate number of shards for a given factor
+ * Calculate number of shards for a frozen legacy factor.
+ * New CLI creation uses explicit levels from presets.ts; this mapping remains
+ * unchanged because factor is committed into every V1 root.
  * Formula: 10^(factor-1)
  *
  * Factor 1: 1 shard (256MB)
@@ -102,62 +103,6 @@ export function validateInputs(name: string, passphrase: string, factor: number)
   }
 
   return { valid: errors.length === 0, errors };
-}
-
-/**
- * Combine all shards into master key using BLAKE3
- */
-export async function combineShards(
-  shardResults: Uint8Array[],
-  factor: number
-): Promise<Uint8Array> {
-  return combineShardsWithParams(shardResults, factor);
-}
-
-/**
- * Combine all shards into master key with explicit KDF parameters.
- * These parameters are domain-separated into the final BLAKE3 hash.
- */
-export async function combineShardsWithParams(
-  shardResults: Uint8Array[],
-  factor: number,
-  params: BrainvaultKdfParams = {}
-): Promise<Uint8Array> {
-  const kdf = resolveKdfParams(params);
-
-  if (!Number.isSafeInteger(factor) || factor < BRAINVAULT_V1.MIN_FACTOR) {
-    throw new Error(`BRAINVAULT_FACTOR_INVALID:${factor}`);
-  }
-  if (shardResults.length < 1) {
-    throw new Error('BRAINVAULT_SHARDS_EMPTY');
-  }
-  for (const [index, shard] of shardResults.entries()) {
-    if (!(shard instanceof Uint8Array) || shard.length !== kdf.shardOutputBytes) {
-      throw new Error(`BRAINVAULT_SHARD_LENGTH_INVALID:${index}:${shard?.length ?? 'not-bytes'}`);
-    }
-  }
-
-  // Concatenate all shards in order
-  const totalLength = shardResults.reduce((sum, s) => sum + s.length, 0);
-  const combined = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const shard of shardResults) {
-    combined.set(shard, offset);
-    offset += shard.length;
-  }
-
-  // AUDITOR NOTE: the domain tag binds every KDF parameter and shard count.
-  // `factor` is redundant with shard count but is frozen into V1; removing it
-  // would be wallet-breaking, not cleanup. Custom settings therefore cannot
-  // alias the V1 namespace even when name/passphrase are identical.
-  const shardCount = shardResults.length;
-  const domainTag = `${kdf.algId}|mem=${kdf.shardMemoryKb}|t=${kdf.argonTimeCost}|p=${kdf.argonParallelism}|out=${kdf.shardOutputBytes}|shards=${shardCount}|factor=${factor}`;
-  const domainBytes = new TextEncoder().encode(domainTag);
-  const withDomain = new Uint8Array(combined.length + domainBytes.length);
-  withDomain.set(combined, 0);
-  withDomain.set(domainBytes, combined.length);
-
-  return blake3(withDomain);
 }
 
 /**

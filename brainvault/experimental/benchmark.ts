@@ -7,11 +7,12 @@ import { cpus } from 'node:os';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import {
   bytesToHex,
-  combineShards,
+  combineShardsWithParams,
   factorForShardCount,
   hexToBytes,
 } from '../core.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from '../primitives/spec.ts';
+import { verifyBundledExecutable } from '../binary-integrity.ts';
 
 type Backend = 'baseline' | 'sync' | 'wasm' | 'direct-async' | 'c-neon' | 'c-neon-wipe' | 'rust-pool' | 'rust-pool-no-wipe';
 
@@ -23,8 +24,12 @@ const readFlag = (name: string, fallback: string): string => {
 const backend = readFlag('backend', 'baseline') as Backend;
 const shardCount = Number(readFlag('shards', '1000'));
 const requestedWorkers = Number(readFlag('workers', '8'));
-const name = readFlag('name', 'benchmark-user');
-const passphrase = readFlag('passphrase', 'benchmark-password');
+const multiplier = Number(readFlag('multiplier', '1'));
+if (process.argv.some(argument => argument.startsWith('--name=') || argument.startsWith('--passphrase='))) {
+  throw new Error('BRAINVAULT_BENCHMARK_SECRET_ARGV_FORBIDDEN');
+}
+const name = 'benchmark-user';
+const passphrase = 'benchmark-password';
 
 if (!['baseline', 'sync', 'wasm', 'direct-async', 'c-neon', 'c-neon-wipe', 'rust-pool', 'rust-pool-no-wipe'].includes(backend)) {
   throw new Error(`Unknown backend: ${backend}`);
@@ -33,9 +38,14 @@ if (!Number.isSafeInteger(shardCount) || shardCount < 1) throw new Error(`Invali
 if (!Number.isSafeInteger(requestedWorkers) || requestedWorkers < 1 || requestedWorkers > 32) {
   throw new Error(`Workers must be an integer in 1..32: ${requestedWorkers}`);
 }
+if (!Number.isSafeInteger(multiplier) || multiplier < 1) {
+  throw new Error(`Multiplier must be a positive integer: ${multiplier}`);
+}
 
 const workers = Math.min(requestedWorkers, shardCount);
 const factor = factorForShardCount(shardCount);
+const shardMemoryKb = BRAINVAULT_V1.SHARD_MEMORY_KB * multiplier;
+const kdfAlgId = multiplier === 1 ? BRAINVAULT_V1.ALG_ID : `${BRAINVAULT_V1.ALG_ID}|custom`;
 const startedAt = performance.now();
 
 if (backend === 'direct-async') {
@@ -46,10 +56,10 @@ if (backend === 'direct-async') {
     for (;;) {
       const index = next++;
       if (index >= shardCount) return;
-      const salt = await createShardSalt(name, index, shardCount);
+      const salt = await createShardSalt(name, index, shardCount, kdfAlgId);
       directShards[index] = new Uint8Array(await argon2Native(password, {
         salt,
-        memoryCost: BRAINVAULT_V1.SHARD_MEMORY_KB,
+        memoryCost: shardMemoryKb,
         timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
         parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
         outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
@@ -60,7 +70,7 @@ if (backend === 'direct-async') {
   }));
   password.fill(0);
   const derivationTimeMs = performance.now() - startedAt;
-  const root = await combineShards(directShards, factor);
+  const root = await combineShardsWithParams(directShards, factor, { algId: kdfAlgId, shardMemoryKb });
   const totalTimeMs = performance.now() - startedAt;
   console.log(JSON.stringify({
     backend,
@@ -68,7 +78,8 @@ if (backend === 'direct-async') {
     shardCount,
     factor,
     workers,
-    memoryKiBPerShard: BRAINVAULT_V1.SHARD_MEMORY_KB,
+    memoryKiBPerShard: shardMemoryKb,
+    multiplier,
     derivationTimeMs: Number(derivationTimeMs.toFixed(3)),
     totalTimeMs: Number(totalTimeMs.toFixed(3)),
     shardsPerSecond: Number((shardCount / (derivationTimeMs / 1000)).toFixed(3)),
@@ -81,17 +92,18 @@ if (backend === 'direct-async') {
 
 if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool' || backend === 'rust-pool-no-wipe') {
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
-  const header = Buffer.alloc(20);
-  header.writeUInt32LE(0x31435642, 0);
+  const header = Buffer.alloc(24);
+  header.writeUInt32LE(0x32435642, 0);
   header.writeUInt32LE(shardCount, 4);
   header.writeUInt32LE(workers, 8);
   header.writeUInt32LE(password.length, 12);
   header.writeUInt32LE(backend === 'c-neon-wipe' ? 1 : 0, 16);
+  header.writeUInt32LE(shardMemoryKb, 20);
   const input = Buffer.alloc(header.length + password.length + (shardCount * 32));
   header.copy(input, 0);
   input.set(password, header.length);
   for (let index = 0; index < shardCount; index += 1) {
-    input.set(await createShardSalt(name, index, shardCount), header.length + password.length + (index * 32));
+    input.set(await createShardSalt(name, index, shardCount, kdfAlgId), header.length + password.length + (index * 32));
   }
   const isAppleM3 = cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
   const cExecutable = process.platform === 'darwin' && process.arch === 'arm64'
@@ -101,12 +113,20 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
       `${import.meta.dir}/argon2-c/brainvault-argon2`,
     ].find(candidate => existsSync(candidate))
     : undefined;
+  const rustPrebuilds = process.platform === 'darwin' && process.arch === 'arm64';
   const executable = backend === 'c-neon' || backend === 'c-neon-wipe'
     ? cExecutable
     : backend === 'rust-pool'
-      ? `${import.meta.dir}/argon2-rust/target/release/brainvault-argon2-rust`
-      : `${import.meta.dir}/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`;
+      ? [
+        ...(rustPrebuilds ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-rust`] : []),
+        `${import.meta.dir}/argon2-rust/target/release/brainvault-argon2-rust`,
+      ].find(candidate => existsSync(candidate))
+      : [
+        ...(rustPrebuilds ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-rust-no-wipe`] : []),
+        `${import.meta.dir}/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`,
+      ].find(candidate => existsSync(candidate));
   if (executable === undefined) throw new Error(`Backend executable unavailable: ${backend}`);
+  verifyBundledExecutable(executable, `${import.meta.dir}/..`);
   const native = spawnSync(executable, [], {
     input,
     maxBuffer: Math.max(1024 * 1024, shardCount * 64),
@@ -120,7 +140,7 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
   const derivationTimeMs = performance.now() - startedAt;
   const nativeShards = Array.from({ length: shardCount }, (_, index) =>
     new Uint8Array(native.stdout.subarray(index * 32, (index + 1) * 32)));
-  const root = await combineShards(nativeShards, factor);
+  const root = await combineShardsWithParams(nativeShards, factor, { algId: kdfAlgId, shardMemoryKb });
   const totalTimeMs = performance.now() - startedAt;
   console.log(JSON.stringify({
     backend,
@@ -128,7 +148,8 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
     shardCount,
     factor,
     workers,
-    memoryKiBPerShard: BRAINVAULT_V1.SHARD_MEMORY_KB,
+    memoryKiBPerShard: shardMemoryKb,
+    multiplier,
     derivationTimeMs: Number(derivationTimeMs.toFixed(3)),
     totalTimeMs: Number(totalTimeMs.toFixed(3)),
     shardsPerSecond: Number((shardCount / (derivationTimeMs / 1000)).toFixed(3)),
@@ -168,6 +189,8 @@ await new Promise<void>((resolve, reject) => {
       passphrase,
       shardIndex: nextShard++,
       shardCount,
+      shardMemoryKb,
+      algId: kdfAlgId,
     });
   };
 
@@ -204,7 +227,7 @@ await new Promise<void>((resolve, reject) => {
 });
 
 const derivationTimeMs = performance.now() - startedAt;
-const root = await combineShards(shards, factor);
+const root = await combineShardsWithParams(shards, factor, { algId: kdfAlgId, shardMemoryKb });
 const totalTimeMs = performance.now() - startedAt;
 
 console.log(JSON.stringify({
@@ -213,7 +236,8 @@ console.log(JSON.stringify({
   shardCount,
   factor,
   workers,
-  memoryKiBPerShard: BRAINVAULT_V1.SHARD_MEMORY_KB,
+  memoryKiBPerShard: shardMemoryKb,
+  multiplier,
   derivationTimeMs: Number(derivationTimeMs.toFixed(3)),
   totalTimeMs: Number(totalTimeMs.toFixed(3)),
   shardsPerSecond: Number((shardCount / (derivationTimeMs / 1000)).toFixed(3)),

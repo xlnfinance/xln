@@ -32,10 +32,16 @@ prebuild-m3: $(PREBUILD_M3)
 $(PREBUILD): $(SOURCES) compat/emmintrin.h vendor/sse2neon/sse2neon.h
 	mkdir -p $(dir $(PREBUILD))
 	$(CC) $(PREBUILD_CFLAGS) $(SOURCES) -o $@
+	codesign --remove-signature $@
+	bun ../normalize-macho.ts $@
+	codesign --force --sign - --timestamp=none $@
 
 $(PREBUILD_M3): $(SOURCES) compat/emmintrin.h vendor/sse2neon/sse2neon.h
 	mkdir -p $(dir $(PREBUILD_M3))
 	$(CC) $(PREBUILD_M3_CFLAGS) $(SOURCES) -o $@
+	codesign --remove-signature $@
+	bun ../normalize-macho.ts $@
+	codesign --force --sign - --timestamp=none $@
 
 clean:
 	rm -f brainvault-argon2 $(PREBUILD) $(PREBUILD_M3)

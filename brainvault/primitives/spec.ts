@@ -9,8 +9,9 @@
  *
  * A classic brainwallet hashes one memorable string once, so GPUs can test
  * candidates extremely cheaply. BrainVault makes every candidate reproduce
- * `shards × 256 MiB` of Argon2id work. At the default factor 3 that is 100
- * independent shards, or 25 GiB of cumulative memory allocation per guess.
+ * `shards x 256 MiB` of Argon2id work. At the default user level 3 that is
+ * exactly 1,000 independent shards, or 250 GiB of cumulative memory traffic
+ * per guess. Level names are UX presets; the frozen factor remains internal.
  * Attackers may parallelize too, but every concurrent lane consumes real RAM
  * and memory bandwidth; there is no shortcut that the legitimate user avoids.
  *
