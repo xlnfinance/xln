@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   canonicalizeStorageAuditValue,
   computeCanonicalEntityHash,
+  computeCanonicalRuntimeStateHash,
   computeCanonicalStateHashFromEnv,
 } from '../../../storage/canonical-hash';
 import {
@@ -28,12 +29,15 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import {
   projectReplayVerifiableRuntimePostStateView,
   buildReplayVerifiableRuntimeMachineSnapshot,
+  buildDurableRuntimeMachineSnapshot,
+  buildStorageRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
 } from '../../../storage/wal/snapshot';
 import { makeAccount as makeBaseAccount } from '../.././helpers/cross-j';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { prepareRuntimeMachineGraphRows } from '../../../storage/wal/runtime-machine-graph';
+import { canonicalizeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 
 const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
 const consensusConfig = {
@@ -140,6 +144,64 @@ test('canonical storage hash is deterministic across Map insertion order', () =>
   const left = computeCanonicalStateHashFromEnv(makeEnv(makeAccount(), [[2, 20n], [1, 10n]]));
   const right = computeCanonicalStateHashFromEnv(makeEnv(makeAccount(), [[1, 10n], [2, 20n]]));
   expect(left).toBe(right);
+});
+
+test('WAL Runtime-machine snapshot cannot alias later live infrastructure mutations', () => {
+  const env = makeEnv(makeAccount(), [[1, 10n]]);
+  env.runtimeConfig = {};
+  // Canonical payloads are safe to encode repeatedly, but the codec is allowed
+  // to reuse their object identity. The WAL snapshot still must own its copy.
+  const pendingCommittedJOutbox = canonicalizeBinaryPayload(
+    new Map([['before', { height: 7 }]]),
+  );
+  env.infrastructure = { pendingCommittedJOutbox } as never;
+
+  const durableSnapshot = buildDurableRuntimeMachineSnapshot(env);
+  const durableBytes = encodeBuffer(durableSnapshot, { omitSymbolKeys: true });
+  const durableGraphBefore = prepareRuntimeMachineGraphRows(env.state.height, durableSnapshot);
+  const snapshot = buildStorageRuntimeMachineSnapshot(env);
+  const snapshotBytesBefore = encodeBuffer(snapshot, { omitSymbolKeys: true });
+  const graphBefore = prepareRuntimeMachineGraphRows(env.state.height, snapshot);
+  const entityHashes = [...env.state.eReplicas.values()].map(computeCanonicalEntityHash);
+  const durableCanonicalHash = computeCanonicalRuntimeStateHash(
+    env.state.height,
+    env.state.timestamp,
+    entityHashes,
+    durableSnapshot,
+  );
+  const canonicalHashBefore = computeCanonicalRuntimeStateHash(
+    env.state.height,
+    env.state.timestamp,
+    entityHashes,
+    snapshot,
+  );
+
+  pendingCommittedJOutbox.get('before')!.height = 70;
+  pendingCommittedJOutbox.set('after', { height: 8 });
+
+  const storedOutbox = (snapshot['infrastructure'] as {
+    pendingCommittedJOutbox: Map<string, { height: number }>;
+  }).pendingCommittedJOutbox;
+  const snapshotBytesAfter = encodeBuffer(snapshot, { omitSymbolKeys: true });
+  const graphAfter = prepareRuntimeMachineGraphRows(env.state.height, snapshot);
+  const canonicalHashAfter = computeCanonicalRuntimeStateHash(
+    env.state.height,
+    env.state.timestamp,
+    entityHashes,
+    snapshot,
+  );
+  const changedSnapshot = buildStorageRuntimeMachineSnapshot(env);
+
+  expect([...durableBytes]).toEqual([...snapshotBytesBefore]);
+  expect(durableGraphBefore.root).toEqual(graphBefore.root);
+  expect(durableCanonicalHash).toBe(canonicalHashBefore);
+  expect([...storedOutbox.keys()]).toEqual(['before']);
+  expect(storedOutbox.get('before')).toEqual({ height: 7 });
+  expect([...snapshotBytesAfter]).toEqual([...snapshotBytesBefore]);
+  expect(graphAfter).toEqual(graphBefore);
+  expect(canonicalHashAfter).toBe(canonicalHashBefore);
+  expect(prepareRuntimeMachineGraphRows(env.state.height, changedSnapshot).root)
+    .not.toEqual(graphBefore.root);
 });
 
 test('canonical storage audit values reject ambiguous or lossy JavaScript values', () => {

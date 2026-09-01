@@ -27,6 +27,7 @@ import {
 } from '../read/projections';
 import { projectPortableBook } from '../schema/book/portable';
 import { decodeBrowserVmSerializedState } from '../../jurisdiction/adapter/browservm/browservm-state';
+import { canonicalizeBinaryPayload } from '../../protocol/serialization/binary-codec';
 
 const projectPortableEntityState = (state: EntityState): Record<string, unknown> => {
   const accounts = new Map<string, ReturnType<typeof projectPortableAccountDoc>>();
@@ -290,7 +291,14 @@ export const buildDurableRuntimeMachineSnapshot = (
  */
 export const buildStorageRuntimeMachineSnapshot = (
   env: RuntimeReplica,
-): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env);
+): Record<string, unknown> => {
+  // canonicalizeBinaryPayload may reuse an already-canonical nested object.
+  // Clone first so the hash and graph own the same immutable-by-ownership
+  // value. Canonicalization immediately removes clone reference identity, so
+  // this does not add or alter a durable representation.
+  const detached = structuredClone(buildDurableRuntimeMachineSnapshot(env));
+  return canonicalizeBinaryPayload(detached, { omitSymbolKeys: true });
+};
 
 /**
  * Project the part of a durable Runtime snapshot that deterministic frame
