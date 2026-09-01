@@ -357,7 +357,7 @@ export const waitForExpectedMatchedTrades = async (options: Readonly<{
     const drained = evidence !== null && !queuesBusy(evidence);
     if (performance.now() >= nextReportAt) {
       nextReportAt = performance.now() + 5_000;
-      console.log(`[load] trade drain ${JSON.stringify({
+      console.log(`[load] trade drain ${safeStringify({
         trades: lastTradeCount ?? null,
         target,
         liveOrders: lastLiveOrderCount ?? null,
@@ -385,7 +385,7 @@ export const waitForExpectedMatchedTrades = async (options: Readonly<{
   // Name the orders that are still resting. Without them the timeout cannot
   // distinguish a stranded counterparty from an uncrossed price.
   const stuck = await readEvidence(options.hub, request);
-  console.error(`[load] trade drain stuck ${JSON.stringify({
+  console.error(`[load] trade drain stuck ${safeStringify({
     bestBid: stuck?.book?.bestBidPriceTicks?.toString() ?? null,
     bestAsk: stuck?.book?.bestAskPriceTicks?.toString() ?? null,
     liveOrders: (stuck?.book?.liveOrderSample ?? []).map(order => ({
@@ -461,7 +461,7 @@ export const reportHubCommittedOffers = async (
       for (const offer of account.offers) if (offer.live) live.push(offer.offerId);
     }
   }
-  console.error(`[load] hub committed offers ${JSON.stringify({
+  console.error(`[load] hub committed offers ${safeStringify({
     liveInHubAccounts: live.length,
     sample: live.slice(0, 24),
   })}`);

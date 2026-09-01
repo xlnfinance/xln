@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { safeStringify } from '../../../protocol/serialization';
 import {
   STAND_LOCK_SLOTS_ENV,
   STAND_LOCK_TOKEN_ENV,
@@ -70,7 +71,7 @@ describe('stand lock', () => {
 
   test('a slot whose owner is gone is reclaimed instead of wedging the machine', async () => {
     mkdirSync(join(root, 'slot-0'), { recursive: true });
-    writeFileSync(join(root, 'slot-0', 'holder.json'), `${JSON.stringify({
+    writeFileSync(join(root, 'slot-0', 'holder.json'), `${safeStringify({
       // PID 0 is never a live user process here; `process.kill(0, 0)` targets
       // the whole process group, so a real dead pid is emulated with a value
       // that cannot own this slot.
