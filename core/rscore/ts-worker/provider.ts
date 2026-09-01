@@ -1,4 +1,4 @@
-import type { HandleAccountInputResult } from '../../account/consensus/types';
+import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../account/consensus/types';
 import { replaceAccountReplica } from '../../account/state/candidate-overlay';
 import { rememberEngineAccountLeaf } from '../cutover/leaf-registry';
 import {
@@ -10,7 +10,7 @@ import {
   validateStorageAccountDocValue,
 } from '../../storage/schema/schema-state-docs';
 import type { RuntimeReplica } from '../../runtime/types';
-import type { AccountInput } from '../../types/account';
+import type { AccountInput, AccountTxBatch } from '../../types/account';
 import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
 import { collectReachableAccountJClaimNodes } from '../../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../../entity/account/account-j-claim-node-store';
@@ -30,6 +30,7 @@ import {
 import { failedProposalHtlcFollowup } from '../../entity/consensus/account/failed-proposal-followups';
 import { accountHankoWitnessRequirements } from '../../entity/consensus/input/hanko-witness';
 import { TsAccountWorkerCoordinator } from './coordinator';
+import { assertAccountRootMatch } from './root-divergence';
 import type {
   TsAccountWorkerBatchResult,
   TsAccountWorkerEffect,
@@ -191,6 +192,26 @@ const replacePostAccount = (
   replaceAccountReplica(live, prepared);
   rememberEngineAccountLeaf(ownerEntityId, accountId, row.entityAccountLeaf);
 };
+
+/**
+ * Compensation the Entity owes upstream when a proposed Account frame could not
+ * carry an HTLC lock forward. Each row becomes one continuation admission.
+ */
+const failedProposalContinuationRows = (
+  entityState: AccountAuthorityEntityBatchOutbound['entityState'],
+  preparedProposals: readonly Readonly<{ result: ProposeAccountFrameResult }>[],
+): readonly Readonly<{ accountId: string; input: AccountTxBatch }>[] =>
+  preparedProposals.flatMap(proposal => {
+    const failures = 'failedHtlcLocks' in proposal.result
+      ? proposal.result.failedHtlcLocks ?? []
+      : [];
+    return failures.flatMap(({ hashlock, reason }) => {
+      const followup = failedProposalHtlcFollowup(entityState, { hashlock, reason });
+      return followup.kind === 'forwarded'
+        ? [{ accountId: normalize(followup.accountId), input: followup.input }]
+        : [];
+    });
+  });
 
 export class TsAccountWorkerAuthority {
   readonly #env: RuntimeReplica;
@@ -404,6 +425,7 @@ export class TsAccountWorkerAuthority {
         ...(counterpartyBoardAuthority ? { counterpartyBoardAuthority } : {}),
       };
     });
+    const baseRoot = coordinator.accountsRoot;
     const result = await coordinator.prepareAccountFrames({
       frameId,
       timestamp: batch.proposals[0]?.timestamp
@@ -442,17 +464,7 @@ export class TsAccountWorkerAuthority {
     if (preparedAdmissions.some(result => !result.ok)) {
       throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_ADMISSION_REJECTED:${safeStringify(preparedAdmissions)}`);
     }
-    const generated = preparedProposals.flatMap(proposal => {
-      const failures = 'failedHtlcLocks' in proposal.result
-        ? proposal.result.failedHtlcLocks ?? []
-        : [];
-      return failures.flatMap(({ hashlock, reason }) => {
-        const followup = failedProposalHtlcFollowup(batch.entityState, { hashlock, reason });
-        return followup.kind === 'forwarded'
-          ? [{ accountId: normalize(followup.accountId), input: followup.input }]
-          : [];
-      });
-    });
+    const generated = failedProposalContinuationRows(batch.entityState, preparedProposals);
     const continuationProposalIds = [...new Set(generated.map(row => row.accountId))];
     const continuation = await coordinator.finishAccountFrames({
       frameId,
@@ -512,10 +524,22 @@ export class TsAccountWorkerAuthority {
     if (finalRoot === undefined) {
       throw new Error('TS_ACCOUNT_WORKER_PROVIDER_FINAL_ROOT_MISSING');
     }
-    const accountRoot = batch.entityState.accounts.rootHash();
-    if (accountRoot !== finalRoot) {
-      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_ROOT_MISMATCH:${finalRoot}:${accountRoot}`);
-    }
+    // Halting on the bare hash pair costs a whole reproduction run to learn
+    // which Account moved, so the assertion carries its own evidence.
+    assertAccountRootMatch({
+      frameId,
+      workers: this.#workerCount,
+      entityTxTypes: batch.unsupportedEntityTxTypes,
+      baseRoot,
+      prepare: result,
+      continuation,
+      continuationTxAccountIds: generated.map(row => row.accountId),
+      continuationProposalAccountIds: continuationProposalIds,
+      applied: postAccounts,
+      accounts: batch.entityState.accounts,
+      finalRoot,
+      entityRoot: batch.entityState.accounts.rootHash(),
+    });
     return {
       proposals: [...preparedProposals, ...continuationProposals],
       generatedAdmissions,

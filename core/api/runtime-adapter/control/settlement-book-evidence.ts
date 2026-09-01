@@ -25,7 +25,7 @@ export type SettlementBookRequest = Readonly<{
  * orders and empty queues is unexplainable without naming the orders and their
  * owners, so the sample is part of the evidence rather than a second probe.
  */
-export type SettlementLiveOrder = Readonly<{
+type SettlementLiveOrder = Readonly<{
   orderId: string;
   ownerId: string;
   side: 0 | 1;
@@ -33,7 +33,7 @@ export type SettlementLiveOrder = Readonly<{
   qtyLots: bigint;
 }>;
 
-export const SETTLEMENT_LIVE_ORDER_SAMPLE_LIMIT = 64;
+const SETTLEMENT_LIVE_ORDER_SAMPLE_LIMIT = 64;
 
 export type SettlementBookEvidence = Readonly<{
   entityId: string;
