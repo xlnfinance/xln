@@ -42,17 +42,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid BrainVault native dimensions".into());
     }
 
-    let password: Arc<[u8]> = Arc::from(input[HEADER_BYTES..HEADER_BYTES + password_len].to_vec());
-    let salts: Arc<[u8]> = Arc::from(input[HEADER_BYTES + password_len..].to_vec());
-    input.fill(0);
-    let next = Arc::new(AtomicU32::new(0));
-    let params = Params::builder()
+    let params = match Params::builder()
         .memory(Memory::kib(memory_kib))
         .passes(1)
         .lanes(1)
         .threads(1)
         .tag_len(TagLen::bytes(OUTPUT_BYTES as u64))
-        .build()?;
+        .build()
+    {
+        Ok(params) => params,
+        Err(error) => {
+            input.fill(0);
+            return Err(error.into());
+        }
+    };
+    let password = Arc::new(input[HEADER_BYTES..HEADER_BYTES + password_len].to_vec());
+    let salts = Arc::new(input[HEADER_BYTES + password_len..].to_vec());
+    input.fill(0);
+    let next = Arc::new(AtomicU32::new(0));
 
     let mut handles = Vec::with_capacity(worker_count);
     for _ in 0..worker_count {
@@ -84,16 +91,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut outputs = vec![[0u8; OUTPUT_BYTES]; shard_count];
+    let mut worker_error: Option<String> = None;
     for handle in handles {
-        for (index, output) in handle.join().map_err(|_| "native worker panicked")?? {
-            outputs[index] = output;
+        match handle.join() {
+            Ok(Ok(completed)) => {
+                for (index, output) in completed {
+                    outputs[index] = output;
+                }
+            }
+            Ok(Err(error)) => {
+                worker_error.get_or_insert_with(|| format!("native worker failed: {error}"));
+            }
+            Err(_) => {
+                worker_error.get_or_insert_with(|| "native worker panicked".to_owned());
+            }
         }
     }
-    let mut stdout = io::stdout().lock();
-    for output in &outputs {
-        stdout.write_all(output)?;
+    let mut password = Arc::try_unwrap(password).map_err(|_| "native password still shared")?;
+    let mut salts = Arc::try_unwrap(salts).map_err(|_| "native salts still shared")?;
+    password.fill(0);
+    salts.fill(0);
+    if let Some(error) = worker_error {
+        outputs.fill([0u8; OUTPUT_BYTES]);
+        return Err(error.into());
     }
-    stdout.flush()?;
+    let mut stdout = io::stdout().lock();
+    let write_result = (|| -> io::Result<()> {
+        for output in &outputs {
+            stdout.write_all(output)?;
+        }
+        stdout.flush()
+    })();
     outputs.fill([0u8; OUTPUT_BYTES]);
+    write_result?;
     Ok(())
 }
