@@ -375,6 +375,7 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/solvency-panel-view.ts',
       'frontend/packages/runtime-client/src/runtime-diagnostics-panel-view.ts',
       'frontend/packages/runtime-client/src/gossip-panel-view.ts',
+      'frontend/packages/runtime-client/src/time-machine-transport.ts',
     ],
     behavior: [
       'Dockview layout',
