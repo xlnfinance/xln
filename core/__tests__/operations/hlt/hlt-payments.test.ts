@@ -119,7 +119,8 @@ describe('hlt payment population', () => {
     expect(source).toContain('waitForHubSettlement');
     expect(source).toContain('core.completedPayments - completedPaymentsBefore');
     expect(source).toContain("type: 'settlement-evidence', book: null, accounts: []");
-    expect(source).toContain('DELIVERY_TIMEOUT_MS = 20_000');
+    expect(source).toContain("process.env['XLN_HLT_DELIVERY_TIMEOUT_MS']");
+    expect(source).toContain('|| 20_000');
     expect(source).toContain('HLT_PAYMENT_STALLED_FAIL_FAST');
     expect(source).not.toContain('HLT_PAYMENT_DRAIN_GATE_FAILED');
     expect(source).not.toContain('readHubReceiverCredits');
@@ -164,7 +165,7 @@ describe('hlt payment population', () => {
     );
     expect(source).toContain('await runParityGatedHltChild({');
     expect(source).toContain("parityArgs: ['core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts']");
-    expect(source).toContain('timeout: 30_000');
+    expect(source).toContain("authorityEvidence ? remainingAuthorityBudget('live') : 30_000");
     expect(source).not.toContain('timeout: 50_000');
     expect(source).not.toContain('XLN_HLT_RUNTIMES_PER_WORKER:');
   });
@@ -478,7 +479,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('submitPreparedParallelSameLoad');
     expect(source).toContain('extraEntityTxs');
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
-    expect(source).toContain("execution: 'balanced'");
+    expect(source).toContain("execution: 'realistic'");
     expect(source).toContain('? rustH1.ready.orderbookMinTradeSize');
     expect(source).toContain('await requireHub().adapter.read<unknown>(`entity/${hubIdentity.entityId}`)');
     expect(source).not.toContain('decodeHubMinTradeSize(\n      await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}/settlement-counters`)');

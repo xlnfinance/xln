@@ -55,7 +55,7 @@ test('one process hosts isolated sovereign Runtime replicas across worker shutdo
     expect(lanes).toHaveLength(26);
     expect(lanes[0]!.child).toBe(lanes[25]!.child);
     expect(lanes[0]!.hostIngress).toBe(lanes[1]!.hostIngress);
-    expect(lanes[0]!.hostIngress).toBe(lanes[25]!.hostIngress);
+    expect(lanes[0]!.hostIngress).not.toBe(lanes[25]!.hostIngress);
     expect(lanes[0]!.port).not.toBe(lanes[1]!.port);
     expect(lanes[0]!.runtime.adapter.runtimeId).not.toBe(lanes[1]!.runtime.adapter.runtimeId);
     await queueLaneRuntimeInputWave(0, lanes.map(lane => ({
@@ -79,7 +79,7 @@ test('one process hosts isolated sovereign Runtime replicas across worker shutdo
     const entitySets = await Promise.all(lanes.slice(0, 2).map(lane => lane.runtime.control.listEntities()));
     expect(entitySets[0]!.map(entity => entity.entityId)).toEqual([identities[0]!.entityId]);
     expect(entitySets[1]!.map(entity => entity.entityId)).toEqual([identities[1]!.entityId]);
-    const diagnostics = await Promise.all([lanes[0]!].map(async lane => {
+    const diagnostics = await Promise.all([lanes[0]!, lanes[25]!].map(async lane => {
       const response = await fetch(`${lane.hostIngress.baseUrl}/api/hlt/diagnostics`, {
         headers: { authorization: `Bearer ${lane.hostIngress.authKey}` },
       });
@@ -90,8 +90,8 @@ test('one process hosts isolated sovereign Runtime replicas across worker shutdo
         totals: { radapterClients: number; relayClients: number; directClients: number };
       };
     }));
-    expect(diagnostics.map(value => value.runtimes)).toEqual([26]);
-    expect(diagnostics.map(value => value.totals.radapterClients)).toEqual([26]);
+    expect(diagnostics.map(value => value.runtimes).sort((left, right) => left - right)).toEqual([1, 25]);
+    expect(diagnostics.map(value => value.totals.radapterClients).sort((left, right) => left - right)).toEqual([1, 25]);
     expect(diagnostics.every(value => value.memory.rss > 0 && value.memory.heapUsed > 0)).toBeTrue();
     const child = lanes[0]!.child;
     await stopLaneRuntimes(lanes);
