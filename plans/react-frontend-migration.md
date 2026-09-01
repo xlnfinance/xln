@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS UNDER WAY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH SOLVENCY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1019,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS UNDER WAY`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH SOLVENCY`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1215,15 +1215,37 @@ module — for panel view models; the no-implementation rule is unchanged.
 Canonical check plus build, all four React checks, and the full frontend
 tree (identical 13-failure pre-existing baseline) are green.
 
+The third panel slice ports the Solvency presentation projection: stable
+stack/token ordering, three-state conservation status, canonical status copy,
+raw bigint formatting, and Depository address shortening now live in
+`packages/runtime-client/src/solvency-panel-view.ts`. Runtime-owned
+`calculateSolvency` remains behind the thin legacy facade, so the shared
+package imports only the public result type and no financial or state-machine
+implementation. The canonical Svelte panel preserves its props, adapter-first
+query, injected-frame fallback, error states, markup, and styling while
+delegating display logic. Three focused tests pass with 8 expectations; the
+affected legacy contract passes its two non-collateral checks and retains only
+the recorded `pendingCollateral` baseline failure. The final unsafe-types gate
+covers 603 files with zero findings, Svelte diagnostics are 0 errors / 0
+warnings, the canonical build transforms 6,403 client modules, all four React
+surfaces pass the local matrix, and the full frontend failure-name diff is
+empty against the exact 13-test baseline. Pre-push root evidence reached 26
+BrainVault tests / 100,156 expectations, 28 compiled Solidity files, 92
+generated TypeChain files, 4 immutable-metadata parity checks, and 10 soundcheck
+gates. The unrelated remainder is host-blocked before Rust checks because
+`cargo` is not installed; the separate frontend-size policy also reports the
+out-of-scope `core/qa/report.ts` at 3,001 / 3,000 lines. This slice changes
+neither surface.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
 `paymentTerminalMonitor`, and all of `packages/{browser,runtime-client}` — is
 already framework-neutral): neutralize `runtimeGraphFrameCache` (the only
 Svelte-importing network3d file) and the `networkMachineRuntimeStore` /
-`settingsStore` facades next; port panels bottom-up (Console → RuntimeIO →
-Solvency → diagnostics → Gossip → TimeMachine → Jurisdiction/Settings →
-Architect); wrap `DockviewComponent` for React with layout JSON kept
+`settingsStore` facades next; panel ports are complete through Console →
+RuntimeIO → Solvency, then continue diagnostics → Gossip → TimeMachine →
+Jurisdiction/Settings → Architect; wrap `DockviewComponent` for React with layout JSON kept
 compatible; rebuild Graph3DPanel around refs + explicit effects last; and
 treat the 112-file / 43k-line Entity workspace tree behind `entity-panel` and
 the pinned wallet as its own explicitly sized sub-program before any `/embed`

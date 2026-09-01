@@ -4,6 +4,11 @@
   import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
   import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
   import { buildSolvencyProjection } from './solvency-panel-view';
+  import {
+    formatSolvencyAmount,
+    getSolvencyStatusView,
+    shortenSolvencyAddress,
+  } from '../../../../../packages/runtime-client/src/solvency-panel-view';
 
   const emptyEnv = readable<RuntimeReplica | null>(null);
 
@@ -15,9 +20,7 @@
   let solvencyData = $derived.by(() =>
     $solvencyStore.data ?? buildSolvencyProjection($runtimeFrameEnv));
   let solvencyError = $derived($solvencyStore.error);
-
-  const formatRawAmount = (amount: bigint): string => amount.toLocaleString('en-US');
-  const shortAddress = (address: string): string => `${address.slice(0, 8)}…${address.slice(-6)}`;
+  let solvencyStatus = $derived(getSolvencyStatusView(solvencyData?.isValid ?? null));
 </script>
 
 <div class="solvency-panel glass-panel" data-testid="solvency-panel">
@@ -27,13 +30,9 @@
     class:unchecked={solvencyData?.isValid === null}
     data-testid="solvency-status"
   >
-    <div class="status-icon">{solvencyData?.isValid === true ? '✓' : solvencyData?.isValid === false ? '⚠' : '?'}</div>
+    <div class="status-icon">{solvencyStatus.icon}</div>
     <div class="status-text text-tiny">
-      {solvencyData?.isValid === true
-        ? 'ASSET CONSERVATION OK'
-        : solvencyData?.isValid === false
-          ? 'ASSET IMBALANCE DETECTED'
-          : 'ASSET CONSERVATION NOT VERIFIED'}
+      {solvencyStatus.label}
     </div>
   </div>
 
@@ -43,20 +42,20 @@
         <section class="glass-card asset-card" class:invalid={asset.isValid === false} data-testid="solvency-asset">
           <header>
             <div class="metric-label">CHAIN {asset.chainId} · TOKEN #{asset.tokenId}</div>
-            <div class="text-tiny address">{shortAddress(asset.depositoryAddress)}</div>
+            <div class="text-tiny address">{shortenSolvencyAddress(asset.depositoryAddress)}</div>
           </header>
           <div class="metric-grid">
             <div>
               <div class="metric-label">RESERVES</div>
-              <div class="metric-value" data-testid="solvency-reserves">{formatRawAmount(asset.reserves)}</div>
+              <div class="metric-value" data-testid="solvency-reserves">{formatSolvencyAmount(asset.reserves)}</div>
             </div>
             <div>
               <div class="metric-label">CONFIRMED COLLATERAL</div>
-              <div class="metric-value" data-testid="solvency-collateral">{formatRawAmount(asset.confirmedCollateral)}</div>
+              <div class="metric-value" data-testid="solvency-collateral">{formatSolvencyAmount(asset.confirmedCollateral)}</div>
             </div>
           </div>
           {#if asset.isValid === false && asset.delta !== null}
-            <div class="delta-warning">Raw-unit delta: {formatRawAmount(asset.delta)}</div>
+            <div class="delta-warning">Raw-unit delta: {formatSolvencyAmount(asset.delta)}</div>
           {:else if asset.isValid === null}
             <div class="delta-unchecked">
               Not verified: needs the Depository total for this token
