@@ -8,21 +8,9 @@
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
   import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
+  import { createGraph3dEntityPanelView } from '../../../../packages/runtime-client/src/graph3d-entity-panel-view';
   import { formatTokenAmount } from './entity/shared/formatters';
   import { getTokenInfo } from '@xln/core/account/utils';
-
-  type MapRecord<T> = Map<string, T> | Record<string, T>;
-  type DeltaLike = { collateral?: bigint | number | string; ondelta?: bigint | number | string };
-  type AccountLike = {
-    state: { deltas?: Map<number, DeltaLike> | Record<string, DeltaLike> };
-  };
-  type ReplicaLike = {
-    state?: {
-      reserves?: MapRecord<bigint | number | string>;
-      accounts?: MapRecord<AccountLike>;
-    };
-  };
-  type FrameLike = RuntimeReplica | EnvSnapshot | null;
 
   export let entityId: string;
   export let entityName: string = '';
@@ -33,74 +21,15 @@
 
   const dispatch = createEventDispatcher();
 
-  // TIME-TRAVEL AWARE: Read from history[timeIndex] when scrubbing, else live state
-  $: env = ((): FrameLike => {
-    const timeIdx = $runtimeFrameTimeIndex;
-    const hist = $runtimeFrameHistory;
-    if (timeIdx >= 0 && hist && hist.length > 0) {
-      const idx = Math.min(timeIdx, hist.length - 1);
-      return hist[idx] ?? null;  // Historical frame
-    }
-    return $runtimeFrameEnv;  // Live state
-  })();
-
-  /**
-   * Get reserve values from reserves object (handles both Map and plain Object formats)
-   * Maps serialize to plain objects when passed through postMessage/JSON
-   */
-  function toBigint(value: unknown): bigint {
-    if (value === undefined || value === null) return 0n;
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return BigInt(Math.trunc(value));
-    if (typeof value === 'string') return BigInt(value.replace(/n$/, '') || '0');
-    return BigInt(String(value));
-  }
-
-  function getReserveValue(reserves: MapRecord<bigint | number | string> | undefined, key: string): bigint {
-    if (!reserves) return 0n;
-    if (reserves instanceof Map) {
-      return toBigint(reserves.get(key));
-    }
-    if (typeof reserves === 'object') {
-      return toBigint(reserves[key]);
-    }
-    return 0n;
-  }
-
-  // Find replica for this entity
-  $: replica = ((): ReplicaLike | null => {
-    if (!env?.state.eReplicas) return null;
-    if (env.state.eReplicas instanceof Map) {
-      const match = Array.from(env.state.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'))?.[1] as ReplicaLike | undefined;
-      return match ?? null;
-    }
-    const entries = Object.entries(env.state.eReplicas as Record<string, ReplicaLike>);
-    return entries.find(([key]) => key.startsWith(entityId + ':'))?.[1] ?? null;
-  })();
-
-  $: reserves = getReserveValue(replica?.state?.reserves, '1');
-
-  // Handle both Map and plain Object (serialized) for accounts
-  $: accounts = ((): [string, AccountLike][] => {
-    if (!replica?.state?.accounts) return [];
-    if (replica.state.accounts instanceof Map) {
-      return Array.from(replica.state.accounts.entries());
-    }
-    return Object.entries(replica.state.accounts);
-  })();
-
-  function getDelta(acc: AccountLike, tokenId: number): DeltaLike | null {
-    if (!acc?.state.deltas) return null;
-    if (acc.state.deltas instanceof Map) {
-      return acc.state.deltas.get(tokenId) ?? null;
-    }
-    return acc.state.deltas[String(tokenId)] ?? null;
-  }
-
-  $: totalCollateral = accounts.reduce((sum: bigint, [, acc]) => {
-    const delta = getDelta(acc, 1);
-    return sum + toBigint(delta?.collateral);
-  }, 0n);
+  // The shared model owns historical-frame selection and serialized Map/Record
+  // normalization. This facade retains stores, formatting, and click effects.
+  $: panelView = createGraph3dEntityPanelView({
+    entityId,
+    entityName,
+    liveFrame: $runtimeFrameEnv,
+    history: $runtimeFrameHistory,
+    timeIndex: $runtimeFrameTimeIndex,
+  });
 
   // Use shared formatter with token ID 1 (USDC default)
   function formatAmount(amount: bigint): string {
@@ -130,22 +59,22 @@
   style="left: {position.x}px; top: {position.y}px;"
 >
   <div class="header">
-    <span class="name">{entityName || entityId}</span>
+    <span class="name">{panelView.title}</span>
     <button class="close-btn" on:click={close}>×</button>
   </div>
 
   <div class="stats">
     <div class="stat">
       <span class="label">Reserve</span>
-      <span class="value">{formatAmount(reserves)} USDC</span>
+      <span class="value">{formatAmount(panelView.reserve)} USDC</span>
     </div>
     <div class="stat">
       <span class="label">Collateral</span>
-      <span class="value">{formatAmount(totalCollateral)} USDC</span>
+      <span class="value">{formatAmount(panelView.totalCollateral)} USDC</span>
     </div>
     <div class="stat">
       <span class="label">Accounts</span>
-      <span class="value">{accounts.length}</span>
+      <span class="value">{panelView.accountCount}</span>
     </div>
   </div>
 
@@ -161,21 +90,19 @@
     </button>
   </div>
 
-  {#if accounts.length > 0}
+  {#if panelView.accountCount > 0}
     <div class="accounts-preview">
       <div class="section-title">Accounts</div>
-      {#each accounts.slice(0, 3) as [counterpartyId, acc]}
-        {@const delta = getDelta(acc, 1)}
-        {@const ondelta = toBigint(delta?.ondelta)}
+      {#each panelView.accountPreviews as account}
         <div class="account-row">
-          <span class="peer">{counterpartyId}</span>
-          <span class="ondelta" class:positive={ondelta > 0n} class:negative={ondelta < 0n}>
-            {ondelta > 0n ? '+' : ''}{formatAmount(ondelta)}
+          <span class="peer">{account.counterpartyId}</span>
+          <span class="ondelta" class:positive={account.ondelta > 0n} class:negative={account.ondelta < 0n}>
+            {account.ondelta > 0n ? '+' : ''}{formatAmount(account.ondelta)}
           </span>
         </div>
       {/each}
-      {#if accounts.length > 3}
-        <div class="more">+{accounts.length - 3} more</div>
+      {#if panelView.remainingAccountCount > 0}
+        <div class="more">+{panelView.remainingAccountCount} more</div>
       {/if}
     </div>
   {/if}
