@@ -4,7 +4,11 @@
   import EntityMiniPanel from './EntityMiniPanel.svelte';
   import Graph3DFpsOverlay from './Graph3DFpsOverlay.svelte';
   import VRControlsHUD from './VRControlsHUD.svelte';
-  import type { RuntimeGraphCanonicity } from '$lib/network3d/runtimeGraphProjection';
+  import {
+    GRAPH3D_CANONICITY_OPTIONS,
+    createGraph3dViewportStatusView,
+    type Graph3dViewportCanonicity,
+  } from '../../../../packages/runtime-client/src/graph3d-viewport-view';
 
   export let container: HTMLDivElement;
   export let showMiniPanel = false;
@@ -31,7 +35,7 @@
   } = { visible: false, x: 0, y: 0, leftContent: '', rightContent: '', leftEntity: '', rightEntity: '' };
   export let runtimeScope = 'merged';
   export let runtimeScopeOptions: Array<{ value: string; label: string }> = [];
-  export let canonicity: RuntimeGraphCanonicity = 'timestamp';
+  export let canonicity: Graph3dViewportCanonicity = 'timestamp';
   export let sourceCount = 0;
   export let desyncCount = 0;
   export let projectionError = '';
@@ -41,7 +45,7 @@
   export let timelineTimestamp = 0;
   export let runtimeNodeLabels: string[] = [];
   export let onRuntimeScopeChange: (scope: string) => void = () => {};
-  export let onCanonicityChange: (policy: RuntimeGraphCanonicity) => void = () => {};
+  export let onCanonicityChange: (policy: Graph3dViewportCanonicity) => void = () => {};
   export let closeMiniPanel: () => void = () => {};
   export let handleMiniPanelAction: (event: CustomEvent) => void = () => {};
   export let handleOpenFullPanel: (event: CustomEvent) => void = () => {};
@@ -49,6 +53,17 @@
   export let handleVrPaymentClick: () => void = () => {};
   export let handleVrAutoRotateClick: () => void = () => {};
   export let exitVR: () => void = () => {};
+
+  $: statusView = createGraph3dViewportStatusView({
+    sourceCount,
+    desyncCount,
+    projectionError,
+    runtimeNodeLabels,
+    timelineRuntimeId,
+    timelineRuntimeColor,
+    timelineHeight,
+    timelineTimestamp,
+  });
 </script>
 
 <div class="graph3d-wrapper">
@@ -72,38 +87,36 @@
       <select
         value={canonicity}
         aria-label="Merged graph reference policy"
-        on:change={(event) => onCanonicityChange(event.currentTarget.value as RuntimeGraphCanonicity)}
+        on:change={(event) => onCanonicityChange(event.currentTarget.value as Graph3dViewportCanonicity)}
       >
-        <option value="timestamp">Latest timestamp</option>
-        <option value="height">Highest height</option>
-        <option value="left">Left entity</option>
-        <option value="right">Right entity</option>
-        <option value="hub">Hub view</option>
+        {#each GRAPH3D_CANONICITY_OPTIONS as option}
+          <option value={option.value}>{option.label}</option>
+        {/each}
       </select>
     </label>
     <span class="projection-status" title="Different runtime states are expected network desynchronization">
-      {sourceCount} source{sourceCount === 1 ? '' : 's'} · {desyncCount} desync
+      {statusView.projectionStatus}
     </span>
-    <span class="sr-only" data-testid="graph-runtime-node-summary">{runtimeNodeLabels.join(' · ')}</span>
+    <span class="sr-only" data-testid="graph-runtime-node-summary">{statusView.runtimeNodeSummary}</span>
   </div>
 
-  {#if projectionError || timelineRuntimeId}
+  {#if statusView.showStatusStack}
     <div class="runtime-status-stack">
-      {#if projectionError}
+      {#if statusView.projectionError}
         <div class="projection-error" role="alert" data-testid="graph-projection-error">
-          {projectionError}
+          {statusView.projectionError}
         </div>
       {/if}
-      {#if timelineRuntimeId}
+      {#if statusView.timeline}
         <div
           class="timeline-runtime-highlight"
           data-testid="network-machine-runtime-highlight"
-          style={`--runtime-color:${timelineRuntimeColor}`}
+          style={`--runtime-color:${statusView.timeline.runtimeColor}`}
         >
           <span class="runtime-dot"></span>
-          <strong>{timelineRuntimeId}</strong>
-          <span>h{timelineHeight}</span>
-          <time datetime={new Date(timelineTimestamp).toISOString()}>{new Date(timelineTimestamp).toISOString()}</time>
+          <strong>{statusView.timeline.runtimeId}</strong>
+          <span>{statusView.timeline.heightLabel}</span>
+          <time datetime={statusView.timeline.timestampIso}>{statusView.timeline.timestampIso}</time>
         </div>
       {/if}
     </div>

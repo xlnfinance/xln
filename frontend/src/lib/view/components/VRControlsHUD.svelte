@@ -7,15 +7,19 @@
    * Copyright (C) 2025 XLN Finance
    */
 
+  import { createGraph3dVrHudView } from '../../../../packages/runtime-client/src/graph3d-viewport-view';
+
   export let isVRActive = false;
   export let onPaymentClick: (() => void) | null = null;
   export let onAutoRotateClick: (() => void) | null = null;
   export let onExitVR: (() => void) | null = null;
   export let entityCount = 0;
   export let currentFPS = 0;
+
+  $: hudView = createGraph3dVrHudView(isVRActive, entityCount, currentFPS);
 </script>
 
-{#if isVRActive}
+{#if hudView.visible}
   <div class="vr-hud">
     <!-- Instructions Panel (Top-Left) -->
     <div class="vr-panel instructions">
@@ -51,11 +55,11 @@
     <div class="vr-panel stats">
       <div class="stat-item">
         <span class="stat-label">Entities</span>
-        <span class="stat-value">{entityCount}</span>
+        <span class="stat-value">{hudView.entityCount}</span>
       </div>
       <div class="stat-item">
         <span class="stat-label">FPS</span>
-        <span class="stat-value">{Math.round(currentFPS)}</span>
+        <span class="stat-value">{hudView.fps}</span>
       </div>
     </div>
   </div>

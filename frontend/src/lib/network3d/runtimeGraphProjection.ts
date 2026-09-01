@@ -8,9 +8,10 @@ import type {
   RuntimeAdapterGraphFrame,
   RuntimeAdapterViewFrame,
 } from '@xln/core/api/public/runtime-module';
+import type { Graph3dViewportCanonicity } from '../../../packages/runtime-client/src/graph3d-viewport-view';
 
 export type RuntimeGraphAdapterKind = 'browser' | 'remote';
-export type RuntimeGraphCanonicity = 'timestamp' | 'height' | 'left' | 'right' | 'hub';
+export type RuntimeGraphCanonicity = Graph3dViewportCanonicity;
 
 export type RuntimeGraphPosition = {
   x: number;

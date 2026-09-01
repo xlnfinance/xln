@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { createGraph3dFpsOverlayView } from '../../../../packages/runtime-client/src/graph3d-viewport-view';
+
   export let renderFps = 0;
   export let frameTime = 0;
   export let entityCount = 0;
@@ -6,20 +8,22 @@
   export let particleCount = 0;
   export let barsMode: 'close' | 'spread' = 'close';
   export let onToggleBars: () => void = () => {};
+
+  $: fpsView = createGraph3dFpsOverlayView(renderFps, frameTime, barsMode);
 </script>
 
 <div class="fps-overlay">
   <div
     class="fps-stat"
-    class:fps-good={renderFps >= 55}
-    class:fps-ok={renderFps >= 30 && renderFps < 55}
-    class:fps-bad={renderFps < 30}
+    class:fps-good={fpsView.tone === 'good'}
+    class:fps-ok={fpsView.tone === 'ok'}
+    class:fps-bad={fpsView.tone === 'bad'}
   >
     <span class="fps-label">Render FPS</span>
-    <span class="fps-value">{renderFps.toFixed(1)}</span>
+    <span class="fps-value">{fpsView.fpsLabel}</span>
   </div>
   <div class="fps-stat-secondary">
-    <span>{frameTime.toFixed(2)}ms/frame</span>
+    <span>{fpsView.frameTimeLabel}</span>
   </div>
 
   <div class="stats-divider"></div>
@@ -42,9 +46,9 @@
   <button
     class="bars-mode-toggle"
     on:click={onToggleBars}
-    title="Toggle bars positioning: {barsMode === 'close' ? 'Center (close)' : 'Sides (spread)'}"
+    title={fpsView.barsTitle}
   >
-    Bars: {barsMode === 'close' ? '⬌ Center' : '↔ Sides'}
+    {fpsView.barsLabel}
   </button>
 </div>
 
