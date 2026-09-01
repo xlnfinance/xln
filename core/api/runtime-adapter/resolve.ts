@@ -1938,7 +1938,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       return {
         height: replica.state.height,
         paybookOpen: replica.state.paybook.entries.size,
-        paymentFeesEarned: replica.state.paybook.feesEarned,
+        paybookFeesEarned: replica.state.paybook.feesEarned,
         metrics: readRuntimeEntityMetricStats(ctx.env, entityId),
       } as T;
     }

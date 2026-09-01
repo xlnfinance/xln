@@ -31,6 +31,7 @@
   export let closedOrderStatusTone: (status: ClosedOrderStatus) => 'bid' | 'ask' | 'neutral' = () => 'neutral';
   export let closedHistoryLoading = false;
   export let closedHistoryHasMore = false;
+  export let onSelectClosedHistory: () => void | Promise<void> = () => {};
   export let onLoadOlderClosedHistory: () => void | Promise<void> = () => {};
   export let cancelSwapOffer: (offerId: string, accountId: string) => void | Promise<void> = () => {};
   export let requestCrossClear: (offerId: string, cancelRemainder?: boolean) => void | Promise<void> = () => {};
@@ -55,7 +56,10 @@
           class:active={orderListTab === 'closed'}
           aria-pressed={orderListTab === 'closed'}
           data-testid="swap-orders-tab-closed"
-          on:click={() => (orderListTab = 'closed')}
+          on:click={() => {
+            orderListTab = 'closed';
+            void onSelectClosedHistory();
+          }}
         >Closed ({closedOrderViews.length})</button>
       </div>
     </div>

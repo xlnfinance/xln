@@ -5,7 +5,6 @@ import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEn
 import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
 import { errorLog } from '../errorLogStore';
 import { hasConnectedJurisdictionAdapter } from '../vault/vault-helpers';
-import { getXLN } from './xlnRuntimeLoader';
 
 const bootstrapEnvironment = writable<RuntimeReplica | null>(null);
 
@@ -87,40 +86,6 @@ registerDebugSurface('runtimePersistence', () => ({
       },
     };
     return frames;
-  },
-  readAccountRebalanceFees: async (input: {
-    entityId: string;
-    counterpartyId: string;
-    afterHeight: number;
-    throughHeight: number;
-    tokenId: number;
-  }) => {
-    if (!localRuntimeEnv) throw new Error('RUNTIME_PERSISTENCE_ENV_UNAVAILABLE');
-    const { afterHeight, throughHeight, tokenId } = input;
-    if (
-      !Number.isSafeInteger(afterHeight) || afterHeight < 0 ||
-      !Number.isSafeInteger(throughHeight) || throughHeight < afterHeight ||
-      throughHeight - afterHeight > 1_000 ||
-      !Number.isSafeInteger(tokenId) || tokenId < 0
-    ) throw new Error('RUNTIME_ACCOUNT_FEE_QUERY_BOUNDARY_INVALID');
-    const xln = await getXLN();
-    const frames = await xln.readPersistedAccountFrameHistory(
-      localRuntimeEnv,
-      input.entityId,
-      input.counterpartyId,
-      Math.max(1, throughHeight - afterHeight + 1),
-      { maxAccountHeight: throughHeight },
-    );
-    return frames
-      .filter(frame => frame.height > afterHeight && frame.height <= throughHeight)
-      .flatMap(frame => frame.accountTxs.flatMap(tx => {
-        if (tx.type !== 'request_collateral' || tx.data.tokenId !== tokenId) return [];
-        return [{
-          height: frame.height,
-          feeTokenId: tx.data.feeTokenId ?? tx.data.tokenId,
-          feeAmount: tx.data.feeAmount.toString(),
-        }];
-      }));
   },
 }));
 

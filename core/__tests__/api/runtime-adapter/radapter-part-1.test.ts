@@ -604,8 +604,8 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   );
   const settlementCounters = await resolveRuntimeAdapterRead<{
     height: number;
-    lockBookOpen: number;
-    htlcFeesEarned: bigint;
+    paybookOpen: number;
+    paybookFeesEarned: bigint;
     metrics: { acceptedPayments: number; completedPayments: number };
   }>({ env }, `entity/${entityId}/settlement-counters`);
   const accounts = await resolveRuntimeAdapterRead<{
@@ -634,8 +634,8 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   expect(entity.profile.name).toBe('Adapter Test');
   expect(settlementCounters).toEqual({
     height: 7,
-    lockBookOpen: 0,
-    htlcFeesEarned: 0n,
+    paybookOpen: 0,
+    paybookFeesEarned: 0n,
     metrics: {
       acceptedPayments: 0,
       completedPayments: 0,

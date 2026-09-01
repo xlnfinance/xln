@@ -8,8 +8,8 @@ import {
   decodeSettlementEvidenceResponse,
 } from '../../../api/runtime-adapter/control/settlement-evidence';
 import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
+import { resolveRuntimeAdminControl } from '../../../api/server/control/runtime-admin';
 import { validateRuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
-import { RuntimeAdapterError } from '../../../api/runtime-adapter/errors';
 import { applyCommand, canonicalPair, createBook } from '../../../orderbook';
 import { createEmptyEnv } from '../../../runtime';
 import {
@@ -26,7 +26,7 @@ const leftId = entity('11');
 const rightId = entity('22');
 const offerId = 'settlement-offer-1';
 
-const makeSettlementEnv = (pending = false, stp = false) => {
+const makeSettlementEnv = (pending = false) => {
   const env = createEmptyEnv('settlement-evidence');
   const signerId = addr('aa');
   const jurisdiction = makeJurisdiction('J1', 31_337, 'dd', 'ee');
@@ -61,9 +61,8 @@ const makeSettlementEnv = (pending = false, stp = false) => {
       type: 'swap_resolve',
       data: {
         offerId,
-        fillRatio: stp ? 0 : 65_535,
+        fillRatio: 65_535,
         cancelRemainder: true,
-        ...(stp ? { comment: 'STP:self-resting-order' } : {}),
       },
     }],
     accountStateRoot: `0x${'12'.repeat(32)}`,
@@ -95,19 +94,16 @@ const request = {
 
 test('settlement evidence returns exact queue digests and certified-frame lifecycle', async () => {
   const env = makeSettlementEnv();
-  const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
-  const readFrames = async () => [account.currentFrame];
   const decodedRequest = decodeSettlementEvidenceRequest(request);
   const response = decodeSettlementEvidenceResponse(
-    await buildSettlementEvidence(env, decodedRequest, readFrames),
+    buildSettlementEvidence(env, decodedRequest),
   );
   expect(response.queues.pendingOutputs.count).toBe(0);
   expect(response.queues.pendingAccountFrames.count).toBe(0);
   expect(response.pendingAccountSample).toEqual([]);
   const pendingEnv = makeSettlementEnv(true);
-  const pendingAccount = Array.from(pendingEnv.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
   const pending = decodeSettlementEvidenceResponse(
-    await buildSettlementEvidence(pendingEnv, decodedRequest, async () => [pendingAccount.currentFrame]),
+    buildSettlementEvidence(pendingEnv, decodedRequest),
   );
   expect(pending.queues.pendingAccountFrames.count).toBe(1);
   expect(pending.pendingAccountSample).toEqual([{
@@ -119,7 +115,7 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     height: 2,
     pendingFrameHash: `0x${'34'.repeat(32)}`,
     pendingFrameTxCount: 2,
-    pendingInputKind: 'frame',
+    pendingInputKind: 'ack_frame',
     pendingAckHeight: null,
     pendingProposalHeight: 2,
     lastOutboundAckHeight: null,
@@ -138,7 +134,7 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     digest: expect.stringMatching(/^0x[0-9a-f]{64}$/),
   });
   expect(response.accounts[0]?.offers).toEqual([{
-    offerId, offerCommitted: true, resolveCommitted: true, stpCommitted: false, live: false, closed: true,
+    offerId, live: false,
   }]);
   expect(() => decodeSettlementEvidenceRequest({ ...request, extra: true }))
     .toThrow('RADAPTER_SETTLEMENT_REQUEST_FIELDS_INVALID');
@@ -152,31 +148,21 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
   })).toThrow('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_COUNT_INVALID');
 });
 
-test('settlement evidence classifies only a persisted head behind live state as retryable', async () => {
+test('settlement evidence reports only the current committed Account head', () => {
   const env = makeSettlementEnv();
   const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
-  const staleFrame = { ...account.currentFrame, height: account.currentHeight - 1 };
-  const behind = await buildSettlementEvidence(env, request, async () => [staleFrame])
-    .then(() => null, error => error);
-  expect(behind).toBeInstanceOf(RuntimeAdapterError);
-  expect(behind).toMatchObject({ code: 'E_INTERNAL', retryable: true });
-
-  const divergentFrame = { ...account.currentFrame, stateHash: `0x${'ff'.repeat(32)}` };
-  const divergent = await buildSettlementEvidence(env, request, async () => [divergentFrame])
-    .then(() => null, error => error);
-  expect(divergent).not.toBeInstanceOf(RuntimeAdapterError);
-  expect(divergent).toMatchObject({
-    message: `RADAPTER_SETTLEMENT_CERTIFIED_HEAD_MISMATCH:${leftId}:${rightId}`,
+  const response = buildSettlementEvidence(env, request);
+  expect(response.accounts[0]).toMatchObject({
+    currentHeight: account.currentHeight,
+    currentStateHash: account.currentFrame.stateHash,
   });
 });
 
-test('settlement evidence counts a committed STP resolve explicitly', async () => {
-  const env = makeSettlementEnv(false, true);
-  const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
+test('runtime admin settlement succeeds from live state without an Account history store', async () => {
   const response = decodeSettlementEvidenceResponse(
-    await buildSettlementEvidence(env, request, async () => [account.currentFrame]),
+    await resolveRuntimeAdminControl(makeSettlementEnv(), request),
   );
-  expect(response.accounts[0]?.offers[0]?.stpCommitted).toBe(true);
+  expect(response.accounts[0]?.offers).toEqual([{ offerId, live: false }]);
 });
 
 test('settlement queue counters never traverse signed payload bodies', async () => {
@@ -189,10 +175,9 @@ test('settlement queue counters never traverse signed payload bodies', async () 
   env.pendingNetworkOutputs = [poison as never];
   env.networkInbox = [poison as never];
   env.runtimeMempool.entityInputs = [poison as never];
-  const response = await buildSettlementEvidence(
+  const response = buildSettlementEvidence(
     env,
     { type: 'settlement-evidence', book: null, accounts: [] },
-    async () => [],
   );
   expect(response.queues.pendingOutputs.count).toBe(1);
   expect(response.queues.pendingNetworkOutputs.count).toBe(1);
@@ -213,8 +198,7 @@ test('settlement evidence control is admin-authenticated and exact on the wire',
     enqueueRuntimeInput: () => {},
     controlRuntime: async (env, action) => {
       if (action === 'verify-chain') return {};
-      const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
-      return buildSettlementEvidence(env, action, async () => [account.currentFrame]);
+      return buildSettlementEvidence(env, action);
     },
   });
   const raw = messages[0]!;

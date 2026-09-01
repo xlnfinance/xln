@@ -154,8 +154,6 @@ const swapCardFromReport = (value: unknown): HltSwapCard => {
     offeredSwapRate: report.offeredEconomicSwapRate,
     submitted: report.expectedSubmittedOffers,
     matched: report.expectedMatchedTrades,
-    fullySettled: report.expectedFullySettledOffers,
-    stp: report.stpOffers,
     sourceDispatchP95Ms: percentile(report.roundSubmissionLagMs, 0.95),
     sourceDispatchMaxMs: Math.max(0, ...report.roundSubmissionLagMs),
     sourceAckMaxMs: report.enqueueAckElapsedMs,

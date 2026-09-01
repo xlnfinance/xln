@@ -22,7 +22,11 @@ import type {
 } from '../authority/entity-stage';
 import type { AccountAuthorityInputRequest } from '../../account/consensus/context';
 import { safeStringify } from '../../protocol/serialization';
-import type { OpCounterSnapshot } from '../../support/performance/op-counters';
+import {
+  countOp,
+  OP_COUNTERS_ENABLED,
+  type OpCounterSnapshot,
+} from '../../support/performance/op-counters';
 import { failedProposalHtlcFollowup } from '../../entity/consensus/account/failed-proposal-followups';
 import { accountHankoWitnessRequirements } from '../../entity/consensus/input/hanko-witness';
 import { TsAccountWorkerCoordinator } from './coordinator';
@@ -253,6 +257,22 @@ export class TsAccountWorkerAuthority {
     totals.joinMs += result.timings.joinMs;
     totals.foldMs += result.timings.foldMs;
     totals.waveWallMs += result.timings.dispatchMs + result.timings.joinMs + result.timings.foldMs;
+    if (OP_COUNTERS_ENABLED) {
+      const prefix = `entity.phase.frameApply.accountWorker.${phase}`;
+      // dispatch/join/fold are exclusive coordinator wall phases. The four
+      // *Sum counters below are worker CPU/data-movement attribution and may
+      // overlap that wall time; keeping the names explicit prevents adding
+      // them as if they were another sequential phase.
+      countOp(`${prefix}.dispatch`, 0, Math.round(result.timings.dispatchMs * 1_000));
+      countOp(`${prefix}.join`, 0, Math.round(result.timings.joinMs * 1_000));
+      countOp(`${prefix}.fold`, 0, Math.round(result.timings.foldMs * 1_000));
+      countOp(`${prefix}.encodeSum`, 0, Math.round(result.timings.encodeMs * 1_000));
+      countOp(`${prefix}.decodeSum`, 0, Math.round(result.timings.decodeMs * 1_000));
+      countOp(`${prefix}.workerEncodeSum`, 0, Math.round(result.workers
+        .reduce((sum, metric) => sum + metric.workerEncodeMs, 0) * 1_000));
+      countOp(`${prefix}.workerWorkSum`, 0, Math.round(result.workers
+        .reduce((sum, metric) => sum + metric.workMs, 0) * 1_000));
+    }
     for (const metric of result.workers) {
       const worker = this.#workers.get(metric.workerIndex) ?? emptyWorkerTotals();
       const current: WorkerTotals = {

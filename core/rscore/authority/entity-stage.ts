@@ -19,6 +19,13 @@ import { accountInputApplied } from '../../account/consensus/result';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
+
+const countFrameApplyPhase = (name: string, startedAt: number): void => {
+  if (!OP_COUNTERS_ENABLED) return;
+  countOp(`entity.phase.frameApply.authority.${name}`, 0, Math.round((getPerfMs() - startedAt) * 1_000));
+};
 
 type TypeScriptAccountExecutionCounts = Readonly<{
   applyAccountInput: number;
@@ -265,6 +272,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.proposalCursor = 0;
     this.generatedAdmissions = [];
     this.generatedAdmissionCursor = 0;
+    const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const newAccounts = new Map<string, AccountAuthorityInputRequest['account']>();
     this.inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
       const accountId = normalizeEntityId(arrival.accountId);
@@ -310,7 +318,9 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         },
       };
     });
+    countFrameApplyPhase('inbound.prepare', prepareStartedAt);
     const run = this.options.provider.executeAccountInboundBatch;
+    const providerStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const materializers = [...await run.call(this.options.provider, {
       ...this.parentOf(),
       expectedAccountsRoot: request.expectedAccountsRoot,
@@ -318,16 +328,19 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       entityContext: request.entityContext,
       requests: this.inboundRequests,
     })];
+    countFrameApplyPhase('inbound.provider', providerStartedAt);
     if (materializers.length !== this.inboundRequests.length) {
       throw new Error(
         `ACCOUNT_AUTHORITY_INBOUND_RESULT_ARITY:${this.inboundRequests.length}:${materializers.length}`,
       );
     }
+    const materializeStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     this.inboundResults = materializers.map((materializeResult, index) => {
       const expected = this.inboundRequests[index];
       if (expected === undefined) throw new Error(`ACCOUNT_AUTHORITY_INBOUND_REQUEST_MISSING:${index}`);
       return materializeResult(expected);
     });
+    countFrameApplyPhase('inbound.materialize', materializeStartedAt);
     this.authoritativeExecutions += this.inboundRequests.length;
     executionLedger.authoritativeOperations += this.inboundRequests.length;
   }
@@ -339,6 +352,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNCONSUMED:${this.inboundCursor}:${this.inboundRequests.length}`);
     }
     this.frameOutboundPrepared = true;
+    const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
       .filter(accountId => request.accounts.has(accountId));
     const proposals = proposalIds.map(accountId => {
@@ -357,6 +371,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const run = this.options.provider.executeAccountOutboundBatch;
     const materializeAccountIds = [...new Set(this.inboundRequests.map(request =>
       normalizeEntityId(request.account.proofHeader.toEntity)))];
+    countFrameApplyPhase('outbound.prepare', prepareStartedAt);
+    const providerStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const prepared = await run.call(this.options.provider, {
       ...this.parentOf(),
       entityState: request.entityState,
@@ -366,6 +382,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       proposals,
       materializeAccountIds,
     });
+    countFrameApplyPhase('outbound.provider', providerStartedAt);
+    const materializeStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     this.preparedProposalIds = prepared.proposals.map(row => normalizeEntityId(row.accountId));
     this.proposalResults = prepared.proposals.map(row => row.result);
     this.generatedAdmissions = [...prepared.generatedAdmissions];
@@ -383,6 +401,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const executed = this.admissionRequests.length
       + this.generatedAdmissions.length
       + this.proposalResults.length;
+    countFrameApplyPhase('outbound.materialize', materializeStartedAt);
     this.authoritativeExecutions += executed;
     executionLedger.authoritativeOperations += executed;
   }

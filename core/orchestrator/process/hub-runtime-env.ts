@@ -68,6 +68,14 @@ export const buildHubChildProcessEnv = (
     XLN_STORAGE_WRITE_TIMEOUT_MS: source['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
     XLN_LOG_LEVEL: source['XLN_HUB_LOG_LEVEL'] ?? source['XLN_LOG_LEVEL'] ?? 'warn',
   };
+  if (source['XLN_HLT_AUTHORITY_EVIDENCE'] === '1') {
+    // Evidence export is owned by TS H1. Do not leak its output path or
+    // materialization policy into sibling Runtime processes.
+    delete child['XLN_HLT_AUTHORITY_EVIDENCE'];
+    delete child['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'];
+    delete child['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'];
+    delete child['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
+  }
   if (source[`XLN_HUB_RSCORE_AUTHORITY_${options.hubName.toUpperCase()}`] === '1') {
     child['XLN_RSCORE_AUTHORITY'] = '1';
     if (source['XLN_RSCORE_BINARY']) {
@@ -82,6 +90,22 @@ export const buildHubChildProcessEnv = (
     if (source['XLN_RSCORE_AUTHORITY_RECORD']) {
       child['XLN_RSCORE_AUTHORITY_RECORD'] = source['XLN_RSCORE_AUTHORITY_RECORD'];
     }
+  }
+  if (
+    options.hubName.toUpperCase() === 'H1' &&
+    source['XLN_HLT_AUTHORITY_EVIDENCE'] === '1' &&
+    source['XLN_HLT_ENGINE'] === 'ts'
+  ) {
+    const outputPath = String(source['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] ?? '').trim();
+    if (!outputPath) throw new Error('HLT_PARITY_CHECKPOINT_OUTPUT_REQUIRED');
+    // The parity base is captured before MM can open an Account. Materialize
+    // H1 from genesis so that boundary is already durable; snapshot export
+    // must never manufacture a frame or retry a later, non-quiescent height.
+    child['XLN_HLT_AUTHORITY_EVIDENCE'] = '1';
+    child['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] = outputPath;
+    child['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] = '1';
+    // Replay compares the canonical Runtime root at every WAL height.
+    child['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = '1';
   }
   for (const key of HUB_PASSTHROUGH_ENV_KEYS) {
     if (source[key]) child[key] = source[key];

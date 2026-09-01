@@ -74,8 +74,17 @@ describe('e2e demo user helper', () => {
     expect(commandStore).toContain('xln.waitForRuntimeWorkDrained(runtimeEnv, timeoutMs)');
     expect(persistenceStore).toContain('Number.isSafeInteger(frames)');
     expect(persistenceStore).not.toContain('snapshotIntervalFrames: frames');
-    expect(persistenceStore).toContain('xln.readPersistedAccountFrameHistory(');
-    expect(persistenceStore).toContain("tx.type !== 'request_collateral'");
+    expect(persistenceStore).not.toContain('readPersistedAccountFrameHistory');
+    expect(persistenceStore).not.toContain('readAccountRebalanceFees');
+  });
+
+  test('Account swap history starts only from the explicit Closed-tab action', () => {
+    const panel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte'), 'utf8');
+    const list = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/swap/SwapOrderList.svelte'), 'utf8');
+    expect(panel).not.toContain('`${runtimeHeight}:${sourceEntityIdValue}:${activeOrderAccountId}`');
+    expect(panel).toContain('onSelectClosedHistory={requestClosedSwapHistory}');
+    expect(list).toContain('void onSelectClosedHistory();');
+    expect(list).toContain('onLoadOlderClosedHistory');
   });
 
   test('assists profile onboarding before waiting for runtime readiness', () => {

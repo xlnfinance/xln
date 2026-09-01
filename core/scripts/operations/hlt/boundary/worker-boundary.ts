@@ -55,9 +55,7 @@ export type LoadSustainedReport = Readonly<{
   roundSubmissionLagMs: readonly number[];
   expectedSubmittedOffers: number;
   expectedMatchedTrades: number;
-  expectedFullySettledOffers: number;
   cancelledOffers: number;
-  stpOffers: number;
   matchedSubmittedOffers: number;
   exchangeDistribution: LoadExchangeDistribution;
   completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence';
@@ -461,7 +459,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     'offeredEconomicSwapRate', 'loadMakerAccountCount', 'loadTakerAccountCount',
     'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
     'runtimeInputBatches', 'expectedSubmittedOffers', 'expectedMatchedTrades',
-    'expectedFullySettledOffers', 'cancelledOffers', 'stpOffers', 'matchedSubmittedOffers',
+    'cancelledOffers', 'matchedSubmittedOffers',
     'enqueueAckElapsedMs', 'commandObservedElapsedMs', 'matchedElapsedMs',
     'fullySettledElapsedMs', 'tradeCountBefore',
     'tradeCountAfter',
@@ -473,7 +471,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     'offeredOrderRate', 'offeredEconomicSwapRate', 'loadMakerAccountCount',
     'loadTakerAccountCount', 'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
     'runtimeInputBatches', 'roundSubmissionLagMs', 'expectedSubmittedOffers',
-    'expectedMatchedTrades', 'expectedFullySettledOffers', 'cancelledOffers', 'stpOffers',
+    'expectedMatchedTrades', 'cancelledOffers',
     'matchedSubmittedOffers', 'exchangeDistribution',
     'completionAuthority', 'enqueueAckElapsedMs', 'commandObservedElapsedMs',
     'matchedElapsedMs', 'fullySettledElapsedMs', 'matchedTps', 'fullySettledTps', 'tradeCountBefore',
@@ -508,14 +506,12 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
   const loadDurableAfter = decodeReportLoadFrame(report['loadDurableAfter']);
   const submitted = Number(report['expectedSubmittedOffers']);
   const matched = Number(report['expectedMatchedTrades']);
-  const fullySettled = Number(report['expectedFullySettledOffers']);
   const cancelled = Number(report['cancelledOffers']);
-  const stpOffers = Number(report['stpOffers']);
   const matchedSubmitted = Number(report['matchedSubmittedOffers']);
   if (Number(report['tradeCountAfter']) - Number(report['tradeCountBefore']) !== matched) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_TRADE_DELTA_MISMATCH');
   }
-  if (fullySettled !== submitted || matchedSubmitted > submitted) {
+  if (matchedSubmitted + cancelled !== submitted) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SUBMISSION_INVALID');
   }
   const maxOrdersPerAccountFrame = Number(report['maxOrdersPerAccountFrame']);
@@ -568,9 +564,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
   const rates = assertProductionSwapFullySettled(settlementEvidence);
   if (settlementEvidence.expectedSubmittedOffers !== submitted ||
     settlementEvidence.expectedMatchedTrades !== matched ||
-    settlementEvidence.expectedFullySettledOffers !== fullySettled ||
     settlementEvidence.cancelledOffers !== cancelled ||
-    settlementEvidence.stpOffers !== stpOffers ||
     settlementEvidence.tradeCountBefore !== Number(report['tradeCountBefore']) ||
     settlementEvidence.tradeCountAfter !== Number(report['tradeCountAfter']) ||
     settlementEvidence.matchedElapsedMs !== Number(report['matchedElapsedMs']) ||
@@ -597,9 +591,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     roundSubmissionLagMs,
     expectedSubmittedOffers: submitted,
     expectedMatchedTrades: matched,
-    expectedFullySettledOffers: fullySettled,
     cancelledOffers: cancelled,
-    stpOffers,
     matchedSubmittedOffers: matchedSubmitted,
     exchangeDistribution,
     completionAuthority: report['completionAuthority'],

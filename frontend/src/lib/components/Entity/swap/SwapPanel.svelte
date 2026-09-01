@@ -369,6 +369,14 @@ async function refreshDetailedOrderAccount(
   }
 }
 
+function requestClosedSwapHistory(): void {
+  const entityId = sourceEntityIdValue;
+  const accountId = activeOrderAccountId;
+  const key = orderAccountProjectionKey;
+  if (!activeIsLive || !entityId || !accountId || !key || swapHistoryLoading) return;
+  void refreshDetailedOrderAccount(key, entityId, accountId);
+}
+
 async function loadOlderSwapHistory(): Promise<void> {
   const cursor = swapHistoryNextCursor;
   const entityId = sourceEntityIdValue;
@@ -426,18 +434,14 @@ $: activeOrderAccountId =
       resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) ||
       defaultHubAccountId;
 $: {
-  const nextKey = `${runtimeHeight}:${sourceEntityIdValue}:${activeOrderAccountId}`;
+  const nextKey = `${sourceEntityIdValue}:${activeOrderAccountId}`;
   if (nextKey !== orderAccountProjectionKey) {
+    orderAccountProjectionRequestId += 1;
     orderAccountProjectionKey = nextKey;
     swapHistoryItems = [];
     swapHistoryNextCursor = null;
-    if (activeIsLive && sourceEntityIdValue && activeOrderAccountId) {
-      void refreshDetailedOrderAccount(
-        nextKey,
-        sourceEntityIdValue,
-        activeOrderAccountId,
-      );
-    }
+    swapHistoryLoading = false;
+    orderListTab = 'open';
   }
 }
 $: activeBookHubId = (() => {
@@ -2840,6 +2844,7 @@ function useMarketPrice(): void {
     {totalPriceImprovementSummary}
     closedHistoryLoading={swapHistoryLoading}
     closedHistoryHasMore={swapHistoryNextCursor !== null}
+    onSelectClosedHistory={requestClosedSwapHistory}
     onLoadOlderClosedHistory={loadOlderSwapHistory}
     {offerPriceImprovementByKey}
     minOrderNotionalUsd={MIN_ORDER_NOTIONAL_USD}

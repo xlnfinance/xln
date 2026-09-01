@@ -44,7 +44,6 @@ import {
   disconnectRuntimeControl,
   directoryBytes,
   entryByLabel,
-  exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readLoadBook,
   resetHltProcessOpCounters,
@@ -74,7 +73,6 @@ import type { LaneRuntime } from '../lanes/lane-runtimes';
 import {
   hltAuthorityEvidenceEnabled,
   materializeCompleteDisputeEvidence,
-  materializeH1CollateralEvidence,
 } from './worker-authority-evidence';
 import {
   attachRustH1,
@@ -276,12 +274,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       )),
     );
     economicPreparePhase('routes-ready');
-    if (authorityEvidence) {
-      const firstUser = users[0];
-      if (!firstUser) throw new Error('HLT_AUTHORITY_EVIDENCE_USER_MISSING');
-      await materializeH1CollateralEvidence({ hub: requireHub(), hubIdentity, lane: firstUser });
-    }
-
     const initialBook = selection.engine === 'rust'
       ? { ...setupBook, tradeCount: prepared.setupTradeCount }
       : await readLoadBook(requireHub(), hubIdentity.entityId);
@@ -298,7 +290,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     economicPreparePhase('lane-counters-reset');
     if (!rustH1) {
       await resetHltProcessOpCounters(args, [requireHub()]);
-      await exportReplayBaseSnapshotIfConfigured(requireHub());
     }
     const rustMetricsBefore: RustH1Metrics | null = rustH1
       ? await waitForRustH1Metrics(
@@ -664,7 +655,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         tradeCountBefore: initialBook.tradeCount,
         expectedSubmittedOffers,
         expectedMatchedTrades,
-        expectedFullySettledOffers: expectedSubmittedOffers,
         cancelledOffers: cancellation.cancelledOffers,
         startedAt,
         matchedElapsedMs,
@@ -748,9 +738,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
       expectedSubmittedOffers,
       expectedMatchedTrades,
-      expectedFullySettledOffers: expectedSubmittedOffers,
       cancelledOffers: cancellation.cancelledOffers,
-      stpOffers: settlementEvidence.stpOffers,
       matchedSubmittedOffers: prepared.distribution.matchedSubmittedOffers,
       exchangeDistribution: observedDistribution,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,

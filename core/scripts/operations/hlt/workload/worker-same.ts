@@ -291,7 +291,6 @@ const runTypescriptSameProductionSwapLoad = async (args: WorkerArgs): Promise<vo
       tradeCountBefore: initialBook.tradeCount,
       expectedSubmittedOffers: preparedParallel.distribution.submittedOffers,
       expectedMatchedTrades: preparedParallel.distribution.matchedTrades,
-      expectedFullySettledOffers: preparedParallel.distribution.submittedOffers,
       cancelledOffers: 0,
       startedAt,
     });
@@ -330,9 +329,7 @@ const runTypescriptSameProductionSwapLoad = async (args: WorkerArgs): Promise<vo
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
       expectedSubmittedOffers: preparedParallel.distribution.submittedOffers,
       expectedMatchedTrades: preparedParallel.distribution.matchedTrades,
-      expectedFullySettledOffers: preparedParallel.distribution.submittedOffers,
       cancelledOffers: 0,
-      stpOffers: settlementEvidence.stpOffers,
       matchedSubmittedOffers: preparedParallel.distribution.matchedSubmittedOffers,
       exchangeDistribution: preparedParallel.distribution,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,

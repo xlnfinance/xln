@@ -414,10 +414,6 @@
         <strong>{formatMs(snapshot.swap.fullySettledElapsedMs)}</strong>
       </article>
       <article class="result-card">
-        <span>STP</span>
-        <strong data-testid="hlt-swap-stp">{snapshot.swap.stp}</strong>
-      </article>
-      <article class="result-card">
         <span>Source lag p95 / max</span>
         <strong>{snapshot.swap.sourceDispatchP95Ms} / {snapshot.swap.sourceDispatchMaxMs} ms</strong>
       </article>

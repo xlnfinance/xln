@@ -8,6 +8,11 @@ import type { AccountReplica } from '../../types/account';
 import { getPerfMs } from '../../support/time';
 import { diffOpCounters, snapshotOpCounters } from '../../support/performance/op-counters';
 import { safeStringify } from '../../protocol/serialization';
+import {
+  createWorkerJClaimAttempt,
+  pruneWorkerJClaimNodes,
+  type WorkerJClaimAttempt,
+} from './worker-j-claim-attempt';
 import { TsAccountWorkerTransferDecoder, TsAccountWorkerTransferEncoder } from './codec';
 import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
@@ -90,14 +95,13 @@ const createWorkspace = (
   };
 };
 
-/**
- * J-claim nodes are content-addressed and may be reachable from Accounts owned by
- * different workers. A worker-local delete cannot prove global unreachability;
- * publishing that delta could erase a node still used by a sibling Account.
- */
-const assertNoWorkerJClaimChanges = (result: HandleAccountInputResult): void => {
-  if (result.ok && result.accountJClaimNodeChanges) {
-    throw new Error('TS_ACCOUNT_WORKER_JCLAIM_NODE_CHANGES_UNSAFE');
+const assertIncreasingOrders = (rows: readonly Readonly<{ order: number }>[], label: string): void => {
+  let previous = -1;
+  for (const row of rows) {
+    if (!Number.isSafeInteger(row.order) || row.order <= previous) {
+      throw new Error(`${label}:${previous}:${row.order}`);
+    }
+    previous = row.order;
   }
 };
 
@@ -126,17 +130,18 @@ const applyInbound = async (
   input: TsAccountWorkerInboundPayload,
   workspace: PhaseWorkspace,
   certifiedBoards: ReturnType<typeof phaseCertifiedBoards>,
+  jClaims: WorkerJClaimAttempt,
 ): Promise<TsAccountWorkerEffect[]> => {
   const context = createWorkerConsensusContext(
     worker,
     input.entityTimestamp,
     input.finalizedJHeight,
-    worker.jClaimNodes,
+    jClaims.store,
     certifiedBoards,
   );
-  const ordered = [...input.inputs].sort((left, right) => left.order - right.order);
+  assertIncreasingOrders(input.inputs, 'TS_ACCOUNT_WORKER_INBOUND_ORDER');
   const effects: TsAccountWorkerEffect[] = [];
-  for (const item of ordered) {
+  for (const item of input.inputs) {
     const result = await applyAccountInput(context, workspace.forWrite(item.accountId), item.input, {
       entityTimestamp: input.entityTimestamp,
       finalizedJHeight: input.finalizedJHeight,
@@ -152,7 +157,7 @@ const applyInbound = async (
           }
         : {}),
     });
-    assertNoWorkerJClaimChanges(result);
+    if (result.ok) jClaims.absorb(result.accountJClaimNodeChanges);
     effects.push({ phase: 'inbound', order: item.order, accountId: item.accountId, result });
   }
   return effects;
@@ -162,16 +167,17 @@ const applyOutboundTxs = async (
   context: AccountConsensusContext,
   input: TsAccountWorkerOutboundPayload,
   workspace: PhaseWorkspace,
+  jClaims: WorkerJClaimAttempt,
 ): Promise<TsAccountWorkerEffect[]> => {
   const effects: TsAccountWorkerEffect[] = [];
-  const ordered = [...input.txs].sort((left, right) => left.order - right.order);
-  for (const item of ordered) {
+  assertIncreasingOrders(input.txs, 'TS_ACCOUNT_WORKER_OUTBOUND_TX_ORDER');
+  for (const item of input.txs) {
     const result: HandleAccountInputResult = await applyAccountInput(
       context,
       workspace.forWrite(item.accountId),
       { kind: 'enqueue', txs: [...item.txs] },
     );
-    assertNoWorkerJClaimChanges(result);
+    if (result.ok) jClaims.absorb(result.accountJClaimNodeChanges);
     effects.push({ phase: 'outbound-enqueue', order: item.order, accountId: item.accountId, result });
   }
   return effects;
@@ -183,8 +189,8 @@ const applyOutboundProposals = async (
   workspace: PhaseWorkspace,
 ): Promise<TsAccountWorkerEffect[]> => {
   const effects: TsAccountWorkerEffect[] = [];
-  const ordered = [...input.proposals].sort((left, right) => left.order - right.order);
-  for (const item of ordered) {
+  assertIncreasingOrders(input.proposals, 'TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_ORDER');
+  for (const item of input.proposals) {
     const result = await proposeAccountFrame(
       context,
       workspace.forWrite(item.accountId),
@@ -235,6 +241,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
       ? []
       : [[row.accountId, row.initialAccount] as const]));
   const workspace = createWorkspace(worker, initialAccounts);
+  const jClaims = createWorkerJClaimAttempt(worker.jClaimNodes);
   const certifiedBoards = phaseCertifiedBoards(input);
   let transitionUs = 0;
   let proposalUs = 0;
@@ -243,7 +250,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     prepareWorkerAttempt(worker, input.restorePrevious);
     worker.inboundPrepared = true;
     const transitionStartedAt = getPerfMs();
-    effects = await applyInbound(worker, input, workspace, certifiedBoards);
+    effects = await applyInbound(worker, input, workspace, certifiedBoards, jClaims);
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
   } else {
     if (input.continuation) {
@@ -258,16 +265,17 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     const transitionStartedAt = getPerfMs();
     const admissions = await applyOutboundTxs(
       createWorkerConsensusContext(
-        worker, input.timestamp, input.jHeight, worker.jClaimNodes, certifiedBoards,
+        worker, input.timestamp, input.jHeight, jClaims.store, certifiedBoards,
       ),
       input,
       workspace,
+      jClaims,
     );
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
     const proposalStartedAt = getPerfMs();
     const proposals = await applyOutboundProposals(
       createWorkerConsensusContext(
-        worker, input.timestamp, input.jHeight, worker.jClaimNodes, certifiedBoards,
+        worker, input.timestamp, input.jHeight, jClaims.store, certifiedBoards,
       ),
       input,
       workspace,
@@ -280,6 +288,12 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   // sibling fails, the coordinator becomes permanently fatal and kills all isolates.
   const rootStartedAt = getPerfMs();
   const subroots = publishWorkspace(worker, workspace, input.needShardRoot);
+  if (jClaims.publish()) {
+    pruneWorkerJClaimNodes(worker.jClaimNodes, [
+      worker.accounts.values(),
+      ...(worker.candidateBaseAccounts ? [worker.candidateBaseAccounts.values()] : []),
+    ]);
+  }
   const rootUs = Math.round((getPerfMs() - rootStartedAt) * 1_000);
   const materializeStartedAt = getPerfMs();
   const postAccounts = input.phase === 'outbound'
@@ -297,7 +311,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   }
   return {
     workerIndex: worker.workerIndex,
-    effects: effects.sort((left, right) => left.order - right.order),
+    effects,
     subroots,
     ...(postAccounts ? { postAccounts } : {}),
     operations: effects.length,

@@ -15,23 +15,50 @@ type AggregateOptions = Readonly<{
   }>[];
   logicalShardToWorker: readonly number[];
   includePostAccounts: boolean;
-  expectedEffects: number;
+  expectedEffects: readonly ExpectedWorkerEffect[];
   needShardRoot: boolean;
   rootTree: TsAccountCanonicalRoot;
   dispatchMs: number;
   joinMs: number;
 }>;
 
+export type ExpectedWorkerEffect = Readonly<{
+  workerIndex: number;
+  phase: TsAccountWorkerEffect['phase'];
+  accountId: string;
+}>;
+
 export const aggregateWorkerPhaseResults = (
   options: AggregateOptions,
 ): TsAccountWorkerBatchResult => {
-  const effects: TsAccountWorkerEffect[] = [];
+  const effects: Array<TsAccountWorkerEffect | undefined> = Array.from({
+    length: options.expectedEffects.length,
+  });
   const subroots = new Map<number, TsAccountWorkerSubroot>();
   const metrics: TsAccountWorkerPhaseMetrics[] = [];
   const postAccounts = new Map<string, Readonly<{ account: Record<string, unknown>; entityAccountLeaf: string }>>();
   for (const { workerIndex, response } of options.responses) {
     const result = parseWorkerPhaseResult(response.value, workerIndex);
-    effects.push(...result.effects);
+    for (const effect of result.effects) {
+      if (!Number.isSafeInteger(effect.order) || effect.order < 0 || effect.order >= effects.length) {
+        throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_RANGE:${workerIndex}:${effect.order}:${effects.length}`);
+      }
+      if (effects[effect.order] !== undefined) {
+        throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_DUPLICATE:${effect.order}`);
+      }
+      const expected = options.expectedEffects[effect.order];
+      if (
+        expected === undefined
+        || expected.workerIndex !== workerIndex
+        || expected.phase !== effect.phase
+        || expected.accountId !== effect.accountId
+      ) {
+        throw new Error(
+          `TS_ACCOUNT_WORKER_EFFECT_BINDING:${effect.order}:${workerIndex}:${effect.phase}:${effect.accountId}`,
+        );
+      }
+      effects[effect.order] = effect;
+    }
     for (const subroot of result.subroots) {
       if (!options.needShardRoot) {
         throw new Error(`TS_ACCOUNT_WORKER_UNREQUESTED_SUBROOT:${workerIndex}:${subroot.shardId}`);
@@ -83,16 +110,18 @@ export const aggregateWorkerPhaseResults = (
       operationsProfile: result.operationsProfile,
     });
   }
-  if (effects.length !== options.expectedEffects) {
-    throw new Error(`TS_ACCOUNT_WORKER_EFFECT_COUNT:${effects.length}:${options.expectedEffects}`);
+  const missingOrder = effects.findIndex(effect => effect === undefined);
+  if (missingOrder >= 0) {
+    throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_MISSING:${missingOrder}:${effects.length}`);
   }
+  const denseEffects = effects as TsAccountWorkerEffect[];
   const foldStart = getPerfMs();
   const changedSubroots: TsAccountWorkerSubroot[] = [...subroots.values()]
     .sort((left, right) => left.shardId - right.shardId);
   if (options.needShardRoot) options.rootTree.update(changedSubroots);
   return {
     ...(options.needShardRoot ? { accountsRoot: options.rootTree.root } : {}),
-    effects: effects.sort((left, right) => left.order - right.order),
+    effects: denseEffects,
     changedSubroots,
     ...(options.includePostAccounts
       ? {

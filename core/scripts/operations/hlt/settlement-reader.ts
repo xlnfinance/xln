@@ -29,8 +29,8 @@ export type SettlementAccountPair = Readonly<{
 
 type RuntimeRole = ProductionSwapSettlementEvidence['runtimes'][number]['role'];
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-// Evidence reads walk history views on the Hub under test; polling every few
-// milliseconds would measure the poller, not settlement.
+// Evidence reads hold a short committed-state lease on the Hub under test;
+// polling every few milliseconds would measure the poller, not settlement.
 const SETTLEMENT_POLL_MS = 250;
 // The measured phase reads only the Hub's compact committed counters. User
 // Runtime state is intentionally untouched until matching has completed, so
@@ -186,22 +186,12 @@ const combineAccount = (
   // before its peer. That is ordinary in-flight work, not divergence. A result
   // is authoritative only after both certified heads are byte-identical.
   if (!sameBilateralAccountHead(hubAccount, loadAccount)) return null;
-  const committed = pair.offerIds.filter((_id, index) =>
-    hubAccount.offers[index]!.offerCommitted && loadAccount.offers[index]!.offerCommitted);
-  const resolved = pair.offerIds.filter((_id, index) =>
-    hubAccount.offers[index]!.resolveCommitted && loadAccount.offers[index]!.resolveCommitted &&
-    hubAccount.offers[index]!.closed && loadAccount.offers[index]!.closed);
   const live = pair.offerIds.filter((_id, index) =>
     hubAccount.offers[index]!.live || loadAccount.offers[index]!.live);
-  const stp = pair.offerIds.filter((_id, index) =>
-    hubAccount.offers[index]!.stpCommitted && loadAccount.offers[index]!.stpCommitted);
   return {
     accountKey: hubAccount.accountKey,
     createdOfferIds: pair.offerIds,
-    committedOfferIds: committed,
-    committedResolveIds: resolved,
     liveOfferIds: live,
-    stpOfferIds: stp,
     pendingFrame: hubAccount.pendingFrame || loadAccount.pendingFrame,
     pendingProposal: hubAccount.pendingProposal || loadAccount.pendingProposal,
     mempoolTxs: hubAccount.mempool.count + loadAccount.mempool.count,
@@ -391,13 +381,12 @@ export const waitForRestingMakerOffers = async (options: Readonly<{
     lastEvidence = evidence ?? lastEvidence;
     const ready = evidence?.accounts.length === options.pairs.length &&
       evidence.accounts.every(account => account.offers.length === 1 &&
-        account.offers[0]?.offerCommitted === true && account.offers[0].live === true);
+        account.offers[0]?.live === true);
     if (ready) return;
     await sleep(SETTLEMENT_POLL_WIDE_MS);
   }
   const notReady = lastEvidence?.accounts.filter(account =>
-    account.offers.length !== 1 || account.offers[0]?.offerCommitted !== true ||
-    account.offers[0].live !== true) ?? [];
+    account.offers.length !== 1 || account.offers[0]?.live !== true) ?? [];
   console.error('[load] maker rest timeout', safeStringify({
     expected: options.pairs.length,
     observed: lastEvidence?.accounts.length ?? 0,
@@ -418,7 +407,6 @@ export const waitForFullySettledEvidence = async (options: {
   tradeCountBefore: number;
   expectedSubmittedOffers: number;
   expectedMatchedTrades: number;
-  expectedFullySettledOffers: number;
   cancelledOffers: number;
   startedAt: number;
   matchedElapsedMs?: number;
@@ -574,9 +562,7 @@ export const waitForFullySettledEvidence = async (options: {
     const evidence: ProductionSwapSettlementEvidence = {
       expectedSubmittedOffers: options.expectedSubmittedOffers,
       expectedMatchedTrades: options.expectedMatchedTrades,
-      expectedFullySettledOffers: options.expectedFullySettledOffers,
       cancelledOffers: options.cancelledOffers,
-      stpOffers: accounts.reduce((sum, account) => sum + account.stpOfferIds.length, 0),
       tradeCountBefore: options.tradeCountBefore,
       tradeCountAfter: book.tradeCount,
       matchedElapsedMs,
@@ -588,8 +574,6 @@ export const waitForFullySettledEvidence = async (options: {
       bestAskPriceTicks: book.bestAskPriceTicks,
     };
     const accountsReady = evidence.accounts.every(account =>
-      account.committedOfferIds.length === account.createdOfferIds.length &&
-      account.committedResolveIds.length === account.createdOfferIds.length &&
       account.liveOfferIds.length === 0 && !account.pendingFrame &&
       !account.pendingProposal && account.mempoolTxs === 0);
     const runtimesReady = evidence.runtimes.every(runtime => Object.entries(runtime)
@@ -601,9 +585,7 @@ export const waitForFullySettledEvidence = async (options: {
     if (performance.now() + pollMs > deadline) {
       console.error('[load] settlement not ready', JSON.stringify({
         accounts: evidence.accounts.filter(account => account.liveOfferIds.length || account.pendingFrame ||
-          account.pendingProposal || account.mempoolTxs ||
-          account.committedOfferIds.length !== account.createdOfferIds.length ||
-          account.committedResolveIds.length !== account.createdOfferIds.length).slice(0, 3),
+          account.pendingProposal || account.mempoolTxs).slice(0, 3),
         runtimes: evidence.runtimes,
         hubPendingSample: hub.pendingAccountSample,
         loadPendingSample: load.pendingAccountSample,

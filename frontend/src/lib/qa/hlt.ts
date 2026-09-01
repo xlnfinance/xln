@@ -115,8 +115,6 @@ const decodeSwap = (value: unknown): HltSwapCard => {
     offeredSwapRate: requireNumber(record, 'offeredSwapRate', 'HLT_SWAP_OFFERED_INVALID'),
     submitted: requireNumber(record, 'submitted', 'HLT_SWAP_SUBMITTED_INVALID'),
     matched: requireNumber(record, 'matched', 'HLT_SWAP_MATCHED_INVALID'),
-    fullySettled: requireNumber(record, 'fullySettled', 'HLT_SWAP_SETTLED_INVALID'),
-    stp: requireNumber(record, 'stp', 'HLT_SWAP_STP_INVALID'),
     sourceDispatchP95Ms: requireNumber(record, 'sourceDispatchP95Ms', 'HLT_SWAP_SOURCE_P95_INVALID'),
     sourceDispatchMaxMs: requireNumber(record, 'sourceDispatchMaxMs', 'HLT_SWAP_SOURCE_MAX_INVALID'),
     sourceAckMaxMs: requireNumber(record, 'sourceAckMaxMs', 'HLT_SWAP_ACK_MAX_INVALID'),

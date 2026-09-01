@@ -176,6 +176,7 @@ import {
   type OrchestratorResetOptions,
 } from './process/reset-coordinator';
 import { buildDiskSummary } from './health/disk-health';
+import { completeResetStartup } from './process/reset-startup';
 import {
   createBaselineWaitReporter,
   createHealthRecomputer,
@@ -2518,12 +2519,9 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
       }
     };
 
-    await Promise.all([
-      waitForMesh(),
-      driveNativeH1Bootstrap(h1, shouldStartMarketMaker),
-      startConfiguredMarketMaker(),
-      startConfiguredCustody(),
-    ]);
+    await completeResetStartup({ h1, host: args.host, shouldStartMarketMaker, waitForMesh,
+      driveNativeH1Bootstrap: () => driveNativeH1Bootstrap(h1, shouldStartMarketMaker),
+      startMarketMaker: startConfiguredMarketMaker, startCustody: startConfiguredCustody });
 
     activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);
     finishTiming('reset_total', resetTotalStartedAt);

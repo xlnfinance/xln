@@ -6,6 +6,10 @@ import {
 } from '../../../scripts/operations/hlt/replay/authority-evidence';
 import { buildHltEntityFrameEventEvidence } from '../../../scripts/operations/hlt/replay/entity-frame-event-evidence';
 import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixture';
+import {
+  hltAuthorityEvidenceRecording,
+  hltAuthorityEvidenceRelayUrls,
+} from '../../../scripts/operations/hlt/authority-evidence-policy';
 import type { PersistedFrameJournal } from '../../../storage/types';
 import type { EntityTx } from '../../../types/entity-tx';
 
@@ -33,6 +37,22 @@ const journal = (entityTxs: EntityTx[] = [], height = 41): PersistedFrameJournal
 });
 
 describe('HLT Rust Runtime authority evidence', () => {
+  test('selects production availability routing only for authority recording', () => {
+    expect(hltAuthorityEvidenceRecording({})).toBe(false);
+    expect(hltAuthorityEvidenceRecording({ XLN_HLT_AUTHORITY_EVIDENCE: '1' })).toBe(true);
+    expect(() => hltAuthorityEvidenceRecording({ XLN_HLT_AUTHORITY_EVIDENCE: 'true' }))
+      .toThrow('HLT_AUTHORITY_EVIDENCE_FLAG_INVALID:true');
+    expect(hltAuthorityEvidenceRelayUrls({})).toEqual([]);
+    expect(hltAuthorityEvidenceRelayUrls({
+      XLN_HLT_AUTHORITY_EVIDENCE: '1',
+      XLN_PORT_BASE: '20000',
+    })).toEqual(['ws://127.0.0.1:20004/relay']);
+    expect(() => hltAuthorityEvidenceRelayUrls({
+      XLN_HLT_AUTHORITY_EVIDENCE: '1',
+      XLN_PORT_BASE: '65532',
+    })).toThrow('HLT_AUTHORITY_EVIDENCE_PORT_BASE_INVALID:65532');
+  });
+
   test('binds canonical Runtime roots and ordered effects without an eager Account-history oracle', () => {
     const evidence = buildHltAuthorityEvidence(Array.from(
       { length: 1_000 },

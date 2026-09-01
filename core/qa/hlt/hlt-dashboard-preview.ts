@@ -105,8 +105,6 @@ export type HltSwapCard = Readonly<{
   offeredSwapRate: number;
   submitted: number;
   matched: number;
-  fullySettled: number;
-  stp: number;
   sourceDispatchP95Ms: number;
   sourceDispatchMaxMs: number;
   sourceAckMaxMs: number;

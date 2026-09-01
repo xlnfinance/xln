@@ -16,6 +16,7 @@ import {
   decodeAccountPage,
   decodeRuntimeManifestEntries,
   decodeLoadSustainedReport,
+  decodeHubSettlementCounters,
   decodeHubMinTradeSize,
   selectLocalHubIdentity,
 } from '../../../scripts/operations/hlt/boundary/worker-boundary';
@@ -533,9 +534,7 @@ describe('production swap load evidence', () => {
     const settlementEvidence = {
       expectedSubmittedOffers: 20,
       expectedMatchedTrades: 10,
-      expectedFullySettledOffers: 20,
       cancelledOffers: 0,
-      stpOffers: 0,
       tradeCountBefore: 5,
       tradeCountAfter: 15,
       matchedElapsedMs: 250,
@@ -544,9 +543,7 @@ describe('production swap load evidence', () => {
       accounts: [{
         accountKey: 'load/hub',
         createdOfferIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
-        committedOfferIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
-        committedResolveIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
-        liveOfferIds: [], stpOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
+        liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
         { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
@@ -565,7 +562,7 @@ describe('production swap load evidence', () => {
       loadParticipantAccountCount: 4, maxOrdersPerAccountFrame: 1,
       runtimeInputBatches: 20, roundSubmissionLagMs: Array.from({ length: 20 }, () => 0),
       expectedSubmittedOffers: 20, expectedMatchedTrades: 10,
-      expectedFullySettledOffers: 20, cancelledOffers: 0, stpOffers: 0,
+      cancelledOffers: 0,
       matchedSubmittedOffers: 20,
       exchangeDistribution: {
         submittedOffers: 20, matchedSubmittedOffers: 20, matchedTrades: 10, cancelledOffers: 0,
@@ -601,19 +598,20 @@ describe('production swap load evidence', () => {
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_COUNTS_INVALID');
     expect(() => decodeLoadSustainedReport({ ...report, crossedBookAfterRun: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
+    expect(() => decodeLoadSustainedReport({ ...report, matchedSubmittedOffers: 19 }))
+      .toThrow('PRODUCTION_SWAP_LOAD_REPORT_SUBMISSION_INVALID');
   });
 
   test('settlement authority rejects pending bilateral and Runtime work', () => {
     const base = {
       expectedSubmittedOffers: 1, expectedMatchedTrades: 1,
-      expectedFullySettledOffers: 1, cancelledOffers: 0, stpOffers: 0,
+      cancelledOffers: 0,
       tradeCountBefore: 7, tradeCountAfter: 8,
       matchedElapsedMs: 10, fullySettledElapsedMs: 20,
       createdOfferIds: ['offer-1'],
       accounts: [{
         accountKey: 'load/hub', createdOfferIds: ['offer-1'],
-        committedOfferIds: ['offer-1'], committedResolveIds: ['offer-1'],
-        liveOfferIds: [], stpOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
+        liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
         { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
@@ -868,6 +866,35 @@ describe('production swap load evidence', () => {
     expect(decodeHubMinTradeSize(core)).toBe(10_000_001n);
     expect(() => decodeHubMinTradeSize({ ...core, futureField: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
+  });
+
+  test('Hub settlement counters expose only the canonical Paybook fee name', () => {
+    const metrics = {
+      acceptedPayments: 7,
+      completedPayments: 5,
+      matchedSwaps: 3,
+      updatedAtRuntimeHeight: 11,
+    };
+    expect(decodeHubSettlementCounters({
+      height: 12,
+      paybookOpen: 2,
+      paybookFeesEarned: 19n,
+      metrics,
+    })).toEqual({
+      height: 12,
+      paybookOpen: 2,
+      paybookFeesEarned: 19n,
+      acceptedPayments: 7,
+      completedPayments: 5,
+      matchedSwaps: 3,
+      metricsRuntimeHeight: 11,
+    });
+    expect(() => decodeHubSettlementCounters({
+      height: 12,
+      paybookOpen: 2,
+      paymentFeesEarned: 19n,
+      metrics,
+    })).toThrow('PRODUCTION_SWAP_LOAD_HUB_SETTLEMENT_COUNTERS_FIELDS_INVALID');
   });
 
   test('cross-j hubs must share one Runtime process and WAL while load and MM stay separate', () => {

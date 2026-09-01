@@ -43,6 +43,7 @@ import {
   decodeHltOpCounterSnapshot,
   type ConnectedRuntime,
 } from '../worker-runtime';
+import { hltAuthorityEvidenceRecording } from '../authority-evidence-policy';
 import {
   encodeSovereignRuntimeSeeds,
   SOVEREIGN_RUNTIMES_PER_WORKER,
@@ -1004,7 +1005,7 @@ const spawnSovereignRuntimeHost = async (options: {
       XLN_STORAGE_HISTORY_PATH: join(dbRoot, 'storage-health-history.json'),
       XLN_JURISDICTIONS_PATH: jurisdictionsPath,
       XLN_LOG_LEVEL: process.env['XLN_LOAD_LANE_LOG_LEVEL'] || 'warn',
-      XLN_HLT_DIRECT_ONLY: '1',
+      ...(hltAuthorityEvidenceRecording(process.env) ? {} : { XLN_HLT_DIRECT_ONLY: '1' }),
       XLN_HLT_OPERATION_LEDGER: '1',
       // Diagnostic-only, one OS host (two 100-Runtime workers). Keeping the
       // other 4,800 users silent avoids turning telemetry into the workload.

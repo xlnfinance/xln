@@ -34,6 +34,7 @@ import {
 } from '../../../scenarios/cross-j/mm-mesh-adversary';
 import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
 import { hltLanePortsPerSlot } from '../hlt/lanes/lane-port-capacity';
+import { hltAuthorityEvidenceRecording } from '../hlt/authority-evidence-policy';
 import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
 import { safeStringify } from '../../../protocol/serialization';
@@ -197,7 +198,11 @@ const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
 if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
   // The baseline isolates Hub consensus: relay remains discovery-only until
   // hub-direct 1000 swaps/s + 1000 payments/s is proven with zero Account loss.
-  inheritedProcessEnv['XLN_HLT_DIRECT_ONLY'] = '1';
+  if (hltAuthorityEvidenceRecording(process.env)) {
+    delete inheritedProcessEnv['XLN_HLT_DIRECT_ONLY'];
+  } else {
+    inheritedProcessEnv['XLN_HLT_DIRECT_ONLY'] = '1';
+  }
   inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] =
     process.env['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] || String(Math.max(64, hltUsers));
   inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] =

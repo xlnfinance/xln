@@ -12,8 +12,6 @@ import { getEntityReplicaById } from '../../../entity/replica/replica-lookup';
 import { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeReplica } from '../../../runtime/types';
-import type { AccountFrame } from '../../../types/account';
-import { RuntimeAdapterError } from '../errors';
 import {
   buildSettlementBookEvidence,
   decodeSettlementBookEvidence,
@@ -41,11 +39,7 @@ export type SettlementEvidenceRequest = Readonly<{
 type QueueEvidence = Readonly<{ count: number; digest: string }>;
 type OfferEvidence = Readonly<{
   offerId: string;
-  offerCommitted: boolean;
-  resolveCommitted: boolean;
-  stpCommitted: boolean;
   live: boolean;
-  closed: boolean;
 }>;
 
 type PendingAccountSample = Readonly<{
@@ -92,13 +86,6 @@ export type SettlementEvidenceResponse = Readonly<{
     offers: readonly OfferEvidence[];
   }>[];
 }>;
-
-export type SettlementAccountFrameReader = (
-  env: RuntimeReplica,
-  entityId: string,
-  counterpartyEntityId: string,
-  limit: number,
-) => Promise<AccountFrame[]>;
 
 const requireEntityId = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || !ENTITY_ID.test(value)) throw new Error(code);
@@ -191,80 +178,25 @@ const pendingAccountFrameSnapshot = (
   return { count, sample };
 };
 
-const committedOfferFlags = (
-  frames: readonly AccountFrame[],
-  offerId: string,
-): Readonly<{ offerCommitted: boolean; resolveCommitted: boolean; stpCommitted: boolean }> => {
-  let offerCommitted = false;
-  let resolveCommitted = false;
-  let stpCommitted = false;
-  for (const frame of frames) {
-    for (const tx of frame.accountTxs) {
-      if (tx.type === 'swap_offer' && tx.data.offerId === offerId) offerCommitted = true;
-      if ((tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack') && tx.data.offerId === offerId) {
-        resolveCommitted = true;
-      }
-      if (tx.type === 'swap_resolve' && tx.data.offerId === offerId && tx.data.comment?.startsWith('STP:')) {
-        stpCommitted = true;
-      }
-    }
-  }
-  return { offerCommitted, resolveCommitted, stpCommitted };
-};
-
-const accountEvidence = async (
+const accountEvidence = (
   env: RuntimeReplica,
   request: SettlementEvidenceRequest['accounts'][number],
-  readAccountFrames: SettlementAccountFrameReader,
-): Promise<SettlementEvidenceResponse['accounts'][number]> => {
+): SettlementEvidenceResponse['accounts'][number] => {
   const entity = getEntityReplicaById(env, request.entityId);
   const account = entity
     ? findAccountByCounterparty(entity.state.accounts, request.entityId, request.counterpartyEntityId)
     : null;
   if (!account) throw new Error(`RADAPTER_SETTLEMENT_ACCOUNT_NOT_FOUND:${request.entityId}:${request.counterpartyEntityId}`);
-  const frames = await readAccountFrames(env, request.entityId, request.counterpartyEntityId, 1_000);
-  const certifiedHead = frames.at(-1);
-  if (certifiedHead && certifiedHead.height < account.currentHeight) {
-    // Runtime admin deliberately reads immutable history before taking the
-    // short committed-State lease. A commit between those two snapshots makes
-    // the history stale, never authoritative. Tell the caller to observe again;
-    // equal-height hash disagreement and history-ahead remain hard failures.
-    throw new RuntimeAdapterError(
-      'E_INTERNAL',
-      `RADAPTER_SETTLEMENT_CERTIFIED_HEAD_BEHIND:${request.entityId}:${request.counterpartyEntityId}`,
-      true,
-    );
-  }
-  if (!certifiedHead || certifiedHead.height !== account.currentHeight ||
-    certifiedHead.stateHash !== account.currentFrame.stateHash) {
-    // Which of the three failures this is decides where to look: history ahead
-    // of the live account, equal heights disagreeing on the state, or no
-    // history at all. Without the numbers every one of them read the same.
-    throw new Error(
-      `RADAPTER_SETTLEMENT_CERTIFIED_HEAD_MISMATCH:${request.entityId}:${request.counterpartyEntityId}` +
-      `:certified=${certifiedHead ? `${String(certifiedHead.height)}/${certifiedHead.stateHash.slice(0, 18)}` : 'none'}` +
-      `:live=${String(account.currentHeight)}/${account.currentFrame.stateHash.slice(0, 18)}` +
-      `:frames=${String(frames.length)}`,
-    );
-  }
-  const offers = request.offerIds.map(offerId => {
-    const committed = committedOfferFlags(frames, offerId);
-    return {
-      offerId,
-      ...committed,
-      live: account.state.swapOffers.has(offerId),
-      closed: committed.offerCommitted && committed.resolveCommitted && !account.state.swapOffers.has(offerId),
-    };
-  });
-  if (frames.length === 1_000 && offers.some(offer => !offer.offerCommitted)) {
-    throw new Error(`RADAPTER_SETTLEMENT_HISTORY_WINDOW_EXCEEDED:${request.entityId}:${request.counterpartyEntityId}`);
-  }
+  const offers = request.offerIds.map(offerId => ({
+    offerId,
+    live: account.state.swapOffers.has(offerId),
+  }));
   return {
     entityId: request.entityId,
     counterpartyEntityId: request.counterpartyEntityId,
     accountKey: `${account.state.leftEntity}:${account.state.rightEntity}`,
-    currentHeight: certifiedHead.height,
-    currentStateHash: certifiedHead.stateHash,
+    currentHeight: account.currentHeight,
+    currentStateHash: account.currentFrame.stateHash,
     pendingFrame: account.pendingFrame !== undefined,
     pendingProposal: account.pendingAccountInput !== undefined,
     mempool: queue(account.mempool),
@@ -272,11 +204,10 @@ const accountEvidence = async (
   };
 };
 
-export const buildSettlementEvidence = async (
+export const buildSettlementEvidence = (
   env: RuntimeReplica,
   input: SettlementEvidenceRequest,
-  readAccountFrames: SettlementAccountFrameReader,
-): Promise<SettlementEvidenceResponse> => {
+): SettlementEvidenceResponse => {
   const request = decodeSettlementEvidenceRequest(input);
   const mempool = env.runtimeMempool;
   const infrastructure = env.infrastructure;
@@ -300,8 +231,7 @@ export const buildSettlementEvidence = async (
       pendingAccountFrames: countedQueue(pending.count),
     },
     pendingAccountSample: pending.sample,
-    accounts: await Promise.all(request.accounts.map(account =>
-      accountEvidence(env, account, readAccountFrames))),
+    accounts: request.accounts.map(account => accountEvidence(env, account)),
   };
 };
 
@@ -324,17 +254,13 @@ const decodeResponseAccount = (value: unknown, index: number): SettlementEvidenc
   if (typeof currentStateHash !== 'string' || !HASH.test(currentStateHash)) throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_ROOT_INVALID:${index}`);
   const offers = account['offers'].map((raw, offerIndex) => {
     const offer = requireBoundaryRecord(raw, `RADAPTER_SETTLEMENT_RESPONSE_OFFER_INVALID:${index}:${offerIndex}`);
-    requireExactBoundaryKeys(offer, ['offerId', 'offerCommitted', 'resolveCommitted', 'stpCommitted', 'live', 'closed'], [], `RADAPTER_SETTLEMENT_RESPONSE_OFFER_FIELDS_INVALID:${index}:${offerIndex}`);
-    for (const field of ['offerCommitted', 'resolveCommitted', 'stpCommitted', 'live', 'closed'] as const) {
-      if (typeof offer[field] !== 'boolean') throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_OFFER_FLAG_INVALID:${index}:${offerIndex}`);
+    requireExactBoundaryKeys(offer, ['offerId', 'live'], [], `RADAPTER_SETTLEMENT_RESPONSE_OFFER_FIELDS_INVALID:${index}:${offerIndex}`);
+    if (typeof offer['live'] !== 'boolean') {
+      throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_OFFER_FLAG_INVALID:${index}:${offerIndex}`);
     }
     return {
       offerId: requireOfferId(offer['offerId'], `RADAPTER_SETTLEMENT_RESPONSE_OFFER_ID_INVALID:${index}:${offerIndex}`),
-      offerCommitted: offer['offerCommitted'] === true,
-      resolveCommitted: offer['resolveCommitted'] === true,
-      stpCommitted: offer['stpCommitted'] === true,
       live: offer['live'] === true,
-      closed: offer['closed'] === true,
     };
   });
   if (typeof account['pendingFrame'] !== 'boolean' || typeof account['pendingProposal'] !== 'boolean') throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_INVALID:${index}`);

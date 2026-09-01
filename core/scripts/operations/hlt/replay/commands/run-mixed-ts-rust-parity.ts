@@ -3,7 +3,8 @@
 /** Record one production TS transcript, then prove it with independent Rust W1/W4 DBs. */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { safeParse } from '../../../../../protocol/serialization';
@@ -25,17 +26,32 @@ const run = (command: string, args: readonly string[], env = process.env): strin
   return result.stdout;
 };
 
-const recordOutput = run(process.execPath, [
-  'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts',
-]);
-const match = /HLT_RUNTIME_REPLAY_V1 path=([^\s]+)/.exec(recordOutput);
-if (!match?.[1]) throw new Error('HLT_MIXED_PARITY_RECORDING_PATH_MISSING');
-const recordingPath = match[1];
+const recordingArgument = (): string | null => {
+  const index = process.argv.indexOf('--recording');
+  if (index < 0) return null;
+  const path = String(process.argv[index + 1] ?? '').trim();
+  if (!path) throw new Error('HLT_MIXED_PARITY_RECORDING_ARGUMENT_MISSING');
+  return path;
+};
+
+const record = (): string => {
+  const output = run(process.execPath, [
+    'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts',
+  ]);
+  const match = /HLT_RUNTIME_REPLAY_V1 path=([^\s]+)/.exec(output);
+  if (!match?.[1]) throw new Error('HLT_MIXED_PARITY_RECORDING_PATH_MISSING');
+  return match[1];
+};
+
+// A supplied immutable artifact is replayed directly; recording is never
+// repeated merely to obtain fresh native DBs for another worker-count trial.
+const recordingPath = recordingArgument() ?? record();
 const artifact = readHltHubRecording(recordingPath);
 if (artifact.source.engine !== 'ts') throw new Error('HLT_MIXED_PARITY_SOURCE_NOT_TS');
 const meshRoot = readFileSync(join(artifact.source.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
 if (!meshRoot) throw new Error('HLT_MIXED_PARITY_MESH_SEED_MISSING');
-const runtimeSeedPath = join(artifact.source.workDir, 'h1-runtime.seed');
+const replayRoot = mkdtempSync(join(tmpdir(), 'xln-runtime-parity-'));
+const runtimeSeedPath = join(replayRoot, 'h1-runtime.seed');
 writeFileSync(runtimeSeedPath, `${deriveMeshChildSeed(meshRoot, 'runtime:h1')}\n`, { mode: 0o600 });
 const wal = join(artifact.source.workDir, 'prod-mesh', 'h1', `${artifact.tail.runtimeId}-wal`);
 const binary = authorityEvidenceBinary();
@@ -48,7 +64,7 @@ const replay = (workers: 1 | 4): Record<string, unknown> => {
     '--runtime-seed-file', runtimeSeedPath,
     '--runtime-signer-label', '1',
     '--entity-signer-label', 'h1-hub',
-    '--native-db', join(artifact.source.workDir, `runtime-replay-w${workers}`),
+    '--native-db', join(replayRoot, `w${workers}`),
     '--workers', String(workers),
   ]);
   const line = output.trim().split('\n').at(-1);

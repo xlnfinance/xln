@@ -81,6 +81,7 @@ import {
   resetHltPaymentOperationLedger,
   snapshotHltPaymentOperationLedger,
 } from '../../../../support/performance/account-delivery-trace';
+import { hltAuthorityEvidenceRelayUrls } from '../authority-evidence-policy';
 
 type HostSocketData = Readonly<{ type: 'rpc'; runtimeId: string }>;
 type HostSocket = ServerWebSocket<HostSocketData>;
@@ -528,7 +529,7 @@ const handleHostPopulationConfigure = async (
           const target = targets[next]!;
           const env = runtimes.get(target.runtimeId)!;
           startP2P(env, {
-            relayUrls: [],
+            relayUrls: [...hltAuthorityEvidenceRelayUrls(process.env)],
             advertiseEntityIds: announceProfiles ? [target.entityId] : [],
           });
         }

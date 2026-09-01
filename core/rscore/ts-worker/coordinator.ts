@@ -28,12 +28,48 @@ import {
   requireWorkerInteger,
   TsAccountWorkerClient,
 } from './coordinator-client';
-import { aggregateWorkerPhaseResults } from './coordinator/result';
+import {
+  aggregateWorkerPhaseResults,
+  type ExpectedWorkerEffect,
+} from './coordinator/result';
 
 type PhaseDispatch = Readonly<{
   workerIndex: number;
   payload: TsAccountWorkerPhasePayload;
 }>;
+
+const expectedPhaseEffects = (
+  dispatches: readonly PhaseDispatch[],
+  count: number,
+): readonly ExpectedWorkerEffect[] => {
+  const slots: Array<ExpectedWorkerEffect | undefined> = Array.from({ length: count });
+  const place = (
+    workerIndex: number,
+    row: Readonly<{ order: number; accountId: string }>,
+    phase: ExpectedWorkerEffect['phase'],
+  ): void => {
+    if (!Number.isSafeInteger(row.order) || row.order < 0 || row.order >= count) {
+      throw new Error(`TS_ACCOUNT_WORKER_EXPECTED_ORDER_RANGE:${workerIndex}:${row.order}:${count}`);
+    }
+    if (slots[row.order] !== undefined) {
+      throw new Error(`TS_ACCOUNT_WORKER_EXPECTED_ORDER_DUPLICATE:${row.order}`);
+    }
+    slots[row.order] = { workerIndex, phase, accountId: row.accountId };
+  };
+  for (const { workerIndex, payload } of dispatches) {
+    if (payload.phase === 'inbound') {
+      for (const row of payload.inputs) place(workerIndex, row, 'inbound');
+    } else {
+      for (const row of payload.txs) place(workerIndex, row, 'outbound-enqueue');
+      for (const row of payload.proposals) place(workerIndex, row, 'outbound-proposal');
+    }
+  }
+  const missingOrder = slots.findIndex(slot => slot === undefined);
+  if (missingOrder >= 0) {
+    throw new Error(`TS_ACCOUNT_WORKER_EXPECTED_ORDER_MISSING:${missingOrder}:${count}`);
+  }
+  return slots as ExpectedWorkerEffect[];
+};
 
 /**
  * Resident Account coordinator. Its worker pool lives for the Runtime process:
@@ -250,6 +286,7 @@ export class TsAccountWorkerCoordinator {
     this.#assertUsable();
     this.#inFlight = true;
     try {
+      const expected = expectedPhaseEffects(dispatches, expectedEffects);
       const dispatchStartedAt = performance.now();
       const pending = dispatches.map(async ({ workerIndex, payload }) => {
         const client = this.#clients[workerIndex];
@@ -263,7 +300,7 @@ export class TsAccountWorkerCoordinator {
         responses,
         logicalShardToWorker: this.#logicalShardToWorker,
         includePostAccounts,
-        expectedEffects,
+        expectedEffects: expected,
         needShardRoot,
         rootTree: this.#rootTree,
         dispatchMs: dispatchedAt - dispatchStartedAt,
