@@ -140,6 +140,10 @@ fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteW
         .ok_or_else(|| invalid(format!("STRING:{path}.type")))?;
     let data_path = format!("{path}.data");
     let data = object(&tx["data"], &data_path)?;
+    if kind == "checkpointBarrier" {
+        exact_fields(data, &[], &data_path)?;
+        return Ok(RuntimeTx::CheckpointBarrier);
+    }
     if kind == "recordRuntimeAdapterCommand" {
         exact_fields(
             data,

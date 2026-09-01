@@ -18,6 +18,7 @@ use xln_rscore_protocol::CanonicalValue;
 /// name before any owned state is touched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeTx {
+    CheckpointBarrier,
     RecordRuntimeAdapterCommand(RuntimeAdapterCommandMarker),
     ImportJ(crate::JurisdictionImportRequest),
     CompleteImportJ(crate::JurisdictionImportResult),
@@ -1245,6 +1246,8 @@ pub enum RuntimeMachineError {
     HeadAccountInputsUnfittable { actual: usize, limit: usize },
     #[error("RUNTIME_INPUT_COUNT_OVERFLOW")]
     InputCountOverflow,
+    #[error("RUNTIME_CHECKPOINT_BARRIER_NOT_ISOLATED")]
+    CheckpointBarrierNotIsolated,
     #[error("RUNTIME_WIRE_BYTES_OVERFLOW")]
     WireBytesOverflow,
     #[error("RUNTIME_SYNTHETIC_ENTITY_INPUT_ENCODING:{0}")]

@@ -25,7 +25,7 @@ use super::{
 use crate::machine::{
     RuntimeEntityFrameContext, RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityState,
     RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeLiveInput, RuntimeReplica,
-    RuntimeState,
+    RuntimeState, RuntimeTx,
 };
 use crate::storage::native::{
     CanonicalRuntimeFrameDraft, NativeRuntimeStore, NativeStorageConfig, build_runtime_frame_commit,
@@ -1043,6 +1043,63 @@ fn canonical_hash_cadence_does_not_materialize_path_nodes() {
     assert_eq!(recovery.wal_frames[0].height, 2);
     drop(reopened);
     std::fs::remove_dir_all(path).expect("remove processor fixture");
+}
+
+#[test]
+fn checkpoint_barrier_materializes_an_isolated_runtime_frame_off_cadence() {
+    let path = path();
+    let _ = std::fs::remove_dir_all(&path);
+    let replica = processor_replica();
+    let store = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
+        },
+    )
+    .expect("native store");
+    let mut processor = DurableRuntimeProcessor::new(
+        replica,
+        store,
+        EntityRouteTable::new([]).expect("empty route table"),
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
+    )
+    .expect("processor");
+    processor
+        .process(empty_entity_input(
+            processor.replica().expect("genesis replica"),
+        ))
+        .expect("materialized genesis");
+    let replica = processor.replica().expect("barrier replica");
+    let barrier = RuntimeInput {
+        runtime_txs: vec![RuntimeTx::CheckpointBarrier],
+        entity_inputs: Vec::new(),
+        frame: frame_context(replica, 2, 300),
+    };
+    processor.process(barrier).expect("materialized barrier");
+    let durable = processor.read_durable_frame(2).expect("barrier frame");
+    let frame = crate::decode_storage_payload(&durable.frame_bytes).expect("decode barrier frame");
+    assert_eq!(frame.get("materializedState"), Some(&Value::Bool(true)));
+    assert_eq!(
+        frame.pointer("/runtimeInput/runtimeTxs/0/type"),
+        Some(&Value::String("checkpointBarrier".into()))
+    );
+    drop(processor);
+
+    let mut reopened =
+        NativeRuntimeStore::open(&path, NativeStorageConfig::default()).expect("reopen store");
+    assert_eq!(
+        reopened
+            .recover()
+            .expect("recover barrier")
+            .checkpoint
+            .as_ref()
+            .map(|row| row.height),
+        Some(2)
+    );
+    drop(reopened);
+    std::fs::remove_dir_all(path).expect("remove barrier fixture");
 }
 
 #[test]

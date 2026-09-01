@@ -134,7 +134,9 @@ pub fn encode_resident_entity_round(
 // 36: Entity snapshots carry the bounded Entity-command nonce fence.
 // 38: fresh Account bootstrap returns its exact empty checkpoint with the
 // loaded root, so an idle Runtime persists one canonical restore base.
-pub const PROCESS_ABI_VERSION: u64 = 38;
+// 39: one explicit checkpoint barrier exports the accepted Account forest
+// without manufacturing an Entity round.
+pub const PROCESS_ABI_VERSION: u64 = 39;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {

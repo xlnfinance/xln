@@ -3,6 +3,7 @@ import { safeStringify } from '../../protocol/serialization';
 import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica, RuntimeInput, RoutedEntityInput } from '../types';
+import { isCheckpointBarrierRuntimeTx } from '../checkpoint/barrier';
 
 export const MAX_RUNTIME_J_INPUTS = 256;
 export const MAX_RUNTIME_J_TXS = 1_024;
@@ -72,6 +73,18 @@ export const validateRuntimeInputShapeAndLimits = (
   }
   if (!Array.isArray(runtimeInput.entityInputs)) {
     reject(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
+  }
+  const checkpointBarriers = runtimeInput.runtimeTxs.filter(isCheckpointBarrierRuntimeTx);
+  if (
+    checkpointBarriers.length > 0 &&
+    (
+      checkpointBarriers.length !== 1 ||
+      runtimeInput.runtimeTxs.length !== 1 ||
+      runtimeInput.entityInputs.length !== 0 ||
+      (runtimeInput.jInputs?.length ?? 0) !== 0
+    )
+  ) {
+    reject('Checkpoint barrier must be the only item in its Runtime input');
   }
   validateRuntimeJIngressLimits(env, runtimeInput, reject);
   if (runtimeInput.runtimeTxs.length > LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS) {

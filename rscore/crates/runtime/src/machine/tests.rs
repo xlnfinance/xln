@@ -16,6 +16,7 @@ use xln_rscore_protocol::CanonicalValue;
 
 use crate::{
     CanonicalEntityInfraMaterializer, EntityInfraMaterializeRequest, EntityInfraMaterializer,
+    enqueue_runtime_input,
 };
 
 use super::{
@@ -217,6 +218,28 @@ fn frame_at(
             )]),
         },
     }
+}
+
+#[test]
+fn checkpoint_barrier_must_be_the_only_runtime_input_item() -> Result<(), RuntimeMachineError> {
+    let mut runtime = replica(RuntimeLimits::hlt())?;
+    let mut isolated = frame(200, Vec::new());
+    isolated.runtime_txs.push(RuntimeTx::CheckpointBarrier);
+    enqueue_runtime_input(&mut runtime.mempool, &mut isolated, runtime.limits)?;
+    assert!(matches!(
+        runtime.mempool.runtime_txs.front(),
+        Some(RuntimeTx::CheckpointBarrier)
+    ));
+
+    let mut mixed = frame(300, vec![entity_input(1)]);
+    mixed.runtime_txs.push(RuntimeTx::CheckpointBarrier);
+    let error = enqueue_runtime_input(&mut runtime.mempool, &mut mixed, runtime.limits)
+        .expect_err("mixed checkpoint barrier must fail");
+    assert!(matches!(
+        error,
+        RuntimeMachineError::CheckpointBarrierNotIsolated
+    ));
+    Ok(())
 }
 
 #[test]

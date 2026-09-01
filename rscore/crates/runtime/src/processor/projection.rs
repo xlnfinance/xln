@@ -26,7 +26,7 @@ use super::entity_checkpoint_projection::{
 use super::machine_snapshot::{
     PreparedRuntimeMachineGraph, RuntimeMachineProjectionError, prepare_runtime_machine_graph,
 };
-use super::replica_meta::{ReplicaMetaProjectionError, prepare_replica_meta};
+use super::replica_meta::{PreparedReplicaMeta, ReplicaMetaProjectionError, prepare_replica_meta};
 use super::{EntityOutputEncodingError, EntityRouteError, EntityRouteTable};
 
 static PROFILE_PROJECTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -45,6 +45,88 @@ fn output_key(output: &crate::RuntimeEntityOutputs) -> RuntimeEntityKey {
         entity_id: output.entity_id,
         signer_id: output.signer_id.clone(),
     }
+}
+
+pub(crate) fn checkpoint_graph_due(result: &RuntimeApplyResult) -> bool {
+    let checkpoint_barrier = result.applied_frame.as_ref().is_some_and(|frame| {
+        frame.runtime_txs.len() == 1
+            && matches!(frame.runtime_txs[0], crate::RuntimeTx::CheckpointBarrier)
+    });
+    checkpoint_barrier
+        || result
+            .outputs
+            .entities
+            .iter()
+            .any(|output| output.checkpoint.is_some())
+}
+
+fn export_checkpoint_barrier(
+    result: &mut RuntimeApplyResult,
+    enabled: bool,
+) -> Result<
+    BTreeMap<RuntimeEntityKey, xln_rscore_batch::AccountsCheckpoint>,
+    RuntimeFrameProjectionError,
+> {
+    if !enabled {
+        return Ok(BTreeMap::new());
+    }
+    let height = result.replica.state.height;
+    let mut checkpoints = BTreeMap::new();
+    for (key, live) in &mut result.replica.e_replicas {
+        checkpoints.insert(key.clone(), live.accounts.export_checkpoint()?);
+        live.last_materialized_height = height;
+    }
+    Ok(checkpoints)
+}
+
+fn prepare_checkpoint_graph_changes(
+    result: &RuntimeApplyResult,
+    replica_metas: &[(RuntimeEntityKey, PreparedReplicaMeta)],
+    prior: &BTreeMap<Vec<u8>, Vec<u8>>,
+    barrier: bool,
+    barrier_checkpoints: &BTreeMap<RuntimeEntityKey, xln_rscore_batch::AccountsCheckpoint>,
+) -> Result<Vec<PathNodeChange>, RuntimeFrameProjectionError> {
+    let mut changes = Vec::new();
+    let mut append = |key: &RuntimeEntityKey, accounts: &xln_rscore_batch::AccountsCheckpoint| {
+        let state = result
+            .replica
+            .state
+            .e_replicas
+            .get(key)
+            .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
+        let live = result
+            .replica
+            .e_replicas
+            .get(key)
+            .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
+        let meta = replica_metas
+            .iter()
+            .find(|(candidate, _)| candidate == key)
+            .map(|(_, meta)| meta)
+            .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
+        let entity = prepare_entity_checkpoint(state, live, &meta.entry, prior)?;
+        let account = prepare_account_checkpoint(
+            accounts,
+            key.entity_id,
+            entity.protocol_fingerprint,
+            prior,
+        )?;
+        changes = merge_checkpoint_changes(std::mem::take(&mut changes), entity.changes)?;
+        changes = merge_checkpoint_changes(std::mem::take(&mut changes), account.changes)?;
+        Ok::<(), RuntimeFrameProjectionError>(())
+    };
+    if barrier {
+        for (key, accounts) in barrier_checkpoints {
+            append(key, accounts)?;
+        }
+    } else {
+        for output in &result.outputs.entities {
+            if let Some(accounts) = output.checkpoint.as_ref() {
+                append(&output_key(output), accounts)?;
+            }
+        }
+    }
+    Ok(changes)
 }
 
 pub(crate) struct ProjectedRuntimeFrame {
@@ -211,6 +293,7 @@ pub(crate) fn project_durable_frame(
     prior_checkpoint_rows: Option<&BTreeMap<Vec<u8>, Vec<u8>>>,
     capture_replay_diagnostics: bool,
 ) -> Result<DurableProjection, RuntimeFrameProjectionError> {
+    let checkpoint_due = checkpoint_graph_due(&result);
     let Some(applied) = result.applied_frame.take() else {
         if result.applied_input.is_some()
             || !result.outputs.entities.is_empty()
@@ -235,11 +318,8 @@ pub(crate) fn project_durable_frame(
     let entity_txs_selected = applied_input.entity_txs_selected;
     let entity_txs_pending = applied_input.entity_txs_pending;
     let entity_frame_count = applied.entity_frame_count;
-    let checkpoint_due = result
-        .outputs
-        .entities
-        .iter()
-        .any(|output| output.checkpoint.is_some());
+    let checkpoint_barrier = applied.runtime_txs.len() == 1
+        && matches!(applied.runtime_txs[0], crate::RuntimeTx::CheckpointBarrier);
     if checkpoint_due && prior_checkpoint_rows.is_none() {
         // A cadence checkpoint is one indivisible graph. Persisting only its
         // RuntimeFrame would make the WAL tail unrecoverable, so fail before
@@ -480,6 +560,7 @@ pub(crate) fn project_durable_frame(
     )?;
     let continuation_done = prelude_started.elapsed();
 
+    let barrier_checkpoints = export_checkpoint_barrier(&mut result, checkpoint_barrier)?;
     let phase_started = std::time::Instant::now();
     let runtime_input = runtime_input(applied.runtime_txs, applied.entity_inputs)?;
     let projection_input = phase_started.elapsed();
@@ -526,41 +607,13 @@ pub(crate) fn project_durable_frame(
 
     let expected_previous_hash = result.replica.durable.prev_frame_hash();
     let checkpoint_changes = match (checkpoint_due, prior_checkpoint_rows) {
-        (true, Some(prior)) => {
-            let mut changes = Vec::new();
-            for output in &result.outputs.entities {
-                let Some(accounts) = output.checkpoint.as_ref() else {
-                    continue;
-                };
-                let key = output_key(output);
-                let state = result
-                    .replica
-                    .state
-                    .e_replicas
-                    .get(&key)
-                    .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
-                let live = result
-                    .replica
-                    .e_replicas
-                    .get(&key)
-                    .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
-                let meta = replica_metas
-                    .iter()
-                    .find(|(candidate, _)| candidate == &key)
-                    .map(|(_, meta)| meta)
-                    .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
-                let entity = prepare_entity_checkpoint(state, live, &meta.entry, prior)?;
-                let account = prepare_account_checkpoint(
-                    accounts,
-                    output.entity_id,
-                    entity.protocol_fingerprint,
-                    prior,
-                )?;
-                changes = merge_checkpoint_changes(changes, entity.changes)?;
-                changes = merge_checkpoint_changes(changes, account.changes)?;
-            }
-            Some(changes)
-        }
+        (true, Some(prior)) => Some(prepare_checkpoint_graph_changes(
+            &result,
+            &replica_metas,
+            prior,
+            checkpoint_barrier,
+            &barrier_checkpoints,
+        )?),
         (false, None) => None,
         _ => {
             return Err(RuntimeFrameProjectionError::CheckpointGraphUnavailable(
@@ -771,6 +824,10 @@ fn encode_runtime_txs<'a>(
     txs: impl Iterator<Item = &'a crate::RuntimeTx>,
 ) -> Result<Vec<Value>, RuntimeFrameProjectionError> {
     txs.map(|tx| match tx {
+        crate::RuntimeTx::CheckpointBarrier => Ok(object([
+            ("type", Value::String("checkpointBarrier".into())),
+            ("data", Value::Object(Map::new())),
+        ])),
         crate::RuntimeTx::RecordRuntimeAdapterCommand(value) => Ok(object([
             ("type", Value::String("recordRuntimeAdapterCommand".into())),
             (

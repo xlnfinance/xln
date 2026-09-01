@@ -43,7 +43,7 @@ import { handleMarketPairCatalogRequest } from './hub/market-catalog-http';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { quiesceNodeRuntime } from './process/node-runtime-quiesce';
+import { checkpointNodeRuntime, quiesceNodeRuntime } from './process/node-runtime-quiesce';
 import { pauseJurisdictionWatchersAndWait } from '../runtime/loop/loop-watchers';
 import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
@@ -1915,33 +1915,63 @@ const createHubControlRequestHandler = (dependencies: {
           process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1' &&
           process.env['XLN_HLT_ENGINE'] !== 'ts'
         ) throw new Error('HLT_PARITY_CHECKPOINT_TS_ENGINE_REQUIRED');
-        const concreteCheckpoint = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1'
-          ? await exportConcreteCheckpointSource(dependencies.state, {
-              getStorageDb: (env, role) => getStorageDb(env, { ensureRuntimeInfrastructure }, role),
-              getRuntimeWalDb: env => getRuntimeWalDb(env, { ensureRuntimeInfrastructure }),
-            })
-          : null;
-        const bundle = await withRuntimeCommittedRead(dependencies.state, () =>
-          buildRuntimeRecoveryBundle(dependencies.state, {
-            kind: 'snapshot',
-            signers: [{
-              index: 1,
-              address: String(dependencies.state.runtimeId || '').toLowerCase(),
-              name: `${dependencies.nodeName} Runtime`,
-            }],
-          }));
-        await writeDurableFile(outputPath, `${serializeTaggedJson(bundle)}\n`);
-        if (concreteCheckpoint) {
-          await writeDurableFile(
-            `${outputPath}.concrete-checkpoint.json`,
-            `${safeStringify(concreteCheckpoint)}\n`,
-          );
-        }
+        await dependencies.pauseBootstrap();
+        const snapshotResult: {
+          value?: Readonly<{
+            runtimeId: string;
+            height: number;
+            checkpointHash: string;
+          }>;
+        } = {};
+        await checkpointNodeRuntime(dependencies.state, {
+          workTimeoutMs: 20_000,
+          loopTimeoutMs: 5_000,
+          quietMs: 750,
+          resumePersistenceAfterCheckpoint: true,
+          persist: async () => {
+            const concreteCheckpoint = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1'
+              ? await exportConcreteCheckpointSource(dependencies.state, {
+                  getStorageDb: (env, role) => getStorageDb(
+                    env,
+                    { ensureRuntimeInfrastructure },
+                    role,
+                  ),
+                  getRuntimeWalDb: env => getRuntimeWalDb(
+                    env,
+                    { ensureRuntimeInfrastructure },
+                  ),
+                })
+              : null;
+            const bundle = await withRuntimeCommittedRead(dependencies.state, () =>
+              buildRuntimeRecoveryBundle(dependencies.state, {
+                kind: 'snapshot',
+                signers: [{
+                  index: 1,
+                  address: String(dependencies.state.runtimeId || '').toLowerCase(),
+                  name: `${dependencies.nodeName} Runtime`,
+                }],
+              }));
+            await writeDurableFile(outputPath, `${serializeTaggedJson(bundle)}\n`);
+            if (concreteCheckpoint) {
+              await writeDurableFile(
+                `${outputPath}.concrete-checkpoint.json`,
+                `${safeStringify(concreteCheckpoint)}\n`,
+              );
+            }
+            const checkpointHash = bundle.checkpointHash;
+            if (!checkpointHash) throw new Error('RUNTIME_SNAPSHOT_CHECKPOINT_HASH_MISSING');
+            snapshotResult.value = {
+              runtimeId: bundle.runtimeId,
+              height: bundle.runtimeHeight,
+              checkpointHash,
+            };
+          },
+        });
+        const snapshotSummary = snapshotResult.value;
+        if (!snapshotSummary) throw new Error('RUNTIME_SNAPSHOT_EXPORT_MISSING');
         return new Response(safeStringify({
           ok: true,
-          runtimeId: bundle.runtimeId,
-          height: bundle.runtimeHeight,
-          checkpointHash: bundle.checkpointHash,
+          ...snapshotSummary,
         }), { headers: JSON_HEADERS });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

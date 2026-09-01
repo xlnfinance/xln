@@ -2798,6 +2798,7 @@ fn apply_runtime_txs(
     let mut observation = None;
     for tx in txs {
         match tx {
+            super::RuntimeTx::CheckpointBarrier => {}
             super::RuntimeTx::RecordRuntimeAdapterCommand(value) => {
                 apply_runtime_adapter_command_marker(replica, value, current_timestamp)?;
             }

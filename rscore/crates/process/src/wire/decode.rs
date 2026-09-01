@@ -52,6 +52,9 @@ pub enum Command {
         expected: xln_rscore_batch::CheckpointToken,
         accounts: Vec<xln_rscore_batch::AccountRestore>,
     },
+    Checkpoint {
+        expected_accounts_root: [u8; 32],
+    },
     Shutdown,
     /// Every retired authority candidate/checkpoint command collapses to one
     /// loud rejection. Keeping decoded payloads here would retain a second,
@@ -86,17 +89,24 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         | OpTag::BeginEntity
         | OpTag::ApplyAccountWave
         | OpTag::ProposeAccountWave
-        | OpTag::Checkpoint
         | OpTag::FinalizeEntity
         | OpTag::DiscardEntity
         | OpTag::SealAccountWave
         | OpTag::GetCheckpointChanges
         | OpTag::CommitCheckpoint => Ok(Command::AuthorityTwoCallOnly),
+        OpTag::Checkpoint => decode_checkpoint(payload),
         OpTag::BootstrapEntity => decode_bootstrap_entity(payload),
         OpTag::EntityRound => decode_entity_round(payload),
         OpTag::RestoreExact => decode_restore_exact(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
+}
+
+fn decode_checkpoint(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "checkpoint")?;
+    Ok(Command::Checkpoint {
+        expected_accounts_root: fixed_bytes(&fields[0], "checkpointAccountsRoot")?,
+    })
 }
 
 fn decode_bootstrap_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {

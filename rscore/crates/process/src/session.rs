@@ -238,6 +238,9 @@ impl ProcessSession {
             } => self.load(revision, accounts, import_existing),
             Command::AuthorityTwoCallOnly => Err(ProcessError::AuthorityTwoCallOnly),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
+            Command::Checkpoint {
+                expected_accounts_root,
+            } => self.checkpoint(expected_accounts_root),
             Command::BootstrapEntity { snapshot } => self.bootstrap_entity(*snapshot),
             Command::EntityRound { request, context } => self.entity_round(*request, *context),
             Command::Shutdown => self.shutdown(),
@@ -423,6 +426,25 @@ impl ProcessSession {
         )?;
         self.authority = Some(Box::new(restored));
         Ok((crate::checkpoint_wire::exact_restored(&expected), false))
+    }
+
+    fn checkpoint(
+        &mut self,
+        expected_accounts_root: [u8; 32],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let actual = engine.accounts_root();
+        if actual != expected_accounts_root {
+            return Err(ProcessError::CheckpointRootMismatch {
+                expected: expected_accounts_root,
+                actual,
+            });
+        }
+        let checkpoint = engine.export_checkpoint()?;
+        Ok((wire_encode::checkpoint(&checkpoint)?, false))
     }
 
     fn shutdown(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {

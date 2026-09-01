@@ -98,12 +98,10 @@ export const buildHubChildProcessEnv = (
   ) {
     const outputPath = String(source['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] ?? '').trim();
     if (!outputPath) throw new Error('HLT_PARITY_CHECKPOINT_OUTPUT_REQUIRED');
-    // The parity base is captured before MM can open an Account. Materialize
-    // H1 from genesis so that boundary is already durable; snapshot export
-    // must never manufacture a frame or retry a later, non-quiescent height.
+    // The parity base is captured by one explicit checkpointBarrier frame.
+    // Ordinary economic frames retain the production materialization cadence.
     child['XLN_HLT_AUTHORITY_EVIDENCE'] = '1';
     child['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] = outputPath;
-    child['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] = '1';
     // Replay compares the canonical Runtime root at every WAL height.
     child['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = '1';
   }

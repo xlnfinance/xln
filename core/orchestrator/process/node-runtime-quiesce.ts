@@ -7,6 +7,8 @@ import {
   waitForRuntimeWorkDrained,
   type RuntimeLoopConfig,
 } from '../../runtime';
+import { createCheckpointBarrierRuntimeTx } from '../../runtime/checkpoint/barrier';
+import { enqueueRuntimeContinuation } from '../../runtime/loop/loop-envelope';
 import { transitionRuntimeLifecycle } from '../../runtime/replica/lifecycle';
 import type { RuntimeP2PConfig } from '../../runtime/envelope/p2p-types';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -46,6 +48,7 @@ const errorText = (error: unknown): string =>
 export const quiesceNodeRuntime = async (
   env: RuntimeReplica,
   options: NodeRuntimeQuiesceOptions,
+  afterInitialDrain?: () => Promise<void>,
 ): Promise<NodeRuntimeQuiesceResult> => {
   const failures: string[] = [];
   let runtimeDrained = false;
@@ -69,6 +72,20 @@ export const quiesceNodeRuntime = async (
     if (!runtimeDrained) failures.push('work_drain_timeout');
   } catch (error) {
     failures.push(`work_drain:${errorText(error)}`);
+  }
+  if (runtimeDrained && afterInitialDrain) {
+    try {
+      await afterInitialDrain();
+      runtimeDrained = await waitForRuntimeWorkDrained(
+        env,
+        options.workTimeoutMs,
+        options.quietMs,
+        { allowPersistencePaused: options.allowPersistencePausedDrain === true },
+      );
+      if (!runtimeDrained) failures.push('barrier_drain_timeout');
+    } catch (error) {
+      failures.push(`barrier:${errorText(error)}`);
+    }
   }
   try {
     runtimeIdle = await stopRuntimeLoopAndWait(env, options.loopTimeoutMs);
@@ -120,6 +137,9 @@ export const checkpointNodeRuntime = async (
   if (wasP2PActive && !previousP2PConfig) {
     throw new Error('NODE_RUNTIME_CHECKPOINT_P2P_CONFIG_MISSING');
   }
+  if (!wasPersistencePaused && !wasLoopActive) {
+    throw new Error('NODE_RUNTIME_CHECKPOINT_LOOP_INACTIVE');
+  }
 
   const quiesceResult = await quiesceNodeRuntime(env, {
     workTimeoutMs: options.workTimeoutMs,
@@ -127,6 +147,14 @@ export const checkpointNodeRuntime = async (
     ...(options.quietMs === undefined ? {} : { quietMs: options.quietMs }),
     allowPersistencePausedDrain:
       wasPersistencePaused && options.resumePersistenceAfterCheckpoint === true,
+  }, wasPersistencePaused ? undefined : async () => {
+    enqueueRuntimeContinuation(
+      env,
+      [],
+      [createCheckpointBarrierRuntimeTx()],
+      [],
+      env.state.timestamp,
+    );
   });
   state.persistencePaused = true;
 

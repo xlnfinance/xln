@@ -141,7 +141,13 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
 
       const loaded = (await client.bootstrapAccounts(0, [])) as unknown[];
       expect(loaded[0]).toBe(0);
-      expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(new Uint8Array(32));
+      const accountsRoot = new Uint8Array(loaded[1] as Uint8Array);
+      expect(accountsRoot).toEqual(new Uint8Array(32));
+      const checkpoint = await client.exportCheckpoint(accountsRoot);
+      expect(new Uint8Array(checkpoint.restoreToken[2])).toEqual(accountsRoot);
+      expect(checkpoint.restoreToken[4]).toBe(0);
+      expect(checkpoint.accounts).toEqual([]);
+      expect(checkpoint.removed).toEqual([]);
       await client.shutdown();
     } finally {
       client.kill();

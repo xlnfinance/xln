@@ -792,6 +792,9 @@ const buildStorageCheckpointRequest = (
   config: Required<StorageRuntimeConfig>,
   appliedRuntimeInput: RuntimeInput,
 ) => {
+  const checkpointBarrierRequested = appliedRuntimeInput.runtimeTxs.some(
+    tx => tx.type === 'checkpointBarrier',
+  );
   const finiteEpochByteBudget = config.epochMaxBytes !== Number.MAX_SAFE_INTEGER;
   const appliedRuntimeInputBytes = finiteEpochByteBudget
     ? encodeBufferPrepared(appliedRuntimeInput, { omitSymbolKeys: true }).buffer.byteLength
@@ -805,6 +808,7 @@ const buildStorageCheckpointRequest = (
     snapshotRequested,
     snapshotRequiredByBytesRequested,
     materializationRequested:
+      checkpointBarrierRequested ||
       height === 1 ||
       height - head.latestMaterializedHeight >= config.materializePeriodFrames ||
       snapshotRequested ||

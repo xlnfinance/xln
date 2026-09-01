@@ -43,6 +43,18 @@ pub fn enqueue_runtime_input(
     input: &mut RuntimeInput,
     limits: RuntimeLimits,
 ) -> Result<(), RuntimeMachineError> {
+    let checkpoint_barriers = input
+        .runtime_txs
+        .iter()
+        .filter(|tx| matches!(tx, RuntimeTx::CheckpointBarrier))
+        .count();
+    if checkpoint_barriers > 0
+        && (checkpoint_barriers != 1
+            || input.runtime_txs.len() != 1
+            || !input.entity_inputs.is_empty())
+    {
+        return Err(RuntimeMachineError::CheckpointBarrierNotIsolated);
+    }
     if let Some(RuntimeTx::Unsupported { kind }) = input
         .runtime_txs
         .iter()

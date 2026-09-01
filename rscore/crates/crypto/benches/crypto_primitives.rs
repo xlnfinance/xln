@@ -53,7 +53,7 @@ fn numeric_arguments() -> Vec<usize> {
 
 fn main() {
     let arguments = numeric_arguments();
-    let count = arguments.first().copied().unwrap_or(100_000);
+    let count = arguments.first().copied().unwrap_or(1_000);
     let max_workers = arguments.get(1).copied().unwrap_or(16);
     let private_key = [7_u8; 32];
     let digest = [11_u8; 32];

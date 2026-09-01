@@ -41,6 +41,14 @@ pub fn loaded(
     ]))
 }
 
+pub fn checkpoint(
+    checkpoint: &xln_rscore_batch::AccountsCheckpoint,
+) -> Result<BodyTuple, crate::ProcessError> {
+    Ok(body(vec![crate::checkpoint_wire::changes(Some(
+        checkpoint,
+    ))?]))
+}
+
 pub fn shutdown() -> BodyTuple {
     body(Vec::new())
 }

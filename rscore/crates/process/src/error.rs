@@ -89,6 +89,11 @@ pub enum ProcessError {
     CheckpointPending,
     #[error("RSCORE_PROCESS_CHECKPOINT_NOT_PENDING")]
     CheckpointNotPending,
+    #[error("RSCORE_PROCESS_CHECKPOINT_ROOT_MISMATCH:expected={expected:?}:actual={actual:?}")]
+    CheckpointRootMismatch {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
     #[error("RSCORE_PROCESS_STOPPED")]
     Stopped,
     #[error("RSCORE_PROCESS_FRAME_EMPTY")]
@@ -156,6 +161,7 @@ impl ProcessError {
             Self::PrepareWaveNonempty { .. } => "RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY",
             Self::CheckpointPending => "RSCORE_PROCESS_CHECKPOINT_PENDING",
             Self::CheckpointNotPending => "RSCORE_PROCESS_CHECKPOINT_NOT_PENDING",
+            Self::CheckpointRootMismatch { .. } => "RSCORE_PROCESS_CHECKPOINT_ROOT_MISMATCH",
             Self::Stopped => "RSCORE_PROCESS_STOPPED",
             Self::EmptyFrame => "RSCORE_PROCESS_FRAME_EMPTY",
             Self::FrameTooLarge { .. } => "RSCORE_PROCESS_FRAME_TOO_LARGE",

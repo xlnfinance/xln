@@ -253,7 +253,10 @@ const validateCompleteImport = (value: unknown, code: string): void => {
 };
 
 const validateRuntimeTxData = (type: string, value: unknown, code: string): void => {
-  if (type === 'recordRuntimeAdapterCommand') {
+  if (type === 'checkpointBarrier') {
+    const data = requireBoundaryRecord(value, code);
+    requireExactBoundaryKeys(data, [], [], `${code}_FIELDS`);
+  } else if (type === 'recordRuntimeAdapterCommand') {
     const data = requireBoundaryRecord(value, code);
     requireExactBoundaryKeys(data, ['laneId', 'sequence', 'commandId', 'inputHash', 'expiresAtMs'], [], `${code}_FIELDS`);
     validateRuntimeAdapterCommandMarker(data as never);

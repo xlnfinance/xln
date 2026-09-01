@@ -265,7 +265,10 @@ const applyRuntimeInputPhases = async (
     installAuthorityCutover(env);
     installTsAccountWorkerAuthority(env);
     markRuntimeApplyPhase(env, 'apply.authority-arm');
-    await armAuthorityWave(env);
+    await armAuthorityWave(
+      env,
+      ingress.runtimeTxs.some(tx => tx.type === 'checkpointBarrier'),
+    );
     markRuntimeApplyPhase(env, 'apply.merge');
     const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
     const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>

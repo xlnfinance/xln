@@ -25,7 +25,7 @@ const numericArgument = (name: string, fallback: number): number => {
   return value;
 };
 
-const count = numericArgument('count', 100_000);
+const count = numericArgument('count', 1_000);
 const workers = numericArgument('workers', 8);
 process.env['XLN_CRYPTO_POOL_WORKERS'] = String(workers);
 process.env['XLN_CRYPTO_SIGN_WORKERS'] = String(workers);
@@ -38,10 +38,15 @@ const x25519Private = new Uint8Array(32).fill(13);
 const x25519PeerPublic = x25519PublicKey(new Uint8Array(32).fill(17));
 const signature = signDigestBytesWithPrivateKey(privateKey, digest);
 
-const measureSync = (operation: () => Uint8Array): Readonly<{ ms: number; checksum: number }> => {
+const measureSync = (
+  operation: () => Uint8Array | string,
+): Readonly<{ ms: number; checksum: number }> => {
   let checksum = 0;
   const started = Bun.nanoseconds();
-  for (let index = 0; index < count; index += 1) checksum ^= operation()[0] ?? 0;
+  for (let index = 0; index < count; index += 1) {
+    const value = operation();
+    checksum ^= typeof value === 'string' ? value.charCodeAt(0) : (value[0] ?? 0);
+  }
   return Object.freeze({ ms: (Bun.nanoseconds() - started) / 1e6, checksum });
 };
 

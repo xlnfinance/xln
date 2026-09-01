@@ -224,6 +224,11 @@ export type JurisdictionImportResult = {
 
 export type RuntimeTx =
   | {
+      /** Local-only WAL marker that forces one isolated materialized checkpoint frame. */
+      type: 'checkpointBarrier';
+      data: Record<string, never>;
+    }
+  | {
       /** Local-only replayable marker; commits remote command replay protection with its effects. */
       type: 'recordRuntimeAdapterCommand';
       data: {

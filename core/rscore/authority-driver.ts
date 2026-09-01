@@ -533,7 +533,10 @@ const disable = (ownerEntityId: string, reason: string): 'disabled' => {
  * enters only through WaveOp::Create inside the abortable Runtime candidate;
  * importing TypeScript's current answer here would hide a missed transition.
  */
-export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
+export const armAuthorityWave = async (
+  env: RuntimeReplica,
+  checkpointBarrierDue = false,
+): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const materializePeriod = env.runtimeConfig?.storage?.materializePeriodFrames
     ?? DEFAULT_MATERIALIZE_PERIOD_FRAMES;
@@ -541,7 +544,7 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
     return halt('CHECKPOINT_PERIOD_INVALID', { materializePeriod });
   }
   const nextHeight = env.state.height + 1;
-  env.accountAuthorityCheckpointDue = nextHeight === 1
+  env.accountAuthorityCheckpointDue = checkpointBarrierDue || nextHeight === 1
     || (nextHeight - 1) % materializePeriod === 0;
   const runtimeSessions = sessionMap(env, true);
   // A zero-account Entity must already own an empty session before the frame
@@ -1010,7 +1013,7 @@ export const assertAuthorityFrameSettled = async (env: RuntimeReplica): Promise<
 const assertCheckpointMatchesCandidate = (
   env: RuntimeReplica,
   candidate: OpenFrame,
-  position: Readonly<{ revision: number; accountsRoot: string }>,
+  position: Readonly<{ revision: number | bigint; accountsRoot: string }>,
   checkpoint: RscoreCheckpointChanges,
 ): void => {
   const owner = candidate.session.ownerEntityId;
@@ -1049,12 +1052,12 @@ const assertCheckpointMatchesCandidate = (
   }
 };
 
-/** Select the already-piggybacked export for the final accepted Entity root. */
-export const prepareAuthorityCheckpoint = (
+/** Select a piggybacked export or explicitly checkpoint an idle accepted root. */
+export const prepareAuthorityCheckpoint = async (
   env: RuntimeReplica,
 ): Promise<readonly AuthorityCheckpointStorageInput[]> => {
   if (!authorityDriverEnabled(env) || env.accountAuthorityCheckpointDue !== true) {
-    return Promise.resolve([]);
+    return [];
   }
   const candidates = pending.get(env);
   if (candidates === undefined) return halt('CHECKPOINT_CANDIDATE_MISSING', {});
@@ -1064,13 +1067,26 @@ export const prepareAuthorityCheckpoint = (
     if (candidate.entityInput !== null) {
       return halt('CHECKPOINT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
     }
-    const checkpoint = candidate.checkpoints.get(candidate.acceptedAccountsRoot);
+    let checkpoint = candidate.checkpoints.get(candidate.acceptedAccountsRoot);
     if (checkpoint === undefined) {
-      // An idle owner has no outbound visit and therefore no changes to
-      // checkpoint. An active owner must have exported every candidate root;
-      // absence here would leave its Runtime WAL without a restorable Account
-      // position and is fatal before the write starts.
-      if (candidate.latest === null) continue;
+      // An idle barrier has no Entity round to piggyback on, so it uses the
+      // single canonical checkpoint export bound to the accepted forest root.
+      if (candidate.latest === null) {
+        const root = candidate.acceptedAccountsRoot;
+        if (!/^0x[0-9a-f]{64}$/.test(root)) {
+          return halt('CHECKPOINT_ACCEPTED_ROOT_INVALID', {
+            owner: candidate.session.ownerEntityId,
+            root,
+          });
+        }
+        const exported = await candidate.session.client.exportCheckpoint(
+          Buffer.from(root.slice(2), 'hex'),
+        );
+        candidate.checkpoints.set(root, exported);
+        checkpoint = exported;
+      }
+    }
+    if (checkpoint === undefined) {
       return halt('CHECKPOINT_ACCEPTED_ROOT_NOT_EXPORTED', {
         owner: candidate.session.ownerEntityId,
         acceptedRoot: candidate.acceptedAccountsRoot,
@@ -1078,7 +1094,7 @@ export const prepareAuthorityCheckpoint = (
       });
     }
     const position = {
-      revision: Number(checkpoint.restoreToken[1]),
+      revision: checkpoint.restoreToken[1],
       accountsRoot: `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`,
     };
     assertCheckpointMatchesCandidate(env, candidate, position, checkpoint);
@@ -1089,7 +1105,7 @@ export const prepareAuthorityCheckpoint = (
       checkpoint,
     });
   }
-  return Promise.resolve(inputs);
+  return inputs;
 };
 
 const checkpointTokensEqual = (
@@ -1255,12 +1271,16 @@ export const finalizeAuthorityFrameAfterWal = async (env: RuntimeReplica): Promi
   delete env.accountAuthorityCheckpointDue;
 };
 
-/** A failed durable write after Account mutation is a mandatory restart. */
+/** A failed durable write after Account or checkpoint-cursor advance is a mandatory restart. */
 export const failStopAuthorityFrame = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const candidates = pending.get(env);
   if (candidates === undefined) return;
-  const mutated = candidates.filter(candidate => candidate.latest !== null || candidate.entityInput !== null);
+  const mutated = candidates.filter(candidate =>
+    candidate.latest !== null ||
+    candidate.entityInput !== null ||
+    candidate.checkpoints.size > 0,
+  );
   if (mutated.length > 0) {
     report.failStops += 1;
     const owners = mutated.map(candidate => candidate.session.ownerEntityId).sort();

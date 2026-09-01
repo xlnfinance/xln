@@ -28,7 +28,7 @@ use crate::{
     RuntimeLiveInput, RuntimeMachineError, RuntimeReplica, apply_runtime, apply_runtime_live,
 };
 
-use super::projection::{DurableProjection, project_durable_frame};
+use super::projection::{DurableProjection, checkpoint_graph_due, project_durable_frame};
 use super::{EntityRouteTable, RuntimeDurableEnvelopeError};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -775,12 +775,7 @@ impl DurableRuntimeProcessor {
             }
         }
         let projection_started = Instant::now();
-        let prior_checkpoint_rows = if applied
-            .outputs
-            .entities
-            .iter()
-            .any(|output| output.checkpoint.is_some())
-        {
+        let prior_checkpoint_rows = if checkpoint_graph_due(&applied) {
             match self.committer_call(CommitterCommand::CheckpointRows) {
                 Ok(Ok(rows)) => Some(rows),
                 Ok(Err(error)) | Err(error) => return self.fail_stop(error),

@@ -265,6 +265,12 @@ describe('node runtime quiesce', () => {
             limit: env.state.height,
           });
           expect(journals.at(-1)?.height).toBe(env.state.height);
+          expect(journals.at(-1)?.runtimeInput).toEqual({
+            runtimeTxs: [{ type: 'checkpointBarrier', data: {} }],
+            entityInputs: [],
+          });
+          expect((await readPersistedStorageHead(env))?.latestMaterializedHeight)
+            .toBe(env.state.height);
           expect(journals.some(journal => journal.runtimeInput.runtimeTxs.some(
             tx => tx.type === 'importReplica' && tx.entityId === entityId,
           ))).toBe(true);
@@ -297,6 +303,7 @@ describe('node runtime quiesce', () => {
 
   test('checkpoint resumes prior runtime state after a loud persistence failure', async () => {
     const env = createEmptyEnv(null);
+    env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: false } };
     startRuntimeLoop(env, { tickDelayMs: 0 });
 
     try {

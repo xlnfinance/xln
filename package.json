@@ -109,6 +109,7 @@
     "bench:swap:consensus": "bun core/scripts/operations/benchmark/bench-swap-hub-consensus-tps.ts --swaps 1000 --warmup 100 --min-aggregate-account-consensus-tps 2000 --batch-size 20 --independent-hub-cohorts 1",
     "bench:swap:consensus:aggregate-scale": "bun core/scripts/operations/benchmark/bench-swap-hub-consensus-tps.ts --swaps 10000 --warmup 1000 --min-aggregate-account-consensus-tps 10000 --batch-size 20 --users 1000 --independent-hub-cohorts 16",
     "bench:swap:scenarios": "bun core/scripts/operations/benchmark/bench-swap-scenarios-tps.ts --swaps 25000 --warmup 2500 --min-tps 10000",
+    "bench:crypto": "bun tools/stand-lock.ts run --reason crypto-primitives-all -- bun core/scripts/operations/benchmark/crypto/crypto-bench.ts",
     "bench:crypto:ts": "bun tools/stand-lock.ts run --reason crypto-primitives-ts -- bun core/scripts/operations/benchmark/crypto/crypto-primitives.ts --workers=8",
     "bench:crypto:rust": "bun tools/stand-lock.ts run --reason crypto-primitives-rust -- cargo bench --quiet --manifest-path rscore/Cargo.toml -p xln-rscore-crypto --bench crypto_primitives",
     "bench:radapter:hub10k": "bun --expose-gc core/scripts/operations/benchmark/bench-radapter-hub-1m.ts --accounts=10000 --hot-percent=10 --memory=hot --seed-mode=bulk --chunk=1000 --traffic-rounds=10 --touch-per-round=100 --new-after-read=100 --rss-cap-mb=1024 --max-read-p99-ms=500 --max-durable-p99-ms=2000 --max-cold-open-ms=1000 --max-cold-read-ms=500",

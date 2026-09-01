@@ -84,3 +84,35 @@ fn authority_bootstrap_accepts_only_empty_revision_zero() {
     assert_eq!(root, &[0; 32]);
     assert_eq!(checkpoint.fields().len(), 4);
 }
+
+#[test]
+fn checkpoint_barrier_exports_only_the_expected_accepted_root() {
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello_authority(0, SEED, "1")).envelope);
+    assert_ok(session.handle(load_accounts(1, 0)).envelope);
+    assert_error(
+        session
+            .handle(request(
+                2,
+                OpTag::Checkpoint,
+                vec![AbiValue::Bytes(vec![1; 32])],
+            ))
+            .envelope,
+        "RSCORE_PROCESS_CHECKPOINT_ROOT_MISMATCH",
+    );
+    let checkpoint = session
+        .handle(request(
+            3,
+            OpTag::Checkpoint,
+            vec![AbiValue::Bytes(vec![0; 32])],
+        ))
+        .envelope;
+    assert_ok(checkpoint.clone());
+    let AbiValue::Tuple(payload) = &checkpoint.body.fields()[0] else {
+        panic!("checkpoint payload must be a tuple")
+    };
+    let [AbiValue::Tuple(changes)] = payload.fields() else {
+        panic!("checkpoint must return exact changes")
+    };
+    assert_eq!(changes.fields().len(), 4);
+}

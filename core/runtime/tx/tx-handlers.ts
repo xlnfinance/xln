@@ -83,6 +83,7 @@ export const applyRuntimeTx = async (
   deps: RuntimeTxHandlerDeps = {},
 ): Promise<JInput[]> => {
   assertRuntimeTxCapabilitiesAuthorized(runtimeTx, deps.isReplay === true);
+  if (runtimeTx.type === 'checkpointBarrier') return [];
   if (runtimeTx.type === 'recordRuntimeAdapterCommand') {
     applyRuntimeAdapterCommandMarker(env, runtimeTx.data);
     return [];

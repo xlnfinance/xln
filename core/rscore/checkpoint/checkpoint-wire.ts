@@ -116,7 +116,7 @@ export const decodeRscoreCheckpointChanges = (value: unknown): RscoreCheckpointC
 /** Candidate identity that the checkpoint must durably describe. */
 export const assertRscoreCheckpointCandidate = (
   checkpoint: RscoreCheckpointChanges,
-  expected: Readonly<{ revision: number; accountsRoot: string; accountCount: number }>,
+  expected: Readonly<{ revision: number | bigint; accountsRoot: string; accountCount: number }>,
 ): void => {
   const checkpointRoot = `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`;
   if (

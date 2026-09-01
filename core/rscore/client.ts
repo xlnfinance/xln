@@ -19,8 +19,10 @@ import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../protocol/serialization';
 import {
+  decodeRscoreCheckpointChanges,
   decodeRscoreCheckpointToken,
   rscoreCheckpointBytes,
+  type RscoreCheckpointChanges,
   type RscoreCheckpointToken,
 } from './checkpoint/checkpoint-wire';
 import {
@@ -104,7 +106,9 @@ const RSCORE_ABI_VERSION = 1;
 // 36: Entity snapshots carry the bounded Entity-command nonce fence.
 // 38: fresh Account bootstrap returns its exact empty checkpoint with the
 // loaded root, so an idle Runtime persists one canonical restore base.
-export const RSCORE_PROCESS_ABI_VERSION = 38;
+// 39: one explicit checkpoint barrier exports the accepted Account forest
+// without manufacturing an Entity round.
+export const RSCORE_PROCESS_ABI_VERSION = 39;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -128,6 +132,7 @@ export const RSCORE_OP = {
   removeAccounts: 16,
   readAccountEnvelope: 18,
   restoreExact: 21,
+  checkpoint: 30,
   bootstrapEntity: 27,
   entityRound: 28,
 } as const;
@@ -661,6 +666,24 @@ export class RscoreProcessClient {
       const response = await this.#authorityRequestOwnedNow(RSCORE_OP.entityRound, payload);
       try {
         return decodeEntityRound(response.result);
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
+    });
+  }
+
+  /** Export the exact accepted Account forest for an isolated Runtime checkpoint barrier. */
+  async exportCheckpoint(expectedAccountsRoot: Uint8Array): Promise<RscoreCheckpointChanges> {
+    return this.#withRequestTurn(async () => {
+      const response = await this.#authorityRequestOwnedNow(
+        RSCORE_OP.checkpoint,
+        ownWirePayload([Buffer.from(expectedAccountsRoot)]),
+      );
+      try {
+        if (!Array.isArray(response.result) || response.result.length !== 1) {
+          throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
+        }
+        return decodeRscoreCheckpointChanges(response.result[0]);
       } catch (cause) {
         throw this.#poisonAuthority(cause);
       }

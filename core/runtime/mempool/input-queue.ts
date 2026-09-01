@@ -104,7 +104,6 @@ export const enqueueRuntimeInputsWithDeps = (
   if (
     hasIncomingWork &&
     state.persistenceQuiescing &&
-    state.persistencePaused &&
     options.acceptedBeforeQuiesce !== true
   ) {
     const runtimeTxTypes = (runtimeTxs ?? []).map((tx) => tx.type).join(',') || 'none';
