@@ -30,12 +30,18 @@ export function registerDebugSurface<T>(
   name: string,
   factory: () => T,
   options: DebugSurfaceOptions = {},
-): void {
-  if (!isLocalDebugSurfaceAllowed()) return;
+): () => void {
+  if (!isLocalDebugSurfaceAllowed()) return () => {};
   const root = ensureDebugRoot();
   Object.defineProperty(root, name, {
     configurable: true,
     enumerable: options.enumerable ?? true,
     get: factory,
   });
+  return () => {
+    const currentRoot = (window as XlnDebugWindow).__xln;
+    if (!currentRoot) return;
+    const descriptor = Object.getOwnPropertyDescriptor(currentRoot, name);
+    if (descriptor?.get === factory) delete currentRoot[name];
+  };
 }

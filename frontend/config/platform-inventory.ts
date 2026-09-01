@@ -432,6 +432,19 @@ export const PLATFORM_INVENTORY = [
     evidence: ['tests/frontend/workspace/workspace-dock-layout.test.ts'],
   },
   {
+    id: 'ops-workspace-graph3d-lifecycle',
+    owner: 'ops',
+    workPackage: 'WP7',
+    status: 'implemented',
+    interfaces: ['registry'],
+    sources: [
+      'frontend/packages/ui/src/graph3d-lifecycle.ts',
+      'frontend/src/lib/utils/runtime/debugSurface.ts',
+    ],
+    consumers: ['frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte'],
+    evidence: ['tests/frontend/graph/graph3d-lifecycle.test.ts'],
+  },
+  {
     id: 'ops-workspace-registries',
     owner: 'ops',
     workPackage: 'WP7',
