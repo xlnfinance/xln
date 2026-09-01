@@ -88,6 +88,7 @@ const replayEnvironment = (dbRoot: string): NodeJS.ProcessEnv => {
     ...process.env,
     XLN_DB_PATH: dbRoot,
     XLN_RDB_ROOT: dbRoot,
+    XLN_RUNTIME_OP_COUNTERS_DIR: join(dbRoot, 'op-counters'),
   };
   for (const key of [
     'XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_AUTHORITY_REPLAY',

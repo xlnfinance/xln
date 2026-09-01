@@ -24,17 +24,19 @@ const HUB_PASSTHROUGH_ENV_KEYS = [
   'XLN_RSCORE_PROFILE_PROJECTION',
   'XLN_RUNTIME_OP_COUNTERS',
   'XLN_RUNTIME_OP_COUNTERS_DIR',
-  // Canonical Runtime intake caps. HLT may use these to preserve production
-  // ordering while recording a deep economic WAL; the Hub child, not the
-  // outer orchestrator, owns frame selection.
-  'XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME',
-  'XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME',
   'XLN_ENTITY_PROPOSAL_TRACE',
   'XLN_HEAVY_LOGS',
   'XLN_LOG_FORMAT',
   'XLN_ENTITY_STATE_ROOT_PROFILE',
   'XLN_HLT_ENGINE',
   'XLN_MESH_PRIMARY_JURISDICTION_ONLY',
+] as const;
+
+// Canonical H1 Runtime intake caps. The authority recorder needs a deeper WAL,
+// but its frame policy must not leak into independent H2/H3 Runtime owners.
+const H1_RUNTIME_CAP_ENV_KEYS = [
+  'XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME',
+  'XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME',
 ] as const;
 
 export const buildHubEngineArgs = (
@@ -117,6 +119,13 @@ export const buildHubChildProcessEnv = (
   }
   for (const key of HUB_PASSTHROUGH_ENV_KEYS) {
     if (source[key]) child[key] = source[key];
+  }
+  if (options.hubName.toUpperCase() === 'H1') {
+    for (const key of H1_RUNTIME_CAP_ENV_KEYS) {
+      if (source[key]) child[key] = source[key];
+    }
+  } else {
+    for (const key of H1_RUNTIME_CAP_ENV_KEYS) delete child[key];
   }
   return child;
 };

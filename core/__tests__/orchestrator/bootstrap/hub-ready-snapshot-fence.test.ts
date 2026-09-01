@@ -99,4 +99,6 @@ test('authority evidence captures materialized H1 before MM bootstrap', () => {
   expect(h2['XLN_HLT_AUTHORITY_EVIDENCE']).toBeUndefined();
   expect(h2['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH']).toBeUndefined();
   expect(h2['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES']).toBeUndefined();
+  expect(h2['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME']).toBeUndefined();
+  expect(h2['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME']).toBeUndefined();
 });
