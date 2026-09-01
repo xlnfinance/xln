@@ -23,6 +23,16 @@
   import { activeRuntimeEntry as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vault/vaultStore';
   import SolvencyPanel from './solvency/SolvencyPanel.svelte';
+  import {
+    getArchitectErrorMessage as errorMessage,
+    getArchitectFrameLabel,
+    getArchitectLiveModeBlockMessage,
+    getArchitectScenarioScrollTop,
+    getNextArchitectEntityName,
+    getNextArchitectJurisdictionName,
+    listArchitectEntityIds,
+    type ArchitectMode,
+  } from '../../../../packages/runtime-client/src/architect-panel-view';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
@@ -30,17 +40,16 @@
   export let runtimeFrameTimeIndex: Writable<number>;
   export let runtimeFrameIsLive: Writable<boolean>;
 
-  type Mode = 'explore' | 'build' | 'economy' | 'solvency' | 'governance' | 'resolve';
   type ArchitectRuntimeInput = {
     runtimeTxs: unknown[];
     entityInputs: unknown[];
     jInputs?: unknown[];
     timestamp?: number;
   };
-  let currentMode: Mode = 'economy';
+
+  let currentMode: ArchitectMode = 'economy';
   let loading = false;
   let lastAction = '';
-  const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
   // Reserve operations state
   let selectedEntityForMint = '';
@@ -144,7 +153,7 @@
   /** Guard function - blocks mutations when viewing history */
   function requireLiveMode(action: string): boolean {
     if (!isLiveActionFrame) {
-      lastAction = `${action} requires LIVE mode. Switch to the current runtime state before acting.`;
+      lastAction = getArchitectLiveModeBlockMessage(action);
       console.warn('[Architect] Blocked mutation outside live mode:', action);
       return false;
     }
@@ -268,7 +277,7 @@
   // Get entity IDs for dropdowns (extract entityId from replica keys)
   let entityIds: string[] = [];
   $: entityIds = $runtimeFrameEnv?.state.eReplicas
-    ? Array.from($runtimeFrameEnv.state.eReplicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
+    ? listArchitectEntityIds($runtimeFrameEnv.state.eReplicas.keys() as Iterable<string>)
     : [];
 
   // Listen for VR payment gestures
@@ -399,25 +408,9 @@
   let scenarioCodeTextarea: HTMLTextAreaElement;
   const scenarioCode = ahbScenarioCode;
 
-  // Find line number for current frame in scenarios/ahb.ts
-  function getFrameLineNumber(frameIndex: number): number {
-    const lines = scenarioCode.split('\n');
-    // Match patterns like "FRAME 12:", "Frame 12:", "FRAME 12 ", etc.
-    const framePattern = new RegExp(`FRAME\\s+${frameIndex}[:\\s]`, 'i');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line && framePattern.test(line)) {
-        return i;
-      }
-    }
-    return 0;
-  }
-
   // Scroll textarea to current frame when timeIndex changes
   $: if (scenarioCodeTextarea && $runtimeFrameTimeIndex >= 0) {
-    const lineNumber = getFrameLineNumber($runtimeFrameTimeIndex);
-    const lineHeight = 18; // Approximate line height in pixels
-    scenarioCodeTextarea.scrollTop = lineNumber * lineHeight - 50;
+    scenarioCodeTextarea.scrollTop = getArchitectScenarioScrollTop(scenarioCode, $runtimeFrameTimeIndex);
   }
 
   /** Run preset by ID */
@@ -1191,14 +1184,7 @@
       // Close modal and advance to next number
       showCreateXlnomyModal = false;
 
-      // Extract number from xlnomyN format
-      const match = newXlnomyName.match(/Testnet(\d+)/i);
-      if (match && match[1]) {
-        const num = parseInt(match[1]);
-        newXlnomyName = `Testnet${num + 1}`;
-      } else {
-        newXlnomyName = 'Testnet';
-      }
+      newXlnomyName = getNextArchitectJurisdictionName(newXlnomyName);
 
       publishCurrentEnv();
     } catch (err: unknown) {
@@ -1288,12 +1274,7 @@
 
       lastAction = ` Created "${newEntityName}"`;
 
-      // Auto-advance to next common name for fast creation
-      const names = ['alice', 'bob', 'charlie', 'dave', 'eve', 'frank', 'grace', 'heidi'];
-      const currentIndex = names.indexOf(newEntityName.toLowerCase());
-      newEntityName = currentIndex >= 0 && currentIndex < names.length - 1
-        ? (names[currentIndex + 1] || 'entity')
-        : 'entity'; // Canonical default name
+      newEntityName = getNextArchitectEntityName(newEntityName);
 
       publishCurrentEnv();
     } catch (err: unknown) {
@@ -1402,7 +1383,7 @@
 
         {#if $runtimeFrameHistory && $runtimeFrameHistory.length > 0}
           <div class="scenario-code-section">
-            <h5>Scenario Code (Frame {$runtimeFrameTimeIndex >= 0 ? $runtimeFrameTimeIndex : 'LIVE'})</h5>
+            <h5>Scenario Code (Frame {getArchitectFrameLabel($runtimeFrameTimeIndex)})</h5>
             <textarea
               bind:this={scenarioCodeTextarea}
               class="scenario-code-textarea"
