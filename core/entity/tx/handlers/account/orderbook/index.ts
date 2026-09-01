@@ -65,19 +65,18 @@ const processSameAccountOrderbookOffers = (
   }
   const zeroFillCancels = zeroFillCancelTotal(pass);
   if (pass.pairSweepCount === 0 && zeroFillCancels === 0) return;
-  const summary = {
+  // Bounded reason categories, so one line explains every offer this pass
+  // destroyed without a fill. Self-trade prevention and price bands are normal
+  // market outcomes, so this stays a debug aggregate: neither a per-offer line
+  // nor a warning for an expected result belongs in a live Hub log.
+  orderbookSameLog.debug('pass.summary', {
     offers: input.sameAccountSwapOffers.length,
     pairSweep: pass.pairSweepCount,
     zeroFillCancels,
-    // Bounded reason categories, so one line explains every offer this pass
-    // destroyed without a fill. A per-offer line would flood the Hub log:
-    // self-trade prevention and price bands fire by design in a real market.
     byReason: Object.fromEntries(Array.from(pass.zeroFillCancels).sort(
       ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
     )),
-  };
-  if (zeroFillCancels > 0) orderbookSameLog.warn('pass.summary', summary);
-  else orderbookSameLog.debug('pass.summary', summary);
+  });
 };
 
 /**

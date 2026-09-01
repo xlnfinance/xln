@@ -19,6 +19,7 @@
  */
 
 import type { EntityAccountMap } from '../../entity/state/persistent-account-map';
+import { safeStringify } from '../../protocol/serialization';
 import type { TsAccountWorkerBatchResult, TsAccountWorkerPostAccount } from './protocol';
 import { tsAccountLogicalShard } from './sharding';
 
@@ -128,7 +129,7 @@ const unreportedShards = (input: AccountRootDivergenceInput): readonly number[] 
 const describeAccountRootDivergence = (input: AccountRootDivergenceInput): string => {
   const missingShards = unreportedShards(input);
   const unreportedDirty = unreportedDirtyAccounts(input.applied, input.accounts);
-  return JSON.stringify({
+  return safeStringify({
     frameId: input.frameId,
     workers: input.workers,
     entityTxTypes: input.entityTxTypes,
