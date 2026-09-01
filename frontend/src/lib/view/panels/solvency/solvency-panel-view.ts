@@ -1,7 +1,11 @@
 import { calculateSolvency } from '@xln/core/api/public/public-utilities';
-import type { RuntimeReplica, RuntimeAdapterSolvencySummary } from '@xln/core/api/public/runtime-module';
+import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
+import {
+  buildSolvencyProjection as projectSolvencyCalculation,
+  type SolvencyProjection,
+} from '../../../../../packages/runtime-client/src/solvency-panel-view';
 
-export type SolvencyProjection = Pick<RuntimeAdapterSolvencySummary, 'assets' | 'isValid'>;
+export type { SolvencyProjection };
 
 export type SolvencyFrame = RuntimeReplica;
 
@@ -9,10 +13,5 @@ export function buildSolvencyProjection(
   frame: SolvencyFrame | null | undefined,
 ): SolvencyProjection | null {
   if (!(frame?.state.eReplicas instanceof Map)) return null;
-  const solvency = calculateSolvency(frame);
-  return {
-    assets: Array.from(solvency.byAsset.values())
-      .sort((left, right) => left.stackId.localeCompare(right.stackId) || left.tokenId - right.tokenId),
-    isValid: solvency.isValid,
-  };
+  return projectSolvencyCalculation(calculateSolvency(frame));
 }

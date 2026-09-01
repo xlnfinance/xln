@@ -45,9 +45,9 @@ to finish, not a reason to block unrelated scaffolding or migration slices.
 
 | Artifact | Status | Next action |
 |---|---|---|
-| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS UNDER WAY; WP8 PARTIAL` | Continue WP7 panel ports (RuntimeIO → Solvency → TimeMachine → … → Graph3D last). |
+| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH SOLVENCY; WP8 PARTIAL` | Continue WP7 panel ports (Runtime Diagnostics → Gossip → TimeMachine → … → Graph3D last). |
 | [Technical decisions](react-frontend-migration-decisions.md) | `ACTIVE` | Use the recorded application, route, build, and coexistence decisions. |
-| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS UNDER WAY` | Continue the workspace panel port, then execute WP8 candidate integration (PWA, native, deployment, rollback). |
+| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH SOLVENCY` | Continue with Runtime Diagnostics, then execute WP8 candidate integration (PWA, native, deployment, rollback). |
 
 WP9 parity follows application completion; WP10 cutover and WP11 production
 activation remain separately owner-authorized.

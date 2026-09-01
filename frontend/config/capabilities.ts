@@ -367,8 +367,19 @@ export const CAPABILITIES = [
     id: 'ops-workspace',
     owner: 'ops',
     routes: ['/embed'],
-    currentSources: ['frontend/src/lib/view/View.svelte', 'frontend/src/routes/embed/+page.svelte'],
-    behavior: ['Dockview layout', 'Graph3D and Architect', 'Runtime I/O, console, and Time Machine'],
+    currentSources: [
+      'frontend/src/lib/view/View.svelte',
+      'frontend/src/routes/embed/+page.svelte',
+      'frontend/packages/runtime-client/src/console-panel-view.ts',
+      'frontend/packages/runtime-client/src/runtime-io-panel-view.ts',
+      'frontend/packages/runtime-client/src/solvency-panel-view.ts',
+    ],
+    behavior: [
+      'Dockview layout',
+      'Graph3D and Architect',
+      'Runtime I/O, console, Solvency, and Time Machine',
+      'framework-neutral panel projections shared with the canonical Svelte workspace',
+    ],
     status: 'unstarted',
   },
 ] as const satisfies readonly CapabilityDefinition[];
