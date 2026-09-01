@@ -3,7 +3,7 @@ import type { EntityState } from '../../entity/types';
 import type { EntityRuntimeContext } from '../../entity/runtime-context';
 import type { RuntimeOverlayRecord } from '../../types/account';
 import { type OrderbookExtState } from '..';
-import { removeBookOrderById } from '.';
+import { removeBookOrderByIdWithPair } from '.';
 import {
   assertCrossJurisdictionOrderAdmissible,
   crossJurisdictionBookAdmissionKeyFor,
@@ -47,14 +47,17 @@ export const applyCommittedSwapCancelsToOrderbook = (
   state: EntityState,
   cancels: readonly CommittedSwapCancel[],
   storageChanges: RuntimeOverlayRecord[] = [],
-): void => {
-  if (cancels.length === 0) return;
+): string[] => {
+  if (cancels.length === 0) return [];
   const ext = state.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return;
+  if (!ext) return [];
+  const touchedPairs = new Set<string>();
   crossJBookLog.debug('committed_cancel.apply', { count: cancels.length });
   for (const { accountId, offerId } of cancels) {
     const namespacedOrderId = `${accountId}:${offerId}`;
-    if (removeBookOrderById(state, namespacedOrderId, storageChanges)) {
+    const pairId = removeBookOrderByIdWithPair(state, namespacedOrderId, storageChanges);
+    if (pairId) {
+      touchedPairs.add(pairId);
       const offer = findAccountByCounterparty(state, accountId)?.state.swapOffers?.get(offerId);
       if (offer?.crossJurisdiction) {
         markCrossJurisdictionBookAdmissionClosed(
@@ -68,6 +71,7 @@ export const applyCommittedSwapCancelsToOrderbook = (
       crossJBookLog.trace('committed_cancel.removed', { order: shortOrder(offerId) });
     }
   }
+  return Array.from(touchedPairs).sort();
 };
 
 export const findAccountByCounterparty = (state: EntityState | null | undefined, counterpartyId: string) => {

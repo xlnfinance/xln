@@ -1108,6 +1108,91 @@ describe('orderbook matching execution mapping', () => {
     expect(getBookOrder(finalBook!, makerOrderId)?.qtyLots).toBe(1n);
   });
 
+  test('drains every eligible crossing after a committed removal exposes the pair', () => {
+    const pairId = '2/5';
+    const priceTicks = 10_000n;
+    const rows = [
+      [MAKER_ACCOUNT, MAKER_ENTITY, 'pending-ask', 1],
+      [MAKER_ACCOUNT_ONE, MAKER_ONE, 'eligible-ask-1', 1],
+      [MAKER_ACCOUNT_TWO, MAKER_TWO, 'eligible-ask-2', 1],
+      [ALICE_MAKER_ACCOUNT, ALICE, 'pending-bid', 0],
+      [ALICE_TAKER_ACCOUNT, TAKER_ENTITY, 'eligible-bid-1', 0],
+      [ASK_MAKER_ACCOUNT, BOB, 'eligible-bid-2', 0],
+    ] as const;
+    const offers = rows.map(([accountId, ownerId, offerId, side], createdHeight) => ({
+      offerId,
+      makerIsLeft: false,
+      fromEntity: HUB_ENTITY,
+      toEntity: ownerId,
+      accountId,
+      createdHeight,
+      giveTokenId: side === 1 ? 2 : 5,
+      giveAmount: SWAP_LOT_SCALE,
+      wantTokenId: side === 1 ? 5 : 2,
+      wantAmount: SWAP_LOT_SCALE,
+      timeInForce: 0 as const,
+      priceTicks,
+    }));
+    const askOrderIds = offers.slice(0, 3).map(offer => orderKey(offer.accountId, offer.offerId));
+    let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+    for (const [index, offer] of offers.entries()) {
+      book = applyCommand(book, {
+        kind: 0,
+        ownerId: offer.toEntity,
+        orderId: orderKey(offer.accountId, offer.offerId),
+        side: index < 3 ? 1 : 0,
+        tif: 0,
+        postOnly: false,
+        priceTicks,
+        qtyLots: 1n,
+      }, index < 3 ? undefined : { suspendedOrderIds: new Set(askOrderIds) }).state;
+    }
+    const accounts = new Map(offers.map(offer => [offer.accountId, makeAccountMachine([offer])]));
+    for (const pendingOffer of [offers[0]!, offers[3]!]) {
+      accounts.get(pendingOffer.accountId)!.mempool.push({
+        type: 'swap_resolve',
+        data: { offerId: pendingOffer.offerId, fillRatio: 0, cancelRemainder: true },
+      });
+    }
+    const entityState = {
+      entityId: HUB_ENTITY,
+      accounts,
+      orderbookExt: {
+        hubProfile: {
+          entityId: HUB_ENTITY,
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, book]]),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
+      },
+    } as any;
+
+    const result = processCommittedOrderbookSwaps(entityState, [], {
+      resumeSamePairIds: [pairId],
+    } as any);
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook?.tradeCount).toBe(2);
+    expect(result.accountTxs.map(item => item.tx.type === 'swap_resolve' && item.tx.data.offerId))
+      .toEqual(['eligible-ask-1', 'eligible-bid-1', 'eligible-ask-2', 'eligible-bid-2']);
+    for (const offer of offers.slice(1, 3).concat(offers.slice(4))) {
+      expect(getBookOrder(finalBook!, orderKey(offer.accountId, offer.offerId))).toBeNull();
+    }
+    expect(getBookOrder(finalBook!, orderKey(offers[0]!.accountId, offers[0]!.offerId))).not.toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(offers[3]!.accountId, offers[3]!.offerId))).not.toBeNull();
+  });
+
   test('uncrosses with the older maker price and preserves the taker level position', () => {
     const askId = 'maker-ask';
     const firstBidId = 'first-crossed-bid';

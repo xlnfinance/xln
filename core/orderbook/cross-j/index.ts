@@ -23,13 +23,13 @@ const crossJurisdictionBookOrderIdFor = (sourceEntityId: string, orderId: string
 const crossJurisdictionBookOrderId = (route: CrossJurisdictionSwapRoute): string =>
   crossJurisdictionBookOrderIdFor(route.source.entityId, route.orderId);
 
-export const removeBookOrderById = (
+export const removeBookOrderByIdWithPair = (
   state: EntityState,
   namespacedOrderId: string,
   storageChanges: RuntimeOverlayRecord[],
-): boolean => {
+): string | null => {
   const ext = state.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return false;
+  if (!ext) return null;
 
   const matches = getOrderbookPairsForOrder(ext, namespacedOrderId)
     .flatMap((pairId) => {
@@ -44,7 +44,7 @@ export const removeBookOrderById = (
   }
 
   const match = matches[0];
-  if (!match) return false;
+  if (!match) return null;
 
   const result = applyCommand(match.book, {
     kind: 1,
@@ -53,8 +53,14 @@ export const removeBookOrderById = (
   });
   replaceOrderbookPair(ext, match.pairId, result.state);
   storageChanges.push({ family: 'book', entityId: state.entityId, pairId: match.pairId });
-  return true;
+  return match.pairId;
 };
+
+export const removeBookOrderById = (
+  state: EntityState,
+  namespacedOrderId: string,
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => removeBookOrderByIdWithPair(state, namespacedOrderId, storageChanges) !== null;
 
 const hasBookOrderById = (
   state: EntityState,

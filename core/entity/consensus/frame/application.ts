@@ -836,6 +836,7 @@ type ApplyOrderbookMatchingContext = {
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   allSwapOffersCreated: SwapOfferEvent[];
+  resumeSamePairIds: readonly string[];
   allOutputs: EntityOutput[];
   proposableAccounts: ProposableAccountMap;
   candidateEffects: EntityCandidateEffect[];
@@ -1040,7 +1041,7 @@ const commitOrderbookMatchResult = (
 async function applyOrderbookMatching(
   context: ApplyOrderbookMatchingContext,
 ): Promise<OrderbookFrameStats> {
-  const { env, currentEntityState, allSwapOffersCreated } = context;
+  const { env, currentEntityState, allSwapOffersCreated, resumeSamePairIds } = context;
   const stats = emptyOrderbookFrameStats();
   const books = currentEntityState.orderbookExt?.books;
   stats.hasPersistedCrossJurisdictionBook = Boolean(
@@ -1053,7 +1054,11 @@ async function applyOrderbookMatching(
   // the user endpoint commits Account state and intentionally does no book
   // work. This is an ownership boundary, not an alternate settlement path.
   if (!currentEntityState.orderbookExt) return stats;
-  if (allSwapOffersCreated.length === 0 && !stats.hasPersistedCrossJurisdictionBook) {
+  if (
+    allSwapOffersCreated.length === 0 &&
+    resumeSamePairIds.length === 0 &&
+    !stats.hasPersistedCrossJurisdictionBook
+  ) {
     return stats;
   }
 
@@ -1070,6 +1075,7 @@ async function applyOrderbookMatching(
   );
   const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, {
     candidateEffects: context.candidateEffects,
+    resumeSamePairIds,
   });
   stats.orderbookMatched = true;
   stats.orderbookMempoolOps = matchResult.accountTxs.length;
@@ -1501,8 +1507,9 @@ const applyPostEntityTxPhases = async (
 ): Promise<PostEntityTxPhases> => {
   const { context, crossJSetupPhase, markFrameProfile } = working;
   let currentEntityState = working.currentEntityState;
+  let resumeSamePairIds: readonly string[] = [];
   if (context.allSwapOffersCancelled.length > 0) {
-    applyCommittedSwapCancelsToOrderbook(
+    resumeSamePairIds = applyCommittedSwapCancelsToOrderbook(
       context.env,
       currentEntityState,
       context.allSwapOffersCancelled,
@@ -1526,6 +1533,7 @@ const applyPostEntityTxPhases = async (
     accountConsensusContext: context.accountConsensusContext,
     currentEntityState,
     allSwapOffersCreated: context.allSwapOffersCreated,
+    resumeSamePairIds,
     allOutputs: context.allOutputs,
     proposableAccounts: context.proposableAccounts,
     candidateEffects: context.candidateEffects,

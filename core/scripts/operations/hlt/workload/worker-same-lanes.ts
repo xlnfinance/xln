@@ -183,10 +183,6 @@ export const prepareParallelSameLoad = async (options: {
   if (anchor <= bestBid || anchor >= bestVisibleAsk) {
     throw new Error('PRODUCTION_SWAP_LOAD_INDEPENDENT_SPREAD_MISSING');
   }
-  const regularMakerAsk = (anchor + bestVisibleAsk) / 2n;
-  if (regularMakerAsk <= anchor || regularMakerAsk >= bestVisibleAsk) {
-    throw new Error('HLT_REALISTIC_USER_PRICE_LEVELS_MISSING');
-  }
   const totalOrdersPerCohort = options.swapsPerRound * options.rounds;
   // Every user is a trader. Strategy assignment changes per round; there are
   // no permanent maker/taker populations or role-specific Runtime hosts.
@@ -197,11 +193,9 @@ export const prepareParallelSameLoad = async (options: {
         rounds: options.rounds,
         lanesPerSide: options.lanes,
         minimumTradeSize: options.minimumTradeSize,
-        partialMakerAskPriceTicks: anchor,
-        makerAskPriceTicks: regularMakerAsk,
+        matchedPriceTicks: anchor,
+        restingAskPriceTicks: highestVisibleAsk,
         restingBidPriceTicks: bestBid,
-        takerLimitPriceTicks: highestVisibleAsk,
-        mmAsks: options.initialBook.executableAsks,
       })
     : null;
   const balancedPlans = options.execution === 'balanced'

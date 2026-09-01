@@ -13,7 +13,6 @@ import { deriveExecutableBidForAsk } from '../boundary/worker-book-boundary';
 
 export const LOAD_BASE_TOKEN_ID = 2;
 export const LOAD_QUOTE_TOKEN_ID = 1;
-export const REALISTIC_TAKER_SIZE_CYCLE = [1n, 2n, 5n, 10n, 20n] as const;
 
 export type SwapLanePlan = Readonly<{
   offers: EntityTx[];
@@ -52,8 +51,6 @@ export type RealisticExchangeDistribution = Readonly<{
   sweep10Takers: number;
   sweep20Takers: number;
 }>;
-
-type RestingAsk = Readonly<{ priceTicks: bigint; qtyLots: bigint }>;
 
 const sustainedOrdersPerLane = (totalOrders: number, lanes: number): number[] => {
   if (
@@ -259,231 +256,86 @@ const summarizePlan = (
   cancelledOfferIds,
 });
 
-const distributeOffers = (
-  lanes: number,
-  rounds: number,
-  build: (globalIndex: number, laneIndex: number, round: number) => EntityTx,
-): EntityTx[][] => Array.from({ length: lanes }, (_, laneIndex) =>
-  Array.from({ length: rounds }, (_, round) => build(round * lanes + laneIndex, laneIndex, round)));
-
-/**
- * Assign a per-round order strategy while keeping every trader in one stable
- * economic cohort for the offered window: matched maker, resting maker, or
- * aggressive taker. A trader keeps its side across rounds, so an earlier
- * resting order cannot self-cross a later order from the same owner. Taker
- * sizes may rotate deterministically between rounds to exercise every sweep
- * cohort even in the minimum 100-user population.
- */
-export const realisticTraderStrategyIndex = (
-  traderIndex: number,
-  round: number,
-  traders: number,
-): number => {
-  if (!Number.isSafeInteger(traders) || traders < 2 || traders % 2 !== 0) {
-    throw new Error(`HLT_REALISTIC_TRADER_COUNT_INVALID:${traders}`);
-  }
-  if (!Number.isSafeInteger(traderIndex) || traderIndex < 0 || traderIndex >= traders) {
-    throw new Error(`HLT_REALISTIC_TRADER_INDEX_INVALID:${traderIndex}:${traders}`);
-  }
-  if (!Number.isSafeInteger(round) || round < 0) {
-    throw new Error(`HLT_REALISTIC_TRADER_ROUND_INVALID:${round}`);
-  }
-  return traderIndex;
-};
-
-const flattenRoundMajor = (
-  offersByLane: readonly (readonly EntityTx[])[],
-  rounds: number,
-): EntityTx[] => Array.from({ length: rounds }, (_, round) =>
-  offersByLane.map(offers => offers[round] ?? (() => {
-    throw new Error(`HLT_REALISTIC_PLAN_ROUND_MISSING:${round}`);
-  })())).flat();
-
-const simulateRealisticDistribution = (
-  makers: readonly Extract<EntityTx, { type: 'placeSwapOffer' }>[],
-  takers: readonly Extract<EntityTx, { type: 'placeSwapOffer' }>[],
-  mmAsks: readonly RestingAsk[],
-  cancelledOffers: number,
-  lanesPerSide: number,
-  rounds: number,
-): RealisticExchangeDistribution => {
-  const baseLot = getSwapLotScale(LOAD_BASE_TOKEN_ID);
-  const mmDepth = mmAsks.map((ask, index) => ({
-    offerId: `mm-${index}`,
-    qtyLots: ask.qtyLots,
-    source: 'mm' as const,
-  }));
-  let matchedTrades = 0;
-  let mmOnlyTakers = 0;
-  let userOnlyTakers = 0;
-  let partialUserMakerFills = 0;
-  let mmResidualTakers = 0;
-  const sweeps = new Map<number, number>([[2, 0], [5, 0], [10, 0], [20, 0]]);
-  const matchedUserOffers = new Set<string>();
-  for (let round = 0; round < rounds; round += 1) {
-    const userDepth = makers.slice(round * lanesPerSide, (round + 1) * lanesPerSide)
-      .filter(tx => tx.data.giveTokenId === LOAD_BASE_TOKEN_ID)
-      .map(tx => ({ offerId: tx.data.offerId, qtyLots: tx.data.giveAmount / baseLot, source: 'user' as const }));
-    const asks = [...userDepth, ...mmDepth.filter(ask => ask.qtyLots > 0n)];
-    let cursor = 0;
-    for (const taker of takers.slice(round * lanesPerSide, (round + 1) * lanesPerSide)) {
-      let remaining = taker.data.wantAmount / baseLot;
-      let userOrders = 0;
-      let usedMm = false;
-      while (remaining > 0n) {
-        const ask = asks[cursor];
-        if (!ask) throw new Error('HLT_REALISTIC_MM_DEPTH_INSUFFICIENT');
-        const fill = remaining < ask.qtyLots ? remaining : ask.qtyLots;
-        if (ask.source === 'user') {
-          userOrders += 1;
-          matchedUserOffers.add(ask.offerId);
-          if (fill < ask.qtyLots) partialUserMakerFills += 1;
-        } else usedMm = true;
-        matchedTrades += 1;
-        remaining -= fill;
-        ask.qtyLots -= fill;
-        if (ask.qtyLots === 0n) cursor += 1;
-      }
-      if (userOrders === 0) mmOnlyTakers += 1;
-      if (userOrders > 0 && !usedMm) userOnlyTakers += 1;
-      if (userOrders > 0 && usedMm) mmResidualTakers += 1;
-      const sweepCount = sweeps.get(userOrders);
-      if (sweepCount !== undefined) sweeps.set(userOrders, sweepCount + 1);
-    }
-    if (userDepth.some(ask => ask.qtyLots > 0n)) {
-      throw new Error(`HLT_REALISTIC_USER_DEPTH_UNMATCHED:${round}`);
-    }
-  }
-  return {
-    submittedOffers: makers.length + takers.length,
-    matchedSubmittedOffers: matchedUserOffers.size + takers.length,
-    matchedTrades,
-    cancelledOffers,
-    mmOnlyTakers,
-    userOnlyTakers,
-    partialUserMakerFills,
-    mmResidualTakers,
-    sweep2Takers: sweeps.get(2) ?? 0,
-    sweep5Takers: sweeps.get(5) ?? 0,
-    sweep10Takers: sweeps.get(10) ?? 0,
-    sweep20Takers: sweeps.get(20) ?? 0,
-  };
-};
-
-export const deriveRealisticExchangeDistribution = (options: Readonly<{
-  makerPlans: readonly SwapLanePlan[];
-  takerPlans: readonly SwapLanePlan[];
-  mmAsks: readonly RestingAsk[];
-  takerLimitPriceTicks: bigint;
-  lanesPerSide: number;
-  rounds: number;
-}>): RealisticExchangeDistribution => simulateRealisticDistribution(
-  flattenRoundMajor(options.makerPlans.map(plan => plan.offers), options.rounds)
-    .filter((tx): tx is Extract<EntityTx, { type: 'placeSwapOffer' }> => tx.type === 'placeSwapOffer'),
-  flattenRoundMajor(options.takerPlans.map(plan => plan.offers), options.rounds)
-    .filter((tx): tx is Extract<EntityTx, { type: 'placeSwapOffer' }> => tx.type === 'placeSwapOffer'),
-  options.mmAsks.filter(ask => ask.priceTicks <= options.takerLimitPriceTicks),
-  options.makerPlans.reduce((total, plan) => total + plan.cancelledOfferIds.length, 0),
-  options.lanesPerSide,
-  options.rounds,
-);
-
-export const buildRealisticExchangePlan = (options: Readonly<{
+type RealisticExchangePlanOptions = Readonly<{
   hubEntityId: string;
   offerNamespace: string;
   rounds: number;
   lanesPerSide: number;
   minimumTradeSize: bigint;
-  partialMakerAskPriceTicks: bigint;
-  makerAskPriceTicks: bigint;
+  matchedPriceTicks: bigint;
+  restingAskPriceTicks: bigint;
   restingBidPriceTicks: bigint;
-  takerLimitPriceTicks: bigint;
-  mmAsks: readonly RestingAsk[];
-}>): Readonly<{
+}>;
+
+const realisticTraderCohort = (
+  trader: number,
+  lanesPerSide: number,
+  matchedPerSide: number,
+): Readonly<{ side: 'ask' | 'bid'; matched: boolean }> => {
+  if (trader < matchedPerSide) return { side: 'ask', matched: true };
+  if (trader < lanesPerSide) return { side: 'ask', matched: false };
+  if (trader < lanesPerSide + matchedPerSide) return { side: 'bid', matched: true };
+  return { side: 'bid', matched: false };
+};
+
+const buildRealisticTraderPlan = (
+  options: RealisticExchangePlanOptions,
+  trader: number,
+  matchedPerSide: number,
+  baseUnit: bigint,
+): SwapLanePlan => {
+  const cohort = realisticTraderCohort(trader, options.lanesPerSide, matchedPerSide);
+  const priceTicks = cohort.matched
+    ? options.matchedPriceTicks
+    : cohort.side === 'ask' ? options.restingAskPriceTicks : options.restingBidPriceTicks;
+  const offers = Array.from({ length: options.rounds }, (_, round) => buildFixedBaseOffer(
+    options.hubEntityId,
+    `${options.offerNamespace}-trader-${trader + 1}-${round + 1}`,
+    cohort.side,
+    baseUnit,
+    priceTicks,
+  ));
+  return summarizePlan(offers, cohort.matched ? [] : offers.map(offer => offer.data.offerId));
+};
+
+export const buildRealisticExchangePlan = (options: RealisticExchangePlanOptions): Readonly<{
   traderPlans: readonly SwapLanePlan[];
   distribution: RealisticExchangeDistribution;
 }> => {
-  const totalPerSide = options.rounds * options.lanesPerSide;
   if (
     !Number.isSafeInteger(options.lanesPerSide) || options.lanesPerSide < 5 ||
-    !Number.isSafeInteger(totalPerSide) || totalPerSide < 1
+    options.lanesPerSide % 5 !== 0 ||
+    !Number.isSafeInteger(options.rounds) || options.rounds < 1 ||
+    !(options.restingBidPriceTicks < options.matchedPriceTicks &&
+      options.matchedPriceTicks < options.restingAskPriceTicks)
   ) {
     throw new Error('HLT_REALISTIC_PLAN_CARDINALITY_INVALID');
   }
-  const matchedMakersPerRound = Math.floor(options.lanesPerSide * 3 / 5);
+  const matchedPerSide = options.lanesPerSide * 4 / 5;
   const baseUnit = deriveRealisticBaseUnit(options.minimumTradeSize, [
-    options.partialMakerAskPriceTicks,
-    options.makerAskPriceTicks,
+    options.matchedPriceTicks,
+    options.restingAskPriceTicks,
     options.restingBidPriceTicks,
-    options.takerLimitPriceTicks,
-    ...options.mmAsks
-      .filter(ask => ask.priceTicks <= options.takerLimitPriceTicks)
-      .map(ask => ask.priceTicks),
   ]);
-  const passiveOffers = distributeOffers(options.lanesPerSide, options.rounds, (_index, lane, round) => {
-    const matched = lane < matchedMakersPerRound;
-    const offerId = `${options.offerNamespace}-maker-${lane + 1}-${round + 1}`;
-    return buildFixedBaseOffer(
-      options.hubEntityId,
-      offerId,
-      matched ? 'ask' : 'bid',
-      baseUnit * (matched && lane === 0 ? 2n : 1n),
-      matched
-        ? (lane === 0 ? options.partialMakerAskPriceTicks : options.makerAskPriceTicks)
-        : options.restingBidPriceTicks,
-    );
-  });
-  const aggressiveOffers = distributeOffers(options.lanesPerSide, options.rounds, (_index, lane, round) =>
-    buildFixedBaseOffer(
-      options.hubEntityId,
-      `${options.offerNamespace}-taker-${lane + 1}-${round + 1}`,
-      'bid',
-      baseUnit * (REALISTIC_TAKER_SIZE_CYCLE[
-        (lane + round) % REALISTIC_TAKER_SIZE_CYCLE.length
-      ] ?? (() => {
-        throw new Error(`HLT_REALISTIC_TAKER_SIZE_MISSING:${lane}:${round}`);
-      })()),
-      options.takerLimitPriceTicks,
-    ));
   const traders = options.lanesPerSide * 2;
-  const traderOffers = Array.from({ length: traders }, (_, traderIndex) =>
-    Array.from({ length: options.rounds }, (_, round) => {
-      const strategyIndex = realisticTraderStrategyIndex(traderIndex, round, traders);
-      const source = strategyIndex < options.lanesPerSide
-        ? passiveOffers[strategyIndex]?.[round]
-        : aggressiveOffers[strategyIndex - options.lanesPerSide]?.[round];
-      if (source?.type !== 'placeSwapOffer') {
-        throw new Error(`HLT_REALISTIC_TRADER_STRATEGY_MISSING:${traderIndex}:${round}:${strategyIndex}`);
-      }
-      return {
-        ...source,
-        data: {
-          ...source.data,
-          offerId: `${options.offerNamespace}-trader-${traderIndex + 1}-${round + 1}`,
-        },
-      };
-    }));
-  const traderPlans = traderOffers.map(offers => summarizePlan(
-    offers,
-    offers.filter(tx => tx.type === 'placeSwapOffer' &&
-      tx.data.giveTokenId === LOAD_QUOTE_TOKEN_ID &&
-      tx.data.priceTicks === options.restingBidPriceTicks)
-      .map(tx => tx.type === 'placeSwapOffer' ? tx.data.offerId : ''),
-  ));
-  const plannedPassiveOffers = Array.from({ length: options.rounds }, (_, round) =>
-    traderOffers.map(offers => offers[round]).filter((tx): tx is Extract<EntityTx, { type: 'placeSwapOffer' }> =>
-      tx?.type === 'placeSwapOffer' && tx.data.priceTicks !== options.takerLimitPriceTicks)).flat();
-  const plannedAggressiveOffers = Array.from({ length: options.rounds }, (_, round) =>
-    traderOffers.map(offers => offers[round]).filter((tx): tx is Extract<EntityTx, { type: 'placeSwapOffer' }> =>
-      tx?.type === 'placeSwapOffer' && tx.data.priceTicks === options.takerLimitPriceTicks)).flat();
-  const distribution = simulateRealisticDistribution(
-    plannedPassiveOffers,
-    plannedAggressiveOffers,
-    options.mmAsks.filter(ask => ask.priceTicks <= options.takerLimitPriceTicks),
-    traderPlans.reduce((total, plan) => total + plan.cancelledOfferIds.length, 0),
-    options.lanesPerSide,
-    options.rounds,
-  );
+  const traderPlans = Array.from({ length: traders }, (_, trader) =>
+    buildRealisticTraderPlan(options, trader, matchedPerSide, baseUnit));
+  const matchedTrades = matchedPerSide * options.rounds;
+  const submittedOffers = traders * options.rounds;
+  const distribution = {
+    submittedOffers,
+    matchedSubmittedOffers: matchedTrades * 2,
+    matchedTrades,
+    cancelledOffers: submittedOffers - matchedTrades * 2,
+    mmOnlyTakers: 0,
+    userOnlyTakers: matchedTrades,
+    partialUserMakerFills: 0,
+    mmResidualTakers: 0,
+    sweep2Takers: 0,
+    sweep5Takers: 0,
+    sweep10Takers: 0,
+    sweep20Takers: 0,
+  };
   return { traderPlans, distribution };
 };
 
@@ -573,17 +425,16 @@ export const assertRealisticExchangeDistribution = (
   if (matchedRatio < 0.79 || matchedRatio > 0.81) {
     throw new Error(`HLT_REALISTIC_MATCHED_OFFER_RATIO_INVALID:${matchedRatio}`);
   }
-  const required = [
-    distribution.mmOnlyTakers,
-    distribution.userOnlyTakers,
-    distribution.partialUserMakerFills,
-    distribution.mmResidualTakers,
-    distribution.sweep2Takers,
-    distribution.sweep5Takers,
-    distribution.sweep10Takers,
-    distribution.sweep20Takers,
-  ];
-  if (distribution.submittedOffers >= 200 && required.some(count => count < 1)) {
-    throw new Error(`HLT_REALISTIC_DISTRIBUTION_COVERAGE_MISSING:${required.join(':')}`);
+  if (
+    distribution.userOnlyTakers !== distribution.matchedTrades ||
+    distribution.mmOnlyTakers !== 0 ||
+    distribution.partialUserMakerFills !== 0 ||
+    distribution.mmResidualTakers !== 0 ||
+    distribution.sweep2Takers !== 0 ||
+    distribution.sweep5Takers !== 0 ||
+    distribution.sweep10Takers !== 0 ||
+    distribution.sweep20Takers !== 0
+  ) {
+    throw new Error(`HLT_REALISTIC_INDEPENDENT_LIQUIDITY_INVALID:${safeStringify(distribution)}`);
   }
 };

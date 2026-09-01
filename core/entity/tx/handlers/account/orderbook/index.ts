@@ -27,7 +27,7 @@ import {
   zeroFillCancelTotal,
   type SameOrderbookProcessInput,
 } from './same/pass';
-import { processSameOrderbookOffer } from './same/offer';
+import { processSameOrderbookOffer, resumeCrossedSameOrderbookPair } from './same/offer';
 
 const orderbookLog = createStructuredLogger('orderbook');
 const orderbookSameLog = createStructuredLogger('orderbook.same');
@@ -58,10 +58,14 @@ const processCrossJurisdictionOrderbookOffers = (
 
 const processSameAccountOrderbookOffers = (
   input: SameOrderbookProcessInput,
+  resumePairIds: readonly string[],
 ): void => {
   const pass = createSameOrderbookPass(input);
   for (const offer of input.sameAccountSwapOffers) {
     processSameOrderbookOffer(pass, offer);
+  }
+  for (const pairId of Array.from(new Set(resumePairIds)).sort()) {
+    if (!pairId.startsWith('cross:')) resumeCrossedSameOrderbookPair(pass, pairId);
   }
   const zeroFillCancels = zeroFillCancelTotal(pass);
   if (pass.pairSweepCount === 0 && zeroFillCancels === 0) return;
@@ -167,7 +171,7 @@ export function processOrderbookSwaps(
     queuedSwapResolutions,
     debugRebuildProjectionOnly,
     recordDebugProjectionReject,
-  });
+  }, options.resumeSamePairIds ?? []);
 
   return {
     accountTxs,
