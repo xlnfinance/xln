@@ -100,12 +100,14 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
   );
   expect(response.queues.pendingOutputs.count).toBe(0);
   expect(response.queues.pendingAccountFrames.count).toBe(0);
+  expect(response.queues.accountMempoolTxs.count).toBe(0);
   expect(response.pendingAccountSample).toEqual([]);
   const pendingEnv = makeSettlementEnv(true);
   const pending = decodeSettlementEvidenceResponse(
     buildSettlementEvidence(pendingEnv, decodedRequest),
   );
   expect(pending.queues.pendingAccountFrames.count).toBe(1);
+  expect(pending.queues.accountMempoolTxs.count).toBe(0);
   expect(pending.pendingAccountSample).toEqual([{
     entityId: leftId,
     counterpartyEntityId: rightId,

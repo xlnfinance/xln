@@ -546,9 +546,9 @@ describe('production swap load evidence', () => {
         liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
-        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
-        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
-        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0, accountMempoolTxs: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0, accountMempoolTxs: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0, accountMempoolTxs: 0 },
       ],
       bestBidPriceTicks: 24_999_000n,
       bestAskPriceTicks: 25_001_000n,
@@ -614,9 +614,9 @@ describe('production swap load evidence', () => {
         liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
-        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
-        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
-        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0, accountMempoolTxs: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0, accountMempoolTxs: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0, accountMempoolTxs: 0 },
       ],
       bestBidPriceTicks: 10n, bestAskPriceTicks: 11n,
     };
@@ -633,6 +633,12 @@ describe('production swap load evidence', () => {
         ? { ...runtime, pendingNetworkOutputs: 1 }
         : runtime),
     }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_RUNTIME_NOT_DRAINED:load');
+    expect(() => assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence({
+      ...base,
+      runtimes: base.runtimes.map(runtime => runtime.role === 'hub'
+        ? { ...runtime, accountMempoolTxs: 1 }
+        : runtime),
+    }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_RUNTIME_NOT_DRAINED:hub');
     expect(() => assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence({
       ...base, bestBidPriceTicks: 11n,
     }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_BOOK_CROSSED');

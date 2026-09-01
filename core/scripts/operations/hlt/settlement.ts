@@ -44,6 +44,7 @@ type RuntimeSettlementEvidence = Readonly<{
   runtimeTxs: number;
   runtimeJInputs: number;
   pendingAccountFrames: number;
+  accountMempoolTxs: number;
 }>;
 
 export type ProductionSwapSettlementRates = Readonly<{
@@ -89,7 +90,7 @@ const decodeRuntimeEvidence = (value: unknown, index: number): RuntimeSettlement
   requireExactBoundaryKeys(runtime, [
     'role', 'processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox',
     'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs',
-    'pendingAccountFrames',
+    'pendingAccountFrames', 'accountMempoolTxs',
   ], [], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_FIELDS_INVALID:${index}`);
   const role = runtime['role'];
   if (role !== 'hub' && role !== 'load' && role !== 'market-maker') {
@@ -105,6 +106,7 @@ const decodeRuntimeEvidence = (value: unknown, index: number): RuntimeSettlement
     runtimeTxs: requireBoundaryInteger(runtime['runtimeTxs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_TXS_INVALID:${index}`),
     runtimeJInputs: requireBoundaryInteger(runtime['runtimeJInputs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_J_INPUTS_INVALID:${index}`),
     pendingAccountFrames: requireBoundaryInteger(runtime['pendingAccountFrames'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_PENDING_FRAMES_INVALID:${index}`),
+    accountMempoolTxs: requireBoundaryInteger(runtime['accountMempoolTxs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_MEMPOOL_TXS_INVALID:${index}`),
   };
 };
 
@@ -185,7 +187,7 @@ export const assertProductionSwapFullySettled = (
   for (const runtime of evidence.runtimes) {
     const pending = runtime.processing + runtime.pendingOutputs + runtime.pendingNetworkOutputs +
       runtime.networkInbox + runtime.runtimeEntityInputs + runtime.runtimeTxs +
-      runtime.runtimeJInputs;
+      runtime.runtimeJInputs + runtime.pendingAccountFrames + runtime.accountMempoolTxs;
     if (pending !== 0) throw new Error(`PRODUCTION_SWAP_SETTLEMENT_RUNTIME_NOT_DRAINED:${runtime.role}`);
   }
   if (evidence.bestBidPriceTicks !== null && evidence.bestAskPriceTicks !== null &&

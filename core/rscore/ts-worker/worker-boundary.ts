@@ -174,6 +174,10 @@ const decodeInboundPayload = (
       input['needShardRoot'],
       'TS_ACCOUNT_WORKER_INBOUND_NEED_SHARD_ROOT',
     ),
+    owningEntityIsHub: requireBoolean(
+      input['owningEntityIsHub'],
+      'TS_ACCOUNT_WORKER_INBOUND_OWNING_ENTITY_IS_HUB',
+    ),
     frameId, restorePrevious, entityTimestamp, finalizedJHeight, inputs,
     ...(localBoardAuthority ? { localBoardAuthority } : {}),
   };

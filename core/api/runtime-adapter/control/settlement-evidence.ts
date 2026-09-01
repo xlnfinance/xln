@@ -72,6 +72,7 @@ export type SettlementEvidenceResponse = Readonly<{
     runtimeTxs: QueueEvidence;
     runtimeJInputs: QueueEvidence;
     pendingAccountFrames: QueueEvidence;
+    accountMempoolTxs: QueueEvidence;
   }>;
   pendingAccountSample: readonly PendingAccountSample[];
   accounts: readonly Readonly<{
@@ -138,11 +139,13 @@ const countedQueue = (count: number): QueueEvidence => ({ count, digest: digest(
 /** RAM-only; drain must not walk Account history to learn Hub ACK backlog. */
 const pendingAccountFrameSnapshot = (
   env: RuntimeReplica,
-): Readonly<{ count: number; sample: readonly PendingAccountSample[] }> => {
+): Readonly<{ count: number; mempoolTxs: number; sample: readonly PendingAccountSample[] }> => {
   const sample: PendingAccountSample[] = [];
   let count = 0;
+  let mempoolTxs = 0;
   for (const replica of env.state.eReplicas.values()) {
     for (const [counterpartyEntityId, account] of replica.state.accounts) {
+      mempoolTxs += account.mempool.length;
       if (!account.pendingFrame) continue;
       count += 1;
       if (sample.length < MAX_PENDING_ACCOUNT_SAMPLE) {
@@ -175,7 +178,7 @@ const pendingAccountFrameSnapshot = (
       }
     }
   }
-  return { count, sample };
+  return { count, mempoolTxs, sample };
 };
 
 const accountEvidence = (
@@ -229,6 +232,7 @@ export const buildSettlementEvidence = (
       runtimeTxs: countedQueue(mempool.runtimeTxs.length),
       runtimeJInputs: countedQueue(mempool.jInputs?.length ?? 0),
       pendingAccountFrames: countedQueue(pending.count),
+      accountMempoolTxs: countedQueue(pending.mempoolTxs),
     },
     pendingAccountSample: pending.sample,
     accounts: request.accounts.map(account => accountEvidence(env, account)),
@@ -345,7 +349,11 @@ export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvid
   const response = requireBoundaryRecord(value, 'RADAPTER_SETTLEMENT_RESPONSE_INVALID');
   requireExactBoundaryKeys(response, ['runtimeHeight', 'book', 'queues', 'accounts', 'pendingAccountSample'], [], 'RADAPTER_SETTLEMENT_RESPONSE_FIELDS_INVALID');
   const queues = requireBoundaryRecord(response['queues'], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUES_INVALID');
-  const queueKeys = ['processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox', 'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'pendingAccountFrames'] as const;
+  const queueKeys = [
+    'processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox',
+    'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'pendingAccountFrames',
+    'accountMempoolTxs',
+  ] as const;
   requireExactBoundaryKeys(queues, queueKeys, [], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUE_FIELDS_INVALID');
   if (!Array.isArray(response['accounts'])) throw new Error('RADAPTER_SETTLEMENT_RESPONSE_ACCOUNTS_INVALID');
   const decodedQueues = (key: typeof queueKeys[number]): QueueEvidence =>
@@ -362,6 +370,7 @@ export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvid
       runtimeTxs: decodedQueues('runtimeTxs'),
       runtimeJInputs: decodedQueues('runtimeJInputs'),
       pendingAccountFrames: decodedQueues('pendingAccountFrames'),
+      accountMempoolTxs: decodedQueues('accountMempoolTxs'),
     },
     pendingAccountSample: decodePendingAccountSample(response['pendingAccountSample']),
     accounts: response['accounts'].map(decodeResponseAccount),

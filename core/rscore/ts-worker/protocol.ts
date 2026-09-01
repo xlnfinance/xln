@@ -38,6 +38,8 @@ export type TsApplyAccountInputsRequest = Readonly<{
   expectedAccountsRoot: string;
   entityTimestamp: number;
   finalizedJHeight: number;
+  /** Mirrors the sequential Account transition's hub-role policy exactly. */
+  owningEntityIsHub: boolean;
   localBoardAuthority?: TsAccountWorkerCertifiedBoard;
   inputs: readonly Readonly<{
     accountId: string;
@@ -183,6 +185,7 @@ export type TsAccountWorkerInboundPayload = Readonly<{
   restorePrevious: boolean;
   entityTimestamp: number;
   finalizedJHeight: number;
+  owningEntityIsHub: boolean;
   localBoardAuthority?: TsAccountWorkerCertifiedBoard;
   inputs: readonly Readonly<{
     order: number;

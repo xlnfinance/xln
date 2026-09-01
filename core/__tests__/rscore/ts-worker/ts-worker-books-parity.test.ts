@@ -51,6 +51,7 @@ const run = async (workerCount: 1 | 4) => {
       expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1,
       finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [],
     });
     const result = await coordinator.applyBookIntents(state, program.slots());

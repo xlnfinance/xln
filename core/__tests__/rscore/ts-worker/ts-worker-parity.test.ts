@@ -285,6 +285,7 @@ const runCoordinator = async (
     expectedAccountsRoot: coordinator.accountsRoot,
     entityTimestamp: 1_000,
     finalizedJHeight: 0,
+    owningEntityIsHub: false,
     inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
   });
   if (inbound.postAccounts !== undefined) {
@@ -348,6 +349,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000,
       finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [],
     });
     await expect(coordinator.proposeAccountFrames({
@@ -367,6 +369,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 2_000,
       finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [],
     })).rejects.toThrow('TS_ACCOUNT_WORKER_COORDINATOR_FATAL');
   });
@@ -415,6 +418,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000,
       finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [{ accountId, input, counterpartyBoardAuthority }],
     });
     const result = inbound.effects[0]?.result as { ok: boolean; error?: string } | undefined;
@@ -512,7 +516,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.applyAccountInputs({
       frameId: 'hanko-frame', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, inputs: [],
+      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
     });
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'hanko-frame', timestamp: 1_000, jHeight: 0,
@@ -560,6 +564,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const first = await coordinator.applyAccountInputs({
       frameId: 'duplicate-frame-1', expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000, finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [{ accountId, input }],
     });
     await coordinator.proposeAccountFrames({
@@ -571,6 +576,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const second = await coordinator.applyAccountInputs({
       frameId: 'duplicate-frame-2', expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 2_000, finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [{ accountId, input }],
     });
     await coordinator.proposeAccountFrames({
@@ -598,6 +604,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const inbound = await coordinator.applyAccountInputs({
       frameId: 'genesis-frame', expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000, finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [{
         accountId,
         input,
@@ -640,7 +647,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const parentRoot = coordinator.accountsRoot;
     await coordinator.applyAccountInputs({
       frameId: 'retry-attempt-1', expectedAccountsRoot: parentRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, inputs: [],
+      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
     });
     const abandoned = await coordinator.proposeAccountFrames({
       frameId: 'retry-attempt-1', timestamp: 1_000, jHeight: 0,
@@ -652,7 +659,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
 
     await coordinator.applyAccountInputs({
       frameId: 'retry-attempt-2', expectedAccountsRoot: parentRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, inputs: [],
+      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
     });
     const retry = await coordinator.proposeAccountFrames({
       frameId: 'retry-attempt-2', timestamp: 1_000, jHeight: 0,
@@ -691,7 +698,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.applyAccountInputs({
       frameId: 'local-genesis', expectedAccountsRoot: coordinator.accountsRoot,
-      entityTimestamp: 1_000, finalizedJHeight: 0, inputs: [],
+      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
     });
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'local-genesis', timestamp: 1_000, jHeight: 0,
@@ -725,6 +732,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 1_000,
       finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [],
     });
     const normal = await coordinator.proposeAccountFrames({
@@ -742,6 +750,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       expectedAccountsRoot: coordinator.accountsRoot,
       entityTimestamp: 2_000,
       finalizedJHeight: 0,
+      owningEntityIsHub: false,
       inputs: [],
     });
     const idle = await coordinator.proposeAccountFrames({

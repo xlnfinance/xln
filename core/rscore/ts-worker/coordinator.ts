@@ -481,6 +481,7 @@ export class TsAccountWorkerCoordinator {
             restorePrevious,
             entityTimestamp: input.entityTimestamp,
             finalizedJHeight: input.finalizedJHeight,
+            owningEntityIsHub: input.owningEntityIsHub,
             ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
             inputs,
           },

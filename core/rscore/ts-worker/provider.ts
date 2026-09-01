@@ -368,6 +368,7 @@ export class TsAccountWorkerAuthority {
       expectedAccountsRoot: batch.expectedAccountsRoot,
       entityTimestamp: batch.requests[0]?.entityTimestamp ?? batch.entityState.timestamp,
       finalizedJHeight: batch.requests[0]?.finalizedJHeight ?? batch.entityState.lastFinalizedJHeight,
+      owningEntityIsHub: Boolean(batch.entityState.hubRebalanceConfig),
       ...(localBoardAuthority ? { localBoardAuthority } : {}),
       inputs: batch.requests.map(request => {
         const counterpartyBoardAuthority = certifiedBoardFor(this.#env, batch.entityState, request.accountId);

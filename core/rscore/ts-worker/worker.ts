@@ -147,7 +147,7 @@ const applyInbound = async (
     const result = await applyAccountInput(context, workspace.forWrite(item.accountId), item.input, {
       entityTimestamp: input.entityTimestamp,
       finalizedJHeight: input.finalizedJHeight,
-      owningEntityIsHub: false,
+      owningEntityIsHub: input.owningEntityIsHub,
       verifyHanko: context.verifyHanko,
       ...(item.counterpartyBoardAuthority
         ? {

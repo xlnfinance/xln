@@ -154,6 +154,7 @@ const runtimeEvidence = (
   runtimeTxs: response.queues.runtimeTxs.count,
   runtimeJInputs: response.queues.runtimeJInputs.count,
   pendingAccountFrames: response.queues.pendingAccountFrames.count,
+  accountMempoolTxs: response.queues.accountMempoolTxs.count,
 });
 
 const requireAccount = (

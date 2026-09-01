@@ -194,6 +194,7 @@ const realWorkerClaim = async (workers: number) => {
     expectedAccountsRoot: coordinator.accountsRoot,
     entityTimestamp: 1_000,
     finalizedJHeight: 0,
+    owningEntityIsHub: false,
     inputs: [{ accountId: peer, input }],
   });
   await coordinator.proposeAccountFrames({
