@@ -7,7 +7,7 @@ import type {
 } from './types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/history/height';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { HTLC_SECRET_ACK_TIMEOUT_MS, terminatePayment } from '../paybook/lifecycle';
+import { HTLC_SECRET_ACK_TIMEOUT_MS, programPaymentTermination } from '../paybook/lifecycle';
 import { scheduleHook } from './hook-state';
 import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
@@ -20,10 +20,13 @@ const crontabLog = createStructuredLogger('entity.crontab');
 const processSecretAckTimeout = (
   hook: Extract<ScheduledHook, { type: 'htlc_secret_ack_timeout' }>,
   replica: EntityTransitionContext,
+  context: CrontabExecutionContext,
   plan: DueHookPlan,
 ): void => {
   const { hashlock, counterpartyEntityId } = hook.data;
-  const route = replica.state.paybook.entries.get(hashlock);
+  const bookIntentSlot = context.bookIntentSlot;
+  if (!bookIntentSlot) throw new Error('SCHEDULED_WAKE_BOOK_INTENT_SLOT_REQUIRED');
+  const route = bookIntentSlot.getPaybookEntry(replica.state, hashlock);
   if (!route) return;
   if (!isDisputeReadyPayment(route, replica.state.timestamp)) {
     if (route.secretAckPending) {
@@ -34,7 +37,7 @@ const processSecretAckTimeout = (
   const account = replica.state.accounts.get(counterpartyEntityId);
   if (!account) return;
   if (!account.state.locks?.has(hashlock)) {
-    terminatePayment(replica.state, hashlock);
+    programPaymentTermination(replica.state, hashlock, bookIntentSlot);
     return;
   }
   if (account.activeDispute) return;
@@ -89,7 +92,7 @@ const processDueHook = (
       processDisputeDeadlineHook(hook, replica, context, currentJBlock, plan);
       return;
     case 'htlc_secret_ack_timeout':
-      processSecretAckTimeout(hook, replica, plan);
+      processSecretAckTimeout(hook, replica, context, plan);
       return;
     case 'settlement_window':
     case 'watchdog':

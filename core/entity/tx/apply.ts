@@ -7,6 +7,7 @@ import type { AccountJClaimNodeStore , AccountJClaimNodeChanges } from '../../ty
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../types/entity/htlc-infra-context';
+import type { BookIntentSlotWriter } from '../books/book-intents';
 import { createAccountConsensusContext } from '../account/account-consensus-context';
 import {
   applyAccountInputToEntity,
@@ -131,6 +132,8 @@ export interface ApplyEntityTxOptions {
   infraContext?: EntityInfraContext;
   /** Ephemeral index derived once from `infraContext`; never hashed or persisted. */
   preparedHtlcEntriesByBinding?: ReadonlyMap<string, PreparedHtlcEntry>;
+  /** Fixed positional output slot owned by this Entity transaction. */
+  bookIntentSlot?: BookIntentSlotWriter;
   accountConsensusContext?: AccountConsensusContext;
   mutableFrameState?: boolean;
   manualBroadcastInInput?: boolean;
@@ -317,6 +320,7 @@ const entityTxDispatchers = {
     state,
     tx as Extract<EntityTx, { type: 'scheduledWake' }>,
     options?.manualBroadcastInInput === true,
+    options?.bookIntentSlot,
   ),
   chat: (_env, state, tx, options) => handleChatEntityTx(
     state,
@@ -374,8 +378,14 @@ const entityTxDispatchers = {
     options?.candidateEffects ?? [],
     options?.mutableFrameState,
     options?.infraContext,
+    options?.bookIntentSlot,
   ),
-  resolveHtlcLock: (_env, state, tx, options) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>, options?.mutableFrameState),
+  resolveHtlcLock: (_env, state, tx, options) => handleResolveHtlcLockEntityTx(
+    state,
+    tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>,
+    options?.mutableFrameState,
+    options?.bookIntentSlot,
+  ),
   processHtlcTimeouts: (_env, state, tx, options) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>, options?.mutableFrameState),
   directPayment: (env, state, tx, options) => handleDirectPaymentEntityTx(
     env,

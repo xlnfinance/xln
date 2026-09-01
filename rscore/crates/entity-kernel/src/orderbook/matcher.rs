@@ -36,6 +36,10 @@ pub(crate) enum SameJOutputDelta {
         account_id: String,
         offer_id: String,
     },
+    DisputeRemove {
+        account_id: String,
+        offer_id: String,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -44,6 +48,85 @@ pub(crate) struct OrderbookEffects {
     pub routed_entity_outputs: Vec<LocalEntityOutput>,
     pub cross_jurisdiction_fills: Vec<crate::cross_j::CrossJurisdictionBookFill>,
     pub matched_swaps: u64,
+}
+
+pub(crate) struct OrderbookPairJob {
+    pair_id: String,
+    state: OrderbookState,
+    commands: Vec<(usize, String, SameJOffer)>,
+}
+
+pub(crate) struct OrderbookPairOutcome {
+    pair_id: String,
+    state: OrderbookState,
+    effects: Vec<(usize, OrderbookEffects)>,
+}
+
+pub(crate) type OrderbookPairResult = Result<OrderbookPairOutcome, (usize, EntityKernelError)>;
+
+pub(crate) struct PreparedOrderbookStage {
+    effects: OrderbookEffects,
+    effect_slots: Vec<Option<OrderbookEffects>>,
+    jobs: Vec<OrderbookPairJob>,
+}
+
+pub(crate) struct ValidatedOrderbookStage {
+    effects: OrderbookEffects,
+    outcomes: Vec<OrderbookPairOutcome>,
+}
+
+impl PreparedOrderbookStage {
+    pub(crate) fn take_jobs(&mut self) -> Vec<OrderbookPairJob> {
+        std::mem::take(&mut self.jobs)
+    }
+}
+
+pub(crate) trait OrderbookPairMapper {
+    fn map_pairs(
+        &mut self,
+        jobs: Vec<OrderbookPairJob>,
+        context: DeterministicContext,
+    ) -> Result<Vec<OrderbookPairResult>, EntityKernelError>;
+}
+
+pub(crate) struct SequentialOrderbookPairMapper;
+
+impl OrderbookPairMapper for SequentialOrderbookPairMapper {
+    fn map_pairs(
+        &mut self,
+        jobs: Vec<OrderbookPairJob>,
+        context: DeterministicContext,
+    ) -> Result<Vec<OrderbookPairResult>, EntityKernelError> {
+        Ok(jobs.into_iter().map(|job| job.apply(&context)).collect())
+    }
+}
+
+impl OrderbookPairJob {
+    pub(crate) fn apply(mut self, context: &DeterministicContext) -> OrderbookPairResult {
+        let mut swept = BTreeSet::new();
+        let mut batch = BTreeMap::new();
+        let mut effects = Vec::with_capacity(self.commands.len());
+        for (ordinal, account_id, offer) in &self.commands {
+            let mut command_effects = OrderbookEffects::default();
+            if let Err(error) = process_one_offer(
+                &mut self.state,
+                &mut command_effects,
+                account_id,
+                offer,
+                context,
+                &mut swept,
+                &mut batch,
+            ) {
+                return Err((*ordinal, error));
+            }
+            effects.push((*ordinal, command_effects));
+        }
+        Ok(OrderbookPairOutcome {
+            pair_id: self.pair_id,
+            state: self.state,
+            effects,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -265,19 +348,6 @@ fn remove_committed(
     Ok(())
 }
 
-/// Remove one Account-owned resting row during dispute preparation through the
-/// same book/index mutation used by normal Account output reconciliation.
-pub(crate) fn remove_account_offer_for_dispute(
-    state: &mut OrderbookState,
-    account_id: &str,
-    offer_id: &str,
-) -> Result<bool, EntityKernelError> {
-    let key = order_id(account_id, offer_id)?;
-    let existed = state.pair_by_order.contains_key(&key);
-    remove_committed(state, account_id, offer_id)?;
-    Ok(existed)
-}
-
 fn is_local_maker(offer: &SameJOffer, entity_id: &str) -> bool {
     let maker = if offer.maker_is_left {
         &offer.left_entity
@@ -310,7 +380,7 @@ fn apply_final_offer_index(
                 state.offers.remove(&key);
                 state.resolving_offers.remove(&key);
             }
-            SameJOutputDelta::CancelRequest { .. } => {}
+            SameJOutputDelta::CancelRequest { .. } | SameJOutputDelta::DisputeRemove { .. } => {}
         }
     }
 }
@@ -318,17 +388,27 @@ fn apply_final_offer_index(
 fn apply_removes(
     state: &mut OrderbookState,
     deltas: &[SameJOutputDelta],
-) -> Result<(), EntityKernelError> {
+) -> Result<BTreeSet<(String, String)>, EntityKernelError> {
+    let mut suppressed = BTreeSet::new();
     for delta in deltas {
-        if let SameJOutputDelta::Remove {
-            account_id,
-            offer_id,
-        } = delta
-        {
-            remove_committed(state, account_id, offer_id)?;
+        match delta {
+            SameJOutputDelta::Remove {
+                account_id,
+                offer_id,
+            } => {
+                remove_committed(state, account_id, offer_id)?;
+            }
+            SameJOutputDelta::DisputeRemove {
+                account_id,
+                offer_id,
+            } => {
+                remove_committed(state, account_id, offer_id)?;
+                suppressed.insert((account_id.clone(), offer_id.clone()));
+            }
+            SameJOutputDelta::Upsert { .. } | SameJOutputDelta::CancelRequest { .. } => {}
         }
     }
-    Ok(())
+    Ok(suppressed)
 }
 
 fn apply_cancel_requests(
@@ -905,38 +985,254 @@ fn process_one_offer<'a>(
     Ok(())
 }
 
-pub(crate) fn apply_orderbook_outputs(
+pub(crate) fn prepare_orderbook_outputs(
+    state: &mut OrderbookState,
+    deltas: &[SameJOutputDelta],
+    context: &DeterministicContext,
+    entity_id: &str,
+) -> Result<PreparedOrderbookStage, EntityKernelError> {
+    let mut effects = OrderbookEffects::default();
+    apply_final_offer_index(state, deltas, entity_id);
+    let suppressed = apply_removes(state, deltas)?;
+    apply_cancel_requests(state, deltas, &mut effects)?;
+    let upserts = sorted_upserts(deltas, entity_id)?;
+    let mut effect_slots = (0..upserts.len())
+        .map(|_| None)
+        .collect::<Vec<Option<OrderbookEffects>>>();
+    let mut commands_by_pair = BTreeMap::<String, Vec<(usize, String, SameJOffer)>>::new();
+    for (ordinal, (account_id, offer)) in upserts.into_iter().enumerate() {
+        if !same_snapshot(state, account_id, offer) {
+            continue;
+        }
+        if suppressed.contains(&(account_id.to_string(), offer.offer_id.clone())) {
+            continue;
+        }
+        if state
+            .resolving_offers
+            .contains(&(account_id.to_string(), offer.offer_id.clone()))
+        {
+            continue;
+        }
+        match materialize(account_id, offer, &context.minimum_trade_size) {
+            Ok(materialized) => commands_by_pair
+                .entry(materialized.pair_id)
+                .or_default()
+                .push((ordinal, account_id.to_string(), offer.clone())),
+            Err(EntityKernelError::SwapRejected { code }) => {
+                let mut rejected = OrderbookEffects::default();
+                queue_cancel(
+                    state,
+                    &mut rejected,
+                    account_id,
+                    &offer.offer_id,
+                    code.to_string(),
+                );
+                effect_slots[ordinal] = Some(rejected);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    let mut jobs = Vec::with_capacity(commands_by_pair.len());
+    for (pair_id, commands) in commands_by_pair {
+        let book = state.books.remove(&pair_id);
+        let mut keys = commands
+            .iter()
+            .map(|(_, account_id, offer)| (account_id.clone(), offer.offer_id.clone()))
+            .collect::<BTreeSet<_>>();
+        if let Some(book) = &book {
+            for order_id in book.orders.keys() {
+                keys.insert(split_order_id(order_id)?);
+            }
+        }
+        let offers = keys
+            .iter()
+            .filter_map(|key| {
+                state
+                    .offers
+                    .get(key)
+                    .cloned()
+                    .map(|offer| (key.clone(), offer))
+            })
+            .collect();
+        let resolving_offers = keys
+            .iter()
+            .filter(|key| state.resolving_offers.contains(*key))
+            .cloned()
+            .collect();
+        let pair_by_order = state
+            .pair_by_order
+            .iter()
+            .filter(|(_, indexed_pair)| *indexed_pair == &pair_id)
+            .map(|(order_id, indexed_pair)| (order_id.clone(), indexed_pair.clone()))
+            .collect();
+        let mut pair_state = OrderbookState::empty(state.max_orders_per_pair);
+        if let Some(book) = book {
+            pair_state.books.insert(pair_id.clone(), book);
+        }
+        if let Some(dimensions) = state.pair_dimensions.get(&pair_id).copied() {
+            pair_state
+                .pair_dimensions
+                .insert(pair_id.clone(), dimensions);
+        }
+        pair_state.offers = offers;
+        pair_state.resolving_offers = resolving_offers;
+        pair_state.pair_by_order = pair_by_order;
+        jobs.push(OrderbookPairJob {
+            pair_id,
+            state: pair_state,
+            commands,
+        });
+    }
+
+    Ok(PreparedOrderbookStage {
+        effects,
+        effect_slots,
+        jobs,
+    })
+}
+
+pub(crate) fn validate_orderbook_outputs(
+    mut prepared: PreparedOrderbookStage,
+    pair_results: Vec<OrderbookPairResult>,
+) -> Result<ValidatedOrderbookStage, EntityKernelError> {
+    let mut first_error = None;
+    let mut outcomes = Vec::with_capacity(pair_results.len());
+    for result in pair_results {
+        match result {
+            Ok(outcome) => outcomes.push(outcome),
+            Err((ordinal, error)) => {
+                if first_error
+                    .as_ref()
+                    .is_none_or(|(first_ordinal, _)| ordinal < *first_ordinal)
+                {
+                    first_error = Some((ordinal, error));
+                }
+            }
+        }
+    }
+    if let Some((_, error)) = first_error {
+        return Err(error);
+    }
+    for outcome in &mut outcomes {
+        for (ordinal, command_effects) in std::mem::take(&mut outcome.effects) {
+            prepared.effect_slots[ordinal] = Some(command_effects);
+        }
+    }
+    for command_effects in prepared.effect_slots.into_iter().flatten() {
+        prepared
+            .effects
+            .account_txs
+            .extend(command_effects.account_txs);
+        prepared
+            .effects
+            .routed_entity_outputs
+            .extend(command_effects.routed_entity_outputs);
+        prepared
+            .effects
+            .cross_jurisdiction_fills
+            .extend(command_effects.cross_jurisdiction_fills);
+        prepared.effects.matched_swaps = prepared
+            .effects
+            .matched_swaps
+            .checked_add(command_effects.matched_swaps)
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_MATCH_COUNT_OVERFLOW"))?;
+    }
+    Ok(ValidatedOrderbookStage {
+        effects: prepared.effects,
+        outcomes,
+    })
+}
+
+pub(crate) fn install_orderbook_outputs(
+    state: &mut OrderbookState,
+    mut validated: ValidatedOrderbookStage,
+) -> OrderbookEffects {
+    for mut outcome in validated.outcomes {
+        state
+            .pair_by_order
+            .retain(|_, pair_id| pair_id != &outcome.pair_id);
+        state
+            .resolving_offers
+            .extend(outcome.state.resolving_offers);
+        state.pair_by_order.extend(outcome.state.pair_by_order);
+        if let Some(dimensions) = outcome.state.pair_dimensions.remove(&outcome.pair_id) {
+            state
+                .pair_dimensions
+                .insert(outcome.pair_id.clone(), dimensions);
+        }
+        if let Some(book) = outcome.state.books.remove(&outcome.pair_id) {
+            state.books.insert(outcome.pair_id.clone(), book);
+        }
+    }
+    std::mem::take(&mut validated.effects)
+}
+
+#[cfg(test)]
+fn apply_orderbook_outputs(
     state: &mut OrderbookState,
     deltas: &[SameJOutputDelta],
     context: &DeterministicContext,
     entity_id: &str,
 ) -> Result<OrderbookEffects, EntityKernelError> {
-    let mut effects = OrderbookEffects::default();
-    apply_final_offer_index(state, deltas, entity_id);
-    apply_removes(state, deltas)?;
-    apply_cancel_requests(state, deltas, &mut effects)?;
-    let mut swept = BTreeSet::new();
-    let mut batch = BTreeMap::new();
-    for (account_id, offer) in sorted_upserts(deltas, entity_id)? {
-        if !same_snapshot(state, account_id, offer) {
-            continue;
-        }
-        process_one_offer(
-            state,
-            &mut effects,
-            account_id,
-            offer,
-            context,
-            &mut swept,
-            &mut batch,
-        )?;
-    }
-    Ok(effects)
+    let mut prepared = prepare_orderbook_outputs(state, deltas, context, entity_id)?;
+    let jobs = prepared.take_jobs();
+    let results = SequentialOrderbookPairMapper.map_pairs(jobs, context.clone())?;
+    let validated = validate_orderbook_outputs(prepared, results)?;
+    Ok(install_orderbook_outputs(state, validated))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ReverseOrderbookPairMapper {
+        job_counts: Vec<usize>,
+    }
+
+    impl OrderbookPairMapper for ReverseOrderbookPairMapper {
+        fn map_pairs(
+            &mut self,
+            mut jobs: Vec<OrderbookPairJob>,
+            context: DeterministicContext,
+        ) -> Result<Vec<OrderbookPairResult>, EntityKernelError> {
+            self.job_counts.push(jobs.len());
+            jobs.reverse();
+            Ok(jobs.into_iter().map(|job| job.apply(&context)).collect())
+        }
+    }
+
+    fn resting_ask(
+        account_id: &str,
+        offer_id: &str,
+        base_token_id: u32,
+        base_decimals: u32,
+        price_ticks: u32,
+        created_height: u64,
+    ) -> SameJOffer {
+        let give_amount = BigInt::from(10_u8).pow(base_decimals);
+        let want_amount = BigInt::from(price_ticks) * BigInt::from(100_u8);
+        SameJOffer {
+            offer_id: offer_id.to_string(),
+            left_entity: account_id.to_string(),
+            right_entity: "hub".to_string(),
+            give_token_id: base_token_id,
+            give_token_decimals: base_decimals,
+            give_amount: give_amount.clone(),
+            want_token_id: 1,
+            want_token_decimals: 6,
+            want_amount: want_amount.clone(),
+            max_fee: BigInt::from(0),
+            min_net_receive: want_amount.clone(),
+            price_ticks: BigInt::from(price_ticks),
+            time_in_force: Some(0),
+            maker_is_left: true,
+            created_height,
+            quantized_give: give_amount,
+            quantized_want: want_amount,
+            cross_jurisdiction: None,
+        }
+    }
 
     fn book_order(order_id: &str) -> BookOrder {
         BookOrder {
@@ -1087,5 +1383,81 @@ mod tests {
             AccountTx::SwapResolve { comment: Some(comment), .. }
                 if comment == "outside-anchor-band:4"
         ));
+    }
+
+    #[test]
+    fn independent_pairs_are_identical_when_worker_completion_order_reverses() {
+        let deltas = vec![
+            SameJOutputDelta::Upsert {
+                account_id: "account-b".to_string(),
+                offer: Box::new(resting_ask("account-b", "pair-4-1", 4, 6, 1_200, 2)),
+            },
+            SameJOutputDelta::Upsert {
+                account_id: "account-a".to_string(),
+                offer: Box::new(resting_ask("account-a", "pair-2-1", 2, 18, 25_000_000, 1)),
+            },
+        ];
+        let context = DeterministicContext::hlt_default();
+        let mut sequential = OrderbookState::empty(20_000);
+        let sequential_effects = apply_orderbook_outputs(&mut sequential, &deltas, &context, "hub")
+            .expect("sequential pairs");
+        let mut reversed = OrderbookState::empty(20_000);
+        let mut mapper = ReverseOrderbookPairMapper {
+            job_counts: Vec::new(),
+        };
+        let reversed_effects = apply_orderbook_outputs_with_mapper(
+            &mut reversed,
+            &deltas,
+            &context,
+            "hub",
+            &mut mapper,
+        )
+        .expect("reversed pair completion");
+
+        assert_eq!(mapper.job_counts, vec![2]);
+        assert_eq!(reversed, sequential);
+        assert_eq!(reversed_effects.account_txs, sequential_effects.account_txs);
+        assert_eq!(
+            reversed_effects.cross_jurisdiction_fills.len(),
+            sequential_effects.cross_jurisdiction_fills.len(),
+        );
+        assert_eq!(
+            reversed_effects.matched_swaps,
+            sequential_effects.matched_swaps
+        );
+    }
+
+    #[test]
+    fn same_round_dispute_removal_suppresses_deferred_upsert() {
+        let account_id = "account-a";
+        let offer = resting_ask(account_id, "disputed", 2, 18, 25_000_000, 1);
+        let deltas = vec![
+            SameJOutputDelta::Upsert {
+                account_id: account_id.to_string(),
+                offer: Box::new(offer.clone()),
+            },
+            SameJOutputDelta::DisputeRemove {
+                account_id: account_id.to_string(),
+                offer_id: offer.offer_id.clone(),
+            },
+        ];
+        let mut state = OrderbookState::empty(20_000);
+        apply_orderbook_outputs(
+            &mut state,
+            &deltas,
+            &DeterministicContext::hlt_default(),
+            "hub",
+        )
+        .expect("dispute removal");
+
+        assert!(state.books.is_empty());
+        assert!(state.pair_by_order.is_empty());
+        assert_eq!(
+            state
+                .offers
+                .get(&(account_id.to_string(), offer.offer_id.clone())),
+            Some(&offer),
+            "Account snapshot remains authoritative while the transient same-round suppression prevents resurrection",
+        );
     }
 }

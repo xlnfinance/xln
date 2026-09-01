@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use xln_rscore_process::native_genesis::NativeGenesisConfig;
 use xln_rscore_process::runtime_replay::replay_native_v1;
 
+fn milliseconds(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1_000.0
+}
+
 fn argument(args: &[String], name: &str) -> Result<String, String> {
     let index = args
         .iter()
@@ -70,6 +74,29 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
         &argument(&args, "--entity-signer-label")?,
         worker_count,
     )?;
+    let apply_profile = serde_json::json!({
+        "fitMs": milliseconds(metrics.apply_profile.fit),
+        "residentCoreMs": milliseconds(metrics.apply_profile.resident_core),
+        "postCorePrepareMs": milliseconds(metrics.apply_profile.post_core_prepare),
+        "certificationMs": milliseconds(metrics.apply_profile.certification),
+        "settlementAttachMs": milliseconds(metrics.apply_profile.settlement_attach),
+        "postCertJMs": milliseconds(metrics.apply_profile.post_cert_j),
+        "residualMs": milliseconds(metrics.apply_profile.residual),
+        "totalMs": milliseconds(metrics.apply_profile.total),
+        "entityGroups": metrics.apply_profile.entity_groups,
+        "entityTxsSelected": metrics.apply_profile.entity_txs_selected,
+        "accountInputs": metrics.apply_profile.account_inputs,
+        "settlementHankos": metrics.apply_profile.settlement_hankos,
+        "postCertJActions": metrics.apply_profile.post_cert_j_actions,
+    });
+    let projection_profile = serde_json::json!({
+        "inputMs": milliseconds(metrics.projection_input),
+        "machineMs": milliseconds(metrics.projection_machine),
+        "metaMs": milliseconds(metrics.projection_meta),
+        "contextMs": milliseconds(metrics.projection_context),
+        "checkpointMs": milliseconds(metrics.projection_checkpoint),
+        "encodeMs": milliseconds(metrics.projection_encode),
+    });
     println!(
         "{}",
         serde_json::json!({
@@ -81,6 +108,12 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             "directPayments": metrics.direct_payments,
             "outputs": metrics.outputs,
             "elapsedMs": metrics.elapsed.as_secs_f64() * 1_000.0,
+            "setupMs": milliseconds(metrics.setup),
+            "sourceDecodeMs": milliseconds(metrics.source_decode),
+            "reconcileMs": milliseconds(metrics.reconcile),
+            "processorWallMs": milliseconds(metrics.processor_wall),
+            "verificationMs": milliseconds(metrics.verification),
+            "finalDrainMs": milliseconds(metrics.final_drain),
             "applyMs": metrics.apply.as_secs_f64() * 1_000.0,
             "projectionMs": metrics.projection.as_secs_f64() * 1_000.0,
             "storageMs": metrics.storage.as_secs_f64() * 1_000.0,
@@ -95,6 +128,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             "committerIdleMs": metrics.committer_idle.as_secs_f64() * 1_000.0,
             "accountsRoot": metrics.accounts_root,
             "transcriptDigest": metrics.transcript_digest,
+            "applyProfile": apply_profile,
+            "projectionProfile": projection_profile,
             "accountPhaseMetrics": phase_metrics(&metrics.account_phase_metrics),
         }),
     );

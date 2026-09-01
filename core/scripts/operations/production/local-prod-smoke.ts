@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, renameSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,7 @@ import {
 } from '../bootstrap/bootstrap-progress';
 import {
   acquireLocalTestPortLease,
+  acquireLocalHltLaneLease,
   assertLocalTestPortsFree,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
@@ -46,6 +47,7 @@ import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
 import { safeStringify } from '../../../protocol/serialization';
 import { assertRustHubBinaryFresh } from '../../../orchestrator/process/hub-engine-plan';
+import { resetOwnedLocalRunRoot } from '../../e2e/harness/local-run-root';
 import {
   decodeLoadFrame,
   decodeRuntimeManifestEntries,
@@ -218,7 +220,11 @@ const localTestLease = await acquireLocalTestPortLease({
 });
 const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
 const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
+const hltLaneLease = Number.isSafeInteger(hltUsers) && hltUsers > 0
+  ? await acquireLocalHltLaneLease(hltLanePortsPerSlot(hltUsers))
+  : null;
 if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
+  if (!hltLaneLease) throw new Error('LOCAL_PROD_HLT_LANE_LEASE_MISSING');
   // The baseline isolates Hub consensus: relay remains discovery-only until
   // hub-direct 1000 swaps/s + 1000 payments/s is proven with zero Account loss.
   if (hltAuthorityEvidenceRecording(process.env)) {
@@ -231,6 +237,7 @@ if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
   inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] =
     process.env['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || String(Math.max(1_000, hltUsers * 4));
   inheritedProcessEnv['XLN_HLT_LANE_PORTS_PER_SLOT'] = String(hltLanePortsPerSlot(hltUsers));
+  inheritedProcessEnv['XLN_HLT_LANE_PORT_BASE'] = String(hltLaneLease.basePort);
   if (process.env['XLN_HLT_ENGINE'] === 'rust') {
     // The native Runtime owns H1 from genesis. Keep the authority workload on
     // its one configured Entity; HLT must never stage H1 through the retired
@@ -1368,8 +1375,7 @@ const main = async (): Promise<void> => {
     custodyDaemonPort,
     ...Array.from({ length: HUB_COUNT + 1 }, (_unused, index) => nodePortBase + index),
   ]);
-  if (existsSync(workDir)) rmSync(workDir, { recursive: true, force: true });
-  mkdirSync(workDir, { recursive: true });
+  resetOwnedLocalRunRoot(workDir, repoRoot, 'local-prod-smoke');
 
   console.log(`[local-prod-smoke] workDir=${workDir} portBase=${portBase}`);
   recordStage('smoke:start', { workDir, portBase, strictBudgets: enforceStageBudgets, stageBudgetsMs, healthPollIntervalMs });
@@ -1673,6 +1679,7 @@ try {
     await stopManaged();
     assertLocalTestPortsFree(localTestLease.ports);
   } finally {
+    hltLaneLease?.release();
     localTestLease.release();
     if (standLock) releaseStandLock(standLock);
     process.off('SIGINT', handleSigint);

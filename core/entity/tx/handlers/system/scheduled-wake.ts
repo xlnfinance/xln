@@ -4,6 +4,7 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { executeCrontab } from '../../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../../scheduler/wake/scheduled-wake-validation';
 import { isCollectiveEntityActionTx } from '../../../auth/authorization';
+import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 
@@ -12,6 +13,7 @@ export const handleScheduledWakeEntityTx = async (
   state: EntityState,
   tx: ScheduledWakeTx,
   manualBroadcastInInput: boolean,
+  bookIntentSlot?: BookIntentSlotWriter,
 ) => {
   assertScheduledWakeMatchesState(state, tx);
   if (!state.crontabState) {
@@ -26,6 +28,7 @@ export const handleScheduledWakeEntityTx = async (
   const candidateEffects: EntityCandidateEffect[] = [];
   const outputs = await executeCrontab(env, transition, state.crontabState, {
     manualBroadcastInInput,
+    ...(bookIntentSlot ? { bookIntentSlot } : {}),
     hashesToSign,
     accountChanges,
     candidateEffects,

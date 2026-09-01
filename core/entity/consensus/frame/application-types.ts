@@ -16,6 +16,7 @@ import type {
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../../types/entity/htlc-infra-context';
 import type { ProposableAccountMap } from '../account/canonical-worklist';
+import type { BookIntentProgram } from '../../books/book-intents';
 
 export type ApplyEntityTxsInOrderContext = {
   env: EntityRuntimeContext;
@@ -25,6 +26,7 @@ export type ApplyEntityTxsInOrderContext = {
   accountConsensusContext: AccountConsensusContext;
   entityTxs: EntityTx[];
   currentEntityState: EntityState;
+  bookIntents: BookIntentProgram;
   allOutputs: EntityOutput[];
   allJOutputs: JInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;

@@ -114,6 +114,7 @@ import {
   getEntityJAdapter,
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
+  waitForRuntimeWorkDrained,
   buildRuntimeRecoveryBundle,
 } from '../runtime.ts';
 import { withRuntimeCommittedRead } from '../runtime/frame/lifecycle/writer-lock';
@@ -913,8 +914,10 @@ const importJurisdiction = async (
     }],
     entityInputs: [],
   });
-  await processRuntime(env);
-  await processRuntime(env);
+  const drained = await waitForRuntimeWorkDrained(env, 10_000, 0);
+  if (!drained || !env.state.jReplicas.has(jurisdiction.name)) {
+    throw new Error(`HUB_JURISDICTION_IMPORT_COMMIT_MISSING:${jurisdiction.name}`);
+  }
 };
 
 type HubBootstrapPosition = NonNullable<

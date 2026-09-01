@@ -7,10 +7,13 @@
 //! work stealing is useful for stateless jobs, but it cannot express permanent
 //! ownership of a shard's mutable replica state.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
+use super::duration_nanos;
 use crate::BatchError;
 
 type ResidentJob<S> = Box<dyn FnOnce(&mut S) + Send + 'static>;
@@ -31,6 +34,23 @@ struct ResidentWorker<S> {
 /// the actor-thread ownership model so their lanes can execute concurrently.
 pub(crate) struct ResidentWorkerPool<S> {
     backend: ResidentWorkerBackend<S>,
+}
+
+pub(crate) struct StatelessIndexedResult<R> {
+    pub(crate) rows: Vec<R>,
+    pub(crate) worker_items: Vec<u64>,
+    pub(crate) worker_nanos: Vec<u64>,
+}
+
+struct StatelessIndexedStage<T, R> {
+    next: AtomicUsize,
+    remaining_workers: AtomicUsize,
+    inputs: Box<[Mutex<Option<T>>]>,
+    results: Box<[Mutex<Option<R>>]>,
+    worker_items: Box<[AtomicU64]>,
+    worker_nanos: Box<[AtomicU64]>,
+    completion: Mutex<()>,
+    completed: Condvar,
 }
 
 enum ResidentWorkerBackend<S> {
@@ -86,6 +106,148 @@ impl<S: Send + 'static> ResidentWorkerPool<S> {
             ResidentWorkerBackend::Inline { .. } => 1,
             ResidentWorkerBackend::Threaded { workers } => workers.len(),
         }
+    }
+
+    /// Execute independent jobs dynamically and restore exact input order.
+    ///
+    /// Every actor claims a unique input index atomically and writes directly
+    /// to that index's result slot. The coordinator waits on one atomic worker
+    /// countdown; no per-result replies or completion-order fold exist.
+    pub(crate) fn run_stateless_indexed<T, R, F>(
+        &mut self,
+        items: Vec<T>,
+        apply: F,
+    ) -> Result<StatelessIndexedResult<R>, BatchError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+        F: Fn(T) -> R + Send + Sync + 'static,
+    {
+        let item_count = items.len();
+        if item_count == 0 {
+            return Ok(StatelessIndexedResult {
+                rows: Vec::new(),
+                worker_items: vec![0; self.worker_count()],
+                worker_nanos: vec![0; self.worker_count()],
+            });
+        }
+        if let ResidentWorkerBackend::Inline { .. } = &mut self.backend {
+            let mut rows = Vec::with_capacity(item_count);
+            let mut nanos = 0_u64;
+            for item in items {
+                let started = Instant::now();
+                rows.push(apply(item));
+                nanos = nanos.saturating_add(duration_nanos(started.elapsed()));
+            }
+            return Ok(StatelessIndexedResult {
+                rows,
+                worker_items: vec![item_count as u64],
+                worker_nanos: vec![nanos],
+            });
+        }
+        let ResidentWorkerBackend::Threaded { workers } = &mut self.backend else {
+            unreachable!("inline resident worker returned above");
+        };
+        let active_workers = item_count.min(workers.len());
+        let stage = Arc::new(StatelessIndexedStage {
+            next: AtomicUsize::new(0),
+            remaining_workers: AtomicUsize::new(active_workers),
+            inputs: items
+                .into_iter()
+                .map(|item| Mutex::new(Some(item)))
+                .collect(),
+            results: (0..item_count).map(|_| Mutex::new(None)).collect(),
+            worker_items: (0..workers.len()).map(|_| AtomicU64::new(0)).collect(),
+            worker_nanos: (0..workers.len()).map(|_| AtomicU64::new(0)).collect(),
+            completion: Mutex::new(()),
+            completed: Condvar::new(),
+        });
+        let apply = Arc::new(apply);
+        for (worker, actor) in workers.iter().enumerate().take(active_workers) {
+            let stage = Arc::clone(&stage);
+            let apply = Arc::clone(&apply);
+            let job = Box::new(move |_state: &mut S| {
+                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut items = 0_u64;
+                    let mut nanos = 0_u64;
+                    loop {
+                        let position = stage.next.fetch_add(1, Ordering::Relaxed);
+                        if position >= stage.inputs.len() {
+                            break;
+                        }
+                        let item = stage.inputs[position]
+                            .lock()
+                            .unwrap_or_else(|_| std::process::abort())
+                            .take()
+                            .unwrap_or_else(|| std::process::abort());
+                        let started = Instant::now();
+                        let result = apply(item);
+                        nanos = nanos.saturating_add(duration_nanos(started.elapsed()));
+                        items = items.saturating_add(1);
+                        let replaced = stage.results[position]
+                            .lock()
+                            .unwrap_or_else(|_| std::process::abort())
+                            .replace(result);
+                        if replaced.is_some() {
+                            std::process::abort();
+                        }
+                    }
+                    stage.worker_items[worker].store(items, Ordering::Relaxed);
+                    stage.worker_nanos[worker].store(nanos, Ordering::Relaxed);
+                    if stage.remaining_workers.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        let _completion = stage
+                            .completion
+                            .lock()
+                            .unwrap_or_else(|_| std::process::abort());
+                        stage.completed.notify_one();
+                    }
+                }));
+                if run.is_err() {
+                    std::process::abort();
+                }
+            });
+            if actor.sender.send(ResidentCommand::Run(job)).is_err() {
+                std::process::abort();
+            }
+        }
+        let mut completion = stage
+            .completion
+            .lock()
+            .unwrap_or_else(|_| std::process::abort());
+        while stage.remaining_workers.load(Ordering::Acquire) != 0 {
+            completion = stage
+                .completed
+                .wait(completion)
+                .unwrap_or_else(|_| std::process::abort());
+        }
+        drop(completion);
+        let rows = stage
+            .results
+            .iter()
+            .enumerate()
+            .map(|(position, slot)| {
+                slot.lock()
+                    .unwrap_or_else(|_| std::process::abort())
+                    .take()
+                    .ok_or(BatchError::ResidentResultPosition {
+                        position,
+                        count: item_count,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(StatelessIndexedResult {
+            rows,
+            worker_items: stage
+                .worker_items
+                .iter()
+                .map(|items| items.load(Ordering::Relaxed))
+                .collect(),
+            worker_nanos: stage
+                .worker_nanos
+                .iter()
+                .map(|nanos| nanos.load(Ordering::Relaxed))
+                .collect(),
+        })
     }
 
     /// Execute one batch on every non-empty lane and return results by worker.

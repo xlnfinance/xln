@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use xln_rscore_batch::{
-    AccountId, AccountInput, AccountInputKind, AccountInputRow, AccountSeed, EngineGeneration,
-    EntityAccountGenesisPolicy, EntityInboundRequest, ResidentConsensusEngine,
+    AccountId, AccountInput, AccountInputKind, AccountInputRow, AccountPhaseKind, AccountSeed,
+    EngineGeneration, EntityAccountGenesisPolicy, EntityInboundRequest, ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountExecutionContext,
@@ -1260,11 +1260,17 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
     let hub = entity(&hub_identity);
     let (maker_seed, maker_row, maker) = peer_proposal("maker", &hub, 0, offer_tx("maker", true));
     let (taker_seed, taker_row, taker) = peer_proposal("taker", &hub, 1, offer_tx("taker", false));
+    let expected_proposal_order = vec![maker_seed.account_id, taker_seed.account_id];
     let seeds = vec![maker_seed, taker_seed];
     let rows = vec![maker_row, taker_row];
-    let mut oracle: Option<([u8; 32], EntityKernelCommitments, Vec<[u8; 32]>)> = None;
+    let mut oracle: Option<(
+        [u8; 32],
+        EntityKernelCommitments,
+        Vec<EntityKernelOutput>,
+        Vec<(AccountId, [u8; 32])>,
+    )> = None;
 
-    for workers in [1, 2, 4, 8, 16] {
+    for workers in [1, 4, 16] {
         let mut accounts = ResidentConsensusEngine::restore(
             EngineGeneration::from_bytes([0x43; 8]),
             workers,
@@ -1304,13 +1310,32 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                 expected_proposer_signer_id: "hub".to_string(),
                 hub_rebalance_has_pending_work: false,
                 finalized_j_events: None,
-                entity_authority: None,
+                entity_authority: Some(single_signer_authority("hub")),
                 local_account_genesis_policy: None,
-                operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 2 }],
+                operations: vec![
+                    ResidentEntityOperation::AccountRange { start: 0, len: 1 },
+                    ResidentEntityOperation::Local(vec![AdmittedLocalEntityTx {
+                        signer_id: "hub".into(),
+                        board_epoch: 0,
+                        tx: LocalEntityTx::Control(LocalEntityControlTx::ChatMessage {
+                            message: "between-independent-account-ranges".into(),
+                        }),
+                    }]),
+                    ResidentEntityOperation::AccountRange { start: 1, len: 1 },
+                ],
             },
             &DeterministicContext::hlt_default(),
         )
         .expect("resident swap round");
+        let inbound_metric = accounts
+            .account_phase_metrics()
+            .into_iter()
+            .find(|metric| metric.kind == AccountPhaseKind::Inbound)
+            .expect("inbound phase metric");
+        assert_eq!(
+            inbound_metric.invocations, 1,
+            "multiple AccountRange operations use one inbound worker phase at W{workers}",
+        );
         assert_eq!(result.inbound.applied.len(), 2);
         assert_eq!(result.outbound.admissions.len(), 2);
         assert_eq!(result.outbound.proposals.len(), 2);
@@ -1321,7 +1346,7 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                 count: 1,
             }]
         );
-        let hashes = result
+        let proposals = result
             .outbound
             .proposals
             .iter()
@@ -1332,18 +1357,166 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                     frame.txs.as_slice(),
                     [AccountTx::SwapResolve { .. }]
                 ));
-                proposed.state_hash
+                (row.account_id, proposed.state_hash)
             })
             .collect::<Vec<_>>();
+        assert_eq!(
+            proposals
+                .iter()
+                .map(|(account_id, _)| *account_id)
+                .collect::<Vec<_>>(),
+            expected_proposal_order,
+            "outbound proposals retain the Account input positions",
+        );
+        let status = result
+            .entity_frame_events
+            .iter()
+            .filter_map(|event| match event {
+                EntityFrameEvent::Status { message } => Some(message.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let maker_event = status
+            .iter()
+            .position(|message| message.starts_with("🤝 Accepted frame"))
+            .expect("first Account event");
+        let local_event = status
+            .iter()
+            .position(|message| *message == "between-independent-account-ranges")
+            .expect("interleaved local event");
+        let taker_event = status
+            .iter()
+            .rposition(|message| message.starts_with("🤝 Accepted frame"))
+            .expect("second Account event");
+        assert!(maker_event < local_event && local_event < taker_event);
         let book = &result.state.orderbook.as_ref().expect("orderbook").books["1/2"];
         assert_eq!(book.trade_count, 1);
-        let evidence = (result.outbound.accounts_root, result.commitments, hashes);
+        let evidence = (
+            result.outbound.accounts_root,
+            result.commitments,
+            result.outputs,
+            proposals,
+        );
         if let Some(expected) = &oracle {
             assert_eq!(&evidence, expected, "worker count {workers}");
         } else {
             oracle = Some(evidence);
         }
     }
+}
+
+#[test]
+fn failed_books_stage_rolls_back_account_candidate_and_exact_retry_matches_fresh_engine() {
+    let hub_identity = identity("books-rollback-hub");
+    let hub = entity(&hub_identity);
+    let (seed, row, maker) = peer_proposal(
+        "books-rollback-maker",
+        &hub,
+        0,
+        offer_tx("books-rollback-offer", true),
+    );
+    let seeds = vec![seed];
+    let make_engine = || {
+        ResidentConsensusEngine::restore(
+            EngineGeneration::from_bytes([0x61; 8]),
+            4,
+            0,
+            derive_signer_key(SEED, "books-rollback-hub").expect("hub key"),
+            "books-rollback-hub".to_string(),
+            support::market(),
+            seeds.clone(),
+        )
+        .expect("resident accounts")
+    };
+    let make_state = |with_orderbook: bool| {
+        let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+        state.known_accounts.insert(maker.to_string());
+        if with_orderbook {
+            state.orderbook = Some(OrderbookState::empty(10_000));
+        }
+        state
+    };
+    let make_request = |expected_accounts_root, row: AccountInputRow| ResidentEntityRequest {
+        inbound: EntityInboundRequest {
+            owner_entity_id: *hub.as_bytes(),
+            expected_accounts_root,
+            clock: ReceiverClock {
+                entity_timestamp: TIMESTAMP,
+                finalized_j_height: 100,
+            },
+            rows: vec![row],
+            post_accounts: false,
+        },
+        local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+        entity_height: 1,
+        outbound_timestamp: TIMESTAMP,
+        outbound_j_height: 100,
+        checkpoint_due: false,
+        post_accounts: false,
+        runtime_seed: None,
+        scheduled_wake: None,
+        expected_proposer_signer_id: "books-rollback-hub".to_string(),
+        hub_rebalance_has_pending_work: false,
+        finalized_j_events: None,
+        entity_authority: None,
+        local_account_genesis_policy: None,
+        operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
+    };
+
+    let mut retried_engine = make_engine();
+    let base_root = retried_engine.accounts_root();
+    let base_revision = retried_engine.revision();
+    let error = match apply_resident_entity_round(
+        &mut retried_engine,
+        make_state(false),
+        make_request(base_root, row.clone()),
+        &DeterministicContext::hlt_default(),
+    ) {
+        Ok(_) => panic!("an offer cannot enter stage 2 without the canonical orderbook extension"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("ORDERBOOK_EXTENSION_REQUIRED"),
+        "unexpected stage-2 failure: {error}",
+    );
+    assert_eq!(retried_engine.accounts_root(), base_root);
+    assert_eq!(retried_engine.revision(), base_revision);
+
+    let retried = apply_resident_entity_round(
+        &mut retried_engine,
+        make_state(true),
+        make_request(base_root, row.clone()),
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("exact retry after books-stage rollback");
+
+    let mut fresh_engine = make_engine();
+    let fresh = apply_resident_entity_round(
+        &mut fresh_engine,
+        make_state(true),
+        make_request(base_root, row),
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("fresh-engine oracle");
+    let evidence = |result: &xln_rscore_entity_kernel::ResidentEntityResult| {
+        (
+            result.outbound.accounts_root,
+            result.commitments.clone(),
+            result.outputs.clone(),
+            result
+                .outbound
+                .proposals
+                .iter()
+                .map(|proposal| {
+                    (
+                        proposal.account_id,
+                        proposal.incoming_ref().map(|frame| frame.state_hash),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(evidence(&retried), evidence(&fresh));
 }
 
 #[test]

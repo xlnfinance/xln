@@ -1,0 +1,12 @@
+{
+  "backend": "rust-pool-no-wipe",
+  "specId": "brainvault/argon2id-sharded/v1.0|argon2id-v19-m262144-t1-p1|out32|nfkd-utf8",
+  "shardCount": 1000,
+  "factor": 4,
+  "workers": 8,
+  "memoryKiBPerShard": 262144,
+  "derivationTimeMs": 18002.972,
+  "totalTimeMs": 18006.593,
+  "shardsPerSecond": 55.546,
+  "root": "dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485"
+}

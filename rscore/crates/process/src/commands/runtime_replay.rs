@@ -7,6 +7,43 @@ use serde_json::Value;
 use xln_rscore_process::runtime_replay::replay_runtime_wal;
 use xln_rscore_runtime::RuntimeWalReader;
 
+fn milliseconds(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1_000.0
+}
+
+fn account_phase_metrics(rows: &[xln_rscore_batch::AccountPhaseMetric]) -> Vec<serde_json::Value> {
+    rows.iter()
+        .map(|row| {
+            serde_json::json!({
+                "kind": format!("{:?}", row.kind),
+                "invocations": row.invocations,
+                "coordinatorWallMs": row.coordinator_wall_nanos as f64 / 1e6,
+                "coordinatorPreDispatchMs": row.coordinator_pre_dispatch_nanos as f64 / 1e6,
+                "runLanesWallMs": row.run_lanes_wall_nanos as f64 / 1e6,
+                "coordinatorPostJoinMs": row.coordinator_post_join_nanos as f64 / 1e6,
+                "coordinatorDispatchJoinMs": row.coordinator_dispatch_join_nanos as f64 / 1e6,
+                "coordinatorFoldMs": row.coordinator_fold_nanos as f64 / 1e6,
+                "workerSamples": row.worker_samples,
+                "workerWorkSumMs": row.worker_work_sum_nanos as f64 / 1e6,
+                "workerWorkMaxMs": row.worker_work_max_nanos as f64 / 1e6,
+                "workerCriticalPathMs": row.worker_critical_path_nanos as f64 / 1e6,
+                "workerPhaseSpanMs": row.worker_phase_span_nanos as f64 / 1e6,
+                "workerBarrierWaitSumMs": row.worker_barrier_wait_sum_nanos as f64 / 1e6,
+                "workerBarrierWaitMaxMs": row.worker_barrier_wait_max_nanos as f64 / 1e6,
+                "workerRows": row.worker_rows,
+                "workerWorkNanos": row.worker_work_nanos,
+                "touchedRows": row.touched_rows,
+                "touchedShards": row.touched_shards,
+                "workersWithWork": row.workers_with_work,
+                "shardHandleClones": row.shard_handle_clones,
+                "candidateBaseReads": row.candidate_base_reads,
+                "continuationRounds": row.continuation_rounds,
+                "restartRounds": row.restart_rounds,
+            })
+        })
+        .collect()
+}
+
 fn arguments(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
     const NAMES: [&str; 7] = [
         "--wal",
@@ -111,6 +148,29 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
         workers,
         &PathBuf::from(format!("{recording_path}.w{workers}.diffs")),
     )?;
+    let apply_profile = serde_json::json!({
+        "fitMs": milliseconds(metrics.apply_profile.fit),
+        "residentCoreMs": milliseconds(metrics.apply_profile.resident_core),
+        "postCorePrepareMs": milliseconds(metrics.apply_profile.post_core_prepare),
+        "certificationMs": milliseconds(metrics.apply_profile.certification),
+        "settlementAttachMs": milliseconds(metrics.apply_profile.settlement_attach),
+        "postCertJMs": milliseconds(metrics.apply_profile.post_cert_j),
+        "residualMs": milliseconds(metrics.apply_profile.residual),
+        "totalMs": milliseconds(metrics.apply_profile.total),
+        "entityGroups": metrics.apply_profile.entity_groups,
+        "entityTxsSelected": metrics.apply_profile.entity_txs_selected,
+        "accountInputs": metrics.apply_profile.account_inputs,
+        "settlementHankos": metrics.apply_profile.settlement_hankos,
+        "postCertJActions": metrics.apply_profile.post_cert_j_actions,
+    });
+    let projection_profile = serde_json::json!({
+        "inputMs": milliseconds(metrics.projection_input_elapsed),
+        "machineMs": milliseconds(metrics.projection_machine_elapsed),
+        "metaMs": milliseconds(metrics.projection_meta_elapsed),
+        "contextMs": milliseconds(metrics.projection_context_elapsed),
+        "checkpointMs": milliseconds(metrics.projection_checkpoint_elapsed),
+        "encodeMs": milliseconds(metrics.projection_encode_elapsed),
+    });
     println!(
         "{}",
         serde_json::json!({
@@ -126,7 +186,9 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             "postStateHashesCompared": metrics.post_state_hashes_compared,
             "runtimeRootsCompared": metrics.runtime_roots_compared,
             "accountsRoot": metrics.accounts_root,
+            "setupMs": milliseconds(metrics.setup_elapsed),
             "elapsedMs": metrics.elapsed.as_secs_f64() * 1_000.0,
+            "engineMs": milliseconds(metrics.engine_elapsed),
             "applyMs": metrics.apply_elapsed.as_secs_f64() * 1_000.0,
             "projectionMs": metrics.projection_elapsed.as_secs_f64() * 1_000.0,
             "storageMs": metrics.storage_elapsed.as_secs_f64() * 1_000.0,
@@ -139,6 +201,9 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             "barrierWaitForPreviousCommitMs": metrics.barrier_wait_for_previous_commit_elapsed.as_secs_f64() * 1_000.0,
             "committerBusyMs": metrics.committer_busy_elapsed.as_secs_f64() * 1_000.0,
             "committerIdleMs": metrics.committer_idle_elapsed.as_secs_f64() * 1_000.0,
+            "applyProfile": apply_profile,
+            "projectionProfile": projection_profile,
+            "accountPhaseMetrics": account_phase_metrics(&metrics.account_phase_metrics),
         })
     );
     Ok(())

@@ -7,8 +7,10 @@
  *   bun run bv -- test secret123 100 --w=64     # Non-interactive (JSON output)
  *   bun test brainvault/core.test.ts            # Run deterministic tests
  *   bun run bv --bench                          # Benchmark performance
+ *   bun run bv --smoke                          # Fast 2-shard backend parity check
  *   bun run bv --lib=wasm                       # Force hash-wasm (slower, parity check)
  *   bun run bv --lib=native                     # Force @node-rs/argon2 (default, faster)
+ *   bun run bv --ask                            # Ask for factor, multiplier, and workers
  *   bun run bv --repeat                         # Interactive: require double entry for name/pass
  *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256MB * multiplier per shard
  *   bun run bv --address-count=5                # Number of standard + ledger-live addresses
@@ -17,6 +19,9 @@
  */
 
 import { stdin } from 'process';
+import { cpus, totalmem } from 'os';
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import * as readline from 'readline/promises';
 import { Worker } from 'worker_threads';
 import {
@@ -39,24 +44,36 @@ What is BrainVault?
 - Same inputs => same master key, mnemonics, and addresses.
 
 Usage:
+- bunx brainvault
+- bunx brainvault --ask
 - bun run bv
+- bun run bv --ask
 - bun run bv -- <name> <passphrase> <shards> [--w=N]
 - bun run bv --bench
+- bun run bv --smoke
 - bun run bv --password
 
 Flags:
 - --help, -h
   Show this help message.
 - --bench
-  Benchmark derivation speed.
+  Sequentially benchmark every available backend with the canonical defaults:
+  1,000 shards, factor 4, multiplier 1, and all available CPU cores (up to 32).
+- --smoke
+  Fast backend sanity check: run the same engines sequentially with exactly
+  2 shards and verify that every result has the same root.
 - --password
   Derive site-specific passwords from the master key.
+- --ask
+  Advanced interactive setup: ask for factor/shards, shard multiplier, and workers.
+  Without this flag the recommended defaults are factor 4 (1,000 shards),
+  multiplier 1, and all CPU cores allowed by RAM.
 - --lib=native
   Use @node-rs/argon2 worker (default).
 - --lib=wasm
   Use hash-wasm worker (slower, cross-backend parity/testing path).
 - --w=N
-  Number of parallel workers in non-interactive mode (default 64, capped by shard count).
+  Number of parallel workers in non-interactive mode (default: all CPU cores allowed by RAM).
 - --repeat
   Interactive mode only: require second entry for Name and Passphrase.
 - --shard-multiplier=N
@@ -68,6 +85,8 @@ Flags:
   Also print raw private key for Address 1 (high risk; use only if you understand key handling risks).
 
 Examples:
+- bunx brainvault
+- bunx brainvault --ask
 - bun run bv
 - bun run bv -- alice "correct horse battery staple" 100 --w=16
 - bun run bv -- alice "secret123456" 1 --address-count=10
@@ -94,6 +113,7 @@ const useWasm = args.includes('--lib=wasm');
 const useNative = args.includes('--lib=native');
 const requireRepeat = args.includes('--repeat');
 const showPrivateKey = args.includes('--show-private-key');
+const askAdvanced = args.includes('--ask');
 
 function getPositiveIntFlag(name: string, defaultValue: number): number {
   const flag = args.find(a => a.startsWith(`--${name}=`));
@@ -109,6 +129,7 @@ function getPositiveIntFlag(name: string, defaultValue: number): number {
 
 const addressCount = getPositiveIntFlag('address-count', 5);
 const shardMultiplier = getPositiveIntFlag('shard-multiplier', 1);
+const hasShardMultiplierFlag = args.some(argument => argument.startsWith('--shard-multiplier='));
 
 if (useWasm && useNative) {
   console.error('Error: cannot use both --lib=wasm and --lib=native');
@@ -117,6 +138,34 @@ if (useWasm && useNative) {
 
 function recoveryRuleText(shardCount: number, shardMultiplierValue: number): string {
   return `Recovery rule: use the exact same Name + Passphrase + Shards (${shardCount}) + shard-multiplier (${shardMultiplierValue}) to reproduce the same master key.`;
+}
+
+type HardwarePlan = Readonly<{
+  cpuCores: number;
+  totalGB: number;
+  memoryPerWorkerGb: number;
+  maxFromRAM: number;
+  recommendedWorkers: number;
+  strongerMultiplier: number;
+  upperMultiplier: number;
+}>;
+
+function getHardwarePlan(shardCount: number, multiplier: number): HardwarePlan {
+  const cpuCores = cpus().length;
+  const totalGB = Math.floor(totalmem() / (1024 ** 3));
+  const baseMemoryPerWorkerGb = BRAINVAULT_V1.SHARD_MEMORY_KB / (1024 * 1024);
+  const memoryPerWorkerGb = baseMemoryPerWorkerGb * multiplier;
+  const maxFromRAM = Math.max(1, Math.floor((totalGB * 0.8) / memoryPerWorkerGb));
+  const maxForAllCoresAtHalfRAM = Math.max(1, Math.floor((totalGB * 0.5) / (cpuCores * baseMemoryPerWorkerGb)));
+  return {
+    cpuCores,
+    totalGB,
+    memoryPerWorkerGb,
+    maxFromRAM,
+    recommendedWorkers: Math.min(cpuCores, maxFromRAM, shardCount),
+    strongerMultiplier: Math.min(4, maxForAllCoresAtHalfRAM),
+    upperMultiplier: maxForAllCoresAtHalfRAM,
+  };
 }
 
 // ============================================================================
@@ -314,25 +363,125 @@ async function derive(name: string, passphrase: string, shardInput: number, work
 // BENCHMARK
 // ============================================================================
 
-async function runBenchmark() {
-  console.log('Benchmarking argon2id performance...\n');
-
-  const configs = [
-    { shards: 1, workers: 1 },
-    { shards: 10, workers: 10 },
-    { shards: 10, workers: 1 },
-  ];
-
-  for (const { shards, workers } of configs) {
-    const result = await derive('bench', 'password', shards, workers, {
-      useWasm,
-      addressCount: 1,
-      shardMultiplier,
-    });
-    const perShard = result.derivationTime / shards;
-    const speedup = workers > 1 ? (perShard * shards / result.derivationTime) : 1;
-    console.log(`${shards} shards × ${workers} workers: ${result.derivationTime}ms (${perShard.toFixed(0)}ms/shard, ${speedup.toFixed(1)}x speedup)`);
+async function runBenchmark(smoke = false) {
+  const shardCount = smoke ? 2 : 1_000;
+  const defaultWorkers = Math.min(32, getHardwarePlan(shardCount, 1).recommendedWorkers);
+  const workerFlag = args.find(argument => argument.startsWith('--w='));
+  const workers = workerFlag ? Number(workerFlag.slice('--w='.length)) : defaultWorkers;
+  if (!Number.isSafeInteger(workers) || workers < 1 || workers > 32) {
+    throw new Error(`Benchmark workers must be an integer in 1..32: ${String(workers)}`);
   }
+
+  const benchmarkPath = `${import.meta.dir}/experimental/benchmark.ts`;
+  if (!existsSync(benchmarkPath)) throw new Error('BRAINVAULT_BENCHMARK_HARNESS_MISSING');
+
+  type BenchmarkBackend = Readonly<{ id: string; label: string; executable?: string }>;
+  const candidates: BenchmarkBackend[] = [
+    {
+      id: 'c-neon',
+      label: 'C/NEON final wipe',
+      executable: `${import.meta.dir}/experimental/argon2-c/brainvault-argon2`,
+    },
+    {
+      id: 'c-neon-wipe',
+      label: 'C/NEON per-shard wipe',
+      executable: `${import.meta.dir}/experimental/argon2-c/brainvault-argon2`,
+    },
+    { id: 'direct-async', label: 'Native direct async (experimental)' },
+    { id: 'sync', label: 'Native sync isolated' },
+    { id: 'baseline', label: 'Native production' },
+    {
+      id: 'rust-pool',
+      label: 'Rust pool secure',
+      executable: `${import.meta.dir}/experimental/argon2-rust/target/release/brainvault-argon2-rust`,
+    },
+    {
+      id: 'rust-pool-no-wipe',
+      label: 'Rust pool final wipe',
+      executable: `${import.meta.dir}/experimental/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`,
+    },
+    { id: 'wasm', label: 'TypeScript/WASM' },
+  ];
+  const available = candidates.filter(candidate => candidate.executable === undefined || existsSync(candidate.executable));
+  const estimatedSeconds = smoke
+    ? 'a few seconds'
+    : available.length <= 4 ? 'about 30 seconds' : 'about one minute';
+  console.log(smoke ? 'BrainVault backend smoke test' : 'BrainVault canonical backend benchmark');
+  console.log(`${shardCount.toLocaleString('en-US')} shards · factor ${factorForShardCount(shardCount)} · multiplier 1 · ${workers} workers`);
+  console.log(`Running ${available.length} engines sequentially; expected duration: ${estimatedSeconds}.\n`);
+
+  type BenchmarkResult = Readonly<{
+    backend: string;
+    label: string;
+    derivationTimeMs: number;
+    shardsPerSecond: number;
+    root: string;
+  }>;
+  const results: BenchmarkResult[] = [];
+
+  for (const [index, candidate] of available.entries()) {
+    process.stdout.write(`[${index + 1}/${available.length}] ${candidate.label}... `);
+    const child = spawnSync(process.execPath, [
+      benchmarkPath,
+      `--backend=${candidate.id}`,
+      `--shards=${shardCount}`,
+      `--workers=${workers}`,
+    ], {
+      cwd: import.meta.dir,
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+      env: { ...process.env, UV_THREADPOOL_SIZE: String(workers) },
+    });
+    if (child.status !== 0) {
+      console.log('FAILED');
+      const details = child.stderr.trim() || child.stdout.trim() || `exit ${String(child.status)}`;
+      console.error(details);
+      continue;
+    }
+    const parsed = JSON.parse(child.stdout) as {
+      backend?: unknown;
+      derivationTimeMs?: unknown;
+      shardsPerSecond?: unknown;
+      root?: unknown;
+    };
+    if (
+      typeof parsed.backend !== 'string'
+      || typeof parsed.derivationTimeMs !== 'number'
+      || typeof parsed.shardsPerSecond !== 'number'
+      || typeof parsed.root !== 'string'
+    ) {
+      console.log('FAILED');
+      console.error('Benchmark returned malformed JSON.');
+      continue;
+    }
+    results.push({
+      backend: parsed.backend,
+      label: candidate.label,
+      derivationTimeMs: parsed.derivationTimeMs,
+      shardsPerSecond: parsed.shardsPerSecond,
+      root: parsed.root,
+    });
+    console.log(`${(parsed.derivationTimeMs / 1000).toFixed(3)}s`);
+  }
+
+  if (results.length === 0) throw new Error('BRAINVAULT_BENCHMARK_ALL_ENGINES_FAILED');
+  const roots = new Set(results.map(result => result.root));
+  if (roots.size !== 1) {
+    throw new Error(`BRAINVAULT_BENCHMARK_ROOT_MISMATCH:${[...roots].join(':')}`);
+  }
+  const sorted = [...results].sort((left, right) => left.derivationTimeMs - right.derivationTimeMs);
+  const fastest = sorted[0]!.derivationTimeMs;
+  const labelWidth = Math.max('Engine'.length, ...sorted.map(result => result.label.length));
+  console.log('\nResults (fastest first)');
+  console.log(`${'Engine'.padEnd(labelWidth)}  Time      Shards/s  vs fastest`);
+  console.log(`${'-'.repeat(labelWidth)}  --------  --------  ----------`);
+  for (const result of sorted) {
+    console.log(
+      `${result.label.padEnd(labelWidth)}  ${(result.derivationTimeMs / 1000).toFixed(3).padStart(7)}s  `
+      + `${result.shardsPerSecond.toFixed(2).padStart(8)}  ${(result.derivationTimeMs / fastest).toFixed(2).padStart(8)}x`,
+    );
+  }
+  console.log(`\nRoot parity: PASS (${results[0]!.root})`);
 }
 
 // ============================================================================
@@ -351,7 +500,7 @@ async function interactive() {
     console.log(`CUSTOM MODE: shard-multiplier=${shardMultiplier} (${memoryPerShardGb.toFixed(2)}GB per shard)\n`);
   }
 
-  const name = await rl.question('Name: ');
+  const name = await rl.question('Username: ');
   if (requireRepeat) {
     const nameRepeat = await rl.question('Repeat Name: ');
     if (name !== nameRepeat) {
@@ -361,7 +510,7 @@ async function interactive() {
     }
   }
 
-  const pass = await rl.question('Pass: ');
+  const pass = await rl.question('Password: ');
   if (requireRepeat) {
     const passRepeat = await rl.question('Repeat Pass: ');
     if (pass !== passRepeat) {
@@ -377,49 +526,71 @@ async function interactive() {
     return;
   }
 
-  console.log('\nShards (quick presets or any number):');
-  console.log('  1 →      1 shard');
-  console.log('  2 →     10 shards');
-  console.log('  3 →    100 shards');
-  console.log('  4 →  1,000 shards');
-  console.log('  5 → 10,000 shards');
-  console.log('  6+ → any number (e.g., 64, 256, 528)\n');
+  let shardInput = 4;
+  let selectedMultiplier = shardMultiplier;
 
-  const shardInput = Number((await rl.question('Shards (100): ')).trim() || '100');
-  if (!Number.isSafeInteger(shardInput) || shardInput < 1) {
-    console.log('Error: Shards must be a positive integer');
-    rl.close();
-    return;
+  if (askAdvanced) {
+    console.log('\nFactor presets (or enter an exact shard count):');
+    console.log('  1 →      1 shard');
+    console.log('  2 →     10 shards');
+    console.log('  3 →    100 shards');
+    console.log('  4 →  1,000 shards  (recommended)');
+    console.log('  5 → 10,000 shards');
+    console.log('  6+ → exact shard count (e.g. 64, 256, 528)\n');
+    shardInput = Number((await rl.question('Factor or exact shard count (4): ')).trim() || '4');
+    if (!Number.isSafeInteger(shardInput) || shardInput < 1) {
+      console.log('Error: factor/shards must be a positive integer');
+      rl.close();
+      return;
+    }
+
+    if (!hasShardMultiplierFlag) {
+      const initialPlan = getHardwarePlan(shardInput <= 5 ? getShardCount(shardInput) : shardInput, 1);
+      console.log(`\nRecommended multiplier: 1 (portable frozen default).`);
+      if (initialPlan.strongerMultiplier > 1) {
+        console.log(`Hardware-aware stronger option: ${initialPlan.strongerMultiplier} (${(0.25 * initialPlan.strongerMultiplier).toFixed(2)}GB per worker).`);
+        console.log(`50% RAM ceiling with all ${initialPlan.cpuCores} CPUs: multiplier ${initialPlan.upperMultiplier}.`);
+      }
+      console.log('Warning: any multiplier other than 1 changes the root and must be remembered for recovery.');
+      selectedMultiplier = Number((await rl.question('Shard multiplier (1): ')).trim() || '1');
+      if (!Number.isSafeInteger(selectedMultiplier) || selectedMultiplier < 1) {
+        console.log('Error: multiplier must be a positive integer');
+        rl.close();
+        return;
+      }
+    }
   }
-  const shardCount = shardInput >= 1 && shardInput <= 5 ? getShardCount(shardInput) : shardInput;
 
-  // Calculate recommended workers (CPU cores, capped by RAM)
-  const os = await import('os');
-  const totalGB = Math.floor(os.totalmem() / (1024**3));
-  const cpuCores = os.cpus().length;
-  const memoryPerWorkerGb = 0.256 * shardMultiplier;
-  const maxFromRAM = Math.floor((totalGB * 0.8) / memoryPerWorkerGb);
-  const maxFromHW = Math.min(cpuCores, maxFromRAM);
-  const recommended = Math.min(maxFromHW, shardCount);
-  const bottleneck = recommended === shardCount ? `shard count (${shardCount})` : recommended === cpuCores ? `CPU cores (${cpuCores})` : `RAM (${totalGB}GB)`;
-
-  console.log(`\nCPU cores detected: ${cpuCores}`);
-  console.log(`System RAM: ${totalGB}GB → max ${maxFromRAM} workers from memory`);
-  console.log(`Memory per worker: ${memoryPerWorkerGb.toFixed(2)}GB`);
-  console.log(`Hardware capacity: ${maxFromHW} parallel workers`);
-  console.log(`Recommended workers: ${recommended} (limited by ${bottleneck})\n`);
-
-  const workersInput = Number((await rl.question(`Number of parallel workers (${recommended}): `)).trim() || `${recommended}`);
-  if (!Number.isSafeInteger(workersInput) || workersInput < 1) {
-    console.log('Error: Workers must be a positive integer');
-    rl.close();
-    return;
+  const shardCount = shardInput <= 5 ? getShardCount(shardInput) : shardInput;
+  const plan = getHardwarePlan(shardCount, selectedMultiplier);
+  let workersInput = plan.recommendedWorkers;
+  if (askAdvanced) {
+    console.log(`\nCPU cores detected: ${plan.cpuCores}`);
+    console.log(`System RAM: ${plan.totalGB}GB; ${plan.memoryPerWorkerGb.toFixed(2)}GB per worker`);
+    console.log(`Recommended workers: ${plan.recommendedWorkers}\n`);
+    workersInput = Number((await rl.question(`Parallel workers (${plan.recommendedWorkers}): `)).trim() || `${plan.recommendedWorkers}`);
+    if (!Number.isSafeInteger(workersInput) || workersInput < 1) {
+      console.log('Error: workers must be a positive integer');
+      rl.close();
+      return;
+    }
+    if (workersInput > plan.recommendedWorkers) {
+      console.log(`Error: workers exceed the safe hardware limit (${plan.recommendedWorkers}) for this shard count/multiplier.`);
+      rl.close();
+      return;
+    }
+  } else {
+    console.log('\nRecommended defaults:');
+    console.log(`  Factor: 4 (${shardCount.toLocaleString('en-US')} shards)`);
+    console.log(`  Shard multiplier: ${selectedMultiplier}`);
+    console.log(`  Workers: ${workersInput} (all available CPUs allowed by RAM)`);
+    console.log('  Use --ask for advanced setup.');
   }
 
   rl.close();
 
   console.log(`\n${shardCount} shards × ${workersInput} workers\n`);
-  console.log(recoveryRuleText(shardCount, shardMultiplier));
+  console.log(recoveryRuleText(shardCount, selectedMultiplier));
   console.log(`Address matrix count: ${addressCount} standard + ${addressCount} Ledger Live\n`);
 
   try {
@@ -427,7 +598,7 @@ async function interactive() {
       useWasm,
       showPrivateKey,
       addressCount,
-      shardMultiplier,
+      shardMultiplier: selectedMultiplier,
     });
 
     console.log(`\n✅ ${formatDuration(result.derivationTime)}\n`);
@@ -510,8 +681,8 @@ async function derivePassword() {
 // MAIN
 // ============================================================================
 
-if (args.includes('--bench')) {
-  await runBenchmark();
+if (args.includes('--bench') || args.includes('--smoke')) {
+  await runBenchmark(args.includes('--smoke'));
 } else if (args.includes('--password')) {
   await derivePassword();
 } else if (args.length >= 3 && !args[0]?.startsWith('--')) {
@@ -524,7 +695,8 @@ if (args.includes('--bench')) {
   }
 
   const wFlag = args.find(a => a.startsWith('--w='));
-  const workers = wFlag ? Number(wFlag.split('=')[1]) : 64;
+  const resolvedShardCount = shards <= 5 ? getShardCount(shards) : shards;
+  const workers = wFlag ? Number(wFlag.split('=')[1]) : getHardwarePlan(resolvedShardCount, shardMultiplier).recommendedWorkers;
   if (!Number.isSafeInteger(workers) || workers < 1) {
     console.error(`Error: invalid worker count: ${wFlag?.split('=')[1] ?? ''}`);
     process.exit(1);

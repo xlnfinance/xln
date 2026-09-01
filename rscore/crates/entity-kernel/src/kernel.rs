@@ -11,7 +11,11 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::commitment::compute_commitments;
 use crate::j_events::apply_committed_j_event_claim;
 use crate::local_financial::{LocalAccountFinancialView, apply_local_entity_financial_txs};
-use crate::orderbook::{SameJOffer, SameJOutputDelta, apply_orderbook_outputs};
+use crate::orderbook::{
+    OrderbookPairJob, OrderbookPairMapper, OrderbookPairResult, PreparedOrderbookStage, SameJOffer,
+    SameJOutputDelta, install_orderbook_outputs, prepare_orderbook_outputs,
+    validate_orderbook_outputs,
+};
 use crate::paybook::{
     PaybookChanges, PaybookEffects, committed_htlc_lock, committed_htlc_resolve,
     direct_payment_forward, revealed_secret_followup, timed_out_followup,
@@ -723,6 +727,7 @@ pub(crate) struct EntityTransitionResult {
     pub(crate) local_hashes_to_sign: Vec<crate::HashToSign>,
     pub(crate) account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
     pub(crate) paybook_changes: PaybookChanges,
+    pub(crate) orderbook_deltas: Vec<SameJOutputDelta>,
 }
 
 #[expect(
@@ -731,6 +736,7 @@ pub(crate) struct EntityTransitionResult {
 )]
 pub(crate) fn apply_entity_transitions(
     mut state: EntityStateSlice,
+    mut paybook_changes: PaybookChanges,
     commits: Vec<OrderedAccountCommit>,
     created_accounts: &BTreeSet<String>,
     local_txs: Vec<crate::AdmittedLocalEntityTx>,
@@ -739,7 +745,6 @@ pub(crate) fn apply_entity_transitions(
     entity_authority: Option<&crate::EntityFrameAuthority>,
     runtime_seed: Option<&str>,
     context: &DeterministicContext,
-    scheduled_commands: &[SchedulerCommand],
 ) -> Result<EntityTransitionResult, EntityKernelError> {
     let total_started = Instant::now();
     let profile = profile_entity();
@@ -796,7 +801,6 @@ pub(crate) fn apply_entity_transitions(
     let mut outputs = Vec::new();
     let mut routed_entity_outputs = Vec::new();
     let mut consumed_htlcs = BTreeSet::new();
-    let mut paybook_changes = PaybookChanges::default();
     let mut preapply_elapsed = Duration::ZERO;
     let mut apply_elapsed = Duration::ZERO;
     let commit_count = commits.len();
@@ -865,6 +869,7 @@ pub(crate) fn apply_entity_transitions(
                 local_wake_targets.extend(applied.wake_targets);
                 account_envelope_mutations.extend(applied.envelope_mutations);
                 routed_entity_outputs.extend(applied.routed_entity_outputs);
+                deltas.extend(applied.orderbook_deltas);
             }
             LocalEntityTx::Control(tx) => {
                 let authority = entity_authority.ok_or_else(|| {
@@ -946,36 +951,8 @@ pub(crate) fn apply_entity_transitions(
     let local_elapsed = local_started.elapsed();
     account_txs.extend(local_account_txs);
     outputs.extend(local_outputs);
-    if !deltas.is_empty() && state.orderbook.is_none() {
-        return Err(EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"));
-    }
-    // TS applies every Account output and EntityTx before matching. Cross-j
-    // admission can therefore publish a working order in this same frame.
-    // One shared matcher then consumes cross-j first and same-J second.
-    let orderbook_started = Instant::now();
-    if let Some(orderbook) = &mut state.orderbook {
-        let orderbook_effects =
-            apply_orderbook_outputs(orderbook, &deltas, context, &state.entity_id)?;
-        account_txs.extend(orderbook_effects.account_txs);
-        routed_entity_outputs.extend(orderbook_effects.routed_entity_outputs);
-        for fill in orderbook_effects.cross_jurisdiction_fills {
-            let applied = crate::cross_j::commit_cross_jurisdiction_book_fill(&mut state, fill)?;
-            for work in applied.proposal_work {
-                account_txs.extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
-            }
-            routed_entity_outputs.extend(applied.outputs);
-        }
-        if orderbook_effects.matched_swaps > 0 {
-            outputs.push(EntityKernelOutput::SwapMatched {
-                entity_id: state.entity_id.clone(),
-                count: orderbook_effects.matched_swaps,
-            });
-        }
-    }
-    let orderbook_elapsed = orderbook_started.elapsed();
+    let orderbook_elapsed = Duration::ZERO;
     let group_started = Instant::now();
-    append_scheduled_account_txs(scheduled_commands, &mut account_txs)?;
-    append_scheduled_entity_outputs(&state, scheduled_commands, &mut routed_entity_outputs)?;
     let account_tx_count = account_txs.len();
     let proposal_work = group_proposal_work(account_txs);
     let group_elapsed = group_started.elapsed();
@@ -1014,7 +991,108 @@ pub(crate) fn apply_entity_transitions(
         local_hashes_to_sign,
         account_envelope_mutations,
         paybook_changes,
+        orderbook_deltas: deltas,
     })
+}
+
+pub(crate) struct PreparedEntityBookStage {
+    orderbook: Option<PreparedOrderbookStage>,
+}
+
+impl PreparedEntityBookStage {
+    pub(crate) fn take_orderbook_jobs(&mut self) -> Vec<OrderbookPairJob> {
+        self.orderbook
+            .as_mut()
+            .map(PreparedOrderbookStage::take_jobs)
+            .unwrap_or_default()
+    }
+}
+
+pub(crate) fn prepare_orderbook_stage(
+    result: &mut EntityTransitionResult,
+    context: &DeterministicContext,
+) -> Result<PreparedEntityBookStage, EntityKernelError> {
+    if !result.orderbook_deltas.is_empty() && result.state.orderbook.is_none() {
+        return Err(EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"));
+    }
+    let orderbook = if let Some(orderbook) = &mut result.state.orderbook {
+        Some(prepare_orderbook_outputs(
+            orderbook,
+            &result.orderbook_deltas,
+            context,
+            &result.state.entity_id,
+        )?)
+    } else {
+        None
+    };
+    Ok(PreparedEntityBookStage { orderbook })
+}
+
+pub(crate) fn finish_orderbook_stage(
+    result: &mut EntityTransitionResult,
+    prepared: PreparedEntityBookStage,
+    pair_results: Vec<OrderbookPairResult>,
+    scheduled_commands: &[SchedulerCommand],
+) -> Result<(), EntityKernelError> {
+    let mut account_txs = Vec::new();
+    if let Some(prepared) = prepared.orderbook {
+        let validated = validate_orderbook_outputs(prepared, pair_results)?;
+        let orderbook = result
+            .state
+            .orderbook
+            .as_mut()
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"))?;
+        let effects = install_orderbook_outputs(orderbook, validated);
+        account_txs.extend(effects.account_txs);
+        result
+            .routed_entity_outputs
+            .extend(effects.routed_entity_outputs);
+        for fill in effects.cross_jurisdiction_fills {
+            let applied =
+                crate::cross_j::commit_cross_jurisdiction_book_fill(&mut result.state, fill)?;
+            for work in applied.proposal_work {
+                account_txs.extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
+            }
+            result.routed_entity_outputs.extend(applied.outputs);
+        }
+        if effects.matched_swaps > 0 {
+            result.outputs.push(EntityKernelOutput::SwapMatched {
+                entity_id: result.state.entity_id.clone(),
+                count: effects.matched_swaps,
+            });
+        }
+    }
+    append_scheduled_account_txs(scheduled_commands, &mut account_txs)?;
+    append_scheduled_entity_outputs(
+        &result.state,
+        scheduled_commands,
+        &mut result.routed_entity_outputs,
+    )?;
+    for appended in group_proposal_work(account_txs) {
+        if let Some(existing) = result
+            .proposal_work
+            .iter_mut()
+            .find(|existing| existing.account_id == appended.account_id)
+        {
+            existing.txs.extend(appended.txs);
+        } else {
+            result.proposal_work.push(appended);
+        }
+    }
+    result.orderbook_deltas.clear();
+    Ok(())
+}
+
+pub(crate) fn apply_orderbook_stage(
+    result: &mut EntityTransitionResult,
+    context: &DeterministicContext,
+    scheduled_commands: &[SchedulerCommand],
+    mapper: &mut dyn OrderbookPairMapper,
+) -> Result<(), EntityKernelError> {
+    let mut prepared = prepare_orderbook_stage(result, context)?;
+    let jobs = prepared.take_orderbook_jobs();
+    let pair_results = mapper.map_pairs(jobs, context.clone())?;
+    finish_orderbook_stage(result, prepared, pair_results, scheduled_commands)
 }
 
 pub fn apply_entity_kernel(
@@ -1024,6 +1102,7 @@ pub fn apply_entity_kernel(
 ) -> Result<EntityKernelResult, EntityKernelError> {
     let mut result = apply_entity_transitions(
         state,
+        PaybookChanges::default(),
         commits.to_vec(),
         &BTreeSet::new(),
         Vec::new(),
@@ -1032,8 +1111,14 @@ pub fn apply_entity_kernel(
         None,
         None,
         context,
-        &[],
     )?;
+    let mut prepared = prepare_orderbook_stage(&mut result, context)?;
+    let pair_results = prepared
+        .take_orderbook_jobs()
+        .into_iter()
+        .map(|job| job.apply(context))
+        .collect();
+    finish_orderbook_stage(&mut result, prepared, pair_results, &[])?;
     std::mem::take(&mut result.paybook_changes).commit_sequential(&mut result.state)?;
     let commitments = compute_commitments(&result.state, &result.proposal_work, &result.outputs)?;
     Ok(EntityKernelResult {

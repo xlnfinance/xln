@@ -331,6 +331,7 @@ export const validatePreparedHtlcPayment = (
   state: EntityState,
   tx: HtlcPaymentTx,
   infraContext: EntityInfraContext | undefined,
+  hasPaybookEntry: (hashlock: string) => boolean = hashlock => state.paybook.entries.has(hashlock),
 ): PreparedOriginatedHtlcPayment => {
   assertRawHtlcPayment(tx);
   if (!infraContext) rejectHtlcPayment('HTLC_PAYMENT_INFRA_CONTEXT_REQUIRED');
@@ -349,7 +350,7 @@ export const validatePreparedHtlcPayment = (
     || (tx.data.startedAtMs !== undefined && prepared.startedAtMs !== tx.data.startedAtMs)) {
     rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
   }
-  if (state.paybook.entries.has(prepared.hashlock)) {
+  if (hasPaybookEntry(prepared.hashlock)) {
     rejectHtlcPayment(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
   }
   const account = state.accounts.get(prepared.nextHopEntityId);

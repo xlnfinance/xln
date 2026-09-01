@@ -13,3 +13,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+[[bench]]
+name = "crypto_primitives"
+harness = false

@@ -7,6 +7,7 @@ import { armPaymentSecretAckTimeout, persistVerifiedPaymentSecret } from '../../
 import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';
 import { hasInboundPayment } from '../../../paybook/views';
+import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 type UnsafeFrameContext = {
   env: EntityRuntimeContext;
@@ -17,6 +18,7 @@ type UnsafeFrameContext = {
   createdAccount: boolean;
   dispute: AccountInputDisputeRequired;
   effects: CommittedAccountEffects;
+  bookIntentSlot?: BookIntentSlotWriter;
 };
 
 export type UnsafeFrameOutcome = {
@@ -25,13 +27,14 @@ export type UnsafeFrameOutcome = {
 };
 
 const persistDisputeEvidenceSecrets = (context: UnsafeFrameContext): void => {
-  const { state, account, counterpartyId, dispute, effects } = context;
+  const { state, account, counterpartyId, dispute, effects, bookIntentSlot } = context;
   for (const { hashlock, secret } of dispute.evidenceSecrets) {
+    if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
     const lock = [...account.state.locks.values()].find(
       candidate => candidate.hashlock.toLowerCase() === hashlock.toLowerCase(),
     );
     if (!lock) throw new Error(`HTLC_DISPUTE_EVIDENCE_LOCK_MISSING:${hashlock}`);
-    const route = persistVerifiedPaymentSecret(state, counterpartyId, lock, secret);
+    const route = persistVerifiedPaymentSecret(state, counterpartyId, lock, secret, bookIntentSlot);
     const localIsLeft = account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase();
     const localSentLock = lock.senderIsLeft === localIsLeft;
     if (!localSentLock || !hasInboundPayment(route)) continue;

@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 import { LOCAL_TEST_LEASE_ENV_NAMES } from '../../scripts/e2e/harness/local-test-port-lease';
+import { signalProcessGroup } from '../../scripts/e2e/runners/process-group';
 import {
   parseHltDashboardConfig,
   previewHltDashboard,
@@ -35,6 +36,7 @@ const FORBIDDEN_CHILD_ENV = [
   'XLN_MESH_PUBLIC_PORT_BASE', 'XLN_MESH_CUSTODY_PORT', 'XLN_MESH_CUSTODY_DAEMON_PORT',
   'ANVIL_RPC', 'PUBLIC_RPC', 'PUBLIC_WS_BASE_URL', 'PUBLIC_RELAY_URL',
   'INTERNAL_RELAY_URL', 'RELAY_URL', 'XLN_DB_PATH', 'XLN_RDB_ROOT', 'XLN_MESH_DB_ROOT',
+  'ANVIL_TMPDIR', 'XLN_DEV_DATA_ROOT', 'XLN_JDB_ROOT', 'XLN_STORAGE_HISTORY_PATH',
   'XLN_LOCAL_PROD_SMOKE_PORT_BASE', 'XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR',
   ...LOCAL_TEST_LEASE_ENV_NAMES,
 ] as const;
@@ -200,11 +202,11 @@ const finishRun = (
 };
 
 const signalRun = (run: ActiveHltRun, signal: NodeJS.Signals): void => {
-  try {
-    run.proc.kill(signal);
-  } catch {
-    // Child already exited; finishRun handles the close path.
-  }
+  if (!run.proc.pid) throw new Error(`HLT_RUN_PID_MISSING:${signal}`);
+  const spawnedProcess = Array.isArray(run.proc.spawnargs) && run.proc.spawnargs.length > 0;
+  if (spawnedProcess && signalProcessGroup(run.proc.pid, signal)) return;
+  if (run.proc.exitCode !== null && run.proc.exitCode !== undefined) return;
+  if (!run.proc.kill(signal)) throw new Error(`HLT_RUN_SIGNAL_FAILED:${run.proc.pid}:${signal}`);
 };
 
 const armKillGrace = (run: ActiveHltRun): void => {

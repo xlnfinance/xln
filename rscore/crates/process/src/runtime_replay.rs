@@ -88,6 +88,12 @@ pub struct RuntimeReplayMetrics {
     pub engine_elapsed: Duration,
     pub apply_elapsed: Duration,
     pub projection_elapsed: Duration,
+    pub projection_input_elapsed: Duration,
+    pub projection_machine_elapsed: Duration,
+    pub projection_meta_elapsed: Duration,
+    pub projection_context_elapsed: Duration,
+    pub projection_checkpoint_elapsed: Duration,
+    pub projection_encode_elapsed: Duration,
     pub storage_elapsed: Duration,
     pub publication_elapsed: Duration,
     pub storage_prepare_validate_elapsed: Duration,
@@ -98,6 +104,7 @@ pub struct RuntimeReplayMetrics {
     pub barrier_wait_for_previous_commit_elapsed: Duration,
     pub committer_busy_elapsed: Duration,
     pub committer_idle_elapsed: Duration,
+    pub apply_profile: xln_rscore_runtime::RuntimeApplyPhaseProfile,
     pub effect_digests_compared: u64,
     pub event_digests_compared: u64,
     pub outbox_digests_compared: u64,
@@ -114,6 +121,12 @@ fn add_wall_decomposition(
     report: &xln_rscore_runtime::RuntimeProcessReport,
 ) {
     let timings = report.timings;
+    metrics.projection_input_elapsed += timings.projection_input;
+    metrics.projection_machine_elapsed += timings.projection_machine;
+    metrics.projection_meta_elapsed += timings.projection_meta;
+    metrics.projection_context_elapsed += timings.projection_context;
+    metrics.projection_checkpoint_elapsed += timings.projection_checkpoint;
+    metrics.projection_encode_elapsed += timings.projection_encode;
     metrics.storage_elapsed += timings.storage;
     metrics.publication_elapsed += timings.publication;
     metrics.storage_prepare_validate_elapsed += timings.storage_prepare_validate;
@@ -124,6 +137,36 @@ fn add_wall_decomposition(
     metrics.barrier_wait_for_previous_commit_elapsed += timings.barrier_wait_for_previous_commit;
     metrics.committer_busy_elapsed += timings.committer_busy;
     metrics.committer_idle_elapsed += timings.committer_idle;
+    if let Some(profile) = &report.apply_profile {
+        metrics.apply_profile.fit += profile.fit;
+        metrics.apply_profile.resident_core += profile.resident_core;
+        metrics.apply_profile.post_core_prepare += profile.post_core_prepare;
+        metrics.apply_profile.certification += profile.certification;
+        metrics.apply_profile.settlement_attach += profile.settlement_attach;
+        metrics.apply_profile.post_cert_j += profile.post_cert_j;
+        metrics.apply_profile.total += profile.total;
+        metrics.apply_profile.residual += profile.residual;
+        metrics.apply_profile.entity_groups = metrics
+            .apply_profile
+            .entity_groups
+            .saturating_add(profile.entity_groups);
+        metrics.apply_profile.entity_txs_selected = metrics
+            .apply_profile
+            .entity_txs_selected
+            .saturating_add(profile.entity_txs_selected);
+        metrics.apply_profile.account_inputs = metrics
+            .apply_profile
+            .account_inputs
+            .saturating_add(profile.account_inputs);
+        metrics.apply_profile.settlement_hankos = metrics
+            .apply_profile
+            .settlement_hankos
+            .saturating_add(profile.settlement_hankos);
+        metrics.apply_profile.post_cert_j_actions = metrics
+            .apply_profile
+            .post_cert_j_actions
+            .saturating_add(profile.post_cert_j_actions);
+    }
 }
 
 /// Submitted directPayment txs in one decoded input. Counted from the
@@ -550,6 +593,12 @@ pub fn replay_runtime_wal(
         engine_elapsed: Duration::ZERO,
         apply_elapsed: Duration::ZERO,
         projection_elapsed: Duration::ZERO,
+        projection_input_elapsed: Duration::ZERO,
+        projection_machine_elapsed: Duration::ZERO,
+        projection_meta_elapsed: Duration::ZERO,
+        projection_context_elapsed: Duration::ZERO,
+        projection_checkpoint_elapsed: Duration::ZERO,
+        projection_encode_elapsed: Duration::ZERO,
         storage_elapsed: Duration::ZERO,
         publication_elapsed: Duration::ZERO,
         storage_prepare_validate_elapsed: Duration::ZERO,
@@ -560,6 +609,7 @@ pub fn replay_runtime_wal(
         barrier_wait_for_previous_commit_elapsed: Duration::ZERO,
         committer_busy_elapsed: Duration::ZERO,
         committer_idle_elapsed: Duration::ZERO,
+        apply_profile: xln_rscore_runtime::RuntimeApplyPhaseProfile::default(),
         effect_digests_compared: 0,
         event_digests_compared: 0,
         outbox_digests_compared: 0,

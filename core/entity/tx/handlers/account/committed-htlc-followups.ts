@@ -12,7 +12,7 @@ import { HEAVY_LOGS } from '../../../../support/debug-flags';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 import {
   armPaymentSecretAckTimeout,
-  terminatePayment,
+  programPaymentTermination,
 } from '../../../paybook/lifecycle';
 import { pushCrossJurisdictionEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
@@ -25,9 +25,9 @@ import { preparedHtlcBindingKey, type PreparedHtlcEntry } from '../../../../type
 import { HTLC } from '../../../../config/constants';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { hasInboundPayment } from '../../../paybook/views';
-import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import { countOp } from '../../../../support/performance/op-counters';
 import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
+import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -40,6 +40,7 @@ type HtlcFollowupContext = {
   outputs: EntityInput[];
   accountTxs: AccountTxTarget[];
   candidateEffects: EntityCandidateEffect[];
+  bookIntentSlot?: BookIntentSlotWriter;
   infraContext?: EntityInfraContext;
   preparedHtlcEntriesByBinding?: ReadonlyMap<string, PreparedHtlcEntry>;
   consumedPreparedHtlcBindings?: Set<string>;
@@ -49,7 +50,7 @@ type RevealedSecret = { secret: string; hashlock: string };
 type DirectPaymentForward = Extract<AccountOutput, { kind: 'directPaymentForward' }>;
 type HtlcSecretFollowupContext = Pick<
   HtlcFollowupContext,
-  'env' | 'state' | 'newState' | 'outputs' | 'accountTxs' | 'candidateEffects'
+  'env' | 'state' | 'newState' | 'outputs' | 'accountTxs' | 'candidateEffects' | 'bookIntentSlot'
 >;
 
 const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): string =>
@@ -93,11 +94,13 @@ const applyPreparedHtlcOutcome = (
   lock: HtlcLock,
   prepared: PreparedHtlcEntry,
 ): void => {
+  const bookIntentSlot = ctx.bookIntentSlot;
+  if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
   const inboundEntity = ctx.input.fromEntityId.toLowerCase();
   if (lock.lockId.toLowerCase() !== lock.hashlock.toLowerCase()) {
     throw new Error(`PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK:${lock.lockId}:${lock.hashlock}`);
   }
-  const existingRoute = ctx.newState.paybook.entries.get(lock.hashlock);
+  const existingRoute = bookIntentSlot.getPaybookEntry(ctx.newState, lock.hashlock);
   const closesOriginatedSelfCycle = prepared.outcome.kind === 'final'
     && existingRoute?.originated === true
     && !hasInboundPayment(existingRoute);
@@ -113,11 +116,11 @@ const applyPreparedHtlcOutcome = (
   }
   if (prepared.outcome.kind === 'final') {
     if (closesOriginatedSelfCycle) {
-      const writableRoute = getEntityCollectionValueForWrite(ctx.newState.paybook.entries, lock.hashlock);
+      const writableRoute = bookIntentSlot.getPaybookEntryForWrite(ctx.newState, lock.hashlock);
       if (!writableRoute) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${lock.hashlock}`);
       writableRoute.inboundEntity = inboundEntity;
     } else {
-      ctx.newState.paybook.entries.set(lock.hashlock, {
+      bookIntentSlot.putPaybookEntry(ctx.newState, lock.hashlock, {
         hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
         ...(prepared.outcome.startedAtMs !== undefined ? { startedAtMs: prepared.outcome.startedAtMs } : {}),
         ...(prepared.outcome.description ? { description: prepared.outcome.description } : {}),
@@ -130,7 +133,7 @@ const applyPreparedHtlcOutcome = (
     countOp('htlc.inbound.final');
     return;
   }
-  ctx.newState.paybook.entries.set(lock.hashlock, {
+  bookIntentSlot.putPaybookEntry(ctx.newState, lock.hashlock, {
     hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
     inboundEntity,
     outboundEntity: prepared.outcome.nextHopEntityId,
@@ -253,8 +256,11 @@ export function applyDirectPaymentForwardFollowups(
 
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {
   const { state, newState, accountTxs, candidateEffects } = ctx;
+  if (timedOutHashlocks.length === 0) return;
+  const bookIntentSlot = ctx.bookIntentSlot;
+  if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
   for (const timedOutHashlock of timedOutHashlocks) {
-    const route = newState.paybook.entries.get(timedOutHashlock);
+    const route = bookIntentSlot.getPaybookEntry(newState, timedOutHashlock);
     if (!route) continue;
     if (hasInboundPayment(route)) {
       accountTxs.push({
@@ -277,22 +283,25 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
         },
       });
     }
-    terminatePayment(newState, timedOutHashlock);
+    programPaymentTermination(newState, timedOutHashlock, bookIntentSlot);
   }
 }
 
 export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, revealedSecrets: RevealedSecret[]): void {
   const { env, state, newState, outputs, accountTxs, candidateEffects } = ctx;
+  if (revealedSecrets.length === 0) return;
+  const bookIntentSlot = ctx.bookIntentSlot;
+  if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
   if (HEAVY_LOGS) accountFollowupLog.debug('htlc.secret_check', { secrets: revealedSecrets.length });
 
   for (const { secret, hashlock } of revealedSecrets) {
-    const route = getEntityCollectionValueForWrite(newState.paybook.entries, hashlock);
+    const route = bookIntentSlot.getPaybookEntryForWrite(newState, hashlock);
     if (!route || route.secret) continue;
     const eventAmount = route.amount;
     const eventTokenId = route.tokenId;
     route.secret = secret;
     if (route.pendingFee) {
-      newState.paybook.feesEarned += route.pendingFee;
+      bookIntentSlot.addPaybookFees(newState, route.pendingFee);
       delete route.pendingFee;
     }
 
@@ -324,7 +333,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
         },
       }], relay.targetSignerId);
     }
-    terminatePayment(newState, hashlock);
+    programPaymentTermination(newState, hashlock, bookIntentSlot);
     candidateEffects.push({
       kind: 'runtimeEvent',
       eventName: 'HtlcFinalized',

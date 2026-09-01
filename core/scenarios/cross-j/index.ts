@@ -15,31 +15,18 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
 import type { RuntimeReplica } from '../../runtime/types';
+import { stopProcessGroup } from '../../scripts/e2e/runners/process-group';
+import { buildScenarioIsolatedEnv, requireScenarioLeasePort } from '../harness/scenario-isolation';
 
 type ProcInfo = {
   role: string;
   proc: ReturnType<typeof spawn>;
   stdoutBuffer: string[];
 };
-
-const getFreePort = async (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => {
-        if (address && typeof address === 'object') resolve(address.port);
-        else reject(new Error('CROSS_J_FREE_PORT_UNAVAILABLE'));
-      });
-    });
-  });
 
 const waitForLineOrError = (
   procInfo: ProcInfo,
@@ -83,10 +70,8 @@ const waitForLineOrError = (
     check();
   });
 
-const spawnNode = (role: 'hubs' | 'users', extraArgs: string[]): ProcInfo => {
-  const dbRoot = path.join(process.cwd(), 'db-tmp');
-  const dbPath = path.join(dbRoot, `cross-j-${role}-${Date.now()}`);
-  fs.rmSync(dbPath, { recursive: true, force: true });
+const spawnNode = (role: 'hubs' | 'users', extraArgs: string[], scenarioDbRoot: string): ProcInfo => {
+  const dbPath = path.join(scenarioDbRoot, role);
   fs.mkdirSync(dbPath, { recursive: true });
   const args = [
     'run',
@@ -98,9 +83,9 @@ const spawnNode = (role: 'hubs' | 'users', extraArgs: string[]): ProcInfo => {
     ...extraArgs,
   ];
   const proc = spawn('bun', args, {
+    detached: true,
     env: {
-      ...process.env,
-      XLN_DB_PATH: dbPath,
+      ...buildScenarioIsolatedEnv(process.env, dbPath, process.env['ANVIL_RPC'] ?? null),
       XLN_RUNTIME_SEED: process.env['XLN_RUNTIME_SEED'] || 'dev-scenario-seed',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -120,14 +105,15 @@ const spawnNode = (role: 'hubs' | 'users', extraArgs: string[]): ProcInfo => {
 };
 
 const stopAll = async (procs: ProcInfo[]): Promise<void> => {
-  await Promise.all(procs.map(({ proc }) => new Promise<void>((resolve) => {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      resolve();
-      return;
-    }
-    proc.once('exit', () => resolve());
-    proc.kill('SIGTERM');
-  })));
+  await Promise.all(procs.map(async ({ proc, role }) => {
+    if (!proc.pid) return;
+    await stopProcessGroup({
+      pid: proc.pid,
+      termTimeoutMs: 2_000,
+      killTimeoutMs: 1_000,
+      timeoutError: `CROSS_J_PROCESS_GROUP_STOP_TIMEOUT:${role}:${proc.pid}`,
+    });
+  }));
 };
 
 const extractJsonAfter = (buffer: string[], marker: string): unknown => {
@@ -147,12 +133,17 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
   if (!_existingEnv) throw new Error('CROSS_J_RUNTIME_REQUIRED');
   console.log('\n🌉 Cross-jurisdiction swap scenario (dual-Runtime P2P)\n');
   const procs: ProcInfo[] = [];
-  const relayPort = await getFreePort();
+  const scenarioDbRoot = String(process.env['XLN_SCENARIO_DB_ROOT'] || '').trim();
+  if (!scenarioDbRoot) throw new Error('CROSS_J_SCENARIO_DB_ROOT_REQUIRED');
+  const relayPort = requireScenarioLeasePort(2);
+  const sourceRpc = String(process.env['ANVIL_RPC'] || '').trim();
+  if (!sourceRpc) throw new Error('CROSS_J_SOURCE_RPC_REQUIRED');
+  const targetRpc = `http://127.0.0.1:${requireScenarioLeasePort(1)}`;
   const relayUrl = `ws://127.0.0.1:${relayPort}`;
   // Parent-owned phase barriers: children must not race credit/orders ahead of
   // bilateral readiness on BOTH runtimes.
-  // Keep process-coordination files outside db-tmp: scenario DB cleanup owns
-  // that tree and may run while the second determinism pass is starting.
+  // Keep process-coordination files outside the child DB roots: teardown may
+  // remove those roots only after every child has acknowledged shutdown.
   const barrierDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xln-cross-j-barrier-'));
   console.log(`[cross-j] relay ${relayUrl}`);
   console.log(`[cross-j] barrierDir ${barrierDir}`);
@@ -162,8 +153,11 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
       '--relay-url', relayUrl,
       '--relay-port', String(relayPort),
       '--relay-host', '127.0.0.1',
+      '--direct-port', String(requireScenarioLeasePort(3)),
+      '--source-rpc', sourceRpc,
+      '--target-rpc', targetRpc,
       '--barrier-dir', barrierDir,
-    ]);
+    ], scenarioDbRoot);
     procs.push(hubs);
 
     await waitForLineOrError(hubs, /CROSS_J_STACKS_READY/, [/CROSS_J_NODE_FATAL/i]);
@@ -193,9 +187,10 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
     const users = spawnNode('users', [
       '--relay-url', relayUrl,
       '--seed-runtime-id', hubsMeta.runtimeId,
+      '--direct-port', String(requireScenarioLeasePort(4)),
       '--stacks', usersPayload,
       '--barrier-dir', barrierDir,
-    ]);
+    ], scenarioDbRoot);
     procs.push(users);
 
     await waitForLineOrError(users, /P2P_NODE_READY role=users/, [/CROSS_J_NODE_FATAL/i]);

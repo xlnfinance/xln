@@ -299,6 +299,10 @@ pub struct ResidentConsensusEngine {
     signer_owners: BTreeMap<AccountId, [u8; 32]>,
     inbound_owner_adds: BTreeMap<AccountId, [u8; 32]>,
     candidate_owner_adds: BTreeMap<AccountId, [u8; 32]>,
+    /// Identity inserted only for the currently open Entity frame. It is
+    /// removed if a later Books/proposal step aborts that frame.
+    round_identity_added: Option<[u8; 32]>,
+    round_abort_armed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -419,6 +423,8 @@ impl ResidentConsensusEngine {
             signer_owners,
             inbound_owner_adds: BTreeMap::new(),
             candidate_owner_adds: BTreeMap::new(),
+            round_identity_added: None,
+            round_abort_armed: false,
         })
     }
 
@@ -524,6 +530,8 @@ impl ResidentConsensusEngine {
                 .collect(),
             inbound_owner_adds: BTreeMap::new(),
             candidate_owner_adds: BTreeMap::new(),
+            round_identity_added: None,
+            round_abort_armed: false,
         })
     }
 
@@ -533,6 +541,31 @@ impl ResidentConsensusEngine {
 
     pub fn worker_count(&self) -> usize {
         self.forest.worker_count()
+    }
+
+    /// Abort only the current in-memory Entity frame. The parent-selected
+    /// Account head remains the base; no durable state or alternate root is
+    /// introduced.
+    pub fn abort_entity_round(&mut self) -> Result<(), BatchError> {
+        if !self.round_abort_armed {
+            return Ok(());
+        }
+        self.forest.abort_entity_round()?;
+        self.inbound_proposable = None;
+        self.candidate_proposable = None;
+        self.inbound_owner_adds.clear();
+        self.candidate_owner_adds.clear();
+        self.round_owner = None;
+        if let Some(owner) = self.round_identity_added.take() {
+            self.identities.remove(&owner);
+        }
+        self.round_abort_armed = false;
+        Ok(())
+    }
+
+    pub fn complete_entity_round(&mut self) {
+        self.round_identity_added = None;
+        self.round_abort_armed = false;
     }
 
     /// Reuse the configured resident worker set for pure, ordered batches
@@ -1212,6 +1245,11 @@ impl ResidentConsensusEngine {
             }
             uses_candidate
         };
+        if !continue_inbound {
+            // The prior frame completed successfully if its identity survived
+            // until another parent-selected inbound began.
+            self.round_identity_added = None;
+        }
         validate_operation_indices(&request.rows)?;
         let applied_count = request.rows.len();
         let mut grouped = BTreeMap::<AccountId, Vec<AccountInputRow>>::new();
@@ -1380,6 +1418,7 @@ impl ResidentConsensusEngine {
             )?;
             (batch.revision, None, batch.rows)
         };
+        self.round_abort_armed = true;
         // The parent named the candidate (or the base) and the workers already
         // reconciled to it, so promotion is a move: one clone seeds the new
         // inbound worklist instead of the previous clone-clone-move dance.
@@ -1457,6 +1496,7 @@ impl ResidentConsensusEngine {
         // a real created Account before admitting a new owner binding.
         if identity_is_new && (created_any || self.forest.len() == 0) {
             self.identities.insert(owner, identity);
+            self.round_identity_added = Some(owner);
         }
         self.inbound_proposable = Some(inbound_proposable);
         self.candidate_proposable = None;

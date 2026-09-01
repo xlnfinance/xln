@@ -2,7 +2,7 @@ import type { HtlcLock } from '../../types/account';
 import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../types';
 import { cancelHook, scheduleHook } from '../scheduler/hook-state';
 import { hasInboundPayment } from './views';
-import { getEntityCollectionValueForWrite } from '../state/persistent-collection-map';
+import type { BookIntentSlotWriter } from '../books/book-intents';
 
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 120_000;
 
@@ -27,11 +27,12 @@ export function persistVerifiedPaymentSecret(
   counterpartyId: string,
   lock: HtlcLock,
   secret: string,
+  bookIntentSlot: BookIntentSlotWriter,
 ): PaybookEntry {
   assertCanonicalPaymentId(lock);
-  const existing = state.paybook.entries.get(lock.hashlock);
+  const existing = bookIntentSlot.getPaybookEntry(state, lock.hashlock);
   const entry = existing
-    ? getEntityCollectionValueForWrite(state.paybook.entries, lock.hashlock)
+    ? bookIntentSlot.getPaybookEntryForWrite(state, lock.hashlock)
     : {
         hashlock: lock.hashlock,
         tokenId: lock.tokenId,
@@ -59,7 +60,7 @@ export function persistVerifiedPaymentSecret(
   Object.assign(entry, localSentLock
     ? { secret, outboundEntity: counterpartyId }
     : { secret, inboundEntity: counterpartyId });
-  state.paybook.entries.set(lock.hashlock, entry);
+  if (!existing) bookIntentSlot.putPaybookEntry(state, lock.hashlock, entry);
   return entry;
 }
 
@@ -89,9 +90,23 @@ export function armPaymentSecretAckTimeout(
   });
 }
 
-export function terminatePayment(state: EntityState, hashlock: string): void {
-  const entry = state.paybook.entries.get(hashlock);
+export function programPaymentTermination(
+  state: EntityState,
+  hashlock: string,
+  bookIntentSlot: BookIntentSlotWriter,
+): void {
+  const entry = bookIntentSlot.getPaybookEntry(state, hashlock);
   if (!entry) return;
+  if (state.crontabState) cancelHook(state.crontabState, `htlc-secret-ack:${hashlock}`);
+  bookIntentSlot.deletePaybookEntry(state, hashlock);
+}
+
+/** Existing Stage-3 proposal-rejection cleanup, which is discovered after Books. */
+export function terminatePayment(
+  state: EntityState,
+  hashlock: string,
+): void {
+  if (!state.paybook.entries.has(hashlock)) return;
   if (state.crontabState) cancelHook(state.crontabState, `htlc-secret-ack:${hashlock}`);
   state.paybook.entries.delete(hashlock);
 }

@@ -979,7 +979,7 @@ const fundLocalJOperator = async (
   }
 };
 
-const fundNativeH1BootstrapReserves = async (
+const fundH1OwnedBootstrapReserves = async (
   entityId: string,
   signerId: string,
 ): Promise<void> => {
@@ -1052,7 +1052,7 @@ const fundNativeH1BootstrapReserves = async (
       : catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
     if (bootstrapCatalog.length < HUB_REQUIRED_TOKEN_COUNT) {
       throw new Error(
-        `RUST_HUB_TOKEN_CATALOG_INCOMPLETE:required=${HUB_REQUIRED_TOKEN_COUNT}:actual=${bootstrapCatalog.length}`,
+        `H1_BOOTSTRAP_TOKEN_CATALOG_INCOMPLETE:required=${HUB_REQUIRED_TOKEN_COUNT}:actual=${bootstrapCatalog.length}`,
       );
     }
     if (jurisdiction.name === primary.name) {
@@ -1090,28 +1090,34 @@ const fundNativeH1BootstrapReserves = async (
   }
 };
 
-const driveNativeH1Bootstrap = async (
+const waitForTsH1LocalReserves = async (h1: HubChild): Promise<void> => {
+  while (resetState.inProgress && h1.proc && h1.exitCode === null && h1.exitSignal === null) {
+    if (h1.lastHealth?.bootstrapReserves?.targetMet === true) return;
+    await scheduler.wait(25);
+  }
+  throw new Error('TS_H1_LOCAL_RESERVE_BOOTSTRAP_STOPPED');
+};
+
+const driveH1Bootstrap = async (
   h1: HubChild,
   includeMarketMaker: boolean,
 ): Promise<void> => {
-  if (h1.engine !== 'rust') return;
-  const entityId = String(h1.lastInfo?.entityId || '').trim().toLowerCase();
+  const entityId = String(h1.lastInfo?.entityId || h1.lastInfo?.hubEntities?.[0]?.entityId || '').trim().toLowerCase();
   const signerId = String(h1.lastInfo?.hubEntities?.[0]?.signerId || '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(entityId) || !/^0x[0-9a-f]{40}$/.test(signerId)) {
-    throw new Error('RUST_HUB_BOOTSTRAP_IDENTITY_MISSING:H1');
+    throw new Error('H1_BOOTSTRAP_IDENTITY_MISSING');
   }
   const bootstrapStartedAt = Date.now();
-  await configureNativeH1Entity(h1, entityId, signerId);
-  await publishNativeHubProfile(h1);
-  logNativeH1Bootstrap('bootstrap_policy_committed', {
-    elapsedMs: Date.now() - bootstrapStartedAt,
-    entityId,
-  });
-  await fundNativeH1BootstrapReserves(entityId, signerId);
-  logNativeH1Bootstrap('bootstrap_reserves_funded', {
-    elapsedMs: Date.now() - bootstrapStartedAt,
-    entityId,
-  });
+  if (h1.engine === 'rust') {
+    await configureNativeH1Entity(h1, entityId, signerId);
+    await publishNativeHubProfile(h1);
+    logNativeH1Bootstrap('bootstrap_policy_committed', { elapsedMs: Date.now() - bootstrapStartedAt, entityId });
+  } else {
+    await waitForTsH1LocalReserves(h1);
+  }
+  await fundH1OwnedBootstrapReserves(entityId, signerId);
+  logNativeH1Bootstrap('bootstrap_reserves_funded', { elapsedMs: Date.now() - bootstrapStartedAt, entityId });
+  if (h1.engine !== 'rust') return;
   const hubPeers = hubChildren.slice(1).map(peer => ({
     name: peer.name,
     isHub: true,
@@ -2297,7 +2303,8 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
   const startedAt = Date.now();
   while (true) {
     await pollHubHealth(child);
-    if (child.lastInfo !== null || child.lastHealth !== null) {
+    const identityReady = child.lastInfo?.entityId || child.lastInfo?.hubEntities?.some(entity => entity.entityId);
+    if (identityReady) {
       return;
     }
     if (child.proc?.exitCode !== null || child.proc?.signalCode !== null) {
@@ -2520,7 +2527,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     };
 
     await completeResetStartup({ h1, host: args.host, shouldStartMarketMaker, waitForMesh,
-      driveNativeH1Bootstrap: () => driveNativeH1Bootstrap(h1, shouldStartMarketMaker),
+      driveH1Bootstrap: () => driveH1Bootstrap(h1, shouldStartMarketMaker),
       startMarketMaker: startConfiguredMarketMaker, startCustody: startConfiguredCustody });
 
     activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);

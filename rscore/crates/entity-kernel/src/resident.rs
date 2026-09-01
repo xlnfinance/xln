@@ -26,17 +26,21 @@ use xln_rscore_protocol::{
 
 use crate::commitment::compute_commitments;
 use crate::frame_tx_effects::{apply_account_tx_hooks, apply_committed_frame_hooks};
-use crate::kernel::apply_entity_transitions;
+use crate::j_events::apply_finalized_j_event_batches_in_frame;
+use crate::kernel::{
+    PreparedEntityBookStage, apply_entity_transitions, finish_orderbook_stage,
+    prepare_orderbook_stage,
+};
 use crate::local_financial::LocalAccountFinancialView;
-use crate::paybook::{PaybookChanges, paybook_entry, terminate_route};
+use crate::orderbook::{OrderbookPairJob, OrderbookPairResult};
+use crate::paybook::{PaybookChanges, paybook_entry, terminate_route, terminate_route_in_frame};
 use crate::scheduler_runtime::validate_scheduled_wake;
 use crate::{
     AccountProposalWork, CommittedAccountTransition, CrontabExecutionContext, DeterministicContext,
     EntityFrameEvent, EntityKernelCommitments, EntityKernelError, EntityKernelOutput,
     EntityStateSlice, FinalizedJEventBatch, HashToSign, HashType, JurisdictionScope,
     LocalEntityFinancialTx, OrderedAccountCommit, PresignedManifest, PresignedManifestEntry,
-    ScheduledHookKind, ScheduledWake, SchedulerCommand, SchedulerError,
-    apply_finalized_j_event_batches, execute_crontab,
+    ScheduledHookKind, ScheduledWake, SchedulerCommand, SchedulerError, execute_crontab,
 };
 
 fn profile_resident_round() -> bool {
@@ -130,6 +134,24 @@ fn commit_paybook_changes(
         }
     };
     Ok(())
+}
+
+struct ResidentOrderbookPairMapper<'a> {
+    accounts: &'a mut ResidentConsensusEngine,
+}
+
+impl OrderbookPairMapper for ResidentOrderbookPairMapper<'_> {
+    fn map_pairs(
+        &mut self,
+        jobs: Vec<OrderbookPairJob>,
+        context: DeterministicContext,
+    ) -> Result<Vec<OrderbookPairResult>, EntityKernelError> {
+        self.accounts
+            .map_entity_stage_ordered(jobs, move |job| job.apply(&context))
+            .map_err(|error| {
+                EntityKernelError::orderbook(format!("ORDERBOOK_RESIDENT_WORKER:{error}"))
+            })
+    }
 }
 
 #[derive(Debug, Error)]
@@ -911,33 +933,6 @@ fn ordered_commits(
     Ok(commits)
 }
 
-fn merge_inbound_round(target: &mut EntityRoundResult, mut next: EntityRoundResult) {
-    target.revision = next.revision;
-    target.accounts_root = next.accounts_root;
-    target.applied.append(&mut next.applied);
-    target.admissions.append(&mut next.admissions);
-    target.proposals.append(&mut next.proposals);
-    let mut touched = target
-        .touched
-        .iter()
-        .enumerate()
-        .map(|(index, (account, _))| (*account, index))
-        .collect::<BTreeMap<_, _>>();
-    for (account, leaf) in next.touched {
-        if let Some(index) = touched.get(&account).copied() {
-            target.touched[index].1 = leaf;
-        } else {
-            touched.insert(account, target.touched.len());
-            target.touched.push((account, leaf));
-        }
-    }
-    target.post_accounts.append(&mut next.post_accounts);
-    target.created_accounts.append(&mut next.created_accounts);
-    if next.checkpoint.is_some() {
-        target.checkpoint = next.checkpoint;
-    }
-}
-
 #[derive(Default)]
 struct EntityTransitionAccumulator {
     account_creates: Vec<xln_rscore_batch::AccountSeed>,
@@ -949,6 +944,8 @@ struct EntityTransitionAccumulator {
     j_outputs: Vec<crate::EntityJOutput>,
     local_hashes_to_sign: Vec<crate::HashToSign>,
     account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
+    paybook_changes: PaybookChanges,
+    orderbook_deltas: Vec<crate::orderbook::SameJOutputDelta>,
 }
 
 impl EntityTransitionAccumulator {
@@ -964,7 +961,8 @@ impl EntityTransitionAccumulator {
             mut j_outputs,
             mut local_hashes_to_sign,
             mut account_envelope_mutations,
-            paybook_changes: _,
+            paybook_changes,
+            mut orderbook_deltas,
         } = next;
         self.account_creates.append(&mut account_creates);
         merge_proposal_work(&mut self.proposal_work, proposal_work);
@@ -978,6 +976,8 @@ impl EntityTransitionAccumulator {
         self.local_hashes_to_sign.append(&mut local_hashes_to_sign);
         self.account_envelope_mutations
             .append(&mut account_envelope_mutations);
+        self.paybook_changes = paybook_changes;
+        self.orderbook_deltas.append(&mut orderbook_deltas);
         state
     }
 }
@@ -1183,6 +1183,7 @@ fn materialize_deferred_settlement_approvals(
 fn apply_scheduled_wake(
     accounts: &mut ResidentConsensusEngine,
     state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
     wake: Option<&ScheduledWake>,
     expected_proposer_signer_id: &str,
     hub_rebalance_has_pending_work: bool,
@@ -1277,7 +1278,7 @@ fn apply_scheduled_wake(
         })
         .collect::<Vec<_>>();
     for (hashlock, counterparty, inbound_lock_id) in due_secret_hooks {
-        let Some(route) = paybook_entry(state, &hashlock)? else {
+        let Some(route) = paybook.entry(state, &hashlock)? else {
             continue;
         };
         if !route.secret_ack_pending {
@@ -1286,7 +1287,7 @@ fn apply_scheduled_wake(
         if active_text.contains(&(counterparty, inbound_lock_id)) {
             secret_acks_requiring_dispute.insert(hashlock);
         } else {
-            terminate_route(state, &hashlock)?;
+            terminate_route_in_frame(state, paybook, &hashlock)?;
         }
     }
 
@@ -1383,14 +1384,43 @@ pub fn apply_resident_entity_round(
     request: ResidentEntityRequest,
     context: &DeterministicContext,
 ) -> Result<ResidentEntityResult, ResidentEntityError> {
-    apply_resident_entity_round_core(accounts, state, request, context)?
-        .with_canonical_commitments()
+    let result = apply_resident_entity_round_core_attempt(accounts, state, request, context)
+        .and_then(ResidentEntityCoreResult::with_canonical_commitments);
+    match result {
+        Ok(result) => {
+            accounts.complete_entity_round();
+            Ok(result)
+        }
+        Err(error) => {
+            accounts.abort_entity_round()?;
+            Err(error)
+        }
+    }
 }
 
 /// Apply the production Entity transition without computing the additional
 /// shadow paybook/orderbook/outbox digests. Runtime consensus commits the
 /// canonical Entity sections instead.
 pub fn apply_resident_entity_round_core(
+    accounts: &mut ResidentConsensusEngine,
+    state: EntityStateSlice,
+    request: ResidentEntityRequest,
+    context: &DeterministicContext,
+) -> Result<ResidentEntityCoreResult, ResidentEntityError> {
+    let result = apply_resident_entity_round_core_attempt(accounts, state, request, context);
+    match result {
+        Ok(result) => {
+            accounts.complete_entity_round();
+            Ok(result)
+        }
+        Err(error) => {
+            accounts.abort_entity_round()?;
+            Err(error)
+        }
+    }
+}
+
+fn apply_resident_entity_round_core_attempt(
     accounts: &mut ResidentConsensusEngine,
     mut state: EntityStateSlice,
     mut request: ResidentEntityRequest,
@@ -1420,19 +1450,55 @@ pub fn apply_resident_entity_round_core(
     let owner_entity_id = request.inbound.owner_entity_id;
     let clock = request.inbound.clock;
     let expected_root = request.inbound.expected_accounts_root;
-    let mut rows = std::mem::take(&mut request.inbound.rows)
-        .into_iter()
-        .map(Some)
-        .collect::<Vec<_>>();
+    let mut rows = std::mem::take(&mut request.inbound.rows);
+    let mut first_row_by_account = BTreeMap::new();
+    for (index, row) in rows.iter_mut().enumerate() {
+        row.operation_index = u64::try_from(index)
+            .map_err(|_| ResidentEntityError::OperationPlan("ACCOUNT_INDEX_OVERFLOW".into()))?;
+        first_row_by_account.entry(row.account_id).or_insert(index);
+    }
     let operations = std::mem::take(&mut request.operations);
     let account_ranges = operations
         .iter()
         .filter(|operation| matches!(operation, ResidentEntityOperation::AccountRange { .. }))
         .count();
     let local_operations = operations.len().saturating_sub(account_ranges);
-    let mut inbound = EntityRoundResult::default();
-    let mut inbound_started = false;
-    let mut inbound_micros = 0_u128;
+    // Stage 1 is one global Account ingress wave. The positional operation
+    // plan controls only the later Entity fold: local/book work intentionally
+    // observes the final Stage-1 Account candidates.
+    let phase_started = Instant::now();
+    let mut inbound = accounts.entity_inbound_unsealed(
+        EntityInboundRequest {
+            owner_entity_id,
+            expected_accounts_root: expected_root,
+            clock,
+            rows,
+            post_accounts: false,
+        },
+        false,
+    )?;
+    let inbound_micros = phase_started.elapsed().as_micros();
+    let created_position_by_account = inbound
+        .created_accounts
+        .iter()
+        .map(|created| {
+            first_row_by_account
+                .get(&created.account_id)
+                .copied()
+                .map(|position| (created.account_id, position))
+                .ok_or_else(|| {
+                    ResidentEntityError::OperationPlan(format!(
+                        "CREATED_ACCOUNT_WITHOUT_INPUT:{}",
+                        account_text(created.account_id)
+                    ))
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, ResidentEntityError>>()?;
+    let mut applied_slots = std::mem::take(&mut inbound.applied)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    let mut ordered_applied = Vec::with_capacity(applied_slots.len());
     let mut commits_micros = 0_u128;
     let mut entity_apply_micros = 0_u128;
     let mut paybook_commit_micros = 0_u128;
@@ -1444,35 +1510,22 @@ pub fn apply_resident_entity_round_core(
     for operation in operations {
         match operation {
             ResidentEntityOperation::AccountRange { start, len } => {
-                let mut segment_rows = rows[start..start + len]
+                let segment_applied = applied_slots[start..start + len]
                     .iter_mut()
                     .enumerate()
-                    .map(|(index, row)| {
-                        let mut row = row.take().ok_or_else(|| {
+                    .map(|(index, applied)| {
+                        applied.take().ok_or_else(|| {
                             ResidentEntityError::OperationPlan(format!(
                                 "ACCOUNT_ROW_REUSED:{}",
                                 start + index
                             ))
-                        })?;
-                        row.operation_index = u64::try_from(index).map_err(|_| {
-                            ResidentEntityError::OperationPlan("ACCOUNT_INDEX_OVERFLOW".into())
-                        })?;
-                        Ok(row)
+                        })
                     })
                     .collect::<Result<Vec<_>, ResidentEntityError>>()?;
-                let phase_started = Instant::now();
-                let mut segment = accounts.entity_inbound_unsealed(
-                    EntityInboundRequest {
-                        owner_entity_id,
-                        expected_accounts_root: expected_root,
-                        clock,
-                        rows: std::mem::take(&mut segment_rows),
-                        post_accounts: false,
-                    },
-                    inbound_started,
-                )?;
-                inbound_micros = inbound_micros.saturating_add(phase_started.elapsed().as_micros());
-                inbound_started = true;
+                let mut segment = EntityRoundResult {
+                    applied: segment_applied,
+                    ..EntityRoundResult::default()
+                };
                 let (mut events, mut hashes, presigned) = collect_round_certification(
                     &segment,
                     &EntityRoundResult::default(),
@@ -1487,10 +1540,10 @@ pub fn apply_resident_entity_round_core(
                 }
                 let phase_started = Instant::now();
                 let commits = ordered_commits(&mut segment)?;
-                let created_accounts = segment
-                    .created_accounts
+                let created_accounts = created_position_by_account
                     .iter()
-                    .map(|created| account_text(created.account_id))
+                    .filter(|(_, position)| **position >= start && **position < start + len)
+                    .map(|(account_id, _)| account_text(*account_id))
                     .collect::<BTreeSet<_>>();
                 for account in &created_accounts {
                     state.known_accounts.insert(account.clone());
@@ -1501,6 +1554,7 @@ pub fn apply_resident_entity_round_core(
                 let phase_started = Instant::now();
                 let mut next = apply_entity_transitions(
                     state,
+                    std::mem::take(&mut accumulated.paybook_changes),
                     commits,
                     &created_accounts,
                     Vec::new(),
@@ -1509,45 +1563,20 @@ pub fn apply_resident_entity_round_core(
                     request.entity_authority.as_ref(),
                     request.runtime_seed.as_deref(),
                     context,
-                    &[],
                 )?;
                 ordered_events.append(&mut next.local_events);
                 ordered_hashes.append(&mut next.local_hashes_to_sign);
                 entity_apply_micros =
                     entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-                let phase_started = Instant::now();
-                commit_paybook_changes(
-                    accounts,
-                    &mut next.state,
-                    std::mem::take(&mut next.paybook_changes),
-                )?;
-                paybook_commit_micros =
-                    paybook_commit_micros.saturating_add(phase_started.elapsed().as_micros());
                 state = accumulated.merge(next);
-                merge_inbound_round(&mut inbound, segment);
+                ordered_applied.append(&mut segment.applied);
             }
             ResidentEntityOperation::Local(local_txs) => {
-                if !inbound_started {
-                    let phase_started = Instant::now();
-                    let segment = accounts.entity_inbound_unsealed(
-                        EntityInboundRequest {
-                            owner_entity_id,
-                            expected_accounts_root: expected_root,
-                            clock,
-                            rows: Vec::new(),
-                            post_accounts: false,
-                        },
-                        false,
-                    )?;
-                    inbound_micros =
-                        inbound_micros.saturating_add(phase_started.elapsed().as_micros());
-                    inbound_started = true;
-                    merge_inbound_round(&mut inbound, segment);
-                }
                 let views = local_account_views(accounts, &state, &local_txs, &[], context)?;
                 let phase_started = Instant::now();
                 let mut next = apply_entity_transitions(
                     state,
+                    std::mem::take(&mut accumulated.paybook_changes),
                     Vec::new(),
                     &BTreeSet::new(),
                     local_txs,
@@ -1556,55 +1585,34 @@ pub fn apply_resident_entity_round_core(
                     request.entity_authority.as_ref(),
                     request.runtime_seed.as_deref(),
                     context,
-                    &[],
                 )?;
                 ordered_events.append(&mut next.local_events);
                 ordered_hashes.append(&mut next.local_hashes_to_sign);
                 entity_apply_micros =
                     entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-                let phase_started = Instant::now();
-                commit_paybook_changes(
-                    accounts,
-                    &mut next.state,
-                    std::mem::take(&mut next.paybook_changes),
-                )?;
-                paybook_commit_micros =
-                    paybook_commit_micros.saturating_add(phase_started.elapsed().as_micros());
                 state = accumulated.merge(next);
             }
         }
     }
-    if rows.iter().any(Option::is_some) {
+    if applied_slots.iter().any(Option::is_some) {
         return Err(ResidentEntityError::OperationPlan(
             "ACCOUNT_ROWS_UNCONSUMED".into(),
         ));
     }
-    if !inbound_started {
-        let phase_started = Instant::now();
-        let segment = accounts.entity_inbound_unsealed(
-            EntityInboundRequest {
-                owner_entity_id,
-                expected_accounts_root: expected_root,
-                clock,
-                rows: Vec::new(),
-                post_accounts: false,
-            },
-            false,
-        )?;
-        inbound_micros = inbound_micros.saturating_add(phase_started.elapsed().as_micros());
-        merge_inbound_round(&mut inbound, segment);
-    }
+    inbound.applied = ordered_applied;
     let forced_acks = forced_ack_accounts(&inbound.applied);
     let scheduled_commands = apply_scheduled_wake(
         accounts,
         &mut state,
+        &mut accumulated.paybook_changes,
         request.scheduled_wake.as_ref(),
         &request.expected_proposer_signer_id,
         request.hub_rebalance_has_pending_work,
     )?;
     let phase_started = Instant::now();
-    let mut final_transition = apply_entity_transitions(
+    let final_transition = apply_entity_transitions(
         state,
+        std::mem::take(&mut accumulated.paybook_changes),
         Vec::new(),
         &BTreeSet::new(),
         Vec::new(),
@@ -1613,21 +1621,8 @@ pub fn apply_resident_entity_round_core(
         request.entity_authority.as_ref(),
         request.runtime_seed.as_deref(),
         context,
-        &scheduled_commands,
     )?;
     entity_apply_micros = entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
-    let paybook_commit_started = Instant::now();
-    // The frame overlay already collapsed repeated writes by hashlock. Reuse
-    // the resident worker pool for only the non-empty canonical radix slots;
-    // the coordinator reconnects returned slot roots in their original 0..255
-    // positions and performs no financial transition itself.
-    commit_paybook_changes(
-        accounts,
-        &mut final_transition.state,
-        std::mem::take(&mut final_transition.paybook_changes),
-    )?;
-    paybook_commit_micros =
-        paybook_commit_micros.saturating_add(paybook_commit_started.elapsed().as_micros());
     let state = accumulated.merge(final_transition);
     let mut kernel = crate::kernel::EntityTransitionResult {
         state,
@@ -1640,8 +1635,16 @@ pub fn apply_resident_entity_round_core(
         j_outputs: accumulated.j_outputs,
         local_hashes_to_sign: accumulated.local_hashes_to_sign,
         account_envelope_mutations: accumulated.account_envelope_mutations,
-        paybook_changes: crate::paybook::PaybookChanges::default(),
+        paybook_changes: std::mem::take(&mut accumulated.paybook_changes),
+        orderbook_deltas: std::mem::take(&mut accumulated.orderbook_deltas),
     };
+    let mut orderbook_mapper = ResidentOrderbookPairMapper { accounts };
+    apply_orderbook_stage(
+        &mut kernel,
+        context,
+        &scheduled_commands,
+        &mut orderbook_mapper,
+    )?;
     let j_ingress_started = Instant::now();
     if let Some(j_events) = request.finalized_j_events.as_ref() {
         if j_events.scanned_through != request.outbound_j_height {
@@ -1730,7 +1733,7 @@ pub fn apply_resident_entity_round_core(
             .into_iter()
             .filter_map(|(account, view)| view.dispute.map(|view| (account_text(account), view)))
             .collect::<BTreeMap<_, _>>();
-        let ingress = apply_finalized_j_event_batches(
+        let ingress = apply_finalized_j_event_batches_in_frame(
             &mut kernel.state,
             j_events.scanned_through,
             &j_events.batches,
@@ -1738,6 +1741,7 @@ pub fn apply_resident_entity_round_core(
             request.entity_authority.as_ref(),
             &active_account_ids,
             &dispute_views,
+            &mut kernel.paybook_changes,
         )?;
         commit_j_range_finality(
             &mut kernel.state,
@@ -1755,6 +1759,18 @@ pub fn apply_resident_entity_round_core(
         kernel.local_events.extend(ingress.frame_events);
     }
     let j_ingress_micros = j_ingress_started.elapsed().as_micros();
+    let paybook_commit_started = Instant::now();
+    // Stage 2 ends with one canonical Paybook radix fold. A dropped Account
+    // proposal is a Stage-3 result and therefore cannot trigger a same-round
+    // Book mutation or a second Account visit; bilateral timeout remains the
+    // canonical unwind for a lock rejected by the outbound Account.
+    commit_paybook_changes(
+        accounts,
+        &mut kernel.state,
+        std::mem::take(&mut kernel.paybook_changes),
+    )?;
+    paybook_commit_micros =
+        paybook_commit_micros.saturating_add(paybook_commit_started.elapsed().as_micros());
 
     let pending_settlement_hankos = materialize_deferred_settlement_approvals(
         accounts,
@@ -1944,10 +1960,69 @@ pub fn apply_resident_entity_round_core(
 
 #[cfg(test)]
 mod tests {
+    use num_bigint::BigInt;
     use xln_rscore_batch::{EntityRoundResult, ProposalRow, ProposedRow};
     use xln_rscore_engine::{AccountDomain, DepositoryAddress, DisputeDraft, OutboundAck};
 
     use super::*;
+
+    #[test]
+    fn transition_accumulator_preserves_uncommitted_paybook_writes() {
+        let hashlock = format!("0x{}", "ab".repeat(32));
+        let state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1_000);
+        let mut paybook_changes = PaybookChanges::default();
+        paybook_changes
+            .put(crate::PaybookEntry {
+                hashlock: hashlock.clone(),
+                description: None,
+                token_id: Some(1),
+                amount: Some(BigInt::from(10)),
+                started_at_ms: Some(1_000),
+                originated: true,
+                inbound_entity: None,
+                outbound_entity: Some(format!("0x{}", "22".repeat(32))),
+                inbound_settled: false,
+                outbound_settled: false,
+                secret: None,
+                secret_ack_pending: false,
+                secret_ack_started_at: None,
+                secret_ack_deadline_at: None,
+                pending_fee: None,
+                created_timestamp: 1_000,
+            })
+            .expect("pending route");
+        let transition = crate::kernel::EntityTransitionResult {
+            state,
+            account_creates: Vec::new(),
+            proposal_work: Vec::new(),
+            outputs: Vec::new(),
+            local_events: Vec::new(),
+            non_mutating_wake_targets: Vec::new(),
+            routed_entity_outputs: Vec::new(),
+            j_outputs: Vec::new(),
+            local_hashes_to_sign: Vec::new(),
+            account_envelope_mutations: Vec::new(),
+            paybook_changes,
+            orderbook_deltas: Vec::new(),
+        };
+        let mut accumulated = EntityTransitionAccumulator::default();
+        let state = accumulated.merge(transition);
+
+        assert!(
+            state
+                .paybook
+                .entry(&hashlock)
+                .expect("state read")
+                .is_none()
+        );
+        assert!(
+            accumulated
+                .paybook_changes
+                .entry(&state, &hashlock)
+                .expect("overlay read")
+                .is_some()
+        );
+    }
 
     #[test]
     fn committed_settlement_transition_requests_the_post_commit_account_view() {

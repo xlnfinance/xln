@@ -43,6 +43,7 @@ pub(crate) struct LocalFinancialResult {
     pub wake_targets: Vec<String>,
     pub envelope_mutations: Vec<(String, AccountEnvelopeMutation)>,
     pub routed_entity_outputs: Vec<crate::LocalEntityOutput>,
+    pub orderbook_deltas: Vec<crate::orderbook::SameJOutputDelta>,
 }
 
 pub(crate) fn apply_local_entity_financial_txs(
@@ -61,6 +62,7 @@ pub(crate) fn apply_local_entity_financial_txs(
     let mut wake_targets = Vec::new();
     let mut envelope_mutations = Vec::new();
     let mut routed_entity_outputs = Vec::new();
+    let mut orderbook_deltas = Vec::new();
     for tx in txs {
         match tx {
             LocalEntityFinancialTx::CrossJurisdictionForceSiblingDispute(tx) => {
@@ -71,6 +73,7 @@ pub(crate) fn apply_local_entity_financial_txs(
                 )?;
                 dispute::apply_prepare(
                     state,
+                    paybook,
                     types::PrepareDisputeEntityTx {
                         counterparty_entity_id: counterparty,
                         description: Some(format!("sibling-dispute:{}", tx.route_id)),
@@ -83,6 +86,7 @@ pub(crate) fn apply_local_entity_financial_txs(
                     &mut envelope_mutations,
                     &mut routed_entity_outputs,
                     &mut events,
+                    &mut orderbook_deltas,
                 )?;
             }
             LocalEntityFinancialTx::DirectPayment(tx) => direct_payment::apply_direct_payment(
@@ -94,6 +98,7 @@ pub(crate) fn apply_local_entity_financial_txs(
             )?,
             LocalEntityFinancialTx::DisputeFinalize(tx) => dispute::apply_finalize(
                 state,
+                paybook,
                 tx,
                 account_views,
                 &mut envelope_mutations,
@@ -102,6 +107,7 @@ pub(crate) fn apply_local_entity_financial_txs(
             )?,
             LocalEntityFinancialTx::DisputeStart(tx) => dispute::apply_start(
                 state,
+                paybook,
                 tx,
                 account_views,
                 runtime_seed,
@@ -161,12 +167,14 @@ pub(crate) fn apply_local_entity_financial_txs(
             }
             LocalEntityFinancialTx::PrepareDispute(tx) => dispute::apply_prepare(
                 state,
+                paybook,
                 tx,
                 account_views,
                 runtime_seed,
                 &mut envelope_mutations,
                 &mut routed_entity_outputs,
                 &mut events,
+                &mut orderbook_deltas,
             )?,
             LocalEntityFinancialTx::ProcessHtlcTimeouts(tx) => {
                 account_txs.extend(tx.expired_locks.into_iter().map(|(account_id, lock_id)| {
@@ -265,6 +273,7 @@ pub(crate) fn apply_local_entity_financial_txs(
         wake_targets,
         envelope_mutations,
         routed_entity_outputs,
+        orderbook_deltas,
     })
 }
 

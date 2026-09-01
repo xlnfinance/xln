@@ -3,14 +3,14 @@ import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../../../
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../support/debug-flags';
 import { cancelHook } from '../../../scheduler';
-import { terminatePayment } from '../../../paybook/lifecycle';
+import { programPaymentTermination } from '../../../paybook/lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../support/logger';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import type { AccountTxTarget } from './orderbook/queue';
 import { applyCommittedLendingFollowup } from './committed-lending-followup';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
-import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
+import type { BookIntentSlotWriter } from '../../../books/book-intents';
 import {
   hasInboundPayment,
   isForwardingPayment,
@@ -56,6 +56,7 @@ const applyCommittedHtlcResolveFollowup = (
   accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
   env: EntityRuntimeContext | undefined,
   candidateEffects: EntityCandidateEffect[],
+  bookIntentSlot: BookIntentSlotWriter | undefined,
 ): void => {
   const visible = newState.accounts.get(counterpartyId);
   if (visible?.mempool?.length) {
@@ -67,6 +68,7 @@ const applyCommittedHtlcResolveFollowup = (
   }
   if (newState.crontabState) cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
   if (accountTx.data.outcome !== 'secret') return;
+  if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
 
   // Account already verified hashHtlcSecret(secret) against the lock. Routes
   // are keyed by that hash, so this is one direct lookup, never a route scan.
@@ -74,7 +76,7 @@ const applyCommittedHtlcResolveFollowup = (
   if (hashlock !== accountTx.data.lockId.toLowerCase()) {
     throw new Error(`PAYBOOK_RESOLVE_ID_MISMATCH:${accountTx.data.lockId}:${hashlock}`);
   }
-  const route = newState.paybook.entries.get(hashlock);
+  const route = bookIntentSlot.getPaybookEntry(newState, hashlock);
   if (!route) return;
   const normalizedCounterparty = counterpartyId.toLowerCase();
   const resolvesInbound = route.inboundEntity?.toLowerCase() === normalizedCounterparty;
@@ -107,13 +109,13 @@ const applyCommittedHtlcResolveFollowup = (
   if (resolvesForwardedOutbound) return;
   emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
   if (route.originated && route.inboundEntity) {
-    const writableRoute = getEntityCollectionValueForWrite(newState.paybook.entries, hashlock);
+    const writableRoute = bookIntentSlot.getPaybookEntryForWrite(newState, hashlock);
     if (!writableRoute) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${hashlock}`);
     if (resolvesInbound) writableRoute.inboundSettled = true;
     if (resolvesOriginatedOutbound) writableRoute.outboundSettled = true;
     if (!writableRoute.inboundSettled || !writableRoute.outboundSettled) return;
   }
-  terminatePayment(newState, hashlock);
+  programPaymentTermination(newState, hashlock, bookIntentSlot);
 };
 
 export function applyCommittedAccountFrameFollowups(
@@ -124,6 +126,7 @@ export function applyCommittedAccountFrameFollowups(
   accountTxs: AccountTxTarget[],
   env: EntityRuntimeContext | undefined,
   candidateEffects: EntityCandidateEffect[],
+  bookIntentSlot?: BookIntentSlotWriter,
 ): void {
   if (HEAVY_LOGS) {
     accountFollowupLog.debug('frame.commit', {
@@ -146,7 +149,14 @@ export function applyCommittedAccountFrameFollowups(
     // Account frames are canonical once committed; update Entity-local
     // indexes only after commit, never while the proposal is tentative.
     if (accountTx.type === 'htlc_resolve') {
-      applyCommittedHtlcResolveFollowup(newState, counterpartyId, accountTx, env, candidateEffects);
+      applyCommittedHtlcResolveFollowup(
+        newState,
+        counterpartyId,
+        accountTx,
+        env,
+        candidateEffects,
+        bookIntentSlot,
+      );
     }
   }
 }

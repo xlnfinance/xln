@@ -1,0 +1,35 @@
+import { parentPort } from 'node:worker_threads';
+import { hashRawSync as argon2NativeSync } from '@node-rs/argon2';
+import { bytesToHex } from '../primitives/encoding.ts';
+import {
+  assertBrainVaultName,
+  assertBrainVaultPassphrase,
+  BRAINVAULT_V1,
+  BRAINVAULT_V1_SPEC_ID,
+  createShardSalt,
+} from '../primitives/spec.ts';
+
+parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount }) => {
+  if (specId !== BRAINVAULT_V1_SPEC_ID) {
+    throw new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(specId)}:${BRAINVAULT_V1_SPEC_ID}`);
+  }
+  assertBrainVaultName(name);
+  assertBrainVaultPassphrase(passphrase);
+  const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
+  try {
+    const result = new Uint8Array(argon2NativeSync(password, {
+      salt: Buffer.from(await createShardSalt(name, shardIndex, shardCount)),
+      memoryCost: BRAINVAULT_V1.SHARD_MEMORY_KB,
+      timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
+      parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
+      outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+      algorithm: 2,
+      version: 1,
+    }));
+    const encoded = bytesToHex(result);
+    result.fill(0);
+    parentPort?.postMessage({ specId: BRAINVAULT_V1_SPEC_ID, shardIndex, result: encoded });
+  } finally {
+    password.fill(0);
+  }
+});

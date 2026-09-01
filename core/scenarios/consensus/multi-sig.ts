@@ -29,6 +29,7 @@ import {
   createJReplica,
   createJurisdictionConfig,
   resolveScenarioBoardSigner,
+  resolveScenarioJurisdictionAddress,
 } from '../harness/boot';
 import {
   findReplica,
@@ -271,7 +272,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
       'MultiSig',
       jadapter.addresses.depository,
       jadapter.addresses.entityProvider,
-      jadapter.mode === 'browservm' ? 'browservm://' : process.env['ANVIL_RPC'] || 'http://localhost:8545',
+      resolveScenarioJurisdictionAddress(jMode),
       Number(jadapter.chainId),
     );
     console.log('✅ JAdapter ready\n');

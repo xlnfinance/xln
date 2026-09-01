@@ -104,6 +104,8 @@ struct WorkerMutationReply<R> {
     /// Persistent shard-root handle clones during head reconciliation. These
     /// are O(1) Arc-root snapshots, not cloned Account values or bytes.
     shard_handle_clones: u64,
+    /// Pure observability sampled on this permanent resident worker thread.
+    ecdsa_recovery: xln_rscore_engine::EcdsaRecoveryProfileSnapshot,
 }
 
 /// Stable observability label for one resident phase. Never participates in
@@ -176,6 +178,12 @@ pub struct AccountPhaseMetric {
     pub worker_barrier_wait_max_nanos: u64,
     pub worker_rows: Vec<u64>,
     pub worker_work_nanos: Vec<u64>,
+    pub ecdsa_recovery_calls: u64,
+    pub ecdsa_recovery_exact_repeats: u64,
+    pub ecdsa_recovery_wall_nanos: u64,
+    pub worker_ecdsa_recovery_calls: Vec<u64>,
+    pub worker_ecdsa_recovery_exact_repeats: Vec<u64>,
+    pub worker_ecdsa_recovery_wall_nanos: Vec<u64>,
     pub coordinator_fold_nanos: u64,
     pub touched_rows: u64,
     pub touched_shards: u64,
@@ -205,6 +213,12 @@ impl AccountPhaseMetric {
             worker_barrier_wait_max_nanos: 0,
             worker_rows: vec![0; worker_count],
             worker_work_nanos: vec![0; worker_count],
+            ecdsa_recovery_calls: 0,
+            ecdsa_recovery_exact_repeats: 0,
+            ecdsa_recovery_wall_nanos: 0,
+            worker_ecdsa_recovery_calls: vec![0; worker_count],
+            worker_ecdsa_recovery_exact_repeats: vec![0; worker_count],
+            worker_ecdsa_recovery_wall_nanos: vec![0; worker_count],
             coordinator_fold_nanos: 0,
             touched_rows: 0,
             touched_shards: 0,
@@ -518,26 +532,16 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         if items.is_empty() {
             return Ok(Vec::new());
         }
-        let lane_size = items.len().div_ceil(self.workers.worker_count());
-        let mut items = items.into_iter();
-        let lanes = (0..self.workers.worker_count())
-            .map(|_| items.by_ref().take(lane_size).collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-        let lane_items = lanes.iter().map(Vec::len).collect::<Vec<_>>();
-        let replies = self.workers.run_lanes(lanes, move |_state, item| {
-            let started = Instant::now();
-            let result = apply(item);
-            (result, duration_nanos(started.elapsed()))
-        })?;
-        let mut output = Vec::new();
-        for (worker, lane) in replies.into_iter().enumerate() {
-            self.entity_worker_items[worker] =
-                self.entity_worker_items[worker].saturating_add(lane_items[worker] as u64);
-            self.entity_worker_nanos[worker] = self.entity_worker_nanos[worker]
-                .saturating_add(lane.iter().map(|(_, nanos)| *nanos).sum::<u64>());
-            output.extend(lane.into_iter().map(|(result, _)| result));
+        // Entity-owned jobs carry no resident Account state. Actors claim
+        // indices dynamically, while the pool restores fixed result slots.
+        let stage = self.workers.run_stateless_indexed(items, apply)?;
+        for (total, items) in self.entity_worker_items.iter_mut().zip(stage.worker_items) {
+            *total = total.saturating_add(items);
         }
-        Ok(output)
+        for (total, nanos) in self.entity_worker_nanos.iter_mut().zip(stage.worker_nanos) {
+            *total = total.saturating_add(nanos);
+        }
+        Ok(stage.rows)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -582,6 +586,44 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             self.reconcile_head(expected_root)?.0,
             ReconcileHead::Candidate
         ))
+    }
+
+    /// Discard the open Entity frame and restore the parent-selected base.
+    ///
+    /// The first inbound phase already promotes or rejects the previous
+    /// candidate named by the parent. That selected head is now `base`; only
+    /// this frame's inbound/candidate overlays are discarded here.
+    pub(crate) fn abort_entity_round(&mut self) -> Result<(), BatchError> {
+        if self.inbound_revision.is_none() {
+            return Ok(());
+        }
+        let reconcile = self
+            .inbound_shards
+            .union(&self.candidate_shards)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let empty = empty_lanes(self.workers.worker_count());
+        self.run_phase::<(), (), _>(
+            WorkerPhase::Inbound {
+                head: ReconcileHead::Base,
+                checkpoint_ack: false,
+            },
+            empty,
+            reconcile,
+            BTreeSet::new(),
+            |_account_id, _current, ()| Err(BatchError::EntityRoundMissing),
+            PhaseStart {
+                revision: self.base_revision,
+                checkpoint_ack: false,
+            },
+        )?;
+        self.inbound_top = None;
+        self.inbound_revision = None;
+        self.candidate_top = None;
+        self.candidate_revision = None;
+        self.inbound_shards.clear();
+        self.candidate_shards.clear();
+        Ok(())
     }
 
     /// Reconcile the prior parent head, then apply all inbound Account inputs
@@ -1237,6 +1279,10 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         let mut barrier_wait_max = 0_u64;
         let mut shard_handle_clones = 0_u64;
         let mut phase_worker_work_nanos = vec![0_u64; self.workers.worker_count()];
+        let mut phase_worker_ecdsa_recovery_calls = vec![0_u64; self.workers.worker_count()];
+        let mut phase_worker_ecdsa_recovery_exact_repeats =
+            vec![0_u64; self.workers.worker_count()];
+        let mut phase_worker_ecdsa_recovery_wall_nanos = vec![0_u64; self.workers.worker_count()];
         for (worker, lane) in replies.iter().enumerate() {
             for reply in lane.iter().flatten() {
                 worker_samples += 1;
@@ -1253,6 +1299,15 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                         .saturating_add(duration_nanos(reply.finish_wall)),
                 );
                 shard_handle_clones = shard_handle_clones.saturating_add(reply.shard_handle_clones);
+                phase_worker_ecdsa_recovery_calls[worker] = phase_worker_ecdsa_recovery_calls
+                    [worker]
+                    .saturating_add(reply.ecdsa_recovery.calls);
+                phase_worker_ecdsa_recovery_exact_repeats[worker] =
+                    phase_worker_ecdsa_recovery_exact_repeats[worker]
+                        .saturating_add(reply.ecdsa_recovery.exact_repeats);
+                phase_worker_ecdsa_recovery_wall_nanos[worker] =
+                    phase_worker_ecdsa_recovery_wall_nanos[worker]
+                        .saturating_add(reply.ecdsa_recovery.wall_nanos);
             }
         }
         let reply = collect_worker_replies(replies)?;
@@ -1325,6 +1380,36 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         {
             *total = total.saturating_add(nanos);
         }
+        for (total, calls) in totals
+            .worker_ecdsa_recovery_calls
+            .iter_mut()
+            .zip(&phase_worker_ecdsa_recovery_calls)
+        {
+            *total = total.saturating_add(*calls);
+        }
+        for (total, repeats) in totals
+            .worker_ecdsa_recovery_exact_repeats
+            .iter_mut()
+            .zip(&phase_worker_ecdsa_recovery_exact_repeats)
+        {
+            *total = total.saturating_add(*repeats);
+        }
+        for (total, nanos) in totals
+            .worker_ecdsa_recovery_wall_nanos
+            .iter_mut()
+            .zip(&phase_worker_ecdsa_recovery_wall_nanos)
+        {
+            *total = total.saturating_add(*nanos);
+        }
+        totals.ecdsa_recovery_calls = totals
+            .ecdsa_recovery_calls
+            .saturating_add(phase_worker_ecdsa_recovery_calls.iter().sum());
+        totals.ecdsa_recovery_exact_repeats = totals
+            .ecdsa_recovery_exact_repeats
+            .saturating_add(phase_worker_ecdsa_recovery_exact_repeats.iter().sum());
+        totals.ecdsa_recovery_wall_nanos = totals
+            .ecdsa_recovery_wall_nanos
+            .saturating_add(phase_worker_ecdsa_recovery_wall_nanos.iter().sum());
         totals.touched_rows = totals.touched_rows.saturating_add(reply.rows.len() as u64);
         totals.touched_shards = totals.touched_shards.saturating_add(touched_shards as u64);
         totals.workers_with_work = totals
@@ -1550,6 +1635,7 @@ where
         .chain(describe.iter().copied())
         .chain(checkpoint_shards)
         .collect::<BTreeSet<_>>();
+    let ecdsa_recovery_before = xln_rscore_engine::ecdsa_recovery_profile_snapshot();
     let work_started = Instant::now();
     let snapshot = snapshot_worker_shards(state, phase, &touched, checkpoint_ack);
     let result = match snapshot {
@@ -1568,6 +1654,8 @@ where
         Err(error) => Err(error),
     };
     let work_wall = work_started.elapsed();
+    let ecdsa_recovery = xln_rscore_engine::ecdsa_recovery_profile_snapshot()
+        .saturating_delta(ecdsa_recovery_before);
     if result.is_err() {
         control.failed.store(true, Ordering::Release);
     }
@@ -1591,6 +1679,7 @@ where
         reply.work_wall = work_wall;
         reply.barrier_wait = barrier_wait;
         reply.finish_wall = finish_wall;
+        reply.ecdsa_recovery = ecdsa_recovery;
         reply
     })
 }
@@ -1638,6 +1727,7 @@ where
         barrier_wait: Duration::ZERO,
         finish_wall: Duration::ZERO,
         shard_handle_clones,
+        ecdsa_recovery: xln_rscore_engine::EcdsaRecoveryProfileSnapshot::default(),
     };
     for batch in batches {
         mutate_shard(state, mode, batch, allow_change, apply, &mut reply)?;
@@ -2092,6 +2182,7 @@ fn collect_worker_replies<R>(
         barrier_wait: Duration::ZERO,
         finish_wall: Duration::ZERO,
         shard_handle_clones: 0,
+        ecdsa_recovery: xln_rscore_engine::EcdsaRecoveryProfileSnapshot::default(),
     };
     let mut first_error = None;
     for mut lane in replies {
@@ -2235,8 +2326,9 @@ fn root_hex(root: [u8; 32]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
 
     use xln_rscore_protocol::{PersistentRadixMap, PersistentRadixOverlayWork};
 
@@ -2270,6 +2362,79 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn dynamic_entity_stage_restores_input_order_after_out_of_order_completion() {
+        let mut forest = ResidentAccountForest::<u64>::restore(2, 0, Vec::new()).expect("forest");
+        let gate = Arc::new(Barrier::new(2));
+        let second_finished = Arc::new(AtomicBool::new(false));
+        let completion = Arc::new(AtomicUsize::new(0));
+
+        let rows = forest
+            .map_entity_stage_ordered(vec![0_usize, 1], {
+                let gate = Arc::clone(&gate);
+                let second_finished = Arc::clone(&second_finished);
+                let completion = Arc::clone(&completion);
+                move |position| {
+                    gate.wait();
+                    let completed_at = if position == 1 {
+                        let completed_at = completion.fetch_add(1, Ordering::AcqRel);
+                        second_finished.store(true, Ordering::Release);
+                        completed_at
+                    } else {
+                        while !second_finished.load(Ordering::Acquire) {
+                            std::thread::yield_now();
+                        }
+                        completion.fetch_add(1, Ordering::AcqRel)
+                    };
+                    (position, completed_at)
+                }
+            })
+            .expect("dynamic stage");
+
+        assert_eq!(rows, vec![(0, 1), (1, 0)]);
+        assert_eq!(forest.entity_worker_items.iter().sum::<u64>(), 2);
+        assert_eq!(
+            forest
+                .entity_worker_items
+                .iter()
+                .filter(|items| **items > 0)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn dynamic_entity_stage_uses_every_available_worker() {
+        let mut forest = ResidentAccountForest::<u64>::restore(4, 0, Vec::new()).expect("forest");
+        let gate = Arc::new(Barrier::new(4));
+
+        let rows = forest
+            .map_entity_stage_ordered((0_usize..4).collect(), {
+                let gate = Arc::clone(&gate);
+                move |position| {
+                    gate.wait();
+                    (position, format!("{:?}", std::thread::current().id()))
+                }
+            })
+            .expect("dynamic stage");
+
+        assert_eq!(
+            rows.iter()
+                .map(|(position, _)| *position)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+        assert_eq!(
+            rows.iter()
+                .map(|(_, thread)| thread)
+                .collect::<HashSet<_>>()
+                .len(),
+            4
+        );
+        assert_eq!(forest.entity_worker_items, vec![1, 1, 1, 1]);
+        assert!(forest.entity_worker_nanos.iter().all(|nanos| *nanos > 0));
     }
 
     fn put(
@@ -2715,6 +2880,22 @@ mod tests {
             inbound.worker_work_nanos.iter().sum::<u64>(),
             inbound.worker_work_sum_nanos,
         );
+        assert_eq!(inbound.worker_ecdsa_recovery_calls.len(), 2);
+        assert_eq!(
+            inbound.worker_ecdsa_recovery_calls.iter().sum::<u64>(),
+            inbound.ecdsa_recovery_calls,
+        );
+        assert_eq!(
+            inbound
+                .worker_ecdsa_recovery_exact_repeats
+                .iter()
+                .sum::<u64>(),
+            inbound.ecdsa_recovery_exact_repeats,
+        );
+        assert_eq!(
+            inbound.worker_ecdsa_recovery_wall_nanos.iter().sum::<u64>(),
+            inbound.ecdsa_recovery_wall_nanos,
+        );
         assert!(inbound.worker_phase_span_nanos >= inbound.worker_critical_path_nanos);
         assert!(inbound.coordinator_wall_nanos >= inbound.worker_phase_span_nanos);
         assert_eq!(
@@ -2817,6 +2998,44 @@ mod tests {
             .updated(account(0x123, 0).as_bytes().to_vec(), 20, digest(20))
             .expect("serial inbound");
         assert_eq!(outbound.accounts_root, serial.root_hash());
+    }
+
+    #[test]
+    fn abort_entity_round_restores_selected_base_revision_and_exact_retry() {
+        let seeds = seeds(&[0x123]);
+        let mut forest = ResidentAccountForest::restore(2, 7, seeds).expect("restore");
+        let base_root = forest.accounts_root();
+        forest
+            .apply_inbound_unsealed(base_root, vec![(account(0x123, 0), 20)], put)
+            .expect("unsealed inbound");
+        assert_eq!(forest.revision(), 8);
+
+        forest.abort_entity_round().expect("abort round");
+        assert_eq!(forest.accounts_root(), base_root);
+        assert_eq!(forest.revision(), 7);
+
+        forest
+            .apply_inbound_unsealed(base_root, vec![(account(0x123, 0), 20)], put)
+            .expect("exact retry inbound");
+        let retried = forest
+            .apply_outbound(vec![(account(0x123, 0), 30)], put)
+            .expect("exact retry outbound");
+
+        let mut fresh = ResidentAccountForest::restore(
+            2,
+            7,
+            vec![(account(0x123, 0), 0x123 + 10, digest(0x123 + 10))],
+        )
+        .expect("fresh");
+        fresh
+            .apply_inbound_unsealed(base_root, vec![(account(0x123, 0), 20)], put)
+            .expect("fresh inbound");
+        let expected = fresh
+            .apply_outbound(vec![(account(0x123, 0), 30)], put)
+            .expect("fresh outbound");
+        assert_eq!(retried.revision, expected.revision);
+        assert_eq!(retried.accounts_root, expected.accounts_root);
+        assert_eq!(retried.rows, expected.rows);
     }
 
     #[test]

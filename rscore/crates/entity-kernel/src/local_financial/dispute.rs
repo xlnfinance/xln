@@ -9,7 +9,8 @@ use crate::j_batch::{
     FinalDisputeProof, InitialDisputeProof, JBatch, JBatchState, SecretReveal,
     proof_body_from_engine, proof_body_hash,
 };
-use crate::orderbook::remove_account_offer_for_dispute;
+use crate::orderbook::SameJOutputDelta;
+use crate::paybook::PaybookChanges;
 use crate::{EntityFrameEvent, EntityKernelError, EntityStateSlice, LocalEntityOutput};
 
 use super::types::{
@@ -208,13 +209,14 @@ fn wrap_arguments(arguments: Vec<u8>, clause_count: usize) -> Result<Vec<u8>, En
 
 fn known_secrets(
     state: &EntityStateSlice,
+    paybook: &PaybookChanges,
     dispute: &xln_rscore_batch::ResidentAccountDisputeView,
     counterparty: &str,
 ) -> Result<Vec<[u8; 32]>, EntityKernelError> {
     let mut seen = BTreeSet::new();
     let mut output = Vec::new();
     for hashlock in &dispute.payment_hashlocks {
-        let Some(entry) = state.paybook.entry(hashlock)? else {
+        let Some(entry) = paybook.entry(state, hashlock)? else {
             continue;
         };
         if entry.inbound_entity.as_deref() != Some(counterparty)
@@ -238,6 +240,7 @@ fn known_secrets(
 
 fn build_arguments(
     state: &EntityStateSlice,
+    paybook: &PaybookChanges,
     dispute: &xln_rscore_batch::ResidentAccountDisputeView,
     counterparty: &str,
     secrets_side_is_left: Option<bool>,
@@ -261,7 +264,7 @@ fn build_arguments(
             left_ratios.push(ratio);
         }
     }
-    let secrets = known_secrets(state, dispute, counterparty)?;
+    let secrets = known_secrets(state, paybook, dispute, counterparty)?;
     let left_secrets = secrets_side_is_left
         .filter(|side| *side)
         .map(|_| secrets.clone())
@@ -344,6 +347,7 @@ fn active_dispute_value(
 )]
 fn start(
     state: &mut EntityStateSlice,
+    paybook: &PaybookChanges,
     counterparty: &str,
     description: Option<&str>,
     cross_jurisdiction_route_id: Option<&str>,
@@ -439,8 +443,13 @@ fn start(
         );
         return Ok(());
     }
-    let (left_arguments, right_arguments) =
-        build_arguments(state, dispute, counterparty, Some(dispute.owner_is_left))?;
+    let (left_arguments, right_arguments) = build_arguments(
+        state,
+        paybook,
+        dispute,
+        counterparty,
+        Some(dispute.owner_is_left),
+    )?;
     let built_initial = if let Some(value) = starter_initial_override.filter(|value| *value != "0x")
     {
         bytes(value, "disputeStart", "STARTER_INITIAL_ARGUMENTS")?
@@ -459,8 +468,13 @@ fn start(
                     && !counter.proposer_is_left)
         })
         .map(|candidate| {
-            let (left, right) =
-                build_arguments(state, dispute, counterparty, Some(dispute.owner_is_left))?;
+            let (left, right) = build_arguments(
+                state,
+                paybook,
+                dispute,
+                counterparty,
+                Some(dispute.owner_is_left),
+            )?;
             Ok::<_, EntityKernelError>((
                 if dispute.owner_is_left { left } else { right },
                 counter_commitment(
@@ -571,12 +585,14 @@ fn start(
 
 pub(super) fn apply_prepare(
     state: &mut EntityStateSlice,
+    paybook: &PaybookChanges,
     tx: PrepareDisputeEntityTx,
     account_views: &std::collections::BTreeMap<String, LocalAccountFinancialView>,
     runtime_seed: Option<&str>,
     mutations: &mut Vec<(String, AccountEnvelopeMutation)>,
     routed_outputs: &mut Vec<LocalEntityOutput>,
     events: &mut Vec<EntityFrameEvent>,
+    orderbook_deltas: &mut Vec<SameJOutputDelta>,
 ) -> Result<(), EntityKernelError> {
     let Some(dispute) = view(account_views, &tx.counterparty_entity_id) else {
         status(
@@ -629,6 +645,7 @@ pub(super) fn apply_prepare(
         let starter = intent.and_then(|fields| text_field(fields, "starterInitialArguments"));
         return start(
             state,
+            paybook,
             &tx.counterparty_entity_id,
             description,
             intent.and_then(|fields| text_field(fields, "crossJurisdictionRouteId")),
@@ -660,11 +677,18 @@ pub(super) fn apply_prepare(
         } else {
             tx.counterparty_entity_id.clone()
         };
-        if let Some(orderbook) = state.orderbook.as_mut()
-            && remove_account_offer_for_dispute(orderbook, &removal_account, &offer.offer_id)?
+        let order_id = format!("{removal_account}:{}", offer.offer_id);
+        if state
+            .orderbook
+            .as_ref()
+            .is_some_and(|orderbook| orderbook.pair_by_order.contains_key(&order_id))
         {
             local_removed += 1;
         }
+        orderbook_deltas.push(SameJOutputDelta::DisputeRemove {
+            account_id: removal_account,
+            offer_id: offer.offer_id.clone(),
+        });
     }
     pending_orderbook_removal_ids.sort();
     if local_removed > 0 || !pending_orderbook_removal_ids.is_empty() {
@@ -745,6 +769,7 @@ pub(super) fn apply_prepare(
     }
     start(
         state,
+        paybook,
         &tx.counterparty_entity_id,
         tx.description.as_deref(),
         tx.cross_jurisdiction_route_id.as_deref(),
@@ -759,6 +784,7 @@ pub(super) fn apply_prepare(
 
 pub(super) fn apply_start(
     state: &mut EntityStateSlice,
+    paybook: &PaybookChanges,
     tx: DisputeStartEntityTx,
     account_views: &std::collections::BTreeMap<String, LocalAccountFinancialView>,
     runtime_seed: Option<&str>,
@@ -815,6 +841,7 @@ pub(super) fn apply_start(
     }
     start(
         state,
+        paybook,
         &tx.counterparty_entity_id,
         tx.description.as_deref(),
         tx.cross_jurisdiction_route_id.as_deref(),
@@ -837,6 +864,7 @@ fn set_object_field(value: &mut CanonicalValue, name: &str, next: CanonicalValue
 
 pub(super) fn apply_finalize(
     state: &mut EntityStateSlice,
+    paybook: &PaybookChanges,
     tx: DisputeFinalizeEntityTx,
     account_views: &std::collections::BTreeMap<String, LocalAccountFinancialView>,
     mutations: &mut Vec<(String, AccountEnvelopeMutation)>,
@@ -1014,6 +1042,7 @@ pub(super) fn apply_finalize(
     } else {
         build_arguments(
             state,
+            paybook,
             dispute,
             &tx.counterparty_entity_id,
             Some(dispute.owner_is_left),
@@ -1071,7 +1100,7 @@ pub(super) fn apply_finalize(
         return Ok(());
     }
     let registry_secrets = if tx.use_onchain_registry {
-        known_secrets(state, dispute, &tx.counterparty_entity_id)?
+        known_secrets(state, paybook, dispute, &tx.counterparty_entity_id)?
     } else {
         Vec::new()
     };
@@ -1233,6 +1262,7 @@ mod tests {
         let mut events = Vec::new();
         apply_prepare(
             &mut state,
+            &PaybookChanges::default(),
             PrepareDisputeEntityTx {
                 counterparty_entity_id: PEER.into(),
                 description: Some("test".into()),
@@ -1245,6 +1275,7 @@ mod tests {
             &mut mutations,
             &mut routed_outputs,
             &mut events,
+            &mut Vec::new(),
         )
         .expect("prepare");
         assert_eq!(
@@ -1274,6 +1305,7 @@ mod tests {
         let mut events = Vec::new();
         apply_prepare(
             &mut state,
+            &PaybookChanges::default(),
             PrepareDisputeEntityTx {
                 counterparty_entity_id: PEER.into(),
                 description: None,
@@ -1286,6 +1318,7 @@ mod tests {
             &mut mutations,
             &mut routed_outputs,
             &mut events,
+            &mut Vec::new(),
         )
         .expect("prepare");
         assert!(state.j_batch_state.is_none());
@@ -1325,6 +1358,7 @@ mod tests {
         let mut events = Vec::new();
         apply_finalize(
             &mut state,
+            &PaybookChanges::default(),
             DisputeFinalizeEntityTx {
                 counterparty_entity_id: PEER.into(),
                 use_onchain_registry: false,

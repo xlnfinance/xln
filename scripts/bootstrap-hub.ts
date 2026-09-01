@@ -6,7 +6,11 @@
  * Idempotent: safe to run multiple times.
  */
 
-import { main, processRuntime } from '../core/runtime.ts';
+import {
+  enqueueRuntimeInput,
+  main,
+  waitForRuntimeWorkDrained,
+} from '../core/runtime.ts';
 import {
   deriveSignerKeySync,
   deriveSignerAddressSync,
@@ -78,11 +82,20 @@ const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: st
   return { signerAddress, signerLabel };
 };
 
-const ensureRuntimeInput = (env: RuntimeReplica) => {
-  if (!env.runtimeMempool) {
-    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-  }
+const HUB_BOOTSTRAP_DRAIN_TIMEOUT_MS = 10_000;
+
+const drainBootstrapInput = async (env: RuntimeReplica, stage: string): Promise<void> => {
+  const drained = await waitForRuntimeWorkDrained(
+    env,
+    HUB_BOOTSTRAP_DRAIN_TIMEOUT_MS,
+    0,
+  );
+  if (!drained) throw new Error(`HUB_BOOTSTRAP_DRAIN_TIMEOUT:${stage}`);
 };
+
+const findHubReplica = (env: RuntimeReplica, entityId: string) =>
+  Array.from(env.state.eReplicas.entries())
+    .find(([key]) => key.startsWith(`${entityId}:`))?.[1];
 
 const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
   const normalizedRequested = String(requestedName || '').trim().toLowerCase();
@@ -135,20 +148,24 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
   const replicaExists = !!Array.from(env.state.eReplicas?.keys?.() || []).find(key => key.startsWith(`${entityId}:`));
 
   if (!replicaExists) {
-    ensureRuntimeInput(env);
-    env.runtimeMempool.runtimeTxs.push(importEntity({
-      entityId,
-      signerId: signerAddress,
-      data: {
-        config: consensusConfig,
-        isProposer: true,
-        profileName: hubConfig.name,
-        position: hubConfig.position || { x: 0, y: 0, z: 0 },
-      },
-      entitySeed: hubConfig.seed,
-    }));
-
-    await processRuntime(env, []);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [importEntity({
+        entityId,
+        signerId: signerAddress,
+        data: {
+          config: consensusConfig,
+          isProposer: true,
+          profileName: hubConfig.name,
+          position: hubConfig.position || { x: 0, y: 0, z: 0 },
+        },
+        entitySeed: hubConfig.seed,
+      })],
+      entityInputs: [],
+    });
+    await drainBootstrapInput(env, 'entity-import');
+    if (!findHubReplica(env, entityId)) {
+      throw new Error(`HUB_BOOTSTRAP_ENTITY_COMMIT_MISSING:${entityId}`);
+    }
     bootstrapLog.info('hub.entity_created', {
       name: hubConfig.name,
       entityId,
@@ -174,32 +191,37 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
     });
   }
 
-  ensureRuntimeInput(env);
-  env.runtimeMempool.entityInputs.push({
-    entityId,
-    signerId: signerAddress,
-    entityTxs: [
-      {
-        type: 'setHubConfig',
-        data: {
-          hubName: hubConfig.name,
-          matchingStrategy: hubConfig.matchingStrategy ?? 'amount',
-          ...(hubConfig.policyVersion !== undefined ? { policyVersion: hubConfig.policyVersion } : {}),
-          routingFeePPM: hubConfig.routingFeePPM ?? 100,
-          baseFee: hubConfig.baseFee ?? 0n,
-          swapTakerFeeBps: hubConfig.swapTakerFeeBps ?? 1,
-          disputeAutoFinalizeMode: hubConfig.disputeAutoFinalizeMode ?? 'auto',
-          ...(hubConfig.minCollateralThreshold !== undefined ? { minCollateralThreshold: hubConfig.minCollateralThreshold } : {}),
-          ...(hubConfig.c2rWithdrawSoftLimit !== undefined ? { c2rWithdrawSoftLimit: hubConfig.c2rWithdrawSoftLimit } : {}),
-          ...(hubConfig.rebalanceBaseFee !== undefined ? { rebalanceBaseFee: hubConfig.rebalanceBaseFee } : {}),
-          ...(hubConfig.rebalanceLiquidityFeeBps !== undefined ? { rebalanceLiquidityFeeBps: hubConfig.rebalanceLiquidityFeeBps } : {}),
-          ...(hubConfig.rebalanceGasFee !== undefined ? { rebalanceGasFee: hubConfig.rebalanceGasFee } : {}),
-          ...(hubConfig.rebalanceTimeoutMs !== undefined ? { rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs } : {}),
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId,
+      signerId: signerAddress,
+      entityTxs: [
+        {
+          type: 'setHubConfig',
+          data: {
+            hubName: hubConfig.name,
+            matchingStrategy: hubConfig.matchingStrategy ?? 'amount',
+            ...(hubConfig.policyVersion !== undefined ? { policyVersion: hubConfig.policyVersion } : {}),
+            routingFeePPM: hubConfig.routingFeePPM ?? 100,
+            baseFee: hubConfig.baseFee ?? 0n,
+            swapTakerFeeBps: hubConfig.swapTakerFeeBps ?? 1,
+            disputeAutoFinalizeMode: hubConfig.disputeAutoFinalizeMode ?? 'auto',
+            ...(hubConfig.minCollateralThreshold !== undefined ? { minCollateralThreshold: hubConfig.minCollateralThreshold } : {}),
+            ...(hubConfig.c2rWithdrawSoftLimit !== undefined ? { c2rWithdrawSoftLimit: hubConfig.c2rWithdrawSoftLimit } : {}),
+            ...(hubConfig.rebalanceBaseFee !== undefined ? { rebalanceBaseFee: hubConfig.rebalanceBaseFee } : {}),
+            ...(hubConfig.rebalanceLiquidityFeeBps !== undefined ? { rebalanceLiquidityFeeBps: hubConfig.rebalanceLiquidityFeeBps } : {}),
+            ...(hubConfig.rebalanceGasFee !== undefined ? { rebalanceGasFee: hubConfig.rebalanceGasFee } : {}),
+            ...(hubConfig.rebalanceTimeoutMs !== undefined ? { rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs } : {}),
+          },
         },
-      },
-    ],
+      ],
+    }],
   });
-  await processRuntime(env, []);
+  await drainBootstrapInput(env, 'hub-config');
+  if (!findHubReplica(env, entityId)?.state.hubRebalanceConfig) {
+    throw new Error(`HUB_BOOTSTRAP_CONFIG_COMMIT_MISSING:${entityId}`);
+  }
 
   if (env.gossip?.getHubs) {
     const hubs = env.gossip.getHubs();

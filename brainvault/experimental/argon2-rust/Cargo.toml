@@ -1,0 +1,18 @@
+[package]
+name = "brainvault-argon2-rust"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["secure-wipe"]
+secure-wipe = ["argon2-rust/zeroize-memory"]
+
+[dependencies]
+argon2-rust = { version = "1.1.0", default-features = false, features = ["std", "parallel"] }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+strip = true

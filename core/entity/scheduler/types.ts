@@ -1,4 +1,5 @@
 import type { EntityCandidateEffect, EntityState, HashToSign } from '../types';
+import type { BookIntentSlotWriter } from '../books/book-intents';
 
 /**
  * One isolated Entity reducer pass only needs the candidate State and its id.
@@ -98,6 +99,7 @@ export interface CrontabState {
 /** Mutable effect sinks shared by one isolated Entity crontab pass. */
 export type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
+  bookIntentSlot?: BookIntentSlotWriter;
   hashesToSign?: HashToSign[];
   accountChanges: Set<string>;
   candidateEffects?: EntityCandidateEffect[];

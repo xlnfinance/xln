@@ -148,12 +148,6 @@ impl PaybookState {
     }
 }
 
-fn paybook_error(error: impl std::fmt::Display) -> EntityKernelError {
-    EntityKernelError::CommitmentEncoding {
-        detail: error.to_string(),
-    }
-}
-
 pub(crate) fn paybook_entry<'a>(
     state: &'a EntityStateSlice,
     hashlock: &str,
@@ -171,6 +165,12 @@ pub(crate) fn remove_paybook_entry(
         state.paybook.entries = state.paybook.entries.removed(&key).map_err(paybook_error)?;
     }
     Ok(entry)
+}
+
+fn paybook_error(error: impl std::fmt::Display) -> EntityKernelError {
+    EntityKernelError::CommitmentEncoding {
+        detail: error.to_string(),
+    }
 }
 
 pub(crate) fn direct_payment_forward(
@@ -497,7 +497,7 @@ pub(crate) fn terminate_route(
     remove_paybook_entry(state, hashlock)
 }
 
-fn terminate_route_in_frame(
+pub(crate) fn terminate_route_in_frame(
     state: &mut EntityStateSlice,
     paybook: &mut PaybookChanges,
     hashlock: &str,

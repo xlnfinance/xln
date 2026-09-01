@@ -23,6 +23,7 @@ import {
 export type { JAdapterMode };
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { configureCryptoPoolEntry } from '../../protocol/crypto/crypto-pool';
+import { assertScenarioRpcOutsideDev } from './scenario-isolation';
 
 // Bun host: the crypto worker pool needs this module URL (shared core cannot spell import.meta).
 configureCryptoPoolEntry(new URL('../../protocol/crypto/crypto-pool.ts', import.meta.url));
@@ -36,7 +37,9 @@ const IS_BROWSER_RUNTIME = typeof window !== 'undefined' && typeof document !== 
 const IS_NODE_RUNTIME = !IS_BROWSER_RUNTIME;
 
 const getDefaultAnvilRpcUrl = (): string => {
-  if (!IS_BROWSER_RUNTIME) return 'http://localhost:8545';
+  if (!IS_BROWSER_RUNTIME) {
+    throw new Error('SCENARIO_RPC_REQUIRED_USE_CANONICAL_RUNNER');
+  }
   return new URL('/rpc', window.location.origin).toString();
 };
 
@@ -45,10 +48,12 @@ const getDefaultAnvilRpcUrl = (): string => {
  * validation requires a non-empty string, so a scenario that hand-rolls this
  * and leaves it blank cannot commit its very first frame.
  */
-export const resolveScenarioJurisdictionAddress = (mode: JAdapterMode): string =>
-  mode === 'browservm'
-    ? 'browservm://'
-    : (process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl());
+export const resolveScenarioJurisdictionAddress = (mode: JAdapterMode): string => {
+  if (mode === 'browservm') return 'browservm://';
+  const rpcUrl = process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
+  assertScenarioRpcOutsideDev(rpcUrl);
+  return rpcUrl;
+};
 
 type ManagedAnvilProcess = {
   exitCode: number | null;
@@ -208,6 +213,7 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
 };
 
 const ensureScenarioRpcReady = async (rpcUrl: string, expectedChainId: number): Promise<number> => {
+  assertScenarioRpcOutsideDev(rpcUrl);
   const forceFreshLocalAnvil =
     process.env['XLN_FORCE_FRESH_ANVIL'] === '1' &&
     IS_NODE_RUNTIME &&
@@ -244,7 +250,7 @@ export interface ScenarioConfig {
   name: string;
   signerIds: string[];
   mode?: JAdapterMode;       // default: JADAPTER_MODE env var → 'rpc'
-  rpcUrl?: string;            // default: ANVIL_RPC env var → 'http://localhost:8545'
+  rpcUrl?: string;            // Node requires canonical runner or explicit isolated RPC.
   jurisdictionName?: string;  // default: `${name} Demo`
   position?: { x: number; y: number; z: number }; // jReplica position
   seed?: string;              // runtime seed (default: `${name}-scenario-seed`)

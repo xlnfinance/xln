@@ -1501,6 +1501,7 @@ describe('production startup wiring', () => {
 
   test('hub mesh, market maker, and custody bootstrap behind one parallel readiness barrier', () => {
     const orchestrator = readOrchestratorSource();
+    const resetStartupSource = readFileSync(join(repoRoot, 'core/orchestrator/process/reset-startup.ts'), 'utf8');
     const custodyBootstrapSource = readFileSync(join(repoRoot, 'core/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
     const resetStart = orchestrator.indexOf('const runReset = async (');
     const resetEnd = orchestrator.indexOf('const resetCoordinator =', resetStart);
@@ -1508,9 +1509,11 @@ describe('production startup wiring', () => {
     expect(reset).toContain('await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));');
     expect(reset).toContain('const startConfiguredMarketMaker = async (): Promise<void> => {');
     expect(reset).toContain('const startConfiguredCustody = async (): Promise<void> => {');
-    expect(reset).toContain(
-      'await Promise.all([\n      waitForMesh(),\n      driveNativeH1Bootstrap(h1, shouldStartMarketMaker),\n      startConfiguredMarketMaker(),\n      startConfiguredCustody(),',
+    expect(reset).toContain('driveH1Bootstrap: () => driveH1Bootstrap(h1, shouldStartMarketMaker)');
+    expect(resetStartupSource).toContain(
+      'startup.driveH1Bootstrap(), startup.startMarketMaker(), startup.startCustody(),',
     );
+    expect(resetStartupSource).toContain('await Promise.all([startup.waitForMesh(), parallel()]);');
     expect(orchestrator).not.toContain('continuing market maker startup before failing reset');
     expect(custodyBootstrapSource).toContain('XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId');
     expect(custodyBootstrapSource).toContain('discoverHubIds(options.apiBaseUrl, 3, 30_000, jurisdictionTarget)');

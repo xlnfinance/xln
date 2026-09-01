@@ -16,7 +16,6 @@
 
 import fs from 'node:fs';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
-import net from 'node:net';
 import path from 'node:path';
 
 import {
@@ -52,6 +51,7 @@ import {
   createJurisdictionConfig,
   ensureJAdapter,
 } from '../harness/boot';
+import { assertScenarioRpcOutsideDev } from '../harness/scenario-isolation';
 import { ensureLiveJAdapterForReplica } from '../../runtime/recovery/j-adapter-restore';
 import { deriveDelta, isLeftEntity } from '../../account/utils';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../../orderbook';
@@ -72,6 +72,9 @@ const relayUrl = readCliOption(args, '--relay-url', 'ws://127.0.0.1:8787');
 const seedRuntimeId = readCliOption(args, '--seed-runtime-id');
 const relayPort = Number(readCliOption(args, '--relay-port', '0'));
 const relayHost = readCliOption(args, '--relay-host', '127.0.0.1');
+const directPort = Number(readCliOption(args, '--direct-port', '0'));
+const sourceRpc = readCliOption(args, '--source-rpc', '');
+const targetRpc = readCliOption(args, '--target-rpc', '');
 const stacksJson = readCliOption(args, '--stacks', '');
 const orderId = readCliOption(args, '--order-id', 'cross-j-scenario-1');
 const barrierDir = readCliOption(args, '--barrier-dir', '');
@@ -97,22 +100,6 @@ type Party = { id: string; signer: string; name: string };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-const reservePort = async (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      if (!addr || typeof addr === 'string') {
-        server.close(() => reject(new Error('CROSS_J_NODE_PORT_RESERVE_FAILED')));
-        return;
-      }
-      const { port } = addr;
-      server.close(() => resolve(port));
-    });
-  });
-
-
 /**
  * Account outputs travel only over authenticated direct Runtime sessions; the
  * relay carries gossip. A scenario hub therefore hosts the production hub
@@ -120,12 +107,14 @@ const reservePort = async (): Promise<number> =>
  * the endpoint in its profile.
  */
 const startDirectIngress = async (env: RuntimeReplica): Promise<string> => {
-  const port = await reservePort();
+  if (!Number.isSafeInteger(directPort) || directPort <= 0) {
+    throw new Error(`CROSS_J_DIRECT_PORT_INVALID:${String(directPort)}`);
+  }
   const route = createHubDirectRuntimeRoute(env, seed, () => true, { lastSeen: null, lastError: null });
   type Socket = Parameters<typeof route.websocket.open>[0];
   Bun.serve<{ type?: string }>({
     hostname: '127.0.0.1',
-    port,
+    port: directPort,
     fetch(request, serverRef) {
       const upgrade = route.maybeUpgrade(request, serverRef);
       if (upgrade.handled) return upgrade.response;
@@ -139,7 +128,7 @@ const startDirectIngress = async (env: RuntimeReplica): Promise<string> => {
       close(ws, code, reason) { route.websocket.close(ws as Socket, code, reason); },
     },
   });
-  return `ws://127.0.0.1:${port}/ws`;
+  return `ws://127.0.0.1:${directPort}/ws`;
 };
 
 const registerSigner = (env: RuntimeReplica, label: string): string => {
@@ -372,8 +361,9 @@ const deployHubStacks = async (env: RuntimeReplica): Promise<{
   sourceAdapter: JAdapter;
   targetAdapter: JAdapter;
 }> => {
-  const sourceRpc = process.env['ANVIL_RPC'] || `http://127.0.0.1:${await reservePort()}`;
-  const targetRpc = `http://127.0.0.1:${await reservePort()}`;
+  if (!sourceRpc || !targetRpc) throw new Error('CROSS_J_RPC_BATCH_REQUIRED');
+  assertScenarioRpcOutsideDev(sourceRpc);
+  assertScenarioRpcOutsideDev(targetRpc);
   // ensureJAdapter auto-starts anvil when the RPC is unreachable — raw
   // createJAdapter does not.
   const sourceAdapter = await ensureJAdapter(env, 'rpc', {

@@ -5,7 +5,7 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs';
-import net from 'net';
+import os from 'os';
 import path from 'path';
 import { ethers } from 'ethers';
 import { deriveSignerAddressSync } from '../../account/crypto';
@@ -15,6 +15,9 @@ import { loadJurisdictions } from '../../jurisdiction/adapter/kernel/jurisdictio
 import { deployMissingDefaultTokens } from '../../jurisdiction/adapter/operations/dev-token-deployment';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { hasCliFlag, readCliOption } from '../../config/cli';
+import { acquireLocalTestPortLease } from '../../scripts/e2e/harness/local-test-port-lease';
+import { stopProcessGroup } from '../../scripts/e2e/runners/process-group';
+import { assertScenarioRpcOutsideDev, buildScenarioIsolatedEnv } from '../harness/scenario-isolation';
 
 const args = globalThis.process.argv.slice(2);
 const hasFlag = (name: string): boolean => hasCliFlag(args, name);
@@ -25,6 +28,8 @@ const jurisdictionName = readCliOption(args, '--jurisdiction', 'arrakis');
 const nodeRpcArgs = useRpc
   ? ['--rpc', '--jurisdiction', jurisdictionName, '--skip-wallet-funding', ...(rpcUrlOverride ? ['--rpc-url', rpcUrlOverride] : [])]
   : [];
+if (useRpc && !rpcUrlOverride) throw new Error('P2P_RPC_URL_REQUIRED');
+if (rpcUrlOverride) assertScenarioRpcOutsideDev(rpcUrlOverride);
 
 const hubSeed = 'hub-seed';
 const aliceSeed = 'alice-seed';
@@ -225,20 +230,11 @@ const spawnNode = (
   role: string,
   seed: string,
   relayUrl: string,
+  scenarioDbRoot: string,
   seedRuntimeId?: string,
   extraArgs: string[] = []
 ): ProcInfo => {
-  const dbRoot = path.join(process.cwd(), 'db-tmp');
-  const relayPort = (() => {
-    try {
-      const url = new URL(relayUrl);
-      return url.port || 'unknown';
-    } catch {
-      return 'unknown';
-    }
-  })();
-  const dbPath = path.join(dbRoot, `p2p-${role}-${relayPort}`);
-  fs.rmSync(dbPath, { recursive: true, force: true });
+  const dbPath = path.join(scenarioDbRoot, role);
   fs.mkdirSync(dbPath, { recursive: true });
   const args = [
     'run',
@@ -257,10 +253,8 @@ const spawnNode = (
   }
 
   const proc = spawn('bun', args, {
-    env: {
-      ...process.env,
-      XLN_DB_PATH: dbPath,
-    },
+    detached: true,
+    env: buildScenarioIsolatedEnv(process.env, dbPath, rpcUrlOverride ?? null),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
@@ -280,49 +274,37 @@ const spawnNode = (
   return { role, proc, stdoutBuffer };
 };
 
-const killAll = (procs: ProcInfo[]) => {
-  for (const { proc } of procs) {
-    if (!proc.killed) {
-      proc.kill('SIGTERM');
-    }
-  }
-};
-
-const getFreePort = async () => {
-  return new Promise<number>((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => {
-        if (address && typeof address === 'object') {
-          resolve(address.port);
-        } else {
-          reject(new Error('FREE_PORT_UNAVAILABLE'));
-        }
-      });
+const killAll = async (procs: ProcInfo[]): Promise<void> => {
+  await Promise.all(procs.map(async ({ proc, role }) => {
+    if (!proc.pid) return;
+    await stopProcessGroup({
+      pid: proc.pid,
+      termTimeoutMs: 2_000,
+      killTimeoutMs: 1_000,
+      timeoutError: `P2P_PROCESS_GROUP_STOP_TIMEOUT:${role}:${proc.pid}`,
     });
-  });
+  }));
 };
 
 const procs: ProcInfo[] = [];
 
 const run = async () => {
-  const envPort = process.env['P2P_RELAY_PORT'];
-  const relayPort = envPort ? Number(envPort) : await getFreePort();
+  const lease = await acquireLocalTestPortLease({ requiredOffsets: [0], timeoutMs: 25_000 });
+  const relayPort = lease.basePort;
+  const scenarioDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xln-p2p-relay-'));
   let hub: ProcInfo | null = null;
   let alice: ProcInfo | null = null;
   let bob: ProcInfo | null = null;
   const relayUrl = `ws://127.0.0.1:${relayPort}`;
 
   console.log(`[P2P] Using relay port ${relayPort}`);
+  try {
   if (useRpc) {
     console.log(`[P2P] RPC mode enabled (jurisdiction=${jurisdictionName}${rpcUrlOverride ? ` rpc=${rpcUrlOverride}` : ''})`);
     await prefundRpcWallets();
   }
 
-  hub = spawnNode('hub', hubSeed, relayUrl, undefined, [
+  hub = spawnNode('hub', hubSeed, relayUrl, scenarioDbRoot, undefined, [
     ...nodeRpcArgs,
     '--hub',
     '--relay-port',
@@ -351,12 +333,12 @@ const run = async () => {
   console.log('[P2P] Hub relay ready - spawning alice/bob NOW');
 
   // Spawn alice/bob IMMEDIATELY (before hub starts waiting for them)
-  bob = spawnNode('bob', bobSeed, relayUrl, hubRuntimeId, [
+  bob = spawnNode('bob', bobSeed, relayUrl, scenarioDbRoot, hubRuntimeId, [
     ...nodeRpcArgs,
     '--stay-alive-after-payment',
   ]);
   procs.push(bob);
-  alice = spawnNode('alice', aliceSeed, relayUrl, hubRuntimeId, [
+  alice = spawnNode('alice', aliceSeed, relayUrl, scenarioDbRoot, hubRuntimeId, [
     ...nodeRpcArgs,
     '--wait-for-bob-ready',
     '--stay-alive-after-payment',
@@ -421,11 +403,14 @@ const run = async () => {
   await waitForLineOrError(hub, /P2P_END_TO_END_SETTLED/, errorMatchers);
   console.log('✅ P2P relay test passed');
 
-  killAll(procs);
+  } finally {
+    await killAll(procs);
+    fs.rmSync(scenarioDbRoot, { recursive: true, force: true });
+    lease.release();
+  }
 };
 
 run().catch(error => {
   console.error('P2P_RELAY_FATAL', error);
-  killAll(procs);
-  process.exit(1);
+  process.exitCode = 1;
 });

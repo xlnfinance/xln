@@ -997,6 +997,18 @@ fn account_phase_metric_value(
         }),
         "accountPhaseWork",
     )?;
+    extend_json_object(
+        &mut object,
+        serde_json::json!({
+            "ecdsaRecoveryCalls": metric.ecdsa_recovery_calls,
+            "ecdsaRecoveryExactRepeats": metric.ecdsa_recovery_exact_repeats,
+            "ecdsaRecoveryMicros": metric.ecdsa_recovery_wall_nanos / 1_000,
+            "workerEcdsaRecoveryCalls": &metric.worker_ecdsa_recovery_calls,
+            "workerEcdsaRecoveryExactRepeats": &metric.worker_ecdsa_recovery_exact_repeats,
+            "workerEcdsaRecoveryNanos": &metric.worker_ecdsa_recovery_wall_nanos,
+        }),
+        "accountPhaseCrypto",
+    )?;
     Ok(Value::Object(object))
 }
 

@@ -92,7 +92,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // SETUP: JAdapter (BrowserVM or RPC)
   // ══════════════════════════════════════════════════════════════
   const jMode = getJAdapterMode();
-  const rpcUrl = globalThis.process?.env?.['ANVIL_RPC'] || 'http://localhost:8545';
+  const rpcUrl = resolveScenarioJurisdictionAddress(jMode);
   const transportLabel = jMode === 'browservm' ? 'browservm' : `rpc → ${rpcUrl}`;
   console.log(`\n📦 Setting up JAdapter (${transportLabel})...`);
 

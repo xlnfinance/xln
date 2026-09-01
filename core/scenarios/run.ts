@@ -13,7 +13,6 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { scheduler } from 'node:timers/promises';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
@@ -24,8 +23,18 @@ import {
   recordSelectiveRerunPass,
 } from '../scripts/e2e/harness/selective-rerun/ledger';
 import { computeRepositoryCodeFingerprint } from '../qa/tools/code-fingerprint';
+import {
+  acquireLocalTestPortLease,
+  type LocalTestPortLease,
+} from '../scripts/e2e/harness/local-test-port-lease';
+import { stopProcessGroup } from '../scripts/e2e/runners/process-group';
+import {
+  assertScenarioRpcOutsideDev,
+  buildScenarioIsolatedEnv,
+} from './harness/scenario-isolation';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+const SCENARIO_PORT_OFFSETS = [0, 1, 2, 3, 4] as const;
 
 type ScenarioEntry = {
   file: string;
@@ -93,27 +102,6 @@ const SMOKE_PARALLEL_SET = [
   'swap-tps',
   'multi-sig',
 ];
-
-async function reserveFreeLocalPort(): Promise<number> {
-  const { createServer } = await import('node:net');
-  return await new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      if (!addr || typeof addr === 'string') {
-        server.close(() => reject(new Error('Failed to reserve local RPC port')));
-        return;
-      }
-      const port = addr.port;
-      server.close(err => {
-        if (err) reject(err);
-        else resolve(port);
-      });
-    });
-  });
-}
 
 const resolveParallelSet = (setName?: string): readonly string[] => {
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
@@ -186,13 +174,13 @@ function tail(path: string, lines = 60): string {
 }
 
 async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
-  if (!proc || proc.exitCode !== null) return;
-  proc.kill('SIGTERM');
-  const deadline = Date.now() + 4000;
-  while (proc.exitCode === null && Date.now() < deadline) {
-    await scheduler.wait(100);
-  }
-  if (proc.exitCode === null) proc.kill('SIGKILL');
+  if (!proc || !proc.pid) return;
+  await stopProcessGroup({
+    pid: proc.pid,
+    termTimeoutMs: 4_000,
+    killTimeoutMs: 1_000,
+    timeoutError: `SCENARIO_PROCESS_GROUP_STOP_TIMEOUT:${proc.pid}`,
+  });
 }
 
 const verifyScenarioPersistence = async (
@@ -248,6 +236,22 @@ type ParallelResult = {
   error?: string;
 };
 
+const acquireScenarioLeases = async (count: number): Promise<LocalTestPortLease[]> => {
+  const leases: LocalTestPortLease[] = [];
+  try {
+    for (let index = 0; index < count; index += 1) {
+      leases.push(await acquireLocalTestPortLease({
+        requiredOffsets: SCENARIO_PORT_OFFSETS,
+        timeoutMs: 25_000,
+      }));
+    }
+    return leases;
+  } catch (error) {
+    for (const lease of leases) lease.release();
+    throw error;
+  }
+};
+
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
   cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) });
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
@@ -260,6 +264,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   const workers = Math.min(workersArg ?? scenarios.length, scenarios.length);
   const logsDir = resolve(process.cwd(), '.logs', 'scenarios-parallel', tsTag());
   mkdirSync(logsDir, { recursive: true });
+  const leases = await acquireScenarioLeases(workers);
 
   console.log('\n' + '='.repeat(72));
   console.log('Parallel Scenario Runner (isolated RPC per worker; in-memory gossip)');
@@ -274,15 +279,18 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   let next = 0;
   const results: ParallelResult[] = [];
 
-  const runOne = async (scenario: string, workerId: number): Promise<ParallelResult> => {
+  const runOne = async (
+    scenario: string,
+    workerId: number,
+    lease: LocalTestPortLease,
+  ): Promise<ParallelResult> => {
     const startedAt = Date.now();
     const logPath = join(logsDir, `${String(workerId).padStart(2, '0')}-${scenario}.log`);
     const log = createWriteStream(logPath, { flags: 'w' });
     let scenarioProc: PipedChildProcess | null = null;
 
     try {
-      const rpcPort = await reserveFreeLocalPort();
-      const rpcUrl = `http://127.0.0.1:${rpcPort}`;
+      const rpcUrl = `http://127.0.0.1:${lease.basePort}`;
       const dbPath = join(logsDir, `db-worker-${workerId}-${scenario}`);
       mkdirSync(dbPath, { recursive: true });
 
@@ -296,13 +304,14 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
         '--single',
       ], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
         env: {
-          ...process.env,
+          ...buildScenarioIsolatedEnv(process.env, dbPath, rpcUrl),
           [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
           JADAPTER_MODE: mode,
-          ANVIL_RPC: rpcUrl,
-          XLN_DB_PATH: dbPath,
           XLN_ENTITY_STATE_ROOT_AUDIT: '1',
+          XLN_SCENARIO_DB_ROOT: dbPath,
+          XLN_SCENARIO_LEASE_BASE: String(lease.basePort),
         },
       });
 
@@ -354,7 +363,9 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
       if (idx >= scenarios.length) return;
       const scenario = scenarios[idx]!;
       console.log(`▶️  [worker ${workerId}] ${scenario}`);
-      const result = await runOne(scenario, workerId);
+      const lease = leases[workerId];
+      if (!lease) throw new Error(`SCENARIO_WORKER_LEASE_MISSING:${workerId}`);
+      const result = await runOne(scenario, workerId, lease);
       results.push(result);
       const seconds = (result.durationMs / 1000).toFixed(1);
       if (result.status === 'passed') {
@@ -366,7 +377,11 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   };
 
   const startedAt = Date.now();
-  await Promise.all(Array.from({ length: workers }, (_, i) => workerLoop(i)));
+  try {
+    await Promise.all(Array.from({ length: workers }, (_, i) => workerLoop(i)));
+  } finally {
+    for (const lease of leases) lease.release();
+  }
   const totalMs = Date.now() - startedAt;
 
   const ordered = scenarios.map(name => results.find(r => r.scenario === name)).filter(Boolean) as ParallelResult[];
@@ -427,22 +442,34 @@ async function main() {
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   process.env['XLN_ENTITY_STATE_ROOT_AUDIT'] = '1';
 
-  if (!process.env['XLN_DB_PATH']) {
-    const dbPath = resolve(process.cwd(), '.logs', 'scenarios-single', tsTag(), scenario, 'db');
-    mkdirSync(dbPath, { recursive: true });
-    process.env['XLN_DB_PATH'] = dbPath;
-  }
-
   // Set env vars — scenarios read these via getJAdapterMode() / ensureJAdapter()
   if (mode) process.env['JADAPTER_MODE'] = mode;
 
-  let effectiveRpc = rpc || process.env['ANVIL_RPC'];
+  let ownedLease: LocalTestPortLease | null = null;
+  let effectiveRpc = rpc;
   if (requestedMode !== 'browservm' && !effectiveRpc) {
-    // Default to isolated RPC per scenario process to allow true parallel runs.
-    const port = await reserveFreeLocalPort();
-    effectiveRpc = `http://127.0.0.1:${port}`;
+    ownedLease = await acquireLocalTestPortLease({ requiredOffsets: SCENARIO_PORT_OFFSETS, timeoutMs: 25_000 });
+    effectiveRpc = `http://127.0.0.1:${ownedLease.basePort}`;
+    process.env['XLN_SCENARIO_LEASE_BASE'] = String(ownedLease.basePort);
   }
-  if (effectiveRpc) process.env['ANVIL_RPC'] = effectiveRpc;
+  if (effectiveRpc) assertScenarioRpcOutsideDev(effectiveRpc);
+  const assignedLeaseBase = Number(process.env['XLN_SCENARIO_LEASE_BASE']);
+  if (process.env['XLN_SCENARIO_LEASE_BASE'] !== undefined) {
+    const assignedPort = effectiveRpc ? Number(new URL(effectiveRpc).port) : NaN;
+    if (
+      !Number.isSafeInteger(assignedLeaseBase) ||
+      !Number.isSafeInteger(assignedPort) ||
+      assignedPort < assignedLeaseBase ||
+      assignedPort > assignedLeaseBase + 2
+    ) throw new Error(`SCENARIO_ASSIGNED_LEASE_MISMATCH:${String(effectiveRpc)}`);
+  }
+  const assignedDbRoot = String(process.env['XLN_SCENARIO_DB_ROOT'] || '').trim();
+  const dbPath = assignedDbRoot
+    ? resolve(assignedDbRoot)
+    : resolve(process.cwd(), '.logs', 'scenarios-single', tsTag(), scenario, 'db');
+  mkdirSync(dbPath, { recursive: true });
+  process.env['XLN_SCENARIO_DB_ROOT'] = dbPath;
+  Object.assign(process.env, buildScenarioIsolatedEnv(process.env, dbPath, effectiveRpc ?? null));
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Scenario: ${scenario}`);
@@ -469,7 +496,7 @@ async function main() {
     console.log(`  ${scenario} COMPLETE`);
     console.log(`  Frames: ${env.state.height}`);
     console.log(`${'='.repeat(60)}\n`);
-    process.exit(0);
+    return;
   } catch (error) {
     recordSelectiveRerunFailure({
       kind: 'scenario',
@@ -479,6 +506,10 @@ async function main() {
       reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
     });
     throw error;
+  } finally {
+    const { stopManagedScenarioAnvil } = await import('./harness/boot');
+    await stopManagedScenarioAnvil();
+    ownedLease?.release();
   }
 }
 

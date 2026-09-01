@@ -274,21 +274,22 @@ mod tests {
         let mut outputs = Vec::new();
         let mut events = Vec::new();
         let mut paybook = PaybookChanges::default();
+        let tx = HtlcPaymentEntityTx {
+            target_entity_id: target.clone(),
+            token_id,
+            amount: BigInt::from(100),
+            max_sender_debit: BigInt::from(120),
+            route: vec![owner.clone(), next.clone(), target.clone()],
+            description: Some("note".into()),
+            delivery_mode: OriginatedHtlcDeliveryMode::Instant,
+            started_at_ms: Some(1_000),
+            hashlock: Some(hashlock.clone()),
+            tx_hash,
+        };
         apply_htlc_payment(
             &mut state,
             &mut paybook,
-            HtlcPaymentEntityTx {
-                target_entity_id: target.clone(),
-                token_id,
-                amount: BigInt::from(100),
-                max_sender_debit: BigInt::from(120),
-                route: vec![owner.clone(), next.clone(), target.clone()],
-                description: Some("note".into()),
-                delivery_mode: OriginatedHtlcDeliveryMode::Instant,
-                started_at_ms: Some(1_000),
-                hashlock: Some(hashlock.clone()),
-                tx_hash,
-            },
+            tx.clone(),
             &context,
             &views,
             &mut account_txs,
@@ -296,6 +297,22 @@ mod tests {
             &mut events,
         )
         .expect("originated payment");
+        let duplicate = apply_htlc_payment(
+            &mut state,
+            &mut paybook,
+            tx,
+            &context,
+            &views,
+            &mut account_txs,
+            &mut outputs,
+            &mut events,
+        )
+        .expect_err("pending hashlock is visible before radix commit");
+        assert!(
+            duplicate
+                .to_string()
+                .contains("HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE")
+        );
         paybook
             .commit_sequential(&mut state)
             .expect("commit paybook");

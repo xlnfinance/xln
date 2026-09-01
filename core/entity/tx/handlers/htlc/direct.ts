@@ -6,6 +6,7 @@ import { addMessage } from '../../../frame-events';
 import { findAccountKey } from '../../account-key';
 import type { AccountTxTarget } from '../account';
 import { persistVerifiedPaymentSecret } from '../../../paybook/lifecycle';
+import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -26,7 +27,9 @@ export const handleResolveHtlcLockEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'resolveHtlcLock'>,
   mutableFrameState = false,
+  bookIntentSlot?: BookIntentSlotWriter,
 ): HtlcEntityTxResult => {
+  if (!bookIntentSlot) throw new Error('HTLC_RESOLVE_BOOK_INTENT_SLOT_REQUIRED');
   const { counterpartyEntityId, lockId, secret } = entityTx.data;
   const normalizedCounterparty = findAccountKey(entityState, counterpartyEntityId);
   if (!normalizedCounterparty) {
@@ -53,7 +56,7 @@ export const handleResolveHtlcLockEntityTx = (
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  persistVerifiedPaymentSecret(newState, normalizedCounterparty, lock, secret);
+  persistVerifiedPaymentSecret(newState, normalizedCounterparty, lock, secret, bookIntentSlot);
   accountTxs.push({
     accountId: normalizedCounterparty,
     tx: {

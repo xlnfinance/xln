@@ -24,8 +24,8 @@ use crate::transport::{
     PublicationReport, RuntimeTransportError, derive_local_runtime_id,
 };
 use crate::{
-    EntityInfraMaterializer, RuntimeApplyResult, RuntimeInput, RuntimeLiveInput,
-    RuntimeMachineError, RuntimeReplica, apply_runtime, apply_runtime_live,
+    EntityInfraMaterializer, RuntimeApplyPhaseProfile, RuntimeApplyResult, RuntimeInput,
+    RuntimeLiveInput, RuntimeMachineError, RuntimeReplica, apply_runtime, apply_runtime_live,
 };
 
 use super::projection::{DurableProjection, project_durable_frame};
@@ -64,6 +64,10 @@ pub struct RuntimeProcessReport {
     pub canonical_input_bytes: usize,
     pub entity_txs_selected: usize,
     pub entity_txs_pending: usize,
+    /// Exact apply-phase attribution produced only when profiling is enabled.
+    /// Keeping it on the transient report avoids stderr parsing and cannot
+    /// affect Runtime execution, roots, WAL bytes or publication order.
+    pub apply_profile: Option<RuntimeApplyPhaseProfile>,
     /// Non-consensus diagnostics for locating production Runtime cost. These
     /// durations never enter a frame, checkpoint or replay decision.
     pub timings: RuntimeProcessTimings,
@@ -747,6 +751,7 @@ impl DurableRuntimeProcessor {
             Ok(applied) => applied,
             Err(error) => return self.fail_stop(DurableRuntimeProcessorError::Machine(error)),
         };
+        let apply_profile = applied.apply_profile.clone();
         let apply_elapsed = apply_started.elapsed();
         // Pipeline barrier: the previous frame must be durable before this
         // one reads checkpoint storage state or enqueues its own commit. A
@@ -798,6 +803,7 @@ impl DurableRuntimeProcessor {
             DurableProjection::Idle(replica) => {
                 self.replica = Some(*replica);
                 let mut report = RuntimeProcessReport {
+                    apply_profile,
                     timings: RuntimeProcessTimings {
                         apply: apply_elapsed,
                         projection: projection_started.elapsed(),
@@ -854,6 +860,7 @@ impl DurableRuntimeProcessor {
         report.canonical_input_bytes = projected.canonical_input_bytes;
         report.entity_txs_selected = projected.entity_txs_selected;
         report.entity_txs_pending = projected.entity_txs_pending;
+        report.apply_profile = apply_profile;
         report.timings.apply = apply_elapsed;
         report.timings.projection = projection_elapsed;
         report.timings.projection_input = projected.projection_input;
@@ -939,6 +946,7 @@ fn process_report(report: PublicationReport) -> RuntimeProcessReport {
         canonical_input_bytes: 0,
         entity_txs_selected: 0,
         entity_txs_pending: 0,
+        apply_profile: None,
         timings: RuntimeProcessTimings::default(),
     }
 }

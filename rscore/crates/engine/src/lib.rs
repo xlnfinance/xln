@@ -55,8 +55,8 @@ pub use consensus::signing::{
     verify_dispute_hanko_with_authority, verify_frame_hanko, verify_frame_hanko_with_authority,
 };
 pub use crypto::{
-    address_of_private_key, derive_signer_address, derive_signer_key, normalize_recovery_byte,
-    recover_signer_address, sign_digest,
+    EcdsaRecoveryProfileSnapshot, address_of_private_key, derive_signer_address, derive_signer_key,
+    ecdsa_recovery_profile_snapshot, normalize_recovery_byte, recover_signer_address, sign_digest,
 };
 pub use dispute::{
     DisputeAllowance, DisputeProof, DisputeProofBody, DisputeTransformerClause,

@@ -939,11 +939,19 @@ export const LANE_PORTS_PER_SLOT = (() => {
   }
   return value;
 })();
-const LANE_PORT_FLOOR = 21_000;
 const MAX_TCP_PORT = 65_535;
 
-export const laneRuntimePortBase = (portBase: number): number =>
-  LANE_PORT_FLOOR + Math.floor((portBase - 20_000) / 20) * LANE_PORTS_PER_SLOT;
+export const laneRuntimePortBase = (_portBase: number): number => {
+  const raw = process.env['XLN_HLT_LANE_PORT_BASE'];
+  const value = Number(raw);
+  if (!raw || !Number.isSafeInteger(value) || value < 21_000 || value > MAX_TCP_PORT) {
+    throw new Error(`HLT_LANE_PORT_BASE_INVALID:${String(raw)}`);
+  }
+  if (value + LANE_PORTS_PER_SLOT - 1 > MAX_TCP_PORT) {
+    throw new Error(`HLT_LANE_PORT_RANGE_OUT_OF_RANGE:${value}:${LANE_PORTS_PER_SLOT}`);
+  }
+  return value;
+};
 
 export const laneRuntimePort = (portBase: number, laneIndex: number): number => {
   if (!Number.isSafeInteger(laneIndex) || laneIndex < 0) {

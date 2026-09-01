@@ -1,0 +1,57 @@
+{
+  "name": "brainvault",
+  "version": "2.0.0",
+  "description": "Memory-hard deterministic wallet derivation with a fast Bun-native CLI",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "brainvault": "./cli.ts"
+  },
+  "files": [
+    "LICENSE",
+    "bip39-english.ts",
+    "cli.ts",
+    "core.ts",
+    "core.test.ts",
+    "native.ts",
+    "worker-browser.ts",
+    "worker-native.ts",
+    "worker-wasm.ts",
+    "experimental/benchmark.ts",
+    "experimental/worker-sync.ts",
+    "experimental/README.md",
+    "experimental/argon2-c/Makefile",
+    "experimental/argon2-c/brainvault_argon2.c",
+    "experimental/argon2-c/compat/",
+    "experimental/argon2-c/vendor/",
+    "experimental/argon2-rust/.cargo/",
+    "experimental/argon2-rust/Cargo.lock",
+    "experimental/argon2-rust/Cargo.toml",
+    "experimental/argon2-rust/Makefile",
+    "experimental/argon2-rust/src/",
+    "primitives/",
+    "readme.md"
+  ],
+  "scripts": {
+    "bench": "bun cli.ts --bench",
+    "smoke": "bun cli.ts --smoke",
+    "build:c": "make -C experimental/argon2-c all",
+    "build:rust": "make -C experimental/argon2-rust all",
+    "build:experimental": "bun run build:c && bun run build:rust",
+    "test": "bun test core.test.ts",
+    "prepack": "bun test core.test.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "@node-rs/argon2": "2.1.0",
+    "ethers": "6.17.0",
+    "hash-wasm": "4.12.0"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "packageManager": "bun@1.4.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}

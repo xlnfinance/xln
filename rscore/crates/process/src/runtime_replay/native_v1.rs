@@ -27,8 +27,20 @@ pub struct NativeV1ReplayMetrics {
     pub direct_payments: u64,
     pub outputs: u64,
     pub elapsed: Duration,
+    pub setup: Duration,
+    pub source_decode: Duration,
+    pub reconcile: Duration,
+    pub processor_wall: Duration,
+    pub verification: Duration,
+    pub final_drain: Duration,
     pub apply: Duration,
     pub projection: Duration,
+    pub projection_input: Duration,
+    pub projection_machine: Duration,
+    pub projection_meta: Duration,
+    pub projection_context: Duration,
+    pub projection_checkpoint: Duration,
+    pub projection_encode: Duration,
     pub storage: Duration,
     pub publication: Duration,
     pub storage_prepare_validate: Duration,
@@ -41,6 +53,7 @@ pub struct NativeV1ReplayMetrics {
     pub committer_idle: Duration,
     pub accounts_root: String,
     pub transcript_digest: String,
+    pub apply_profile: xln_rscore_runtime::RuntimeApplyPhaseProfile,
     pub account_phase_metrics: Vec<xln_rscore_batch::AccountPhaseMetric>,
 }
 
@@ -49,6 +62,12 @@ fn add_wall_decomposition(
     report: &xln_rscore_runtime::RuntimeProcessReport,
 ) {
     let timings = report.timings;
+    metrics.projection_input += timings.projection_input;
+    metrics.projection_machine += timings.projection_machine;
+    metrics.projection_meta += timings.projection_meta;
+    metrics.projection_context += timings.projection_context;
+    metrics.projection_checkpoint += timings.projection_checkpoint;
+    metrics.projection_encode += timings.projection_encode;
     metrics.storage += timings.storage;
     metrics.publication += timings.publication;
     metrics.storage_prepare_validate += timings.storage_prepare_validate;
@@ -59,6 +78,36 @@ fn add_wall_decomposition(
     metrics.barrier_wait_for_previous_commit += timings.barrier_wait_for_previous_commit;
     metrics.committer_busy += timings.committer_busy;
     metrics.committer_idle += timings.committer_idle;
+    if let Some(profile) = &report.apply_profile {
+        metrics.apply_profile.fit += profile.fit;
+        metrics.apply_profile.resident_core += profile.resident_core;
+        metrics.apply_profile.post_core_prepare += profile.post_core_prepare;
+        metrics.apply_profile.certification += profile.certification;
+        metrics.apply_profile.settlement_attach += profile.settlement_attach;
+        metrics.apply_profile.post_cert_j += profile.post_cert_j;
+        metrics.apply_profile.residual += profile.residual;
+        metrics.apply_profile.total += profile.total;
+        metrics.apply_profile.entity_groups = metrics
+            .apply_profile
+            .entity_groups
+            .saturating_add(profile.entity_groups);
+        metrics.apply_profile.entity_txs_selected = metrics
+            .apply_profile
+            .entity_txs_selected
+            .saturating_add(profile.entity_txs_selected);
+        metrics.apply_profile.account_inputs = metrics
+            .apply_profile
+            .account_inputs
+            .saturating_add(profile.account_inputs);
+        metrics.apply_profile.settlement_hankos = metrics
+            .apply_profile
+            .settlement_hankos
+            .saturating_add(profile.settlement_hankos);
+        metrics.apply_profile.post_cert_j_actions = metrics
+            .apply_profile
+            .post_cert_j_actions
+            .saturating_add(profile.post_cert_j_actions);
+    }
 }
 
 fn add(total: &mut u64, value: usize, label: &str) -> Result<(), String> {
@@ -132,6 +181,7 @@ fn replay_frame(
     metrics: &mut NativeV1ReplayMetrics,
     transcript: &mut Sha256,
 ) -> Result<(), String> {
+    let source_decode_started = Instant::now();
     let source_frame = source
         .read_durable_frame(height)
         .map_err(|error| format!("NATIVE_REPLAY_SOURCE:{height}:{error}"))?;
@@ -148,12 +198,18 @@ fn replay_frame(
         .direct_payments
         .checked_add(direct_payment_count(&decoded.input)?)
         .ok_or_else(|| "NATIVE_REPLAY_COUNT:directPayments".to_string())?;
+    metrics.source_decode += source_decode_started.elapsed();
+    let reconcile_started = Instant::now();
     processor
         .reconcile_exact_replay_input(&decoded.input)
         .map_err(|error| format!("NATIVE_REPLAY_RECONCILE:{height}:{error}"))?;
+    metrics.reconcile += reconcile_started.elapsed();
+    let process_started = Instant::now();
     let report = processor
         .process(decoded.input)
         .map_err(|error| format!("NATIVE_REPLAY_PROCESS:{height}:{error}"))?;
+    metrics.processor_wall += process_started.elapsed();
+    let verification_started = Instant::now();
     let commitments = report
         .commitments
         .as_ref()
@@ -189,6 +245,7 @@ fn replay_frame(
     metrics.projection += report.timings.projection;
     add_wall_decomposition(metrics, &report);
     metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
+    metrics.verification += verification_started.elapsed();
     Ok(())
 }
 
@@ -202,6 +259,7 @@ pub fn replay_native_v1(
     entity_signer_label: &str,
     workers: usize,
 ) -> Result<NativeV1ReplayMetrics, String> {
+    let setup_started = Instant::now();
     if workers == 0 || source_database.as_ref() == replay_database.as_ref() {
         return Err("NATIVE_REPLAY_ARGUMENTS".into());
     }
@@ -239,8 +297,20 @@ pub fn replay_native_v1(
         direct_payments: 0,
         outputs: 0,
         elapsed: Duration::ZERO,
+        setup: setup_started.elapsed(),
+        source_decode: Duration::ZERO,
+        reconcile: Duration::ZERO,
+        processor_wall: Duration::ZERO,
+        verification: Duration::ZERO,
+        final_drain: Duration::ZERO,
         apply: Duration::ZERO,
         projection: Duration::ZERO,
+        projection_input: Duration::ZERO,
+        projection_machine: Duration::ZERO,
+        projection_meta: Duration::ZERO,
+        projection_context: Duration::ZERO,
+        projection_checkpoint: Duration::ZERO,
+        projection_encode: Duration::ZERO,
         storage: Duration::ZERO,
         publication: Duration::ZERO,
         storage_prepare_validate: Duration::ZERO,
@@ -253,6 +323,7 @@ pub fn replay_native_v1(
         committer_idle: Duration::ZERO,
         accounts_root: String::new(),
         transcript_digest: String::new(),
+        apply_profile: xln_rscore_runtime::RuntimeApplyPhaseProfile::default(),
         account_phase_metrics: Vec::new(),
     };
     let mut transcript = Sha256::new();
@@ -266,6 +337,7 @@ pub fn replay_native_v1(
             &mut transcript,
         )?;
     }
+    let final_drain_started = Instant::now();
     if let Some(final_commit) = processor
         .sync_committed()
         .map_err(|error| format!("NATIVE_REPLAY_FINAL_COMMIT:{error}"))?
@@ -277,6 +349,7 @@ pub fn replay_native_v1(
         )?;
         add_wall_decomposition(&mut metrics, &final_commit);
     }
+    metrics.final_drain = final_drain_started.elapsed();
     let replica = processor
         .replica()
         .map_err(|error| format!("NATIVE_REPLAY_FINAL:{error}"))?;

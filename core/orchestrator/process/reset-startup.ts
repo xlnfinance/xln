@@ -6,12 +6,12 @@ export const completeResetStartup = async (startup: Readonly<{
   host: string;
   shouldStartMarketMaker: boolean;
   waitForMesh: () => Promise<void>;
-  driveNativeH1Bootstrap: () => Promise<void>;
+  driveH1Bootstrap: () => Promise<void>;
   startMarketMaker: () => Promise<void>;
   startCustody: () => Promise<void>;
 }>): Promise<void> => {
   const parallel = () => Promise.all([
-    startup.driveNativeH1Bootstrap(), startup.startMarketMaker(), startup.startCustody(),
+    startup.driveH1Bootstrap(), startup.startMarketMaker(), startup.startCustody(),
   ]).then(() => undefined);
   if (process.env['XLN_HLT_AUTHORITY_EVIDENCE'] !== '1') {
     await Promise.all([startup.waitForMesh(), parallel()]);

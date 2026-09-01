@@ -19,6 +19,10 @@ export const LOCAL_TEST_STACK_BASES = Object.freeze([
   20_120,
 ] as const);
 const LOCAL_TEST_STACK_GUARD_OFFSET = 19;
+const HLT_LANE_BLOCK_PORTS = 4_096;
+const HLT_LANE_BLOCK_COUNT = 10;
+const HLT_LANE_GUARD_FLOOR = 19_980;
+export const HLT_LANE_PORT_FLOOR = 21_000;
 const LOCAL_TEST_ASSERT_ONLY_MODE = 'assert-only-v1';
 export const LOCAL_TEST_LEASE_ENV_NAMES = Object.freeze([
   'XLN_LOCAL_TEST_LEASE_MODE',
@@ -37,6 +41,12 @@ export type LocalTestPortLease = Readonly<{
   basePort: number;
   guardPort: number;
   ports: readonly number[];
+  release: () => void;
+}>;
+
+export type LocalHltLaneLease = Readonly<{
+  basePort: number;
+  portCount: number;
   release: () => void;
 }>;
 
@@ -127,6 +137,81 @@ export const assertLocalTestPortsFree = (ports: readonly number[]): void => {
   if (listeners.size === 0) return;
   const detail = Array.from(listeners.entries()).map(([port, pids]) => `${port}:${pids.join(',')}`).join(';');
   throw new Error(`LOCAL_TEST_PORT_BUSY:${detail}`);
+};
+
+const readListeningPortsInRange = (first: number, last: number): Map<number, number[]> => {
+  const result = spawnSync('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-FnP'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
+    timeout: 5_000,
+    killSignal: 'SIGKILL',
+  });
+  if (result.error || (result.status !== 0 && result.status !== 1)) {
+    throw new Error(`HLT_LANE_PORT_SCAN_FAILED:${result.error?.message || String(result.status)}`);
+  }
+  return new Map(Array.from(parseLocalTestListeningPortOutput(String(result.stdout || '')).entries())
+    .filter(([port]) => port >= first && port <= last));
+};
+
+const stopHltGuards = (guards: Bun.Server<unknown>[]): void => {
+  for (const guard of guards) guard.stop(true);
+};
+
+const tryAcquireHltLaneBlock = (
+  startBlock: number,
+  blocks: number,
+): LocalHltLaneLease | null => {
+  const guards: Bun.Server<unknown>[] = [];
+  try {
+    for (let block = startBlock; block < startBlock + blocks; block += 1) {
+      guards.push(Bun.serve({
+        hostname: '127.0.0.1',
+        port: HLT_LANE_GUARD_FLOOR + block,
+        fetch: () => Response.json({ service: 'xln-hlt-lane-lease', block, pid: process.pid }),
+      }));
+    }
+  } catch (cause) {
+    stopHltGuards(guards);
+    if ((cause as NodeJS.ErrnoException).code === 'EADDRINUSE') return null;
+    throw new Error(`HLT_LANE_GUARD_FAILED:${startBlock}`, { cause });
+  }
+  const basePort = HLT_LANE_PORT_FLOOR + startBlock * HLT_LANE_BLOCK_PORTS;
+  const portCount = blocks * HLT_LANE_BLOCK_PORTS;
+  if (readListeningPortsInRange(basePort, basePort + portCount - 1).size > 0) {
+    stopHltGuards(guards);
+    return null;
+  }
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    process.off('exit', release);
+    stopHltGuards(guards);
+  };
+  process.once('exit', release);
+  return { basePort, portCount, release };
+};
+
+export const acquireLocalHltLaneLease = async (
+  portCount: number,
+  timeoutMs = 25_000,
+): Promise<LocalHltLaneLease> => {
+  if (
+    !Number.isSafeInteger(portCount) ||
+    portCount < HLT_LANE_BLOCK_PORTS ||
+    portCount > 32_768 ||
+    portCount % HLT_LANE_BLOCK_PORTS !== 0
+  ) throw new Error(`HLT_LANE_LEASE_SIZE_INVALID:${portCount}`);
+  const blocks = portCount / HLT_LANE_BLOCK_PORTS;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    for (let start = 0; start + blocks <= HLT_LANE_BLOCK_COUNT; start += 1) {
+      const lease = tryAcquireHltLaneBlock(start, blocks);
+      if (lease) return lease;
+    }
+    if (Date.now() >= deadline) throw new Error(`HLT_LANE_LEASE_EXHAUSTED:${portCount}`);
+    await Bun.sleep(Math.min(50, Math.max(1, deadline - Date.now())));
+  }
 };
 
 const normalizeOffsets = (offsets: readonly number[]): number[] => {

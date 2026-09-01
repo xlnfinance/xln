@@ -134,10 +134,12 @@ const finishDisputedAccountInput = async (
   result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { disposition: 'dispute' }>,
 ): Promise<AccountConsensusOutcome> => {
   const { env, state, input, account, counterpartyId, createdAccount, effects } = context;
+  const bookIntentSlot = context.options?.bookIntentSlot;
   const unsafe = await handleUnsafeAccountFrame({
     env, state, input, account, counterpartyId, createdAccount,
     dispute: result.disputeRequired,
     effects,
+    ...(bookIntentSlot ? { bookIntentSlot } : {}),
   });
   return {
     terminalResult: buildAccountHandlerResult(

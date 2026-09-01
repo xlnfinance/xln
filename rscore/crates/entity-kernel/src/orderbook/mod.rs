@@ -24,6 +24,8 @@ pub use types::{
 };
 
 pub(crate) use matcher::{
-    SameJOutputDelta, apply_orderbook_outputs, remove_account_offer_for_dispute,
+    OrderbookPairJob, OrderbookPairMapper, OrderbookPairResult, PreparedOrderbookStage,
+    SameJOutputDelta, SequentialOrderbookPairMapper, install_orderbook_outputs,
+    prepare_orderbook_outputs, validate_orderbook_outputs,
 };
 pub(crate) use math::lot_scale;

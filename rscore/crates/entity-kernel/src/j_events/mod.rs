@@ -10,6 +10,7 @@ pub use history::{
     CanonicalJEventBlock, EMPTY_J_HISTORY_ROOT, canonical_j_event_blocks,
     canonical_j_event_range_hash, fold_j_history_root, j_event_range_digest,
 };
+pub(crate) use ingress::apply_finalized_j_event_batches_in_frame;
 pub use ingress::{apply_finalized_j_event_batches, project_finalized_j_event_batch};
 pub use types::{
     EntityJEventIngress, FinalizedJEventBatch, JClaimIngress, JEventClaimQueued, JReserveUpdate,

@@ -2078,6 +2078,35 @@ pub fn apply_finalized_j_event_batches(
     active_accounts: &BTreeSet<String>,
     dispute_views: &BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
 ) -> Result<EntityJEventIngress, EntityKernelError> {
+    let mut paybook_changes = crate::paybook::PaybookChanges::default();
+    let result = apply_finalized_j_event_batches_in_frame(
+        state,
+        finalized_through,
+        batches,
+        runtime_seed,
+        authority,
+        active_accounts,
+        dispute_views,
+        &mut paybook_changes,
+    )?;
+    paybook_changes.commit_sequential(state)?;
+    Ok(result)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the frame-local Paybook overlay is explicit consensus state"
+)]
+pub(crate) fn apply_finalized_j_event_batches_in_frame(
+    state: &mut EntityStateSlice,
+    finalized_through: u64,
+    batches: &[FinalizedJEventBatch],
+    runtime_seed: &str,
+    authority: Option<&crate::EntityFrameAuthority>,
+    active_accounts: &BTreeSet<String>,
+    dispute_views: &BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
+    paybook_changes: &mut crate::paybook::PaybookChanges,
+) -> Result<EntityJEventIngress, EntityKernelError> {
     validate_active_accounts(state, active_accounts)?;
     if finalized_through < state.last_finalized_j_height || finalized_through > MAX_SAFE_INTEGER {
         return Err(invalid("FINALIZED_HEIGHT_REGRESSION"));
@@ -2101,7 +2130,6 @@ pub fn apply_finalized_j_event_batches(
 
     let mut grouped = BTreeMap::<ClaimKey, Vec<JurisdictionEvent>>::new();
     let mut event_proposals = BTreeMap::<String, Vec<AccountTx>>::new();
-    let mut paybook_changes = crate::paybook::PaybookChanges::default();
     let mut queued_claims = Vec::new();
     let mut routed_entity_outputs = Vec::new();
     let mut frame_events = Vec::new();
@@ -2264,7 +2292,7 @@ pub fn apply_finalized_j_event_batches(
                 }
                 JurisdictionEvent::SecretRevealed(value) => apply_secret_revealed(
                     state,
-                    &mut paybook_changes,
+                    paybook_changes,
                     value,
                     &mut event_proposals,
                     &mut frame_events,
@@ -2281,7 +2309,7 @@ pub fn apply_finalized_j_event_batches(
                     value,
                     runtime_seed,
                     dispute_views,
-                    &mut paybook_changes,
+                    paybook_changes,
                     &mut event_proposals,
                     &mut account_envelope_mutations,
                     &mut routed_entity_outputs,
@@ -2324,7 +2352,6 @@ pub fn apply_finalized_j_event_batches(
         }
         queued_claims.extend(queued);
     }
-    paybook_changes.commit_sequential(state)?;
     state.last_finalized_j_height = finalized_through;
 
     let mut proposals = event_proposals;

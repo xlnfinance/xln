@@ -7,8 +7,8 @@
 //! account machine's view of them.
 
 pub use xln_rscore_crypto::{
-    address_of_private_key, derive_signer_address, derive_signer_key, normalize_recovery_byte,
-    recover_signer_address, sign_digest,
+    EcdsaRecoveryProfileSnapshot, address_of_private_key, derive_signer_address, derive_signer_key,
+    ecdsa_recovery_profile_snapshot, normalize_recovery_byte, recover_signer_address, sign_digest,
 };
 
 #[cfg(test)]

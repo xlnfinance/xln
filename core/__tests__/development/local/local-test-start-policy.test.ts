@@ -1,13 +1,15 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import {
   acquireLocalTestPortLease,
+  acquireLocalHltLaneLease,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
 } from '../../../scripts/e2e/harness/local-test-port-lease';
+import { resetOwnedLocalRunRoot } from '../../../scripts/e2e/harness/local-run-root';
 
 const repoRoot = resolve(import.meta.dir, '../../../..');
 const tempRoots: string[] = [];
@@ -106,4 +108,32 @@ test('local prod startup reports a post-lease port race without killing the owne
     foreign.stop(true);
     lease.release();
   }
+});
+
+test('HLT lane leases allocate disjoint fixed-size port batches', async () => {
+  const first = await acquireLocalHltLaneLease(4_096, 1_000);
+  const second = await acquireLocalHltLaneLease(4_096, 1_000);
+  try {
+    expect(second.basePort).not.toBe(first.basePort);
+    expect(Math.abs(second.basePort - first.basePort)).toBeGreaterThanOrEqual(4_096);
+  } finally {
+    second.release();
+    first.release();
+  }
+});
+
+test('owned local run roots reject dev and foreign data before reset', () => {
+  const owned = mkdtempSync(join(tmpdir(), 'xln-owned-root-test-'));
+  const foreign = mkdtempSync(join(tmpdir(), 'xln-foreign-root-test-'));
+  tempRoots.push(owned, foreign);
+  resetOwnedLocalRunRoot(owned, repoRoot, 'test');
+  writeFileSync(join(owned, 'stale.txt'), 'stale');
+  resetOwnedLocalRunRoot(owned, repoRoot, 'test');
+  expect(existsSync(join(owned, 'stale.txt'))).toBeFalse();
+
+  writeFileSync(join(foreign, 'owner-data.txt'), 'keep');
+  expect(() => resetOwnedLocalRunRoot(foreign, repoRoot, 'test'))
+    .toThrow('LOCAL_RUN_ROOT_NOT_OWNED');
+  expect(() => resetOwnedLocalRunRoot(join(repoRoot, 'db', 'dev'), repoRoot, 'test'))
+    .toThrow('LOCAL_RUN_ROOT_OVERLAPS_DEV');
 });

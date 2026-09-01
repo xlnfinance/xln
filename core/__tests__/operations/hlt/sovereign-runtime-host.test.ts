@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { getBytes } from 'ethers';
 import { deserializeTaggedJson } from '../../../protocol/serialization';
 import { importEntity } from '../../../runtime/registration/entity-creation';
-import { acquireLocalTestPortLease } from '../../../scripts/e2e/harness/local-test-port-lease';
+import {
+  acquireLocalHltLaneLease,
+  acquireLocalTestPortLease,
+} from '../../../scripts/e2e/harness/local-test-port-lease';
 import {
   deriveLoadLaneIdentities,
   deriveLoadLaneSeeds,
@@ -27,6 +30,9 @@ const waitForEntity = async (lane: Awaited<ReturnType<typeof spawnLaneRuntimes>>
 
 test('one process hosts isolated sovereign Runtime replicas across worker shutdown', async () => {
   const lease = await acquireLocalTestPortLease({ timeoutMs: 10_000 });
+  const laneLease = await acquireLocalHltLaneLease(4_096, 10_000);
+  const previousLaneBase = process.env['XLN_HLT_LANE_PORT_BASE'];
+  process.env['XLN_HLT_LANE_PORT_BASE'] = String(laneLease.basePort);
   const workDir = mkdtempSync(join(tmpdir(), 'xln-sovereign-host-'));
   const meshDir = join(workDir, 'prod-mesh');
   mkdirSync(meshDir, { recursive: true });
@@ -102,6 +108,9 @@ test('one process hosts isolated sovereign Runtime replicas across worker shutdo
     throw error;
   } finally {
     if (!stopped) await stopLaneRuntimes(lanes);
+    if (previousLaneBase === undefined) delete process.env['XLN_HLT_LANE_PORT_BASE'];
+    else process.env['XLN_HLT_LANE_PORT_BASE'] = previousLaneBase;
+    laneLease.release();
     lease.release();
     rmSync(workDir, { recursive: true, force: true });
   }

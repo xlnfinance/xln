@@ -141,6 +141,7 @@ import {
 } from '../account/canonical-worklist';
 import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
 import { EntityCandidateMap } from '../../state/candidate-map';
+import { applyBookIntentProgram, createBookIntentProgram } from '../../books/book-intents';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -327,6 +328,7 @@ const applyRegularEntityTx = async (
     manualBroadcastInInput,
     accountJClaimNodeStore: context.accountJClaimNodeStore,
     accountConsensusContext: context.accountConsensusContext,
+    bookIntentSlot: context.bookIntents.openSlot(),
     ...(context.authorizedBoardHandoverConfig
       ? { authorizedBoardHandoverConfig: context.authorizedBoardHandoverConfig }
       : {}),
@@ -1229,6 +1231,7 @@ const createEntityFrameApplyContext = (
     accountConsensusContext: createAccountConsensusContext(env, accountJClaimNodeStore, currentEntityState),
     entityTxs,
     currentEntityState,
+    bookIntents: createBookIntentProgram(),
     allOutputs: [],
     allJOutputs: [],
     collectedHashes: [],
@@ -1673,6 +1676,9 @@ const applyEntityFrameWithIsolation = async (
     working.currentEntityState,
   );
   working.markFrameProfile('entityTxLoop');
+  markRuntimeEntityFramePhase(env, 'apply.entity.frame.books');
+  applyBookIntentProgram(working.currentEntityState, working.context.bookIntents);
+  working.markFrameProfile('books');
   if (working.authorityTransitionOnly) {
     await working.context.env.accountAuthorityEntityStage
       ?.prepareEntityAccountOutbound({

@@ -42,7 +42,9 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   expect(hubSpawner).toContain('directWsUrl: `ws://${status.listen}/ws`');
   expect(supervisor).toContain("? 'rscore/target/release/xlnrs'");
   expect(hubSpawner).toContain('stdio: invocation.rustIdentity');
-  expect(supervisor).toContain('driveNativeH1Bootstrap(h1, shouldStartMarketMaker)');
+  expect(supervisor).toContain('driveH1Bootstrap(h1, shouldStartMarketMaker)');
+  expect(supervisor).toContain("if (h1.engine === 'rust') {");
+  expect(supervisor).toContain('child.lastInfo?.hubEntities?.some(entity => entity.entityId)');
   expect(supervisor).toContain('/api/control/runtime/entity-inputs');
   expect(supervisor).toContain('/api/account/status');
   expect(source).not.toContain('offlineTsImport');

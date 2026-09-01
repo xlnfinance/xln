@@ -324,6 +324,7 @@ const applyCommittedFrameTransactions = async (
   swapCursor: SameJurisdictionSwapCursor,
 ): Promise<void> => {
   const { env, state, input, account, counterpartyId, result, effects, options } = context;
+  const bookIntentSlot = options?.bookIntentSlot;
   const consumedPreparedHtlcBindings = new Set<string>();
   const committedAccountTxs = (result.committedFrames ?? [])
     .flatMap(({ frame }) => frame.accountTxs ?? []);
@@ -338,6 +339,7 @@ const applyCommittedFrameTransactions = async (
       effects.accountTxs,
       env,
       effects.candidateEffects,
+      bookIntentSlot,
     );
     for (const accountTx of frame.accountTxs ?? []) {
       const settlement = await processCommittedSettlementTransitionFollowup(
@@ -374,6 +376,7 @@ const applyCommittedFrameTransactions = async (
             outputs: effects.outputs,
             accountTxs: effects.accountTxs,
             candidateEffects: effects.candidateEffects,
+            ...(bookIntentSlot ? { bookIntentSlot } : {}),
             ...(options?.infraContext ? { infraContext: options.infraContext } : {}),
             ...(options?.preparedHtlcEntriesByBinding
               ? { preparedHtlcEntriesByBinding: options.preparedHtlcEntriesByBinding }
@@ -425,6 +428,7 @@ const applyCommittedHtlcFollowups = (
   directPaymentForwards: readonly DirectPaymentForward[],
 ): void => {
   const { env, state, input, account, result, effects } = context;
+  const bookIntentSlot = context.options?.bookIntentSlot;
   const followupContext = {
     env,
     state: context.state,
@@ -434,6 +438,7 @@ const applyCommittedHtlcFollowups = (
     outputs: effects.outputs,
     accountTxs: effects.accountTxs,
     candidateEffects: effects.candidateEffects,
+    ...(bookIntentSlot ? { bookIntentSlot } : {}),
   };
   applyDirectPaymentForwardFollowups(followupContext, directPaymentForwards);
   applyHtlcTimeoutFollowups(followupContext, result.timedOutHashlocks ?? []);

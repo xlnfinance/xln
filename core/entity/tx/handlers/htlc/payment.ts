@@ -16,6 +16,7 @@ import { addMessage } from '../../../frame-events';
 import { validatePreparedHtlcPayment } from '../../../paybook/payment-admission';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../../support/logger';
 import type { EntityInfraContext } from '../../../../types/entity/infra-context';
+import type { BookIntentSlotWriter } from '../../../books/book-intents';
 
 const htlcLog = createStructuredLogger('entity.htlc');
 const formatEntityId = (id: string): string => id.slice(-4);
@@ -44,8 +45,9 @@ const recordOriginatedHtlc = (
   newState: EntityState,
   prepared: PreparedHtlcPayment,
   candidateEffects: EntityCandidateEffect[],
+  bookIntentSlot: BookIntentSlotWriter,
 ): void => {
-  newState.paybook.entries.set(prepared.hashlock, {
+  bookIntentSlot.putPaybookEntry(newState, prepared.hashlock, {
     hashlock: prepared.hashlock,
     ...(prepared.description ? { description: prepared.description } : {}),
     tokenId: prepared.tokenId,
@@ -82,8 +84,15 @@ export async function handleHtlcPayment(
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
   infraContext?: EntityInfraContext,
+  bookIntentSlot?: BookIntentSlotWriter,
 ): Promise<HtlcPaymentResult> {
-  const prepared = validatePreparedHtlcPayment(entityState, entityTx, infraContext);
+  if (!bookIntentSlot) throw new Error('HTLC_PAYMENT_BOOK_INTENT_SLOT_REQUIRED');
+  const prepared = validatePreparedHtlcPayment(
+    entityState,
+    entityTx,
+    infraContext,
+    hashlock => bookIntentSlot.hasPaybookEntry(entityState, hashlock),
+  );
   const trace = (message: string, fields: Record<string, unknown> = {}): void => {
     if (env.quietRuntimeLogs !== true) htlcLog.debug(message, fields);
   };
@@ -95,7 +104,7 @@ export async function handleHtlcPayment(
     route: prepared.route.map(shortId),
   });
   const newState = prepareEntityTxState(entityState, mutableFrameState);
-  recordOriginatedHtlc(newState, prepared, candidateEffects);
+  recordOriginatedHtlc(newState, prepared, candidateEffects, bookIntentSlot);
   const accountTx = buildOutboundLockTx(prepared);
   const accountTxs = [{ accountId: prepared.nextHopEntityId, tx: accountTx }];
   addMessage(
