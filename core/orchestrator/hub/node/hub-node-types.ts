@@ -1,4 +1,3 @@
-import type { AccountRoleEvidence } from '../../../account/config/dispute-config';
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { BootstrapProgress, BootstrapProgressHealth } from '../../bootstrap/bootstrap-progress-watchdog';
@@ -43,11 +42,6 @@ export type HubPairHealth = {
   grantedByMe: string;
   grantedByPeer: string;
   ready: boolean;
-};
-
-export type VisibleSupportPeer = SupportPeerIdentity & {
-  runtimeId: string;
-  roleEvidence: AccountRoleEvidence;
 };
 
 type StageTiming = {

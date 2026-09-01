@@ -1405,6 +1405,8 @@ describe('production startup wiring', () => {
     expect(planHubStart).toBeGreaterThan(planSupportStart);
     const planSupportAccountSetupInputs = hubNode.slice(planSupportStart, planHubStart);
     expect(planSupportAccountSetupInputs).toContain('const tokenIds = tokenIdsForHubJurisdiction(owner);');
+    expect(planSupportAccountSetupInputs).toContain('const peers = configuredSupportPeers(');
+    expect(planSupportAccountSetupInputs).not.toContain('visibleProfiles');
     expect(planSupportAccountSetupInputs).toContain('if (!account || !canWrite) continue;');
     expect(planSupportAccountSetupInputs).toContain('const missingTokenIds = tokenIds.filter(');
     expect(planSupportAccountSetupInputs).toContain('entityTxs: missingTokenIds.map(tokenId => ({');
@@ -1475,7 +1477,8 @@ describe('production startup wiring', () => {
     expect(shutdownStart).toBeGreaterThan(controllerStart);
 
     const readiness = hubNode.slice(readinessStart, healthStart);
-    expect(readiness).toContain('if (peers.length !== expected.length) return false;');
+    expect(readiness).toContain('const peers = configuredSupportPeers(identities, owner.entityId, owner);');
+    expect(readiness).not.toContain('profiles');
     expect(readiness).toContain('if (!account || account.pendingFrame || account.mempool.length > 0) return false;');
     expect(readiness).toContain('getCreditGrantedByEntity(account, owner.entityId, tokenId) >=');
 

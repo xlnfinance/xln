@@ -7,7 +7,6 @@ import { createExternalWalletApi } from '../api/public/external-wallet-api';
 import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/ownership/brainvault';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
-import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
 import {
@@ -15,7 +14,6 @@ import {
 } from '../account/config/dispute-config';
 import {
   committedAccountRoleEvidence,
-  verifiedGossipAccountRoleEvidence,
 } from '../account/config/role-evidence';
 import {
   normalizeJurisdictionDisplayName,
@@ -185,7 +183,6 @@ import type {
   LocalHealthResponse,
   SupportPeerIdentity,
   TimingMap,
-  VisibleSupportPeer,
 } from './hub/node/hub-node-types';
 
 const normalizeJurisdictionName = (value: unknown): string =>
@@ -1333,34 +1330,14 @@ const ensureHubBootstrapReserves = async (
 const directHubPeersReady = (env: RuntimeReplica, peers: VisibleHubProfile[]): boolean =>
   getP2P(env)?.prepareDirectEntityRoutes(peers.map(peer => peer.entityId)) ?? false;
 
-const visibleDirectSupportPeers = (
+const configuredSupportPeers = (
   identities: SupportPeerIdentity[],
-  profiles: ReturnType<NonNullable<RuntimeReplica['gossip']>['getProfiles']>,
   selfEntityId: string,
   jurisdiction: unknown,
-): VisibleSupportPeer[] => {
-  const profilesByEntityId = new Map(
-    profiles.map(profile => [String(profile.entityId || '').toLowerCase(), profile] as const),
-  );
-  return identities
-    .map((identity) => {
-      const entityId = identity.entityId.toLowerCase();
-      if (entityId === selfEntityId.toLowerCase()) return null;
-      const profile = profilesByEntityId.get(entityId);
-      if (!profile) return null;
-      const runtimeId = normalizeRuntimeId(profile.runtimeId || '');
-      if (!runtimeId) return null;
-      const peerJurisdiction = profile.metadata?.jurisdiction || identity;
-      if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;
-      if (typeof profile.metadata?.isHub !== 'boolean') return null;
-      return {
-        ...identity,
-        runtimeId,
-        roleEvidence: verifiedGossipAccountRoleEvidence(entityId, profile.metadata.isHub),
-      };
-    })
-    .filter((peer): peer is VisibleSupportPeer => peer !== null);
-};
+): SupportPeerIdentity[] => identities.filter(identity =>
+  identity.entityId.toLowerCase() !== selfEntityId.toLowerCase() &&
+  sameJurisdictionRef(identity, jurisdiction),
+);
 
 type HubMeshInputPlan = {
   openInputs: EntityInput[];
@@ -1374,15 +1351,13 @@ const planSupportAccountSetupInputs = (
     'entityId' | 'signerId' | 'jurisdictionName' | 'chainId' | 'depositoryAddress'
   >,
   supportPeerIdentities: SupportPeerIdentity[],
-  visibleProfiles: ReturnType<
-    NonNullable<RuntimeReplica['gossip']>['getProfiles']
-  >,
 ): HubMeshInputPlan => {
   const creditInputs: EntityInput[] = [];
   const tokenIds = tokenIdsForHubJurisdiction(owner);
-  const peers = visibleDirectSupportPeers(
+  // The configured identity selects the managed peer; the committed Account is
+  // the financial authority. Gossip is discovery only and must not gate credit.
+  const peers = configuredSupportPeers(
     supportPeerIdentities,
-    visibleProfiles,
     owner.entityId,
     owner,
   );
@@ -1513,7 +1488,6 @@ const planMeshBootstrapInputs = (
   peers: VisibleHubProfile[],
   supportPeerIdentities: SupportPeerIdentity[],
 ): HubMeshInputPlan => {
-  const visibleProfiles = env.gossip?.getProfiles?.() || [];
   const plans = [
     planHubAccountSetupInputs(env, bootstrap, peers),
     ...hubBootstraps.map(owner =>
@@ -1521,7 +1495,6 @@ const planMeshBootstrapInputs = (
         env,
         owner,
         supportPeerIdentities,
-        visibleProfiles,
       ),
     ),
   ];
@@ -1535,13 +1508,8 @@ const supportPeerProvisioningReady = (
   env: RuntimeReplica,
   hubBootstraps: HubBootstrapEntry[],
   identities: SupportPeerIdentity[],
-  profiles: ReturnType<NonNullable<RuntimeReplica['gossip']>['getProfiles']>,
 ): boolean => hubBootstraps.every(owner => {
-  const expected = identities.filter(identity =>
-    identity.entityId !== owner.entityId && sameJurisdictionRef(identity, owner),
-  );
-  const peers = visibleDirectSupportPeers(expected, profiles, owner.entityId, owner);
-  if (peers.length !== expected.length) return false;
+  const peers = configuredSupportPeers(identities, owner.entityId, owner);
   const tokenIds = tokenIdsForHubJurisdiction(owner);
   return peers.every(peer => {
     const account = getAccountReplica(env, owner.entityId, peer.entityId);
@@ -1879,7 +1847,7 @@ const handleDebugReserveRequest = async (
 const createHubControlRequestHandler = (dependencies: {
   state: RuntimeReplica;
   nodeName: string;
-  pauseBootstrap: () => Promise<void>;
+  pauseBootstrap: () => Promise<() => void>;
   markShuttingDown: () => void;
 }): ((request: Request, url: URL) => Promise<Response | null>) =>
   async (request, url) => {
@@ -1915,20 +1883,21 @@ const createHubControlRequestHandler = (dependencies: {
           process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1' &&
           process.env['XLN_HLT_ENGINE'] !== 'ts'
         ) throw new Error('HLT_PARITY_CHECKPOINT_TS_ENGINE_REQUIRED');
-        await dependencies.pauseBootstrap();
-        const snapshotResult: {
-          value?: Readonly<{
-            runtimeId: string;
-            height: number;
-            checkpointHash: string;
-          }>;
-        } = {};
-        await checkpointNodeRuntime(dependencies.state, {
-          workTimeoutMs: 20_000,
-          loopTimeoutMs: 5_000,
-          quietMs: 750,
-          resumePersistenceAfterCheckpoint: true,
-          persist: async () => {
+        const releaseBootstrapPause = await dependencies.pauseBootstrap();
+        try {
+          const snapshotResult: {
+            value?: Readonly<{
+              runtimeId: string;
+              height: number;
+              checkpointHash: string;
+            }>;
+          } = {};
+          await checkpointNodeRuntime(dependencies.state, {
+            workTimeoutMs: 20_000,
+            loopTimeoutMs: 5_000,
+            quietMs: 750,
+            resumePersistenceAfterCheckpoint: true,
+            persist: async () => {
             const concreteCheckpoint = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1'
               ? await exportConcreteCheckpointSource(dependencies.state, {
                   getStorageDb: (env, role) => getStorageDb(
@@ -1965,14 +1934,20 @@ const createHubControlRequestHandler = (dependencies: {
               height: bundle.runtimeHeight,
               checkpointHash,
             };
-          },
-        });
-        const snapshotSummary = snapshotResult.value;
-        if (!snapshotSummary) throw new Error('RUNTIME_SNAPSHOT_EXPORT_MISSING');
-        return new Response(safeStringify({
-          ok: true,
-          ...snapshotSummary,
-        }), { headers: JSON_HEADERS });
+            },
+          });
+          const snapshotSummary = snapshotResult.value;
+          if (!snapshotSummary) throw new Error('RUNTIME_SNAPSHOT_EXPORT_MISSING');
+          return new Response(safeStringify({
+            ok: true,
+            ...snapshotSummary,
+          }), { headers: JSON_HEADERS });
+        } finally {
+          // A checkpoint fences producers only while its root and WAL boundary
+          // are captured. Keeping bootstrap paused afterwards stranded Accounts
+          // opened by support peers after the base snapshot.
+          releaseBootstrapPause();
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return new Response(
@@ -2355,7 +2330,6 @@ const advanceHubMeshBootstrap = async (
     input.env,
     input.hubBootstraps,
     supportPeerIdentities,
-    input.env.gossip?.getProfiles?.() || [],
   );
   if (!supportReady) return false;
   return input.milestones.gossipReady &&
@@ -2446,7 +2420,7 @@ const startHubHttpSurface = (
   live: HubNodeLiveContext,
   faucetRelayStore: ReturnType<typeof createRelayStore>,
   brainVaultOwner: BrainVaultOwnerController,
-  pauseBootstrap: () => Promise<void>,
+  pauseBootstrap: () => Promise<() => void>,
   bootstrapClockMs: () => number,
 ): HubHttpSurface => {
   const externalWalletApi = createHubExternalWalletApi(live);
@@ -2547,7 +2521,7 @@ const startHubHttpSurface = (
 };
 
 type HubMeshBootstrapController = {
-  pauseAndWait(): Promise<void>;
+  pauseAndWait(): Promise<() => void>;
   start(
     jurisdiction: JurisdictionConfig,
     tokenCatalog: JTokenInfo[],
@@ -2562,8 +2536,11 @@ const createHubMeshBootstrapController = (
   let loop: ReturnType<typeof setInterval> | null = null;
   let fatal = false;
   let paused = false;
+  let pauseLeaseCount = 0;
+  let resumeDrive: (() => void) | null = null;
 
-  const pauseAndWait = async (): Promise<void> => {
+  const pauseAndWait = async (): Promise<() => void> => {
+    pauseLeaseCount += 1;
     paused = true;
     if (loop) {
       clearInterval(loop);
@@ -2575,12 +2552,25 @@ const createHubMeshBootstrapController = (
     const deadline = Date.now() + MESH_PRODUCER_PAUSE_TIMEOUT_MS;
     while (live.meshLoopInFlight && Date.now() < deadline) await sleep(100);
     if (live.meshLoopInFlight) {
-      nodeLog.warn('mesh_producer.pause_timeout', {
+      nodeLog.error('mesh_producer.pause_timeout', {
         name: resolvedArgs.name,
         timeoutMs: MESH_PRODUCER_PAUSE_TIMEOUT_MS,
         progress: live.meshLoopProgress,
       });
+      // Fail closed: the producer stays paused because exporting a checkpoint
+      // across an active producer would bind a root to the wrong WAL boundary.
+      throw new Error('MESH_PRODUCER_PAUSE_TIMEOUT');
     }
+    let released = false;
+    return () => {
+      if (released) throw new Error('MESH_PRODUCER_PAUSE_LEASE_ALREADY_RELEASED');
+      released = true;
+      pauseLeaseCount -= 1;
+      if (pauseLeaseCount < 0) throw new Error('MESH_PRODUCER_PAUSE_LEASE_UNDERFLOW');
+      if (pauseLeaseCount > 0 || live.shuttingDown || fatal) return;
+      paused = false;
+      resumeDrive?.();
+    };
   };
 
   const start: HubMeshBootstrapController['start'] = (jurisdiction, tokenCatalog, externalWalletApi) => {
@@ -2646,11 +2636,15 @@ const createHubMeshBootstrapController = (
         logError: (...args) => console.error(...args),
       });
     };
-    if (live.shuttingDown || fatal || paused) return;
-    loop = setInterval(() => {
-      if (!live.shuttingDown && !fatal && !paused) void drive().catch(handleFatal);
-    }, BOOTSTRAP_POLL_MS);
-    void drive().catch(handleFatal);
+    const schedule = (): void => {
+      if (live.shuttingDown || fatal || paused || loop) return;
+      loop = setInterval(() => {
+        if (!live.shuttingDown && !fatal && !paused) void drive().catch(handleFatal);
+      }, BOOTSTRAP_POLL_MS);
+      void drive().catch(handleFatal);
+    };
+    resumeDrive = schedule;
+    schedule();
   };
 
   return { pauseAndWait, start };

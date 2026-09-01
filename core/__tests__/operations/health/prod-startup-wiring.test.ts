@@ -797,7 +797,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("pathname === '/api/lending/state'");
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain('const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);');
-    expect(hubNode).toContain('visibleDirectSupportPeers');
+    expect(hubNode).toContain('configuredSupportPeers');
     expect(hubNode).toContain("jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'])");
     expect(hubNode).toContain('SUPPORT_PEER_IDENTITIES_JSON_INVALID:malformed JSON');
     expect(hubNode).not.toContain('} catch {\n    return [];\n  }\n};\n\nconst resolvedArgs');
@@ -841,8 +841,7 @@ describe('production startup wiring', () => {
     expect(hubVisibleProfiles).toContain(
       'getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef',
     );
-    expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
-    expect(hubNode).toContain('if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;');
+    expect(hubNode).toContain('sameJurisdictionRef(identity, jurisdiction)');
     expect(hubNode).toContain('...hubBootstraps.map(owner =>\n      planSupportAccountSetupInputs(');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
