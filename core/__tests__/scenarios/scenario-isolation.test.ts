@@ -6,7 +6,9 @@ import {
   assertScenarioRpcOutsideDev,
   buildScenarioIsolatedEnv,
   requireScenarioLeasePort,
+  resolveScenarioIsolatedDbRoot,
 } from '../../scenarios/harness/scenario-isolation';
+import { stripAmbientLocalStackEnv } from '../../scripts/e2e/harness/local-test-port-lease';
 
 test('scenario RPC rejects every reserved dev endpoint', () => {
   expect(() => assertScenarioRpcOutsideDev('http://127.0.0.1:8545'))
@@ -59,4 +61,48 @@ test('scenario child environment replaces every ambient storage root', () => {
   expect(env['XLN_MESH_DB_ROOT']).toBe('/tmp/xln-scenario-isolated/mesh');
   expect(env['XLN_STORAGE_HISTORY_PATH']).toBe('/tmp/xln-scenario-isolated/history');
   expect(env['XLN_DEV_DATA_ROOT']).toBeUndefined();
+});
+
+test('scenario database root rejects shared and dev storage before creation', () => {
+  const repo = process.cwd();
+  expect(() => resolveScenarioIsolatedDbRoot(join(repo, 'db', 'dev'), repo))
+    .toThrow('SCENARIO_DB_ROOT_OVERLAPS_SHARED');
+  expect(() => resolveScenarioIsolatedDbRoot(join(repo, 'db', 'scenario'), repo))
+    .toThrow('SCENARIO_DB_ROOT_OVERLAPS_SHARED');
+  expect(() => resolveScenarioIsolatedDbRoot(join(repo, '.logs', 'dev', 'scenario'), repo))
+    .toThrow('SCENARIO_DB_ROOT_OVERLAPS_SHARED');
+  expect(resolveScenarioIsolatedDbRoot('/tmp/xln-scenario-isolated-db', repo))
+    .toBe('/tmp/xln-scenario-isolated-db');
+});
+
+test('HLT child environment drops ambient dev ports and roots before leased values are assigned', () => {
+  const smoke = readFileSync(
+    join(process.cwd(), 'core/scripts/operations/production/local-prod-smoke.ts'),
+    'utf8',
+  );
+  const env = stripAmbientLocalStackEnv({
+    ANVIL_PORT: '8545',
+    ANVIL2_PORT: '8546',
+    ANVIL_RPC2: 'http://127.0.0.1:8546',
+    RPC_TRON: 'http://127.0.0.1:8546',
+    XLN_DB_PATH: '/repo/db/dev',
+    XLN_RDB_ROOT: '/repo/db/dev/rdb',
+    XLN_DEV_LAUNCHER_PORT: '17999',
+    XLN_HLT_USERS: '1000',
+  });
+  expect(env['ANVIL_PORT']).toBeUndefined();
+  expect(env['ANVIL2_PORT']).toBeUndefined();
+  expect(env['ANVIL_RPC2']).toBeUndefined();
+  expect(env['RPC_TRON']).toBeUndefined();
+  expect(env['XLN_DB_PATH']).toBeUndefined();
+  expect(env['XLN_RDB_ROOT']).toBeUndefined();
+  expect(env['XLN_DEV_LAUNCHER_PORT']).toBeUndefined();
+  expect(env['XLN_HLT_USERS']).toBe('1000');
+
+  const leased = { ...env, XLN_PORT_BASE: '20000', XLN_DB_PATH: '/tmp/xln-hlt/prod-main' };
+  expect(leased['XLN_PORT_BASE']).toBe('20000');
+  expect(leased['XLN_DB_PATH']).toBe('/tmp/xln-hlt/prod-main');
+  expect(smoke).toContain('XLN_PORT_BASE: String(portBase)');
+  expect(smoke).toContain("XLN_JDB_ROOT: join(workDir, 'jdb')");
+  expect(smoke).toContain("ANVIL_TMPDIR: join(workDir, 'server-anvil-tmp')");
 });

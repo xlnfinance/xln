@@ -68,6 +68,57 @@ export const stripLocalTestLeaseEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEn
   return scrubbed;
 };
 
+const AMBIENT_LOCAL_STACK_ENV_NAMES = Object.freeze([
+  'ANVIL_LOG',
+  'ANVIL_PORT',
+  'ANVIL_RPC',
+  'ANVIL_RPC2',
+  'ANVIL_STATE',
+  'ANVIL_TMPDIR',
+  'ANVIL2_LOG',
+  'ANVIL2_PORT',
+  'ANVIL2_STATE',
+  'API_PORT',
+  'CUSTODY_DAEMON_PORT',
+  'CUSTODY_PORT',
+  'DEV_DATA_ROOT',
+  'DEV_LOG_DIR',
+  'DEV_RUNTIME_BUNDLE_PATH',
+  'DEV_STARTED_AT_MS',
+  'PORT',
+  'PUBLIC_RELAY_URL',
+  'PUBLIC_RPC',
+  'PUBLIC_WS_BASE_URL',
+  'RELAY_URL',
+  'RPC_PORT',
+  'RPC_TRON',
+  'WATCHTOWER_PORT',
+  'WEB_HTTP_PORT',
+  'WEB_PORT',
+  'XLN_DB_PATH',
+  'XLN_JDB_ROOT',
+  'XLN_JURISDICTIONS_PATH',
+  'XLN_MESH_DB_ROOT',
+  'XLN_PORT_BASE',
+  'XLN_RDB_ROOT',
+  'XLN_SERVER_PORT',
+  'XLN_STORAGE_HISTORY_PATH',
+] as const);
+
+/**
+ * A local stand receives its ports and durable roots from its acquired lease
+ * and owned work directory. Ambient dev/testnet endpoints must not be allowed
+ * to override those explicit values in a child shell.
+ */
+export const stripAmbientLocalStackEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const scrubbed = stripLocalTestLeaseEnv(env);
+  for (const name of AMBIENT_LOCAL_STACK_ENV_NAMES) delete scrubbed[name];
+  for (const name of Object.keys(scrubbed)) {
+    if (name.startsWith('XLN_DEV_')) delete scrubbed[name];
+  }
+  return scrubbed;
+};
+
 export const parseLocalTestListeningPortOutput = (output: string): Map<number, number[]> => {
   const pidsByPort = new Map<number, Set<number>>();
   let currentPid: number | null = null;

@@ -31,6 +31,7 @@ import { stopProcessGroup } from '../scripts/e2e/runners/process-group';
 import {
   assertScenarioRpcOutsideDev,
   buildScenarioIsolatedEnv,
+  resolveScenarioIsolatedDbRoot,
 } from './harness/scenario-isolation';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
@@ -464,9 +465,10 @@ async function main() {
     ) throw new Error(`SCENARIO_ASSIGNED_LEASE_MISMATCH:${String(effectiveRpc)}`);
   }
   const assignedDbRoot = String(process.env['XLN_SCENARIO_DB_ROOT'] || '').trim();
-  const dbPath = assignedDbRoot
+  const dbPathCandidate = assignedDbRoot
     ? resolve(assignedDbRoot)
     : resolve(process.cwd(), '.logs', 'scenarios-single', tsTag(), scenario, 'db');
+  const dbPath = resolveScenarioIsolatedDbRoot(dbPathCandidate);
   mkdirSync(dbPath, { recursive: true });
   process.env['XLN_SCENARIO_DB_ROOT'] = dbPath;
   Object.assign(process.env, buildScenarioIsolatedEnv(process.env, dbPath, effectiveRpc ?? null));

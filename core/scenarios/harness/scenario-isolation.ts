@@ -1,4 +1,6 @@
-import { join, resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const DEV_RESERVED_PORTS = new Set([
   8_080, 8_081, 8_082, 8_087, 8_088,
@@ -18,6 +20,44 @@ const SCENARIO_STORAGE_ENV = [
 
 const isLoopbackHost = (hostname: string): boolean =>
   hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+
+const isInsideOrEqual = (parent: string, target: string): boolean => {
+  const child = relative(parent, target);
+  return child === '' || (!child.startsWith('..') && !isAbsolute(child));
+};
+
+const resolveProspectiveRealPath = (path: string): string => {
+  const target = resolve(path);
+  let existing = target;
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) break;
+    existing = parent;
+  }
+  const canonicalParent = existsSync(existing) ? realpathSync(existing) : existing;
+  return resolve(canonicalParent, relative(existing, target));
+};
+
+export const resolveScenarioIsolatedDbRoot = (
+  dbRoot: string,
+  repoRoot = process.cwd(),
+): string => {
+  const lexicalTarget = resolve(dbRoot);
+  const target = resolveProspectiveRealPath(dbRoot);
+  const repo = resolveProspectiveRealPath(repoRoot);
+  const exactForbidden = [repo, homedir(), tmpdir(), join(repo, '.logs')]
+    .map(resolveProspectiveRealPath);
+  const sharedTrees = [
+    join(repo, 'db'),
+    join(repo, 'data'),
+    join(repo, 'db-tmp'),
+    join(repo, '.logs', 'dev'),
+  ].map(resolveProspectiveRealPath);
+  if (exactForbidden.includes(target) || sharedTrees.some(root => isInsideOrEqual(root, target))) {
+    throw new Error(`SCENARIO_DB_ROOT_OVERLAPS_SHARED:${target}`);
+  }
+  return lexicalTarget;
+};
 
 export const assertScenarioRpcOutsideDev = (rpcUrl: string): void => {
   let parsed: URL;
@@ -49,7 +89,7 @@ export const buildScenarioIsolatedEnv = (
 ): NodeJS.ProcessEnv => {
   const env = { ...source };
   for (const name of SCENARIO_STORAGE_ENV) delete env[name];
-  const root = resolve(dbRoot);
+  const root = resolveScenarioIsolatedDbRoot(dbRoot);
   if (rpcUrl) env['ANVIL_RPC'] = rpcUrl;
   else delete env['ANVIL_RPC'];
   env['ANVIL_TMPDIR'] = join(root, 'anvil-tmp');

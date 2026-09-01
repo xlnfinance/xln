@@ -26,7 +26,7 @@ import {
   acquireLocalHltLaneLease,
   assertLocalTestPortsFree,
   buildInheritedLocalTestLeaseEnv,
-  stripLocalTestLeaseEnv,
+  stripAmbientLocalStackEnv,
 } from '../../e2e/harness/local-test-port-lease';
 import {
   parseAdversaryProfile,
@@ -218,7 +218,7 @@ if (standLock) {
 const localTestLease = await acquireLocalTestPortLease({
   requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13],
 });
-const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
+const inheritedProcessEnv = stripAmbientLocalStackEnv(process.env);
 const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
 const hltLaneLease = Number.isSafeInteger(hltUsers) && hltUsers > 0
   ? await acquireLocalHltLaneLease(hltLanePortsPerSlot(hltUsers))
@@ -1432,8 +1432,11 @@ const main = async (): Promise<void> => {
         .filter(([name]) => name.startsWith('XLN_HUB_RSCORE_AUTHORITY_'))
         .map(([name, value]) => [name, String(value)]),
     ),
+    XLN_PORT_BASE: String(portBase),
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,
+    XLN_JDB_ROOT: join(workDir, 'jdb'),
+    ANVIL_TMPDIR: join(workDir, 'server-anvil-tmp'),
     XLN_DB_PATH: join(workDir, 'prod-main'),
     XLN_JURISDICTIONS_PATH: join(workDir, 'prod-main', 'jurisdictions.json'),
     XLN_MESH_DB_ROOT: join(workDir, 'prod-mesh'),
