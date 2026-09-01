@@ -18,10 +18,42 @@ import {
   getPendingBoardHandoverConfig,
   withBoardAuthority,
 } from '../authority/board-handover';
+import { txFingerprint } from '../../../protocol/state/tx-multiset';
 
 export type EntityTransactionAdmission = {
   localCanPropose: boolean;
   trustedLocalEntityTxs: EntityTx[];
+};
+
+/**
+ * A non-proposer may forward its retained mempool again while Entity consensus
+ * is still certifying the frame. Exact Account inputs are transport retries,
+ * not repeatable financial commands: their inner Account frame already owns
+ * transaction multiplicity. Collapse only their complete wire fingerprint;
+ * every other Entity transaction keeps its original order and multiplicity.
+ * No committed-history set belongs here: a retry after commit must reach the
+ * Account duplicate path so it can regenerate a peer ACK lost in transport.
+ */
+export const appendEntityMempoolTransactions = (
+  mempool: readonly EntityTx[],
+  admitted: readonly EntityTx[],
+): EntityTx[] => {
+  if (!admitted.some(tx => tx.type === 'accountInput')) return [...mempool, ...admitted];
+  const seen = new Set(
+    mempool.filter(tx => tx.type === 'accountInput').map(txFingerprint),
+  );
+  const appended = [...mempool];
+  for (const tx of admitted) {
+    if (tx.type !== 'accountInput') {
+      appended.push(tx);
+      continue;
+    }
+    const fingerprint = txFingerprint(tx);
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    appended.push(tx);
+  }
+  return appended;
 };
 
 const addAdmittedTransactions = (
@@ -32,7 +64,8 @@ const addAdmittedTransactions = (
   trustedLocalCrossJurisdiction: boolean,
 ): EntityTx[] => {
   const { env, workingReplica } = context;
-  if (admitted.length === 0) return [];
+  const deduped = appendEntityMempoolTransactions([], admitted);
+  if (deduped.length === 0) return [];
   if (!localCanPropose && workingReplica.lastConsensusProgressAt === undefined) {
     workingReplica.lastConsensusProgressAt = env.state.timestamp;
   }
@@ -52,16 +85,19 @@ const addAdmittedTransactions = (
       env,
       workingReplica.state,
       workingReplica.signerId,
-      admitted,
+      deduped,
     );
   }
-  if (admitted.every(tx => tx.type === 'accountInput')) {
+  if (deduped.every(tx => tx.type === 'accountInput')) {
     // AccountInput is already authenticated/decoded at the Entity boundary and
     // is forbidden inside an EntityCommand. Old mempool entries were prepared
     // when first admitted; re-running the whole growing prefix through command
     // canonicalization made Hub ingress quadratic. Append the exact new
     // protocol delta and preserve FIFO order.
-    workingReplica.mempool = [...workingReplica.mempool, ...admitted];
+    workingReplica.mempool = appendEntityMempoolTransactions(
+      workingReplica.mempool,
+      deduped,
+    );
     return [];
   }
   workingReplica.mempool = prioritizeScheduledWakeTransactions(
@@ -69,7 +105,7 @@ const addAdmittedTransactions = (
       env,
       workingReplica.state,
       workingReplica.signerId,
-      [...workingReplica.mempool, ...admitted],
+      appendEntityMempoolTransactions(workingReplica.mempool, deduped),
     ),
   );
   return [];

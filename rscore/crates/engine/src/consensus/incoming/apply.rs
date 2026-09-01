@@ -1115,6 +1115,23 @@ pub fn apply_incoming_ack_frame_with_authority(
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     security: IncomingFrameSecurityContext<'_>,
 ) -> Result<AckFrameOutcome, StateError> {
+    // An at-least-once retry replays the exact original ACK+successor bytes.
+    // The first delivery may already have consumed ACK(H) and committed the
+    // successor H+1. Match TypeScript's replay gate: authenticate/classify the
+    // exact-current proposal before the ACK phase and re-ACK it as a duplicate.
+    // This exception is deliberately unavailable to standalone ACK inputs and
+    // to non-duplicate proposals, so ACCOUNT_INPUT_ACK_UNMATCHED stays strict.
+    if frame.frame.height == account.current_height()
+        && account
+            .current()
+            .is_some_and(|current| current.state_hash == frame.state_hash)
+        && let Some(outcome) =
+            classify_incoming_frame_without_mutation(account, identity, envelope, &frame, security)?
+    {
+        return Ok(AckFrameOutcome::Replay {
+            frame: Box::new(outcome),
+        });
+    }
     let ack = apply_incoming_ack_with_authority(
         account,
         envelope,

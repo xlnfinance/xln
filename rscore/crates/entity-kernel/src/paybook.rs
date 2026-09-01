@@ -691,6 +691,98 @@ pub(crate) fn revealed_secret_followup(
     Ok(())
 }
 
+/// Consume a secret that arrived only as authenticated rejected-frame
+/// evidence. The Account frame itself is deliberately not committed, but the
+/// receiver must retain the verified secret before building its dispute proof
+/// and must propagate it to an upstream payer exactly as TypeScript does.
+pub(crate) fn dispute_evidence_secret(
+    state: &mut EntityStateSlice,
+    paybook: &mut PaybookChanges,
+    account_id: &str,
+    account_view: &crate::LocalAccountFinancialView,
+    lock: &xln_rscore_engine::HtlcLock,
+    secret: &str,
+    effects: &mut PaybookEffects<'_>,
+) -> Result<(), EntityKernelError> {
+    if lock.lock_id() != lock.hashlock().as_str() {
+        return Err(EntityKernelError::htlc(
+            "PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK",
+        ));
+    }
+    let hashlock = lock.hashlock().as_str();
+    let existing = paybook.entry(state, hashlock)?.cloned();
+    let mut route = existing.unwrap_or(PaybookEntry {
+        hashlock: hashlock.to_string(),
+        description: None,
+        token_id: Some(lock.token_id().get()),
+        amount: Some(lock.amount().clone()),
+        started_at_ms: None,
+        originated: false,
+        inbound_entity: None,
+        outbound_entity: None,
+        inbound_settled: false,
+        outbound_settled: false,
+        secret: None,
+        secret_ack_pending: false,
+        secret_ack_started_at: None,
+        secret_ack_deadline_at: None,
+        pending_fee: None,
+        created_timestamp: state.timestamp,
+    });
+    if route.secret.as_ref().is_some_and(|known| known != secret) {
+        return Err(EntityKernelError::htlc("PAYBOOK_SECRET_CONFLICT"));
+    }
+    let token_id = lock.token_id().get();
+    if route.token_id.is_some_and(|known| known != token_id) {
+        return Err(EntityKernelError::htlc("PAYBOOK_TOKEN_CONFLICT"));
+    }
+    if route
+        .amount
+        .as_ref()
+        .is_some_and(|known| known != lock.amount())
+    {
+        return Err(EntityKernelError::htlc("PAYBOOK_AMOUNT_CONFLICT"));
+    }
+    let local_sent_lock = lock.sender() == account_view.owner_side;
+    let endpoint = if local_sent_lock {
+        &mut route.outbound_entity
+    } else {
+        &mut route.inbound_entity
+    };
+    if endpoint
+        .as_ref()
+        .is_some_and(|known| !known.eq_ignore_ascii_case(account_id))
+    {
+        return Err(EntityKernelError::htlc("PAYBOOK_ENTITY_CONFLICT"));
+    }
+    *endpoint = Some(account_id.to_string());
+    route.secret = Some(secret.to_string());
+    if local_sent_lock && let Some(inbound) = route.inbound_entity.clone() {
+        queue_secret(effects, &inbound, hashlock, secret);
+        route.secret_ack_pending = true;
+        route.secret_ack_started_at = Some(state.timestamp);
+        let deadline = state
+            .timestamp
+            .checked_add(SECRET_ACK_TIMEOUT_MS)
+            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?;
+        route.secret_ack_deadline_at = Some(deadline);
+        let crontab = state
+            .crontab
+            .as_mut()
+            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_CRONTAB_MISSING"))?;
+        schedule_hook(
+            crontab,
+            ScheduledHook::htlc_secret_ack_timeout(
+                hashlock.to_string(),
+                inbound,
+                hashlock.to_string(),
+                deadline,
+            ),
+        )?;
+    }
+    paybook.put(route)
+}
+
 pub(crate) fn timed_out_followup(
     state: &mut EntityStateSlice,
     paybook: &mut PaybookChanges,
@@ -719,7 +811,88 @@ pub(crate) fn timed_out_followup(
 
 #[cfg(test)]
 mod key_tests {
-    use super::paybook_key;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use num_bigint::BigInt;
+    use sha3::{Digest as _, Keccak256};
+    use xln_rscore_batch::ResidentAccountFinancialView;
+    use xln_rscore_engine::{HtlcHashlock, HtlcLock, Side, TokenId};
+
+    use super::{PaybookChanges, PaybookEffects, dispute_evidence_secret, paybook_key};
+    use crate::{
+        CrontabState, EntityKernelOutput, EntityStateSlice, LocalAccountFinancialView,
+        PaybookEntry, PaybookState,
+    };
+
+    fn evidence() -> (String, String) {
+        let secret_bytes = [0x61_u8; 32];
+        (
+            format!(
+                "0x{}",
+                hex::encode(<[u8; 32]>::from(Keccak256::digest(secret_bytes)))
+            ),
+            format!("0x{}", hex::encode(secret_bytes)),
+        )
+    }
+
+    fn lock(hashlock: &str, sender: Side) -> HtlcLock {
+        HtlcLock::restore(
+            hashlock.to_string(),
+            HtlcHashlock::parse(hashlock).expect("hashlock"),
+            BigInt::from(1_700_000_100_000_u64),
+            100,
+            BigInt::from(50),
+            TokenId::new(1).expect("token"),
+            sender,
+            1,
+            1_700_000_000_000,
+            None,
+        )
+        .expect("lock")
+    }
+
+    fn view(owner_side: Side, lock: HtlcLock) -> LocalAccountFinancialView {
+        ResidentAccountFinancialView {
+            active: true,
+            owner_side,
+            owner_in_capacity: BTreeMap::new(),
+            owner_out_capacity: BTreeMap::new(),
+            owner_own_credit_limit: BTreeMap::new(),
+            owner_peer_credit_limit: BTreeMap::new(),
+            settlement_workspace: None,
+            settlement_transition_pending: false,
+            settlement_execution: Err("not requested".into()),
+            rebalance_active_quote: None,
+            htlc_locks: BTreeMap::from([(lock.lock_id().to_string(), lock)]),
+            pulls: BTreeMap::new(),
+            swap_offers: BTreeMap::new(),
+            pending_cross_pull_close_ids: BTreeSet::new(),
+            pending_cross_swap_ack_ids: BTreeSet::new(),
+            dispute: None,
+        }
+        .into()
+    }
+
+    fn route(hashlock: &str, inbound: Option<&str>) -> PaybookEntry {
+        PaybookEntry {
+            hashlock: hashlock.to_string(),
+            description: None,
+            token_id: Some(1),
+            amount: Some(BigInt::from(50)),
+            started_at_ms: None,
+            originated: false,
+            inbound_entity: inbound.map(str::to_string),
+            outbound_entity: None,
+            inbound_settled: false,
+            outbound_settled: false,
+            secret: None,
+            secret_ack_pending: false,
+            secret_ack_started_at: None,
+            secret_ack_deadline_at: None,
+            pending_fee: None,
+            created_timestamp: 1_700_000_000_000,
+        }
+    }
 
     #[test]
     fn canonical_hashlocks_select_independent_physical_slots() {
@@ -731,5 +904,82 @@ mod key_tests {
         assert_eq!([zero[0], middle[0], high[0]], [0x00, 0x7f, 0xff]);
         assert!(paybook_key(&format!("0X{}", "ff".repeat(32))).is_err());
         assert!(paybook_key(&format!("0x{}", "FF".repeat(32))).is_err());
+    }
+
+    #[test]
+    fn downstream_unsafe_secret_queues_upstream_resolve_and_ack_timeout() {
+        let (hashlock, secret) = evidence();
+        let mut state = EntityStateSlice::empty("local", 1_700_000_000_000);
+        state.crontab = Some(CrontabState::default());
+        state.paybook =
+            PaybookState::from_entries([route(&hashlock, Some("upstream"))], BigInt::from(0))
+                .expect("paybook");
+        let lock = lock(&hashlock, Side::Left);
+        let view = view(Side::Left, lock.clone());
+        let mut changes = PaybookChanges::default();
+        let mut account_txs = Vec::new();
+        let mut outputs = Vec::<EntityKernelOutput>::new();
+        dispute_evidence_secret(
+            &mut state,
+            &mut changes,
+            "downstream",
+            &view,
+            &lock,
+            &secret,
+            &mut PaybookEffects {
+                account_txs: &mut account_txs,
+                outputs: &mut outputs,
+            },
+        )
+        .expect("downstream evidence");
+
+        assert!(matches!(
+            account_txs.as_slice(),
+            [(account, xln_rscore_engine::AccountTx::HtlcResolve(resolve))]
+                if account == "upstream"
+                    && resolve.lock_id == hashlock
+                    && matches!(&resolve.outcome, xln_rscore_engine::HtlcResolveOutcome::Secret { secret: value } if value == &secret)
+        ));
+        let route = changes
+            .entry(&state, &hashlock)
+            .expect("route lookup")
+            .expect("route");
+        assert!(route.secret_ack_pending);
+        assert_eq!(route.outbound_entity.as_deref(), Some("downstream"));
+        assert!(state.crontab.as_ref().expect("crontab").hooks.len() > 0);
+    }
+
+    #[test]
+    fn upstream_unsafe_secret_only_persists_without_resolve_or_timeout() {
+        let (hashlock, secret) = evidence();
+        let mut state = EntityStateSlice::empty("local", 1_700_000_000_000);
+        state.crontab = None;
+        let lock = lock(&hashlock, Side::Right);
+        let view = view(Side::Left, lock.clone());
+        let mut changes = PaybookChanges::default();
+        let mut account_txs = Vec::new();
+        let mut outputs = Vec::<EntityKernelOutput>::new();
+        dispute_evidence_secret(
+            &mut state,
+            &mut changes,
+            "upstream",
+            &view,
+            &lock,
+            &secret,
+            &mut PaybookEffects {
+                account_txs: &mut account_txs,
+                outputs: &mut outputs,
+            },
+        )
+        .expect("upstream evidence");
+
+        assert!(account_txs.is_empty());
+        let route = changes
+            .entry(&state, &hashlock)
+            .expect("route lookup")
+            .expect("route");
+        assert_eq!(route.secret.as_deref(), Some(secret.as_str()));
+        assert_eq!(route.inbound_entity.as_deref(), Some("upstream"));
+        assert!(!route.secret_ack_pending);
     }
 }

@@ -43,6 +43,7 @@ mod snapshot;
 #[path = "storage/projection.rs"]
 mod storage_projection;
 mod types;
+mod unsafe_account_frame;
 
 pub use board_handover::resolve_board_handover_authority;
 pub use certified_board::{

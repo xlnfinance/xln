@@ -195,6 +195,11 @@ pub struct ForceSiblingDisputeEntityTx {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountEnvelopeMutation {
     ClearRebalanceActiveQuote,
+    SetRejectedFrameEvidence {
+        reason: String,
+        frame_hash: [u8; 32],
+        frame_hanko: Vec<u8>,
+    },
     SetRebalancePolicy {
         token_id: u32,
         policy: xln_rscore_protocol::CanonicalValue,

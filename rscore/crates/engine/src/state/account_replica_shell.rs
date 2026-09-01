@@ -277,6 +277,53 @@ impl AccountEnvelope {
         self.set_field("shadow".into(), CanonicalValue::Object(shadow))
     }
 
+    /// Retain only the consensus-visible projection of an authenticated peer
+    /// frame that forced the Entity into dispute handling. The full signed
+    /// frame already lives in the accepted Runtime WAL input; duplicating it
+    /// in Account storage would create a second historical representation.
+    pub fn set_rejected_frame_evidence(
+        &mut self,
+        reason: String,
+        frame_hash: [u8; 32],
+        frame_hanko: Vec<u8>,
+    ) -> Result<(), EnvelopeError> {
+        let mut shadow = match self.field("shadow").cloned() {
+            Some(CanonicalValue::Object(shadow)) => shadow,
+            Some(_) => return Err(EnvelopeError::RebalanceShadowPolicyRootInvalid),
+            None => vec![(
+                "rebalance".into(),
+                CanonicalValue::Object(vec![
+                    (
+                        "policyRoot".into(),
+                        CanonicalValue::String(hex_32(&self.rebalance_shadow_policy.root_hash())),
+                    ),
+                    (
+                        "submittedAtByTokenRoot".into(),
+                        CanonicalValue::String(hex_32(
+                            &self.rebalance_shadow_submitted.root_hash(),
+                        )),
+                    ),
+                ]),
+            )],
+        };
+        shadow.retain(|(name, _)| name != "rejectedFrameEvidence");
+        shadow.push((
+            "rejectedFrameEvidence".into(),
+            CanonicalValue::Object(vec![
+                ("reason".into(), CanonicalValue::String(reason)),
+                (
+                    "frameHash".into(),
+                    CanonicalValue::String(hex_32(&frame_hash)),
+                ),
+                (
+                    "frameHanko".into(),
+                    CanonicalValue::String(format!("0x{}", hex::encode(frame_hanko))),
+                ),
+            ]),
+        ));
+        self.set_field("shadow".into(), CanonicalValue::Object(shadow))
+    }
+
     /// The carried projection fields, so a caller that owns part of the
     /// projection can replace exactly those.
     /// Drop one carried field. Used when the engine takes ownership of a
@@ -373,7 +420,10 @@ impl AccountEnvelope {
             .rebalance_shadow_submitted
             .updated(token_id.radix_key(), submitted_at, digest)
             .map_err(|error| EnvelopeError::RebalanceShadowSubmittedMap(error.to_string()))?;
-        set_submitted_root(&mut self.fields, self.rebalance_shadow_submitted.root_hash())
+        set_submitted_root(
+            &mut self.fields,
+            self.rebalance_shadow_submitted.root_hash(),
+        )
     }
 
     pub fn clear_rebalance_shadow_submitted(

@@ -32,6 +32,10 @@ use crate::local_financial::LocalAccountFinancialView;
 use crate::orderbook::{OrderbookPairJob, OrderbookPairResult};
 use crate::paybook::{PaybookChanges, paybook_entry, terminate_route, terminate_route_in_frame};
 use crate::scheduler_runtime::validate_scheduled_wake;
+use crate::unsafe_account_frame::{
+    UnsafeAccountFrame, collect_unsafe_account_frames, consume_unsafe_account_frames,
+    unsafe_account_view_requests,
+};
 use crate::{
     AccountProposalWork, CommittedAccountTransition, CrontabExecutionContext, DeterministicContext,
     EntityFrameEvent, EntityKernelCommitments, EntityKernelError, EntityKernelOutput,
@@ -1144,6 +1148,7 @@ fn local_account_views(
     state: &EntityStateSlice,
     local_txs: &[crate::AdmittedLocalEntityTx],
     commits: &[OrderedAccountCommit],
+    unsafe_frames: &[UnsafeAccountFrame],
     context: &DeterministicContext,
 ) -> Result<BTreeMap<String, LocalAccountFinancialView>, ResidentEntityError> {
     let mut financial = Vec::new();
@@ -1163,6 +1168,19 @@ fn local_account_views(
         .enumerate()
         .map(|(index, (account, _))| (*account, index))
         .collect::<BTreeMap<_, _>>();
+    for (account, requested) in unsafe_account_view_requests(unsafe_frames) {
+        let view = if let Some(index) = positions.get(&account).copied() {
+            &mut requests[index].1
+        } else {
+            positions.insert(account, requests.len());
+            requests.push((account, Default::default()));
+            &mut requests.last_mut().expect("inserted unsafe request").1
+        };
+        view.htlc_lock_ids.extend(requested.htlc_lock_ids);
+        view.htlc_lock_ids.sort();
+        view.htlc_lock_ids.dedup();
+        view.dispute = true;
+    }
     for request in
         crate::cross_j::cross_jurisdiction_account_view_requests(state, &cross_jurisdiction)?
     {
@@ -1696,17 +1714,34 @@ fn apply_resident_entity_round_core_attempt(
                     }
                 }
                 let phase_started = Instant::now();
-                let commits = ordered_commits(&mut segment)?;
                 let created_accounts = created_position_by_account
                     .iter()
                     .filter(|(_, position)| **position >= start && **position < start + len)
                     .map(|(account_id, _)| account_text(*account_id))
                     .collect::<BTreeSet<_>>();
+                let unsafe_frames = collect_unsafe_account_frames(
+                    &segment.applied,
+                    &created_accounts,
+                    account_text,
+                );
+                let commits = ordered_commits(&mut segment)?;
                 for account in &created_accounts {
                     state.known_accounts.insert(account.clone());
                 }
                 apply_committed_frame_hooks(&mut state, &commits)?;
-                let views = local_account_views(accounts, &state, &[], &commits, context)?;
+                let views =
+                    local_account_views(accounts, &state, &[], &commits, &unsafe_frames, context)?;
+                let starts_before = state
+                    .j_batch_state
+                    .as_ref()
+                    .map_or(0, |j| j.batch.dispute_starts.len());
+                let unsafe_effects = consume_unsafe_account_frames(
+                    &mut state,
+                    &mut accumulated.paybook_changes,
+                    &unsafe_frames,
+                    &views,
+                    &request.expected_proposer_signer_id,
+                )?;
                 commits_micros = commits_micros.saturating_add(phase_started.elapsed().as_micros());
                 let phase_started = Instant::now();
                 let mut next = apply_entity_transitions(
@@ -1714,13 +1749,52 @@ fn apply_resident_entity_round_core_attempt(
                     std::mem::take(&mut accumulated.paybook_changes),
                     commits,
                     &created_accounts,
-                    Vec::new(),
+                    unsafe_effects.local_txs,
                     &views,
                     request.local_account_genesis_policy.as_ref(),
                     request.entity_authority.as_ref(),
                     request.runtime_seed.as_deref(),
                     context,
                 )?;
+                let mut evidence_mutations = unsafe_effects.envelope_mutations;
+                evidence_mutations.append(&mut next.account_envelope_mutations);
+                next.account_envelope_mutations = evidence_mutations;
+                let mut evidence_work = unsafe_effects.proposal_work;
+                merge_proposal_work(&mut evidence_work, next.proposal_work);
+                next.proposal_work = evidence_work;
+                let starts_after = next
+                    .state
+                    .j_batch_state
+                    .as_ref()
+                    .map_or(0, |j| j.batch.dispute_starts.len());
+                let dispute_started = starts_after > starts_before;
+                for _ in &unsafe_frames {
+                    next.local_events.push(EntityFrameEvent::Status {
+                        message: if dispute_started {
+                            "⚠️ Unsafe account frame rejected; dispute start queued".into()
+                        } else {
+                            "⚠️ Unsafe account frame rejected; dispute preparation awaits Hanko"
+                                .into()
+                        },
+                    });
+                }
+                if dispute_started && let Some(j_state) = next.state.j_batch_state.as_mut() {
+                    j_state.auto_broadcast_draft = true;
+                    if j_state.sent_batch.is_none() {
+                        next.routed_entity_outputs.push(crate::LocalEntityOutput {
+                            entity_id: next.state.entity_id.clone(),
+                            entity_txs: vec![crate::LocalEntityOutputTx::Projected(
+                                crate::CanonicalEntityTx::from_frame_projection(
+                                    crate::EntityTxKind::JBroadcast,
+                                    CanonicalValue::Object(Vec::new()),
+                                )
+                                .map_err(|error| {
+                                    EntityKernelError::local("accountInput", error.to_string())
+                                })?,
+                            )],
+                        });
+                    }
+                }
                 ordered_events.append(&mut next.local_events);
                 ordered_hashes.append(&mut next.local_hashes_to_sign);
                 entity_apply_micros =
@@ -1729,7 +1803,7 @@ fn apply_resident_entity_round_core_attempt(
                 ordered_applied.append(&mut segment.applied);
             }
             ResidentEntityOperation::Local(local_txs) => {
-                let views = local_account_views(accounts, &state, &local_txs, &[], context)?;
+                let views = local_account_views(accounts, &state, &local_txs, &[], &[], context)?;
                 let phase_started = Instant::now();
                 let mut next = apply_entity_transitions(
                     state,
@@ -1953,6 +2027,15 @@ fn apply_resident_entity_round_core_attempt(
                 crate::AccountEnvelopeMutation::ClearRebalanceActiveQuote => {
                     xln_rscore_batch::AccountEnvelopeUpdate::ClearRebalanceActiveQuote
                 }
+                crate::AccountEnvelopeMutation::SetRejectedFrameEvidence {
+                    reason,
+                    frame_hash,
+                    frame_hanko,
+                } => xln_rscore_batch::AccountEnvelopeUpdate::SetRejectedFrameEvidence {
+                    reason,
+                    frame_hash,
+                    frame_hanko,
+                },
                 crate::AccountEnvelopeMutation::SetRebalancePolicy { token_id, policy } => {
                     xln_rscore_batch::AccountEnvelopeUpdate::SetRebalancePolicy { token_id, policy }
                 }

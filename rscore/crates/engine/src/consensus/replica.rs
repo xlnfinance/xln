@@ -7,11 +7,16 @@
 //! state stays in `AccountReplica` so executing a transaction never copies the
 //! queue.
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::Arc,
+};
 
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
-use crate::consensus::frame::hash::{AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value};
+use crate::consensus::frame::hash::{
+    AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value, wire_tx_value,
+};
 use crate::consensus::proposal::propose::{WindowExecution, execute_window};
 use crate::error::StateError;
 use crate::input::mempool::{
@@ -54,6 +59,19 @@ fn queued_claim_witness(claim: &crate::JEventClaimTx) -> Result<QueuedClaimWitne
             &claim.events,
         )?)?,
     })
+}
+
+/// Exact local-admission identity, including settlement witnesses that the
+/// frame hash deliberately omits. TypeScript fingerprints the complete tx
+/// payload here as well; using `canonical_tx_value` would wrongly collapse two
+/// distinct `settle_transition` envelopes before their Hankos are certified.
+fn local_admission_identity(tx: &AccountTx) -> Result<Option<Vec<u8>>, StateError> {
+    if matches!(tx, AccountTx::DirectPayment { .. }) {
+        return Ok(None);
+    }
+    xln_rscore_protocol::encode_account_state_value(&wire_tx_value(tx)?)
+        .map(Some)
+        .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
 
 fn is_truthy_canonical_value(value: &CanonicalValue) -> bool {
@@ -235,6 +253,19 @@ pub struct PendingFrame {
     pub(crate) proposal_dispute: Option<DisputeDraft>,
 }
 
+impl PendingFrame {
+    /// The ACK half of this exact pending wire input, when it was authored as
+    /// `ack_frame` rather than a bare frame.
+    pub const fn bundled_ack(&self) -> Option<&OutboundAck> {
+        self.bundled_ack.as_ref()
+    }
+
+    /// The proof carried by this exact pending proposal.
+    pub const fn proposal_dispute(&self) -> Option<&DisputeDraft> {
+        self.proposal_dispute.as_ref()
+    }
+}
+
 #[derive(Clone)]
 pub struct AccountConsensus {
     replica: AccountReplica,
@@ -347,6 +378,16 @@ impl AccountConsensus {
 
     pub fn clear_rebalance_active_quote(&mut self) -> Result<(), StateError> {
         self.replica.clear_rebalance_active_quote()
+    }
+
+    pub fn set_entity_rejected_frame_evidence(
+        &mut self,
+        reason: String,
+        frame_hash: [u8; 32],
+        frame_hanko: Vec<u8>,
+    ) -> Result<(), StateError> {
+        self.replica
+            .set_rejected_frame_evidence(reason, frame_hash, frame_hanko)
     }
 
     fn freeze_for_dispute(&mut self, retain_optional_evidence: bool) -> Result<(), StateError> {
@@ -525,12 +566,6 @@ impl AccountConsensus {
         txs: Vec<AccountTx>,
         context: &'static str,
     ) -> Result<AccountAdmission, StateError> {
-        assert_mempool_admission(
-            self.mempool.len(),
-            self.pending_tx_count(),
-            txs.len(),
-            context,
-        )?;
         // Validate through the canonical frame projection itself. Collapsing
         // every projection error into `UnsupportedFrameTx` hid typed field
         // failures such as an unsafe policyVersion and let admission disagree
@@ -547,10 +582,15 @@ impl AccountConsensus {
             .collect();
         let mut summary = AccountAdmission::default();
         let mut admitted: Vec<AccountTx> = Vec::with_capacity(txs.len());
-        if incoming_claim_heights.is_empty() {
-            summary.admitted = txs.len();
-            self.mempool.extend(txs);
-            return Ok(summary);
+        let mut seen_lifecycle = HashSet::new();
+        for queued in self
+            .mempool
+            .iter()
+            .chain(self.pending.iter().flat_map(|pending| &pending.frame.txs))
+        {
+            if let Some(identity) = local_admission_identity(queued)? {
+                seen_lifecycle.insert(identity);
+            }
         }
         // Only queued claims at an incoming height can conflict, so the queue
         // is canonicalized for exactly those rows. A decode failure here is a
@@ -569,6 +609,14 @@ impl AccountConsensus {
             })
             .collect::<Result<_, _>>()?;
         for (index, tx) in txs.into_iter().enumerate() {
+            let identity = local_admission_identity(&tx)?;
+            if identity
+                .as_ref()
+                .is_some_and(|identity| seen_lifecycle.contains(identity))
+            {
+                summary.duplicates += 1;
+                continue;
+            }
             if let AccountTx::JEventClaim(claim) = &tx {
                 let carried = self.replica.state().carried();
                 let plan = plan_local_claim(
@@ -595,11 +643,20 @@ impl AccountConsensus {
                     }
                 }
             }
+            if let Some(identity) = identity {
+                seen_lifecycle.insert(identity);
+            }
             if let AccountTx::JEventClaim(claim) = &tx {
                 queued.push(queued_claim_witness(claim)?);
             }
             admitted.push(tx);
         }
+        assert_mempool_admission(
+            self.mempool.len(),
+            self.pending_tx_count(),
+            admitted.len(),
+            context,
+        )?;
         summary.admitted = admitted.len();
         self.mempool.extend(admitted);
         Ok(summary)

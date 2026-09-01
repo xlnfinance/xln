@@ -28,6 +28,7 @@ use crate::{
 pub use decode::decode_local_entity_financial_tx;
 pub use types::AccountEnvelopeMutation;
 pub use types::LocalAccountFinancialView;
+pub(crate) use types::PrepareDisputeEntityTx;
 pub use types::{
     DirectPaymentEntityTx, ExtendCreditEntityTx, HtlcPaymentEntityTx, LendingBorrowEntityTx,
     LendingClosePositionEntityTx, LendingOfferEntityTx, LendingRepayEntityTx,

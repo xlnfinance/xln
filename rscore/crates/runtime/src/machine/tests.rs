@@ -318,6 +318,44 @@ fn entity_input_is_decoded_into_one_consistent_owned_projection() -> Result<(), 
 }
 
 #[test]
+fn exact_account_input_deduplication_is_pending_only() -> Result<(), RuntimeMachineError> {
+    let (_, first, _) = RuntimeEntityInput::decode(account_ack_entity_input())?.into_parts();
+    let (_, forwarded_retry, _) =
+        RuntimeEntityInput::decode(account_ack_entity_input())?.into_parts();
+    let mut mempool = VecDeque::new();
+    super::apply::append_entity_pending_work(&mut mempool, first)?;
+    super::apply::append_entity_pending_work(&mut mempool, forwarded_retry)?;
+    assert_eq!(mempool.len(), 1, "pending exact retry must collapse");
+
+    mempool.pop_front().expect("one committed AccountInput");
+    let (_, late_retry, _) = RuntimeEntityInput::decode(account_ack_entity_input())?.into_parts();
+    super::apply::append_entity_pending_work(&mut mempool, late_retry)?;
+    assert_eq!(
+        mempool.len(),
+        1,
+        "post-commit retry reaches Account duplicate semantics"
+    );
+    Ok(())
+}
+
+#[test]
+fn account_input_deduplication_compares_the_complete_wire() -> Result<(), RuntimeMachineError> {
+    let (_, first, _) = RuntimeEntityInput::decode(account_ack_entity_input())?.into_parts();
+    let mut changed = account_ack_entity_input();
+    changed["entityTxs"][0]["data"]["ack"]["frameHanko"] = serde_json::json!("0x0506");
+    let (_, second, _) = RuntimeEntityInput::decode(changed)?.into_parts();
+    let mut mempool = VecDeque::new();
+    super::apply::append_entity_pending_work(&mut mempool, first)?;
+    super::apply::append_entity_pending_work(&mut mempool, second)?;
+    assert_eq!(
+        mempool.len(),
+        2,
+        "different authenticated wire must remain distinct"
+    );
+    Ok(())
+}
+
+#[test]
 fn entity_input_cannot_smuggle_an_independent_projection() {
     let mut canonical = account_ack_entity_input();
     if let Some(object) = canonical.as_object_mut() {

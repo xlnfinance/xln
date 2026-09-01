@@ -1646,6 +1646,83 @@ describe('audit fail-fast regressions', () => {
     expect(proposer.currentHeight).toBe(2);
     expect(proposer.counterpartyDisputeProofBodyHash).toBe(proposalHanko?.proofBodyHash);
     expect(proposer.counterpartyDisputeProofHanko).toBe(proposalHanko?.hanko);
+    // The signing helper returns the certified wire bytes without publishing
+    // an Entity candidate. Mirror that commit boundary in the responder's
+    // envelope before exercising a post-publication retry.
+    receiver.pendingAccountInput = structuredClone(hankoAttachedFlushed);
+    receiver.lastOutboundAckFrame = {
+      height: hankoAttachedFlushed.ack.height,
+      counterpartyEntityId: left.entityId,
+      response: {
+        kind: 'ack',
+        fromEntityId: right.entityId,
+        toEntityId: left.entityId,
+        domain: structuredClone(hankoAttachedFlushed.domain),
+        disputeConfig: structuredClone(hankoAttachedFlushed.disputeConfig),
+        ack: structuredClone(hankoAttachedFlushed.ack),
+      },
+    };
+    const pendingBundledRetry = structuredClone(receiver.pendingAccountInput);
+    if (pendingBundledRetry?.kind !== 'ack_frame' || pendingBundledRetry.ack === undefined) {
+      throw new Error('BUNDLED_ACK_PENDING_RETRY_MISSING');
+    }
+    const duplicateWhileSuccessorPending = await applyAccountInput(
+      createAccountConsensusContext(env),
+      receiver,
+      hankoAttachedProposal,
+    );
+    expect(duplicateWhileSuccessorPending.ok).toBe(true);
+    expect(duplicateWhileSuccessorPending.response).toEqual(pendingBundledRetry);
+
+    const certifiedHeightTwoAck = await attachAccountDraftHankosAsEntity(
+      env,
+      left.entityId,
+      left.signerId,
+      {
+        accountInput: committedBundled.response,
+        hashesToSign: committedBundled.hashesToSign,
+      },
+    );
+    if (certifiedHeightTwoAck.kind !== 'ack') {
+      throw new Error('BUNDLED_ACK_ADVANCED_PEER_RESPONSE_INVALID');
+    }
+    proposer.lastOutboundAckFrame = {
+      height: 2,
+      counterpartyEntityId: right.entityId,
+      response: certifiedHeightTwoAck,
+    };
+    const advancedPeerRoot = computeAccountStateRoot(proposer.state);
+    const repeatedAtAdvancedPeer = await applyAccountInput(
+      createAccountConsensusContext(env),
+      proposer,
+      duplicateWhileSuccessorPending.response!,
+    );
+    expect(repeatedAtAdvancedPeer.ok).toBe(true);
+    expect(repeatedAtAdvancedPeer.response?.kind).toBe('ack');
+    expect(repeatedAtAdvancedPeer.response?.kind === 'ack'
+      ? repeatedAtAdvancedPeer.response.ack.height
+      : undefined).toBe(2);
+    expect(proposer.currentHeight).toBe(2);
+    expect(computeAccountStateRoot(proposer.state)).toBe(advancedPeerRoot);
+    const staleStandaloneAck = await applyAccountInput(
+      createAccountConsensusContext(env),
+      proposer,
+      {
+        kind: 'ack',
+        fromEntityId: hankoAttachedFlushed.fromEntityId,
+        toEntityId: hankoAttachedFlushed.toEntityId,
+        domain: structuredClone(hankoAttachedFlushed.domain),
+        disputeConfig: structuredClone(hankoAttachedFlushed.disputeConfig),
+        ack: structuredClone(hankoAttachedFlushed.ack),
+      },
+    );
+    expect(staleStandaloneAck.ok).toBe(false);
+    if (staleStandaloneAck.ok || staleStandaloneAck.disposition !== 'rejected') {
+      throw new Error('STALE_STANDALONE_ACK_MUST_REJECT');
+    }
+    expect(staleStandaloneAck.rejection.code).toBe('ACCOUNT_INPUT_ACK_UNMATCHED');
+    expect(proposer.currentHeight).toBe(2);
+    expect(computeAccountStateRoot(proposer.state)).toBe(advancedPeerRoot);
     const retainedAck = structuredClone(receiver.lastOutboundAckFrame?.response);
 
     // The new proposal can be discarded independently (for example by the
@@ -1660,7 +1737,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.currentHeight).toBe(1);
   });
 
-  test('duplicate committed frame returns ACK only and never re-carries a pending proposal', async () => {
+  test('duplicate committed frame re-carries the exact pending ACK plus successor proposal', async () => {
     const seed = 'account-frame-duplicate-bundled-response';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1718,10 +1795,8 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.response?.kind).toBe('ack');
-    expect(result.response?.kind === 'ack' ? result.response.ack : undefined).toEqual(
-      accountMachine.pendingAccountInput.ack,
-    );
+    expect(result.response).toEqual(accountMachine.pendingAccountInput);
+    expect(result.response?.kind).toBe('ack_frame');
     expect(accountMachine.currentHeight).toBe(10);
     expect(accountMachine.pendingFrame?.height).toBe(11);
   });

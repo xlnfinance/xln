@@ -52,6 +52,11 @@ pub struct EntityAccountGenesisPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountEnvelopeUpdate {
     ClearRebalanceActiveQuote,
+    SetRejectedFrameEvidence {
+        reason: String,
+        frame_hash: [u8; 32],
+        frame_hanko: Vec<u8>,
+    },
     SetRebalancePolicy {
         token_id: u32,
         policy: CanonicalValue,

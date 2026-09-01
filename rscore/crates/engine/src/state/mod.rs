@@ -1005,6 +1005,17 @@ impl AccountReplica {
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
+    pub fn set_rejected_frame_evidence(
+        &mut self,
+        reason: String,
+        frame_hash: [u8; 32],
+        frame_hanko: Vec<u8>,
+    ) -> Result<(), StateError> {
+        Arc::make_mut(&mut self.envelope)
+            .set_rejected_frame_evidence(reason, frame_hash, frame_hanko)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
     /// The `DeltaTransformer` this account's jurisdiction runs, which the
     /// recovery proof names. Absent only when the Account's jurisdiction
     /// defines no transformer.

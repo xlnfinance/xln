@@ -20,8 +20,8 @@ use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
     ProposalRow, UpstreamHtlcResolutionRow, active, apply_one, apply_one_without_mutation,
     build_signing_identity, force_ack_directive, inbound_genesis_account, leaf_root,
-    outbound_ack_input, proposable, proposal_row, restore_checkpoint_account, restore_seed_account,
-    state_error, validate_genesis_seed, verdict_commits_genesis,
+    outbound_ack_retry_input, proposable, proposal_row, restore_checkpoint_account,
+    restore_seed_account, state_error, validate_genesis_seed, verdict_commits_genesis,
 };
 use crate::parallel::{OutboundContinuationKind, ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
@@ -1988,6 +1988,16 @@ fn apply_outbound_work(
                     .map_err(|error| state_error(account_id, &error))?;
                 changed = true;
             }
+            crate::AccountEnvelopeUpdate::SetRejectedFrameEvidence {
+                reason,
+                frame_hash,
+                frame_hanko,
+            } => {
+                account
+                    .set_entity_rejected_frame_evidence(reason, frame_hash, frame_hanko)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
             crate::AccountEnvelopeUpdate::SetRebalancePolicy { token_id, policy } => {
                 let token_id =
                     TokenId::new(token_id).map_err(|error| BatchError::AccountsTree {
@@ -2055,13 +2065,12 @@ fn apply_outbound_work(
         changed = true;
         let mut row = proposal_row(account_id, outcome, &account)?;
         if work.force_ack && row.outbound_input.is_none() {
-            row.outbound_input =
-                Some(
-                    outbound_ack_input(&account).ok_or_else(|| BatchError::AccountsTree {
-                        account_id,
-                        detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
-                    })?,
-                );
+            row.outbound_input = Some(outbound_ack_retry_input(&account).ok_or_else(|| {
+                BatchError::AccountsTree {
+                    account_id,
+                    detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
+                }
+            })?);
         }
         if work.force_ack
             && !row.outbound_input.as_ref().is_some_and(|input| {
@@ -2081,7 +2090,7 @@ fn apply_outbound_work(
     } else if work.force_ack {
         Some(ProposalRow {
             account_id,
-            outbound_input: Some(outbound_ack_input(&account).ok_or_else(|| {
+            outbound_input: Some(outbound_ack_retry_input(&account).ok_or_else(|| {
                 BatchError::AccountsTree {
                     account_id,
                     detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),

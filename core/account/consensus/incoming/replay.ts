@@ -223,12 +223,12 @@ const requireCurrentFrameHanko = async (
   'CURRENT_FRAME',
 );
 
-const cacheAckOnlyResponse = (
+const retainPendingResponseAck = (
   account: AccountReplica,
   pendingResponse: AccountInput,
   input: AccountInput,
   receivedHeight: number,
-): Extract<AccountInput, { kind: 'ack' }> => {
+): AccountInput => {
   const pendingAck = accountInputAck(pendingResponse);
   if (!pendingAck) {
     throw new Error(`DUPLICATE_ACK_PENDING_RESPONSE_MISSING_ACK:${receivedHeight}`);
@@ -247,7 +247,13 @@ const cacheAckOnlyResponse = (
     counterpartyEntityId: input.fromEntityId,
     response: structuredClone(response),
   };
-  return response;
+  // A successor proposal that originally carried this ACK is one indivisible
+  // canonical retry. Returning ACK-only here races the already-delivered
+  // successor: the peer can commit H+1 and then receive the newly-created H
+  // ACK as an impossible stale standalone input. Keep the ACK-only cache for
+  // a later rollback, but while the successor is pending re-emit its exact
+  // signed AccountInput bytes.
+  return structuredClone(pendingResponse);
 };
 
 const reusableCertifiedAckHanko = (account: AccountReplica): AccountDisputeHanko | undefined => {
@@ -408,7 +414,7 @@ export const buildDuplicateCommittedAckFrame = async (
         throw new Error(`DUPLICATE_ACK_CACHED_HANKO_CONFLICT:height=${receivedHeight}`);
       }
     }
-    const response = cacheAckOnlyResponse(
+    const response = retainPendingResponseAck(
       account,
       pendingResponse,
       input,

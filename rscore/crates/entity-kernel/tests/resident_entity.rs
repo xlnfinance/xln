@@ -11,9 +11,9 @@ use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountExecutionContext,
     AccountIdentity, AccountInputEnvelope, AccountReplica, AccountSettledEvent, AccountState,
     AccountTx, AccountVerdict, AckFrameOutcome, BoardDelays, CounterpartyDispute, DeliveryMode,
-    Delta, DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, IncomingAck,
-    IncomingFrame, IncomingOutcome, JEventClaimTx, JEventMetadata, JurisdictionEvent,
-    OpaqueHtlcCiphertext, ProposalOutcome, ReceiverClock, ReserveUpdatedEvent,
+    Delta, DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
+    HtlcResolveTx, IncomingAck, IncomingFrame, IncomingOutcome, JEventClaimTx, JEventMetadata,
+    JurisdictionEvent, OpaqueHtlcCiphertext, ProposalOutcome, ReceiverClock, ReserveUpdatedEvent,
     SequentialAccountEngine, SigningIdentity, TokenId, WatchSeed, apply_incoming_ack_frame,
     apply_incoming_frame, derive_signer_key, propose_account_frame,
 };
@@ -1723,4 +1723,347 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
         ResidentEntityError::Scheduler(SchedulerError::ProposerMismatch)
     ));
     assert_eq!(accounts.accounts_root(), base_root);
+}
+
+/// The Account deadline reducer is only half the protocol: authenticated
+/// secret evidence inside the 30-second reserve must cross the resident
+/// Account→Entity boundary, enter Paybook, and queue the dispute lifecycle.
+#[test]
+fn reserve_window_secret_is_consumed_by_the_resident_entity_dispute_flow() {
+    use sha3::{Digest as _, Keccak256};
+
+    let hub_identity = identity("reserve-dispute-hub");
+    let peer_identity = identity("reserve-dispute-peer");
+    let hub = entity(&hub_identity);
+    let peer = entity(&peer_identity);
+    let account_id = AccountId::from_bytes(*peer.as_bytes());
+    let transformer = [0x77_u8; 20];
+    let shared_state = account_state(&hub, &peer);
+    let mut hub_replica =
+        AccountReplica::new(hub.clone(), shared_state.clone()).expect("hub replica");
+    hub_replica.set_delta_transformer(transformer);
+    let mut peer_replica = AccountReplica::new(peer.clone(), shared_state).expect("peer replica");
+    peer_replica.set_delta_transformer(transformer);
+    let mut hub_account = AccountConsensus::new(hub_replica);
+    let mut peer_account = AccountConsensus::new(peer_replica);
+    let secret_bytes = [0x7c_u8; 32];
+    let secret = format!("0x{}", hex::encode(secret_bytes));
+    let hashlock = format!(
+        "0x{}",
+        hex::encode(<[u8; 32]>::from(Keccak256::digest(secret_bytes)))
+    );
+    let timelock = TIMESTAMP + 100_000;
+    peer_account
+        .admit_txs(
+            vec![AccountTx::HtlcLock(HtlcLockTx {
+                lock_id: hashlock.clone(),
+                hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
+                timelock: BigInt::from(timelock),
+                reveal_before_height: 200,
+                amount: BigInt::from(50),
+                token_id: TokenId::new(1).expect("token"),
+                delivery_mode: None,
+                envelope: None,
+            })],
+            "reserve dispute lock",
+        )
+        .expect("admit lock");
+    let ProposalOutcome::Proposed(lock_frame) = propose_account_frame(
+        &mut peer_account,
+        &peer_identity,
+        TIMESTAMP,
+        100,
+        &support::market(),
+    )
+    .expect("propose lock") else {
+        panic!("peer lock proposal missing")
+    };
+    let lock_frame = *lock_frame;
+    let lock_dispute = lock_frame
+        .dispute
+        .as_ref()
+        .map(|draft| CounterpartyDispute {
+            hanko: lock_frame.dispute_hanko.clone(),
+            hash: draft.hash,
+            proof_body_hash: draft.proof_body_hash,
+            nonce: draft.nonce,
+            proposer_is_left: draft.proposer_is_left,
+        });
+    let IncomingOutcome::Committed {
+        ack_hanko,
+        ack_dispute,
+        ack_dispute_hanko,
+        ..
+    } = apply_incoming_frame(
+        &mut hub_account,
+        &hub_identity,
+        &AccountInputEnvelope {
+            from_entity_id: *peer.as_bytes(),
+            to_entity_id: *hub.as_bytes(),
+            domain: domain(),
+            dispute_config: AccountDisputeConfig::new(10, 10).expect("dispute config"),
+            watch_seed: Some(
+                WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+            ),
+        },
+        ReceiverClock {
+            entity_timestamp: TIMESTAMP,
+            finalized_j_height: 100,
+        },
+        IncomingFrame {
+            frame: lock_frame.frame.clone(),
+            state_hash: lock_frame.state_hash,
+            frame_hanko: Some(lock_frame.hanko.clone()),
+            dispute: lock_dispute,
+        },
+        &support::market(),
+    )
+    .expect("hub commits lock")
+    else {
+        panic!("hub did not commit lock")
+    };
+    let ack_dispute = ack_dispute.map(|draft| CounterpartyDispute {
+        hanko: ack_dispute_hanko,
+        hash: draft.hash,
+        proof_body_hash: draft.proof_body_hash,
+        nonce: draft.nonce,
+        proposer_is_left: draft.proposer_is_left,
+    });
+    let ack = xln_rscore_engine::apply_incoming_ack(
+        &mut peer_account,
+        &AccountInputEnvelope {
+            from_entity_id: *hub.as_bytes(),
+            to_entity_id: *peer.as_bytes(),
+            domain: domain(),
+            dispute_config: AccountDisputeConfig::new(10, 10).expect("dispute config"),
+            watch_seed: Some(
+                WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+            ),
+        },
+        IncomingAck {
+            height: 1,
+            frame_hash: lock_frame.state_hash,
+            frame_hanko: Some(ack_hanko),
+            dispute: ack_dispute,
+        },
+    )
+    .expect("peer accepts lock ACK");
+    assert!(matches!(
+        ack,
+        xln_rscore_engine::AckOutcome::Committed { .. }
+    ));
+
+    peer_account
+        .admit_txs(
+            vec![AccountTx::HtlcResolve(HtlcResolveTx {
+                lock_id: hashlock.clone(),
+                outcome: HtlcResolveOutcome::Secret {
+                    secret: secret.clone(),
+                },
+            })],
+            "reserve dispute secret",
+        )
+        .expect("admit secret");
+    let ProposalOutcome::Proposed(resolve_frame) = propose_account_frame(
+        &mut peer_account,
+        &peer_identity,
+        timelock - 20_000,
+        100,
+        &support::market(),
+    )
+    .expect("propose secret") else {
+        panic!("peer secret proposal missing")
+    };
+    let resolve_frame = *resolve_frame;
+    let expected_reason = format!(
+        "HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT: lock={hashlock} reserve=30000ms localTimestamp={}",
+        timelock - 10_000,
+    );
+    let expected_frame_hash = format!("0x{}", hex::encode(resolve_frame.state_hash));
+    let expected_frame_hanko = format!("0x{}", hex::encode(&resolve_frame.hanko));
+    let resolve_dispute = resolve_frame
+        .dispute
+        .as_ref()
+        .map(|draft| CounterpartyDispute {
+            hanko: resolve_frame.dispute_hanko.clone(),
+            hash: draft.hash,
+            proof_body_hash: draft.proof_body_hash,
+            nonce: draft.nonce,
+            proposer_is_left: draft.proposer_is_left,
+        });
+    let seed = AccountSeed {
+        account_id,
+        replica: hub_account.replica().clone(),
+        consensus: Some(hub_account.consensus_snapshot()),
+    };
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x7d; 8]),
+        4,
+        0,
+        derive_signer_key(SEED, "reserve-dispute-hub").expect("hub key"),
+        "reserve-dispute-hub".to_string(),
+        support::market(),
+        vec![seed],
+    )
+    .expect("resident account");
+    let mut state = EntityStateSlice::empty(hub.to_string(), timelock - 10_000);
+    state.known_accounts.insert(peer.to_string());
+    state.crontab = Some(CrontabState::default());
+    let expected_accounts_root = accounts.accounts_root();
+    let result = apply_resident_entity_round(
+        &mut accounts,
+        state,
+        ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root,
+                clock: ReceiverClock {
+                    entity_timestamp: timelock - 10_000,
+                    finalized_j_height: 100,
+                },
+                rows: vec![AccountInputRow {
+                    operation_index: 0,
+                    account_id,
+                    genesis_policy: None,
+                    certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    local_certified_board_authority:
+                        xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    input: AccountInput {
+                        envelope: AccountInputEnvelope {
+                            from_entity_id: *peer.as_bytes(),
+                            to_entity_id: *hub.as_bytes(),
+                            domain: domain(),
+                            dispute_config: AccountDisputeConfig::new(10, 10)
+                                .expect("dispute config"),
+                            watch_seed: Some(
+                                WatchSeed::parse(&format!("0x{}", "99".repeat(32)))
+                                    .expect("watch seed"),
+                            ),
+                        },
+                        kind: AccountInputKind::AckFrame {
+                            ack: None,
+                            frame: Box::new(IncomingFrame {
+                                frame: resolve_frame.frame,
+                                state_hash: resolve_frame.state_hash,
+                                frame_hanko: Some(resolve_frame.hanko),
+                                dispute: resolve_dispute,
+                            }),
+                        },
+                    },
+                }],
+                post_accounts: false,
+            },
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: timelock - 10_000,
+            outbound_j_height: 100,
+            checkpoint_due: true,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            expected_proposer_signer_id: "reserve-dispute-hub".to_string(),
+            hub_rebalance_has_pending_work: false,
+            finalized_j_events: None,
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
+        },
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("resident dispute-required round");
+
+    assert!(matches!(
+        result.inbound.applied[0].verdict,
+        xln_rscore_batch::AccountInputVerdict::FrameDisputeRequired { .. }
+    ));
+    assert_eq!(
+        result
+            .state
+            .paybook
+            .entry(&hashlock)
+            .expect("paybook lookup")
+            .and_then(|entry| entry.secret.as_deref()),
+        Some(secret.as_str()),
+    );
+    assert_eq!(
+        result
+            .state
+            .j_batch_state
+            .as_ref()
+            .expect("dispute batch")
+            .batch
+            .dispute_starts
+            .len(),
+        1,
+    );
+    let status = result
+        .entity_frame_events
+        .iter()
+        .filter_map(|event| match event {
+            EntityFrameEvent::Status { message } => Some(message.as_str()),
+            EntityFrameEvent::Text { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let prepare_status = status
+        .iter()
+        .position(|message| message.starts_with("⚔️ Dispute started vs "))
+        .expect("prepare-dispute status");
+    let unsafe_status = status
+        .iter()
+        .position(|message| *message == "⚠️ Unsafe account frame rejected; dispute start queued")
+        .expect("unsafe-frame status");
+    assert!(
+        prepare_status < unsafe_status,
+        "TS emits PrepareDispute before its final unsafe-frame disposition",
+    );
+    assert_eq!(
+        result.routed_entity_outputs.len(),
+        1,
+        "upstream unsafe secret only persists; the sole output is JBroadcast",
+    );
+    assert_eq!(result.routed_entity_outputs[0].entity_id, hub.to_string());
+    assert!(matches!(
+        result.routed_entity_outputs[0].entity_txs.as_slice(),
+        [xln_rscore_entity_kernel::LocalEntityOutputTx::Projected(tx)]
+            if tx.kind == xln_rscore_entity_kernel::EntityTxKind::JBroadcast
+    ));
+    let checkpoint = result.outbound.checkpoint.expect("checkpoint");
+    let account = checkpoint
+        .accounts
+        .iter()
+        .find(|row| row.account_id == account_id)
+        .expect("changed account checkpoint");
+    let shadow = account
+        .header
+        .envelope
+        .field("shadow")
+        .expect("shadow evidence");
+    let CanonicalValue::Object(shadow_fields) = shadow else {
+        panic!("shadow is not an object")
+    };
+    let evidence = shadow_fields
+        .iter()
+        .find_map(|(name, value)| (name == "rejectedFrameEvidence").then_some(value))
+        .expect("rejected-frame evidence");
+    let CanonicalValue::Object(evidence_fields) = evidence else {
+        panic!("rejected-frame evidence is not an object")
+    };
+    let evidence_field = |name: &str| {
+        evidence_fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value))
+            .unwrap_or_else(|| panic!("missing rejected-frame evidence field {name}"))
+    };
+    assert_eq!(
+        evidence_field("reason"),
+        &CanonicalValue::String(expected_reason),
+    );
+    assert_eq!(
+        evidence_field("frameHash"),
+        &CanonicalValue::String(expected_frame_hash),
+    );
+    assert_eq!(
+        evidence_field("frameHanko"),
+        &CanonicalValue::String(expected_frame_hanko),
+    );
 }

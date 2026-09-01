@@ -77,6 +77,14 @@ impl fmt::Display for AckFramePhase {
 /// phase could mutate the caller's account.
 #[derive(Clone, Debug)]
 pub enum AckFrameOutcome {
+    /// The proposal half is an exact retry of the committed head. TypeScript's
+    /// replay gate returns before its ACK phase in this case: the older ACK
+    /// may already have been consumed by the original delivery. Treating that
+    /// ACK as a standalone input would reject a valid retry after the peer has
+    /// advanced, so only the authenticated duplicate proposal is reported.
+    Replay {
+        frame: Box<super::apply::IncomingOutcome>,
+    },
     Applied {
         ack: Box<super::apply::AckOutcome>,
         frame: Box<super::apply::IncomingOutcome>,

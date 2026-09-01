@@ -20,9 +20,10 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountFrame, AccountIdentity,
-    AccountReplica, AccountState, AccountTx, BoardDelays, DeliveryMode, Delta, DepositoryAddress,
-    EntityId, IncomingFrame, IncomingOutcome, MAX_POLICY_VERSION, ReceiverClock, ReserveSide,
-    SigningIdentity, TokenId, WatchSeed, apply_incoming_frame,
+    AccountReplica, AccountState, AccountTx, BoardDelays, CanonicalValue, DeliveryMode, Delta,
+    DepositoryAddress, EntityId, IncomingFrame, IncomingOutcome, MAX_POLICY_VERSION,
+    ProposalOutcome, ReceiverClock, ReserveSide, SigningIdentity, TokenId, WatchSeed,
+    apply_incoming_frame, canonical_tx_value, propose_account_frame,
 };
 
 const CLOCK: ReceiverClock = ReceiverClock {
@@ -298,6 +299,120 @@ fn rejects_out_of_range_policy_version_before_the_mempool() {
         );
         assert!(left.account.mempool().is_empty());
     }
+}
+
+#[test]
+fn lifecycle_admission_is_idempotent_across_batch_queue_and_pending_frame() {
+    let (mut left, _right) = parties();
+    let policy = rebalance_policy(7);
+
+    let batch = left
+        .account
+        .admit_txs(vec![policy.clone(), policy.clone()], "test")
+        .expect("exact lifecycle retry in one batch");
+    assert_eq!((batch.admitted, batch.duplicates), (1, 1));
+    assert_eq!(left.account.mempool(), &[policy.clone()]);
+
+    let queued = left
+        .account
+        .admit_txs(vec![policy.clone()], "test")
+        .expect("exact queued lifecycle retry");
+    assert_eq!((queued.admitted, queued.duplicates), (0, 1));
+    assert_eq!(left.account.mempool(), &[policy.clone()]);
+
+    let ProposalOutcome::Proposed(_) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose lifecycle row") else {
+        panic!("expected pending lifecycle frame");
+    };
+    assert!(left.account.mempool().is_empty());
+
+    let pending = left
+        .account
+        .admit_txs(vec![policy], "test")
+        .expect("exact pending-frame lifecycle retry");
+    assert_eq!((pending.admitted, pending.duplicates), (0, 1));
+    assert!(left.account.mempool().is_empty());
+}
+
+#[test]
+fn direct_payment_admission_preserves_identical_authorized_intents() {
+    let (mut left, right) = parties();
+    let payment = payment(&left.entity_id, &right.entity_id, 5);
+    let admission = left
+        .account
+        .admit_txs(vec![payment.clone(), payment], "test")
+        .expect("separately authorized identical payments");
+    assert_eq!((admission.admitted, admission.duplicates), (2, 0));
+    assert_eq!(left.account.mempool().len(), 2);
+}
+
+#[test]
+fn settlement_witnesses_remain_distinct_local_admission_intents() {
+    let settlement = |witness: &str| AccountTx::SettleTransition {
+        data: CanonicalValue::Object(vec![
+            (
+                "kind".to_string(),
+                CanonicalValue::String("hanko".to_string()),
+            ),
+            (
+                "postProof".to_string(),
+                CanonicalValue::Object(vec![(
+                    "hanko".to_string(),
+                    CanonicalValue::String(witness.to_string()),
+                )]),
+            ),
+            (
+                "settlementHanko".to_string(),
+                CanonicalValue::String(witness.to_string()),
+            ),
+        ]),
+    };
+    let first = settlement("0x11");
+    let second = settlement("0x22");
+    assert_eq!(
+        canonical_tx_value(&first).expect("first frame projection"),
+        canonical_tx_value(&second).expect("second frame projection"),
+        "post-commit witnesses are deliberately absent from the frame hash",
+    );
+
+    let (mut left, _right) = parties();
+    let admission = left
+        .account
+        .admit_txs(vec![first, second], "test")
+        .expect("distinct certified settlement envelopes");
+    assert_eq!((admission.admitted, admission.duplicates), (2, 0));
+    assert_eq!(left.account.mempool().len(), 2);
+}
+
+#[test]
+fn idempotent_retry_does_not_consume_mempool_capacity() {
+    let (mut left, right) = parties();
+    let policy = rebalance_policy(9);
+    let mut full = Vec::with_capacity(xln_rscore_engine::ACCOUNT_MEMPOOL_SIZE);
+    full.push(policy.clone());
+    full.extend(
+        (1..xln_rscore_engine::ACCOUNT_MEMPOOL_SIZE)
+            .map(|amount| payment(&left.entity_id, &right.entity_id, amount as i64)),
+    );
+    left.account
+        .admit_txs(full, "test")
+        .expect("fill queue to its exact bound");
+
+    let retry = left
+        .account
+        .admit_txs(vec![policy], "test")
+        .expect("duplicate is removed before the capacity check");
+    assert_eq!((retry.admitted, retry.duplicates), (0, 1));
+    assert_eq!(
+        left.account.mempool().len(),
+        xln_rscore_engine::ACCOUNT_MEMPOOL_SIZE,
+    );
 }
 
 #[test]

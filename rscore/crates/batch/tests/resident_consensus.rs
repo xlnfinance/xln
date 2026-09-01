@@ -105,6 +105,16 @@ fn outbound_request(
     }
 }
 
+fn force_ack_request(
+    owner: [u8; 32],
+    account_id: AccountId,
+    txs: Vec<AccountTx>,
+) -> EntityOutboundRequest {
+    let mut request = outbound_request(owner, account_id, txs);
+    request.proposal_work[0].2 = true;
+    request
+}
+
 fn empty_checkpoint_request(owner: [u8; 32]) -> EntityOutboundRequest {
     EntityOutboundRequest {
         owner_entity_id: owner,
@@ -166,8 +176,7 @@ fn entity_owned_rebalance_submitted_marker_sets_and_releases_one_token() {
         engine
             .entity_outbound(EntityOutboundRequest {
                 owner_entity_id: pair.payer_entity,
-                local_certified_board_authority:
-                    xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
                 timestamp: TIMESTAMP,
                 j_height: 100,
                 creates: Vec::new(),
@@ -199,14 +208,16 @@ fn entity_owned_rebalance_submitted_marker_sets_and_releases_one_token() {
 
     enter_resident(&mut engine, pair.payer_entity);
     let released = stamp(&mut engine, None);
-    assert!(released
-        .post_accounts
-        .first()
-        .expect("materialized account")
-        .header
-        .envelope
-        .rebalance_shadow_submitted_rows()
-        .is_empty());
+    assert!(
+        released
+            .post_accounts
+            .first()
+            .expect("materialized account")
+            .header
+            .envelope
+            .rebalance_shadow_submitted_rows()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1070,6 +1081,197 @@ fn create_admit_propose_and_force_ack_share_one_outbound_worker_wave() {
             expected = Some(signature);
         }
     }
+}
+
+/// At-least-once transport retries the exact pending ACK(H1)+proposal(H2).
+/// The first delivery may already have advanced the peer to H2, so reducing
+/// the retry to standalone ACK(H1) would manufacture an unmatched stale ACK.
+#[test]
+fn duplicate_predecessor_retries_pending_bundle_and_reacks_duplicate_successor() {
+    let (payer_seed, pair) = funded_seed();
+    let (left, right) = if pair.payer < pair.payee {
+        (pair.payer.clone(), pair.payee.clone())
+    } else {
+        (pair.payee.clone(), pair.payer.clone())
+    };
+    let payee_seed = AccountSeed {
+        account_id: pair.payee_account,
+        replica: AccountReplica::new(pair.payee.clone(), fixture::account_state(&left, &right))
+            .expect("payee replica"),
+        consensus: None,
+    };
+    let mut payer = resident(1, "payer-0", 0, fixture::market(), vec![payer_seed]);
+    let mut payee = resident(1, "payee-0", 0, fixture::market(), vec![payee_seed]);
+
+    enter_resident(&mut payee, pair.payee_entity);
+    let predecessor = payee
+        .entity_outbound(outbound_request(
+            pair.payee_entity,
+            pair.payee_account,
+            vec![AccountTx::DirectPayment {
+                token_id: TokenId::new(1).expect("token"),
+                amount: BigInt::from(17),
+                route: vec![pair.payer.to_string()],
+                description: None,
+                from_entity_id: pair.payee.to_string(),
+                to_entity_id: pair.payer.to_string(),
+                delivery_mode: xln_rscore_engine::DeliveryMode::Direct,
+                trusted_gateway_entity_id: None,
+            }],
+        ))
+        .expect("payee H1")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("payee H1 input");
+
+    let receive = |engine: &mut ResidentConsensusEngine, owner_entity_id, account_id, input| {
+        engine
+            .entity_inbound(EntityInboundRequest {
+                owner_entity_id,
+                expected_accounts_root: engine.accounts_root(),
+                clock: fixture::clock(TIMESTAMP),
+                rows: vec![AccountInputRow {
+                    operation_index: 0,
+                    account_id,
+                    genesis_policy: None,
+                    certified_board_authority: AccountInputBoardAuthority::Lazy,
+                    local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+                    input,
+                }],
+                post_accounts: false,
+            })
+            .expect("receive Account input")
+    };
+
+    receive(
+        &mut payer,
+        pair.payer_entity,
+        pair.payer_account,
+        predecessor.clone(),
+    );
+    let original_bundle = payer
+        .entity_outbound(force_ack_request(
+            pair.payer_entity,
+            pair.payer_account,
+            fixture::payment(&pair, 25).1,
+        ))
+        .expect("payer ACK H1 plus H2")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("pending ACK H1 plus H2");
+    assert!(matches!(
+        original_bundle.kind,
+        xln_rscore_batch::AccountInputKind::AckFrame { ack: Some(_), .. }
+    ));
+    let stale_standalone_ack = match &original_bundle.kind {
+        xln_rscore_batch::AccountInputKind::AckFrame { ack: Some(ack), .. } => {
+            xln_rscore_batch::AccountInput {
+                envelope: original_bundle.envelope.clone(),
+                kind: xln_rscore_batch::AccountInputKind::Ack(ack.clone()),
+            }
+        }
+        _ => panic!("original bundle must carry ACK H1"),
+    };
+
+    receive(
+        &mut payee,
+        pair.payee_entity,
+        pair.payee_account,
+        original_bundle.clone(),
+    );
+    let first_h2_ack = payee
+        .entity_outbound(force_ack_request(
+            pair.payee_entity,
+            pair.payee_account,
+            Vec::new(),
+        ))
+        .expect("payee commits H2")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("payee ACK H2");
+    let root_after_h2 = payee.accounts_root();
+
+    receive(
+        &mut payer,
+        pair.payer_entity,
+        pair.payer_account,
+        predecessor,
+    );
+    let retry = payer
+        .entity_outbound(force_ack_request(
+            pair.payer_entity,
+            pair.payer_account,
+            Vec::new(),
+        ))
+        .expect("retry pending bundle")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("exact pending bundle retry");
+    assert_eq!(retry.envelope, original_bundle.envelope);
+    match (&retry.kind, &original_bundle.kind) {
+        (
+            xln_rscore_batch::AccountInputKind::AckFrame {
+                ack: retry_ack,
+                frame: retry_frame,
+            },
+            xln_rscore_batch::AccountInputKind::AckFrame {
+                ack: original_ack,
+                frame: original_frame,
+            },
+        ) => {
+            assert_eq!(retry_ack, original_ack);
+            assert_eq!(retry_frame, original_frame);
+        }
+        _ => panic!("retry must preserve exact ACK+successor kind"),
+    }
+
+    let duplicate = receive(&mut payee, pair.payee_entity, pair.payee_account, retry);
+    assert!(matches!(
+        duplicate.applied[0].verdict,
+        AccountInputVerdict::FrameDuplicate { height: 2, .. }
+    ));
+    let repeated_h2_ack = payee
+        .entity_outbound(force_ack_request(
+            pair.payee_entity,
+            pair.payee_account,
+            Vec::new(),
+        ))
+        .expect("re-ACK duplicate H2")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("repeated ACK H2");
+    assert_eq!(payee.accounts_root(), root_after_h2);
+    assert_eq!(repeated_h2_ack.envelope, first_h2_ack.envelope);
+    match (&repeated_h2_ack.kind, &first_h2_ack.kind) {
+        (
+            xln_rscore_batch::AccountInputKind::Ack(repeated),
+            xln_rscore_batch::AccountInputKind::Ack(original),
+        ) => assert_eq!(repeated, original),
+        _ => panic!("duplicate H2 must re-emit ACK H2"),
+    }
+
+    let stale = receive(
+        &mut payee,
+        pair.payee_entity,
+        pair.payee_account,
+        stale_standalone_ack,
+    );
+    assert!(matches!(
+        &stale.applied[0].verdict,
+        AccountInputVerdict::AckRejected { reason }
+            if reason == "ACCOUNT_INPUT_ACK_UNMATCHED:1:none"
+    ));
+    assert_eq!(payee.accounts_root(), root_after_h2);
 }
 
 #[test]

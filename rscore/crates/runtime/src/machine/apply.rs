@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -1643,6 +1643,43 @@ struct PendingEntitySegment {
     groups: Vec<PendingEntityGroup>,
 }
 
+fn account_input_wire(work: &EntityPendingWork) -> Result<Option<Vec<u8>>, RuntimeMachineError> {
+    let EntityPendingWork::Account { projected, .. } = work else {
+        return Ok(None);
+    };
+    encode_canonical_consensus_bytes(&projected.wire_data)
+        .map(Some)
+        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))
+}
+
+pub(super) fn append_entity_pending_work(
+    mempool: &mut VecDeque<EntityPendingWork>,
+    pending: Vec<EntityPendingWork>,
+) -> Result<(), RuntimeMachineError> {
+    // Validators may forward one retained AccountInput several times before
+    // its Entity frame commits. Compare the complete canonical child input,
+    // not its claimed frame hash: a hostile body may reuse claimed scalars.
+    // The set is deliberately pending-only. After commit, an exact retry must
+    // reach Account duplicate handling so the peer can recover a lost ACK.
+    let mut seen = mempool
+        .iter()
+        .map(account_input_wire)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<BTreeSet<_>>();
+    for work in pending {
+        let Some(wire) = account_input_wire(&work)? else {
+            mempool.push_back(work);
+            continue;
+        };
+        if seen.insert(wire) {
+            mempool.push_back(work);
+        }
+    }
+    Ok(())
+}
+
 fn push_pending_entity_input(
     groups: &mut Vec<PendingEntityGroup>,
     indexes: &mut BTreeMap<RuntimeEntityKey, usize>,
@@ -2283,7 +2320,7 @@ fn apply_entity_group(
         .height
         .checked_add(1)
         .ok_or(RuntimeMachineError::EntityHeightOverflow)?;
-    slot.replica.entity_mempool.extend(group.pending);
+    append_entity_pending_work(&mut slot.replica.entity_mempool, group.pending)?;
     let mut synthetic_input = None;
     if let Some(scheduled) = group.wake.as_ref().and_then(|wake| wake.scheduled.as_ref()) {
         if !group.recorded_scheduled_wake {

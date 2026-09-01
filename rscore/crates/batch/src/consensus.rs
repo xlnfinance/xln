@@ -440,6 +440,29 @@ pub(crate) fn outbound_ack_input(account: &AccountConsensus) -> Option<AccountIn
     })
 }
 
+/// Retry the exact Account input which still owns the acknowledgement.
+///
+/// If a pending H+1 proposal originally carried ACK(H), reducing its retry to
+/// standalone ACK(H) creates new wire bytes. The peer may already have
+/// committed H+1, in which case those newly-created old bytes are necessarily
+/// unmatched. Re-carry the pending proposal until it is committed or rolled
+/// back; only the retained ACK remains after that terminal.
+pub(crate) fn outbound_ack_retry_input(account: &AccountConsensus) -> Option<AccountInput> {
+    if let Some(pending) = account.pending()
+        && let Some(bundled_ack) = pending.bundled_ack()
+    {
+        return Some(outgoing_account_input(
+            account,
+            pending.frame.clone(),
+            pending.state_hash,
+            pending.hanko.clone(),
+            pending.proposal_dispute(),
+            Some(bundled_ack),
+        ));
+    }
+    outbound_ack_input(account)
+}
+
 pub(crate) fn force_ack_directive(pure_ack: bool, verdict: &AccountInputVerdict) -> Option<bool> {
     let requires_ack = match verdict {
         AccountInputVerdict::FrameCommitted { .. } | AccountInputVerdict::FrameDuplicate { .. } => {
@@ -739,6 +762,7 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
 
 fn ack_frame_verdict(outcome: AckFrameOutcome) -> AccountInputVerdict {
     match outcome {
+        AckFrameOutcome::Replay { frame } => incoming_verdict(*frame),
         AckFrameOutcome::Applied { ack, frame } => AccountInputVerdict::AckFrameApplied {
             ack: Box::new(ack_verdict(*ack)),
             frame: Box::new(incoming_verdict(*frame)),
