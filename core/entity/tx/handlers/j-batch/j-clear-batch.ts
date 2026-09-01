@@ -18,6 +18,7 @@ import { addMessage } from '../../../frame-events';
 import { createEmptyBatch, batchOpCount } from '../../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 import { requirePersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
@@ -25,7 +26,7 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 export async function handleJClearBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_clear_batch' }>,
-  _env: EntityRuntimeContext,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { reason } = entityTx.data;
@@ -80,7 +81,13 @@ export async function handleJClearBatch(
       if (!droppedFinalizeCounterparties.has(counterpartyId.toLowerCase())) continue;
       const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
       if (!account?.activeDispute) continue;
-      account.activeDispute.finalizeQueued = false;
+      // Same typed transition the Account stage applies; a direct write here
+      // would leave the Account workers holding the pre-clear leaf.
+      applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+        type: 'replaceDisputeLifecycle',
+        status: account.status,
+        activeDispute: { ...account.activeDispute, finalizeQueued: false },
+      });
     }
   }
 

@@ -12,6 +12,7 @@ import {
 } from '../../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 import { requirePersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
@@ -80,19 +81,28 @@ const releaseR2CSubmittedLatches = (state: EntityState, batch: JBatch): void => 
 };
 
 const releaseFinalizeLatches = (
+  env: EntityRuntimeContext,
   state: EntityState,
   droppedFinalizers: Set<string>,
 ): void => {
   for (const counterpartyId of droppedFinalizers) {
     const account = getEntityAccountForWrite(state.accounts, counterpartyId);
-    if (account?.activeDispute) account.activeDispute.finalizeQueued = false;
+    if (!account?.activeDispute) continue;
+    // The latch lives in the Account envelope, so it moves through the same
+    // typed transition the Account stage applies. Writing it here would leave
+    // the Account workers holding the pre-abort leaf.
+    applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+      type: 'replaceDisputeLifecycle',
+      status: account.status,
+      activeDispute: { ...account.activeDispute, finalizeQueued: false },
+    });
   }
 };
 
 export async function handleJAbortSentBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
-  _env: EntityRuntimeContext,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const newState = prepareEntityTxState(entityState, mutableFrameState);
@@ -126,7 +136,7 @@ export async function handleJAbortSentBatch(
   delete newState.jBatchState.sentBatch;
   newState.jBatchState.status = hasJBatchWork(newState.jBatchState) ? 'accumulating' : 'empty';
 
-  releaseFinalizeLatches(newState, droppedFinalizeCounterparties);
+  releaseFinalizeLatches(env, newState, droppedFinalizeCounterparties);
 
   addMessage(
     newState,
