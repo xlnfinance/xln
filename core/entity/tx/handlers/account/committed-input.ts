@@ -1,4 +1,5 @@
 import type {
+  AccountFrame,
   AccountOutput,
   AccountInput,
   AccountReplica,
@@ -58,6 +59,8 @@ type AccountHashToSign = {
   type: 'accountFrame' | 'dispute' | 'settlement';
   context: string;
 };
+
+type HubRebalanceConfig = NonNullable<EntityState['hubRebalanceConfig']>;
 
 export type CommittedAccountEffects = {
   outputs: EntityInput[];
@@ -404,23 +407,33 @@ const applyCommittedFrameTransactions = async (
   if (unconsumed !== 0) throw new Error(`ACCOUNT_SWAP_OUTPUT_UNCONSUMED:${unconsumed}`);
 };
 
+export const buildInitialHubPolicyTargets = (
+  counterpartyId: string,
+  config: HubRebalanceConfig,
+  committedInboundGenesis: Pick<AccountFrame, 'accountTxs'>,
+): AccountTxTarget[] => {
+  const tokenIds = new Set(committedInboundGenesis.accountTxs
+    .filter(tx => tx.type === 'add_delta')
+    .map(tx => tx.data.tokenId));
+  return [...tokenIds]
+    .sort((left, right) => left - right)
+    .map(tokenId => ({
+      accountId: counterpartyId,
+      tx: buildHubRebalancePolicyTx(config, tokenId),
+    }));
+};
+
 const queueInitialHubPolicies = (
   context: SuccessfulAccountInputContext,
-  committedInboundGenesis: boolean,
+  committedInboundGenesis: AccountFrame | undefined,
 ): void => {
-  const { state, account, counterpartyId, createdAccount, effects } = context;
+  const { state, counterpartyId, createdAccount, effects } = context;
   if (!createdAccount || !committedInboundGenesis || !state.hubRebalanceConfig) return;
-  const localSide = state.entityId.toLowerCase() === account.state.leftEntity.toLowerCase()
-    ? 'left'
-    : 'right';
-  for (const tokenId of [...account.state.deltas.keys()].sort((left, right) => left - right)) {
-    const policy = account.state.rebalanceFeePolicies?.get(tokenId)?.[localSide];
-    if (policy?.policyVersion === state.hubRebalanceConfig.policyVersion) continue;
-    effects.accountTxs.push({
-      accountId: counterpartyId,
-      tx: buildHubRebalancePolicyTx(state.hubRebalanceConfig, tokenId),
-    });
-  }
+  effects.accountTxs.push(...buildInitialHubPolicyTargets(
+    counterpartyId,
+    state.hubRebalanceConfig,
+    committedInboundGenesis,
+  ));
 };
 
 const applyCommittedHtlcFollowups = (
@@ -516,7 +529,9 @@ export const applySuccessfulAccountInput = async (
   recordCommittedFrames(context);
 
   const committedFrames = result.committedFrames ?? [];
-  const committedInboundGenesis = committedFrames.some(({ frame }) => frame.height === 1);
+  const committedInboundGenesis = committedFrames.find(
+    ({ frame, committedViaNewFrame }) => frame.height === 1 && committedViaNewFrame,
+  )?.frame;
   if (createdAccount) {
     if (!committedInboundGenesis) {
       throw new Error(`ACCOUNT_GENESIS_COMMIT_REQUIRED:${counterpartyId}`);

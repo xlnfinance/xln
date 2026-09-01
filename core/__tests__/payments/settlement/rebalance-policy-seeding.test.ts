@@ -8,6 +8,7 @@ import {
   resolveJurisdictionRebalanceDefaults,
 } from '../../../account/config/defaults';
 import type { EntityState, JurisdictionConfig } from '../../../entity/types';
+import { buildInitialHubPolicyTargets } from '../../../entity/tx/handlers/account/committed-input';
 
 const baseJurisdiction: JurisdictionConfig = {
   name: 'Testnet',
@@ -81,4 +82,30 @@ test('both account creation paths seed the local rebalance policy', () => {
   // Neither side may keep a private copy of the policy maths.
   expect(openAccount).not.toContain('const resolveJurisdictionRebalanceDefaults');
   expect(inboundAccount).toContain('DEFAULT_ACCOUNT_TOKEN_IDS');
+});
+
+test('inbound H1 policies derive from committed add_delta transitions, not a stale H0 shell', () => {
+  const targets = buildInitialHubPolicyTargets(`0x${'33'.repeat(32)}`, {
+    matchingStrategy: 'amount',
+    policyVersion: 7,
+    routingFeePPM: 0,
+    baseFee: 0n,
+    rebalanceLiquidityFeeBps: 9n,
+  }, {
+    accountTxs: [
+      { type: 'add_delta', data: { tokenId: 3 } },
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: 1n } },
+      { type: 'add_delta', data: { tokenId: 1 } },
+      { type: 'add_delta', data: { tokenId: 3 } },
+      { type: 'add_delta', data: { tokenId: 2 } },
+    ],
+  });
+
+  expect(targets.map(({ tx }) => tx.type === 'rebalance_policy' && tx.data.tokenId))
+    .toEqual([1, 2, 3]);
+  expect(targets.every(({ tx }) =>
+    tx.type === 'rebalance_policy'
+    && tx.data.policyVersion === 7
+    && tx.data.liquidityFeeBps === 9n,
+  )).toBe(true);
 });
