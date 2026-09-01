@@ -354,6 +354,56 @@ const reuseLastOutboundDuplicateAck = async (
   return applyDuplicateAck(cached.response, events);
 };
 
+const reusePendingDuplicateAck = async (
+  account: AccountReplica,
+  input: AccountInput,
+  receivedHeight: number,
+  events: string[],
+  securityContext: AccountInputSecurityContext,
+): Promise<HandleAccountInputResult | null> => {
+  const pendingResponse = account.pendingAccountInput;
+  const pendingAck = pendingResponse ? accountInputAck(pendingResponse) : undefined;
+  if (!pendingResponse || !pendingAck || !isDuplicateAckTarget(
+    pendingAck.height,
+    pendingResponse.toEntityId,
+    receivedHeight,
+    input.fromEntityId,
+  )) return null;
+  await requireVerifiedDuplicateAckHanko(
+    account,
+    pendingAck,
+    account.currentFrame.stateHash,
+    receivedHeight,
+    securityContext,
+    'CACHED',
+  );
+  const cached = account.lastOutboundAckFrame;
+  const retainedAck = cached
+    && Number(cached.height) === receivedHeight
+    && cached.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
+    ? accountInputAck(cached.response)
+    : undefined;
+  if (retainedAck) {
+    if (!retainedAck.frameHanko) {
+      throw new Error(`DUPLICATE_ACK_CACHED_HANKO_MISSING:height=${receivedHeight}`);
+    }
+    if (
+      !sameAccountFrameHash(retainedAck.frameHash, pendingAck.frameHash)
+      || retainedAck.frameHanko.toLowerCase() !== pendingAck.frameHanko?.toLowerCase()
+    ) {
+      throw new Error(`DUPLICATE_ACK_CACHED_HANKO_CONFLICT:height=${receivedHeight}`);
+    }
+  }
+  const response = cacheAckOnlyResponse(account, pendingResponse, input, receivedHeight);
+  events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
+  replayLog.debug('input.duplicate_ack_cached_pending', {
+    height: receivedHeight,
+    from: shortId(input.fromEntityId),
+    currentHeight: account.currentHeight,
+  });
+  return applyDuplicateAck(response, events);
+};
+
 export const buildDuplicateCommittedAckFrame = async (
   account: AccountReplica,
   input: AccountInput,
@@ -407,53 +457,14 @@ export const buildDuplicateCommittedAckFrame = async (
       return rejectAccountInput('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID', predecessorError, events);
     }
   }
-  const pendingResponse = account.pendingAccountInput;
-  const pendingAck = pendingResponse
-    ? accountInputAck(pendingResponse)
-    : undefined;
-  if (
-    pendingResponse
-    && pendingAck
-    && isDuplicateAckTarget(pendingAck.height, pendingResponse.toEntityId, receivedHeight, input.fromEntityId)
-  ) {
-    await requireVerifiedDuplicateAckHanko(
-      account,
-      pendingAck,
-      account.currentFrame.stateHash,
-      receivedHeight,
-      securityContext,
-      'CACHED',
-    );
-    const retainedAck = account.lastOutboundAckFrame
-      && Number(account.lastOutboundAckFrame.height) === receivedHeight
-      && account.lastOutboundAckFrame.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
-      ? accountInputAck(account.lastOutboundAckFrame.response)
-      : undefined;
-    if (retainedAck) {
-      if (!retainedAck.frameHanko) {
-        throw new Error(`DUPLICATE_ACK_CACHED_HANKO_MISSING:height=${receivedHeight}`);
-      }
-      if (
-        !sameAccountFrameHash(retainedAck.frameHash, pendingAck.frameHash)
-        || retainedAck.frameHanko.toLowerCase() !== pendingAck.frameHanko?.toLowerCase()
-      ) {
-        throw new Error(`DUPLICATE_ACK_CACHED_HANKO_CONFLICT:height=${receivedHeight}`);
-      }
-    }
-    const response = cacheAckOnlyResponse(
-      account,
-      pendingResponse,
-      input,
-      receivedHeight,
-    );
-    events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
-    replayLog.debug('input.duplicate_ack_cached_pending', {
-      height: receivedHeight,
-      from: shortId(input.fromEntityId),
-      currentHeight: account.currentHeight,
-    });
-    return applyDuplicateAck(response, events);
-  }
+  const pendingAck = await reusePendingDuplicateAck(
+    account,
+    input,
+    receivedHeight,
+    events,
+    securityContext,
+  );
+  if (pendingAck) return pendingAck;
   const cachedAck = await reuseLastOutboundDuplicateAck(
     account,
     input,

@@ -25,7 +25,7 @@ export async function combineShardsWithParams(
   shards: readonly Uint8Array[],
   factor: number,
   params: BrainvaultKdfParams = {},
-): Uint8Array {
+): Promise<Uint8Array> {
   const kdf = resolveKdfParams(params);
   if (shards.length < 1) throw new Error('BRAINVAULT_SHARDS_EMPTY');
   for (const [index, shard] of shards.entries()) {

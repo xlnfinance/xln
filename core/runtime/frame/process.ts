@@ -542,6 +542,23 @@ const planAppliedRuntimeOutputs = (
   return { routing, outputPlan };
 };
 
+const buildRuntimePostCommitInput = (
+  applied: Awaited<ReturnType<typeof applyPreparedRuntimeFrame>>,
+  planned: ReturnType<typeof planAppliedRuntimeOutputs>,
+  frameAdvanced: boolean,
+  started: RuntimeFrameStart,
+) => ({
+  appliedInput: applied.appliedInput,
+  changedEntityIds: applied.changedEntityIds,
+  jOutbox: applied.jOutbox,
+  queuedJSubmitRetries: applied.queuedJSubmitRetries,
+  outputPlan: planned.outputPlan,
+  routing: planned.routing,
+  ...(frameAdvanced && started.frameStartedAt !== undefined
+    ? { frameStartedAt: started.frameStartedAt }
+    : {}),
+});
+
 const applyAndCommitRuntimeFrame = async (
   liveEnv: RuntimeReplica,
   processState: RuntimeLifecycleState,
@@ -588,7 +605,7 @@ const applyAndCommitRuntimeFrame = async (
   candidate.state.runtimeFramePhase = 'candidate.prepare';
   const applied = await applyRuntimeFrameCandidate(env, state, candidate, frame, profile, deps);
   candidate.state.runtimeFramePhase = 'outputs.plan';
-  const { routing, outputPlan } = planAppliedRuntimeOutputs(
+  const planned = planAppliedRuntimeOutputs(
     env,
     applied,
     profile,
@@ -625,17 +642,7 @@ const applyAndCommitRuntimeFrame = async (
   candidate.state.runtimeFramePhase = 'effects.post-commit';
   await runCommittedRuntimeEffects(
     commit.env,
-    {
-      appliedInput: applied.appliedInput,
-      changedEntityIds: applied.changedEntityIds,
-      jOutbox: applied.jOutbox,
-      queuedJSubmitRetries: applied.queuedJSubmitRetries,
-      outputPlan,
-      routing,
-      ...(frameAdvanced && started.frameStartedAt !== undefined
-        ? { frameStartedAt: started.frameStartedAt }
-        : {}),
-    },
+    buildRuntimePostCommitInput(applied, planned, frameAdvanced, started),
     profile,
     {
       enqueueRuntimeInputs: deps.loop.enqueueRuntimeContinuation,
