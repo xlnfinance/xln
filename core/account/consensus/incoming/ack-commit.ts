@@ -101,6 +101,45 @@ const handleRepeatedCurrentAck = async (
   return { kind: 'fallthrough' };
 };
 
+const immediatePredecessorAckError = async (
+  account: AccountReplica,
+  input: Extract<AccountInput, { kind: 'ack' }>,
+  securityContext: AccountInputSecurityContext,
+): Promise<string | undefined> => {
+  const expectedHash = account.currentFrame?.prevFrameHash;
+  if (!expectedHash || input.ack.frameHash.toLowerCase() !== expectedHash.toLowerCase()) {
+    return 'ACK immediate predecessor frameHash mismatch';
+  }
+  if (!input.ack.frameHanko) return 'Missing ACK immediate predecessor Hanko';
+  const verified = await securityContext.verifyHanko(
+    input.ack.frameHanko,
+    expectedHash,
+    input.fromEntityId,
+    securityContext.counterpartyCertifiedBoard
+      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash, allowPreviousBoard: true }
+      : { allowPreviousBoard: true },
+  );
+  return verified.valid && verified.entityId?.toLowerCase() === input.fromEntityId.toLowerCase()
+    ? undefined
+    : 'ACK immediate predecessor Hanko invalid';
+};
+
+export const handleImmediatePredecessorAck = async (
+  account: AccountReplica,
+  input: AccountInput,
+  securityContext: AccountInputSecurityContext,
+  events: string[],
+): Promise<HandleAccountInputResult | undefined> => {
+  if (input.kind !== 'ack') return undefined;
+  const currentHeight = Number(account.currentHeight ?? 0);
+  if (currentHeight <= 1 || Number(input.ack.height) !== currentHeight - 1) return undefined;
+  const error = await immediatePredecessorAckError(account, input, securityContext);
+  if (error) return rejectAccountInput('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID', error, events);
+  // The dispute witness was fully authenticated by the caller, but belongs
+  // to the predecessor and must not replace current Account dispute evidence.
+  return accountInputApplied({ events });
+};
+
 const verifyPendingAckCertificate = async (
   account: AccountReplica,
   ack: AccountAckFrame,

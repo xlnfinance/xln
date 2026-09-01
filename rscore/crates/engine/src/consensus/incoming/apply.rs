@@ -5,7 +5,7 @@
 //! checks, then replay — and the frame commits only when our own replay
 //! reproduces the exact account state root and frame hash the peer signed.
 
-use crate::consensus::frame::hash::AccountFrame;
+use crate::consensus::frame::hash::{AccountFrame, parse_root_hex};
 use crate::consensus::proposal::propose::{WindowExecution, execute_window};
 use crate::consensus::replica::AccountConsensus;
 use crate::consensus::signing::{
@@ -926,6 +926,17 @@ pub fn apply_incoming_ack_with_authority(
     incoming: IncomingAck,
     authority: Option<&CertifiedBoardAuthority>,
 ) -> Result<AckOutcome, StateError> {
+    apply_incoming_ack_with_authority_mode(account, envelope, clock, incoming, authority, true)
+}
+
+fn apply_incoming_ack_with_authority_mode(
+    account: &mut AccountConsensus,
+    envelope: &AccountInputEnvelope,
+    clock: ReceiverClock,
+    incoming: IncomingAck,
+    authority: Option<&CertifiedBoardAuthority>,
+    allow_predecessor_noop: bool,
+) -> Result<AckOutcome, StateError> {
     if let Err(error) = validate_account_input_envelope(account, envelope) {
         return Ok(AckOutcome::Rejected {
             reason: error.to_string(),
@@ -965,6 +976,33 @@ pub fn apply_incoming_ack_with_authority(
     }
 
     let current_height = account.current_height();
+    if allow_predecessor_noop && current_height.checked_sub(1) == Some(height) && height > 0 {
+        let Some(expected_hash) = account
+            .current()
+            .and_then(|current| parse_root_hex(&current.frame.prev_frame_hash))
+        else {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_PREDECESSOR_HASH_MISSING"));
+        };
+        if frame_hash != expected_hash {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_HASH_MISMATCH"));
+        }
+        let Some(frame_hanko) = frame_hanko.filter(|hanko| !hanko.is_empty()) else {
+            return Ok(ack_rejected("ACCOUNT_INPUT_ACK_HANKO_MISSING"));
+        };
+        if let Err(error) = verify_ack_hanko_with_authority(
+            &frame_hanko,
+            &frame_hash,
+            &envelope.from_entity_id,
+            authority,
+            clock.entity_timestamp,
+        ) {
+            return Ok(ack_rejected(error.to_string()));
+        }
+        // The optional predecessor dispute witness was authenticated above,
+        // but cannot replace current Account dispute evidence.
+        return Ok(AckOutcome::Accepted { height });
+    }
+
     let pending_height = account.pending().map(|pending| pending.frame.height);
     if height == current_height && height > 0 {
         let Some(current) = account.current() else {
@@ -1132,12 +1170,13 @@ pub fn apply_incoming_ack_frame_with_authority(
             frame: Box::new(outcome),
         });
     }
-    let ack = apply_incoming_ack_with_authority(
+    let ack = apply_incoming_ack_with_authority_mode(
         account,
         envelope,
         security.clock,
         ack,
         security.peer_certified_board_authority,
+        false,
     )?;
     if let AckOutcome::Rejected { reason } = &ack {
         return Ok(AckFrameOutcome::Rejected {

@@ -1704,7 +1704,15 @@ describe('audit fail-fast regressions', () => {
       : undefined).toBe(2);
     expect(proposer.currentHeight).toBe(2);
     expect(computeAccountStateRoot(proposer.state)).toBe(advancedPeerRoot);
-    const staleStandaloneAck = await applyAccountInput(
+    const advancedPeerEvidence = {
+      currentFrameHanko: proposer.currentFrameHanko,
+      counterpartyFrameHanko: proposer.counterpartyFrameHanko,
+      counterpartyDisputeHash: proposer.counterpartyDisputeHash,
+      counterpartyDisputeProofHanko: proposer.counterpartyDisputeProofHanko,
+      counterpartyDisputeProofNonce: proposer.counterpartyDisputeProofNonce,
+      pendingFrame: proposer.pendingFrame,
+    };
+    const delayedPredecessorAck = await applyAccountInput(
       createAccountConsensusContext(env),
       proposer,
       {
@@ -1716,11 +1724,35 @@ describe('audit fail-fast regressions', () => {
         ack: structuredClone(hankoAttachedFlushed.ack),
       },
     );
-    expect(staleStandaloneAck.ok).toBe(false);
-    if (staleStandaloneAck.ok || staleStandaloneAck.disposition !== 'rejected') {
-      throw new Error('STALE_STANDALONE_ACK_MUST_REJECT');
-    }
-    expect(staleStandaloneAck.rejection.code).toBe('ACCOUNT_INPUT_ACK_UNMATCHED');
+    expect(delayedPredecessorAck.ok).toBe(true);
+    expect(proposer.currentHeight).toBe(2);
+    expect(computeAccountStateRoot(proposer.state)).toBe(advancedPeerRoot);
+    expect({
+      currentFrameHanko: proposer.currentFrameHanko,
+      counterpartyFrameHanko: proposer.counterpartyFrameHanko,
+      counterpartyDisputeHash: proposer.counterpartyDisputeHash,
+      counterpartyDisputeProofHanko: proposer.counterpartyDisputeProofHanko,
+      counterpartyDisputeProofNonce: proposer.counterpartyDisputeProofNonce,
+      pendingFrame: proposer.pendingFrame,
+    }).toEqual(advancedPeerEvidence);
+    const wrongPredecessorHash = await applyAccountInput(
+      createAccountConsensusContext(env),
+      proposer,
+      {
+        kind: 'ack',
+        fromEntityId: hankoAttachedFlushed.fromEntityId,
+        toEntityId: hankoAttachedFlushed.toEntityId,
+        domain: structuredClone(hankoAttachedFlushed.domain),
+        disputeConfig: structuredClone(hankoAttachedFlushed.disputeConfig),
+        ack: {
+          ...structuredClone(hankoAttachedFlushed.ack),
+          frameHash: `0x${'aa'.repeat(32)}`,
+        },
+      },
+    );
+    expect(wrongPredecessorHash.ok).toBe(false);
+    expect(wrongPredecessorHash.ok ? undefined : wrongPredecessorHash.rejection.code)
+      .toBe('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID');
     expect(proposer.currentHeight).toBe(2);
     expect(computeAccountStateRoot(proposer.state)).toBe(advancedPeerRoot);
     const retainedAck = structuredClone(receiver.lastOutboundAckFrame?.response);

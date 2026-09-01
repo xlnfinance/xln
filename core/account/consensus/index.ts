@@ -76,7 +76,7 @@ import {
 } from './dispute/deadline-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
 import { handleBoardHankoRefresh } from './incoming/board-hanko-refresh';
-import { handlePendingAckFrame } from './incoming/ack-commit';
+import { handleImmediatePredecessorAck, handlePendingAckFrame } from './incoming/ack-commit';
 import {
   getDisputeHankoRequirementError,
   replaceLocalDisputeDraft,
@@ -1025,6 +1025,13 @@ const handleAccountAckPhase = async (
       result: rejectAccountInputEvidenceError(error, events),
     };
   }
+  const predecessor = await handleImmediatePredecessorAck(
+    account,
+    input,
+    securityContext,
+    events,
+  );
+  if (predecessor) return { kind: 'return', result: predecessor };
   const { ackHeight } = resolveAccountAckTarget(account, input, normalizedInputHeight);
   const pending = await handlePendingAckFrame(
     context,

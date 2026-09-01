@@ -3165,20 +3165,116 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
         pending_hash,
     );
 
+    let second_commit = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&second.frame, second.state_hash, second.hanko.clone()),
+        &market(),
+    )
+    .expect("commit second on receiver");
+    let IncomingOutcome::Committed {
+        ack_hanko: second_ack_hanko,
+        ..
+    } = second_commit
+    else {
+        panic!("expected second commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        2,
+        &second.state_hash,
+        &second_ack_hanko,
+        None,
+    )
+    .expect("commit second on proposer");
+
     let right_leaf = right.account.entity_account_leaf().expect("right leaf");
     let right_envelope = envelope(&right.account, left.identity.entity_id());
-    for (height, frame_hanko) in [(1, None), (2, Some(vec![0]))] {
+    let delayed_predecessor_hanko = left
+        .identity
+        .sign_frame(&first.state_hash)
+        .expect("sign predecessor ACK");
+    let delayed = apply_exact_incoming_ack(
+        &mut right.account,
+        &right_envelope,
+        IncomingAck {
+            height: 1,
+            frame_hash: first.state_hash,
+            frame_hanko: Some(delayed_predecessor_hanko.clone()),
+            dispute: None,
+        },
+    )
+    .expect("authenticated immediate predecessor ACK is an idempotent no-op");
+    assert!(matches!(
+        delayed,
+        xln_rscore_engine::AckOutcome::Accepted { height: 1 }
+    ));
+    assert_eq!(right.account.current_height(), 2);
+    assert_eq!(
+        right.account.entity_account_leaf().expect("right leaf"),
+        right_leaf
+    );
+
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 1)], "test")
+        .expect("admit third");
+    let ProposalOutcome::Proposed(third) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_002,
+        7,
+        &market(),
+    )
+    .expect("propose third") else {
+        panic!("expected third proposal");
+    };
+    let bundled = xln_rscore_engine::apply_incoming_ack_frame(
+        &mut right.account,
+        &right.identity,
+        &right_envelope,
+        CLOCK,
+        IncomingAck {
+            height: 1,
+            frame_hash: first.state_hash,
+            frame_hanko: Some(delayed_predecessor_hanko.clone()),
+            dispute: None,
+        },
+        incoming_of(&third.frame, third.state_hash, third.hanko.clone()),
+        &market(),
+    )
+    .expect("stale ACK cannot authorize a bundled successor");
+    assert!(matches!(
+        bundled,
+        AckFrameOutcome::Rejected {
+            phase: xln_rscore_engine::AckFramePhase::Ack,
+            ..
+        }
+    ));
+    assert_eq!(right.account.current_height(), 2);
+    assert_eq!(
+        right.account.entity_account_leaf().expect("right leaf"),
+        right_leaf
+    );
+
+    for (height, frame_hash, frame_hanko) in [
+        (0, first.state_hash, Some(delayed_predecessor_hanko)),
+        (1, [0x55; 32], Some(vec![0])),
+        (2, second.state_hash, Some(vec![0])),
+    ] {
         let invalid = apply_exact_incoming_ack(
             &mut right.account,
             &right_envelope,
             IncomingAck {
                 height,
-                frame_hash: [0x55; 32],
+                frame_hash,
                 frame_hanko,
                 dispute: None,
             },
         )
-        .expect("only an exact authenticated current ACK is a no-op");
+        .expect("only exact authenticated current/predecessor ACKs are no-ops");
         assert!(matches!(
             invalid,
             xln_rscore_engine::AckOutcome::Rejected { .. }
@@ -3188,7 +3284,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
         &mut right.account,
         &right_envelope,
         IncomingAck {
-            height: 3,
+            height: 4,
             frame_hash: [0x66; 32],
             frame_hanko: Some(vec![0]),
             dispute: None,
@@ -3198,7 +3294,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
     assert!(matches!(
         future,
         xln_rscore_engine::AckOutcome::Rejected { reason }
-            if reason == "ACCOUNT_INPUT_ACK_UNMATCHED:3:none"
+            if reason == "ACCOUNT_INPUT_ACK_UNMATCHED:4:none"
     ));
     assert_eq!(
         right.account.entity_account_leaf().expect("right leaf"),
