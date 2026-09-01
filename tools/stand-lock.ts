@@ -26,6 +26,11 @@ export const STAND_LOCK_DISABLE_ENV = 'XLN_STAND_LOCK_DISABLED';
 /** A held slot whose owner is gone is reclaimed; liveness is the primary test. */
 export const STAND_LOCK_STALE_MS = 30 * 60_000;
 
+export const buildStandLockChildEnv = (
+  env: NodeJS.ProcessEnv,
+  token: string,
+): NodeJS.ProcessEnv => ({ ...env, [STAND_LOCK_TOKEN_ENV]: token });
+
 export type StandLockHolder = Readonly<{
   pid: number;
   reason: string;
@@ -196,7 +201,13 @@ if (import.meta.main) {
       waitMs: Number(flag('wait-ms') || '1800000'),
     });
     process.on('exit', () => releaseStandLock(grant));
-    const result = spawnSync(child[0]!, child.slice(1), { stdio: 'inherit' });
+    const result = spawnSync(child[0]!, child.slice(1), {
+      stdio: 'inherit',
+      // Wired stands treat the token as proof that this child already owns
+      // the machine slot. Without it, `stand:run` deadlocks when the wrapped
+      // command reaches an auto-wired local-prod/e2e entrypoint.
+      env: buildStandLockChildEnv(process.env, grant.token),
+    });
     releaseStandLock(grant);
     process.exit(result.status ?? 1);
   } else if (command === 'release') {

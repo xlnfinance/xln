@@ -5,7 +5,9 @@ import { join } from 'node:path';
 
 import {
   STAND_LOCK_SLOTS_ENV,
+  STAND_LOCK_TOKEN_ENV,
   acquireStandLock,
+  buildStandLockChildEnv,
   readStandLockHolder,
   reapStandLockSlots,
   releaseStandLock,
@@ -35,6 +37,12 @@ describe('stand lock', () => {
     expect(standLockCapacity({ [STAND_LOCK_SLOTS_ENV]: '2' })).toBe(2);
     expect(() => standLockCapacity({ [STAND_LOCK_SLOTS_ENV]: '0' })).toThrow('STAND_LOCK_SLOTS_INVALID');
     expect(() => standLockCapacity({ [STAND_LOCK_SLOTS_ENV]: '9' })).toThrow('STAND_LOCK_SLOTS_INVALID');
+  });
+
+  test('manual wrapper passes its grant to auto-wired child stands', () => {
+    const inherited = buildStandLockChildEnv({ KEEP: 'yes' }, 'owned-token');
+    expect(inherited['KEEP']).toBe('yes');
+    expect(inherited[STAND_LOCK_TOKEN_ENV]).toBe('owned-token');
   });
 
   test('a second acquisition is refused while the slot is held, and allowed after release', async () => {
