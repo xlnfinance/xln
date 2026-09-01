@@ -386,17 +386,20 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/runtime-client/src/console-panel-view.ts',
       'frontend/packages/runtime-client/src/runtime-io-panel-view.ts',
       'frontend/packages/runtime-client/src/solvency-panel-view.ts',
+      'frontend/packages/runtime-client/src/runtime-diagnostics-panel-view.ts',
     ],
     consumers: [
       'frontend/src/lib/view/panels/ConsolePanel.svelte',
       'frontend/src/lib/view/panels/RuntimeIOPanel.svelte',
       'frontend/src/lib/view/panels/solvency/solvency-panel-view.ts',
       'frontend/src/lib/view/panels/solvency/SolvencyPanel.svelte',
+      'frontend/src/lib/view/panels/RuntimeDiagnosticsPanel.svelte',
     ],
     evidence: [
       'tests/frontend/runtime/console-panel-view.test.ts',
       'tests/frontend/runtime/runtime-io-panel-view.test.ts',
       'tests/frontend/runtime/solvency-panel-view.test.ts',
+      'tests/frontend/runtime/runtime-diagnostics-panel-view.test.ts',
     ],
   },
   {

@@ -6,6 +6,15 @@
   import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { activeRuntime } from '$lib/stores/vault/vaultStore';
+  import {
+    filterActiveRuntimeDiagnosticsIncidents,
+    formatRuntimeDiagnosticsTimestamp,
+    getRuntimeDiagnosticsAdapterLabel,
+    getRuntimeDiagnosticsErrorMessage,
+    getRuntimeDiagnosticsFrameLabel,
+    sortRuntimeDiagnosticsIncidents,
+    visibleRuntimeDiagnosticsIncidents,
+  } from '../../../../packages/runtime-client/src/runtime-diagnostics-panel-view';
 
   let head: StorageHead | null = null;
   let timeline: RuntimeAdapterTimelineIndexPage | null = null;
@@ -16,10 +25,10 @@
   let securityIncidents: RuntimeSecurityIncident[] = [];
   let activeSecurityIncidents: RuntimeSecurityIncident[] = [];
 
-  $: securityIncidents = Array.from(
+  $: securityIncidents = sortRuntimeDiagnosticsIncidents(
     $activeRuntime?.env?.infrastructure?.securityIncidents?.values() ?? [],
-  ).sort((left, right) => right.lastSeenAt - left.lastSeenAt || left.id.localeCompare(right.id));
-  $: activeSecurityIncidents = securityIncidents.filter((incident) => incident.status === 'active');
+  );
+  $: activeSecurityIncidents = filterActiveRuntimeDiagnosticsIncidents(securityIncidents);
 
   async function refresh(): Promise<void> {
     loading = true;
@@ -31,7 +40,7 @@
         runtimeQueryClient.readTimelineIndex({ limit: 40, scanLimit: 160 }),
       ]);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = getRuntimeDiagnosticsErrorMessage(cause);
     } finally {
       loading = false;
     }
@@ -45,7 +54,7 @@
 	  if (!adapter || adapter.status !== 'connected') throw new Error('Runtime adapter is not connected.');
 	  verification = await adapter.control('verify-chain');
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = getRuntimeDiagnosticsErrorMessage(cause);
       verification = null;
     } finally {
       verifying = false;
@@ -59,7 +68,7 @@
   <header><div><small>Storage integrity</small><h2>Runtime Diagnostics</h2></div><div><button disabled={loading} on:click={() => void refresh()}>Refresh</button><button disabled={verifying} on:click={() => void verify()}>{verifying ? 'Verifying…' : 'Verify chain'}</button></div></header>
   {#if error}<div class="error">{error}</div>{/if}
   <div class="metrics">
-    <article><small>Adapter</small><strong>{$runtimeControllerHandle.mode === 'embedded' ? 'browser' : 'remote'}</strong></article>
+    <article><small>Adapter</small><strong>{getRuntimeDiagnosticsAdapterLabel($runtimeControllerHandle.mode)}</strong></article>
     <article><small>Live height</small><strong>{$runtimeControllerHandle.height}</strong></article>
     <article><small>Persisted</small><strong>{head?.latestHeight ?? '—'}</strong></article>
     <article><small>Security</small><strong class:critical={activeSecurityIncidents.length > 0}>{activeSecurityIncidents.length > 0 ? `${activeSecurityIncidents.length} active` : 'clear'}</strong></article>
@@ -67,18 +76,18 @@
   <section data-testid="runtime-security-status">
     <h3>Security status</h3>
     <div class="incidents">
-      {#each securityIncidents.slice(0, 20) as incident}
+      {#each visibleRuntimeDiagnosticsIncidents(securityIncidents) as incident}
         <article class:active={incident.status === 'active'} data-testid="runtime-security-incident">
           <div><strong>{incident.code}</strong><span>{incident.status}</span></div>
           <p>{incident.summary}</p>
-          <small>{incident.entityId || 'runtime'} · seen {incident.occurrences}× · {new Date(incident.lastSeenAt).toISOString()}</small>
+          <small>{incident.entityId || 'runtime'} · seen {incident.occurrences}× · {formatRuntimeDiagnosticsTimestamp(incident.lastSeenAt)}</small>
         </article>
       {:else}
         <div class="empty" data-testid="runtime-security-clear">No active security incidents.</div>
       {/each}
     </div>
   </section>
-  <section><h3>Recent timeline index</h3><div class="frames">{#each timeline?.entries ?? [] as frame}<article><code>{frame.runtimeId}</code><span>h{frame.height}</span><span>{new Date(frame.timestamp).toISOString()}</span><span>{frame.graphChanged ? 'graph' : frame.materialized ? 'snapshot' : 'frame'}</span></article>{:else}<div class="empty">No persisted frame index.</div>{/each}</div></section>
+  <section><h3>Recent timeline index</h3><div class="frames">{#each timeline?.entries ?? [] as frame}<article><code>{frame.runtimeId}</code><span>h{frame.height}</span><span>{formatRuntimeDiagnosticsTimestamp(frame.timestamp)}</span><span>{getRuntimeDiagnosticsFrameLabel(frame)}</span></article>{:else}<div class="empty">No persisted frame index.</div>{/each}</div></section>
   {#if verification}<details open><summary>Verification result</summary><pre>{safeStringify(verification, 2)}</pre></details>{/if}
 </section>
 
