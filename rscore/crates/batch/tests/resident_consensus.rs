@@ -1084,8 +1084,9 @@ fn create_admit_propose_and_force_ack_share_one_outbound_worker_wave() {
 }
 
 /// At-least-once transport retries the exact pending ACK(H1)+proposal(H2).
-/// The first delivery may already have advanced the peer to H2, so reducing
-/// the retry to standalone ACK(H1) would manufacture an unmatched stale ACK.
+/// The first delivery may already have advanced the peer to H2. A delayed,
+/// authenticated standalone ACK(H1) is therefore an exact predecessor no-op;
+/// the pending ACK(H1)+proposal(H2) retry must still preserve its full bundle.
 #[test]
 fn duplicate_predecessor_retries_pending_bundle_and_reacks_duplicate_successor() {
     let (payer_seed, pair) = funded_seed();
@@ -1260,16 +1261,15 @@ fn duplicate_predecessor_retries_pending_bundle_and_reacks_duplicate_successor()
         _ => panic!("duplicate H2 must re-emit ACK H2"),
     }
 
-    let stale = receive(
+    let delayed_predecessor = receive(
         &mut payee,
         pair.payee_entity,
         pair.payee_account,
         stale_standalone_ack,
     );
     assert!(matches!(
-        &stale.applied[0].verdict,
-        AccountInputVerdict::AckRejected { reason }
-            if reason == "ACCOUNT_INPUT_ACK_UNMATCHED:1:none"
+        delayed_predecessor.applied[0].verdict,
+        AccountInputVerdict::AckAccepted { height: 1 }
     ));
     assert_eq!(payee.accounts_root(), root_after_h2);
 }
