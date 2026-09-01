@@ -394,6 +394,7 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/runtime-client/src/architect-panel-view.ts',
       'frontend/packages/runtime-client/src/graph3d-entity-panel-view.ts',
       'frontend/packages/runtime-client/src/graph3d-viewport-view.ts',
+      'frontend/packages/runtime-client/src/graph3d-scene-input.ts',
     ],
     consumers: [
       'frontend/src/lib/view/panels/ConsolePanel.svelte',
@@ -426,6 +427,7 @@ export const PLATFORM_INVENTORY = [
       'tests/frontend/runtime/architect-panel-view.test.ts',
       'tests/frontend/graph/graph3d-entity-panel-view.test.ts',
       'tests/frontend/graph/graph3d-viewport-view.test.ts',
+      'tests/frontend/graph/graph3d-scene-input.test.ts',
     ],
   },
   {
