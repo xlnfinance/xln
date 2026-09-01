@@ -200,6 +200,7 @@ const realWorkerClaim = async (workers: number) => {
     frameId: `real-jclaim-${workers}`,
     timestamp: 1_000,
     jHeight: 0,
+    envelopeUpdates: [],
     txs: [],
     proposals: [],
   });

@@ -112,6 +112,7 @@ describe('TS Account worker genuine HTLC proposal rejection', () => {
         finalizedJHeight: 100,
         selectionIsWholeMempool: true,
       }],
+      envelopeUpdates: [],
       materializeAccountIds: [],
     } as never);
     expect(result.generatedAdmissions).toHaveLength(1);

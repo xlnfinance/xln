@@ -108,8 +108,10 @@ export const canonicalizeProofBodyStruct = (
   }
   return {
     watchSeed: requireBytesLike(proofBody.watchSeed, `${source}.watchSeed`),
-    leftResponseSeconds,
-    rightResponseSeconds,
+    // ABI accepts bigint, but the canonical in-memory/WAL type is u32/number.
+    // Keeping bigint here makes a persisted graph decode to different bytes.
+    leftResponseSeconds: Number(leftResponseSeconds),
+    rightResponseSeconds: Number(rightResponseSeconds),
     offdeltas: proofBody.offdeltas.map(
       (entry, index) => toBigIntStrict(entry, `${source}.offdeltas[${index}]`),
     ),

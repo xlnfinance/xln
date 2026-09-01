@@ -297,6 +297,7 @@ const runCoordinator = async (
     frameId: 'parity-frame-1',
     timestamp: 1_000,
     jHeight: 0,
+    envelopeUpdates: [],
     txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
     proposals: ids.map(accountId => ({ accountId })),
   });
@@ -353,6 +354,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       frameId: 'fail-stop-frame',
       timestamp: 1_000,
       jHeight: 0,
+      envelopeUpdates: [],
       txs: [
         { accountId: validId, txs: [paymentTx(validId, 1n)] },
         { accountId: missingId, txs: [paymentTx(missingId, 1n)] },
@@ -421,6 +423,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       frameId: 'certified-board-frame',
       timestamp: 1_000,
       jHeight: 0,
+      envelopeUpdates: [],
       txs: [],
       proposals: [],
     });
@@ -513,6 +516,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'hanko-frame', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [{ accountId, txs: [paymentTx(accountId, 1n)] }],
       proposals: [{ accountId }],
     });
@@ -560,6 +564,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.proposeAccountFrames({
       frameId: 'duplicate-frame-1', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [], proposals: [],
     });
     const firstRoot = coordinator.accountsRoot;
@@ -570,6 +575,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     await coordinator.proposeAccountFrames({
       frameId: 'duplicate-frame-2', timestamp: 2_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [], proposals: [],
     });
     expect(first.effects).toHaveLength(1);
@@ -600,6 +606,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'genesis-frame', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [], proposals: [],
     });
     const sequential = parityAccount(accountId, true);
@@ -637,6 +644,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const abandoned = await coordinator.proposeAccountFrames({
       frameId: 'retry-attempt-1', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [{ accountId, txs: [paymentTx(accountId, 1n)] }],
       proposals: [{ accountId }],
     });
@@ -648,6 +656,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const retry = await coordinator.proposeAccountFrames({
       frameId: 'retry-attempt-2', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [{ accountId, txs: [paymentTx(accountId, 2n)] }],
       proposals: [{ accountId }],
     });
@@ -686,6 +695,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     });
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'local-genesis', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
       txs: [{ accountId, txs, initialAccount: projectPortableAccountDoc(shell) }],
       proposals: [{ accountId }],
     });
@@ -721,6 +731,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       frameId: 'parity-checkpoint-1',
       timestamp: 1_000,
       jHeight: 0,
+      envelopeUpdates: [],
       txs: ids.map((accountId, order) => ({ accountId, txs: txsByAccount[order] ?? [] })),
       proposals: ids.map(accountId => ({ accountId })),
     });
@@ -737,6 +748,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       frameId: 'parity-checkpoint-2',
       timestamp: 2_000,
       jHeight: 0,
+      envelopeUpdates: [],
       txs: [],
       proposals: [],
     });
