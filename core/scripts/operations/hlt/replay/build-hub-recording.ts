@@ -64,6 +64,7 @@ const {
   assertCompleteHltAuthorityEvidence,
   assertCanonicalMixedCoverage,
 } = await import('./authority-evidence');
+const { buildHltAuthoritySourceBinding } = await import('./source-binding');
 const meshRootSeed = readFileSync(join(workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
 if (!meshRootSeed) throw new Error('HLT_HUB_RECORDING_MESH_ROOT_SEED_MISSING');
 const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
@@ -85,6 +86,7 @@ env.runtimeId = runtimeId;
 env.dbNamespace = runtimeId;
 env.quietRuntimeLogs = true;
 
+let databasesClosed = false;
 try {
   const targetHeight = await getPersistedLatestHeight(env);
   if (targetHeight <= baseHeight) {
@@ -126,11 +128,18 @@ try {
     assertCompleteHltAuthorityEvidence(authorityEvidence);
     assertCanonicalMixedCoverage(frames);
   }
+  // Bind only a closed WAL. Opening LevelDB may update its LOG/LOCK files;
+  // hashing before close would bind bytes that no replay can later observe.
+  await closeRuntimeDb(env);
+  await closeInfraDb(env);
+  databasesClosed = true;
+  const walPath = join(workDir, 'prod-mesh', 'h1', `${runtimeId}-wal`);
+  const binding = await buildHltAuthoritySourceBinding(walPath, runtimeSeed);
   const totals = summarizeHltHubFrames(frames);
   const artifact: HltHubRecordingArtifact = {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: frames.at(-1)!.timestamp,
-    source: { engine: 'ts', workDir, users, workload },
+    source: { engine: 'ts', workDir, users, workload, binding },
     checkpoint,
     tail,
     authorityEvidence,
@@ -144,6 +153,8 @@ try {
     `runtimeRoots=${authorityEvidence.expectations.runtimeFrames.length}`,
   );
 } finally {
-  await closeRuntimeDb(env);
-  await closeInfraDb(env);
+  if (!databasesClosed) {
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  }
 }

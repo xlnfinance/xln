@@ -84,6 +84,8 @@ test('authority evidence captures materialized H1 before MM bootstrap', () => {
     XLN_HLT_AUTHORITY_EVIDENCE: '1',
     XLN_HLT_ENGINE: 'ts',
     XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: '/tmp/authority-base.json',
+    XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: '4',
+    XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME: '8',
   };
   const h1 = buildHubChildProcessEnv({ ...base, hubName: 'H1', sourceEnv });
   const h2 = buildHubChildProcessEnv({ ...base, hubName: 'H2', sourceEnv });
@@ -91,6 +93,8 @@ test('authority evidence captures materialized H1 before MM bootstrap', () => {
   expect(h1['XLN_HLT_AUTHORITY_EVIDENCE']).toBe('1');
   expect(h1['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH']).toBe('/tmp/authority-base.json');
   expect(h1['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES']).toBe('1');
+  expect(h1['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME']).toBe('4');
+  expect(h1['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME']).toBe('8');
   expect(h2['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES']).toBeUndefined();
   expect(h2['XLN_HLT_AUTHORITY_EVIDENCE']).toBeUndefined();
   expect(h2['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH']).toBeUndefined();

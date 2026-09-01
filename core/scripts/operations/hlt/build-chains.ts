@@ -12,6 +12,7 @@ import {
   parseHltEngineSelection,
 } from './rust/rust-h1';
 import { hltLanePortsPerSlot } from './lanes/lane-port-capacity';
+import { hltLiveReportPath } from './live-report-path';
 import { runParityGatedHltChild } from './controller/live-economic-controller';
 import {
   AUTHORITY_EVIDENCE_BUILD_BUDGET_MS,
@@ -28,6 +29,12 @@ if (!['payments', 'same', 'mixed', 'cross'].includes(workload)) {
   throw new Error(`HLT_BUILD_WORKLOAD_INVALID:${workload}`);
 }
 const authorityEvidence = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1';
+const authorityDeadline = performance.now() + AUTHORITY_EVIDENCE_RECORD_BUDGET_MS;
+const remainingAuthorityBudget = (phase: string): number => {
+  const remaining = Math.floor(authorityDeadline - performance.now());
+  if (remaining <= 0) throw new Error(`HLT_AUTHORITY_EVIDENCE_BUDGET_EXHAUSTED:${phase}`);
+  return remaining;
+};
 if (authorityEvidence && (workload !== 'mixed' || process.env['XLN_MM_CROSS_J'] !== '0')) {
   throw new Error('HLT_AUTHORITY_EVIDENCE_REQUIRES_MIXED_SAME_J');
 }
@@ -97,17 +104,15 @@ const smokeStatus = economicGateDir
       cwd: process.cwd(),
       env: buildEnv,
       stdio: 'inherit',
-      timeout: authorityEvidence ? AUTHORITY_EVIDENCE_RECORD_BUDGET_MS : 30_000,
+      timeout: authorityEvidence ? remainingAuthorityBudget('live') : 30_000,
     }).status;
 if (smokeStatus !== 0) throw new Error(`HLT_BUILD_SMOKE_FAILED:${String(smokeStatus)}`);
 
-const reportPath = selection.engine === 'rust'
-  ? join(workDir, 'hlt-rust-h1-live.json')
-  : workload === 'payments'
-  ? join(workDir, 'hlt-payment-load-report.json')
-  : workload === 'cross'
-    ? join(workDir, 'production-cross-swap-load-report.json')
-    : join(workDir, 'production-swap-load-report.json');
+const reportPath = hltLiveReportPath({
+  workDir,
+  engine: selection.engine,
+  workload,
+});
 if (!existsSync(reportPath)) throw new Error(`HLT_BUILD_WORKLOAD_REPORT_MISSING:${reportPath}`);
 if (selection.engine === 'ts' && authorityEvidence && !existsSync(`${snapshotPath}.concrete-checkpoint.json`)) {
   throw new Error(`HLT_BUILD_CONCRETE_CHECKPOINT_MISSING:${snapshotPath}.concrete-checkpoint.json`);
@@ -136,7 +141,12 @@ if (selection.engine === 'rust') {
       '--users', String(users),
       '--workload', workload,
       '--require-complete-authority-evidence',
-    ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit', timeout: AUTHORITY_EVIDENCE_BUILD_BUDGET_MS });
+    ], {
+      cwd: process.cwd(),
+      env: buildEnv,
+      stdio: 'inherit',
+      timeout: Math.min(AUTHORITY_EVIDENCE_BUILD_BUDGET_MS, remainingAuthorityBudget('artifact')),
+    });
     if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
     console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
   }

@@ -282,6 +282,7 @@ const frameProfileEnabled = process.argv.includes('--frame-profile');
 // journal, post-state). The report records verified=false.
 const recoveryVerifyEnabled = !process.argv.includes('--no-verify');
 const completeAuthorityEvidenceRequired = process.argv.includes('--require-complete-authority-evidence');
+const parityEvidence = process.argv.includes('--parity-evidence');
 const rustAccountAuthorityRequired = process.argv.includes('--require-rust-account-authority');
 const tsAccountWorkersRaw = optionalArgument('ts-account-workers');
 const tsAccountWorkers = tsAccountWorkersRaw === null ? null : Number(tsAccountWorkersRaw);
@@ -290,6 +291,9 @@ if (tsAccountWorkers !== null && (
 )) throw new Error(`HLT_REPLAY_TS_ACCOUNT_WORKERS_INVALID:${tsAccountWorkersRaw}`);
 if (tsAccountWorkers !== null && rustAccountAuthorityRequired) {
   throw new Error('HLT_REPLAY_ACCOUNT_AUTHORITY_EXCLUSIVE');
+}
+if (parityEvidence && (mode !== 'max' || !completeAuthorityEvidenceRequired)) {
+  throw new Error('HLT_REPLAY_PARITY_EVIDENCE_REQUIRES_MAX_COMPLETE');
 }
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
@@ -556,21 +560,30 @@ const trials: ReplayTrial[] = [];
 for (const rate of rates) {
   const trial = await runTrial(rate);
   trials.push(trial);
-  console.log(
-    `HLT_REPLAY_EQUIVALENT offeredEntityInputsPerSecond=${trial.offeredEntityInputsPerSecond ?? 'max'} ` +
-    `frameVerified=${trial.frameVerified} ` +
-    `payments=${trial.deliveredPayments}/${trial.replayPaymentsPerSecond.toFixed(2)}pay/s ` +
-    `swaps=${trial.matchedEconomicSwaps}/${trial.replaySwapsPerSecond.toFixed(2)}swap/s ` +
-    `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
-    `mainThreadBusy=${(trial.mainThreadBusyFraction * 100).toFixed(1)}%` +
-    `(idleBaseline=${(trial.mainThreadIdleBaselineFraction * 100).toFixed(1)}%) ` +
-    `accountInputsObserved=${trial.accountInputsObservedPerSecond.toFixed(1)}/s${
-      Object.entries(trial.accountInputKinds)
-        .filter(([kind]) => kind.startsWith('accountInput:'))
-        .map(([kind, count]) => ` ${kind.slice('accountInput:'.length)}=${String(count)}`)
-        .join('')} ` +
-    `height=${trial.finalHeight} pendingOutbox=${trial.finalPendingOutbox}`,
-  );
+  if (parityEvidence) {
+    console.log(
+      `HLT_REPLAY_PARITY_EQUIVALENT frameVerified=${trial.frameVerified} ` +
+      `frames=${trial.frames} entityInputs=${trial.runtimeEntityInputs} ` +
+      `payments=${trial.deliveredPayments} swaps=${trial.matchedEconomicSwaps} ` +
+      `height=${trial.finalHeight} pendingOutbox=${trial.finalPendingOutbox}`,
+    );
+  } else {
+    console.log(
+      `HLT_REPLAY_EQUIVALENT offeredEntityInputsPerSecond=${trial.offeredEntityInputsPerSecond ?? 'max'} ` +
+      `frameVerified=${trial.frameVerified} ` +
+      `payments=${trial.deliveredPayments}/${trial.replayPaymentsPerSecond.toFixed(2)}pay/s ` +
+      `swaps=${trial.matchedEconomicSwaps}/${trial.replaySwapsPerSecond.toFixed(2)}swap/s ` +
+      `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
+      `mainThreadBusy=${(trial.mainThreadBusyFraction * 100).toFixed(1)}%` +
+      `(idleBaseline=${(trial.mainThreadIdleBaselineFraction * 100).toFixed(1)}%) ` +
+      `accountInputsObserved=${trial.accountInputsObservedPerSecond.toFixed(1)}/s${
+        Object.entries(trial.accountInputKinds)
+          .filter(([kind]) => kind.startsWith('accountInput:'))
+          .map(([kind, count]) => ` ${kind.slice('accountInput:'.length)}=${String(count)}`)
+          .join('')} ` +
+      `height=${trial.finalHeight} pendingOutbox=${trial.finalPendingOutbox}`,
+    );
+  }
 }
 dumpRuntimeSamplingProfile('complete');
 
@@ -587,6 +600,18 @@ if (BOUNDARY_AUDIT_ENABLED) {
   }
 }
 
+const parityTrial = (trial: ReplayTrial) => ({
+  frames: trial.frames,
+  runtimeEntityInputs: trial.runtimeEntityInputs,
+  outboxEnvelopes: trial.outboxEnvelopes,
+  deliveredPayments: trial.deliveredPayments,
+  matchedEconomicSwaps: trial.matchedEconomicSwaps,
+  finalHeight: trial.finalHeight,
+  finalPendingOutbox: trial.finalPendingOutbox,
+  equivalent: trial.equivalent,
+  frameVerified: trial.frameVerified,
+});
+
 const report = {
   schema: 'xln-hlt-hub-replay-report-v1',
   createdAt: Date.now(),
@@ -600,7 +625,7 @@ const report = {
   ...(artifact.source.workload === 'payments'
     ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }
     : {}),
-  trials,
+  trials: parityEvidence ? trials.map(parityTrial) : trials,
 };
 writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
 console.log(`HLT_REPLAY_REPORT path=${outputPath}`);

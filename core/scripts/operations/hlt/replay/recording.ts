@@ -23,6 +23,10 @@ import {
   buildHltAuthorityEvidence,
   type HltAuthorityEvidence,
 } from './authority-evidence';
+import {
+  HLT_AUTHORITY_SOURCE_BINDING_ALGORITHM,
+  type HltAuthoritySourceBinding,
+} from './source-binding';
 
 export const HLT_HUB_RECORDING_SCHEMA = 'xln-hlt-runtime-wal-recording-v1' as const;
 
@@ -40,6 +44,7 @@ export type HltHubRecordingArtifact = Readonly<{
     workDir: string;
     users: number;
     workload: string;
+    binding: HltAuthoritySourceBinding;
   }>;
   checkpoint: ConcreteCheckpointSourceExport;
   tail: RuntimeRecoveryBundleV1;
@@ -116,6 +121,31 @@ const decodeCheckpoint = (value: unknown): ConcreteCheckpointSourceExport => {
   };
 };
 
+const decodeSourceBinding = (value: unknown): HltAuthoritySourceBinding => {
+  const binding = requireBoundaryRecord(value, 'HLT_HUB_RECORDING_SOURCE_BINDING_INVALID');
+  requireExactBoundaryKeys(
+    binding,
+    ['algorithm', 'runtimeSeedHash', 'walTreeHash'],
+    [],
+    'HLT_HUB_RECORDING_SOURCE_BINDING',
+  );
+  const hash = (field: 'runtimeSeedHash' | 'walTreeHash'): string => {
+    const raw = binding[field];
+    if (typeof raw !== 'string' || !/^0x[0-9a-f]{64}$/.test(raw)) {
+      throw new Error(`HLT_HUB_RECORDING_SOURCE_BINDING_HASH:${field}`);
+    }
+    return raw;
+  };
+  if (binding['algorithm'] !== HLT_AUTHORITY_SOURCE_BINDING_ALGORITHM) {
+    throw new Error(`HLT_HUB_RECORDING_SOURCE_BINDING_ALGORITHM:${String(binding['algorithm'])}`);
+  }
+  return {
+    algorithm: HLT_AUTHORITY_SOURCE_BINDING_ALGORITHM,
+    runtimeSeedHash: hash('runtimeSeedHash'),
+    walTreeHash: hash('walTreeHash'),
+  };
+};
+
 export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   const root = requireBoundaryRecord(value, 'HLT_HUB_RECORDING_INVALID');
   requireExactBoundaryKeys(
@@ -128,7 +158,12 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   );
   if (root['schema'] !== HLT_HUB_RECORDING_SCHEMA) throw new Error('HLT_HUB_RECORDING_SCHEMA_INVALID');
   const source = requireBoundaryRecord(root['source'], 'HLT_HUB_RECORDING_SOURCE_INVALID');
-  requireExactBoundaryKeys(source, ['engine', 'workDir', 'users', 'workload'], [], 'HLT_HUB_RECORDING_SOURCE');
+  requireExactBoundaryKeys(
+    source,
+    ['engine', 'workDir', 'users', 'workload', 'binding'],
+    [],
+    'HLT_HUB_RECORDING_SOURCE',
+  );
   const checkpoint = decodeCheckpoint(root['checkpoint']);
   const tail = validateRuntimeRecoveryBundle(root['tail']);
   if (tail.kind !== 'journal_tail' || tail.baseRuntimeHeight !== checkpoint.height ||
@@ -148,6 +183,7 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
       workDir: String(source['workDir'] || ''),
       users: Number(source['users']),
       workload: String(source['workload'] || ''),
+      binding: decodeSourceBinding(source['binding']),
     },
     checkpoint,
     tail,

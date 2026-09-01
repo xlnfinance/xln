@@ -24,6 +24,11 @@ const HUB_PASSTHROUGH_ENV_KEYS = [
   'XLN_RSCORE_PROFILE_PROJECTION',
   'XLN_RUNTIME_OP_COUNTERS',
   'XLN_RUNTIME_OP_COUNTERS_DIR',
+  // Canonical Runtime intake caps. HLT may use these to preserve production
+  // ordering while recording a deep economic WAL; the Hub child, not the
+  // outer orchestrator, owns frame selection.
+  'XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME',
+  'XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME',
   'XLN_ENTITY_PROPOSAL_TRACE',
   'XLN_HEAVY_LOGS',
   'XLN_LOG_FORMAT',

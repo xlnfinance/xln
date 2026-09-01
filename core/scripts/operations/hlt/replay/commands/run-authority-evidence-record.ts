@@ -17,11 +17,14 @@ const env: NodeJS.ProcessEnv = {
   XLN_LOCAL_PROD_SMOKE_DIR: workDir,
   XLN_HLT_RECORDING_OUTPUT: output,
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'mixed',
-  // Overridable: the ≥1000-RuntimeFrame artifact gate needs a longer,
-  // undersaturated run (fewer users, more rounds) than the default smoke.
-  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '1000',
-  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '1',
-  XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '5',
+  // Twenty bounded rounds on 100 real sovereign Runtimes minimize setup while
+  // the H1 frame cap targets the >=1,000 economic RuntimeFrame gate. This is
+  // parity evidence only; the workload deliberately emits no TPS verdict.
+  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '100',
+  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '20',
+  XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '1',
+  XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
+    process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '4',
   XLN_HLT_MIX: '1:1',
   XLN_HLT_HUBS: 'H1',
   XLN_HLT_MARKET_MAKERS: 'MM',

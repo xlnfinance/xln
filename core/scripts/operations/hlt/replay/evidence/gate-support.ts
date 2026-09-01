@@ -5,6 +5,12 @@ import { join, resolve } from 'node:path';
 
 /** Subprocess boundary shared by the replay fixture commands. */
 
+/** Every recorder/replay command remains inside the repository-wide hard gate. */
+export const AUTHORITY_EVIDENCE_RECORD_BUDGET_MS = 30_000;
+
+/** Closed-WAL read and artifact write share that same aggregate command gate. */
+export const AUTHORITY_EVIDENCE_BUILD_BUDGET_MS = 30_000;
+
 export const freshAuthorityEvidenceDir = (prefix: string): string => {
   const configured = String(process.env['XLN_RSCORE_EVIDENCE_DIR'] ?? '').trim();
   if (!configured) return mkdtempSync(join(tmpdir(), prefix));
@@ -32,6 +38,7 @@ export const runAuthorityEvidenceGate = (options: Readonly<{
     cwd: process.cwd(),
     env: options.env,
     stdio: 'inherit',
+    timeout: AUTHORITY_EVIDENCE_RECORD_BUDGET_MS,
   });
   const elapsedMs = performance.now() - startedAt;
   if (result.error) throw result.error;
@@ -40,25 +47,6 @@ export const runAuthorityEvidenceGate = (options: Readonly<{
       `${options.label}_FAILED:status=${String(result.status)}:signal=${String(result.signal)}`,
     );
   }
-  // Production setup is reusable and may legitimately exceed one short test
-  // phase. Its child emits named stage timings; only a silent/stalled stage is
-  // a failure, not the aggregate wall time of setup + economic work.
   console.log(`${options.label}_OK elapsedMs=${elapsedMs.toFixed(2)}`);
   return elapsedMs;
 };
-
-/**
- * Owner-authorized exemption (2026-09-01) from the 30-second hard execution
- * budget, and only for the authority-evidence recorder chain.
- *
- * The Rust replay gate proves parity over at least 1,000 contiguous
- * RuntimeFrames on one immutable artifact. The canonical 1,000-user mixed
- * workload cannot reach that frame depth inside 30 seconds, so the recorder
- * is the single sanctioned long child. Every other script, benchmark, test
- * and gate in this repository keeps the 30-second limit; do not reuse this
- * constant to make an unrelated slow run pass.
- */
-export const AUTHORITY_EVIDENCE_RECORD_BUDGET_MS = 600_000;
-
-/** Journal read + artifact write for the same recording, sharing that exemption. */
-export const AUTHORITY_EVIDENCE_BUILD_BUDGET_MS = 120_000;
