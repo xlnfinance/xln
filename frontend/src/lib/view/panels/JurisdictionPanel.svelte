@@ -13,6 +13,19 @@
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import { loadJurisdictionTokenRegistry } from './jurisdiction-token-registry';
+  import {
+    buildJurisdictionTokenOptions,
+    filterJurisdictionRowsByToken,
+    formatJurisdictionBalance as formatBalance,
+    formatJurisdictionEntityId as formatEntityId,
+    formatJurisdictionEthAmount,
+    formatJurisdictionStateRoot as formatStateRoot,
+    isBrowserVmDebugAdapter as isBrowserVMDebugAdapter,
+    parseJurisdictionTokenId,
+    selectJurisdictionTokenIdText,
+    selectJurisdictionTokenMeta,
+    toJurisdictionDisplayBigInt,
+  } from '../../../../packages/runtime-client/src/jurisdiction-panel-view';
 
   // Props
   interface Props {
@@ -33,14 +46,6 @@
 
   // Tab state
   let activeTab = $state<'overview' | 'balances'>('balances'); // Start with Balances
-
-  type TokenOption = {
-    tokenId: number;
-    symbol: string;
-    decimals: number;
-    address: string | undefined;
-    name: string | undefined;
-  };
 
   type SignerRef = {
     address: string;
@@ -73,30 +78,6 @@
   let entityDebts = $state<Array<{ entityId: string; entityName: string; tokenId: number; debts: Array<{ amount: bigint; creditor: string; creditorName: string }> }>>([]);
   let debtsLoading = $state(false);
   let debtsRequestId = 0;
-
-  function isBrowserVMDebugAdapter(adapter: unknown): adapter is { mode: 'browservm'; timeTravel?: (stateRoot: Uint8Array) => Promise<void> } {
-    return !!adapter && typeof adapter === 'object' && 'mode' in adapter && (adapter as { mode?: string }).mode === 'browservm';
-  }
-
-  // Helper to safely convert serialized BigInt objects from snapshots
-  function toBigInt(value: unknown): bigint {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return BigInt(value);
-    if (typeof value === 'string') return BigInt(value);
-    if (value && typeof value === 'object') {
-      const encoded = value as { _dataType?: unknown; value?: unknown; toString(): string };
-      // Handle serialized format: { _dataType: 'BigInt', value: '...' }
-      if (encoded._dataType === 'BigInt' && encoded.value !== undefined) {
-        return BigInt(String(encoded.value));
-      }
-      // Handle BigInt(n) string format
-      if (encoded.toString().startsWith('BigInt(')) {
-        const match = encoded.toString().match(/BigInt\((-?\d+)\)/);
-        if (match?.[1]) return BigInt(match[1]);
-      }
-    }
-    return 0n;
-  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
@@ -197,7 +178,7 @@
     for (const [entityId, tokenMap] of reservesMap.entries()) {
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
       for (const [tokenId, rawAmount] of tokens.entries()) {
-        const amount = toBigInt(rawAmount);
+        const amount = toJurisdictionDisplayBigInt(rawAmount);
         if (amount > 0n) {
           result.push({
             entityId,
@@ -225,8 +206,8 @@
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
       for (const [tokenId, data] of tokens.entries()) {
         const entry = data as { collateral?: unknown; ondelta?: unknown };
-        const collateral = toBigInt(entry.collateral);
-        const ondelta = toBigInt(entry.ondelta);
+        const collateral = toJurisdictionDisplayBigInt(entry.collateral);
+        const ondelta = toJurisdictionDisplayBigInt(entry.ondelta);
         if (collateral > 0n || ondelta !== 0n) {
           result.push({
             channelKey,
@@ -366,85 +347,34 @@
     );
   });
 
-  let tokenOptions = $derived.by(() => {
-    const options = new Map<number, TokenOption>();
-
-    for (const token of browserVmTokens) {
-      if (options.has(token.tokenId)) continue;
-      options.set(token.tokenId, {
-        tokenId: token.tokenId,
-        symbol: token.symbol,
-        decimals: token.decimals,
-        address: token.address,
-        name: token.name
-      });
-    }
-
-    const addTokenId = (tokenId: number) => {
-      if (options.has(tokenId)) return;
-      const info = $xlnFunctions.getTokenInfo(tokenId);
-      options.set(tokenId, {
-        tokenId,
-        symbol: info.symbol,
-        decimals: info.decimals,
-        address: undefined,
-        name: info.name
-      });
-    };
-
-    for (const entry of reserves) addTokenId(entry.tokenId);
-    for (const entry of collaterals) addTokenId(entry.tokenId);
-
-    return Array.from(options.values()).sort((a, b) => a.tokenId - b.tokenId);
-  });
+  let tokenOptions = $derived.by(() => buildJurisdictionTokenOptions({
+    browserTokens: browserVmTokens,
+    reserveTokenIds: reserves.map(({ tokenId }) => tokenId),
+    collateralTokenIds: collaterals.map(({ tokenId }) => tokenId),
+    getFallbackTokenInfo: (tokenId) => $xlnFunctions.getTokenInfo(tokenId),
+  }));
 
   $effect(() => {
-    const ids = tokenOptions.map(option => String(option.tokenId));
-    if (ids.length === 0) {
-      if (selectedTokenIdText !== '') {
-        selectedTokenIdText = '';
-      }
-      return;
-    }
-    if (!ids.includes(selectedTokenIdText)) {
-      selectedTokenIdText = ids.includes('1') ? '1' : (ids[0] ?? '');
-    }
+    const nextTokenIdText = selectJurisdictionTokenIdText(tokenOptions, selectedTokenIdText);
+    if (nextTokenIdText !== selectedTokenIdText) selectedTokenIdText = nextTokenIdText;
   });
 
-  let selectedTokenId = $derived.by(() => {
-    if (!selectedTokenIdText) return null;
-    const parsed = Number(selectedTokenIdText);
-    return Number.isNaN(parsed) ? null : parsed;
-  });
+  let selectedTokenId = $derived(parseJurisdictionTokenId(selectedTokenIdText));
 
-  let selectedTokenMeta = $derived.by(() => {
-    if (selectedTokenId === null) return null;
-    const option = tokenOptions.find(opt => opt.tokenId === selectedTokenId);
-    if (option) return option;
-    const info = $xlnFunctions.getTokenInfo(selectedTokenId);
-    return {
-      tokenId: selectedTokenId,
-      symbol: info.symbol,
-      decimals: info.decimals,
-      address: undefined,
-      name: info.name
-    };
-  });
+  let selectedTokenMeta = $derived(selectJurisdictionTokenMeta(
+    tokenOptions,
+    selectedTokenId,
+    (tokenId) => $xlnFunctions.getTokenInfo(tokenId),
+  ));
 
   let externalBalanceCount = $derived.by(() => {
     if (externalBalanceMode === 'eth') return externalEthBalances.length;
     return externalBalances.length;
   });
 
-  let filteredReserves = $derived.by(() => {
-    if (selectedTokenId === null) return reserves;
-    return reserves.filter(entry => entry.tokenId === selectedTokenId);
-  });
+  let filteredReserves = $derived(filterJurisdictionRowsByToken(reserves, selectedTokenId));
 
-  let filteredCollaterals = $derived.by(() => {
-    if (selectedTokenId === null) return collaterals;
-    return collaterals.filter(entry => entry.tokenId === selectedTokenId);
-  });
+  let filteredCollaterals = $derived(filterJurisdictionRowsByToken(collaterals, selectedTokenId));
 
   let signerRefs = $derived.by(() => {
     const vault = $activeRuntime;
@@ -506,7 +436,7 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
+        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && typeof jadapter.timeTravel === 'function') {
           await jadapter.timeTravel(stateRoot);
         }
 
@@ -570,7 +500,7 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
+        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && typeof jadapter.timeTravel === 'function') {
           await jadapter.timeTravel(stateRoot);
         }
 
@@ -651,7 +581,7 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
+        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && typeof jadapter.timeTravel === 'function') {
           await jadapter.timeTravel(stateRoot);
         }
 
@@ -700,24 +630,6 @@
   //                              HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  function formatEntityId(entityId: string): string {
-    if (!entityId) return 'N/A';
-    return entityId;
-  }
-
-  function formatStateRoot(stateRoot: Uint8Array | null | undefined): string {
-    if (!stateRoot || stateRoot.length === 0) return 'Unavailable';
-    const hex = Array.from(stateRoot).map(b => b.toString(16).padStart(2, '0')).join('');
-    return '0x' + hex;
-  }
-
-  function formatBalance(balance: bigint): string {
-    const num = Number(balance) / 1e18;
-    if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
-    if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
-    return `$${num.toFixed(0)}`;
-  }
-
   function getTokenInfoFor(tokenId: number): { symbol: string; decimals: number } {
     const info = $xlnFunctions.getTokenInfo(tokenId);
     return {
@@ -735,19 +647,7 @@
   }
 
   function formatEthAmount(amount: bigint): string {
-    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 4))));
-    const negative = amount < 0n;
-    const abs = negative ? -amount : amount;
-    const divisor = 10n ** 18n;
-    const whole = abs / divisor;
-    const frac = abs % divisor;
-    let body = whole.toLocaleString('en-US');
-    if (precision > 0 && frac > 0n) {
-      const fullFrac = frac.toString().padStart(18, '0');
-      const sliced = fullFrac.slice(0, precision).replace(/0+$/, '');
-      if (sliced.length > 0) body = `${body}.${sliced}`;
-    }
-    return `${negative ? '-' : ''}${body} ETH`;
+    return formatJurisdictionEthAmount(amount, $settings?.tokenPrecision ?? 4);
   }
 
   function handleEntityClick(entityId: string) {

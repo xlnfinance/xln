@@ -389,6 +389,7 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/runtime-client/src/runtime-diagnostics-panel-view.ts',
       'frontend/packages/runtime-client/src/gossip-panel-view.ts',
       'frontend/packages/runtime-client/src/time-machine-transport.ts',
+      'frontend/packages/runtime-client/src/jurisdiction-panel-view.ts',
     ],
     consumers: [
       'frontend/src/lib/view/panels/ConsolePanel.svelte',
@@ -399,6 +400,7 @@ export const PLATFORM_INVENTORY = [
       'frontend/src/lib/view/panels/GossipPanel.svelte',
       'frontend/src/lib/components/Entity/activity/gossip-directory-view.ts',
       'frontend/src/lib/stores/runtimeHistoryStore.ts',
+      'frontend/src/lib/view/panels/JurisdictionPanel.svelte',
     ],
     evidence: [
       'tests/frontend/runtime/console-panel-view.test.ts',
@@ -407,6 +409,7 @@ export const PLATFORM_INVENTORY = [
       'tests/frontend/runtime/runtime-diagnostics-panel-view.test.ts',
       'tests/frontend/runtime/gossip-panel-view.test.ts',
       'tests/frontend/runtime/time-machine-transport.test.ts',
+      'tests/frontend/runtime/jurisdiction-panel-view.test.ts',
     ],
   },
   {
