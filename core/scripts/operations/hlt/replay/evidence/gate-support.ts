@@ -46,3 +46,19 @@ export const runAuthorityEvidenceGate = (options: Readonly<{
   console.log(`${options.label}_OK elapsedMs=${elapsedMs.toFixed(2)}`);
   return elapsedMs;
 };
+
+/**
+ * Owner-authorized exemption (2026-09-01) from the 30-second hard execution
+ * budget, and only for the authority-evidence recorder chain.
+ *
+ * The Rust replay gate proves parity over at least 1,000 contiguous
+ * RuntimeFrames on one immutable artifact. The canonical 1,000-user mixed
+ * workload cannot reach that frame depth inside 30 seconds, so the recorder
+ * is the single sanctioned long child. Every other script, benchmark, test
+ * and gate in this repository keeps the 30-second limit; do not reuse this
+ * constant to make an unrelated slow run pass.
+ */
+export const AUTHORITY_EVIDENCE_RECORD_BUDGET_MS = 600_000;
+
+/** Journal read + artifact write for the same recording, sharing that exemption. */
+export const AUTHORITY_EVIDENCE_BUILD_BUDGET_MS = 120_000;

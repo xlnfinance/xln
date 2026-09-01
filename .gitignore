@@ -141,3 +141,6 @@ ui/public/runtime.js
 # Formal-proof build and model-checker output (reproducible, never source).
 /proofs/**/target/
 /proofs/tla/states/
+
+# Machine-wide stand semaphore (tools/stand-lock.ts); lives beside the main checkout.
+.xln-stand-lock/

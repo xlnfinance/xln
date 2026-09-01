@@ -117,6 +117,31 @@ Quick iteration signals (full autonomy):
 - "ugly/meh" → polish matching past aesthetic
 - "go/just try" → full send, zero questions
 
+## 🔒 ONE MACHINE, MANY AGENTS: STAND SEMAPHORE
+
+Several agents drive this repository from separate worktrees on one Mac. Two
+heavy stands sharing 32 cores invalidate both runs, so every stand is
+serialized by a machine-wide semaphore.
+
+- Lock directory: `<main checkout>/.xln-stand-lock` (`tools/stand-lock.ts`).
+  Every worktree resolves the same path through `git rev-parse --git-common-dir`.
+- `bun run stand:status` — who holds the machine right now, and why.
+- Already wired, nothing to do by hand: `local-prod-smoke.ts` (so every HLT
+  stand, recorder and prod smoke) and `run-e2e-parallel-isolated.ts`. They wait
+  for a free slot, then release on exit; children inherit the grant through
+  `XLN_STAND_LOCK_TOKEN` instead of deadlocking on it.
+- Anything not yet wired — `cargo bench`, an ad-hoc profile run, a manual
+  orchestrator — must run under `bun run stand:run --reason <why> -- <command>`.
+- Capacity is one. `XLN_STAND_LOCK_SLOTS=2` exists for the owner to allow two
+  concurrent stands once concurrency is proven not to distort a measurement;
+  an agent may not raise it to get its turn sooner.
+- `XLN_STAND_LOCK_DISABLED=1` is for a single-agent machine only. Using it to
+  jump the queue silently corrupts another agent's numbers, so it is a
+  reportable violation, not a convenience.
+- A slot whose owner died is reclaimed automatically (pid liveness, 30-minute
+  ceiling). If a measurement looks anomalous, check `bun run stand:status`
+  first: a contended run is not evidence.
+
 ## 🌳 GIT WORKFLOW
 
 - Work and push on `main` only. Do not create feature/`ai/*` branches or extra worktrees unless the owner explicitly asks.

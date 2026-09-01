@@ -136,6 +136,12 @@ export type {
   E2EShardPaths,
   E2EShardPorts,
 } from '../harness/e2e-isolated-runtime';
+import {
+  STAND_LOCK_DISABLE_ENV,
+  STAND_LOCK_TOKEN_ENV,
+  acquireStandLock,
+  releaseStandLock,
+} from '../../../../tools/stand-lock';
 export {
   acquireLocalTestPortLease,
   assertLocalTestPortsFree,
@@ -2796,6 +2802,19 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
+  // One machine, several agent worktrees: a browser batch and an HLT stand
+  // must not share 32 cores, or both results are noise. See tools/stand-lock.ts.
+  const standLock =
+    process.env[STAND_LOCK_DISABLE_ENV] === '1' || process.env[STAND_LOCK_TOKEN_ENV]
+      ? null
+      : await acquireStandLock({
+          reason: 'e2e-parallel-isolated',
+          waitMs: Number(process.env['XLN_STAND_LOCK_WAIT_MS'] || '1800000'),
+        });
+  if (standLock) {
+    process.env[STAND_LOCK_TOKEN_ENV] = standLock.token;
+    process.on('exit', () => releaseStandLock(standLock));
+  }
   main().catch(err => {
     console.error('E2E isolated parallel runner failed:', (err as Error).message);
     process.exit(1);

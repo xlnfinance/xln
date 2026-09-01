@@ -13,6 +13,10 @@ import {
 } from './rust/rust-h1';
 import { hltLanePortsPerSlot } from './lanes/lane-port-capacity';
 import { runParityGatedHltChild } from './controller/live-economic-controller';
+import {
+  AUTHORITY_EVIDENCE_BUILD_BUDGET_MS,
+  AUTHORITY_EVIDENCE_RECORD_BUDGET_MS,
+} from './replay/evidence/gate-support';
 
 const workDirRaw = String(process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || '').trim();
 if (!workDirRaw) throw new Error('HLT_BUILD_WORK_DIR_MISSING');
@@ -93,7 +97,7 @@ const smokeStatus = economicGateDir
       cwd: process.cwd(),
       env: buildEnv,
       stdio: 'inherit',
-      timeout: 30_000,
+      timeout: authorityEvidence ? AUTHORITY_EVIDENCE_RECORD_BUDGET_MS : 30_000,
     }).status;
 if (smokeStatus !== 0) throw new Error(`HLT_BUILD_SMOKE_FAILED:${String(smokeStatus)}`);
 
@@ -132,7 +136,7 @@ if (selection.engine === 'rust') {
       '--users', String(users),
       '--workload', workload,
       '--require-complete-authority-evidence',
-    ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit', timeout: 20_000 });
+    ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit', timeout: AUTHORITY_EVIDENCE_BUILD_BUDGET_MS });
     if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
     console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
   }

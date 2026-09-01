@@ -35,6 +35,13 @@ import {
 import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
 import { hltLanePortsPerSlot } from '../hlt/lanes/lane-port-capacity';
 import { hltAuthorityEvidenceRecording } from '../hlt/authority-evidence-policy';
+import {
+  STAND_LOCK_DISABLE_ENV,
+  STAND_LOCK_TOKEN_ENV,
+  acquireStandLock,
+  releaseStandLock,
+  type StandLockGrant,
+} from '../../../../tools/stand-lock';
 import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
 import { safeStringify } from '../../../protocol/serialization';
@@ -189,6 +196,22 @@ const PROFILING_ENV_KEYS = [
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
+}
+// Several agents drive this repository from separate worktrees on one Mac.
+// The port lease below only prevents socket collisions; two stands sharing 32
+// cores still invalidate each other's numbers, so serialize on CPU first and
+// let the port lease resolve trivially afterwards.
+const standLock: StandLockGrant | null =
+  process.env[STAND_LOCK_DISABLE_ENV] === '1' || process.env[STAND_LOCK_TOKEN_ENV]
+    ? null
+    : await acquireStandLock({
+        reason: `local-prod-smoke:${String(process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'default')}`,
+        waitMs: Number(process.env['XLN_STAND_LOCK_WAIT_MS'] || '1800000'),
+      });
+if (standLock) {
+  // Children of this stand inherit the grant instead of deadlocking on it.
+  process.env[STAND_LOCK_TOKEN_ENV] = standLock.token;
+  process.on('exit', () => releaseStandLock(standLock));
 }
 const localTestLease = await acquireLocalTestPortLease({
   requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13],
@@ -1651,6 +1674,7 @@ try {
     assertLocalTestPortsFree(localTestLease.ports);
   } finally {
     localTestLease.release();
+    if (standLock) releaseStandLock(standLock);
     process.off('SIGINT', handleSigint);
     process.off('SIGTERM', handleSigterm);
   }

@@ -9,15 +9,23 @@ import { join } from 'node:path';
 
 import { safeParse } from '../../../../../protocol/serialization';
 import { deriveMeshChildSeed } from '../../../../../orchestrator/mesh/mesh-seeds';
-import { authorityEvidenceBinary } from '../evidence/gate-support';
+import {
+  AUTHORITY_EVIDENCE_RECORD_BUDGET_MS,
+  authorityEvidenceBinary,
+} from '../evidence/gate-support';
 import { readHltHubRecording } from '../recording';
 
-const run = (command: string, args: readonly string[], env = process.env): string => {
+const run = (
+  command: string,
+  args: readonly string[],
+  timeoutMs = 30_000,
+  env = process.env,
+): string => {
   const result = spawnSync(command, [...args], {
     cwd: process.cwd(),
     env,
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout: timeoutMs,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -37,7 +45,7 @@ const recordingArgument = (): string | null => {
 const record = (): string => {
   const output = run(process.execPath, [
     'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts',
-  ]);
+  ], AUTHORITY_EVIDENCE_RECORD_BUDGET_MS);
   const match = /HLT_RUNTIME_REPLAY_V1 path=([^\s]+)/.exec(output);
   if (!match?.[1]) throw new Error('HLT_MIXED_PARITY_RECORDING_PATH_MISSING');
   return match[1];
@@ -66,7 +74,7 @@ const replay = (workers: 1 | 4): Record<string, unknown> => {
     '--entity-signer-label', 'h1-hub',
     '--native-db', join(replayRoot, `w${workers}`),
     '--workers', String(workers),
-  ]);
+  ], AUTHORITY_EVIDENCE_RECORD_BUDGET_MS);
   const line = output.trim().split('\n').at(-1);
   return safeParse(line ?? '') as Record<string, unknown>;
 };
