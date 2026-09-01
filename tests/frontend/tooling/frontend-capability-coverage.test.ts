@@ -56,9 +56,11 @@ describe('frontend capability inventory', () => {
       'wallet-native-and-offline',
       'ops-health-and-qa',
       'ops-runs-scenarios-and-ai',
+      'ops-workspace',
     ].includes(id)).every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
+    expect(CAPABILITIES.find(({ id }) => id === 'ops-workspace')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-boot-lifecycle.ts');
