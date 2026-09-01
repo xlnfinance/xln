@@ -65,8 +65,14 @@ export const materializeCompleteDisputeEvidence = async (options: Readonly<{
   hub: ConnectedRuntime;
   hubIdentity: LoadIdentity;
   lane: LaneRuntime;
+  /**
+   * Second lane for the reverse lifecycle. Immediate mutual-consent finalize
+   * is a non-starter right, so the hub-recorded `disputeFinalize` command the
+   * canonical coverage demands requires a dispute the LANE started.
+   */
+  reverseLane: LaneRuntime;
 }>): Promise<void> => {
-  const { hub, hubIdentity, lane } = options;
+  const { hub, hubIdentity, lane, reverseLane } = options;
   await startLaneJurisdictionWatcher(lane);
   await sendObserved(hub, 'hlt-authority-dispute-prepare', {
     runtimeTxs: [],
@@ -134,5 +140,77 @@ export const materializeCompleteDisputeEvidence = async (options: Readonly<{
   console.log(
     `HLT_AUTHORITY_DISPUTE_EVIDENCE_OK hub=${hubIdentity.entityId} ` +
     `counterparty=${lane.identity.entityId}`,
+  );
+
+  // Reverse lifecycle: the lane starts, the hub (non-starter) finalizes
+  // immediately — this is the only flow that records a `disputeFinalize`
+  // command in the hub's own runtime input.
+  await startLaneJurisdictionWatcher(reverseLane);
+  await queueLaneRuntimeInputWave(0, [{
+    lane: reverseLane,
+    input: {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: reverseLane.identity.entityId,
+        signerId: reverseLane.identity.signerId,
+        entityTxs: [{
+          type: 'prepareDispute',
+          data: {
+            counterpartyEntityId: hubIdentity.entityId,
+            description: 'hlt-authority-reverse-dispute',
+            minCooldownMs: 0,
+          },
+        }],
+      }],
+    },
+  }], { waitForCommit: true });
+  await queueLaneRuntimeInputWave(0, [{
+    lane: reverseLane,
+    input: {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: reverseLane.identity.entityId,
+        signerId: reverseLane.identity.signerId,
+        entityTxs: [{ type: 'j_broadcast', data: {} }],
+      }],
+    },
+  }], { waitForCommit: true });
+  await waitForCounterpartyDisputeState({
+    lane: reverseLane,
+    hubRuntimeId: hub.adapter.runtimeId,
+    hubEntityId: hubIdentity.entityId,
+    finalized: false,
+  });
+  await sendObserved(hub, 'hlt-authority-dispute-finalize', {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: hubIdentity.entityId,
+      signerId: hubIdentity.signerId,
+      entityTxs: [{
+        type: 'disputeFinalize',
+        data: {
+          counterpartyEntityId: reverseLane.identity.entityId,
+          description: 'hlt-authority-reverse-mutual-consent',
+        },
+      }],
+    }],
+  });
+  await sendObserved(hub, 'hlt-authority-dispute-finalize-broadcast', {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: hubIdentity.entityId,
+      signerId: hubIdentity.signerId,
+      entityTxs: [{ type: 'j_broadcast', data: {} }],
+    }],
+  });
+  await waitForCounterpartyDisputeState({
+    lane: reverseLane,
+    hubRuntimeId: hub.adapter.runtimeId,
+    hubEntityId: hubIdentity.entityId,
+    finalized: true,
+  });
+  console.log(
+    `HLT_AUTHORITY_REVERSE_DISPUTE_EVIDENCE_OK hub=${hubIdentity.entityId} ` +
+    `starter=${reverseLane.identity.entityId}`,
   );
 };

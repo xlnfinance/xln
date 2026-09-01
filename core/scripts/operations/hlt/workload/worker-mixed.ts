@@ -725,11 +725,13 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const deliveredElapsedMs = paymentSettlement.deliveredElapsedMs;
     if (authorityEvidence) {
       const firstUser = users[0];
-      if (!firstUser) throw new Error('HLT_AUTHORITY_EVIDENCE_USER_MISSING');
+      const secondUser = users[1];
+      if (!firstUser || !secondUser) throw new Error('HLT_AUTHORITY_EVIDENCE_USER_MISSING');
       await materializeCompleteDisputeEvidence({
         hub: requireHub(),
         hubIdentity,
         lane: firstUser,
+        reverseLane: secondUser,
       });
     }
     const [hubIo, laneIo] = await Promise.all([
