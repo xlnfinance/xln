@@ -269,10 +269,10 @@ const distributeOffers = (
 /**
  * Assign a per-round order strategy while keeping every trader in one stable
  * economic cohort for the offered window: matched maker, resting maker, or
- * aggressive taker. A trader repeats its exact strategy across rounds, so an
- * earlier resting order cannot self-cross a later order from the same owner
- * and the size mix is identical at every cadence tick. STP is therefore not an
- * arrival-order-dependent hidden outcome of the first realistic policy.
+ * aggressive taker. A trader keeps its side across rounds, so an earlier
+ * resting order cannot self-cross a later order from the same owner. Taker
+ * sizes may rotate deterministically between rounds to exercise every sweep
+ * cohort even in the minimum 100-user population.
  */
 export const realisticTraderStrategyIndex = (
   traderIndex: number,
@@ -433,13 +433,15 @@ export const buildRealisticExchangePlan = (options: Readonly<{
         : options.restingBidPriceTicks,
     );
   });
-  const aggressiveOffers = distributeOffers(options.lanesPerSide, options.rounds, (index, lane, round) =>
+  const aggressiveOffers = distributeOffers(options.lanesPerSide, options.rounds, (_index, lane, round) =>
     buildFixedBaseOffer(
       options.hubEntityId,
       `${options.offerNamespace}-taker-${lane + 1}-${round + 1}`,
       'bid',
-      baseUnit * (REALISTIC_TAKER_SIZE_CYCLE[index % REALISTIC_TAKER_SIZE_CYCLE.length] ?? (() => {
-        throw new Error(`HLT_REALISTIC_TAKER_SIZE_MISSING:${index}`);
+      baseUnit * (REALISTIC_TAKER_SIZE_CYCLE[
+        (lane + round) % REALISTIC_TAKER_SIZE_CYCLE.length
+      ] ?? (() => {
+        throw new Error(`HLT_REALISTIC_TAKER_SIZE_MISSING:${lane}:${round}`);
       })()),
       options.takerLimitPriceTicks,
     ));

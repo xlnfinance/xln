@@ -412,6 +412,30 @@ describe('production swap load evidence', () => {
     }
   });
 
+  test('minimum 100-user realistic population covers every declared sweep cohort', () => {
+    const plan = buildRealisticExchangePlan({
+      hubEntityId: `0x${'14'.repeat(32)}`,
+      offerNamespace: 'minimum-realistic-coverage',
+      rounds: 20,
+      lanesPerSide: 50,
+      minimumTradeSize: 10_000_000n,
+      partialMakerAskPriceTicks: 24_995_000n,
+      makerAskPriceTicks: 25_000_000n,
+      restingBidPriceTicks: 24_990_000n,
+      takerLimitPriceTicks: 25_010_000n,
+      mmAsks: [{ priceTicks: 25_005_000n, qtyLots: MAX_ORDERBOOK_QTY_LOTS }],
+    });
+
+    expect(plan.traderPlans).toHaveLength(100);
+    expect(() => assertRealisticExchangeDistribution(plan.distribution)).not.toThrow();
+    expect([
+      plan.distribution.sweep2Takers,
+      plan.distribution.sweep5Takers,
+      plan.distribution.sweep10Takers,
+      plan.distribution.sweep20Takers,
+    ].every(count => count > 0)).toBe(true);
+  });
+
   test('balanced exchange matches every order without consuming MM depth', () => {
     const plan = buildBalancedExchangePlan({
       hubEntityId: `0x${'13'.repeat(32)}`,
