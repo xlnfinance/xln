@@ -6,7 +6,7 @@ use xln_rscore_engine::{
 };
 use xln_rscore_protocol::{PersistentRadixMutation, SlotWork};
 
-use crate::commitment::{canonical_paybook_entry, consensus_digest_bytes, raw_text_key};
+use crate::commitment::{canonical_paybook_entry, consensus_digest_bytes};
 use crate::types::{
     EntityKernelOutput, EntityStateSlice, HtlcPreparedOutcome, PaybookEntry, PaybookState,
     TargetedAccountTx,
@@ -19,6 +19,27 @@ use crate::{
 const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
 const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
 const SECRET_ACK_TIMEOUT_MS: u64 = 120_000;
+
+/// Paybook paths are the raw 32-byte hashlock. A length-prefixed text key puts
+/// every canonical `0x…` hashlock under the same Patricia prefix and defeats
+/// physical sharding even though the financial identifier itself is uniform.
+fn paybook_key(hashlock: &str) -> Result<Vec<u8>, EntityKernelError> {
+    let payload = hashlock
+        .strip_prefix("0x")
+        .filter(|payload| {
+            payload.len() == 64
+                && payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .ok_or_else(|| EntityKernelError::htlc("PAYBOOK_HASHLOCK_INVALID"))?;
+    let bytes =
+        hex::decode(payload).map_err(|_| EntityKernelError::htlc("PAYBOOK_HASHLOCK_INVALID"))?;
+    if bytes.len() != 32 {
+        return Err(EntityKernelError::htlc("PAYBOOK_HASHLOCK_INVALID"));
+    }
+    Ok(bytes)
+}
 
 pub(crate) struct PaybookEffects<'a> {
     pub account_txs: &'a mut Vec<TargetedAccountTx>,
@@ -45,7 +66,7 @@ impl PaybookChanges {
         state: &'a EntityStateSlice,
         hashlock: &str,
     ) -> Result<Option<&'a PaybookEntry>, EntityKernelError> {
-        let key = raw_text_key(hashlock)?;
+        let key = paybook_key(hashlock)?;
         Ok(match self.pending.get(&key) {
             Some(entry) => entry.as_ref(),
             None => state.paybook.entries.get(&key),
@@ -54,7 +75,7 @@ impl PaybookChanges {
 
     pub(crate) fn put(&mut self, entry: PaybookEntry) -> Result<(), EntityKernelError> {
         self.pending
-            .insert(raw_text_key(&entry.hashlock)?, Some(entry));
+            .insert(paybook_key(&entry.hashlock)?, Some(entry));
         Ok(())
     }
 
@@ -63,7 +84,7 @@ impl PaybookChanges {
         state: &EntityStateSlice,
         hashlock: &str,
     ) -> Result<Option<PaybookEntry>, EntityKernelError> {
-        let key = raw_text_key(hashlock)?;
+        let key = paybook_key(hashlock)?;
         let entry = match self.pending.get(&key) {
             Some(entry) => entry.clone(),
             None => state.paybook.entries.get(&key).cloned(),
@@ -122,7 +143,7 @@ pub(crate) fn build_paybook_mutation(
 
 impl PaybookState {
     pub fn entry(&self, hashlock: &str) -> Result<Option<&PaybookEntry>, EntityKernelError> {
-        Ok(self.entries.get(&raw_text_key(hashlock)?))
+        Ok(self.entries.get(&paybook_key(hashlock)?))
     }
 
     pub fn from_entries(
@@ -134,7 +155,7 @@ impl PaybookState {
             fees_earned,
         };
         for entry in entries {
-            let key = raw_text_key(&entry.hashlock)?;
+            let key = paybook_key(&entry.hashlock)?;
             if output.entries.get(&key).is_some() {
                 return Err(EntityKernelError::htlc("PAYBOOK_ENTRY_DUPLICATE"));
             }
@@ -159,7 +180,7 @@ pub(crate) fn remove_paybook_entry(
     state: &mut EntityStateSlice,
     hashlock: &str,
 ) -> Result<Option<PaybookEntry>, EntityKernelError> {
-    let key = raw_text_key(hashlock)?;
+    let key = paybook_key(hashlock)?;
     let entry = state.paybook.entries.get(&key).cloned();
     if entry.is_some() {
         state.paybook.entries = state.paybook.entries.removed(&key).map_err(paybook_error)?;
@@ -694,4 +715,21 @@ pub(crate) fn timed_out_followup(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::paybook_key;
+
+    #[test]
+    fn canonical_hashlocks_select_independent_physical_slots() {
+        let zero = paybook_key(&format!("0x{}", "00".repeat(32))).expect("zero hashlock");
+        let middle = paybook_key(&format!("0x{}", "7f".repeat(32))).expect("middle hashlock");
+        let high = paybook_key(&format!("0x{}", "ff".repeat(32))).expect("high hashlock");
+
+        assert_eq!(zero.len(), 32);
+        assert_eq!([zero[0], middle[0], high[0]], [0x00, 0x7f, 0xff]);
+        assert!(paybook_key(&format!("0X{}", "ff".repeat(32))).is_err());
+        assert!(paybook_key(&format!("0x{}", "FF".repeat(32))).is_err());
+    }
 }

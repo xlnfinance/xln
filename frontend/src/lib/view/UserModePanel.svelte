@@ -22,6 +22,11 @@
   } from '$lib/stores/xlnStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import {
+    clearLocalLauncherOnboarding,
+    localLauncherOnboarding,
+    setLocalLauncherOnboarding,
+  } from '$lib/stores/localLauncherStore';
+  import {
     runtimeView,
     runtimeViewActiveEntityId,
     setRuntimeViewActiveEntityId,
@@ -638,8 +643,15 @@
     && Boolean($activeRuntimeStore?.protectedSecrets)
     && !$activeRuntimeStore?.seed,
   );
-  const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeRuntimeStore?.requiresOnboarding !== false);
-  const showVaultGate = $derived(!isRemoteRuntime && (!hasSigner || activeVaultLocked));
+  const launcherOnboardingStage = $derived($localLauncherOnboarding.stage);
+  const onboardingRequiredForRuntime = $derived(
+    launcherOnboardingStage === 'formation'
+    || (!isRemoteRuntime && $activeRuntimeStore?.requiresOnboarding !== false),
+  );
+  const showVaultGate = $derived(
+    (isRemoteRuntime && launcherOnboardingStage === 'create')
+    || (!isRemoteRuntime && (!hasSigner || activeVaultLocked)),
+  );
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
   let mountedRemoteRuntimeId = $state('');
   $effect(() => {
@@ -710,6 +722,10 @@
 
   $effect(() => {
     const entityId = selectedEntityId;
+    if (launcherOnboardingStage === 'formation') {
+      onboardingComplete = false;
+      return;
+    }
     if (!onboardingRequiredForRuntime) {
       onboardingComplete = true;
       return;
@@ -761,9 +777,21 @@
   function handleOnboardingComplete() {
     const runtimeEntityIds = getRuntimeOnboardingEntityIds();
     writeOnboardingCompleteForEntities(runtimeEntityIds.length > 0 ? runtimeEntityIds : [selectedEntityId || ''], true);
+    clearLocalLauncherOnboarding();
     onboardingComplete = true;
     viewMode = 'entity';
     activeInlinePanel = 'none';
+  }
+
+  async function handleNodeReadyComplete(event: CustomEvent<{ entityId: string }>): Promise<void> {
+    const nextEntityId = normalizeId(event.detail.entityId);
+    if (!nextEntityId) throw new Error('BRAINVAULT_NODE_ENTITY_ID_MISSING');
+    setLocalLauncherOnboarding('formation', nextEntityId);
+    viewMode = 'entity';
+    selectedEntityId = nextEntityId;
+    selectedJurisdictionName = null;
+    setRuntimeViewActiveEntityId(nextEntityId);
+    await refreshCurrentRuntimeProjection();
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ name: string }>) {
@@ -867,7 +895,7 @@
 {:else if showVaultPanelVisible}
   <main class="panel-content">
     <!-- Onboarding Screen 1: derive/import seed and atomically create/select runtime. -->
-    <RuntimeCreation embedded={true} />
+    <RuntimeCreation embedded={true} on:nodeReadyComplete={(event) => void handleNodeReadyComplete(event)} />
   </main>
 {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
   <main class="panel-content">
@@ -875,6 +903,7 @@
     <OnboardingPanel
       entityId={selectedEntityId}
       runtimeProjection={onboardingRuntimeProjection}
+      daemonCustody={isRemoteRuntime}
       on:complete={handleOnboardingComplete}
     />
   </main>

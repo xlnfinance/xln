@@ -65,6 +65,7 @@
 
   export let entityId: string = '';
   export let runtimeProjection: OnboardingRuntimeProjection = emptyOnboardingRuntimeProjection();
+  export let daemonCustody: boolean = false;
 
   const dispatch = createEventDispatcher();
 
@@ -762,10 +763,9 @@
         displayName: cleanDisplayName,
       }));
 
-      // Recovery must be committed before opening hub accounts. Account opens create
-      // usable bilateral state; with a configured tower, the runtime backup barrier
-      // must already be installed before those committed frames can leave the device.
-      await saveRecoveryConfig();
+      // Browser-owned runtimes must install their backup barrier before account
+      // opens. A paired daemon owns its seed and recovery policy outside the browser.
+      if (!daemonCustody) await saveRecoveryConfig();
 
       const autoJoinCount = parseJoinCount(savedJoinPreference);
       const autoJoinTargets = autoJoinCount > 0
@@ -935,7 +935,14 @@
         {/if}
       </section>
 
-      {#if recoveryDiscoveryStatus}
+      {#if daemonCustody}
+        <section class="setup-section recovery-check-compact" data-testid="daemon-custody-notice">
+          <div class="recovery-check-copy">
+            <strong>Recovery is managed by this local node.</strong>
+            <small>The BrainVault mnemonic and signer never enter the browser.</small>
+          </div>
+        </section>
+      {:else if recoveryDiscoveryStatus}
         <section class="setup-section recovery-check-compact" data-testid="runtime-recovery-check-status">
           <div class="recovery-check-copy">
             <span>Checked {recoveryDiscoveryStatus.checkedTowers} watchtower{recoveryDiscoveryStatus.checkedTowers === 1 ? '' : 's'}; found {recoveryDiscoveryStatus.backupCount} encrypted backup{recoveryDiscoveryStatus.backupCount === 1 ? '' : 's'}.</span>
@@ -951,6 +958,7 @@
         </section>
       {/if}
 
+    {#if !daemonCustody}
     <section class="setup-section recovery-section">
       <div class="section-headline">
         <h3>Encrypted backup and last-resort dispute protection</h3>
@@ -1063,6 +1071,7 @@
         </div>
       {/if}
     </section>
+    {/if}
     </details>
 
     <section class="setup-section confirm-section">

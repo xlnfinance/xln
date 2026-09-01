@@ -1,25 +1,32 @@
-# xlnfinance
+# xlnd
 
-Run a persistent local xln runtime and open its wallet UI in your system browser:
+Run the complete local xln TypeScript runtime and open its wallet UI:
 
-Install and run the exact versioned GitHub Release archive linked from
-`https://xln.finance/install`; do not resolve a mutable registry tag.
+```sh
+bunx --bun xlnd
+```
 
-The runtime listens only on `127.0.0.1:8080`. The launcher opens
-`http://localhost:8080/app`, exchanges a single-use pairing token for full admin
-runtime control, and removes the pairing token from browser history. Closing the
-browser does not stop the runtime.
+For a first login whose BrainVault credentials never enter the browser:
 
-Fresh installs create one deterministic local owner entity before the daemon reports
-ready. Its seed and signer remain in the node runtime; the browser controls it through
-the paired admin capability.
+```sh
+bunx --bun xlnd --derive-cli
+```
 
-When BrainVault is used from this paired UI, Argon2 runs through the native node
-backend and the resulting signer is stored in the node state directory with owner-only
-permissions. Normal recovery returns only the public address/entity and timing. The
-mnemonic crosses into the browser only after the separate **Show mnemonic** action.
+`--derive-cli` asks only for the BrainVault username and hidden password. It uses
+the recommended defaults: factor 4 (1,000 shards), multiplier 1, and every CPU
+available to the process. Argon2id runs in the local native node backend. The
+mnemonic and signer remain in the node state directory; only the public owner
+Entity and a single-use browser capability are sent to the UI.
 
-Commands: `daemon`, `open`, `status`, `stop`, `logs`, and `version`.
+The daemon listens only on `127.0.0.1:8080`. Closing the browser does not stop
+it. State is stored with owner-only permissions in the platform state directory.
 
-The launcher does not install mutable tags. Upgrade by installing the exact versioned
-GitHub Release archive shown on the xln install page after verifying its release manifest.
+Commands:
+
+```text
+xlnd [start|daemon|open|status|stop|logs|version] [--derive-cli]
+```
+
+The package currently ships the canonical TypeScript runtime. There is no
+`--rs` switch until the Rust runtime can provide the same complete daemon,
+storage, custody, and browser protocol without changing semantics.

@@ -9,7 +9,8 @@
  *   bun run bv --bench                          # Benchmark performance
  *   bun run bv --smoke                          # Fast 2-shard backend parity check
  *   bun run bv --lib=wasm                       # Force hash-wasm (slower, parity check)
- *   bun run bv --lib=native                     # Force @node-rs/argon2 (default, faster)
+ *   bun run bv --lib=native                     # Force portable @node-rs/argon2
+ *   bun run bv --lib=neon                       # Force bundled Apple Silicon C/NEON
  *   bun run bv --ask                            # Ask for factor, multiplier, and workers
  *   bun run bv --repeat                         # Interactive: require double entry for name/pass
  *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256MB * multiplier per shard
@@ -28,7 +29,7 @@ import {
   getShardCount, combineShardsWithParams, deriveKey, entropyToMnemonic,
   deriveEthereumAddressMatrix, deriveEthereumPrivateKeyAtPath,
   factorForShardCount, formatDuration, hexToBytes, bytesToHex,
-  BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, deriveSitePassword,
+  BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, deriveSitePassword,
 } from './core.ts';
 import { assertBrainVaultName, assertBrainVaultPassphrase } from './primitives/spec.ts';
 
@@ -69,7 +70,10 @@ Flags:
   Without this flag the recommended defaults are factor 4 (1,000 shards),
   multiplier 1, and all CPU cores allowed by RAM.
 - --lib=native
-  Use @node-rs/argon2 worker (default).
+  Force the portable @node-rs/argon2 worker implementation.
+- --lib=neon
+  Force the bundled C/NEON implementation (Apple Silicon, multiplier 1 only).
+  It is selected automatically when available and falls back safely elsewhere.
 - --lib=wasm
   Use hash-wasm worker (slower, cross-backend parity/testing path).
 - --w=N
@@ -111,6 +115,7 @@ if (showHelp) {
 
 const useWasm = args.includes('--lib=wasm');
 const useNative = args.includes('--lib=native');
+const useNeon = args.includes('--lib=neon');
 const requireRepeat = args.includes('--repeat');
 const showPrivateKey = args.includes('--show-private-key');
 const askAdvanced = args.includes('--ask');
@@ -131,8 +136,8 @@ const addressCount = getPositiveIntFlag('address-count', 5);
 const shardMultiplier = getPositiveIntFlag('shard-multiplier', 1);
 const hasShardMultiplierFlag = args.some(argument => argument.startsWith('--shard-multiplier='));
 
-if (useWasm && useNative) {
-  console.error('Error: cannot use both --lib=wasm and --lib=native');
+if ([useWasm, useNative, useNeon].filter(Boolean).length > 1) {
+  console.error('Error: choose only one of --lib=wasm, --lib=native, or --lib=neon');
   process.exit(1);
 }
 
@@ -174,15 +179,73 @@ function getHardwarePlan(shardCount: number, multiplier: number): HardwarePlan {
 
 interface DeriveOptions {
   useWasm?: boolean;
+  useNative?: boolean;
+  useNeon?: boolean;
   showDevice?: boolean;
   showPrivateKey?: boolean;
   addressCount?: number;
   shardMultiplier?: number;
 }
 
+function resolveNeonExecutable(): string | undefined {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return undefined;
+  const isAppleM3 = cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
+  const candidates = [
+    ...(isAppleM3 ? [`${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-m3`] : []),
+    `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2`,
+    `${import.meta.dir}/experimental/argon2-c/brainvault-argon2`,
+  ];
+  return candidates.find(candidate => existsSync(candidate));
+}
+
+async function deriveNeonShards(
+  executable: string,
+  name: string,
+  passphrase: string,
+  shardCount: number,
+  workers: number,
+): Promise<Uint8Array[]> {
+  const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
+  const header = Buffer.alloc(20);
+  header.writeUInt32LE(0x31435642, 0);
+  header.writeUInt32LE(shardCount, 4);
+  header.writeUInt32LE(workers, 8);
+  header.writeUInt32LE(password.length, 12);
+  header.writeUInt32LE(0, 16);
+  const input = Buffer.alloc(header.length + password.length + (shardCount * 32));
+  header.copy(input, 0);
+  input.set(password, header.length);
+  for (let index = 0; index < shardCount; index += 1) {
+    input.set(await createShardSalt(name, index, shardCount), header.length + password.length + (index * 32));
+  }
+
+  const child = spawnSync(executable, [], {
+    input,
+    maxBuffer: Math.max(1024 * 1024, shardCount * 64),
+  });
+  password.fill(0);
+  input.fill(0);
+  if (child.status !== 0) {
+    throw new Error(`BRAINVAULT_NEON_FAILED:${String(child.status)}:${child.stderr.toString().trim()}`);
+  }
+  if (child.stdout.length !== shardCount * BRAINVAULT_V1.SHARD_OUTPUT_BYTES) {
+    throw new Error(`BRAINVAULT_NEON_OUTPUT_INVALID:${child.stdout.length}`);
+  }
+  const shards = Array.from({ length: shardCount }, (_, index) => new Uint8Array(
+    child.stdout.subarray(
+      index * BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+      (index + 1) * BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+    ),
+  ));
+  child.stdout.fill(0);
+  return shards;
+}
+
 async function derive(name: string, passphrase: string, shardInput: number, workers = 64, options: DeriveOptions = {}) {
   const {
     useWasm = false,
+    useNative = false,
+    useNeon = false,
     showDevice = false,
     showPrivateKey = false,
     addressCount = 5,
@@ -211,19 +274,43 @@ async function derive(name: string, passphrase: string, shardInput: number, work
   const shardResults: Uint8Array[] = new Array(shardCount);
 
   const start = Date.now();
-  let completed = 0;
-  let nextShard = 0;
-  let failed = false;
-
-  // Choose worker based on library
-  const workerPath = import.meta.dir + (useWasm ? '/worker-wasm.ts' : '/worker-native.ts');
-  const pool: Worker[] = [];
-
-  if (useWasm) {
-    console.log('Using hash-wasm (WASM) - slower but browser-compatible');
+  const neonExecutable = resolveNeonExecutable();
+  const selectNeon = useNeon || (
+    !useWasm
+    && !useNative
+    && shardMultiplier === 1
+    && shardCount >= 100
+    && neonExecutable !== undefined
+  );
+  if (useNeon && (neonExecutable === undefined || shardMultiplier !== 1)) {
+    throw new Error('BRAINVAULT_NEON_UNAVAILABLE: requires Apple Silicon, bundled binary, and shard-multiplier=1');
   }
 
-  await new Promise<void>((resolve, reject) => {
+  let usedNeon = false;
+  if (selectNeon) {
+    console.log(`Using bundled Apple Silicon C/NEON (${actualWorkers} workers)`);
+    try {
+      const nativeShards = await deriveNeonShards(neonExecutable!, name, passphrase, shardCount, actualWorkers);
+      for (let index = 0; index < shardCount; index += 1) shardResults[index] = nativeShards[index]!;
+      usedNeon = true;
+    } catch (error) {
+      if (useNeon) throw error;
+      console.warn(`C/NEON unavailable at runtime; using portable native fallback (${String(error)}).`);
+    }
+  }
+
+  if (!usedNeon) {
+    let completed = 0;
+    let nextShard = 0;
+    let failed = false;
+    const workerPath = import.meta.dir + (useWasm ? '/worker-wasm.ts' : '/worker-native.ts');
+    const pool: Worker[] = [];
+
+    if (useWasm) {
+      console.log('Using hash-wasm (WASM) - slower but browser-compatible');
+    }
+
+    await new Promise<void>((resolve, reject) => {
     let lastUpdate = 0;
     const terminatePool = () => Promise.all(pool.map(worker => worker.terminate())).then(() => undefined);
     const fail = (error: unknown) => {
@@ -317,7 +404,8 @@ async function derive(name: string, passphrase: string, shardInput: number, work
         });
       }
     }
-  });
+    });
+  }
 
   const derivationTime = Date.now() - start;
   const masterKey = await combineShardsWithParams(shardResults, factor, {
@@ -376,16 +464,17 @@ async function runBenchmark(smoke = false) {
   if (!existsSync(benchmarkPath)) throw new Error('BRAINVAULT_BENCHMARK_HARNESS_MISSING');
 
   type BenchmarkBackend = Readonly<{ id: string; label: string; executable?: string }>;
+  const benchmarkNeonExecutable = resolveNeonExecutable();
   const candidates: BenchmarkBackend[] = [
     {
       id: 'c-neon',
       label: 'C/NEON final wipe',
-      executable: `${import.meta.dir}/experimental/argon2-c/brainvault-argon2`,
+      executable: benchmarkNeonExecutable ?? '__unavailable__',
     },
     {
       id: 'c-neon-wipe',
       label: 'C/NEON per-shard wipe',
-      executable: `${import.meta.dir}/experimental/argon2-c/brainvault-argon2`,
+      executable: benchmarkNeonExecutable ?? '__unavailable__',
     },
     { id: 'direct-async', label: 'Native direct async (experimental)' },
     { id: 'sync', label: 'Native sync isolated' },
@@ -596,6 +685,8 @@ async function interactive() {
   try {
     const result = await derive(name, pass, shardInput, workersInput, {
       useWasm,
+      useNative,
+      useNeon,
       showPrivateKey,
       addressCount,
       shardMultiplier: selectedMultiplier,
@@ -655,6 +746,8 @@ async function derivePassword() {
   console.log('\nDeriving master key...');
   const result = await derive(name, pass, shardInput, 1, {
     useWasm,
+    useNative,
+    useNeon,
     showDevice: true,
     shardMultiplier,
   });
@@ -708,6 +801,8 @@ if (args.includes('--bench') || args.includes('--smoke')) {
 
   const result = await derive(name!, pass!, shards, workers, {
     useWasm,
+    useNative,
+    useNeon,
     showPrivateKey,
     addressCount,
     shardMultiplier,

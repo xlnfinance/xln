@@ -7,6 +7,13 @@ import {
 import { readJsonUnknown, requireUnknownRecord } from '../boundary';
 
 export const LOCAL_RUNTIME_PAIR_HASH_PARAM = 'xlnPair';
+export const LOCAL_RUNTIME_ONBOARDING_HASH_PARAM = 'xlnOnboarding';
+export const LOCAL_RUNTIME_ENTITY_HASH_PARAM = 'xlnEntity';
+
+export type LocalRuntimeLaunchRequest = Readonly<{
+  stage: 'create' | 'formation' | null;
+  entityId: string;
+}>;
 
 const hashParams = (): URLSearchParams => {
   if (typeof window === 'undefined') return new URLSearchParams();
@@ -19,12 +26,41 @@ const hashParams = (): URLSearchParams => {
 export const readLocalRuntimePairingToken = (): string =>
   String(hashParams().get(LOCAL_RUNTIME_PAIR_HASH_PARAM) || '').trim();
 
-export const stripLocalRuntimePairingToken = (): void => {
+export const readLocalRuntimeLaunchRequest = (): LocalRuntimeLaunchRequest => {
+  const params = hashParams();
+  const rawStage = String(params.get(LOCAL_RUNTIME_ONBOARDING_HASH_PARAM) || '').trim();
+  if (rawStage && rawStage !== 'create' && rawStage !== 'formation') {
+    throw new Error(`LOCAL_LAUNCHER_ONBOARDING_STAGE_INVALID:${rawStage}`);
+  }
+  const entityId = String(params.get(LOCAL_RUNTIME_ENTITY_HASH_PARAM) || '').trim().toLowerCase();
+  if (entityId && !/^0x[0-9a-f]{64}$/.test(entityId)) {
+    throw new Error('LOCAL_LAUNCHER_ENTITY_ID_INVALID');
+  }
+  if (rawStage === 'formation' && !entityId) {
+    throw new Error('LOCAL_LAUNCHER_ENTITY_ID_MISSING');
+  }
+  if (rawStage !== 'formation' && entityId) {
+    throw new Error('LOCAL_LAUNCHER_ENTITY_WITHOUT_FORMATION');
+  }
+  return {
+    stage: rawStage === 'create' || rawStage === 'formation' ? rawStage : null,
+    entityId,
+  };
+};
+
+export const stripLocalRuntimeLaunchParams = (): void => {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
   const params = hashParams();
-  if (!params.has(LOCAL_RUNTIME_PAIR_HASH_PARAM)) return;
+  const launcherParams = [
+    LOCAL_RUNTIME_PAIR_HASH_PARAM,
+    LOCAL_RUNTIME_ONBOARDING_HASH_PARAM,
+    LOCAL_RUNTIME_ENTITY_HASH_PARAM,
+  ];
+  if (!launcherParams.some((name) => params.has(name))) return;
   params.delete(LOCAL_RUNTIME_PAIR_HASH_PARAM);
+  params.delete(LOCAL_RUNTIME_ONBOARDING_HASH_PARAM);
+  params.delete(LOCAL_RUNTIME_ENTITY_HASH_PARAM);
   url.hash = params.toString() ? `#${params.toString()}` : '';
   const next = `${url.pathname}${url.search}${url.hash}`;
   try {

@@ -13,6 +13,8 @@ import type { PersistentRadixNodeCommitment } from '../../protocol/state/persist
 import type { OpCounterSnapshot } from '../../support/performance/op-counters';
 import type { AccountAuthorityCommittedHanko } from '../../entity/runtime-context';
 import type { AuthorityCertifiedBoard } from '../authority-wave';
+import type { BookIntent } from '../../entity/books/book-intents';
+import type { PaybookEntry } from '../../entity/types';
 
 export type TsAccountWorkerCertifiedBoard = AuthorityCertifiedBoard & Readonly<{
   entityId: string;
@@ -215,6 +217,26 @@ export type TsAccountWorkerPhasePayload =
   | TsAccountWorkerInboundPayload
   | TsAccountWorkerOutboundPayload;
 
+export type TsBookWorkerSlot = Readonly<{
+  physicalSlot: number;
+  entries: readonly (readonly [hashlock: string, entry: PaybookEntry])[];
+  intents: readonly BookIntent[];
+  feesEarned?: bigint;
+}>;
+
+export type TsBookWorkerPayload = Readonly<{
+  slots: readonly TsBookWorkerSlot[];
+}>;
+
+export type TsBookWorkerResult = Readonly<{
+  workerIndex: number;
+  slots: readonly Readonly<{
+    physicalSlot: number;
+    entries: readonly (readonly [hashlock: string, entry: PaybookEntry])[];
+    feesEarned?: bigint;
+  }>[];
+}>;
+
 export type TsAccountWorkerCommittedHankoRow = Readonly<{
   accountId: string;
   hankos: readonly AccountAuthorityCommittedHanko[];
@@ -261,7 +283,7 @@ export type TsAccountWorkerInitResult = Readonly<{
 
 export type TsAccountWorkerRequestEnvelope = Readonly<{
   requestId: number;
-  kind: 'init' | 'phase' | 'install_hankos';
+  kind: 'init' | 'phase' | 'books' | 'install_hankos';
   payload: ArrayBuffer;
 }>;
 

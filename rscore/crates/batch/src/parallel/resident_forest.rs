@@ -347,6 +347,7 @@ pub(crate) struct ResidentAccountForest<V> {
     last_outbound_kind: Option<AccountPhaseKind>,
     entity_worker_items: Vec<u64>,
     entity_worker_nanos: Vec<u64>,
+    entity_stage_invocations: u64,
 }
 
 impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
@@ -476,6 +477,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             last_outbound_kind: None,
             entity_worker_items: vec![0; worker_count],
             entity_worker_nanos: vec![0; worker_count],
+            entity_stage_invocations: 0,
         })
     }
 
@@ -532,6 +534,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         if items.is_empty() {
             return Ok(Vec::new());
         }
+        self.entity_stage_invocations = self.entity_stage_invocations.saturating_add(1);
         // Entity-owned jobs carry no resident Account state. Actors claim
         // indices dynamically, while the pool restores fixed result slots.
         let stage = self.workers.run_stateless_indexed(items, apply)?;
@@ -576,6 +579,10 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
 
     pub(crate) fn entity_worker_metrics(&self) -> (&[u64], &[u64]) {
         (&self.entity_worker_items, &self.entity_worker_nanos)
+    }
+
+    pub(crate) fn entity_stage_invocations(&self) -> u64 {
+        self.entity_stage_invocations
     }
 
     pub(crate) fn expected_uses_candidate(
@@ -2394,6 +2401,7 @@ mod tests {
             .expect("dynamic stage");
 
         assert_eq!(rows, vec![(0, 1), (1, 0)]);
+        assert_eq!(forest.entity_stage_invocations, 1);
         assert_eq!(forest.entity_worker_items.iter().sum::<u64>(), 2);
         assert_eq!(
             forest
@@ -2434,6 +2442,7 @@ mod tests {
             4
         );
         assert_eq!(forest.entity_worker_items, vec![1, 1, 1, 1]);
+        assert_eq!(forest.entity_stage_invocations, 1);
         assert!(forest.entity_worker_nanos.iter().all(|nanos| *nanos > 0));
     }
 

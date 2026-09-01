@@ -10,6 +10,7 @@ import type { AccountTxBatch, AccountInput } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import type {
   AccountAuthorityFrameBeginRequest,
+  AccountAuthorityFrameBooksRequest,
   AccountAuthorityCommittedHankosRequest,
   AccountAuthorityFrameOutboundRequest,
   AccountAuthorityEntityStageCapability,
@@ -43,6 +44,10 @@ export type AccountAuthorityEntityStageProvider = Readonly<{
   executeAccountOutboundBatch(
     input: AccountAuthorityEntityBatchOutbound,
   ): Promise<AccountAuthorityPreparedOutbound>;
+  executeEntityBooksBatch(input: Readonly<{
+    ownerEntityId: string;
+    request: AccountAuthorityFrameBooksRequest;
+  }>): Promise<void>;
   installCommittedAccountHankos?(
     input: AccountAuthorityCommittedHankosRequest,
   ): Promise<void>;
@@ -212,6 +217,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   private authoritativeExecutions = 0;
   private frameOpened = false;
   private frameOutboundPrepared = false;
+  private frameBooksExecuted = false;
   private inboundRequests: AccountAuthorityInboundBatchRequest[] = [];
   private inboundResults: HandleAccountInputResult[] = [];
   private inboundCursor = 0;
@@ -263,6 +269,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     // candidate from expectedAccountsRoot before applying this batch.
     this.frameOpened = true;
     this.frameOutboundPrepared = false;
+    this.frameBooksExecuted = false;
     this.inboundRequests = [];
     this.inboundResults = [];
     this.inboundCursor = 0;
@@ -345,12 +352,24 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     executionLedger.authoritativeOperations += this.inboundRequests.length;
   }
 
+  async executeEntityBooks(request: AccountAuthorityFrameBooksRequest): Promise<void> {
+    if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
+    if (this.frameBooksExecuted) throw new Error(`ACCOUNT_AUTHORITY_BOOKS_DUPLICATE:${this.ownerEntityId}`);
+    if (this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_BOOKS_AFTER_OUTBOUND:${this.ownerEntityId}`);
+    this.frameBooksExecuted = true;
+    await this.options.provider.executeEntityBooksBatch({
+      ownerEntityId: this.ownerEntityId,
+      request,
+    });
+  }
+
   async prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void> {
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_DUPLICATE:${this.ownerEntityId}`);
     if (this.inboundCursor !== this.inboundRequests.length) {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNCONSUMED:${this.inboundCursor}:${this.inboundRequests.length}`);
     }
+    if (!this.frameBooksExecuted) throw new Error(`ACCOUNT_AUTHORITY_BOOKS_NOT_EXECUTED:${this.ownerEntityId}`);
     this.frameOutboundPrepared = true;
     const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]

@@ -54,9 +54,10 @@ run produced the same master root shown above.
 
 The C final-wipe process does not leave a long-lived dirty arena: each worker
 reuses its arena only while processing its assigned shards, then securely wipes
-the full 256 MiB before the subprocess exits. It remains experimental and
-Darwin/ARM64-specific; the publishable CLI defaults to the portable native
-binding and automatically uses all CPU cores allowed by RAM.
+the full 256 MiB before the subprocess exits. The source variants and comparison
+modes remain under `experimental/`; the publishable CLI bundles release builds
+as its fast Apple Silicon default and falls back to the portable native binding.
+Both paths automatically use all CPU cores allowed by RAM.
 
 ## Run
 

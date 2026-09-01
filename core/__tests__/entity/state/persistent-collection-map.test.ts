@@ -5,6 +5,7 @@ import {
   PersistentEntityCollectionMap,
   ensureEntityCollectionCandidate,
 } from '../../../entity/state/persistent-collection-map';
+import { hexToBytes } from '../../../support/bytes/hex-bytes';
 
 describe('persistent Entity collection radix', () => {
   test('path-copies one dirty value and preserves the certified root', () => {
@@ -51,5 +52,19 @@ describe('persistent Entity collection radix', () => {
       PersistentEntityCollectionMap.empty<{ amount: bigint }>(),
       value => ({ ...value }),
     )).toThrow('ENTITY_COLLECTION_WRITE_OUTSIDE_CANDIDATE');
+  });
+
+  test('paybook key codec uses the raw 32-byte hashlock', () => {
+    const hashlock = `0x${'ab'.repeat(32)}`;
+    const paybook = PersistentEntityCollectionMap.from(
+      new Map([[hashlock, { amount: 1n }]]),
+      'paybookHashlock',
+    );
+    const leaf = [...paybook.nodeRecords()].find(record => record.kind === 'leaf');
+    expect(leaf?.keyBytes).toEqual(hexToBytes(hashlock));
+    expect(() => PersistentEntityCollectionMap.from(
+      new Map([[hashlock.toUpperCase(), { amount: 1n }]]),
+      'paybookHashlock',
+    )).toThrow('PAYBOOK_HASHLOCK_KEY_INVALID');
   });
 });

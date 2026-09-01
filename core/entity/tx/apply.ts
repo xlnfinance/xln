@@ -212,6 +212,7 @@ const handleJEventEntityTx: EntityTxDispatcher = async (
     options.accountConsensusContext,
     candidateEffects,
     options?.mutableFrameState,
+    options?.bookIntentSlot,
   );
   return {
     newState,

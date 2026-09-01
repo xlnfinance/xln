@@ -31,6 +31,16 @@ export type BookIntentProgram = Readonly<{
   slots(): readonly BookIntentSlot[];
 }>;
 
+export const PAYBOOK_PHYSICAL_SLOT_COUNT = 256;
+
+export const paybookPhysicalSlot = (hashlock: string): number => {
+  const normalized = hashlock.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`PAYBOOK_PHYSICAL_SLOT_HASHLOCK_INVALID:${hashlock}`);
+  }
+  return Number.parseInt(normalized.slice(2, 4), 16);
+};
+
 /**
  * Frame-local Book program. Slots are allocated in Entity transaction order;
  * workers may execute independent physical shards in any order, but the fold
@@ -59,7 +69,9 @@ export const createBookIntentProgram = (): BookIntentProgram => {
         getPaybookEntryForWrite(state: EntityState, hashlock: string): PaybookEntry | undefined {
           const current = read(state, hashlock);
           if (!current) return undefined;
-          const entry = structuredClone(current);
+          // Migrated handlers mutate only top-level PaybookEntry fields. Keep
+          // the candidate isolated without serializing immutable nested relay data.
+          const entry = { ...current };
           pendingPaybook.set(hashlock, entry);
           slot.intents.push({ kind: 'paybookSet', hashlock, entry });
           return entry;

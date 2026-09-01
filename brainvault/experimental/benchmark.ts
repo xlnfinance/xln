@@ -2,6 +2,8 @@
 
 import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import {
   bytesToHex,
@@ -91,11 +93,20 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
   for (let index = 0; index < shardCount; index += 1) {
     input.set(await createShardSalt(name, index, shardCount), header.length + password.length + (index * 32));
   }
+  const isAppleM3 = cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
+  const cExecutable = process.platform === 'darwin' && process.arch === 'arm64'
+    ? [
+      ...(isAppleM3 ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-m3`] : []),
+      `${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2`,
+      `${import.meta.dir}/argon2-c/brainvault-argon2`,
+    ].find(candidate => existsSync(candidate))
+    : undefined;
   const executable = backend === 'c-neon' || backend === 'c-neon-wipe'
-    ? `${import.meta.dir}/argon2-c/brainvault-argon2`
+    ? cExecutable
     : backend === 'rust-pool'
       ? `${import.meta.dir}/argon2-rust/target/release/brainvault-argon2-rust`
       : `${import.meta.dir}/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`;
+  if (executable === undefined) throw new Error(`Backend executable unavailable: ${backend}`);
   const native = spawnSync(executable, [], {
     input,
     maxBuffer: Math.max(1024 * 1024, shardCount * 64),

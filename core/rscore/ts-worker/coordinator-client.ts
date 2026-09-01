@@ -5,6 +5,7 @@ import type {
   TsAccountWorkerPhaseResult,
   TsAccountWorkerRequestEnvelope,
   TsAccountWorkerResponseEnvelope,
+  TsBookWorkerResult,
 } from './protocol';
 
 export type WorkerRequestResult = Readonly<{
@@ -194,6 +195,18 @@ export const parseWorkerPhaseResult = (
       || !Number.isSafeInteger(row[1]) || row[1] < 1) {
       throw new Error(`TS_ACCOUNT_WORKER_PHASE_SHARD_ROWS:${expectedWorkerIndex}`);
     }
+  }
+  return result;
+};
+
+export const parseBookWorkerResult = (
+  value: unknown,
+  expectedWorkerIndex: number,
+): TsBookWorkerResult => {
+  if (value === null || typeof value !== 'object') throw new Error('TS_BOOK_WORKER_RESULT_INVALID');
+  const result = value as TsBookWorkerResult;
+  if (result.workerIndex !== expectedWorkerIndex || !Array.isArray(result.slots)) {
+    throw new Error(`TS_BOOK_WORKER_RESULT_SHAPE:${expectedWorkerIndex}`);
   }
   return result;
 };

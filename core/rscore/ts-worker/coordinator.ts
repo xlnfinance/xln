@@ -20,14 +20,23 @@ import type {
   TsAccountWorkerInitPayload,
   TsAccountWorkerOptions,
   TsAccountWorkerPhasePayload,
+  TsBookWorkerPayload,
+  TsBookWorkerResult,
 } from './protocol';
 import {
   asWorkerError,
   parseWorkerInitResult,
+  parseBookWorkerResult,
   requireWorkerFrameId,
   requireWorkerInteger,
   TsAccountWorkerClient,
 } from './coordinator-client';
+import type { BookIntentSlot } from '../../entity/books/book-intents';
+import {
+  PAYBOOK_PHYSICAL_SLOT_COUNT,
+  paybookPhysicalSlot,
+} from '../../entity/books/book-intents';
+import type { EntityState, PaybookEntry } from '../../entity/types';
 import {
   aggregateWorkerPhaseResults,
   type ExpectedWorkerEffect,
@@ -275,6 +284,93 @@ export class TsAccountWorkerCoordinator {
       for (const client of this.#clients) client.poison(this.#fatal);
     }
     return this.#fatal;
+  }
+
+  /** Stateless Stage-2 callback over active transient Paybook slots. */
+  async applyBookIntents(
+    state: EntityState,
+    slots: readonly BookIntentSlot[],
+  ): Promise<Readonly<{ activeSlots: number; workers: number }>> {
+    this.#assertUsable();
+    if (this.#openFrameId === null) throw new Error('TS_BOOK_WORKER_FRAME_NOT_OPEN');
+    this.#inFlight = true;
+    try {
+      const intentsBySlot = Array.from(
+        { length: PAYBOOK_PHYSICAL_SLOT_COUNT },
+        () => [] as BookIntentSlot['intents'][number][],
+      );
+      let expectedPosition = 0;
+      for (const slot of slots) {
+        if (slot.position !== expectedPosition) {
+          throw new Error(`TS_BOOK_WORKER_INPUT_POSITION:${slot.position}:${expectedPosition}`);
+        }
+        expectedPosition += 1;
+        for (const intent of slot.intents) {
+          const physicalSlot = intent.kind === 'paybookFeesSet'
+            ? 0
+            : paybookPhysicalSlot(intent.hashlock);
+          intentsBySlot[physicalSlot]?.push(intent);
+        }
+      }
+      const activePhysicalSlots = intentsBySlot.flatMap((intents, physicalSlot) =>
+        intents.length === 0 ? [] : [physicalSlot]);
+      const entriesBySlot = Array.from(
+        { length: PAYBOOK_PHYSICAL_SLOT_COUNT },
+        () => [] as Array<readonly [string, PaybookEntry]>,
+      );
+      const activeSet = new Set(activePhysicalSlots);
+      for (const [hashlock, entry] of state.paybook.entries) {
+        const physicalSlot = paybookPhysicalSlot(hashlock);
+        if (activeSet.has(physicalSlot)) entriesBySlot[physicalSlot]?.push([hashlock, entry]);
+      }
+      const buckets = Array.from({ length: this.#workerCount }, () => [] as TsBookWorkerPayload['slots'][number][]);
+      activePhysicalSlots.forEach((physicalSlot, activeIndex) => {
+        const bucket = buckets[activeIndex % this.#workerCount];
+        const intents = intentsBySlot[physicalSlot];
+        const entries = entriesBySlot[physicalSlot];
+        if (!bucket || !intents || !entries) throw new Error(`TS_BOOK_WORKER_BUCKET_MISSING:${physicalSlot}`);
+        bucket.push({
+          physicalSlot,
+          entries,
+          intents,
+          ...(physicalSlot === 0 ? { feesEarned: state.paybook.feesEarned } : {}),
+        });
+      });
+      const pending = buckets.flatMap((workerSlots, workerIndex) => {
+        if (workerSlots.length === 0) return [];
+        const client = this.#clients[workerIndex];
+        if (!client) throw new Error(`TS_BOOK_WORKER_CLIENT_MISSING:${workerIndex}`);
+        return [client.request('books', { slots: workerSlots }).then(response => ({ workerIndex, response }))];
+      });
+      const responses = await Promise.all(pending);
+      const fixedResults: Array<TsBookWorkerResult['slots'][number] | undefined> =
+        Array.from({ length: PAYBOOK_PHYSICAL_SLOT_COUNT });
+      for (const { workerIndex, response } of responses) {
+        const result = parseBookWorkerResult(response.value, workerIndex);
+        for (const slot of result.slots) {
+          if (!activeSet.has(slot.physicalSlot) || fixedResults[slot.physicalSlot] !== undefined) {
+            throw new Error(`TS_BOOK_WORKER_RESULT_SLOT:${slot.physicalSlot}`);
+          }
+          fixedResults[slot.physicalSlot] = slot;
+        }
+      }
+      const missing = activePhysicalSlots.find(physicalSlot => fixedResults[physicalSlot] === undefined);
+      if (missing !== undefined) throw new Error(`TS_BOOK_WORKER_RESULT_MISSING:${missing}`);
+      for (const hashlock of [...state.paybook.entries.keys()]) {
+        if (activeSet.has(paybookPhysicalSlot(hashlock))) state.paybook.entries.delete(hashlock);
+      }
+      for (const physicalSlot of activePhysicalSlots) {
+        const result = fixedResults[physicalSlot];
+        if (!result) throw new Error(`TS_BOOK_WORKER_RESULT_MISSING:${physicalSlot}`);
+        for (const [hashlock, entry] of result.entries) state.paybook.entries.set(hashlock, entry);
+        if (result.feesEarned !== undefined) state.paybook.feesEarned = result.feesEarned;
+      }
+      return { activeSlots: activePhysicalSlots.length, workers: responses.length };
+    } catch (error) {
+      throw this.#poison(error);
+    } finally {
+      this.#inFlight = false;
+    }
   }
 
   async #runPhase(

@@ -1,0 +1,177 @@
+{
+  "version": "1",
+  "lastUpdated": "2026-07-24T18:16:13.082Z",
+  "jurisdictions": {
+    "arrakis": {
+      "name": "Testnet",
+      "chainId": 31337,
+      "rpc": "http://127.0.0.1:20740",
+      "blockTimeMs": 10000,
+      "contracts": {
+        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "SPICE",
+      "status": "active",
+      "description": "Primary local testnet",
+      "rebalancePolicyUsd": {
+        "r2cRequestSoftLimit": 500,
+        "hardLimit": 10000,
+        "maxFee": 15
+      }
+    },
+    "tron": {
+      "name": "Tron",
+      "chainId": 31338,
+      "rpc": "/rpc2",
+      "blockTimeMs": 10000,
+      "explorer": "",
+      "currency": "TRX",
+      "status": "active",
+      "description": "Second local EVM chain used to simulate Tron cross-jurisdiction swaps",
+      "contracts": {
+        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      }
+    },
+    "tron-nile": {
+      "name": "TRON Nile",
+      "chainId": 3448148188,
+      "rpc": "https://nile.trongrid.io/jsonrpc",
+      "blockTimeMs": 3000,
+      "entityProviderDeploymentBlock": 69421628,
+      "contracts": {
+        "account": "0xe25ef10bb79f2c7d23855b73f1776a674eebb964",
+        "entityProvider": "0xc2832268ea9724322cbaf1e5aa30d26087806c9d",
+        "depository": "0x75eb26153b18feef80006573bd2b38ea7235d25e",
+        "deltaTransformer": "0xf4e527c7b42ad49a435ff95564b317d9f7dd8a11"
+      },
+      "explorer": "https://nile.tronscan.org",
+      "currency": "TRX",
+      "status": "pending",
+      "description": "TRON Nile XLN deployment",
+      "tokens": {
+        "USDT": {
+          "symbol": "USDT",
+          "decimals": 6,
+          "tokenId": 1,
+          "address": "0xeca9bc828a3005b9a3b909f2cc5c2a54794de05f",
+          "tron": {
+            "base58": "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
+            "hex41": "0x41eca9bc828a3005b9a3b909f2cc5c2a54794de05f",
+            "evm": "0xeca9bc828a3005b9a3b909f2cc5c2a54794de05f"
+          }
+        }
+      },
+      "tronContracts": {
+        "account": {
+          "base58": "TWc9T4zZE6BPTDeKSrMySFbJDVdtASDj2f",
+          "hex41": "0x41e25ef10bb79f2c7d23855b73f1776a674eebb964",
+          "evm": "0xe25ef10bb79f2c7d23855b73f1776a674eebb964",
+          "deploymentBlock": 69421609,
+          "transactionHash": "637fbbd4eceb6dd5326218f28d73d609e5ddc45fae2fad11e1cb04964969b2dc"
+        },
+        "entityProvider": {
+          "base58": "TThhBepXm7aoU7V88VscLkuDJ13V6p92FA",
+          "hex41": "0x41c2832268ea9724322cbaf1e5aa30d26087806c9d",
+          "evm": "0xc2832268ea9724322cbaf1e5aa30d26087806c9d",
+          "deploymentBlock": 69421628,
+          "transactionHash": "82c7bc9e0964e356c6a669d498260416947e70a644b4e3f2832c11276fcc20c0"
+        },
+        "depository": {
+          "base58": "TLihkvdkuJmAWYEsSebkiZPwQaBU2dtsiC",
+          "hex41": "0x4175eb26153b18feef80006573bd2b38ea7235d25e",
+          "evm": "0x75eb26153b18feef80006573bd2b38ea7235d25e",
+          "deploymentBlock": 69421647,
+          "transactionHash": "9674a7cb756dbb68c8330e932c647326ecccea0e79274cff1e3de8e9cee6e828"
+        },
+        "deltaTransformer": {
+          "base58": "TYJ6PrujKpo2FX3iXhheUnGV48EdVw4XfD",
+          "hex41": "0x41f4e527c7b42ad49a435ff95564b317d9f7dd8a11",
+          "evm": "0xf4e527c7b42ad49a435ff95564b317d9f7dd8a11",
+          "deploymentBlock": 69421667,
+          "transactionHash": "25b41465f7703e21367fb2645aadc36d1738b937c5fc50de4eacfbc03e85fbe8"
+        }
+      }
+    },
+    "ethereum-sepolia": {
+      "name": "Ethereum Sepolia",
+      "chainId": 11155111,
+      "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+      "blockTimeMs": 12000,
+      "entityProviderDeploymentBlock": 11342391,
+      "contracts": {
+        "account": "0x2e41cF40fB454CE793a5948852E99a93da72b0a7",
+        "hankoVerifier": "0xAE4d02017190Bee851E913fe1Ccf8711e0dFeABB",
+        "entityProvider": "0x210061A68c17FEe851407c8d00aa27cFF6Ce399c",
+        "depository": "0xC7757F7A9857d41820Ef96b80a2f811e2976cf0B",
+        "deltaTransformer": "0x2daAf23E04fa4De532737C14a20B6512cB94ba1e"
+      },
+      "explorer": "https://sepolia.etherscan.io",
+      "currency": "ETH",
+      "status": "pending",
+      "description": "Ethereum Sepolia XLN deployment (disabled for local anvil/Tron debug; re-enable when public testnet is needed)",
+      "tokens": {
+        "USDT": {
+          "symbol": "USDT",
+          "decimals": 6,
+          "tokenId": 1,
+          "address": "0xcFe82353Ae846B306E5273A1B8239C1d90541232"
+        }
+      },
+      "evmContracts": {
+        "account": {
+          "address": "0x2e41cF40fB454CE793a5948852E99a93da72b0a7",
+          "deploymentBlock": 11342389,
+          "transactionHash": "0x2d88e08ebded2bfedaf01d5258143ad605a51acc97111a1a078854deb752e648"
+        },
+        "hankoVerifier": {
+          "address": "0xAE4d02017190Bee851E913fe1Ccf8711e0dFeABB",
+          "deploymentBlock": 11342390,
+          "transactionHash": "0xdb94b37b8ee9c2f3177a8ca7984e9f1e7b634e0690d849d2282fbdea0df8256d"
+        },
+        "entityProvider": {
+          "address": "0x210061A68c17FEe851407c8d00aa27cFF6Ce399c",
+          "deploymentBlock": 11342391,
+          "transactionHash": "0x0e892367561c7b06816fff1b3b0c5def56f6c74e86f7f3eb57a34fbc8a21b157"
+        },
+        "depository": {
+          "address": "0xC7757F7A9857d41820Ef96b80a2f811e2976cf0B",
+          "deploymentBlock": 11342539,
+          "transactionHash": "0xb1035c3671a3a487fa114e372b8381c1997f19fe9e8db2a5376721e3c2f41b87"
+        },
+        "deltaTransformer": {
+          "address": "0x2daAf23E04fa4De532737C14a20B6512cB94ba1e",
+          "deploymentBlock": 11342393,
+          "transactionHash": "0x89eb726b5bcbb2afa2f7971776b9edf5970c6fcc5492fcfb6ba2aa4aa78fc791"
+        },
+        "stablecoin": {
+          "address": "0xcFe82353Ae846B306E5273A1B8239C1d90541232",
+          "deploymentBlock": 11342394,
+          "transactionHash": "0xb7f05f6c681b1f714c057365b5099a63c672101ad7ca194197d1a090e1aebc25"
+        },
+        "stablecoinRegistration": {
+          "transactionHash": "0xcf46e0f675bfc5c5e97c3a7526bdbcf8bd20537e4e0a6219cf8990958954daa3",
+          "blockNumber": 11342540
+        }
+      }
+    }
+  },
+  "defaults": {
+    "timeout": 30000,
+    "retryAttempts": 3,
+    "gasLimit": 1000000,
+    "rebalancePolicyUsd": {
+      "r2cRequestSoftLimit": 500,
+      "hardLimit": 10000,
+      "maxFee": 15
+    }
+  },
+  "deployVersion": "chains-testnet-2026-07-24T18:16:13.082Z",
+  "networkVersion": "chains-testnet-2026-07-24T18:16:13.082Z"
+}

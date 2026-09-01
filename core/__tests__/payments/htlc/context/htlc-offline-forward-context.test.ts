@@ -12,6 +12,10 @@ import { openWritableEntityAccounts, entity, makeAccount, makeJurisdiction, make
 import { createOnionEnvelopes } from '../../../../protocol/htlc/codec/envelope';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import type { EntityTx } from '../../../../types/entity-tx';
+import {
+  applyBookIntentProgram,
+  createBookIntentProgram,
+} from '../../../../entity/books/book-intents';
 
 const x25519Public = (privateKey: string): string => hexlify(x25519.getPublicKey(getBytes(privateKey)));
 
@@ -122,6 +126,7 @@ describe('offline HTLC forwarding from committed Entity context', () => {
     if (!preparedEntry) throw new Error('prepared HTLC entry missing');
     const sourceAccount = state.accounts.get(source);
     if (!sourceAccount) throw new Error('source Account missing');
+    const bookIntents = createBookIntentProgram();
     await applyCommittedHtlcLockFollowup({
       env: {},
       state,
@@ -131,10 +136,12 @@ describe('offline HTLC forwarding from committed Entity context', () => {
       outputs: [],
       accountTxs,
       candidateEffects: [],
+      bookIntentSlot: bookIntents.openSlot(),
       infraContext: committedContext,
       preparedHtlcEntriesByBinding: new Map([[`${frame.stateHash}:${hashlock}`, preparedEntry]]),
       consumedPreparedHtlcBindings: new Set(),
     } as never, lock, frame, source < hub, true);
+    applyBookIntentProgram(state, bookIntents);
     expect(accountTxs).toEqual([{
       accountId: source,
       tx: {

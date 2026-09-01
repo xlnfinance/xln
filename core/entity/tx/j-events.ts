@@ -115,6 +115,7 @@ import {
   verifyCounterProofIdentity,
 } from './handlers/dispute/finalize-proof';
 import { proofBodyHasPulls } from './handlers/dispute/start-admission';
+import type { BookIntentSlotWriter } from '../books/book-intents';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -284,6 +285,7 @@ const applyJRangeBlocks = async (
   accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[],
   mutableFrameState: boolean,
+  bookIntentSlot?: BookIntentSlotWriter,
 ): Promise<AppliedJRange> => {
   let state = prepareEntityTxState(entityState, mutableFrameState);
   const applied: AppliedJRange = {
@@ -314,6 +316,7 @@ const applyJRangeBlocks = async (
         block.disputeFinalizationEvidence ?? [],
         candidateEffects,
         true,
+        bookIntentSlot,
       );
       state = applied.state = result.newState;
       applied.accountTxs.push(...result.accountTxs);
@@ -363,6 +366,7 @@ export const applyJEvent = async (
   accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
+  bookIntentSlot?: BookIntentSlotWriter,
 ): Promise<JEventApplyResult> => {
   const activeProposerId = normalizeSignerId(getEntityLeaderState(entityState).activeValidatorId);
   // Reject unauthorized senders before canonicalizing attacker-controlled bytes.
@@ -404,6 +408,7 @@ export const applyJEvent = async (
     accountConsensusContext,
     candidateEffects,
     mutableFrameState,
+    bookIntentSlot,
   );
   if (applied.certifiedPrefixRoot !== reconciled.eventHistoryRoot) {
     throw new Error(
@@ -446,6 +451,7 @@ export type FinalizedJEventContext = {
   accountTxs: JEventAccountTx[];
   outputs: EntityInput[];
   dirtyAccounts: Set<string>;
+  bookIntentSlot?: BookIntentSlotWriter;
 };
 
 type DisputeAccountContext = {
@@ -891,6 +897,7 @@ const applyStartedDisputeFollowups = (
       disputeSecret,
       blockNumber,
       'DisputeStarted',
+      context.bookIntentSlot,
     );
   }
   if (!weAreStarter && !counterProofQueued) {
@@ -1696,6 +1703,7 @@ async function applyFinalizedJEvent(
   disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
+  bookIntentSlot?: BookIntentSlotWriter,
 ): Promise<JEventApplyResult> {
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -1722,6 +1730,7 @@ async function applyFinalizedJEvent(
     accountTxs,
     outputs,
     dirtyAccounts,
+    ...(bookIntentSlot ? { bookIntentSlot } : {}),
   };
 
   switch (event.type) {

@@ -1,16 +1,17 @@
 import { closeSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 
-import { openDaemonLog, PACKAGE_ROOT, PATHS } from './state.js';
+import { ensureJurisdictionsConfig, openDaemonLog, PACKAGE_ROOT, PATHS } from './state.js';
 
 export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, controlToken }) => {
+  const jurisdictionsPath = ensureJurisdictionsConfig();
   const logDescriptor = openDaemonLog();
   const child = spawn(process.execPath, [
     PATHS.server,
     '--host', '127.0.0.1',
     '--port', '8080',
     '--static-dir', PATHS.app,
-    '--server-id', 'xlnfinance-local',
+    '--server-id', 'xlnd-local',
   ], {
     cwd: PACKAGE_ROOT,
     detached: true,
@@ -20,12 +21,11 @@ export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, contro
       NODE_ENV: 'production',
       RUNTIME_VERBOSE_LOGS: '0',
       XLN_DB_PATH: PATHS.database,
-      XLN_JURISDICTIONS_PATH: PATHS.jurisdictions,
+      XLN_JURISDICTIONS_PATH: jurisdictionsPath,
       XLN_DISTRIBUTION_VERSION: version,
       XLN_LOCAL_CONTROL_TOKEN: controlToken,
       XLN_LOCAL_INSTANCE_ID: instanceId,
-      XLN_LOCAL_OWNER_LABEL: 'xlnfinance-owner',
-      XLN_LOCAL_OWNER_PROFILE_NAME: 'xln finance',
+      XLN_LOCAL_OWNER_PROFILE_NAME: 'xln',
       XLN_BRAINVAULT_OWNER_PATH: PATHS.brainvaultOwner,
       XLN_BRAINVAULT_WORKER_PATH: PATHS.brainvaultWorker,
       XLN_RADAPTER_AUTH_SEED: authSeed,

@@ -234,6 +234,7 @@ export const hydrateEntityTrees = async (
   for (const descriptor of descriptors) {
     const tree = PersistentEntityCollectionMap.fromNodeRecords(
       await readTreeRecords(db, entityId, descriptor.namespace),
+      descriptor.namespace === 'paybookEntries' ? 'paybookHashlock' : 'text',
     );
     if (tree.rootHash() !== descriptor.rootHash || tree.size !== descriptor.leafCount) {
       throw new Error(`STORAGE_ENTITY_TREE_ROOT_MISMATCH:${descriptor.namespace}`);

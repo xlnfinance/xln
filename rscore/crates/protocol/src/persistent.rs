@@ -236,6 +236,36 @@ impl<V: Clone> SlotWork<V> {
         self.mutations.len()
     }
 
+    /// Add one mutation to a caller-owned two-nibble slot.
+    ///
+    /// Encoding may happen on the worker that owns this transient work item;
+    /// the slot check keeps physical scheduling separate from canonical key
+    /// placement and fails loudly if a caller routes a key incorrectly.
+    pub fn push_two_level_mutation(
+        &mut self,
+        slot: usize,
+        mutation: PersistentRadixMutation<V>,
+    ) -> Result<(), PersistentRadixMapError> {
+        validate_key_path(mutation.key())?;
+        let path = path_slots(mutation.key());
+        let actual = usize::from(path[0]) * 16 + usize::from(path[1]);
+        if actual != slot {
+            return Err(PersistentRadixMapError::ShardKey {
+                actual,
+                expected: slot,
+            });
+        }
+        self.mutations.push(match mutation {
+            PersistentRadixMutation::Put {
+                key,
+                value,
+                value_digest,
+            } => SlotMutation::Put(make_leaf(key, value, value_digest)),
+            PersistentRadixMutation::Remove { key } => SlotMutation::Remove(key),
+        });
+        Ok(())
+    }
+
     /// Fold this slot's leaves into its subtree without materializing hashes.
     /// The canonical root/descriptor/checkpoint projection owns that demand;
     /// `Node` caches it in `OnceLock`, so a later consumer pays exactly once.
@@ -266,6 +296,30 @@ impl<V: Clone> SlotWork<V> {
             deleted,
         })
     }
+}
+
+fn collect_two_level_roots<V>(
+    node: &NodeRef<V>,
+    slots: &mut [Option<NodeRef<V>>; 256],
+) -> Result<(), PersistentRadixMapError> {
+    let path = node_path(node);
+    if path.len() >= 2 {
+        let slot = usize::from(path[0]) * 16 + usize::from(path[1]);
+        if slots[slot].replace(Arc::clone(node)).is_some() {
+            return Err(PersistentRadixMapError::BranchSlotCollision { slot });
+        }
+        return Ok(());
+    }
+    let Node::Branch { children, .. } = &**node else {
+        return Err(PersistentRadixMapError::KeyDepth {
+            actual: path.len(),
+            required: 2,
+        });
+    };
+    for child in children.iter().flatten() {
+        collect_two_level_roots(child, slots)?;
+    }
+    Ok(())
 }
 
 impl PersistentRadixSubtreeRoot {
@@ -1091,80 +1145,32 @@ impl<V: Clone> PersistentRadixMap<V> {
         }
     }
 
-    pub fn try_mutated_batch_two_levels<E>(
-        &self,
-        mutations: Vec<PersistentRadixMutation<V>>,
-        map_slots: impl FnOnce(
-            [SlotWork<V>; 256],
-        )
-            -> Result<[Result<SlotOutcome<V>, PersistentRadixMapError>; 256], E>,
-    ) -> Result<Self, PersistentRadixBatchError<E>>
+    /// Split the current canonical tree into 256 transient two-nibble slots.
+    /// Callers may add already-validated mutations on the worker that executes
+    /// each slot, avoiding a coordinator encode/digest pass.
+    pub fn prepare_two_level_slots(&self) -> Result<[SlotWork<V>; 256], PersistentRadixMapError>
     where
         V: Send + Sync,
     {
-        if mutations.is_empty() {
-            return Ok(self.clone());
-        }
-        for mutation in &mutations {
-            validate_key_path(mutation.key())?;
-        }
-        let Some(root) = self.root.as_ref() else {
-            return self.fold_mutations(mutations).map_err(Into::into);
-        };
-        let Node::Branch { path, children, .. } = &**root else {
-            return self.fold_mutations(mutations).map_err(Into::into);
-        };
-        if !path.is_empty() {
-            return self.fold_mutations(mutations).map_err(Into::into);
-        }
-
         let mut existing: [Option<NodeRef<V>>; 256] = std::array::from_fn(|_| None);
-        for (root_slot, child) in children.iter().enumerate() {
-            let Some(child) = child else { continue };
-            match &**child {
-                Node::Branch {
-                    path,
-                    children: grandchildren,
-                    ..
-                } if path.len() == 1 => {
-                    for (second_slot, grandchild) in grandchildren.iter().enumerate() {
-                        if let Some(grandchild) = grandchild {
-                            existing[root_slot * 16 + second_slot] = Some(Arc::clone(grandchild));
-                        }
-                    }
-                }
-                _ => {
-                    let child_path = node_path(child);
-                    let second_slot = usize::from(
-                        *child_path
-                            .get(1)
-                            .ok_or(PersistentRadixMapError::KeyPrefixCollision)?,
-                    );
-                    existing[root_slot * 16 + second_slot] = Some(Arc::clone(child));
-                }
-            }
-        }
-
-        let mut buckets: [Vec<SlotMutation<V>>; 256] = std::array::from_fn(|_| Vec::new());
-        for mutation in mutations {
-            let path = path_slots(mutation.key());
-            let slot = usize::from(path[0]) * 16 + usize::from(path[1]);
-            buckets[slot].push(match mutation {
-                PersistentRadixMutation::Put {
-                    key,
-                    value,
-                    value_digest,
-                } => SlotMutation::Put(make_leaf(key, value, value_digest)),
-                PersistentRadixMutation::Remove { key } => SlotMutation::Remove(key),
-            });
+        if let Some(root) = self.root.as_ref() {
+            collect_two_level_roots(root, &mut existing)?;
         }
         let mut existing = existing.into_iter();
-        let mut buckets = buckets.into_iter();
-        let work: [SlotWork<V>; 256] = std::array::from_fn(|_| SlotWork {
+        Ok(std::array::from_fn(|_| SlotWork {
             child: existing.next().flatten(),
-            mutations: buckets.next().unwrap_or_default(),
-        });
-        let updated = map_slots(work).map_err(PersistentRadixBatchError::Mapper)?;
+            mutations: Vec::new(),
+        }))
+    }
+
+    /// Reconnect 256 completed two-nibble slots into the one canonical root.
+    pub fn reconnect_two_level_slots(
+        &self,
+        updated: [Result<SlotOutcome<V>, PersistentRadixMapError>; 256],
+    ) -> Result<Self, PersistentRadixMapError>
+    where
+        V: Send + Sync,
+    {
         let mut outcomes = updated.into_iter();
         let mut root_children: [Option<NodeRef<V>>; 16] = std::array::from_fn(|_| None);
         let mut inserted = 0;
@@ -1194,6 +1200,30 @@ impl<V: Clone> PersistentRadixMap<V> {
             },
             len: adjusted_len(self.len, inserted, deleted)?,
         })
+    }
+
+    pub fn try_mutated_batch_two_levels<E>(
+        &self,
+        mutations: Vec<PersistentRadixMutation<V>>,
+        map_slots: impl FnOnce(
+            [SlotWork<V>; 256],
+        )
+            -> Result<[Result<SlotOutcome<V>, PersistentRadixMapError>; 256], E>,
+    ) -> Result<Self, PersistentRadixBatchError<E>>
+    where
+        V: Send + Sync,
+    {
+        if mutations.is_empty() {
+            return Ok(self.clone());
+        }
+        let mut work = self.prepare_two_level_slots()?;
+        for mutation in mutations {
+            let path = path_slots(mutation.key());
+            let slot = usize::from(path[0]) * 16 + usize::from(path[1]);
+            work[slot].push_two_level_mutation(slot, mutation)?;
+        }
+        let updated = map_slots(work).map_err(PersistentRadixBatchError::Mapper)?;
+        self.reconnect_two_level_slots(updated).map_err(Into::into)
     }
 
     /// Apply a large Account batch as 4096 independent three-nibble prefixes.
@@ -1304,24 +1334,6 @@ impl<V: Clone> PersistentRadixMap<V> {
         let mut map = self.clone();
         for (key, value, digest) in entries {
             map = map.updated(key, value, digest)?;
-        }
-        Ok(map)
-    }
-
-    fn fold_mutations(
-        &self,
-        mutations: Vec<PersistentRadixMutation<V>>,
-    ) -> Result<Self, PersistentRadixMapError> {
-        let mut map = self.clone();
-        for mutation in mutations {
-            map = match mutation {
-                PersistentRadixMutation::Put {
-                    key,
-                    value,
-                    value_digest,
-                } => map.updated(key, value, value_digest)?,
-                PersistentRadixMutation::Remove { key } => map.removed(&key)?,
-            };
         }
         Ok(map)
     }

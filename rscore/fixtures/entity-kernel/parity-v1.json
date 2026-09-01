@@ -62,7 +62,7 @@
     "canonicalEntity": {
       "accountCount": 2,
       "accountsRoot": "0x85927db1dd129ec443346886eb070a7337649fd73b475d2a0ce41c04ad550e5b",
-      "root": "0xc85f521d6ee2a2edb91ffb11384dd96dc4042dcef499cbdfbc8f3f020d888bc9",
+      "root": "0xd2f5200a22b48c87a80c9786177d6c643ff401621a28c871d5e23b26fe8c8411",
       "sections": [
         {
           "digest": "0xb21cb53d2bbeadfd742d51bba9af866940fe4400721071bc4629ad7e281493f5",
@@ -101,7 +101,7 @@
           "field": "nonces"
         },
         {
-          "digest": "0xc13ca1ccede292b183a3c89b544cc4fe3db27155b1700e1e955037a236624f00",
+          "digest": "0x6f73e8136b214228c5c74f9872e6e226bfb602ce84aab32fbeab6a9388fa7904",
           "field": "paybook"
         },
         {
@@ -125,7 +125,7 @@
     "orderbookRoot": "0x0ee44d1670f4f967accda605ad0e3e6dc665640d9c8085c0ff1e5ecfc4b9b2aa",
     "orderedOutboxDigest": "0x28c5fbba932223df567151ff73c030ccdc4d375857c3926f9745607c717a147b",
     "outerEnvelopeHash": "0x0c593247b03c65eec39dc891901cc1eaeb766e9f94b816e7a60523742c362aaf",
-    "paybookRoot": "0x1223c23283b010fc23d7a86caae1813287b9f661eb0f31e8768f8d30d6b61823",
+    "paybookRoot": "0x68e6df8c1bcea4ae53778ab34671c242b97cf5a85313788eec958bd6038cb29c",
     "txDigests": [
       "0x6bf2835ff2faf8b9c7e745489a94648ab2ca83890fac176e462cd5db5bf14760",
       "0xe90299c2ddd6cae0c4de4ad30d5ca6166e974bbfe9e58c54d91bb3c7d81f555a"

@@ -22,6 +22,7 @@ const ROOT = resolve(import.meta.dir, '../..');
 const PACKAGE_DIR = join(ROOT, 'packages/npm/xlnfinance');
 const DIST_DIR = join(PACKAGE_DIR, 'dist');
 const APP_DIR = join(PACKAGE_DIR, 'app');
+const CONFIG_DIR = join(PACKAGE_DIR, 'config');
 const FRONTEND_BUILD = join(ROOT, 'frontend/build');
 const skipBuild = process.argv.includes('--skip-build');
 const shouldPack = process.argv.includes('--pack');
@@ -44,20 +45,30 @@ const walkFiles = (root: string): string[] => readdirSync(root, { withFileTypes:
 
 const sha256 = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
 
+const includeLauncherAppAsset = (source: string): boolean => {
+  if (basename(source) === '.DS_Store') return false;
+  const asset = relative(FRONTEND_BUILD, source).replaceAll('\\', '/');
+  if (!asset || asset.startsWith('..')) return true;
+  const topLevel = asset.split('/')[0] || '';
+  return topLevel !== 'docs-catalog' && !topLevel.startsWith('llms');
+};
+
 const assertPortableServerBundle = (): void => {
   const server = readFileSync(join(DIST_DIR, 'server.js'), 'utf8');
   const worker = join(DIST_DIR, 'brainvault-worker-native.js');
-  if (server.includes(ROOT)) throw new Error(`XLNFINANCE_SERVER_BUNDLE_CONTAINS_BUILD_PATH:${ROOT}`);
-  if (!server.includes('classic-level')) throw new Error('XLNFINANCE_SERVER_BUNDLE_MISSING_LEVEL_IMPORT');
-  if (!server.includes('@node-rs/argon2')) throw new Error('XLNFINANCE_SERVER_BUNDLE_MISSING_ARGON2_IMPORT');
-  if (!statSync(worker).isFile()) throw new Error(`XLNFINANCE_BRAINVAULT_WORKER_MISSING:${worker}`);
+  const launcherClient = join(DIST_DIR, 'launcher-client.js');
+  if (server.includes(ROOT)) throw new Error(`XLND_SERVER_BUNDLE_CONTAINS_BUILD_PATH:${ROOT}`);
+  if (!server.includes('classic-level')) throw new Error('XLND_SERVER_BUNDLE_MISSING_LEVEL_IMPORT');
+  if (!server.includes('@node-rs/argon2')) throw new Error('XLND_SERVER_BUNDLE_MISSING_ARGON2_IMPORT');
+  if (!statSync(worker).isFile()) throw new Error(`XLND_BRAINVAULT_WORKER_MISSING:${worker}`);
+  if (!statSync(launcherClient).isFile()) throw new Error(`XLND_LAUNCHER_CLIENT_MISSING:${launcherClient}`);
 };
 
 const assertVersions = (): string => {
   const root = jsonFile<{ version: string }>(join(ROOT, 'package.json'));
   const packageFile = jsonFile<{ version: string }>(join(PACKAGE_DIR, 'package.json'));
   if (root.version !== packageFile.version) {
-    throw new Error(`XLNFINANCE_VERSION_MISMATCH:root=${root.version}:package=${packageFile.version}`);
+    throw new Error(`XLND_VERSION_MISMATCH:root=${root.version}:package=${packageFile.version}`);
   }
   return root.version;
 };
@@ -74,7 +85,9 @@ const buildPackage = (): void => {
   }
   rmSync(DIST_DIR, { recursive: true, force: true });
   rmSync(APP_DIR, { recursive: true, force: true });
+  rmSync(CONFIG_DIR, { recursive: true, force: true });
   mkdirSync(DIST_DIR, { recursive: true });
+  mkdirSync(CONFIG_DIR, { recursive: true });
   run('bun', [
     'build',
     'core/api/server/index.ts',
@@ -92,13 +105,20 @@ const buildPackage = (): void => {
     '--external=@node-rs/argon2',
     `--outfile=${join(DIST_DIR, 'brainvault-worker-native.js')}`,
   ]);
+  run('bun', [
+    'build',
+    'packages/npm/xlnfinance/src/launcher-client.ts',
+    '--target=bun',
+    `--outfile=${join(DIST_DIR, 'launcher-client.js')}`,
+  ]);
   assertPortableServerBundle();
   cpSync(FRONTEND_BUILD, APP_DIR, {
     recursive: true,
-    filter: source => basename(source) !== '.DS_Store',
+    filter: includeLauncherAppAsset,
   });
+  cpSync(join(ROOT, 'jurisdictions/jurisdictions.json'), join(CONFIG_DIR, 'jurisdictions.json'));
 
-  const files = [...walkFiles(DIST_DIR), ...walkFiles(APP_DIR)];
+  const files = [...walkFiles(DIST_DIR), ...walkFiles(APP_DIR), ...walkFiles(CONFIG_DIR)];
   const manifest = {
     schemaVersion: 1,
     version,
@@ -109,7 +129,7 @@ const buildPackage = (): void => {
     })),
   };
   writeFileSync(join(DIST_DIR, 'bundle-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`xlnfinance ${version}: ${manifest.files.length} files ready`);
+  console.log(`xlnd ${version}: ${manifest.files.length} files ready`);
 };
 
 const responseJson = async (response: Response): Promise<Record<string, unknown>> => {
@@ -135,7 +155,7 @@ const pairPackedRuntime = async (state: string): Promise<RemoteRuntimeAdapter> =
   }));
   const manifest = consumed['manifest'] as { entries?: Array<{ wsUrl?: string; token?: string }> };
   const entry = manifest.entries?.[0];
-  if (!entry?.wsUrl || !entry.token) throw new Error('XLNFINANCE_PACKAGE_SMOKE_PAIRING_MANIFEST_INVALID');
+  if (!entry?.wsUrl || !entry.token) throw new Error('XLND_PACKAGE_SMOKE_PAIRING_MANIFEST_INVALID');
 
   const adapter = new RemoteRuntimeAdapter();
   await adapter.connect({
@@ -144,7 +164,7 @@ const pairPackedRuntime = async (state: string): Promise<RemoteRuntimeAdapter> =
     authKey: entry.token,
     requestTimeoutMs: 5_000,
   });
-  if (adapter.authLevel !== 'admin') throw new Error('XLNFINANCE_PACKAGE_SMOKE_ADMIN_REQUIRED');
+  if (adapter.authLevel !== 'admin') throw new Error('XLND_PACKAGE_SMOKE_ADMIN_REQUIRED');
   return adapter;
 };
 
@@ -155,12 +175,12 @@ const awaitHeight = async (adapter: RemoteRuntimeAdapter, minimum: number): Prom
     if (head.latestHeight >= minimum) return head.latestHeight;
     await Bun.sleep(100);
   }
-  throw new Error(`XLNFINANCE_PACKAGE_SMOKE_HEIGHT_TIMEOUT:${minimum}`);
+  throw new Error(`XLND_PACKAGE_SMOKE_HEIGHT_TIMEOUT:${minimum}`);
 };
 
 const smokePackedPackage = async (version: string): Promise<void> => {
-  const archive = join(PACKAGE_DIR, `xlnfinance-${version}.tgz`);
-  const workspace = mkdtempSync(join(tmpdir(), 'xlnfinance-package-smoke-'));
+  const archive = join(PACKAGE_DIR, `xlnd-${version}.tgz`);
+  const workspace = mkdtempSync(join(tmpdir(), 'xlnd-package-smoke-'));
   const state = join(workspace, 'state');
   const project = join(workspace, 'project');
   mkdirSync(project);
@@ -170,9 +190,9 @@ const smokePackedPackage = async (version: string): Promise<void> => {
   const command = (args: string[]): void => {
     const result = spawnSync('bun', args, {
       cwd: project,
-      env: { ...process.env, XLNFINANCE_STATE_DIR: state },
+      env: { ...process.env, XLND_STATE_DIR: state },
       encoding: 'utf8',
-      timeout: 90_000,
+      timeout: 30_000,
     });
     if (result.status !== 0) {
       const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
@@ -183,15 +203,15 @@ const smokePackedPackage = async (version: string): Promise<void> => {
         // The daemon may fail before opening its log; command output remains authoritative.
       }
       throw new Error(
-        `XLNFINANCE_PACKAGE_SMOKE_FAILED:${args.join(' ')}\n${output}`
+        `XLND_PACKAGE_SMOKE_FAILED:${args.join(' ')}\n${output}`
         + (daemonLog ? `\n--- daemon log ---\n${daemonLog}` : ''),
       );
     }
   };
 
   try {
-    command(['add', archive]);
-    executable = join(project, 'node_modules', '.bin', 'xlnfinance');
+    command(['add', '--offline', archive]);
+    executable = join(project, 'node_modules', '.bin', 'xlnd');
     command([executable, 'daemon']);
     command([executable, 'status']);
     const firstAdapter = await pairPackedRuntime(state);
@@ -203,22 +223,36 @@ const smokePackedPackage = async (version: string): Promise<void> => {
       workers: 256,
     });
     if (brainVault.ethereumAddress !== '0x085509050d1A7c061eeDD0dF1084A9766E153b0c') {
-      throw new Error(`XLNFINANCE_PACKAGE_SMOKE_BRAINVAULT_ADDRESS_MISMATCH:${brainVault.ethereumAddress}`);
+      throw new Error(`XLND_PACKAGE_SMOKE_BRAINVAULT_ADDRESS_MISMATCH:${brainVault.ethereumAddress}`);
     }
-    if ('mnemonic24' in brainVault) throw new Error('XLNFINANCE_PACKAGE_SMOKE_BRAINVAULT_DEFAULT_SECRET_LEAK');
-    const recovery = await firstAdapter.revealBrainVaultMnemonic();
-    if (recovery.mnemonic24.trim().split(/\s+/).length !== 24) {
-      throw new Error('XLNFINANCE_PACKAGE_SMOKE_BRAINVAULT_RECOVERY_INVALID');
+    if ('mnemonic24' in brainVault) throw new Error('XLND_PACKAGE_SMOKE_BRAINVAULT_DEFAULT_SECRET_LEAK');
+    let browserRevealDenied = false;
+    try {
+      await firstAdapter.revealBrainVaultMnemonic();
+    } catch (error) {
+      browserRevealDenied = String(error).includes('vault-owner lane required');
     }
-    const before = (await firstAdapter.read<{ latestHeight: number }>('head')).latestHeight;
-    const sequence = firstAdapter.nextCommandSequence;
-    if (!sequence) throw new Error('XLNFINANCE_PACKAGE_SMOKE_COMMAND_SEQUENCE_MISSING');
-    await firstAdapter.send({ runtimeTxs: [], entityInputs: [], jInputs: [] }, {
-      commandId: 'xlnfinance-package-smoke-0001',
+    if (!browserRevealDenied) throw new Error('XLND_PACKAGE_SMOKE_BROWSER_RECOVERY_NOT_DENIED');
+    const ownerPath = join(state, 'brainvault-owner.json');
+    if ((statSync(ownerPath).mode & 0o777) !== 0o600) {
+      throw new Error('XLND_PACKAGE_SMOKE_BRAINVAULT_OWNER_MODE_INVALID');
+    }
+    const ownerBeforeRestart = readFileSync(ownerPath, 'utf8');
+    const recovery = JSON.parse(ownerBeforeRestart) as { mnemonic24?: string };
+    if (String(recovery.mnemonic24 || '').trim().split(/\s+/).length !== 24) {
+      throw new Error('XLND_PACKAGE_SMOKE_BRAINVAULT_RECOVERY_INVALID');
+    }
+    firstAdapter.disconnect();
+    const ownerAdapter = await pairPackedRuntime(state);
+    const before = (await ownerAdapter.read<{ latestHeight: number }>('head')).latestHeight;
+    const sequence = ownerAdapter.nextCommandSequence;
+    if (!sequence) throw new Error('XLND_PACKAGE_SMOKE_COMMAND_SEQUENCE_MISSING');
+    await ownerAdapter.send({ runtimeTxs: [], entityInputs: [], jInputs: [] }, {
+      commandId: 'xlnd-package-smoke-0001',
       commandSequence: sequence,
     });
-    const committed = await awaitHeight(firstAdapter, before + 1);
-    firstAdapter.disconnect();
+    const committed = await awaitHeight(ownerAdapter, before + 1);
+    ownerAdapter.disconnect();
     command([executable, 'stop']);
     command([executable, 'daemon']);
     command([executable, 'status']);
@@ -226,22 +260,22 @@ const smokePackedPackage = async (version: string): Promise<void> => {
     const restored = await awaitHeight(restartedAdapter, committed);
     const restoredEntities = await restartedAdapter.read<Array<{ entityId: string }>>('entities');
     if (!restoredEntities.some(entity => entity.entityId.toLowerCase() === brainVault.entityId.toLowerCase())) {
-      throw new Error('XLNFINANCE_PACKAGE_SMOKE_BRAINVAULT_OWNER_NOT_RESTORED');
+      throw new Error('XLND_PACKAGE_SMOKE_BRAINVAULT_OWNER_NOT_RESTORED');
     }
-    if ((await restartedAdapter.revealBrainVaultMnemonic()).mnemonic24 !== recovery.mnemonic24) {
-      throw new Error('XLNFINANCE_PACKAGE_SMOKE_BRAINVAULT_RECOVERY_CHANGED_AFTER_RESTART');
+    if (readFileSync(ownerPath, 'utf8') !== ownerBeforeRestart) {
+      throw new Error('XLND_PACKAGE_SMOKE_BRAINVAULT_RECOVERY_CHANGED_AFTER_RESTART');
     }
     restartedAdapter.disconnect();
     command([executable, 'stop']);
     console.log(
-      `xlnfinance ${version}: BrainVault ${brainVault.ethereumAddress} (${brainVault.derivationTimeMs}ms, ${brainVault.workers}w), `
+      `xlnd ${version}: BrainVault ${brainVault.ethereumAddress} (${brainVault.derivationTimeMs}ms, ${brainVault.workers}w), `
       + `admin write ${before}->${committed}, restart restored ${restored}`,
     );
   } finally {
     if (executable) {
       spawnSync('bun', [executable, 'stop'], {
         cwd: project,
-        env: { ...process.env, XLNFINANCE_STATE_DIR: state },
+        env: { ...process.env, XLND_STATE_DIR: state },
         stdio: 'ignore',
         timeout: 10_000,
       });

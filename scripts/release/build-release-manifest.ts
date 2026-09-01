@@ -74,7 +74,7 @@ const version = (): string => {
 const classify = (path: string, releaseVersion: string): Omit<ReleaseAsset, 'bytes' | 'sha256' | 'url'> | null => {
   const name = basename(path);
   if (!name.includes(releaseVersion)) return null;
-  if (/^xlnfinance-.*\.tgz$/.test(name)) return { name, kind: 'launcher', platform: 'macos-windows-linux' };
+  if (/^xlnd-.*\.tgz$/.test(name)) return { name, kind: 'launcher', platform: 'macos-windows-linux' };
   if (
     name === `xln-finance-${releaseVersion}-mac-arm64-signed-notarized.zip` ||
     name === `xln-finance-${releaseVersion}-mac-x64-signed-notarized.zip`

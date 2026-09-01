@@ -27,9 +27,9 @@ export const assertLauncherPortAvailable = async () => {
       cache: 'no-store',
     });
     void response.body?.cancel();
-    throw new Error('PORT_8080_IS_NOT_XLNFINANCE');
+    throw new Error('PORT_8080_IS_NOT_XLND');
   } catch (error) {
-    if (error instanceof Error && error.message === 'PORT_8080_IS_NOT_XLNFINANCE') throw error;
+    if (error instanceof Error && error.message === 'PORT_8080_IS_NOT_XLND') throw error;
   }
 };
 
@@ -63,4 +63,25 @@ export const issueBrowserPairing = async (controlToken) => {
   const pairingToken = String(payload.pairingToken || '').trim();
   if (!pairingToken) throw new Error('LOCAL_PAIRING_TOKEN_MISSING_FROM_DAEMON');
   return pairingToken;
+};
+
+export const consumeCliPairing = async (controlToken) => {
+  const pairingToken = await issueBrowserPairing(controlToken);
+  const response = await fetch('http://localhost:8080/api/local-pairing/consume', {
+    method: 'POST',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(5_000),
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://localhost:8080',
+      'sec-fetch-site': 'same-origin',
+    },
+    body: JSON.stringify({ pairingToken }),
+  });
+  const payload = await responseJson(response);
+  const entry = payload?.manifest?.entries?.[0];
+  const wsUrl = String(entry?.wsUrl || '').trim();
+  const token = String(entry?.token || '').trim();
+  if (!wsUrl || !token) throw new Error('XLND_CLI_PAIRING_MANIFEST_INVALID');
+  return { wsUrl, token };
 };

@@ -1,6 +1,6 @@
 <script lang="ts">
   import './runtime-creation.css';
-  import { onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   // Runtime creation is entry only; entity capabilities are resolved in EntityWorkspace.
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
@@ -59,6 +59,7 @@
 
   // Props
   export let embedded: boolean = false;
+  const dispatch = createEventDispatcher<{ nodeReadyComplete: { entityId: string } }>();
 
   $: t = $translations$;
 
@@ -188,9 +189,6 @@
   let derivationRun: BrainVaultDerivationRun | null = null;
   let nodeDerivationAbort: AbortController | null = null;
   let nodeDerivationResult: RuntimeAdapterBrainVaultResult | null = null;
-  let revealedNodeMnemonic = '';
-  let revealingNodeMnemonic = false;
-  let nodeRevealRunToken = 0;
 
   const isCurrentDerivationRun = (run: BrainVaultDerivationRun): boolean =>
     derivationRun === run && phase === 'deriving';
@@ -684,12 +682,6 @@
     phase = 'input';
   }
 
-  function invalidateNodeReveal(): void {
-    nodeRevealRunToken += 1;
-    revealedNodeMnemonic = '';
-    revealingNodeMnemonic = false;
-  }
-
   function wipeShardResults(): void {
     for (const shard of shardResults.values()) shard.fill(0);
     shardResults.clear();
@@ -706,7 +698,6 @@
     wipeShardResults();
     shardsCompleted = 0;
     nodeDerivationResult = null;
-    invalidateNodeReveal();
   }
 
   function clearSensitiveWalletMaterial(): void {
@@ -893,7 +884,6 @@
       factor,
     }) satisfies BrainVaultDerivationRun;
     derivationRun = run;
-    invalidateNodeReveal();
     nodeDerivationResult = null;
     shardCount = run.shardCount;
     const initialUsableCap = Math.max(1, Math.min(maxWorkers, shardCount));
@@ -996,7 +986,6 @@
   }
 
   async function startNodeDerivation(run: BrainVaultDerivationRun): Promise<void> {
-    invalidateNodeReveal();
     const adapter = getRuntimeControllerAdapter();
     if (!adapter || adapter.mode !== 'remote' || adapter.status !== 'connected') {
       failDerivation('The selected node is not connected. Reconnect it before BrainVault recovery.');
@@ -1061,34 +1050,10 @@
     }
   }
 
-  async function revealNodeMnemonic(): Promise<void> {
-    const adapter = getRuntimeControllerAdapter();
-    const expectedResult = nodeDerivationResult;
-    if (!adapter || adapter.mode !== 'remote' || phase !== 'node-ready' || !expectedResult) {
-      derivationError = 'The node is no longer connected.';
-      return;
-    }
-    const runToken = ++nodeRevealRunToken;
-    const isCurrentReveal = (): boolean =>
-      runToken === nodeRevealRunToken
-      && phase === 'node-ready'
-      && nodeDerivationResult === expectedResult
-      && getRuntimeControllerAdapter() === adapter;
-    revealingNodeMnemonic = true;
-    derivationError = '';
-    try {
-      const recovery = await adapter.revealBrainVaultMnemonic();
-      if (!isCurrentReveal()) return;
-      revealedNodeMnemonic = recovery.mnemonic24;
-    } catch (err) {
-      if (!isCurrentReveal()) return;
-      derivationError = err instanceof Error ? err.message : String(err);
-    } finally {
-      if (runToken === nodeRevealRunToken) revealingNodeMnemonic = false;
-    }
-  }
-
   function finishNodeWallet(): void {
+    const completedEntityId = String(nodeDerivationResult?.entityId || entityId || '').trim().toLowerCase();
+    if (!completedEntityId) throw new Error('BRAINVAULT_NODE_ENTITY_ID_MISSING');
+    dispatch('nodeReadyComplete', { entityId: completedEntityId });
     clearSensitiveWalletMaterial();
     vaultUiOperations.hideVault();
     if (!embedded) {
@@ -1901,29 +1866,9 @@
         </p>
 
         <div class="node-secret-export">
-          {#if revealedNodeMnemonic}
-            <label for="node-mnemonic-export">Recovery mnemonic</label>
-            <textarea
-              id="node-mnemonic-export"
-              readonly
-              rows="4"
-              value={revealedNodeMnemonic}
-              autocomplete="off"
-              autocapitalize="none"
-              spellcheck="false"
-            ></textarea>
-            <p class="warning-text">Mnemonic is now present in this tab. Hide it before screen sharing or remote access.</p>
-            <button type="button" class="backup-upload-btn" on:click={invalidateNodeReveal}>Hide mnemonic</button>
-          {:else}
-            <button
-              type="button"
-              class="backup-upload-btn"
-              disabled={revealingNodeMnemonic}
-              on:click={revealNodeMnemonic}
-            >
-              {revealingNodeMnemonic ? 'Loading from node…' : 'Show mnemonic'}
-            </button>
-          {/if}
+          <p class="warning-text">
+            Recovery material stays in the owner-only node state and is never delivered to this browser.
+          </p>
         </div>
         {#if derivationError}<div class="matrix-status error">{derivationError}</div>{/if}
         <div class="recovery-actions">

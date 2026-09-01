@@ -63,6 +63,7 @@ export const buildHubChildProcessEnv = (
     USE_ANVIL: 'true',
     XLN_ORCHESTRATOR_PID: String(options.orchestratorPid),
     XLN_ORCHESTRATOR_OWNER_ID: options.orchestratorOwnerId,
+    XLN_HUB_NAME: options.hubName.toUpperCase(),
     XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs),
     XLN_RUNTIME_MIN_FRAME_DELAY_MS: String(resolveHubRuntimeFrameDelayMs(source)),
     XLN_STORAGE_WRITE_TIMEOUT_MS: source['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',

@@ -69,6 +69,10 @@ import {
 } from '../../../core/entity/consensus/state-root';
 import { createEntityFrameCandidateState } from '../../../core/entity/state-clone';
 import { initCrontab } from '../../../core/entity/scheduler';
+import {
+  applyBookIntentProgram,
+  createBookIntentProgram,
+} from '../../../core/entity/books/book-intents';
 
 const HUB = `0x${'11'.repeat(32)}`;
 const MAKER = `0x${'22'.repeat(32)}`;
@@ -644,6 +648,7 @@ const fixtureEnv: EntityRuntimeContext = {
 const paybookEntityOutputs: EntityInput[] = [];
 const paybookAccountTxs: Array<{ accountId: string; tx: AccountTx }> = [];
 const paybookCandidateEffects: EntityCandidateEffect[] = [];
+const paybookBookIntents = createBookIntentProgram();
 const paybookFollowupContext = {
   env: fixtureEnv,
   state: paybookCommittedState,
@@ -653,6 +658,7 @@ const paybookFollowupContext = {
   outputs: paybookEntityOutputs,
   accountTxs: paybookAccountTxs,
   candidateEffects: paybookCandidateEffects,
+  bookIntentSlot: paybookBookIntents.openSlot(),
   infraContext: paybookInfraContext,
   preparedHtlcEntriesByBinding: new Map([
     [`${committedHtlcFrame.stateHash}:${HASHLOCK}`, preparedHtlc],
@@ -667,6 +673,7 @@ await applyCommittedHtlcLockFollowup(
   true,
 );
 applyDirectPaymentForwardFollowups(paybookFollowupContext, [directForward]);
+applyBookIntentProgram(paybookWorkingState, paybookBookIntents);
 if (
   paybookAccountTxs.length !== 2
   || paybookAccountTxs[0]?.tx.type !== 'htlc_lock'
@@ -757,6 +764,7 @@ const finalCommittedState = entityState(finalAccounts);
 const finalWorkingState = createEntityFrameCandidateState(finalCommittedState);
 const finalCandidateEffects: EntityCandidateEffect[] = [];
 const finalPreparedAccountTxs: Array<{ accountId: string; tx: AccountTx }> = [];
+const finalBookIntents = createBookIntentProgram();
 await applyCommittedHtlcLockFollowup(
   {
     env: fixtureEnv,
@@ -767,6 +775,7 @@ await applyCommittedHtlcLockFollowup(
     outputs: [],
     accountTxs: finalPreparedAccountTxs,
     candidateEffects: finalCandidateEffects,
+    bookIntentSlot: finalBookIntents.openSlot(),
     infraContext: {
       ...paybookInfraContext,
       htlc: { version: 1, entries: [finalPrepared], originated: [] },
@@ -802,6 +811,7 @@ applyCommittedAccountFrameFollowups(
   finalPostAccountTxs,
   fixtureEnv,
   finalCandidateEffects,
+  finalBookIntents.openSlot(),
 );
 applyHtlcSecretFollowups(
   {
@@ -811,9 +821,11 @@ applyHtlcSecretFollowups(
     outputs: [],
     accountTxs: finalPostAccountTxs,
     candidateEffects: finalCandidateEffects,
+    bookIntentSlot: finalBookIntents.openSlot(),
   },
   [{ secret: FINAL_SECRET, hashlock: FINAL_HASHLOCK }],
 );
+applyBookIntentProgram(finalWorkingState, finalBookIntents);
 const finalReceivedEffect = finalCandidateEffects.find(
   effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcReceived',
 );

@@ -12,9 +12,8 @@ use crate::commitment::compute_commitments;
 use crate::j_events::apply_committed_j_event_claim;
 use crate::local_financial::{LocalAccountFinancialView, apply_local_entity_financial_txs};
 use crate::orderbook::{
-    OrderbookPairJob, OrderbookPairMapper, OrderbookPairResult, PreparedOrderbookStage, SameJOffer,
-    SameJOutputDelta, install_orderbook_outputs, prepare_orderbook_outputs,
-    validate_orderbook_outputs,
+    OrderbookPairJob, OrderbookPairResult, PreparedOrderbookStage, SameJOffer, SameJOutputDelta,
+    install_orderbook_outputs, prepare_orderbook_outputs, validate_orderbook_outputs,
 };
 use crate::paybook::{
     PaybookChanges, PaybookEffects, committed_htlc_lock, committed_htlc_resolve,
@@ -1081,18 +1080,6 @@ pub(crate) fn finish_orderbook_stage(
     }
     result.orderbook_deltas.clear();
     Ok(())
-}
-
-pub(crate) fn apply_orderbook_stage(
-    result: &mut EntityTransitionResult,
-    context: &DeterministicContext,
-    scheduled_commands: &[SchedulerCommand],
-    mapper: &mut dyn OrderbookPairMapper,
-) -> Result<(), EntityKernelError> {
-    let mut prepared = prepare_orderbook_stage(result, context)?;
-    let jobs = prepared.take_orderbook_jobs();
-    let pair_results = mapper.map_pairs(jobs, context.clone())?;
-    finish_orderbook_stage(result, prepared, pair_results, scheduled_commands)
 }
 
 pub fn apply_entity_kernel(

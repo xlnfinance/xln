@@ -1,5 +1,3 @@
-import packageJson from '../../../package.json';
-
 export type InstallChannel = Readonly<{
   id: 'web' | 'cli' | 'desktop' | 'mobile' | 'extension';
   title: string;
@@ -13,9 +11,7 @@ export type InstallChannel = Readonly<{
   command?: string;
 }>;
 
-const launcherVersion = packageJson.version;
-const launcherUrl = `https://github.com/xlnfinance/xln/releases/download/v${launcherVersion}/xlnfinance-${launcherVersion}.tgz`;
-export const LOCAL_RUNTIME_COMMAND = `bunx --bun xlnfinance@${launcherUrl}`;
+export const LOCAL_RUNTIME_COMMAND = 'bunx --bun xlnd';
 
 export const INSTALL_CHANNELS: readonly InstallChannel[] = [
   {
@@ -26,7 +22,7 @@ export const INSTALL_CHANNELS: readonly InstallChannel[] = [
     platforms: ['macOS', 'Windows', 'Linux'],
     benefit: 'Runtime survives the browser and grants the local wallet full admin control.',
     tradeoff: 'Requires Bun and a terminal.',
-    href: 'https://www.npmjs.com/package/xlnfinance',
+    href: 'https://www.npmjs.com/package/xlnd',
     action: 'Package details',
     command: LOCAL_RUNTIME_COMMAND,
   },

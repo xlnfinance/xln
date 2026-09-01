@@ -9,8 +9,8 @@ Memory-hard brainwallet construction. Derive the same wallet from the exact same
 ## Usage
 
 ```bash
-# Run immediately without installing. Native Argon2 and all CPU cores are the
-# default fast, portable path.
+# Run immediately without installing. The bundled C/NEON engine is the default
+# on Apple Silicon; other platforms fall back to portable native Argon2.
 bunx brainvault
 
 # Or install the command globally.
@@ -46,7 +46,10 @@ npm publish
 This directory is the complete npm package boundary. Nothing above
 `brainvault/` is required after installation:
 
-- `@node-rs/argon2` is the portable, prebuilt native default;
+- bundled Apple Silicon executables under `prebuilds/darwin-arm64/` are the
+  fastest default for the frozen multiplier-1 mode at 100+ shards; smaller jobs
+  use the lower-overhead portable native path;
+- `@node-rs/argon2` is the portable native fallback and handles custom multipliers;
 - `hash-wasm` is the cross-platform compatibility engine;
 - `experimental/argon2-c/` contains the complete C/NEON source and vendored
   Argon2/SSE2NEON dependencies;

@@ -19,10 +19,7 @@ use xln_rscore_batch::{
 use xln_rscore_engine::{
     AccountTx, CommittedFrameEvidence, EntityId, HtlcResolveOutcome, HtlcResolveTx,
 };
-use xln_rscore_protocol::{
-    CanonicalNumber, CanonicalValue, PersistentRadixBatchError, PersistentRadixMapError,
-    SlotOutcome, SlotWork,
-};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, SlotOutcome, SlotWork};
 
 use crate::commitment::compute_commitments;
 use crate::frame_tx_effects::{apply_account_tx_hooks, apply_committed_frame_hooks};
@@ -60,7 +57,7 @@ fn report_resident_round_profile(
         return;
     }
     eprintln!(
-        "RSCORE_ENTITY_PHASE inbound={} commits={} entityApply={} paybookCommit={} jIngress={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={} accountRanges={} localOperations={} failedFollowups={} deferredSettlementHankos={}",
+        "RSCORE_ENTITY_PHASE inbound={} commits={} entityApply={} bookStage={} jIngress={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={} accountRanges={} localOperations={} failedFollowups={} deferredSettlementHankos={}",
         phases[0],
         phases[1],
         phases[2],
@@ -80,78 +77,238 @@ fn report_resident_round_profile(
     );
 }
 
-fn commit_paybook_changes(
+enum BookStageJob {
+    Paybook {
+        slot: usize,
+        work: SlotWork<crate::PaybookEntry>,
+        pending: Vec<crate::paybook::PendingPaybookMutation>,
+    },
+    Orderbook {
+        position: usize,
+        job: OrderbookPairJob,
+    },
+}
+
+enum BookStageResult {
+    Paybook {
+        slot: usize,
+        outcome: Result<SlotOutcome<crate::PaybookEntry>, EntityKernelError>,
+    },
+    Orderbook {
+        position: usize,
+        outcome: OrderbookPairResult,
+    },
+}
+
+type PaybookSlotResults = [SlotOutcome<crate::PaybookEntry>; 256];
+type PendingPaybookSlots = [Vec<crate::paybook::PendingPaybookMutation>; 256];
+
+fn partition_paybook_pending(
+    pending: Vec<crate::paybook::PendingPaybookMutation>,
+) -> Result<PendingPaybookSlots, EntityKernelError> {
+    let mut pending_slots: PendingPaybookSlots = std::array::from_fn(|_| Vec::new());
+    for row in pending {
+        let slot =
+            usize::from(
+                *row.0
+                    .first()
+                    .ok_or_else(|| EntityKernelError::CommitmentEncoding {
+                        detail: "PAYBOOK_SHARD_KEY_EMPTY".into(),
+                    })?,
+            );
+        pending_slots[slot].push(row);
+    }
+    Ok(pending_slots)
+}
+
+fn apply_paybook_slot(
+    slot: usize,
+    mut work: SlotWork<crate::PaybookEntry>,
+    pending: Vec<crate::paybook::PendingPaybookMutation>,
+) -> Result<SlotOutcome<crate::PaybookEntry>, EntityKernelError> {
+    for row in pending {
+        let mutation = crate::paybook::build_paybook_mutation(row)?;
+        work.push_two_level_mutation(slot, mutation)
+            .map_err(|error| EntityKernelError::CommitmentEncoding {
+                detail: error.to_string(),
+            })?;
+    }
+    work.apply()
+        .map_err(|error| EntityKernelError::CommitmentEncoding {
+            detail: error.to_string(),
+        })
+}
+
+fn dispatch_book_stage(
     accounts: &mut ResidentConsensusEngine,
-    state: &mut EntityStateSlice,
-    changes: PaybookChanges,
-) -> Result<(), ResidentEntityError> {
-    // Build the final canonical mutations once, then pay exactly one worker
-    // barrier for independent Patricia slots. Dispatching per-entry encoding
-    // and slot folding as separate stages made w4 slower while preserving the
-    // same bytes and root.
-    let mutations = changes.into_mutations()?;
-    let updated: Result<_, PersistentRadixBatchError<BatchError>> = state
-        .paybook
-        .entries
-        .try_mutated_batch_two_levels(mutations, |slots| {
-            let mut outcomes = (0..slots.len())
-                .map(|_| None)
-                .collect::<Vec<Option<Result<SlotOutcome<_>, PersistentRadixMapError>>>>();
-            let mut active = Vec::new();
-            for (index, slot) in slots.into_iter().enumerate() {
-                if slot.has_work() {
-                    active.push((index, slot));
-                } else {
-                    outcomes[index] = Some(slot.apply());
+    paybook_slots: Option<([SlotWork<crate::PaybookEntry>; 256], PendingPaybookSlots)>,
+    orderbook_jobs: Vec<OrderbookPairJob>,
+    context: &DeterministicContext,
+) -> Result<(Option<PaybookSlotResults>, Vec<OrderbookPairResult>), ResidentEntityError> {
+    let mut jobs = Vec::new();
+    let mut paybook_outcomes = paybook_slots.map(|(slots, pending_slots)| {
+        let mut outcomes = (0..slots.len())
+            .map(|_| None)
+            .collect::<Vec<Option<Result<SlotOutcome<_>, EntityKernelError>>>>();
+        for (slot, (work, pending)) in slots.into_iter().zip(pending_slots).enumerate() {
+            if !pending.is_empty() {
+                jobs.push(BookStageJob::Paybook {
+                    slot,
+                    work,
+                    pending,
+                });
+            } else {
+                outcomes[slot] =
+                    Some(
+                        work.apply()
+                            .map_err(|error| EntityKernelError::CommitmentEncoding {
+                                detail: error.to_string(),
+                            }),
+                    );
+            }
+        }
+        outcomes
+    });
+    let orderbook_count = orderbook_jobs.len();
+    jobs.extend(
+        orderbook_jobs
+            .into_iter()
+            .enumerate()
+            .map(|(position, job)| BookStageJob::Orderbook { position, job }),
+    );
+    let mut orderbook_outcomes = (0..orderbook_count)
+        .map(|_| None)
+        .collect::<Vec<Option<OrderbookPairResult>>>();
+    if !jobs.is_empty() {
+        for result in accounts.map_entity_stage_ordered(jobs, {
+            let context = context.clone();
+            move |job| match job {
+                BookStageJob::Paybook {
+                    slot,
+                    work,
+                    pending,
+                } => BookStageResult::Paybook {
+                    slot,
+                    outcome: apply_paybook_slot(slot, work, pending),
+                },
+                BookStageJob::Orderbook { position, job } => BookStageResult::Orderbook {
+                    position,
+                    outcome: job.apply(&context),
+                },
+            }
+        })? {
+            match result {
+                BookStageResult::Paybook { slot, outcome } => {
+                    let outcomes = paybook_outcomes.as_mut().ok_or_else(|| {
+                        EntityKernelError::CommitmentEncoding {
+                            detail: "BOOK_STAGE_UNEXPECTED_PAYBOOK_RESULT".into(),
+                        }
+                    })?;
+                    if slot >= outcomes.len() || outcomes[slot].replace(outcome).is_some() {
+                        return Err(EntityKernelError::CommitmentEncoding {
+                            detail: format!("BOOK_STAGE_PAYBOOK_SLOT_INVALID:{slot}"),
+                        }
+                        .into());
+                    }
+                }
+                BookStageResult::Orderbook { position, outcome } => {
+                    let slot = orderbook_outcomes.get_mut(position).ok_or_else(|| {
+                        EntityKernelError::orderbook(format!(
+                            "BOOK_STAGE_ORDERBOOK_SLOT_INVALID:{position}"
+                        ))
+                    })?;
+                    if slot.replace(outcome).is_some() {
+                        return Err(EntityKernelError::orderbook(format!(
+                            "BOOK_STAGE_ORDERBOOK_SLOT_DUPLICATE:{position}"
+                        ))
+                        .into());
+                    }
                 }
             }
-            for (index, outcome) in accounts
-                .map_entity_stage_ordered(active, |(index, slot): (usize, SlotWork<_>)| {
-                    (index, slot.apply())
-                })?
-            {
-                outcomes[index] = Some(outcome);
-            }
-            let outcomes = outcomes
-                .into_iter()
-                .map(|outcome| outcome.expect("all 256 paybook slots return exactly once"))
-                .collect::<Vec<_>>();
+        }
+    }
+    let paybook_outcomes = paybook_outcomes
+        .map(|outcomes| {
+            let returned = outcomes.iter().filter(|outcome| outcome.is_some()).count();
             outcomes
+                .into_iter()
+                .map(|outcome| {
+                    outcome
+                        .ok_or(BatchError::ResidentWorkerResultCount {
+                            expected: 256,
+                            actual: returned,
+                        })?
+                        .map_err(ResidentEntityError::from)
+                })
+                .collect::<Result<Vec<_>, ResidentEntityError>>()?
                 .try_into()
                 .map_err(|outcomes: Vec<_>| BatchError::ResidentWorkerResultCount {
                     expected: 256,
                     actual: outcomes.len(),
                 })
-        });
-    state.paybook.entries = match updated {
-        Ok(updated) => updated,
-        Err(PersistentRadixBatchError::Mapper(error)) => return Err(error.into()),
-        Err(PersistentRadixBatchError::Radix(error)) => {
-            return Err(EntityKernelError::CommitmentEncoding {
-                detail: error.to_string(),
-            }
-            .into());
-        }
-    };
-    Ok(())
-}
-
-struct ResidentOrderbookPairMapper<'a> {
-    accounts: &'a mut ResidentConsensusEngine,
-}
-
-impl OrderbookPairMapper for ResidentOrderbookPairMapper<'_> {
-    fn map_pairs(
-        &mut self,
-        jobs: Vec<OrderbookPairJob>,
-        context: DeterministicContext,
-    ) -> Result<Vec<OrderbookPairResult>, EntityKernelError> {
-        self.accounts
-            .map_entity_stage_ordered(jobs, move |job| job.apply(&context))
-            .map_err(|error| {
-                EntityKernelError::orderbook(format!("ORDERBOOK_RESIDENT_WORKER:{error}"))
+                .map_err(ResidentEntityError::from)
+        })
+        .transpose()?;
+    let returned = orderbook_outcomes
+        .iter()
+        .filter(|outcome| outcome.is_some())
+        .count();
+    let orderbook_outcomes = orderbook_outcomes
+        .into_iter()
+        .map(|outcome| {
+            outcome.ok_or_else(|| {
+                EntityKernelError::orderbook(format!(
+                    "BOOK_STAGE_ORDERBOOK_RESULT_COUNT:{returned}:{orderbook_count}"
+                ))
             })
-    }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((paybook_outcomes, orderbook_outcomes))
+}
+
+fn commit_book_stage(
+    accounts: &mut ResidentConsensusEngine,
+    kernel: &mut crate::kernel::EntityTransitionResult,
+    changes: PaybookChanges,
+    mut prepared: PreparedEntityBookStage,
+    context: &DeterministicContext,
+    scheduled_commands: &[SchedulerCommand],
+) -> Result<(), ResidentEntityError> {
+    let pending = changes.into_pending();
+    let paybook_slots = if pending.is_empty() {
+        None
+    } else {
+        let slots = kernel
+            .state
+            .paybook
+            .entries
+            .prepare_two_level_slots()
+            .map_err(|error| EntityKernelError::CommitmentEncoding {
+                detail: error.to_string(),
+            })?;
+        let pending_slots = partition_paybook_pending(pending)?;
+        Some((slots, pending_slots))
+    };
+    let (paybook_results, orderbook_results) = dispatch_book_stage(
+        accounts,
+        paybook_slots,
+        prepared.take_orderbook_jobs(),
+        context,
+    )?;
+    let updated = match paybook_results {
+        Some(results) => kernel
+            .state
+            .paybook
+            .entries
+            .reconnect_two_level_slots(results.map(Ok))
+            .map_err(|error| EntityKernelError::CommitmentEncoding {
+                detail: error.to_string(),
+            })?,
+        None => kernel.state.paybook.entries.clone(),
+    };
+    finish_orderbook_stage(kernel, prepared, orderbook_results, scheduled_commands)?;
+    kernel.state.paybook.entries = updated;
+    Ok(())
 }
 
 #[derive(Debug, Error)]
@@ -1501,7 +1658,7 @@ fn apply_resident_entity_round_core_attempt(
     let mut ordered_applied = Vec::with_capacity(applied_slots.len());
     let mut commits_micros = 0_u128;
     let mut entity_apply_micros = 0_u128;
-    let mut paybook_commit_micros = 0_u128;
+    let mut book_stage_micros = 0_u128;
     let mut accumulated = EntityTransitionAccumulator::default();
     let mut ordered_events = Vec::new();
     let mut ordered_hashes = Vec::new();
@@ -1638,14 +1795,12 @@ fn apply_resident_entity_round_core_attempt(
         paybook_changes: std::mem::take(&mut accumulated.paybook_changes),
         orderbook_deltas: std::mem::take(&mut accumulated.orderbook_deltas),
     };
-    let mut orderbook_mapper = ResidentOrderbookPairMapper { accounts };
-    apply_orderbook_stage(
-        &mut kernel,
-        context,
-        &scheduled_commands,
-        &mut orderbook_mapper,
-    )?;
+    // Prepare the coordinator-owned Orderbook candidate before J ingress, as
+    // before, but defer every independent pair job to the one mixed Book
+    // worker dispatch shared with active Paybook radix slots.
+    let prepared_book_stage = prepare_orderbook_stage(&mut kernel, context)?;
     let j_ingress_started = Instant::now();
+    let mut deferred_j_ingress = None;
     if let Some(j_events) = request.finalized_j_events.as_ref() {
         if j_events.scanned_through != request.outbound_j_height {
             return Err(EntityKernelError::JEventInvalid {
@@ -1749,6 +1904,21 @@ fn apply_resident_entity_round_core_attempt(
             request.entity_height,
             j_events,
         )?;
+        deferred_j_ingress = Some(ingress);
+    }
+    let j_ingress_micros = j_ingress_started.elapsed().as_micros();
+    let book_stage_started = Instant::now();
+    let paybook_changes = std::mem::take(&mut kernel.paybook_changes);
+    commit_book_stage(
+        accounts,
+        &mut kernel,
+        paybook_changes,
+        prepared_book_stage,
+        context,
+        &scheduled_commands,
+    )?;
+    book_stage_micros = book_stage_micros.saturating_add(book_stage_started.elapsed().as_micros());
+    if let Some(ingress) = deferred_j_ingress {
         merge_proposal_work(&mut kernel.proposal_work, ingress.proposal_work);
         kernel
             .account_envelope_mutations
@@ -1758,19 +1928,6 @@ fn apply_resident_entity_round_core_attempt(
             .extend(ingress.routed_entity_outputs);
         kernel.local_events.extend(ingress.frame_events);
     }
-    let j_ingress_micros = j_ingress_started.elapsed().as_micros();
-    let paybook_commit_started = Instant::now();
-    // Stage 2 ends with one canonical Paybook radix fold. A dropped Account
-    // proposal is a Stage-3 result and therefore cannot trigger a same-round
-    // Book mutation or a second Account visit; bilateral timeout remains the
-    // canonical unwind for a lock rejected by the outbound Account.
-    commit_paybook_changes(
-        accounts,
-        &mut kernel.state,
-        std::mem::take(&mut kernel.paybook_changes),
-    )?;
-    paybook_commit_micros =
-        paybook_commit_micros.saturating_add(paybook_commit_started.elapsed().as_micros());
 
     let pending_settlement_hankos = materialize_deferred_settlement_approvals(
         accounts,
@@ -1926,7 +2083,7 @@ fn apply_resident_entity_round_core_attempt(
             inbound_micros,
             commits_micros,
             entity_apply_micros,
-            paybook_commit_micros,
+            book_stage_micros,
             j_ingress_micros,
             worklist_micros,
             proposable_micros,
@@ -1965,6 +2122,43 @@ mod tests {
     use xln_rscore_engine::{AccountDomain, DepositoryAddress, DisputeDraft, OutboundAck};
 
     use super::*;
+
+    fn pending_route(hash_byte: u8) -> crate::PaybookEntry {
+        crate::PaybookEntry {
+            hashlock: format!("0x{}", format!("{hash_byte:02x}").repeat(32)),
+            description: None,
+            token_id: Some(1),
+            amount: Some(BigInt::from(1)),
+            started_at_ms: Some(1),
+            originated: true,
+            inbound_entity: None,
+            outbound_entity: None,
+            inbound_settled: false,
+            outbound_settled: false,
+            secret: None,
+            secret_ack_pending: false,
+            secret_ack_started_at: None,
+            secret_ack_deadline_at: None,
+            pending_fee: None,
+            created_timestamp: 1,
+        }
+    }
+
+    #[test]
+    fn paybook_hashlocks_create_independent_stage_two_jobs() {
+        let mut changes = PaybookChanges::default();
+        for hash_byte in [0x00, 0x7f, 0xff] {
+            changes.put(pending_route(hash_byte)).expect("route");
+        }
+        let slots = partition_paybook_pending(changes.into_pending()).expect("slots");
+        let active = slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, rows)| (!rows.is_empty()).then_some(slot))
+            .collect::<Vec<_>>();
+
+        assert_eq!(active, vec![0x00, 0x7f, 0xff]);
+    }
 
     #[test]
     fn transition_accumulator_preserves_uncommitted_paybook_writes() {

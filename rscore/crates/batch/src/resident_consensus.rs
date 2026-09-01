@@ -691,6 +691,10 @@ impl ResidentConsensusEngine {
         self.forest.entity_worker_metrics()
     }
 
+    pub fn entity_stage_invocations(&self) -> u64 {
+        self.forest.entity_stage_invocations()
+    }
+
     /// Exact resident worklist before Entity adds same-round transactions.
     /// Values stay inside their owner workers; only matching Account ids cross
     /// back to the coordinator.
@@ -1545,24 +1549,11 @@ impl ResidentConsensusEngine {
         let (identity, identity_is_new) =
             self.identity_candidate(owner, !request.creates.is_empty())?;
         let original_admissions = admission_results(&request.proposal_work);
-        let create_entries = create_work(&request.creates)?;
         let (fast_entries, named, proposal_order) = outbound_work(&mut request)?;
 
         let mut round_leafs = BTreeMap::new();
-        if !create_entries.is_empty() {
-            self.run_outbound(
-                false,
-                create_entries,
-                owner,
-                Arc::clone(&identity),
-                0,
-                0,
-                local_board_authority,
-                &mut round_leafs,
-            )?;
-        }
         let mut fast = self.run_outbound(
-            !request.creates.is_empty(),
+            false,
             fast_entries,
             owner,
             Arc::clone(&identity),
@@ -2138,28 +2129,6 @@ fn set_proposable(accounts: &mut BTreeSet<AccountId>, account_id: AccountId, rea
     }
 }
 
-fn create_work(creates: &[AccountSeed]) -> Result<Vec<(AccountId, OutboundWork)>, BatchError> {
-    let mut seen = BTreeSet::new();
-    let mut work = Vec::with_capacity(creates.len());
-    for seed in creates {
-        if !seen.insert(seed.account_id) {
-            return Err(BatchError::DuplicateAccount(seed.account_id));
-        }
-        work.push((
-            seed.account_id,
-            OutboundWork {
-                create: Some(seed.clone()),
-                envelope_updates: Vec::new(),
-                txs: None,
-                finish: false,
-                force_ack: false,
-                seal: true,
-            },
-        ));
-    }
-    Ok(work)
-}
-
 type OutboundWorkSet = (
     Vec<(AccountId, OutboundWork)>,
     BTreeSet<AccountId>,
@@ -2169,17 +2138,22 @@ type OutboundWorkSet = (
 fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet, BatchError> {
     let mut grouped = BTreeMap::<AccountId, OutboundWork>::new();
     for seed in &request.creates {
-        grouped.insert(
-            seed.account_id,
-            OutboundWork {
-                create: None,
-                envelope_updates: Vec::new(),
-                txs: None,
-                finish: false,
-                force_ack: false,
-                seal: true,
-            },
-        );
+        if grouped
+            .insert(
+                seed.account_id,
+                OutboundWork {
+                    create: Some(seed.clone()),
+                    envelope_updates: Vec::new(),
+                    txs: None,
+                    finish: false,
+                    force_ack: false,
+                    seal: true,
+                },
+            )
+            .is_some()
+        {
+            return Err(BatchError::DuplicateAccount(seed.account_id));
+        }
     }
     let mut selected = BTreeSet::new();
     for (account_id, tx) in std::mem::take(&mut request.unsigned_settlement_txs) {

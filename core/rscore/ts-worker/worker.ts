@@ -27,6 +27,7 @@ import {
   workerHeapUsedBytes,
   type TsAccountWorkerState,
 } from './worker-state';
+import { processBookSlots } from './worker-books';
 import type {
   TsAccountWorkerEffect,
   TsAccountWorkerInboundPayload,
@@ -365,6 +366,12 @@ scope.onmessage = event => {
         postResult(request.requestId, initialized.result);
       } else if (request.kind === 'phase') {
         postResult(request.requestId, await processPhase(decoded));
+      } else if (request.kind === 'books') {
+        if (state === null) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
+        postResult(request.requestId, processBookSlots(
+          state.workerIndex,
+          decoded as import('./protocol').TsBookWorkerPayload,
+        ));
       } else if (request.kind === 'install_hankos') {
         if (state === null) throw new Error('TS_ACCOUNT_WORKER_NOT_INITIALIZED');
         postResult(

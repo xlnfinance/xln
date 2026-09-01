@@ -8,6 +8,7 @@ import type { AccountAuthorityExecutionScope } from '../account/consensus/contex
 import type { AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
 import type { HankoString } from '../types/hanko';
+import type { BookIntentSlot } from './books/book-intents';
 
 export type AccountAuthorityFrameBeginRequest = Readonly<{
   ownerEntityId: string;
@@ -36,6 +37,11 @@ export type AccountAuthorityFrameOutboundRequest = Readonly<{
   jHeight: number;
 }>;
 
+export type AccountAuthorityFrameBooksRequest = Readonly<{
+  entityState: EntityState;
+  slots: readonly BookIntentSlot[];
+}>;
+
 export type AccountAuthorityCommittedHanko = Readonly<{
   hash: string;
   hanko: HankoString;
@@ -55,6 +61,7 @@ export type AccountAuthorityCommittedHankosRequest = Readonly<{
 /** Narrow child-machine capability; lifecycle ownership remains in Runtime. */
 export interface AccountAuthorityEntityStageCapability extends AccountAuthorityExecutionScope {
   beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void>;
+  executeEntityBooks(request: AccountAuthorityFrameBooksRequest): Promise<void>;
   prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
   finishEntityAccountFrame(): void;
   installCommittedAccountHankos(request: AccountAuthorityCommittedHankosRequest): Promise<void>;

@@ -16,8 +16,10 @@
   import {
     runtimeViewPageInfo,
     runtimeViewPageNeedsNavigation,
+    setRuntimeViewActiveEntityId,
     setRuntimeViewPage,
   } from '$lib/stores/runtimeViewStore';
+  import { setLocalLauncherOnboarding } from '$lib/stores/localLauncherStore';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/ui/tabStore';
@@ -44,8 +46,9 @@
   } from '$lib/utils/onboarding/remoteRuntimeImportFlow';
   import {
     consumeLocalRuntimePairing,
+    readLocalRuntimeLaunchRequest,
     readLocalRuntimePairingToken,
-    stripLocalRuntimePairingToken,
+    stripLocalRuntimeLaunchParams,
   } from '$lib/utils/runtime/localRuntimePairing';
   import {
     persistRemoteRuntimeRequest,
@@ -201,12 +204,15 @@
   async function pairLocalRuntimeIntoApp(pairingToken: string): Promise<void> {
     const token = pairingToken.trim();
     if (!token) return;
-    stripLocalRuntimePairingToken();
+    const launchRequest = readLocalRuntimeLaunchRequest();
+    stripLocalRuntimeLaunchParams();
     isLoading.set(true);
     error.set(null);
     const entries = await consumeLocalRuntimePairing(token);
     const result = await importRemoteRuntimeEntries(entries);
     persistActiveRemoteRuntimeImport(result.validated[0]!);
+    if (launchRequest.entityId) setRuntimeViewActiveEntityId(launchRequest.entityId);
+    setLocalLauncherOnboarding(launchRequest.stage, launchRequest.entityId);
   }
 
   type RemoteRuntimeBootstrapResult = 'continue' | 'pending-auth';

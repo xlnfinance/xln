@@ -204,6 +204,35 @@ fn two_level_batch_matches_serial_with_compressed_children() {
 }
 
 #[test]
+fn two_level_mutation_always_enters_slot_mapper_for_empty_and_compressed_roots() {
+    use std::cell::Cell;
+
+    for base in [
+        PersistentRadixMap::empty(),
+        PersistentRadixMap::empty()
+            .updated(vec![0x12, 0x34], digest(1), digest(1))
+            .expect("compressed base"),
+    ] {
+        let calls = Cell::new(0_usize);
+        let updated = base
+            .mutated_batch_two_levels(
+                vec![PersistentRadixMutation::Put {
+                    key: vec![0xab, 0xcd],
+                    value: digest(2),
+                    value_digest: digest(2),
+                }],
+                |slots| {
+                    calls.set(calls.get() + 1);
+                    slots.map(SlotWork::apply)
+                },
+            )
+            .expect("two-level mutation");
+        assert_eq!(calls.get(), 1);
+        assert_eq!(updated.get(&[0xab, 0xcd]), Some(&digest(2)));
+    }
+}
+
+#[test]
 fn slot_mutation_defers_hashing_until_canonical_root_or_descriptor_demand() {
     use std::cell::Cell;
 

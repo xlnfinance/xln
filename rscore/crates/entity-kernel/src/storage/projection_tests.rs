@@ -124,7 +124,7 @@ fn state() -> EntityStateSlice {
     );
     state.paybook = PaybookState::from_entries(
         [PaybookEntry {
-            hashlock: "route-1".to_string(),
+            hashlock: format!("0x{}", "ab".repeat(32)),
             description: Some("invoice".to_string()),
             token_id: Some(1),
             amount: Some(BigInt::from(20)),
@@ -270,7 +270,28 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
     let paybook = CanonicalValue::Object(vec![
         (
             "entries".to_string(),
-            logical_commitment(&projection.paybook_entries),
+            CanonicalValue::Object(vec![
+                (
+                    "radix".to_string(),
+                    CanonicalValue::Number(CanonicalNumber::from_u32(16)),
+                ),
+                (
+                    "leafCount".to_string(),
+                    CanonicalValue::Number(
+                        CanonicalNumber::try_from_u64(
+                            u64::try_from(projection.paybook_entries.len()).expect("paybook count"),
+                        )
+                        .expect("canonical paybook count"),
+                    ),
+                ),
+                (
+                    "root".to_string(),
+                    CanonicalValue::String(format!(
+                        "0x{}",
+                        hex::encode(state.paybook.entries.root_hash())
+                    )),
+                ),
+            ]),
         ),
         ("feesEarned".to_string(), fees),
     ]);

@@ -139,7 +139,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withDefinedProperty('certifiedBoardState', core.certifiedBoardState),
     profile: core.profile,
     paybook: {
-      entries: PersistentEntityCollectionMap.from(core.paybook.entries),
+      entries: PersistentEntityCollectionMap.from(core.paybook.entries, 'paybookHashlock'),
       feesEarned: core.paybook.feesEarned,
     },
     ...withDefinedProperty('prevFrameHash', core.prevFrameHash),

@@ -81,26 +81,6 @@ impl PreparedOrderbookStage {
     }
 }
 
-pub(crate) trait OrderbookPairMapper {
-    fn map_pairs(
-        &mut self,
-        jobs: Vec<OrderbookPairJob>,
-        context: DeterministicContext,
-    ) -> Result<Vec<OrderbookPairResult>, EntityKernelError>;
-}
-
-pub(crate) struct SequentialOrderbookPairMapper;
-
-impl OrderbookPairMapper for SequentialOrderbookPairMapper {
-    fn map_pairs(
-        &mut self,
-        jobs: Vec<OrderbookPairJob>,
-        context: DeterministicContext,
-    ) -> Result<Vec<OrderbookPairResult>, EntityKernelError> {
-        Ok(jobs.into_iter().map(|job| job.apply(&context)).collect())
-    }
-}
-
 impl OrderbookPairJob {
     pub(crate) fn apply(mut self, context: &DeterministicContext) -> OrderbookPairResult {
         let mut swept = BTreeSet::new();
@@ -1177,7 +1157,7 @@ fn apply_orderbook_outputs(
 ) -> Result<OrderbookEffects, EntityKernelError> {
     let mut prepared = prepare_orderbook_outputs(state, deltas, context, entity_id)?;
     let jobs = prepared.take_jobs();
-    let results = SequentialOrderbookPairMapper.map_pairs(jobs, context.clone())?;
+    let results = jobs.into_iter().map(|job| job.apply(context)).collect();
     let validated = validate_orderbook_outputs(prepared, results)?;
     Ok(install_orderbook_outputs(state, validated))
 }
@@ -1190,7 +1170,7 @@ mod tests {
         job_counts: Vec<usize>,
     }
 
-    impl OrderbookPairMapper for ReverseOrderbookPairMapper {
+    impl ReverseOrderbookPairMapper {
         fn map_pairs(
             &mut self,
             mut jobs: Vec<OrderbookPairJob>,
@@ -1405,14 +1385,14 @@ mod tests {
         let mut mapper = ReverseOrderbookPairMapper {
             job_counts: Vec::new(),
         };
-        let reversed_effects = apply_orderbook_outputs_with_mapper(
-            &mut reversed,
-            &deltas,
-            &context,
-            "hub",
-            &mut mapper,
-        )
-        .expect("reversed pair completion");
+        let mut prepared =
+            prepare_orderbook_outputs(&mut reversed, &deltas, &context, "hub").expect("prepare");
+        let jobs = prepared.take_jobs();
+        let results = mapper
+            .map_pairs(jobs, context.clone())
+            .expect("reverse jobs");
+        let validated = validate_orderbook_outputs(prepared, results).expect("validate");
+        let reversed_effects = install_orderbook_outputs(&mut reversed, validated);
 
         assert_eq!(mapper.job_counts, vec![2]);
         assert_eq!(reversed, sequential);

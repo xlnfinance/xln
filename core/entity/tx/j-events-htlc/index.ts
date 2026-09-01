@@ -36,6 +36,7 @@ import { hasInboundPayment } from '../../paybook/views';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
 import { buildCurrentDisputeArgumentPlan } from '../../../protocol/dispute/arguments';
+import type { BookIntentSlotWriter } from '../../books/book-intents';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
@@ -911,11 +912,13 @@ export function applyKnownHtlcSecret(
   secretRaw: string,
   blockNumber: number,
   source: 'SecretRevealed' | 'DisputeStarted',
+  bookIntentSlot?: BookIntentSlotWriter,
 ): boolean {
   const hashlock = String(hashlockRaw).toLowerCase();
   const secret = String(secretRaw).toLowerCase();
 
-  const route = newState.paybook.entries.get(hashlock);
+  if (!bookIntentSlot) throw new Error('J_EVENT_BOOK_INTENT_SLOT_REQUIRED');
+  const route = bookIntentSlot.getPaybookEntry(newState, hashlock);
 
   if (!route) {
     const recovered = queueInboundResolvesByHashlock(newState, accountTxs, hashlock, secret);
@@ -932,12 +935,12 @@ export function applyKnownHtlcSecret(
     return true;
   }
 
-  const writableRoute = getEntityCollectionValueForWrite(newState.paybook.entries, hashlock);
+  const writableRoute = bookIntentSlot.getPaybookEntryForWrite(newState, hashlock);
   if (!writableRoute) throw new Error(`PAYBOOK_ENTRY_WRITE_MISSING:${hashlock}`);
   writableRoute.secret = secret;
 
   if (writableRoute.pendingFee) {
-    newState.paybook.feesEarned += writableRoute.pendingFee;
+    bookIntentSlot.addPaybookFees(newState, writableRoute.pendingFee);
     delete writableRoute.pendingFee;
   }
 

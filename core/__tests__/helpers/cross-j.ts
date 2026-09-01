@@ -197,7 +197,10 @@ export const makeState = (
     accounts,
     lastFinalizedJHeight: 0,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-    paybook: { entries: PersistentEntityCollectionMap.empty(), feesEarned: 0n },
+    paybook: {
+      entries: PersistentEntityCollectionMap.empty('paybookHashlock'),
+      feesEarned: 0n,
+    },
     crossJurisdictionSwaps: PersistentEntityCollectionMap.empty(),
     swapTradingPairs: [],
   };

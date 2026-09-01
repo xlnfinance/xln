@@ -1677,7 +1677,17 @@ const applyEntityFrameWithIsolation = async (
   );
   working.markFrameProfile('entityTxLoop');
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.books');
-  applyBookIntentProgram(working.currentEntityState, working.context.bookIntents);
+  const accountStage = working.context.env.accountAuthorityEntityStage;
+  if (accountStage) {
+    await accountStage.executeEntityBooks({
+      entityState: working.currentEntityState,
+      slots: working.context.bookIntents.slots(),
+    });
+  } else {
+    // Standalone reducer tests and sovereign inline Runtimes retain the pure
+    // oracle. Production H1 installation rejects this path before frame apply.
+    applyBookIntentProgram(working.currentEntityState, working.context.bookIntents);
+  }
   working.markFrameProfile('books');
   if (working.authorityTransitionOnly) {
     await working.context.env.accountAuthorityEntityStage

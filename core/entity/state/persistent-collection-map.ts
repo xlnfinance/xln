@@ -1,6 +1,7 @@
 /** Persistent radix-16 storage for potentially large Entity string-keyed collections. */
 
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
+import { hexToBytes } from '../../support/bytes/hex-bytes';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
 import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
@@ -14,6 +15,15 @@ import {
 } from '../../protocol/state/persistent-radix-value-map';
 
 const MAX_ENTITY_COLLECTION_LEAF_BYTES = 10_000;
+
+export type EntityCollectionKeyCodec = 'text' | 'paybookHashlock';
+
+const encodePaybookHashlockKey = (value: string): Uint8Array => {
+  if (!/^0x[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`PAYBOOK_HASHLOCK_KEY_INVALID:${value}`);
+  }
+  return hexToBytes(value);
+};
 
 const valueHash = <Value>(value: Value): string => {
   const encoded = encodeCanonicalConsensusBytes(value);
@@ -38,10 +48,10 @@ const sealEntityCollectionValue = <Value>(value: Value): Value => {
   return Object.freeze(copy) as Value;
 };
 
-const options = <Value>(): PersistentRadixValueMapOptions<string, Value> => ({
+const options = <Value>(keyCodec: EntityCollectionKeyCodec): PersistentRadixValueMapOptions<string, Value> => ({
   radix: 16 as const,
   ownKey: (key: string): string => key,
-  keyBytes: encodeRawRadixTextKey,
+  keyBytes: keyCodec === 'paybookHashlock' ? encodePaybookHashlockKey : encodeRawRadixTextKey,
   valueHash: (value: Value): string => valueHash(value),
   // A leaf and every nested record are immutable behind the committed root.
   // Candidate mutation must first fork this one bounded (<10 KiB) leaf.
@@ -52,54 +62,81 @@ const options = <Value>(): PersistentRadixValueMapOptions<string, Value> => ({
 export class PersistentEntityCollectionMap<Value> implements Map<string, Value> {
   readonly [Symbol.toStringTag] = 'Map';
   readonly #values: PersistentRadixValueMap<string, Value>;
+  readonly #keyCodec: EntityCollectionKeyCodec;
 
-  private constructor(values: PersistentRadixValueMap<string, Value>) {
+  private constructor(
+    values: PersistentRadixValueMap<string, Value>,
+    keyCodec: EntityCollectionKeyCodec,
+  ) {
     this.#values = values;
+    this.#keyCodec = keyCodec;
   }
 
-  static empty<Value>(): PersistentEntityCollectionMap<Value> {
+  static empty<Value>(keyCodec: EntityCollectionKeyCodec = 'text'): PersistentEntityCollectionMap<Value> {
     return new PersistentEntityCollectionMap<Value>(
-      PersistentRadixValueMap.empty<string, Value>(options<Value>()),
+      PersistentRadixValueMap.empty<string, Value>(options<Value>(keyCodec)),
+      keyCodec,
     );
   }
 
-  static from<Value>(source: ReadonlyMap<string, Value>): PersistentEntityCollectionMap<Value> {
-    if (source instanceof PersistentEntityCollectionMap) return source;
-    if (source instanceof EntityCollectionCandidateMap) return source.snapshotCandidate();
+  static from<Value>(
+    source: ReadonlyMap<string, Value>,
+    keyCodec?: EntityCollectionKeyCodec,
+  ): PersistentEntityCollectionMap<Value> {
+    if (source instanceof PersistentEntityCollectionMap) {
+      if (keyCodec !== undefined && source.#keyCodec !== keyCodec) {
+        throw new Error(`ENTITY_COLLECTION_KEY_CODEC:${source.#keyCodec}:${keyCodec}`);
+      }
+      return source;
+    }
+    if (source instanceof EntityCollectionCandidateMap) {
+      const candidate = source.snapshotCandidate();
+      if (keyCodec !== undefined && candidate.#keyCodec !== keyCodec) {
+        throw new Error(`ENTITY_COLLECTION_KEY_CODEC:${candidate.#keyCodec}:${keyCodec}`);
+      }
+      return candidate;
+    }
+    const resolvedCodec = keyCodec ?? 'text';
     return new PersistentEntityCollectionMap<Value>(
-      PersistentRadixValueMap.fromMap<string, Value>(source, options<Value>()),
+      PersistentRadixValueMap.fromMap<string, Value>(source, options<Value>(resolvedCodec)),
+      resolvedCodec,
     );
   }
 
   /** Cold storage boundary: relink the persisted graph without rebuilding it. */
   static fromNodeRecords<Value>(
     records: Iterable<PersistentRadixNodeRecord<string, Value>>,
+    keyCodec: EntityCollectionKeyCodec = 'text',
   ): PersistentEntityCollectionMap<Value> {
     return new PersistentEntityCollectionMap<Value>(
-      PersistentRadixValueMap.fromNodeRecords(records, options<Value>()),
+      PersistentRadixValueMap.fromNodeRecords(records, options<Value>(keyCodec)),
+      keyCodec,
     );
   }
 
   updated(key: string, value: Value): PersistentEntityCollectionMap<Value> {
-    return new PersistentEntityCollectionMap(this.#values.updated(key, value));
+    return new PersistentEntityCollectionMap(this.#values.updated(key, value), this.#keyCodec);
   }
 
   removed(key: string): PersistentEntityCollectionMap<Value> {
-    return new PersistentEntityCollectionMap(this.#values.removed(key));
+    return new PersistentEntityCollectionMap(this.#values.removed(key), this.#keyCodec);
   }
 
   foldDirty(
     mutations: Iterable<RadixFoldMutation<string, Value>>,
     reset = false,
   ): PersistentEntityCollectionMap<Value> {
-    return new PersistentEntityCollectionMap(this.#values.foldMutations(mutations, reset));
+    return new PersistentEntityCollectionMap(
+      this.#values.foldMutations(mutations, reset),
+      this.#keyCodec,
+    );
   }
 
   rootHash(): string { return this.#values.rootHash(); }
 
   /** Independent O(n) oracle for checkpoint-time cache validation. */
   coldRootHash(): string {
-    return PersistentRadixValueMap.fromMap(this.#values, options<Value>()).rootHash();
+    return PersistentRadixValueMap.fromMap(this.#values, options<Value>(this.#keyCodec)).rootHash();
   }
 
   /** Full traversal is reserved for a first checkpoint or cold snapshot. */
@@ -111,6 +148,9 @@ export class PersistentEntityCollectionMap<Value> implements Map<string, Value> 
   nodeChangesSince(
     previous: PersistentEntityCollectionMap<Value>,
   ): PersistentRadixNodeChanges<string, Value> {
+    if (this.#keyCodec !== previous.#keyCodec) {
+      throw new Error(`ENTITY_COLLECTION_KEY_CODEC:${previous.#keyCodec}:${this.#keyCodec}`);
+    }
     return this.#values.nodeChangesSince(previous.#values);
   }
   get size(): number { return this.#values.size; }
@@ -156,8 +196,12 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
   #cleared = false;
   #sealed = false;
 
-  constructor(source: ReadonlyMap<string, Value>, forkValue: (value: Value) => Value) {
-    this.#base = PersistentEntityCollectionMap.from(source);
+  constructor(
+    source: ReadonlyMap<string, Value>,
+    forkValue: (value: Value) => Value,
+    keyCodec?: EntityCollectionKeyCodec,
+  ) {
+    this.#base = PersistentEntityCollectionMap.from(source, keyCodec);
     this.#forkValue = forkValue;
   }
 
@@ -332,14 +376,18 @@ export const ensureEntityCollectionCandidate = <Value>(
   throw new Error('ENTITY_COLLECTION_WRITE_OUTSIDE_CANDIDATE');
 };
 
-export const entityCollectionCommitment = <Value>(source: ReadonlyMap<string, Value>, cold = false): Readonly<{
+export const entityCollectionCommitment = <Value>(
+  source: ReadonlyMap<string, Value>,
+  cold = false,
+  keyCodec?: EntityCollectionKeyCodec,
+): Readonly<{
   radix: 16;
   leafCount: number;
   root: string;
 }> => {
   const persistent = source instanceof EntityCollectionCandidateMap
     ? source.snapshotCandidate()
-    : PersistentEntityCollectionMap.from(source);
+    : PersistentEntityCollectionMap.from(source, keyCodec);
   const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const root = cold ? persistent.coldRootHash() : persistent.rootHash();
   countOp('entity.collection.seal', persistent.size, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0);

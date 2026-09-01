@@ -843,6 +843,147 @@ fn unsigned_settlement_transition_is_sealed_before_certified_hankos_attach() {
 }
 
 #[test]
+fn create_admit_propose_and_force_ack_share_one_outbound_worker_wave() {
+    let mut expected = None;
+    for workers in [1, 4] {
+        let (payer_seed, pair) = funded_seed();
+        let (left, right) = if pair.payer < pair.payee {
+            (pair.payer.clone(), pair.payee.clone())
+        } else {
+            (pair.payee.clone(), pair.payer.clone())
+        };
+        let payee_seed = AccountSeed {
+            account_id: pair.payee_account,
+            replica: AccountReplica::new(pair.payee.clone(), fixture::account_state(&left, &right))
+                .expect("payee replica"),
+            consensus: None,
+        };
+        let mut payee = resident(1, "payee-0", 0, fixture::market(), vec![payee_seed]);
+        enter_resident(&mut payee, pair.payee_entity);
+        let signed_peer = payee
+            .entity_outbound(outbound_request(
+                pair.payee_entity,
+                pair.payee_account,
+                vec![AccountTx::DirectPayment {
+                    token_id: TokenId::new(1).expect("token"),
+                    amount: BigInt::from(17),
+                    route: vec![pair.payer.to_string()],
+                    description: None,
+                    from_entity_id: pair.payee.to_string(),
+                    to_entity_id: pair.payer.to_string(),
+                    delivery_mode: xln_rscore_engine::DeliveryMode::Direct,
+                    trusted_gateway_entity_id: None,
+                }],
+            ))
+            .expect("signed peer frame")
+            .proposals
+            .into_iter()
+            .next()
+            .and_then(|proposal| proposal.outbound_input)
+            .expect("peer AccountInput");
+
+        let (created, owner, _) = genesis_seed("payer-0", "new-peer");
+        assert_eq!(owner, pair.payer_entity);
+        let created_account = created.account_id;
+        let create_tx = AccountTx::AddDelta {
+            token_id: TokenId::new(1).expect("token"),
+        };
+        let local_tx = fixture::payment(&pair, 25).1;
+        let mut engine = resident(workers, "payer-0", 0, fixture::market(), vec![payer_seed]);
+        engine
+            .entity_inbound(EntityInboundRequest {
+                owner_entity_id: owner,
+                expected_accounts_root: engine.accounts_root(),
+                clock: fixture::clock(TIMESTAMP),
+                rows: vec![AccountInputRow {
+                    operation_index: 0,
+                    account_id: pair.payer_account,
+                    genesis_policy: None,
+                    certified_board_authority: AccountInputBoardAuthority::Lazy,
+                    local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+                    input: signed_peer,
+                }],
+                post_accounts: false,
+            })
+            .expect("accepted peer frame");
+        let result = engine
+            .entity_outbound(EntityOutboundRequest {
+                owner_entity_id: owner,
+                local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+                timestamp: TIMESTAMP,
+                j_height: 100,
+                creates: vec![created],
+                envelope_updates: Vec::new(),
+                unsigned_settlement_txs: Vec::new(),
+                proposal_work: vec![
+                    (pair.payer_account, local_tx.clone(), true),
+                    (created_account, vec![create_tx.clone()], false),
+                ],
+                checkpoint_due: false,
+                post_accounts: false,
+            })
+            .expect("one-wave create/admit/propose");
+
+        let outbound = engine
+            .account_phase_metrics()
+            .into_iter()
+            .find(|metric| metric.kind == AccountPhaseKind::OutboundReset)
+            .expect("outbound phase metric");
+        assert_eq!(outbound.invocations, 1, "workers={workers}");
+        assert_eq!(outbound.touched_rows, 2, "workers={workers}");
+        assert_eq!(result.admissions.len(), 2, "workers={workers}");
+        assert_eq!(result.proposals.len(), 2, "workers={workers}");
+        assert_eq!(result.proposals[0].account_id, pair.payer_account);
+        assert_eq!(result.proposals[1].account_id, created_account);
+        let acked = &result.proposals[0];
+        let incoming = acked.incoming_ref().expect("local proposed Account frame");
+        assert_eq!(incoming.frame.txs, local_tx, "workers={workers}");
+        assert!(
+            matches!(
+                &acked.outbound_input,
+                Some(xln_rscore_batch::AccountInput {
+                    kind: xln_rscore_batch::AccountInputKind::AckFrame { ack: Some(_), .. },
+                    ..
+                })
+            ),
+            "force ACK stays bundled workers={workers}",
+        );
+        assert_eq!(
+            result.proposals[1]
+                .incoming_ref()
+                .expect("created Account proposal")
+                .frame
+                .txs,
+            vec![create_tx],
+            "create and admission share the proposal wave workers={workers}",
+        );
+        let signature = (
+            result.accounts_root,
+            result.revision,
+            result.touched.clone(),
+            result
+                .proposals
+                .iter()
+                .map(|proposal| {
+                    (
+                        proposal.account_id,
+                        proposal.proposed.as_ref().map(|row| row.state_hash),
+                        proposal
+                            .incoming_ref()
+                            .map(|incoming| incoming.frame.clone()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        if let Some(expected) = &expected {
+            assert_eq!(&signature, expected, "worker-count parity");
+        } else {
+            expected = Some(signature);
+        }
+    }
+}
+
+#[test]
 fn failed_outbound_restores_the_exact_post_inbound_head() {
     let (seed, pair) = funded_seed();
     let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);

@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
+  copyFileSync,
+  existsSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -15,21 +17,23 @@ import { fileURLToPath } from 'node:url';
 export const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const defaultStateDir = () => {
-  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'xlnfinance');
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'xlnd');
   if (process.platform === 'win32') {
     const localAppData = String(process.env['LOCALAPPDATA'] || '').trim();
     if (!localAppData) throw new Error('LOCALAPPDATA is required on Windows');
-    return join(localAppData, 'xlnfinance');
+    return join(localAppData, 'xlnd');
   }
   const xdgState = String(process.env['XDG_STATE_HOME'] || '').trim();
-  return join(xdgState || join(homedir(), '.local', 'state'), 'xlnfinance');
+  return join(xdgState || join(homedir(), '.local', 'state'), 'xlnd');
 };
 
-const STATE_DIR = String(process.env['XLNFINANCE_STATE_DIR'] || '').trim() || defaultStateDir();
+const STATE_DIR = String(process.env['XLND_STATE_DIR'] || '').trim() || defaultStateDir();
 export const PATHS = Object.freeze({
   app: join(PACKAGE_ROOT, 'app'),
   server: join(PACKAGE_ROOT, 'dist', 'server.js'),
   brainvaultWorker: join(PACKAGE_ROOT, 'dist', 'brainvault-worker-native.js'),
+  launcherClient: join(PACKAGE_ROOT, 'dist', 'launcher-client.js'),
+  jurisdictionsTemplate: join(PACKAGE_ROOT, 'config', 'jurisdictions.json'),
   database: join(STATE_DIR, 'db'),
   jurisdictions: join(STATE_DIR, 'jurisdictions.json'),
   log: join(STATE_DIR, 'xln.log'),
@@ -95,4 +99,15 @@ export const openDaemonLog = () => {
   ensureStateDirectory();
   mkdirSync(dirname(PATHS.log), { recursive: true });
   return openSync(PATHS.log, 'a', 0o600);
+};
+
+export const ensureJurisdictionsConfig = () => {
+  ensureStateDirectory();
+  if (existsSync(PATHS.jurisdictions)) return PATHS.jurisdictions;
+  if (!existsSync(PATHS.jurisdictionsTemplate)) {
+    throw new Error(`XLND_JURISDICTIONS_TEMPLATE_MISSING:${PATHS.jurisdictionsTemplate}`);
+  }
+  copyFileSync(PATHS.jurisdictionsTemplate, PATHS.jurisdictions);
+  chmodSync(PATHS.jurisdictions, 0o600);
+  return PATHS.jurisdictions;
 };

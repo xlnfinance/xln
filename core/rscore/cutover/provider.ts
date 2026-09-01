@@ -376,6 +376,9 @@ const createAuthorityCutoverProvider = (
   env: RuntimeReplica,
 ): AccountAuthorityEntityStageProvider => ({
   executeAccountInboundBatch: batch => executeInboundBatch(env, batch),
+  executeEntityBooksBatch: async () => {
+    throw new Error('RSCORE_ACCOUNT_CUTOVER_ENTITY_BOOKS_UNSUPPORTED');
+  },
   executeAccountOutboundBatch: batch => executeOutboundBatch(env, batch),
 });
 

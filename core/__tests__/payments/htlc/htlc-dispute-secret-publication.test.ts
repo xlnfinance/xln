@@ -66,7 +66,7 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
     observedOnChain: true,
     finalizeQueued: false,
   };
-  state.htlcRoutes.set(hashlock, {
+  state.paybook.entries.set(hashlock, {
     hashlock,
     secret: proofSecret,
     tokenId: 1,
@@ -134,7 +134,7 @@ describe('HTLC dispute secret publication liveness', () => {
     for (let index = 0; index < 32; index += 1) {
       const unrelatedSecret = `0x${(index + 100).toString(16).padStart(64, '0')}`;
       const unrelatedHashlock = hashHtlcSecret(unrelatedSecret);
-      state.htlcRoutes.set(unrelatedHashlock, {
+      state.paybook.entries.set(unrelatedHashlock, {
         hashlock: unrelatedHashlock,
         secret: unrelatedSecret,
         tokenId: 1,

@@ -72,7 +72,7 @@ const state = (routes = 1, bioBytes = 0): EntityState => ({
         const entry = payment(index);
         return [entry.hashlock, entry];
       }),
-    )),
+    ), 'paybookHashlock'),
     feesEarned: 0n,
   },
 });

@@ -440,7 +440,7 @@ const buildGenesisReplica = (
         website: '',
       },
       paybook: {
-        entries: PersistentEntityCollectionMap.empty(),
+        entries: PersistentEntityCollectionMap.empty('paybookHashlock'),
         feesEarned: 0n,
       },
       crontabState: initCrontab(),

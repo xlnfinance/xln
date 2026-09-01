@@ -1263,12 +1263,13 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
     let expected_proposal_order = vec![maker_seed.account_id, taker_seed.account_id];
     let seeds = vec![maker_seed, taker_seed];
     let rows = vec![maker_row, taker_row];
-    let mut oracle: Option<(
+    type SwapParityEvidence = (
         [u8; 32],
         EntityKernelCommitments,
         Vec<EntityKernelOutput>,
         Vec<(AccountId, [u8; 32])>,
-    )> = None;
+    );
+    let mut oracle: Option<SwapParityEvidence> = None;
 
     for workers in [1, 4, 16] {
         let mut accounts = ResidentConsensusEngine::restore(
@@ -1285,6 +1286,7 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
         state.known_accounts = BTreeSet::from([maker.to_string(), taker.to_string()]).into();
         state.orderbook = Some(OrderbookState::empty(10_000));
         let expected_accounts_root = accounts.accounts_root();
+        let stage_invocations_before = accounts.entity_stage_invocations();
         let result = apply_resident_entity_round(
             &mut accounts,
             state,
@@ -1327,6 +1329,11 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
             &DeterministicContext::hlt_default(),
         )
         .expect("resident swap round");
+        assert_eq!(
+            accounts.entity_stage_invocations() - stage_invocations_before,
+            1,
+            "Paybook slots and independent Orderbook pairs share one Stage2 dispatch at W{workers}",
+        );
         let inbound_metric = accounts
             .account_phase_metrics()
             .into_iter()

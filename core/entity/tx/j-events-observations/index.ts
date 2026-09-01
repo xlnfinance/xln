@@ -52,7 +52,7 @@ export const applyExternalWalletJEvent = (context: FinalizedJEventContext): void
 };
 
 export const applySecretRevealedJEvent = (context: FinalizedJEventContext): void => {
-  const { newState, event, blockNumber, accountTxs, outputs } = context;
+  const { newState, event, blockNumber, accountTxs, outputs, bookIntentSlot } = context;
   if (event.type !== 'SecretRevealed') {
     throw haltRuntimeFailure("J_EVENT_SECRET_ROUTE_MISMATCH", `J_EVENT_SECRET_ROUTE_MISMATCH:${event.type}`);
   }
@@ -64,6 +64,7 @@ export const applySecretRevealedJEvent = (context: FinalizedJEventContext): void
     String(event.data.secret),
     blockNumber,
     'SecretRevealed',
+    bookIntentSlot,
   );
 };
 

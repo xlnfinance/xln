@@ -127,7 +127,11 @@ const installGrowingEntityCollections = (
   source: EntityState,
 ): void => {
   target.paybook = {
-    entries: new EntityCollectionCandidateMap(source.paybook.entries, forkPaybookEntry),
+    entries: new EntityCollectionCandidateMap(
+      source.paybook.entries,
+      forkPaybookEntry,
+      'paybookHashlock',
+    ),
     feesEarned: source.paybook.feesEarned,
   };
   if (source.crontabState) {

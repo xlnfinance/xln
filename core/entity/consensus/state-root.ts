@@ -482,7 +482,7 @@ const projectEntityConsensusState = (
     paybook: {
       entries: timePerfPhase(
         'entity.proj.paybook',
-        () => entityCollectionCommitment(state.paybook.entries, cold),
+        () => entityCollectionCommitment(state.paybook.entries, cold, 'paybookHashlock'),
       ),
       feesEarned: state.paybook.feesEarned,
     },

@@ -215,9 +215,22 @@ export class TsAccountWorkerAuthority {
     }
     this.provider = {
       executeAccountInboundBatch: batch => this.#executeInbound(batch),
+      executeEntityBooksBatch: input => this.#executeBooks(input),
       executeAccountOutboundBatch: batch => this.#executeOutbound(batch),
       installCommittedAccountHankos: request => this.#installCommittedAccountHankos(request),
     };
+  }
+
+  async #executeBooks(input: Readonly<{
+    ownerEntityId: string;
+    request: import('../../entity/runtime-context').AccountAuthorityFrameBooksRequest;
+  }>): Promise<void> {
+    const ownerEntityId = normalize(input.ownerEntityId);
+    const coordinator = await this.#coordinators.get(ownerEntityId);
+    if (coordinator === undefined) {
+      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_BOOK_COORDINATOR_MISSING:${ownerEntityId}`);
+    }
+    await coordinator.applyBookIntents(input.request.entityState, input.request.slots);
   }
 
   async #installCommittedAccountHankos(
@@ -567,7 +580,12 @@ export const installTsAccountWorkerAuthority = (env: RuntimeReplica): void => {
   // 1,000-user HLT into thousands of threads without adding Account-level
   // parallelism. Zero explicitly selects the canonical inline TS transition;
   // Hub processes keep their configured/default shared Account worker pool.
-  if (processValue?.env?.['XLN_TS_ACCOUNT_WORKERS'] === '0') return;
+  if (processValue?.env?.['XLN_TS_ACCOUNT_WORKERS'] === '0') {
+    if (processValue.env?.['XLN_HUB_NAME']?.toUpperCase() === 'H1') {
+      throw new Error('TS_H1_BOOK_WORKER_PROVIDER_REQUIRED');
+    }
+    return;
+  }
   const authority = new TsAccountWorkerAuthority(env, canonicalTsAccountWorkerCount());
   env.accountAuthorityExecutionMode = 'cutover';
   env.accountAuthorityEntityStageProvider = authority.provider;

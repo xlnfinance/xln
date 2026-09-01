@@ -48,7 +48,10 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
     bio: '',
     website: '',
   },
-  paybook: { entries: PersistentEntityCollectionMap.empty(), feesEarned: 0n },
+  paybook: {
+    entries: PersistentEntityCollectionMap.empty('paybookHashlock'),
+    feesEarned: 0n,
+  },
   swapTradingPairs: [],
 });
 

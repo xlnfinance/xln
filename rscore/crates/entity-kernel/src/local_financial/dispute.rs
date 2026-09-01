@@ -583,6 +583,10 @@ fn start(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "dispute authority, evidence views, and ordered effect sinks stay explicit at the security boundary"
+)]
 pub(super) fn apply_prepare(
     state: &mut EntityStateSlice,
     paybook: &PaybookChanges,
@@ -782,6 +786,10 @@ pub(super) fn apply_prepare(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "dispute authority, evidence views, and ordered effect sinks stay explicit at the security boundary"
+)]
 pub(super) fn apply_start(
     state: &mut EntityStateSlice,
     paybook: &PaybookChanges,
