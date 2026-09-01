@@ -10,14 +10,14 @@ export type HltProfile = (typeof HLT_PROFILES)[number];
 
 export type HltEngineSelection = Readonly<{ engine: HltEngine; profile: HltProfile }>;
 
-export type RustLivePaymentCounts = Readonly<{
+export type HltLivePaymentCounts = Readonly<{
   users: number;
   payments: number;
   offeredPerSecond: number;
   durationSeconds: number;
 }>;
 
-export type RustLivePaymentEvidence = 'functional-smoke' | 'tps-authority';
+export type HltLivePaymentEvidence = 'functional-smoke' | 'tps-authority';
 
 export type RustLiveSameCounts = Readonly<{
   users: number;
@@ -41,7 +41,7 @@ export const HLT_PROFILE_PLAN: Readonly<Record<HltProfile, Readonly<{
   heavy: { users: 10_000, runtimesPerProcess: 200 },
 };
 
-const isRustLivePaymentTpsAuthority = (counts: RustLivePaymentCounts): boolean =>
+const isHltLivePaymentTpsAuthority = (counts: HltLivePaymentCounts): boolean =>
   Number.isSafeInteger(counts.users) &&
   Number.isSafeInteger(counts.payments) &&
   Number.isSafeInteger(counts.offeredPerSecond) &&
@@ -52,19 +52,19 @@ const isRustLivePaymentTpsAuthority = (counts: RustLivePaymentCounts): boolean =
   counts.durationSeconds === 20 &&
   counts.payments === counts.offeredPerSecond * counts.durationSeconds;
 
-export const assertRustLivePaymentCardinality = (counts: RustLivePaymentCounts): void => {
+export const assertHltLivePaymentCardinality = (counts: HltLivePaymentCounts): void => {
   if (
-    !isRustLivePaymentTpsAuthority(counts)
+    !isHltLivePaymentTpsAuthority(counts)
   ) {
     throw new Error(
-      `HLT_RUST_LIVE_CARDINALITY_TOO_SMALL:users=${counts.users}:` +
+      `HLT_LIVE_PAYMENT_CARDINALITY_TOO_SMALL:users=${counts.users}:` +
       `payments=${counts.payments}:offered=${counts.offeredPerSecond}:` +
       `duration=${counts.durationSeconds}:requiredDuration=20`,
     );
   }
 };
 
-const isRustLivePaymentDiagnostic = (counts: RustLivePaymentCounts): boolean => {
+const isHltLivePaymentDiagnostic = (counts: HltLivePaymentCounts): boolean => {
   const values = [counts.users, counts.payments, counts.offeredPerSecond, counts.durationSeconds];
   return values.every(value => Number.isSafeInteger(value) && value > 0) &&
     counts.payments === counts.offeredPerSecond * counts.durationSeconds;
@@ -74,20 +74,20 @@ const isRustLivePaymentDiagnostic = (counts: RustLivePaymentCounts): boolean => 
  * Any internally consistent smaller run may exercise the production path,
  * but only the exact authority cardinality is allowed to expose rate fields.
  */
-export const classifyRustLivePaymentRun = (
-  counts: RustLivePaymentCounts,
-): RustLivePaymentEvidence => {
-  if (isRustLivePaymentTpsAuthority(counts)) return 'tps-authority';
-  if (isRustLivePaymentDiagnostic(counts)) return 'functional-smoke';
+export const classifyHltLivePaymentRun = (
+  counts: HltLivePaymentCounts,
+): HltLivePaymentEvidence => {
+  if (isHltLivePaymentTpsAuthority(counts)) return 'tps-authority';
+  if (isHltLivePaymentDiagnostic(counts)) return 'functional-smoke';
   throw new Error(
-    `HLT_RUST_LIVE_COUNTS_INVALID:users=${counts.users}:payments=${counts.payments}:` +
+    `HLT_LIVE_PAYMENT_COUNTS_INVALID:users=${counts.users}:payments=${counts.payments}:` +
     `offered=${counts.offeredPerSecond}:duration=${counts.durationSeconds}`,
   );
 };
 
 /** Result rates exist only for the exact 20-second TPS authority. */
-export const rustLivePaymentRateEvidence = (
-  evidence: RustLivePaymentEvidence,
+export const hltLivePaymentRateEvidence = (
+  evidence: HltLivePaymentEvidence,
   counts: Readonly<{ offeredPerSecond: number; deliveredPayments: number; deliveredElapsedMs: number }>,
 ): Readonly<{ offeredPaymentRate: number; deliveredTps: number }> | Readonly<Record<never, never>> =>
   evidence === 'tps-authority'

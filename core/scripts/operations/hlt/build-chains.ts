@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import {
-  classifyRustLivePaymentRun,
+  classifyHltLivePaymentRun,
   classifyRustLiveSameRun,
   parseHltEngineSelection,
 } from './rust/rust-h1';
@@ -50,7 +50,7 @@ if (selection.engine === 'rust') {
   if (!Number.isSafeInteger(rustRatePerUser) || rustRatePerUser < 1) throw new Error(`HLT_RATE_PER_USER_INVALID:${rustRatePerUser}`);
   if (!Number.isSafeInteger(rustDurationSeconds) || rustDurationSeconds < 1) throw new Error(`HLT_DURATION_INVALID:${rustDurationSeconds}`);
   if (workload === 'payments') {
-    classifyRustLivePaymentRun({
+    classifyHltLivePaymentRun({
       users,
       payments: submittedPayments,
       offeredPerSecond: offeredPayments,

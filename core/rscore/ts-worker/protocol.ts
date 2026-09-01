@@ -229,7 +229,7 @@ export type TsAccountWorkerPhasePayload =
   | TsAccountWorkerInboundPayload
   | TsAccountWorkerOutboundPayload;
 
-export type TsBookWorkerSlot = Readonly<{
+type TsBookWorkerSlot = Readonly<{
   physicalSlot: number;
   entries: readonly (readonly [hashlock: string, entry: PaybookEntry])[];
   intents: readonly BookIntent[];

@@ -110,6 +110,8 @@ describe('hlt payment population', () => {
     expect(source).not.toContain('gossipProfilesCounterparties');
     expect(source).not.toContain('forEachLimited');
     expect(source).toContain('buildPacedOperationSchedule');
+    expect(source).toContain('const paymentEvidence = classifyHltLivePaymentRun({');
+    expect(source).toContain("const report = paymentEvidence === 'tps-authority'");
     // One wave per time window, not per payment. Repeated operations owned by
     // one sovereign Runtime remain distinct ordered EntityTxs in one input.
     expect(source).toContain('queueLaneRuntimeInputWave(batchIndex, submissions)');

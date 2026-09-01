@@ -72,19 +72,6 @@ const cloneActiveDispute = (
     : { crossJurisdictionRecovery: cloneRecovery(value.crossJurisdictionRecovery) }),
 });
 
-export const disputeLifecycleEnvelopeUpdate = (
-  account: AccountReplica,
-): AccountEnvelopeUpdate => ({
-  type: 'replaceDisputeLifecycle',
-  status: account.status,
-  ...(account.disputePrepare === undefined
-    ? {}
-    : { disputePrepare: cloneDisputePrepare(account.disputePrepare) }),
-  ...(account.activeDispute === undefined
-    ? {}
-    : { activeDispute: cloneActiveDispute(account.activeDispute) }),
-});
-
 /** Apply one Entity-owned Account envelope transition on the Account's owning stage. */
 export const applyAccountEnvelopeUpdate = (
   account: AccountReplica,

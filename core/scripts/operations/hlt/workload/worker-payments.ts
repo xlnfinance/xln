@@ -70,9 +70,9 @@ import { buildPacedOperationSchedule } from './operation-pacer';
 import { hltWorkloadFingerprint } from './workload-fingerprint';
 import {
   attachRustH1,
-  classifyRustLivePaymentRun,
+  classifyHltLivePaymentRun,
+  hltLivePaymentRateEvidence,
   parseHltEngineSelection,
-  rustLivePaymentRateEvidence,
   summarizeRustH1WorkerExecution,
   type RustH1Handle,
   type RustH1Metrics,
@@ -598,14 +598,12 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     }
     const submittedPayments = lanes * args.rounds;
     const offeredPaymentRate = Math.round(lanes * 1_000 / args.cadenceMs);
-    const rustPaymentEvidence = selection.engine === 'rust'
-      ? classifyRustLivePaymentRun({
-          users: lanes,
-          payments: submittedPayments,
-          offeredPerSecond: offeredPaymentRate,
-          durationSeconds: args.plan?.economy.durationSeconds ?? 0,
-        })
-      : null;
+    const paymentEvidence = classifyHltLivePaymentRun({
+      users: lanes,
+      payments: submittedPayments,
+      offeredPerSecond: offeredPaymentRate,
+      durationSeconds: args.plan?.economy.durationSeconds ?? 0,
+    });
     if (selection.engine === 'rust') {
       if (hubLabels.length !== 1 || hubLabel !== 'H1') throw new Error('HLT_RUST_LIVE_REQUIRES_SINGLE_H1');
     }
@@ -1049,7 +1047,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     } as const;
     // Diagnostics run the exact production path, but only the authority
     // cardinality may create the rate-bearing dashboard report.
-    const report = rustPaymentEvidence === 'tps-authority'
+    const report = paymentEvidence === 'tps-authority'
       ? decodeLoadPaymentReport(reportInput)
       : null;
     if (report) {
@@ -1061,14 +1059,14 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         rustH1.ready.workers,
         deliveredPayments,
       );
-      const rateEvidence = rustLivePaymentRateEvidence(rustPaymentEvidence!, {
+      const rateEvidence = hltLivePaymentRateEvidence(paymentEvidence, {
         offeredPerSecond: offeredPaymentRate,
         deliveredPayments,
         deliveredElapsedMs,
       });
       writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify({
         engine: 'rust',
-        evidence: rustPaymentEvidence,
+        evidence: paymentEvidence,
         users: lanes,
         submittedPayments,
         deliveredPayments,
@@ -1093,7 +1091,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     const disputeSmoke = shouldRunRustH1DisputeSmoke({
       requested: process.env['XLN_HLT_DISPUTE_SMOKE'],
       engine: selection.engine,
-      evidence: rustPaymentEvidence,
+      evidence: paymentEvidence,
       users: lanes,
       payments: submittedPayments,
       offeredPerSecond: offeredPaymentRate,
@@ -1127,7 +1125,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     if (shouldRunRustH1AccountSettlementSmoke({
       requested: process.env['XLN_HLT_ACCOUNT_SETTLEMENT_SMOKE'],
       engine: selection.engine,
-      evidence: rustPaymentEvidence,
+      evidence: paymentEvidence,
       users: lanes,
       payments: submittedPayments,
       offeredPerSecond: offeredPaymentRate,
@@ -1149,10 +1147,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         `${safeStringify(result, 2)}\n`,
       );
     }
-    const authoritativeCardinality = rustPaymentEvidence === 'tps-authority' || (
-      rustPaymentEvidence === null &&
-      lanes >= 1_000 && submittedPayments >= 1_000 && offeredPaymentRate >= 1_000
-    );
+    const authoritativeCardinality = paymentEvidence === 'tps-authority';
     if (authoritativeCardinality && report) {
       publishHltDashboardReport('payment', report);
       publishHltDashboardPerfFromWorkDir(args.workDir);
@@ -1165,7 +1160,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         `lanePersistence=${report.environment.lanePersistence} laneNice=${report.environment.laneNice} ` +
         `hubWalSync=${report.environment.hubWalSync}`,
       );
-    } else if (rustPaymentEvidence === 'functional-smoke') {
+    } else if (selection.engine === 'rust' && paymentEvidence === 'functional-smoke') {
       console.log(
         `[load] RUST_H1_FUNCTIONAL_SMOKE_COMPLETE users=${lanes} ` +
         `submitted=${submittedPayments} delivered=${deliveredPayments} ` +

@@ -1,7 +1,7 @@
 /** Black-box Account settlement over the canonical production xlnrs path. */
 
 import { safeStringify } from '../../../../protocol/serialization';
-import type { RustLivePaymentEvidence, RustH1Handle } from './rust-h1';
+import type { HltLivePaymentEvidence, RustH1Handle } from './rust-h1';
 import {
   readLaneAccountDetails,
   startLaneJurisdictionWatcher,
@@ -34,7 +34,7 @@ const readCounterpartyPendingDetails = async (
 export const shouldRunRustH1AccountSettlementSmoke = (options: Readonly<{
   requested: string | undefined;
   engine: 'ts' | 'rust';
-  evidence: RustLivePaymentEvidence | null;
+  evidence: HltLivePaymentEvidence | null;
   users: number;
   payments: number;
   offeredPerSecond: number;

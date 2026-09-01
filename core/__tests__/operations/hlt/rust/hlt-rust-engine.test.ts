@@ -8,14 +8,14 @@ import {
 } from '../../../../scripts/operations/hlt/lanes/sovereign-runtime-sharding';
 import {
   HLT_PROFILE_PLAN,
+  assertHltLivePaymentCardinality,
   assertRustLiveMixedCardinality,
-  assertRustLivePaymentCardinality,
-  classifyRustLivePaymentRun,
+  classifyHltLivePaymentRun,
   classifyRustLiveSameRun,
   diffRustH1EconomicMetrics,
   isRustLiveMixedTpsAuthority,
   parseHltEngineSelection,
-  rustLivePaymentRateEvidence,
+  hltLivePaymentRateEvidence,
   rustLiveSameRateEvidence,
   summarizeRustH1WorkerExecution,
   type RustH1Metrics,
@@ -140,43 +140,43 @@ test('1,000 ephemeral Runtime seeds fit the private child pipe without JSON fan-
     .toThrow('HLT_SOVEREIGN_HOST_LANE_SEEDS_INVALID');
 });
 
-test('Rust live TPS authority rejects smoke-sized populations and rates', () => {
-  expect(() => assertRustLivePaymentCardinality({ users: 999, payments: 20_000, offeredPerSecond: 1_000, durationSeconds: 20 }))
-    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
-  expect(() => assertRustLivePaymentCardinality({ users: 1_000, payments: 999, offeredPerSecond: 1_000, durationSeconds: 20 }))
-    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
-  expect(() => assertRustLivePaymentCardinality({ users: 1_000, payments: 19_980, offeredPerSecond: 999, durationSeconds: 20 }))
-    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
-  expect(() => assertRustLivePaymentCardinality({ users: 1_000, payments: 1_000, offeredPerSecond: 1_000, durationSeconds: 1 }))
-    .toThrow('HLT_RUST_LIVE_CARDINALITY_TOO_SMALL');
-  expect(assertRustLivePaymentCardinality({ users: 1_000, payments: 20_000, offeredPerSecond: 1_000, durationSeconds: 20 }))
+test('live payment TPS authority rejects smoke-sized populations and rates', () => {
+  expect(() => assertHltLivePaymentCardinality({ users: 999, payments: 20_000, offeredPerSecond: 1_000, durationSeconds: 20 }))
+    .toThrow('HLT_LIVE_PAYMENT_CARDINALITY_TOO_SMALL');
+  expect(() => assertHltLivePaymentCardinality({ users: 1_000, payments: 999, offeredPerSecond: 1_000, durationSeconds: 20 }))
+    .toThrow('HLT_LIVE_PAYMENT_CARDINALITY_TOO_SMALL');
+  expect(() => assertHltLivePaymentCardinality({ users: 1_000, payments: 19_980, offeredPerSecond: 999, durationSeconds: 20 }))
+    .toThrow('HLT_LIVE_PAYMENT_CARDINALITY_TOO_SMALL');
+  expect(() => assertHltLivePaymentCardinality({ users: 1_000, payments: 1_000, offeredPerSecond: 1_000, durationSeconds: 1 }))
+    .toThrow('HLT_LIVE_PAYMENT_CARDINALITY_TOO_SMALL');
+  expect(assertHltLivePaymentCardinality({ users: 1_000, payments: 20_000, offeredPerSecond: 1_000, durationSeconds: 20 }))
     .toBeUndefined();
 });
 
-test('Rust H1 permits smaller diagnostics but never exposes rate fields for them', () => {
+test('live H1 permits smaller diagnostics but never exposes rate fields for them', () => {
   const smoke = { users: 1_000, payments: 5_000, offeredPerSecond: 1_000, durationSeconds: 5 };
-  expect(classifyRustLivePaymentRun(smoke)).toBe('functional-smoke');
-  expect(rustLivePaymentRateEvidence('functional-smoke', {
+  expect(classifyHltLivePaymentRun(smoke)).toBe('functional-smoke');
+  expect(hltLivePaymentRateEvidence('functional-smoke', {
     offeredPerSecond: 1_000,
     deliveredPayments: 5_000,
     deliveredElapsedMs: 6_000,
   })).toEqual({});
-  expect(classifyRustLivePaymentRun({ ...smoke, users: 999 })).toBe('functional-smoke');
-  expect(classifyRustLivePaymentRun({
+  expect(classifyHltLivePaymentRun({ ...smoke, users: 999 })).toBe('functional-smoke');
+  expect(classifyHltLivePaymentRun({
     users: 100,
     payments: 2_000,
     offeredPerSecond: 100,
     durationSeconds: 20,
   })).toBe('functional-smoke');
-  expect(() => classifyRustLivePaymentRun({ ...smoke, durationSeconds: 4 }))
-    .toThrow('HLT_RUST_LIVE_COUNTS_INVALID');
-  expect(classifyRustLivePaymentRun({
+  expect(() => classifyHltLivePaymentRun({ ...smoke, durationSeconds: 4 }))
+    .toThrow('HLT_LIVE_PAYMENT_COUNTS_INVALID');
+  expect(classifyHltLivePaymentRun({
     users: 1_000,
     payments: 20_000,
     offeredPerSecond: 1_000,
     durationSeconds: 20,
   })).toBe('tps-authority');
-  expect(rustLivePaymentRateEvidence('tps-authority', {
+  expect(hltLivePaymentRateEvidence('tps-authority', {
     offeredPerSecond: 1_000,
     deliveredPayments: 20_000,
     deliveredElapsedMs: 20_000,
