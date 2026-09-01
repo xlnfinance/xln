@@ -19,7 +19,7 @@ import {
 } from '../flush';
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 import type { HandleAccountInputResult } from '../types';
-import { accountInputApplied } from '../result';
+import { accountInputApplied, rejectAccountInput } from '../result';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { computeFrameHash } from '../frame/hash';
 
@@ -115,31 +115,44 @@ const sameAccountFrameHash = (left: string | undefined, right: string | undefine
   && typeof right === 'string'
   && left.toLowerCase() === right.toLowerCase();
 
-const requireExactCurrentFrameRetryHanko = (
+const rejectCurrentFrameRetry = (
+  code: 'ACCOUNT_INPUT_FRAME_HASH_INVALID' | 'ACCOUNT_INPUT_FRAME_HANKO_INVALID',
+  detail: string,
+  receivedHeight: number,
+  events: string[],
+): HandleAccountInputResult => rejectAccountInput(code, `${detail}:height=${receivedHeight}`, events);
+
+const rejectInvalidCurrentFrameRetry = (
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   receivedHeight: number,
-): void => {
+  events: string[],
+): HandleAccountInputResult | undefined => {
+  const reject = (
+    code: 'ACCOUNT_INPUT_FRAME_HASH_INVALID' | 'ACCOUNT_INPUT_FRAME_HANKO_INVALID',
+    detail: string,
+  ): HandleAccountInputResult => rejectCurrentFrameRetry(code, detail, receivedHeight, events);
   // Matching a copied stateHash field is insufficient: the retry must carry
   // the exact frame bytes committed by that hash, not altered fields plus the
   // old hash. Otherwise the duplicate fast path would bypass frame validation.
   if (!sameAccountFrameHash(computeFrameHash(receivedFrame), receivedFrame.stateHash)) {
-    throw new Error(`DUPLICATE_FRAME_BYTES_CONFLICT:height=${receivedHeight}`);
+    return reject('ACCOUNT_INPUT_FRAME_HASH_INVALID', 'DUPLICATE_FRAME_BYTES_CONFLICT');
   }
   const stored = account.counterpartyFrameHanko;
   if (!stored) {
-    throw new Error(`DUPLICATE_FRAME_COUNTERPARTY_HANKO_MISSING:height=${receivedHeight}`);
+    return reject('ACCOUNT_INPUT_FRAME_HANKO_INVALID', 'DUPLICATE_FRAME_COUNTERPARTY_HANKO_MISSING');
   }
   const received = accountInputProposal(input)?.frameHanko;
   if (!received) {
-    throw new Error(`DUPLICATE_FRAME_RETRY_HANKO_MISSING:height=${receivedHeight}`);
+    return reject('ACCOUNT_INPUT_FRAME_HANKO_INVALID', 'DUPLICATE_FRAME_RETRY_HANKO_MISSING');
   }
   // A committed-frame retry is not fresh authority. It is admissible only
   // when it repeats the peer certificate already stored for these exact bytes.
   if (received.toLowerCase() !== stored.toLowerCase()) {
-    throw new Error(`DUPLICATE_FRAME_COUNTERPARTY_HANKO_CONFLICT:height=${receivedHeight}`);
+    return reject('ACCOUNT_INPUT_FRAME_HANKO_INVALID', 'DUPLICATE_FRAME_COUNTERPARTY_HANKO_CONFLICT');
   }
+  return undefined;
 };
 
 const applyDuplicateAck = (
@@ -354,7 +367,14 @@ export const buildDuplicateCommittedAckFrame = async (
     });
     return null;
   }
-  requireExactCurrentFrameRetryHanko(account, input, receivedFrame, receivedHeight);
+  const invalidRetry = rejectInvalidCurrentFrameRetry(
+    account,
+    input,
+    receivedFrame,
+    receivedHeight,
+    events,
+  );
+  if (invalidRetry) return invalidRetry;
   const pendingResponse = account.pendingAccountInput;
   const pendingAck = pendingResponse
     ? accountInputAck(pendingResponse)

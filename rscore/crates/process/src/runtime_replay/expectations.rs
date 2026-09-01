@@ -12,7 +12,7 @@ use xln_rscore_runtime::RuntimeDurableCommitments;
 struct RuntimeFrameExpectation {
     timestamp: u64,
     post_state_hash: [u8; 32],
-    canonical_state_hash: Option<[u8; 32]>,
+    canonical_state_hash: [u8; 32],
     output_count: u64,
     output_digest: [u8; 32],
 }
@@ -123,11 +123,16 @@ fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpect
         )?;
         for (index, frame) in frames.iter().enumerate() {
             let path = format!("{bundle_path}.frames[{index}]");
+            if object(frame, &path)?.contains_key("runtimeStateHash") {
+                return Err(format!(
+                    "RUNTIME_REPLAY_EXPECTED_RETIRED_RUNTIME_STATE_HASH:{path}"
+                ));
+            }
             let height = unsigned(field(frame, "height", &path)?, &format!("{path}.height"))?;
-            let canonical_state_hash = match object(frame, &path)?.get("canonicalStateHash") {
-                None | Some(Value::Null) => None,
-                Some(value) => Some(digest(value, &format!("{path}.canonicalStateHash"))?),
-            };
+            let canonical_state_hash = digest(
+                field(frame, "canonicalStateHash", &path)?,
+                &format!("{path}.canonicalStateHash"),
+            )?;
             let expected = RuntimeFrameExpectation {
                 timestamp: unsigned(
                     field(frame, "timestamp", &path)?,
@@ -203,10 +208,7 @@ impl ReplayExpectations {
         }
     }
 
-    pub(super) fn expected_canonical_state_hash(
-        &self,
-        height: u64,
-    ) -> Result<Option<[u8; 32]>, String> {
+    pub(super) fn expected_canonical_state_hash(&self, height: u64) -> Result<[u8; 32], String> {
         Ok(self.runtime_frame(height)?.canonical_state_hash)
     }
 
@@ -285,7 +287,7 @@ mod tests {
                         "height": 7,
                         "timestamp": 9,
                         "postStateHash": format!("0x{}", "55".repeat(32)),
-                        "canonicalStateHash": null,
+                        "canonicalStateHash": format!("0x{}", "77".repeat(32)),
                         "runtimeOutputCount": 0,
                         "runtimeOutputsDigest": format!("0x{}", "66".repeat(32)),
                     }],
@@ -295,14 +297,51 @@ mod tests {
     }
 
     #[test]
-    fn missing_runtime_evidence_is_loud() {
+    fn missing_runtime_height_is_loud() {
         let expectations = ReplayExpectations::from_recording(&fixture()).expect("fixture");
-        assert_eq!(expectations.expected_canonical_state_hash(7).unwrap(), None);
+        assert_eq!(
+            expectations.expected_canonical_state_hash(7).unwrap(),
+            [0x77; 32]
+        );
         assert!(
             expectations
                 .assert_exact_range(8, 8)
                 .unwrap_err()
                 .contains("EXPECTED_RANGE_MISMATCH")
+        );
+    }
+
+    #[test]
+    fn canonical_root_is_required_and_the_retired_duplicate_is_rejected() {
+        let mut missing = fixture();
+        missing["recording"]["bundles"][0]["frames"][0]
+            .as_object_mut()
+            .expect("frame")
+            .remove("canonicalStateHash");
+        assert!(
+            ReplayExpectations::from_recording(&missing)
+                .err()
+                .expect("missing canonical root must fail")
+                .contains("EXPECTED_FIELD")
+        );
+
+        let mut null = fixture();
+        null["recording"]["bundles"][0]["frames"][0]["canonicalStateHash"] = Value::Null;
+        assert!(
+            ReplayExpectations::from_recording(&null)
+                .err()
+                .expect("null canonical root must fail")
+                .contains("EXPECTED_DIGEST")
+        );
+
+        let mut retired = fixture();
+        retired["recording"]["bundles"][0]["frames"][0]["runtimeStateHash"] =
+            Value::String(format!("0x{}", "77".repeat(32)));
+        assert!(
+            ReplayExpectations::from_recording(&retired)
+                .err()
+                .expect("retired duplicate must fail")
+                .contains("RETIRED_RUNTIME_STATE_HASH")
         );
     }
 

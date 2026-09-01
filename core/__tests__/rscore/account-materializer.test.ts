@@ -526,6 +526,15 @@ describe('rscore Account materializer', () => {
     const prior = replica(emptyState());
     const before = safeStringify(prior);
     const wire = restoreWire(target, consensusWire(target, committedHanko));
+    const recoveryEnvelope = (wire[2] as RscoreWireValue[])[7] as RscoreWireValue[];
+    const recoveryFields = (recoveryEnvelope[0] as RscoreWireValue[])[1] as RscoreWireValue[];
+    recoveryFields.push(
+      ['rollbackCount', canonicalValueWire(2)],
+      ['lastRollbackFrameHash', canonicalValueWire(target.lastRollbackFrameHash)],
+      ['pendingFrameHash', canonicalValueWire(pending.stateHash)],
+      ['pendingAccountInput', canonicalValueWire({ kind: 'ack_frame' })],
+      ['lastOutboundAckFrame', canonicalValueWire({ height: 1 })],
+    );
     const witnessPlan: RscoreAccountLocalWitnessPlan = { freshHashesToSign: [
       { hash: current.stateHash, type: 'accountFrame', context: `account:${PEER.slice(-8)}:ack:1` },
       { hash: pending.stateHash, type: 'accountFrame', context: `account:${PEER.slice(-8)}:frame:2` },

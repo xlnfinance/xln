@@ -1326,18 +1326,37 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     )
     .expect("ack");
 
-    // The replay key includes the exact peer certificate retained at commit.
-    // The signed stateHash remains authoritative, so unauthenticated body
-    // drift does not mutate state or prevent ACK-loss recovery.
+    // A copied stateHash and Hanko cannot authenticate altered frame bytes.
     let leaf_after_first = right.account.entity_account_leaf().expect("leaf");
-    let mut duplicate = incoming_of(&first.frame, first.state_hash, first.hanko.clone());
-    duplicate.frame.account_state_root[0] ^= 0x01;
+    let mut altered = incoming_of(&first.frame, first.state_hash, first.hanko.clone());
+    altered.frame.account_state_root[0] ^= 0x01;
+    let altered = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        altered,
+        &market(),
+    )
+    .expect("altered duplicate is a typed rejection");
+    assert!(matches!(
+        altered,
+        IncomingOutcome::Rejected { reason }
+            if reason == "DUPLICATE_FRAME_BYTES_CONFLICT:height=1"
+    ));
+    assert_eq!(
+        right.account.entity_account_leaf().expect("leaf"),
+        leaf_after_first
+    );
+
+    // The exact frame and exact retained peer certificate remain a no-op that
+    // returns the original local ACK after delivery loss.
     let duplicate = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
         CLOCK,
-        duplicate,
+        incoming_of(&first.frame, first.state_hash, first.hanko.clone()),
         &market(),
     )
     .expect("exact-current retry retains its certificate");

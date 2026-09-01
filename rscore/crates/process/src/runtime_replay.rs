@@ -523,19 +523,18 @@ pub fn replay_runtime_wal(
                 next_read += 1;
             }
             expectations.assert_timestamp(height, decoded.timestamp)?;
-            if let Some(expected_root) = expectations.expected_canonical_state_hash(height)? {
-                let source_root = decoded
-                    .canonical_state_hash
-                    .ok_or_else(|| format!("RUNTIME_REPLAY_RUNTIME_ROOT_MISSING:{height}"))?;
-                if source_root != expected_root {
-                    return Err(format!(
-                        "RUNTIME_REPLAY_RUNTIME_ROOT_MISMATCH:{height}:expected={}:actual={}",
-                        hex(&expected_root),
-                        hex(&source_root),
-                    ));
-                }
-                add(&mut metrics.runtime_roots_compared, 1, "runtimeRoots")?;
+            let expected_root = expectations.expected_canonical_state_hash(height)?;
+            let source_root = decoded
+                .canonical_state_hash
+                .ok_or_else(|| format!("RUNTIME_REPLAY_RUNTIME_ROOT_MISSING:{height}"))?;
+            if source_root != expected_root {
+                return Err(format!(
+                    "RUNTIME_REPLAY_RUNTIME_ROOT_MISMATCH:{height}:expected={}:actual={}",
+                    hex(&expected_root),
+                    hex(&source_root),
+                ));
             }
+            add(&mut metrics.runtime_roots_compared, 1, "runtimeRoots")?;
             let input = &mut decoded.input;
             add(
                 &mut metrics.direct_payments,

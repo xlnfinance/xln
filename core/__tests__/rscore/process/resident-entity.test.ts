@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Level } from 'level';
 
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../account/crypto';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
@@ -13,10 +15,18 @@ import {
   getSwapLotScaleForDecimals,
   quoteAmountAtPriceForDecimals,
 } from '../../../orderbook/types';
-import { RscoreProcessClient } from '../../../rscore/client';
+import {
+  RSCORE_PROTOCOL_FINGERPRINT,
+  RscoreProcessClient,
+} from '../../../rscore/client';
+import {
+  decodeRscoreAccountRestoreRow,
+  projectRscoreCommittedEnvelopeFields,
+} from '../../../rscore/checkpoint/checkpoint-restore';
 import { entityDeterministicContextWire } from '../../../rscore/entity/round-wire';
 import { entityOwnedSectionDigests, entitySnapshotWire } from '../../../rscore/entity/snapshot-wire';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
+import { prepareRscoreCheckpointStorage } from '../../../storage/schema/rscore/checkpoint';
 import {
   accountConsensusWire,
   accountEnvelopeWire,
@@ -37,7 +47,7 @@ const identity = () => ({
 });
 
 describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
-  test('restores exact TS book pages and executes one fused empty round', async () => {
+  test('restores exact TS book pages and round-trips a real Rust checkpoint', async () => {
     const seed = `0x${'73'.repeat(32)}`;
     const signerLabel = '1';
     const signerAddress = deriveSignerAddressSync(seed, signerLabel);
@@ -76,6 +86,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
       ['offer-a', offer('offer-a')],
       ['offer-c', offer('offer-c')],
     ]);
+    account.rollbackCount = 3;
     state.accounts.set(counterparty, account);
 
     let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 32, stpPolicy: 1 });
@@ -229,6 +240,64 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         timestamp: state.timestamp + 3,
       };
       expect(advanced.ownedSections).toEqual(entityOwnedSectionDigests(advancedExpected));
+
+      // Exercise the production encoder and strict TS decoder together. The
+      // rollback counter must survive for crash recovery without entering the
+      // committed Entity Account leaf.
+      const checkpointRound = await client.entityRound({
+        ownerEntityId: hexToWireBytes(owner, 32, 'RSCORE_ENTITY_TEST_OWNER'),
+        expectedAccountsRoot: hexToWireBytes(state.accounts.rootHash(), 32, 'RSCORE_ENTITY_TEST_ROOT'),
+        inboundTimestamp: state.timestamp + 3,
+        inboundJHeight: state.lastFinalizedJHeight,
+        inboundRows: [],
+        entityHeight: state.height + 3,
+        outboundTimestamp: state.timestamp + 4,
+        outboundJHeight: state.lastFinalizedJHeight,
+        checkpointDue: true,
+        postAccounts: false,
+        context: entityDeterministicContextWire(advancedExpected, {
+          ...context,
+          parentFrameHash: advancedExpected.prevFrameHash!,
+          height: advancedExpected.height + 1,
+        }, jurisdiction.name),
+      });
+      const checkpoint = checkpointRound.outbound.checkpoint;
+      if (checkpoint === null) throw new Error('RSCORE_ENTITY_TEST_CHECKPOINT_REQUIRED');
+      expect(checkpoint.accounts).toHaveLength(1);
+      expect(checkpoint.accounts[0]).toHaveLength(12);
+      const storageRoot = mkdtempSync(join(tmpdir(), 'xln-rscore-checkpoint-'));
+      const storage = new Level<Buffer, Buffer>(storageRoot, {
+        keyEncoding: 'buffer',
+        valueEncoding: 'buffer',
+      });
+      try {
+        await storage.open();
+        // Rust emits a bounded delta checkpoint. Exercise the same canonical
+        // materialization used by Runtime WAL commit before strict TS restore;
+        // decoding the delta directly would invent a second restore format.
+        const prepared = await prepareRscoreCheckpointStorage(storage, [{
+          ownerEntityId: owner,
+          protocolFingerprint: `0x${RSCORE_PROTOCOL_FINGERPRINT.toString('hex')}`,
+          checkpoint,
+        }]);
+        expect(prepared.exactCheckpoints).toHaveLength(1);
+        const checkpointRow = prepared.exactCheckpoints[0]?.accounts[0];
+        if (checkpointRow === undefined) throw new Error('RSCORE_ENTITY_TEST_ACCOUNT_ROW_REQUIRED');
+        expect(checkpointRow).toHaveLength(11);
+        const decoded = decodeRscoreAccountRestoreRow(checkpointRow);
+        expect(decoded.consensus.rollbackCount).toBe(3);
+        expect(decoded.stateSeed.envelope?.fields['rollbackCount']).toBe(3);
+        expect(Object.hasOwn(
+          projectRscoreCommittedEnvelopeFields(decoded.stateSeed.envelope?.fields ?? {}),
+          'rollbackCount',
+        )).toBe(false);
+        expect(decoded.entityAccountLeaf).toBe(
+          `0x${Buffer.from(checkpointRow[1] as Uint8Array).toString('hex')}`,
+        );
+      } finally {
+        await storage.close();
+        rmSync(storageRoot, { recursive: true, force: true });
+      }
       await client.shutdown();
     } finally {
       client.kill();

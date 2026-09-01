@@ -844,6 +844,18 @@ pub fn classify_incoming_frame_without_mutation(
             .current()
             .is_some_and(|committed| committed.state_hash == incoming.state_hash)
     {
+        // The supplied state_hash field is not self-authenticating. Bind it
+        // back to the exact frame body before the duplicate fast path, or an
+        // altered body carrying a copied hash would bypass normal validation.
+        let received_hash = match incoming.frame.hash() {
+            Ok(hash) => hash,
+            Err(error) => return Ok(Some(rejected(error.to_string()))),
+        };
+        if received_hash != incoming.state_hash {
+            return Ok(Some(rejected(format!(
+                "DUPLICATE_FRAME_BYTES_CONFLICT:height={current_height}"
+            ))));
+        }
         let Some(frame_hanko) = incoming
             .frame_hanko
             .as_deref()

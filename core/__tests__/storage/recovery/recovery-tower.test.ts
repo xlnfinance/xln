@@ -19,6 +19,7 @@ import {
 import {
   buildRuntimeRecoveryBundle,
   computeRuntimeRecoveryCheckpointHash,
+  validateRuntimeRecoveryBundle,
 } from '../../../storage/recovery/bundle';
 import { buildRuntimeRecording, validateRuntimeRecording } from '../../../storage/recovery/bundle/recording';
 import {
@@ -187,6 +188,32 @@ const buildRecoveryHubProfile = async (
 };
 
 describe('runtime recovery tower', () => {
+  const journalTailBundle = (frame: Record<string, unknown>) => ({
+    version: 1 as const,
+    kind: 'journal_tail' as const,
+    runtimeId: `0x${'11'.repeat(20)}`,
+    runtimeHeight: 2,
+    runtimeTimestamp: 2,
+    createdAt: 2,
+    signers: [{ index: 1, address: `0x${'22'.repeat(20)}`, name: 'Signer' }],
+    baseRuntimeHeight: 1,
+    baseCheckpointHash: `0x${'33'.repeat(32)}`,
+    frames: [{ height: 2, ...frame }],
+    signature: `0x${'44'.repeat(65)}`,
+  });
+
+  test('V1 recovery tail rejects retired runtimeStateHash even with a canonical root', () => {
+    expect(() => validateRuntimeRecoveryBundle(journalTailBundle({
+      canonicalStateHash: `0x${'55'.repeat(32)}`,
+      runtimeStateHash: `0x${'55'.repeat(32)}`,
+    }))).toThrow('RECOVERY_BUNDLE_JOURNAL_RUNTIME_STATE_HASH_RETIRED');
+  });
+
+  test('V1 recovery tail requires canonicalStateHash and rejects its absence', () => {
+    expect(() => validateRuntimeRecoveryBundle(journalTailBundle({})))
+      .toThrow('RECOVERY_BUNDLE_JOURNAL_CANONICAL_STATE_HASH_REQUIRED:height=2');
+  });
+
   test('action lookup keys stay deterministic and separate from blind backup lookup keys', async () => {
     const runtimeId = Wallet.createRandom().address.toLowerCase();
     const seed = 'tower-action-lookup-seed';
@@ -446,6 +473,16 @@ describe('runtime recovery tower', () => {
 
   test('snapshot plus journal tail restores the latest runtime height', async () => {
     const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
+    // A recovery tail is accepted only when every journal frame carries its
+    // independently verifiable canonical root. Ordinary sparse WAL remains
+    // valid for local replay, but it is not a portable recovery authority.
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        canonicalHashPeriodFrames: 1,
+      },
+    };
     const signers = [{
       index: 0,
       derivationIndex: 0,
@@ -485,10 +522,8 @@ describe('runtime recovery tower', () => {
 
     const frame = await readPersistedFrameJournal(env, env.state.height);
     expect(frame, 'journal frame must be persisted before building tail bundle').toBeTruthy();
-    expect(frame?.runtimeMachine, 'ordinary WAL must not repeat the complete R-machine').toBeUndefined();
-    // Ordinary sparse WAL frames carry exact inputs/transport fences plus the
-    // replica commitment without paying for a complete state serialization.
-    expect(frame?.canonicalStateHash).toBeUndefined();
+    expect(frame?.runtimeMachine, 'portable recovery frame must carry its verifiable R-machine').toBeDefined();
+    expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     const tailBundle = buildRuntimeRecoveryBundle(env, {
       signers,
       kind: 'journal_tail',

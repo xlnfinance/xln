@@ -47,7 +47,12 @@ export type RscoreDecodedAccountRestore = Readonly<{
   rootOnlyCarriedSections: typeof RSCORE_ROOT_ONLY_CARRIED_SECTIONS;
 }>;
 
-const DERIVED_CONSENSUS_FIELDS: ReadonlySet<string> = new Set([
+/**
+ * Fields rebuilt from consensus or carried only so a checkpoint can resume
+ * delivery. Rust checkpoint envelopes legitimately contain the transient
+ * subset, but none may enter the committed Entity Account leaf.
+ */
+const REBUILT_COMMITTED_ENVELOPE_FIELDS: ReadonlySet<string> = new Set([
   'counterpartyDisputeHash',
   'counterpartyDisputeProofBodyHash',
   'counterpartyDisputeProofNonce',
@@ -62,6 +67,27 @@ const DERIVED_CONSENSUS_FIELDS: ReadonlySet<string> = new Set([
   'currentHeight',
   'currentFrameHash',
 ]);
+
+const RECOVERY_ONLY_ENVELOPE_FIELDS: ReadonlySet<string> = new Set([
+  'pendingAccountInput',
+  'lastOutboundAckFrame',
+  'rollbackCount',
+  'pendingFrameHash',
+  'lastRollbackFrameHash',
+]);
+
+export const projectRscoreCommittedEnvelopeFields = (
+  fields: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => Object.fromEntries(
+  Object.entries(fields).filter(([field]) => !RECOVERY_ONLY_ENVELOPE_FIELDS.has(field)),
+);
+
+const projectRscoreStoredEnvelopeFields = (
+  fields: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => Object.fromEntries(
+  Object.entries(projectRscoreCommittedEnvelopeFields(fields))
+    .filter(([field]) => !REBUILT_COMMITTED_ENVELOPE_FIELDS.has(field)),
+);
 
 const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =>
   computeCanonicalMerkleRoot(
@@ -153,9 +179,7 @@ const computeRestoredEntityLeaf = (
   accountStateRoot: string,
 ): string => {
   const envelope = seed.envelope ?? checkpointRestoreFail('RESTORE_ENVELOPE_MISSING');
-  const projection = Object.fromEntries(
-    Object.entries(envelope.fields).filter(([field]) => !DERIVED_CONSENSUS_FIELDS.has(field)),
-  );
+  const projection = projectRscoreStoredEnvelopeFields(envelope.fields);
   projection['currentHeight'] = consensus.currentFrame?.height ?? 0;
   // H=0 is represented by an explicit empty frame hash in both the canonical
   // TypeScript AccountReplica and Rust's projected envelope. Omitting the

@@ -408,16 +408,30 @@ fn materialized_frame_has_one_state_hash_and_rejects_the_retired_duplicate() {
         }),
     );
     let mut decoded = crate::decode_storage_payload(&commit.frame_bytes).expect("decode frame");
-    let fields = decoded.as_object_mut().expect("frame object");
+    let fields = decoded.as_object().expect("frame object");
     let canonical = fields
         .get("canonicalStateHash")
         .cloned()
         .expect("sole canonical state commitment");
     assert!(!fields.contains_key("runtimeStateHash"));
 
+    let mut missing = decoded.clone();
+    let missing_fields = missing.as_object_mut().expect("missing-root frame object");
+    missing_fields.remove("canonicalStateHash");
+    missing_fields.remove("canonicalEntityHashes");
+    let missing = crate::transport::msgpack::encode_framed_runtime_frame(&missing)
+        .expect("encode missing-root frame shape");
+    assert!(matches!(
+        validate_runtime_frame(&missing),
+        Err(RuntimeFrameCodecError::MaterializedRootsRequired)
+    ));
+
     // V1 is versionless: the retired duplicate is an unknown field, not a
     // compatibility alias. Reject it before restore can choose between roots.
-    fields.insert("runtimeStateHash".into(), canonical);
+    decoded
+        .as_object_mut()
+        .expect("retired-root frame object")
+        .insert("runtimeStateHash".into(), canonical);
     let retired = crate::transport::msgpack::encode_framed_runtime_frame(&decoded)
         .expect("encode retired frame shape");
     assert!(matches!(

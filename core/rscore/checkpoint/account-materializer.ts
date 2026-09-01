@@ -43,6 +43,7 @@ import type {
 import type { HankoString } from '../../types/hanko';
 import type { RscoreDisputeDraft, RscoreOutboundAck } from './checkpoint-restore-consensus';
 import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
+import { projectRscoreCommittedEnvelopeFields } from './checkpoint-restore';
 import { RSCORE_CUTOVER_VERIFY } from '../cutover/verify';
 import type {
   RscoreAccountCheckpointRow,
@@ -587,7 +588,7 @@ const assertMaterializedAccount = (
   if (!RSCORE_CUTOVER_VERIFY) return;
   validateAccountReplica(account, 'rscore.materialize.result');
   const expectedProjection = {
-    ...row.decoded.stateSeed.envelope?.fields,
+    ...projectRscoreCommittedEnvelopeFields(row.decoded.stateSeed.envelope?.fields ?? {}),
     accountStateRoot: row.decoded.accountStateRoot,
   };
   const projected = projectEntityAccountLeaf(account);

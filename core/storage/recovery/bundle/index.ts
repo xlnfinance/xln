@@ -136,6 +136,9 @@ const normalizeAndValidateBundleFields = (
     let expectedHeight = baseRuntimeHeight + 1;
     for (const frame of frames) {
       if (!frame || typeof frame !== 'object') throw new Error('RECOVERY_BUNDLE_JOURNAL_FRAME_INVALID');
+      if (Object.hasOwn(frame, 'runtimeStateHash')) {
+        throw new Error('RECOVERY_BUNDLE_JOURNAL_RUNTIME_STATE_HASH_RETIRED');
+      }
       const frameHeight = Math.max(0, Math.floor(Number(frame.height || 0)));
       if (frameHeight !== expectedHeight) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_FRAME_GAP: expected=${expectedHeight} actual=${frameHeight}`);
@@ -147,7 +150,10 @@ const normalizeAndValidateBundleFields = (
       if (frame.runtimeMachine) {
         assertRuntimeMachineBoundToRuntime(frame.runtimeMachine, runtimeId, frameHeight, 'post');
       }
-      if (frame.canonicalStateHash !== undefined && !/^0x[0-9a-f]{64}$/i.test(String(frame.canonicalStateHash))) {
+      if (frame.canonicalStateHash === undefined) {
+        throw new Error(`RECOVERY_BUNDLE_JOURNAL_CANONICAL_STATE_HASH_REQUIRED:height=${frameHeight}`);
+      }
+      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.canonicalStateHash))) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_STATE_HASH_INVALID:height=${frameHeight}`);
       }
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest || ''))) {

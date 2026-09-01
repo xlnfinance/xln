@@ -295,6 +295,28 @@ describe('rscore checkpoint wire', () => {
     );
   });
 
+  test('filters Rust checkpoint coordination fields without dropping their recovery payload', () => {
+    const fixture = restoreFixture();
+    const envelope = (fixture.row[2] as unknown[])[7] as unknown[];
+    envelope[0] = canonicalWire({
+      status: 'active',
+      publicPinned: true,
+      rollbackCount: 3,
+      lastRollbackFrameHash: `0x${'91'.repeat(32)}`,
+      pendingFrameHash: `0x${'92'.repeat(32)}`,
+      pendingAccountInput: { kind: 'ack_frame' },
+      lastOutboundAckFrame: { height: 3 },
+    });
+
+    const decoded = decodeRscoreAccountRestoreRow(fixture.row);
+    expect(decoded.entityAccountLeaf).toBe(fixture.leaf);
+    expect(decoded.stateSeed.envelope?.fields).toMatchObject({
+      rollbackCount: 3,
+      pendingAccountInput: { kind: 'ack_frame' },
+      lastOutboundAckFrame: { height: 3 },
+    });
+  });
+
   test('rejects corrupt frame, state-root and Entity-leaf commitments', () => {
     const badFrame = restoreFixture().row;
     ((badFrame[10] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);

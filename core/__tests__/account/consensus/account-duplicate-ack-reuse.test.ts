@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { buildDuplicateCommittedAckFrame } from '../../../account/consensus/incoming/replay';
+import { applyAccountInput } from '../../../account/consensus';
 import { computeFrameHash } from '../../../account/consensus/frame/hash';
+import { accountInputFailureMessage, accountInputPeerRejectionCode } from '../../../account/consensus/result';
 import type { AccountInputSecurityContext } from '../../../account/consensus/dispute/deadline-policy';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
+import { safeStringify } from '../../../protocol/serialization';
+import { createEmptyEnv } from '../../../runtime';
+import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
@@ -249,51 +254,55 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
   });
 
   test('current-frame retry requires the exact stored counterparty Hanko', async () => {
-    const alteredFrame = account();
-    const alteredInput = duplicateInput(alteredFrame);
-    alteredInput.proposal.frame.timestamp += 1;
-    await expect(buildDuplicateCommittedAckFrame(
-      alteredFrame,
-      alteredInput,
-      [],
-      10,
-      alteredInput.proposal.frame,
-      verifier(ACK_HANKO, { count: 0 }),
-    )).rejects.toThrow('DUPLICATE_FRAME_BYTES_CONFLICT:height=10');
+    const cases = [
+      {
+        message: 'DUPLICATE_FRAME_BYTES_CONFLICT:height=10',
+        code: 'ACCOUNT_INPUT_FRAME_HASH_INVALID' as const,
+        mutate: (current: AccountReplica, input: ReturnType<typeof duplicateInput>): void => {
+          input.proposal.frame.timestamp += 1;
+        },
+      },
+      {
+        message: 'DUPLICATE_FRAME_COUNTERPARTY_HANKO_MISSING:height=10',
+        code: 'ACCOUNT_INPUT_FRAME_HANKO_INVALID' as const,
+        mutate: (current: AccountReplica): void => {
+          delete current.counterpartyFrameHanko;
+        },
+      },
+      {
+        message: 'DUPLICATE_FRAME_RETRY_HANKO_MISSING:height=10',
+        code: 'ACCOUNT_INPUT_FRAME_HANKO_INVALID' as const,
+        mutate: (_current: AccountReplica, input: ReturnType<typeof duplicateInput>): void => {
+          delete input.proposal.frameHanko;
+        },
+      },
+      {
+        message: 'DUPLICATE_FRAME_COUNTERPARTY_HANKO_CONFLICT:height=10',
+        code: 'ACCOUNT_INPUT_FRAME_HANKO_INVALID' as const,
+        mutate: (_current: AccountReplica, input: ReturnType<typeof duplicateInput>): void => {
+          input.proposal.frameHanko = `0x${'aa'.repeat(65)}`;
+        },
+      },
+    ];
+    for (const candidate of cases) {
+      const current = account();
+      current.pendingFrame = frame(11);
+      const input = duplicateInput(current);
+      candidate.mutate(current, input);
+      const before = safeStringify(current);
 
-    const missingStored = account();
-    delete missingStored.counterpartyFrameHanko;
-    await expect(buildDuplicateCommittedAckFrame(
-      missingStored,
-      duplicateInput(missingStored),
-      [],
-      10,
-      missingStored.currentFrame,
-      verifier(ACK_HANKO, { count: 0 }),
-    )).rejects.toThrow('DUPLICATE_FRAME_COUNTERPARTY_HANKO_MISSING:height=10');
+      const result = await applyAccountInput(
+        createAccountConsensusContext(createEmptyEnv(`duplicate-retry-${candidate.code}`)),
+        current,
+        input,
+        verifier(ACK_HANKO, { count: 0 }),
+      );
 
-    const missingRetry = account();
-    const withoutHanko = duplicateInput(missingRetry);
-    delete withoutHanko.proposal.frameHanko;
-    await expect(buildDuplicateCommittedAckFrame(
-      missingRetry,
-      withoutHanko,
-      [],
-      10,
-      missingRetry.currentFrame,
-      verifier(ACK_HANKO, { count: 0 }),
-    )).rejects.toThrow('DUPLICATE_FRAME_RETRY_HANKO_MISSING:height=10');
-
-    const conflicting = account();
-    const conflictInput = duplicateInput(conflicting);
-    conflictInput.proposal.frameHanko = `0x${'aa'.repeat(65)}`;
-    await expect(buildDuplicateCommittedAckFrame(
-      conflicting,
-      conflictInput,
-      [],
-      10,
-      conflicting.currentFrame,
-      verifier(ACK_HANKO, { count: 0 }),
-    )).rejects.toThrow('DUPLICATE_FRAME_COUNTERPARTY_HANKO_CONFLICT:height=10');
+      expect(result.ok).toBe(false);
+      expect(accountInputPeerRejectionCode(result)).toBe(candidate.code);
+      expect(accountInputFailureMessage(result)).toBe(candidate.message);
+      expect(safeStringify(current)).toBe(before);
+      expect(current.pendingFrame?.height).toBe(11);
+    }
   });
 });
