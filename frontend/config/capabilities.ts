@@ -374,11 +374,12 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/runtime-io-panel-view.ts',
       'frontend/packages/runtime-client/src/solvency-panel-view.ts',
       'frontend/packages/runtime-client/src/runtime-diagnostics-panel-view.ts',
+      'frontend/packages/runtime-client/src/gossip-panel-view.ts',
     ],
     behavior: [
       'Dockview layout',
       'Graph3D and Architect',
-      'Runtime I/O, console, Solvency, Runtime Diagnostics, and Time Machine',
+      'Runtime I/O, console, Solvency, Runtime Diagnostics, Gossip, and Time Machine',
       'framework-neutral panel projections shared with the canonical Svelte workspace',
     ],
     status: 'unstarted',

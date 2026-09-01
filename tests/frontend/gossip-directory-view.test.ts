@@ -91,6 +91,7 @@ test('dock GossipPanel consumes the Runtime query projection', () => {
   expect(dockPanel).toContain('createRuntimeQueryStore');
   expect(dockPanel).toContain('readViewFrame');
   expect(dockPanel).toContain('buildGossipDirectoryViewFromRuntimeEntities');
+  expect(dockPanel).toContain("from '../../../../packages/runtime-client/src/gossip-panel-view'");
   expect(dockPanel).not.toContain('export let runtimeFrameEnv');
   expect(dockPanel).not.toContain('env?.gossip');
   expect(dockPanel).not.toContain('gossip.getProfiles');
