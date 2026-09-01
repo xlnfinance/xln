@@ -387,6 +387,7 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/runtime-client/src/runtime-io-panel-view.ts',
       'frontend/packages/runtime-client/src/solvency-panel-view.ts',
       'frontend/packages/runtime-client/src/runtime-diagnostics-panel-view.ts',
+      'frontend/packages/runtime-client/src/gossip-panel-view.ts',
     ],
     consumers: [
       'frontend/src/lib/view/panels/ConsolePanel.svelte',
@@ -394,12 +395,15 @@ export const PLATFORM_INVENTORY = [
       'frontend/src/lib/view/panels/solvency/solvency-panel-view.ts',
       'frontend/src/lib/view/panels/solvency/SolvencyPanel.svelte',
       'frontend/src/lib/view/panels/RuntimeDiagnosticsPanel.svelte',
+      'frontend/src/lib/view/panels/GossipPanel.svelte',
+      'frontend/src/lib/components/Entity/activity/gossip-directory-view.ts',
     ],
     evidence: [
       'tests/frontend/runtime/console-panel-view.test.ts',
       'tests/frontend/runtime/runtime-io-panel-view.test.ts',
       'tests/frontend/runtime/solvency-panel-view.test.ts',
       'tests/frontend/runtime/runtime-diagnostics-panel-view.test.ts',
+      'tests/frontend/runtime/gossip-panel-view.test.ts',
     ],
   },
   {

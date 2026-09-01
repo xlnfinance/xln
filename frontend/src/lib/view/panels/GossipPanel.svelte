@@ -4,8 +4,9 @@
   import {
     buildGossipDirectoryViewFromRuntimeEntities,
     emptyGossipDirectoryView,
-    type GossipDirectoryProfile,
-  } from '$lib/components/Entity/activity/gossip-directory-view';
+    filterGossipDirectoryProfiles,
+    getGossipDirectoryDisplayName,
+  } from '../../../../packages/runtime-client/src/gossip-panel-view';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
 
@@ -27,18 +28,7 @@
       runtimeId: $runtimeControllerHandle.id,
     })
     : emptyGossipDirectoryView();
-  $: normalizedSearch = search.trim().toLowerCase();
-  $: filteredProfiles = directoryView.profiles.filter((profile) => {
-    if (!normalizedSearch) return true;
-    return profile.name.toLowerCase().includes(normalizedSearch)
-      || profile.entityId.toLowerCase().includes(normalizedSearch)
-      || profile.runtimeId.toLowerCase().includes(normalizedSearch)
-      || String(profile.jurisdictionName || '').toLowerCase().includes(normalizedSearch);
-  });
-
-  function displayName(profile: GossipDirectoryProfile): string {
-    return profile.name || profile.entityId;
-  }
+  $: filteredProfiles = filterGossipDirectoryProfiles(directoryView.profiles, search);
 </script>
 
 <div class="gossip-panel" data-testid="runtime-gossip-panel">
@@ -77,7 +67,7 @@
         <div class="profile-card" class:hub={profile.isHub}>
           <EntityIdentity
             entityId={profile.entityId}
-            name={displayName(profile)}
+            name={getGossipDirectoryDisplayName(profile)}
             showAddress={true}
             copyable={true}
             clickable={true}
