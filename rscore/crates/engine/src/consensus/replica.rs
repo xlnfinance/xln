@@ -331,6 +331,20 @@ impl AccountConsensus {
         self.replica.set_rebalance_shadow_policy(token_id, policy)
     }
 
+    /// `None` releases the marker; a value stamps it. One narrow transition
+    /// instead of a generic envelope field writer, so the only reachable
+    /// change to this tree is the one the Entity actually intends.
+    pub fn set_rebalance_submitted_at(
+        &mut self,
+        token_id: crate::TokenId,
+        submitted_at: Option<u64>,
+    ) -> Result<(), StateError> {
+        match submitted_at {
+            Some(at) => self.replica.set_rebalance_shadow_submitted(token_id, at),
+            None => self.replica.clear_rebalance_shadow_submitted(token_id),
+        }
+    }
+
     pub fn clear_rebalance_active_quote(&mut self) -> Result<(), StateError> {
         self.replica.clear_rebalance_active_quote()
     }

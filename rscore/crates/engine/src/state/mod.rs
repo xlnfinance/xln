@@ -970,6 +970,16 @@ impl AccountReplica {
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
+    pub(crate) fn set_rebalance_shadow_submitted(
+        &mut self,
+        token_id: TokenId,
+        submitted_at: u64,
+    ) -> Result<(), StateError> {
+        Arc::make_mut(&mut self.envelope)
+            .set_rebalance_shadow_submitted(token_id, submitted_at)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
     pub(crate) fn clear_rebalance_shadow_submitted(
         &mut self,
         token_id: TokenId,

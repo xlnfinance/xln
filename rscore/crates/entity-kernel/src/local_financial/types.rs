@@ -199,6 +199,10 @@ pub enum AccountEnvelopeMutation {
         token_id: u32,
         policy: xln_rscore_protocol::CanonicalValue,
     },
+    SetRebalanceSubmittedAt {
+        token_id: u32,
+        submitted_at: Option<u64>,
+    },
     ReplaceDisputeLifecycle {
         status: String,
         dispute_prepare: Option<xln_rscore_protocol::CanonicalValue>,

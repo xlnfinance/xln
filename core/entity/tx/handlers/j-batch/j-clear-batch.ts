@@ -68,11 +68,19 @@ export async function handleJClearBatch(
   for (const accountId of newState.accounts.keys()) {
     const account = getEntityAccountForWrite(newState.accounts, accountId);
     if (!account) continue;
-    resetSubmittedMarkers += account.shadow.rebalance.submittedAtByToken.size;
-    account.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
+    // One typed release per token rather than one generic map write: the
+    // Account stage must see exactly which markers this recovery dropped.
+    const submittedTokenIds = [...requirePersistentAccountStateMap(
       account.shadow.rebalance.submittedAtByToken,
       'rebalanceShadowSubmitted',
-    ).emptied();
+    ).keys()].sort((left, right) => left - right);
+    resetSubmittedMarkers += submittedTokenIds.length;
+    for (const tokenId of submittedTokenIds) {
+      applyEntityAccountEnvelopeUpdate(env, accountId, account, {
+        type: 'setRebalanceSubmittedAt',
+        tokenId,
+      });
+    }
   }
   if (droppedFinalizeCounterparties.size > 0) {
     for (const counterpartyId of newState.accounts.keys()) {

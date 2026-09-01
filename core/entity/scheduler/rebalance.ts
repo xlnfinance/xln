@@ -25,7 +25,7 @@ import type {
 } from './types';
 import { getRebalanceAccountIds } from '../consensus/account/work-index';
 import { getEntityAccountForWrite } from '../state/persistent-account-map';
-import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
+import { applyEntityAccountEnvelopeUpdate } from '../account-envelope-update';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -391,10 +391,13 @@ const queueR2CTargets = (
   for (const { target } of submissions) {
     const writableAccount = getEntityAccountForWrite(run.replica.state.accounts, target.counterpartyId);
     if (!writableAccount) throw new Error(`REBALANCE_TARGET_ACCOUNT_MISSING:${target.counterpartyId}`);
-    writableAccount.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
-      writableAccount.shadow.rebalance.submittedAtByToken,
-      'rebalanceShadowSubmitted',
-    ).updated(target.tokenId, run.now);
+    // The marker is hashed Account envelope state, so it moves through the
+    // Account stage instead of being written here.
+    applyEntityAccountEnvelopeUpdate(run.env, target.counterpartyId, writableAccount, {
+      type: 'setRebalanceSubmittedAt',
+      tokenId: target.tokenId,
+      submittedAt: run.now,
+    });
     run.execution.accountChanges.add(target.counterpartyId);
     crontabLog.debug('rebalance.r2c.batch_add', {
       hub: shortId(run.hubId, 8),

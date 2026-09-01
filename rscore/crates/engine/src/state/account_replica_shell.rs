@@ -356,6 +356,26 @@ impl AccountEnvelope {
             .collect()
     }
 
+    /// Stamp the local "R2C already submitted" marker for one token. The
+    /// marker is Entity-owned coordination, but it is part of the hashed
+    /// envelope, so it may only move through this typed transition.
+    pub fn set_rebalance_shadow_submitted(
+        &mut self,
+        token_id: crate::TokenId,
+        submitted_at: u64,
+    ) -> Result<(), EnvelopeError> {
+        let encoded = encode_account_state_value(&CanonicalValue::Number(
+            CanonicalNumber::try_from_u64(submitted_at)
+                .map_err(|_| EnvelopeError::RebalanceShadowSubmittedRootInvalid)?,
+        ))?;
+        let digest: [u8; 32] = Sha256::digest(encoded).into();
+        self.rebalance_shadow_submitted = self
+            .rebalance_shadow_submitted
+            .updated(token_id.radix_key(), submitted_at, digest)
+            .map_err(|error| EnvelopeError::RebalanceShadowSubmittedMap(error.to_string()))?;
+        set_submitted_root(&mut self.fields, self.rebalance_shadow_submitted.root_hash())
+    }
+
     pub fn clear_rebalance_shadow_submitted(
         &mut self,
         token_id: crate::TokenId,

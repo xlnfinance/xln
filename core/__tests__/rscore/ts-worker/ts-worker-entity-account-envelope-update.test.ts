@@ -116,10 +116,38 @@ const prepareAccountDispute: EntityWrite = (state, env) => {
   });
 };
 
+/**
+ * The R2C "already submitted" marker is Entity-owned coordination that is still
+ * hashed into the Entity Account leaf, so it moves as one narrow typed
+ * transition. Stamping and releasing are the same transition with and without a
+ * timestamp — there is no generic envelope field writer.
+ */
+const stampRebalanceSubmittedAt: EntityWrite = (state, env) => {
+  const account = getEntityAccountForWrite(state.accounts, COUNTERPARTY);
+  if (!account) throw new Error('TEST_ACCOUNT_MISSING');
+  applyEntityAccountEnvelopeUpdate(env, COUNTERPARTY, account, {
+    type: 'setRebalanceSubmittedAt',
+    tokenId: 1,
+    submittedAt: 1_700_000_000_000,
+  });
+};
+
+const releaseRebalanceSubmittedAt: EntityWrite = (state, env) => {
+  stampRebalanceSubmittedAt(state, env);
+  const account = getEntityAccountForWrite(state.accounts, COUNTERPARTY);
+  if (!account) throw new Error('TEST_ACCOUNT_MISSING');
+  applyEntityAccountEnvelopeUpdate(env, COUNTERPARTY, account, {
+    type: 'setRebalanceSubmittedAt',
+    tokenId: 1,
+  });
+};
+
 describe('Entity-owned Account envelope updates', () => {
   for (const [name, write] of [
     ['setRebalancePolicy', setRebalancePolicy],
     ['dispute preparation', prepareAccountDispute],
+    ['rebalance submitted marker', stampRebalanceSubmittedAt],
+    ['rebalance submitted release', releaseRebalanceSubmittedAt],
   ] as const) {
     test(`${name} has identical W0/W1/W4 roots`, async () => {
       const inline = await rootAfter(0, write);

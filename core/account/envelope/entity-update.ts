@@ -27,6 +27,12 @@ export type AccountEnvelopeUpdate =
       policy: RebalancePolicy;
     }>
   | Readonly<{
+      type: 'setRebalanceSubmittedAt';
+      tokenId: number;
+      /** Omitted releases the marker for that token. */
+      submittedAt?: number;
+    }>
+  | Readonly<{
       type: 'replaceDisputeLifecycle';
       status: AccountReplica['status'];
       disputePrepare?: AccountReplica['disputePrepare'];
@@ -93,6 +99,16 @@ export const applyAccountEnvelopeUpdate = (
       account.shadow.rebalance.policy,
       'rebalanceShadowPolicy',
     ).updated(update.tokenId, { ...update.policy });
+    return undefined;
+  }
+  if (update.type === 'setRebalanceSubmittedAt') {
+    const submitted = requirePersistentAccountStateMap(
+      account.shadow.rebalance.submittedAtByToken,
+      'rebalanceShadowSubmitted',
+    );
+    account.shadow.rebalance.submittedAtByToken = update.submittedAt === undefined
+      ? submitted.removed(update.tokenId)
+      : submitted.updated(update.tokenId, update.submittedAt);
     return undefined;
   }
   if (update.type === 'replaceDisputeLifecycle') {

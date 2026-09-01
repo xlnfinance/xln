@@ -13,7 +13,6 @@ import {
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
-import { requirePersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
@@ -66,16 +65,20 @@ const dropStaleCollateralToReserve = (state: EntityState): void => {
   }
 };
 
-const releaseR2CSubmittedLatches = (state: EntityState, batch: JBatch): void => {
+const releaseR2CSubmittedLatches = (
+  env: EntityRuntimeContext,
+  state: EntityState,
+  batch: JBatch,
+): void => {
   for (const operation of batch.reserveToCollateral) {
     for (const pair of operation.pairs) {
       const accountId = String(pair.entity).toLowerCase();
       const account = getEntityAccountForWrite(state.accounts, accountId);
       if (!account) continue;
-      account.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
-        account.shadow.rebalance.submittedAtByToken,
-        'rebalanceShadowSubmitted',
-      ).removed(operation.tokenId);
+      applyEntityAccountEnvelopeUpdate(env, accountId, account, {
+        type: 'setRebalanceSubmittedAt',
+        tokenId: operation.tokenId,
+      });
     }
   }
 };
@@ -130,7 +133,7 @@ export async function handleJAbortSentBatch(
     dropStaleCollateralToReserve(newState);
     prependRecoveryBatch(newState.jBatchState, sent.batch);
   } else {
-    releaseR2CSubmittedLatches(newState, sent.batch);
+    releaseR2CSubmittedLatches(env, newState, sent.batch);
   }
 
   delete newState.jBatchState.sentBatch;

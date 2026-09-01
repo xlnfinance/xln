@@ -208,6 +208,7 @@ const decodeOutboundPayload = (
     if (![
       'clearRebalanceActiveQuote',
       'setRebalancePolicy',
+      'setRebalanceSubmittedAt',
       'replaceDisputeLifecycle',
       'applyDisputeStarted',
       'applyDisputeFinality',

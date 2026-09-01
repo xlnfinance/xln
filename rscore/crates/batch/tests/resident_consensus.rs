@@ -120,6 +120,95 @@ fn empty_checkpoint_request(owner: [u8; 32]) -> EntityOutboundRequest {
     }
 }
 
+/// A funded seed whose rebalance shadow trees are both empty, so a test can
+/// assert the exact rows one envelope transition produced.
+fn seed_with_empty_shadow() -> (AccountSeed, fixture::Pair) {
+    let (mut seed, pair) = funded_seed();
+    let empty_root = format!("0x{}", hex::encode(xln_rscore_protocol::EMPTY_RADIX_ROOT));
+    seed.replica.set_envelope(
+        AccountEnvelope::new(
+            vec![
+                ("status".into(), CanonicalValue::String("active".into())),
+                (
+                    "shadow".into(),
+                    CanonicalValue::Object(vec![(
+                        "rebalance".into(),
+                        CanonicalValue::Object(vec![
+                            (
+                                "policyRoot".into(),
+                                CanonicalValue::String(empty_root.clone()),
+                            ),
+                            (
+                                "submittedAtByTokenRoot".into(),
+                                CanonicalValue::String(empty_root),
+                            ),
+                        ]),
+                    )]),
+                ),
+            ],
+            Vec::new(),
+        )
+        .expect("empty shadow"),
+    );
+    (seed, pair)
+}
+
+/// The R2C "already submitted" marker is Entity-owned coordination that is
+/// nonetheless hashed into the Entity Account leaf. It therefore travels as one
+/// narrow typed transition — never a generic envelope field write — and
+/// `submitted_at: None` is the release.
+#[test]
+fn entity_owned_rebalance_submitted_marker_sets_and_releases_one_token() {
+    let (seed, pair) = seed_with_empty_shadow();
+    let mut engine = resident(2, "payer-0", REVISION, Arc::default(), vec![seed]);
+    enter_resident(&mut engine, pair.payer_entity);
+    let stamp = |engine: &mut ResidentConsensusEngine, submitted_at: Option<u64>| {
+        engine
+            .entity_outbound(EntityOutboundRequest {
+                owner_entity_id: pair.payer_entity,
+                local_certified_board_authority:
+                    xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                timestamp: TIMESTAMP,
+                j_height: 100,
+                creates: Vec::new(),
+                envelope_updates: vec![(
+                    pair.payer_account,
+                    vec![AccountEnvelopeUpdate::SetRebalanceSubmittedAt {
+                        token_id: 1,
+                        submitted_at,
+                    }],
+                )],
+                unsigned_settlement_txs: Vec::new(),
+                proposal_work: vec![(pair.payer_account, Vec::new(), false)],
+                checkpoint_due: false,
+                post_accounts: true,
+            })
+            .expect("submitted marker")
+    };
+
+    let set = stamp(&mut engine, Some(TIMESTAMP));
+    assert_eq!(
+        set.post_accounts
+            .first()
+            .expect("materialized account")
+            .header
+            .envelope
+            .rebalance_shadow_submitted_rows(),
+        [(1, TIMESTAMP)]
+    );
+
+    enter_resident(&mut engine, pair.payer_entity);
+    let released = stamp(&mut engine, None);
+    assert!(released
+        .post_accounts
+        .first()
+        .expect("materialized account")
+        .header
+        .envelope
+        .rebalance_shadow_submitted_rows()
+        .is_empty());
+}
+
 #[test]
 fn entity_owned_rebalance_policy_updates_the_resident_leaf_and_checkpoint_body() {
     let (mut seed, pair) = funded_seed();

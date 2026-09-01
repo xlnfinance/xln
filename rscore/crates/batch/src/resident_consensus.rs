@@ -1999,6 +1999,20 @@ fn apply_outbound_work(
                     .map_err(|error| state_error(account_id, &error))?;
                 changed = true;
             }
+            crate::AccountEnvelopeUpdate::SetRebalanceSubmittedAt {
+                token_id,
+                submitted_at,
+            } => {
+                let token_id =
+                    TokenId::new(token_id).map_err(|error| BatchError::AccountsTree {
+                        account_id,
+                        detail: error.to_string(),
+                    })?;
+                account
+                    .set_rebalance_submitted_at(token_id, submitted_at)
+                    .map_err(|error| state_error(account_id, &error))?;
+                changed = true;
+            }
             crate::AccountEnvelopeUpdate::ReplaceDisputeLifecycle {
                 status,
                 dispute_prepare,

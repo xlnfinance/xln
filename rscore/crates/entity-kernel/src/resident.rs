@@ -1956,6 +1956,13 @@ fn apply_resident_entity_round_core_attempt(
                 crate::AccountEnvelopeMutation::SetRebalancePolicy { token_id, policy } => {
                     xln_rscore_batch::AccountEnvelopeUpdate::SetRebalancePolicy { token_id, policy }
                 }
+                crate::AccountEnvelopeMutation::SetRebalanceSubmittedAt {
+                    token_id,
+                    submitted_at,
+                } => xln_rscore_batch::AccountEnvelopeUpdate::SetRebalanceSubmittedAt {
+                    token_id,
+                    submitted_at,
+                },
                 crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
                     status,
                     dispute_prepare,

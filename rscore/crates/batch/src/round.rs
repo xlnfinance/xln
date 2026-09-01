@@ -56,6 +56,11 @@ pub enum AccountEnvelopeUpdate {
         token_id: u32,
         policy: CanonicalValue,
     },
+    /// `submitted_at: None` releases the marker for that token.
+    SetRebalanceSubmittedAt {
+        token_id: u32,
+        submitted_at: Option<u64>,
+    },
     ReplaceDisputeLifecycle {
         status: String,
         dispute_prepare: Option<CanonicalValue>,
