@@ -5,11 +5,8 @@ import { join, resolve } from 'node:path';
 
 /** Subprocess boundary shared by the replay fixture commands. */
 
-/** Every recorder/replay command remains inside the repository-wide hard gate. */
-export const AUTHORITY_EVIDENCE_RECORD_BUDGET_MS = 30_000;
-
-/** Closed-WAL read and artifact write share that same aggregate command gate. */
-export const AUTHORITY_EVIDENCE_BUILD_BUDGET_MS = 30_000;
+/** Owner-approved aggregate budget for the >=1,000-frame recording and replay gate. */
+export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = 180_000;
 
 export const freshAuthorityEvidenceDir = (prefix: string): string => {
   const configured = String(process.env['XLN_RSCORE_EVIDENCE_DIR'] ?? '').trim();
@@ -38,7 +35,7 @@ export const runAuthorityEvidenceGate = (options: Readonly<{
     cwd: process.cwd(),
     env: options.env,
     stdio: 'inherit',
-    timeout: AUTHORITY_EVIDENCE_RECORD_BUDGET_MS,
+    timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS,
   });
   const elapsedMs = performance.now() - startedAt;
   if (result.error) throw result.error;

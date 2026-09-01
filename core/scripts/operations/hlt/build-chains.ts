@@ -15,8 +15,7 @@ import { hltLanePortsPerSlot } from './lanes/lane-port-capacity';
 import { hltLiveReportPath } from './live-report-path';
 import { runParityGatedHltChild } from './controller/live-economic-controller';
 import {
-  AUTHORITY_EVIDENCE_BUILD_BUDGET_MS,
-  AUTHORITY_EVIDENCE_RECORD_BUDGET_MS,
+  AUTHORITY_EVIDENCE_GATE_BUDGET_MS,
 } from './replay/evidence/gate-support';
 
 const workDirRaw = String(process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || '').trim();
@@ -29,7 +28,7 @@ if (!['payments', 'same', 'mixed', 'cross'].includes(workload)) {
   throw new Error(`HLT_BUILD_WORKLOAD_INVALID:${workload}`);
 }
 const authorityEvidence = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1';
-const authorityDeadline = performance.now() + AUTHORITY_EVIDENCE_RECORD_BUDGET_MS;
+const authorityDeadline = performance.now() + AUTHORITY_EVIDENCE_GATE_BUDGET_MS;
 const remainingAuthorityBudget = (phase: string): number => {
   const remaining = Math.floor(authorityDeadline - performance.now());
   if (remaining <= 0) throw new Error(`HLT_AUTHORITY_EVIDENCE_BUDGET_EXHAUSTED:${phase}`);
@@ -145,7 +144,7 @@ if (selection.engine === 'rust') {
       cwd: process.cwd(),
       env: buildEnv,
       stdio: 'inherit',
-      timeout: Math.min(AUTHORITY_EVIDENCE_BUILD_BUDGET_MS, remainingAuthorityBudget('artifact')),
+      timeout: remainingAuthorityBudget('artifact'),
     });
     if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
     console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);

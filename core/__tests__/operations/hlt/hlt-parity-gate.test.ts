@@ -34,7 +34,7 @@ test('binds one closed WAL and runtime seed before creating pristine replay copi
   }
 });
 
-test('one-artifact gate runs four isolated exact replays inside one 30-second budget', () => {
+test('one-artifact gate runs four isolated exact replays inside one three-minute budget', () => {
   const gatePath = join(
     repoRoot,
     'core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts',
@@ -52,7 +52,7 @@ test('one-artifact gate runs four isolated exact replays inside one 30-second bu
     repoRoot,
     'core/scripts/operations/hlt/workload/worker-mixed.ts',
   ), 'utf8');
-  expect(gate).toContain('const PARITY_GATE_TIMEOUT_MS = 30_000');
+  expect(gate).toContain('performance.now() + AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
   expect(gate).toContain('HLT_MIXED_PARITY_RECORDING_ARGUMENT_REQUIRED');
   expect(gate).toContain('remainingParityBudget(`ts-w${workers}`)');
   expect(gate).toContain('replayTypescript(1)');

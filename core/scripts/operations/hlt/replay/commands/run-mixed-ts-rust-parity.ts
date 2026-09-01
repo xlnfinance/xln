@@ -14,6 +14,7 @@ import {
 } from '../../../../../protocol/boundary-validation';
 import { deriveMeshChildSeed } from '../../../../../orchestrator/mesh/mesh-seeds';
 import {
+  AUTHORITY_EVIDENCE_GATE_BUDGET_MS,
   authorityEvidenceBinary,
 } from '../evidence/gate-support';
 import { readHltHubRecording } from '../recording';
@@ -22,8 +23,7 @@ import {
   copyBoundAuthorityWal,
 } from '../source-binding';
 
-const PARITY_GATE_TIMEOUT_MS = 30_000;
-const parityDeadline = performance.now() + PARITY_GATE_TIMEOUT_MS;
+const parityDeadline = performance.now() + AUTHORITY_EVIDENCE_GATE_BUDGET_MS;
 
 const remainingParityBudget = (phase: string): number => {
   const remaining = Math.floor(parityDeadline - performance.now());
