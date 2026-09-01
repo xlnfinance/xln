@@ -13,7 +13,7 @@ import {
 } from '../../../../../account/config/defaults';
 import type { AccountTxTarget } from '..';
 import { getEntityAccountForWrite } from '../../../../state/persistent-account-map';
-import { requirePersistentAccountStateMap } from '../../../../../account/state/persistent-state-map';
+import { applyEntityAccountEnvelopeUpdate } from '../../../../account-envelope-update';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -196,7 +196,7 @@ export const handleSetHubConfigEntityTx = (
 };
 
 export const handleSetRebalancePolicyEntityTx = (
-  _env: EntityRuntimeContext,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'setRebalancePolicy'>,
   mutableFrameState = false,
@@ -214,13 +214,14 @@ export const handleSetRebalancePolicyEntityTx = (
   }
   const account = getEntityAccountForWrite(newState.accounts, counterpartyEntityId);
   if (!account) throw new Error(`REBALANCE_POLICY_ACCOUNT_MISSING:${counterpartyEntityId}`);
-  account.shadow.rebalance.policy = requirePersistentAccountStateMap(
-    account.shadow.rebalance.policy,
-    'rebalanceShadowPolicy',
-  ).updated(tokenId, {
-    r2cRequestSoftLimit,
-    hardLimit,
-    maxAcceptableFee,
+  applyEntityAccountEnvelopeUpdate(env, counterpartyEntityId, account, {
+    type: 'setRebalancePolicy',
+    tokenId,
+    policy: {
+      r2cRequestSoftLimit,
+      hardLimit,
+      maxAcceptableFee,
+    },
   });
 
   const rebalanceTxs = newState.hubRebalanceConfig

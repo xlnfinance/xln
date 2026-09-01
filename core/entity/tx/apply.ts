@@ -395,7 +395,8 @@ const entityTxDispatchers = {
     options?.candidateEffects ?? [],
     options?.mutableFrameState,
   ),
-  r2c: (_env, state, tx, options) => handleR2C(
+  r2c: (env, state, tx, options) => handleR2C(
+    env,
     state,
     tx as Extract<EntityTx, { type: 'r2c' }>,
     options?.mutableFrameState,

@@ -42,6 +42,7 @@ import {
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 import {
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionRouteTransition,
@@ -480,12 +481,10 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
   if ((visible.status ?? 'active') === 'dispute_preparing' && pendingDisputeRemovals?.includes(route.orderId)) {
     const account = getEntityAccountForWrite(newState.accounts, entityTx.data.sourceAccountId);
     if (!account?.disputePrepare) throw new Error(`CROSS_J_BOOK_REMOVAL_WRITE_ACCOUNT_MISSING:${entityTx.data.sourceAccountId}`);
-    account.disputePrepare!.pendingOrderbookRemovalIds = pendingDisputeRemovals.filter(
-      (orderId) => orderId !== route.orderId,
-    );
-    if (account.disputePrepare!.pendingOrderbookRemovalIds.length === 0) {
-      delete account.disputePrepare!.pendingOrderbookRemovalIds;
-    }
+    applyEntityAccountEnvelopeUpdate(env, entityTx.data.sourceAccountId, account, {
+      type: 'confirmDisputeBookRemoval',
+      orderId: route.orderId,
+    });
     addMessage(newState, `🌉 Cross-j dispute book removal confirmed ${route.orderId}`);
     const drafted = await draftPreparedDisputeStartIfReady(
       newState,

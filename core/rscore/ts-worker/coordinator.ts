@@ -505,6 +505,20 @@ export class TsAccountWorkerCoordinator {
     if (this.#openFrameId !== frameId) {
       throw new Error(`TS_ACCOUNT_WORKER_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
     }
+    const envelopeUpdateBuckets = Array.from({ length: this.#workerCount }, () =>
+      [] as Array<typeof input.envelopeUpdates[number]>);
+    for (const item of input.envelopeUpdates) {
+      const accountId = normalizeTsWorkerAccountId(item.accountId);
+      const workerIndex = tsAccountWorkerForShard(
+        tsAccountLogicalShard(accountId),
+        this.#logicalShardToWorker,
+      );
+      const bucket = envelopeUpdateBuckets[workerIndex];
+      if (bucket === undefined) {
+        throw new Error(`TS_ACCOUNT_WORKER_ENVELOPE_BUCKET_MISSING:${workerIndex}`);
+      }
+      bucket.push({ accountId, update: item.update });
+    }
     const txBuckets = Array.from({ length: this.#workerCount }, () =>
       [] as Array<{
         order: number;
@@ -557,17 +571,19 @@ export class TsAccountWorkerCoordinator {
       .filter(workerIndex => {
         const txs = txBuckets[workerIndex];
         const proposalsForWorker = proposalBuckets[workerIndex];
-        if (txs === undefined || proposalsForWorker === undefined) {
+        const envelopeUpdates = envelopeUpdateBuckets[workerIndex];
+        if (txs === undefined || proposalsForWorker === undefined || envelopeUpdates === undefined) {
           throw new Error(`TS_ACCOUNT_WORKER_ACTIVE_BUCKET_MISSING:${workerIndex}`);
         }
-        return txs.length > 0 || proposalsForWorker.length > 0;
+        return envelopeUpdates.length > 0 || txs.length > 0 || proposalsForWorker.length > 0;
       });
     const selectedWorkerIndexes = [...new Set([...this.#openFrameWorkerIndexes, ...activeWorkerIndexes])]
       .sort((left, right) => left - right);
     const dispatches: PhaseDispatch[] = selectedWorkerIndexes.map(workerIndex => {
       const txs = txBuckets[workerIndex];
       const proposalsForWorker = proposalBuckets[workerIndex];
-      if (txs === undefined || proposalsForWorker === undefined) {
+      const envelopeUpdates = envelopeUpdateBuckets[workerIndex];
+      if (txs === undefined || proposalsForWorker === undefined || envelopeUpdates === undefined) {
         throw new Error(`TS_ACCOUNT_WORKER_DISPATCH_BUCKET_MISSING:${workerIndex}`);
       }
       return {
@@ -581,6 +597,7 @@ export class TsAccountWorkerCoordinator {
           timestamp: input.timestamp,
           jHeight: input.jHeight,
           ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
+          envelopeUpdates,
           txs,
           proposals: proposalsForWorker,
         },
@@ -599,7 +616,7 @@ export class TsAccountWorkerCoordinator {
   /** Canonical outbound with no generated continuation rows. */
   async proposeAccountFrames(input: TsProposeAccountFramesRequest): Promise<TsAccountWorkerBatchResult> {
     const result = await this.prepareAccountFrames(input);
-    await this.finishAccountFrames({ ...input, txs: [], proposals: [] });
+    await this.finishAccountFrames({ ...input, envelopeUpdates: [], txs: [], proposals: [] });
     return result;
   }
 
@@ -611,6 +628,9 @@ export class TsAccountWorkerCoordinator {
     this.#assertUsable();
     if (this.#openFrameId !== frameId) {
       throw new Error(`TS_ACCOUNT_WORKER_CONTINUATION_FRAME_NOT_OPEN:${frameId}:${this.#openFrameId ?? 'none'}`);
+    }
+    if (input.envelopeUpdates.length !== 0) {
+      throw new Error('TS_ACCOUNT_WORKER_CONTINUATION_ENVELOPE_UPDATE_FORBIDDEN');
     }
     const txBuckets = Array.from({ length: this.#workerCount }, () =>
       [] as Array<{
@@ -670,6 +690,7 @@ export class TsAccountWorkerCoordinator {
         timestamp: input.timestamp,
         jHeight: input.jHeight,
         ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
+        envelopeUpdates: [],
         txs,
         proposals: proposalsForWorker,
       } };

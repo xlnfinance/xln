@@ -413,6 +413,7 @@ export class TsAccountWorkerAuthority {
         ?? batch.admissions[0]?.finalizedJHeight
         ?? batch.entityState.lastFinalizedJHeight,
       ...(localBoardAuthority ? { localBoardAuthority } : {}),
+      envelopeUpdates: batch.envelopeUpdates,
       txs,
       proposals: batch.proposals.map(request => {
         const accountId = normalize(request.account.proofHeader.toEntity);
@@ -462,6 +463,7 @@ export class TsAccountWorkerAuthority {
         ?? batch.admissions[0]?.finalizedJHeight
         ?? batch.entityState.lastFinalizedJHeight,
       ...(localBoardAuthority ? { localBoardAuthority } : {}),
+      envelopeUpdates: [],
       txs: generated.map(row => {
         const counterpartyBoardAuthority = certifiedBoardFor(this.#env, batch.entityState, row.accountId);
         return {

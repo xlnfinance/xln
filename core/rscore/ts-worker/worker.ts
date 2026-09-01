@@ -1,6 +1,7 @@
 /** Bun Worker entry for the resident TypeScript Account-shard prototype. */
 
 import { applyAccountInput, proposeAccountFrame } from '../../account/consensus';
+import { applyAccountEnvelopeUpdate } from '../../account/envelope/entity-update';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { HandleAccountInputResult } from '../../account/consensus/types';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
@@ -184,6 +185,15 @@ const applyOutboundTxs = async (
   return effects;
 };
 
+const applyOutboundEnvelopeUpdates = (
+  input: TsAccountWorkerOutboundPayload,
+  workspace: PhaseWorkspace,
+): void => {
+  for (const item of input.envelopeUpdates) {
+    applyAccountEnvelopeUpdate(workspace.forWrite(item.accountId), item.update);
+  }
+};
+
 const applyOutboundProposals = async (
   context: AccountConsensusContext,
   input: TsAccountWorkerOutboundPayload,
@@ -264,6 +274,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
       worker.inboundPrepared = true;
     }
     const transitionStartedAt = getPerfMs();
+    applyOutboundEnvelopeUpdates(input, workspace);
     const admissions = await applyOutboundTxs(
       createWorkerConsensusContext(
         worker, input.timestamp, input.jHeight, jClaims.store, certifiedBoards,
@@ -306,6 +317,9 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   const operationAccountIds = input.phase === 'inbound'
     ? input.inputs.map(row => row.accountId)
     : [...input.txs.map(row => row.accountId), ...input.proposals.map(row => row.accountId)];
+  if (input.phase === 'outbound') {
+    operationAccountIds.unshift(...input.envelopeUpdates.map(row => row.accountId));
+  }
   for (const accountId of operationAccountIds) {
     const shardId = tsAccountLogicalShard(accountId);
     shardRows.set(shardId, (shardRows.get(shardId) ?? 0) + 1);
@@ -315,7 +329,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     effects,
     subroots,
     ...(postAccounts ? { postAccounts } : {}),
-    operations: effects.length,
+    operations: effects.length + (input.phase === 'outbound' ? input.envelopeUpdates.length : 0),
     shardRows: [...shardRows].sort(([left], [right]) => left - right),
     operationsProfile: diffOpCounters(operationsBefore),
     elapsedUs: Math.round((getPerfMs() - startedAt) * 1_000),

@@ -81,8 +81,7 @@ import {
   advanceCertifiedBoardFinality,
 } from '../../jurisdiction/machine/board-registry';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/machine/j-event-range-validation';
-import { applyAccountInput } from '../../account/consensus';
-import { accountInputFailureMessage } from '../../account/consensus/result';
+import { applyEntityAccountEnvelopeUpdate } from '../account-envelope-update';
 import type { HandleAccountInputApplied } from '../../account/consensus/types';
 import {
   createAccountDisputeFinalityInput,
@@ -771,17 +770,13 @@ const applyStartedDisputeAccountInput = async (
     observedBlockNumber: Number(context.blockNumber || 0),
     ...(data.batchNonce !== undefined ? { batchNonce: data.batchNonce } : {}),
   });
-  const result = await applyAccountInput(
-    context.accountConsensusContext,
-    account,
-    accountInput,
-  );
-  if (!result.ok) {
-    throw new Error(
-      `ACCOUNT_DISPUTE_STARTED_INPUT_FAILED:${counterpartyId}:` +
-      `${accountInputFailureMessage(result)}`,
-    );
+  if (accountInput.finality.kind !== 'dispute_started') {
+    throw new Error(`ACCOUNT_DISPUTE_STARTED_INPUT_KIND:${accountInput.finality.kind}`);
   }
+  applyEntityAccountEnvelopeUpdate(context.env, counterpartyId, account, {
+    type: 'applyDisputeStarted',
+    finality: accountInput.finality,
+  });
 };
 
 const initializeStartedDispute = async (
@@ -1359,7 +1354,7 @@ const applyResolvedDisputeFinality = async (
   finalizedProof: ReturnType<typeof requireOnchainProofBodyEvidence>,
   resolved: ReturnType<typeof resolveFinalizationEvidence>,
 ): Promise<void> => {
-  const { accountConsensusContext, newState, dirtyAccounts } = context;
+  const { newState, dirtyAccounts } = context;
   syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, batchNonce);
   dirtyAccounts.add(counterpartyId.toLowerCase());
   // A finalized dispute changes the authoritative Account epoch. Any
@@ -1382,18 +1377,18 @@ const applyResolvedDisputeFinality = async (
     resolved.finalizedJNonce,
     finalizedProof.tokenIds,
   );
-  const accountInputResult = await applyAccountInput(
-    accountConsensusContext,
-    account,
-    accountInput,
-  );
-  if (!accountInputResult.ok || !accountInputResult.externalFinality) {
-    throw new Error(
-      `ACCOUNT_DISPUTE_FINALITY_INPUT_FAILED:${counterpartyId}:` +
-      `${accountInputFailureMessage(accountInputResult)}`,
-    );
+  if (accountInput.finality.kind !== 'dispute_finalized') {
+    throw new Error(`ACCOUNT_DISPUTE_FINALITY_INPUT_KIND:${accountInput.finality.kind}`);
   }
-  const accountFinality = accountInputResult.externalFinality;
+  const accountFinality = applyEntityAccountEnvelopeUpdate(
+    context.env,
+    counterpartyId,
+    account,
+    { type: 'applyDisputeFinality', finality: accountInput.finality },
+  );
+  if (!accountFinality) {
+    throw new Error(`ACCOUNT_DISPUTE_FINALITY_RESULT_MISSING:${counterpartyId}`);
+  }
   invalidateSettlementIntentAfterDisputeFinality(newState, counterpartyId, accountFinality);
   if (accountFinality.hadActiveDispute) {
     addMessage(

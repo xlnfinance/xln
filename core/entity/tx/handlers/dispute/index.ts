@@ -20,10 +20,7 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { addMessage } from '../../../frame-events';
-import {
-  freezeAccountForDispute,
-  returnPreparedAccountToActive,
-} from '../../../../account/consensus/dispute/policy';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 import { removeBookOrderById } from '../../../../orderbook/cross-j';
 import { swapKey } from '../../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../../extensions/cross-j/orderbook';
@@ -128,7 +125,9 @@ const removeDisputedAccountOrdersFromBook = (
 };
 
 const markAccountDisputePreparing = (
+  env: EntityRuntimeContext,
   state: EntityState,
+  accountId: string,
   account: AccountReplica,
   description: string,
   minCooldownMs: number,
@@ -137,20 +136,20 @@ const markAccountDisputePreparing = (
   crossJurisdictionRecovery: CrossJurisdictionDisputeRecovery | null,
 ): void => {
   const startedAt = Number(state.timestamp ?? 0);
-  account.status = 'dispute_preparing';
-  account.disputePrepare = {
-    startedAt,
-    readyAfter: startedAt + Math.max(0, Math.floor(minCooldownMs)),
-    reason: description || 'prepare-dispute',
-    ...(pendingOrderbookRemovalIds.length > 0
-      ? { pendingOrderbookRemovalIds: [...pendingOrderbookRemovalIds].sort() }
-      : {}),
-    ...(crossJurisdictionRecovery ? { crossJurisdictionRecovery } : {}),
-    ...(startIntent ? { startIntent } : {}),
-  };
-  // Optional resolution evidence may still arrive, but ordinary bilateral
-  // proposals must stop changing the signed ProofBody during preparation.
-  freezeAccountForDispute(account, true);
+  applyEntityAccountEnvelopeUpdate(env, accountId, account, {
+    type: 'replaceDisputeLifecycle',
+    status: 'dispute_preparing',
+    disputePrepare: {
+      startedAt,
+      readyAfter: startedAt + Math.max(0, Math.floor(minCooldownMs)),
+      reason: description || 'prepare-dispute',
+      ...(pendingOrderbookRemovalIds.length > 0
+        ? { pendingOrderbookRemovalIds: [...pendingOrderbookRemovalIds].sort() }
+        : {}),
+      ...(crossJurisdictionRecovery ? { crossJurisdictionRecovery } : {}),
+      ...(startIntent ? { startIntent } : {}),
+    },
+  });
 };
 
 const buildDisputeStartIntent = (
@@ -232,7 +231,10 @@ const finishDisputePreparation = async (
   if (recovery?.requiredPullIds.every(
     (pullId) => recovery.resultsByPullId[pullId] === '0x',
   )) {
-    returnPreparedAccountToActive(account);
+    applyEntityAccountEnvelopeUpdate(env, counterpartyEntityId, account, {
+      type: 'replaceDisputeLifecycle',
+      status: 'active',
+    });
     addMessage(state, '🌉 Cross-j source finality required no target dispute');
     return { newState: state, outputs };
   }
@@ -314,7 +316,9 @@ export const handlePrepareDispute = async (
     storageChanges,
   );
   markAccountDisputePreparing(
+    env,
     newState,
+    counterpartyEntityId,
     account,
     description,
     entityTx.data.minCooldownMs ?? 0,

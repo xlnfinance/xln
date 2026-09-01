@@ -14,10 +14,8 @@ import {
   FailureDispositionError,
   haltRuntimeFailure,
 } from '../../../../protocol/errors/failure-taxonomy';
-import {
-  freezeAccountForDispute,
-  isDisputeStartedByLeft,
-} from '../../../../account/consensus/dispute/policy';
+import { isDisputeStartedByLeft } from '../../../../account/consensus/dispute/policy';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 import { disputeLog } from './shared';
 import {
   admitDisputeStart,
@@ -93,6 +91,7 @@ const queuePullDisputeRegistrations = (
 };
 
 const queueDisputeStart = (
+  env: EntityRuntimeContext,
   sourceState: EntityState,
   state: EntityState,
   account: AccountReplica,
@@ -141,27 +140,28 @@ const queueDisputeStart = (
     starterCounterArguments: evidence.starterCounterArguments,
     starterCounterProofCommitment: evidence.starterCounterProofCommitment,
   });
-  account.status = 'disputed';
-  delete account.disputePrepare;
-  freezeAccountForDispute(account, false);
-  account.activeDispute ??= {
-    startedByLeft: isDisputeStartedByLeft(
-      sourceState.entityId,
-      account.state.leftEntity,
-      account.state.rightEntity,
-    ),
-    initialProofbodyHash: evidence.proofBodyHash,
-    initialNonce: evidence.signedNonce,
-    initialProposerIsLeft: evidence.proposerIsLeft,
-    // Depository chooses the authoritative timeout at inclusion height.
-    disputeTimeout: 0,
-    jNonce: evidence.jNonce,
-    starterInitialArguments: evidence.starterInitialArguments,
-    starterCounterArguments: evidence.starterCounterArguments,
-    starterCounterProofCommitment: evidence.starterCounterProofCommitment,
-    observedOnChain: false,
-    finalizeQueued: false,
-  };
+  applyEntityAccountEnvelopeUpdate(env, tx.data.counterpartyEntityId, account, {
+    type: 'replaceDisputeLifecycle',
+    status: 'disputed',
+    activeDispute: account.activeDispute ?? {
+      startedByLeft: isDisputeStartedByLeft(
+        sourceState.entityId,
+        account.state.leftEntity,
+        account.state.rightEntity,
+      ),
+      initialProofbodyHash: evidence.proofBodyHash,
+      initialNonce: evidence.signedNonce,
+      initialProposerIsLeft: evidence.proposerIsLeft,
+      // Depository chooses the authoritative timeout at inclusion height.
+      disputeTimeout: 0,
+      jNonce: evidence.jNonce,
+      starterInitialArguments: evidence.starterInitialArguments,
+      starterCounterArguments: evidence.starterCounterArguments,
+      starterCounterProofCommitment: evidence.starterCounterProofCommitment,
+      observedOnChain: false,
+      finalizeQueued: false,
+    },
+  });
   if (hasPulls) {
     // A verified Target witness may have arrived while order removal was still
     // preparing this dispute. Install the exact draft binding first, then pull
@@ -232,6 +232,7 @@ export const handleDisputeStart = async (
     return { newState, outputs };
   }
   queueDisputeStart(
+    env,
     entityState,
     newState,
     account,

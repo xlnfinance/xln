@@ -9,6 +9,7 @@ import type { AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
 import type { HankoString } from '../types/hanko';
 import type { BookIntentSlot } from './books/book-intents';
+import type { AccountEnvelopeUpdate } from '../account/envelope/entity-update';
 
 export type AccountAuthorityFrameBeginRequest = Readonly<{
   ownerEntityId: string;
@@ -62,6 +63,7 @@ export type AccountAuthorityCommittedHankosRequest = Readonly<{
 export interface AccountAuthorityEntityStageCapability extends AccountAuthorityExecutionScope {
   beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void>;
   executeEntityBooks(request: AccountAuthorityFrameBooksRequest): Promise<void>;
+  recordAccountEnvelopeUpdate(accountId: string, update: AccountEnvelopeUpdate): void;
   prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
   finishEntityAccountFrame(): void;
   installCommittedAccountHankos(request: AccountAuthorityCommittedHankosRequest): Promise<void>;

@@ -15,6 +15,7 @@ import type { AccountAuthorityCommittedHanko } from '../../entity/runtime-contex
 import type { AuthorityCertifiedBoard } from '../authority-wave';
 import type { BookIntent } from '../../entity/books/book-intents';
 import type { PaybookEntry } from '../../entity/types';
+import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
 
 export type TsAccountWorkerCertifiedBoard = AuthorityCertifiedBoard & Readonly<{
   entityId: string;
@@ -52,6 +53,10 @@ export type TsProposeAccountFramesRequest = Readonly<{
   timestamp: number;
   jHeight: number;
   localBoardAuthority?: TsAccountWorkerCertifiedBoard;
+  envelopeUpdates: readonly Readonly<{
+    accountId: string;
+    update: AccountEnvelopeUpdate;
+  }>[];
   txs: readonly Readonly<{
     accountId: string;
     txs: readonly AccountTx[];
@@ -199,6 +204,10 @@ export type TsAccountWorkerOutboundPayload = Readonly<{
   timestamp: number;
   jHeight: number;
   localBoardAuthority?: TsAccountWorkerCertifiedBoard;
+  envelopeUpdates: readonly Readonly<{
+    accountId: string;
+    update: AccountEnvelopeUpdate;
+  }>[];
   txs: readonly Readonly<{
     order: number;
     accountId: string;

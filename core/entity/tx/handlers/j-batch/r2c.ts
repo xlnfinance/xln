@@ -27,12 +27,15 @@ import { getEntityAccountForWrite } from '../../../state/persistent-account-map'
 import { batchAddReserveToCollateral, initJBatch } from '../../../../jurisdiction/machine/batch';
 import { createStructuredLogger, formatAmount, shortId } from '../../../../support/logger';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
+import type { EntityRuntimeContext } from '../../../runtime-context';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 
 type AccountTxTarget = { accountId: string; tx: AccountTx };
 
 const r2cLog = createStructuredLogger('entity.r2c');
 
 const collectRebalanceFee = (
+  env: EntityRuntimeContext,
   originalState: EntityState,
   state: EntityState,
   tx: Extract<EntityTx, { type: 'r2c' }>,
@@ -80,7 +83,9 @@ const collectRebalanceFee = (
   if (originalState.timestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
     const account = getEntityAccountForWrite(state.accounts, counterpartyId);
     if (!account) throw new Error(`R2C_QUOTE_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
-    delete account.shadow.rebalance.activeQuote;
+    applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+      type: 'clearRebalanceActiveQuote',
+    });
     addMessage(state, `❌ Rebalance fee: quote expired (age: ${originalState.timestamp - quote.quoteId}ms)`);
     return false;
   }
@@ -111,7 +116,9 @@ const collectRebalanceFee = (
   }
   const account = getEntityAccountForWrite(state.accounts, counterpartyId);
   if (!account) throw new Error(`R2C_QUOTE_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
-  delete account.shadow.rebalance.activeQuote;
+  applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+    type: 'clearRebalanceActiveQuote',
+  });
   r2cLog.debug('fee.collected', {
     entity: shortId(originalState.entityId),
     counterparty: shortId(counterpartyId),
@@ -139,6 +146,7 @@ const getR2CAdmissionIssue = (
 };
 
 export async function handleR2C(
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
   mutableFrameState = false,
@@ -198,6 +206,7 @@ export async function handleR2C(
   }
 
   if (!collectRebalanceFee(
+    env,
     entityState,
     newState,
     entityTx,

@@ -22,6 +22,7 @@ import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
+import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
 
 const countFrameApplyPhase = (name: string, startedAt: number): void => {
   if (!OP_COUNTERS_ENABLED) return;
@@ -101,6 +102,10 @@ export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent &
   accountForWrite(accountId: string): AccountAuthorityInputRequest['account'] | undefined;
   admissions: readonly AccountAuthorityInputRequest[];
   proposals: readonly AccountAuthorityProposalRequest[];
+  envelopeUpdates: readonly Readonly<{
+    accountId: string;
+    update: AccountEnvelopeUpdate;
+  }>[];
   materializeAccountIds: readonly string[];
 }>;
 
@@ -222,6 +227,10 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   private inboundResults: HandleAccountInputResult[] = [];
   private inboundCursor = 0;
   private admissionRequests: AccountAuthorityInputRequest[] = [];
+  private envelopeUpdates: Array<Readonly<{
+    accountId: string;
+    update: AccountEnvelopeUpdate;
+  }>> = [];
   private preparedProposalIds: string[] = [];
   private proposalResults: ProposeAccountFrameResult[] = [];
   private proposalCursor = 0;
@@ -274,6 +283,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.inboundResults = [];
     this.inboundCursor = 0;
     this.admissionRequests = [];
+    this.envelopeUpdates = [];
     this.preparedProposalIds = [];
     this.proposalResults = [];
     this.proposalCursor = 0;
@@ -363,6 +373,14 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     });
   }
 
+  recordAccountEnvelopeUpdate(accountId: string, update: AccountEnvelopeUpdate): void {
+    if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
+    if (this.frameOutboundPrepared) {
+      throw new Error(`ACCOUNT_AUTHORITY_ENVELOPE_UPDATE_AFTER_OUTBOUND:${this.ownerEntityId}`);
+    }
+    this.envelopeUpdates.push({ accountId: normalizeEntityId(accountId), update });
+  }
+
   async prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void> {
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_DUPLICATE:${this.ownerEntityId}`);
@@ -399,6 +417,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       accountForWrite: request.accountForWrite,
       admissions: this.admissionRequests,
       proposals,
+      envelopeUpdates: this.envelopeUpdates,
       materializeAccountIds,
     });
     countFrameApplyPhase('outbound.provider', providerStartedAt);

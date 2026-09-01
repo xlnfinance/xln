@@ -1,4 +1,5 @@
 import type { AccountTx } from '../../types/account';
+import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
 import { decodeAccountInput } from '../../account/validation/input-validation';
 import { parseAccountJClaimNode } from '../../account/j-claims/j-claim-codec';
 import { validateJReplicas } from '../../storage/wal/runtime-machine-schema/j';
@@ -183,6 +184,35 @@ const decodeOutboundPayload = (
   input: Record<string, unknown>,
 ): TsAccountWorkerOutboundPayload => {
   const createdAccountIds = new Set<string>();
+  const envelopeUpdates = requireArray(
+    input['envelopeUpdates'],
+    'TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_UPDATES',
+  ).map((entry, index) => {
+    const row = requireRecord(entry, `TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_${index}`);
+    const accountId = requireWorkerAccount(
+      worker,
+      requireString(row['accountId'], `TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_${index}_ACCOUNT`),
+    );
+    const update = requireRecord(
+      row['update'],
+      `TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_${index}_UPDATE`,
+    );
+    const type = requireString(
+      update['type'],
+      `TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_${index}_TYPE`,
+    );
+    if (![
+      'clearRebalanceActiveQuote',
+      'setRebalancePolicy',
+      'replaceDisputeLifecycle',
+      'applyDisputeStarted',
+      'applyDisputeFinality',
+      'confirmDisputeBookRemoval',
+    ].includes(type)) {
+      throw new Error(`TS_ACCOUNT_WORKER_OUTBOUND_ENVELOPE_${index}_TYPE_UNKNOWN:${type}`);
+    }
+    return { accountId, update: update as AccountEnvelopeUpdate };
+  });
   const txs = requireArray(input['txs'], 'TS_ACCOUNT_WORKER_OUTBOUND_TXS').map((entry, index) => {
     const row = requireRecord(entry, `TS_ACCOUNT_WORKER_OUTBOUND_TXS_${index}`);
     const rawInitialAccount = row['initialAccount'];
@@ -270,6 +300,7 @@ const decodeOutboundPayload = (
     timestamp: requireInteger(input['timestamp'], 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP'),
     jHeight: requireInteger(input['jHeight'], 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT'),
     ...(localBoardAuthority ? { localBoardAuthority } : {}),
+    envelopeUpdates,
     txs,
     proposals,
   };
