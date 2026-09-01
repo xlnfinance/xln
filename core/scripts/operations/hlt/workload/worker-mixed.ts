@@ -3,9 +3,9 @@
  *
  * Mix 1:1 no longer partitions users into pay-only vs swap-only halves.
  * The same 1000 Entities open one Hub Account, then each cadence tick
- * every user pays someone else and submits exactly one swap order. Half the
- * users ask and half bid at one exact price; roles flip every round. N users
- * therefore mean exactly N payments + N offers = N/2 economic swaps per tick.
+ * every user pays someone else and submits exactly one swap order. Stable,
+ * deterministic cohorts produce user-user fills, partial fills, MM residual,
+ * and a deliberate resting tail which is explicitly cancelled after matching.
  */
 
 import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
@@ -41,7 +41,7 @@ import {
   submitPreparedParallelSameLoad,
   type PreparedParallelSameLoad,
 } from './worker-same-lanes';
-import { assertBalancedExchangeDistribution } from './worker-same-plan';
+import { assertRealisticExchangeDistribution } from './worker-same-plan';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
   connectRuntime,
@@ -273,7 +273,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       rounds: args.rounds,
       lanes: args.lanes,
       laneOffset: args.laneOffset,
-      execution: 'balanced',
+      execution: 'realistic',
       compactSettlement: selection.engine === 'rust',
       additionalQuoteDebits: Array.from(
         { length: args.lanes * 2 },
@@ -282,8 +282,8 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       ),
       ...(nativeAuthority ? { nativeAuthority } : {}),
     });
-    assertBalancedExchangeDistribution(prepared.distribution);
-    console.log(`[load] balanced exchange ${safeStringify(prepared.distribution)}`);
+    assertRealisticExchangeDistribution(prepared.distribution);
+    console.log(`[load] realistic exchange ${safeStringify(prepared.distribution)}`);
     const users: LaneRuntime[] = [...prepared.traderRuntimes];
     const workloadFingerprint = hltWorkloadFingerprint('mixed', {
       users: users.map(lane => lane.identity.entityId),
@@ -295,11 +295,12 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       distribution: prepared.distribution,
     });
     const offeredWindowMs = args.rounds * args.cadenceMs;
-    const rustTpsAuthority = selection.engine === 'rust' && isRustLiveMixedTpsAuthority({
+    const mixedTpsAuthority = isRustLiveMixedTpsAuthority({
       users: users.length,
       ratePerUser: 1_000 / args.cadenceMs,
       durationSeconds: offeredWindowMs / 1_000,
     });
+    const rustTpsAuthority = selection.engine === 'rust' && mixedTpsAuthority;
     const economicPrepareStartedAt = performance.now();
     const economicPreparePhase = (name: string): void => console.log(
       `[load] economic-prepare phase=${name} elapsedMs=${Math.ceil(performance.now() - economicPrepareStartedAt)}`,
@@ -476,12 +477,35 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     });
     const submittedPayments = users.length * args.rounds;
     if (rustH1 && rustMetricsBefore) {
-      const expectedMatchedTrades = args.lanes * args.rounds;
+      const expectedMatchedTrades = prepared.distribution.matchedTrades;
+      const matchedSettlement = await waitForRustMixedSettlement({
+        rust: rustH1,
+        lanes: users,
+        expectedPayments: submittedPayments,
+        expectedMatchedSwaps: expectedMatchedTrades,
+        requireExpectedMatchedSwaps: true,
+        economicStartedAt: startedAt,
+        metricsBefore: rustMetricsBefore,
+      });
+      if (matchedSettlement.metrics.openSwapOfferIdsTruncated) {
+        throw new Error('HLT_MIXED_OPEN_SWAP_IDS_TRUNCATED');
+      }
+      const baselineOpenIds = new Set(rustMetricsBefore.openSwapOfferIds);
+      const plannedRestingIds = new Set(prepared.traderPlans.flatMap(plan => plan.cancelledOfferIds));
+      const observedRestingIds = matchedSettlement.metrics.openSwapOfferIds.filter(
+        offerId => !baselineOpenIds.has(offerId),
+      );
+      if (
+        observedRestingIds.length !== plannedRestingIds.size ||
+        observedRestingIds.some(offerId => !plannedRestingIds.has(offerId))
+      ) throw new Error('HLT_MIXED_RESTING_SWAP_PARTITION');
+      const cancellation = await cancelPreparedRestingTail(prepared);
       const rustSettlement = await waitForRustMixedSettlement({
         rust: rustH1,
         lanes: users,
         expectedPayments: submittedPayments,
         expectedMatchedSwaps: expectedMatchedTrades,
+        requireExpectedMatchedSwaps: true,
         economicStartedAt: startedAt,
         metricsBefore: rustMetricsBefore,
       });
@@ -578,11 +602,16 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       const matchedEconomicSwaps = rustSettlement.metrics.matchedSwaps - rustMetricsBefore.matchedSwaps;
       const rejectedAtOrderbook =
         rustSettlement.metrics.zeroFillSwapCancels - rustMetricsBefore.zeroFillSwapCancels;
-      const acceptedTerminal = matchedEconomicSwaps * 2 + rejectedAtOrderbook + restingOfferIds.length;
+      if (rejectedAtOrderbook !== 0) {
+        throw new Error(`HLT_MIXED_UNEXPECTED_STP_OR_ZERO_FILL:${rejectedAtOrderbook}`);
+      }
+      const acceptedTerminal = prepared.distribution.matchedSubmittedOffers +
+        cancellation.cancelledOffers + rejectedAtOrderbook + restingOfferIds.length;
       if (swapProposalLedger.accepted !== acceptedTerminal) {
         throw new Error(`HLT_MIXED_ACCEPTED_SWAP_PARTITION:${safeStringify({
           acceptedAtAccount: swapProposalLedger.accepted,
-          matchedOffers: matchedEconomicSwaps * 2,
+          matchedOffers: prepared.distribution.matchedSubmittedOffers,
+          explicitlyCancelled: cancellation.cancelledOffers,
           rejectedAtOrderbook,
           resting: restingOfferIds.length,
         })}`);
@@ -615,6 +644,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         rejectedSwapOrdersAtAccount: swapProposalLedger.rejectedAtAccount,
         rejectedSwapOrdersAtOrderbook: rejectedAtOrderbook,
         restingSwapOrders: restingOfferIds.length,
+        explicitlyCancelledSwapOrders: cancellation.cancelledOffers,
         swapProposalRejectionCodes: swapProposalLedger.rejectionCodes,
         repeatedSwapProposalObservations: swapProposalLedger.repeatedObservations,
         offeredWindowMs,
@@ -663,13 +693,13 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       submittedPayments,
       startedAt,
     );
-    // Pairwise-balanced orders have no measured MM dependency. The committed
-    // Hub trade delta, not submitted order count, is the swap TPS authority.
+    // The plan predicts exact user/MM fill cardinality. The committed Hub
+    // trade delta, not submitted order count, is the matching authority.
     const matchedDrain = await waitForExpectedMatchedTrades({
       hub: requireHub(),
       hubBookEntityId: hubIdentity.entityId,
       tradeCountBefore: initialBook.tradeCount,
-      expectedMatchedTrades: args.lanes * args.rounds,
+      expectedMatchedTrades: prepared.distribution.matchedTrades,
       startedAt,
       allowAdditionalTrades: true,
       acceptDrainedBelowTarget: !authorityEvidence,
@@ -741,7 +771,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo })}`);
     const hubDurableAfter = decodeLoadFrame(await requireHub().adapter.read<unknown>('frame/latest'));
 
-    const paymentReport = decodeLoadPaymentReport({
+    const paymentReport = mixedTpsAuthority ? decodeLoadPaymentReport({
       schema: 'xln-hlt-payment-load-v1',
       engine: 'ts',
       mode: 'payments',
@@ -775,20 +805,22 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       hubDurableBefore,
       hubDurableAfter,
       environment: collectHltEnvironmentManifest(),
-    });
-    persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
-    publishHltDashboardReport('payment', paymentReport);
+    }) : null;
+    if (paymentReport !== null) {
+      persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
+      publishHltDashboardReport('payment', paymentReport);
+    }
 
-    const swapReport = decodeLoadSustainedReport({
+    const swapReport = mixedTpsAuthority ? decodeLoadSustainedReport({
       schema: 'xln-production-swap-load-sustained-v1',
       engine: 'ts',
       mode: 'same',
-      schedule: 'balanced_role_rotation',
+      schedule: 'resting_maker_aggressive_taker',
       configuredUsers: users.length,
       configuredRounds: args.rounds,
       cadenceMs: offerCadenceMs,
       offeredOrderRate: users.length * 1_000 / offerCadenceMs,
-      offeredEconomicSwapRate: args.lanes * 1_000 / offerCadenceMs,
+      offeredEconomicSwapRate: prepared.distribution.matchedTrades / args.rounds * 1_000 / offerCadenceMs,
       loadMakerAccountCount: args.lanes,
       loadTakerAccountCount: args.lanes,
       loadParticipantAccountCount: users.length,
@@ -820,11 +852,40 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       loadDurableAfter: hubDurableAfter,
       settlementEvidence,
       environment: collectHltEnvironmentManifest(),
-    });
-    persistReport(join(args.workDir, 'production-swap-load-report.json'), swapReport);
-    publishHltDashboardReport('swap', swapReport);
-    publishHltDashboardPerfFromWorkDir(args.workDir);
-    console.log(safeStringify({ payment: paymentReport, swap: swapReport }));
+    }) : null;
+    if (swapReport !== null) {
+      persistReport(join(args.workDir, 'production-swap-load-report.json'), swapReport);
+      publishHltDashboardReport('swap', swapReport);
+      publishHltDashboardPerfFromWorkDir(args.workDir);
+    }
+    const functionalEvidence = {
+      engine: 'ts',
+      workload: 'mixed',
+      evidence: mixedTpsAuthority ? 'tps-authority' : 'functional-parity',
+      users: users.length,
+      submittedPayments,
+      deliveredPayments: submittedPayments,
+      submittedSwapOrders: expectedSubmittedOffers,
+      matchedSwapOrders: prepared.distribution.matchedSubmittedOffers,
+      matchedEconomicSwaps: expectedMatchedTrades,
+      explicitlyCancelledSwapOrders: cancellation.cancelledOffers,
+      offeredWindowMs,
+      fullySettledElapsedMs: settlementEvidence.fullySettledElapsedMs,
+      workloadFingerprint,
+    };
+    writeFileSync(join(args.workDir, 'hlt-ts-h1-live.json'), `${safeStringify(functionalEvidence, 2)}\n`);
+    if (authorityEvidence) {
+      console.log(`HLT_MIXED_PARITY_SMOKE ${safeStringify({
+        users: users.length,
+        rounds: args.rounds,
+        payments: submittedPayments,
+        submittedOffers: expectedSubmittedOffers,
+        matchedTrades: expectedMatchedTrades,
+        cancelledOffers: cancellation.cancelledOffers,
+        finalRuntimeHeight: hubDurableAfter.height,
+      })}`);
+    }
+    console.log(safeStringify({ live: functionalEvidence, payment: paymentReport, swap: swapReport }));
   } finally {
     await stopRustH1();
     if (prepared) await stopLaneRuntimes(prepared.traderRuntimes);

@@ -300,6 +300,10 @@ describe('production swap load evidence', () => {
     expect(plan.traderPlans).toHaveLength(200);
     expect(plan.traderPlans.flatMap(lane => lane.cancelledOfferIds)).toHaveLength(40);
     expect(() => assertRealisticExchangeDistribution(plan.distribution)).not.toThrow();
+    expect(() => assertRealisticExchangeDistribution({
+      ...plan.distribution,
+      cancelledOffers: plan.distribution.cancelledOffers - 1,
+    })).toThrow('HLT_REALISTIC_TERMINAL_PARTITION_INVALID');
     const roundOffers = plan.traderPlans.map((lane, index) => {
       const offer = lane.offers[0];
       if (offer?.type !== 'placeSwapOffer' || offer.data.priceTicks === undefined) {
@@ -368,7 +372,7 @@ describe('production swap load evidence', () => {
     expect([...tradesByTaker.values()].flat()).toHaveLength(plan.distribution.matchedTrades);
   });
 
-  test('every realistic trader uses both sides while each round emits one order per user', () => {
+  test('realistic cohorts stay stable while each round emits one order per user', () => {
     const plan = buildRealisticExchangePlan({
       hubEntityId: `0x${'12'.repeat(32)}`,
       offerNamespace: 'role-free-test',
@@ -396,7 +400,7 @@ describe('production swap load evidence', () => {
         if (offer.type !== 'placeSwapOffer') throw new Error('TEST_REALISTIC_TRADER_TYPE_INVALID');
         return offer.data.giveTokenId;
       }));
-      expect(sides).toEqual(new Set([1, 2]));
+      expect(sides.size).toBe(1);
     }
     for (let round = 0; round < 10; round += 1) {
       const offers = plan.traderPlans.map(trader => trader.offers[round]);
@@ -427,12 +431,13 @@ describe('production swap load evidence', () => {
       mmResidualTakers: 0,
     });
     expect(() => assertBalancedExchangeDistribution(plan.distribution)).not.toThrow();
-    for (const trader of plan.traderPlans) {
-      expect(new Set(trader.offers.map(offer => {
+    const traderSides = plan.traderPlans.map(trader => new Set(trader.offers.map(offer => {
         if (offer.type !== 'placeSwapOffer') throw new Error('TEST_BALANCED_OFFER_INVALID');
         return offer.data.giveTokenId;
-      }))).toEqual(new Set([1, 2]));
-    }
+      })));
+    expect(traderSides.every(sides => sides.size === 1)).toBe(true);
+    expect(traderSides.filter(sides => sides.has(1))).toHaveLength(500);
+    expect(traderSides.filter(sides => sides.has(2))).toHaveLength(500);
   });
 
   test('each sustained round emits exactly one order per user Account', () => {

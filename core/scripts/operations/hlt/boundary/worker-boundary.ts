@@ -538,9 +538,9 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ROUND_COUNT_INVALID');
   }
   const expectedOrderRate = participantAccounts * 1_000 / cadenceMs;
-  const expectedEconomicRate = (schedule === 'resting_maker_aggressive_taker'
-    ? participantAccounts
-    : takerAccounts) * 1_000 / cadenceMs;
+  const expectedEconomicRate = schedule === 'resting_maker_aggressive_taker'
+    ? matched / rounds * 1_000 / cadenceMs
+    : takerAccounts * 1_000 / cadenceMs;
   if (report['offeredOrderRate'] !== expectedOrderRate || report['offeredEconomicSwapRate'] !== expectedEconomicRate) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_OFFERED_RATE_INVALID');
   }

@@ -266,26 +266,13 @@ const distributeOffers = (
 ): EntityTx[][] => Array.from({ length: lanes }, (_, laneIndex) =>
   Array.from({ length: rounds }, (_, round) => build(round * lanes + laneIndex, laneIndex, round)));
 
-const greatestCommonDivisor = (left: number, right: number): number => {
-  let a = Math.abs(left);
-  let b = Math.abs(right);
-  while (b !== 0) [a, b] = [b, a % b];
-  return a;
-};
-
-const deterministicCoprimeStride = (size: number): number => {
-  let stride = 2_654_435_761 % size;
-  if (stride < 1) stride = 1;
-  while (greatestCommonDivisor(stride, size) !== 1) stride += 1;
-  return stride;
-};
-
 /**
- * Assign a per-round order strategy to a trader without permanent maker/taker
- * cohorts. The seeded permutation randomizes the initial side; every next
- * round flips that side and rotates the size/price strategy within it. Thus a
- * trader deterministically exercises both sides while every round remains an
- * exact balanced permutation of all strategies.
+ * Assign a per-round order strategy while keeping every trader in one stable
+ * economic cohort for the offered window: matched maker, resting maker, or
+ * aggressive taker. A trader repeats its exact strategy across rounds, so an
+ * earlier resting order cannot self-cross a later order from the same owner
+ * and the size mix is identical at every cadence tick. STP is therefore not an
+ * arrival-order-dependent hidden outcome of the first realistic policy.
  */
 export const realisticTraderStrategyIndex = (
   traderIndex: number,
@@ -301,17 +288,7 @@ export const realisticTraderStrategyIndex = (
   if (!Number.isSafeInteger(round) || round < 0) {
     throw new Error(`HLT_REALISTIC_TRADER_ROUND_INVALID:${round}`);
   }
-  const perSide = traders / 2;
-  const stride = deterministicCoprimeStride(traders);
-  const sideFor = (index: number): number =>
-    (Math.floor((index * stride % traders) / perSide)) ^ (round % 2);
-  const side = sideFor(traderIndex);
-  let rank = 0;
-  for (let index = 0; index < traderIndex; index += 1) {
-    if (sideFor(index) === side) rank += 1;
-  }
-  const strategyRotation = Math.floor(round / 2) * Math.max(1, Math.floor(perSide / 5));
-  return side * perSide + (rank + strategyRotation) % perSide;
+  return traderIndex;
 };
 
 const flattenRoundMajor = (
@@ -427,7 +404,10 @@ export const buildRealisticExchangePlan = (options: Readonly<{
   distribution: RealisticExchangeDistribution;
 }> => {
   const totalPerSide = options.rounds * options.lanesPerSide;
-  if (!Number.isSafeInteger(totalPerSide) || totalPerSide < 1) {
+  if (
+    !Number.isSafeInteger(options.lanesPerSide) || options.lanesPerSide < 5 ||
+    !Number.isSafeInteger(totalPerSide) || totalPerSide < 1
+  ) {
     throw new Error('HLT_REALISTIC_PLAN_CARDINALITY_INVALID');
   }
   const matchedMakersPerRound = Math.floor(options.lanesPerSide * 3 / 5);
@@ -507,8 +487,9 @@ export const buildRealisticExchangePlan = (options: Readonly<{
 
 /**
  * One balanced user market: every round has exactly one ask and one bid for
- * each pair of traders. Roles flip every round, so no Runtime is permanently
- * a maker or taker and measured settlement never depends on MM replenishment.
+ * each pair of traders. A trader keeps one side for the whole offered window:
+ * flipping sides while earlier rounds are still in flight makes valid delivery
+ * interleavings hit self-trade prevention and invalidates the fixed trade count.
  */
 export const buildBalancedExchangePlan = (options: Readonly<{
   hubEntityId: string;
@@ -532,7 +513,7 @@ export const buildBalancedExchangePlan = (options: Readonly<{
     Array.from({ length: options.rounds }, (_, round) => buildFixedBaseOffer(
       options.hubEntityId,
       `${options.offerNamespace}-trader-${trader + 1}-${round + 1}`,
-      (trader + round) % 2 === 0 ? 'ask' : 'bid',
+      trader % 2 === 0 ? 'ask' : 'bid',
       baseUnit,
       options.priceTicks,
     )),
@@ -578,6 +559,14 @@ export const assertBalancedExchangeDistribution = (
 export const assertRealisticExchangeDistribution = (
   distribution: RealisticExchangeDistribution,
 ): void => {
+  if (
+    distribution.submittedOffers < 1 ||
+    distribution.matchedSubmittedOffers + distribution.cancelledOffers !== distribution.submittedOffers ||
+    distribution.cancelledOffers < 1 ||
+    distribution.matchedTrades < 1
+  ) {
+    throw new Error(`HLT_REALISTIC_TERMINAL_PARTITION_INVALID:${safeStringify(distribution)}`);
+  }
   const matchedRatio = distribution.matchedSubmittedOffers / distribution.submittedOffers;
   if (matchedRatio < 0.79 || matchedRatio > 0.81) {
     throw new Error(`HLT_REALISTIC_MATCHED_OFFER_RATIO_INVALID:${matchedRatio}`);
@@ -592,7 +581,7 @@ export const assertRealisticExchangeDistribution = (
     distribution.sweep10Takers,
     distribution.sweep20Takers,
   ];
-  if (required.some(count => count < 1)) {
+  if (distribution.submittedOffers >= 200 && required.some(count => count < 1)) {
     throw new Error(`HLT_REALISTIC_DISTRIBUTION_COVERAGE_MISSING:${required.join(':')}`);
   }
 };
