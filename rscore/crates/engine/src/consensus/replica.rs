@@ -7,7 +7,7 @@
 //! state stays in `AccountReplica` so executing a transaction never copies the
 //! queue.
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -836,6 +836,29 @@ impl AccountConsensus {
             state_hash,
         }));
         self.pending = None;
+        self.prune_committed_htlc_lock_replays(frame);
+    }
+
+    /// Once a resolve is bilaterally committed, retrying the same lock can
+    /// never become valid again. Keep this envelope cleanup at the Account
+    /// commit boundary so receiver and ACK commits, resident workers and the
+    /// sequential engine all preserve the same FIFO queue.
+    fn prune_committed_htlc_lock_replays(&mut self, frame: &AccountFrame) {
+        let resolved: BTreeSet<&str> = frame
+            .txs
+            .iter()
+            .filter_map(|tx| match tx {
+                AccountTx::HtlcResolve(resolve) => Some(resolve.lock_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        if resolved.is_empty() {
+            return;
+        }
+        self.mempool.retain(|tx| match tx {
+            AccountTx::HtlcLock(lock) => !resolved.contains(lock.lock_id.as_str()),
+            _ => true,
+        });
     }
 
     /// Discard our own unacknowledged proposal and put its transactions back

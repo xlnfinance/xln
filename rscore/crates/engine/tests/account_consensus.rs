@@ -373,6 +373,141 @@ fn a_signed_frame_commits_on_both_sides() {
     );
 }
 
+/// A resolve commits financial state and its Account-owned queue cleanup as
+/// one transition. The duplicate may be queued on the receiver before the
+/// frame arrives or on the proposer while its frame awaits the ACK; both
+/// replicas must prune it at the same canonical commit boundary.
+#[test]
+fn committed_htlc_resolve_prunes_queued_lock_replays_on_both_commit_paths() {
+    use sha3::{Digest as _, Keccak256};
+    use xln_rscore_engine::{HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx};
+
+    let (mut left, mut right) = parties();
+    let secret_bytes = [0x5a_u8; 32];
+    let secret = format!("0x{}", hex::encode(secret_bytes));
+    let lock_id = format!(
+        "0x{}",
+        hex::encode(<[u8; 32]>::from(Keccak256::digest(secret_bytes)))
+    );
+    let lock = AccountTx::HtlcLock(HtlcLockTx {
+        lock_id: lock_id.clone(),
+        hashlock: HtlcHashlock::parse(&lock_id).expect("hashlock"),
+        timelock: BigInt::from(1_700_000_900_000_u64),
+        reveal_before_height: 100,
+        amount: BigInt::from(50),
+        token_id: TokenId::new(1).expect("token"),
+        delivery_mode: None,
+        envelope: None,
+    });
+
+    left.account
+        .admit_txs(vec![lock.clone()], "test lock")
+        .expect("admit lock");
+    let ProposalOutcome::Proposed(lock_frame) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose lock") else {
+        panic!("expected lock proposal");
+    };
+    let lock_frame = *lock_frame;
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&lock_frame.frame, lock_frame.state_hash, lock_frame.hanko),
+        &market(),
+    )
+    .expect("commit lock") else {
+        panic!("expected lock commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &lock_frame.state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("ack lock");
+
+    left.account
+        .admit_txs(
+            vec![AccountTx::HtlcResolve(HtlcResolveTx {
+                lock_id: lock_id.clone(),
+                outcome: HtlcResolveOutcome::Secret { secret },
+            })],
+            "test resolve",
+        )
+        .expect("admit resolve");
+    let ProposalOutcome::Proposed(resolve_frame) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose resolve") else {
+        panic!("expected resolve proposal");
+    };
+    let resolve_frame = *resolve_frame;
+
+    // The same stale retry reaches each side at a different bilateral phase.
+    right
+        .account
+        .admit_txs(vec![lock.clone()], "receiver duplicate")
+        .expect("admit receiver duplicate");
+    left.account
+        .admit_txs(vec![lock], "proposer duplicate")
+        .expect("admit proposer duplicate");
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(
+            &resolve_frame.frame,
+            resolve_frame.state_hash,
+            resolve_frame.hanko,
+        ),
+        &market(),
+    )
+    .expect("commit resolve") else {
+        panic!("expected resolve commit");
+    };
+    assert!(right.account.mempool().iter().all(|tx| !matches!(
+        tx,
+        AccountTx::HtlcLock(lock) if lock.lock_id == lock_id
+    )));
+
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        2,
+        &resolve_frame.state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("ack resolve");
+    assert!(left.account.mempool().iter().all(|tx| !matches!(
+        tx,
+        AccountTx::HtlcLock(lock) if lock.lock_id == lock_id
+    )));
+    assert!(left.account.replica().state().htlc_lock(&lock_id).is_none());
+    assert!(
+        right
+            .account
+            .replica()
+            .state()
+            .htlc_lock(&lock_id)
+            .is_none()
+    );
+}
+
 #[test]
 fn transient_coordination_survives_restore_without_moving_the_entity_leaf() {
     let (mut left, mut right) = parties();

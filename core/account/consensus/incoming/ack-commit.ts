@@ -1,7 +1,6 @@
 import type { AccountFrame, AccountOutput, AccountInput, AccountReplica } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
-import { cloneIsolatedAccountFrame } from '../../../protocol/state/account-input-clone';
 import { appendAccountMempoolTxs } from '../../input/mempool';
 import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
@@ -21,6 +20,7 @@ import { publishAccountOverlay } from '../../state/candidate-overlay';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import { countOp } from '../../../support/performance/op-counters';
 import { timePerfPhase } from '../../../support/performance/profile';
+import { installCommittedAccountFrameHead } from '../frame/committed-envelope';
 
 const ackLog = createStructuredLogger('account.ack');
 
@@ -279,8 +279,7 @@ const installPendingFrameCommit = (
   validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   committedFrames: AccountCommittedFrame[],
 ): number => {
-  account.currentFrame = cloneIsolatedAccountFrame(pendingFrame);
-  account.currentHeight = pendingFrame.height;
+  installCommittedAccountFrameHead(account, pendingFrame);
   // The ACK is the second half of this bilateral certificate. It must survive
   // so a later board rotation can prove that both parties committed the frame.
   account.counterpartyFrameHanko = ackHanko;

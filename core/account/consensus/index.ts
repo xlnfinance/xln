@@ -21,7 +21,6 @@ import type {
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import {
-  cloneIsolatedAccountFrame,
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../protocol/state/account-input-clone';
@@ -104,6 +103,7 @@ import {
   rejectAccountInput,
 } from './result';
 import { timePerfPhase } from '../../support/performance/profile';
+import { installCommittedAccountFrameHead } from './frame/committed-envelope';
 import { countOp } from '../../support/performance/op-counters';
 export { proposeAccountFrame } from './proposal/propose';
 export type { HandleAccountInputResult } from './types';
@@ -491,8 +491,7 @@ async function commitIncomingFrameOnRealState(
     height: receivedFrame.height,
     tokens: account.state.deltas.size,
   });
-  account.currentFrame = cloneIsolatedAccountFrame(receivedFrame);
-  account.currentHeight = receivedFrame.height;
+  installCommittedAccountFrameHead(account, receivedFrame);
   const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;
   if (!acceptedFrameHanko) throw new Error('ACCEPTED_ACCOUNT_FRAME_HANKO_MISSING');
   account.counterpartyFrameHanko = acceptedFrameHanko;

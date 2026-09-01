@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { executeCrontab, initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { installCommittedAccountFrameHead } from '../../../account/consensus/frame/committed-envelope';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
@@ -16,7 +17,7 @@ import {
   readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
-import type { AccountReplica } from '../../../types/account';
+import type { AccountFrame, AccountReplica } from '../../../types/account';
 import type { EntityCandidateEffect, EntityReplica } from '../../../entity/types';
 import {
   getEntityAccountForWrite,
@@ -574,7 +575,7 @@ describe('htlc event contract and dispute tail', () => {
     });
 
     const candidateEffects: EntityCandidateEffect[] = [];
-    applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
+    const committedFrame: AccountFrame = {
       height: 1,
       timestamp: replica.state.timestamp,
       jHeight: 0,
@@ -589,7 +590,17 @@ describe('htlc event contract and dispute tail', () => {
       prevFrameHash: '',
       accountStateRoot: '',
       stateHash: '',
-    }, true, [], env, candidateEffects);
+    };
+    installCommittedAccountFrameHead(account, committedFrame);
+    applyCommittedAccountFrameFollowups(
+      replica.state,
+      counterpartyId,
+      committedFrame,
+      true,
+      [],
+      env,
+      candidateEffects,
+    );
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(account.mempool).toEqual([]);

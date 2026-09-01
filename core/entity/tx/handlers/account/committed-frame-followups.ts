@@ -9,7 +9,6 @@ import { createStructuredLogger } from '../../../../support/logger';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import type { AccountTxTarget } from './orderbook/queue';
 import { applyCommittedLendingFollowup } from './committed-lending-followup';
-import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import type { BookIntentSlotWriter } from '../../../books/book-intents';
 import {
   hasInboundPayment,
@@ -58,14 +57,6 @@ const applyCommittedHtlcResolveFollowup = (
   candidateEffects: EntityCandidateEffect[],
   bookIntentSlot: BookIntentSlotWriter | undefined,
 ): void => {
-  const visible = newState.accounts.get(counterpartyId);
-  if (visible?.mempool?.length) {
-    const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
-    if (!account) throw new Error(`HTLC_FOLLOWUP_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
-    account.mempool = account.mempool.filter((mempoolTx) =>
-      !(mempoolTx.type === 'htlc_lock' && mempoolTx.data.lockId === accountTx.data.lockId)
-    );
-  }
   if (newState.crontabState) cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
   if (accountTx.data.outcome !== 'secret') return;
   if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
