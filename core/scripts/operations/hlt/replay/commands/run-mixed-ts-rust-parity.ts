@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-/** Record one production TS transcript, then prove it with independent Rust W1/W4 DBs. */
+/** Prove one bound production TS transcript with isolated TS/Rust W1/W4 replays. */
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -50,26 +50,17 @@ const run = (
   return result.stdout;
 };
 
-const recordingArgument = (): string | null => {
+const recordingArgument = (): string => {
   const index = process.argv.indexOf('--recording');
-  if (index < 0) return null;
+  if (index < 0) throw new Error('HLT_MIXED_PARITY_RECORDING_ARGUMENT_REQUIRED');
   const path = String(process.argv[index + 1] ?? '').trim();
   if (!path) throw new Error('HLT_MIXED_PARITY_RECORDING_ARGUMENT_MISSING');
   return path;
 };
 
-const record = (): string => {
-  const output = run(process.execPath, [
-    'core/scripts/operations/hlt/replay/commands/run-authority-evidence-record.ts',
-  ], remainingParityBudget('record'));
-  const match = /HLT_RUNTIME_REPLAY_V1 path=([^\s]+)/.exec(output);
-  if (!match?.[1]) throw new Error('HLT_MIXED_PARITY_RECORDING_PATH_MISSING');
-  return match[1];
-};
-
-// A supplied immutable artifact is replayed directly; recording is never
-// repeated merely to obtain fresh native DBs for another worker-count trial.
-const recordingPath = recordingArgument() ?? record();
+// Recording and replay are separate bounded commands. Requiring the immutable
+// artifact prevents a failed replay retry from silently producing a new WAL.
+const recordingPath = recordingArgument();
 const artifact = readHltHubRecording(recordingPath);
 if (artifact.source.engine !== 'ts') throw new Error('HLT_MIXED_PARITY_SOURCE_NOT_TS');
 const meshRoot = readFileSync(join(artifact.source.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();

@@ -34,11 +34,12 @@ test('binds one closed WAL and runtime seed before creating pristine replay copi
   }
 });
 
-test('one-artifact gate runs four isolated exact replays with 30-second child limits', () => {
-  const gate = readFileSync(join(
+test('one-artifact gate runs four isolated exact replays inside one 30-second budget', () => {
+  const gatePath = join(
     repoRoot,
     'core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts',
-  ), 'utf8');
+  );
+  const gate = readFileSync(gatePath, 'utf8');
   const replay = readFileSync(join(
     repoRoot,
     'core/scripts/operations/hlt/replay/replay-hub-recording.ts',
@@ -52,6 +53,7 @@ test('one-artifact gate runs four isolated exact replays with 30-second child li
     'core/scripts/operations/hlt/workload/worker-mixed.ts',
   ), 'utf8');
   expect(gate).toContain('const PARITY_GATE_TIMEOUT_MS = 30_000');
+  expect(gate).toContain('HLT_MIXED_PARITY_RECORDING_ARGUMENT_REQUIRED');
   expect(gate).toContain('remainingParityBudget(`ts-w${workers}`)');
   expect(gate).toContain('replayTypescript(1)');
   expect(gate).toContain('replayTypescript(4)');
@@ -65,6 +67,15 @@ test('one-artifact gate runs four isolated exact replays with 30-second child li
   const paritySmoke = /HLT_MIXED_PARITY_SMOKE[\s\S]*?\}\)\}`\);/.exec(workerMixed)?.[0];
   expect(paritySmoke).toBeDefined();
   expect(paritySmoke).not.toMatch(/tps|rate|perSecond/i);
+  const missingRecording = Bun.spawnSync([process.execPath, gatePath], {
+    cwd: repoRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  expect(missingRecording.exitCode).not.toBe(0);
+  expect(missingRecording.stderr.toString()).toContain(
+    'HLT_MIXED_PARITY_RECORDING_ARGUMENT_REQUIRED',
+  );
 });
 
 test('selects the functional TS mixed artifact for smoke and authority recording', () => {
