@@ -317,7 +317,7 @@ const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => {
   const engine = canonicalHubEngine(name);
   const apiPort = args.nodeApiPortBase + index;
   const configuredPublicPort = args.nodePublicPortBase + index;
-  // TS owns /rpc and /ws on one Bun server. Native H1 currently owns two
+  // TS owns /rpc and /ws on one Bun server. Rust H1 owns two
   // independent listeners, so its direct socket must use the first free slot
   // after the three hubs and MM when the configured bases coincide.
   const publicPort = engine === 'rust' && configuredPublicPort === apiPort

@@ -1,5 +1,8 @@
 mod common;
 
+#[path = "authority/account_tx_dispute_admission_vectors.rs"]
+mod account_tx_dispute_admission_vectors;
+
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountOutput, AccountTx, AccountVerdict, DeliveryMode, ReserveSide, SequentialAccountEngine,

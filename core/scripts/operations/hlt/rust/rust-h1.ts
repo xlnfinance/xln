@@ -224,6 +224,7 @@ export type RustH1Metrics = Readonly<{
   outboxRowsPending: number;
   outboxBytesPending: number;
   outboxFailures: number;
+  retainedWalBytes: number;
   acceptedPayments: number;
   completedPayments: number;
   matchedSwaps: number;
@@ -264,6 +265,14 @@ export type RustH1Metrics = Readonly<{
   totalProjectionContextMicros: number;
   totalProjectionCheckpointMicros: number;
   totalProjectionEncodeMicros: number;
+  totalStoragePrepareValidateMicros: number;
+  totalStorageBatchBuildMicros: number;
+  totalStorageDbWriteSyncMicros: number;
+  totalStorageDirectorySyncMicros: number;
+  totalStoragePostCommitMicros: number;
+  totalBarrierWaitForPreviousCommitMicros: number;
+  totalCommitterBusyMicros: number;
+  totalCommitterIdleMicros: number;
   accountCoordinatorWallMicros: number;
   accountCoordinatorPreDispatchMicros: number;
   accountRunLanesWallMicros: number;
@@ -333,6 +342,14 @@ export type RustH1EconomicPhaseMetrics = Readonly<{
   projectionContextMicros: number;
   projectionCheckpointMicros: number;
   projectionEncodeMicros: number;
+  storagePrepareValidateMicros: number;
+  storageBatchBuildMicros: number;
+  storageDbWriteSyncMicros: number;
+  storageDirectorySyncMicros: number;
+  storagePostCommitMicros: number;
+  barrierWaitForPreviousCommitMicros: number;
+  committerBusyMicros: number;
+  committerIdleMicros: number;
   accountCoordinatorWallMicros: number;
   accountCoordinatorPreDispatchMicros: number;
   accountRunLanesWallMicros: number;
@@ -451,6 +468,14 @@ export const diffRustH1EconomicMetrics = (
     projectionContextMicros: delta('totalProjectionContextMicros'),
     projectionCheckpointMicros: delta('totalProjectionCheckpointMicros'),
     projectionEncodeMicros: delta('totalProjectionEncodeMicros'),
+    storagePrepareValidateMicros: delta('totalStoragePrepareValidateMicros'),
+    storageBatchBuildMicros: delta('totalStorageBatchBuildMicros'),
+    storageDbWriteSyncMicros: delta('totalStorageDbWriteSyncMicros'),
+    storageDirectorySyncMicros: delta('totalStorageDirectorySyncMicros'),
+    storagePostCommitMicros: delta('totalStoragePostCommitMicros'),
+    barrierWaitForPreviousCommitMicros: delta('totalBarrierWaitForPreviousCommitMicros'),
+    committerBusyMicros: delta('totalCommitterBusyMicros'),
+    committerIdleMicros: delta('totalCommitterIdleMicros'),
     accountCoordinatorWallMicros: delta('accountCoordinatorWallMicros'),
     accountCoordinatorPreDispatchMicros: delta('accountCoordinatorPreDispatchMicros'),
     accountRunLanesWallMicros: delta('accountRunLanesWallMicros'),
@@ -578,7 +603,8 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     'backpressureWaitMicros', 'backpressureWaitMaxMicros',
     'acceptedConnections', 'authenticatedSessions', 'rejectedSessions', 'openSessions',
     'queueRejections', 'outputsPublished', 'outboxTargetsPending',
-    'outboxRowsPending', 'outboxBytesPending', 'outboxFailures', 'applyMicros', 'projectionMicros',
+    'outboxRowsPending', 'outboxBytesPending', 'outboxFailures', 'retainedWalBytes',
+    'applyMicros', 'projectionMicros',
     'storageMicros', 'publicationMicros', 'acceptedPayments', 'completedPayments',
     'matchedSwaps', 'zeroFillSwapCancels', 'paybookOpen', 'orderbookTradeCount', 'openBookOrders',
     'openSwapOffers', 'resolvingSwapOffers', 'lastCompletedAtUnixMicros',
@@ -599,6 +625,10 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     'totalProjectionInputMicros', 'totalProjectionMachineMicros',
     'totalProjectionMetaMicros', 'totalProjectionContextMicros',
     'totalProjectionCheckpointMicros', 'totalProjectionEncodeMicros',
+    'totalStoragePrepareValidateMicros', 'totalStorageBatchBuildMicros',
+    'totalStorageDbWriteSyncMicros', 'totalStorageDirectorySyncMicros',
+    'totalStoragePostCommitMicros', 'totalBarrierWaitForPreviousCommitMicros',
+    'totalCommitterBusyMicros', 'totalCommitterIdleMicros',
   ] as const;
   const values = Object.fromEntries(fields.map(field => {
     const value = Number(record[field]);

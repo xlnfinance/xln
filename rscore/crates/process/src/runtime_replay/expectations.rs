@@ -26,6 +26,44 @@ struct EntityEffectExpectation {
 pub(super) struct ReplayExpectations {
     runtime_frames: BTreeMap<u64, RuntimeFrameExpectation>,
     entity_effects: BTreeMap<u64, EntityEffectExpectation>,
+    entity_events: BTreeMap<u64, EntityEffectExpectation>,
+}
+
+fn entity_event_expectations(
+    root: &Value,
+) -> Result<BTreeMap<u64, EntityEffectExpectation>, String> {
+    let authority = field(root, "authorityEvidence", "recordingRoot")?;
+    let expectations = field(authority, "expectations", "authorityEvidence")?;
+    let rows = array(
+        field(
+            expectations,
+            "entityFrameEvents",
+            "authorityEvidence.expectations",
+        )?,
+        "authorityEvidence.expectations.entityFrameEvents",
+    )?;
+    let mut output = BTreeMap::new();
+    for (index, row) in rows.iter().enumerate() {
+        let path = format!("authorityEvidence.expectations.entityFrameEvents[{index}]");
+        let height = unsigned(
+            field(row, "runtimeHeight", &path)?,
+            &format!("{path}.runtimeHeight"),
+        )?;
+        let expectation = EntityEffectExpectation {
+            count: unsigned(
+                field(row, "eventCount", &path)?,
+                &format!("{path}.eventCount"),
+            )?,
+            digest: digest(
+                field(row, "orderedEventDigest", &path)?,
+                &format!("{path}.orderedEventDigest"),
+            )?,
+        };
+        if output.insert(height, expectation).is_some() {
+            return Err(format!("RUNTIME_REPLAY_EXPECTED_EVENT_DUPLICATE:{height}"));
+        }
+    }
+    Ok(output)
 }
 
 fn entity_effect_expectations(
@@ -106,55 +144,45 @@ fn digest(value: &Value, path: &str) -> Result<[u8; 32], String> {
 }
 
 fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpectation>, String> {
-    let recording = field(root, "recording", "recordingRoot")?;
-    let bundles = array(
-        field(recording, "bundles", "recording")?,
-        "recording.bundles",
-    )?;
+    let tail = field(root, "tail", "recordingRoot")?;
+    if field(tail, "kind", "tail")?.as_str() != Some("journal_tail") {
+        return Err("RUNTIME_REPLAY_EXPECTED_TAIL_KIND".into());
+    }
+    let frames = array(field(tail, "frames", "tail")?, "tail.frames")?;
     let mut grouped = BTreeMap::new();
-    for (bundle_index, bundle) in bundles.iter().enumerate() {
-        let bundle_path = format!("recording.bundles[{bundle_index}]");
-        if field(bundle, "kind", &bundle_path)?.as_str() != Some("journal_tail") {
-            continue;
+    for (index, frame) in frames.iter().enumerate() {
+        let path = format!("tail.frames[{index}]");
+        if object(frame, &path)?.contains_key("runtimeStateHash") {
+            return Err(format!(
+                "RUNTIME_REPLAY_EXPECTED_RETIRED_RUNTIME_STATE_HASH:{path}"
+            ));
         }
-        let frames = array(
-            field(bundle, "frames", &bundle_path)?,
-            &format!("{bundle_path}.frames"),
+        let height = unsigned(field(frame, "height", &path)?, &format!("{path}.height"))?;
+        let canonical_state_hash = digest(
+            field(frame, "canonicalStateHash", &path)?,
+            &format!("{path}.canonicalStateHash"),
         )?;
-        for (index, frame) in frames.iter().enumerate() {
-            let path = format!("{bundle_path}.frames[{index}]");
-            if object(frame, &path)?.contains_key("runtimeStateHash") {
-                return Err(format!(
-                    "RUNTIME_REPLAY_EXPECTED_RETIRED_RUNTIME_STATE_HASH:{path}"
-                ));
-            }
-            let height = unsigned(field(frame, "height", &path)?, &format!("{path}.height"))?;
-            let canonical_state_hash = digest(
-                field(frame, "canonicalStateHash", &path)?,
-                &format!("{path}.canonicalStateHash"),
-            )?;
-            let expected = RuntimeFrameExpectation {
-                timestamp: unsigned(
-                    field(frame, "timestamp", &path)?,
-                    &format!("{path}.timestamp"),
-                )?,
-                post_state_hash: digest(
-                    field(frame, "postStateHash", &path)?,
-                    &format!("{path}.postStateHash"),
-                )?,
-                canonical_state_hash,
-                output_count: unsigned(
-                    field(frame, "runtimeOutputCount", &path)?,
-                    &format!("{path}.runtimeOutputCount"),
-                )?,
-                output_digest: digest(
-                    field(frame, "runtimeOutputsDigest", &path)?,
-                    &format!("{path}.runtimeOutputsDigest"),
-                )?,
-            };
-            if grouped.insert(height, expected).is_some() {
-                return Err(format!("RUNTIME_REPLAY_EXPECTED_FRAME_DUPLICATE:{height}"));
-            }
+        let expected = RuntimeFrameExpectation {
+            timestamp: unsigned(
+                field(frame, "timestamp", &path)?,
+                &format!("{path}.timestamp"),
+            )?,
+            post_state_hash: digest(
+                field(frame, "postStateHash", &path)?,
+                &format!("{path}.postStateHash"),
+            )?,
+            canonical_state_hash,
+            output_count: unsigned(
+                field(frame, "runtimeOutputCount", &path)?,
+                &format!("{path}.runtimeOutputCount"),
+            )?,
+            output_digest: digest(
+                field(frame, "runtimeOutputsDigest", &path)?,
+                &format!("{path}.runtimeOutputsDigest"),
+            )?,
+        };
+        if grouped.insert(height, expected).is_some() {
+            return Err(format!("RUNTIME_REPLAY_EXPECTED_FRAME_DUPLICATE:{height}"));
         }
     }
     Ok(grouped)
@@ -165,6 +193,7 @@ impl ReplayExpectations {
         Ok(Self {
             runtime_frames: runtime_expectations(root)?,
             entity_effects: entity_effect_expectations(root)?,
+            entity_events: entity_event_expectations(root)?,
         })
     }
 
@@ -176,9 +205,10 @@ impl ReplayExpectations {
             .map_err(|_| "RUNTIME_REPLAY_EXPECTED_RANGE".to_string())?;
         let runtime_frames = self.runtime_frames.range(from..=to).count();
         let entity_effects = self.entity_effects.range(from..=to).count();
-        if runtime_frames != expected || entity_effects != expected {
+        let entity_events = self.entity_events.range(from..=to).count();
+        if runtime_frames != expected || entity_effects != expected || entity_events != expected {
             return Err(format!(
-                "RUNTIME_REPLAY_EXPECTED_RANGE_MISMATCH:from={from}:to={to}:frames={runtime_frames}:effects={entity_effects}",
+                "RUNTIME_REPLAY_EXPECTED_RANGE_MISMATCH:from={from}:to={to}:frames={runtime_frames}:effects={entity_effects}:events={entity_events}",
             ));
         }
         Ok(())
@@ -204,6 +234,30 @@ impl ReplayExpectations {
                 commitments.entity_effect_count,
                 hex(&expected.digest),
                 hex(&commitments.entity_effects_parity_digest),
+            ))
+        }
+    }
+
+    pub(super) fn assert_events(
+        &self,
+        height: u64,
+        commitments: &RuntimeDurableCommitments,
+    ) -> Result<(), String> {
+        let expected = self
+            .entity_events
+            .get(&height)
+            .ok_or_else(|| format!("RUNTIME_REPLAY_EXPECTED_EVENTS_MISSING:{height}"))?;
+        if expected.count == commitments.entity_event_count
+            && expected.digest == commitments.events_parity_digest
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "RUNTIME_REPLAY_ENTITY_EVENTS_MISMATCH:{height}:expectedCount={}:actualCount={}:expectedDigest={}:actualDigest={}",
+                expected.count,
+                commitments.entity_event_count,
+                hex(&expected.digest),
+                hex(&commitments.events_parity_digest),
             ))
         }
     }
@@ -278,12 +332,16 @@ mod tests {
                         "effectCount": 0,
                         "orderedEffectDigest": format!("0x{}", "88".repeat(32)),
                     }],
+                    "entityFrameEvents": [{
+                        "runtimeHeight": 7,
+                        "eventCount": 0,
+                        "orderedEventDigest": format!("0x{}", "99".repeat(32)),
+                    }],
                 },
             },
-            "recording": {
-                "bundles": [{
-                    "kind": "journal_tail",
-                    "frames": [{
+            "tail": {
+                "kind": "journal_tail",
+                "frames": [{
                         "height": 7,
                         "timestamp": 9,
                         "postStateHash": format!("0x{}", "55".repeat(32)),
@@ -291,7 +349,6 @@ mod tests {
                         "runtimeOutputCount": 0,
                         "runtimeOutputsDigest": format!("0x{}", "66".repeat(32)),
                     }],
-                }],
             },
         })
     }
@@ -314,7 +371,7 @@ mod tests {
     #[test]
     fn canonical_root_is_required_and_the_retired_duplicate_is_rejected() {
         let mut missing = fixture();
-        missing["recording"]["bundles"][0]["frames"][0]
+        missing["tail"]["frames"][0]
             .as_object_mut()
             .expect("frame")
             .remove("canonicalStateHash");
@@ -326,7 +383,7 @@ mod tests {
         );
 
         let mut null = fixture();
-        null["recording"]["bundles"][0]["frames"][0]["canonicalStateHash"] = Value::Null;
+        null["tail"]["frames"][0]["canonicalStateHash"] = Value::Null;
         assert!(
             ReplayExpectations::from_recording(&null)
                 .err()
@@ -335,7 +392,7 @@ mod tests {
         );
 
         let mut retired = fixture();
-        retired["recording"]["bundles"][0]["frames"][0]["runtimeStateHash"] =
+        retired["tail"]["frames"][0]["runtimeStateHash"] =
             Value::String(format!("0x{}", "77".repeat(32)));
         assert!(
             ReplayExpectations::from_recording(&retired)
@@ -371,6 +428,12 @@ mod tests {
                 .assert_effects(7, &commitments)
                 .unwrap_err()
                 .contains("ENTITY_EFFECTS_MISMATCH")
+        );
+        assert!(
+            expectations
+                .assert_events(7, &commitments)
+                .unwrap_err()
+                .contains("ENTITY_EVENTS_MISMATCH")
         );
     }
 }

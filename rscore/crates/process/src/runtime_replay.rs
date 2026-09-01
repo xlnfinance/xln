@@ -21,9 +21,9 @@ use xln_rscore_engine::BoardDelays;
 use xln_rscore_runtime::processor::{EntityRoute, EntityRouteTable};
 use xln_rscore_runtime::restore::{
     ConcreteCheckpointConfiguration, ConcreteCheckpointSource, ConcreteWalSource,
-    DecodedRuntimeWalFrame, MigrationOrigin, decode_concrete_runtime_checkpoint,
-    decode_concrete_runtime_wal_frame, decode_offline_ts_import_checkpoint,
-    restore_decoded_runtime_checkpoint, verify_checkpoint_source,
+    DecodedRuntimeWalFrame, MigrationOrigin, decode_concrete_runtime_wal_frame,
+    decode_offline_ts_import_checkpoint, restore_decoded_runtime_checkpoint,
+    verify_checkpoint_source,
 };
 use xln_rscore_runtime::storage::native::{
     NativeRuntimeStore, NativeStorageConfig, validate_runtime_frame,
@@ -90,7 +90,16 @@ pub struct RuntimeReplayMetrics {
     pub projection_elapsed: Duration,
     pub storage_elapsed: Duration,
     pub publication_elapsed: Duration,
+    pub storage_prepare_validate_elapsed: Duration,
+    pub storage_batch_build_elapsed: Duration,
+    pub storage_db_write_sync_elapsed: Duration,
+    pub storage_directory_sync_elapsed: Duration,
+    pub storage_post_commit_elapsed: Duration,
+    pub barrier_wait_for_previous_commit_elapsed: Duration,
+    pub committer_busy_elapsed: Duration,
+    pub committer_idle_elapsed: Duration,
     pub effect_digests_compared: u64,
+    pub event_digests_compared: u64,
     pub outbox_digests_compared: u64,
     pub post_state_hashes_compared: u64,
     pub runtime_roots_compared: u64,
@@ -98,6 +107,23 @@ pub struct RuntimeReplayMetrics {
     /// Resident Account sharding observability per phase kind. Timing-only:
     /// serialized once after replay and never part of committed state.
     pub account_phase_metrics: Vec<xln_rscore_batch::AccountPhaseMetric>,
+}
+
+fn add_wall_decomposition(
+    metrics: &mut RuntimeReplayMetrics,
+    report: &xln_rscore_runtime::RuntimeProcessReport,
+) {
+    let timings = report.timings;
+    metrics.storage_elapsed += timings.storage;
+    metrics.publication_elapsed += timings.publication;
+    metrics.storage_prepare_validate_elapsed += timings.storage_prepare_validate;
+    metrics.storage_batch_build_elapsed += timings.storage_batch_build;
+    metrics.storage_db_write_sync_elapsed += timings.storage_db_write_sync;
+    metrics.storage_directory_sync_elapsed += timings.storage_directory_sync;
+    metrics.storage_post_commit_elapsed += timings.storage_post_commit;
+    metrics.barrier_wait_for_previous_commit_elapsed += timings.barrier_wait_for_previous_commit;
+    metrics.committer_busy_elapsed += timings.committer_busy;
+    metrics.committer_idle_elapsed += timings.committer_idle;
 }
 
 /// Submitted directPayment txs in one decoded input. Counted from the
@@ -144,17 +170,103 @@ fn field<'a>(value: &'a Value, name: &str, path: &str) -> Result<&'a Value, Stri
         .ok_or_else(|| format!("RUNTIME_REPLAY_FIELD:{path}.{name}"))
 }
 
-fn assert_native_scope(recording: &Value) -> Result<(), String> {
-    let policy = object(
-        field(recording, "featurePolicy", "recordingRoot")?,
-        "featurePolicy",
-    )?;
-    for field in ["disputes", "lending", "crossJ", "hubRebalance"] {
-        if policy.get(field).and_then(Value::as_str) != Some("disabled") {
-            return Err(format!("RUNTIME_REPLAY_FEATURE_NOT_DISABLED:{field}"));
+fn artifact_hex(value: &Value, path: &str) -> Result<Vec<u8>, String> {
+    let raw = value
+        .as_str()
+        .and_then(|value| value.strip_prefix("0x"))
+        .filter(|value| !value.is_empty() && value.len() % 2 == 0)
+        .ok_or_else(|| format!("RUNTIME_REPLAY_CHECKPOINT_HEX:{path}"))?;
+    (0..raw.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&raw[index..index + 2], 16)
+                .map_err(|_| format!("RUNTIME_REPLAY_CHECKPOINT_HEX:{path}"))
+        })
+        .collect()
+}
+
+struct ArtifactRow {
+    key: Vec<u8>,
+    value: Vec<u8>,
+}
+
+fn artifact_rows(value: &Value, path: &str) -> Result<Vec<ArtifactRow>, String> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| format!("RUNTIME_REPLAY_CHECKPOINT_ROWS:{path}"))?;
+    let mut output = Vec::with_capacity(rows.len());
+    let mut previous = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let row = row
+            .as_array()
+            .filter(|row| row.len() == 2)
+            .ok_or_else(|| format!("RUNTIME_REPLAY_CHECKPOINT_ROW:{path}:{index}"))?;
+        let key = artifact_hex(&row[0], &format!("{path}[{index}].key"))?;
+        if !previous.is_empty() && previous >= key {
+            return Err(format!(
+                "RUNTIME_REPLAY_CHECKPOINT_ROW_ORDER:{path}:{index}"
+            ));
         }
+        let value = artifact_hex(&row[1], &format!("{path}[{index}].value"))?;
+        previous = key.clone();
+        output.push(ArtifactRow { key, value });
     }
-    Ok(())
+    Ok(output)
+}
+
+fn checkpoint_from_artifact(root: &Value) -> Result<ConcreteCheckpointSource, String> {
+    let value = field(root, "checkpoint", "recordingRoot")?;
+    let checkpoint = object(value, "checkpoint")?;
+    let expected = [
+        "frameBytes",
+        "height",
+        "leafCount",
+        "rootHash",
+        "runtimeMachineLeaves",
+        "stateRows",
+    ];
+    if checkpoint.len() != expected.len()
+        || expected.iter().any(|name| !checkpoint.contains_key(*name))
+    {
+        return Err("RUNTIME_REPLAY_CHECKPOINT_FIELDS".into());
+    }
+    let height = checkpoint["height"]
+        .as_u64()
+        .filter(|height| *height > 0 && *height <= 9_007_199_254_740_991)
+        .ok_or_else(|| "RUNTIME_REPLAY_CHECKPOINT_HEIGHT".to_string())?;
+    let leaf_count = checkpoint["leafCount"]
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "RUNTIME_REPLAY_CHECKPOINT_LEAF_COUNT".to_string())?;
+    let root_hash = artifact_hex(&checkpoint["rootHash"], "checkpoint.rootHash")?
+        .try_into()
+        .map_err(|_| "RUNTIME_REPLAY_CHECKPOINT_ROOT_HASH".to_string())?;
+    let runtime_machine_leaves = artifact_rows(
+        &checkpoint["runtimeMachineLeaves"],
+        "checkpoint.runtimeMachineLeaves",
+    )?
+    .into_iter()
+    .map(|row| (row.key, row.value))
+    .collect::<Vec<_>>();
+    if runtime_machine_leaves.len() != leaf_count {
+        return Err("RUNTIME_REPLAY_CHECKPOINT_LEAF_COUNT_MISMATCH".into());
+    }
+    let state_rows = artifact_rows(&checkpoint["stateRows"], "checkpoint.stateRows")?
+        .into_iter()
+        .map(|row| (row.key, row.value))
+        .collect::<BTreeMap<_, _>>();
+    let source = ConcreteCheckpointSource {
+        height,
+        frame_bytes: artifact_hex(&checkpoint["frameBytes"], "checkpoint.frameBytes")?,
+        root_hash,
+        leaf_count,
+        runtime_machine_leaves,
+        state_rows,
+    };
+    verify_checkpoint_source(&source)
+        .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_SOURCE:{error}"))?;
+    Ok(source)
 }
 
 fn text_field<'a>(
@@ -319,8 +431,6 @@ fn assert_checkpoint_runtime_root(source: &ConcreteCheckpointSource) -> Result<(
 #[allow(clippy::too_many_arguments)]
 pub fn replay_runtime_wal(
     reader: &mut RuntimeWalReader,
-    mut checkpoint_reader: Option<&mut RuntimeWalReader>,
-    state_reader: &mut RuntimeWalReader,
     recording: &Value,
     runtime_seed: &str,
     runtime_signer_label: &str,
@@ -329,34 +439,26 @@ pub fn replay_runtime_wal(
     from: u64,
     to: u64,
     workers: usize,
-    migration_origin: Option<MigrationOrigin>,
     diff_dir: &Path,
 ) -> Result<RuntimeReplayMetrics, String> {
     if from <= 1 || to < from || workers == 0 {
         return Err("RUNTIME_REPLAY_ARGUMENTS".into());
     }
-    assert_native_scope(recording)?;
     let native_database = native_database.as_ref();
     let setup_started = Instant::now();
     let expectations = ReplayExpectations::from_recording(recording)?;
     expectations.assert_exact_range(from, to)?;
     let checkpoint_height = from - 1;
-    let source_checkpoint_hash = migration_origin
-        .map(|_| {
-            reader
-                .concrete_wal_source(checkpoint_height)
-                .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT:{error}"))
-                .map(|source| source.validated().frame_hash)
-        })
-        .transpose()?;
-
-    let checkpoint_source = match checkpoint_reader.as_deref_mut() {
-        Some(checkpoint_reader) => {
-            checkpoint_reader.concrete_checkpoint_source(state_reader, checkpoint_height)
-        }
-        None => reader.concrete_checkpoint_source(state_reader, checkpoint_height),
+    let checkpoint_source = checkpoint_from_artifact(recording)?;
+    if checkpoint_source.height != checkpoint_height {
+        return Err(format!(
+            "RUNTIME_REPLAY_CHECKPOINT_HEIGHT:expected={checkpoint_height}:actual={}",
+            checkpoint_source.height,
+        ));
     }
-    .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_SOURCE:{error}"))?;
+    let source_frame_hash = validate_runtime_frame(&checkpoint_source.frame_bytes)
+        .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT:{error}"))?
+        .frame_hash;
     assert_checkpoint_runtime_root(&checkpoint_source)?;
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_string(),
@@ -367,22 +469,19 @@ pub fn replay_runtime_wal(
         expected_protocol_fingerprint: PAYMENT_PROFILE_BINDING.protocol_fingerprint,
         board_delays: BoardDelays::default(),
     };
-    let decoded = match migration_origin {
-        Some(origin) => {
-            decode_offline_ts_import_checkpoint(checkpoint_source, configuration, origin)
-        }
-        None => decode_concrete_runtime_checkpoint(checkpoint_source, configuration),
-    }
+    let decoded = decode_offline_ts_import_checkpoint(
+        checkpoint_source.clone(),
+        configuration,
+        MigrationOrigin::OfflineTsImport,
+    )
     .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_DECODE:{error}"))?;
     let owner = decoded.entity_snapshot.entity_id.to_ascii_lowercase();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RUNTIME_REPLAY_RESTORE:{error}"))?;
-    if let (Some(origin), Some(source_frame_hash)) = (migration_origin, source_checkpoint_hash) {
-        restored
-            .replica
-            .durable
-            .adopt_offline_import_lineage(origin, source_frame_hash);
-    }
+    restored
+        .replica
+        .durable
+        .adopt_offline_import_lineage(MigrationOrigin::OfflineTsImport, source_frame_hash);
     // Validate-only replay reproduces the recorded frames bit-for-bit, so it
     // must run under the operator cadence the recording was produced with,
     // even on the offline-import binding where a live takeover would keep its
@@ -407,13 +506,9 @@ pub fn replay_runtime_wal(
 
     let routes = routes_from_wal(reader, &owner, from, to)?;
     let restart_routes = routes.clone();
-    let checkpoint_commit = match checkpoint_reader {
-        Some(checkpoint_reader) => {
-            checkpoint_reader.native_checkpoint_import_frame(state_reader, checkpoint_height)
-        }
-        None => reader.native_checkpoint_import_frame(state_reader, checkpoint_height),
-    }
-    .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_IMPORT_SOURCE:{error}"))?;
+    let checkpoint_commit = reader
+        .native_checkpoint_import_from_source(checkpoint_source)
+        .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_IMPORT_SOURCE:{error}"))?;
     let mut store = NativeRuntimeStore::open(
         native_database,
         NativeStorageConfig {
@@ -457,7 +552,16 @@ pub fn replay_runtime_wal(
         projection_elapsed: Duration::ZERO,
         storage_elapsed: Duration::ZERO,
         publication_elapsed: Duration::ZERO,
+        storage_prepare_validate_elapsed: Duration::ZERO,
+        storage_batch_build_elapsed: Duration::ZERO,
+        storage_db_write_sync_elapsed: Duration::ZERO,
+        storage_directory_sync_elapsed: Duration::ZERO,
+        storage_post_commit_elapsed: Duration::ZERO,
+        barrier_wait_for_previous_commit_elapsed: Duration::ZERO,
+        committer_busy_elapsed: Duration::ZERO,
+        committer_idle_elapsed: Duration::ZERO,
         effect_digests_compared: 0,
+        event_digests_compared: 0,
         outbox_digests_compared: 0,
         post_state_hashes_compared: 0,
         // The independently verified materialized checkpoint graph is the one
@@ -559,8 +663,7 @@ pub fn replay_runtime_wal(
             metrics.engine_elapsed += started.elapsed();
             metrics.apply_elapsed += report.timings.apply;
             metrics.projection_elapsed += report.timings.projection;
-            metrics.storage_elapsed += report.timings.storage;
-            metrics.publication_elapsed += report.timings.publication;
+            add_wall_decomposition(&mut metrics, &report);
             // The committer pipelines exactly one frame: this call reports
             // the previous frame's completed commit. Every replayed height
             // must still commit exactly once, in order; the terminal
@@ -640,6 +743,7 @@ pub fn replay_runtime_wal(
             }
             expectations.assert_durable(height, commitments)?;
             expectations.assert_effects(height, commitments)?;
+            expectations.assert_events(height, commitments)?;
 
             add(&mut metrics.frames, 1, "frames")?;
             add(&mut metrics.ingress, ingress, "ingress")?;
@@ -650,6 +754,7 @@ pub fn replay_runtime_wal(
                 "egress",
             )?;
             add(&mut metrics.effect_digests_compared, 1, "effects")?;
+            add(&mut metrics.event_digests_compared, 1, "events")?;
             add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
             add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
             metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
@@ -681,8 +786,7 @@ pub fn replay_runtime_wal(
                     .map_err(|_| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?,
             )
             .ok_or_else(|| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?;
-        metrics.storage_elapsed += final_commit.timings.storage;
-        metrics.publication_elapsed += final_commit.timings.publication;
+        add_wall_decomposition(&mut metrics, &final_commit);
     }
     if committed_next != to + 1 {
         return Err(format!(
@@ -702,15 +806,17 @@ pub fn replay_runtime_wal(
     let expected_frames = to - from + 1;
     if metrics.frames != expected_frames
         || metrics.effect_digests_compared != expected_frames
+        || metrics.event_digests_compared != expected_frames
         || metrics.outbox_digests_compared != expected_frames
         || metrics.post_state_hashes_compared != expected_frames
         || metrics.runtime_roots_compared == 0
     {
         return Err(format!(
-            "RUNTIME_REPLAY_PARITY_UNARMED:frames={}/{}:effects={}:outbox={}:postState={}:runtimeRoots={}",
+            "RUNTIME_REPLAY_PARITY_UNARMED:frames={}/{}:effects={}:events={}:outbox={}:postState={}:runtimeRoots={}",
             metrics.frames,
             expected_frames,
             metrics.effect_digests_compared,
+            metrics.event_digests_compared,
             metrics.outbox_digests_compared,
             metrics.post_state_hashes_compared,
             metrics.runtime_roots_compared,
@@ -740,7 +846,7 @@ pub fn replay_runtime_wal(
         entity_signer_label,
         workers,
         restart_routes,
-        migration_origin,
+        Some(MigrationOrigin::OfflineTsImport),
     )?;
     let actual = restarted
         .processor

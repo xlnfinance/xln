@@ -92,10 +92,10 @@ const orderbookWire = (state: EntityState): RscoreWireValue[] | null => {
   if (ext === undefined) return null;
   return [
     [...ext.books.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareStableText(left, right))
       .map(([pairId, book]) => [pairId, bookWire(book)]),
     [...ext.pairDimensions.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareStableText(left, right))
       .map(([pairId, dimensions]) => [
         pairId,
         dimensions.baseTokenDecimals,
@@ -124,7 +124,7 @@ const metadataWire = (state: EntityState): RscoreWireValue[] | null => {
     profile.minTradeSize.toString(),
     [...profile.supportedPairs],
   ], [...ext.referrals.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareStableText(left, right))
     .map(([key, referral]) => [
       bytes32(key, 'RSCORE_ENTITY_REFERRAL_KEY'),
       bytes32(referral.entityId, 'RSCORE_ENTITY_REFERRAL_ENTITY'),
@@ -137,7 +137,7 @@ const metadataWire = (state: EntityState): RscoreWireValue[] | null => {
 
 const paybookWire = (state: EntityState): RscoreWireValue[] => [
   [...state.paybook.entries.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareStableText(left, right))
     .map(([key, route]) => {
       if (key !== route.hashlock) throw new Error(`RSCORE_ENTITY_PAYBOOK_KEY:${key}`);
       if (route.secretAckedAt !== undefined || route.crossJurisdictionRelay !== undefined) {
@@ -234,7 +234,7 @@ export const entityOwnedSectionDigests = (
 ): readonly Readonly<{ field: string; digest: string }>[] =>
   computeEntityConsensusSectionDigestsCold(state)
     .filter(section => OWNED_FIELDS.has(section.field))
-    .sort((left, right) => left.field.localeCompare(right.field));
+    .sort((left, right) => compareStableText(left.field, right.field));
 
 export const entitySnapshotWire = (state: EntityState): RscoreWireValue[] => {
   const sections = entityOwnedSectionDigests(state)

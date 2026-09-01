@@ -14,6 +14,7 @@ import {
 import { decodeProductionSwapLoadTopology } from '../../../scripts/operations/hlt/topology';
 import {
   decodeAccountPage,
+  decodeRuntimeManifestEntries,
   decodeLoadSustainedReport,
   decodeHubMinTradeSize,
   selectLocalHubIdentity,
@@ -556,7 +557,7 @@ describe('production swap load evidence', () => {
       bestAskPriceTicks: 25_001_000n,
     };
     const report = decodeLoadSustainedReport({
-      schema: 'xln-production-swap-load-sustained-v1', mode: 'same',
+      schema: 'xln-production-swap-load-sustained-v1', engine: 'ts', mode: 'same',
       schedule: 'one_order_per_account_per_round', configuredUsers: 4,
       configuredRounds: 5, cadenceMs: 1_000,
       offeredOrderRate: 4, offeredEconomicSwapRate: 2,
@@ -906,6 +907,28 @@ describe('production swap load evidence', () => {
     ])).toThrow('PRODUCTION_SWAP_LOAD_COUNTER_REGRESSION:completedTotal');
     expect(() => observation({ latencyHistogram: [] }))
       .toThrow('PRODUCTION_SWAP_LOAD_LATENCY_HISTOGRAM_LENGTH_INVALID');
+  });
+
+  test('runtime manifest names the exact production engine for each process', () => {
+    const root = {
+      importUrl: 'http://127.0.0.1/app',
+      manifest: {
+        v: 1, issuedAt: 1, expiresAt: 2,
+        entries: [{ access: 'admin', engine: 'ts', label: 'H1', token: 'token', wsUrl: 'ws://127.0.0.1/rpc' }],
+      },
+    };
+    expect(decodeRuntimeManifestEntries(root)[0]?.engine).toBe('ts');
+    expect(() => decodeRuntimeManifestEntries({
+      ...root,
+      manifest: { ...root.manifest, entries: [{ ...root.manifest.entries[0], engine: 'native' }] },
+    })).toThrow('PRODUCTION_SWAP_LOAD_MANIFEST_ENGINE_INVALID:0');
+    const entry = root.manifest.entries[0];
+    if (entry === undefined) throw new Error('TEST_RUNTIME_MANIFEST_ENTRY_REQUIRED');
+    const { engine: _engine, ...missingEngine } = entry;
+    expect(() => decodeRuntimeManifestEntries({
+      ...root,
+      manifest: { ...root.manifest, entries: [missingEngine] },
+    })).toThrow('PRODUCTION_SWAP_LOAD_MANIFEST_ENTRY_FIELDS_INVALID:0');
   });
 
   test('completed TPS uses economic completions and hard-stops on loss or 70% RAM', () => {

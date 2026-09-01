@@ -5,6 +5,12 @@ import {
   buildHltEntityEffectEvidence,
   type HltEntityEffectEvidence,
 } from './entity-effect-evidence';
+import {
+  buildHltEntityFrameEventEvidence,
+  type HltEntityFrameEventEvidence,
+} from './entity-frame-event-evidence';
+
+const MIN_EXACT_REPLAY_FRAMES = 1_000;
 
 export type HltAuthorityExpectations = Readonly<{
   runtimeFrames: readonly Readonly<{
@@ -20,6 +26,8 @@ export type HltAuthorityExpectations = Readonly<{
   }>[];
   /** Ordered Entity economic effects projected from the Runtime WAL frame logs. */
   entityEffects: readonly HltEntityEffectEvidence[];
+  /** Exact ordered events from the signed EntityFrames carried by Runtime input. */
+  entityFrameEvents: readonly HltEntityFrameEventEvidence[];
 }>;
 
 export type HltAuthorityEvidence = Readonly<{
@@ -32,41 +40,70 @@ const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => {
   return [];
 };
 
-const assertAccountFeaturePolicy = (tx: AccountTx): void => {
+type MixedCoverage = {
+  payments: number;
+  sameChainSwapOffers: number;
+  disputePrepare: number;
+  disputeFinalizeCommand: number;
+  disputeStartedEvent: number;
+  disputeFinalizedEvent: number;
+};
+
+const assertAccountScope = (tx: AccountTx, coverage: MixedCoverage): void => {
   if (
     tx.type.startsWith('lending_') || tx.type.startsWith('cross_') ||
     tx.type === 'reserve_to_collateral'
-  ) throw new Error(`HLT_AUTHORITY_FEATURE_POLICY_ACCOUNT_TX_FORBIDDEN:${tx.type}`);
+  ) throw new Error(`HLT_AUTHORITY_SCOPE_ACCOUNT_TX_FORBIDDEN:${tx.type}`);
   if (tx.type === 'swap_offer' && tx.data.crossJurisdiction !== undefined) {
-    throw new Error('HLT_AUTHORITY_FEATURE_POLICY_CROSS_J_SWAP_FORBIDDEN');
+    throw new Error('HLT_AUTHORITY_SCOPE_CROSS_J_SWAP_FORBIDDEN');
   }
+  if (tx.type === 'swap_offer') coverage.sameChainSwapOffers += 1;
 };
 
-const assertEntityFeaturePolicy = (tx: EntityTx): void => {
+const assertEntityScope = (tx: EntityTx, coverage: MixedCoverage): void => {
   if (
-    tx.type === 'disputeStart' || tx.type === 'disputeFinalize' ||
     tx.type === 'crossPullClose' || tx.type.startsWith('crossJurisdiction') ||
-    tx.type.startsWith('lending') || tx.type === 'runtimeOutput'
-  ) throw new Error(`HLT_AUTHORITY_FEATURE_POLICY_ENTITY_TX_FORBIDDEN:${tx.type}`);
-  if (tx.type === 'accountInput' && tx.data.kind === 'ack_frame') {
-    for (const accountTx of tx.data.proposal.frame.accountTxs) assertAccountFeaturePolicy(accountTx);
-  }
-  for (const nested of nestedEntityTxs(tx)) assertEntityFeaturePolicy(nested);
-};
-
-const assertFeaturePolicy = (frames: readonly PersistedFrameJournal[]): void => {
-  for (const frame of frames) {
-    for (const input of frame.runtimeInput.entityInputs) {
-      for (const tx of input.entityTxs ?? []) assertEntityFeaturePolicy(tx);
-      for (const tx of input.proposedFrame?.txs ?? []) assertEntityFeaturePolicy(tx);
+    tx.type.startsWith('lending')
+  ) throw new Error(`HLT_AUTHORITY_SCOPE_ENTITY_TX_FORBIDDEN:${tx.type}`);
+  if (tx.type === 'directPayment' || tx.type === 'htlcPayment') coverage.payments += 1;
+  if (tx.type === 'prepareDispute') coverage.disputePrepare += 1;
+  if (tx.type === 'disputeFinalize') coverage.disputeFinalizeCommand += 1;
+  if (tx.type === 'j_event') {
+    for (const block of tx.data.blocks) {
+      for (const event of block.events) {
+        if (event.type === 'DisputeStarted') coverage.disputeStartedEvent += 1;
+        if (event.type === 'DisputeFinalized') coverage.disputeFinalizedEvent += 1;
+      }
     }
   }
+  if (tx.type === 'accountInput' && tx.data.kind === 'ack_frame') {
+    for (const accountTx of tx.data.proposal.frame.accountTxs) assertAccountScope(accountTx, coverage);
+  }
+  for (const nested of nestedEntityTxs(tx)) assertEntityScope(nested, coverage);
+};
+
+const inspectCanonicalScope = (frames: readonly PersistedFrameJournal[]): MixedCoverage => {
+  const coverage: MixedCoverage = {
+    payments: 0,
+    sameChainSwapOffers: 0,
+    disputePrepare: 0,
+    disputeFinalizeCommand: 0,
+    disputeStartedEvent: 0,
+    disputeFinalizedEvent: 0,
+  };
+  for (const frame of frames) {
+    for (const input of frame.runtimeInput.entityInputs) {
+      for (const tx of input.entityTxs ?? []) assertEntityScope(tx, coverage);
+      for (const tx of input.proposedFrame?.txs ?? []) assertEntityScope(tx, coverage);
+    }
+  }
+  return coverage;
 };
 
 export const buildHltAuthorityEvidence = (
   frames: readonly PersistedFrameJournal[],
 ): HltAuthorityEvidence => {
-  assertFeaturePolicy(frames);
+  inspectCanonicalScope(frames);
   return {
     expectations: {
       runtimeFrames: frames.map(frame => ({
@@ -81,19 +118,43 @@ export const buildHltAuthorityEvidence = (
         orderedOutputDigest: frame.runtimeOutputsDigest,
       })),
       entityEffects: frames.map(frame => buildHltEntityEffectEvidence(frame.height, frame.logs)),
+      entityFrameEvents: frames.map(buildHltEntityFrameEventEvidence),
     },
   };
 };
 
 export const assertCompleteHltAuthorityEvidence = (evidence: HltAuthorityEvidence): void => {
-  const { runtimeFrames, effects, entityEffects } = evidence.expectations;
-  if (runtimeFrames.length === 0) throw new Error('HLT_AUTHORITY_EVIDENCE_RUNTIME_FRAMES_EMPTY');
-  if (effects.length !== runtimeFrames.length || entityEffects.length !== runtimeFrames.length) {
+  const { runtimeFrames, effects, entityEffects, entityFrameEvents } = evidence.expectations;
+  if (runtimeFrames.length < MIN_EXACT_REPLAY_FRAMES) {
+    throw new Error(`HLT_AUTHORITY_EVIDENCE_RUNTIME_FRAMES_MINIMUM:${runtimeFrames.length}:${MIN_EXACT_REPLAY_FRAMES}`);
+  }
+  if (
+    effects.length !== runtimeFrames.length || entityEffects.length !== runtimeFrames.length ||
+    entityFrameEvents.length !== runtimeFrames.length
+  ) {
     throw new Error(
       `HLT_AUTHORITY_EVIDENCE_FRAME_COUNT_MISMATCH:` +
-      `runtime=${runtimeFrames.length}:effects=${effects.length}:entityEffects=${entityEffects.length}`,
+      `runtime=${runtimeFrames.length}:effects=${effects.length}:entityEffects=${entityEffects.length}:` +
+      `entityFrameEvents=${entityFrameEvents.length}`,
     );
   }
   const missingRoot = runtimeFrames.find(frame => frame.canonicalStateHash === null);
   if (missingRoot) throw new Error(`HLT_AUTHORITY_EVIDENCE_RUNTIME_ROOT_MISSING:${missingRoot.height}`);
+  for (let index = 1; index < runtimeFrames.length; index += 1) {
+    const previous = runtimeFrames[index - 1];
+    const current = runtimeFrames[index];
+    if (previous === undefined || current === undefined) {
+      throw new Error(`HLT_AUTHORITY_EVIDENCE_RUNTIME_FRAME_INDEX:${index}`);
+    }
+    if (current.height !== previous.height + 1) {
+      throw new Error(`HLT_AUTHORITY_EVIDENCE_RUNTIME_FRAME_GAP:${previous.height}:${current.height}`);
+    }
+  }
+};
+
+export const assertCanonicalMixedCoverage = (frames: readonly PersistedFrameJournal[]): void => {
+  const coverage = inspectCanonicalScope(frames);
+  for (const [field, count] of Object.entries(coverage)) {
+    if (count < 1) throw new Error(`HLT_AUTHORITY_EVIDENCE_MIXED_COVERAGE_MISSING:${field}`);
+  }
 };

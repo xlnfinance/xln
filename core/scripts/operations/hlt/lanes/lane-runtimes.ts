@@ -1119,8 +1119,9 @@ const spawnSovereignRuntimeHost = async (options: {
     const runtimeId = runtimeIds[index];
     if (!runtimeId) throw new Error(`HLT_SOVEREIGN_RUNTIME_ID_MISSING:${index}`);
     const runtime = options.connectRuntimeAdapters
-      ? await connectRuntime({
+        ? await connectRuntime({
           label: `load-runtime-${options.laneIndex}-${index}`,
+          engine: 'ts',
           wsUrl: `ws://127.0.0.1:${port}/rpc`,
           token: deriveRuntimeAdapterCapabilityToken(authSeed, 'full', Date.now() + 60 * 60_000, {
             audience: runtimeId,

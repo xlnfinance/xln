@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-/** HLT phase 1: run real sovereign nodes once, then seal H1 checkpoint + WAL tail. */
+/** Run the live sovereign workload. Offline replay fixtures have their own builder. */
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -12,6 +12,7 @@ import {
   parseHltEngineSelection,
 } from './rust/rust-h1';
 import { hltLanePortsPerSlot } from './lanes/lane-port-capacity';
+import { runParityGatedHltChild } from './controller/live-economic-controller';
 
 const workDirRaw = String(process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || '').trim();
 if (!workDirRaw) throw new Error('HLT_BUILD_WORK_DIR_MISSING');
@@ -23,11 +24,8 @@ if (!['payments', 'same', 'mixed', 'cross'].includes(workload)) {
   throw new Error(`HLT_BUILD_WORKLOAD_INVALID:${workload}`);
 }
 const authorityEvidence = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1';
-if (authorityEvidence && workload !== 'mixed') {
-  throw new Error(`HLT_AUTHORITY_EVIDENCE_REQUIRES_MIXED:${workload}`);
-}
-if (authorityEvidence && process.env['XLN_MM_CROSS_J'] !== '0') {
-  throw new Error('HLT_AUTHORITY_EVIDENCE_REQUIRES_MM_CROSS_J_DISABLED');
+if (authorityEvidence && (workload !== 'mixed' || process.env['XLN_MM_CROSS_J'] !== '0')) {
+  throw new Error('HLT_AUTHORITY_EVIDENCE_REQUIRES_MIXED_SAME_J');
 }
 const selection = parseHltEngineSelection(process.env);
 if (selection.engine === 'rust' && workload !== 'payments' && workload !== 'same' && workload !== 'mixed') {
@@ -79,21 +77,25 @@ const buildEnv = {
     XLN_MM_CROSS_J: '0',
     XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
   } : {}),
-  // The RRS MVP owns one H1 Entity. Cross-J is separately disabled below;
-  // booting a second local Entity would silently turn this into a multi-Entity gate.
   ...(authorityEvidence ? { XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1' } : {}),
 };
-const smoke = spawnSync(process.execPath, ['core/scripts/operations/production/local-prod-smoke.ts'], {
-  cwd: process.cwd(),
-  env: buildEnv,
-  stdio: 'inherit',
-  // A gated HLT is already owned by the launcher in two bounded phases:
-  // setup ends at `ready`, then the launcher writes `start` and owns the
-  // 20-second offer plus drain deadline. A wall clock here would include
-  // setup and kill a healthy live stack during its economic drain.
-  timeout: process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ? undefined : 30_000,
-});
-if (smoke.status !== 0) throw new Error(`HLT_BUILD_SMOKE_FAILED:${String(smoke.status)}`);
+const economicGateDir = String(process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ?? '').trim();
+const smokeStatus = economicGateDir
+  ? await runParityGatedHltChild({
+      gateDir: economicGateDir,
+      parityCommand: process.execPath,
+      parityArgs: ['core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts'],
+      command: process.execPath,
+      args: ['core/scripts/operations/production/local-prod-smoke.ts'],
+      env: buildEnv,
+    })
+  : spawnSync(process.execPath, ['core/scripts/operations/production/local-prod-smoke.ts'], {
+      cwd: process.cwd(),
+      env: buildEnv,
+      stdio: 'inherit',
+      timeout: 30_000,
+    }).status;
+if (smokeStatus !== 0) throw new Error(`HLT_BUILD_SMOKE_FAILED:${String(smokeStatus)}`);
 
 const reportPath = selection.engine === 'rust'
   ? join(workDir, 'hlt-rust-h1-live.json')
@@ -103,10 +105,9 @@ const reportPath = selection.engine === 'rust'
     ? join(workDir, 'production-cross-swap-load-report.json')
     : join(workDir, 'production-swap-load-report.json');
 if (!existsSync(reportPath)) throw new Error(`HLT_BUILD_WORKLOAD_REPORT_MISSING:${reportPath}`);
-if (selection.engine === 'ts' && !existsSync(snapshotPath)) {
-  throw new Error(`HLT_BUILD_BASE_SNAPSHOT_MISSING:${snapshotPath}`);
+if (selection.engine === 'ts' && authorityEvidence && !existsSync(`${snapshotPath}.concrete-checkpoint.json`)) {
+  throw new Error(`HLT_BUILD_CONCRETE_CHECKPOINT_MISSING:${snapshotPath}.concrete-checkpoint.json`);
 }
-
 const output = resolve(
   String(process.env['XLN_HLT_RECORDING_OUTPUT'] || join(workDir, 'hlt-hub-recording.json')),
 );
@@ -120,15 +121,19 @@ if (selection.engine === 'rust') {
   // replay source is the native checkpoint + ordered native WAL itself.
   console.log(`HLT_BUILD_CHAINS_OK_RUST_H1 nativeDb=${nativeDb} live=${liveReport}`);
 } else {
-  const builder = spawnSync(process.execPath, [
-    'core/scripts/operations/hlt/replay/build-hub-recording.ts',
-    '--work-dir', workDir,
-    '--output', output,
-    '--snapshot', snapshotPath,
-    '--users', String(users),
-    '--workload', workload,
-    ...(authorityEvidence ? ['--require-complete-authority-evidence'] : []),
-  ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit', timeout: 20_000 });
-  if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
-  console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
+  if (!authorityEvidence) {
+    console.log(`HLT_BUILD_CHAINS_OK_TS report=${reportPath}`);
+  } else {
+    const builder = spawnSync(process.execPath, [
+      'core/scripts/operations/hlt/replay/build-hub-recording.ts',
+      '--work-dir', workDir,
+      '--output', output,
+      '--checkpoint', `${snapshotPath}.concrete-checkpoint.json`,
+      '--users', String(users),
+      '--workload', workload,
+      '--require-complete-authority-evidence',
+    ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit', timeout: 20_000 });
+    if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
+    console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
+  }
 }

@@ -125,7 +125,7 @@ const valueHash = (namespace: AccountStateMapNamespace, value: unknown): string 
   return encodeLeafForCommit(namespace, value);
 };
 
-const namespaceOptions = <K extends AccountStateMapKey, V>(
+const createNamespaceOptions = <K extends AccountStateMapKey, V>(
   namespace: AccountStateMapNamespace,
 ): PersistentRadixValueMapOptions<K, V> => ({
   radix: 16,
@@ -139,6 +139,28 @@ const namespaceOptions = <K extends AccountStateMapKey, V>(
     return sealed;
   },
 });
+
+type NamespaceOptionsOwner = PersistentRadixValueMapOptions<AccountStateMapKey, unknown>;
+
+// Structural Patricia diffs are valid only when both roots were built by the
+// exact same key/value policy object. Own one immutable options object per
+// canonical Account namespace so ordinary mutation, Rust materialization and
+// cold recovery all share that identity; rebuilding options per constructor
+// would make the first cross-boundary structural commit invalid.
+const NAMESPACE_OPTIONS = new Map<AccountStateMapNamespace, NamespaceOptionsOwner>(
+  ACCOUNT_STATE_MAP_NAMESPACES.map(namespace => [
+    namespace,
+    createNamespaceOptions<AccountStateMapKey, unknown>(namespace),
+  ]),
+);
+
+const namespaceOptions = <K extends AccountStateMapKey, V>(
+  namespace: AccountStateMapNamespace,
+): PersistentRadixValueMapOptions<K, V> => {
+  const options = NAMESPACE_OPTIONS.get(namespace);
+  if (!options) throw new Error(`ACCOUNT_STATE_NAMESPACE_OPTIONS_MISSING:${namespace}`);
+  return options as PersistentRadixValueMapOptions<K, V>;
+};
 
 /**
  * A Map-compatible read view backed by one persistent Patricia root.

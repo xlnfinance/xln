@@ -427,11 +427,10 @@ pub fn decode_concrete_runtime_wal_frame(
         }
         contexts.push((entity_height, decoded));
     }
-    // Runtime-generated Entity work (scheduler wakes and resident
-    // continuations) is intentionally absent from serialized `entityInputs`,
-    // but consumes an exact committed context during replay. The reducer
-    // rejects both missing and unconsumed contexts after reconstructing that
-    // deterministic work, which is the authoritative cardinality check.
+    // Live Runtime-generated work (scheduler wakes and resident continuations)
+    // is persisted as explicit `entityInputs`. Exact replay consumes those WAL
+    // inputs and their committed contexts verbatim; it must never derive the
+    // same work again from the pre-frame replica.
     let entity_contexts = entity_contexts
         .into_iter()
         .map(|(key, mut contexts)| {

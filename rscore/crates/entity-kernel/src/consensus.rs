@@ -144,6 +144,13 @@ mod tests {
     }
 
     #[test]
+    fn text_order_matches_typescript_utf16_for_non_ascii() {
+        let mut values = ["\u{e000}", "\u{10000}", "é", "z"];
+        values.sort_by(|left, right| compare_utf16(left, right));
+        assert_eq!(values, ["z", "é", "\u{10000}", "\u{e000}"]);
+    }
+
+    #[test]
     fn rejects_noncanonical_or_duplicate_sections() {
         let duplicate = vec![
             EntityConsensusSection {

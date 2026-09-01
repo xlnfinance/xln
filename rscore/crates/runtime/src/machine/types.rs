@@ -1106,6 +1106,38 @@ pub struct RuntimeApplyResult {
     /// fsync. The same attempts are committed in Runtime infrastructure, so a
     /// crash reconstructs them without a second queue.
     pub post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
+    /// Transient diagnostics for the exact Runtime apply call. This is never
+    /// encoded, rooted or persisted; replay and live execution expose the same
+    /// observation only when `XLN_RUNTIME_APPLY_PROFILE=1`.
+    pub apply_profile: Option<RuntimeApplyPhaseProfile>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeApplyPhaseProfile {
+    pub fit: std::time::Duration,
+    pub resident_core: std::time::Duration,
+    pub post_core_prepare: std::time::Duration,
+    pub certification: std::time::Duration,
+    pub settlement_attach: std::time::Duration,
+    pub post_cert_j: std::time::Duration,
+    pub total: std::time::Duration,
+    pub residual: std::time::Duration,
+    pub entity_groups: usize,
+    pub entity_txs_selected: usize,
+    pub account_inputs: usize,
+    pub settlement_hankos: usize,
+    pub post_cert_j_actions: usize,
+}
+
+impl RuntimeApplyPhaseProfile {
+    pub fn accounted(&self) -> std::time::Duration {
+        self.fit
+            + self.resident_core
+            + self.post_core_prepare
+            + self.certification
+            + self.settlement_attach
+            + self.post_cert_j
+    }
 }
 
 impl RuntimeApplyResult {

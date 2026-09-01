@@ -21,7 +21,12 @@ import {
   type ProductionSwapSettlementEvidence,
 } from '../settlement';
 
-export type LoadRuntimeEntry = Readonly<{ label: string; token: string; wsUrl: string }>;
+export type LoadRuntimeEntry = Readonly<{
+  label: string;
+  engine: 'ts' | 'rust';
+  token: string;
+  wsUrl: string;
+}>;
 export type LoadFrame = Readonly<{ height: number; canonicalStateHash: string }>;
 export type LoadIdentity = Readonly<{ entityId: string; signerId: string }>;
 export type LoadAccountProjection = Readonly<{
@@ -34,6 +39,7 @@ export type LoadAccountProjection = Readonly<{
 }>;
 export type LoadSustainedReport = Readonly<{
   schema: 'xln-production-swap-load-sustained-v1';
+  engine: 'ts' | 'rust';
   mode: 'same';
   schedule: 'one_order_per_account_per_round' | 'resting_maker_aggressive_taker' | 'balanced_role_rotation';
   configuredUsers: number;
@@ -134,10 +140,15 @@ export const decodeRuntimeManifestEntries = (value: unknown): LoadRuntimeEntry[]
   if (!Array.isArray(manifest['entries'])) throw new Error('PRODUCTION_SWAP_LOAD_MANIFEST_ENTRIES_INVALID');
   return manifest['entries'].map((raw, index) => {
     const entry = requireBoundaryRecord(raw, `PRODUCTION_SWAP_LOAD_MANIFEST_ENTRY_INVALID:${index}`);
-    requireExactBoundaryKeys(entry, ['access', 'label', 'token', 'wsUrl'], [], `PRODUCTION_SWAP_LOAD_MANIFEST_ENTRY_FIELDS_INVALID:${index}`);
+    requireExactBoundaryKeys(entry, ['access', 'engine', 'label', 'token', 'wsUrl'], [], `PRODUCTION_SWAP_LOAD_MANIFEST_ENTRY_FIELDS_INVALID:${index}`);
     if (entry['access'] !== 'admin') throw new Error(`PRODUCTION_SWAP_LOAD_MANIFEST_ACCESS_INVALID:${index}`);
+    const engine = entry['engine'];
+    if (engine !== 'ts' && engine !== 'rust') {
+      throw new Error(`PRODUCTION_SWAP_LOAD_MANIFEST_ENGINE_INVALID:${index}`);
+    }
     return {
       label: requireText(entry['label'], `PRODUCTION_SWAP_LOAD_MANIFEST_LABEL_INVALID:${index}`),
+      engine,
       token: requireText(entry['token'], `PRODUCTION_SWAP_LOAD_MANIFEST_TOKEN_INVALID:${index}`),
       wsUrl: requireText(entry['wsUrl'], `PRODUCTION_SWAP_LOAD_MANIFEST_WS_URL_INVALID:${index}`),
     };
@@ -458,7 +469,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     'walBytesBefore', 'walBytesAfter',
   ] as const;
   requireExactBoundaryKeys(report, [
-    'schema', 'mode', 'schedule', 'configuredUsers', 'configuredRounds', 'cadenceMs',
+    'schema', 'engine', 'mode', 'schedule', 'configuredUsers', 'configuredRounds', 'cadenceMs',
     'offeredOrderRate', 'offeredEconomicSwapRate', 'loadMakerAccountCount',
     'loadTakerAccountCount', 'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
     'runtimeInputBatches', 'roundSubmissionLagMs', 'expectedSubmittedOffers',
@@ -473,6 +484,8 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     'settlementEvidence', 'environment',
   ], [], 'PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
   if (report['schema'] !== 'xln-production-swap-load-sustained-v1' || report['mode'] !== 'same') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEMA_INVALID');
+  const engine = report['engine'];
+  if (engine !== 'ts' && engine !== 'rust') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ENGINE_INVALID');
   const schedule = report['schedule'];
   if (
     schedule !== 'one_order_per_account_per_round' &&
@@ -572,7 +585,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_DISTRIBUTION_MISMATCH');
   }
   return {
-    schema: report['schema'], mode: report['mode'], schedule,
+    schema: report['schema'], engine, mode: report['mode'], schedule,
     configuredUsers: Number(report['configuredUsers']), configuredRounds: rounds,
     cadenceMs, offeredOrderRate: report['offeredOrderRate'],
     offeredEconomicSwapRate: report['offeredEconomicSwapRate'],

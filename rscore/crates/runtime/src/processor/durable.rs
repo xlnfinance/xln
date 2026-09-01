@@ -16,7 +16,9 @@ use xln_rscore_batch::{AccountId, ResidentAccountStatusView};
 use xln_rscore_engine::TokenId;
 
 use crate::storage::native::RecoveredWalFrame;
-use crate::storage::native::{DurableRuntimeFrame, NativeRuntimeStore, NativeStorageError};
+use crate::storage::native::{
+    DurableRuntimeFrame, NativeRuntimeStore, NativeStorageError, NativeStorageTimings,
+};
 use crate::transport::{
     DirectOutboxPublisher, DirectOutboxPublisherConfig, InboundSessionTable, PublicationBacklog,
     PublicationReport, RuntimeTransportError, derive_local_runtime_id,
@@ -79,6 +81,14 @@ pub struct RuntimeProcessTimings {
     pub projection_context: Duration,
     pub projection_checkpoint: Duration,
     pub projection_encode: Duration,
+    pub storage_prepare_validate: Duration,
+    pub storage_batch_build: Duration,
+    pub storage_db_write_sync: Duration,
+    pub storage_directory_sync: Duration,
+    pub storage_post_commit: Duration,
+    pub barrier_wait_for_previous_commit: Duration,
+    pub committer_busy: Duration,
+    pub committer_idle: Duration,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +158,9 @@ pub struct DurableRuntimeProcessor {
     /// pipeline is never deeper: `process_with` blocks on this outcome before
     /// it projects the next frame.
     in_flight: Option<u64>,
+    /// Fine-grained timers are diagnostic-only and disabled on the live hot
+    /// path unless the existing Runtime profiling gate is explicitly enabled.
+    profile: bool,
     poisoned: bool,
 }
 
@@ -157,6 +170,10 @@ enum PublicationTarget {
     ReplayValidateOnly,
 }
 
+fn profiled_elapsed(started: Option<Instant>) -> Duration {
+    started.map_or(Duration::ZERO, |started| started.elapsed())
+}
+
 /// Storage append + publication outcome for one committed frame, produced on
 /// the committer thread strictly in height order.
 struct CommitOutcome {
@@ -164,6 +181,9 @@ struct CommitOutcome {
     publication: RuntimeProcessReport,
     storage_elapsed: Duration,
     publication_elapsed: Duration,
+    storage_timings: NativeStorageTimings,
+    committer_busy_elapsed: Duration,
+    committer_idle_elapsed: Duration,
     post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
 }
 
@@ -178,7 +198,7 @@ enum CommitterCommand {
     ),
     RetryPublication(Sender<Result<Option<RuntimeProcessReport>, DurableRuntimeProcessorError>>),
     HasPendingPublication(Sender<bool>),
-    Backlog(Sender<PublicationBacklog>),
+    Backlog(Sender<(PublicationBacklog, u64)>),
     AttachInboundSessions(InboundSessionTable),
     CheckpointRows(Sender<CheckpointRowsResult>),
     ReadDurableFrame(
@@ -214,6 +234,7 @@ struct Committer {
     publisher: DirectOutboxPublisher,
     publication_target: PublicationTarget,
     pending_publications: VecDeque<DurableRuntimeFrame>,
+    profile: bool,
     /// A storage failure is terminal: after it, every command answers
     /// `Poisoned` and no further byte is written.
     failed: bool,
@@ -225,15 +246,30 @@ impl Committer {
         commands: Receiver<CommitterCommand>,
         results: Sender<Result<CommitOutcome, DurableRuntimeProcessorError>>,
     ) {
+        // Committer utilization is measured between commit jobs. Cold-path
+        // reader commands may run inside that interval, but must not reset it
+        // and make the next commit look artificially well fed.
+        let mut previous_commit_finished: Option<Instant> = None;
         for command in commands {
             match command {
                 CommitterCommand::Commit(encoded) => {
-                    let outcome = if self.failed {
+                    let committer_idle_elapsed = if self.profile {
+                        previous_commit_finished
+                            .map_or(Duration::ZERO, |finished| finished.elapsed())
+                    } else {
+                        Duration::ZERO
+                    };
+                    let busy_started = self.profile.then(Instant::now);
+                    let mut outcome = if self.failed {
                         Err(DurableRuntimeProcessorError::Poisoned)
                     } else {
                         let (encoded, attempts) = *encoded;
                         self.commit_one(encoded, attempts)
                     };
+                    if let Ok(outcome) = &mut outcome {
+                        outcome.committer_busy_elapsed = profiled_elapsed(busy_started);
+                        outcome.committer_idle_elapsed = committer_idle_elapsed;
+                    }
                     if matches!(
                         outcome,
                         Err(DurableRuntimeProcessorError::Storage(_)
@@ -244,6 +280,7 @@ impl Committer {
                     if results.send(outcome).is_err() {
                         return;
                     }
+                    previous_commit_finished = self.profile.then(Instant::now);
                 }
                 CommitterCommand::RetryPublication(reply) => {
                     let result = if self.failed {
@@ -257,7 +294,7 @@ impl Committer {
                     let _ = reply.send(!self.pending_publications.is_empty());
                 }
                 CommitterCommand::Backlog(reply) => {
-                    let _ = reply.send(self.publisher.backlog());
+                    let _ = reply.send((self.publisher.backlog(), self.store.retained_wal_bytes()));
                 }
                 CommitterCommand::AttachInboundSessions(sessions) => {
                     self.publisher.attach_inbound_sessions(sessions);
@@ -291,8 +328,9 @@ impl Committer {
         post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
     ) -> Result<CommitOutcome, DurableRuntimeProcessorError> {
         let storage_started = Instant::now();
-        let durable = self.store.append_encoded_frame(encoded)?;
+        let (durable, storage_timings) = self.store.append_encoded_frame(encoded, self.profile)?;
         let storage_elapsed = storage_started.elapsed();
+        debug_assert!(!self.profile || storage_timings.accounted() <= storage_elapsed);
         let height = durable.height();
         self.pending_publications.push_back(durable);
         let publication_started = Instant::now();
@@ -306,6 +344,9 @@ impl Committer {
             publication,
             storage_elapsed,
             publication_elapsed: publication_started.elapsed(),
+            storage_timings,
+            committer_busy_elapsed: Duration::ZERO,
+            committer_idle_elapsed: Duration::ZERO,
             post_commit_j_attempts,
         })
     }
@@ -441,11 +482,14 @@ impl DurableRuntimeProcessor {
                 publisher_config.with_local_entity(&state.entity.entity_id, &live.signer_id)?;
         }
         let publisher = DirectOutboxPublisher::new(publisher_config)?;
+        let profile = matches!(publication_target, PublicationTarget::ReplayValidateOnly)
+            || super::projection::runtime_profile_enabled();
         let committer = Committer {
             store,
             publisher,
             publication_target,
             pending_publications,
+            profile,
             failed: false,
         };
         // Depth 1 plus the in-flight guard keeps at most one commit queued;
@@ -466,6 +510,7 @@ impl DurableRuntimeProcessor {
                 thread: Some(thread),
             },
             in_flight: None,
+            profile,
             poisoned: false,
         })
     }
@@ -525,11 +570,13 @@ impl DurableRuntimeProcessor {
     pub fn sync_committed(
         &mut self,
     ) -> Result<Option<RuntimeProcessReport>, DurableRuntimeProcessorError> {
+        let wait_started = self.profile.then(Instant::now);
         match self.drain_in_flight(true) {
             Ok(None) => Ok(None),
             Ok(outcome) => {
                 let mut report = RuntimeProcessReport::default();
                 merge_commit_outcome(&mut report, outcome)?;
+                report.timings.barrier_wait_for_previous_commit = profiled_elapsed(wait_started);
                 Ok(Some(report))
             }
             Err(DurableRuntimeProcessorError::Storage(error)) => {
@@ -708,9 +755,14 @@ impl DurableRuntimeProcessor {
         // storage failure poisons because the reducer already consumed the
         // replica for a frame that can no longer follow its predecessor.
         let mut deferred_publication: Option<DurableRuntimeProcessorError> = None;
+        let mut barrier_wait_for_previous_commit = Duration::ZERO;
         if drained.is_none() && self.in_flight.is_some() {
+            let wait_started = self.profile.then(Instant::now);
             match self.drain_in_flight(true) {
-                Ok(outcome) => drained = outcome,
+                Ok(outcome) => {
+                    barrier_wait_for_previous_commit = profiled_elapsed(wait_started);
+                    drained = outcome;
+                }
                 Err(DurableRuntimeProcessorError::Transport(error)) => {
                     deferred_publication = Some(DurableRuntimeProcessorError::Transport(error));
                 }
@@ -754,6 +806,7 @@ impl DurableRuntimeProcessor {
                     ..RuntimeProcessReport::default()
                 };
                 merge_commit_outcome(&mut report, drained)?;
+                report.timings.barrier_wait_for_previous_commit = barrier_wait_for_previous_commit;
                 if let Some(error) = deferred_publication {
                     return Err(error);
                 }
@@ -788,6 +841,7 @@ impl DurableRuntimeProcessor {
         self.in_flight = Some(commit_height);
         let mut report = RuntimeProcessReport::default();
         merge_commit_outcome(&mut report, drained)?;
+        report.timings.barrier_wait_for_previous_commit = barrier_wait_for_previous_commit;
         report.commitments = Some(projected.commitments);
         report.account_commits = projected.account_commits;
         report.accepted_payments = projected.accepted_payments;
@@ -835,7 +889,17 @@ impl DurableRuntimeProcessor {
 
     pub fn publication_backlog(&self) -> PublicationBacklog {
         self.committer_call(CommitterCommand::Backlog)
+            .map(|(backlog, _)| backlog)
             .unwrap_or_default()
+    }
+
+    /// One cold telemetry round-trip returns transport backlog and the
+    /// authoritative storage HEAD together. Metrics must not add a second
+    /// committer barrier merely to prove WAL growth.
+    pub fn publication_backlog_and_retained_wal_bytes(
+        &self,
+    ) -> Result<(PublicationBacklog, u64), DurableRuntimeProcessorError> {
+        self.committer_call(CommitterCommand::Backlog)
     }
 
     fn ensure_healthy(&self) -> Result<(), DurableRuntimeProcessorError> {
@@ -899,6 +963,13 @@ fn merge_commit_outcome(
     report.durable_height = Some(height);
     report.timings.storage = storage_elapsed;
     report.timings.publication = publication_elapsed;
+    report.timings.storage_prepare_validate = outcome.storage_timings.prepare_validate;
+    report.timings.storage_batch_build = outcome.storage_timings.batch_build;
+    report.timings.storage_db_write_sync = outcome.storage_timings.db_write_sync;
+    report.timings.storage_directory_sync = outcome.storage_timings.directory_sync;
+    report.timings.storage_post_commit = outcome.storage_timings.post_commit;
+    report.timings.committer_busy = outcome.committer_busy_elapsed;
+    report.timings.committer_idle = outcome.committer_idle_elapsed;
     Ok(())
 }
 
@@ -950,4 +1021,61 @@ pub enum DurableRuntimeProcessorError {
     Transport(#[from] RuntimeTransportError),
     #[error(transparent)]
     Envelope(#[from] RuntimeDurableEnvelopeError),
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+
+    #[test]
+    fn commit_wall_decomposition_is_copied_without_changing_report_authority() {
+        let storage_timings = NativeStorageTimings {
+            prepare_validate: Duration::from_micros(1),
+            batch_build: Duration::from_micros(2),
+            db_write_sync: Duration::from_micros(3),
+            directory_sync: Duration::from_micros(4),
+            post_commit: Duration::from_micros(5),
+        };
+        let mut report = RuntimeProcessReport::default();
+        merge_commit_outcome(
+            &mut report,
+            Some(CommitOutcome {
+                height: 7,
+                publication: RuntimeProcessReport::default(),
+                storage_elapsed: Duration::from_micros(20),
+                publication_elapsed: Duration::from_micros(6),
+                storage_timings,
+                committer_busy_elapsed: Duration::from_micros(30),
+                committer_idle_elapsed: Duration::from_micros(40),
+                post_commit_j_attempts: Vec::new(),
+            }),
+        )
+        .expect("merge");
+
+        assert_eq!(report.durable_height, Some(7));
+        assert_eq!(report.timings.storage, Duration::from_micros(20));
+        assert_eq!(report.timings.publication, Duration::from_micros(6));
+        assert_eq!(
+            report.timings.storage_prepare_validate,
+            storage_timings.prepare_validate
+        );
+        assert_eq!(
+            report.timings.storage_batch_build,
+            storage_timings.batch_build
+        );
+        assert_eq!(
+            report.timings.storage_db_write_sync,
+            storage_timings.db_write_sync
+        );
+        assert_eq!(
+            report.timings.storage_directory_sync,
+            storage_timings.directory_sync
+        );
+        assert_eq!(
+            report.timings.storage_post_commit,
+            storage_timings.post_commit
+        );
+        assert_eq!(report.timings.committer_busy, Duration::from_micros(30));
+        assert_eq!(report.timings.committer_idle, Duration::from_micros(40));
+    }
 }

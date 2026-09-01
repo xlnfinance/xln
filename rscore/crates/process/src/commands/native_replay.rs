@@ -28,11 +28,22 @@ fn phase_metrics(rows: &[xln_rscore_batch::AccountPhaseMetric]) -> Vec<serde_jso
     rows.iter()
         .map(|row| {
             serde_json::json!({
-                "kind": format!("{:?}", row.kind),
+                "kind": match row.kind {
+                    xln_rscore_batch::AccountPhaseKind::Inbound => "inbound",
+                    xln_rscore_batch::AccountPhaseKind::OutboundReset => "outboundReset",
+                    xln_rscore_batch::AccountPhaseKind::OutboundFailedHtlcFollowup => {
+                        "outboundFailedHtlcFollowup"
+                    }
+                    xln_rscore_batch::AccountPhaseKind::OutboundSettlementHankoAttach => {
+                        "outboundSettlementHankoAttach"
+                    }
+                },
                 "invocations": row.invocations,
                 "coordinatorWallMs": row.coordinator_wall_nanos as f64 / 1e6,
                 "workerSamples": row.worker_samples,
                 "workerWorkMs": row.worker_work_sum_nanos as f64 / 1e6,
+                "workerRows": &row.worker_rows,
+                "workerWorkNanos": &row.worker_work_nanos,
                 "workerBarrierWaitMs": row.worker_barrier_wait_sum_nanos as f64 / 1e6,
                 "coordinatorFoldMs": row.coordinator_fold_nanos as f64 / 1e6,
                 "touchedRows": row.touched_rows,
@@ -74,6 +85,14 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             "projectionMs": metrics.projection.as_secs_f64() * 1_000.0,
             "storageMs": metrics.storage.as_secs_f64() * 1_000.0,
             "publicationMs": metrics.publication.as_secs_f64() * 1_000.0,
+            "storagePrepareValidateMs": metrics.storage_prepare_validate.as_secs_f64() * 1_000.0,
+            "storageBatchBuildMs": metrics.storage_batch_build.as_secs_f64() * 1_000.0,
+            "storageDbWriteSyncMs": metrics.storage_db_write_sync.as_secs_f64() * 1_000.0,
+            "storageDirectorySyncMs": metrics.storage_directory_sync.as_secs_f64() * 1_000.0,
+            "storagePostCommitMs": metrics.storage_post_commit.as_secs_f64() * 1_000.0,
+            "barrierWaitForPreviousCommitMs": metrics.barrier_wait_for_previous_commit.as_secs_f64() * 1_000.0,
+            "committerBusyMs": metrics.committer_busy.as_secs_f64() * 1_000.0,
+            "committerIdleMs": metrics.committer_idle.as_secs_f64() * 1_000.0,
             "accountsRoot": metrics.accounts_root,
             "transcriptDigest": metrics.transcript_digest,
             "accountPhaseMetrics": phase_metrics(&metrics.account_phase_metrics),

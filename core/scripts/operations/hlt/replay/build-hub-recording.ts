@@ -6,7 +6,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { safeParse } from '../../../../protocol/serialization';
-import type { HltHubRecording } from './recording';
+import type { ConcreteCheckpointSourceExport } from '../../../../storage/read/concrete-checkpoint-source';
+import type { HltHubRecordingArtifact } from './recording';
 
 const argument = (name: string): string => {
   const index = process.argv.indexOf(`--${name}`);
@@ -24,7 +25,7 @@ const positiveIntegerArgument = (name: string): number => {
 
 const workDir = resolve(argument('work-dir'));
 const outputPath = resolve(argument('output'));
-const snapshotPath = resolve(argument('snapshot'));
+const checkpointPath = resolve(argument('checkpoint'));
 const users = positiveIntegerArgument('users');
 const workload = argument('workload');
 const requireCompleteAuthorityEvidence = process.argv.includes('--require-complete-authority-evidence');
@@ -46,14 +47,12 @@ const [meshSeeds, runtime, { deriveRuntimeIdFromSeed }, recordingApi] = await Pr
 const { prewarmSignerLabels } = await import('../../../../account/crypto');
 const { deriveMeshChildSeed } = meshSeeds;
 const {
-  buildRuntimeRecording,
   buildRuntimeRecoveryBundle,
   closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
-  validateRuntimeRecoveryBundle,
 } = runtime;
 const {
   HLT_HUB_RECORDING_SCHEMA,
@@ -63,6 +62,7 @@ const {
 const {
   buildHltAuthorityEvidence,
   assertCompleteHltAuthorityEvidence,
+  assertCanonicalMixedCoverage,
 } = await import('./authority-evidence');
 const meshRootSeed = readFileSync(join(workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
 if (!meshRootSeed) throw new Error('HLT_HUB_RECORDING_MESH_ROOT_SEED_MISSING');
@@ -74,15 +74,9 @@ if (!runtimeId) throw new Error('HLT_HUB_RECORDING_RUNTIME_ID_MISSING');
 // recovery bundle; restore the deterministic H1 label before replaying any
 // frame that may create J-prefix or Entity Hanko evidence.
 prewarmSignerLabels(runtimeSeed, ['h1-hub']);
-const snapshot = validateRuntimeRecoveryBundle(safeParse(readFileSync(snapshotPath, 'utf8')));
-if ((snapshot.kind ?? 'snapshot') !== 'snapshot' || snapshot.runtimeId !== runtimeId) {
-  throw new Error(
-    `HLT_HUB_RECORDING_SNAPSHOT_IDENTITY_INVALID:expected=${runtimeId}:actual=${snapshot.runtimeId}:` +
-    `kind=${String(snapshot.kind || 'snapshot')}`,
-  );
-}
-const baseHeight = snapshot.runtimeHeight;
-if (!Number.isSafeInteger(baseHeight) || baseHeight < 1 || !snapshot.checkpointHash) {
+const checkpoint = safeParse(readFileSync(checkpointPath, 'utf8')) as ConcreteCheckpointSourceExport;
+const baseHeight = checkpoint.height;
+if (!Number.isSafeInteger(baseHeight) || baseHeight < 1 || !/^0x[0-9a-f]{64}$/.test(checkpoint.rootHash)) {
   throw new Error(`HLT_HUB_RECORDING_SNAPSHOT_BASE_INVALID:${baseHeight}`);
 }
 
@@ -124,24 +118,21 @@ try {
     kind: 'journal_tail',
     signers,
     createdAt: recordingCreatedAt,
-    baseCheckpoint: { height: baseHeight, hash: snapshot.checkpointHash },
+    baseCheckpoint: { height: baseHeight, hash: checkpoint.rootHash },
     frames,
   });
-  const recording = buildRuntimeRecording([snapshot, tail], recordingCreatedAt);
   const authorityEvidence = buildHltAuthorityEvidence(frames);
-  if (requireCompleteAuthorityEvidence) assertCompleteHltAuthorityEvidence(authorityEvidence);
-  const artifact: HltHubRecording = {
+  if (requireCompleteAuthorityEvidence) {
+    assertCompleteHltAuthorityEvidence(authorityEvidence);
+    assertCanonicalMixedCoverage(frames);
+  }
+  const totals = summarizeHltHubFrames(frames);
+  const artifact: HltHubRecordingArtifact = {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: frames.at(-1)!.timestamp,
-    source: { workDir, users, workload },
-    recording,
-    totals: summarizeHltHubFrames(frames),
-    featurePolicy: {
-      hubRebalance: 'disabled',
-      crossJ: 'disabled',
-      disputes: 'disabled',
-      lending: 'disabled',
-    },
+    source: { engine: 'ts', workDir, users, workload },
+    checkpoint,
+    tail,
     authorityEvidence,
   };
   mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
@@ -149,7 +140,7 @@ try {
   console.log(
     `HLT_BUILD_RECORDING_OK path=${outputPath} runtime=${runtimeId} ` +
     `heights=${baseHeight}-${targetHeight} frames=${frames.length} ` +
-    `entityInputs=${artifact.totals.runtimeEntityInputs} outbox=${artifact.totals.outboxEnvelopes} ` +
+    `entityInputs=${totals.runtimeEntityInputs} outbox=${totals.outboxEnvelopes} ` +
     `runtimeRoots=${authorityEvidence.expectations.runtimeFrames.length}`,
   );
 } finally {

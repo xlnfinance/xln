@@ -13,10 +13,12 @@ import { dirname } from 'node:path';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
 import { safeParse, safeStringify, serializeTaggedJson } from '../../../../protocol/serialization';
 import {
-  validateRuntimeRecording,
+  validateRuntimeRecoveryBundle,
   type RuntimeRecording,
+  type RuntimeRecoveryBundleV1,
 } from '../../../../runtime';
 import type { PersistedFrameJournal } from '../../../../storage/types';
+import type { ConcreteCheckpointSourceExport } from '../../../../storage/read/concrete-checkpoint-source';
 import {
   buildHltAuthorityEvidence,
   type HltAuthorityEvidence,
@@ -30,23 +32,25 @@ export type HltHubRecordingTotals = Readonly<{
   outboxEnvelopes: number;
 }>;
 
-export type HltHubRecording = Readonly<{
+export type HltHubRecordingArtifact = Readonly<{
   schema: typeof HLT_HUB_RECORDING_SCHEMA;
   createdAt: number;
   source: Readonly<{
+    engine: 'ts';
     workDir: string;
     users: number;
     workload: string;
   }>;
-  recording: RuntimeRecording;
-  totals: HltHubRecordingTotals;
-  featurePolicy: Readonly<{
-    hubRebalance: 'disabled';
-    crossJ: 'disabled';
-    disputes: 'disabled';
-    lending: 'disabled';
-  }>;
+  checkpoint: ConcreteCheckpointSourceExport;
+  tail: RuntimeRecoveryBundleV1;
   authorityEvidence: HltAuthorityEvidence;
+}>;
+
+export type HltHubRecording = HltHubRecordingArtifact & Readonly<{
+  /** Read-time summary derived from the sole canonical signed WAL tail. */
+  totals: HltHubRecordingTotals;
+  /** Retired TS replay view; contains the signed tail only and cannot restore. */
+  recording: RuntimeRecording;
 }>;
 
 export const summarizeHltHubFrames = (
@@ -61,48 +65,78 @@ export const summarizeHltHubFrames = (
   outboxEnvelopes: 0,
 });
 
-export const recordingFrames = (recording: RuntimeRecording): PersistedFrameJournal[] =>
-  recording.bundles.flatMap(bundle => bundle.kind === 'journal_tail' ? bundle.frames ?? [] : []);
+export const recordingFrames = (recording: HltHubRecordingArtifact): PersistedFrameJournal[] =>
+  recording.tail.frames ?? [];
 
-const sameTotals = (left: HltHubRecordingTotals, right: HltHubRecordingTotals): boolean =>
-  Object.keys(left).every(key => left[key as keyof HltHubRecordingTotals] === right[key as keyof HltHubRecordingTotals]);
+const decodeCheckpoint = (value: unknown): ConcreteCheckpointSourceExport => {
+  const checkpoint = requireBoundaryRecord(value, 'HLT_HUB_CHECKPOINT_INVALID');
+  requireExactBoundaryKeys(
+    checkpoint,
+    ['height', 'frameBytes', 'rootHash', 'leafCount', 'runtimeMachineLeaves', 'stateRows'],
+    [],
+    'HLT_HUB_CHECKPOINT',
+  );
+  const height = Number(checkpoint['height']);
+  const leafCount = Number(checkpoint['leafCount']);
+  const hex = (field: string, bytes?: number): `0x${string}` => {
+    const raw = checkpoint[field];
+    if (typeof raw !== 'string' || !/^0x(?:[0-9a-f]{2})+$/.test(raw) ||
+        (bytes !== undefined && raw.length !== 2 + bytes * 2)) {
+      throw new Error(`HLT_HUB_CHECKPOINT_HEX_INVALID:${field}`);
+    }
+    return raw as `0x${string}`;
+  };
+  const rows = (field: string): readonly (readonly [`0x${string}`, `0x${string}`])[] => {
+    const raw = checkpoint[field];
+    if (!Array.isArray(raw)) throw new Error(`HLT_HUB_CHECKPOINT_ROWS_INVALID:${field}`);
+    let previous = '';
+    return raw.map((entry, index) => {
+      if (!Array.isArray(entry) || entry.length !== 2 ||
+          typeof entry[0] !== 'string' || typeof entry[1] !== 'string' ||
+          !/^0x(?:[0-9a-f]{2})+$/.test(entry[0]) || !/^0x(?:[0-9a-f]{2})+$/.test(entry[1]) ||
+          entry[0] <= previous) {
+        throw new Error(`HLT_HUB_CHECKPOINT_ROW_INVALID:${field}:${index}`);
+      }
+      previous = entry[0];
+      return entry as [`0x${string}`, `0x${string}`];
+    });
+  };
+  if (!Number.isSafeInteger(height) || height < 1 || !Number.isSafeInteger(leafCount) || leafCount < 1) {
+    throw new Error('HLT_HUB_CHECKPOINT_NUMBER_INVALID');
+  }
+  const runtimeMachineLeaves = rows('runtimeMachineLeaves');
+  if (runtimeMachineLeaves.length !== leafCount) throw new Error('HLT_HUB_CHECKPOINT_LEAF_COUNT');
+  return {
+    height,
+    frameBytes: hex('frameBytes'),
+    rootHash: hex('rootHash', 32),
+    leafCount,
+    runtimeMachineLeaves,
+    stateRows: rows('stateRows'),
+  };
+};
 
 export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   const root = requireBoundaryRecord(value, 'HLT_HUB_RECORDING_INVALID');
   requireExactBoundaryKeys(
     root,
     [
-      'schema', 'createdAt', 'source', 'recording', 'totals', 'featurePolicy',
-      'authorityEvidence',
+      'schema', 'createdAt', 'source', 'checkpoint', 'tail', 'authorityEvidence',
     ],
     [],
     'HLT_HUB_RECORDING',
   );
   if (root['schema'] !== HLT_HUB_RECORDING_SCHEMA) throw new Error('HLT_HUB_RECORDING_SCHEMA_INVALID');
   const source = requireBoundaryRecord(root['source'], 'HLT_HUB_RECORDING_SOURCE_INVALID');
-  requireExactBoundaryKeys(source, ['workDir', 'users', 'workload'], [], 'HLT_HUB_RECORDING_SOURCE');
-  const totals = requireBoundaryRecord(root['totals'], 'HLT_HUB_RECORDING_TOTALS_INVALID');
-  requireExactBoundaryKeys(
-    totals,
-    ['runtimeFrames', 'runtimeEntityInputs', 'outboxEnvelopes'],
-    [],
-    'HLT_HUB_RECORDING_TOTALS',
-  );
-  const recording = validateRuntimeRecording(root['recording'] as RuntimeRecording);
-  const featurePolicy = requireBoundaryRecord(root['featurePolicy'], 'HLT_AUTHORITY_FEATURE_POLICY_INVALID');
-  requireExactBoundaryKeys(
-    featurePolicy,
-    ['hubRebalance', 'crossJ', 'disputes', 'lending'],
-    [],
-    'HLT_AUTHORITY_FEATURE_POLICY_FIELDS_INVALID',
-  );
-  if (
-    featurePolicy['hubRebalance'] !== 'disabled' ||
-    featurePolicy['crossJ'] !== 'disabled' ||
-    featurePolicy['disputes'] !== 'disabled' ||
-    featurePolicy['lending'] !== 'disabled'
-  ) throw new Error('HLT_AUTHORITY_FEATURE_POLICY_INVALID');
-  const authorityEvidence = buildHltAuthorityEvidence(recordingFrames(recording));
+  requireExactBoundaryKeys(source, ['engine', 'workDir', 'users', 'workload'], [], 'HLT_HUB_RECORDING_SOURCE');
+  const checkpoint = decodeCheckpoint(root['checkpoint']);
+  const tail = validateRuntimeRecoveryBundle(root['tail']);
+  if (tail.kind !== 'journal_tail' || tail.baseRuntimeHeight !== checkpoint.height ||
+      tail.baseCheckpointHash !== checkpoint.rootHash) {
+    throw new Error('HLT_HUB_RECORDING_CHECKPOINT_TAIL_MISMATCH');
+  }
+  const frames = tail.frames ?? [];
+  const authorityEvidence = buildHltAuthorityEvidence(frames);
   if (safeStringify(root['authorityEvidence']) !== safeStringify(authorityEvidence)) {
     throw new Error('HLT_AUTHORITY_EVIDENCE_MISMATCH');
   }
@@ -110,45 +144,51 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: Number(root['createdAt']),
     source: {
+      engine: source['engine'] as 'ts',
       workDir: String(source['workDir'] || ''),
       users: Number(source['users']),
       workload: String(source['workload'] || ''),
     },
-    recording,
-    totals: {
-      runtimeFrames: Number(totals['runtimeFrames']),
-      runtimeEntityInputs: Number(totals['runtimeEntityInputs']),
-      outboxEnvelopes: Number(totals['outboxEnvelopes']),
+    checkpoint,
+    tail,
+    recording: {
+      format: 'xln-runtime-recording',
+      version: 1,
+      runtimeId: tail.runtimeId,
+      baseHeight: checkpoint.height,
+      targetHeight: tail.runtimeHeight,
+      createdAt: Number(root['createdAt']),
+      bundles: [tail],
+      bundleHashes: [],
+      manifestHash: '',
     },
-    featurePolicy: {
-      hubRebalance: 'disabled',
-      crossJ: 'disabled',
-      disputes: 'disabled',
-      lending: 'disabled',
-    },
+    totals: summarizeHltHubFrames(frames),
     authorityEvidence,
   };
   if (!Number.isSafeInteger(decoded.createdAt) || decoded.createdAt < 0) throw new Error('HLT_HUB_RECORDING_CREATED_AT_INVALID');
   if (!decoded.source.workDir || !decoded.source.workload || !Number.isSafeInteger(decoded.source.users) || decoded.source.users < 1) {
     throw new Error('HLT_HUB_RECORDING_SOURCE_INVALID');
   }
-  if (!Object.values(decoded.totals).every(value => Number.isSafeInteger(value) && value >= 0)) {
-    throw new Error('HLT_HUB_RECORDING_TOTALS_INVALID');
-  }
-  const actualTotals = summarizeHltHubFrames(recordingFrames(recording));
-  if (!sameTotals(decoded.totals, actualTotals)) throw new Error('HLT_HUB_RECORDING_TOTALS_MISMATCH');
+  if (decoded.source.engine !== 'ts') throw new Error('HLT_HUB_RECORDING_ENGINE_NOT_TS');
   return decoded;
 };
 
 export const readHltHubRecording = (path: string): HltHubRecording =>
   validateHltHubRecording(safeParse(readFileSync(path, 'utf8')));
 
-export const writeHltHubRecording = (path: string, recording: HltHubRecording): void => {
+export const writeHltHubRecording = (path: string, recording: HltHubRecordingArtifact): void => {
   const validated = validateHltHubRecording(recording);
   const temporary = `${path}.tmp-${process.pid}`;
   const descriptor = openSync(temporary, 'wx', 0o600);
   try {
-    writeSync(descriptor, `${serializeTaggedJson(validated)}\n`);
+    writeSync(descriptor, `${serializeTaggedJson({
+      schema: validated.schema,
+      createdAt: validated.createdAt,
+      source: validated.source,
+      checkpoint: validated.checkpoint,
+      tail: validated.tail,
+      authorityEvidence: validated.authorityEvidence,
+    })}\n`);
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);

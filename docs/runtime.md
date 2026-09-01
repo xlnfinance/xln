@@ -366,8 +366,9 @@ Parity is complete only when all of the following are green:
 - payment, same-chain swap, cross-j and dispute scenarios;
 - live J watcher → Entity → batch submission → receipt handling;
 - production and test Rust trees compile;
-- H1 launches the same complete Rust process under dev, scenario and HLT
-  drivers; TypeScript does not execute H1 financial transitions.
+- H1 is the hub role. The explicit plan engine selects the complete TypeScript
+  or Rust production process, and that selected process is unchanged across
+  dev, scenario and HLT drivers.
 
 Catalog equality, wire decoding, a release build or replay root equality alone
 does not prove semantic parity.
@@ -489,7 +490,7 @@ iteration. Deferral is evidence triage, not a production workaround:
 - exclude the set only from the default fast gate and run it as a separate
   focused campaign when that subsystem becomes the active milestone;
 - never defer compilation, payment, same-chain swap, canonical WAL/recovery,
-  Runtime/Entity/Account root parity or the production Rust H1 launch path;
+  Runtime/Entity/Account root parity or either production H1 engine launch path;
 - a deferred failure must not be reported as green or as completed parity.
 
 The current dispute-restart recovery campaign is such an opt-in set. Its known

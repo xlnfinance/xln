@@ -730,4 +730,12 @@ mod tests {
             compute_entity_frame_hash_with_measure(&fallback).expect("fallback hash"),
         );
     }
+
+    #[test]
+    fn empty_event_parity_vector_matches_typescript() {
+        assert_eq!(
+            hex_digest(&compute_entity_events_parity_digest(&[]).expect("empty event digest"),),
+            "0x701d6f37973653c3cd817e7c8b7cbc401a10bdad404170e7cda85a02f605d656",
+        );
+    }
 }

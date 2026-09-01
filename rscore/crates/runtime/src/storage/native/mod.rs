@@ -33,6 +33,7 @@ pub(crate) use frame::{reset_runtime_frame_validation_count, runtime_frame_valid
 pub use keys::PathNodeKey;
 pub(crate) use keys::valid_path_key;
 pub use store::NativeRuntimeStore;
+pub(crate) use types::NativeStorageTimings;
 pub use types::{
     CheckpointGraph, DurableRuntimeFrame, NativeRuntimeRecovery, NativeStorageConfig,
     PathNodeChange, RecoveredCheckpoint, RecoveredOutboxFrame, RecoveredWalFrame,

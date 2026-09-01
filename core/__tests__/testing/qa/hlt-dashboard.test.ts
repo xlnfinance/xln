@@ -24,6 +24,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 const SAMPLE_PAYMENT = {
   schema: 'xln-hlt-payment-load-v1',
+  engine: 'rust',
   mode: 'payments',
   runId: 'hlt-dashboard-test',
   completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
@@ -49,8 +50,8 @@ const SAMPLE_PAYMENT = {
   hubAcceptedPaymentsAfter: 1040,
   hubIngressElapsedMs: 5000,
   settlementSamples: [
-    { elapsedMs: 5000, runtimeHeight: 310, acceptedPayments: 1000, completedPayments: 900, lockBookOpen: 100 },
-    { elapsedMs: 6699, runtimeHeight: 313, acceptedPayments: 1000, completedPayments: 1000, lockBookOpen: 0 },
+    { elapsedMs: 5000, runtimeHeight: 310, acceptedPayments: 1000, completedPayments: 900, paybookOpen: 100 },
+    { elapsedMs: 6699, runtimeHeight: 313, acceptedPayments: 1000, completedPayments: 1000, paybookOpen: 0 },
   ],
   roundSubmissionLagMs: Array.from({ length: 1000 }, () => 1),
   walBytesBefore: 13268608,
@@ -62,6 +63,10 @@ const SAMPLE_PAYMENT = {
   hubDurableAfter: {
     height: 313,
     canonicalStateHash: '0x35eecd38bd0a40efc6431d181b1d0dd09d05916cc53e8fa9c0d16a33723ae817',
+  },
+  environment: {
+    disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
+    laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
   },
 };
 

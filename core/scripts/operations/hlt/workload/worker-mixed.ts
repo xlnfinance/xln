@@ -73,6 +73,7 @@ import {
 import type { LaneRuntime } from '../lanes/lane-runtimes';
 import {
   hltAuthorityEvidenceEnabled,
+  materializeCompleteDisputeEvidence,
   materializeH1CollateralEvidence,
 } from './worker-authority-evidence';
 import {
@@ -215,7 +216,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     if (selection.engine === 'rust' && authorityEvidence) {
       throw new Error('HLT_RUST_AUTHORITY_EVIDENCE_REQUIRES_NATIVE_MATERIALIZER');
     }
-    if (authorityEvidence) await exportReplayBaseSnapshotIfConfigured(requireHub());
     const nativeAuthority = selection.engine === 'rust'
       ? createRustSameLoadNativeAuthority({
           portBase: args.portBase,
@@ -290,7 +290,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         `PRODUCTION_SWAP_LOAD_SETUP_TRADE_COUNT_MISMATCH:${initialBook.tradeCount}:${prepared.setupTradeCount}`,
       );
     }
-    if (selection.engine === 'ts' && !hubBackgroundStopped) {
+    if (selection.engine === 'ts' && !authorityEvidence && !hubBackgroundStopped) {
       await stopHltHubBackgroundIo(args, [hubLabel]);
       hubBackgroundStopped = true;
     }
@@ -298,7 +298,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     economicPreparePhase('lane-counters-reset');
     if (!rustH1) {
       await resetHltProcessOpCounters(args, [requireHub()]);
-      if (!authorityEvidence) await exportReplayBaseSnapshotIfConfigured(requireHub());
+      await exportReplayBaseSnapshotIfConfigured(requireHub());
     }
     const rustMetricsBefore: RustH1Metrics | null = rustH1
       ? await waitForRustH1Metrics(
@@ -332,7 +332,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const walPath = rustH1
       ? join(args.workDir, 'prod-mesh', hubLabel.toLowerCase(), 'rscore-native')
       : resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
-    const walBytesBefore = directoryBytes(walPath);
+    const walBytesBefore = rustMetricsBefore?.retainedWalBytes ?? directoryBytes(walPath);
     economicPreparePhase('wal-sized');
     const driverRssBefore = process.memoryUsage().rss;
     const expectedSubmittedOffers = prepared.distribution.submittedOffers;
@@ -459,6 +459,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       const finalElapsedMs = rustSettlement.fullySettledElapsedMs;
       const paymentReport = rustTpsAuthority ? decodeLoadPaymentReport({
         schema: 'xln-hlt-payment-load-v1',
+        engine: 'rust',
         mode: 'payments',
         runId: basename(args.workDir),
         completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
@@ -496,7 +497,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         }],
         roundSubmissionLagMs: submitted.roundSubmissionLagMs,
         walBytesBefore,
-        walBytesAfter: directoryBytes(walPath),
+        walBytesAfter: rustSettlement.metrics.retainedWalBytes,
         hubDurableBefore,
         hubDurableAfter: {
           height: rustSettlement.metrics.height,
@@ -591,7 +592,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         matchedElapsedMs: rustSettlement.matchedElapsedMs,
         fullySettledElapsedMs: finalElapsedMs,
         walBytesBefore,
-        walBytesAfter: directoryBytes(walPath),
+        walBytesAfter: rustSettlement.metrics.retainedWalBytes,
         hubDurableBefore,
         hubDurableAfter: {
           height: rustSettlement.metrics.height,
@@ -674,6 +675,15 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const hubCountersAfter = paymentSettlement.counters;
     const hubIngressElapsedMs = paymentSettlement.hubIngressElapsedMs;
     const deliveredElapsedMs = paymentSettlement.deliveredElapsedMs;
+    if (authorityEvidence) {
+      const firstUser = users[0];
+      if (!firstUser) throw new Error('HLT_AUTHORITY_EVIDENCE_USER_MISSING');
+      await materializeCompleteDisputeEvidence({
+        hub: requireHub(),
+        hubIdentity,
+        lane: firstUser,
+      });
+    }
     const [hubIo, laneIo] = await Promise.all([
       assertHltHubProcessIsolation(args),
       assertLaneHostSocketCounterCoverage(users),
@@ -683,6 +693,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
 
     const paymentReport = decodeLoadPaymentReport({
       schema: 'xln-hlt-payment-load-v1',
+      engine: 'ts',
       mode: 'payments',
       runId: basename(args.workDir),
       completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
@@ -720,6 +731,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
 
     const swapReport = decodeLoadSustainedReport({
       schema: 'xln-production-swap-load-sustained-v1',
+      engine: 'ts',
       mode: 'same',
       schedule: 'balanced_role_rotation',
       configuredUsers: users.length,

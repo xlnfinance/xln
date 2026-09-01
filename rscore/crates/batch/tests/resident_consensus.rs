@@ -5,9 +5,9 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountEnvelopeUpdate, AccountId, AccountInputBoardAuthority, AccountInputRow,
-    AccountInputVerdict, AccountSeed, CertifiedSettlementHankoDraft, EngineGeneration,
-    EntityInboundRequest, EntityOutboundRequest, FailedHtlcFollowup, PendingSettlementHankoDraft,
-    ResidentConsensusEngine,
+    AccountInputVerdict, AccountPhaseKind, AccountSeed, CertifiedSettlementHankoDraft,
+    EngineGeneration, EntityInboundRequest, EntityOutboundRequest, FailedHtlcFollowup,
+    PendingSettlementHankoDraft, ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity, AccountReplica,
@@ -436,6 +436,19 @@ fn failed_htlc_uses_one_exact_continuation_and_matches_workers() {
             "workers={workers}"
         );
         assert_eq!(result.admissions.len(), 2, "workers={workers}");
+        let phases = engine.account_phase_metrics();
+        let failed = phases
+            .iter()
+            .find(|metric| metric.kind == AccountPhaseKind::OutboundFailedHtlcFollowup)
+            .expect("failed HTLC metric");
+        let settlement = phases
+            .iter()
+            .find(|metric| metric.kind == AccountPhaseKind::OutboundSettlementHankoAttach)
+            .expect("settlement metric");
+        assert_eq!(failed.invocations, 1, "workers={workers}");
+        assert_eq!(failed.continuation_rounds, 1, "workers={workers}");
+        assert_eq!(failed.worker_rows.iter().sum::<u64>(), failed.touched_rows);
+        assert_eq!(settlement.invocations, 0, "workers={workers}");
         assert_eq!(
             result.proposals[0].failed_htlc_locks[0]
                 .upstream_resolution
@@ -801,6 +814,22 @@ fn unsigned_settlement_transition_is_sealed_before_certified_hankos_attach() {
             dispute_hanko: vec![0x41, 0x42],
         }])
         .expect("attach manifest witnesses");
+    let phases = engine.account_phase_metrics();
+    let failed = phases
+        .iter()
+        .find(|metric| metric.kind == AccountPhaseKind::OutboundFailedHtlcFollowup)
+        .expect("failed HTLC metric");
+    let settlement = phases
+        .iter()
+        .find(|metric| metric.kind == AccountPhaseKind::OutboundSettlementHankoAttach)
+        .expect("settlement metric");
+    assert_eq!(failed.invocations, 0);
+    assert_eq!(settlement.invocations, 1);
+    assert_eq!(settlement.continuation_rounds, 1);
+    assert_eq!(
+        settlement.worker_rows.iter().sum::<u64>(),
+        settlement.touched_rows
+    );
     assert_eq!(engine.accounts_root(), result.accounts_root);
     assert_eq!(
         engine

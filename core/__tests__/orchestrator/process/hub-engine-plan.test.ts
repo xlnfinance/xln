@@ -12,10 +12,16 @@ import {
 import { buildRustHubGenesisConfig } from '../../../orchestrator/process/rust-hub-genesis';
 import { safeStringify } from '../../../protocol/serialization';
 
-test('canonical dev topology is Rust H1 and TypeScript H2/H3', () => {
-  expect(['H1', 'H2', 'H3'].map(canonicalHubEngine)).toEqual([
+test('the explicit plan engine selects H1 while H2/H3 remain TypeScript', () => {
+  expect(['H1', 'H2', 'H3'].map(name => canonicalHubEngine(name, { XLN_HLT_ENGINE: 'ts' }))).toEqual([
+    'typescript', 'typescript', 'typescript',
+  ]);
+  expect(['H1', 'H2', 'H3'].map(name => canonicalHubEngine(name, { XLN_HLT_ENGINE: 'rust' }))).toEqual([
     'rust', 'typescript', 'typescript',
   ]);
+  expect(canonicalHubEngine('H1', {})).toBe('typescript');
+  expect(() => canonicalHubEngine('H1', { XLN_HLT_ENGINE: 'native' }))
+    .toThrow('HUB_ENGINE_SELECTOR_INVALID:native');
   expect(() => canonicalHubEngine('MM')).toThrow('HUB_ENGINE_NAME_INVALID:MM');
 });
 
@@ -45,7 +51,7 @@ test('mesh supervisor dispatches canonical per-hub process kinds', () => {
   expect(hubSpawner).toContain('const routes = [...hubRoutes, ...supportRoutes');
 });
 
-test('dev lets Cargo verify native H1 before orchestration inside one bounded process', () => {
+test('dev verifies native bytes only when the explicit engine selects Rust H1', () => {
   const launcher = readFileSync(join(import.meta.dir, '../../../../scripts/dev/run-dev.ts'), 'utf8');
   const preflight = readFileSync(
     join(import.meta.dir, '../../../../scripts/dev/checks/check-rscore-runtime-freshness.ts'),
@@ -56,6 +62,7 @@ test('dev lets Cargo verify native H1 before orchestration inside one bounded pr
   expect(freshness).toBeGreaterThan(-1);
   expect(prepare).toBeGreaterThan(freshness);
   expect(preflight).toContain('const BUILD_TIMEOUT_MS = 30_000');
+  expect(preflight).toContain("if (selectedEngine === 'rust')");
   expect(preflight).toContain('if (stopping) return stopping');
   expect(preflight).toContain('await buildNativeH1()');
   expect(preflight).toContain('utimesSync(runtimeBinary');

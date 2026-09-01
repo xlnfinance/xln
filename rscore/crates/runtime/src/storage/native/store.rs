@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use rusty_leveldb::{DB, LdbIterator, Options, WriteBatch};
 
@@ -17,7 +18,8 @@ use super::fsync::{DurableEnv, sync_database_directory};
 use super::keys::runtime_machine_leaf_key;
 use super::keys::{KEY_HEAD, KEY_NATIVE_CHECKPOINT, frame_key, output_key};
 use super::types::{
-    DurableRuntimeFrame, NativeStorageConfig, PathNodeChange, RuntimeFrameCommit, StorageHead,
+    DurableRuntimeFrame, NativeStorageConfig, NativeStorageTimings, PathNodeChange,
+    RuntimeFrameCommit, StorageHead,
 };
 use super::{MAX_FRAME_BYTES, MAX_OUTPUT_BYTES, MAX_OUTPUT_ROWS, NativeStorageError};
 
@@ -40,6 +42,10 @@ struct PreparedRuntimeFrame {
     digest: [u8; 32],
     materialized_state: bool,
     next_head: StorageHead,
+}
+
+fn elapsed(started: Option<Instant>) -> Duration {
+    started.map_or(Duration::ZERO, |started| started.elapsed())
 }
 
 impl NativeRuntimeStore {
@@ -85,6 +91,15 @@ impl NativeRuntimeStore {
         self.head.latest_height
     }
 
+    /// Exact bytes retained by the canonical Runtime WAL head.
+    ///
+    /// This is a read-only projection of the same HEAD row advanced in the
+    /// synced frame batch. Filesystem directory size is not equivalent: a
+    /// LevelDB compaction may shrink it while the logical WAL grows.
+    pub fn retained_wal_bytes(&self) -> u64 {
+        self.head.retained_wal_bytes
+    }
+
     /// Exact permanent checkpoint graph visible before the next cadence
     /// write. This is read only at cadence so carried Entity rows can remain
     /// untouched while native-owned rows are replaced in the same WAL batch.
@@ -117,7 +132,7 @@ impl NativeRuntimeStore {
     ) -> Result<DurableRuntimeFrame, NativeStorageError> {
         self.ensure_healthy()?;
         let prepared = self.prepare_frame(frame)?;
-        self.persist_frame(prepared)
+        self.persist_frame(prepared, false).map(|(frame, _)| frame)
     }
 
     /// Hot production seam for the sealed output of the canonical Runtime
@@ -126,14 +141,18 @@ impl NativeRuntimeStore {
     pub(crate) fn append_encoded_frame(
         &mut self,
         mut encoded: EncodedRuntimeFrame,
-    ) -> Result<DurableRuntimeFrame, NativeStorageError> {
+        profile: bool,
+    ) -> Result<(DurableRuntimeFrame, NativeStorageTimings), NativeStorageError> {
         self.ensure_healthy()?;
+        let prepare_started = profile.then(Instant::now);
         validate_encoded_frame(&encoded)?;
         let resident_output_values = encoded.resident_output_values.take();
         let prepared = self.prepare_validated_frame(encoded.commit, encoded.validated)?;
-        let mut durable = self.persist_frame(prepared)?;
+        let prepare_validate = elapsed(prepare_started);
+        let (mut durable, mut timings) = self.persist_frame(prepared, profile)?;
+        timings.prepare_validate = prepare_validate;
         durable.resident_output_values = std::cell::RefCell::new(resident_output_values);
-        Ok(durable)
+        Ok((durable, timings))
     }
 
     /// Atomically install one already-verified materialized Runtime checkpoint
@@ -164,12 +183,16 @@ impl NativeRuntimeStore {
         next_head.latest_materialized_height = frame.height;
         next_head.epoch_replay_bytes = bytes;
         next_head.retained_wal_bytes = bytes;
-        self.persist_frame(PreparedRuntimeFrame {
-            frame,
-            digest: envelope.output_digest,
-            materialized_state: true,
-            next_head,
-        })
+        self.persist_frame(
+            PreparedRuntimeFrame {
+                frame,
+                digest: envelope.output_digest,
+                materialized_state: true,
+                next_head,
+            },
+            false,
+        )
+        .map(|(frame, _)| frame)
     }
 
     pub fn read_durable_outputs(
@@ -319,7 +342,9 @@ impl NativeRuntimeStore {
     fn persist_frame(
         &mut self,
         mut prepared: PreparedRuntimeFrame,
-    ) -> Result<DurableRuntimeFrame, NativeStorageError> {
+        profile: bool,
+    ) -> Result<(DurableRuntimeFrame, NativeStorageTimings), NativeStorageError> {
+        let batch_started = profile.then(Instant::now);
         let mut batch = WriteBatch::default();
         if prepared
             .frame
@@ -345,16 +370,24 @@ impl NativeRuntimeStore {
             }
         }
         batch.put(KEY_HEAD, &encode_head(&prepared.next_head)?);
+        let batch_build = elapsed(batch_started);
+        let write_started = profile.then(Instant::now);
         if let Err(error) = self.database.write(batch, self.config.durable_fsync) {
             self.poisoned = true;
             return Err(NativeStorageError::Database(error.to_string()));
         }
-        if self.config.durable_fsync
-            && let Err(error) = sync_database_directory(&self.path)
-        {
-            self.poisoned = true;
-            return Err(error);
-        }
+        let db_write_sync = elapsed(write_started);
+        let directory_sync = if self.config.durable_fsync {
+            let directory_started = profile.then(Instant::now);
+            if let Err(error) = sync_database_directory(&self.path) {
+                self.poisoned = true;
+                return Err(error);
+            }
+            elapsed(directory_started)
+        } else {
+            Duration::ZERO
+        };
+        let post_commit_started = profile.then(Instant::now);
         match prepared.frame.checkpoint.as_mut() {
             Some(checkpoint) if checkpoint.full => {
                 self.checkpoint_path_nodes = Some(
@@ -387,13 +420,24 @@ impl NativeRuntimeStore {
         self.head = prepared.next_head;
         let height = prepared.frame.height;
         let output_count = prepared.frame.outputs.len();
-        Ok(DurableRuntimeFrame {
+        let durable = DurableRuntimeFrame {
             height,
             output_count,
             output_digest: prepared.digest,
             resident_outputs: Some(prepared.frame.outputs),
             resident_output_values: std::cell::RefCell::new(None),
-        })
+        };
+        let post_commit = elapsed(post_commit_started);
+        Ok((
+            durable,
+            NativeStorageTimings {
+                prepare_validate: Duration::ZERO,
+                batch_build,
+                db_write_sync,
+                directory_sync,
+                post_commit,
+            },
+        ))
     }
 
     pub(super) fn ensure_healthy(&self) -> Result<(), NativeStorageError> {

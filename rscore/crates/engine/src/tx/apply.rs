@@ -164,6 +164,20 @@ pub(crate) fn apply_to_candidate(
     tx: &AccountTx,
     context: Option<&AccountExecutionContext>,
 ) -> Result<MutationDecision, TransitionError> {
+    if let Some(crate::CanonicalValue::String(status)) = candidate.envelope().field("status")
+        && status != "active"
+    {
+        // Parity target: mutation.ts rejects before routing every AccountTx.
+        // Checking here, rather than only at local enqueue or peer ingress,
+        // keeps direct execution, signed-frame validation and proposal work on
+        // one freeze rule and prevents a late queued tx from crossing dispute.
+        return Ok(MutationDecision::rejected(
+            AccountRejection::ClosedForDispute {
+                status: status.clone(),
+                tx_type: tx.wire_name(),
+            },
+        ));
+    }
     match tx {
         AccountTx::JEventClaim(tx) => {
             crate::tx::handlers::j_events::apply_j_event_claim(candidate, tx, proposer)

@@ -327,6 +327,17 @@ impl RuntimeWalReader {
         height: u64,
     ) -> Result<RuntimeFrameCommit, RuntimeLevelDbError> {
         let source = self.concrete_checkpoint_source(state_reader, height)?;
+        self.native_checkpoint_import_from_source(source)
+    }
+
+    /// Import the exact frozen common-bootstrap graph carried by an offline
+    /// parity artifact. The caller already decoded the same
+    /// `ConcreteCheckpointSource`; this avoids re-reading mutable live rows.
+    pub fn native_checkpoint_import_from_source(
+        &mut self,
+        source: ConcreteCheckpointSource,
+    ) -> Result<RuntimeFrameCommit, RuntimeLevelDbError> {
+        let height = source.height;
         let validated =
             validate_runtime_frame(&source.frame_bytes).map_err(NativeStorageError::FrameCodec)?;
         let state_root = validated

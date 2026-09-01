@@ -31,6 +31,15 @@ use super::{EntityOutputEncodingError, EntityRouteError, EntityRouteTable};
 
 static PROFILE_PROJECTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
+/// One process-wide gate owns all fine-grained Runtime wall diagnostics.
+/// Keeping the lookup here prevents projection, reducer and storage from
+/// drifting onto separate profiling modes or paying an environment lookup per
+/// frame.
+pub(super) fn runtime_profile_enabled() -> bool {
+    *PROFILE_PROJECTION
+        .get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_PROJECTION").as_deref() == Ok("1"))
+}
+
 fn output_key(output: &crate::RuntimeEntityOutputs) -> RuntimeEntityKey {
     RuntimeEntityKey {
         entity_id: output.entity_id,
@@ -213,8 +222,7 @@ pub(crate) fn project_durable_frame(
         }
         return Ok(DurableProjection::Idle(Box::new(result.replica)));
     };
-    let profile = *PROFILE_PROJECTION
-        .get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_PROJECTION").as_deref() == Ok("1"));
+    let profile = runtime_profile_enabled();
     let prelude_started = std::time::Instant::now();
     let post_commit_j_attempts = std::mem::take(&mut result.post_commit_j_attempts);
     let applied_input = result

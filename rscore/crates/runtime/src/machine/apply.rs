@@ -13,7 +13,7 @@ use xln_rscore_entity_kernel::{
     EntityFrameWireMeasureBody, EntityTransitionCertificationRequest, EntityTransitionError,
     EntityTxKind, HashType, JPrefixRangeClaim, LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES,
     MAX_ENTITY_PROPOSAL_WIRE_BYTES, MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, PendingNonMutatingWake,
-    ResidentEntityOperation, ResidentEntityRequest, ScheduledWake,
+    ResidentEntityOperation, ResidentEntityRequest, ScheduledWake, SchedulerError,
     UNREGISTERED_ENTITY_COMMAND_STACK_KEY, advance_entity_command_nonce,
     apply_resident_entity_round_core, assert_signed_entity_command,
     build_collective_entity_command, build_proposer_materializations,
@@ -21,9 +21,10 @@ use xln_rscore_entity_kernel::{
     collect_due_scheduled_wake_jobs, current_entity_command_board_hash, decode_local_entity_tx,
     encode_entity_frame_context, measure_entity_frame_tx_bytes, measure_entity_frame_wire,
     normalize_entity_command_nonce_board, proposer_materialization_account_view_requests,
-    proposer_materialization_key, resolve_board_handover_authority, sign_j_event_range,
+    proposer_materialization_key, resolve_board_handover_authority, scheduled_wake_entity_tx,
+    sign_j_event_range,
 };
-use xln_rscore_protocol::CanonicalValue;
+use xln_rscore_protocol::{CanonicalValue, encode_canonical_consensus_bytes};
 
 use crate::entity_context_json::apply_entity_state_policy;
 use crate::{
@@ -34,10 +35,10 @@ use super::inbound_genesis::{attach_inbound_genesis_policies, derive_policy};
 use super::types::EntityPendingWork;
 use super::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
-    RuntimeApplyResult, RuntimeEntityFrameContext, RuntimeEntityKey, RuntimeEntityOutputs,
-    RuntimeEntityReplica, RuntimeEntityState, RuntimeFrameContext, RuntimeFrameTouches,
-    RuntimeInput, RuntimeLiveInput, RuntimeMachineError, RuntimeOutputs, RuntimeReplica,
-    RuntimeWake, enqueue_runtime_input,
+    RuntimeApplyPhaseProfile, RuntimeApplyResult, RuntimeEntityFrameContext, RuntimeEntityInput,
+    RuntimeEntityKey, RuntimeEntityOutputs, RuntimeEntityReplica, RuntimeEntityState,
+    RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput, RuntimeLiveInput, RuntimeMachineError,
+    RuntimeOutputs, RuntimeReplica, RuntimeWake, enqueue_runtime_input,
     scheduled_input::{empty_entity_input, scheduled_wake_entity_input},
     select_runtime_frame,
 };
@@ -218,7 +219,47 @@ fn prepare_j_prefix_range(
 
 fn profile_runtime_apply() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("XLN_RUNTIME_APPLY_PROFILE").as_deref() == Ok("1"))
+}
+
+fn profile_account_input_outcomes_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
+}
+
+fn profiled_elapsed(started: Option<Instant>) -> std::time::Duration {
+    started.map_or(std::time::Duration::ZERO, |started| started.elapsed())
+}
+
+fn finish_runtime_apply_profile(
+    enabled: bool,
+    started: Option<Instant>,
+    runtime_height: u64,
+    mut profile: RuntimeApplyPhaseProfile,
+) -> Option<RuntimeApplyPhaseProfile> {
+    if !enabled {
+        return None;
+    }
+    profile.total = profiled_elapsed(started);
+    profile.residual = profile.total.saturating_sub(profile.accounted());
+    eprintln!(
+        "RSCORE_RUNTIME_APPLY_PHASES runtimeHeight={} fitMicros={} residentCoreMicros={} postCorePrepareMicros={} certificationMicros={} settlementAttachMicros={} postCertJMicros={} residualMicros={} totalMicros={} entityGroups={} entityTxsSelected={} accountInputs={} settlementHankos={} postCertJActions={}",
+        runtime_height,
+        profile.fit.as_micros(),
+        profile.resident_core.as_micros(),
+        profile.post_core_prepare.as_micros(),
+        profile.certification.as_micros(),
+        profile.settlement_attach.as_micros(),
+        profile.post_cert_j.as_micros(),
+        profile.residual.as_micros(),
+        profile.total.as_micros(),
+        profile.entity_groups,
+        profile.entity_txs_selected,
+        profile.account_inputs,
+        profile.settlement_hankos,
+        profile.post_cert_j_actions,
+    );
+    Some(profile)
 }
 
 #[derive(Default)]
@@ -689,6 +730,22 @@ fn internal_wake(
 ) -> Result<Option<RuntimeWake>, RuntimeMachineError> {
     let entity_mempool = !replica.entity_mempool.is_empty();
     let account_mempool = replica.accounts.has_proposable_accounts()?;
+    let scheduled = scheduled_wake_from_state(state, &replica.signer_id, frame)?;
+    if !entity_mempool && !account_mempool && scheduled.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(RuntimeWake {
+        entity_mempool,
+        account_mempool,
+        scheduled,
+    }))
+}
+
+fn scheduled_wake_from_state(
+    state: &RuntimeEntityState,
+    signer_id: &str,
+    frame: &RuntimeFrameContext,
+) -> Result<Option<ScheduledWake>, RuntimeMachineError> {
     let jobs = match &state.entity.crontab {
         Some(crontab) => collect_due_scheduled_wake_jobs(
             crontab,
@@ -702,21 +759,14 @@ fn internal_wake(
         .map(|first| first.due_at)
         .map(|due_at| ScheduledWake {
             version: 1,
-            proposer_signer_id: replica.signer_id.clone(),
+            proposer_signer_id: signer_id.to_string(),
             due_at,
             jobs: jobs
                 .into_iter()
                 .take(MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS)
                 .collect(),
         });
-    if !entity_mempool && !account_mempool && scheduled.is_none() {
-        return Ok(None);
-    }
-    Ok(Some(RuntimeWake {
-        entity_mempool,
-        account_mempool,
-        scheduled,
-    }))
+    Ok(scheduled)
 }
 
 enum PreparedFrameTx<'a> {
@@ -1551,7 +1601,7 @@ pub fn apply_runtime(
     replica: RuntimeReplica,
     input: RuntimeInput,
 ) -> Result<RuntimeApplyResult, RuntimeMachineError> {
-    apply_runtime_inner(replica, input, None)
+    apply_runtime_inner(replica, input, None, profile_runtime_apply())
 }
 
 /// Apply one live input after selecting its exact FIFO prefix and then
@@ -1562,7 +1612,21 @@ pub fn apply_runtime_live(
     input: RuntimeLiveInput,
     materializer: &mut dyn EntityInfraMaterializer,
 ) -> Result<RuntimeApplyResult, RuntimeMachineError> {
-    apply_runtime_inner(replica, input.into_selection_input(), Some(materializer))
+    apply_runtime_inner(
+        replica,
+        input.into_selection_input(),
+        Some(materializer),
+        profile_runtime_apply(),
+    )
+}
+
+#[cfg(test)]
+pub(super) fn apply_runtime_with_profile_for_test(
+    replica: RuntimeReplica,
+    input: RuntimeInput,
+    profile: bool,
+) -> Result<RuntimeApplyResult, RuntimeMachineError> {
+    apply_runtime_inner(replica, input, None, profile)
 }
 
 struct PendingEntityGroup {
@@ -1571,6 +1635,7 @@ struct PendingEntityGroup {
     pending: Vec<EntityPendingWork>,
     input_positions: Vec<usize>,
     wake: Option<RuntimeWake>,
+    recorded_scheduled_wake: bool,
     j_observation: Option<crate::j_watcher::ObserveJRange>,
 }
 
@@ -1585,7 +1650,7 @@ fn push_pending_entity_input(
     signer_id: String,
     pending: Vec<EntityPendingWork>,
     position: usize,
-) -> Result<(), RuntimeMachineError> {
+) -> Result<usize, RuntimeMachineError> {
     let key = RuntimeEntityKey::new(entity_id, &signer_id)?;
     let index = match indexes.get(&key).copied() {
         Some(index) => index,
@@ -1598,6 +1663,7 @@ fn push_pending_entity_input(
                 pending: Vec::new(),
                 input_positions: Vec::new(),
                 wake: None,
+                recorded_scheduled_wake: false,
                 j_observation: None,
             });
             index
@@ -1605,7 +1671,42 @@ fn push_pending_entity_input(
     };
     groups[index].pending.extend(pending);
     groups[index].input_positions.push(position);
-    Ok(())
+    Ok(index)
+}
+
+fn recorded_scheduled_wake(
+    replica: &RuntimeReplica,
+    input: &RuntimeEntityInput,
+    frame: &RuntimeFrameContext,
+) -> Result<Option<ScheduledWake>, RuntimeMachineError> {
+    let Some(recorded) = input.scheduled_wake() else {
+        return Ok(None);
+    };
+    let key = RuntimeEntityKey::new(*input.entity_id(), input.signer_id())?;
+    let state = replica
+        .state
+        .e_replicas
+        .get(&key)
+        .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+    let expected =
+        scheduled_wake_from_state(state, input.signer_id(), frame)?.ok_or_else(|| {
+            RuntimeMachineError::Scheduler(SchedulerError::InvalidWake {
+                detail: "RECORDED_NOT_DUE".into(),
+            })
+        })?;
+    let expected_tx = scheduled_wake_entity_tx(&expected)?;
+    let expected_bytes = encode_canonical_consensus_bytes(&expected_tx.wire_data)
+        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))?;
+    let recorded_bytes = encode_canonical_consensus_bytes(recorded)
+        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))?;
+    if expected_bytes != recorded_bytes {
+        return Err(RuntimeMachineError::Scheduler(
+            SchedulerError::InvalidWake {
+                detail: "RECORDED_CONFLICT".into(),
+            },
+        ));
+    }
+    Ok(Some(expected))
 }
 
 struct AppliedEntityGroup {
@@ -1619,13 +1720,22 @@ struct AppliedEntityGroup {
     selected_count: usize,
     pending_count: usize,
     post_commit_j_actions: Vec<crate::j_submit::DurableJAttempt>,
+    apply_profile: RuntimeApplyPhaseProfile,
 }
 
 fn apply_runtime_inner(
     mut replica: RuntimeReplica,
     mut input: RuntimeInput,
     mut materializer: Option<&mut dyn EntityInfraMaterializer>,
+    profile_enabled: bool,
 ) -> Result<RuntimeApplyResult, RuntimeMachineError> {
+    let profile_started = profile_enabled.then(Instant::now);
+    let mut apply_profile = RuntimeApplyPhaseProfile::default();
+    // Live execution derives resident/Crontab work and persists the resulting
+    // explicit Entity inputs in the Runtime WAL. Exact execution already
+    // receives those inputs from that WAL, so deriving them again would apply
+    // one committed wake twice after restoring the pre-frame checkpoint.
+    let derive_internal_wakes = materializer.is_some();
     for entity_input in &input.entity_inputs {
         let Some((_, slot)) =
             replica.entity_slot(entity_input.entity_id(), entity_input.signer_id())
@@ -1667,17 +1777,19 @@ fn apply_runtime_inner(
     validate_selected_context(&replica, &selected_context)?;
 
     let mut wakes = Vec::new();
-    for (key, state) in &replica.state.e_replicas {
-        let live = replica
-            .e_replicas
-            .get(key)
-            .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
-        if let Some(wake) = internal_wake(state, live, &selected_context)? {
-            wakes.push(super::RuntimeEntityWake {
-                entity_id: key.entity_id,
-                signer_id: key.signer_id.clone(),
-                wake,
-            });
+    if derive_internal_wakes {
+        for (key, state) in &replica.state.e_replicas {
+            let live = replica
+                .e_replicas
+                .get(key)
+                .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+            if let Some(wake) = internal_wake(state, live, &selected_context)? {
+                wakes.push(super::RuntimeEntityWake {
+                    entity_id: key.entity_id,
+                    signer_id: key.signer_id.clone(),
+                    wake,
+                });
+            }
         }
     }
     let Some(mut frame) = selected.or_else(|| {
@@ -1705,6 +1817,7 @@ fn apply_runtime_inner(
             },
             account_commits: Vec::new(),
             post_commit_j_attempts: Vec::new(),
+            apply_profile: None,
         });
     };
     frame.receipt.wakes = wakes.clone();
@@ -1724,8 +1837,19 @@ fn apply_runtime_inner(
     let mut inputs = std::collections::VecDeque::from(frame.entity_inputs);
     let mut position = 0_usize;
     while let Some(input) = inputs.pop_front() {
+        let recorded_wake = (!derive_internal_wakes)
+            .then(|| recorded_scheduled_wake(&replica, &input, &frame.frame))
+            .transpose()?
+            .flatten();
         let marker = input.atomic_pair().cloned();
         if let Some(marker) = marker {
+            if recorded_wake.is_some() {
+                return Err(RuntimeMachineError::Scheduler(
+                    SchedulerError::InvalidWake {
+                        detail: "RECORDED_ATOMIC".into(),
+                    },
+                ));
+            }
             if !deferred_groups.is_empty() {
                 segments.push(PendingEntitySegment {
                     groups: std::mem::take(&mut deferred_groups),
@@ -1752,7 +1876,7 @@ fn apply_runtime_inner(
                 let signer_id = input.signer_id().to_string();
                 let (canonical, pending, _) = input.into_parts();
                 canonical_slots[input_position] = Some(canonical);
-                push_pending_entity_input(
+                let _ = push_pending_entity_input(
                     &mut groups,
                     &mut indexes,
                     entity_id,
@@ -1779,7 +1903,7 @@ fn apply_runtime_inner(
             }
             let mut groups = Vec::with_capacity(1);
             let mut indexes = BTreeMap::<RuntimeEntityKey, usize>::new();
-            push_pending_entity_input(
+            let _ = push_pending_entity_input(
                 &mut groups,
                 &mut indexes,
                 entity_id,
@@ -1791,7 +1915,7 @@ fn apply_runtime_inner(
             position += 1;
             continue;
         }
-        push_pending_entity_input(
+        let group_index = push_pending_entity_input(
             &mut deferred_groups,
             &mut deferred_indexes,
             entity_id,
@@ -1799,6 +1923,22 @@ fn apply_runtime_inner(
             pending,
             position,
         )?;
+        if let Some(scheduled) = recorded_wake {
+            let group = &mut deferred_groups[group_index];
+            if group.recorded_scheduled_wake {
+                return Err(RuntimeMachineError::Scheduler(
+                    SchedulerError::InvalidWake {
+                        detail: "RECORDED_DUPLICATE".into(),
+                    },
+                ));
+            }
+            group.wake = Some(RuntimeWake {
+                entity_mempool: false,
+                account_mempool: false,
+                scheduled: Some(scheduled),
+            });
+            group.recorded_scheduled_wake = true;
+        }
         position += 1;
     }
     if !deferred_groups.is_empty() {
@@ -1851,6 +1991,7 @@ fn apply_runtime_inner(
                 pending: Vec::new(),
                 input_positions: Vec::new(),
                 wake: Some(entity_wake.wake),
+                recorded_scheduled_wake: false,
                 j_observation: None,
             });
         }
@@ -1870,6 +2011,7 @@ fn apply_runtime_inner(
                     pending: Vec::new(),
                     input_positions: Vec::new(),
                     wake: None,
+                    recorded_scheduled_wake: false,
                     j_observation: Some(observation),
                 });
             }
@@ -1899,6 +2041,12 @@ fn apply_runtime_inner(
             },
             account_commits: Vec::new(),
             post_commit_j_attempts,
+            apply_profile: finish_runtime_apply_profile(
+                profile_enabled,
+                profile_started,
+                next_height,
+                apply_profile,
+            ),
         });
     }
 
@@ -1972,7 +2120,27 @@ fn apply_runtime_inner(
                 replica.limits,
                 allow_checkpoint,
                 &mut materializer,
+                profile_enabled,
             )?;
+            apply_profile.fit += applied.apply_profile.fit;
+            apply_profile.resident_core += applied.apply_profile.resident_core;
+            apply_profile.post_core_prepare += applied.apply_profile.post_core_prepare;
+            apply_profile.certification += applied.apply_profile.certification;
+            apply_profile.settlement_attach += applied.apply_profile.settlement_attach;
+            apply_profile.post_cert_j += applied.apply_profile.post_cert_j;
+            apply_profile.entity_groups = apply_profile.entity_groups.saturating_add(1);
+            apply_profile.entity_txs_selected = apply_profile
+                .entity_txs_selected
+                .saturating_add(applied.apply_profile.entity_txs_selected);
+            apply_profile.account_inputs = apply_profile
+                .account_inputs
+                .saturating_add(applied.apply_profile.account_inputs);
+            apply_profile.settlement_hankos = apply_profile
+                .settlement_hankos
+                .saturating_add(applied.apply_profile.settlement_hankos);
+            apply_profile.post_cert_j_actions = apply_profile
+                .post_cert_j_actions
+                .saturating_add(applied.apply_profile.post_cert_j_actions);
             let entity_id_text = state_entity_id(&applied.state.entity);
             outputs.touches.entity_ids.push(entity_id_text.clone());
             outputs.touches.accounts.extend(applied.touched_accounts);
@@ -2078,6 +2246,12 @@ fn apply_runtime_inner(
         outputs,
         account_commits,
         post_commit_j_attempts,
+        apply_profile: finish_runtime_apply_profile(
+            profile_enabled,
+            profile_started,
+            next_height,
+            apply_profile,
+        ),
     })
 }
 
@@ -2092,7 +2266,9 @@ fn apply_entity_group(
     limits: super::RuntimeLimits,
     allow_checkpoint: bool,
     materializer: &mut Option<&mut dyn EntityInfraMaterializer>,
+    profile_enabled: bool,
 ) -> Result<AppliedEntityGroup, RuntimeMachineError> {
+    let mut apply_profile = RuntimeApplyPhaseProfile::default();
     let group_key = RuntimeEntityKey::new(group.entity_id, &group.signer_id)?;
     let resident_root = slot.replica.accounts.accounts_root();
     if slot.state.accounts_root != resident_root {
@@ -2110,11 +2286,13 @@ fn apply_entity_group(
     slot.replica.entity_mempool.extend(group.pending);
     let mut synthetic_input = None;
     if let Some(scheduled) = group.wake.as_ref().and_then(|wake| wake.scheduled.as_ref()) {
-        let (tx, canonical) = scheduled_wake_entity_input(group.entity_id, scheduled)?;
-        slot.replica
-            .entity_mempool
-            .push_front(EntityPendingWork::Projected(tx));
-        synthetic_input = Some(canonical);
+        if !group.recorded_scheduled_wake {
+            let (tx, canonical) = scheduled_wake_entity_input(group.entity_id, scheduled)?;
+            slot.replica
+                .entity_mempool
+                .push_front(EntityPendingWork::Projected(tx));
+            synthetic_input = Some(canonical);
+        }
     } else if group.input_positions.is_empty() && group.wake.is_some() {
         synthetic_input = Some(empty_entity_input(group.entity_id, &group.signer_id));
     }
@@ -2172,6 +2350,7 @@ fn apply_entity_group(
     enqueue_proposer_materializations(&mut slot, proposer_runtime_seed)?;
 
     let mut entity_mempool = std::mem::take(&mut slot.replica.entity_mempool);
+    let fit_started = profile_enabled.then(Instant::now);
     let (selected_count, mut context, entity_context_bytes) = match materializer.as_deref_mut() {
         Some(materializer) => {
             let (count, materialized, entity_context_bytes) = fit_live_entity_prefix(
@@ -2220,6 +2399,8 @@ fn apply_entity_group(
             (count, context, entity_context_bytes)
         }
     };
+    apply_profile.fit = profiled_elapsed(fit_started);
+    apply_profile.entity_txs_selected = selected_count;
     let selected = take_entity_prefix(&slot, &mut entity_mempool, selected_count)?;
     let pending_count = entity_mempool.len();
     slot.replica.entity_mempool = entity_mempool;
@@ -2241,7 +2422,8 @@ fn apply_entity_group(
             .as_ref(),
         j_replicas,
     )?;
-    let profiled_account_inputs = profile_runtime_apply().then(|| {
+    apply_profile.account_inputs = rows.len();
+    let profiled_account_inputs = profile_account_input_outcomes_enabled().then(|| {
         rows.iter()
             .map(|row| ProfileAccountInputKind::from(&row.input.kind))
             .collect::<Vec<_>>()
@@ -2346,12 +2528,15 @@ fn apply_entity_group(
             .as_ref(),
     )
     .map_err(|error| RuntimeMachineError::EntityContextMaterialization(error.to_string()))?;
+    let resident_core_started = profile_enabled.then(Instant::now);
     let mut core = apply_resident_entity_round_core(
         &mut slot.replica.accounts,
         slot.state.entity,
         request,
         &context.execution,
     )?;
+    apply_profile.resident_core = profiled_elapsed(resident_core_started);
+    let post_core_prepare_started = profile_enabled.then(Instant::now);
     let accounts_root = core.outbound.accounts_root;
     if let Some(inputs) = profiled_account_inputs.as_deref() {
         profile_account_input_outcomes(
@@ -2398,6 +2583,8 @@ fn apply_entity_group(
         })
         .collect::<Result<Vec<_>, RuntimeMachineError>>()?;
     let j_outputs = std::mem::take(&mut core.j_outputs);
+    apply_profile.post_core_prepare = profiled_elapsed(post_core_prepare_started);
+    let certification_started = profile_enabled.then(Instant::now);
     let certified = certify_entity_transition(
         &slot.replica.entity_signer,
         slot.replica.entity_consensus,
@@ -2418,6 +2605,7 @@ fn apply_entity_group(
             non_mutating_wakes,
         },
     )?;
+    apply_profile.certification = profiled_elapsed(certification_started);
     slot.replica.entity_consensus = certified.consensus;
     let certified_settlement_hankos = std::mem::take(&mut core.pending_settlement_hankos)
         .into_iter()
@@ -2458,9 +2646,13 @@ fn apply_entity_group(
             })
         })
         .collect::<Result<Vec<_>, RuntimeMachineError>>()?;
+    apply_profile.settlement_hankos = certified_settlement_hankos.len();
+    let settlement_attach_started = profile_enabled.then(Instant::now);
     slot.replica
         .accounts
         .attach_certified_settlement_hankos(certified_settlement_hankos)?;
+    apply_profile.settlement_attach = profiled_elapsed(settlement_attach_started);
+    let post_cert_j_started = profile_enabled.then(Instant::now);
     let prepared_j = crate::j_submit::prepare_certified_entity_j_intents(
         &core.state,
         &mut slot.replica.replica_metadata,
@@ -2504,6 +2696,8 @@ fn apply_entity_group(
             .into_iter()
             .map(crate::j_submit::DurableJAttempt::Maintenance),
     );
+    apply_profile.post_cert_j_actions = post_commit_j_actions.len();
+    apply_profile.post_cert_j = profiled_elapsed(post_cert_j_started);
     let checkpoint = checkpoint_due
         .then(|| slot.replica.accounts.export_checkpoint())
         .transpose()?;
@@ -2571,6 +2765,7 @@ fn apply_entity_group(
         selected_count,
         pending_count,
         post_commit_j_actions,
+        apply_profile,
     })
 }
 

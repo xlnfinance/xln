@@ -1,0 +1,16 @@
+{
+  "vectors": [
+    {
+      "status": "dispute_preparing",
+      "txType": "direct_payment",
+      "expectedCode": "ACCOUNT_CLOSED_FOR_DISPUTE",
+      "expectedMessage": "ACCOUNT_CLOSED_FOR_DISPUTE:status=dispute_preparing;tx=direct_payment"
+    },
+    {
+      "status": "disputed",
+      "txType": "direct_payment",
+      "expectedCode": "ACCOUNT_CLOSED_FOR_DISPUTE",
+      "expectedMessage": "ACCOUNT_CLOSED_FOR_DISPUTE:status=disputed;tx=direct_payment"
+    }
+  ]
+}

@@ -35,6 +35,7 @@ import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-count
 import { getPerfMs } from '../../support/time';
 import { RecencyMemo } from '../../support/collections/recency-memo';
 import { timePerfPhase } from '../../support/performance/profile';
+import { compareStableText } from '../../protocol/serialization';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
   state: EntityState;
@@ -305,7 +306,7 @@ export const collectInboundHtlcBindingKeys = (
         ? [preparedHtlcBindingKey(inboundBindingWithContext(tx, proposal, accountTx).binding)]
         : []);
   });
-  return [...new Set(keys)].sort((left, right) => left.localeCompare(right));
+  return [...new Set(keys)].sort(compareStableText);
 };
 
 /**
@@ -318,7 +319,7 @@ export const collectInboundHtlcBindingKeys = (
  */
 const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcEntry[] => {
   const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }));
-  decorated.sort((left, right) => left.key.localeCompare(right.key));
+  decorated.sort((left, right) => compareStableText(left.key, right.key));
   const canonical: PreparedHtlcEntry[] = [];
   for (const { entry } of decorated) {
     const previous = canonical[canonical.length - 1];

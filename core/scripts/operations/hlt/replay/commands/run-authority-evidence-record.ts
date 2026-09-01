@@ -1,53 +1,46 @@
 #!/usr/bin/env bun
 
-/** Generate the sole V1 replay fixture from one production Rust H1 run. */
+/** Record the canonical mixed transcript from the production TS H1. */
 
-import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { safeParse, safeStringify } from '../../../../../protocol/serialization';
 import { freshAuthorityEvidenceDir, runAuthorityEvidenceGate } from '../evidence/gate-support';
 
-const workDir = freshAuthorityEvidenceDir('xln-native-replay-v1-');
+const workDir = freshAuthorityEvidenceDir('xln-runtime-replay-v1-');
+const output = join(workDir, 'hlt-hub-recording.json');
 const env: NodeJS.ProcessEnv = {
   ...process.env,
-  XLN_HLT_ENGINE: 'rust',
+  XLN_HLT_ENGINE: 'ts',
+  XLN_HLT_H1_ONLY: '1',
+  XLN_HUB_COUNT: '1',
   XLN_HLT_PROFILE: 'smoke',
   XLN_LOCAL_PROD_SMOKE_DIR: workDir,
-  XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'payments',
-  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] ?? '100',
-  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] ?? '1',
-  XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] ?? '2',
+  XLN_HLT_RECORDING_OUTPUT: output,
+  XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'mixed',
+  XLN_HLT_USERS: '1000',
+  XLN_HLT_RATE_PER_USER: '1',
+  XLN_HLT_DURATION_S: '5',
+  XLN_HLT_MIX: '1:1',
   XLN_HLT_HUBS: 'H1',
+  XLN_HLT_MARKET_MAKERS: 'MM',
+  XLN_HLT_AUTHORITY_EVIDENCE: '1',
+  XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES: '1',
+  XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
   XLN_MM_CROSS_J: '0',
   MARKET_MAKER_STEADY_QUOTES_ENABLED: '0',
   XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS: '0',
   XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: '0',
 };
+for (const key of [
+  'XLN_HLT_ECONOMIC_GATE_DIR', 'XLN_HLT_ECONOMIC_GATE_READY', 'XLN_HLT_ECONOMIC_GATE_START',
+  'XLN_HUB_RSCORE_AUTHORITY_H1', 'XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_AUTHORITY_CUTOVER',
+  'XLN_RSCORE_AUTHORITY_IMPORT', 'XLN_RSCORE_AUTHORITY_RECORD',
+  'XLN_RSCORE_AUTHORITY_REPLAY', 'XLN_RSCORE_AUTHORITY_RUNTIME_ID',
+] as const) delete env[key];
 
 runAuthorityEvidenceGate({
-  label: 'HLT_NATIVE_REPLAY_V1_RECORD_GATE',
+  label: 'HLT_RUNTIME_REPLAY_V1_RECORD_GATE',
   script: 'core/scripts/operations/hlt/build-chains.ts',
   env,
 });
-
-const reportPath = join(workDir, 'hlt-rust-h1-live.json');
-const report = safeParse(readFileSync(reportPath, 'utf8')) as Record<string, unknown>;
-const metrics = report['metrics'] as Record<string, unknown> | undefined;
-if (report['engine'] !== 'rust' || !metrics) throw new Error('NATIVE_REPLAY_V1_REPORT_INVALID');
-const manifestPath = join(workDir, 'native-replay-v1.json');
-writeFileSync(manifestPath, `${safeStringify({
-  format: 'xln-native-replay-v1',
-  sourceNativeDb: join(workDir, 'prod-mesh', 'h1', 'rscore-native'),
-  genesisFile: join(workDir, 'prod-mesh', 'h1', 'rscore-genesis.json'),
-  runtimeSeedFile: join(workDir, 'prod-mesh', 'h1', 'runtime.seed'),
-  runtimeSignerLabel: '1',
-  entitySignerLabel: 'h1-hub',
-  users: report['users'],
-  payments: report['submittedPayments'],
-  minFrameDelayMs: report['minFrameDelayMs'],
-  sourceRuntimeFrames: metrics['totalFrames'],
-  sourceEntityInputs: metrics['totalRuntimeEntityInputs'],
-  sourceAccountInputs: metrics['totalAccountInputs'],
-})}\n`);
-console.log(`HLT_NATIVE_REPLAY_V1 path=${manifestPath}`);
+console.log(`HLT_RUNTIME_REPLAY_V1 path=${output}`);

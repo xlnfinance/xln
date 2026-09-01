@@ -112,7 +112,7 @@ describe('HTLC prepared Entity context boundary', () => {
   test('inbound canonicalize decorate-sorts binding keys once', () => {
     const source = readFileSync(join(import.meta.dir, '../../../../entity/paybook/materialize-context.ts'), 'utf8');
     expect(source).toContain('const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }))');
-    expect(source).toContain('decorated.sort((left, right) => left.key.localeCompare(right.key))');
+    expect(source).toContain('decorated.sort((left, right) => compareStableText(left.key, right.key))');
     expect(source).not.toContain('preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding))');
   });
 });

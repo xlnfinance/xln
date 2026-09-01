@@ -31,9 +31,34 @@ pub struct NativeV1ReplayMetrics {
     pub projection: Duration,
     pub storage: Duration,
     pub publication: Duration,
+    pub storage_prepare_validate: Duration,
+    pub storage_batch_build: Duration,
+    pub storage_db_write_sync: Duration,
+    pub storage_directory_sync: Duration,
+    pub storage_post_commit: Duration,
+    pub barrier_wait_for_previous_commit: Duration,
+    pub committer_busy: Duration,
+    pub committer_idle: Duration,
     pub accounts_root: String,
     pub transcript_digest: String,
     pub account_phase_metrics: Vec<xln_rscore_batch::AccountPhaseMetric>,
+}
+
+fn add_wall_decomposition(
+    metrics: &mut NativeV1ReplayMetrics,
+    report: &xln_rscore_runtime::RuntimeProcessReport,
+) {
+    let timings = report.timings;
+    metrics.storage += timings.storage;
+    metrics.publication += timings.publication;
+    metrics.storage_prepare_validate += timings.storage_prepare_validate;
+    metrics.storage_batch_build += timings.storage_batch_build;
+    metrics.storage_db_write_sync += timings.storage_db_write_sync;
+    metrics.storage_directory_sync += timings.storage_directory_sync;
+    metrics.storage_post_commit += timings.storage_post_commit;
+    metrics.barrier_wait_for_previous_commit += timings.barrier_wait_for_previous_commit;
+    metrics.committer_busy += timings.committer_busy;
+    metrics.committer_idle += timings.committer_idle;
 }
 
 fn add(total: &mut u64, value: usize, label: &str) -> Result<(), String> {
@@ -162,8 +187,7 @@ fn replay_frame(
     metrics.frames += 1;
     metrics.apply += report.timings.apply;
     metrics.projection += report.timings.projection;
-    metrics.storage += report.timings.storage;
-    metrics.publication += report.timings.publication;
+    add_wall_decomposition(metrics, &report);
     metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
     Ok(())
 }
@@ -219,6 +243,14 @@ pub fn replay_native_v1(
         projection: Duration::ZERO,
         storage: Duration::ZERO,
         publication: Duration::ZERO,
+        storage_prepare_validate: Duration::ZERO,
+        storage_batch_build: Duration::ZERO,
+        storage_db_write_sync: Duration::ZERO,
+        storage_directory_sync: Duration::ZERO,
+        storage_post_commit: Duration::ZERO,
+        barrier_wait_for_previous_commit: Duration::ZERO,
+        committer_busy: Duration::ZERO,
+        committer_idle: Duration::ZERO,
         accounts_root: String::new(),
         transcript_digest: String::new(),
         account_phase_metrics: Vec::new(),
@@ -243,8 +275,7 @@ pub fn replay_native_v1(
             final_commit.outputs_published,
             "outputs",
         )?;
-        metrics.storage += final_commit.timings.storage;
-        metrics.publication += final_commit.timings.publication;
+        add_wall_decomposition(&mut metrics, &final_commit);
     }
     let replica = processor
         .replica()

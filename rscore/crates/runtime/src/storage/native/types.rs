@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -9,6 +10,27 @@ use super::entity_context::EntityContextPayloadRows;
 use super::keys::PathNodeKey;
 
 pub const DEFAULT_CHECKPOINT_PERIOD_FRAMES: u64 = 1_000;
+
+/// RAM-only wall decomposition of one native WAL append. It is returned to
+/// the committer for diagnostics and never enters HEAD, a frame or checkpoint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NativeStorageTimings {
+    pub prepare_validate: Duration,
+    pub batch_build: Duration,
+    pub db_write_sync: Duration,
+    pub directory_sync: Duration,
+    pub post_commit: Duration,
+}
+
+impl NativeStorageTimings {
+    pub(crate) fn accounted(self) -> Duration {
+        self.prepare_validate
+            + self.batch_build
+            + self.db_write_sync
+            + self.directory_sync
+            + self.post_commit
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeStorageConfig {

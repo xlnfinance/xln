@@ -112,7 +112,8 @@ struct WorkerMutationReply<R> {
 pub enum AccountPhaseKind {
     Inbound,
     OutboundReset,
-    OutboundContinue,
+    OutboundFailedHtlcFollowup,
+    OutboundSettlementHankoAttach,
 }
 
 impl AccountPhaseKind {
@@ -120,7 +121,35 @@ impl AccountPhaseKind {
         match self {
             AccountPhaseKind::Inbound => 0,
             AccountPhaseKind::OutboundReset => 1,
-            AccountPhaseKind::OutboundContinue => 2,
+            AccountPhaseKind::OutboundFailedHtlcFollowup => 2,
+            AccountPhaseKind::OutboundSettlementHankoAttach => 3,
+        }
+    }
+
+    fn is_continuation(self) -> bool {
+        matches!(
+            self,
+            AccountPhaseKind::OutboundFailedHtlcFollowup
+                | AccountPhaseKind::OutboundSettlementHankoAttach
+        )
+    }
+}
+
+/// Existing outbound-candidate continuations have different protocol owners.
+/// Keeping the reason at the call site prevents one aggregate timing bucket
+/// from hiding whether failed routing or post-certification settlement costs
+/// the extra worker wave. This label is observability-only.
+#[derive(Clone, Copy)]
+pub(crate) enum OutboundContinuationKind {
+    FailedHtlcFollowup,
+    SettlementHankoAttach,
+}
+
+impl OutboundContinuationKind {
+    fn phase(self) -> AccountPhaseKind {
+        match self {
+            Self::FailedHtlcFollowup => AccountPhaseKind::OutboundFailedHtlcFollowup,
+            Self::SettlementHankoAttach => AccountPhaseKind::OutboundSettlementHankoAttach,
         }
     }
 }
@@ -145,6 +174,8 @@ pub struct AccountPhaseMetric {
     pub coordinator_dispatch_join_nanos: u64,
     pub worker_barrier_wait_sum_nanos: u64,
     pub worker_barrier_wait_max_nanos: u64,
+    pub worker_rows: Vec<u64>,
+    pub worker_work_nanos: Vec<u64>,
     pub coordinator_fold_nanos: u64,
     pub touched_rows: u64,
     pub touched_shards: u64,
@@ -156,7 +187,7 @@ pub struct AccountPhaseMetric {
 }
 
 impl AccountPhaseMetric {
-    fn new(kind: AccountPhaseKind) -> Self {
+    fn new(kind: AccountPhaseKind, worker_count: usize) -> Self {
         Self {
             kind,
             invocations: 0,
@@ -172,6 +203,8 @@ impl AccountPhaseMetric {
             coordinator_dispatch_join_nanos: 0,
             worker_barrier_wait_sum_nanos: 0,
             worker_barrier_wait_max_nanos: 0,
+            worker_rows: vec![0; worker_count],
+            worker_work_nanos: vec![0; worker_count],
             coordinator_fold_nanos: 0,
             touched_rows: 0,
             touched_shards: 0,
@@ -210,7 +243,7 @@ fn phase_kind(mode: WorkerPhase) -> AccountPhaseKind {
     match mode {
         WorkerPhase::Inbound { .. } => AccountPhaseKind::Inbound,
         WorkerPhase::OutboundReset => AccountPhaseKind::OutboundReset,
-        WorkerPhase::OutboundContinue => AccountPhaseKind::OutboundContinue,
+        WorkerPhase::OutboundContinue(kind) => kind.phase(),
     }
 }
 
@@ -221,7 +254,7 @@ enum WorkerPhase {
         checkpoint_ack: bool,
     },
     OutboundReset,
-    OutboundContinue,
+    OutboundContinue(OutboundContinuationKind),
 }
 
 #[derive(Clone, Copy)]
@@ -296,7 +329,7 @@ pub(crate) struct ResidentAccountForest<V> {
     checkpoint_revision: u64,
     pending_checkpoint: Option<PendingCheckpoint>,
     phase: u64,
-    phase_totals: [AccountPhaseMetric; 3],
+    phase_totals: [AccountPhaseMetric; 4],
     last_outbound_kind: Option<AccountPhaseKind>,
     entity_worker_items: Vec<u64>,
     entity_worker_nanos: Vec<u64>,
@@ -418,9 +451,13 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             pending_checkpoint: None,
             phase: 0,
             phase_totals: [
-                AccountPhaseMetric::new(AccountPhaseKind::Inbound),
-                AccountPhaseMetric::new(AccountPhaseKind::OutboundReset),
-                AccountPhaseMetric::new(AccountPhaseKind::OutboundContinue),
+                AccountPhaseMetric::new(AccountPhaseKind::Inbound, worker_count),
+                AccountPhaseMetric::new(AccountPhaseKind::OutboundReset, worker_count),
+                AccountPhaseMetric::new(AccountPhaseKind::OutboundFailedHtlcFollowup, worker_count),
+                AccountPhaseMetric::new(
+                    AccountPhaseKind::OutboundSettlementHankoAttach,
+                    worker_count,
+                ),
             ],
             last_outbound_kind: None,
             entity_worker_items: vec![0; worker_count],
@@ -806,7 +843,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             + Sync
             + 'static,
     {
-        self.apply_outbound_phase(entries, apply, false)
+        self.apply_outbound_phase(entries, apply, None)
     }
 
     /// Append another proposal batch to the current outbound candidate.
@@ -814,6 +851,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
     /// updates and folds only the newly dirty shard descriptors.
     pub(crate) fn apply_outbound_continue<T, R, F>(
         &mut self,
+        continuation: OutboundContinuationKind,
         entries: Vec<(AccountId, T)>,
         apply: F,
     ) -> Result<ResidentAccountBatch<R>, BatchError>
@@ -829,7 +867,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             + Sync
             + 'static,
     {
-        self.apply_outbound_phase(entries, apply, true)
+        self.apply_outbound_phase(entries, apply, Some(continuation))
     }
 
     /// Read final candidate values and their pre-inbound bases on the owning
@@ -1008,7 +1046,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         &mut self,
         entries: Vec<(AccountId, T)>,
         apply: F,
-        continue_candidate: bool,
+        continuation: Option<OutboundContinuationKind>,
     ) -> Result<ResidentAccountBatch<R>, BatchError>
     where
         T: Send + 'static,
@@ -1022,6 +1060,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             + Sync
             + 'static,
     {
+        let continue_candidate = continuation.is_some();
         let start_revision = if continue_candidate {
             self.candidate_revision
                 .ok_or(BatchError::EntityRoundMissing)?
@@ -1035,11 +1074,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             self.candidate_shards.clone()
         };
         let (worker_batches, touched) = self.worker_batches(entries)?;
-        let mode = if continue_candidate {
-            WorkerPhase::OutboundContinue
-        } else {
-            WorkerPhase::OutboundReset
-        };
+        let mode = continuation.map_or(WorkerPhase::OutboundReset, WorkerPhase::OutboundContinue);
         // Restarting a fresh outbound candidate after this round already built
         // one is the explicit restart path back to the inbound head.
         let restart_round = !continue_candidate && self.candidate_revision.is_some();
@@ -1128,6 +1163,14 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         } = start;
         let phase_started = Instant::now();
         let kind = phase_kind(mode);
+        let phase_worker_rows = worker_batches
+            .iter()
+            .map(|lane| {
+                lane.iter()
+                    .map(|batch| batch.entries.len() as u64)
+                    .sum::<u64>()
+            })
+            .collect::<Vec<_>>();
         let workers_with_batches = worker_batches
             .iter()
             .filter(|lane| !lane.is_empty())
@@ -1193,11 +1236,14 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         let mut barrier_wait_sum = 0_u64;
         let mut barrier_wait_max = 0_u64;
         let mut shard_handle_clones = 0_u64;
-        for lane in &replies {
+        let mut phase_worker_work_nanos = vec![0_u64; self.workers.worker_count()];
+        for (worker, lane) in replies.iter().enumerate() {
             for reply in lane.iter().flatten() {
                 worker_samples += 1;
                 let work = duration_nanos(reply.work_wall);
                 worker_work_sum = worker_work_sum.saturating_add(work);
+                phase_worker_work_nanos[worker] =
+                    phase_worker_work_nanos[worker].saturating_add(work);
                 worker_work_max = worker_work_max.max(work);
                 let wait = duration_nanos(reply.barrier_wait);
                 barrier_wait_sum = barrier_wait_sum.saturating_add(wait);
@@ -1269,6 +1315,16 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             .saturating_add(barrier_wait_sum);
         totals.worker_barrier_wait_max_nanos =
             totals.worker_barrier_wait_max_nanos.max(barrier_wait_max);
+        for (total, rows) in totals.worker_rows.iter_mut().zip(phase_worker_rows) {
+            *total = total.saturating_add(rows);
+        }
+        for (total, nanos) in totals
+            .worker_work_nanos
+            .iter_mut()
+            .zip(phase_worker_work_nanos)
+        {
+            *total = total.saturating_add(nanos);
+        }
         totals.touched_rows = totals.touched_rows.saturating_add(reply.rows.len() as u64);
         totals.touched_shards = totals.touched_shards.saturating_add(touched_shards as u64);
         totals.workers_with_work = totals
@@ -1277,7 +1333,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         totals.shard_handle_clones = totals
             .shard_handle_clones
             .saturating_add(shard_handle_clones);
-        if matches!(kind, AccountPhaseKind::OutboundContinue) {
+        if kind.is_continuation() {
             totals.continuation_rounds += 1;
         }
         let revision = next_revision(start_revision, !reply.changed.is_empty())?;
@@ -1570,7 +1626,7 @@ where
             &mut shard_handle_clones,
         )?,
         WorkerPhase::OutboundReset => prepare_worker_outbound(state, reconcile, mutation_shards)?,
-        WorkerPhase::OutboundContinue => {}
+        WorkerPhase::OutboundContinue(_) => {}
     }
     let mut reply = WorkerMutationReply {
         rows: Vec::new(),
@@ -1800,7 +1856,7 @@ fn phase_shard<V>(
             .inbound
             .as_ref()
             .ok_or(BatchError::EntityRoundMissing),
-        WorkerPhase::OutboundReset | WorkerPhase::OutboundContinue => Ok(resident
+        WorkerPhase::OutboundReset | WorkerPhase::OutboundContinue(_) => Ok(resident
             .candidate
             .as_ref()
             .or(resident.inbound.as_ref())
@@ -1820,7 +1876,7 @@ where
             .inbound
             .as_mut()
             .ok_or(BatchError::EntityRoundMissing),
-        WorkerPhase::OutboundReset | WorkerPhase::OutboundContinue => {
+        WorkerPhase::OutboundReset | WorkerPhase::OutboundContinue(_) => {
             if resident.candidate.is_none() {
                 resident.candidate =
                     Some(resident.inbound.as_ref().unwrap_or(&resident.base).clone());
@@ -2184,7 +2240,9 @@ mod tests {
 
     use xln_rscore_protocol::{PersistentRadixMap, PersistentRadixOverlayWork};
 
-    use super::{AccountPhaseKind, ResidentAccountAction, ResidentAccountForest};
+    use super::{
+        AccountPhaseKind, OutboundContinuationKind, ResidentAccountAction, ResidentAccountForest,
+    };
     use crate::{AccountId, BatchError};
 
     fn account(shard: usize, suffix: u8) -> AccountId {
@@ -2357,7 +2415,11 @@ mod tests {
             .apply_outbound(vec![(account_id, 50)], put)
             .expect("create account");
         let candidate = forest
-            .apply_outbound_continue(vec![(continued_account_id, 60)], put)
+            .apply_outbound_continue(
+                OutboundContinuationKind::FailedHtlcFollowup,
+                vec![(continued_account_id, 60)],
+                put,
+            )
             .expect("continue into absent shard");
         let serial = serial_map(&[
             (account_id, 50, digest(50)),
@@ -2618,7 +2680,11 @@ mod tests {
             .apply_outbound(vec![(account(0x123, 0), 30)], put)
             .expect("outbound");
         forest
-            .apply_outbound_continue(vec![(account(0x456, 0), 55)], put)
+            .apply_outbound_continue(
+                OutboundContinuationKind::FailedHtlcFollowup,
+                vec![(account(0x456, 0), 55)],
+                put,
+            )
             .expect("outbound continue");
         forest
             .read_outbound(
@@ -2632,12 +2698,23 @@ mod tests {
         let metrics = forest.phase_metrics();
         let inbound = &metrics[0];
         let outbound_reset = &metrics[1];
-        let outbound_continue = &metrics[2];
+        let outbound_followup = &metrics[2];
+        let outbound_settlement = &metrics[3];
         assert_eq!(inbound.invocations, 1);
         assert_eq!(inbound.touched_rows, 1);
         assert_eq!(inbound.touched_shards, 1);
         assert_eq!(inbound.workers_with_work, 1);
         assert_eq!(inbound.worker_samples, 1);
+        assert_eq!(inbound.worker_rows.len(), 2);
+        assert_eq!(
+            inbound.worker_rows.iter().sum::<u64>(),
+            inbound.touched_rows
+        );
+        assert_eq!(inbound.worker_work_nanos.len(), 2);
+        assert_eq!(
+            inbound.worker_work_nanos.iter().sum::<u64>(),
+            inbound.worker_work_sum_nanos,
+        );
         assert!(inbound.worker_phase_span_nanos >= inbound.worker_critical_path_nanos);
         assert!(inbound.coordinator_wall_nanos >= inbound.worker_phase_span_nanos);
         assert_eq!(
@@ -2659,10 +2736,12 @@ mod tests {
         assert_eq!(outbound_reset.invocations, 2);
         assert_eq!(outbound_reset.restart_rounds, 1);
         assert_eq!(outbound_reset.touched_rows, 2);
-        assert_eq!(outbound_continue.invocations, 1);
-        assert_eq!(outbound_continue.continuation_rounds, 1);
-        assert_eq!(outbound_continue.candidate_base_reads, 1);
-        assert_eq!(outbound_continue.worker_samples, 1);
+        assert_eq!(outbound_followup.invocations, 1);
+        assert_eq!(outbound_followup.continuation_rounds, 1);
+        assert_eq!(outbound_settlement.invocations, 0);
+        assert_eq!(outbound_settlement.continuation_rounds, 0);
+        assert_eq!(outbound_followup.candidate_base_reads, 1);
+        assert_eq!(outbound_followup.worker_samples, 1);
     }
 
     #[test]
@@ -2752,7 +2831,11 @@ mod tests {
             .apply_outbound(vec![(account(0x123, 0), 30)], put)
             .expect("outbound");
         let continued = forest
-            .apply_outbound_continue(vec![(account(0x456, 0), 40)], put)
+            .apply_outbound_continue(
+                OutboundContinuationKind::SettlementHankoAttach,
+                vec![(account(0x456, 0), 40)],
+                put,
+            )
             .expect("continue outbound");
         assert_eq!(continued.rows, vec![(account(0x456, 0), digest(40), 40)]);
         assert_eq!(forest.active_overlay_dirty_len(), 2);

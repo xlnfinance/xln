@@ -1,7 +1,11 @@
 import { expect, test } from 'bun:test';
 
 import { createDefaultDelta } from '../../../account/state/delta';
-import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { computeAccountStateRoot } from '../../../account/commitment/state-root';
+import {
+  PersistentAccountStateMap,
+  requirePersistentAccountStateMap,
+} from '../../../account/state/persistent-state-map';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { createSnapshot, readSnapshotDocs } from '../../../storage/database/lifecycle';
 import {
@@ -96,6 +100,58 @@ test('Account snapshot copies and relinks the exact Patricia graph without live 
   if (!corruptKey) throw new Error('TEST_SNAPSHOT_ACCOUNT_GRAPH_MISSING');
   snapshot.rows.get(corruptKey)![0] ^= 0xff;
   await expect(readSnapshotDocs(snapshot, 1)).rejects.toThrow();
+});
+
+test('first independently materialized Account delta uses one namespace owner and recovers exact root', async () => {
+  const db = new MemoryRuntimeDb();
+  const rootKey = keyLiveAccount(entityId, counterpartyId);
+  const deltas = (changed: boolean) => Array.from({ length: 32 }, (_, index) => {
+    const tokenId = index + 1;
+    const delta = createDefaultDelta(tokenId);
+    delta.offdelta = BigInt(tokenId + (changed && tokenId === 17 ? 1 : 0));
+    return [tokenId, delta] as const;
+  });
+  const previous = makeAccount(entityId, counterpartyId);
+  previous.state.deltas = PersistentAccountStateMap.fromEntries('deltas', deltas(false));
+  const initial = await prepareAccountStorageLayout(
+    db,
+    entityId,
+    counterpartyId,
+    rootKey,
+    previous,
+  );
+  const initialBatch = db.batch();
+  for (const row of initial.puts) initialBatch.put(row.key, row.value);
+  await initialBatch.write();
+
+  // Rust materialization authors a fresh Account object rather than mutating
+  // the cached TS replica. Its independently reconstructed tree must still
+  // share the namespace options owner required for a dirty-path diff.
+  const next = makeAccount(entityId, counterpartyId);
+  next.state.deltas = PersistentAccountStateMap.fromEntries('deltas', deltas(true));
+  const incremental = await prepareAccountStorageLayout(
+    db,
+    entityId,
+    counterpartyId,
+    rootKey,
+    next,
+    previous,
+  );
+  const initialTreeRows = initial.puts.filter(row =>
+    row.key[0] === KEY_LIVE_ACCOUNT_BRANCH || row.key[0] === KEY_LIVE_ACCOUNT_LEAF);
+  const incrementalTreeRows = incremental.puts.filter(row =>
+    row.key[0] === KEY_LIVE_ACCOUNT_BRANCH || row.key[0] === KEY_LIVE_ACCOUNT_LEAF);
+  expect(incrementalTreeRows.length).toBeGreaterThan(0);
+  expect(incrementalTreeRows.length).toBeLessThan(initialTreeRows.length);
+
+  const incrementalBatch = db.batch();
+  for (const key of incremental.dels) incrementalBatch.del(key);
+  for (const row of incremental.puts) incrementalBatch.put(row.key, row.value);
+  await incrementalBatch.write();
+  const recovered = await readAccountStorageLayout(db, entityId, counterpartyId, rootKey);
+  if (recovered === null) throw new Error('TEST_ACCOUNT_STORAGE_RECOVERY_REQUIRED');
+  expect(computeAccountStateRoot(recovered.doc.state)).toBe(computeAccountStateRoot(next.state));
+  expect(recovered.doc.state.deltas.get(17)?.offdelta).toBe(18n);
 });
 
 test('large Account envelope fields use bounded static-key chunks and round-trip exactly', async () => {

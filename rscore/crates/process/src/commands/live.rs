@@ -960,7 +960,12 @@ fn account_phase_metric_value(
             "kind": match metric.kind {
                 xln_rscore_batch::AccountPhaseKind::Inbound => "inbound",
                 xln_rscore_batch::AccountPhaseKind::OutboundReset => "outboundReset",
-                xln_rscore_batch::AccountPhaseKind::OutboundContinue => "outboundContinue",
+                xln_rscore_batch::AccountPhaseKind::OutboundFailedHtlcFollowup => {
+                    "outboundFailedHtlcFollowup"
+                }
+                xln_rscore_batch::AccountPhaseKind::OutboundSettlementHankoAttach => {
+                    "outboundSettlementHankoAttach"
+                }
             },
             "invocations": metric.invocations,
             "coordinatorWallMicros": metric.coordinator_wall_nanos / 1_000,
@@ -973,6 +978,8 @@ fn account_phase_metric_value(
             "workerPhaseSpanMicros": metric.worker_phase_span_nanos / 1_000,
             "coordinatorDispatchJoinMicros": metric.coordinator_dispatch_join_nanos / 1_000,
             "workerBarrierWaitSumMicros": metric.worker_barrier_wait_sum_nanos / 1_000,
+            "workerRows": &metric.worker_rows,
+            "workerWorkNanos": &metric.worker_work_nanos,
         }),
         "accountPhaseTiming",
     )?;
@@ -1234,6 +1241,14 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     let mut total_projection_context_micros = 0_u128;
     let mut total_projection_checkpoint_micros = 0_u128;
     let mut total_projection_encode_micros = 0_u128;
+    let mut total_storage_prepare_validate_micros = 0_u128;
+    let mut total_storage_batch_build_micros = 0_u128;
+    let mut total_storage_db_write_sync_micros = 0_u128;
+    let mut total_storage_directory_sync_micros = 0_u128;
+    let mut total_storage_post_commit_micros = 0_u128;
+    let mut total_barrier_wait_for_previous_commit_micros = 0_u128;
+    let mut total_committer_busy_micros = 0_u128;
+    let mut total_committer_idle_micros = 0_u128;
     let mut previous_runtime_entity_inputs = 0_u64;
     let mut previous_account_inputs = 0_u64;
     let mut previous_shard_work_items = Vec::<u64>::new();
@@ -1489,6 +1504,23 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                 .saturating_add(report.timings.projection_checkpoint.as_micros());
             total_projection_encode_micros = total_projection_encode_micros
                 .saturating_add(report.timings.projection_encode.as_micros());
+            total_storage_prepare_validate_micros = total_storage_prepare_validate_micros
+                .saturating_add(report.timings.storage_prepare_validate.as_micros());
+            total_storage_batch_build_micros = total_storage_batch_build_micros
+                .saturating_add(report.timings.storage_batch_build.as_micros());
+            total_storage_db_write_sync_micros = total_storage_db_write_sync_micros
+                .saturating_add(report.timings.storage_db_write_sync.as_micros());
+            total_storage_directory_sync_micros = total_storage_directory_sync_micros
+                .saturating_add(report.timings.storage_directory_sync.as_micros());
+            total_storage_post_commit_micros = total_storage_post_commit_micros
+                .saturating_add(report.timings.storage_post_commit.as_micros());
+            total_barrier_wait_for_previous_commit_micros =
+                total_barrier_wait_for_previous_commit_micros
+                    .saturating_add(report.timings.barrier_wait_for_previous_commit.as_micros());
+            total_committer_busy_micros = total_committer_busy_micros
+                .saturating_add(report.timings.committer_busy.as_micros());
+            total_committer_idle_micros = total_committer_idle_micros
+                .saturating_add(report.timings.committer_idle.as_micros());
             total_accepted_payments = total_accepted_payments
                 .checked_add(
                     u64::try_from(report.accepted_payments)
@@ -1554,7 +1586,10 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
         {
             let elapsed = metric_started.elapsed();
             let ingress = service.ingress_metrics();
-            let backlog = service.publication_backlog();
+            let (backlog, retained_wal_bytes) = service
+                .processor()
+                .publication_backlog_and_retained_wal_bytes()
+                .map_err(|error| format!("RRS_RUNTIME_STORAGE_HEAD:{error}"))?;
             let height = service
                 .processor()
                 .replica()
@@ -1766,6 +1801,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                     "outboxRowsPending": backlog.rows,
                     "outboxBytesPending": backlog.bytes,
                     "outboxFailures": backlog.failures.len(),
+                    "retainedWalBytes": retained_wal_bytes,
                     "acceptedPayments": total_accepted_payments,
                     "completedPayments": total_completed_payments,
                     "matchedSwaps": total_matched_swaps,
@@ -1819,6 +1855,20 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                     "totalProjectionEncodeMicros": total_projection_encode_micros,
                 }),
                 "projectionDetail",
+            )?;
+            extend_json_object(
+                &mut metric_object,
+                serde_json::json!({
+                    "totalStoragePrepareValidateMicros": total_storage_prepare_validate_micros,
+                    "totalStorageBatchBuildMicros": total_storage_batch_build_micros,
+                    "totalStorageDbWriteSyncMicros": total_storage_db_write_sync_micros,
+                    "totalStorageDirectorySyncMicros": total_storage_directory_sync_micros,
+                    "totalStoragePostCommitMicros": total_storage_post_commit_micros,
+                    "totalBarrierWaitForPreviousCommitMicros": total_barrier_wait_for_previous_commit_micros,
+                    "totalCommitterBusyMicros": total_committer_busy_micros,
+                    "totalCommitterIdleMicros": total_committer_idle_micros,
+                }),
+                "storageDetail",
             )?;
             extend_json_object(
                 &mut metric_object,

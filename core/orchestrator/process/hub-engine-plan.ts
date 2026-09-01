@@ -3,12 +3,21 @@ import { join, resolve } from 'node:path';
 
 export type HubEngineKind = 'rust' | 'typescript';
 
-export const canonicalHubEngine = (hubName: string): HubEngineKind => {
+export const canonicalHubEngine = (
+  hubName: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): HubEngineKind => {
   const normalized = hubName.trim().toUpperCase();
   if (!/^H[1-9][0-9]*$/.test(normalized)) {
     throw new Error(`HUB_ENGINE_NAME_INVALID:${hubName}`);
   }
-  return normalized === 'H1' ? 'rust' : 'typescript';
+  const selected = String(env['XLN_HLT_ENGINE'] || 'ts').trim();
+  if (selected !== 'ts' && selected !== 'rust') {
+    throw new Error(`HUB_ENGINE_SELECTOR_INVALID:${selected}`);
+  }
+  // H1 is a role, not an implementation. The explicit workload selector owns
+  // its production engine; the remaining mesh hubs are TypeScript processes.
+  return normalized === 'H1' && selected === 'rust' ? 'rust' : 'typescript';
 };
 
 export type RustHubProcessConfig = Readonly<{
@@ -90,7 +99,7 @@ const positivePort = (value: number, field: string): void => {
  * database owner; they are native CLI fields, not a TypeScript sidecar.
  */
 export const buildRustHubProcessPlan = (config: RustHubProcessConfig): RustHubProcessPlan => {
-  if (canonicalHubEngine(config.name) !== 'rust') {
+  if (config.name.trim().toUpperCase() !== 'H1') {
     throw new Error(`RUST_HUB_ROLE_INVALID:${config.name}`);
   }
   positivePort(config.apiPort, 'API_PORT');

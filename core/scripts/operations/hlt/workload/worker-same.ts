@@ -313,6 +313,7 @@ const runTypescriptSameProductionSwapLoad = async (args: WorkerArgs): Promise<vo
     );
     const report = decodeLoadSustainedReport({
       schema: 'xln-production-swap-load-sustained-v1',
+      engine: 'ts',
       mode: 'same',
       schedule: 'one_order_per_account_per_round',
       configuredUsers: args.lanes * 2,

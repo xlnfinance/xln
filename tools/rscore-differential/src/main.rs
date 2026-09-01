@@ -362,6 +362,7 @@ fn verdict_value(verdict: &AccountVerdict) -> AbiValue {
         AccountVerdict::Rejected(rejection) => {
             let kind = match rejection {
                 AccountRejection::Validation(_) => "validation",
+                AccountRejection::ClosedForDispute { .. } => "account_closed_for_dispute",
                 AccountRejection::DeltaRowLimitExceeded { .. } => "delta_row_limit_exceeded",
                 AccountRejection::HtlcLockCapacity { .. } => "htlc_lock_capacity",
             };
@@ -372,6 +373,30 @@ fn verdict_value(verdict: &AccountVerdict) -> AbiValue {
                 AbiValue::Text(rejection.message()),
             ])
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_for_dispute_verdict_uses_the_canonical_typescript_label() {
+        let verdict = AccountVerdict::Rejected(AccountRejection::ClosedForDispute {
+            status: "disputed".into(),
+            tx_type: "direct_payment",
+        });
+        assert_eq!(
+            verdict_value(&verdict),
+            values_tuple(vec![
+                AbiValue::Text("rejected".into()),
+                AbiValue::Text("account_closed_for_dispute".into()),
+                AbiValue::Text("ACCOUNT_CLOSED_FOR_DISPUTE".into()),
+                AbiValue::Text(
+                    "ACCOUNT_CLOSED_FOR_DISPUTE:status=disputed;tx=direct_payment".into(),
+                ),
+            ]),
+        );
     }
 }
 

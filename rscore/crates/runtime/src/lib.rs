@@ -77,12 +77,12 @@ pub use leveldb::{
 };
 pub use machine::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
-    RewindJHistory, RuntimeAdapterCommandMarker, RuntimeApplyResult, RuntimeEntityFrameContext,
-    RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs, RuntimeEntityReplica,
-    RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
-    RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeOutputs,
-    RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx, RuntimeWake,
-    SelectedRuntimeFrame, apply_runtime, apply_runtime_live, enqueue_runtime_input,
+    RewindJHistory, RuntimeAdapterCommandMarker, RuntimeApplyPhaseProfile, RuntimeApplyResult,
+    RuntimeEntityFrameContext, RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityOutputs,
+    RuntimeEntityReplica, RuntimeEntityState, RuntimeEntityWake, RuntimeFrameContext,
+    RuntimeFrameTouches, RuntimeInput, RuntimeLimits, RuntimeLiveInput, RuntimeMachineError,
+    RuntimeMempool, RuntimeOutputs, RuntimeReplica, RuntimeState, RuntimeTouchedAccount, RuntimeTx,
+    RuntimeWake, SelectedRuntimeFrame, apply_runtime, apply_runtime_live, enqueue_runtime_input,
     select_runtime_frame,
 };
 pub use machine_graph::{RuntimeMachineGraphError, rebuild_runtime_machine_graph};

@@ -28,6 +28,7 @@ import type { PreparedOriginatedHtlcPayment } from '../../types/entity/htlc-infr
 import type { EntityTx } from '../../types/entity-tx';
 import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 import { toJHeight, toUnixMs } from '../../protocol/units';
+import { compareStableText } from '../../protocol/serialization';
 import type { Profile } from '../profile';
 import type { EntityState } from '../types';
 import type { AccountStateDomain } from '../../types/account';
@@ -228,7 +229,7 @@ export const materializeOriginatedHtlcPayments = async (
       nextHopEntityId: route[1]!, envelope,
     });
   }
-  originated.sort((left, right) => left.txHash.localeCompare(right.txHash));
+  originated.sort((left, right) => compareStableText(left.txHash, right.txHash));
   for (let index = 1; index < originated.length; index += 1) {
     if (originated[index - 1]!.txHash === originated[index]!.txHash) rejectHtlcPayment(`HTLC_PAYMENT_TX_DUPLICATE:${originated[index]!.txHash}`);
   }

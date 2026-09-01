@@ -45,6 +45,7 @@ export const createRuntimeImportController = (deps: RuntimeImportControllerDeps)
       const runtimeId = runtimeIdFromChild(child);
       return runtimeId ? [{
         label: child.name,
+        engine: child.engine === 'rust' ? 'rust' : 'ts',
         wsUrl: buildRuntimeNodeRpcUrl(
           deps.publicWsBaseUrl,
           isLoopbackPublicBase,
@@ -61,6 +62,7 @@ export const createRuntimeImportController = (deps: RuntimeImportControllerDeps)
     if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId) {
       candidates.push({
         label: deps.marketMakerChild.name,
+        engine: 'ts',
         wsUrl: buildRuntimeNodeRpcUrl(
           deps.publicWsBaseUrl,
           isLoopbackPublicBase,
@@ -83,6 +85,7 @@ export const createRuntimeImportController = (deps: RuntimeImportControllerDeps)
       if (custodyWsUrl) {
         candidates.push({
           label: 'Custody',
+          engine: 'ts',
           wsUrl: custodyWsUrl,
           authSeed: custodySupport.daemonAuthSeed,
           audience: custodySupport.daemonAuthAudience,

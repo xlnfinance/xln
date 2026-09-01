@@ -268,14 +268,24 @@ impl ValidationRejection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountRejection {
     Validation(ValidationRejection),
-    DeltaRowLimitExceeded { attempted: usize, maximum: usize },
-    HtlcLockCapacity { maximum: usize },
+    ClosedForDispute {
+        status: String,
+        tx_type: &'static str,
+    },
+    DeltaRowLimitExceeded {
+        attempted: usize,
+        maximum: usize,
+    },
+    HtlcLockCapacity {
+        maximum: usize,
+    },
 }
 
 impl AccountRejection {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::Validation(_) => "ACCOUNT_TX_VALIDATION",
+            Self::ClosedForDispute { .. } => "ACCOUNT_CLOSED_FOR_DISPUTE",
             Self::DeltaRowLimitExceeded { .. } => "ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED",
             Self::HtlcLockCapacity { .. } => "ACCOUNT_HTLC_LOCK_CAPACITY",
         }
@@ -284,6 +294,9 @@ impl AccountRejection {
     pub fn message(&self) -> String {
         match self {
             Self::Validation(reason) => reason.message(),
+            Self::ClosedForDispute { status, tx_type } => {
+                format!("ACCOUNT_CLOSED_FOR_DISPUTE:status={status};tx={tx_type}")
+            }
             Self::DeltaRowLimitExceeded { attempted, maximum } => {
                 format!("ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:{attempted}:{maximum}")
             }

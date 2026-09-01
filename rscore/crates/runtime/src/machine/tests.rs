@@ -20,8 +20,9 @@ use crate::{
 
 use super::{
     RuntimeEntityInput, RuntimeEntityKey, RuntimeEntityState, RuntimeFrameContext, RuntimeInput,
-    RuntimeLimits, RuntimeMachineError, RuntimeMempool, RuntimeReplica, RuntimeState, RuntimeTx,
-    apply_runtime, materialization_due, select_runtime_frame,
+    RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeReplica,
+    RuntimeState, RuntimeTx, apply_runtime, apply_runtime_live, materialization_due,
+    select_runtime_frame,
 };
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
@@ -652,6 +653,76 @@ fn no_work_does_not_advance_runtime() -> Result<(), RuntimeMachineError> {
 }
 
 #[test]
+fn runtime_apply_phase_profile_accounts_once_without_moving_roots()
+-> Result<(), RuntimeMachineError> {
+    let input = RuntimeEntityInput::decode(serde_json::json!({
+        "entityId": hex32(owner_bytes()),
+        "signerId": entity_signer_id(),
+        "entityTxs": [{
+            "type":"extendCredit",
+            "data":{
+                "counterpartyEntityId":format!("0x{}", "ff".repeat(32)),
+                "tokenId":1,
+                "amount":{"__xlnType":"BigInt","value":"7"}
+            }
+        }]
+    }))?;
+    let input = frame(101, vec![input]);
+    let unprofiled = super::apply::apply_runtime_with_profile_for_test(
+        replica(RuntimeLimits::hlt())?,
+        input.clone(),
+        false,
+    )?;
+    let profiled = super::apply::apply_runtime_with_profile_for_test(
+        replica(RuntimeLimits::hlt())?,
+        input,
+        true,
+    )?;
+
+    assert!(unprofiled.apply_profile.is_none());
+    let profile = profiled.apply_profile.as_ref().expect("enabled profile");
+    assert_eq!(profile.entity_groups, 1);
+    assert_eq!(
+        profile.entity_groups,
+        profiled
+            .applied_frame
+            .as_ref()
+            .expect("profiled frame")
+            .entity_frame_count,
+    );
+    assert_eq!(
+        profile.entity_txs_selected,
+        profiled
+            .applied_input
+            .as_ref()
+            .expect("profiled input")
+            .entity_txs_selected,
+    );
+    assert_eq!(profile.entity_txs_selected, 1);
+    assert_eq!(
+        profile.account_inputs,
+        profiled
+            .applied_input
+            .as_ref()
+            .expect("profiled input")
+            .account_inputs,
+    );
+    assert_eq!(profile.total, profile.accounted() + profile.residual);
+
+    let off = &unprofiled.outputs.entities[0];
+    let on = &profiled.outputs.entities[0];
+    assert_eq!(on.accounts_root, off.accounts_root);
+    assert_eq!(on.entity_state_root, off.entity_state_root);
+    assert_eq!(on.entity_authority_root, off.entity_authority_root);
+    assert_eq!(on.entity_frame_hash, off.entity_frame_hash);
+    assert_eq!(
+        profiled.replica.state.height,
+        unprofiled.replica.state.height
+    );
+    Ok(())
+}
+
+#[test]
 fn entity_wire_tail_replays_from_full_input_and_blocks_checkpoint_until_drain()
 -> Result<(), RuntimeMachineError> {
     let limits = RuntimeLimits {
@@ -669,7 +740,15 @@ fn entity_wire_tail_replays_from_full_input_and_blocks_checkpoint_until_drain()
     let input =
         RuntimeEntityInput::fixture_with_entity_txs(accepted.clone(), vec![large(), large()]);
     let first_input = frame(200, vec![input]);
-    let second_input = frame(300, Vec::new());
+    // Live execution persists an explicit empty EntityInput when resident
+    // Entity work continues into the next Runtime frame. Exact replay consumes
+    // that WAL input; it does not rediscover the RAM continuation itself.
+    let continuation = RuntimeEntityInput::decode(serde_json::json!({
+        "entityId": hex32(owner_bytes()),
+        "signerId": entity_signer_id(),
+        "entityTxs": [],
+    }))?;
+    let second_input = frame(300, vec![continuation]);
 
     let run = |first_input: RuntimeInput, second_input: RuntimeInput| {
         let first = apply_runtime(replica(limits)?, first_input)?;
@@ -1007,7 +1086,8 @@ fn scheduled_hooks_are_deadline_then_id_ordered() -> Result<(), RuntimeMachineEr
 }
 
 #[test]
-fn due_hook_runs_an_entity_round_without_external_ingress() -> Result<(), RuntimeMachineError> {
+fn due_hook_runs_one_live_entity_round_without_external_ingress() -> Result<(), RuntimeMachineError>
+{
     let mut runtime = replica(RuntimeLimits {
         checkpoint_period_frames: 0,
         ..RuntimeLimits::hlt()
@@ -1026,7 +1106,18 @@ fn due_hook_runs_an_entity_round_without_external_ingress() -> Result<(), Runtim
         )]))
         .expect("scheduled hooks"),
     });
-    let result = apply_runtime(runtime, frame(200, Vec::new()))?;
+    let mut materializer = CanonicalEntityInfraMaterializer::new();
+    let result = apply_runtime_live(
+        runtime,
+        RuntimeLiveInput {
+            runtime_txs: Vec::new(),
+            entity_inputs: Vec::new(),
+            timestamp: 200,
+            finalized_j_height: 0,
+            hub_rebalance_has_pending_work: false,
+        },
+        &mut materializer,
+    )?;
     assert_eq!(result.replica.state.height, 1);
     let wake = result
         .applied_input
@@ -1077,5 +1168,263 @@ fn due_hook_runs_an_entity_round_without_external_ingress() -> Result<(), Runtim
             .map(|crontab| crontab.hooks.len()),
         Some(0),
     );
+    Ok(())
+}
+
+#[test]
+fn exact_apply_does_not_derive_a_due_scheduled_wake() -> Result<(), RuntimeMachineError> {
+    let mut runtime = replica(RuntimeLimits {
+        checkpoint_period_frames: 0,
+        ..RuntimeLimits::hlt()
+    })?;
+    runtime
+        .state
+        .e_replicas
+        .get_mut(&entity_key())
+        .expect("fixture Entity state")
+        .entity
+        .crontab = Some(CrontabState {
+        tasks: BTreeMap::new(),
+        hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
+            "htlc-timeout:due".to_string(),
+            ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+        )]))
+        .expect("scheduled hooks"),
+    });
+
+    let result = apply_runtime(
+        runtime,
+        RuntimeInput {
+            runtime_txs: Vec::new(),
+            entity_inputs: Vec::new(),
+            frame: RuntimeFrameContext {
+                timestamp: 200,
+                finalized_j_height: 0,
+                hub_rebalance_has_pending_work: false,
+                entity_contexts: BTreeMap::new(),
+            },
+        },
+    )?;
+
+    assert!(result.applied_input.is_none());
+    assert!(result.applied_frame.is_none());
+    assert_eq!(result.replica.state.height, 0);
+    assert_eq!(
+        result
+            .replica
+            .state
+            .e_replicas
+            .get(&entity_key())
+            .expect("fixture Entity state")
+            .entity
+            .crontab
+            .as_ref()
+            .map(|crontab| crontab.hooks.len()),
+        Some(1),
+    );
+    Ok(())
+}
+
+#[test]
+fn recorded_scheduled_wake_replays_exactly_once() -> Result<(), RuntimeMachineError> {
+    let limits = RuntimeLimits {
+        checkpoint_period_frames: 0,
+        ..RuntimeLimits::hlt()
+    };
+    let mut live_runtime = replica(limits)?;
+    let mut replay_runtime = replica(limits)?;
+    for runtime in [&mut live_runtime, &mut replay_runtime] {
+        runtime
+            .state
+            .e_replicas
+            .get_mut(&entity_key())
+            .expect("fixture Entity state")
+            .entity
+            .crontab = Some(CrontabState {
+            tasks: BTreeMap::new(),
+            hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
+                "htlc-timeout:due".to_string(),
+                ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+            )]))
+            .expect("scheduled hooks"),
+        });
+    }
+
+    let mut materializer = CanonicalEntityInfraMaterializer::new();
+    let live = apply_runtime_live(
+        live_runtime,
+        RuntimeLiveInput {
+            runtime_txs: Vec::new(),
+            entity_inputs: Vec::new(),
+            timestamp: 200,
+            finalized_j_height: 0,
+            hub_rebalance_has_pending_work: false,
+        },
+        &mut materializer,
+    )?;
+    let live_frame = live.applied_frame.as_ref().expect("live wake frame");
+    assert_eq!(live_frame.entity_inputs.len(), 1);
+    let replay_context = CanonicalEntityInfraMaterializer::new()
+        .materialize(EntityInfraMaterializeRequest {
+            state: replay_runtime
+                .state
+                .e_replicas
+                .get(&entity_key())
+                .expect("replay Entity state"),
+            replica: replay_runtime
+                .e_replicas
+                .get_mut(&entity_key())
+                .expect("replay Entity replica"),
+            account_inputs: &[],
+            local_financial_txs: &[],
+            timestamp: 200,
+            finalized_j_height: 0,
+        })
+        .expect("replay Entity context");
+    assert_eq!(
+        live.outputs
+            .entities
+            .first()
+            .map(|output| &output.entity_context),
+        Some(&replay_context.canonical),
+    );
+    let mut replay_frame_context = live_frame.frame.clone();
+    replay_frame_context.entity_contexts = BTreeMap::from([(
+        entity_key(),
+        VecDeque::from([super::types::RuntimeEntityFrameContext {
+            execution: replay_context.execution,
+            canonical: replay_context.canonical,
+        }]),
+    )]);
+    let replay_input = RuntimeInput {
+        runtime_txs: live_frame.runtime_txs.clone(),
+        entity_inputs: live_frame
+            .entity_inputs
+            .iter()
+            .cloned()
+            .map(RuntimeEntityInput::decode)
+            .collect::<Result<Vec<_>, _>>()?,
+        frame: replay_frame_context,
+    };
+
+    let replay = apply_runtime(replay_runtime, replay_input)?;
+    let replay_frame = replay.applied_frame.as_ref().expect("replayed wake frame");
+    assert_eq!(replay_frame.entity_inputs, live_frame.entity_inputs);
+    assert_eq!(replay_frame.entity_frame_count, 1);
+    assert_eq!(
+        replay.applied_input.as_ref().map(|input| input.wakes.len()),
+        Some(0)
+    );
+    assert_eq!(replay.replica.state.height, live.replica.state.height);
+    let live_entity = live
+        .replica
+        .state
+        .e_replicas
+        .get(&entity_key())
+        .expect("live Entity state");
+    let replay_entity = replay
+        .replica
+        .state
+        .e_replicas
+        .get(&entity_key())
+        .expect("replayed Entity state");
+    assert_eq!(replay_entity.entity.height, live_entity.entity.height);
+    assert_eq!(replay_entity.accounts_root, live_entity.accounts_root);
+    assert_eq!(
+        replay_entity
+            .entity
+            .crontab
+            .as_ref()
+            .map(|crontab| crontab.hooks.len()),
+        Some(0),
+    );
+    assert_eq!(
+        replay
+            .certified_entity_frames()
+            .next()
+            .map(|(_, frame)| frame.hash.as_str()),
+        live.certified_entity_frames()
+            .next()
+            .map(|(_, frame)| frame.hash.as_str()),
+    );
+    Ok(())
+}
+
+fn recorded_due_wake_input(due_at: u64) -> Result<RuntimeEntityInput, RuntimeMachineError> {
+    RuntimeEntityInput::decode(serde_json::json!({
+        "entityId": hex32(owner_bytes()),
+        "signerId": entity_signer_id(),
+        "entityTxs": [{
+            "type": "scheduledWake",
+            "data": {
+                "version": 1,
+                "proposerSignerId": entity_signer_id(),
+                "dueAt": due_at,
+                "jobs": [{
+                    "kind": "hook",
+                    "id": "htlc-timeout:due",
+                    "dueAt": due_at,
+                }],
+            },
+        }],
+    }))
+}
+
+fn runtime_with_due_hook() -> Result<RuntimeReplica, RuntimeMachineError> {
+    let mut runtime = replica(RuntimeLimits {
+        checkpoint_period_frames: 0,
+        ..RuntimeLimits::hlt()
+    })?;
+    runtime
+        .state
+        .e_replicas
+        .get_mut(&entity_key())
+        .expect("fixture Entity state")
+        .entity
+        .crontab = Some(CrontabState {
+        tasks: BTreeMap::new(),
+        hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
+            "htlc-timeout:due".to_string(),
+            ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+        )]))
+        .expect("scheduled hooks"),
+    });
+    Ok(runtime)
+}
+
+fn rejected_apply(
+    result: Result<super::RuntimeApplyResult, RuntimeMachineError>,
+) -> RuntimeMachineError {
+    match result {
+        Ok(_) => panic!("Runtime apply must reject"),
+        Err(error) => error,
+    }
+}
+
+#[test]
+fn exact_replay_rejects_mutated_or_duplicate_recorded_wake() -> Result<(), RuntimeMachineError> {
+    let mutated = rejected_apply(apply_runtime(
+        runtime_with_due_hook()?,
+        frame(200, vec![recorded_due_wake_input(151)?]),
+    ));
+    assert!(mutated.to_string().contains("RECORDED_CONFLICT"));
+
+    let wake = recorded_due_wake_input(150)?;
+    let duplicate = rejected_apply(apply_runtime(
+        runtime_with_due_hook()?,
+        frame(200, vec![wake.clone(), wake]),
+    ));
+    assert!(duplicate.to_string().contains("RECORDED_DUPLICATE"));
+    Ok(())
+}
+
+#[test]
+fn exact_replay_rejects_recorded_wake_without_due_crontab_state() -> Result<(), RuntimeMachineError>
+{
+    let missing = rejected_apply(apply_runtime(
+        replica(RuntimeLimits::hlt())?,
+        frame(200, vec![recorded_due_wake_input(150)?]),
+    ));
+    assert!(missing.to_string().contains("RECORDED_NOT_DUE"));
     Ok(())
 }

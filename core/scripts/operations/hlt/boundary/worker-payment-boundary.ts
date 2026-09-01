@@ -9,6 +9,7 @@ import {
 
 export type LoadPaymentReport = Readonly<{
   schema: 'xln-hlt-payment-load-v1';
+  engine: 'ts' | 'rust';
   mode: 'payments';
   runId: string;
   completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence';
@@ -41,6 +42,17 @@ export type LoadPaymentReport = Readonly<{
   hubDurableAfter: Readonly<{ height: number; canonicalStateHash: string }>;
   environment: HltEnvironmentManifest;
 }>;
+
+export const assertHltWalAdvanced = (
+  walBytesBefore: number,
+  walBytesAfter: number,
+  hubWalSync: boolean,
+): void => {
+  if (!hubWalSync) throw new Error('HLT_PAYMENT_REPORT_HUB_WAL_SYNC_REQUIRED');
+  if (walBytesAfter <= walBytesBefore) {
+    throw new Error(`HLT_PAYMENT_REPORT_WAL_DID_NOT_GROW:${walBytesBefore}:${walBytesAfter}`);
+  }
+};
 
 export type PaymentSettlementSample = Readonly<{
   elapsedMs: number;
@@ -122,7 +134,7 @@ const decodeFrame = (value: unknown, code: string): LoadPaymentReport['hubDurabl
 export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
   const record = requireBoundaryRecord(value, 'HLT_PAYMENT_REPORT_INVALID');
   requireExactBoundaryKeys(record, [
-    'schema', 'mode', 'runId', 'completionAuthority', 'configuredUsers', 'configuredRounds', 'cadenceMs',
+    'schema', 'engine', 'mode', 'runId', 'completionAuthority', 'configuredUsers', 'configuredRounds', 'cadenceMs',
     'senders', 'receivers', 'tokenId', 'amount', 'offeredPaymentRate',
     'submittedPayments', 'deliveredPayments',
     'enqueueAckElapsedMs', 'sourceDispatchFinishedElapsedMs', 'sourceAllAckedElapsedMs',
@@ -133,6 +145,8 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     'environment',
   ], [], 'HLT_PAYMENT_REPORT_FIELDS_INVALID');
   if (record['schema'] !== 'xln-hlt-payment-load-v1') throw new Error('HLT_PAYMENT_REPORT_SCHEMA_INVALID');
+  const engine = record['engine'];
+  if (engine !== 'ts' && engine !== 'rust') throw new Error('HLT_PAYMENT_REPORT_ENGINE_INVALID');
   if (record['mode'] !== 'payments') throw new Error('HLT_PAYMENT_REPORT_MODE_INVALID');
   const runId = record['runId'];
   if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new Error('HLT_PAYMENT_REPORT_RUN_ID_INVALID');
@@ -207,8 +221,19 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
   if (hubIngressElapsedMs < commandObservedElapsedMs || hubIngressElapsedMs > deliveredElapsedMs) {
     throw new Error('HLT_PAYMENT_REPORT_TIMING_INVALID');
   }
+  const walBytesBefore = requireBoundaryInteger(
+    record['walBytesBefore'], 'HLT_PAYMENT_REPORT_WAL_BEFORE_INVALID', 0,
+  );
+  const walBytesAfter = requireBoundaryInteger(
+    record['walBytesAfter'], 'HLT_PAYMENT_REPORT_WAL_AFTER_INVALID', 0,
+  );
+  const environment = decodeHltEnvironmentManifest(
+    record['environment'], 'HLT_PAYMENT_REPORT_ENVIRONMENT',
+  );
+  assertHltWalAdvanced(walBytesBefore, walBytesAfter, environment.hubWalSync);
   return {
     schema: 'xln-hlt-payment-load-v1',
+    engine,
     mode: 'payments',
     runId,
     completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
@@ -236,10 +261,10 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     settlementSamples,
     roundSubmissionLagMs: lags.map((lag, index) =>
       requireBoundaryInteger(lag, `HLT_PAYMENT_REPORT_LAG_INVALID:${index}`, 0)),
-    walBytesBefore: requireBoundaryInteger(record['walBytesBefore'], 'HLT_PAYMENT_REPORT_WAL_BEFORE_INVALID', 0),
-    walBytesAfter: requireBoundaryInteger(record['walBytesAfter'], 'HLT_PAYMENT_REPORT_WAL_AFTER_INVALID', 0),
+    walBytesBefore,
+    walBytesAfter,
     hubDurableBefore: decodeFrame(record['hubDurableBefore'], 'HLT_PAYMENT_REPORT_HUB_BEFORE'),
     hubDurableAfter: decodeFrame(record['hubDurableAfter'], 'HLT_PAYMENT_REPORT_HUB_AFTER'),
-    environment: decodeHltEnvironmentManifest(record['environment'], 'HLT_PAYMENT_REPORT_ENVIRONMENT'),
+    environment,
   };
 };

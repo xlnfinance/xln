@@ -16,7 +16,7 @@ use crate::{
 /// A materialized checkpoint has two independent row families. Runtime-machine
 /// leaves are height-scoped 0x16 rows and authenticate the Runtime envelope;
 /// state rows are permanent 0x17-0x38 paths that hydrate Entity/Account data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ConcreteCheckpointSource {
     pub height: u64,
     /// Exact canonical RuntimeFrame bytes that selected this checkpoint.  The

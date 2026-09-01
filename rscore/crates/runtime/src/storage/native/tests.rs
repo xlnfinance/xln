@@ -499,6 +499,7 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
             },
         )
         .expect("open");
+        assert_eq!(store.retained_wal_bytes(), 0);
         let first = store
             .append_frame(frame(
                 1,
@@ -524,6 +525,8 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
                 }),
             ))
             .expect("durable checkpoint frame");
+        let retained_after_first = store.retained_wal_bytes();
+        assert!(retained_after_first > 0);
         assert_eq!(first.resident_outputs(), Some(first_outputs.as_slice()));
         assert_eq!(
             store.read_durable_outputs(&first).expect("published"),
@@ -532,6 +535,7 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
         store
             .append_frame(frame(2, second_outputs.clone(), None))
             .expect("durable tail frame");
+        assert!(store.retained_wal_bytes() > retained_after_first);
     }
     let mut reopened = NativeRuntimeStore::open(
         &path,
@@ -541,6 +545,7 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
         },
     )
     .expect("reopen");
+    assert!(reopened.retained_wal_bytes() > 0);
     let recovered = reopened.recover().expect("recover");
     let checkpoint = recovered.checkpoint.expect("checkpoint");
     assert_eq!(checkpoint.height, 1);
@@ -869,4 +874,70 @@ fn a_real_filesystem_sync_failure_poison_stops_publication_and_future_work() {
     ));
     drop(store);
     cleanup(&moved);
+}
+
+#[test]
+fn storage_wall_decomposition_is_gated_and_does_not_change_wal_rows() {
+    let path = temporary_path("profile-wall");
+    cleanup(&path);
+    let mut store = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            durable_fsync: false,
+            ..NativeStorageConfig::default()
+        },
+    )
+    .expect("open");
+    let build = |height| {
+        build_runtime_frame_commit(
+            CanonicalRuntimeFrameDraft {
+                height,
+                timestamp: height,
+                prev_frame_hash: [0; 32],
+                replica_meta_digest: [0x11; 32],
+                runtime_component_digests: vec![],
+                materialized_state: false,
+                canonical_state: None,
+                runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+                runtime_machine_root: None,
+                account_authority_checkpoints: vec![],
+                touched_entities: vec![],
+                touched_accounts: vec![],
+                touched_book_entities: vec![],
+            },
+            EntityContextPayloadRows::empty(),
+            vec![],
+            None,
+        )
+        .expect("encoded frame")
+    };
+    let first = build(1);
+    let first_bytes = first.commit.frame_bytes.clone();
+    let (_, disabled) = store
+        .append_encoded_frame(first, false)
+        .expect("unprofiled append");
+    assert_eq!(disabled, NativeStorageTimings::default());
+    assert_eq!(
+        store
+            .read_durable_frame(1)
+            .expect("first frame")
+            .frame_bytes,
+        first_bytes,
+    );
+
+    let (_, profiled) = store
+        .append_encoded_frame(build(2), true)
+        .expect("profiled append");
+    assert_eq!(profiled.directory_sync, std::time::Duration::ZERO);
+    assert!(profiled.accounted() > std::time::Duration::ZERO);
+    assert_eq!(
+        profiled.accounted(),
+        profiled.prepare_validate
+            + profiled.batch_build
+            + profiled.db_write_sync
+            + profiled.directory_sync
+            + profiled.post_commit,
+    );
+    drop(store);
+    cleanup(&path);
 }

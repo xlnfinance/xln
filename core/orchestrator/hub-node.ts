@@ -51,6 +51,9 @@ import { createRelayStore } from '../network/relay/store';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../protocol/boundary-validation';
 import { writeDurableFile } from '../storage/fs-durability';
+import { exportConcreteCheckpointSource } from '../storage/read/concrete-checkpoint-source';
+import { getRuntimeWalDb, getStorageDb } from '../storage/runtime-dbs';
+import { ensureRuntimeInfrastructure } from '../runtime/envelope/replica-envelope';
 import { createStructuredLogger } from '../support/logger';
 import { getPerfMs } from '../support/time';
 import { handleMeshBootstrapLoopError } from './mesh/mesh-bootstrap-fail-fast';
@@ -114,6 +117,7 @@ import {
   buildRuntimeRecoveryBundle,
 } from '../runtime.ts';
 import { withRuntimeCommittedRead } from '../runtime/frame/lifecycle/writer-lock';
+import { shutdownAuthorityDriver } from '../rscore/authority-driver';
 import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import type { EntityInput } from '../entity/types';
@@ -1905,6 +1909,55 @@ const createHubControlRequestHandler = (dependencies: {
         );
       }
       try {
+        if (process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1') {
+          if (process.env['XLN_HLT_ENGINE'] !== 'ts') {
+            throw new Error('HLT_PARITY_CHECKPOINT_TS_ENGINE_REQUIRED');
+          }
+          const previousStorage = dependencies.state.runtimeConfig.storage;
+          const keys = [
+            'XLN_RSCORE_AUTHORITY', 'XLN_RSCORE_AUTHORITY_IMPORT',
+            'XLN_RSCORE_AUTHORITY_RECORD', 'XLN_RSCORE_AUTHORITY_RUNTIME_ID',
+          ] as const;
+          const previous = new Map(keys.map(key => [key, process.env[key]] as const));
+          const runtimeId = dependencies.state.runtimeId;
+          if (runtimeId === undefined) throw new Error('HLT_PARITY_CHECKPOINT_RUNTIME_ID_REQUIRED');
+          try {
+            // The parity checkpoint is an explicit one-frame projection. Keep
+            // production materialization disabled outside this request instead
+            // of forcing every TS H1 frame through the Rust projector.
+            dependencies.state.runtimeConfig.storage = {
+              ...previousStorage,
+              materializePeriodFrames: 1,
+            };
+            process.env['XLN_RSCORE_AUTHORITY'] = '1';
+            process.env['XLN_RSCORE_AUTHORITY_IMPORT'] = '1';
+            process.env['XLN_RSCORE_AUTHORITY_RECORD'] = '1';
+            process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'] = runtimeId;
+            // Commit one empty projection barrier into the base checkpoint.
+            // It is excluded from the replay tail and carries no fabricated
+            // command identity or financial transition.
+            enqueueRuntimeInput(dependencies.state, {
+              runtimeTxs: [],
+              entityInputs: [],
+            });
+            await processRuntime(dependencies.state);
+          } finally {
+            await shutdownAuthorityDriver();
+            if (previousStorage === undefined) delete dependencies.state.runtimeConfig.storage;
+            else dependencies.state.runtimeConfig.storage = previousStorage;
+            for (const key of keys) {
+              const value = previous.get(key);
+              if (value === undefined) delete process.env[key];
+              else process.env[key] = value;
+            }
+          }
+        }
+        const concreteCheckpoint = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1'
+          ? await exportConcreteCheckpointSource(dependencies.state, {
+              getStorageDb: (env, role) => getStorageDb(env, { ensureRuntimeInfrastructure }, role),
+              getRuntimeWalDb: env => getRuntimeWalDb(env, { ensureRuntimeInfrastructure }),
+            })
+          : null;
         const bundle = await withRuntimeCommittedRead(dependencies.state, () =>
           buildRuntimeRecoveryBundle(dependencies.state, {
             kind: 'snapshot',
@@ -1915,6 +1968,12 @@ const createHubControlRequestHandler = (dependencies: {
             }],
           }));
         await writeDurableFile(outputPath, `${serializeTaggedJson(bundle)}\n`);
+        if (concreteCheckpoint) {
+          await writeDurableFile(
+            `${outputPath}.concrete-checkpoint.json`,
+            `${safeStringify(concreteCheckpoint)}\n`,
+          );
+        }
         return new Response(safeStringify({
           ok: true,
           runtimeId: bundle.runtimeId,

@@ -3,6 +3,7 @@ import { REMOTE_RUNTIME } from '../../config/constants';
 
 type RuntimeImportManifestEntry = {
   label: string;
+  engine: 'ts' | 'rust';
   access: 'admin';
   wsUrl: string;
   token: string;
@@ -17,6 +18,7 @@ export type RuntimeImportManifest = {
 
 export type RuntimeImportCandidate = {
   label: string;
+  engine: 'ts' | 'rust';
   wsUrl: string;
   authSeed: string;
   audience: string;
@@ -74,6 +76,7 @@ export const createRuntimeImportManifest = (
   const expiresAt = issuedAt + tokenTtlMs;
   const entries = candidates.map((candidate): RuntimeImportManifestEntry => ({
     label: candidate.label,
+    engine: candidate.engine,
     access: 'admin',
     wsUrl: candidate.wsUrl,
     token: deriveRuntimeAdapterCapabilityToken(candidate.authSeed, 'full', expiresAt, {

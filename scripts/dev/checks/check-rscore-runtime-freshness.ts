@@ -12,6 +12,7 @@ import { stopProcessGroup } from '../../../core/scripts/e2e/runners/process-grou
 const repositoryRoot = import.meta.dir + '/../../..';
 const runtimeBinary = `${repositoryRoot}/rscore/target/release/xlnrs`;
 const BUILD_TIMEOUT_MS = 30_000;
+const selectedEngine = String(process.env['XLN_HLT_ENGINE'] || 'ts').trim();
 
 const buildNativeH1 = async (): Promise<void> => {
   const command = RSCORE_RUNTIME_BUILD_COMMAND.split(' ');
@@ -59,7 +60,9 @@ const ensureNativeH1 = async (): Promise<void> => {
   console.log(`[dev] native H1 binary fresh: ${executable}`);
 };
 
-await ensureNativeH1().catch(error => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+if (selectedEngine === 'rust') {
+  await ensureNativeH1().catch(error => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

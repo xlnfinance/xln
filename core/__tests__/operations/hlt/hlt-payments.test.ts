@@ -17,6 +17,9 @@ import {
   waitForHltEconomicStartGate,
 } from '../../../scripts/operations/hlt/workload/worker-payments';
 import { buildPacedOperationSchedule } from '../../../scripts/operations/hlt/workload/operation-pacer';
+import {
+  runParityGatedHltChild,
+} from '../../../scripts/operations/hlt/controller/live-economic-controller';
 import { summarizeRecordedPaymentWork } from '../../../scripts/operations/hlt/replay/payment-work-ledger';
 import type { PersistedFrameJournal } from '../../../storage/types';
 import {
@@ -27,6 +30,7 @@ import {
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { safeStringify } from '../../../protocol/serialization';
 
 describe('hlt payment population', () => {
   test('post-completion drain audit never reduces measured payment throughput', () => {
@@ -158,11 +162,90 @@ describe('hlt payment population', () => {
       join(import.meta.dir, '../../../scripts/operations/hlt/build-chains.ts'),
       'utf8',
     );
-    expect(source).toContain(
-      "timeout: process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ? undefined : 30_000",
-    );
+    expect(source).toContain('await runParityGatedHltChild({');
+    expect(source).toContain("parityArgs: ['core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts']");
+    expect(source).toContain('timeout: 30_000');
     expect(source).not.toContain('timeout: 50_000');
     expect(source).not.toContain('XLN_HLT_RUNTIMES_PER_WORKER:');
+  });
+
+  test('controller opens one prepared workload without replacing its PID', async () => {
+    const gateDir = mkdtempSync(join(tmpdir(), 'xln-hlt-controller-'));
+    const parityEnvPath = join(gateDir, 'parity-env.json');
+    const liveEnvPath = join(gateDir, 'live-env.txt');
+    let admittedPid = 0;
+    try {
+      const status = await runParityGatedHltChild({
+        gateDir,
+        parityCommand: process.execPath,
+        parityArgs: ['-e', [
+          `await Bun.write(${safeStringify(parityEnvPath)}, JSON.stringify({`,
+          "dir: process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ?? null,",
+          "ready: process.env['XLN_HLT_ECONOMIC_GATE_READY'] ?? null,",
+          "start: process.env['XLN_HLT_ECONOMIC_GATE_START'] ?? null,",
+          '}));',
+        ].join(' ')],
+        command: process.execPath,
+        args: ['-e', [
+          "import { waitForHltEconomicStartGate } from './core/scripts/operations/hlt/workload/worker-payments.ts';",
+          `await Bun.write(${safeStringify(liveEnvPath)}, process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ?? 'missing');`,
+          'await waitForHltEconomicStartGate();',
+        ].join(' ')],
+        env: {
+          ...process.env,
+          XLN_HLT_ECONOMIC_GATE_DIR: '/must-not-reach-parity',
+          XLN_HLT_ECONOMIC_GATE_READY: 'must-not-reach-parity',
+          XLN_HLT_ECONOMIC_GATE_START: 'must-not-reach-parity',
+        },
+      });
+      admittedPid = Number(readFileSync(join(gateDir, 'ready'), 'utf8').trim());
+      expect(status).toBe(0);
+      expect(JSON.parse(readFileSync(parityEnvPath, 'utf8'))).toEqual({
+        dir: null,
+        ready: null,
+        start: null,
+      });
+      expect(readFileSync(liveEnvPath, 'utf8')).toBe(gateDir);
+      expect(admittedPid).toBeGreaterThan(0);
+      expect(Number(readFileSync(join(gateDir, 'started'), 'utf8').trim())).toBe(admittedPid);
+    } finally {
+      rmSync(gateDir, { recursive: true, force: true });
+    }
+  });
+
+  test('controller rejects stale gates before starting a child', async () => {
+    const gateDir = mkdtempSync(join(tmpdir(), 'xln-hlt-controller-stale-'));
+    writeFileSync(join(gateDir, 'ready'), `${process.pid}\n`);
+    try {
+      await expect(runParityGatedHltChild({
+        gateDir,
+        parityCommand: process.execPath,
+        parityArgs: ['-e', 'process.exit(0)'],
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+        env: process.env,
+      })).rejects.toThrow('HLT_ECONOMIC_GATE_STALE');
+    } finally {
+      rmSync(gateDir, { recursive: true, force: true });
+    }
+  });
+
+  test('offline mixed parity failure prevents the live H1 child from starting', async () => {
+    const gateDir = mkdtempSync(join(tmpdir(), 'xln-hlt-parity-red-'));
+    const childMarker = join(gateDir, 'child-started');
+    try {
+      await expect(runParityGatedHltChild({
+        gateDir,
+        parityCommand: process.execPath,
+        parityArgs: ['-e', 'process.exit(7)'],
+        command: process.execPath,
+        args: ['-e', `await Bun.write(${safeStringify(childMarker)}, 'started')`],
+        env: process.env,
+      })).rejects.toThrow('HLT_OFFLINE_MIXED_PARITY_FAILED:7');
+      expect(existsSync(childMarker)).toBe(false);
+    } finally {
+      rmSync(gateDir, { recursive: true, force: true });
+    }
   });
 
   test('1000 users are evenly paced at one operation per millisecond', () => {
@@ -438,6 +521,7 @@ describe('hlt payment report boundary', () => {
   const frame = { height: 12, canonicalStateHash: `0x${'ab'.repeat(32)}` };
   const report = {
     schema: 'xln-hlt-payment-load-v1',
+    engine: 'rust',
     mode: 'payments',
     runId: 'hlt-payment-test',
     completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
@@ -473,6 +557,17 @@ describe('hlt payment report boundary', () => {
     expect(() => decodeLoadPaymentReport(bare)).toThrow('HLT_PAYMENT_REPORT_FIELDS_INVALID');
     expect(() => decodeLoadPaymentReport({ ...report, environment: { ...report.environment, disputeHankos: 'off' } }))
       .toThrow('HLT_PAYMENT_REPORT_ENVIRONMENT_DISPUTE_HANKOS_INVALID');
+  });
+
+  test('a result requires synced H1 WAL growth', () => {
+    expect(() => decodeLoadPaymentReport({ ...report, walBytesAfter: report.walBytesBefore }))
+      .toThrow('HLT_PAYMENT_REPORT_WAL_DID_NOT_GROW');
+    expect(() => decodeLoadPaymentReport({ ...report, walBytesAfter: report.walBytesBefore - 1 }))
+      .toThrow('HLT_PAYMENT_REPORT_WAL_DID_NOT_GROW');
+    expect(() => decodeLoadPaymentReport({
+      ...report,
+      environment: { ...report.environment, hubWalSync: false },
+    })).toThrow('HLT_PAYMENT_REPORT_HUB_WAL_SYNC_REQUIRED');
   });
 
   test('a partially delivered run is rejected, not averaged', () => {

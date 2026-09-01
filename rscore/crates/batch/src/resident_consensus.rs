@@ -23,7 +23,7 @@ use crate::consensus::{
     outbound_ack_input, proposable, proposal_row, restore_checkpoint_account, restore_seed_account,
     state_error, validate_genesis_seed, verdict_commits_genesis,
 };
-use crate::parallel::{ResidentAccountAction, ResidentAccountForest};
+use crate::parallel::{OutboundContinuationKind, ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
     EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcFollowup,
 };
@@ -1028,6 +1028,7 @@ impl ResidentConsensusEngine {
             .map(|draft| draft.pending.account_id)
             .collect::<Vec<_>>();
         self.forest.apply_outbound_continue(
+            OutboundContinuationKind::SettlementHankoAttach,
             drafts
                 .into_iter()
                 .map(|draft| (draft.pending.account_id, draft))
@@ -1784,7 +1785,11 @@ impl ResidentConsensusEngine {
             .map(|(account_id, _)| *account_id)
             .collect::<Vec<_>>();
         let batch = if continue_candidate {
-            self.forest.apply_outbound_continue(entries, apply)?
+            self.forest.apply_outbound_continue(
+                OutboundContinuationKind::FailedHtlcFollowup,
+                entries,
+                apply,
+            )?
         } else {
             // A reset discards the previous candidate together with any
             // Accounts only that candidate created.

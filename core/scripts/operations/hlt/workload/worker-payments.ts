@@ -25,7 +25,11 @@ import {
   type LoadIdentity,
   type HubSettlementCounters,
 } from '../boundary/worker-boundary';
-import { decodeLoadPaymentReport, type PaymentSettlementSample } from '../boundary/worker-payment-boundary';
+import {
+  assertHltWalAdvanced,
+  decodeLoadPaymentReport,
+  type PaymentSettlementSample,
+} from '../boundary/worker-payment-boundary';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
   HLT_FAUCET_AMOUNT,
@@ -268,7 +272,9 @@ export const waitForHltEconomicStartGate = async (): Promise<void> => {
   if (readFileSync(startPath, 'utf8').trim() !== 'start') {
     throw new Error('HLT_ECONOMIC_GATE_START_INVALID');
   }
-  writeFileSync(startedPath, `${Date.now()}\n`, { mode: 0o600 });
+  // The controller compares this with `ready`; a PID change would mean the
+  // measured window ran on a restarted workload instead of the prepared one.
+  writeFileSync(startedPath, `${process.pid}\n`, { mode: 0o600 });
 };
 
 /**
@@ -741,10 +747,6 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
           await readWithRateLimitRetry<unknown>(requireShardHub(shard), `entity/${shard.hubIdentity.entityId}/settlement-counters`),
         )))
       : [];
-    const rustDbPath = join(args.workDir, 'prod-mesh', 'h1', 'rscore-native');
-    const walBytesBefore = selection.engine === 'rust'
-      ? directoryBytes(rustDbPath)
-      : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
     let rustMetricsBefore: RustH1Metrics | null = rustH1?.metrics() ?? null;
     if (rustH1) {
       if (rustSetupHeight === null) throw new Error('HLT_RUST_FINANCIAL_SETUP_HEIGHT_MISSING');
@@ -778,6 +780,11 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         throw new Error(`HLT_RUST_ECONOMIC_METRICS_BASELINE_MISSING:${String(rustSetupHeight)}`);
       }
     }
+    // Native WAL authority is the synced StorageHead counter, not LevelDB's
+    // directory size: compaction may shrink physical files after a valid append.
+    const walBytesBefore = rustMetricsBefore
+      ? rustMetricsBefore.retainedWalBytes
+      : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
     const countersBefore = selection.engine === 'rust'
       ? [{
           height: rustMetricsBefore!.height,
@@ -991,8 +998,13 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       : tsHubIo;
     console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo, phaseTimeline })}`);
     const environment = collectHltEnvironmentManifest();
+    const walBytesAfter = rustSettlement
+      ? rustSettlement.metrics.retainedWalBytes
+      : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
+    assertHltWalAdvanced(walBytesBefore, walBytesAfter, environment.hubWalSync);
     const reportInput = {
       schema: 'xln-hlt-payment-load-v1',
+      engine: selection.engine,
       mode: 'payments',
       runId: basename(args.workDir),
       completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
@@ -1023,9 +1035,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs,
       walBytesBefore,
-      walBytesAfter: rustH1
-        ? directoryBytes(rustDbPath)
-        : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0),
+      walBytesAfter,
       hubDurableBefore,
       hubDurableAfter: rustSettlement
         ? {
