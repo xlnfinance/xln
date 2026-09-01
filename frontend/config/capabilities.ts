@@ -379,13 +379,16 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/jurisdiction-panel-view.ts',
       'frontend/packages/runtime-client/src/settings-panel-view.ts',
       'frontend/packages/runtime-client/src/architect-panel-view.ts',
+      'frontend/packages/runtime-client/src/workspace-dock-layout.ts',
+      'frontend/packages/ui/src/workspace-dock.tsx',
     ],
     behavior: [
       'Dockview layout',
       'Graph3D and Architect',
       'Runtime I/O, console, Solvency, Runtime Diagnostics, Gossip, and Time Machine',
       'framework-neutral panel projections shared with the canonical Svelte workspace',
+      'shared Svelte-compatible layout persistence and a lifecycle-safe React Dockview adapter',
     ],
-    status: 'unstarted',
+    status: 'in_progress',
   },
 ] as const satisfies readonly CapabilityDefinition[];

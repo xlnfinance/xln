@@ -419,6 +419,19 @@ export const PLATFORM_INVENTORY = [
     ],
   },
   {
+    id: 'ops-workspace-dock-layout',
+    owner: 'ops',
+    workPackage: 'WP7',
+    status: 'implemented',
+    interfaces: ['local-storage', 'registry'],
+    sources: ['frontend/packages/runtime-client/src/workspace-dock-layout.ts'],
+    consumers: [
+      'frontend/packages/ui/src/workspace-dock.tsx',
+      'frontend/src/lib/view/DockRoot.svelte',
+    ],
+    evidence: ['tests/frontend/workspace/workspace-dock-layout.test.ts'],
+  },
+  {
     id: 'ops-workspace-registries',
     owner: 'ops',
     workPackage: 'WP7',

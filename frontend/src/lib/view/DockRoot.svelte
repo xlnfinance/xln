@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, mount, unmount } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
-  import { DockviewComponent } from 'dockview';
+  import { DockviewComponent, type SerializedDockview } from 'dockview';
   import type { RuntimeReplica, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
   import type { EnvSnapshot } from '@xln/core/runtime/types';
   import Graph3DPanel from './panels/graph3d/Graph3DPanel.svelte';
@@ -26,6 +26,11 @@
   import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { appStateOperations } from '$lib/stores/appStateStore';
+  import {
+    WORKSPACE_LAYOUT_STORAGE_KEY,
+    parseWorkspaceLayoutEnvelope,
+    serializeWorkspaceDockLayout,
+  } from '../../../packages/runtime-client/src/workspace-dock-layout';
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
@@ -41,6 +46,7 @@
   let unsubOpenJurisdiction: (() => void) | null = null;
   let unsubFocusPanel: (() => void) | null = null;
   let activePanelDisposable: { dispose: () => void } | null = null;
+  let layoutChangeDisposable: { dispose: () => void } | null = null;
   let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
   let workspaceReadyFrame: number | null = null;
   let workspaceReady = false;
@@ -384,14 +390,14 @@
       window.__dockview_instance = dockview;
     }
 
-    const savedLayout = localStorage.getItem('xln-workspace-layout');
-    let shouldRestoreLayout = false;
+    const savedLayout = localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY);
+    let savedDockviewLayout: SerializedDockview | null = null;
     if (savedLayout && !mobileDockLayout) {
       try {
-        const config = JSON.parse(savedLayout);
-        if (config.dockview) shouldRestoreLayout = true;
-      } catch {
-        localStorage.removeItem('xln-workspace-layout');
+        savedDockviewLayout = parseWorkspaceLayoutEnvelope(savedLayout).dockview;
+      } catch (err) {
+        logDockRootDiagnostic('Stored workspace layout is invalid; clearing it', err);
+        localStorage.removeItem(WORKSPACE_LAYOUT_STORAGE_KEY);
       }
     }
 
@@ -465,16 +471,15 @@
 
     ensureWorkspacePanels();
 
-    if (shouldRestoreLayout && savedLayout) {
+    if (savedDockviewLayout) {
       setTimeout(() => {
         try {
-          const config = JSON.parse(savedLayout);
-          if (config.dockview) dockview.fromJSON(config.dockview);
+          dockview.fromJSON(savedDockviewLayout);
           ensureWorkspacePanels();
           markWorkspaceReady();
         } catch (err) {
           logDockRootDiagnostic('Layout restore failed; clearing saved workspace layout', err);
-          localStorage.removeItem('xln-workspace-layout');
+          localStorage.removeItem(WORKSPACE_LAYOUT_STORAGE_KEY);
           localStorage.removeItem('xln-dockview-layout');
           localStorage.removeItem('dockview-layout');
           markWorkspaceReady();
@@ -498,7 +503,7 @@
       if (panelId === 'graph3d') graphInitSignal.set(true);
     });
 
-    dockview.onDidLayoutChange(() => {
+    layoutChangeDisposable = dockview.onDidLayoutChange(() => {
       if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
       if (mobileDockLayout) {
         saveLayoutTimer = null;
@@ -506,12 +511,10 @@
       }
       saveLayoutTimer = setTimeout(() => {
         try {
-          const config = {
-            version: '1.0.0',
-            timestamp: new Date().toISOString(),
-            dockview: dockview.toJSON(),
-          };
-          localStorage.setItem('xln-workspace-layout', JSON.stringify(config));
+          localStorage.setItem(
+            WORKSPACE_LAYOUT_STORAGE_KEY,
+            serializeWorkspaceDockLayout(dockview.toJSON(), new Date().toISOString()),
+          );
         } catch (err) {
           logDockRootDiagnostic('Failed to auto-save workspace layout', err);
         }
@@ -585,6 +588,10 @@
     if (activePanelDisposable) {
       activePanelDisposable.dispose();
       activePanelDisposable = null;
+    }
+    if (layoutChangeDisposable) {
+      layoutChangeDisposable.dispose();
+      layoutChangeDisposable = null;
     }
     unsubOpenEntity?.();
     unsubOpenJurisdiction?.();
