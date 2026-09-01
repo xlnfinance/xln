@@ -208,8 +208,10 @@ traced to executable source. Report exact file and line evidence for each item.
   implementation or library API;
 - `vectors-v1.json` freezes normalized input bytes, salts, shard outputs, roots,
   mnemonic projections, and first Ethereum addresses;
-- `MANIFEST.sha256` authenticates the canonical source, native source, and all
-  shipped native binaries. It intentionally does not hash itself.
+- `MANIFEST.sha256` detects drift between the co-shipped canonical source,
+  native source, and binaries. It intentionally does not hash itself. Release
+  provenance must come separately from the signed tag/tarball and registry
+  integrity; a manifest shipped beside its files is not an independent signature.
 - `bun.lock` freezes exact dependency versions and registry tarball integrity;
 - `historical-v1.json` pins retained historical release tarballs by SHA-256;
 - `release.md` defines signed, multi-archive release procedure.
@@ -254,8 +256,9 @@ to multiplier 7; multiplier 10 tests all seven engines physically representable
 inside their address space. Periodic 1,000-shard/32-worker runs remain thermal
 and OOM evidence rather than a per-commit gate.
 
-`historical.test.ts` hashes each archived tarball and executes that release's
-own frozen vectors. `package.test.ts` packs a real `.tgz`, installs it into an
+`historical.test.ts` hashes each archived tarball and extracts pinned source and
+vector artifacts strictly as inert data; historical package code is never
+executed. `package.test.ts` packs a real `.tgz`, installs it into an
 empty directory with `--offline --ignore-scripts`, checks the allowlist and
 lifecycle-script absence, then runs its launcher and two-shard smoke test.
 

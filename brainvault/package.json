@@ -29,6 +29,7 @@
     "sandbox.test.ts",
     "shard-collector.ts",
     "suggestion.ts",
+    "test-fixtures/",
     "worker-browser.ts",
     "worker-native.ts",
     "worker-wasm.ts",
@@ -70,8 +71,9 @@
     "build:prebuild:rust": "make -C experimental/argon2-rust prebuild",
     "build:rust": "make -C experimental/argon2-rust all",
     "build:experimental": "bun run build:c && bun run build:rust",
-    "test": "bun test core.test.ts sandbox.test.ts package.test.ts",
-    "test:matrix": "bun test release-matrix.test.ts"
+    "test": "bun test core.test.ts sandbox.test.ts package.test.ts historical.test.ts",
+    "test:matrix": "bun test release-matrix.test.ts",
+    "test:native-release": "bun test native-build.test.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",

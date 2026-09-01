@@ -11,10 +11,18 @@ import {
   factorForShardCount,
   hexToBytes,
 } from '../core.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from '../primitives/spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, shardRequestFingerprint } from '../primitives/spec.ts';
 import { verifyBundledExecutable } from '../binary-integrity.ts';
 
 type Backend = 'baseline' | 'sync' | 'wasm' | 'direct-async' | 'c-neon' | 'c-neon-wipe' | 'rust-pool' | 'rust-pool-no-wipe';
+
+const benchmarkArgs = process.argv.slice(2);
+const allowedPrefixes = ['--backend=', '--shards=', '--workers=', '--multiplier='];
+if (benchmarkArgs.some(argument => !allowedPrefixes.some(prefix => argument.startsWith(prefix))
+  || argument.endsWith('=')
+  || /^--(?:name|password|passphrase|pass|secret|unsafe-password)(?:=|$)/.test(argument))) {
+  throw new Error('BRAINVAULT_BENCHMARK_ARGV_INVALID');
+}
 
 const readFlag = (name: string, fallback: string): string => {
   const prefix = `--${name}=`;
@@ -25,9 +33,6 @@ const backend = readFlag('backend', 'baseline') as Backend;
 const shardCount = Number(readFlag('shards', '1000'));
 const requestedWorkers = Number(readFlag('workers', '8'));
 const multiplier = Number(readFlag('multiplier', '1'));
-if (process.argv.some(argument => argument.startsWith('--name=') || argument.startsWith('--passphrase='))) {
-  throw new Error('BRAINVAULT_BENCHMARK_SECRET_ARGV_FORBIDDEN');
-}
 const name = 'benchmark-user';
 const passphrase = 'benchmark-password';
 
@@ -52,23 +57,26 @@ if (backend === 'direct-async') {
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
   const directShards = new Array<Uint8Array>(shardCount);
   let next = 0;
-  await Promise.all(Array.from({ length: workers }, async () => {
-    for (;;) {
-      const index = next++;
-      if (index >= shardCount) return;
-      const salt = await createShardSalt(name, index, shardCount, kdfAlgId);
-      directShards[index] = new Uint8Array(await argon2Native(password, {
-        salt,
-        memoryCost: shardMemoryKb,
-        timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
-        parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
-        outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
-        algorithm: 2,
-        version: 1,
-      }));
-    }
-  }));
-  password.fill(0);
+  try {
+    await Promise.all(Array.from({ length: workers }, async () => {
+      for (;;) {
+        const index = next++;
+        if (index >= shardCount) return;
+        const salt = await createShardSalt(name, index, shardCount, kdfAlgId);
+        directShards[index] = new Uint8Array(await argon2Native(password, {
+          salt,
+          memoryCost: shardMemoryKb,
+          timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
+          parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
+          outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+          algorithm: 2,
+          version: 1,
+        }));
+      }
+    }));
+  } finally {
+    password.fill(0);
+  }
   const derivationTimeMs = performance.now() - startedAt;
   const root = await combineShardsWithParams(directShards, factor, { algId: kdfAlgId, shardMemoryKb });
   const totalTimeMs = performance.now() - startedAt;
@@ -126,8 +134,8 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
         `${import.meta.dir}/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`,
       ].find(candidate => existsSync(candidate));
   if (executable === undefined) throw new Error(`Backend executable unavailable: ${backend}`);
-  verifyBundledExecutable(executable, `${import.meta.dir}/..`);
-  const native = spawnSync(executable, [], {
+  const verifiedExecutable = verifyBundledExecutable(executable, `${import.meta.dir}/..`);
+  const native = spawnSync(verifiedExecutable, [], {
     input,
     maxBuffer: Math.max(1024 * 1024, shardCount * 64),
   });
@@ -203,12 +211,15 @@ await new Promise<void>((resolve, reject) => {
     });
     worker.on('message', (message: unknown) => {
       if (settled) return;
-      const record = message as { specId?: unknown; shardIndex?: unknown; result?: unknown };
+      const record = message as { specId?: unknown; requestId?: unknown; shardIndex?: unknown; result?: unknown };
       if (record.specId !== BRAINVAULT_V1_SPEC_ID) return fail(new Error('Worker spec mismatch'));
       if (!Number.isSafeInteger(record.shardIndex)) return fail(new Error('Invalid worker shard index'));
       const shardIndex = Number(record.shardIndex);
       if (shardIndex < 0 || shardIndex >= shardCount || shards[shardIndex] !== undefined) {
         return fail(new Error(`Invalid or duplicate shard: ${shardIndex}`));
+      }
+      if (record.requestId !== shardRequestFingerprint(shardIndex, shardCount, kdfAlgId, shardMemoryKb)) {
+        return fail(new Error(`Worker request mismatch: ${shardIndex}`));
       }
       if (typeof record.result !== 'string' || record.result.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
         return fail(new Error(`Invalid shard result: ${shardIndex}`));

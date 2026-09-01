@@ -74,6 +74,29 @@ export const BRAINVAULT_V1_SPEC_ID = [
   'nfkd-utf8',
 ].join('|');
 
+/** Runtime-only handshake binding one worker result to every effective KDF input. */
+export function shardRequestFingerprint(
+  shardIndex: number,
+  shardCount: number,
+  algId: string,
+  shardMemoryKb: number,
+  argonTimeCost = BRAINVAULT_V1.ARGON_TIME_COST,
+  argonParallelism = BRAINVAULT_V1.ARGON_PARALLELISM,
+  shardOutputBytes = BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+): string {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1
+    || !Number.isSafeInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount
+    || typeof algId !== 'string' || algId.length === 0) {
+    throw new Error('BRAINVAULT_WORKER_REQUEST_INVALID');
+  }
+  for (const value of [shardMemoryKb, argonTimeCost, argonParallelism, shardOutputBytes]) {
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error('BRAINVAULT_WORKER_REQUEST_INVALID');
+  }
+  return `${BRAINVAULT_V1_SPEC_ID}|request|alg=${encodeURIComponent(algId)}`
+    + `|m=${shardMemoryKb}|t=${argonTimeCost}|p=${argonParallelism}|out=${shardOutputBytes}`
+    + `|shards=${shardCount}|index=${shardIndex}`;
+}
+
 /**
  * salt = BLAKE3(name_NFKD || ALG_ID || shardCount_u32be || shardIndex_u32be)
  *

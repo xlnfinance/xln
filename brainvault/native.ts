@@ -22,6 +22,7 @@
 
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import { Worker } from 'node:worker_threads';
+import { cpus, totalmem } from 'node:os';
 import {
   combineShards,
   deriveEthereumAddress,
@@ -36,6 +37,7 @@ import {
   BRAINVAULT_V1,
   BRAINVAULT_V1_SPEC_ID,
   createShardSalt,
+  shardRequestFingerprint,
 } from './primitives/spec.ts';
 import { hexToBytes } from './primitives/encoding.ts';
 
@@ -82,10 +84,6 @@ const requireNotAborted = (signal: AbortSignal | undefined): void => {
 const validateInput = (input: BrainVaultNativeInput): { shardCount: number; factor: number; workers: number } => {
   assertBrainVaultName(input.name);
   assertBrainVaultPassphrase(input.passphrase);
-  // No upper bound by design: the work factor must be able to track hardware for
-  // decades, so a caller who wants a year-long derivation is allowed to have one.
-  // These checks are type safety (Array(NaN), negative counts), not policy, and
-  // they match cli.ts exactly so both entry points accept the same inputs.
   if (!Number.isSafeInteger(input.shardInput) || input.shardInput < 1) {
     throw new Error(`BRAINVAULT_SHARD_INPUT_INVALID:${String(input.shardInput)}`);
   }
@@ -94,10 +92,16 @@ const validateInput = (input: BrainVaultNativeInput): { shardCount: number; fact
   }
   const preset = input.shardInput <= 5;
   const shardCount = preset ? getShardCount(input.shardInput) : input.shardInput;
+  const requestedWorkers = Math.min(input.workers, shardCount);
+  const ramWorkers = Math.floor((totalmem() * 0.8) / (BRAINVAULT_V1.SHARD_MEMORY_KB * 1024));
+  const safeWorkers = Math.max(1, Math.min(cpus().length, ramWorkers, shardCount));
+  if (requestedWorkers > safeWorkers) {
+    throw new Error(`BRAINVAULT_WORKERS_EXCEED_MEMORY_LIMIT:${requestedWorkers}:${safeWorkers}`);
+  }
   return {
     shardCount,
     factor: preset ? input.shardInput : factorForShardCount(shardCount),
-    workers: Math.min(input.workers, shardCount),
+    workers: requestedWorkers,
   };
 };
 
@@ -197,6 +201,17 @@ export const deriveBrainVaultNative = async (
               return;
             }
             const exactIndex = Number(shardIndex);
+            const requestId = record?.['requestId'];
+            const expectedRequestId = shardRequestFingerprint(
+              exactIndex,
+              shardCount,
+              BRAINVAULT_V1.ALG_ID,
+              BRAINVAULT_V1.SHARD_MEMORY_KB,
+            );
+            if (requestId !== expectedRequestId) {
+              fail(new Error(`BRAINVAULT_WORKER_REQUEST_MISMATCH:${exactIndex}`));
+              return;
+            }
             if (shards[exactIndex] !== undefined) {
               fail(new Error(`BRAINVAULT_WORKER_SHARD_DUPLICATE:${exactIndex}`));
               return;
@@ -252,19 +267,22 @@ export const deriveBrainVaultNative = async (
     const masterKey = await combineShards(shards, factor);
     try {
       const entropy24 = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
-      const mnemonic24 = await entropyToMnemonic(entropy24);
-      const ethereumAddress = await deriveEthereumAddress(mnemonic24);
-      entropy24.fill(0);
-      return {
-        specId: BRAINVAULT_V1_SPEC_ID,
-        backend: 'native-node',
-        shardCount,
-        factor,
-        workers,
-        derivationTimeMs: Math.round(performance.now() - startedAt),
-        mnemonic24,
-        ethereumAddress,
-      };
+      try {
+        const mnemonic24 = await entropyToMnemonic(entropy24);
+        const ethereumAddress = await deriveEthereumAddress(mnemonic24);
+        return {
+          specId: BRAINVAULT_V1_SPEC_ID,
+          backend: 'native-node',
+          shardCount,
+          factor,
+          workers,
+          derivationTimeMs: Math.round(performance.now() - startedAt),
+          mnemonic24,
+          ethereumAddress,
+        };
+      } finally {
+        entropy24.fill(0);
+      }
     } finally {
       masterKey.fill(0);
     }

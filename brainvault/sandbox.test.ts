@@ -19,5 +19,5 @@ test('derivation succeeds with operating-system network access denied', () => {
     stdout: 'pipe',
   });
   expect(run.exitCode).toBe(0);
-  expect(run.stdout.toString()).toContain('Root parity: PASS');
+  expect(run.stdout.toString()).toContain('Frozen root check: PASS');
 });

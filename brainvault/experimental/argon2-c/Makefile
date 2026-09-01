@@ -15,12 +15,17 @@ SOURCES := brainvault_argon2.c \
 	$(ARGON2)/src/thread.c \
 	$(ARGON2)/src/encoding.c \
 	$(ARGON2)/src/opt.c
+HEADERS := compat/emmintrin.h vendor/sse2neon/sse2neon.h \
+	$(ARGON2)/include/argon2.h $(ARGON2)/src/core.h \
+	$(ARGON2)/src/encoding.h $(ARGON2)/src/thread.h \
+	$(ARGON2)/src/blake2/blake2.h $(ARGON2)/src/blake2/blake2-impl.h \
+	$(ARGON2)/src/blake2/blamka-round-opt.h $(ARGON2)/src/blake2/blamka-round-ref.h
 
 .PHONY: all prebuild prebuild-m3 clean
 
 all: brainvault-argon2
 
-brainvault-argon2: $(SOURCES) compat/emmintrin.h vendor/sse2neon/sse2neon.h
+brainvault-argon2: $(SOURCES) $(HEADERS)
 	$(CC) $(CFLAGS) $(SOURCES) -o $@
 
 prebuild: $(PREBUILD)
@@ -29,14 +34,14 @@ prebuild: $(PREBUILD)
 # runtime selection checks the CPU model before executing it.
 prebuild-m3: $(PREBUILD_M3)
 
-$(PREBUILD): $(SOURCES) compat/emmintrin.h vendor/sse2neon/sse2neon.h
+$(PREBUILD): $(SOURCES) $(HEADERS)
 	mkdir -p $(dir $(PREBUILD))
 	$(CC) $(PREBUILD_CFLAGS) $(SOURCES) -o $@
 	codesign --remove-signature $@
 	bun ../normalize-macho.ts $@
 	codesign --force --sign - --timestamp=none $@
 
-$(PREBUILD_M3): $(SOURCES) compat/emmintrin.h vendor/sse2neon/sse2neon.h
+$(PREBUILD_M3): $(SOURCES) $(HEADERS)
 	mkdir -p $(dir $(PREBUILD_M3))
 	$(CC) $(PREBUILD_M3_CFLAGS) $(SOURCES) -o $@
 	codesign --remove-signature $@

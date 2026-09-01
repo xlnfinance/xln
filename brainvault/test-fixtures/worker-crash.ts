@@ -1,0 +1,1 @@
+throw new Error('BRAINVAULT_TEST_WORKER_CRASH');

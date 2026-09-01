@@ -26,5 +26,5 @@ test(`release matrix: workers=${workers}, multiplier=${multiplier}`, () => {
   expect(output).not.toContain('FAILED');
   expect(matrix.format).toBe('brainvault-release-matrix-v1/1');
   expect(output).toContain(`Running ${engine === undefined ? (multiplier > 7 ? 7 : 8) : 1} engines sequentially`);
-  expect(output).toContain(`Root parity: PASS (${matrix.roots[`w${workers}-m${multiplier}`]})`);
+  expect(output).toContain(`${engine === undefined ? 'Root parity' : 'Frozen root check'}: PASS (${matrix.roots[`w${workers}-m${multiplier}`]})`);
 }, 28_000);

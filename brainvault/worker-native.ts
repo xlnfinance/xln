@@ -14,6 +14,7 @@ import {
   BRAINVAULT_V1,
   BRAINVAULT_V1_SPEC_ID,
   createShardSalt,
+  shardRequestFingerprint,
 } from './primitives/spec.ts';
 
 parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
@@ -51,5 +52,10 @@ parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCo
 
   const encoded = bytesToHex(result);
   result.fill(0);
-  parentPort?.postMessage({ specId: BRAINVAULT_V1_SPEC_ID, shardIndex, result: encoded });
+  parentPort?.postMessage({
+    specId: BRAINVAULT_V1_SPEC_ID,
+    requestId: shardRequestFingerprint(shardIndex, shardCount, effectiveAlgId, memoryKb),
+    shardIndex,
+    result: encoded,
+  });
 });

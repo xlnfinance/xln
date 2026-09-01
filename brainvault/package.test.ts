@@ -20,6 +20,21 @@ test('packed package installs inertly and runs from an audited empty directory',
       throw new Error(`BRAINVAULT_TARBALL_LIST_FAILED:${tarball}:${listed.stderr.toString()}:pack=${packed.stdout.toString()}`);
     }
     const files = listed.stdout.toString().trim().split('\n');
+    expect(new Set(files).size).toBe(files.length);
+    const packageJson = JSON.parse(readFileSync(`${import.meta.dir}/package.json`, 'utf8')) as { files: string[] };
+    const exactAllowlist = new Set(packageJson.files.filter(path => !path.endsWith('/')).map(path => `package/${path}`));
+    const prefixAllowlist = packageJson.files.filter(path => path.endsWith('/')).map(path => `package/${path}`);
+    exactAllowlist.add('package/package.json');
+    for (const path of files) {
+      expect(path.startsWith('package/')).toBe(true);
+      expect(path.split('/')).not.toContain('..');
+      expect(exactAllowlist.has(path) || prefixAllowlist.some(prefix => path.startsWith(prefix))).toBe(true);
+    }
+    const verbose = Bun.spawnSync({ cmd: ['tar', '-tvzf', tarball], stderr: 'pipe', stdout: 'pipe' });
+    expect(verbose.exitCode).toBe(0);
+    for (const line of verbose.stdout.toString().trim().split('\n')) {
+      expect(['l', 'h'].includes(line[0] ?? '')).toBe(false);
+    }
     expect(files).toContain('package/MANIFEST.sha256');
     expect(files).toContain('package/SPEC-V1.md');
     expect(files).toContain('package/vectors-v1.json');

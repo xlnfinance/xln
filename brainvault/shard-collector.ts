@@ -4,6 +4,7 @@ export type ShardMessage = Readonly<{
   specId: unknown;
   shardIndex: unknown;
   result: unknown;
+  requestId: unknown;
 }>;
 
 export function createShardSlots(shardCount: number): Array<Uint8Array | undefined> {
@@ -18,6 +19,7 @@ export function acceptShard(
   message: ShardMessage,
   expectedSpecId: string,
   outputBytes: number,
+  expectedRequestId: (index: number) => string,
 ): number {
   if (message.specId !== expectedSpecId) {
     throw new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(message.specId)}:${expectedSpecId}`);
@@ -28,6 +30,9 @@ export function acceptShard(
   }
   if (slots[index as number] !== undefined) {
     throw new Error(`BRAINVAULT_WORKER_SHARD_DUPLICATE:${String(index)}`);
+  }
+  if (message.requestId !== expectedRequestId(index as number)) {
+    throw new Error(`BRAINVAULT_WORKER_REQUEST_MISMATCH:${String(index)}`);
   }
   if (typeof message.result !== 'string' || message.result.length !== outputBytes * 2) {
     throw new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${String(index)}`);

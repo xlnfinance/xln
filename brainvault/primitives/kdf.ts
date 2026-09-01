@@ -61,14 +61,18 @@ export async function deriveShardWithParams(
   // Bun Wasm and the native bridge; passing a JS string directly would delegate
   // that boundary behavior to whichever Argon wrapper happened to be installed.
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
-  const result = await argon2id({
-    password,
-    salt: shardSalt,
-    parallelism: kdf.argonParallelism,
-    iterations: kdf.argonTimeCost,
-    memorySize: kdf.shardMemoryKb,
-    hashLength: kdf.shardOutputBytes,
-    outputType: 'binary',
-  });
-  return new Uint8Array(result);
+  try {
+    const result = await argon2id({
+      password,
+      salt: shardSalt,
+      parallelism: kdf.argonParallelism,
+      iterations: kdf.argonTimeCost,
+      memorySize: kdf.shardMemoryKb,
+      hashLength: kdf.shardOutputBytes,
+      outputType: 'binary',
+    });
+    return new Uint8Array(result);
+  } finally {
+    password.fill(0);
+  }
 }

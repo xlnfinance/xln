@@ -4,7 +4,13 @@
     {
       "version": "2.0.0",
       "path": "experimental/results/brainvault-2.0.0.tgz",
-      "sha256": "afba86e87cae6f28fd1e8fe2654a7150cf6f7cfe48a4e026a1bc6724ef5780f6"
+      "sha256": "afba86e87cae6f28fd1e8fe2654a7150cf6f7cfe48a4e026a1bc6724ef5780f6",
+      "artifacts": {
+        "package/core.test.ts": "34b1f1a8046de03ae28d4188172ae88f6b2026e351f3c4b2bce885d9d591a568",
+        "package/primitives/spec.ts": "d03902ce0a846e00e8eb1f2c9289f5aa13352239bcdc2f006385cc7963350cc3",
+        "package/core.ts": "ca76ee4612045540747f5d93d1f8418e73f1a862f233da550082258b78d6f8ff",
+        "package/package.json": "2476361bf8822c300d845b0321d76214d03296d49e28ed587d04267acb87fe2d"
+      }
     }
   ]
 }

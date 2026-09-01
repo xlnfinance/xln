@@ -11,15 +11,17 @@
 import { test, expect } from 'bun:test';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import { Worker } from 'node:worker_threads';
+import { cpus } from 'node:os';
 import {
   createShardSalt, deriveShard, deriveShardWithParams, combineShards, combineShardsWithParams, deriveKey,
   entropyToMnemonic, deriveEthereumAddress, bytesToHex,
   deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs, rootDomain,
 } from './core.ts';
 import { BIP39_ENGLISH } from './bip39-english.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from './primitives/spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, shardRequestFingerprint } from './primitives/spec.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
 import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
+import { deriveBrainVaultNative } from './native.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
   BRAINVAULT_LEVEL_NAMES,
@@ -196,14 +198,18 @@ test('wallet boundaries fail loudly on malformed bytes', async () => {
 test('worker shard collection fails closed on malformed scheduling results', () => {
   const result = '00'.repeat(32);
   const slots = createShardSlots(2);
-  expect(acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32)).toBe(1);
-  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32))
+  const expectedRequest = (index: number) => shardRequestFingerprint(index, 2, BRAINVAULT_V1.ALG_ID, BRAINVAULT_V1.SHARD_MEMORY_KB);
+  const requestId = expectedRequest(1);
+  expect(acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest)).toBe(1);
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_SHARD_DUPLICATE:1');
-  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: -1, result }, BRAINVAULT_V1_SPEC_ID, 32))
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId, shardIndex: -1, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_SHARD_INDEX_INVALID:-1');
-  expect(() => acceptShard(slots, { specId: 'wrong', shardIndex: 0, result }, BRAINVAULT_V1_SPEC_ID, 32))
+  expect(() => acceptShard(slots, { specId: 'wrong', requestId, shardIndex: 0, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH:wrong');
-  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, shardIndex: 0, result: result.slice(2) }, BRAINVAULT_V1_SPEC_ID, 32))
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId: 'wrong', shardIndex: 0, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
+    .toThrow('BRAINVAULT_WORKER_REQUEST_MISMATCH:0');
+  expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId: expectedRequest(0), shardIndex: 0, result: result.slice(2) }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_RESULT_INVALID:0');
   expect(() => finalizeShards(slots)).toThrow('BRAINVAULT_WORKER_SHARD_MISSING:0');
 });
@@ -219,6 +225,20 @@ test('native worker crashes closed on a wrong spec handshake', async () => {
   });
   expect(error.message).toContain('BRAINVAULT_WORKER_SPEC_MISMATCH');
   await worker.terminate();
+});
+
+test('native orchestration rejects worker crash, truncation, and unsafe concurrency', async () => {
+  const input = { name: 'alice', passphrase: 'secret123456', shardInput: 1, workers: 1 };
+  await expect(deriveBrainVaultNative(input, {
+    workerPath: `${import.meta.dir}/test-fixtures/worker-crash.ts`,
+  })).rejects.toThrow('BRAINVAULT_TEST_WORKER_CRASH');
+  await expect(deriveBrainVaultNative(input, {
+    workerPath: `${import.meta.dir}/test-fixtures/worker-truncated.ts`,
+  })).rejects.toThrow('BRAINVAULT_WORKER_RESULT_INVALID:0');
+  const unsafeWorkers = cpus().length + 1;
+  await expect(deriveBrainVaultNative({
+    name: 'alice', passphrase: 'secret123456', shardInput: unsafeWorkers, workers: unsafeWorkers,
+  })).rejects.toThrow('BRAINVAULT_WORKERS_EXCEED_MEMORY_LIMIT');
 });
 
 async function tinyRoot(name: string, passphrase: string, shardCount = 1): Promise<string> {
@@ -264,13 +284,13 @@ test('every semantic input and KDF domain parameter separates the root', async (
   const shard = new Uint8Array(32).fill(7);
   const canonical = bytesToHex(await combineShardsWithParams([shard], 1));
   const mutations = [
-    combineShardsWithParams([shard], 2),
     combineShardsWithParams([shard], 1, { algId: `${BRAINVAULT_V1.ALG_ID}|mutated` }),
     combineShardsWithParams([shard], 1, { shardMemoryKb: BRAINVAULT_V1.SHARD_MEMORY_KB * 2 }),
     combineShardsWithParams([shard], 1, { argonTimeCost: 2 }),
     combineShardsWithParams([shard], 1, { argonParallelism: 2 }),
   ];
   for (const mutation of mutations) expect(bytesToHex(await mutation)).not.toBe(canonical);
+  await expect(combineShardsWithParams([shard], 2)).rejects.toThrow('BRAINVAULT_FACTOR_SHARD_MISMATCH:2:1:1');
   expect(rootDomain(1, 1)).toContain('|shards=1|factor=1');
 });
 
@@ -282,9 +302,11 @@ test('completion order is irrelevant but final shard order is canonical', async 
   for (const index of completionOrder) {
     acceptShard(slots, {
       specId: BRAINVAULT_V1_SPEC_ID,
+      requestId: shardRequestFingerprint(index, 32, BRAINVAULT_V1.ALG_ID, BRAINVAULT_V1.SHARD_MEMORY_KB),
       shardIndex: index,
       result: bytesToHex(source[index]!),
-    }, BRAINVAULT_V1_SPEC_ID, 32);
+    }, BRAINVAULT_V1_SPEC_ID, 32,
+    value => shardRequestFingerprint(value, 32, BRAINVAULT_V1.ALG_ID, BRAINVAULT_V1.SHARD_MEMORY_KB));
   }
   expect(bytesToHex(await combineShards(finalizeShards(slots), 3))).toBe(expected);
   expect(bytesToHex(await combineShards([...source].reverse(), 3))).not.toBe(expected);
@@ -400,11 +422,22 @@ function publicSummary(output: string): { fingerprint: string; address: string }
 test('CLI keeps secrets off argv and prints only public summary by default', () => {
   const positional = runCli(['alice', 'secret123456', '1']);
   expect(positional.exitCode).toBe(1);
-  expect(positional.stderr.toString()).toContain('positional username/password arguments are forbidden');
+  expect(positional.stderr.toString()).toContain('unsupported or secret-bearing argv');
 
-  const unsafe = runCli(['--unsafe-password', 'secret123456']);
-  expect(unsafe.exitCode).toBe(1);
-  expect(unsafe.stderr.toString()).toContain('password argv is forbidden');
+  for (const secretArgs of [
+    ['--unsafe-password', 'secret123456'],
+    ['--unsafe-password=secret123456'],
+    ['--password=secret123456'],
+    ['--password', 'secret123456'],
+    ['--passphrase=secret123456'],
+    ['--bench', 'secret123456'],
+    ['--unknown=secret123456'],
+  ]) {
+    const rejected = runCli(secretArgs);
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.stderr.toString()).toContain('unsupported or secret-bearing argv');
+    expect(rejected.stderr.toString()).not.toContain('secret123456');
+  }
 
   const launched = runCliTty([]);
   const output = launched.stdout.toString();
@@ -432,6 +465,24 @@ test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocatio
   const aborted = Bun.spawnSync({ cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe' });
   expect(aborted.exitCode).toBe(130);
   expect(aborted.stdout.toString()).toContain('Exited.');
+
+  const passwordScript = [
+    'set timeout 5',
+    'spawn bun cli.ts --password',
+    'expect "Name: "',
+    'send "alice\\r"',
+    'expect "Password: "',
+    'send "\\003"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const passwordAbort = Bun.spawnSync({
+    cmd: ['expect', '-c', passwordScript], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  expect(passwordAbort.exitCode).toBe(130);
+  expect(passwordAbort.stdout.toString()).toContain('Exited.');
+  expect(passwordAbort.stdout.toString()).not.toContain('AbortError');
 
   const oversized = runCli(['--bench', '--shards', '1', '--workers', '1', '--multiplier', '10000']);
   expect(oversized.exitCode).toBe(1);
@@ -515,7 +566,7 @@ test('custom multiplier preserves final wallet parity across compatible engines'
   for (const engine of engines) {
     const child = runCli(['--bench', '--shards', '1', '--workers', '1', '--multiplier', '2', '--engine', engine]);
     expect(child.exitCode).toBe(0);
-    const output = child.stdout.toString().match(/Root parity: PASS \(([0-9a-f]{64})\)/)?.[1];
+    const output = child.stdout.toString().match(/(?:Root parity|Frozen root check): PASS \(([0-9a-f]{64})\)/)?.[1];
     expect(output).toBeDefined();
     expected ??= output;
     expect(output).toBe(expected);

@@ -26,7 +26,7 @@ export { bytesToHex, hexToBytes } from './primitives/encoding.ts';
 export { deriveShard, deriveShardWithParams } from './primitives/kdf.ts';
 export type { BrainvaultKdfParams } from './primitives/kdf.ts';
 export { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
-export { combineShards, combineShardsWithParams, rootDomain, rootFingerprint } from './canonical.ts';
+export { combineShards, combineShardsWithParams, factorForShardCount, rootDomain, rootFingerprint } from './canonical.ts';
 
 /**
  * Calculate number of shards for a frozen legacy factor.
@@ -49,18 +49,6 @@ export function getShardCount(factor: number): number {
     throw new Error(`Factor must be ${BRAINVAULT_V1.MIN_FACTOR}-${BRAINVAULT_V1.MAX_FACTOR}`);
   }
   return Math.pow(10, factor - 1);
-}
-
-/**
- * Derive the canonical factor for an explicit shard count without floating point.
- * This is exactly equivalent to ceil(log10(shardCount)) + 1 for positive integers.
- */
-export function factorForShardCount(shardCount: number): number {
-  if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
-    throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
-  }
-  if (shardCount === 1) return 1;
-  return String(shardCount - 1).length + 1;
 }
 
 /**
@@ -118,8 +106,13 @@ export async function deriveKey(
   input.set(masterKey, 0);
   input.set(contextBytes, masterKey.length);
 
-  // BLAKE3 can output variable length
-  return blake3(input, { dkLen: length });
+  try {
+    // BLAKE3 can output variable length.
+    return blake3(input, { dkLen: length });
+  } finally {
+    input.fill(0);
+    contextBytes.fill(0);
+  }
 }
 
 /**
@@ -215,15 +208,19 @@ export async function deriveEthereumAddressMatrix(
  * Derive site-specific password for password manager
  */
 export async function deriveSitePassword(
-  masterKeyHex: string,
+  masterKeyInput: string | Uint8Array,
   domain: string,
   length: number = 20
 ): Promise<string> {
   if (!Number.isSafeInteger(length) || length < 4) {
     throw new Error(`BRAINVAULT_SITE_PASSWORD_LENGTH_INVALID:${length}`);
   }
-  const masterKey = hexToBytes(masterKeyHex);
-  const raw = await deriveKey(masterKey, `site-password:${domain}`, length * 2);
+  const masterKey = typeof masterKeyInput === 'string'
+    ? hexToBytes(masterKeyInput)
+    : new Uint8Array(masterKeyInput);
+  let raw: Uint8Array | undefined;
+  try {
+    raw = await deriveKey(masterKey, `site-password:${domain}`, length * 2);
 
   // Convert to password with all character classes
   const lowers = 'abcdefghijklmnopqrstuvwxyz';
@@ -251,7 +248,11 @@ export async function deriveSitePassword(
     [password[i], password[j]] = [password[j]!, password[i]!];
   }
 
-  return password.join('');
+    return password.join('');
+  } finally {
+    masterKey.fill(0);
+    raw?.fill(0);
+  }
 }
 function bytesToBits(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(2).padStart(8, '0')).join('');

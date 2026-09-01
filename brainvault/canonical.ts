@@ -4,6 +4,14 @@ import { resolveKdfParams } from './primitives/kdf.ts';
 import type { BrainvaultKdfParams } from './primitives/kdf.ts';
 import { bytesToHex } from './primitives/encoding.ts';
 
+/** Frozen V1 factor for an exact positive shard count. */
+export function factorForShardCount(shardCount: number): number {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
+    throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
+  }
+  return shardCount === 1 ? 1 : String(shardCount - 1).length + 1;
+}
+
 export function rootDomain(
   factor: number,
   shardCount: number,
@@ -15,6 +23,10 @@ export function rootDomain(
   }
   if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
     throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
+  }
+  const expectedFactor = factorForShardCount(shardCount);
+  if (factor !== expectedFactor) {
+    throw new Error(`BRAINVAULT_FACTOR_SHARD_MISMATCH:${factor}:${expectedFactor}:${shardCount}`);
   }
   return `${kdf.algId}|mem=${kdf.shardMemoryKb}|t=${kdf.argonTimeCost}`
     + `|p=${kdf.argonParallelism}|out=${kdf.shardOutputBytes}`
@@ -37,7 +49,12 @@ export async function combineShardsWithParams(
   const input = new Uint8Array((shards.length * kdf.shardOutputBytes) + domain.length);
   for (const [index, shard] of shards.entries()) input.set(shard, index * kdf.shardOutputBytes);
   input.set(domain, shards.length * kdf.shardOutputBytes);
-  return blake3(input);
+  try {
+    return blake3(input);
+  } finally {
+    input.fill(0);
+    domain.fill(0);
+  }
 }
 
 export async function combineShards(shards: readonly Uint8Array[], factor: number): Promise<Uint8Array> {

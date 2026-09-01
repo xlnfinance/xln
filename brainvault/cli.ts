@@ -30,11 +30,11 @@ import { Worker } from 'worker_threads';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import {
   getShardCount, combineShardsWithParams, deriveKey, entropyToMnemonic,
-  deriveEthereumAddressMatrix, deriveEthereumPrivateKeyAtPath,
+  deriveEthereumAddress, deriveEthereumAddressMatrix, deriveEthereumPrivateKeyAtPath,
   factorForShardCount, formatDuration, bytesToHex,
   BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, deriveSitePassword, rootFingerprint,
 } from './core.ts';
-import { assertBrainVaultName, assertBrainVaultPassphrase } from './primitives/spec.ts';
+import { assertBrainVaultName, assertBrainVaultPassphrase, shardRequestFingerprint } from './primitives/spec.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
 import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
 import { verifyBundledExecutable } from './binary-integrity.ts';
@@ -51,6 +51,44 @@ import {
 } from './suggestion.ts';
 
 const args = process.argv.slice(2);
+const BOOLEAN_FLAGS = new Set([
+  '--help', '-h', '--bench', '--smoke', '--password', '--ask', '--repeat',
+  '--show-private-key', '--reveal', '--allow-short-password',
+  '--suggest-password', '--unicode-recovery',
+]);
+const VALUE_FLAGS = new Set([
+  '--level', '--shards', '--factor', '--multiplier', '--shard-multiplier',
+  '--workers', '--w', '--engine', '--address-count',
+]);
+const LEGACY_ENGINE_FLAGS = new Set(['--lib=wasm', '--lib=native', '--lib=neon']);
+
+function rejectUnsafeArgv(): never {
+  console.error('Error: unsupported or secret-bearing argv. Passwords are accepted only through hidden interactive input.');
+  process.exit(1);
+}
+
+function validateArgv(argv: readonly string[]): void {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (/^--(?:unsafe-password|passphrase|pass|secret)(?:=|$)/.test(argument)
+      || argument.startsWith('--password=')) rejectUnsafeArgv();
+    if (BOOLEAN_FLAGS.has(argument) || LEGACY_ENGINE_FLAGS.has(argument)) continue;
+    const equals = argument.indexOf('=');
+    if (equals !== -1) {
+      if (!VALUE_FLAGS.has(argument.slice(0, equals)) || equals === argument.length - 1) rejectUnsafeArgv();
+      continue;
+    }
+    if (VALUE_FLAGS.has(argument)) {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith('--')) rejectUnsafeArgv();
+      index += 1;
+      continue;
+    }
+    rejectUnsafeArgv();
+  }
+}
+
+validateArgv(args);
 const showHelp = args.includes('--help') || args.includes('-h');
 
 const UI_INNER_WIDTH = 70;
@@ -306,10 +344,6 @@ const inlineFactor = getPositiveIntFlag(['factor']);
 const inlineShards = getPositiveIntFlag(['shards']);
 const inlineWorkers = getPositiveIntFlag(['workers', 'w']);
 
-if (args.includes('--unsafe-password')) {
-  console.error('Error: password argv is forbidden. Use hidden interactive input or the library API.');
-  process.exit(1);
-}
 if (showPrivateKey && !revealRequested) {
   console.error('Error: --show-private-key requires --reveal and exact password rehearsal.');
   process.exit(1);
@@ -408,9 +442,6 @@ function getHardwarePlan(shardCount: number, multiplier: number): HardwarePlan {
 
 interface DeriveOptions {
   engine?: EngineSelection;
-  showDevice?: boolean;
-  showPrivateKey?: boolean;
-  addressCount?: number;
   shardMultiplier?: number;
 }
 
@@ -478,7 +509,7 @@ async function deriveExecutableShards(
   shardMemoryKb = BRAINVAULT_V1.SHARD_MEMORY_KB,
   algId = BRAINVAULT_V1.ALG_ID,
 ): Promise<Uint8Array[]> {
-  verifyBundledExecutable(executable, import.meta.dir);
+  const verifiedExecutable = verifyBundledExecutable(executable, import.meta.dir);
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
   const header = Buffer.alloc(24);
   header.writeUInt32LE(0x32435642, 0);
@@ -490,16 +521,19 @@ async function deriveExecutableShards(
   const input = Buffer.alloc(header.length + password.length + (shardCount * 32));
   header.copy(input, 0);
   input.set(password, header.length);
-  for (let index = 0; index < shardCount; index += 1) {
-    input.set(await createShardSalt(name, index, shardCount, algId), header.length + password.length + (index * 32));
+  let child: ReturnType<typeof spawnSync>;
+  try {
+    for (let index = 0; index < shardCount; index += 1) {
+      input.set(await createShardSalt(name, index, shardCount, algId), header.length + password.length + (index * 32));
+    }
+    child = spawnSync(verifiedExecutable, [], {
+      input,
+      maxBuffer: Math.max(1024 * 1024, shardCount * 64),
+    });
+  } finally {
+    password.fill(0);
+    input.fill(0);
   }
-
-  const child = spawnSync(executable, [], {
-    input,
-    maxBuffer: Math.max(1024 * 1024, shardCount * 64),
-  });
-  password.fill(0);
-  input.fill(0);
   if (child.status !== 0) {
     throw new Error(`BRAINVAULT_EXECUTABLE_FAILED:${String(child.status)}:${child.stderr.toString().trim()}`);
   }
@@ -553,9 +587,6 @@ async function deriveDirectAsyncShards(
 async function derive(name: string, passphrase: string, work: WorkSpec, workers = 64, options: DeriveOptions = {}) {
   const {
     engine = 'auto',
-    showDevice = false,
-    showPrivateKey = false,
-    addressCount = 5,
     shardMultiplier = 1,
   } = options;
 
@@ -683,7 +714,13 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
       w.on('message', (message) => {
         if (failed) return;
         try {
-          acceptShard(workerShardResults, message, BRAINVAULT_V1_SPEC_ID, BRAINVAULT_V1.SHARD_OUTPUT_BYTES);
+          acceptShard(
+            workerShardResults,
+            message,
+            BRAINVAULT_V1_SPEC_ID,
+            BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+            index => shardRequestFingerprint(index, shardCount, kdfAlgId, shardMemoryKb),
+          );
         } catch (error) {
           fail(error);
           return;
@@ -737,53 +774,65 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
   }
 
   const derivationTime = Date.now() - start;
-  const masterKey = await combineShardsWithParams(shardResults, factor, {
-    algId: kdfAlgId,
-    shardMemoryKb,
-  });
-  for (const shard of shardResults) shard.fill(0);
-  const fingerprint = rootFingerprint(masterKey);
+  let masterKey: Uint8Array;
+  try {
+    masterKey = await combineShardsWithParams(shardResults, factor, {
+      algId: kdfAlgId,
+      shardMemoryKb,
+    });
+  } finally {
+    for (const shard of shardResults) shard.fill(0);
+  }
+  try {
+    const fingerprint = rootFingerprint(masterKey);
 
-  // Derive TWO wallets from one masterKey
-  const entropy24 = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
-  const mnemonic24 = await entropyToMnemonic(entropy24);
-  entropy24.fill(0);
-  const matrix24 = await deriveEthereumAddressMatrix(mnemonic24, '', addressCount);
-  const ethAddr24 = matrix24.standard[0]!;
-  const privKey24 = showPrivateKey
-    ? await deriveEthereumPrivateKeyAtPath(mnemonic24, "m/44'/60'/0'/0/0")
-    : undefined;
+    // Derive only the first public address before reveal. The root remains in a
+    // wipeable buffer; mnemonic/address matrices are projected only after rehearsal.
+    const entropy24 = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
+    try {
+      const mnemonic24 = await entropyToMnemonic(entropy24);
+      const ethAddr24 = await deriveEthereumAddress(mnemonic24);
+      return {
+        name, shardCount, factor, workers, engine: selectedEngine, derivationTime, shardMultiplier,
+        fingerprint, ethAddr24, rootKey: masterKey,
+      };
+    } finally {
+      entropy24.fill(0);
+    }
+  } catch (error) {
+    masterKey.fill(0);
+    throw error;
+  }
+}
 
-  const entropy12 = await deriveKey(masterKey, 'bip39/entropy-128/v1.0', 16);
-  const mnemonic12 = await entropyToMnemonic(entropy12);
-  entropy12.fill(0);
-  const matrix12 = await deriveEthereumAddressMatrix(mnemonic12, '', addressCount);
-  const ethAddr12 = matrix12.standard[0]!;
-  const privKey12 = showPrivateKey
-    ? await deriveEthereumPrivateKeyAtPath(mnemonic12, "m/44'/60'/0'/0/0")
-    : undefined;
-
-  const devicePassBytes = showDevice
-    ? await deriveKey(masterKey, 'bip39/passphrase/v1.0', 32)
-    : undefined;
-  const devicePass = devicePassBytes === undefined ? undefined : bytesToHex(devicePassBytes);
-  devicePassBytes?.fill(0);
-  const masterKeyHex = showDevice ? bytesToHex(masterKey) : undefined;
-  masterKey.fill(0);
-
-  return {
-    name, shardCount, factor, workers, engine: selectedEngine, derivationTime, shardMultiplier, addressCount,
-    fingerprint,
-    mnemonic24, ethAddr24,
-    standardAddrs24: matrix24.standard,
-    ledgerLiveAddrs24: matrix24.ledgerLive,
-    ...(showPrivateKey ? { privateKey24: privKey24 } : {}),
-    mnemonic12, ethAddr12,
-    standardAddrs12: matrix12.standard,
-    ledgerLiveAddrs12: matrix12.ledgerLive,
-    ...(showPrivateKey ? { privateKey12: privKey12 } : {}),
-    ...(showDevice ? { devicePass, masterKey: masterKeyHex } : {}),
-  };
+async function deriveSensitiveMaterial(rootKey: Uint8Array, count: number, includePrivateKeys: boolean) {
+  let entropy24: Uint8Array | undefined;
+  let entropy12: Uint8Array | undefined;
+  try {
+    entropy24 = await deriveKey(rootKey, 'bip39/entropy/v1.0', 32);
+    entropy12 = await deriveKey(rootKey, 'bip39/entropy-128/v1.0', 16);
+    const mnemonic24 = await entropyToMnemonic(entropy24);
+    const mnemonic12 = await entropyToMnemonic(entropy12);
+    const matrix24 = await deriveEthereumAddressMatrix(mnemonic24, '', count);
+    const matrix12 = await deriveEthereumAddressMatrix(mnemonic12, '', count);
+    return {
+      mnemonic24,
+      mnemonic12,
+      standardAddrs24: matrix24.standard,
+      ledgerLiveAddrs24: matrix24.ledgerLive,
+      standardAddrs12: matrix12.standard,
+      ledgerLiveAddrs12: matrix12.ledgerLive,
+      privateKey24: includePrivateKeys
+        ? await deriveEthereumPrivateKeyAtPath(mnemonic24, "m/44'/60'/0'/0/0")
+        : undefined,
+      privateKey12: includePrivateKeys
+        ? await deriveEthereumPrivateKeyAtPath(mnemonic12, "m/44'/60'/0'/0/0")
+        : undefined,
+    };
+  } finally {
+    entropy24?.fill(0);
+    entropy12?.fill(0);
+  }
 }
 
 
@@ -909,24 +958,32 @@ async function runBenchmark(smoke = false) {
     if (child.status !== 0) {
       console.log('FAILED');
       const details = child.stderr.trim() || child.stdout.trim() || `exit ${String(child.status)}`;
-      console.error(details);
-      continue;
+      throw new Error(`BRAINVAULT_BENCHMARK_ENGINE_FAILED:${candidate.id}:${details}`);
     }
     const parsed = JSON.parse(child.stdout) as {
       backend?: unknown;
+      specId?: unknown;
+      shardCount?: unknown;
+      factor?: unknown;
+      workers?: unknown;
+      multiplier?: unknown;
       derivationTimeMs?: unknown;
       shardsPerSecond?: unknown;
       root?: unknown;
     };
     if (
-      typeof parsed.backend !== 'string'
-      || typeof parsed.derivationTimeMs !== 'number'
-      || typeof parsed.shardsPerSecond !== 'number'
-      || typeof parsed.root !== 'string'
+      parsed.backend !== candidate.id
+      || parsed.specId !== BRAINVAULT_V1_SPEC_ID
+      || parsed.shardCount !== shardCount
+      || parsed.factor !== factorForShardCount(shardCount)
+      || parsed.workers !== Math.min(workers, shardCount)
+      || parsed.multiplier !== benchmarkMultiplier
+      || typeof parsed.derivationTimeMs !== 'number' || !Number.isFinite(parsed.derivationTimeMs) || parsed.derivationTimeMs <= 0
+      || typeof parsed.shardsPerSecond !== 'number' || !Number.isFinite(parsed.shardsPerSecond) || parsed.shardsPerSecond <= 0
+      || typeof parsed.root !== 'string' || !/^[0-9a-f]{64}$/.test(parsed.root)
     ) {
       console.log('FAILED');
-      console.error('Benchmark returned malformed JSON.');
-      continue;
+      throw new Error(`BRAINVAULT_BENCHMARK_RESULT_INVALID:${candidate.id}`);
     }
     results.push({
       backend: parsed.backend,
@@ -956,7 +1013,18 @@ async function runBenchmark(smoke = false) {
       + `${(result.derivationTimeMs / fastest).toFixed(2).padStart(8)}x`,
     );
   }
-  console.log(`\nRoot parity: PASS (${results[0]!.root})`);
+  if (results.length >= 2) {
+    console.log(`\nRoot parity: PASS (${results[0]!.root})`);
+  } else {
+    const matrix = await Bun.file(`${import.meta.dir}/matrix-v1.json`).json() as { roots?: Record<string, string> };
+    const expected = shardCount === workers ? matrix.roots?.[`w${workers}-m${benchmarkMultiplier}`] : undefined;
+    if (expected !== undefined && results[0]!.root !== expected) {
+      throw new Error(`BRAINVAULT_FROZEN_ROOT_MISMATCH:${results[0]!.root}:${expected}`);
+    }
+    console.log(expected === undefined
+      ? `\nSingle-engine root (not a parity check): ${results[0]!.root}`
+      : `\nFrozen root check: PASS (${results[0]!.root})`);
+  }
 }
 
 // ============================================================================
@@ -1121,13 +1189,13 @@ async function interactive() {
   console.log(`Address matrix: ${addressCount} standard + ${addressCount} Ledger Live`);
   printStep(3, 'DERIVE');
 
+  let rootKey: Uint8Array | undefined;
   try {
     const result = await derive(name, pass, selectedWork, workersInput, {
       engine: selectedEngine,
-      showPrivateKey,
-      addressCount,
       shardMultiplier: selectedMultiplier,
     });
+    rootKey = result.rootKey;
 
     console.log(`\n[OK] Root derived in ${formatDuration(result.derivationTime)}\n`);
     console.log(`Root fingerprint: ${result.fingerprint}`);
@@ -1155,21 +1223,26 @@ async function interactive() {
     revealRl.close();
     if (rehearsal !== pass) throw new Error('BRAINVAULT_REHEARSAL_MISMATCH');
 
+    const sensitive = await deriveSensitiveMaterial(result.rootKey, addressCount, showPrivateKey);
+
     console.log('\nSENSITIVE OUTPUT — terminal scrollback may retain everything below.');
     console.log('\nPRIMARY (24-word):');
-    console.log(result.mnemonic24);
-    for (let i = 0; i < result.standardAddrs24.length; i++) console.log(`Address ${i + 1}:`, result.standardAddrs24[i]);
-    for (let i = 0; i < result.ledgerLiveAddrs24.length; i++) console.log(`Ledger Live ${i + 1}:`, result.ledgerLiveAddrs24[i]);
-    if ('privateKey24' in result && result.privateKey24) console.log('Private Key 1:', result.privateKey24);
+    console.log(sensitive.mnemonic24);
+    for (let i = 0; i < sensitive.standardAddrs24.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs24[i]);
+    for (let i = 0; i < sensitive.ledgerLiveAddrs24.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs24[i]);
+    if (sensitive.privateKey24) console.log('Private Key 1:', sensitive.privateKey24);
 
     console.log('\nSECONDARY (12-word):');
-    console.log(result.mnemonic12);
-    for (let i = 0; i < result.standardAddrs12.length; i++) console.log(`Address ${i + 1}:`, result.standardAddrs12[i]);
-    for (let i = 0; i < result.ledgerLiveAddrs12.length; i++) console.log(`Ledger Live ${i + 1}:`, result.ledgerLiveAddrs12[i]);
-    if ('privateKey12' in result && result.privateKey12) console.log('Private Key 1:', result.privateKey12);
+    console.log(sensitive.mnemonic12);
+    for (let i = 0; i < sensitive.standardAddrs12.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs12[i]);
+    for (let i = 0; i < sensitive.ledgerLiveAddrs12.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs12[i]);
+    if (sensitive.privateKey12) console.log('Private Key 1:', sensitive.privateKey12);
   } catch (err) {
+    if (isUserCancellation(err)) throw err;
     console.error('Derivation failed:', err);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    rootKey?.fill(0);
   }
 }
 
@@ -1180,6 +1253,11 @@ async function interactive() {
 async function derivePassword() {
   const promptOutput = new PromptOutput();
   const rl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+  let rehearsalRl: readline.Interface | undefined;
+  let rlPassword: readline.Interface | undefined;
+  let rootKey: Uint8Array | undefined;
+
+  try {
 
   printBrand();
   console.log('\nPASSWORD MODE\n');
@@ -1213,51 +1291,60 @@ async function derivePassword() {
   console.log('\nDeriving master key...');
   const result = await derive(name, pass, selectedWork, workers, {
     engine: flagEngine,
-    showDevice: true,
     shardMultiplier,
   });
-  if (!result.masterKey) {
-    throw new Error('Internal error: masterKey missing in password mode');
-  }
+  rootKey = result.rootKey;
 
   console.log('\n[OK] Master key ready\n');
 
-  const rlPassword = readline.createInterface({ input: stdin, output: process.stdout });
+  rehearsalRl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+  const rehearsal = await askSecret(rehearsalRl, promptOutput, 'Repeat the exact password before site-password output: ');
+  rehearsalRl.close();
+  if (rehearsal !== pass) throw new Error('BRAINVAULT_REHEARSAL_MISMATCH');
+
+  rlPassword = readline.createInterface({ input: stdin, output: process.stdout });
 
   while (true) {
     const domain = await rlPassword.question('Domain (or Enter to exit): ');
     if (!domain) break;
 
-    const sitePass = await deriveSitePassword(result.masterKey, domain);
+    const sitePass = await deriveSitePassword(result.rootKey, domain);
     console.log(`  ${domain}: ${sitePass}\n`);
   }
 
-  rlPassword.close();
+  } finally {
+    rl.close();
+    rehearsalRl?.close();
+    rlPassword?.close();
+    rootKey?.fill(0);
+  }
 }
 
 // ============================================================================
 // MAIN
 // ============================================================================
 
-if (args.includes('--bench') || args.includes('--smoke')) {
-  if (suggestPassword) throw new Error('BRAINVAULT_SUGGEST_PASSWORD_INTERACTIVE_ONLY');
-  await runBenchmark(args.includes('--smoke'));
-} else if (args.includes('--password')) {
-  if (suggestPassword) throw new Error('BRAINVAULT_SUGGEST_PASSWORD_INTERACTIVE_ONLY');
-  await derivePassword();
-} else if (args[0] !== undefined && !args[0].startsWith('--')) {
-  console.error('Error: positional username/password arguments are forbidden because shell history and process listings retain them.');
-  console.error('Run brainvault interactively, or import the library API for programmatic derivation.');
-  process.exit(1);
-} else {
-  try {
+async function main(): Promise<void> {
+  if (args.includes('--bench') || args.includes('--smoke')) {
+    if (suggestPassword) throw new Error('BRAINVAULT_SUGGEST_PASSWORD_INTERACTIVE_ONLY');
+    await runBenchmark(args.includes('--smoke'));
+  } else if (args.includes('--password')) {
+    if (suggestPassword) throw new Error('BRAINVAULT_SUGGEST_PASSWORD_INTERACTIVE_ONLY');
+    await derivePassword();
+  } else {
     await interactive();
-  } catch (error) {
-    if (isUserCancellation(error)) {
-      console.log('\nExited.');
-      process.exitCode = 130;
-    } else {
-      throw error;
-    }
+  }
+}
+
+try {
+  await main();
+} catch (error) {
+  if (isUserCancellation(error)) {
+    console.log('\nExited.');
+    process.exitCode = 130;
+  } else {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error: ${message}`);
+    process.exitCode = 1;
   }
 }

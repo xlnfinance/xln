@@ -14,7 +14,7 @@
 import { argon2id } from 'hash-wasm';
 import { bytesToHex } from './primitives/encoding.ts';
 import { deriveShardWithParams } from './primitives/kdf.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, shardRequestFingerprint } from './primitives/spec.ts';
 
 // Message handler
 self.onmessage = async function(e: MessageEvent) {
@@ -54,13 +54,18 @@ self.onmessage = async function(e: MessageEvent) {
 
         const startTime = performance.now();
         const salt = await createShardSalt(name, shardIndex, shardCount, effectiveAlgId);
-        const result = await deriveShardWithParams(passphrase, salt, { shardMemoryKb: memorySizeKb });
+        const result = await deriveShardWithParams(passphrase, salt, {
+          algId: effectiveAlgId,
+          shardMemoryKb: memorySizeKb,
+        });
         const elapsed = performance.now() - startTime;
 
         self.postMessage({
           type: 'shard_complete',
           id,
           data: {
+            specId: BRAINVAULT_V1_SPEC_ID,
+            requestId: shardRequestFingerprint(shardIndex, shardCount, effectiveAlgId, memorySizeKb),
             shardIndex,
             resultHex: bytesToHex(result),
             elapsedMs: elapsed,
