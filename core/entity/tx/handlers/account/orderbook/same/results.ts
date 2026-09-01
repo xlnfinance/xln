@@ -14,7 +14,7 @@ import {
 import {
   hasQueuedSwapResolveForEntityState,
 } from '../queue';
-import { queueSameSwapResolve, type SameOrderbookPass } from './pass';
+import { queueSameSwapResolve, recordZeroFillCancel, type SameOrderbookPass } from './pass';
 import type { PreparedSameOffer } from './offer-types';
 import { normalizeEntityRef } from '../../../../account-key';
 
@@ -125,11 +125,11 @@ const rejectUnfilledOffer = (
   resolveComment: string | undefined,
 ): void => {
   const reason = `post-only-reject:${reasons || 'unknown'}`;
-  // The single funnel for "a committed offer left the book with a zero fill".
-  // It releases a bilateral hold and destroys the trade the counterparty was
-  // waiting for, so it is an operator-visible financial outcome rather than a
-  // debug detail. Self-trade prevention reaches this path too.
-  orderbookSameLog.warn('offer.reject_post_only', {
+  // The single funnel for "a committed offer left the book with a zero fill",
+  // self-trade prevention included. Each of those is a legitimate market
+  // outcome, so the pass counts them by reason and reports one summary.
+  recordZeroFillCancel(pass, reasons || 'unknown');
+  orderbookSameLog.debug('offer.reject_post_only', {
     offer: shortOrder(offer.offer.offerId, 8),
     account: shortId(offer.accountId, 8),
     side: offer.side,

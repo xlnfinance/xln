@@ -9,6 +9,7 @@ import {
   classifySameBookMaker,
   containSamePairFailure,
   queueSameSwapResolve,
+  recordZeroFillCancel,
   type SameOrderbookPass,
 } from './pass';
 import type { PreparedSameOffer } from './offer-types';
@@ -19,6 +20,7 @@ const rejectFullBook = (
   pass: SameOrderbookPass,
   offer: PreparedSameOffer,
 ): void => {
+  recordZeroFillCancel(pass, 'book-full');
   orderbookSameLog.debug('book.full', {
     pair: offer.bookKey,
     maxOrders: offer.book.params.maxOrders,

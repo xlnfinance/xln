@@ -24,6 +24,7 @@ import { createCrossOrderbookPass } from './cross/pass';
 import type { CrossOrderbookProcessInput } from './cross/types';
 import {
   createSameOrderbookPass,
+  zeroFillCancelTotal,
   type SameOrderbookProcessInput,
 } from './same/pass';
 import { processSameOrderbookOffer } from './same/offer';
@@ -62,11 +63,21 @@ const processSameAccountOrderbookOffers = (
   for (const offer of input.sameAccountSwapOffers) {
     processSameOrderbookOffer(pass, offer);
   }
-  if (pass.pairSweepCount > 0) {
-    orderbookSameLog.debug('pass.summary', {
-      pairSweep: pass.pairSweepCount,
-    });
-  }
+  const zeroFillCancels = zeroFillCancelTotal(pass);
+  if (pass.pairSweepCount === 0 && zeroFillCancels === 0) return;
+  const summary = {
+    offers: input.sameAccountSwapOffers.length,
+    pairSweep: pass.pairSweepCount,
+    zeroFillCancels,
+    // Bounded reason categories, so one line explains every offer this pass
+    // destroyed without a fill. A per-offer line would flood the Hub log:
+    // self-trade prevention and price bands fire by design in a real market.
+    byReason: Object.fromEntries(Array.from(pass.zeroFillCancels).sort(
+      ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
+    )),
+  };
+  if (zeroFillCancels > 0) orderbookSameLog.warn('pass.summary', summary);
+  else orderbookSameLog.debug('pass.summary', summary);
 };
 
 /**

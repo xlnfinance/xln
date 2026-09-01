@@ -507,19 +507,8 @@ export const buildRealisticExchangePlan = (options: Readonly<{
 
 /**
  * One balanced user market: every round has exactly one ask and one bid for
- * each pair of traders, so measured settlement never depends on MM
- * replenishment.
- *
- * A trader keeps its side for the whole run. Flipping sides per round looks
- * more lifelike, but every order here rests at the same price: a trader whose
- * previous order is still resting when its opposite-side order arrives crosses
- * itself, and self-trade prevention then cancels the incoming order with a
- * zero fill (`core/orderbook/core.ts`, `stpPolicy === 1`). The maker stays
- * resting, its intended counterparty is destroyed, and the run silently loses
- * trades — measured at 5 to 19 of 2,500 with 1,000 traders, varying with
- * arrival order. A fixed side per trader makes the plan's trade count exact by
- * construction instead of by timing. Side coverage per Runtime belongs to a
- * workload whose price levels keep the two sides apart.
+ * each pair of traders. Roles flip every round, so no Runtime is permanently
+ * a maker or taker and measured settlement never depends on MM replenishment.
  */
 export const buildBalancedExchangePlan = (options: Readonly<{
   hubEntityId: string;
@@ -543,7 +532,7 @@ export const buildBalancedExchangePlan = (options: Readonly<{
     Array.from({ length: options.rounds }, (_, round) => buildFixedBaseOffer(
       options.hubEntityId,
       `${options.offerNamespace}-trader-${trader + 1}-${round + 1}`,
-      trader % 2 === 0 ? 'ask' : 'bid',
+      (trader + round) % 2 === 0 ? 'ask' : 'bid',
       baseUnit,
       options.priceTicks,
     )),

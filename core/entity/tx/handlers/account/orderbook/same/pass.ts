@@ -60,6 +60,7 @@ export type SameOrderbookPass = SameOrderbookProcessInput & {
   suspendedSameOrderIds: Set<string>;
   sweptPairs: Set<string>;
   pairSweepCount: number;
+  zeroFillCancels: Map<string, number>;
 };
 
 export const createSameOrderbookPass = (
@@ -70,7 +71,32 @@ export const createSameOrderbookPass = (
   suspendedSameOrderIds: new Set(),
   sweptPairs: new Set(),
   pairSweepCount: 0,
+  zeroFillCancels: new Map(),
 });
+
+/**
+ * Count a committed offer that left the book without a fill.
+ *
+ * Self-trade prevention, a price band, an out-of-band sweep and a full book all
+ * reach that outcome legitimately, so a real market produces them by design and
+ * one log line per destroyed offer would drown the Hub log. Aggregate per
+ * reason instead; the pass emits a single summary.
+ *
+ * Reasons carry order-specific detail after the first colon (a price, a lot
+ * count). Only the prefix is a category, so the key is bounded and two passes
+ * with the same failure mode aggregate into one counter.
+ */
+export const recordZeroFillCancel = (pass: SameOrderbookPass, reason: string): void => {
+  const category = reason.split(':')[0] || 'unknown';
+  pass.zeroFillCancels.set(category, (pass.zeroFillCancels.get(category) ?? 0) + 1);
+};
+
+/** Total offers this pass destroyed with a zero fill, across every reason. */
+export const zeroFillCancelTotal = (pass: SameOrderbookPass): number => {
+  let total = 0;
+  for (const count of pass.zeroFillCancels.values()) total += count;
+  return total;
+};
 
 /**
  * Same-j resolve admission and matcher visibility are one atomic invariant.
@@ -213,7 +239,8 @@ export const sweepSamePairOutOfBandOffers = (
     if (disposition === 'suspended') continue;
     const liveOffer = disposition === 'eligible' ? buildLiveSameOfferMeta(pass, order.orderId) : null;
     removed += 1;
-    orderbookSameLog.warn('sweep.out_of_band', {
+    recordZeroFillCancel(pass, 'outside-anchor-band');
+    orderbookSameLog.debug('sweep.out_of_band', {
       offer: shortOrder(liveOffer?.offerId ?? order.orderId, 8),
       pair: pairId,
       price: order.priceTicks.toString(),

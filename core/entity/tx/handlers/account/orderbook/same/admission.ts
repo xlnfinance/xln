@@ -13,6 +13,7 @@ import {
 } from '../queue';
 import {
   queueSameSwapResolve,
+  recordZeroFillCancel,
   sweepSamePairOutOfBandOffers,
   type SameOrderbookPass,
 } from './pass';
@@ -44,11 +45,8 @@ export const materializeSameOffer = (
   });
   const materialized = deriveSameOrderbookMaterialization(offer, pass.minTradeSize);
   if (materialized.kind === 'reject') {
-    // Cancelling a committed offer with a zero fill releases a bilateral hold
-    // and destroys the counterparty's expected trade. That is a financial
-    // outcome, not a debug detail: name it at warn so an operator sees why an
-    // order left the book.
-    orderbookSameLog.warn('offer.reject_materialization', {
+    recordZeroFillCancel(pass, `materialization-${materialized.reason}`);
+    orderbookSameLog.debug('offer.reject_materialization', {
       offer: shortOrder(offer.offerId, 8),
       account: shortId(accountId, 8),
       reason: materialized.reason,
@@ -70,7 +68,8 @@ export const materializeSameOffer = (
   const order = materialized.order;
   const committedDimensions = pass.ext.pairDimensions.get(order.pairId);
   if (committedDimensions && !equalSwapPairDimensions(committedDimensions, order)) {
-    orderbookSameLog.warn('offer.reject_pair_decimals', {
+    recordZeroFillCancel(pass, 'pair-decimals-mismatch');
+    orderbookSameLog.debug('offer.reject_pair_decimals', {
       offer: shortOrder(offer.offerId, 8),
       account: shortId(accountId, 8),
       projectionOnly: pass.debugRebuildProjectionOnly,
@@ -162,7 +161,8 @@ export const prepareSameOffer = (
     hasExplicitPairPolicy: offer.hasExplicitPairPolicy,
   });
   if (band.rejectReason) {
-    orderbookSameLog.warn('offer.reject_price_band', {
+    recordZeroFillCancel(pass, band.rejectReason);
+    orderbookSameLog.debug('offer.reject_price_band', {
       offer: shortOrder(offer.offer.offerId, 8),
       account: shortId(offer.accountId, 8),
       reason: band.rejectReason,
