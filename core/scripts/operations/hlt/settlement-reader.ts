@@ -334,6 +334,10 @@ export const waitForExpectedMatchedTrades = async (options: Readonly<{
   let matchedElapsedMs: number | null = null;
   let lastTradeCount: number | undefined;
   let lastLiveOrderCount: number | undefined;
+  // A silent wait that ends in a timeout says nothing about whether the book
+  // was still moving. Report the trajectory so slow and stuck are separable
+  // from the log alone, without a second instrumented run.
+  let nextReportAt = performance.now();
   while (performance.now() <= deadline) {
     const evidence = await readEvidence(options.hub, request);
     const tradeCount = evidence?.book?.tradeCount;
@@ -350,6 +354,24 @@ export const waitForExpectedMatchedTrades = async (options: Readonly<{
     }
     lastTradeCount = tradeCount ?? lastTradeCount;
     const drained = evidence !== null && !queuesBusy(evidence);
+    if (performance.now() >= nextReportAt) {
+      nextReportAt = performance.now() + 5_000;
+      console.log(`[load] trade drain ${JSON.stringify({
+        trades: lastTradeCount ?? null,
+        target,
+        liveOrders: lastLiveOrderCount ?? null,
+        // A crossed book (bid >= ask) that stops moving is a matcher defect;
+        // an uncrossed one means the two legs of a pair never faced each other.
+        bestBid: evidence?.book?.bestBidPriceTicks?.toString() ?? null,
+        bestAsk: evidence?.book?.bestAskPriceTicks?.toString() ?? null,
+        drained,
+        queues: evidence ? Object.fromEntries(
+          Object.entries(evidence.queues).filter(([, queue]) => queue.count > 0)
+            .map(([name, queue]) => [name, queue.count]),
+        ) : null,
+        elapsedMs: Math.round(performance.now() - options.startedAt),
+      })}`);
+    }
     if (drained && (targetReached || options.acceptDrainedBelowTarget)) {
       matchedElapsedMs ??= Math.max(1, Math.ceil(performance.now() - options.startedAt));
       return {
@@ -359,6 +381,20 @@ export const waitForExpectedMatchedTrades = async (options: Readonly<{
     }
     await sleep(SETTLEMENT_POLL_WIDE_MS);
   }
+  // Name the orders that are still resting. Without them the timeout cannot
+  // distinguish a stranded counterparty from an uncrossed price.
+  const stuck = await readEvidence(options.hub, request);
+  console.error(`[load] trade drain stuck ${JSON.stringify({
+    bestBid: stuck?.book?.bestBidPriceTicks?.toString() ?? null,
+    bestAsk: stuck?.book?.bestAskPriceTicks?.toString() ?? null,
+    liveOrders: (stuck?.book?.liveOrderSample ?? []).map(order => ({
+      orderId: order.orderId,
+      owner: order.ownerId.slice(-8),
+      side: order.side === 0 ? 'bid' : 'ask',
+      price: order.priceTicks.toString(),
+      qty: order.qtyLots.toString(),
+    })),
+  })}`);
   throw new Error(
     `PRODUCTION_SWAP_LOAD_MATCH_TIMEOUT:actual=${String(lastTradeCount)}:target=${target}:` +
     `liveOrders=${String(lastLiveOrderCount)}`,
@@ -396,6 +432,38 @@ export const waitForRestingMakerOffers = async (options: Readonly<{
     pendingAccountSample: lastEvidence?.pendingAccountSample ?? null,
   }));
   throw new Error(`PRODUCTION_SWAP_LOAD_MAKER_REST_TIMEOUT:${options.pairs.length}`);
+};
+
+/**
+ * Report every planned offer the Hub still holds as a committed Account row.
+ * An offer live here while the book has no matching order is the exact
+ * divergence a trade shortfall hides: the maker's capacity stays locked
+ * bilaterally, but no counterparty can ever reach it.
+ */
+export const reportHubCommittedOffers = async (
+  hub: ConnectedRuntime,
+  hubBookEntityId: string,
+  pairs: readonly SettlementAccountPair[],
+): Promise<void> => {
+  const live: string[] = [];
+  for (let start = 0; start < pairs.length; start += 256) {
+    const evidence = await readEvidence(hub, {
+      type: 'settlement-evidence',
+      book: { entityId: hubBookEntityId, pairId: PRODUCTION_SWAP_LOAD_PAIR_ID },
+      accounts: pairs.slice(start, start + 256).map(pair => ({
+        entityId: pair.hubEntityId,
+        counterpartyEntityId: pair.loadEntityId,
+        offerIds: pair.offerIds,
+      })),
+    });
+    for (const account of evidence?.accounts ?? []) {
+      for (const offer of account.offers) if (offer.live) live.push(offer.offerId);
+    }
+  }
+  console.error(`[load] hub committed offers ${JSON.stringify({
+    liveInHubAccounts: live.length,
+    sample: live.slice(0, 24),
+  })}`);
 };
 
 export const waitForFullySettledEvidence = async (options: {

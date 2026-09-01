@@ -427,12 +427,18 @@ describe('production swap load evidence', () => {
       mmResidualTakers: 0,
     });
     expect(() => assertBalancedExchangeDistribution(plan.distribution)).not.toThrow();
-    for (const trader of plan.traderPlans) {
-      expect(new Set(trader.offers.map(offer => {
-        if (offer.type !== 'placeSwapOffer') throw new Error('TEST_BALANCED_OFFER_INVALID');
-        return offer.data.giveTokenId;
-      }))).toEqual(new Set([1, 2]));
-    }
+    // Every order rests at one price, so a trader holding both sides would
+    // cross itself and lose the incoming order to self-trade prevention. The
+    // plan's trade count must be exact by construction: one side per trader,
+    // and the two sides present in equal numbers.
+    const sidesByTrader = plan.traderPlans.map(trader => new Set(trader.offers.map(offer => {
+      if (offer.type !== 'placeSwapOffer') throw new Error('TEST_BALANCED_OFFER_INVALID');
+      return offer.data.giveTokenId;
+    })));
+    for (const sides of sidesByTrader) expect(sides.size).toBe(1);
+    const askTraders = sidesByTrader.filter(sides => sides.has(2)).length;
+    expect(askTraders).toBe(500);
+    expect(sidesByTrader.filter(sides => sides.has(1)).length).toBe(500);
   });
 
   test('each sustained round emits exactly one order per user Account', () => {

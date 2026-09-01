@@ -213,7 +213,7 @@ export const sweepSamePairOutOfBandOffers = (
     if (disposition === 'suspended') continue;
     const liveOffer = disposition === 'eligible' ? buildLiveSameOfferMeta(pass, order.orderId) : null;
     removed += 1;
-    orderbookSameLog.debug('sweep.out_of_band', {
+    orderbookSameLog.warn('sweep.out_of_band', {
       offer: shortOrder(liveOffer?.offerId ?? order.orderId, 8),
       pair: pairId,
       price: order.priceTicks.toString(),

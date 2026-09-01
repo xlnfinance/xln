@@ -23,7 +23,11 @@ import {
 } from '../boundary/worker-boundary';
 import { decodeLoadPaymentReport } from '../boundary/worker-payment-boundary';
 import { assertProductionSwapFullySettled } from '../settlement';
-import { waitForExpectedMatchedTrades, waitForFullySettledEvidence } from '../settlement-reader';
+import {
+  reportHubCommittedOffers,
+  waitForExpectedMatchedTrades,
+  waitForFullySettledEvidence,
+} from '../settlement-reader';
 import {
   assertLaneHostSocketCounterCoverage,
   readLaneHostPaymentOperationLedgers,
@@ -151,6 +155,41 @@ const assertCompleteUserSwapProposalLedger = (
     repeatedObservations: snapshots.reduce((sum, snapshot) => sum + snapshot.repeatedObservations, 0),
     rejectionCodes,
   };
+};
+
+/**
+ * Report which planned offers were accepted, refused or still deferred at the
+ * lanes. A missing trade with an idle book means an offer never reached the
+ * orderbook; only this partition says which one and why.
+ */
+const reportSwapProposalPartition = async (
+  users: Parameters<typeof readLaneHostPaymentOperationLedgers>[0],
+  plannedOfferIds: ReadonlySet<string>,
+): Promise<void> => {
+  const ledgers = await readLaneHostPaymentOperationLedgers(users);
+  const planned = plannedOfferIds;
+  const snapshots = Object.values(ledgers).map(ledger => ledger.swapProposals);
+  const accepted = new Set(snapshots.flatMap(snapshot => [...snapshot.acceptedOfferIds]));
+  const rejected = snapshots.flatMap(snapshot => [...snapshot.rejectedOfferIds]);
+  const deferred = snapshots.flatMap(snapshot => [...snapshot.deferredOfferIds]);
+  const unobserved = [...planned].filter(offerId =>
+    !accepted.has(offerId) && !rejected.includes(offerId) && !deferred.includes(offerId));
+  console.error(`[load] swap proposal partition ${safeStringify({
+    planned: planned.size,
+    accepted: accepted.size,
+    rejected: rejected.length,
+    rejectedSample: rejected.slice(0, 20),
+    deferred: deferred.length,
+    deferredSample: deferred.slice(0, 20),
+    unobserved: unobserved.length,
+    unobservedSample: unobserved.slice(0, 20),
+    rejectionCodes: snapshots.reduce<Record<string, number>>((totals, snapshot) => {
+      for (const [code, count] of Object.entries(snapshot.rejectionCodes)) {
+        totals[code] = (totals[code] ?? 0) + count;
+      }
+      return totals;
+    }, {}),
+  })}`);
 };
 
 export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> => {
@@ -634,6 +673,25 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       startedAt,
       allowAdditionalTrades: true,
       acceptDrainedBelowTarget: !authorityEvidence,
+    }).catch(async (error: unknown) => {
+      // A trade shortfall is an accounting question, not a timing one: every
+      // offer the workload planned either reached the book or was refused at
+      // an Account. Name that partition here, keyed by offer id, before the
+      // failure leaves this process. Diagnostics only — the original error is
+      // always rethrown.
+      const plannedOfferIds = new Set((prepared?.traderPlans ?? []).flatMap(plan =>
+        plan.offers.flatMap(tx => (tx.type === 'placeSwapOffer' ? [tx.data.offerId] : []))));
+      await reportSwapProposalPartition(users, plannedOfferIds).catch((reportError: unknown) => {
+        console.error(`[load] swap proposal partition unavailable: ${String(reportError)}`);
+      });
+      await reportHubCommittedOffers(
+        requireHub(),
+        hubIdentity.entityId,
+        submitted.settlementPairs,
+      ).catch((reportError: unknown) => {
+        console.error(`[load] hub committed offers unavailable: ${String(reportError)}`);
+      });
+      throw error;
     });
     const expectedMatchedTrades = matchedDrain.matchedTrades;
     const matchedElapsedMs = matchedDrain.matchedElapsedMs;

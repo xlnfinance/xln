@@ -20,6 +20,21 @@ export type SettlementBookRequest = Readonly<{
   pairId: string;
 }>;
 
+/**
+ * One resting order, as an operator sees it. A drain that times out with live
+ * orders and empty queues is unexplainable without naming the orders and their
+ * owners, so the sample is part of the evidence rather than a second probe.
+ */
+export type SettlementLiveOrder = Readonly<{
+  orderId: string;
+  ownerId: string;
+  side: 0 | 1;
+  priceTicks: bigint;
+  qtyLots: bigint;
+}>;
+
+export const SETTLEMENT_LIVE_ORDER_SAMPLE_LIMIT = 64;
+
 export type SettlementBookEvidence = Readonly<{
   entityId: string;
   pairId: string;
@@ -27,6 +42,7 @@ export type SettlementBookEvidence = Readonly<{
   bestBidPriceTicks: bigint | null;
   bestAskPriceTicks: bigint | null;
   liveOrderCount: number;
+  liveOrderSample: readonly SettlementLiveOrder[];
   digest: string;
 }>;
 
@@ -85,15 +101,50 @@ export const buildSettlementBookEvidence = (
     bestBidPriceTicks: getBestBid(book),
     bestAskPriceTicks: getBestAsk(book),
     liveOrderCount: book.orders.size,
+    liveOrderSample: [...book.orders.values()]
+      .slice(0, SETTLEMENT_LIVE_ORDER_SAMPLE_LIMIT)
+      .map(order => ({
+        orderId: order.orderId,
+        ownerId: order.ownerId,
+        side: order.side,
+        priceTicks: order.priceTicks,
+        qtyLots: order.qtyLots,
+      })),
     digest,
   };
+};
+
+const decodeLiveOrderSample = (value: unknown): readonly SettlementLiveOrder[] => {
+  if (!Array.isArray(value) || value.length > SETTLEMENT_LIVE_ORDER_SAMPLE_LIMIT) {
+    throw new Error('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_SAMPLE_INVALID');
+  }
+  return value.map(entry => {
+    const order = requireBoundaryRecord(entry, 'RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_ORDER_INVALID');
+    requireExactBoundaryKeys(order, ['orderId', 'ownerId', 'side', 'priceTicks', 'qtyLots'], [],
+      'RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_ORDER_FIELDS_INVALID');
+    const side = order['side'];
+    if (side !== 0 && side !== 1) throw new Error('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_ORDER_SIDE_INVALID');
+    if (typeof order['priceTicks'] !== 'bigint' || typeof order['qtyLots'] !== 'bigint') {
+      throw new Error('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_ORDER_AMOUNT_INVALID');
+    }
+    if (typeof order['orderId'] !== 'string' || typeof order['ownerId'] !== 'string') {
+      throw new Error('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_ORDER_ID_INVALID');
+    }
+    return {
+      orderId: order['orderId'],
+      ownerId: order['ownerId'],
+      side,
+      priceTicks: order['priceTicks'],
+      qtyLots: order['qtyLots'],
+    };
+  });
 };
 
 export const decodeSettlementBookEvidence = (value: unknown): SettlementBookEvidence => {
   const evidence = requireBoundaryRecord(value, 'RADAPTER_SETTLEMENT_BOOK_RESPONSE_INVALID');
   requireExactBoundaryKeys(evidence, [
     'entityId', 'pairId', 'tradeCount', 'bestBidPriceTicks', 'bestAskPriceTicks',
-    'liveOrderCount', 'digest',
+    'liveOrderCount', 'liveOrderSample', 'digest',
   ], [], 'RADAPTER_SETTLEMENT_BOOK_RESPONSE_FIELDS_INVALID');
   const digest = evidence['digest'];
   if (typeof digest !== 'string' || !HASH.test(digest)) {
@@ -106,6 +157,7 @@ export const decodeSettlementBookEvidence = (value: unknown): SettlementBookEvid
     bestBidPriceTicks: requireNullableBigInt(evidence['bestBidPriceTicks'], 'RADAPTER_SETTLEMENT_BOOK_RESPONSE_BID_INVALID'),
     bestAskPriceTicks: requireNullableBigInt(evidence['bestAskPriceTicks'], 'RADAPTER_SETTLEMENT_BOOK_RESPONSE_ASK_INVALID'),
     liveOrderCount: requireBoundaryInteger(evidence['liveOrderCount'], 'RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_COUNT_INVALID'),
+    liveOrderSample: decodeLiveOrderSample(evidence['liveOrderSample']),
     digest,
   };
 };

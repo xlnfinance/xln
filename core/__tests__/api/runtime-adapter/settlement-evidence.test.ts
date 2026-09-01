@@ -131,6 +131,15 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     bestBidPriceTicks: null,
     bestAskPriceTicks: 2n,
     liveOrderCount: 1,
+    // The sample names the resting order so a drain that times out with live
+    // orders and empty queues can say which order is stuck and who owns it.
+    liveOrderSample: [{
+      orderId: 'resting-ask',
+      ownerId: rightId,
+      side: 1,
+      priceTicks: 2n,
+      qtyLots: 1n,
+    }],
     digest: expect.stringMatching(/^0x[0-9a-f]{64}$/),
   });
   expect(response.accounts[0]?.offers).toEqual([{
