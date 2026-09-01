@@ -8,6 +8,9 @@ import { getEntityAccountForWrite } from '../state/persistent-account-map';
 import { scheduleHook } from './hook-state';
 import type { DueHookPlan } from './due-hook-types';
 import { toUnixMs, unixMsToUnixSFloor } from '../../protocol/units';
+import type { EntityRuntimeContext } from '../runtime-context';
+import { applyEntityAccountEnvelopeUpdate } from '../account-envelope-update';
+import type { AccountReplica } from '../../types/account';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -25,7 +28,23 @@ const retryDisputeDeadline = (
   });
 };
 
+const setDisputeFinalizeQueued = (
+  env: EntityRuntimeContext,
+  accountId: string,
+  account: AccountReplica,
+  finalizeQueued: boolean,
+): void => {
+  const activeDispute = account.activeDispute;
+  if (!activeDispute) throw new Error(`DISPUTE_DEADLINE_ACTIVE_ACCOUNT_MISSING:${accountId}`);
+  applyEntityAccountEnvelopeUpdate(env, accountId, account, {
+    type: 'replaceDisputeLifecycle',
+    status: account.status,
+    activeDispute: { ...activeDispute, finalizeQueued },
+  });
+};
+
 export const processDisputeDeadlineHook = (
+  env: EntityRuntimeContext,
   hook: ScheduledHook & { type: 'dispute_deadline' },
   replica: EntityTransitionContext,
   context: CrontabExecutionContext,
@@ -38,7 +57,6 @@ export const processDisputeDeadlineHook = (
   if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') return;
   const weAreLeft = visible.state.leftEntity === replica.state.entityId;
   const weAreStarter = weAreLeft === visible.activeDispute.startedByLeft;
-  // L1 disputeTimeout is absolute unix seconds (jurisdiction clock).
   const timeoutSec = Number(visible.activeDispute.disputeTimeout || 0);
   const nowSec = unixMsToUnixSFloor(toUnixMs(Number(replica.state.timestamp || 0)));
   if (visible.activeDispute.observedOnChain !== true) {
@@ -49,8 +67,7 @@ export const processDisputeDeadlineHook = (
     });
     return;
   }
-  // Wait until the on-chain challenge end (seconds). Event-driven fanout
-  // starts sibling legs; no sealed pull deadline and no cross-j margin.
+  // Wait for the on-chain challenge end; sibling fanout has no extra margin.
   if (!timeoutSec || nowSec < timeoutSec) {
     const recovery = visible.activeDispute.crossJurisdictionRecovery;
     const missingRecoveryResults = recovery
@@ -87,8 +104,12 @@ export const processDisputeDeadlineHook = (
   const account = getEntityAccountForWrite(replica.state.accounts, accountId);
   if (!account?.activeDispute) throw new Error(`DISPUTE_DEADLINE_WRITE_ACCOUNT_MISSING:${accountId}`);
   if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
-    account.activeDispute.finalizeQueued =
-      sentHasFinalize || (account.activeDispute.finalizeQueued ?? false);
+    setDisputeFinalizeQueued(
+      env,
+      accountId,
+      account,
+      sentHasFinalize || (account.activeDispute.finalizeQueued ?? false),
+    );
     context.accountChanges.add(accountId);
     retryDisputeDeadline(replica, hook, 1000);
     crontabLog.debug('dispute.deferred_sent_batch', {
@@ -98,14 +119,14 @@ export const processDisputeDeadlineHook = (
     return;
   }
   if (draftHasFinalize || recoveryHasFinalize) {
-    account.activeDispute.finalizeQueued = true;
+    setDisputeFinalizeQueued(env, accountId, account, true);
     context.accountChanges.add(accountId);
     plan.shouldBroadcastQueuedDisputeFinalizations = true;
     return;
   }
   if (account.activeDispute.finalizeQueued) {
     // An abort/drop may remove the draft while leaving this local latch.
-    account.activeDispute.finalizeQueued = false;
+    setDisputeFinalizeQueued(env, accountId, account, false);
     context.accountChanges.add(accountId);
   }
   if (plan.disputeFinalizeCounterparties.size > 0) {

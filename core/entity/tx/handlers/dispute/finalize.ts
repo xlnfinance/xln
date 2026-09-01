@@ -38,6 +38,7 @@ import {
   unixMsToUnixSFloor,
   unixSToUnixMs,
 } from '../../../../protocol/units';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 
@@ -129,7 +130,6 @@ const resolveFinalizeSubmitNotBefore = (
 
 const queueDisputeFinalize = (
   state: EntityState,
-  account: AccountReplica,
   proof: FinalProofPayload,
   registry: { secrets: string[]; transformerAddress: string },
   submitNotBeforeTimestamp: UnixS | null,
@@ -161,7 +161,6 @@ const queueDisputeFinalize = (
     ...(submitNotBeforeTimestamp === null ? {} : { submitNotBeforeTimestamp }),
   });
   encodeJBatch(batch);
-  account.activeDispute!.finalizeQueued = true;
 };
 
 const selectedCrossJurisdictionRecoveryIsReady = (
@@ -265,7 +264,7 @@ export const handleDisputeFinalize = async (
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),
   });
-  const account = admitDisputeFinalize(newState, entityTx);
+  const account = admitDisputeFinalize(env, newState, entityTx);
   if (!account) return { newState, outputs };
   const selection = selectFinalProof(
     entityState,
@@ -323,11 +322,18 @@ export const handleDisputeFinalize = async (
   }
   queueDisputeFinalize(
     newState,
-    account,
     finalProof,
     registry,
     submitNotBeforeTimestamp,
   );
+  if (!account.activeDispute) {
+    throw new Error(`DISPUTE_FINALIZE_ACTIVE_ACCOUNT_MISSING:${counterpartyId}`);
+  }
+  applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+    type: 'replaceDisputeLifecycle',
+    status: account.status,
+    activeDispute: { ...account.activeDispute, finalizeQueued: true },
+  });
   disputeLog.debug('finalize.jbatch_queued', {
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),

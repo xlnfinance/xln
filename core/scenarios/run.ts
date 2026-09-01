@@ -513,7 +513,12 @@ async function main() {
   }
 }
 
-main().catch((error: unknown) => {
+main().then(() => {
+  // Every owned process and port lease has already been released by main's
+  // finally block. Scenario adapters may retain diagnostic poll timers; those
+  // must not outlive a successful CLI gate or contend with the next stand.
+  process.exit(0);
+}).catch((error: unknown) => {
   const details = error instanceof Error
     ? `${error.name}: ${error.message}\n${error.stack ?? '(no stack)'}`
     : String(error);

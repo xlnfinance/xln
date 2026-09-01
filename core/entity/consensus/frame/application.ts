@@ -1636,6 +1636,42 @@ const appendFinalProfileHash = (
   });
 };
 
+const finishAuthorityTransitionOnly = async (
+  working: EntityFrameWorkingSet,
+  entityTxs: readonly EntityTx[],
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
+): Promise<EntityFrameResult | null> => {
+  if (!working.authorityTransitionOnly) return null;
+  await working.context.env.accountAuthorityEntityStage?.prepareEntityAccountOutbound({
+    entityState: working.currentEntityState,
+    entityHeight: entityContext.height,
+    accounts: working.currentEntityState.accounts,
+    accountForWrite: accountId => getEntityAccountForWrite(
+      working.currentEntityState.accounts,
+      accountId,
+    ),
+    proposalAccountIds: [],
+    timestamp: working.currentEntityState.timestamp,
+    jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
+  });
+  working.context.env.accountAuthorityEntityStage?.finishEntityAccountFrame();
+  entityLog.info('frame.board_authority_transition_only', {
+    entity: shortId(working.currentEntityState.entityId),
+    txs: entityTxs.length,
+    finalizedJHeight: working.currentEntityState.lastFinalizedJHeight,
+  });
+  // A board handover must re-certify the current public profile even when its
+  // descriptor bytes did not change. Otherwise the hash-keyed witness slot can
+  // retain the retired board's Hanko and fail current-board authentication.
+  const profileHash = computeEntityProfileHash(working.currentEntityState);
+  working.context.collectedHashes.push({
+    hash: profileHash,
+    type: 'profile',
+    context: `profile:${profileHash}`,
+  });
+  return buildEntityFrameResult(working.currentEntityState, working.context);
+};
+
 const applyEntityFrameWithIsolation = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
@@ -1689,41 +1725,12 @@ const applyEntityFrameWithIsolation = async (
     applyBookIntentProgram(working.currentEntityState, working.context.bookIntents);
   }
   working.markFrameProfile('books');
-  if (working.authorityTransitionOnly) {
-    await working.context.env.accountAuthorityEntityStage
-      ?.prepareEntityAccountOutbound({
-        entityState: working.currentEntityState,
-        entityHeight: entityContext.height,
-        accounts: working.currentEntityState.accounts,
-        accountForWrite: accountId => getEntityAccountForWrite(
-          working.currentEntityState.accounts,
-          accountId,
-        ),
-        proposalAccountIds: [],
-        timestamp: working.currentEntityState.timestamp,
-        jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
-      });
-    working.context.env.accountAuthorityEntityStage?.finishEntityAccountFrame();
-    entityLog.info('frame.board_authority_transition_only', {
-      entity: shortId(working.currentEntityState.entityId),
-      txs: entityTxs.length,
-      finalizedJHeight: working.currentEntityState.lastFinalizedJHeight,
-    });
-    // A board handover must re-certify the current public profile even when
-    // its descriptor bytes did not change. The hash-keyed witness slot may
-    // otherwise retain the retired board's Hanko and fail current-board-only
-    // profile authentication immediately after the transition.
-    const profileHash = computeEntityProfileHash(working.currentEntityState);
-    working.context.collectedHashes.push({
-      hash: profileHash,
-      type: 'profile',
-      context: `profile:${profileHash}`,
-    });
-    return buildEntityFrameResult(
-      working.currentEntityState,
-      working.context,
-    );
-  }
+  const authorityOnlyResult = await finishAuthorityTransitionOnly(
+    working,
+    entityTxs,
+    entityContext,
+  );
+  if (authorityOnlyResult) return authorityOnlyResult;
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.post');
   const post = await applyPostEntityTxPhases(working);
   appendFinalProfileHash(

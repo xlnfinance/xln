@@ -89,7 +89,7 @@ const processDueHook = (
       return;
     }
     case 'dispute_deadline':
-      processDisputeDeadlineHook(hook, replica, context, currentJBlock, plan);
+      processDisputeDeadlineHook(env, hook, replica, context, currentJBlock, plan);
       return;
     case 'htlc_secret_ack_timeout':
       processSecretAckTimeout(hook, replica, context, plan);

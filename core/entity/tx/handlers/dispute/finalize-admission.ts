@@ -1,10 +1,11 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';
-import { freezeAccountForDispute } from '../../../../account/consensus/dispute/policy';
+import { applyEntityAccountEnvelopeUpdate } from '../../../account-envelope-update';
 import {
   collectDisputeEvidenceReadinessIssues,
   hasQueuedDisputeFinalize,
@@ -13,6 +14,7 @@ import {
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 
 export const admitDisputeFinalize = (
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: FinalizeTx,
 ): AccountReplica | null => {
@@ -53,14 +55,17 @@ export const admitDisputeFinalize = (
   const account = getEntityAccountForWrite(state.accounts, counterpartyId);
   if (!account?.activeDispute) return null;
   if (hasQueuedDisputeFinalize(state, counterpartyId)) {
-    account.activeDispute.finalizeQueued = true;
+    applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+      type: 'replaceDisputeLifecycle',
+      status: account.status,
+      activeDispute: { ...account.activeDispute, finalizeQueued: true },
+    });
     addMessage(
       state,
       `ℹ️ disputeFinalize already present in batch lifecycle for ${counterpartyId.slice(-4)}`,
     );
     return null;
   }
-  freezeAccountForDispute(account, true);
   const readinessIssues = collectDisputeEvidenceReadinessIssues(
     account,
     Number(state.timestamp ?? 0),
