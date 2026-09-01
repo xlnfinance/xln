@@ -5,15 +5,25 @@ import {
   readLaneAccountDetails,
   startLaneJurisdictionWatcher,
 } from '../lanes/lane-runtimes';
-import { requireBoundaryRecord } from '../../../../protocol/boundary-validation';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+} from '../../../../protocol/boundary-validation';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
   sendObserved,
   type ConnectedRuntime,
 } from '../worker-runtime';
+import { decodeHubCoreRecord } from '../boundary/worker-boundary';
 import { hltAuthorityEvidenceRecording } from '../authority-evidence-policy';
 
 const DISPUTE_EVIDENCE_TIMEOUT_MS = 10_000;
+
+type CounterpartyDisputeState = Readonly<{
+  status: string;
+  observedOnChain: boolean;
+  finalizedJHeight: number;
+}>;
 
 export const hltAuthorityEvidenceEnabled = (): boolean =>
   hltAuthorityEvidenceRecording(process.env);
@@ -22,7 +32,7 @@ const readCounterpartyDispute = async (
   lane: LaneRuntime,
   hubRuntimeId: string,
   hubEntityId: string,
-): Promise<Readonly<{ status: string; observedOnChain: boolean }> | null> => {
+): Promise<CounterpartyDisputeState | null> => {
   const rows = await readLaneAccountDetails(lane, hubRuntimeId);
   for (const value of rows) {
     const row = requireBoundaryRecord(value, 'HLT_AUTHORITY_DISPUTE_ACCOUNT_INVALID');
@@ -30,9 +40,36 @@ const readCounterpartyDispute = async (
     return {
       status: String(row['status'] || ''),
       observedOnChain: row['activeDisputeObservedOnChain'] === true,
+      finalizedJHeight: requireBoundaryInteger(
+        row['entityLastFinalizedJHeight'],
+        'HLT_AUTHORITY_DISPUTE_J_HEIGHT_INVALID',
+      ),
     };
   }
   return null;
+};
+
+const waitForHubFinalizedJHeight = async (
+  hub: ConnectedRuntime,
+  hubEntityId: string,
+  targetJHeight: number,
+): Promise<void> => {
+  const deadline = Date.now() + DISPUTE_EVIDENCE_TIMEOUT_MS;
+  let latest = -1;
+  while (Date.now() <= deadline) {
+    const core = decodeHubCoreRecord(
+      await hub.adapter.read<unknown>(`entity/${hubEntityId}`),
+    );
+    latest = requireBoundaryInteger(
+      core['lastFinalizedJHeight'],
+      'HLT_AUTHORITY_HUB_J_HEIGHT_INVALID',
+    );
+    if (latest >= targetJHeight) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(
+    `HLT_AUTHORITY_HUB_J_HEIGHT_TIMEOUT:target=${targetJHeight}:latest=${latest}`,
+  );
 };
 
 const waitForCounterpartyDisputeState = async (options: Readonly<{
@@ -40,17 +77,21 @@ const waitForCounterpartyDisputeState = async (options: Readonly<{
   hubRuntimeId: string;
   hubEntityId: string;
   finalized: boolean;
-}>): Promise<void> => {
+}>): Promise<CounterpartyDisputeState | null> => {
   const deadline = Date.now() + DISPUTE_EVIDENCE_TIMEOUT_MS;
   let latest: Awaited<ReturnType<typeof readCounterpartyDispute>> = null;
   while (Date.now() <= deadline) {
-    latest = await readCounterpartyDispute(options.lane, options.hubRuntimeId, options.hubEntityId);
-    if (!options.finalized && latest?.status === 'disputed' && latest.observedOnChain) return;
+    latest = await readCounterpartyDispute(
+      options.lane,
+      options.hubRuntimeId,
+      options.hubEntityId,
+    );
+    if (!options.finalized && latest?.status === 'disputed' && latest.observedOnChain) return latest;
     // Quiescence omits Accounts after their active dispute is cleared. If a
     // pending diagnostic row remains, require the same terminal status.
     if (options.finalized && (latest === null || (
       latest.status === 'disputed' && !latest.observedOnChain
-    ))) return;
+    ))) return latest;
     await Bun.sleep(25);
   }
   throw new Error(
@@ -175,12 +216,22 @@ export const materializeCompleteDisputeEvidence = async (options: Readonly<{
       }],
     },
   }], { waitForCommit: true });
-  await waitForCounterpartyDisputeState({
+  const reverseStarted = await waitForCounterpartyDisputeState({
     lane: reverseLane,
     hubRuntimeId: hub.adapter.runtimeId,
     hubEntityId: hubIdentity.entityId,
     finalized: false,
   });
+  if (!reverseStarted) throw new Error('HLT_AUTHORITY_REVERSE_DISPUTE_START_MISSING');
+  // The starter's watcher becoming current does not prove the finalizer has
+  // applied the same J prefix. The Entity J-height advances atomically with
+  // event application, so wait for the actor's own certified prefix before
+  // sending a command that is intentionally rejected pre-observation.
+  await waitForHubFinalizedJHeight(
+    hub,
+    hubIdentity.entityId,
+    reverseStarted.finalizedJHeight,
+  );
   await sendObserved(hub, 'hlt-authority-dispute-finalize', {
     runtimeTxs: [],
     entityInputs: [{

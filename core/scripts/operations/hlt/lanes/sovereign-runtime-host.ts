@@ -824,6 +824,7 @@ const handleHostQuiescence = async (
             counterpartyId,
             currentHeight: account.currentHeight,
             status: account.status,
+            entityLastFinalizedJHeight: entity.state.lastFinalizedJHeight,
             activeDisputeObservedOnChain: account.activeDispute?.observedOnChain === true,
             pendingFrameHeight: account.pendingFrame?.height ?? null,
             pendingFrameStateHash: account.pendingFrame?.stateHash ?? null,
