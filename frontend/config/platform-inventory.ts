@@ -393,6 +393,7 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/runtime-client/src/settings-panel-view.ts',
       'frontend/packages/runtime-client/src/architect-panel-view.ts',
       'frontend/packages/runtime-client/src/graph3d-entity-panel-view.ts',
+      'frontend/packages/runtime-client/src/graph3d-viewport-view.ts',
     ],
     consumers: [
       'frontend/src/lib/view/panels/ConsolePanel.svelte',
@@ -407,6 +408,11 @@ export const PLATFORM_INVENTORY = [
       'frontend/src/lib/view/panels/SettingsPanel.svelte',
       'frontend/src/lib/view/panels/ArchitectPanel.svelte',
       'frontend/src/lib/view/components/EntityMiniPanel.svelte',
+      'frontend/src/lib/view/components/Graph3DViewport.svelte',
+      'frontend/src/lib/view/components/Graph3DFpsOverlay.svelte',
+      'frontend/src/lib/view/components/VRControlsHUD.svelte',
+      'frontend/src/lib/network3d/runtimeGraphProjection.ts',
+      'frontend/src/lib/stores/network/runtimeGraphControlStore.ts',
     ],
     evidence: [
       'tests/frontend/runtime/console-panel-view.test.ts',
@@ -419,6 +425,7 @@ export const PLATFORM_INVENTORY = [
       'tests/frontend/runtime/settings-panel-view.test.ts',
       'tests/frontend/runtime/architect-panel-view.test.ts',
       'tests/frontend/graph/graph3d-entity-panel-view.test.ts',
+      'tests/frontend/graph/graph3d-viewport-view.test.ts',
     ],
   },
   {
