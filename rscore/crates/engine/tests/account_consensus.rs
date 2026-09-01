@@ -1659,6 +1659,161 @@ fn duplicate_current_frame_reuses_committed_hanko_while_successor_is_pending() {
     );
 }
 
+#[test]
+fn duplicate_ack_frame_authenticates_bundled_predecessor_before_replay() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit first");
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose first") else {
+        panic!("expected first proposal");
+    };
+    let first = *first;
+    let IncomingOutcome::Committed {
+        ack_hanko: right_ack_hanko,
+        ..
+    } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&first.frame, first.state_hash, first.hanko),
+        &market(),
+    )
+    .expect("right commits first")
+    else {
+        panic!("expected first commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &first.state_hash,
+        &right_ack_hanko,
+        None,
+    )
+    .expect("left commits first");
+
+    right
+        .account
+        .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 5)], "test")
+        .expect("admit second");
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose second") else {
+        panic!("expected second proposal");
+    };
+    let second = *second;
+    let committed = apply_incoming_frame(
+        &mut left.account,
+        &left.identity,
+        right.identity.entity_id(),
+        CLOCK,
+        incoming_of(&second.frame, second.state_hash, second.hanko.clone()),
+        &market(),
+    )
+    .expect("left commits second");
+    assert!(matches!(
+        committed,
+        IncomingOutcome::Committed { height: 2, .. }
+    ));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 1)], "test")
+        .expect("admit successor");
+    let ProposalOutcome::Proposed(_) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_002,
+        7,
+        &market(),
+    )
+    .expect("propose successor") else {
+        panic!("expected successor proposal");
+    };
+    let pending_hash = left
+        .account
+        .pending()
+        .expect("pending successor")
+        .state_hash;
+    let leaf = left
+        .account
+        .entity_account_leaf()
+        .expect("leaf before replay");
+    let right_to_left = envelope(&left.account, right.identity.entity_id());
+    let valid_ack = IncomingAck {
+        height: 1,
+        frame_hash: first.state_hash,
+        frame_hanko: Some(right_ack_hanko.clone()),
+        dispute: None,
+    };
+    let replay = xln_rscore_engine::apply_incoming_ack_frame(
+        &mut left.account,
+        &left.identity,
+        &right_to_left,
+        CLOCK,
+        valid_ack.clone(),
+        incoming_of(&second.frame, second.state_hash, second.hanko.clone()),
+        &market(),
+    )
+    .expect("valid predecessor under duplicate frame");
+    assert!(matches!(replay, AckFrameOutcome::Replay { .. }));
+    assert_eq!(
+        left.account.pending().expect("pending survives").state_hash,
+        pending_hash
+    );
+    assert_eq!(
+        left.account
+            .entity_account_leaf()
+            .expect("leaf after replay"),
+        leaf
+    );
+
+    let mut conflicting_ack = valid_ack;
+    conflicting_ack.frame_hash[0] ^= 0x01;
+    let conflict = xln_rscore_engine::apply_incoming_ack_frame(
+        &mut left.account,
+        &left.identity,
+        &right_to_left,
+        CLOCK,
+        conflicting_ack,
+        incoming_of(&second.frame, second.state_hash, second.hanko),
+        &market(),
+    )
+    .expect("conflicting ACK is a typed rejection");
+    assert!(matches!(
+        conflict,
+        AckFrameOutcome::Rejected {
+            phase: xln_rscore_engine::AckFramePhase::Ack,
+            ..
+        }
+    ));
+    assert_eq!(
+        left.account
+            .pending()
+            .expect("pending survives conflict")
+            .state_hash,
+        pending_hash
+    );
+    assert_eq!(
+        left.account
+            .entity_account_leaf()
+            .expect("leaf after conflict"),
+        leaf
+    );
+}
+
 /// A frame that fails validation must not cost us our own proposal, even at
 /// the same height.
 #[test]

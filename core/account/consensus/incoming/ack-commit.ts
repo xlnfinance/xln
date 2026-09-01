@@ -101,18 +101,20 @@ const handleRepeatedCurrentAck = async (
   return { kind: 'fallthrough' };
 };
 
-const immediatePredecessorAckError = async (
+export const immediatePredecessorAckError = async (
   account: AccountReplica,
-  input: Extract<AccountInput, { kind: 'ack' }>,
+  input: AccountInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<string | undefined> => {
+  const ack = accountInputAck(input);
+  if (!ack) return 'Missing ACK immediate predecessor certificate';
   const expectedHash = account.currentFrame?.prevFrameHash;
-  if (!expectedHash || input.ack.frameHash.toLowerCase() !== expectedHash.toLowerCase()) {
+  if (!expectedHash || ack.frameHash.toLowerCase() !== expectedHash.toLowerCase()) {
     return 'ACK immediate predecessor frameHash mismatch';
   }
-  if (!input.ack.frameHanko) return 'Missing ACK immediate predecessor Hanko';
+  if (!ack.frameHanko) return 'Missing ACK immediate predecessor Hanko';
   const verified = await securityContext.verifyHanko(
-    input.ack.frameHanko,
+    ack.frameHanko,
     expectedHash,
     input.fromEntityId,
     securityContext.counterpartyCertifiedBoard

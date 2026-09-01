@@ -1153,12 +1153,11 @@ pub fn apply_incoming_ack_frame_with_authority(
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     security: IncomingFrameSecurityContext<'_>,
 ) -> Result<AckFrameOutcome, StateError> {
-    // An at-least-once retry replays the exact original ACK+successor bytes.
-    // The first delivery may already have consumed ACK(H) and committed the
-    // successor H+1. Match TypeScript's replay gate: authenticate/classify the
-    // exact-current proposal before the ACK phase and re-ACK it as a duplicate.
-    // This exception is deliberately unavailable to standalone ACK inputs and
-    // to non-duplicate proposals, so ACCOUNT_INPUT_ACK_UNMATCHED stays strict.
+    // Channel.ts emits one proposal and answers an exact retry with ACK only.
+    // A bundled ACK is still peer-controlled evidence: authenticate it against
+    // the known immediate predecessor before taking the duplicate-frame fast
+    // path. Ignoring changed ACK bytes under an exact proposal would let a
+    // valid frame hide a conflicting certificate.
     if frame.frame.height == account.current_height()
         && account
             .current()
@@ -1166,6 +1165,40 @@ pub fn apply_incoming_ack_frame_with_authority(
         && let Some(outcome) =
             classify_incoming_frame_without_mutation(account, identity, envelope, &frame, security)?
     {
+        let Some(predecessor_height) = account.current_height().checked_sub(1) else {
+            return Ok(AckFrameOutcome::Rejected {
+                phase: AckFramePhase::Ack,
+                reason: "ACCOUNT_INPUT_ACK_PREDECESSOR_HEIGHT_MISSING".to_string(),
+            });
+        };
+        if predecessor_height == 0 || ack.height != predecessor_height {
+            return Ok(AckFrameOutcome::Rejected {
+                phase: AckFramePhase::Ack,
+                reason: "ACCOUNT_INPUT_ACK_PREDECESSOR_HEIGHT_MISMATCH".to_string(),
+            });
+        }
+        let replay_ack = apply_incoming_ack_with_authority_mode(
+            account,
+            envelope,
+            security.clock,
+            ack,
+            security.peer_certified_board_authority,
+            true,
+        )?;
+        match replay_ack {
+            AckOutcome::Accepted { .. } => {}
+            AckOutcome::Rejected { reason } => {
+                return Ok(AckFrameOutcome::Rejected {
+                    phase: AckFramePhase::Ack,
+                    reason,
+                });
+            }
+            _ => {
+                return Err(StateError::TransitionFailed(
+                    "ACCOUNT_INPUT_ACK_REPLAY_MUTATION_INVARIANT".to_string(),
+                ));
+            }
+        }
         return Ok(AckFrameOutcome::Replay {
             frame: Box::new(outcome),
         });

@@ -1672,25 +1672,12 @@ describe('audit fail-fast regressions', () => {
       hankoAttachedProposal,
     );
     expect(duplicateWhileSuccessorPending.ok).toBe(true);
-    expect(duplicateWhileSuccessorPending.response).toEqual(pendingBundledRetry);
+    expect(duplicateWhileSuccessorPending.response?.kind).toBe('ack');
+    expect(duplicateWhileSuccessorPending.response?.kind === 'ack'
+      ? duplicateWhileSuccessorPending.response.ack
+      : undefined).toEqual(pendingBundledRetry.ack);
+    expect(receiver.pendingAccountInput).toEqual(pendingBundledRetry);
 
-    const certifiedHeightTwoAck = await attachAccountDraftHankosAsEntity(
-      env,
-      left.entityId,
-      left.signerId,
-      {
-        accountInput: committedBundled.response,
-        hashesToSign: committedBundled.hashesToSign,
-      },
-    );
-    if (certifiedHeightTwoAck.kind !== 'ack') {
-      throw new Error('BUNDLED_ACK_ADVANCED_PEER_RESPONSE_INVALID');
-    }
-    proposer.lastOutboundAckFrame = {
-      height: 2,
-      counterpartyEntityId: right.entityId,
-      response: certifiedHeightTwoAck,
-    };
     const advancedPeerRoot = computeAccountStateRoot(proposer.state);
     const repeatedAtAdvancedPeer = await applyAccountInput(
       createAccountConsensusContext(env),
@@ -1698,10 +1685,7 @@ describe('audit fail-fast regressions', () => {
       duplicateWhileSuccessorPending.response!,
     );
     expect(repeatedAtAdvancedPeer.ok).toBe(true);
-    expect(repeatedAtAdvancedPeer.response?.kind).toBe('ack');
-    expect(repeatedAtAdvancedPeer.response?.kind === 'ack'
-      ? repeatedAtAdvancedPeer.response.ack.height
-      : undefined).toBe(2);
+    expect(repeatedAtAdvancedPeer.response).toBeUndefined();
     expect(proposer.currentHeight).toBe(2);
     expect(computeAccountStateRoot(proposer.state)).toBe(advancedPeerRoot);
     const advancedPeerEvidence = {
@@ -1769,7 +1753,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.currentHeight).toBe(1);
   });
 
-  test('duplicate committed frame re-carries the exact pending ACK plus successor proposal', async () => {
+  test('duplicate committed frame returns ACK only and never re-carries a pending proposal', async () => {
     const seed = 'account-frame-duplicate-bundled-response';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1781,6 +1765,7 @@ describe('audit fail-fast regressions', () => {
     accountMachine.currentFrame = {
       ...accountMachine.currentFrame,
       height: 10,
+      prevFrameHash: `0x${'12'.repeat(32)}`,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
     accountMachine.currentFrame.stateHash = computeFrameHash(accountMachine.currentFrame);
@@ -1813,22 +1798,56 @@ describe('audit fail-fast regressions', () => {
     };
     delete accountMachine.lastOutboundAckFrame;
 
-    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
-      kind: 'ack_frame',
+    const predecessorHash = accountMachine.currentFrame.prevFrameHash;
+    const [predecessorHanko] = await signEntityHashes(
+      env,
+      right.entityId,
+      right.signerId,
+      [predecessorHash],
+    );
+    const duplicateInput = {
+      kind: 'ack_frame' as const,
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
       signerId: right.signerId,
       disputeConfig: { ...accountMachine.state.disputeConfig },
+      ack: {
+        height: 9,
+        frameHash: predecessorHash,
+        frameHanko: predecessorHanko,
+      },
       proposal: {
         frame: { ...accountMachine.currentFrame },
         frameHanko: `0x${'78'.repeat(65)}`,
       },
-    });
+    };
+
+    const result = await applyAccountInput(
+      createAccountConsensusContext(env),
+      accountMachine,
+      duplicateInput,
+    );
 
     expect(result.ok).toBe(true);
-    expect(result.response).toEqual(accountMachine.pendingAccountInput);
-    expect(result.response?.kind).toBe('ack_frame');
+    expect(result.response?.kind).toBe('ack');
+    expect(result.response?.kind === 'ack' ? result.response.ack : undefined).toEqual(
+      accountMachine.pendingAccountInput.ack,
+    );
+    expect(accountMachine.currentHeight).toBe(10);
+    expect(accountMachine.pendingFrame?.height).toBe(11);
+
+    const conflictingAck = await applyAccountInput(
+      createAccountConsensusContext(env),
+      accountMachine,
+      {
+        ...structuredClone(duplicateInput),
+        ack: { ...structuredClone(duplicateInput.ack), frameHash: `0x${'aa'.repeat(32)}` },
+      },
+    );
+    expect(conflictingAck.ok).toBe(false);
+    expect(conflictingAck.ok ? undefined : conflictingAck.rejection.code)
+      .toBe('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID');
     expect(accountMachine.currentHeight).toBe(10);
     expect(accountMachine.pendingFrame?.height).toBe(11);
   });

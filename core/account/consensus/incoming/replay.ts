@@ -20,8 +20,11 @@ import {
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountInput } from '../result';
+import { rejectAccountInputEvidenceError } from '../result';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { computeFrameHash } from '../frame/hash';
+import { immediatePredecessorAckError } from './ack-commit';
+import { validateCounterpartyDisputeHanko } from '../dispute/hanko';
 
 const replayLog = createStructuredLogger('account.replay');
 
@@ -223,12 +226,12 @@ const requireCurrentFrameHanko = async (
   'CURRENT_FRAME',
 );
 
-const retainPendingResponseAck = (
+const cacheAckOnlyResponse = (
   account: AccountReplica,
   pendingResponse: AccountInput,
   input: AccountInput,
   receivedHeight: number,
-): AccountInput => {
+): Extract<AccountInput, { kind: 'ack' }> => {
   const pendingAck = accountInputAck(pendingResponse);
   if (!pendingAck) {
     throw new Error(`DUPLICATE_ACK_PENDING_RESPONSE_MISSING_ACK:${receivedHeight}`);
@@ -247,13 +250,11 @@ const retainPendingResponseAck = (
     counterpartyEntityId: input.fromEntityId,
     response: structuredClone(response),
   };
-  // A successor proposal that originally carried this ACK is one indivisible
-  // canonical retry. Returning ACK-only here races the already-delivered
-  // successor: the peer can commit H+1 and then receive the newly-created H
-  // ACK as an impossible stale standalone input. Keep the ACK-only cache for
-  // a later rollback, but while the successor is pending re-emit its exact
-  // signed AccountInput bytes.
-  return structuredClone(pendingResponse);
+  // Channel.ts invariant: one pending proposal is emitted once. A duplicate
+  // committed peer proposal may recover its lost ACK, but it cannot trigger a
+  // second publication of our already-pending successor. Re-emitting H+1 here
+  // creates duplicate ACK cascades and destroys FIFO convergence.
+  return response;
 };
 
 const reusableCertifiedAckHanko = (account: AccountReplica): AccountDisputeHanko | undefined => {
@@ -381,6 +382,31 @@ export const buildDuplicateCommittedAckFrame = async (
     events,
   );
   if (invalidRetry) return invalidRetry;
+  const bundledAck = accountInputAck(input);
+  if (input.kind === 'ack_frame' && bundledAck) {
+    if (receivedHeight <= 1 || Number(bundledAck.height) !== receivedHeight - 1) {
+      return rejectAccountInput(
+        'ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID',
+        'Duplicate frame bundled ACK is not the immediate predecessor',
+        events,
+      );
+    }
+    try {
+      await validateCounterpartyDisputeHanko(
+        account,
+        input,
+        bundledAck.disputeHanko,
+        'ACCOUNT_ACK_REPLAY',
+        securityContext,
+      );
+    } catch (error) {
+      return rejectAccountInputEvidenceError(error, events);
+    }
+    const predecessorError = await immediatePredecessorAckError(account, input, securityContext);
+    if (predecessorError) {
+      return rejectAccountInput('ACCOUNT_INPUT_ACK_CERTIFICATE_INVALID', predecessorError, events);
+    }
+  }
   const pendingResponse = account.pendingAccountInput;
   const pendingAck = pendingResponse
     ? accountInputAck(pendingResponse)
@@ -414,7 +440,7 @@ export const buildDuplicateCommittedAckFrame = async (
         throw new Error(`DUPLICATE_ACK_CACHED_HANKO_CONFLICT:height=${receivedHeight}`);
       }
     }
-    const response = retainPendingResponseAck(
+    const response = cacheAckOnlyResponse(
       account,
       pendingResponse,
       input,

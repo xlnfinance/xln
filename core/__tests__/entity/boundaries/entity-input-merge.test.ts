@@ -69,6 +69,36 @@ describe('mergeEntityInputs', () => {
     expect(merged[0]?.entityTxs).toEqual(original.entityTxs);
   });
 
+  test('collapses cumulative overlap but preserves a conflicting Account certificate', () => {
+    const accountTx = (frameHanko: string) => ({
+      type: 'accountInput',
+      data: {
+        kind: 'ack',
+        fromEntityId: entityId('1'),
+        toEntityId: entityId('2'),
+        domain: { chainId: 1, jurisdiction: `0x${'11'.repeat(20)}` },
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        ack: { height: 2, frameHash: `0x${'22'.repeat(32)}`, frameHanko },
+      },
+    } as never);
+    const first = {
+      ...inputFor('2'),
+      from: entityId('1'),
+      runtimeId: entityId('9'),
+      sourceRuntimeFrame: { height: 7, timestamp: 700 },
+      entityTxs: [accountTx('0xaa')],
+    };
+    const cumulative = {
+      ...first,
+      entityTxs: [accountTx('0xaa'), accountTx('0xbb')],
+    };
+
+    const merged = mergeEntityInputs([first, cumulative]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.entityTxs).toEqual([accountTx('0xaa'), accountTx('0xbb')]);
+  });
+
   test('does not merge remote entity txs across their authenticated runtime origins', () => {
     const target = entityId('2');
     const fromA = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';

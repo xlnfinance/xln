@@ -7,6 +7,7 @@ import { hashEntityLeaderVoteBody } from '../leader';
 import { hashJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { getEffectiveEntityInputTxs } from '../output/envelope';
 import { accountInputProposal } from '../../../account/consensus/flush';
+import { txFingerprint } from '../../../protocol/state/tx-multiset';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
@@ -41,6 +42,22 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
     merged.push(tx);
   }
 
+  return merged;
+};
+
+const mergeExactAccountInputReplays = (txs: EntityTx[]): EntityTx[] => {
+  const merged: EntityTx[] = [];
+  const seen = new Set<string>();
+  for (const tx of txs) {
+    if (tx.type !== 'accountInput') {
+      merged.push(tx);
+      continue;
+    }
+    const fingerprint = txFingerprint(tx);
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    merged.push(tx);
+  }
   return merged;
 };
 
@@ -322,6 +339,11 @@ export const mergeEntityInputs = (
   const mergedInputs = Array.from(merged.values());
   return applyCausalEntityInputOrder([...mergedInputs, ...conflicts].map(input => {
     if (!input.entityTxs || input.entityTxs.length === 0) return input;
-    return { ...input, entityTxs: prioritizeScheduledWakeTransactions(mergeJEventTxs(input.entityTxs)) };
+    return {
+      ...input,
+      entityTxs: prioritizeScheduledWakeTransactions(
+        mergeExactAccountInputReplays(mergeJEventTxs(input.entityTxs)),
+      ),
+    };
   }), hasVerifiedCommit);
 };
