@@ -45,9 +45,9 @@ to finish, not a reason to block unrelated scaffolding or migration slices.
 
 | Artifact | Status | Next action |
 |---|---|---|
-| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH JURISDICTION; WP8 PARTIAL` | Continue WP7 panel ports (Settings → Architect → … → Graph3D last). |
+| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH SETTINGS; WP8 PARTIAL` | Continue WP7 panel ports (Architect → Dockview → Graph3D last). |
 | [Technical decisions](react-frontend-migration-decisions.md) | `ACTIVE` | Use the recorded application, route, build, and coexistence decisions. |
-| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH JURISDICTION` | Continue with Settings, then execute WP8 candidate integration (PWA, native, deployment, rollback). |
+| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH SETTINGS` | Continue with Architect, then execute WP8 candidate integration (PWA, native, deployment, rollback). |
 
 WP9 parity follows application completion; WP10 cutover and WP11 production
 activation remain separately owner-authorized.
