@@ -103,7 +103,9 @@ const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 /** Credit headroom over the exact total, so a fee cannot starve the last round. */
 export const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
-const DELIVERY_TIMEOUT_MS = 20_000;
+// Overridable: 20s covers the 5s smoke; the ≥1000-frame authority-evidence
+// recording pushes 10-20k payments through the same gate and needs minutes.
+const DELIVERY_TIMEOUT_MS = Number(process.env['XLN_HLT_DELIVERY_TIMEOUT_MS'] || 0) || 20_000;
 
 export const shouldRunRustH1DisputeSmoke = (options: Readonly<{
   requested: string | undefined;
