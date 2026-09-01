@@ -574,6 +574,7 @@ test('runtime view-frame live reads do not force historical atHeight queries', a
 test('remote runtime refresh reads typed RuntimeView projections without RuntimeReplica bridge', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const historySource = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');
+  const transportSource = readFileSync('frontend/packages/runtime-client/src/time-machine-transport.ts', 'utf8');
   const refreshIndex = source.indexOf('const refreshRemoteRuntimeProjection = async');
   expect(refreshIndex).toBeGreaterThan(0);
   const refreshSource = source.slice(refreshIndex, source.indexOf('const createEmbeddedRuntimeAdapter', refreshIndex));
@@ -587,7 +588,8 @@ test('remote runtime refresh reads typed RuntimeView projections without Runtime
   expect(refreshSource).not.toContain("adapter.read<RuntimeAdapterViewFrame>('view-frame'");
   expect(source).not.toContain('export const scanRuntimeAdapterHistoryAtHeight');
   expect(scanSource).toContain('runtimeQueryClient.readHistoryFrameBatch');
-  expect(scanSource).toContain('heights: [requestedHeight]');
+  expect(scanSource).toContain('createTimeMachineHistoryBatchQuery');
+  expect(transportSource).toContain('heights: [height]');
   expect(scanSource).not.toContain('heights: missingHeights');
   expect(scanSource).not.toContain("adapter.read<RuntimeAdapterHistoryFrameBatch>('history-frame-batch'");
   expect(source).not.toContain("$lib/utils/runtimeViewEnv");
@@ -635,12 +637,14 @@ test('radapter page redirects remote users into the canonical app workspace', ()
 
 test('remote Time Machine scan reads historical frames through history-frame-batch only', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');
+  const transport = readFileSync('frontend/packages/runtime-client/src/time-machine-transport.ts', 'utf8');
   const scanStart = source.indexOf('export const scanRuntimeAdapterHistoryAtHeight');
   expect(scanStart).toBeGreaterThan(0);
   const scanSource = source.slice(scanStart);
 
   expect(scanSource).toContain('runtimeQueryClient.readHistoryFrameBatch');
-  expect(scanSource).toContain('heights: [requestedHeight]');
+  expect(scanSource).toContain('createTimeMachineHistoryBatchQuery');
+  expect(transport).toContain('heights: [height]');
   expect(scanSource).toContain('upsertRuntimeHistoryFrame');
   expect(scanSource).toContain('ensureRuntimeHistoryContext');
   expect(scanSource).toContain('setRuntimeViewActiveEntityId(projected.activeEntityId)');

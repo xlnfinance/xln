@@ -166,6 +166,10 @@ test('runtime store fails fast on cross-runtime env overwrite', () => {
 test('remote time-machine history requires radapter batch reads', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const source = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');
+  const transportSource = readFileSync(
+    'frontend/packages/runtime-client/src/time-machine-transport.ts',
+    'utf8',
+  );
   const querySource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
   const queryBoundarySource = readFileSync(
     'frontend/packages/runtime-client/src/runtime-query-client.ts',
@@ -182,7 +186,9 @@ test('remote time-machine history requires radapter batch reads', () => {
   expect(source).not.toContain('buildRemoteAdapterEnvSnapshot');
   expect(source).not.toContain('remoteViewFrameToEnv');
   expect(source).toContain('REMOTE_HISTORY_VIEW_PAGE_SIZE');
-  expect(scanSource).toContain('runtimeViewHistoryScan.set({');
+  expect(scanSource).toContain('runtimeViewHistoryScan.set(createTimeMachineScanLoadingState({');
+  expect(transportSource).toContain('heights: [height]');
+  expect(transportSource).toContain('createTimeMachineScanFailureState');
   expect(scanSource).toContain('error: message');
   expect(scanSource).toContain('snapshot: { height: scannedHeight }');
   expect(scanSource).not.toContain('setXlnEnvironment');
