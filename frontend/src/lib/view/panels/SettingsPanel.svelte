@@ -22,6 +22,19 @@
   import { networkMachineConfig, networkMachineOperations } from '$lib/stores/network/networkMachineStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
   import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
+  import {
+    ENTITY_OPEN_MODE_STORAGE_KEY,
+    VIEW_SETTINGS_STORAGE_KEY,
+    createDefaultViewSettings,
+    formatSettingsPanelError as formatSettingsError,
+    mergeSettingsCameraState,
+    normalizeViewSettings,
+    parseViewSettings,
+    resolveEntityOpenMode,
+    serializeViewSettings,
+    type EntityOpenMode,
+    type ViewSettings,
+  } from '../../../../packages/runtime-client/src/settings-panel-view';
 
   // Props (isolated stores - reserved for future time-travel settings UI)
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>; void runtimeFrameEnv;
@@ -35,85 +48,9 @@
     distance: 0,
   };
 
-  // Settings state (loaded from localStorage on mount)
-  interface ViewSettings {
-    // Scene
-    gridSize: number;          // Grid extends ±gridSize in X/Z
-    gridDivisions: number;     // Number of grid lines
-    gridOpacity: number;       // 0.0-1.0
-    gridColor: string;         // Hex color
-
-    // Camera
-    cameraDistance: number;    // Distance from target
-    cameraTarget: { x: number; y: number; z: number }; // Rotation center
-    fov: number;              // Field of view (degrees)
-
-    // Entities
-    entityLabelScale: number;  // Label size multiplier
-    entitySizeMultiplier: number; // Mesh size
-
-    // Visual Effects
-    lightningSpeed: number;    // Animation speed (ms per hop)
-    lightningEnabled: boolean;
-    broadcastEnabled: boolean;
-    broadcastStyle: 'raycast' | 'wave' | 'particles';
-
-    // Performance
-    rendererMode: 'webgl' | 'webgpu';
-    forceLayoutEnabled: boolean;
-    antiAlias: boolean;
-    verboseLogging: boolean; // Master log toggle
-    showFpsOverlay: boolean; // Show FPS + network stats overlay
-
-    // Camera Presets
-    autoRotate: boolean;
-    autoRotateSpeed: number; // RPM
-    cameraPreset: 'free' | 'top-down' | 'side' | 'orbit';
-
-    // VR Settings
-    vrScaleMultiplier: number; // 0.1-10x for comfortable VR viewing
-  }
-
-  const DEFAULT_SETTINGS: ViewSettings = {
-    // Scene — must match Graph3DPanel's own defaults, otherwise the first broadcast
-    // after mount visibly changes a scene the user never configured.
-    gridSize: 2000,
-    gridDivisions: 3,
-    gridOpacity: 0.4,
-    gridColor: '#ffffff',
-
-    // Camera
-    cameraDistance: 500,
-    cameraTarget: { x: 0, y: 0, z: 0 },
-    fov: 75,
-
-    // Entities
-    entityLabelScale: 2.0,
-    entitySizeMultiplier: 1.0,
-
-    // Visual Effects
-    lightningSpeed: 100,
-    lightningEnabled: false,
-    broadcastEnabled: true,
-    broadcastStyle: 'raycast',
-
-    // Performance
-    rendererMode: 'webgl',
-    forceLayoutEnabled: true,
-    antiAlias: true,
-    verboseLogging: false, // Logs OFF by default
-    showFpsOverlay: false, // FPS overlay hidden by default
-
-    // Camera Presets
-    autoRotate: false,
-    autoRotateSpeed: 0.5, // RPM (revolutions per minute)
-    cameraPreset: 'free',
-
-    // VR Settings
-    vrScaleMultiplier: 1.0 // Default 1:1 scale
-  };
-
-  let settings: ViewSettings = { ...DEFAULT_SETTINGS };
+  // Settings state (loaded from localStorage on mount). Defaults must match
+  // Graph3DPanel so the first broadcast never changes an untouched scene.
+  let settings: ViewSettings = createDefaultViewSettings();
   let activeCategory: 'storage' | 'stack-manager' | 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'advanced' | 'layout' = 'storage';
 
   // Layout config state
@@ -121,26 +58,18 @@
   let layoutError = '';
   let layoutSuccess = '';
   let settingsStorageError = '';
-  let entityOpenMode: 'replace' | 'new-tab' = 'replace';
+  let entityOpenMode: EntityOpenMode = 'replace';
   let networkMachineJson = '';
   let networkMachineStatus = '';
   let networkMachineError = '';
 
-  function formatSettingsError(action: string, err: unknown): string {
-    const message = err instanceof Error ? err.message : String(err);
-    return `Settings ${action} failed: ${message}`;
-  }
-
   // Load settings from localStorage on mount
   async function loadSettings() {
     try {
-      const stored = localStorage.getItem('xln-view-settings');
-      const storedSettings = stored ? JSON.parse(stored) : null;
-      if (stored) {
-        settings = { ...DEFAULT_SETTINGS, ...storedSettings };
-      }
+      const stored = localStorage.getItem(VIEW_SETTINGS_STORAGE_KEY);
+      if (stored) settings = parseViewSettings(stored);
       settingsStorageError = '';
-      entityOpenMode = localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab' ? 'new-tab' : 'replace';
+      entityOpenMode = resolveEntityOpenMode(localStorage.getItem(ENTITY_OPEN_MODE_STORAGE_KEY));
 
       // WebGL is the deterministic default renderer. `navigator.gpu`
       // only proves that the API exists; the browser may still have no usable
@@ -154,11 +83,7 @@
   // Listen for live camera updates from Graph3D
   onMount(() => {
     const unsubscribe = panelBridge.on('camera:update', (data) => {
-      liveCameraState = {
-        position: data.position || liveCameraState.position,
-        target: data.target || liveCameraState.target,
-        distance: data.distance || liveCameraState.distance,
-      };
+      liveCameraState = mergeSettingsCameraState(liveCameraState, data);
     });
 
     void loadSettings().then(broadcastAllSettings);
@@ -177,7 +102,7 @@
   // Save settings to localStorage
   function saveSettings() {
     try {
-      localStorage.setItem('xln-view-settings', JSON.stringify(settings));
+      localStorage.setItem(VIEW_SETTINGS_STORAGE_KEY, serializeViewSettings(settings));
       settingsStorageError = '';
     } catch (err) {
       settingsStorageError = formatSettingsError('save', err);
@@ -206,7 +131,7 @@
 
   // Reset to defaults
   function resetToDefaults() {
-    settings = { ...DEFAULT_SETTINGS };
+    settings = createDefaultViewSettings();
     saveSettings();
     panelBridge.emit('settings:reset', {});
   }
@@ -270,7 +195,7 @@
 
       // Restore settings
       if (config.settings) {
-        settings = { ...DEFAULT_SETTINGS, ...config.settings };
+        settings = normalizeViewSettings(config.settings);
         saveSettings();
         panelBridge.emit('settings:reset', {});
       }
@@ -327,9 +252,9 @@
     }
   }
 
-  function updateEntityOpenMode(mode: 'replace' | 'new-tab'): void {
+  function updateEntityOpenMode(mode: EntityOpenMode): void {
     entityOpenMode = mode;
-    localStorage.setItem('xln-dock-entity-open-mode', mode);
+    localStorage.setItem(ENTITY_OPEN_MODE_STORAGE_KEY, mode);
   }
 
   function focusDockPanel(panelId: string): void {

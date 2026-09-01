@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH JURISDICTION; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH SETTINGS; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1019,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH JURISDICTION`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH SETTINGS`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1324,6 +1324,27 @@ soundcheck gates before the unchanged host-only `cargo` absence stops Rust
 checks. The separate size policy still reports only out-of-scope
 `core/qa/report.ts` at 3,001 / 3,000 lines.
 
+The eighth panel slice ports the Settings state model: independent canonical
+defaults, partial persisted-setting normalization, malformed-value rejection,
+storage serialization, live-camera snapshot merging, entity-open-mode
+normalization, and operator-facing error text now live in
+`packages/runtime-client/src/settings-panel-view.ts`. The canonical Svelte
+panel retains browser storage effects, Dockview import/export, Graph3D events,
+NetworkMachine operations, lifecycle, markup, copy, and styling. Six focused
+tests pass with 39 expectations, and the complete affected Settings/Dock batch
+passes 20 tests with 158 expectations. The unsafe-types gate covers 608 files
+with zero findings, Svelte diagnostics are 0 errors / 0 warnings, the
+canonical build transforms 6,407 client modules, all four React surfaces pass
+the local matrix, and the valid outside-sandbox full frontend run has an empty
+diff against the exact 13-test baseline. Nominal UI behavior is unchanged;
+malformed persisted settings now reach the existing loud storage-error path,
+so no new visual feature or screenshot evidence is required. Pre-push root
+evidence passes 26 BrainVault/runtime tests with 100,156 expectations, compiles
+28 Solidity files, regenerates 92 TypeChain files, verifies 4
+immutable-metadata contracts, and passes all 10 soundcheck gates before the
+unchanged host-only `cargo` absence stops Rust checks. The separate size policy
+still reports only out-of-scope `core/qa/report.ts` at 3,001 / 3,000 lines.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1332,7 +1353,7 @@ already framework-neutral): neutralize `runtimeGraphFrameCache` (the only
 Svelte-importing network3d file) and the `networkMachineRuntimeStore` /
 `settingsStore` facades next; panel ports are complete through Console →
 RuntimeIO → Solvency → Runtime Diagnostics → Gossip → Time Machine transport →
-Jurisdiction, then continue Settings → Architect; wrap `DockviewComponent` for React with layout JSON kept
+Jurisdiction → Settings, then continue Architect; wrap `DockviewComponent` for React with layout JSON kept
 compatible; rebuild Graph3DPanel around refs + explicit effects last; and
 treat the 112-file / 43k-line Entity workspace tree behind `entity-panel` and
 the pinned wallet as its own explicitly sized sub-program before any `/embed`
@@ -1424,7 +1445,7 @@ any mismatch. Never compile on production.
 1. Continue WP7 with the workspace port in the recorded order: state layer
    is now svelte-free and panel ports are complete through Console → RuntimeIO
    → Solvency → Runtime Diagnostics → Gossip → Time Machine transport →
-   Jurisdiction. Continue Settings → Architect, wrap Dockview for React, rebuild
+   Jurisdiction → Settings. Continue Architect, wrap Dockview for React, rebuild
    Graph3DPanel last, and size
    the Entity workspace sub-program before flipping the `/embed` route.
 2. Owner to assign: two `network-timeline-source` failures
