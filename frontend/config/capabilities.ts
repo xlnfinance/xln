@@ -381,6 +381,7 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/architect-panel-view.ts',
       'frontend/packages/runtime-client/src/workspace-dock-layout.ts',
       'frontend/packages/ui/src/workspace-dock.tsx',
+      'frontend/packages/ui/src/graph3d-lifecycle.ts',
     ],
     behavior: [
       'Dockview layout',
@@ -388,6 +389,7 @@ export const CAPABILITIES = [
       'Runtime I/O, console, Solvency, Runtime Diagnostics, Gossip, and Time Machine',
       'framework-neutral panel projections shared with the canonical Svelte workspace',
       'shared Svelte-compatible layout persistence and a lifecycle-safe React Dockview adapter',
+      'framework-neutral Graph3D canvas, controls, resize, debug, renderer, and XR teardown boundaries',
     ],
     status: 'in_progress',
   },

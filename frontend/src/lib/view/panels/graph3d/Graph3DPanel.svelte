@@ -65,6 +65,11 @@ import {
 import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphTransactionLike, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
 import { collectGraphTokenIds, getGraphEntitySizeForToken } from "./graph3d-actions";
+import {
+  bindGraphControlsLifecycle,
+  bindGraphViewportLifecycle,
+  type GraphLifecycleBinding,
+} from "../../../../../packages/ui/src/graph3d-lifecycle";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -333,7 +338,6 @@ let autoRotateSpeed: number = 0.5; // RPM
 let showFpsOverlay: boolean = false; // Controlled by settings
 let cameraTarget: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
 let gridHelper: THREE.GridHelper | null = null;
-let resizeDebounceTimer: number | null = null;
 let gridPulseIntensity: number = 0; // 0-1, animates on J-Machine broadcasts
 function getTokenSymbol(tokenId: number): string {
   const tokenInfo = XLN?.getTokenInfo?.(tokenId);
@@ -577,6 +581,9 @@ let activeRipples: GraphRipple[] = [];
 let availableRoutes: GraphPaymentRoute[] = [];
 let selectedRouteIndex: number = 0;
 let graphInitialized = false;
+let graphDestroyed = false;
+let viewportLifecycle: GraphLifecycleBinding | null = null;
+let controlsLifecycle: GraphLifecycleBinding | null = null;
 async function initAndSetup() {
   if (graphInitialized) return;
   graphInitialized = true;
@@ -585,6 +592,7 @@ async function initAndSetup() {
   } catch (err) {
     console.error("[Graph3D] Failed to load XLN runtime:", err);
   }
+  if (graphDestroyed) return;
   if (navigator.xr) {
     try {
       const vrSupported = await navigator.xr.isSessionSupported("immersive-vr");
@@ -595,7 +603,9 @@ async function initAndSetup() {
   } else {
     isVRSupported = false;
   }
+  if (graphDestroyed) return;
   await initThreeJS();
+  if (graphDestroyed) return;
   animate();
   startJAutoProposer();
 }
@@ -746,34 +756,22 @@ onMount(() => {
     panelBridge.off("camera:restore", handleCameraRestore);
   };
 });
-let resizeObserver: ResizeObserver | null = null;
 onDestroy(() => {
+  graphDestroyed = true;
+  viewportLifecycle?.dispose();
+  viewportLifecycle = null;
+  controlsLifecycle?.dispose();
+  controlsLifecycle = null;
+  unregisterGraphDebugSurface();
   immersiveWalletSurface?.dispose();
   immersiveWalletSurface = null;
   if (jAutoProposerInterval) {
     clearInterval(jAutoProposerInterval);
     jAutoProposerInterval = null;
   }
-  if (resizeObserver && container) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
-  }
-  activeBroadcastSpheres.forEach(({ sphere, animationId: rafId }) => {
-    cancelAnimationFrame(rafId);
-    if (graphWorld) graphWorld.remove(sphere);
-    disposeGraphObject3D(sphere);
-  });
-  activeBroadcastSpheres = [];
   if (animationId) {
     cancelAnimationFrame(animationId);
     animationId = null;
-  }
-  if (renderer) {
-    renderer.dispose();
-  }
-  if (scene) {
-  }
-  if (camera) {
   }
   if (controls) {
     if (typeof controls.dispose === "function") {
@@ -781,14 +779,52 @@ onDestroy(() => {
     }
   }
   entityMeshMap.clear();
-  entityInputStrikes.forEach((strike) => {
-    if (strike.line && scene) {
+  if (typeof window !== "undefined") {
+    if (window.__debugScene === scene) delete window.__debugScene;
+    if (window.__debugCamera === camera) delete window.__debugCamera;
+    if (window.__debugRenderer === renderer) delete window.__debugRenderer;
+  }
+  let resourcesDisposed = false;
+  const disposeGraphResources = () => {
+    if (resourcesDisposed) return;
+    resourcesDisposed = true;
+    activeBroadcastSpheres.forEach(({ sphere, animationId: rafId }) => {
+      cancelAnimationFrame(rafId);
+      if (graphWorld) graphWorld.remove(sphere);
+      disposeGraphObject3D(sphere);
+    });
+    activeBroadcastSpheres = [];
+    entityInputStrikes.forEach((strike) => {
+      if (!strike.line || !graphWorld) return;
       graphWorld.remove(strike.line);
       strike.line.geometry.dispose();
       (strike.line.material as THREE.Material).dispose();
+    });
+    entityInputStrikes = [];
+    if (scene) {
+      disposeGraphObject3D(scene);
+      scene.clear();
     }
-  });
-  entityInputStrikes = [];
+    gridHelper = null;
+    entities = [];
+    connections = [];
+    particles = [];
+    activeRipples = [];
+    jMachines.clear();
+    if (renderer) {
+      renderer.setAnimationLoop(null);
+      renderer.domElement.remove();
+      renderer.dispose();
+    }
+  };
+  const xrSession = renderer?.xr?.getSession?.() ?? null;
+  if (xrSession) {
+    void xrSession.end().catch((error) => {
+      debug.error("Graph XR session teardown failed:", error);
+    }).finally(disposeGraphResources);
+  } else {
+    disposeGraphResources();
+  }
 });
 function createGrid() {
   if (!scene) return;
@@ -857,6 +893,7 @@ async function initThreeJS() {
   } catch (error) {
     debug.warn("OrbitControls not available:", error);
   }
+  if (graphDestroyed) return;
   scene = new THREE.Scene();
   graphWorld = new THREE.Group();
   graphWorld.name = "xln-graph-world";
@@ -874,6 +911,10 @@ async function initThreeJS() {
   );
   camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
   const createdRenderer = await createGraphRenderer(rendererMode, { antialias: false }); // Disabled for performance
+  if (graphDestroyed) {
+    createdRenderer?.dispose();
+    return;
+  }
   if (!createdRenderer) {
     console.warn("[Graph3D] Renderer unavailable - skipping 3D init");
     return;
@@ -901,15 +942,15 @@ async function initThreeJS() {
     controls.keys = { LEFT: "", UP: "", RIGHT: "", BOTTOM: "" };
     controls.target.set(-37, 511, -243);
     controls.update();
-    controls.addEventListener("change", () => {
-      panelBridge.emit("camera:update", {
+    controlsLifecycle?.dispose();
+    controlsLifecycle = bindGraphControlsLifecycle(controls, {
+      onChange: () => panelBridge.emit("camera:update", {
         position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
         target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
         distance: camera.position.distanceTo(controls.target),
-      });
+      }),
+      onEnd: saveBirdViewSettings,
     });
-    controls.addEventListener("start", () => {});
-    controls.addEventListener("end", () => {});
     controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
     if (savedSettings.camera) {
       const cam = savedSettings.camera;
@@ -921,9 +962,6 @@ async function initThreeJS() {
     } else {
       controls.update();
     }
-    controls.addEventListener("end", () => {
-      saveBirdViewSettings();
-    });
   }
   raycaster = new THREE.Raycaster();
   raycaster.params.Line = { threshold: 5 };
@@ -936,27 +974,19 @@ async function initThreeJS() {
   const rimLight = new THREE.DirectionalLight(0x00ff88, 0.4);
   rimLight.position.set(-200, 30, -50); // Opposite side
   scene.add(rimLight);
-  renderer.domElement.addEventListener("mousedown", onMouseDown);
-  renderer.domElement.addEventListener("mouseup", onMouseUp);
-  renderer.domElement.addEventListener("mousemove", onMouseMove);
-  renderer.domElement.addEventListener("mouseout", onMouseOut);
-  renderer.domElement.addEventListener("click", onMouseClick);
-  renderer.domElement.addEventListener("dblclick", onMouseDoubleClick);
-  renderer.domElement.addEventListener("touchstart", onTouchStart, { passive: false });
-  renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: false });
-  renderer.domElement.addEventListener("touchend", onTouchEnd);
-  window.addEventListener("resize", onWindowResize);
-  resizeObserver = new ResizeObserver(() => {
-    if (resizeDebounceTimer) {
-      clearTimeout(resizeDebounceTimer);
-    }
-    resizeDebounceTimer = window.setTimeout(() => {
-      requestAnimationFrame(() => {
-        onWindowResize();
-      });
-    }, 50); // 50ms debounce
+  viewportLifecycle?.dispose();
+  viewportLifecycle = bindGraphViewportLifecycle(container, renderer.domElement, {
+    onMouseDown,
+    onMouseUp,
+    onMouseMove,
+    onMouseOut,
+    onClick: onMouseClick,
+    onDoubleClick: onMouseDoubleClick,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
+    onResize: onWindowResize,
   });
-  resizeObserver.observe(container);
   if (isVRSupported && renderer) {
     setupVRControllers();
   }
@@ -1153,7 +1183,7 @@ async function enterVR() {
       immersiveWalletSurface?.dispose();
       immersiveWalletSurface = null;
       renderer.setAnimationLoop(null);
-      animate();
+      if (!graphDestroyed) animate();
     });
   } catch (error) {
     console.error("Failed to enter VR:", error);
@@ -1672,6 +1702,7 @@ const perfMonitor = new PerformanceMonitor((metrics: PerfMetrics) => {
   frameTime = metrics.frameTime;
 });
 function animate() {
+  if (graphDestroyed) return;
   perfMonitor.begin(); // Start FPS measurement
   if (!renderer?.xr?.isPresenting) {
     animationId = requestAnimationFrame(animate);
@@ -2359,7 +2390,7 @@ function graphDebugSnapshot() {
       : null,
   };
 }
-registerDebugSurface("graph", () => ({ snapshot: graphDebugSnapshot }));
+const unregisterGraphDebugSurface = registerDebugSurface("graph", () => ({ snapshot: graphDebugSnapshot }));
 function getEntityName(entityId: string): string {
   return getGraphEntityNameFromGossip(env?.gossip, entityId);
 }
