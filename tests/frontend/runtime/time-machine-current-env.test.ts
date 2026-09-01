@@ -381,13 +381,15 @@ describe('frontend time-machine current env contract', () => {
 
   test('demo actions block historical frames and retired graph actions stay absent', () => {
     const architect = read('frontend/src/lib/view/panels/ArchitectPanel.svelte');
+    const architectView = read('frontend/packages/runtime-client/src/architect-panel-view.ts');
     const graph = read('frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte');
     const dock = read('frontend/src/lib/view/DockRoot.svelte');
 
     expect(architect).toContain('function publishCurrentEnv');
     expect(architect).toContain('$: isLiveActionFrame = Boolean($runtimeFrameIsLive) && $runtimeFrameTimeIndex === -1;');
     expect(architect).toContain('function requireLiveMode');
-    expect(architect).toContain('Switch to the current runtime state before acting.');
+    expect(architect).toContain('getArchitectLiveModeBlockMessage(action)');
+    expect(architectView).toContain('Switch to the current runtime state before acting.');
     expect(architect).toContain('await ingressRuntimeInput');
     expect(architect).not.toContain('XLN.enqueueRuntimeInput($runtimeFrameEnv, {');
     expect(architect).not.toContain('runtimeFrameTimeIndex.set(($runtimeFrameEnv.history?.length || 1) - 1)');
