@@ -967,6 +967,18 @@ export const laneRuntimePort = (portBase: number, laneIndex: number): number => 
 
 const READY_TIMEOUT_MS = 20_000;
 
+/**
+ * All load hosts boot in parallel, so one host's readiness competes with
+ * every other host's workers for the same CPUs. At 8,000 users (40 hosts,
+ * 320 workers) host-7200 logged HOST_READY exactly 20 s after spawn and lost
+ * the race with the fixed budget. Scale the budget with the total user count;
+ * 1,000 users keeps the historical 20 s.
+ */
+const laneHostReadyTimeoutMs = (): number => {
+  const users = Number(process.env['XLN_HLT_USERS'] || '0') || 0;
+  return Math.max(READY_TIMEOUT_MS, users * 15);
+};
+
 export const resolveHltLaneJurisdictionsPath = (workDir: string): string => {
   const jurisdictionsPath = join(workDir, 'prod-mesh', 'jurisdictions.json');
   if (!existsSync(jurisdictionsPath)) {
@@ -1065,7 +1077,7 @@ const spawnSovereignRuntimeHost = async (options: {
   await waitForHttpReady(
     `http://127.0.0.1:${firstPort}/health`,
     child,
-    READY_TIMEOUT_MS,
+    laneHostReadyTimeoutMs(),
     (_response, bodyText) => {
       try {
         const body = JSON.parse(bodyText) as { ready?: unknown; runtimes?: unknown; expected?: unknown };
