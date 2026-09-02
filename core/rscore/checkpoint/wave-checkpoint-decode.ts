@@ -15,7 +15,7 @@ import {
   type RscoreConsensusSeed,
 } from './checkpoint-restore-consensus';
 import type { AccountReplica } from '../../types/account';
-import { RSCORE_CUTOVER_VERIFY } from '../cutover/verify';
+import { RSCORE_CUTOVER_VERIFY } from '../engine-leaf/verify';
 import {
   rscoreCheckpointBytes,
   rscoreCheckpointList,

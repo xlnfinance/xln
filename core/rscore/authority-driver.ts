@@ -29,9 +29,7 @@ import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import {
-  authorityAccountInputRow,
   buildAuthorityWave,
-  type AuthorityCertifiedBoard,
   type AuthorityWave,
 } from './authority-wave';
 import {
@@ -60,14 +58,12 @@ import {
 } from './checkpoint/checkpoint-wire';
 import { decodeRscoreAccountRestoreRow } from './checkpoint/checkpoint-restore';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
-import type { AccountInput, AccountReplica } from '../types/account';
+import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 import { DEFAULT_MATERIALIZE_PERIOD_FRAMES } from '../storage/keys';
 import { entityOwnedSectionDigests, entitySnapshotWire } from './entity/snapshot-wire';
-import { entityDeterministicContextWire, type RscoreEntityRound } from './entity/round-wire';
-import type { EntityInfraContext } from '../types/entity/infra-context';
-import type { EntityState } from '../entity/types';
+import { type RscoreEntityRound } from './entity/round-wire';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -117,7 +113,7 @@ export const authorityReplayEnabled = (): boolean =>
   && process.env['XLN_RSCORE_AUTHORITY'] === '1';
 
 /** Explicit feature gate while the resident Entity profile is proved in HLT. */
-export const entityAuthorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean =>
+const entityAuthorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean =>
   authorityDriverEnabled(env)
   && process.env['XLN_RSCORE_ENTITY_AUTHORITY'] === '1';
 
@@ -165,7 +161,7 @@ export type AuthorityEntityStageHandle = Readonly<{
   baseAccountsRoot: string;
 }>;
 
-export type AuthorityCheckpointStorageInput = Readonly<{
+type AuthorityCheckpointStorageInput = Readonly<{
   ownerEntityId: string;
   protocolFingerprint: string;
   checkpoint: RscoreCheckpointChanges;
@@ -760,175 +756,11 @@ const candidateForOwner = (
   .find(frame => frame.session.ownerEntityId === ownerEntityId);
 
 /** The Entity input whose Rust path-copy candidate is currently open. */
-export const authorityCutoverStageHandle = (
+export const authorityEntityStageHandle = (
   env: RuntimeReplica,
   ownerEntityId: string,
 ): AuthorityEntityStageHandle | null =>
   candidateForOwner(env, ownerEntityId.trim().toLowerCase())?.entityInput ?? null;
-
-const openEntityInputCandidate = (
-  frame: OpenFrame,
-  owner: string,
-  expectedAccountsRoot: string,
-): void => {
-  const expected = expectedAccountsRoot.toLowerCase();
-  if (frame.entityInput === null) {
-    if (expected !== frame.acceptedAccountsRoot) {
-      return halt('ENTITY_INPUT_PARENT_ROOT_MISMATCH', {
-        owner,
-        accepted: frame.acceptedAccountsRoot,
-        requested: expectedAccountsRoot,
-      });
-    }
-    frame.entityInput = { ownerEntityId: owner, baseAccountsRoot: expected };
-    frame.entityRound = null;
-    return;
-  }
-  if (expected !== frame.entityInput.baseAccountsRoot) {
-    return halt('ENTITY_INPUT_RETRY_ROOT_MISMATCH', {
-      owner,
-      opened: frame.entityInput.baseAccountsRoot,
-      requested: expectedAccountsRoot,
-    });
-  }
-};
-
-/**
- * One process crossing for Account inbound, Entity pay/orderbook work and
- * Account outbound. TypeScript may execute the same Entity logic as an oracle,
- * but the outbound phase consumes this cached result and performs no IPC.
- */
-export const runAuthorityCutoverEntityBatch = async (
-  env: RuntimeReplica,
-  request: Readonly<{
-    ownerEntityId: string;
-    expectedAccountsRoot: string;
-    entityState: EntityState;
-    entityContext: EntityInfraContext;
-    entityTimestamp: number;
-    finalizedJHeight: number;
-    inputs: readonly Readonly<{
-      accountId: string;
-      input: Extract<AccountInput, { kind: 'ack' | 'ack_frame' }>;
-      counterpartyBoardAuthority?: AuthorityCertifiedBoard;
-      localBoardAuthority?: AuthorityCertifiedBoard;
-      genesisPolicy?: Readonly<{
-        expectedDomain: AccountReplica['state']['domain'];
-        shadowPolicyRoot: string;
-        shadowPolicyRows: readonly (readonly [number, unknown])[];
-        deltaTransformer: string;
-        publicPinned: false;
-      }>;
-    }>[];
-  }>,
-): Promise<RscoreEntityRound | null> => {
-  if (!entityAuthorityDriverEnabled(env)) return null;
-  const owner = request.ownerEntityId.trim().toLowerCase();
-  const frame = candidateForOwner(env, owner);
-  if (frame === undefined) return null;
-  if (!frame.session.entityResident) {
-    return halt('ENTITY_RESIDENT_SESSION_REQUIRED', { owner });
-  }
-  if (request.entityState.entityId.trim().toLowerCase() !== owner) {
-    return halt('ENTITY_ROUND_OWNER_MISMATCH', {
-      owner,
-      state: request.entityState.entityId,
-    });
-  }
-  if (request.entityContext.height !== request.entityState.height + 1) {
-    return halt('ENTITY_ROUND_HEIGHT_MISMATCH', {
-      owner,
-      parent: request.entityState.height,
-      context: request.entityContext.height,
-    });
-  }
-  const parentRoot = accountMapRoot(request.entityState.accounts, owner);
-  if (parentRoot !== request.expectedAccountsRoot.toLowerCase()) {
-    return halt('ENTITY_ROUND_PARENT_ROOT_MISMATCH', {
-      owner,
-      expected: request.expectedAccountsRoot,
-      state: parentRoot,
-    });
-  }
-  openEntityInputCandidate(frame, owner, request.expectedAccountsRoot);
-  const rows = request.inputs.map((entry, index) => authorityAccountInputRow(
-    index,
-    entry.accountId,
-    { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityAccountInputRow>[2],
-    entry.genesisPolicy,
-    entry.counterpartyBoardAuthority,
-    entry.localBoardAuthority,
-  ));
-  const startedMs = performance.now();
-  const round = await frame.session.client.entityRound({
-    ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_ENTITY_OWNER'),
-    expectedAccountsRoot: hexToWireBytes(
-      request.expectedAccountsRoot,
-      32,
-      'AUTHORITY_ENTITY_EXPECTED_ACCOUNTS_ROOT',
-    ),
-    inboundTimestamp: request.entityTimestamp,
-    inboundJHeight: request.finalizedJHeight,
-    inboundRows: rows,
-    // Entity Stage 2 consumes Account state committed by Stage 1. The full
-    // resident round still defers root sealing, but must return the exact
-    // changed inbound Account rows to the TypeScript oracle/followup path.
-    inboundPostAccounts: true,
-    entityHeight: request.entityContext.height,
-    outboundTimestamp: request.entityTimestamp,
-    outboundJHeight: request.finalizedJHeight,
-    checkpointDue: env.accountAuthorityCheckpointDue === true,
-    postAccounts: true,
-    context: entityDeterministicContextWire(
-      request.entityState,
-      request.entityContext,
-      request.entityState.config?.jurisdiction?.name,
-    ),
-  });
-  if ((env.accountAuthorityCheckpointDue === true) !== (round.outbound.checkpoint !== null)) {
-    return halt('ENTITY_ROUND_CHECKPOINT_PRESENCE', {
-      owner,
-      requested: env.accountAuthorityCheckpointDue === true,
-      received: round.outbound.checkpoint !== null,
-    });
-  }
-  if (round.outbound.checkpoint !== null) {
-    const checkpointRoot = `0x${Buffer.from(
-      round.outbound.checkpoint.restoreToken[2],
-    ).toString('hex')}`.toLowerCase();
-    frame.checkpoints.set(checkpointRoot, round.outbound.checkpoint);
-  }
-  for (const created of round.inbound.createdAccounts) {
-    frame.candidateAccounts.add(created.accountId);
-  }
-  frame.latest = {
-    revision: round.outbound.revision,
-    accountsRoot: round.outbound.accountsRoot,
-  };
-  frame.entityRound = round;
-  report.waves += 1;
-  report.inboundRounds += 1;
-  report.outboundRounds += 1;
-  report.engineMicros += round.engineMicros;
-  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
-  report.inputsApplied += round.inbound.applied.length;
-  report.framesProposed += round.outbound.proposals.filter(row => row.frame !== null).length;
-  return round;
-};
-
-export const authorityCutoverEntityRound = (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-): RscoreEntityRound | null => {
-  if (!entityAuthorityDriverEnabled(env)) return null;
-  const owner = ownerEntityId.trim().toLowerCase();
-  const frame = candidateForOwner(env, owner);
-  if (frame === undefined) return null;
-  if (frame.entityInput === null || frame.entityRound === null) {
-    return halt('ENTITY_ROUND_RESULT_MISSING', { owner });
-  }
-  return frame.entityRound;
-};
 
 /** Close the Entity bookkeeping marker; Rust already owns the new state. */
 export const acceptAuthorityEntityStage = async (

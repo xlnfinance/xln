@@ -109,7 +109,6 @@ describe('production startup wiring', () => {
         XLN_RUNTIME_MIN_FRAME_DELAY_MS: '25',
         XLN_HUB_RSCORE_AUTHORITY_H1: '1',
         XLN_RSCORE_BINARY: '/bin/rscore',
-        XLN_RSCORE_AUTHORITY_CUTOVER: '1',
         XLN_RSCORE_AUTHORITY_RECORD: '1',
         XLN_RUNTIME_APPLY_PROFILE: '1',
         XLN_RSCORE_PROFILE_ENTITY: '1',
@@ -122,7 +121,6 @@ describe('production startup wiring', () => {
       ANVIL_RPC: 'http://rpc',
       XLN_RSCORE_AUTHORITY: '1',
       XLN_RSCORE_BINARY: '/bin/rscore',
-      XLN_RSCORE_AUTHORITY_CUTOVER: '1',
       XLN_RSCORE_AUTHORITY_RECORD: '1',
       XLN_RUNTIME_APPLY_PROFILE: '1',
       XLN_RSCORE_PROFILE_ENTITY: '1',
@@ -216,7 +214,6 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('green h1-production-path');
     expect(smoke).not.toContain('green h1-live-authority');
     expect(smoke).not.toContain("inheritedProcessEnv['XLN_HUB_RSCORE_AUTHORITY_H1'] = '1';");
-    expect(smoke).not.toContain("inheritedProcessEnv['XLN_RSCORE_AUTHORITY_CUTOVER'] = '1';");
     expect(smoke).not.toContain('XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES:');
     expect(smoke).toContain("readH1AuthorityFrame(before.height)");
     expect(smoke).toContain('restored.canonicalStateHash !== before.canonicalStateHash');

@@ -34,7 +34,7 @@ import {
   rscoreWireTuple,
   rscoreWireUint,
 } from './account-tx-wire-decode';
-import { RSCORE_CUTOVER_VERIFY } from './cutover/verify';
+import { RSCORE_CUTOVER_VERIFY } from './engine-leaf/verify';
 import {
   decodeRscoreCheckpointChanges,
   type RscoreCheckpointChanges,

@@ -44,7 +44,7 @@ import type { HankoString } from '../../types/hanko';
 import type { RscoreDisputeDraft, RscoreOutboundAck } from './checkpoint-restore-consensus';
 import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
 import { projectRscoreCommittedEnvelopeFields } from './checkpoint-restore';
-import { RSCORE_CUTOVER_VERIFY } from '../cutover/verify';
+import { RSCORE_CUTOVER_VERIFY } from '../engine-leaf/verify';
 import type {
   RscoreAccountCheckpointRow,
   RscoreResolvedAccountRow,

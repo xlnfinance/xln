@@ -96,9 +96,6 @@ export const buildHubChildProcessEnv = (
     if (source['XLN_RSCORE_AUTHORITY_WORKERS']) {
       child['XLN_RSCORE_AUTHORITY_WORKERS'] = source['XLN_RSCORE_AUTHORITY_WORKERS'];
     }
-    if (source['XLN_RSCORE_AUTHORITY_CUTOVER']) {
-      child['XLN_RSCORE_AUTHORITY_CUTOVER'] = source['XLN_RSCORE_AUTHORITY_CUTOVER'];
-    }
     if (source['XLN_RSCORE_AUTHORITY_RECORD']) {
       child['XLN_RSCORE_AUTHORITY_RECORD'] = source['XLN_RSCORE_AUTHORITY_RECORD'];
     }

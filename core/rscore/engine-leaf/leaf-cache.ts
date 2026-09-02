@@ -3,8 +3,8 @@
  *
  * TypeScript hashes the same leaf a second time whenever the account map
  * folds — the projection reads every field of an Account the engine just
- * sealed. Under cutover that is redundant work over a body the engine is
- * authoritative for, so the digest it returned is handed to the fold instead.
+ * sealed. That is redundant work over a body the engine is authoritative for,
+ * so the digest it returned is handed to the fold instead.
  *
  * The cache is only ever a shortcut: the map drops an entry the moment
  * TypeScript takes that Account for writing, so a leaf cannot outlive the

@@ -4,7 +4,7 @@
  * Key projections: bounded Entity fields and nested Account/Book Patricia roots.
  * Human-audit importance: 100/100 — this root is the Entity quorum's signed state.
  */
-import { forgetEngineAccountLeaf } from '../../rscore/cutover/leaf-registry';
+import { forgetEngineAccountLeaf } from '../../rscore/engine-leaf/leaf-registry';
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import type {

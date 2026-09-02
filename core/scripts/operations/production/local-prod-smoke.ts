@@ -193,7 +193,7 @@ const PROFILING_ENV_KEYS = [
   // process-wide switch: an Entity the engine cannot sign for must not be
   // handed to it by inheritance.
   'XLN_RSCORE_AUTHORITY_WORKERS', 'XLN_RSCORE_AUTHORITY_RECORD',
-  'XLN_RSCORE_AUTHORITY_CUTOVER', 'XLN_RSCORE_PROFILE_ENTITY',
+  'XLN_RSCORE_PROFILE_ENTITY',
   'XLN_RSCORE_PROFILE_PROJECTION',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {

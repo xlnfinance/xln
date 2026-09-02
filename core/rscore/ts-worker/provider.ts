@@ -1,6 +1,6 @@
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../account/consensus/types';
 import { replaceAccountReplica } from '../../account/state/candidate-overlay';
-import { rememberEngineAccountLeaf } from '../cutover/leaf-registry';
+import { rememberEngineAccountLeaf } from '../engine-leaf/leaf-registry';
 import {
   hydrateAccountDocFromStorage,
   projectPortableAccountDoc,

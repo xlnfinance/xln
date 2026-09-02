@@ -18,7 +18,7 @@ import {
 import {
   authorityDriverEnabled,
   authorityRuntimeSuppressed,
-  authorityCutoverStageHandle,
+  authorityEntityStageHandle,
   type AuthorityEntityStageHandle,
 } from '../../rscore/authority-driver.ts';
 import {
@@ -328,7 +328,7 @@ export const applyEntityInputToReplica = async (
       // The engine opened its savepoint while executing this input, if the
       // input moved any account at all. Nothing is staged after the fact.
       const authorityStage = authority.driverEnabled
-        ? authorityCutoverStageHandle(env, entityReplica.entityId)
+        ? authorityEntityStageHandle(env, entityReplica.entityId)
         : null;
       return {
         outcome: applied.outcome,

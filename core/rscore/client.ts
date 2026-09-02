@@ -13,7 +13,7 @@
  * request per client. The engine is OPTIONAL: nothing in the runtime imports
  * this module unless the rscore flag wiring asks for it.
  */
-import { RSCORE_CUTOVER_VERIFY } from './cutover/verify';
+import { RSCORE_CUTOVER_VERIFY } from './engine-leaf/verify';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';

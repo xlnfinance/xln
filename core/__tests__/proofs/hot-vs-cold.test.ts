@@ -58,12 +58,12 @@ import {
   EntityAccountCandidateMap,
   PersistentEntityAccountMap,
 } from '../../entity/state/persistent-account-map';
-import { engineAccountValueHash } from '../../rscore/cutover/leaf-cache';
+import { engineAccountValueHash } from '../../rscore/engine-leaf/leaf-cache';
 import {
   forgetEngineAccountLeaf,
   peekEngineAccountLeaf,
   rememberEngineAccountLeaf,
-} from '../../rscore/cutover/leaf-registry';
+} from '../../rscore/engine-leaf/leaf-registry';
 import type { EntityState } from '../../entity/types';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
