@@ -78,6 +78,9 @@ jobs:
         with:
           version: v1.7.1
 
+      - name: Setup forge-std
+        run: bun --cwd jurisdictions run forge:setup
+
       - name: Install source-check tooling
         run: sudo apt-get update && sudo apt-get install --yes ripgrep
 

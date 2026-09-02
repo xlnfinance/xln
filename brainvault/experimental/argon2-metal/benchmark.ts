@@ -22,12 +22,12 @@ if (args.some(value => !allowed.some(prefix => value.startsWith(prefix)) || valu
   throw new Error('BRAINVAULT_METAL_BENCHMARK_ARGV_INVALID');
 }
 
-function flag(name: string, fallback: string): string {
-  return args.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
+function flag(name: string, defaultValue: string): string {
+  return args.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? defaultValue;
 }
 
-function integerFlag(name: string, fallback: number, minimum: number, maximum: number): number {
-  const value = Number(flag(name, String(fallback)));
+function integerFlag(name: string, defaultValue: number, minimum: number, maximum: number): number {
+  const value = Number(flag(name, String(defaultValue)));
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
     throw new Error(`BRAINVAULT_METAL_BENCHMARK_${name.toUpperCase().replaceAll('-', '_')}_INVALID:${String(value)}`);
   }

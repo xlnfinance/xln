@@ -309,6 +309,38 @@ export const collectCommittedEntityResult = (
   context.jOutbox.push(...result.jOutputs);
 };
 
+const assertImmediateCascadeWithinBudget = (
+  env: RuntimeReplica,
+  context: RuntimeEntityInputBatchContext,
+  round: number,
+): void => {
+  // One touched replica may queue one account-work command per input; this
+  // bounds runaway cycles without imposing a fixed hub-size limit.
+  const replicaCount = env.state.eReplicas.size;
+  const roundsWithinBudget = round <= 64 + replicaCount;
+  const eventsWithinBudget = context.localEventCount <= 1_000 + 64 * replicaCount;
+  if (roundsWithinBudget && eventsWithinBudget) return;
+  throw new Error(
+    `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${round}:events=${context.localEventCount}`,
+  );
+};
+
+const rememberImmediateCommand = (
+  fingerprints: Set<string>,
+  command: CrossJCommand,
+  round: number,
+  entityId: string,
+): void => {
+  if (command.kind !== 'entity-txs') return;
+  const fingerprint = safeStringify(command);
+  if (fingerprints.has(fingerprint)) {
+    throw new Error(
+      `RUNTIME_CROSS_J_EVENT_CYCLE:round=${round}:entity=${entityId}`,
+    );
+  }
+  fingerprints.add(fingerprint);
+};
+
 export const drainImmediateCrossJurisdictionOutputs = async (
   env: RuntimeReplica,
   options: RuntimeEntityInputApplyOptions,
@@ -320,26 +352,10 @@ export const drainImmediateCrossJurisdictionOutputs = async (
     const command = context.crossJCommandQueue.shift()!;
     round += 1;
     context.localEventCount += 1;
-    // Every touched replica may legitimately queue one account-work command
-    // per input (a lane hosting 100 users takes 100 per input); the guard is
-    // against runaway cross-J cycles, so scale it with the replica count.
-    const replicaCount = env.state.eReplicas.size;
-    if (round > 64 + replicaCount || context.localEventCount > 1_000 + 64 * replicaCount) {
-      throw new Error(
-        `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${round}:events=${context.localEventCount}`,
-      );
-    }
+    assertImmediateCascadeWithinBudget(env, context, round);
     const signerId = command.targetSignerId;
     const input = commandToEntityInput(command);
-    if (command.kind === 'entity-txs') {
-      const fingerprint = safeStringify(command);
-      if (fingerprints.has(fingerprint)) {
-        throw new Error(
-          `RUNTIME_CROSS_J_EVENT_CYCLE:round=${round}:entity=${input.entityId}`,
-        );
-      }
-      fingerprints.add(fingerprint);
-    }
+    rememberImmediateCommand(fingerprints, command, round, input.entityId);
     const replicaKey = findEntityReplicaKey(env, input.entityId, signerId);
     assertRuntimeEntityIngress(
       replicaKey,

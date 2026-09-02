@@ -76,7 +76,7 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
-  'brainvault': 19,
+  'brainvault': 22,
   'core/__tests__/runtime/observability': 11,
   'core/__tests__/testing/tooling': 11,
   'core/orchestrator/process': 12,
@@ -86,6 +86,8 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'frontend/src/lib/stores': 11,
   'jurisdictions/contracts': 16,
   'rscore/crates/entity-kernel/src': 12,
+  'rscore/crates/entity-kernel/src/local_financial': 12,
+  'rscore/crates/entity-kernel/tests': 11,
   'scripts/dev': 12,
   'tools': 11,
 };

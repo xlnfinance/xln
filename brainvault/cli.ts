@@ -716,7 +716,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
       shardResults = accelerated.shards;
     } catch (error) {
       if (!autoSelectedMetal) throw error;
-      console.warn(`Metal unavailable at runtime; using C/NEON fallback (${String(error)}).`);
+      console.warn(`Metal unavailable at runtime; using C/NEON backend (${String(error)}).`);
       selectedEngine = 'c-neon';
     } finally {
       password.fill(0);

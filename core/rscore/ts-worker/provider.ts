@@ -244,6 +244,15 @@ const failedProposalContinuationRows = (
     });
   });
 
+const outboundFrameClock = (batch: AccountAuthorityEntityBatchOutbound) => ({
+  timestamp: batch.proposals[0]?.timestamp
+    ?? batch.admissions[0]?.entityTimestamp
+    ?? batch.entityState.timestamp,
+  jHeight: batch.proposals[0]?.jHeight
+    ?? batch.admissions[0]?.finalizedJHeight
+    ?? batch.entityState.lastFinalizedJHeight,
+});
+
 export class TsAccountWorkerAuthority {
   readonly #env: RuntimeReplica;
   readonly #workerCount: number;
@@ -479,12 +488,7 @@ export class TsAccountWorkerAuthority {
     const baseRoot = coordinator.accountsRoot;
     const result = await coordinator.prepareAccountFrames({
       frameId,
-      timestamp: batch.proposals[0]?.timestamp
-        ?? batch.admissions[0]?.entityTimestamp
-        ?? batch.entityState.timestamp,
-      jHeight: batch.proposals[0]?.jHeight
-        ?? batch.admissions[0]?.finalizedJHeight
-        ?? batch.entityState.lastFinalizedJHeight,
+      ...outboundFrameClock(batch),
       ...(localBoardAuthority ? { localBoardAuthority } : {}),
       envelopeUpdates: batch.envelopeUpdates,
       txs,
@@ -520,12 +524,7 @@ export class TsAccountWorkerAuthority {
     const continuationProposalIds = [...new Set(generated.map(row => row.accountId))];
     const continuation = await coordinator.finishAccountFrames({
       frameId,
-      timestamp: batch.proposals[0]?.timestamp
-        ?? batch.admissions[0]?.entityTimestamp
-        ?? batch.entityState.timestamp,
-      jHeight: batch.proposals[0]?.jHeight
-        ?? batch.admissions[0]?.finalizedJHeight
-        ?? batch.entityState.lastFinalizedJHeight,
+      ...outboundFrameClock(batch),
       ...(localBoardAuthority ? { localBoardAuthority } : {}),
       envelopeUpdates: [],
       txs: generated.map(row => {

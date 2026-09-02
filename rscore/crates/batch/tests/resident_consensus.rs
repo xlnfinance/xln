@@ -299,7 +299,7 @@ fn wait_for_sibling_routes_required_ack_without_proposing() {
         .into_iter()
         .next()
         .and_then(|row| row.outbound_input)
-        .expect("peer input");
+        .expect("outbound Account input");
 
     let mut payer = resident(1, "payer-0", 0, fixture::market(), vec![payer_seed]);
     payer
@@ -317,7 +317,7 @@ fn wait_for_sibling_routes_required_ack_without_proposing() {
             }],
             post_accounts: false,
         })
-        .expect("peer input accepted");
+        .expect("outbound Account input accepted");
     let root_before_wait = payer.accounts_root();
     let mut request = force_ack_request(pair.payer_entity, pair.payer_account, Vec::new());
     request.proposal_work[0].2 = BatchAccountSelection::WaitForSibling;
