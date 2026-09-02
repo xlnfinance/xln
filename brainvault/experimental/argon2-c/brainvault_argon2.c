@@ -1,3 +1,5 @@
+#define __STDC_WANT_LIB_EXT1__ 1
+
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -39,8 +41,12 @@ static void reuse_free(uint8_t *memory, size_t bytes_to_allocate) {
 }
 
 static void secure_zero(void *pointer, size_t length) {
+#if defined(__APPLE__)
+    (void)memset_s(pointer, length, 0, length);
+#else
     volatile uint8_t *bytes = (volatile uint8_t *)pointer;
     while (length-- != 0u) *bytes++ = 0;
+#endif
 }
 
 static void *derive_worker(void *opaque) {

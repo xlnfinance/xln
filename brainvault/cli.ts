@@ -473,7 +473,7 @@ function getInteractiveEngineChoices(multiplier: number): EngineChoice[] {
   const choices: EngineChoice[] = [];
   if (resolveNeonExecutable() !== undefined) {
     choices.push(
-      { id: 'c-neon', label: 'C/NEON final wipe (fastest)', referenceRate: 186.44 },
+      { id: 'c-neon', label: 'C/NEON final wipe (fastest)', referenceRate: 191.87 },
       { id: 'c-neon-wipe', label: '(experimental) C/NEON wipe after every shard', referenceRate: 177.11 },
     );
   }

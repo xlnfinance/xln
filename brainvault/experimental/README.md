@@ -43,7 +43,7 @@ run produced the same master root shown above.
 
 | Backend | 1,000-shard time | Shards/s | Speedup vs original 8-worker CLI |
 | --- | ---: | ---: | ---: |
-| C/NEON, reused arena and final wipe | **5.364 s** | **186.44** | **2.86x** |
+| C/NEON, reused arena and final wipe | **5.212 s** | **191.87** | **2.94x** |
 | C/NEON, secure wipe after every shard | 5.646 s | 177.11 | 2.72x |
 | Native binding, direct async pool | 5.984 s | 167.10 | 2.56x |
 | Native binding, synchronous isolated workers | 6.056 s | 165.12 | 2.53x |
@@ -54,7 +54,9 @@ run produced the same master root shown above.
 
 The C final-wipe process does not leave a long-lived dirty arena: each worker
 reuses its arena only while processing its assigned shards, then securely wipes
-the full 256 MiB before the subprocess exits. The source variants and comparison
+the full 256 MiB before the subprocess exits. On macOS that final erase uses the
+non-elidable, libc-vectorized C11 `memset_s`; other platforms retain the portable
+volatile fallback. The source variants and comparison
 modes remain under `experimental/`; the publishable CLI bundles release builds
 as its fast Apple Silicon default and falls back to the portable native binding.
 Both paths automatically use all CPU cores allowed by RAM.
