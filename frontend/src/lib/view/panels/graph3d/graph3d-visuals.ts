@@ -3,7 +3,10 @@ import type { Delta } from '@xln/core/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from '../../../../../packages/ui/src/graph3d-renderer';
-import { createAccountMempoolBoxes } from '../../../../../packages/ui/src/graph3d-account-visuals';
+import {
+  buildGraphAccountVisuals as buildSharedGraphAccountVisuals,
+  type GraphAccountBarRenderRequest,
+} from '../../../../../packages/ui/src/graph3d-account-visuals';
 import type { GraphConnectionData, GraphEntityData, GraphXLNRuntime } from './graph3d-types';
 import { formatGraphMempoolTxLabel, type GraphAccountViewLike, type GraphReplicaLike } from './graph3d-helpers';
 
@@ -181,85 +184,38 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   bars: THREE.Group;
   mempoolBoxes: THREE.Group[];
 } {
-  const findReplica = (entityId: string) => {
-    const key = [...options.replicas.keys()].find(candidate => candidate.startsWith(`${entityId}:`));
-    return key ? options.replicas.get(key) : null;
-  };
-  const fromIsLeft = options.fromId < options.toId;
-  const leftId = fromIsLeft ? options.fromId : options.toId;
-  const rightId = fromIsLeft ? options.toId : options.fromId;
-  const leftAccount = findReplica(leftId)?.state?.accounts?.get(rightId);
-  const rightAccount = findReplica(rightId)?.state?.accounts?.get(leftId);
-  const leftHeight = Number(leftAccount?.currentFrame?.height ?? 0);
-  const rightHeight = Number(rightAccount?.currentFrame?.height ?? 0);
-  let account = leftAccount ?? rightAccount;
-  let confirmedAccount = account;
-  let pendingAccount = null;
-  if (leftAccount && rightAccount && leftHeight !== rightHeight) {
-    account = leftHeight > rightHeight ? leftAccount : rightAccount;
-    confirmedAccount = leftHeight > rightHeight ? rightAccount : leftAccount;
-    pendingAccount = account;
-  }
-  if (!account?.state.deltas || account.state.deltas.size === 0) {
-    const bars = new THREE.Group();
-    options.graphWorld.add(bars);
-    return { bars, mempoolBoxes: [] };
-  }
-
-  const leftEntityAccount = fromIsLeft ? confirmedAccount : pendingAccount;
-  const rightEntityAccount = fromIsLeft ? pendingAccount : confirmedAccount;
-  const leftConsensus = options.runtime?.classifyBilateralState?.(
-    leftEntityAccount ?? undefined,
-    Number(rightEntityAccount?.currentFrame?.height ?? 0),
-    true,
-  );
-  const rightConsensus = options.runtime?.classifyBilateralState?.(
-    rightEntityAccount ?? undefined,
-    Number(leftEntityAccount?.currentFrame?.height ?? 0),
-    false,
-  );
-  const barVisual =
-    leftConsensus && rightConsensus ? options.runtime?.getAccountBarVisual?.(leftConsensus, rightConsensus) : null;
-  // Unknown consensus (no runtime helper) is not evidence of desync.
-  const desyncDetected = Boolean(
-    leftConsensus && rightConsensus && (leftConsensus.state !== 'committed' || rightConsensus.state !== 'committed'),
-  );
-  const dispute = account.activeDispute;
-  const bars = createAccountBars(
-    options.graphWorld,
-    options.fromEntity,
-    options.toEntity,
-    account.state.deltas,
-    fromIsLeft,
-    {
-      barsMode: options.barsMode,
-      portfolioScale: options.portfolioScale,
-      desyncDetected,
-      bilateralState: barVisual,
-      dispute: dispute
-        ? {
-            startedByLeft: dispute.startedByLeft,
-            disputeTimeout: dispute.disputeTimeout,
-            initialNonce: dispute.initialNonce,
-          }
-        : null,
-    },
-    options.getEntitySize,
-    options.runtime,
-  );
-  const mempoolBoxes = createAccountMempoolBoxes({
+  return buildSharedGraphAccountVisuals({
+    graphWorld: options.graphWorld,
     fromEntity: options.fromEntity,
     toEntity: options.toEntity,
-    leftAccount,
-    rightAccount,
-    leftState: leftAccount
-      ? options.runtime?.classifyBilateralState?.(leftAccount, 0, true)?.state ?? null
-      : null,
-    rightState: rightAccount
-      ? options.runtime?.classifyBilateralState?.(rightAccount, 0, false)?.state ?? null
-      : null,
+    fromId: options.fromId,
+    toId: options.toId,
+    replicas: options.replicas,
+    barsMode: options.barsMode,
+    portfolioScale: options.portfolioScale,
     getEntitySize: options.getEntitySize,
+    classifyBilateralState: (account, peerHeight, isLeft) =>
+      options.runtime?.classifyBilateralState?.(account, peerHeight, isLeft),
+    getAccountBarVisual: (leftState, rightState) =>
+      options.runtime?.getAccountBarVisual?.(leftState, rightState),
+    renderBars: (request: GraphAccountBarRenderRequest<
+      Delta,
+      ReturnType<GraphXLNRuntime['getAccountBarVisual']>
+    >) => createAccountBars(
+      request.graphWorld,
+      request.fromEntity,
+      request.toEntity,
+      request.deltas,
+      request.fromIsLeft,
+      {
+        barsMode: request.barsMode,
+        portfolioScale: request.portfolioScale,
+        desyncDetected: request.desyncDetected,
+        bilateralState: request.bilateralState,
+        dispute: request.dispute,
+      },
+      request.getEntitySize,
+      options.runtime,
+    ),
   });
-  for (const box of mempoolBoxes) options.graphWorld.add(box);
-  return { bars, mempoolBoxes };
 }

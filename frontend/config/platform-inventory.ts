@@ -455,6 +455,8 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/ui/src/graph3d-scene-primitives.ts',
       'frontend/packages/ui/src/graph3d-visual-effects.ts',
       'frontend/packages/ui/src/graph3d-entity-visuals.ts',
+      'frontend/packages/ui/src/graph3d-account-visuals.ts',
+      'frontend/packages/ui/src/graph3d-interaction.ts',
       'frontend/src/lib/utils/runtime/debugSurface.ts',
     ],
     consumers: [
@@ -467,6 +469,8 @@ export const PLATFORM_INVENTORY = [
       'tests/frontend/graph/graph3d-scene-primitives.test.ts',
       'tests/frontend/graph/graph3d-visual-effects.test.ts',
       'tests/frontend/graph/graph3d-entity-visuals.test.ts',
+      'tests/frontend/graph/graph3d-account-visuals.test.ts',
+      'tests/frontend/graph/graph3d-interaction.test.ts',
     ],
   },
   {
