@@ -74,6 +74,32 @@ test('ops HLT lazy chunk is browser-safe', async ({ page }) => {
   expect(consoleErrors).toEqual([]);
 });
 
+test('quorum evidence supports filtering and selection without browser errors', async ({ page }, testInfo) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('pageerror', error => pageErrors.push(error.message));
+
+  const response = await page.goto('/qa/quorum', { waitUntil: 'networkidle' });
+  expect(response?.ok()).toBe(true);
+  await expect(page.getByTestId('quorum-dashboard')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Who actually finds the bottleneck?' })).toBeVisible();
+  await expect(page.getByLabel('Quorum summary')).toContainText('46');
+
+  await page.getByLabel('Work').selectOption('performance');
+  await expect(page.getByLabel('Quorum summary')).toContainText('5');
+  await page.getByLabel('Work').selectOption('all');
+  await page.locator('.ops-quorum-leader-row').filter({ hasText: 'Claude Fable 5' }).click();
+  await expect(page.getByTestId('quorum-selected-interaction')).toContainText('895');
+  await expect(page.getByTestId('quorum-selected-interaction')).toContainText('60-second live H1 CPU profile');
+  await expect.poll(() => page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.evaluate(() => window.scrollTo({ left: 0, top: 0 }));
+  await screenshotEvidence(page, testInfo, 'ops-quorum');
+
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
 test('entity workspace tabs follow canonical hash routes', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];

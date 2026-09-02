@@ -14,6 +14,11 @@ const OpsQaPage = lazy(async () => {
   return { default: module.OpsQaPage };
 });
 
+const OpsQuorumPage = lazy(async () => {
+  const module = await import('./ops-quorum');
+  return { default: module.OpsQuorumPage };
+});
+
 const OpsRunsPage = lazy(async () => {
   const module = await import('./ops-runs');
   return { default: module.OpsRunsPage };
@@ -41,6 +46,9 @@ export function OpsApp({ page }: Readonly<{ page: OpsPage }>) {
   }
   if (page.kind === 'hlt') {
     return <Suspense fallback={<main className="candidate-shell">Loading HLT controls…</main>}><OpsHltPage /></Suspense>;
+  }
+  if (page.kind === 'quorum') {
+    return <Suspense fallback={<main className="candidate-shell">Loading quorum evidence…</main>}><OpsQuorumPage /></Suspense>;
   }
   if (page.kind === 'runs') {
     return <Suspense fallback={<main className="candidate-shell">Loading run evidence…</main>}><OpsRunsPage /></Suspense>;

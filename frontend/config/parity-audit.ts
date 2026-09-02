@@ -12,7 +12,6 @@ export const PARITY_GAP_IDS = [
   'wallet-address-route',
   'wallet-external-provider',
   'ops-health-qa-browser',
-  'ops-quorum-route',
   'ops-workspace-route',
   'per-surface-browser-isolation',
 ] as const;
@@ -66,7 +65,7 @@ export const RETAINED_ROUTE_PARITY = [
   { id: 'health', pathname: '/health', representativePath: '/health', sveltePage: 'frontend/src/routes/health/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'missing', reactSource: 'frontend/apps/ops/src/ops-health.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-health.test.ts'], browserTests: [], gapIds: ['ops-health-qa-browser', 'per-surface-browser-isolation'] },
   { id: 'qa', pathname: '/qa', representativePath: '/qa', sveltePage: 'frontend/src/routes/qa/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'missing', reactSource: 'frontend/apps/ops/src/ops-qa.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-qa.test.ts'], browserTests: [], gapIds: ['ops-health-qa-browser', 'per-surface-browser-isolation'] },
   { id: 'qa-hlt', pathname: '/qa/hlt', representativePath: '/qa/hlt', sveltePage: 'frontend/src/routes/qa/hlt/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'partial', reactSource: 'frontend/apps/ops/src/ops-hlt.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-hlt.test.ts'], browserTests: candidateBrowser, gapIds: ['ops-health-qa-browser', 'per-surface-browser-isolation'] },
-  { id: 'qa-quorum', pathname: '/qa/quorum', representativePath: '/qa/quorum', sveltePage: 'frontend/src/routes/qa/quorum/+page.svelte', intendedOwner: 'ops', implementation: 'missing', browserEvidence: 'missing', reactSource: null, focusedTests: [], browserTests: [], gapIds: ['ops-quorum-route', 'per-surface-browser-isolation'] },
+  { id: 'qa-quorum', pathname: '/qa/quorum', representativePath: '/qa/quorum', sveltePage: 'frontend/src/routes/qa/quorum/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'covered', reactSource: 'frontend/apps/ops/src/ops-quorum.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-quorum.test.ts'], browserTests: candidateBrowser, gapIds: ['per-surface-browser-isolation'] },
   { id: 'runs', pathname: '/runs', representativePath: '/runs', sveltePage: 'frontend/src/routes/runs/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'covered', reactSource: 'frontend/apps/ops/src/ops-runs.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-runs.test.ts'], browserTests: candidateBrowser, gapIds: ['per-surface-browser-isolation'] },
   { id: 'scenarios', pathname: '/scenarios', representativePath: '/scenarios', sveltePage: 'frontend/src/routes/scenarios/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'covered', reactSource: 'frontend/apps/ops/src/ops-scenarios.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-scenarios.test.ts'], browserTests: candidateBrowser, gapIds: ['per-surface-browser-isolation'] },
   { id: 'ai', pathname: '/ai/:chatId?', representativePath: '/ai/audit', sveltePage: 'frontend/src/routes/ai/[[chatId]]/+page.svelte', intendedOwner: 'ops', implementation: 'complete', browserEvidence: 'covered', reactSource: 'frontend/apps/ops/src/ops-ai.tsx', focusedTests: ['tests/frontend/ops/frontend-ops-ai.test.ts'], browserTests: candidateBrowser, gapIds: ['per-surface-browser-isolation'] },
@@ -90,7 +89,6 @@ export const PARITY_GAPS = [
   { id: 'wallet-address-route', kind: 'implementation', capabilityIds: ['wallet-shell-and-identity', 'wallet-finance'], routeIds: ['wallet-address', 'wallet-address-entity'], evidenceSources: ['frontend/apps/wallet/src/wallet-model.ts', 'frontend/apps/wallet/src/wallet-app.tsx'], nextSlice: 'Implement the public address index and entity detail routes in the React wallet.' },
   { id: 'wallet-external-provider', kind: 'implementation', capabilityIds: ['wallet-payments-and-markets', 'wallet-native-and-offline'], routeIds: ['wallet-app'], evidenceSources: ['frontend/apps/wallet/src/wallet-payments.tsx', 'frontend/src/lib/native'], nextSlice: 'Connect the React payment surface to the existing external-wallet provider and native authority boundary.' },
   { id: 'ops-health-qa-browser', kind: 'browser', capabilityIds: ['ops-health-and-qa'], routeIds: ['health', 'qa', 'qa-hlt'], evidenceSources: ['frontend/tests/react-candidate/surfaces.spec.ts'], nextSlice: 'Add direct health, QA, and HLT route flows at all required viewports.' },
-  { id: 'ops-quorum-route', kind: 'owner', capabilityIds: ['ops-health-and-qa'], routeIds: ['qa-quorum'], evidenceSources: ['frontend/src/routes/qa/quorum/+page.svelte', 'frontend/apps/ops/src/ops-model.ts', 'frontend/config/surfaces.ts'], nextSlice: 'Port the quorum dashboard, then assign /qa/quorum to the ops candidate with focused and browser evidence.' },
   { id: 'ops-workspace-route', kind: 'owner-decision', capabilityIds: ['ops-workspace'], routeIds: ['embed'], evidenceSources: ['frontend/apps/ops/src/ops-app.tsx', 'frontend/apps/ops/src/ops-model.ts', 'frontend/apps/ops/src/ops-entity-workspace.tsx'], nextSlice: 'Keep /embed canonical until the owner authorizes the sized Entity workspace expansion and the remaining workspace parity closes.' },
   { id: 'per-surface-browser-isolation', kind: 'verification', capabilityIds, routeIds: RETAINED_ROUTE_PARITY.map(({ id }) => id), evidenceSources: ['frontend/playwright.react.config.ts', 'frontend/package.json'], nextSlice: 'Add per-surface browser commands that do not prepare or launch unrelated applications.' },
 ] as const satisfies readonly ParityGap[];
@@ -105,7 +103,7 @@ export const CAPABILITY_PARITY = [
   { capabilityId: 'wallet-finance', gapIds: ['wallet-app-browser-depth', 'wallet-address-route', 'per-surface-browser-isolation'] },
   { capabilityId: 'wallet-payments-and-markets', gapIds: ['wallet-app-browser-depth', 'wallet-external-provider', 'per-surface-browser-isolation'] },
   { capabilityId: 'wallet-native-and-offline', gapIds: ['wallet-external-provider', 'per-surface-browser-isolation'] },
-  { capabilityId: 'ops-health-and-qa', gapIds: ['ops-health-qa-browser', 'ops-quorum-route', 'per-surface-browser-isolation'] },
+  { capabilityId: 'ops-health-and-qa', gapIds: ['ops-health-qa-browser', 'per-surface-browser-isolation'] },
   { capabilityId: 'ops-runs-scenarios-and-ai', gapIds: ['per-surface-browser-isolation'] },
   { capabilityId: 'ops-workspace', gapIds: ['ops-workspace-route', 'per-surface-browser-isolation'] },
 ] as const;

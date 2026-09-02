@@ -348,6 +348,29 @@ export const PLATFORM_INVENTORY = [
     ],
   },
   {
+    id: 'ops-quorum-dashboard',
+    owner: 'ops',
+    workPackage: 'WP9',
+    status: 'implemented',
+    interfaces: ['registry', 'route'],
+    sources: [
+      'audits/registry.json',
+      'frontend/packages/runtime-client/src/qa-quorum-history.ts',
+      'frontend/packages/runtime-client/src/qa-quorum-model.ts',
+      'frontend/packages/runtime-client/src/qa-quorum-registry.ts',
+      'frontend/packages/runtime-client/src/qa-quorum-types.ts',
+      'frontend/apps/ops/src/ops-quorum-source.ts',
+    ],
+    consumers: [
+      'frontend/src/routes/qa/quorum/+page.svelte',
+      'frontend/apps/ops/src/ops-quorum.tsx',
+    ],
+    evidence: [
+      'tests/frontend/ops/frontend-ops-quorum.test.ts',
+      'frontend/tests/react-candidate/surfaces.spec.ts',
+    ],
+  },
+  {
     id: 'ops-ai-browser-boundary',
     owner: 'ops',
     workPackage: 'WP7',

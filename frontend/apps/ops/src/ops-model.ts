@@ -2,6 +2,7 @@ export type OpsPage =
   | Readonly<{ kind: 'health'; pathname: '/health' }>
   | Readonly<{ kind: 'qa'; pathname: '/qa' }>
   | Readonly<{ kind: 'hlt'; pathname: '/qa/hlt' }>
+  | Readonly<{ kind: 'quorum'; pathname: '/qa/quorum' }>
   | Readonly<{ kind: 'runs'; pathname: '/runs' }>
   | Readonly<{ kind: 'scenarios'; pathname: '/scenarios' }>
   | Readonly<{ kind: 'ai'; pathname: string }>
@@ -12,6 +13,7 @@ export const OPS_LINKS = [
   { href: '/health', label: 'Health' },
   { href: '/qa', label: 'QA' },
   { href: '/qa/hlt', label: 'HLT' },
+  { href: '/qa/quorum', label: 'Quorum' },
   { href: '/runs', label: 'Runs' },
   { href: '/scenarios', label: 'Scenarios' },
   { href: '/ai', label: 'AI' },
@@ -25,6 +27,8 @@ export const resolveOpsPage = (pathname: string): OpsPage =>
       ? { kind: 'qa', pathname }
     : pathname === '/qa/hlt'
       ? { kind: 'hlt', pathname }
+    : pathname === '/qa/quorum'
+      ? { kind: 'quorum', pathname }
     : pathname === '/runs'
       ? { kind: 'runs', pathname }
     : pathname === '/scenarios'
@@ -52,6 +56,12 @@ export const opsPageMetadata = (page: OpsPage): Readonly<{ title: string; descri
     return {
       title: 'xln QA Cockpit',
       description: 'Inspect authoritative xln test runs, browser evidence, artifacts, and controlled recovery.',
+    };
+  }
+  if (page.kind === 'quorum') {
+    return {
+      title: 'xln Quorum Intelligence',
+      description: 'Verified usefulness, evidence chains, and impact history for xln external model audits.',
     };
   }
   if (page.kind === 'runs') {
