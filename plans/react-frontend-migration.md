@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE SIZED; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER DRAG STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE SIZED; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1019,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE SIZED`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER DRAG STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE SIZED`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1657,6 +1657,28 @@ the repository check then stops at the unchanged host limitation that `cargo`
 is unavailable. The separate size policy still reports only out-of-scope
 `core/qa/report.ts` at 3,001 / 3,000 lines.
 
+The fourteenth Graph3D slice moves the duplicated mouse/touch drag-plane
+setup, pointer intersection, mesh-position synchronization, and drag emissive
+transitions into `packages/ui/src/graph3d-interaction.ts`. The Svelte panel
+retains input events, raycast hit selection, gesture state, controls enablement,
+pinning, spacing enforcement, position persistence, click suppression, and
+connection updates. The shared interaction module remains within policy at 198
+lines, and the Svelte panel drops 23 lines (2,567 to 2,544). Seven focused tests
+pin 41 expectations, including the exact plane normal, initial grab offset,
+projected movement, mesh synchronization, and begin/end colors; the affected
+Graph3D batch passes 105 tests with 441 expectations. The unsafe-types gate
+covers 620 files with zero findings, Svelte diagnostics are 0 errors / 0
+warnings, the canonical build transforms 4,667 SSR and 6,418 client modules,
+all four React surfaces pass, and the full frontend failure-name diff remains
+empty against the exact 13-test baseline (1,186 passes and 6,602 expectations).
+This is a nonvisual, behavior-preserving extraction, so screenshot evidence is
+not required. Root verification passes 26 BrainVault/runtime tests with 100,156
+expectations, contract artifact sync compiles 28 Solidity files and passes
+immutable-metadata parity for four contracts, and all 10 soundcheck gates pass;
+the repository check then stops at the unchanged host limitation that `cargo`
+is unavailable. The separate size policy still reports only out-of-scope
+`core/qa/report.ts` at 3,001 / 3,000 lines.
+
 The required read-only Entity workspace sizing gate covers
 `frontend/src/lib/components/Entity/**`: 112 files and 43,268 lines, comprising
 58 Svelte files / 32,453 lines, 53 TypeScript files / 8,993 lines, and one CSS
@@ -1681,9 +1703,9 @@ RuntimeIO → Solvency → Runtime Diagnostics → Gossip → Time Machine trans
 Jurisdiction → Settings → Architect; the React Dockview wrapper now preserves
 the canonical Svelte layout JSON; Graph3D browser/Three.js lifecycle, renderer
 resource ownership, scene primitives/effects/entity/Account visual factory,
-interaction/selection/camera state, entity mini-panel, viewport-chrome
+interaction/selection/camera/pointer-drag state, entity mini-panel, viewport-chrome
 presentation, and scene-input projections are framework-neutral.
-Port the remaining Graph3D live drag/hover effects to React around refs +
+Port the remaining Graph3D XR grab and hover effects to React around refs +
 explicit effects last. Treat the sized 112-file / 43,268-line Entity workspace
 tree behind `entity-panel` and the wallet shell as its own owner-approved
 sub-program before any `/embed` route flip. `tests/frontend/graph/*`,
@@ -1772,11 +1794,11 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue WP7 with the remaining Graph3D live drag and hover effects
+1. Continue WP7 with the remaining Graph3D XR grab and hover effects
    around React refs and explicit cleanup. The lifecycle/renderer ownership,
    scene primitives/effects/entity/Account visual factory,
-   interaction/selection/camera state, entity mini-panel, viewport chrome, and
-   scene input are now framework-neutral. Starting the separately sized 112-file /
+   interaction/selection/camera/pointer-drag state, entity mini-panel, viewport
+   chrome, and scene input are now framework-neutral. Starting the separately sized 112-file /
    43,268-line Entity workspace remains an owner checkpoint before `/embed`.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
