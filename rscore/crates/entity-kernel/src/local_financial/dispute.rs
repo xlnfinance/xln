@@ -1482,9 +1482,15 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(mutations.len(), 1);
+        // TS commits the prepared envelope before the ready start replaces it.
+        assert_eq!(mutations.len(), 2);
         assert!(matches!(
             &mutations[0].1,
+            AccountEnvelopeMutation::ReplaceDisputeLifecycle { status, dispute_prepare: Some(_), active_dispute: None }
+                if status == "dispute_preparing"
+        ));
+        assert!(matches!(
+            &mutations[1].1,
             AccountEnvelopeMutation::ReplaceDisputeLifecycle { status, dispute_prepare: None, active_dispute: Some(_) }
                 if status == "disputed"
         ));

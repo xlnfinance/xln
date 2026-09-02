@@ -6361,8 +6361,49 @@ mod tests {
             ]),
         )
         .expect("ack");
-        let result =
-            apply_book_order_removed(&mut source_hub, &BTreeMap::new(), &ack).expect("apply ack");
+        // TS confirms the removal only for an Account whose dispute
+        // preparation still waits on this exact orderbook removal.
+        let views = BTreeMap::from([(
+            "target-user".to_string(),
+            crate::local_financial::LocalAccountFinancialView {
+                active: false,
+                owner_side: xln_rscore_engine::Side::Left,
+                owner_out_capacity: BTreeMap::new(),
+                owner_peer_credit_limit: BTreeMap::new(),
+                settlement_workspace: None,
+                settlement_transition_pending: false,
+                settlement_execution: Err("unused".into()),
+                rebalance_active_quote: None,
+                htlc_locks: BTreeMap::new(),
+                pulls: BTreeMap::new(),
+                swap_offers: BTreeMap::new(),
+                pending_cross_pull_close_ids: Default::default(),
+                pending_cross_swap_ack_ids: Default::default(),
+                dispute: Some(xln_rscore_batch::ResidentAccountDisputeView {
+                    status: "dispute_preparing".into(),
+                    dispute_prepare: Some(obj(vec![(
+                        "pendingOrderbookRemovalIds",
+                        CanonicalValue::Array(vec![string("order-1")]),
+                    )])),
+                    active_dispute: None,
+                    local_dispute: None,
+                    counterparty_dispute: None,
+                    proof_body: Err("unused".into()),
+                    j_nonce: 0,
+                    owner_is_left: true,
+                    delta_transformer: None,
+                    payment_hashlocks: Vec::new(),
+                    pull_ids: Vec::new(),
+                    pull_count: 0,
+                    swap_offers: Vec::new(),
+                    pending_swap_fill_ratios: BTreeMap::new(),
+                }),
+            },
+        )]);
+        let unrelated = apply_book_order_removed(&mut source_hub, &BTreeMap::new(), &ack)
+            .expect("apply ack without dispute");
+        assert!(unrelated.account_envelope_mutations.is_empty());
+        let result = apply_book_order_removed(&mut source_hub, &views, &ack).expect("apply ack");
         assert!(matches!(
             result.account_envelope_mutations.as_slice(),
             [(account, crate::AccountEnvelopeMutation::ConfirmDisputeBookRemoval { order_id })]
