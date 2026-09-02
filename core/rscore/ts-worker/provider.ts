@@ -199,7 +199,9 @@ const replacePostAccount = (
     'ts-account-worker-post',
   );
   const hydrateStartedAt = getPerfMs();
-  const prepared = hydrateAccountDocFromStorage(validated);
+  // Reuse the coordinator's own committed mirror: only leaves the worker
+  // actually changed are re-sealed (Rust never re-hashes resident rows).
+  const prepared = hydrateAccountDocFromStorage(validated, account);
   const replaceStartedAt = getPerfMs();
   if (normalize(account.proofHeader.toEntity) !== accountId) {
     throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${accountId}`);

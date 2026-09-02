@@ -21,34 +21,124 @@ import {
   type AccountStateMapNamespace,
 } from '../../account/state/persistent-state-map';
 
+/**
+ * Structural equality over sealed leaf values: primitives, bigints, bytes,
+ * arrays and plain records. Stricter than canonical-bytes equality (a
+ * mismatch only costs one fresh leaf seal), never looser.
+ */
+const plainValueEquals = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true;
+  if (typeof left !== 'object' || typeof right !== 'object' || left === null || right === null) return false;
+  if (left instanceof Uint8Array || right instanceof Uint8Array) {
+    if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array) || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+    return true;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      if (!plainValueEquals(left[index], right[index])) return false;
+    }
+    return true;
+  }
+  if (left instanceof Map || right instanceof Map || left instanceof Set || right instanceof Set) return false;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  const rightRecord = right as Record<string, unknown>;
+  for (const key of leftKeys) {
+    if (!Object.hasOwn(rightRecord, key)) return false;
+    if (!plainValueEquals((left as Record<string, unknown>)[key], rightRecord[key])) return false;
+  }
+  return true;
+};
+
+/**
+ * Mirror refresh: fold only the changed leaves into the previously committed
+ * map. Untouched leaves keep their sealed identity (digest memo hit) and
+ * untouched subtrees are shared, so a one-payment account refresh re-hashes
+ * one path instead of every leaf.
+ */
+export const reuseAccountStateMap = <Key extends AccountStateMapKey, Value>(
+  namespace: AccountStateMapNamespace,
+  value: ReadonlyMap<Key, Value>,
+  previous: ReadonlyMap<Key, Value> | undefined,
+): PersistentAccountStateMap<Key, Value> => {
+  if (isPersistentAccountStateMap(value)) return value as PersistentAccountStateMap<Key, Value>;
+  if (!isPersistentAccountStateMap(previous) || previous.namespace !== namespace) {
+    return PersistentAccountStateMap.fromEntries(namespace, value);
+  }
+  let next = previous as PersistentAccountStateMap<Key, Value>;
+  for (const [key, entry] of value) {
+    if (next.has(key) && plainValueEquals(next.get(key), entry)) continue;
+    next = next.updated(key, entry);
+  }
+  if (next.size !== value.size) {
+    for (const key of previous.keys()) {
+      if (!value.has(key as Key)) next = next.removed(key as Key);
+    }
+  }
+  return next;
+};
+
 const persistentAccountMap = <Key extends AccountStateMapKey, Value>(
   namespace: AccountStateMapNamespace,
   value: ReadonlyMap<Key, Value>,
+  previous?: ReadonlyMap<Key, Value>,
 ): PersistentAccountStateMap<Key, Value> => isPersistentAccountStateMap(value)
   ? value as PersistentAccountStateMap<Key, Value>
-  : PersistentAccountStateMap.fromEntries(namespace, value);
+  : previous
+    ? reuseAccountStateMap(namespace, value, previous)
+    : PersistentAccountStateMap.fromEntries(namespace, value);
 
-export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountReplica => {
+/**
+ * `previous` is the caller's committed mirror of the same account (post-phase
+ * refresh from an Account worker): unchanged leaves are shared with it.
+ */
+export const hydrateAccountDocFromStorage = (
+  doc: StorageAccountDoc,
+  previous?: AccountReplica,
+): AccountReplica => {
   assertAccountMempoolWithinLimit(doc, 'storage.account.mempool');
   const state = {
     ...doc.state,
-    deltas: persistentAccountMap('deltas', doc.state.deltas),
-    locks: persistentAccountMap('locks', doc.state.locks),
-    swapOffers: persistentAccountMap('swapOffers', doc.state.swapOffers),
-    ...(doc.state.pulls ? { pulls: persistentAccountMap('pulls', doc.state.pulls) } : {}),
+    deltas: persistentAccountMap('deltas', doc.state.deltas, previous?.state.deltas),
+    locks: persistentAccountMap('locks', doc.state.locks, previous?.state.locks),
+    swapOffers: persistentAccountMap(
+      'swapOffers',
+      doc.state.swapOffers,
+      previous?.state.swapOffers,
+    ),
+    ...(doc.state.pulls ? { pulls: persistentAccountMap('pulls', doc.state.pulls, previous?.state.pulls) } : {}),
     ...(doc.state.subcontracts
-      ? { subcontracts: persistentAccountMap('subcontracts', doc.state.subcontracts) }
+      ? { subcontracts: persistentAccountMap(
+          'subcontracts',
+          doc.state.subcontracts,
+          previous?.state.subcontracts,
+        ) }
       : {}),
     ...(doc.state.lendingIntents
-      ? { lendingIntents: persistentAccountMap('lendingIntents', doc.state.lendingIntents) }
+      ? { lendingIntents: persistentAccountMap(
+          'lendingIntents',
+          doc.state.lendingIntents,
+          previous?.state.lendingIntents,
+        ) }
       : {}),
-    requestedRebalance: persistentAccountMap('requestedRebalance', doc.state.requestedRebalance),
+    requestedRebalance: persistentAccountMap(
+      'requestedRebalance',
+      doc.state.requestedRebalance,
+      previous?.state.requestedRebalance,
+    ),
     requestedRebalanceFeeState: persistentAccountMap(
       'requestedRebalanceFeeState',
       doc.state.requestedRebalanceFeeState,
+      previous?.state.requestedRebalanceFeeState,
     ),
     ...(doc.state.rebalanceFeePolicies
-      ? { rebalanceFeePolicies: persistentAccountMap('rebalanceFeePolicies', doc.state.rebalanceFeePolicies) }
+      ? { rebalanceFeePolicies: persistentAccountMap(
+          'rebalanceFeePolicies',
+          doc.state.rebalanceFeePolicies,
+          previous?.state.rebalanceFeePolicies,
+        ) }
       : {}),
     leftPendingJClaims: assertAccountJClaimAccumulatorState(doc.state.leftPendingJClaims),
     rightPendingJClaims: assertAccountJClaimAccumulatorState(doc.state.rightPendingJClaims),
@@ -61,15 +151,24 @@ export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountRep
   return {
     ...doc,
     state,
-    pendingWithdrawals: persistentAccountMap('pendingWithdrawals', doc.pendingWithdrawals),
+    pendingWithdrawals: persistentAccountMap(
+      'pendingWithdrawals',
+      doc.pendingWithdrawals,
+      previous?.pendingWithdrawals,
+    ),
     shadow: {
       ...doc.shadow,
       rebalance: {
         ...doc.shadow.rebalance,
-        policy: persistentAccountMap('rebalanceShadowPolicy', doc.shadow.rebalance.policy),
+        policy: persistentAccountMap(
+          'rebalanceShadowPolicy',
+          doc.shadow.rebalance.policy,
+          previous?.shadow.rebalance.policy,
+        ),
         submittedAtByToken: persistentAccountMap(
           'rebalanceShadowSubmitted',
           doc.shadow.rebalance.submittedAtByToken,
+          previous?.shadow.rebalance.submittedAtByToken,
         ),
       },
     },
