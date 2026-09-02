@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 COMPLETE WITH VERIFIED NATIVE/PACKAGED COPY + ISOLATED PWA/DEPLOYMENT ROLLBACK`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 COMPLETE; WP9 PARITY AUDIT RECORDED, /QA/QUORUM NEXT`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -2152,7 +2152,7 @@ tests can activate, reject invalid candidates, and roll back.
 
 ### WP9 — Close parity and prepare cutover
 
-**Status:** `IN PROGRESS — RETAINED-ROUTE AND CAPABILITY PARITY AUDIT NEXT`
+**Status:** `IN PROGRESS — PARITY AUDIT COMPLETE; /QA/QUORUM IMPLEMENTATION NEXT`
 
 - Confirm all retained routes and capabilities have React owners and tests.
 - Run all-frontend checks and representative browser flows at required
@@ -2160,6 +2160,36 @@ tests can activate, reject invalid candidates, and roll back.
 - Resolve genuine parity gaps; do not narrow baseline assertions.
 - Produce a cutover checklist covering canonical commands, artifact consumers,
   Svelte dependencies/source, rollback, and release evidence.
+
+The deterministic `frontend:parity:audit` command now accounts for all 20
+retained Svelte page routes and all 12 capability groups. Fifteen routes have a
+complete React implementation, `/app` and `/embed` are partial, and
+`/address`, `/address/:entityId`, and `/qa/quorum` are missing. Six routes have
+direct candidate-browser evidence, three have partial evidence, and eleven have
+no direct route evidence yet. The capability ledger remains truthful at three
+implemented, eight in progress, and one unstarted.
+
+Ten typed gap records separate implementation, owner, browser, verification,
+and owner-decision work. `/qa/quorum` is the smallest unowned retained route and
+is the next non-cutover implementation slice. `/embed` remains behind the
+explicit Entity-workspace owner decision; canonical command/routing, artifact
+consumer, and Svelte retirement work remains WP10-only. The eight-item cutover
+checklist records two verified release/rollback gates, two WP9 parity gates,
+three owner-authorized WP10 gates, and the separate WP11 production operation.
+
+The audit-focused suite passes 5 / 5 with 269 expectations; the affected route,
+capability, wallet, and platform-inventory batch passes 27 / 27 with 734
+expectations. Repository entrypoint coverage passes 4 / 4 with 519 expectations.
+All four React local checks pass with 642 files and zero unsafe findings; the
+canonical Svelte check remains at zero errors/warnings and builds 4,671 SSR plus
+6,422 client modules. The full frontend suite preserves the exact 13-name
+baseline with 1,244 passes, 14 reported failures, and 7,158 expectations across
+1,258 tests / 206 files. The repository gate passes 26 deterministic tests /
+100,156 expectations, compiles 28 Solidity files, publishes 92 TypeChain files,
+confirms immutable metadata parity for four contracts, and passes all ten
+soundchecks before the established missing-`cargo` environment stop. File-size
+policy still reports only `core/qa/report.ts` at 3,001 / 3,000 lines; dead-code
+analysis retains only the existing Dockview hint.
 
 **Done:** the four React apps form a complete candidate and no known retained
 capability depends on Svelte.
@@ -2189,7 +2219,7 @@ any mismatch. Never compile on production.
 ## Done criteria
 
 - [x] Four independent React/Vite/TypeScript application roots exist.
-- [x] Every retained browser route and capability has one application owner.
+- [ ] Every retained browser route and capability has one application owner.
 - [ ] Each app checks, tests, builds, and runs targeted browser flows without
       building unrelated apps.
 - [x] Shared packages preserve storage/lifecycle and Runtime-client boundaries.
@@ -2205,19 +2235,23 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Run the WP9 retained-route and capability parity audit against the current
-   four-app candidate; record exact remaining Svelte-owned behavior, test, and
-   browser gaps without flipping routes or deleting either application.
-2. Owner to assign: two `network-timeline-source` failures
+1. Port the retained `/qa/quorum` dashboard into the React ops candidate, then
+   assign its route and capability ownership with focused tests and direct
+   three-viewport browser evidence. Do not change the canonical Svelte route.
+2. Add direct three-viewport evidence for `/health`, `/qa`, `/qa/hlt`, and the
+   six secondary site routes; then split candidate browser commands per surface
+   so no targeted flow prepares or launches unrelated applications.
+3. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner
    changes in the working tree and are collateral from that stream, not the
    frontend migration.
-3. Use the parity audit to select the next non-cutover implementation slice;
-   keep the sized Entity workspace expansion behind its explicit owner decision.
-4. When WP9 evidence is complete, request explicit WP10 cutover authority and
+4. Close the wallet address, irreversible identity/recovery, external-provider,
+   and deep browser-flow gaps as separate slices. Keep the sized Entity
+   workspace expansion behind its explicit owner decision.
+5. When WP9 evidence is complete, request explicit WP10 cutover authority and
    prepare the canonical-consumer change separately.
-5. Keep WP11 as a separately authorized production operation using immutable
+6. Keep WP11 as a separately authorized production operation using immutable
    prebuilt artifacts.
 
 ## WP5 closure record

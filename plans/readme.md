@@ -45,9 +45,9 @@ to finish, not a reason to block unrelated scaffolding or migration slices.
 
 | Artifact | Status | Next action |
 |---|---|---|
-| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 COMPLETE WITH VERIFIED NATIVE/PACKAGED COPY + PWA/DEPLOYMENT ROLLBACK` | Audit WP9 retained-route and capability parity without route cutover. |
+| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 + WP8 COMPLETE; WP7 WORKSPACE PARTIAL; WP9 AUDIT RECORDS 15 COMPLETE / 2 PARTIAL / 3 MISSING REACT ROUTES` | Port `/qa/quorum` into the React ops candidate without canonical route cutover. |
 | [Technical decisions](react-frontend-migration-decisions.md) | `ACTIVE` | Use the recorded application, route, build, and coexistence decisions. |
-| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 CANDIDATE CONSUMERS AND ROLLBACK COMPLETE` | Audit WP9 parity while canonical Svelte remains unchanged. |
+| Frontend implementation | `IN PROGRESS — WP9 TYPED PARITY LEDGER + CUTOVER CHECKLIST READY; 10 EXACT GAPS REMAIN` | Implement the unowned `/qa/quorum` route while canonical Svelte remains unchanged. |
 
 WP9 parity follows application completion; WP10 cutover and WP11 production
 activation remain separately owner-authorized.
