@@ -38,8 +38,7 @@ describe('WP9 retained-route and capability parity audit', () => {
         for (const path of route.focusedTests) expect(existsSync(path)).toBe(true);
       }
       for (const path of route.browserTests) expect(existsSync(path)).toBe(true);
-      if (route.id === 'qa-quorum') expect(resolveRouteOwner(route.representativePath)).toBe('edge');
-      else expect(resolveRouteOwner(route.representativePath)).toBe(route.intendedOwner);
+      expect(resolveRouteOwner(route.representativePath)).toBe(route.intendedOwner);
     }
   });
 
@@ -80,8 +79,8 @@ describe('WP9 retained-route and capability parity audit', () => {
       schemaVersion: 1,
       routes: {
         total: 20,
-        implementation: { complete: 15, partial: 2, missing: 3 },
-        browserEvidence: { covered: 6, partial: 3, missing: 11 },
+        implementation: { complete: 16, partial: 2, missing: 2 },
+        browserEvidence: { covered: 7, partial: 3, missing: 10 },
       },
       capabilities: { total: 12, accounted: 12 },
     });

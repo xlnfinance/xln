@@ -90,6 +90,7 @@ export const SURFACES = [
       exact('/health'),
       exact('/qa'),
       exact('/qa/hlt'),
+      exact('/qa/quorum'),
       exact('/runs'),
       exact('/scenarios'),
       prefix('/ai'),

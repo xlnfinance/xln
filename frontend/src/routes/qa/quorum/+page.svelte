@@ -1,61 +1,34 @@
 <script lang="ts">
   import './quorum.css';
-  import { summarizeModels } from '$lib/qa/quorum/derive';
-  import type { QuorumCategory, QuorumInteraction } from '$lib/qa/quorum/types';
+  import {
+    buildQuorumView,
+    formatQuorumDate,
+    quorumChartX,
+    quorumChartY,
+    quorumColorFor,
+    quorumVerdictLabel,
+    shortQuorumSha,
+  } from '$lib/qa/quorum/derive';
+  import type {
+    QuorumCategoryFilter,
+    QuorumInteraction,
+    QuorumRange,
+  } from '$lib/qa/quorum/types';
 
   export let data: { interactions: QuorumInteraction[] };
 
-  type Range = '7d' | '30d' | 'all';
-  type CategoryFilter = QuorumCategory | 'all';
-
-  let range: Range = 'all';
-  let category: CategoryFilter = 'all';
+  let range: QuorumRange = 'all';
+  let category: QuorumCategoryFilter = 'all';
   let selectedId = 'fable-wire-fit-20260822';
 
-  const colors = ['#ffbf3f', '#52d7ff', '#a78bfa', '#4ade80', '#fb7185', '#f97316', '#e879f9', '#94a3b8'];
-  const colorFor = (model: string): string => {
-    let hash = 0;
-    for (const char of model) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-    return colors[hash % colors.length]!;
-  };
-  const shortSha = (sha: string): string => sha.slice(0, 10);
-  const formatDate = (value: string): string => new Intl.DateTimeFormat('en', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
-  }).format(new Date(value));
-  const verdictLabel = (value: string): string => ({
-    verified: 'Verified', partial: 'Partial', noise: 'Noise', blocked: 'Blocked',
-  }[value] ?? value);
-
-  $: newestAt = Math.max(...data.interactions.map(entry => Date.parse(entry.occurredAt)));
-  $: cutoff = range === 'all' ? 0 : newestAt - (range === '7d' ? 7 : 30) * 86_400_000;
-  $: interactions = data.interactions
-    .filter(entry => Date.parse(entry.occurredAt) >= cutoff)
-    .filter(entry => category === 'all' || entry.category === category)
-    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  $: summaries = summarizeModels(interactions);
-  $: selected = interactions.find(entry => entry.id === selectedId) ?? interactions.at(-1) ?? null;
-  $: verified = interactions.filter(entry => entry.verdict === 'verified').length;
-  $: average = interactions.length
-    ? Math.round(interactions.reduce((sum, entry) => sum + entry.score, 0) / interactions.length)
-    : 0;
-  $: totalImpact = interactions.reduce((sum, entry) => sum + (entry.verifiedImpact ?? 0), 0);
-  $: minTime = Math.min(...interactions.map(entry => Date.parse(entry.occurredAt)));
-  $: maxTime = Math.max(...interactions.map(entry => Date.parse(entry.occurredAt)));
-  $: timeSpan = Math.max(1, maxTime - minTime);
-  $: chartX = (entry: QuorumInteraction) => 72 + 886 * (Date.parse(entry.occurredAt) - minTime) / timeSpan;
-  $: chartY = (entry: QuorumInteraction) => 370 - entry.score * 0.32;
-  $: modelGroups = summaries.map(summary => ({
-    ...summary,
-    entries: interactions.filter(entry => entry.model === summary.model),
-  }));
-  $: reviewChains = interactions
-    .filter(entry => entry.challengedInteractionId)
-    .map(entry => ({
-      challenger: entry,
-      challenged: interactions.find(candidate => candidate.id === entry.challengedInteractionId),
-    }))
-    .filter((chain): chain is { challenger: QuorumInteraction; challenged: QuorumInteraction } => Boolean(chain.challenged));
-  $: recentInteractions = [...interactions].reverse().slice(0, 8);
+  $: view = buildQuorumView(data.interactions, { range, category, selectedId });
+  $: ({ interactions, summaries, selected, verified, modelGroups, reviewChains, recentInteractions } = view);
+  $: average = view.averageScore;
+  $: totalImpact = view.verifiedImpact;
+  $: minTime = view.minTime;
+  $: maxTime = view.maxTime;
+  $: chartX = (entry: QuorumInteraction) => quorumChartX(entry, view);
+  const chartY = quorumChartY;
 </script>
 
 <svelte:head>
@@ -103,7 +76,7 @@
       <div><p class="eyebrow">AUDITOR SCORE OVER TIME</p><h2>Evidence beats eloquence</h2></div>
       <div class="legend">
         {#each modelGroups as group}
-          <span><i style={`--model-color:${colorFor(group.model)}`}></i>{group.model}</span>
+          <span><i style={`--model-color:${quorumColorFor(group.model)}`}></i>{group.model}</span>
         {/each}
       </div>
     </div>
@@ -124,7 +97,7 @@
           {#if group.entries.length > 1}
             <polyline
               points={group.entries.map(entry => `${chartX(entry)},${chartY(entry)}`).join(' ')}
-              fill="none" stroke={colorFor(group.model)} stroke-opacity="0.42" stroke-width="2"
+              fill="none" stroke={quorumColorFor(group.model)} stroke-opacity="0.42" stroke-width="2"
             />
           {/if}
           {#each group.entries as entry}
@@ -133,18 +106,18 @@
               onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') selectedId = entry.id; }}>
               <circle cx={chartX(entry)} cy={chartY(entry)}
                 r={5 + Math.min(9, Math.sqrt(entry.verifiedImpact ?? 0))}
-                fill={colorFor(entry.model)} class={`point ${entry.verdict}`} />
+                fill={quorumColorFor(entry.model)} class={`point ${entry.verdict}`} />
               <title>{entry.model} · {entry.score}/1000 · {entry.scope}</title>
             </g>
           {/each}
         {/each}
-        <text x="72" y="405" class="axis-label">{formatDate(new Date(minTime).toISOString())}</text>
-        <text x="958" y="405" text-anchor="end" class="axis-label">{formatDate(new Date(maxTime).toISOString())}</text>
+        <text x="72" y="405" class="axis-label">{formatQuorumDate(minTime)}</text>
+        <text x="958" y="405" text-anchor="end" class="axis-label">{formatQuorumDate(maxTime)}</text>
       </svg>
       <div class="mobile-timeline" aria-label="Recent model scores over time">
         {#each recentInteractions as entry}
           <button onclick={() => selectedId = entry.id}>
-            <span><i style={`--model-color:${colorFor(entry.model)}`}></i><b>{entry.model}</b><small>{formatDate(entry.occurredAt)}</small></span>
+            <span><i style={`--model-color:${quorumColorFor(entry.model)}`}></i><b>{entry.model}</b><small>{formatQuorumDate(entry.occurredAt)}</small></span>
             <strong>{entry.score}</strong>
           </button>
         {/each}
@@ -157,7 +130,7 @@
   <section class="split">
     <article class="detail-card" data-testid="quorum-selected-interaction">
       <div class="section-head compact"><div><p class="eyebrow">SELECTED INTERACTION</p><h2>{selected?.model ?? '—'}</h2></div>
-        {#if selected}<span class={`verdict ${selected.verdict}`}>{verdictLabel(selected.verdict)}</span>{/if}
+        {#if selected}<span class={`verdict ${selected.verdict}`}>{quorumVerdictLabel(selected.verdict)}</span>{/if}
       </div>
       {#if selected}
         <div class="score-lockup"><strong>{selected.score}</strong><span>/1000<br />auditor score</span></div>
@@ -165,8 +138,8 @@
         <p class="summary">{selected.summary}</p>
         <div class="evidence"><span>Decisive evidence</span><p>{selected.evidence}</p></div>
         <dl>
-          <div><dt>Observed</dt><dd>{formatDate(selected.occurredAt)} UTC</dd></div>
-          <div><dt>Source</dt><dd>{shortSha(selected.sourceSha)}</dd></div>
+          <div><dt>Observed</dt><dd>{formatQuorumDate(selected.occurredAt)} UTC</dd></div>
+          <div><dt>Source</dt><dd>{shortQuorumSha(selected.sourceSha)}</dd></div>
           <div><dt>Session</dt><dd>{selected.sessionId ?? 'not recorded'}</dd></div>
           <div><dt>Response</dt><dd>{selected.responseMinutes === undefined ? 'not recorded' : `${selected.responseMinutes} min`}</dd></div>
           <div><dt>Impact</dt><dd>{selected.verifiedImpact ?? 0}</dd></div>
@@ -184,7 +157,7 @@
             const latest = [...interactions].reverse().find(entry => entry.model === item.model);
             if (latest) selectedId = latest.id;
           }}>
-            <span><b>{index + 1}</b><i style={`--model-color:${colorFor(item.model)}`}></i>{item.model}<small>{item.interactions} answers</small></span>
+            <span><b>{index + 1}</b><i style={`--model-color:${quorumColorFor(item.model)}`}></i>{item.model}<small>{item.interactions} answers</small></span>
             <strong>{item.averageScore}</strong><span>{item.verifiedRate}%</span><span>{item.verifiedImpact}</span>
             <span>{item.medianResponseMinutes === null ? '—' : `${item.medianResponseMinutes}m`}</span>
           </button>
@@ -203,13 +176,13 @@
         {#each reviewChains as chain}
           <button class="chain" onclick={() => selectedId = chain.challenger.id}>
             <span class="chain-node">
-              <i style={`--model-color:${colorFor(chain.challenged.model)}`}></i>
+              <i style={`--model-color:${quorumColorFor(chain.challenged.model)}`}></i>
               <b>{chain.challenged.model}</b>
               <small>{chain.challenged.score}/1000 · {chain.challenged.scope}</small>
             </span>
             <span class="chain-arrow">challenged by →</span>
             <span class="chain-node">
-              <i style={`--model-color:${colorFor(chain.challenger.model)}`}></i>
+              <i style={`--model-color:${quorumColorFor(chain.challenger.model)}`}></i>
               <b>{chain.challenger.model}</b>
               <small>{chain.challenger.score}/1000 · {chain.challenger.scope}</small>
             </span>

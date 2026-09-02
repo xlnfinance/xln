@@ -13,6 +13,7 @@ describe('frontend route ownership', () => {
     expect(resolveRouteOwner('/docs')).toBe('docs');
     expect(resolveRouteOwner('/address/0xabc')).toBe('wallet');
     expect(resolveRouteOwner('/qa/hlt')).toBe('ops');
+    expect(resolveRouteOwner('/qa/quorum')).toBe('ops');
     expect(resolveRouteOwner('/ai/session-1')).toBe('ops');
     expect(SURFACES.find(({ id }) => id === 'docs')?.assetRoutes).toContainEqual({
       kind: 'stem',
