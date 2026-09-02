@@ -247,8 +247,10 @@ class BilateralHarness {
       if (!hanko) throw new Error(`HARNESS_WITNESS_UNDECLARED:${this.sides[side].entityId}:${hash}`);
       return hanko;
     };
-    if (input.kind === 'ack' || input.kind === 'ack_frame') {
-      const ack = input.ack;
+    // An ack_frame may carry a bare proposal (no piggybacked ACK) — see
+    // AccountInput `ack?: AccountAckFrame`.
+    const ack = input.kind === 'ack' || input.kind === 'ack_frame' ? input.ack : undefined;
+    if (ack) {
       ack.frameHanko = ack.frameHanko ?? requireWitness(ack.frameHash);
       if (account) account.currentFrameHanko = ack.frameHanko;
       if (ack.disputeHanko) {
@@ -740,7 +742,11 @@ class BilateralHarness {
     expect(sealed2.rootHash(), `${label} ${side} overlay.postWriteSeal==rebuild`).toBe(
       PersistentEntityAccountMap.fromEntries(overlay2Entries, ownerId, computeEntityAccountValueHash).rootHash(),
     );
-    expect(sealed2.rootHash() === sealed.rootHash(), `${label} ${side} overlay.writeChangedRoot`).toBe(false);
+    // The mempool is coordination state, not certified financial state
+    // (state-root.ts ACCOUNT_ENTITY_EXCLUDED_FIELDS): a queued tx must leave the
+    // committed Entity root exactly where it was, hot and cold alike.
+    expect(sealed2.rootHash(), `${label} ${side} overlay.mempoolWriteKeepsRoot`).toBe(sealed.rootHash());
+    expect(fork.mempool.length, `${label} ${side} overlay.mempoolWriteAdmitted`).toBe(frozenLeaf.mempool.length + 1);
 
     // invalidateEntityAccountCommitment: committed map (forget + type check)
     // and candidate map (forget + dropCachedProjection) both stay active-safe.
@@ -1006,11 +1012,19 @@ describe('proofs/C2 hot-vs-cold account roots', () => {
     expect(batchHarness.mempoolTypes('alpha')).toEqual(['direct_payment']);
     batchHarness.checkAll('d4-two-conflicts');
 
-    // (c) exact duplicate after commit: idempotent skip, no rejection row.
+    // (c) the same observation the peer already committed is not a duplicate
+    // on our side: it is the closing half of the 2-of-2 agreement, so it is
+    // admitted once (j-claim-transition.ts planAccountJClaimLocalAdmission).
+    // Re-admitting it while it is queued is the idempotent skip, no rejection row.
+    const closingHalf = await batchHarness.admitClaim('alpha', 5, 0x77);
+    expect(closingHalf.ok).toBe(true);
+    expect(closingHalf.ok ? closingHalf.admittedAccountTxCount : undefined).toBe(1);
+    expect(closingHalf.ok ? closingHalf.admissionRejections : 'absent').toBeUndefined();
     const duplicate = await batchHarness.admitClaim('alpha', 5, 0x77);
     expect(duplicate.ok).toBe(true);
     expect(duplicate.ok ? duplicate.admittedAccountTxCount : undefined).toBe(0);
     expect(duplicate.ok ? duplicate.admissionRejections : 'absent').toBeUndefined();
+    expect(batchHarness.mempoolTypes('alpha')).toEqual(['direct_payment', 'j_event_claim']);
     batchHarness.checkAll('d4-exact-duplicate');
 
     // (d) stale admitted claim after an incoming frame: the proposal window
