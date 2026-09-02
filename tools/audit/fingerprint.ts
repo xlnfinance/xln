@@ -7,18 +7,39 @@ import { dirname, normalize, resolve } from 'node:path';
 
 import type { AuditModule, AuditRegistry } from './types';
 
+const gitLsFiles = (root: string, args: readonly string[]): string =>
+  execFileSync('git', ['ls-files', ...args, '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+    // A CI checkout with build outputs present can exceed Node's 1 MB default.
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+const describeExecError = (error: unknown): string => {
+  if (!(error instanceof Error)) return String(error);
+  const detail = error as Error & { stderr?: unknown; status?: unknown; signal?: unknown; code?: unknown };
+  const stderr = String(detail.stderr ?? '').trim();
+  return `${error.message}|status=${String(detail.status)}|signal=${String(detail.signal)}|code=${String(detail.code)}${stderr ? `|stderr=${stderr}` : ''}`;
+};
+
+/**
+ * Tracked files plus untracked-but-not-ignored ones. A CI checkout has no
+ * meaningful untracked sources; if the untracked walk fails there, fall back
+ * to the tracked listing and say so, instead of failing the whole audit.
+ */
 const runGitLsFiles = (root: string): string => {
   try {
-    return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
-      cwd: root,
-      encoding: 'utf8',
-      // A CI checkout with build outputs present can exceed Node's 1 MB default.
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    return gitLsFiles(root, ['--cached', '--others', '--exclude-standard']);
   } catch (error) {
-    const stderr = error instanceof Error && 'stderr' in error ? String(error.stderr ?? '') : '';
-    throw new Error(`AUDIT_GIT_LS_FILES_FAILED:${root}:${stderr.trim() || (error instanceof Error ? error.message : String(error))}`);
+    const combined = describeExecError(error);
+    try {
+      const cached = gitLsFiles(root, ['--cached']);
+      console.error(`AUDIT_GIT_LS_FILES_UNTRACKED_UNAVAILABLE:${root}:${combined}`);
+      return cached;
+    } catch (cachedError) {
+      throw new Error(`AUDIT_GIT_LS_FILES_FAILED:${root}:${combined}:${describeExecError(cachedError)}`);
+    }
   }
 };
 
