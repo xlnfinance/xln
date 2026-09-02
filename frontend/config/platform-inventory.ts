@@ -452,6 +452,7 @@ export const PLATFORM_INVENTORY = [
     sources: [
       'frontend/packages/ui/src/graph3d-lifecycle.ts',
       'frontend/packages/ui/src/graph3d-renderer.ts',
+      'frontend/packages/ui/src/graph3d-scene-primitives.ts',
       'frontend/src/lib/utils/runtime/debugSurface.ts',
     ],
     consumers: [
@@ -461,6 +462,7 @@ export const PLATFORM_INVENTORY = [
     evidence: [
       'tests/frontend/graph/graph3d-lifecycle.test.ts',
       'tests/frontend/graph/graph3d-renderer.test.ts',
+      'tests/frontend/graph/graph3d-scene-primitives.test.ts',
     ],
   },
   {

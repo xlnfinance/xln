@@ -50,8 +50,6 @@ import {
   createDirectionalLightningMesh,
   createEntityLabel,
   createGraphEntityNode,
-  createGraphGrid,
-  createGraphJMachine,
   createMempoolIndicator,
   createMempoolTxCube,
   deriveGraphEntry,
@@ -59,8 +57,6 @@ import {
   graphAccountMempoolCount,
   positionEntityLabel,
   positionMempoolIndicator,
-  startProportionalBroadcast,
-  buildSimpleRadialLayout,
 } from "./graph3d-visuals";
 import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphTransactionLike, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
@@ -74,6 +70,12 @@ import {
   createGraph3dSceneInputView,
   graph3dSceneTransactionOf,
 } from "../../../../../packages/runtime-client/src/graph3d-scene-input";
+import {
+  buildSimpleRadialLayout,
+  createGraphGrid,
+  createGraphJMachine,
+  startProportionalBroadcast,
+} from "../../../../../packages/ui/src/graph3d-scene-primitives";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
