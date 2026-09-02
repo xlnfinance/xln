@@ -15,7 +15,6 @@ import { runtimeControllerHandle } from "$lib/stores/runtimeControllerStore";
 import { runtimeView } from "$lib/stores/runtimeViewStore";
 import { runtimeGraphLiveFrameCache, watchRuntimeGraphFrameCache } from "$lib/network3d/runtimeGraphFrameCache";
 import { runtimeGraphCanonicity, runtimeGraphControlOperations, runtimeGraphScope } from "$lib/stores/network/runtimeGraphControlStore";
-import { beginGraphGesture, emptyGraphGestureState, endGraphGesture, type GraphGestureOutcome } from "$lib/network3d/graphSelectionGesture";
 import { ImmersiveWalletSurface } from "$lib/network3d/ImmersiveWalletSurface";
 import { registerDebugSurface } from "$lib/utils/runtime/debugSurface";
 import { networkMachineRuntime } from "$lib/stores/network/networkMachineRuntimeStore";
@@ -81,9 +80,14 @@ import {
   positionMempoolIndicator,
 } from "../../../../../packages/ui/src/graph3d-entity-visuals";
 import {
+  beginGraphGesture,
+  emptyGraphGestureState,
+  endGraphGesture,
   findGraphEntityFromObject,
   resetGraphObjectHighlight,
   setGraphPointerNdc,
+  updateGraphSelectionHighlight,
+  type GraphGestureOutcome,
 } from "../../../../../packages/ui/src/graph3d-interaction";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
@@ -1252,7 +1256,7 @@ function updateNetworkData() {
   if (selectedGraphEntityId && !entities.some((entity) => entity.id === selectedGraphEntityId)) {
     selectedGraphEntityId = "";
   }
-  updateGraphSelectionVisual();
+  updateGraphSelectionHighlight(entities, selectedGraphEntityId);
   createConnections();
   applyNetworkMachineRuntimeHighlight();
   createTransactionParticles();
@@ -2242,31 +2246,13 @@ function onMouseClick(event: MouseEvent) {
   } else {
     showMiniPanel = false;
     selectedGraphEntityId = "";
-    updateGraphSelectionVisual();
-  }
-}
-function updateGraphSelectionVisual(): void {
-  for (const entity of entities) {
-    const previous = entity.mesh.getObjectByName("graph-selection-highlight");
-    if (previous) {
-      entity.mesh.remove(previous);
-      if (previous instanceof THREE.Mesh) {
-        previous.geometry.dispose();
-        const materials = Array.isArray(previous.material) ? previous.material : [previous.material];
-        materials.forEach((material) => material.dispose());
-      }
-    }
-    if (entity.id !== selectedGraphEntityId) continue;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.35, 0.07, 8, 36), new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.95, depthTest: false }));
-    ring.name = "graph-selection-highlight";
-    ring.rotation.x = Math.PI / 2;
-    entity.mesh.add(ring);
+    updateGraphSelectionHighlight(entities, selectedGraphEntityId);
   }
 }
 function selectGraphEntity(entity: GraphEntityData): void {
   if (!entity.id) throw new Error("GRAPH_ENTITY_ID_REQUIRED");
   selectedGraphEntityId = entity.id;
-  updateGraphSelectionVisual();
+  updateGraphSelectionHighlight(entities, selectedGraphEntityId);
   triggerEntityActivity(entity.id);
   panelBridge.emit("entity:selected", { entityId: entity.id });
 }

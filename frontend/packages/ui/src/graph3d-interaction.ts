@@ -1,4 +1,12 @@
 import * as THREE from 'three';
+import { detachGraphObject3D } from './graph3d-renderer';
+
+export type GraphGestureOutcome = 'none' | 'select' | 'open' | 'drag-end';
+
+export type GraphGestureState = {
+  active: Record<string, { entityId: string; startedAt: number }>;
+  lastTap: Record<string, { entityId: string; endedAt: number }>;
+};
 
 type GraphClientPoint = Readonly<{
   clientX: number;
@@ -20,6 +28,56 @@ type GraphPointer = {
 type GraphEntityHitTarget = Readonly<{
   mesh: THREE.Object3D;
 }>;
+
+type GraphSelectableEntity = Readonly<{
+  id: string;
+  mesh: THREE.Object3D;
+}>;
+
+export const emptyGraphGestureState = (): GraphGestureState => ({ active: {}, lastTap: {} });
+
+const gestureSource = (value: string): string => String(value || '').trim().toLowerCase();
+const gestureEntity = (value: string): string => String(value || '').trim().toLowerCase();
+const gestureTime = (value: number): number => Math.max(0, Number(value) || 0);
+
+export const beginGraphGesture = (
+  state: GraphGestureState,
+  input: { sourceId: string; entityId: string; at: number },
+): GraphGestureState => {
+  const sourceId = gestureSource(input.sourceId);
+  const entityId = gestureEntity(input.entityId);
+  if (!sourceId || !entityId) throw new Error('GRAPH_GESTURE_SOURCE_AND_ENTITY_REQUIRED');
+  return { ...state, active: { ...state.active, [sourceId]: { entityId, startedAt: gestureTime(input.at) } } };
+};
+
+export const endGraphGesture = (
+  state: GraphGestureState,
+  input: { sourceId: string; entityId: string; at: number; moved: boolean; doubleSelectMs?: number },
+): { state: GraphGestureState; outcome: GraphGestureOutcome } => {
+  const sourceId = gestureSource(input.sourceId);
+  const entityId = gestureEntity(input.entityId);
+  const active = state.active[sourceId];
+  if (!active || active.entityId !== entityId) return { state, outcome: 'none' };
+  const activeNext = { ...state.active };
+  delete activeNext[sourceId];
+  if (input.moved) {
+    const lastTap = { ...state.lastTap };
+    delete lastTap[sourceId];
+    return { state: { active: activeNext, lastTap }, outcome: 'drag-end' };
+  }
+  const endedAt = gestureTime(input.at);
+  const previous = state.lastTap[sourceId];
+  const doubleSelectMs = Math.max(100, Math.floor(Number(input.doubleSelectMs ?? 450)));
+  if (previous?.entityId === entityId && endedAt >= previous.endedAt && endedAt - previous.endedAt <= doubleSelectMs) {
+    const lastTap = { ...state.lastTap };
+    delete lastTap[sourceId];
+    return { state: { active: activeNext, lastTap }, outcome: 'open' };
+  }
+  return {
+    state: { active: activeNext, lastTap: { ...state.lastTap, [sourceId]: { entityId, endedAt } } },
+    outcome: 'select',
+  };
+};
 
 const hasGraphMaterial = (target: THREE.Object3D): target is THREE.Object3D & { material: unknown } =>
   'material' in target;
@@ -79,4 +137,19 @@ export function resetGraphObjectHighlight(target: THREE.Object3D): void {
   const material = target.material;
   if (isMeshLambertMaterial(material)) material.emissive.setHex(0x002200);
   else if (isLineDashedMaterial(material)) material.color.setHex(0x00ff44);
+}
+
+export function updateGraphSelectionHighlight(entities: readonly GraphSelectableEntity[], selectedEntityId: string): void {
+  for (const entity of entities) {
+    const previous = entity.mesh.getObjectByName('graph-selection-highlight');
+    if (previous) detachGraphObject3D(entity.mesh, previous);
+    if (entity.id !== selectedEntityId) continue;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.35, 0.07, 8, 36),
+      new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.95, depthTest: false }),
+    );
+    ring.name = 'graph-selection-highlight';
+    ring.rotation.x = Math.PI / 2;
+    entity.mesh.add(ring);
+  }
 }

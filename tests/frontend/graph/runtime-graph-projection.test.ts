@@ -40,7 +40,7 @@ import {
   beginGraphGesture,
   emptyGraphGestureState,
   endGraphGesture,
-} from '../../../frontend/src/lib/network3d/graphSelectionGesture';
+} from '../../../frontend/packages/ui/src/graph3d-interaction';
 import { immersiveWalletActionAt } from '../../../frontend/src/lib/network3d/ImmersiveWalletSurface';
 
 const source = (runtimeId: string, height: number, timestamp: number): RuntimeGraphSource => ({
