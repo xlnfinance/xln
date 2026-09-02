@@ -1,8 +1,9 @@
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { UserConfig } from 'vite';
+import type { Plugin, UserConfig } from 'vite';
 
+import { CONTENT_SECURITY_POLICY } from './content-security-policy.js';
 import {
   parseDevelopmentGatewayPort,
   parseDevelopmentPortOffset,
@@ -19,6 +20,22 @@ type ReactAppConfigInput = Readonly<{
   surfaceId: SurfaceId;
   rootDirectory: string;
 }>;
+
+const createWalletContentSecurityPolicyPlugin = (policy: string): Plugin => ({
+  name: 'xln-wallet-content-security-policy',
+  apply: 'build',
+  transformIndexHtml: () => [{
+    tag: 'meta',
+    attrs: {
+      'http-equiv': 'Content-Security-Policy',
+      content: policy,
+    },
+    injectTo: 'head-prepend',
+  }],
+});
+
+export const getReactContentSecurityPolicy = (surfaceId: SurfaceId): string | null =>
+  surfaceId === 'wallet' ? CONTENT_SECURITY_POLICY : null;
 
 export const getReactAppBase = (
   surfaceId: SurfaceId,
@@ -39,6 +56,7 @@ export const getReactViteCacheDirectory = (
 
 export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfigInput): UserConfig => {
   const surface = getSurface(surfaceId);
+  const contentSecurityPolicy = getReactContentSecurityPolicy(surfaceId);
   const developmentPort = resolveDevelopmentSurfacePort(
     surface.developmentPort,
     parseDevelopmentPortOffset(process.env['XLN_REACT_PORT_OFFSET']),
@@ -48,7 +66,7 @@ export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfi
     base: getReactAppBase(surfaceId, USE_DEVELOPMENT_GATEWAY),
     appType: 'spa',
     publicDir: getReactPublicDirectory(surfaceId, USE_DEVELOPMENT_GATEWAY),
-    plugins: [react()],
+    plugins: [react(), ...(contentSecurityPolicy ? [createWalletContentSecurityPolicyPlugin(contentSecurityPolicy)] : [])],
     resolve: {
       alias: {
         '@xln/core': resolve(REPOSITORY_ROOT, 'core'),

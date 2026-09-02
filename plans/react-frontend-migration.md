@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 WALLET PWA INPUT + CANDIDATE VERIFIER + NATIVE WALLET STAGING READY`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED NATIVE WALLET + CAPACITOR CSP SMOKE READY`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1927,7 +1927,7 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + ISOLATED NATIVE WALLET STAGING READY`
+**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + ISOLATED CAPACITOR CSP SMOKE READY`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
@@ -1997,8 +1997,35 @@ existing Dockview hint. The full frontend suite remains at the exact known
 The broader native suite exposes three unrelated existing watchtower/Runtime
 fixture failures: one oversized Runtime machine-graph recovery row and two
 non-Map Account `.set` calls. This frontend-native slice does not change those
-Runtime, Account, watchtower, or storage paths. Native candidate CSP parity is
-not yet claimed: it is an explicit gate before any isolated Capacitor sync.
+Runtime, Account, watchtower, or storage paths. At that checkpoint native
+candidate CSP parity was not yet claimed and remained the next explicit gate.
+
+Native candidate CSP parity and isolated Capacitor consumption are now explicit.
+One canonical directive map feeds SvelteKit hash-mode CSP and the React wallet's
+production HTML; the native verifier requires exactly one byte-canonical CSP
+meta tag and rejects inline scripts. The `native:candidate:capacitor:smoke`
+command creates a content-addressed two-file Capacitor workspace beside the
+verified wallet stage, inherits the canonical app/security configuration, and
+points `webDir` at that exact release. Capacitor 8's real `copy web` path then
+loads the isolated configuration and validates the web root without an iOS or
+Android project directory, so it cannot mutate either checked-in native shell.
+Exact workspaces are reused; corrupt config, manifest drift, extra files,
+missing/mismatched CSP, inline scripts, symlinks, and candidate corruption fail
+loudly without repair.
+
+A real four-app candidate now verifies as
+`sha256-ea173909e635649b5f4ed9eee848015f82d4db7a47ef22730c5ae6a7f3275e3a`
+with 333 files, stages 51 wallet files, and passes the Capacitor smoke twice
+(`created`, then `reused`). Focused CSP, candidate, Capacitor, native config,
+build-option, and inventory coverage passes 34 / 34 with 313 expectations. All
+four React local checks pass with 635 files and zero unsafe findings; canonical
+Svelte remains at zero errors/warnings and builds 4,671 SSR plus 6,422 client
+modules. The real browser loads the staged wallet with zero console errors or
+warnings and all 5 / 5 static requests at HTTP 200. The full frontend suite is
+back at the exact known 13-name baseline; the two new CSP tests pass in addition
+to that baseline. Canonical `frontend/build`, iOS, Android, `webDir=build`,
+`localhost`, and both `xln` deep-link declarations remain unchanged. No iOS or
+Android copy/sync, package, signing, activation, deployment, or cutover ran.
 
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
@@ -2058,11 +2085,11 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Add an isolated Capacitor candidate configuration/smoke path that consumes
-   one verified native wallet stage without changing canonical `webDir=build`
-   or the checked-in iOS/Android shells. Establish explicit native CSP parity,
-   preserve `localhost` storage origin and `xln` deep links, and do not activate,
-   package, or cut over production.
+1. Copy the checked-in iOS and Android shells into disposable candidate
+   workspaces, run Capacitor copy against the exact verified release there, and
+   verify copied web/config bytes plus `localhost` storage and `xln` deep-link
+   invariants. Do not modify canonical shells, package, sign, activate, deploy,
+   or cut over production.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

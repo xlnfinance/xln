@@ -1,6 +1,8 @@
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
+import { CONTENT_SECURITY_POLICY_DIRECTIVES } from './config/content-security-policy.js';
+
 const outDir = process.env.XLN_SVELTE_KIT_OUT_DIR || '.svelte-kit';
 const buildDir = process.env.XLN_SVELTE_BUILD_DIR || 'build';
 const assetsDir = process.env.VITE_PUBLIC_DIR || 'static';
@@ -14,20 +16,7 @@ const config = {
 	kit: {
 		csp: {
 			mode: 'hash',
-			directives: {
-				'default-src': ['self'],
-				'script-src': ['self'],
-				'script-src-attr': ['none'],
-				'object-src': ['none'],
-				'base-uri': ['self'],
-				'form-action': ['self'],
-				'img-src': ['self', 'data:', 'blob:', 'https:'],
-				'media-src': ['self', 'blob:'],
-				'font-src': ['self', 'data:'],
-				'worker-src': ['self', 'blob:'],
-				'connect-src': ['self', 'https:', 'wss:', 'http:', 'ws:'],
-				'style-src': ['self', 'unsafe-inline'],
-			},
+			directives: CONTENT_SECURITY_POLICY_DIRECTIVES,
 		},
 		outDir,
 		files: {

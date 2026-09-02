@@ -551,6 +551,8 @@ export const PLATFORM_INVENTORY = [
     consumers: [
       'scripts/native/wallet-candidate-manifest.ts',
       'scripts/native/stage-wallet-candidate.ts',
+      'scripts/native/capacitor-candidate.ts',
+      'scripts/native/smoke-capacitor-candidate.ts',
       'scripts/release/build-xlnfinance-package.ts',
       'scripts/native/build-platforms.ts',
       'scripts/deployment/deploy-platform.sh',
@@ -559,6 +561,8 @@ export const PLATFORM_INVENTORY = [
       'tests/frontend/tooling/frontend-candidate-assembly.test.ts',
       'tests/frontend/tooling/frontend-candidate-release-verifier.test.ts',
       'native/__tests__/wallet-candidate-staging.test.ts',
+      'native/__tests__/capacitor-candidate-smoke.test.ts',
+      'tests/frontend/tooling/content-security-policy.test.ts',
       'native/__tests__/native-build-options.test.ts',
     ],
   },
