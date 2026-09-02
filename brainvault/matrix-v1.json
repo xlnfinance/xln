@@ -1,6 +1,7 @@
 {
   "format": "brainvault-release-matrix-v1/1",
   "roots": {
+    "s1000-m1": "dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485",
     "w1-m1": "4d7d5510c9db574dd641bb1273bc90ec5ef93f18198c4b668d13bf56a6161d6a",
     "w2-m1": "706332288bd9586f7a91447d08159ea3ce400e6f94dfc28cf7a65ca9572fb1ac",
     "w8-m1": "e9fe890cca4530d235a34788036c74bea0ce68cbd5d6a8b7f90eab304d072dd8",

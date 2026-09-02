@@ -1151,7 +1151,8 @@ async function runBenchmark(smoke = false) {
     console.log(`\nRoot parity: PASS (${results[0]!.root})`);
   } else {
     const matrix = await Bun.file(`${import.meta.dir}/matrix-v1.json`).json() as { roots?: Record<string, string> };
-    const expected = shardCount === workers ? matrix.roots?.[`w${workers}-m${benchmarkMultiplier}`] : undefined;
+    const expected = matrix.roots?.[`s${shardCount}-m${benchmarkMultiplier}`]
+      ?? (shardCount === workers ? matrix.roots?.[`w${workers}-m${benchmarkMultiplier}`] : undefined);
     if (expected !== undefined && results[0]!.root !== expected) {
       throw new Error(`BRAINVAULT_FROZEN_ROOT_MISMATCH:${results[0]!.root}:${expected}`);
     }

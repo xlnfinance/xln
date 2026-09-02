@@ -39,7 +39,7 @@ if (!['cpu', 'metal', 'hybrid', 'parity'].includes(mode)) throw new Error(`BRAIN
 const explicitShards = args.some(value => value.startsWith('--shards='));
 const shardCount = integerFlag('shards', mode === 'parity' && !explicitShards ? 2 : 1_000, 1, 1_000_000);
 const cpuWorkers = integerFlag('cpu-workers', 32, 1, 64);
-const metalWorkers = integerFlag('metal-workers', 139, 1, 256);
+const metalWorkers = integerFlag('metal-workers', 147, 1, 256);
 const metalProcesses = integerFlag('metal-processes', 2, 1, 2);
 const simdgroups = integerFlag('simdgroups', 4, 1, 8);
 if (![1, 2, 4, 8].includes(simdgroups)) throw new Error(`BRAINVAULT_METAL_SIMDGROUPS_INVALID:${simdgroups}`);
@@ -52,11 +52,18 @@ if ((kernel === 'modern64' || kernel === 'v1special' || kernel === 'segmented64'
 }
 const memory = flag('memory', 'private');
 if (!['shared', 'private'].includes(memory)) throw new Error(`BRAINVAULT_METAL_MEMORY_INVALID:${memory}`);
-const defaultGpuShards = Math.min(shardCount - 1, Math.round(shardCount * 0.556));
+const defaultGpuShards = Math.min(shardCount - 1, Math.round(shardCount * 0.588));
 const gpuShards = integerFlag('gpu-shards', Math.max(0, defaultGpuShards), 0, shardCount);
 
-const cpuExecutable = `${import.meta.dir}/../argon2-c/brainvault-argon2-oversubscribed`;
-const metalExecutable = `${import.meta.dir}/brainvault-argon2-metal`;
+const cpuExecutable = [
+  `${import.meta.dir}/../../prebuilds/darwin-arm64/brainvault-argon2-m3`,
+  `${import.meta.dir}/../../prebuilds/darwin-arm64/brainvault-argon2`,
+  `${import.meta.dir}/../argon2-c/brainvault-argon2-oversubscribed`,
+].find(candidate => existsSync(candidate)) ?? `${import.meta.dir}/../argon2-c/brainvault-argon2-oversubscribed`;
+const metalExecutable = [
+  `${import.meta.dir}/../../prebuilds/darwin-arm64/brainvault-argon2-metal`,
+  `${import.meta.dir}/brainvault-argon2-metal`,
+].find(candidate => existsSync(candidate)) ?? `${import.meta.dir}/brainvault-argon2-metal`;
 if ((mode === 'cpu' || mode === 'hybrid' || mode === 'parity') && !existsSync(cpuExecutable)) {
   throw new Error('BRAINVAULT_METAL_CPU_EXECUTABLE_MISSING:run make -C ../argon2-c oversubscribed');
 }

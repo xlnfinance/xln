@@ -56,14 +56,14 @@ export function acceleratorPlan(
   if (ultra && shardCount >= 100) {
     const acceleratorShards = engine === 'opencl'
       ? Math.min(shardCount - 1, Math.round(shardCount * 0.496))
-      : Math.min(shardCount - 1, Math.round(shardCount * 0.544));
+      : Math.min(shardCount - 1, Math.round(shardCount * 0.588));
     return {
       cpuShards: shardCount - acceleratorShards,
       cpuWorkers: boundedWorkers(engine === 'opencl' ? Math.min(30, requestedCpuWorkers) : requestedCpuWorkers, shardCount - acceleratorShards),
       acceleratorShards,
       acceleratorWorkers: engine === 'opencl'
         ? Math.min(248, acceleratorShards)
-        : Math.min(136, Math.ceil(acceleratorShards / acceleratorProcesses)),
+        : Math.min(147, Math.ceil(acceleratorShards / acceleratorProcesses)),
       acceleratorProcesses,
     };
   }

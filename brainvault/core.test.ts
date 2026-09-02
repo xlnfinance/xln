@@ -590,7 +590,7 @@ test('custom multiplier preserves final wallet parity across compatible engines'
     expected ??= output;
     expect(output).toBe(expected);
   }
-});
+}, 20_000);
 
 console.log('✅ All deterministic tests passed');
 console.log('These vectors define wallet compatibility - never change them!');

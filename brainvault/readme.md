@@ -107,8 +107,8 @@ This directory is the complete npm package boundary. Nothing above
   dependencies, and secure-wipe/no-wipe comparison variants;
 - `experimental/argon2-metal/` contains the complete native Apple GPU source,
   raw parity harness, generic kernel, frozen-V1-specialized kernel, and retained
-  upstream MIT notice. The M3 Ultra default uses 544 Metal / 456 C shards with
-  136 workers per Metal process and about 77 GiB of arenas;
+  upstream MIT notice. The M3 Ultra default uses 588 Metal / 412 C shards with
+  147 workers per Metal process and about 84 GiB of arenas;
 - `experimental/argon2-opencl/` contains the complete deprecated OpenCL source
   and retained upstream notices. It remains selectable and benchmarked for
   parity/research, but native Metal is automatic only on the measured M3 Ultra.
@@ -288,6 +288,8 @@ many shards as workers and runs engines sequentially. WASM is expected only up
 to multiplier 7; multiplier 10 tests all seven engines physically representable
 inside their address space. Periodic 1,000-shard/32-worker runs remain thermal
 and OOM evidence rather than a per-commit gate.
+The canonical 1,000-shard benchmark root is also frozen there, so even a
+single-engine production timing fails rather than merely printing a changed root.
 
 `historical.test.ts` hashes each archived tarball and extracts pinned source and
 vector artifacts strictly as inert data; historical package code is never

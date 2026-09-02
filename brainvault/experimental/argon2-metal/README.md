@@ -32,7 +32,8 @@ The original shared-memory Metal path completed 256 shards in 5.213 seconds
 - two independent Metal processes, each reusing a 139-shard private arena.
 
 On the 32-CPU-core / 80-GPU-core M3 Ultra used for development, the current
-default sends 544 shards to Metal and 456 to C/NEON. Earlier retained runs of
+default sends 588 shards to Metal and 412 to C/NEON, with 147 workers in each
+of two Metal processes. Earlier retained runs of
 the 556/444 profile took
 2.732, 2.740, 2.738, and 2.741 seconds: **2.739-second median** and
 **365.0 shards/s**. A later cool run of the same retained profile set the best
@@ -41,7 +42,10 @@ Against the fresh 5.136-second C/NEON baseline, the stable profile is **1.875x**
 faster. It is also **1.082x** faster than the 2.964-second OpenCL best while
 using Apple's native Metal API and no external runtime.
 
-The default profile needs roughly 78 GiB of unified memory at peak, so it is an
+Five retained V1-specialized runs of the final 588/412 profile took 2.735,
+2.747, 2.765, 2.786, and 2.889 seconds: **2.765-second median**. CPU and GPU
+completion differed by only 39–152 ms. The profile needs roughly 84 GiB of
+unified memory at peak, so it is an
 M3 Ultra tuning, not a laptop default. The frozen-V1 function-constant kernel and
 generic kernel both retain exact raw-shard and 1,000-shard root parity.
 

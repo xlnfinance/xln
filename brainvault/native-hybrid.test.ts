@@ -5,10 +5,10 @@ import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } fro
 
 test('M3 Ultra Metal V1 profile freezes the measured balanced split', () => {
   expect(acceleratorPlan('metal', 1_000, 32, 32, 256 * 1024 ** 3)).toEqual({
-    cpuShards: 456,
+    cpuShards: 412,
     cpuWorkers: 32,
-    acceleratorShards: 544,
-    acceleratorWorkers: 136,
+    acceleratorShards: 588,
+    acceleratorWorkers: 147,
     acceleratorProcesses: 2,
   });
 });

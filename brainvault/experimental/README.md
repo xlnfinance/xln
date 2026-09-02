@@ -71,7 +71,8 @@ for the complete 1,000-shard CPU/GPU derivation. The best observed run was
 2.675 seconds. The frozen root remained
 `dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
 This is **1.875x** the fresh C/NEON baseline and about **1.082x** the OpenCL
-record. The current 544 Metal / 456 CPU profile uses about 78 GiB at peak and is
+record. The current V1-specialized 588 Metal / 412 CPU profile produced a
+2.765-second five-run median, uses about 84 GiB at peak, and is
 the automatic wallet engine only on the measured M3 Ultra class. Other Macs
 retain the C/NEON default until a real-device release matrix exists.
 
