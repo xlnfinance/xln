@@ -70,6 +70,22 @@ Running CPU and GPU concurrently did not materially improve total throughput
 because they contend for unified-memory service. It remains an auditable
 research backend and is intentionally not routed into wallet creation.
 
+`argon2-opencl/` is the faster source-only experiment. A one-shard-per-workgroup
+layout plus concurrent C/NEON processing completed 1,000 exact V1 shards in a
+best 3.072 seconds (325.53 shards/s), versus a fresh 5.136-second C/NEON
+baseline: **1.67x best / about 1.62x typical end-to-end**. The frozen root remained
+`dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
+The measured M3 Ultra split is 480 GPU shards in two batches of 240 and 520 CPU
+shards. The required 32-worker run took 3.127 seconds; the best observed
+3.072-second tuning used 30 workers to reduce unified-memory contention. GPU
+and host memory are explicitly erased.
+
+OpenCL is deprecated by Apple and the pinned upstream has mixed license
+notices, so this directory is excluded from the npm package and not selected by
+wallet creation. Its `NOTICE` explains provenance and the conservative GPL
+treatment. The retained source is small, builds against the macOS system
+framework, and contains no hashcat runtime or downloaded dependency.
+
 ## Run
 
 ```bash

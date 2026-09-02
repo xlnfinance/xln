@@ -1,0 +1,40 @@
+{
+  "date": "2026-09-02",
+  "platform": "Apple M3 Ultra, macOS arm64, 32 CPU cores, 80 GPU compute units",
+  "specId": "brainvault/argon2id-sharded/v1.0|argon2id-v19-m262144-t1-p1|out32|nfkd-utf8",
+  "shards": 1000,
+  "factor": 4,
+  "multiplier": 1,
+  "root": "dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485",
+  "cpuBaseline": {
+    "engine": "C/NEON final wipe",
+    "workers": 32,
+    "timeMs": 5135.514,
+    "shardsPerSecond": 194.722
+  },
+  "hybrid32": {
+    "gpuShards": 480,
+    "gpuBatch": 240,
+    "gpuJobsPerWorkgroup": 1,
+    "cpuShards": 520,
+    "cpuWorkers": 32,
+    "timeMs": 3126.648,
+    "shardsPerSecond": 319.831,
+    "speedup": 1.642
+  },
+  "bestObservedHybrid": {
+    "gpuShards": 480,
+    "gpuBatch": 240,
+    "gpuJobsPerWorkgroup": 1,
+    "cpuShards": 520,
+    "cpuWorkers": 30,
+    "timeMs": 3071.891,
+    "shardsPerSecond": 325.532,
+    "speedup": 1.672
+  },
+  "parity": {
+    "rawShardCounts": [1, 2, 8],
+    "fullRootAt1000": true,
+    "secureGpuWipeIncluded": true
+  }
+}
