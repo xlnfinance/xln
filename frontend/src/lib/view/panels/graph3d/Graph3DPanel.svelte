@@ -80,10 +80,13 @@ import {
   positionMempoolIndicator,
 } from "../../../../../packages/ui/src/graph3d-entity-visuals";
 import {
+  beginGraphEntityDrag,
   beginGraphGesture,
   emptyGraphGestureState,
+  endGraphEntityDrag,
   endGraphGesture,
   findGraphEntityFromObject,
+  moveGraphEntityDrag,
   resetGraphObjectHighlight,
   setGraphPointerNdc,
   updateGraphSelectionHighlight,
@@ -2054,14 +2057,7 @@ function onMouseDown(event: MouseEvent) {
     hasMoved = false; // Reset movement flag for this drag
     draggedEntity = entity;
     selectGraphEntity(entity);
-    entity.isDragging = true;
-    dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).normalize(), entity.position);
-    const intersection = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlane, intersection);
-    dragOffset.subVectors(entity.position, intersection);
-    if (entity.mesh.material instanceof THREE.MeshLambertMaterial) {
-      entity.mesh.material.emissive.setHex(0x00ff88);
-    }
+    beginGraphEntityDrag(camera, raycaster, entity, dragPlane, dragOffset);
   }
 }
 function onMouseUp(_event: MouseEvent) {
@@ -2069,10 +2065,7 @@ function onMouseUp(_event: MouseEvent) {
     if (hasMoved) {
       draggedEntity.isPinned = true;
     }
-    draggedEntity.isDragging = false;
-    if (draggedEntity.mesh.material instanceof THREE.MeshLambertMaterial) {
-      draggedEntity.mesh.material.emissive.setHex(0x002200);
-    }
+    endGraphEntityDrag(draggedEntity);
     if (hasMoved) {
       enforceSpacingConstraints();
       saveEntityPositionOverride(draggedEntity);
@@ -2094,10 +2087,7 @@ function onMouseMove(event: MouseEvent) {
   raycaster.setFromCamera(mouse, camera);
   if (isDragging && draggedEntity) {
     hasMoved = true; // Actual movement occurred
-    const intersection = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlane, intersection);
-    draggedEntity.position.copy(intersection.add(dragOffset));
-    draggedEntity.mesh.position.copy(draggedEntity.position);
+    moveGraphEntityDrag(raycaster, draggedEntity, dragPlane, dragOffset);
     updateConnectionsForEntity(draggedEntity.id);
     return; // Skip hover logic while dragging
   }
@@ -2359,14 +2349,7 @@ function onTouchStart(event: TouchEvent) {
       hasMoved = false; // Reset movement flag for this drag
       draggedEntity = entity;
       graphGestureState = beginGraphGesture(graphGestureState, { sourceId: "touch:primary", entityId: entity.id, at: event.timeStamp });
-      entity.isDragging = true;
-      dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).normalize(), entity.position);
-      const intersection = new THREE.Vector3();
-      raycaster.ray.intersectPlane(dragPlane, intersection);
-      dragOffset.subVectors(entity.position, intersection);
-      if (entity.mesh.material instanceof THREE.MeshLambertMaterial) {
-        entity.mesh.material.emissive.setHex(0x00ff88);
-      }
+      beginGraphEntityDrag(camera, raycaster, entity, dragPlane, dragOffset);
     }
   }
 }
@@ -2380,10 +2363,7 @@ function onTouchMove(event: TouchEvent) {
     raycaster.setFromCamera(mouse, camera);
     if (isDragging && draggedEntity) {
       hasMoved = true; // Actual movement occurred
-      const intersection = new THREE.Vector3();
-      raycaster.ray.intersectPlane(dragPlane, intersection);
-      draggedEntity.position.copy(intersection.add(dragOffset));
-      draggedEntity.mesh.position.copy(draggedEntity.position);
+      moveGraphEntityDrag(raycaster, draggedEntity, dragPlane, dragOffset);
     }
   }
 }
@@ -2401,10 +2381,7 @@ function onTouchEnd(event: TouchEvent) {
     if (hasMoved) {
       draggedEntity.isPinned = true;
     }
-    draggedEntity.isDragging = false;
-    if (draggedEntity.mesh.material instanceof THREE.MeshLambertMaterial) {
-      draggedEntity.mesh.material.emissive.setHex(0x002200);
-    }
+    endGraphEntityDrag(draggedEntity);
     if (hasMoved) {
       enforceSpacingConstraints();
       saveEntityPositionOverride(draggedEntity);

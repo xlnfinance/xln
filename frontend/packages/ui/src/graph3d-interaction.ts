@@ -34,6 +34,12 @@ type GraphSelectableEntity = Readonly<{
   mesh: THREE.Object3D;
 }>;
 
+type GraphDraggableEntity = {
+  position: THREE.Vector3;
+  mesh: THREE.Object3D;
+  isDragging?: boolean;
+};
+
 export const emptyGraphGestureState = (): GraphGestureState => ({ active: {}, lastTap: {} });
 
 const gestureSource = (value: string): string => String(value || '').trim().toLowerCase();
@@ -93,6 +99,43 @@ const isLineDashedMaterial = (material: unknown): material is THREE.LineDashedMa
   material !== null &&
   'isLineDashedMaterial' in material &&
   material.isLineDashedMaterial === true;
+
+const setGraphDragEmissive = (entity: GraphDraggableEntity, color: number): void => {
+  if (!hasGraphMaterial(entity.mesh) || !isMeshLambertMaterial(entity.mesh.material)) return;
+  entity.mesh.material.emissive.setHex(color);
+};
+
+export function beginGraphEntityDrag(
+  camera: THREE.Camera,
+  raycaster: THREE.Raycaster,
+  entity: GraphDraggableEntity,
+  dragPlane: THREE.Plane,
+  dragOffset: THREE.Vector3,
+): void {
+  entity.isDragging = true;
+  dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).normalize(), entity.position);
+  const intersection = new THREE.Vector3();
+  raycaster.ray.intersectPlane(dragPlane, intersection);
+  dragOffset.subVectors(entity.position, intersection);
+  setGraphDragEmissive(entity, 0x00ff88);
+}
+
+export function moveGraphEntityDrag(
+  raycaster: THREE.Raycaster,
+  entity: GraphDraggableEntity,
+  dragPlane: THREE.Plane,
+  dragOffset: THREE.Vector3,
+): void {
+  const intersection = new THREE.Vector3();
+  raycaster.ray.intersectPlane(dragPlane, intersection);
+  entity.position.copy(intersection.add(dragOffset));
+  entity.mesh.position.copy(entity.position);
+}
+
+export function endGraphEntityDrag(entity: GraphDraggableEntity): void {
+  entity.isDragging = false;
+  setGraphDragEmissive(entity, 0x002200);
+}
 
 export function setGraphPointerNdc(
   pointer: GraphPointer,
