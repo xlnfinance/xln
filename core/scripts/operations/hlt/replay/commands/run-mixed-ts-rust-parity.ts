@@ -94,9 +94,9 @@ const replayEnvironment = (dbRoot: string): NodeJS.ProcessEnv => {
   return env;
 };
 
-const typescriptReportPath = (workers: 1 | 4): string => join(replayRoot, `ts-w${workers}.json`);
+const typescriptReportPath = (workers: number): string => join(replayRoot, `ts-w${workers}.json`);
 
-const replayTypescript = (workers: 1 | 4): void => {
+const replayTypescript = (workers: number): void => {
   parityStage(`ts-w${workers}:start`);
   const dbRoot = join(replayRoot, `ts-w${workers}`);
   run(process.execPath, [
@@ -126,7 +126,7 @@ type TsParityReport = Readonly<{
 }>;
 
 const decodeAuthorityExpectations = (
-  workers: 1 | 4,
+  workers: number,
   value: unknown,
 ): TsParityReport['authorityExpectations'] => {
   const expectations = requireBoundaryRecord(
@@ -161,7 +161,7 @@ const decodeAuthorityExpectations = (
   };
 };
 
-const decodeTsParityReport = (workers: 1 | 4): TsParityReport => {
+const decodeTsParityReport = (workers: number): TsParityReport => {
   const path = typescriptReportPath(workers);
   const root = requireBoundaryRecord(
     safeParse(readFileSync(path, 'utf8')),
@@ -239,7 +239,7 @@ const decodeRustParityReport = (value: unknown): RustParityReport => {
   };
 };
 
-const replayRust = async (workers: 1 | 4, tsParityReport: string): Promise<RustParityReport> => {
+const replayRust = async (workers: number, tsParityReport: string): Promise<RustParityReport> => {
   const wal = join(replayRoot, `rust-w${workers}-wal`);
   parityStage(`rust-w${workers}:copy-start`);
   await copyBoundAuthorityWal(boundWal, wal, artifact.source.binding, runtimeSeed);
@@ -285,6 +285,23 @@ for (const [label, report] of [['w1', w1], ['w4', w4]] as const) {
 }
 for (const field of ['frames', 'ingress', 'egress', 'directPayments', 'accountsRoot'] as const) {
   if (w1[field] !== w4[field]) throw new Error(`HLT_MIXED_PARITY_W1_W4:${field}:${String(w1[field])}:${String(w4[field])}`);
+}
+// Optional throughput ladder on the same recording: XLN_HLT_REPLAY_BENCH_WORKERS="8,16"
+// replays both engines at those worker counts after the exact 4-way verdict.
+// Every extra replay must still produce the same accountsRoot; its wall time
+// (HLT_MIXED_PARITY_STAGE lines) is the hub-only throughput evidence.
+const benchWorkers = String(process.env['XLN_HLT_REPLAY_BENCH_WORKERS'] ?? '')
+  .split(',').map(value => value.trim()).filter(value => value.length > 0).map(Number);
+for (const workers of benchWorkers) {
+  if (!Number.isSafeInteger(workers) || workers < 1 || workers > 64) {
+    throw new Error(`HLT_MIXED_PARITY_BENCH_WORKERS_INVALID:${workers}`);
+  }
+  replayTypescript(workers);
+  assertTsParityReportsEqual(tsW1, decodeTsParityReport(workers));
+  const bench = await replayRust(workers, tsW1ReportPath);
+  if (bench['accountsRoot'] !== w1['accountsRoot']) {
+    throw new Error(`HLT_MIXED_PARITY_BENCH_ROOT:w${workers}:${String(bench['accountsRoot'])}:${String(w1['accountsRoot'])}`);
+  }
 }
 const provenance = collectHltRunProvenance('rust');
 console.log(

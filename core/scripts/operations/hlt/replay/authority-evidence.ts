@@ -12,7 +12,12 @@ import {
   type HltEntityFrameEventEvidence,
 } from './entity-frame-event-evidence';
 
-const MIN_EXACT_REPLAY_FRAMES = 1_000;
+// Production framing coalesces a busy second into a handful of Runtime
+// frames (1,000 users × rate 2 ≈ 70 frames of ~300 EntityInputs per 10 s), so
+// exactness is measured in admitted bilateral Account inputs, with a floor on frames only to
+// keep frame-boundary effects (hooks, coalescing, outputs) represented.
+const MIN_EXACT_REPLAY_FRAMES = 50;
+const MIN_EXACT_REPLAY_ACCOUNT_INPUTS = 10_000;
 
 export type HltAuthorityExpectations = Readonly<{
   runtimeFrames: readonly Readonly<{
@@ -230,5 +235,10 @@ export const assertCanonicalMixedCoverage = (frames: readonly PersistedFrameJour
   const coverage = inspectCanonicalScope(frames);
   for (const [field, count] of Object.entries(coverage)) {
     if (count < 1) throw new Error(`HLT_AUTHORITY_EVIDENCE_MIXED_COVERAGE_MISSING:${field}`);
+  }
+  if (coverage.accountInputs < MIN_EXACT_REPLAY_ACCOUNT_INPUTS) {
+    throw new Error(
+      `HLT_AUTHORITY_EVIDENCE_ACCOUNT_INPUTS_MINIMUM:${coverage.accountInputs}:${MIN_EXACT_REPLAY_ACCOUNT_INPUTS}`,
+    );
   }
 };

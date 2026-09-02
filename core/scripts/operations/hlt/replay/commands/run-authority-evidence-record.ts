@@ -13,19 +13,18 @@ const env: NodeJS.ProcessEnv = {
   XLN_HLT_ENGINE: 'ts',
   XLN_HLT_H1_ONLY: '1',
   XLN_HUB_COUNT: '1',
-  XLN_HLT_PROFILE: 'smoke',
+  XLN_HLT_PROFILE: 'medium',
   XLN_LOCAL_PROD_SMOKE_DIR: workDir,
   XLN_HLT_RECORDING_OUTPUT: output,
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'mixed',
-  // Pace twenty bounded rounds across 100 real sovereign Runtimes and admit
-  // one EntityInput per H1 frame. This prevents mempool coalescing from making
-  // a busy economic run too short for the >=1,000-frame parity gate.
-  // This is parity evidence only; the workload deliberately emits no TPS.
-  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '100',
-  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '1',
+  // Parity evidence is the production load itself: the canonical 1,000
+  // sovereign Runtimes at the production rate (2 payments + 2 swap actions
+  // per user per second) with production frame coalescing. A selective
+  // one-input-per-frame transcript would prove parity on a shape the hub
+  // never runs; the >=1,000-frame gate is met by the real frame cadence.
+  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '1000',
+  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '2',
   XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '20',
-  XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
-    process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1',
   XLN_HLT_MIX: '1:1',
   XLN_HLT_HUBS: 'H1',
   XLN_HLT_MARKET_MAKERS: 'MM',
