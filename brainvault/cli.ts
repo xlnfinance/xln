@@ -39,7 +39,7 @@ import { acceptShard, createShardSlots, finalizeShards } from './shard-collector
 import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
 import { verifyBundledExecutable } from './binary-integrity.ts';
 import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } from './native-hybrid.ts';
-import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native-progress.ts';
+import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native/progress.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
   BRAINVAULT_LEVEL_NAMES,
@@ -760,7 +760,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     && !autoSelectedMetal
     && shardCount >= 100
     && neonExecutable !== undefined;
-  const fallbackFromC = autoSelectedC || autoSelectedMetal;
+  const allowAutoRecovery = autoSelectedC || autoSelectedMetal;
   let selectedEngine: Exclude<EngineSelection, 'auto'> = autoSelectedMetal
     ? 'metal'
     : autoSelectedC ? 'c-neon' : engine === 'auto' ? 'native' : engine;
@@ -832,7 +832,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         completed => onProgress?.(completed, shardCount),
       );
     } catch (error) {
-      if (!fallbackFromC) throw error;
+      if (!allowAutoRecovery) throw error;
       console.warn(`C/NEON unavailable at runtime; using portable native fallback (${String(error)}).`);
       onProgress?.(0, shardCount);
       selectedEngine = 'native';

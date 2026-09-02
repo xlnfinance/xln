@@ -1,6 +1,6 @@
 import { cpus, totalmem } from 'node:os';
 import { verifyBundledExecutable, verifyBundledFile } from './binary-integrity.ts';
-import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native-progress.ts';
+import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native/progress.ts';
 
 const INPUT_MAGIC = 0x32435642;
 const HEADER_BYTES = 24;

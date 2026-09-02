@@ -274,7 +274,7 @@ Expand the audit only for the property being trusted:
 | Mnemonics and Ethereum paths | `core.ts`, `bip39-english.ts`, `primitives/encoding.ts` |
 | CLI input and secret disclosure | `cli-policy.ts`, `suggestion.ts`, `cli.ts`, `core.test.ts` |
 | Worker ordering and failure | `shard-collector.ts`, `native.ts`, `worker-native.ts`, `worker-wasm.ts` |
-| Default M3 Ultra acceleration | `binary-integrity.ts`, `native-hybrid.ts`, `native-progress.ts`, `experimental/argon2-c/brainvault_argon2.c`, `experimental/argon2-metal/brainvault_argon2_metal.m`, `experimental/argon2-metal/argon2.metal` |
+| Default M3 Ultra acceleration | `binary-integrity.ts`, `native-hybrid.ts`, `native/progress.ts`, `experimental/argon2-c/brainvault_argon2.c`, `experimental/argon2-metal/brainvault_argon2_metal.m`, `experimental/argon2-metal/argon2.metal` |
 | Native build inputs | the two relevant `Makefile`s plus every source/header named by their `SOURCES` and `HEADERS` variables |
 | npm/release integrity | `package.json`, `manifest.ts`, `package.test.ts`, `native-build.test.ts`, `release.md`, `historical.test.ts` |
 

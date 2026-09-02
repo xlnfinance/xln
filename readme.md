@@ -28,6 +28,7 @@ change the architecture rubric.
 ```text
 xln/
 ├── core/             deterministic Runtime, Entity, Account, and boundaries
+├── brainvault/       standalone deterministic wallet-derivation package
 ├── jurisdictions/    Solidity settlement and dispute contracts
 ├── frontend/         xln.finance client; presentation and user input
 ├── tests/            browser and full-stack E2E evidence
@@ -39,6 +40,31 @@ xln/
 `core/runtime.ts` is the narrow public facade. Core behavior belongs to its
 owning Runtime, Entity, or Account module; physical I/O remains outside the
 deterministic state-machine transitions.
+
+## BrainVault: standalone module used by XLN
+
+[BrainVault V1](brainvault/readme.md) is an independently packable, installable,
+and auditable memory-hard wallet-derivation module. It has its own package,
+frozen [byte specification](brainvault/SPEC-V1.md), vectors, native sources,
+binaries, manifest, CLI, and tests entirely inside `brainvault/`; it does not
+import XLN runtime, storage, network, frontend, or consensus code.
+
+XLN is one consumer. Its terminal onboarding, browser wallet creation, remote
+runtime adapter, and recovery tests call BrainVault's public derivation and
+worker interfaces. Engine choice and XLN state never enter the frozen root.
+
+Run and audit only BrainVault without starting XLN:
+
+```bash
+cd brainvault
+bun install --frozen-lockfile --ignore-scripts
+bun ./brainvault --smoke
+bun ./brainvault
+```
+
+The exact minimal and expanded reading paths are in BrainVault's
+[audit surface](brainvault/readme.md#exact-audit-surface). Coding agents must
+also load its package-local [contract](brainvault/AGENTS.md).
 
 ## Quick start
 

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readNativeProgress } from './native-progress.ts';
+import { readNativeProgress } from './progress.ts';
 
 function stream(text: string): ReadableStream<Uint8Array> {
   return new Response(text).body!;

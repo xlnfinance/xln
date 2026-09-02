@@ -456,6 +456,31 @@ function runAnimatedCliTty(noColor: boolean) {
   });
 }
 
+function runAskCliTty() {
+  const script = [
+    'set timeout 10',
+    'spawn bun cli.ts --ask --engine native --workers 1 --multiplier 1',
+    'expect "Username: "',
+    'send "alice\\r"',
+    'expect "Password: "',
+    'send "secret123456\\r"',
+    'expect "work level (up/down or j/k, Enter confirms)"',
+    // The default is level 4. Three k presses select level 1 before Enter.
+    'send "kkk\\r"',
+    'expect "Repeat the exact password to reveal recovery material, or press Enter to exit: "',
+    'send "\\r"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  return Bun.spawnSync({
+    cmd: ['expect', '-c', script],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+}
+
 function publicSummary(output: string): { fingerprint: string; address: string } {
   const fingerprint = output.match(/Root fingerprint: ([0-9a-f]{8})/)?.[1];
   const address = output.match(/First address:\s+(0x[0-9A-Fa-f]{40})/)?.[1];
@@ -540,6 +565,19 @@ test('CLI defaults to printable ASCII while preserving explicit Unicode recovery
   expect(cliCreationCharacterError('café', 'secrét-password', true)).toBeUndefined();
   expect(cliPasswordError('1234567', false)).toContain('BRAINVAULT_PASSPHRASE_TOO_SHORT');
   expect(cliPasswordError('1234567', true)).toBeUndefined();
+});
+
+test('CLI advanced menu accepts keyboard navigation and derives the selected level', () => {
+  const selected = runAskCliTty();
+  const output = selected.stdout.toString();
+  expect(selected.exitCode).toBe(0);
+  expect(output).toContain('work level (up/down or j/k, Enter confirms)');
+  expect(output).toContain('1 shards x 1 workers');
+  expect(output).toContain('Using native isolated workers (1 workers)');
+  expect(publicSummary(output)).toEqual({
+    fingerprint: VECTORS[0]!.expect.masterKey.slice(0, 8),
+    address: VECTORS[0]!.expect.ethAddr,
+  });
 });
 
 test('exact password rehearsal reveals sensitive output without a reveal command', () => {
