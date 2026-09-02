@@ -131,7 +131,7 @@ Passwords are forbidden in argv; automation must import the library API.
 Every interactive engine shows the same dependency-free, single-line terminal
 activity bar. Its small cyan comet respects `NO_COLOR`. Native batches expose
 elapsed time without inventing a percentage or ETA; the bar turns green and
-reports exact shards, workers, duration, and 100% only after successful
+reports exact shards, CPU workers, duration, and 100% only after successful
 completion.
 
 ## Self-contained package
@@ -141,7 +141,8 @@ This directory is the complete npm package boundary. Nothing above
 
 - bundled Apple Silicon executables and Metal library under
   `prebuilds/darwin-arm64/` provide the fastest default for frozen multiplier-1
-  mode at 1,000+ shards on the measured M3 Ultra; unmeasured Apple Silicon and
+  mode at 1,000+ shards only on the measured 32-CPU-core, approximately
+  512-GiB M3 Ultra configuration; unmeasured Apple Silicon and
   smaller jobs use the lower-overhead native
   path, and accelerator failure falls back to C/NEON then portable native;
 - `@node-rs/argon2` is the portable native fallback and handles custom multipliers;

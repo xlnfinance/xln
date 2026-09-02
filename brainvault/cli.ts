@@ -143,7 +143,7 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
     const offset = forward ? phase : cycle - phase;
     const comet = forward ? '━━━━╸' : '╺━━━━';
     const bar = `${dim}${'·'.repeat(offset)}${reset}${cyan}${comet}${reset}${dim}${'·'.repeat(width - span - offset)}${reset}`;
-    stdout.write(`\r  ${cyan}◇${reset} derive  [${bar}]  ${formatDuration(Date.now() - startedAt)} · ${workers}w`);
+    stdout.write(`\r  ${cyan}◇${reset} derive  [${bar}]  ${formatDuration(Date.now() - startedAt)} · ${workers} cpu`);
   };
   const timer = setInterval(render, 100);
   const stop = () => {
@@ -155,7 +155,7 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   return {
     complete: elapsedMs => {
       stop();
-      console.log(`  ${green}✓${reset} derived [${green}${'━'.repeat(width)}${reset}]  100% · ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${workers}w · ${formatDuration(elapsedMs)}`);
+      console.log(`  ${green}✓${reset} derived [${green}${'━'.repeat(width)}${reset}]  100% · ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${workers} cpu · ${formatDuration(elapsedMs)}`);
     },
     stop,
   };
@@ -508,8 +508,8 @@ function resolveNeonExecutable(): string | undefined {
 function isMeasuredM3Ultra(): boolean {
   return process.platform === 'darwin'
     && process.arch === 'arm64'
-    && totalmem() >= 128 * 1024 ** 3
-    && cpus().length >= 24
+    && totalmem() >= 500 * 1024 ** 3
+    && cpus().length === 32
     && cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
 }
 
@@ -724,6 +724,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     && !autoSelectedMetal
     && shardCount >= 100
     && neonExecutable !== undefined;
+  const fallbackFromC = autoSelectedC || autoSelectedMetal;
   let selectedEngine: Exclude<EngineSelection, 'auto'> = autoSelectedMetal
     ? 'metal'
     : autoSelectedC ? 'c-neon' : engine === 'auto' ? 'native' : engine;
@@ -740,17 +741,18 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
       throw new Error(`BRAINVAULT_ACCELERATOR_UNAVAILABLE:${selectedEngine}`);
     }
     const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
+    const planned = acceleratorPlan(selectedEngine, shardCount, actualWorkers);
+    console.log(
+      `Using ${selectedEngine === 'metal' ? 'Metal V1' : selectedEngine === 'metal-generic' ? '(experimental) Metal generic' : '(experimental) OpenCL'} + C/NEON hybrid `
+      + `(${planned.acceleratorShards} GPU / ${planned.cpuShards} CPU shards · `
+      + `${planned.acceleratorProcesses}×${planned.acceleratorWorkers} GPU / ${planned.cpuWorkers} CPU workers)`,
+    );
     let salts: Uint8Array[] = [];
     try {
       salts = await Promise.all(Array.from(
         { length: shardCount },
         (_, index) => createShardSalt(name, index, shardCount, kdfAlgId),
       ));
-      const planned = acceleratorPlan(selectedEngine, shardCount, actualWorkers);
-      console.log(
-        `Using ${selectedEngine === 'metal' ? 'Metal V1' : selectedEngine === 'metal-generic' ? '(experimental) Metal generic' : '(experimental) OpenCL'} + C/NEON hybrid `
-        + `(${planned.acceleratorShards} GPU / ${planned.cpuShards} CPU shards)`,
-      );
       const accelerated = await deriveHybridNativeShards({
         engine: selectedEngine,
         password,
@@ -791,7 +793,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         kdfAlgId,
       );
     } catch (error) {
-      if (!autoSelectedC) throw error;
+      if (!fallbackFromC) throw error;
       console.warn(`C/NEON unavailable at runtime; using portable native fallback (${String(error)}).`);
       selectedEngine = 'native';
     }
@@ -1365,7 +1367,7 @@ async function interactive() {
     rootKey = result.rootKey;
     progress.complete(result.derivationTime);
 
-    console.log(`\n[OK] Root derived in ${formatDuration(result.derivationTime)}\n`);
+    console.log('');
     console.log(`Root fingerprint: ${result.fingerprint}`);
     console.log(`First address:    ${result.ethAddr24}`);
 

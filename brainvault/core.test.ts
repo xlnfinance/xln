@@ -433,6 +433,29 @@ function runCliTty(extraArgs: readonly string[], rehearsal = '') {
   });
 }
 
+function runAnimatedCliTty(noColor: boolean) {
+  const environment = noColor ? 'env NO_COLOR=1 TERM=xterm-256color' : 'env -u NO_COLOR TERM=xterm-256color';
+  const script = [
+    'set timeout 10',
+    `spawn ${environment} bun cli.ts --shards 100 --workers 32 --engine c-neon`,
+    'expect "Username: "',
+    'send "progress-audit\\r"',
+    'expect "Password: "',
+    'send "secret123456\\r"',
+    'expect "Repeat the exact password to reveal recovery material, or press Enter to exit: "',
+    'send "\\r"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  return Bun.spawnSync({
+    cmd: ['expect', '-c', script],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+}
+
 function publicSummary(output: string): { fingerprint: string; address: string } {
   const fingerprint = output.match(/Root fingerprint: ([0-9a-f]{8})/)?.[1];
   const address = output.match(/First address:\s+(0x[0-9A-Fa-f]{40})/)?.[1];
@@ -465,7 +488,7 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
   const vector = VECTORS[0]!;
   expect(launched.exitCode).toBe(0);
   expect(publicSummary(output)).toEqual({ fingerprint: vector.expect.masterKey.slice(0, 8), address: vector.expect.ethAddr });
-  expect(output).toContain('100% · 1/1 · 1w');
+  expect(output).toContain('100% · 1/1 · 1 cpu');
   expect(output).not.toContain(vector.expect.mnemonic24);
   expect(output).not.toContain('Private Key 1:');
 
@@ -535,6 +558,23 @@ test('wrong reveal rehearsal fails closed without a runtime stack trace', () => 
   expect(output).not.toContain(VECTORS[0]!.expect.mnemonic24);
   expect(output).not.toContain('BRAINVAULT_REHEARSAL_MISMATCH');
   expect(output).not.toContain('cli.ts:');
+});
+
+test('native progress animates, completes exactly, and respects NO_COLOR', () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const colored = runAnimatedCliTty(false);
+  const coloredOutput = colored.stdout.toString();
+  expect(colored.exitCode).toBe(0);
+  expect(coloredOutput).toContain('◇');
+  expect(coloredOutput).toContain('100% · 100/100 · 32 cpu');
+  expect(coloredOutput).toContain('\x1b[38;5;45m');
+
+  const plain = runAnimatedCliTty(true);
+  const plainOutput = plain.stdout.toString();
+  expect(plain.exitCode).toBe(0);
+  expect(plainOutput).toContain('◇');
+  expect(plainOutput).toContain('100% · 100/100 · 32 cpu');
+  expect(plainOutput).not.toContain('\x1b[38;5;45m');
 });
 
 test('CLI benchmark honors inline advanced parameters', () => {
