@@ -120,6 +120,5 @@ pub use tx::handlers::settlement::{
 };
 pub use tx::{
     ACCOUNT_TX_TYPES, AccountTx, DeliveryMode, LendingAction, LendingTermId, RebalanceRefundReason,
-    ReserveSide,
 };
 pub use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};

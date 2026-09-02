@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use num_bigint::BigInt;
 use support::{MAKER, commit, token};
-use xln_rscore_engine::{AccountTx, RebalanceRefundReason, ReserveSide};
+use xln_rscore_engine::{AccountTx, RebalanceRefundReason};
 use xln_rscore_entity_kernel::{
     DeterministicContext, EntityKernelError, EntityStateSlice, JurisdictionScope,
     apply_entity_kernel,

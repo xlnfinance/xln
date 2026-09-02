@@ -781,6 +781,14 @@ impl ResidentConsensusEngine {
         &self,
         expected_accounts_root: [u8; 32],
     ) -> Result<Vec<AccountId>, BatchError> {
+        // TS primes the frame worklist after the inbound Account stage
+        // (application.ts prepare → primeEntityFrameAccountWork), so an ACK
+        // admitted this frame already made its Account proposable. Once the
+        // inbound phase ran, its set is the canonical frame-start prefix; the
+        // branch check only matters before any inbound work exists.
+        if let Some(inbound) = self.inbound_proposable.as_ref() {
+            return Ok(inbound.iter().copied().collect());
+        }
         let selected = if self
             .forest
             .expected_uses_candidate(expected_accounts_root)?

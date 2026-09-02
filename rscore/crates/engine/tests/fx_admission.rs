@@ -18,7 +18,7 @@ use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountFrame, AccountIdentity,
     AccountReplica, AccountState, AccountTx, BoardDelays, CanonicalValue, DeliveryMode, Delta,
     DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, IncomingFrame, IncomingOutcome,
-    MAX_POLICY_VERSION, ProposalOutcome, ReceiverClock, ReserveSide, SigningIdentity, TokenId,
+    MAX_POLICY_VERSION, ProposalOutcome, ReceiverClock, SigningIdentity, TokenId,
     WatchSeed, apply_incoming_frame, canonical_tx_value, propose_account_frame,
 };
 

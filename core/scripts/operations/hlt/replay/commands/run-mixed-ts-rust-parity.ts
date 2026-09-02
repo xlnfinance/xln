@@ -37,23 +37,38 @@ const remainingParityBudget = (phase: string): number => {
   return remaining;
 };
 
-const run = (
+const runCaptured = (
   command: string,
   args: readonly string[],
   timeoutMs: number,
   env = process.env,
-): string => {
+): Readonly<{ stdout: string; stderr: string }> => {
   const result = spawnSync(command, [...args], {
     cwd: process.cwd(),
     env,
     encoding: 'utf8',
     timeout: timeoutMs,
+    maxBuffer: 256 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`HLT_MIXED_PARITY_CHILD_FAILED:${command}:${String(result.status)}:${result.stderr.slice(-2_000)}`);
   }
-  return result.stdout;
+  return { stdout: result.stdout, stderr: result.stderr };
+};
+
+const run = (
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+  env = process.env,
+): string => runCaptured(command, args, timeoutMs, env).stdout;
+
+/** Sum of the Runtime `apply.profile` frame timings the TS replay logs. */
+const sumTsApplyMs = (stdout: string): number => {
+  let total = 0;
+  for (const match of stdout.matchAll(/apply\.profile \{"elapsedMs":(\d+)/g)) total += Number(match[1]);
+  return total;
 };
 
 const recordingArgument = (): string => {
@@ -96,10 +111,19 @@ const replayEnvironment = (dbRoot: string): NodeJS.ProcessEnv => {
 
 const typescriptReportPath = (workers: number): string => join(replayRoot, `ts-w${workers}.json`);
 
+const engineTiming = (engine: 'ts' | 'rust', workers: number, fields: Record<string, number | string>): void => {
+  const rendered = Object.entries(fields).map(([key, value]) => `${key}=${typeof value === 'number' ? value.toFixed(1) : value}`).join(' ');
+  console.error(`HLT_MIXED_PARITY_ENGINE engine=${engine} workers=${workers} ${rendered}`);
+};
+
 const replayTypescript = (workers: number): void => {
+  const startedAt = performance.now();
   parityStage(`ts-w${workers}:start`);
   const dbRoot = join(replayRoot, `ts-w${workers}`);
-  run(process.execPath, [
+  // Every frame logs apply.profile so the engine time is a full sum, not the
+  // slow-frame sample the default threshold keeps.
+  const environment = { ...replayEnvironment(dbRoot), XLN_RUNTIME_APPLY_PROFILE: '1' };
+  const { stdout } = runCaptured(process.execPath, [
     'core/scripts/operations/hlt/replay/replay-hub-recording.ts',
     '--recording', recordingPath,
     '--output', typescriptReportPath(workers),
@@ -109,8 +133,9 @@ const replayTypescript = (workers: number): void => {
     '--ts-account-workers', String(workers),
     '--require-complete-authority-evidence',
     '--parity-evidence',
-  ], remainingParityBudget(`ts-w${workers}`), replayEnvironment(dbRoot));
+  ], remainingParityBudget(`ts-w${workers}`), environment);
   parityStage(`ts-w${workers}:done`);
+  engineTiming('ts', workers, { wallMs: performance.now() - startedAt, applyMs: sumTsApplyMs(stdout) });
 };
 
 const AUTHORITY_EXPECTATION_FIELDS = [
@@ -244,6 +269,7 @@ const replayRust = async (workers: number, tsParityReport: string): Promise<Rust
   parityStage(`rust-w${workers}:copy-start`);
   await copyBoundAuthorityWal(boundWal, wal, artifact.source.binding, runtimeSeed);
   parityStage(`rust-w${workers}:run-start`);
+  const runStartedAt = performance.now();
   const output = run(binary, [
     'runtime-replay',
     '--wal', wal,
@@ -258,7 +284,20 @@ const replayRust = async (workers: number, tsParityReport: string): Promise<Rust
   ], remainingParityBudget(`rust-w${workers}`));
   parityStage(`rust-w${workers}:done`);
   const line = output.trim().split('\n').at(-1);
-  return decodeRustParityReport(safeParse(line ?? ''));
+  const report = decodeRustParityReport(safeParse(line ?? ''));
+  const numeric = (key: string): number => {
+    const value = report[key];
+    return typeof value === 'number' ? value : Number.NaN;
+  };
+  engineTiming('rust', workers, {
+    wallMs: performance.now() - runStartedAt,
+    elapsedMs: numeric('elapsedMs'),
+    applyMs: numeric('applyMs'),
+    storageMs: numeric('storageMs'),
+    frames: numeric('frames'),
+    ingress: numeric('ingress'),
+  });
+  return report;
 };
 
 replayTypescript(1);

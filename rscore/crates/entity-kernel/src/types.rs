@@ -33,6 +33,10 @@ pub struct OrderedAccountCommit {
     pub frame_state_hash: String,
     pub frame_height: u64,
     pub frame_timestamp: u64,
+    /// Position of the Entity input that committed this frame. Local effects
+    /// it triggers (HTLC forwards, resolves) are first-touched right after it
+    /// in TS `storageChanges`, so the Runtime frame publishes them there.
+    pub inbound_position: usize,
     pub transitions: Vec<CommittedAccountTransition>,
 }
 

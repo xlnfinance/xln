@@ -828,6 +828,37 @@ fn order_proposal_work_by_first_touch(
     Ok(ordered)
 }
 
+/// TS records an inbound commit's local effects (HTLC forwards, resolves)
+/// inside that EntityTx's `storageChanges`, so a forward target is first
+/// touched right after the input that produced it — not after every input of
+/// the frame. Move each origin-bearing candidate to that position; anything
+/// without an inbound origin keeps its stage order.
+fn interleave_first_touch(
+    candidates: Vec<AccountId>,
+    inbound_count: usize,
+    proposal_origins: &[(String, usize)],
+) -> Result<Vec<AccountId>, ResidentEntityError> {
+    let mut by_origin = BTreeMap::<usize, Vec<AccountId>>::new();
+    let mut placed = BTreeSet::<AccountId>::new();
+    for (account, position) in proposal_origins {
+        let account = account_id(account)?;
+        if placed.insert(account) {
+            by_origin.entry(*position).or_default().push(account);
+        }
+    }
+    let mut ordered = Vec::with_capacity(candidates.len());
+    let (inbound, rest) = candidates.split_at(inbound_count.min(candidates.len()));
+    for (position, account) in inbound.iter().enumerate() {
+        ordered.push(*account);
+        if let Some(targets) = by_origin.remove(&position) {
+            ordered.extend(targets);
+        }
+    }
+    ordered.extend(by_origin.into_values().flatten());
+    ordered.extend(rest.iter().copied());
+    Ok(ordered)
+}
+
 fn canonical_account_touch_order(
     candidates: impl IntoIterator<Item = AccountId>,
     changed: &BTreeSet<AccountId>,
@@ -1049,6 +1080,7 @@ fn ordered_commit(
     account_id: AccountId,
     state_hash: &[u8; 32],
     evidence: &mut CommittedFrameEvidence,
+    inbound_position: usize,
 ) -> Result<OrderedAccountCommit, ResidentEntityError> {
     let account_id = account_text(account_id);
     validate_effect_binding(&account_id, state_hash, evidence)?;
@@ -1066,6 +1098,7 @@ fn ordered_commit(
         scope: JurisdictionScope::Same,
         committed_via_new_frame: evidence.committed_via_new_frame,
         frame_state_hash: hex_prefixed(state_hash),
+        inbound_position,
         frame_height: evidence.frame.height,
         frame_timestamp: evidence.frame.timestamp,
         transitions,
@@ -1076,6 +1109,7 @@ fn collect_verdict_commits(
     account_id: AccountId,
     verdict: &mut AccountInputVerdict,
     commits: &mut Vec<OrderedAccountCommit>,
+    inbound_position: usize,
 ) -> Result<(), ResidentEntityError> {
     match verdict {
         AccountInputVerdict::FrameCommitted {
@@ -1087,11 +1121,16 @@ fn collect_verdict_commits(
             state_hash,
             committed_frame,
             ..
-        } => commits.push(ordered_commit(account_id, state_hash, committed_frame)?),
+        } => commits.push(ordered_commit(
+            account_id,
+            state_hash,
+            committed_frame,
+            inbound_position,
+        )?),
         AccountInputVerdict::AckFrameApplied { ack, frame } => {
             // TS applies the ACK half before the peer-frame half.
-            collect_verdict_commits(account_id, ack, commits)?;
-            collect_verdict_commits(account_id, frame, commits)?;
+            collect_verdict_commits(account_id, ack, commits, inbound_position)?;
+            collect_verdict_commits(account_id, frame, commits, inbound_position)?;
         }
         _ => {}
     }
@@ -1144,6 +1183,77 @@ fn append_rollback_events(
     });
 }
 
+/// A LEFT-WINS collision whose "pending txs" count TS reports from the
+/// Account mempool as it stands when that input is applied — including HTLC
+/// forwards produced by earlier inputs of the same frame. Rust learns those
+/// forwards only after the inbound phase, so the count is completed once the
+/// Entity transition has run.
+struct CollisionFixup {
+    account_id: AccountId,
+    position: usize,
+    queued: usize,
+}
+
+const LEFT_WINS_PREFIX: &str = "📤 LEFT-WINS: Ignored RIGHT's frame ";
+const LEFT_PENDING_PREFIX: &str = "⚠️ LEFT has ";
+
+fn apply_collision_fixups(
+    events: &mut Vec<EntityFrameEvent>,
+    collisions: &[CollisionFixup],
+    proposal_tx_origins: &[(String, usize)],
+) -> Result<(), ResidentEntityError> {
+    if collisions.is_empty() {
+        return Ok(());
+    }
+    let mut origins_by_account = BTreeMap::<AccountId, Vec<usize>>::new();
+    for (account, position) in proposal_tx_origins {
+        origins_by_account
+            .entry(account_id(account)?)
+            .or_default()
+            .push(*position);
+    }
+    let mut next_collision = 0;
+    let mut index = 0;
+    while index < events.len() {
+        let is_left_wins = matches!(
+            &events[index],
+            EntityFrameEvent::Status { message } if message.starts_with(LEFT_WINS_PREFIX)
+        );
+        if is_left_wins {
+            let Some(fixup) = collisions.get(next_collision) else {
+                return Err(ResidentEntityError::OperationPlan(
+                    "COLLISION_FIXUP_EVENT_WITHOUT_RECORD".into(),
+                ));
+            };
+            next_collision += 1;
+            let earlier_forwards = origins_by_account
+                .get(&fixup.account_id)
+                .map_or(0, |positions| positions.iter().filter(|p| **p < fixup.position).count());
+            let total = fixup.queued + earlier_forwards;
+            let has_warning = matches!(
+                events.get(index + 1),
+                Some(EntityFrameEvent::Status { message }) if message.starts_with(LEFT_PENDING_PREFIX)
+            );
+            if total > 0 {
+                let message = format!("{LEFT_PENDING_PREFIX}{total} pending txs while waiting for RIGHT's ACK");
+                if has_warning {
+                    events[index + 1] = EntityFrameEvent::Status { message };
+                } else {
+                    events.insert(index + 1, EntityFrameEvent::Status { message });
+                }
+                index += 1;
+            }
+        }
+        index += 1;
+    }
+    if next_collision != collisions.len() {
+        return Err(ResidentEntityError::OperationPlan(
+            "COLLISION_FIXUP_RECORD_WITHOUT_EVENT".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn append_collision_ignored_events(target: &mut Vec<EntityFrameEvent>, height: u64, queued: usize) {
     target.push(EntityFrameEvent::Status {
         message: format!("📤 LEFT-WINS: Ignored RIGHT's frame {height} (waiting for their ACK)"),
@@ -1161,10 +1271,17 @@ fn collect_verdict_certification(
     events: &mut Vec<EntityFrameEvent>,
     hashes: &mut Vec<HashToSign>,
     presigned: &mut PresignedManifest,
+    collisions: &mut Vec<CollisionFixup>,
+    position: usize,
 ) -> Result<(), ResidentEntityError> {
     match verdict {
         AccountInputVerdict::FrameCollisionIgnored { height, queued } => {
             append_collision_ignored_events(events, *height, *queued);
+            collisions.push(CollisionFixup {
+                account_id,
+                position,
+                queued: *queued,
+            });
         }
         AccountInputVerdict::FrameCommitted {
             height,
@@ -1239,8 +1356,8 @@ fn collect_verdict_certification(
             ..
         } => append_status_events(events, committed_events),
         AccountInputVerdict::AckFrameApplied { ack, frame } => {
-            collect_verdict_certification(account_id, ack, events, hashes, presigned)?;
-            collect_verdict_certification(account_id, frame, events, hashes, presigned)?;
+            collect_verdict_certification(account_id, ack, events, hashes, presigned, collisions, position)?;
+            collect_verdict_certification(account_id, frame, events, hashes, presigned, collisions, position)?;
         }
         _ => {}
     }
@@ -1251,17 +1368,26 @@ fn collect_round_certification(
     inbound: &EntityRoundResult,
     outbound: &EntityRoundResult,
     local_events: Vec<EntityFrameEvent>,
+    collisions: &mut Vec<CollisionFixup>,
 ) -> Result<(Vec<EntityFrameEvent>, Vec<HashToSign>, PresignedManifest), ResidentEntityError> {
     let mut events = Vec::new();
     let mut hashes = Vec::new();
     let mut presigned = PresignedManifest::new();
     for row in &inbound.applied {
+        let position = usize::try_from(row.operation_index).map_err(|_| {
+            ResidentEntityError::OperationPlan(format!(
+                "INBOUND_POSITION_OVERFLOW:{}",
+                row.operation_index
+            ))
+        })?;
         collect_verdict_certification(
             row.account_id,
             &row.verdict,
             &mut events,
             &mut hashes,
             &mut presigned,
+            collisions,
+            position,
         )?;
     }
     events.extend(local_events);
@@ -1332,7 +1458,13 @@ fn ordered_commits(
 ) -> Result<Vec<OrderedAccountCommit>, ResidentEntityError> {
     let mut commits = Vec::new();
     for row in &mut inbound.applied {
-        collect_verdict_commits(row.account_id, &mut row.verdict, &mut commits)?;
+        let inbound_position = usize::try_from(row.operation_index).map_err(|_| {
+            ResidentEntityError::OperationPlan(format!(
+                "INBOUND_POSITION_OVERFLOW:{}",
+                row.operation_index
+            ))
+        })?;
+        collect_verdict_commits(row.account_id, &mut row.verdict, &mut commits, inbound_position)?;
     }
     Ok(commits)
 }
@@ -1341,6 +1473,8 @@ fn ordered_commits(
 struct EntityTransitionAccumulator {
     account_creates: Vec<xln_rscore_batch::AccountSeed>,
     proposal_work: Vec<AccountProposalWork>,
+    proposal_origins: Vec<(String, usize)>,
+    proposal_tx_origins: Vec<(String, usize)>,
     outputs: Vec<EntityKernelOutput>,
     local_events: Vec<crate::EntityFrameEvent>,
     non_mutating_wake_targets: Vec<String>,
@@ -1358,6 +1492,8 @@ impl EntityTransitionAccumulator {
             state,
             mut account_creates,
             proposal_work,
+            mut proposal_origins,
+            mut proposal_tx_origins,
             mut outputs,
             mut local_events,
             mut non_mutating_wake_targets,
@@ -1370,6 +1506,8 @@ impl EntityTransitionAccumulator {
         } = next;
         self.account_creates.append(&mut account_creates);
         merge_proposal_work(&mut self.proposal_work, proposal_work);
+        self.proposal_origins.append(&mut proposal_origins);
+        self.proposal_tx_origins.append(&mut proposal_tx_origins);
         self.outputs.append(&mut outputs);
         self.local_events.append(&mut local_events);
         self.non_mutating_wake_targets
@@ -1880,18 +2018,13 @@ fn apply_resident_entity_round_core_attempt(
     if let Some(wake) = request.scheduled_wake.as_ref() {
         validate_scheduled_wake(wake, &request.expected_proposer_signer_id, state.timestamp)?;
     }
-    // TS primes the frame-local Account worklist before applying this frame's
-    // inputs. Preserve that prefix separately: the active proposable set is a
-    // membership index and cannot recover first-touch order after all three
-    // Entity stages have completed.
-    let initially_proposable =
-        accounts.selected_proposable_account_ids(request.inbound.expected_accounts_root)?;
     let mut touch_candidates = request
         .inbound
         .rows
         .iter()
         .map(|row| row.account_id)
         .collect::<Vec<_>>();
+    let inbound_touch_count = touch_candidates.len();
     let owner_entity_id = request.inbound.owner_entity_id;
     let clock = request.inbound.clock;
     let expected_root = request.inbound.expected_accounts_root;
@@ -1941,6 +2074,14 @@ fn apply_resident_entity_round_core_attempt(
     // boundary. The enclosing resident round abort restores every staged
     // Account mutation, including an ACK paired with a rejected frame.
     reject_failed_inbound_frames(&inbound.applied)?;
+    // TS primes the frame-local Account worklist after the inbound Account
+    // stage (prepare → primeEntityFrameAccountWork): an ACK admitted this
+    // frame already made its Account proposable, and that sorted post-inbound
+    // set is the publication prefix. Preserve it separately: the active
+    // proposable set is a membership index and cannot recover first-touch
+    // order after all three Entity stages have completed.
+    let initially_proposable =
+        accounts.selected_proposable_account_ids(request.inbound.expected_accounts_root)?;
     let inbound_micros = phase_started.elapsed().as_micros();
     let created_position_by_account = inbound
         .created_accounts
@@ -1970,6 +2111,7 @@ fn apply_resident_entity_round_core_attempt(
     let mut ordered_events = Vec::new();
     let mut ordered_hashes = Vec::new();
     let mut ordered_presigned = PresignedManifest::new();
+    let mut collisions = Vec::<CollisionFixup>::new();
 
     for operation in operations {
         match operation {
@@ -1994,6 +2136,7 @@ fn apply_resident_entity_round_core_attempt(
                     &segment,
                     &EntityRoundResult::default(),
                     Vec::new(),
+                    &mut collisions,
                 )?;
                 ordered_events.append(&mut events);
                 ordered_hashes.append(&mut hashes);
@@ -2265,6 +2408,8 @@ fn apply_resident_entity_round_core_attempt(
         state,
         account_creates: accumulated.account_creates,
         proposal_work: accumulated.proposal_work,
+        proposal_origins: accumulated.proposal_origins,
+        proposal_tx_origins: accumulated.proposal_tx_origins,
         outputs: accumulated.outputs,
         local_events: accumulated.local_events,
         non_mutating_wake_targets: accumulated.non_mutating_wake_targets,
@@ -2542,6 +2687,11 @@ fn apply_resident_entity_round_core_attempt(
     // post-stage membership set. Reapply the canonical TS queue: work already
     // pending at frame start, then each Account's first accepted input/local
     // touch. A BTree/radix key order must never become flat-outbox order.
+    let mut touch_candidates = interleave_first_touch(
+        touch_candidates,
+        inbound_touch_count,
+        &kernel.proposal_origins,
+    )?;
     let proposal_work = order_proposal_work_by_first_touch(
         proposal_work,
         &initially_proposable,
@@ -2586,6 +2736,7 @@ fn apply_resident_entity_round_core_attempt(
         &EntityRoundResult::default(),
         &outbound,
         std::mem::take(&mut kernel.local_events),
+        &mut collisions,
     )?;
     final_hashes.extend(std::mem::take(&mut kernel.local_hashes_to_sign));
     ordered_events.append(&mut final_events);
@@ -2595,7 +2746,8 @@ fn apply_resident_entity_round_core_attempt(
             return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
         }
     }
-    let entity_frame_events = ordered_events;
+    let mut entity_frame_events = ordered_events;
+    apply_collision_fixups(&mut entity_frame_events, &collisions, &kernel.proposal_tx_origins)?;
     let secondary_hashes = ordered_hashes;
     let presigned_manifest = ordered_presigned;
     // Worklist membership alone is not a TS history touch: an Entity envelope
@@ -3111,6 +3263,8 @@ mod tests {
             state,
             account_creates: Vec::new(),
             proposal_work: Vec::new(),
+            proposal_origins: Vec::new(),
+            proposal_tx_origins: Vec::new(),
             outputs: Vec::new(),
             local_events: Vec::new(),
             non_mutating_wake_targets: Vec::new(),
@@ -3155,6 +3309,7 @@ mod tests {
             frame_state_hash: format!("0x{}", "44".repeat(32)),
             frame_height: 2,
             frame_timestamp: 2,
+            inbound_position: 0,
             transitions: vec![CommittedAccountTransition {
                 tx: AccountTx::SettleTransition {
                     data: CanonicalValue::Object(vec![]),
@@ -3210,7 +3365,7 @@ mod tests {
             ..EntityRoundResult::default()
         };
         let (_, hashes, _) =
-            collect_round_certification(&EntityRoundResult::default(), &outbound, Vec::new())
+            collect_round_certification(&EntityRoundResult::default(), &outbound, Vec::new(), &mut Vec::new())
                 .expect("manifest");
         assert!(!hashes.iter().any(|entry| {
             entry.hash == hex_prefixed(&dispute.hash)

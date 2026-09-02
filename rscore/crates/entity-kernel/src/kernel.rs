@@ -735,6 +735,14 @@ pub(crate) struct EntityTransitionResult {
     pub(crate) state: EntityStateSlice,
     pub(crate) account_creates: Vec<xln_rscore_batch::AccountSeed>,
     pub(crate) proposal_work: Vec<AccountProposalWork>,
+    /// First inbound position that targeted each proposal-work Account, in
+    /// discovery order: the TS first-touch anchor for Accounts an inbound
+    /// commit reached through local effects instead of its own input.
+    pub(crate) proposal_origins: Vec<(String, usize)>,
+    /// Every proposal-work AccountTx with the inbound position of the commit
+    /// that produced it. TS sees these txs in the Account mempool while it
+    /// applies later inputs of the same frame; Rust applies inbound first.
+    pub(crate) proposal_tx_origins: Vec<(String, usize)>,
     pub(crate) outputs: Vec<EntityKernelOutput>,
     pub(crate) local_events: Vec<crate::EntityFrameEvent>,
     pub(crate) non_mutating_wake_targets: Vec<String>,
@@ -821,8 +829,12 @@ pub(crate) fn apply_entity_transitions(
     let mut preapply_elapsed = Duration::ZERO;
     let mut apply_elapsed = Duration::ZERO;
     let commit_count = commits.len();
+    let mut proposal_origins = Vec::<(String, usize)>::new();
+    let mut proposal_tx_origins = Vec::<(String, usize)>::new();
+    let mut origin_seen = BTreeSet::<String>::new();
     for mut commit in commits {
         validate_commit(&state, &commit)?;
+        let account_txs_before = account_txs.len();
         let started = profile.then(Instant::now);
         let (timed_out, revealed) = preapply_resolves(
             &mut state,
@@ -854,6 +866,12 @@ pub(crate) fn apply_entity_transitions(
         )?;
         if let Some(started) = started {
             apply_elapsed = apply_elapsed.saturating_add(started.elapsed());
+        }
+        for (account_id, _) in &account_txs[account_txs_before..] {
+            proposal_tx_origins.push((account_id.clone(), commit.inbound_position));
+            if origin_seen.insert(account_id.clone()) {
+                proposal_origins.push((account_id.clone(), commit.inbound_position));
+            }
         }
     }
     let local_started = Instant::now();
@@ -1002,6 +1020,8 @@ pub(crate) fn apply_entity_transitions(
         state,
         account_creates,
         proposal_work,
+        proposal_origins,
+        proposal_tx_origins,
         outputs,
         local_events,
         non_mutating_wake_targets: local_wake_targets,

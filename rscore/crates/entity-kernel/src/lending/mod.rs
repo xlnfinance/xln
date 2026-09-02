@@ -141,6 +141,7 @@ mod tests {
             frame_state_hash: format!("0x{}", "55".repeat(32)),
             frame_height: timestamp,
             frame_timestamp: timestamp,
+            inbound_position: 0,
             transitions: vec![CommittedAccountTransition {
                 tx,
                 outputs: Vec::new(),

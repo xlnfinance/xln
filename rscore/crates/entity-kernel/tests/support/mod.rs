@@ -184,6 +184,7 @@ pub fn commit(
         frame_state_hash: format!("0x{}", format!("{frame_byte:02x}").repeat(32)),
         frame_height,
         frame_timestamp: 1_000,
+        inbound_position: 0,
         transitions: vec![CommittedAccountTransition { tx, outputs }],
     }
 }

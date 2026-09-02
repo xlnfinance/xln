@@ -2,7 +2,7 @@ use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{
     AccountTx, DeliveryMode, Delta, HtlcDeliveryMode, HtlcResolveOutcome, JClaimNode, JClaimProof,
-    JurisdictionEvent, LendingAction, LendingTermId, ReserveSide, Side,
+    JurisdictionEvent, LendingAction, LendingTermId, Side,
 };
 
 use super::{AccountWireEncodeError, encode_canonical_value, integer, tuple};

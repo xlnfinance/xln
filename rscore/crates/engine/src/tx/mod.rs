@@ -95,21 +95,6 @@ impl LendingAction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReserveSide {
-    Receiving,
-    Counterparty,
-}
-
-impl ReserveSide {
-    pub const fn wire_name(self) -> &'static str {
-        match self {
-            Self::Receiving => "receiving",
-            Self::Counterparty => "counterparty",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RebalanceRefundReason {
     PolicyMismatch,
     Timeout,

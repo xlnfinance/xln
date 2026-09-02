@@ -479,6 +479,7 @@ fn committed_bilateral_finality_projects_the_exact_runtime_event() {
             frame_state_hash: format!("0x{}", "55".repeat(32)),
             frame_height: 1,
             frame_timestamp: 1,
+            inbound_position: 0,
             transitions: vec![CommittedAccountTransition {
                 tx: AccountTx::JEventClaim(claim),
                 outputs: vec![AccountOutput::AccountSettledFinalized {
