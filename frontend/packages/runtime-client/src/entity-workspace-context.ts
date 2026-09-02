@@ -28,6 +28,13 @@ type SelectedEntityWorkspaceContext = Readonly<{
 
 export type EntityWorkspaceContext = EmptyEntityWorkspaceContext | SelectedEntityWorkspaceContext;
 
+export type EntityWorkspaceReadState =
+  | Readonly<{ status: 'ready'; message: '' }>
+  | Readonly<{
+    status: 'unavailable' | 'connecting' | 'loading' | 'error';
+    message: string;
+  }>;
+
 export type EntityWorkspaceContextInput = Readonly<{
   runtimeId?: unknown;
   frame?: unknown;

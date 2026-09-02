@@ -14,6 +14,7 @@ import {
 import {
   getReactAppBase,
   getReactPublicDirectory,
+  getReactViteCacheDirectory,
 } from '../../../frontend/config/create-react-app-config';
 import { createDevelopmentGateway } from '../../../frontend/scripts/dev-gateway';
 import {
@@ -172,6 +173,8 @@ describe('React development gateway', () => {
     expect(getReactPublicDirectory('docs', true)).toEndWith('/.artifacts/public/docs');
     expect(getReactPublicDirectory('wallet', true)).toEndWith('/.artifacts/public/wallet');
     expect(getReactPublicDirectory('docs', false)).toBe(false);
+    expect(getReactViteCacheDirectory('ops')).toEndWith('/node_modules/.vite-react/ops');
+    expect(getReactViteCacheDirectory('ops', '/tmp/xln-react-cache')).toBe('/tmp/xln-react-cache/ops');
     expect(parseDevelopmentGatewayPort('18080')).toBe(18080);
     expect(() => parseDevelopmentGatewayPort('0')).toThrow('DEVELOPMENT_GATEWAY_PORT_INVALID:0');
     expect(parseDevelopmentPortOffset('12000')).toBe(12_000);

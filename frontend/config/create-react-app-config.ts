@@ -32,6 +32,11 @@ export const getReactPublicDirectory = (
   ? resolve(FRONTEND_ROOT, '.artifacts/public', surfaceId)
   : false;
 
+export const getReactViteCacheDirectory = (
+  surfaceId: SurfaceId,
+  configuredRoot = process.env['XLN_REACT_VITE_CACHE_ROOT'],
+): string => resolve(FRONTEND_ROOT, configuredRoot?.trim() || 'node_modules/.vite-react', surfaceId);
+
 export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfigInput): UserConfig => {
   const surface = getSurface(surfaceId);
   const developmentPort = resolveDevelopmentSurfacePort(
@@ -49,7 +54,7 @@ export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfi
         '@xln/core': resolve(REPOSITORY_ROOT, 'core'),
       },
     },
-    cacheDir: resolve(FRONTEND_ROOT, 'node_modules/.vite-react', surfaceId),
+    cacheDir: getReactViteCacheDirectory(surfaceId),
     server: {
       host: '127.0.0.1',
       port: developmentPort,
