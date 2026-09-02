@@ -10,7 +10,96 @@ type GraphAccountMempoolView = Readonly<{
   pendingFrame?: Readonly<{ accountTxs?: readonly unknown[] }>;
 }>;
 
+type GraphAccountVisualView<TDelta> = GraphAccountMempoolView & Readonly<{
+  state: Readonly<{ deltas: Map<number, TDelta> }>;
+  currentFrame?: Readonly<{ height?: number }>;
+  activeDispute?: Readonly<{
+    startedByLeft: boolean;
+    disputeTimeout: number;
+    initialNonce: number;
+  }>;
+}>;
+
+type GraphAccountReplica<TAccount> = Readonly<{
+  state?: Readonly<{ accounts?: ReadonlyMap<string, TAccount> | null }> | null;
+}>;
+
+type GraphPresentationState = Readonly<{ state: string }>;
+
+export type GraphAccountBarRenderRequest<TDelta, TVisual> = Readonly<{
+  graphWorld: THREE.Group;
+  fromEntity: GraphAccountEndpoint;
+  toEntity: GraphAccountEndpoint;
+  deltas: Map<number, TDelta>;
+  fromIsLeft: boolean;
+  barsMode: 'close' | 'spread';
+  portfolioScale: number;
+  desyncDetected: boolean;
+  bilateralState: TVisual | null;
+  dispute: GraphAccountVisualView<TDelta>['activeDispute'] | null;
+  getEntitySize(entityId: string, tokenId: number): number;
+}>;
+
+type GraphAccountVisualOptions<
+  TDelta,
+  TAccount extends GraphAccountVisualView<TDelta>,
+  TState extends GraphPresentationState,
+  TVisual,
+> = Readonly<{
+  graphWorld: THREE.Group;
+  fromEntity: GraphAccountEndpoint;
+  toEntity: GraphAccountEndpoint;
+  fromId: string;
+  toId: string;
+  replicas: ReadonlyMap<string, GraphAccountReplica<TAccount>>;
+  barsMode: 'close' | 'spread';
+  portfolioScale: number;
+  getEntitySize(entityId: string, tokenId: number): number;
+  classifyBilateralState(account: TAccount | undefined, peerHeight: number, isLeft: boolean): TState | undefined;
+  getAccountBarVisual(leftState: TState, rightState: TState): TVisual | null | undefined;
+  renderBars(request: GraphAccountBarRenderRequest<TDelta, TVisual>): THREE.Group;
+}>;
+
+type SelectedAccountViews<TAccount> = Readonly<{
+  account: TAccount | undefined;
+  confirmedAccount: TAccount | undefined;
+  pendingAccount: TAccount | null;
+}>;
+
 const MEMPOOL_BOX_DEPTH = 0.4;
+
+const findGraphAccount = <TAccount>(
+  replicas: ReadonlyMap<string, GraphAccountReplica<TAccount>>,
+  entityId: string,
+  peerId: string,
+): TAccount | undefined => {
+  const key = Array.from(replicas.keys()).find(candidate => candidate.startsWith(`${entityId}:`));
+  return key ? replicas.get(key)?.state?.accounts?.get(peerId) : undefined;
+};
+
+const selectAccountViews = <TAccount extends { currentFrame?: { height?: number } }>(
+  leftAccount: TAccount | undefined,
+  rightAccount: TAccount | undefined,
+): SelectedAccountViews<TAccount> => {
+  const account = leftAccount ?? rightAccount;
+  const leftHeight = Number(leftAccount?.currentFrame?.height ?? 0);
+  const rightHeight = Number(rightAccount?.currentFrame?.height ?? 0);
+  if (!leftAccount || !rightAccount || leftHeight === rightHeight) {
+    return { account, confirmedAccount: account, pendingAccount: null };
+  }
+  const leftIsAhead = leftHeight > rightHeight;
+  return {
+    account: leftIsAhead ? leftAccount : rightAccount,
+    confirmedAccount: leftIsAhead ? rightAccount : leftAccount,
+    pendingAccount: leftIsAhead ? leftAccount : rightAccount,
+  };
+};
+
+const addEmptyAccountBars = (graphWorld: THREE.Group): THREE.Group => {
+  const bars = new THREE.Group();
+  graphWorld.add(bars);
+  return bars;
+};
 
 const createMempoolTransactionCube = (color: number, opacity: number, z: number, index: number): THREE.Mesh => {
   const cube = new THREE.Mesh(
@@ -106,4 +195,96 @@ export function createAccountMempoolBoxes(options: {
     box.position.copy(anchor.position).add(direction.clone().multiplyScalar(offset));
     return [box];
   });
+}
+
+const classifyAccountViews = <
+  TDelta,
+  TAccount extends GraphAccountVisualView<TDelta>,
+  TState extends GraphPresentationState,
+  TVisual,
+>(
+  options: GraphAccountVisualOptions<TDelta, TAccount, TState, TVisual>,
+  selected: SelectedAccountViews<TAccount>,
+  fromIsLeft: boolean,
+): Readonly<{ leftState: TState | undefined; rightState: TState | undefined }> => {
+  const leftView = fromIsLeft ? selected.confirmedAccount : selected.pendingAccount;
+  const rightView = fromIsLeft ? selected.pendingAccount : selected.confirmedAccount;
+  return {
+    leftState: options.classifyBilateralState(
+      leftView ?? undefined,
+      Number(rightView?.currentFrame?.height ?? 0),
+      true,
+    ),
+    rightState: options.classifyBilateralState(
+      rightView ?? undefined,
+      Number(leftView?.currentFrame?.height ?? 0),
+      false,
+    ),
+  };
+};
+
+/**
+ * Build the visual projection for one bilateral Account without deriving balances.
+ *
+ * Account storage orientation is security-sensitive: LEFT is always the lower
+ * entity id lexicographically, regardless of which endpoint happened to create
+ * the drawn connection. Reversing draw direction must never reverse the replica
+ * lookup. The existing confirmed/pending presentation projection is applied only
+ * after those canonical sides and their exact frame heights have been resolved.
+ */
+export function buildGraphAccountVisuals<
+  TDelta,
+  TAccount extends GraphAccountVisualView<TDelta>,
+  TState extends GraphPresentationState,
+  TVisual,
+>(options: GraphAccountVisualOptions<TDelta, TAccount, TState, TVisual>): {
+  bars: THREE.Group;
+  mempoolBoxes: THREE.Group[];
+} {
+  const fromIsLeft = options.fromId < options.toId;
+  const leftId = fromIsLeft ? options.fromId : options.toId;
+  const rightId = fromIsLeft ? options.toId : options.fromId;
+  const leftAccount = findGraphAccount(options.replicas, leftId, rightId);
+  const rightAccount = findGraphAccount(options.replicas, rightId, leftId);
+  const selected = selectAccountViews(leftAccount, rightAccount);
+  if (!selected.account?.state.deltas || selected.account.state.deltas.size === 0) {
+    return { bars: addEmptyAccountBars(options.graphWorld), mempoolBoxes: [] };
+  }
+
+  const { leftState, rightState } = classifyAccountViews(options, selected, fromIsLeft);
+  const bilateralState = leftState && rightState
+    ? options.getAccountBarVisual(leftState, rightState) ?? null
+    : null;
+  const bars = options.renderBars({
+    graphWorld: options.graphWorld,
+    fromEntity: options.fromEntity,
+    toEntity: options.toEntity,
+    deltas: selected.account.state.deltas,
+    fromIsLeft,
+    barsMode: options.barsMode,
+    portfolioScale: options.portfolioScale,
+    desyncDetected: Boolean(
+      leftState && rightState && (leftState.state !== 'committed' || rightState.state !== 'committed'),
+    ),
+    bilateralState,
+    dispute: selected.account.activeDispute ?? null,
+    getEntitySize: options.getEntitySize,
+  });
+  const leftMempoolState = leftAccount
+    ? options.classifyBilateralState(leftAccount, 0, true)?.state ?? null
+    : null;
+  const rightMempoolState = rightAccount
+    ? options.classifyBilateralState(rightAccount, 0, false)?.state ?? null
+    : null;
+  const mempoolBoxes = createAccountMempoolBoxes({
+    fromEntity: options.fromEntity,
+    toEntity: options.toEntity,
+    leftAccount,
+    rightAccount,
+    leftState: leftMempoolState,
+    rightState: rightMempoolState,
+    getEntitySize: options.getEntitySize,
+  });
+  for (const box of mempoolBoxes) options.graphWorld.add(box);
+  return { bars, mempoolBoxes };
 }
