@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED CAPACITOR IOS/ANDROID CANDIDATE COPY READY`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED CAPACITOR COPY + ISOLATED PWA LIFECYCLE READY`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1927,7 +1927,7 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + VERIFIED CAPACITOR IOS/ANDROID CANDIDATE COPY READY`
+**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + VERIFIED CAPACITOR COPY + ISOLATED PWA LIFECYCLE READY`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
@@ -2051,6 +2051,31 @@ The canonical shell trees have zero diff. This is Capacitor `copy` evidence in
 isolated replicas only: dependency sync, IDE open, compilation, package,
 signing, activation, deployment, and production cutover remain untouched.
 
+The verified release now also has an isolated real-browser PWA lifecycle
+consumer. Its generated Service Worker is byte-bound to one release, uses the
+fixed root scope, names its cache `xln-react-candidate:<releaseId>`, and
+pre-caches all 333 declared files plus the canonical release manifest from
+immutable release-qualified URLs. Install validates SHA-256 and size before
+activation; an incomplete install deletes only its partial candidate cache and
+cannot replace the active worker. Previous complete content-addressed caches
+remain available for immediate rollback, and fetches expose the exact serving
+release identity without mixing paths or falling through for wallet-owned
+routes.
+
+Chromium exercised one registration through install
+`sha256-ea173909e635649b5f4ed9eee848015f82d4db7a47ef22730c5ae6a7f3275e3a`,
+an offline-rejected update, successful update
+`sha256-7547d498beafd9f139b00030e006a28626691388f2bda277e43710ede88b6f66`,
+and offline rollback to the original release. Both caches contain exactly 334
+verified files; the controller, response identity, and wallet entry hash match
+at every accepted phase, with zero page errors or console warnings/errors.
+The affected release/PWA/ownership batch passes 54 / 54 with 455 expectations,
+all four React local checks pass with 637 files and zero unsafe findings, and
+all 513 entrypoint expectations pass. The full frontend suite remains at the
+exact 13-name baseline (1,235 passes, 14 reported failures, 6,828 expectations
+across 1,249 tests / 204 files). Canonical `push-wake-sw.js`, Svelte service-
+worker registration, deployment, and production activation are unchanged.
+
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
 
@@ -2109,9 +2134,10 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Add an isolated PWA install/update/rollback smoke for one verified candidate,
-   pinning service-worker scope and whole-release cache identity without
-   activating production or changing canonical Svelte service-worker behavior.
+1. Materialize disposable desktop and browser-extension wallet candidates from
+   the exact verified wallet stage, then verify copied bytes, manifests,
+   permissions, CSP, and deep-link ownership without packaging, signing,
+   installing, activating, deploying, or changing canonical shells.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner
