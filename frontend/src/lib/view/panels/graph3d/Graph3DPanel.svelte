@@ -89,6 +89,11 @@ import {
   updateGraphSelectionHighlight,
   type GraphGestureOutcome,
 } from "../../../../../packages/ui/src/graph3d-interaction";
+import {
+  applyGraphCameraPose,
+  applyGraphCameraTarget,
+  fitGraphCameraToEntities,
+} from "../../../../../packages/ui/src/graph3d-camera";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -608,8 +613,7 @@ onMount(() => {
     else if (key === "cameraTarget") {
       cameraTarget = settingVector(value, key);
       if (controls) {
-        controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
-        controls.update();
+        applyGraphCameraTarget(controls, cameraTarget);
       }
     } else if (key === "entityLabelScale") {
       labelScale = settingNumber(value, key);
@@ -641,8 +645,7 @@ onMount(() => {
     rendererMode = "webgl";
     forceLayoutEnabled = true;
     if (controls) {
-      controls.target.set(0, 0, 0);
-      controls.update();
+      applyGraphCameraTarget(controls, cameraTarget);
     }
     recreateGrid();
   };
@@ -650,17 +653,14 @@ onMount(() => {
     const { target } = event;
     if (controls) {
       cameraTarget = target;
-      controls.target.set(target.x, target.y, target.z);
-      controls.update();
+      applyGraphCameraTarget(controls, target);
     }
   };
   const handleCameraRestore = (event: { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number } }) => {
     if (!controls || !camera) return;
     const { position, target } = event;
-    camera.position.set(position.x, position.y, position.z);
     cameraTarget = target;
-    controls.target.set(target.x, target.y, target.z);
-    controls.update();
+    applyGraphCameraPose(camera, controls, { position, target });
     saveBirdViewSettings();
   };
   panelBridge.on("settings:update", handleSettingsUpdate);
@@ -908,8 +908,7 @@ async function initThreeJS() {
     controls.minDistance = 0; // No minimum - zoom into anything
     controls.maxDistance = Infinity; // No maximum - zoom out as far as you want
     controls.keys = { LEFT: "", UP: "", RIGHT: "", BOTTOM: "" };
-    controls.target.set(-37, 511, -243);
-    controls.update();
+    applyGraphCameraTarget(controls, { x: -37, y: 511, z: -243 });
     controlsLifecycle?.dispose();
     controlsLifecycle = bindGraphControlsLifecycle(controls, {
       onChange: () => panelBridge.emit("camera:update", {
@@ -921,12 +920,7 @@ async function initThreeJS() {
     });
     controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
     if (savedSettings.camera) {
-      const cam = savedSettings.camera;
-      camera.position.set(cam.position.x, cam.position.y, cam.position.z);
-      controls.target.set(cam.target.x, cam.target.y, cam.target.z);
-      camera.zoom = cam.zoom;
-      camera.updateProjectionMatrix();
-      controls.update();
+      applyGraphCameraPose(camera, controls, savedSettings.camera);
     } else {
       controls.update();
     }
@@ -1157,28 +1151,8 @@ async function exitVR() {
   }
 }
 function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()) {
-  if (!camera || !controls || entities.length === 0) return;
-  const preferredEntities = entities.filter((entity) => preferredEntityIds.has(entity.id));
-  const focusEntities = preferredEntities.length >= 2 ? preferredEntities : entities;
-  const box = new THREE.Box3();
-  focusEntities.forEach((entity) => {
-    box.expandByPoint(entity.position);
-  });
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-  const verticalTangent = Math.tan(verticalFov / 2);
-  const horizontalTangent = verticalTangent * Math.max(camera.aspect, 0.1);
-  const projectedHeight = Math.hypot(size.y, size.z);
-  const fitWidth = size.x / (2 * horizontalTangent);
-  const fitHeight = projectedHeight / (2 * verticalTangent);
-  const distance = Math.max(fitWidth, fitHeight, 36) * 1.65;
-  const viewDirection = new THREE.Vector3(0, 1, 1).normalize();
-  camera.position.copy(center).addScaledVector(viewDirection, distance);
-  controls.target.copy(center);
-  controls.update();
+  if (!camera || !controls) return;
+  fitGraphCameraToEntities(camera, controls, entities, preferredEntityIds);
 }
 function updateNetworkData() {
   if (!scene) return;
@@ -2224,8 +2198,7 @@ function onMouseClick(event: MouseEvent) {
       const name = String(clickedJMachine.userData['jurisdictionName']);
       if (controls && pos) {
         cameraTarget = pos;
-        controls.target.set(pos.x, pos.y, pos.z);
-        controls.update();
+        applyGraphCameraTarget(controls, pos);
       }
       panelBridge.emit("openJurisdiction", { jurisdictionName: name });
       return; // Don't process entity clicks
