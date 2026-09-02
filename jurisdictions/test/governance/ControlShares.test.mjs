@@ -81,6 +81,7 @@ describe("Entity Control-Shares System", function () {
       await transformer.getAddress(),
     );
     await depository.waitForDeployment();
+    await entityProvider.bindShareDepository(await depository.getAddress());
 
     // Create mock board hashes
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -214,7 +215,7 @@ describe("Entity Control-Shares System", function () {
           "Invalid Release",
           "0x"
         )
-      ).to.be.revertedWith("Invalid recipient address");
+      ).to.be.revertedWithCustomError(entityProvider, "ShareDepositoryRequired");
     });
 
     it("Should reject release for non-existent entity", async function () {
