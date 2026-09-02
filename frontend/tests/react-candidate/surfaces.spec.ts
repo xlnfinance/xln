@@ -6,6 +6,25 @@ type SurfaceEvidence = Readonly<{
   ready: (page: Page) => Promise<void>;
 }>;
 
+type BrowserErrors = Readonly<{
+  consoleErrors: string[];
+  pageErrors: string[];
+}>;
+
+const observeBrowserErrors = (page: Page): BrowserErrors => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('pageerror', error => pageErrors.push(error.message));
+  return { consoleErrors, pageErrors };
+};
+
+const expectOnlyProxyFailures = (errors: BrowserErrors): void => {
+  expect(errors.pageErrors).toEqual([]);
+  expect(errors.consoleErrors.length).toBeGreaterThan(0);
+  for (const error of errors.consoleErrors) expect(error).toContain('status of 502');
+};
+
 const surfaces: readonly SurfaceEvidence[] = [
   {
     id: 'site',
@@ -52,6 +71,25 @@ for (const surface of surfaces) {
 
     expect(pageErrors, `page errors for ${surface.pathname}`).toEqual([]);
     expect(consoleErrors, `console errors for ${surface.pathname}`).toEqual([]);
+  });
+}
+
+const unavailableOpsRoutes = [
+  { id: 'ops-health', pathname: '/health', heading: 'System health', failure: 'OPS_HEALTH_HTTP_502' },
+  { id: 'ops-qa', pathname: '/qa', heading: 'Test Cockpit', failure: 'OPS_QA_HTTP_502' },
+  { id: 'ops-hlt', pathname: '/qa/hlt', heading: 'HLT', failure: 'DEVELOPMENT_GATEWAY_PROXY_FAILED' },
+] as const;
+
+for (const route of unavailableOpsRoutes) {
+  test(`${route.pathname} exposes its unavailable upstream without browser errors`, async ({ page }, testInfo) => {
+    const errors = observeBrowserErrors(page);
+    const response = await page.goto(route.pathname, { waitUntil: 'networkidle' });
+    expect(response?.ok()).toBe(true);
+    await expect(page.getByRole('heading', { exact: true, name: route.heading })).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText(route.failure);
+    await expect.poll(() => page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBe(true);
+    await screenshotEvidence(page, testInfo, route.id);
+    expectOnlyProxyFailures(errors);
   });
 }
 

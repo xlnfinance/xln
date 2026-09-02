@@ -139,6 +139,9 @@
   .ops-hlt-header { align-items: flex-start; flex-direction: column; }
   .ops-hlt-header h1 { font-size: 4rem; }
   .ops-hlt-head-actions { width: 100%; justify-content: flex-start; }
+  .ops-hlt-error { align-items: stretch; flex-direction: column; }
+  .ops-hlt-error strong { overflow-wrap: anywhere; }
+  .ops-hlt-error button { width: 100%; justify-content: center; }
   .ops-hlt-verdict { grid-template-columns: 1fr; gap: 0.8rem; padding: 1.35rem 0; }
   .ops-hlt-verdict button { width: 100%; justify-content: center; }
   .ops-hlt-run { grid-template-columns: 1fr; }

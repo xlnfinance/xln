@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 COMPLETE; WP9 /QA/QUORUM COMPLETE, DIRECT ROUTE EVIDENCE NEXT`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 COMPLETE; WP9 OPS DIRECT ROUTE EVIDENCE COMPLETE, SECONDARY SITE EVIDENCE NEXT`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -2152,7 +2152,7 @@ tests can activate, reject invalid candidates, and roll back.
 
 ### WP9 — Close parity and prepare cutover
 
-**Status:** `IN PROGRESS — PARITY AUDIT + /QA/QUORUM COMPLETE; DIRECT ROUTE EVIDENCE NEXT`
+**Status:** `IN PROGRESS — PARITY AUDIT + OPS DIRECT ROUTE EVIDENCE COMPLETE; SECONDARY SITE EVIDENCE NEXT`
 
 - Confirm all retained routes and capabilities have React owners and tests.
 - Run all-frontend checks and representative browser flows at required
@@ -2164,8 +2164,8 @@ tests can activate, reject invalid candidates, and roll back.
 The deterministic `frontend:parity:audit` command now accounts for all 20
 retained Svelte page routes and all 12 capability groups. Sixteen routes have a
 complete React implementation, `/app` and `/embed` are partial, and only
-`/address` plus `/address/:entityId` are missing. Seven routes have direct
-candidate-browser evidence, three have partial evidence, and ten have no direct
+`/address` plus `/address/:entityId` are missing. Ten routes have direct
+candidate-browser evidence, two have partial evidence, and eight have no direct
 route evidence yet. The capability ledger remains truthful at three
 implemented, eight in progress, and one unstarted.
 
@@ -2174,7 +2174,7 @@ model projects the versioned audit registry, current verified history, filters,
 score summaries, explicit review chains, and selected evidence for both React
 and the retained Svelte route. The registry boundary rejects malformed required
 fields, unsupported versions, duplicate IDs, unknown reviewers, invalid scores,
-and invalid run dates instead of inventing fallback evidence. Nine typed gaps
+and invalid run dates instead of inventing fallback evidence. Eight typed gaps
 remain; `/embed` stays behind the explicit Entity-workspace owner decision and
 canonical command/routing, artifact-consumer, and Svelte retirement work stays
 WP10-only.
@@ -2195,6 +2195,23 @@ deterministic tests / 100,156 expectations, compiles 28 Solidity files,
 publishes 92 TypeChain files, confirms immutable metadata parity for four
 contracts, and passes all ten soundchecks before the established missing-`cargo`
 environment stop.
+
+Direct same-origin failure-state evidence now covers `/health`, `/qa`, and
+`/qa/hlt` without network interception or response mocks. The focused parity
+and route batch passes 19 / 19 with 496 expectations. The first nine-case
+browser run reproduced a mobile HLT overflow caused by the long proxy error;
+the alert now wraps and stacks its action below the message. The corrected
+matrix passes 9 / 9 across mobile, laptop, and wide viewports, with all nine
+screenshots inspected, zero page errors, and only the expected surfaced HTTP
+502 console failures. The complete candidate browser matrix passes 39 / 39.
+The isolated ops production build transforms 1,614 modules. The full frontend
+suite preserves the same known 13-name baseline with 1,249 passes, 14 reported
+failures, one error, and 7,177 expectations across 1,263 tests / 207 files; the
+canonical frontend check remains at zero errors/warnings and builds 4,674 SSR
+plus 6,425 client modules. The repository gate repeats the 26-test, contract,
+immutable-metadata, and ten-soundcheck evidence above before the established
+missing-`cargo` stop. File-size policy still reports only `core/qa/report.ts`
+at 3,001 / 3,000 lines.
 
 **Done:** the four React apps form a complete candidate and no known retained
 capability depends on Svelte.
@@ -2240,8 +2257,8 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Add direct three-viewport evidence for `/health`, `/qa`, `/qa/hlt`, and the
-   six secondary site routes; then split candidate browser commands per surface
+1. Add direct three-viewport evidence for the six secondary site routes; then
+   split candidate browser commands per surface
    so no targeted flow prepares or launches unrelated applications.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
