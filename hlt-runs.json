@@ -298,6 +298,28 @@
       "status": "green",
       "headline": "Release evidence, TS core: 723.1/s at 1000 users, rate 1/user, clean tree",
       "detail": "Fresh authoritative run after bun run check went green on our files (only brainvault dead-code left, other owner). 20000/20000 delivered, WAL+fsync, full drain, provenance SHA/binary/lock recorded in the report. TS stays the logic reference; production-rate hubs run Rust."
+    },
+    {
+      "at": "2026-09-02T23:25:00Z",
+      "commit": "3fa4a7073",
+      "engine": "ts",
+      "users": 1000,
+      "paymentsTps": 1131.3,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Authority TS core, rate 2/user: 1131.3/s at 1000 users (40000/40000)",
+      "detail": "Owner rule: at most 2 payments per user per second — per-user rate above that only batches. Offered 2000/s, 20 s window, WAL+fsync, full drain. TS delivers 57% of offered at this rate: the TS coordinator is the wall."
+    },
+    {
+      "at": "2026-09-02T23:42:00Z",
+      "commit": "702bc4a3d",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 1891.8,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Authority Rust H1, rate 2/user: 1891.8/s at 1000 users (40000/40000), offered-bound",
+      "detail": "Same rule and gate as the TS row. Rust delivers 95% of the 2000/s offered with apply at ~88 ms per frame (12.2 s over 138 frames); headroom is shown by the users ladder, not by per-user rate."
     }
   ]
 }
