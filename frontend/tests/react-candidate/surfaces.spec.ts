@@ -74,6 +74,26 @@ test('ops HLT lazy chunk is browser-safe', async ({ page }) => {
   expect(consoleErrors).toEqual([]);
 });
 
+test('entity workspace tabs follow canonical hash routes', async ({ page }, testInfo) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('pageerror', error => pageErrors.push(error.message));
+
+  await page.goto('/__app/ops/entity-workspace#settings/network', { waitUntil: 'networkidle' });
+  await expect(page.getByTestId('entity-workspace-shell')).toHaveAttribute('data-active-tab', 'settings');
+  await expect(page.getByTestId('entity-workspace-tab-settings')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('entity-workspace-stage').getByRole('heading')).toHaveText('Settings');
+
+  await page.getByTestId('entity-workspace-tab-accounts').click();
+  await expect(page).toHaveURL(/\/__app\/ops\/entity-workspace#accounts$/);
+  await expect(page.getByTestId('entity-workspace-shell')).toHaveAttribute('data-active-tab', 'accounts');
+  await expect.poll(() => page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBe(true);
+  await screenshotEvidence(page, testInfo, 'ops-entity-workspace-accounts');
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
 test('ai console reports the unavailable local AI service without browser errors', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
