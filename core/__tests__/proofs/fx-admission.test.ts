@@ -136,17 +136,6 @@ const OUT_OF_PROFILE_TXS: Array<[string, AccountTx]> = [
       amount: 10n,
     },
   }],
-  ['reserve_to_collateral', {
-    type: 'reserve_to_collateral',
-    data: {
-      tokenId: 1,
-      collateral: '1',
-      ondelta: '0',
-      side: 'receiving',
-      blockNumber: 1,
-      transactionHash: `0x${'ee'.repeat(32)}`,
-    },
-  }],
 ];
 
 const enqueue = async (account: AccountReplica, txs: AccountTx[]) =>

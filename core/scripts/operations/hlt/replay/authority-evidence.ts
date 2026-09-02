@@ -94,7 +94,7 @@ const inspectJPrefixScope = (input: EntityInput, coverage: MixedCoverage): void 
 const assertAccountScope = (tx: AccountTx, coverage: MixedCoverage): void => {
   if (
     tx.type.startsWith('lending_') || tx.type.startsWith('cross_') ||
-    tx.type === 'reserve_to_collateral'
+    false
   ) throw new Error(`HLT_AUTHORITY_SCOPE_ACCOUNT_TX_FORBIDDEN:${tx.type}`);
   if (tx.type === 'swap_offer' && tx.data.crossJurisdiction !== undefined) {
     throw new Error('HLT_AUTHORITY_SCOPE_CROSS_J_SWAP_FORBIDDEN');

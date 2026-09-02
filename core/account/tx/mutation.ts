@@ -15,7 +15,6 @@ import { toJHeight, toUnixMs, type JHeight, type UnixMs } from '../../protocol/u
 import { handleAddDelta } from './handlers/balance/add-delta';
 import { handleSetCreditLimit } from './handlers/balance/set-credit-limit';
 import { handleDirectPayment } from './handlers/balance/direct-payment';
-import { handleReserveToCollateral } from './handlers/rebalance/reserve-to-collateral';
 import { handleRequestCollateral } from './handlers/rebalance/request-collateral';
 import { handleRebalancePolicy } from './handlers/rebalance/policy';
 import { handleRebalanceRefund } from './handlers/rebalance/refund';
@@ -205,7 +204,6 @@ export const applyAccountTxMutation = async (
     case 'lending_close_request':
     case 'lending_close_payout':
       return handleLendingAccountTx(account, tx, byLeft);
-    case 'reserve_to_collateral': return handleReserveToCollateral(account.state, tx);
     case 'request_collateral': return applyCollateralRequest(context);
     case 'rebalance_refund': return handleRebalanceRefund(account, tx, byLeft);
     case 'rebalance_policy': return handleRebalancePolicy(account.state, tx, byLeft, timestamp);

@@ -213,17 +213,6 @@ fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
                 amount: BigInt::from(10),
             },
         ),
-        (
-            "reserve_to_collateral",
-            AccountTx::ReserveToCollateral {
-                token_id: token,
-                collateral: "1".to_string(),
-                ondelta: "0".to_string(),
-                side: ReserveSide::Receiving,
-                block_number: 1,
-                transaction_hash: format!("0x{}", "ee".repeat(32)),
-            },
-        ),
     ]
 }
 

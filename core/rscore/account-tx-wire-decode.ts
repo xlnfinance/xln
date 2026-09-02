@@ -243,7 +243,6 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
     case 13: return decodeLendingCredit(row);
     case 14: return decodeLendingCloseRequest(row);
     case 15: return decodeLendingClosePayout(row);
-    case 16: return decodeReserveToCollateral(row);
     case 17: return decodeRequestCollateral(row);
     case 18: return decodeRebalanceRefund(row);
     case 19: return decodeCanonicalTx(row, 'cross_pull_lock');
@@ -300,14 +299,6 @@ const decodeLendingClosePayout = (row: readonly unknown[]): AccountTx => {
   return { type: 'lending_close_payout', data: { positionId: rscoreWireText(f[1], 'tx.positionId'),
     hubEntityId: rscoreWireText(f[2], 'tx.hubEntityId'), lenderEntityId: rscoreWireText(f[3], 'tx.lenderEntityId'),
     tokenId: rscoreWireUint(f[4], 'tx.tokenId'), amount: rscoreWireBig(f[5], 'tx.amount') } };
-};
-const decodeReserveToCollateral = (row: readonly unknown[]): AccountTx => {
-  const f = rscoreWireTuple(row, 7, 'tx.reserveToCollateral'); const side = rscoreWireInt(f[4], 'tx.side');
-  if (side !== 0 && side !== 1) return rscoreWireDecodeFail('tx.side:unknown');
-  return { type: 'reserve_to_collateral', data: { tokenId: rscoreWireUint(f[1], 'tx.tokenId'),
-    collateral: rscoreWireText(f[2], 'tx.collateral'), ondelta: rscoreWireText(f[3], 'tx.ondelta'),
-    side: side === 0 ? 'receiving' : 'counterparty', blockNumber: rscoreWireInt(f[5], 'tx.blockNumber'),
-    transactionHash: rscoreWireText(f[6], 'tx.transactionHash') } };
 };
 const decodeRequestCollateral = (row: readonly unknown[]): AccountTx => {
   const f = rscoreWireTuple(row, 6, 'tx.requestCollateral');

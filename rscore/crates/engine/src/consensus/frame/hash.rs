@@ -416,24 +416,6 @@ fn projected_tx_value(
                 ("amount".to_string(), big(amount)),
             ],
         ),
-        AccountTx::ReserveToCollateral {
-            token_id,
-            collateral,
-            ondelta,
-            side,
-            block_number,
-            transaction_hash,
-        } => (
-            "reserve_to_collateral",
-            vec![
-                ("tokenId".to_string(), token(*token_id)),
-                ("collateral".to_string(), text(collateral)),
-                ("ondelta".to_string(), text(ondelta)),
-                ("side".to_string(), text(side.wire_name())),
-                ("blockNumber".to_string(), number_i64(*block_number)?),
-                ("transactionHash".to_string(), text(transaction_hash)),
-            ],
-        ),
         AccountTx::CrossPullLock { data }
         | AccountTx::CrossPullClose { data }
         | AccountTx::CrossPullProgress { data }
@@ -999,21 +981,6 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-    #[test]
-    fn reserve_transition_is_part_of_the_exhaustive_frame_hash_catalog() {
-        let tx = AccountTx::ReserveToCollateral {
-            token_id: TokenId::new(1).expect("token"),
-            collateral: "1".to_string(),
-            ondelta: "0".to_string(),
-            side: crate::ReserveSide::Receiving,
-            block_number: 1,
-            transaction_hash: format!("0x{}", "ee".repeat(32)),
-        };
-        assert!(is_frame_hashable(&tx));
-        frame_for(tx)
-            .hash()
-            .expect("reserve transaction frame hash");
-    }
 
     #[test]
     fn settlement_post_commit_hankos_do_not_move_the_frame_or_mempool_root() {

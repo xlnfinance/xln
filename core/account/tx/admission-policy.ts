@@ -32,7 +32,6 @@ const OUT_OF_PROFILE_TX_KINDS: ReadonlySet<AccountTx['type']> = new Set<AccountT
   'lending_credit',
   'lending_close_request',
   'lending_close_payout',
-  'reserve_to_collateral',
 ]);
 
 const ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE =

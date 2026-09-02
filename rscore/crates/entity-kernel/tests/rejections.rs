@@ -32,14 +32,6 @@ fn state_only_transactions_are_inert_but_cross_j_fails_loudly() {
     assert!(applied.proposal_work.is_empty());
 
     for tx in [
-        AccountTx::ReserveToCollateral {
-            token_id: token(1),
-            collateral: "100".into(),
-            ondelta: "0".into(),
-            side: ReserveSide::Receiving,
-            block_number: 7,
-            transaction_hash: format!("0x{}", "33".repeat(32)),
-        },
         AccountTx::RequestCollateral {
             token_id: token(1),
             amount: BigInt::from(100),

@@ -471,7 +471,6 @@ export function createDirectionalLightningMesh(connection: GraphConnectionData, 
 export function createBroadcastRippleMesh(position: THREE.Vector3, txType: string): THREE.Mesh {
   const colors: Record<string, number> = {
     r2c: 0x00ff88,
-    reserve_to_collateral: 0x00ff88,
     deposit_reserve: 0x00ff00,
     withdraw_reserve: 0xff0000,
     credit_from_reserve: 0xffaa00,

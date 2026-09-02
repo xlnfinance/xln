@@ -9,7 +9,7 @@ use xln_rscore_engine::{
     DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx,
     HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode, JClaimProof, JClaimRecord,
     JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction, LendingTermId,
-    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, ReserveSide, Side,
+    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, Side,
     SwapMarketPolicy, SwapOffer, SwapToken, TokenId, WatchSeed,
 };
 
@@ -904,7 +904,6 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         13 => decode_lending_credit(fields),
         14 => decode_lending_close_request(fields),
         15 => decode_lending_close_payout(fields),
-        16 => decode_reserve_to_collateral(fields),
         17 => decode_request_collateral(fields),
         18 => decode_rebalance_refund(fields),
         19 => decode_canonical_tx(fields, "crossPullLock", |data| AccountTx::CrossPullLock {
@@ -1028,28 +1027,6 @@ fn decode_lending_close_payout(fields: &[AbiValue]) -> Result<AccountTx, Process
         lender_entity_id: text(&fields[3])?.into(),
         token_id: token(&fields[4])?,
         amount: bigint(&fields[5], "amount")?,
-    })
-}
-
-fn decode_reserve_to_collateral(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 7, "reserveToCollateral")?;
-    Ok(AccountTx::ReserveToCollateral {
-        token_id: token(&fields[1])?,
-        collateral: text(&fields[2])?.into(),
-        ondelta: text(&fields[3])?.into(),
-        side: match integer(&fields[4])? {
-            0 => ReserveSide::Receiving,
-            1 => ReserveSide::Counterparty,
-            value => {
-                return Err(ProcessError::Tag {
-                    field: "reserveSide",
-                    value,
-                });
-            }
-        },
-        block_number: i64::try_from(integer(&fields[5])?)
-            .map_err(|_| ProcessError::Expected("blockNumber"))?,
-        transaction_hash: text(&fields[6])?.into(),
     })
 }
 

@@ -4,11 +4,10 @@
  *
  * Historical state (commit dfd45cc7c, the state the C1 report fuzzed):
  *   TS  `canonicalAccountTxForFrameHash` hashes ANY tx kind passthrough
- *       (`{type, data}`), including `lending_fund`, `request_collateral`,
- *       `reserve_to_collateral`.
+ *       (`{type, data}`), including `lending_fund`, `request_collateral`.
  *   Rust `canonical_tx_value` returns `StateError::UnsupportedFrameTx(kind)` for
  *       kinds it does not model (`request_collateral` has no Rust enum variant
- *       at all; the other two exist but are not frame-hashable).
+ *       at all; lending_fund exists but is not frame-hashable).
  *   => a frame with such a tx is hashable in TS and never reproducible in Rust.
  *       Confirmed by committed corpus cases (class ts-only).
  *
@@ -61,20 +60,6 @@ const PROBES: { id: string; kind: string; class: string; txKind: string; data: R
     txKind: 'request_collateral',
     data: { tokenId: 1, amount: '7', feeTokenId: 2, feeAmount: '1', policyVersion: 3 },
   },
-  {
-    id: 'probe-reserve-to-collateral',
-    kind: 'tx',
-    class: 'ts-only',
-    txKind: 'reserve_to_collateral',
-    data: {
-      tokenId: 1,
-      collateral: '5',
-      ondelta: '0',
-      side: 'receiving',
-      blockNumber: 1,
-      transactionHash: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-    },
-  },
 ];
 
 const { canonicalAccountTxForFrameHash } = await import(
@@ -88,7 +73,6 @@ const { encodeAccountStateValue } = await import(
 const BIGINT_FIELDS: Record<string, string[]> = {
   lending_fund: ['amount'],
   request_collateral: ['amount', 'feeAmount'],
-  reserve_to_collateral: ['collateral', 'ondelta'],
 };
 const buildData = (kind: string, data: Record<string, unknown>): Record<string, unknown> => {
   const bigints = new Set(BIGINT_FIELDS[kind] ?? []);

@@ -572,10 +572,6 @@ const seeds = (): Case[] => {
     txKind: 'lending_fund',
     data: { positionId: '0x' + 'aa'.repeat(32), hubEntityId: '0x' + 'bb'.repeat(32), lenderEntityId: '0x' + 'cc'.repeat(32), tokenId: 1, amount: '5', termId: 'one_hour', interestBps: 100 },
   });
-  push('tx-reserve-to-collateral', 'tx', 'ts-only', {
-    txKind: 'reserve_to_collateral',
-    data: { tokenId: 1, collateral: '5', ondelta: '0', side: 'receiving', blockNumber: 1, transactionHash: '0x' + 'ee'.repeat(32) },
-  });
   push('tx-request-collateral', 'tx', 'ts-only', {
     txKind: 'request_collateral',
     data: { tokenId: 1, amount: '7', feeTokenId: 2, feeAmount: '1', policyVersion: 3 },

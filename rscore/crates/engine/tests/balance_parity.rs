@@ -236,27 +236,3 @@ fn trusted_forward_preserves_one_thousand_identical_outputs() {
         &BigInt::from(1_000)
     );
 }
-
-#[test]
-fn reserve_to_collateral_is_always_an_atomic_rejection() {
-    let base = replica(entity(0x11), entity(0x11), entity(0x22), Vec::new());
-    let tx = AccountTx::ReserveToCollateral {
-        token_id: token(1),
-        collateral: "999999999999999999999".into(),
-        ondelta: "-5".into(),
-        side: ReserveSide::Receiving,
-        block_number: i64::MAX,
-        transaction_hash: "arbitrary-signed-value".into(),
-    };
-    let transition =
-        SequentialAccountEngine::apply(&base, Side::Left, &tx).expect("explicit rejection");
-    let AccountVerdict::Rejected(rejection) = transition.verdict() else {
-        panic!("expected rejection")
-    };
-    assert_eq!(rejection.code(), "ACCOUNT_TX_VALIDATION");
-    assert_eq!(
-        rejection.message(),
-        "SECURITY: reserve_to_collateral blocked - must use j_event_claim bilateral consensus"
-    );
-    assert!(transition.candidate().is_none());
-}

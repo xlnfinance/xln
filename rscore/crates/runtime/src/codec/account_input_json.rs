@@ -16,7 +16,7 @@ use xln_rscore_engine::{
     EntityId, HtlcDeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
     IncomingAck, IncomingFrame, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
     JEventMetadata, JurisdictionEvent, LendingAction, LendingTermId, OpaqueHtlcCiphertext,
-    RebalanceRefundReason, ReserveSide, TokenId, WatchSeed,
+    RebalanceRefundReason, TokenId, WatchSeed,
 };
 
 use super::tagged_json::canonical_value_from_tagged_json;
@@ -1049,72 +1049,6 @@ fn decode_lending_close_payout(
     })
 }
 
-fn decode_reserve_to_collateral(
-    value: &Map<String, Value>,
-    operation_index: u64,
-    path: &str,
-) -> Result<AccountTx, AccountInputJsonError> {
-    exact_fields(
-        value,
-        &[
-            "tokenId",
-            "collateral",
-            "ondelta",
-            "side",
-            "blockNumber",
-            "transactionHash",
-        ],
-        &[],
-        operation_index,
-        path,
-    )?;
-    let side = match text(
-        field(value, "side", operation_index, path)?,
-        operation_index,
-        &format!("{path}.side"),
-    )?
-    .as_str()
-    {
-        "receiving" => ReserveSide::Receiving,
-        "counterparty" => ReserveSide::Counterparty,
-        _ => {
-            return Err(invalid(
-                operation_index,
-                format!("{path}.side"),
-                "VALUE_INVALID",
-            ));
-        }
-    };
-    Ok(AccountTx::ReserveToCollateral {
-        token_id: token_id(
-            field(value, "tokenId", operation_index, path)?,
-            operation_index,
-            &format!("{path}.tokenId"),
-        )?,
-        collateral: text(
-            field(value, "collateral", operation_index, path)?,
-            operation_index,
-            &format!("{path}.collateral"),
-        )?,
-        ondelta: text(
-            field(value, "ondelta", operation_index, path)?,
-            operation_index,
-            &format!("{path}.ondelta"),
-        )?,
-        side,
-        block_number: signed(
-            field(value, "blockNumber", operation_index, path)?,
-            operation_index,
-            &format!("{path}.blockNumber"),
-        )?,
-        transaction_hash: text(
-            field(value, "transactionHash", operation_index, path)?,
-            operation_index,
-            &format!("{path}.transactionHash"),
-        )?,
-    })
-}
-
 fn decode_request_collateral(
     value: &Map<String, Value>,
     operation_index: u64,
@@ -1677,7 +1611,6 @@ fn decode_account_tx_at(
         }
         "htlc_lock" => decode_htlc_lock(data, operation_index, &data_path),
         "htlc_resolve" => decode_htlc_resolve(data, operation_index, &data_path),
-        "reserve_to_collateral" => decode_reserve_to_collateral(data, operation_index, &data_path),
         "request_collateral" => decode_request_collateral(data, operation_index, &data_path),
         "rebalance_refund" => decode_rebalance_refund(data, operation_index, &data_path),
         "rebalance_policy" => {

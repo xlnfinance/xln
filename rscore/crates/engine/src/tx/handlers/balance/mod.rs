@@ -74,10 +74,6 @@ pub(crate) fn set_credit_limit(
     Ok(MutationDecision::applied(events))
 }
 
-pub(crate) fn reserve_to_collateral() -> MutationDecision {
-    rejected(ValidationRejection::ReserveToCollateralBlocked)
-}
-
 fn rejected(reason: ValidationRejection) -> MutationDecision {
     MutationDecision::rejected(AccountRejection::Validation(reason))
 }

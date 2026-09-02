@@ -11,7 +11,6 @@ export const ACCOUNT_TX_TYPES = [
   'lending_close_payout',
   'add_delta',
   'set_credit_limit',
-  'reserve_to_collateral',
   'request_collateral',
   'rebalance_refund',
   'rebalance_policy',

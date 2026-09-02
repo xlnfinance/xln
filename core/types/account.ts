@@ -758,17 +758,6 @@ export type AccountTx =
   | { type: 'add_delta'; data: { tokenId: number } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
   | {
-      type: 'reserve_to_collateral';
-      data: {
-        tokenId: number;
-        collateral: string; // Absolute collateral value from contract
-        ondelta: string;    // Absolute ondelta value from contract
-        side: 'receiving' | 'counterparty';
-        blockNumber: number;
-        transactionHash: string;
-      };
-    }
-  | {
       type: 'request_collateral';
       data: {
         tokenId: number;

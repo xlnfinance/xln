@@ -273,25 +273,6 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
             integer(token_id.get()),
             encode_bigint(amount),
         ],
-        AccountTx::ReserveToCollateral {
-            token_id,
-            collateral,
-            ondelta,
-            side,
-            block_number,
-            transaction_hash,
-        } => vec![
-            integer(16),
-            integer(token_id.get()),
-            AbiValue::Text(collateral.clone()),
-            AbiValue::Text(ondelta.clone()),
-            integer(match side {
-                ReserveSide::Receiving => 0,
-                ReserveSide::Counterparty => 1,
-            }),
-            integer(*block_number),
-            AbiValue::Text(transaction_hash.clone()),
-        ],
         AccountTx::RequestCollateral {
             token_id,
             amount,

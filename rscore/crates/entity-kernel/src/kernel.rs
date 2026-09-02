@@ -541,7 +541,6 @@ fn apply_commit_transitions(
             }
             AccountTx::AddDelta { .. }
             | AccountTx::SetCreditLimit { .. }
-            | AccountTx::ReserveToCollateral { .. }
             | AccountTx::RequestCollateral { .. }
             | AccountTx::RebalanceRefund { .. }
             | AccountTx::RebalancePolicy { .. } => {

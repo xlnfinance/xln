@@ -901,9 +901,6 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
     case 'lending_close_payout':
       return [15, tx.data.positionId, tx.data.hubEntityId, tx.data.lenderEntityId,
         tx.data.tokenId, tx.data.amount.toString()];
-    case 'reserve_to_collateral':
-      return [16, tx.data.tokenId, tx.data.collateral, tx.data.ondelta,
-        tx.data.side === 'receiving' ? 0 : 1, tx.data.blockNumber, tx.data.transactionHash];
     case 'request_collateral':
       return [17, tx.data.tokenId, tx.data.amount.toString(), tx.data.feeTokenId ?? null,
         tx.data.feeAmount.toString(), tx.data.policyVersion];

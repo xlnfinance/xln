@@ -2120,34 +2120,6 @@ fn certified_checkpoint_restores_post_finality_state_with_historical_frame() {
 
 /// Historical signed frames remain hashable, but the live production profile
 /// rejects this kind before it can enter the mempool.
-#[test]
-fn reserve_to_collateral_is_rejected_before_live_admission() {
-    let (mut left, right) = parties();
-    let error = left
-        .account
-        .admit_txs(
-            vec![AccountTx::ReserveToCollateral {
-                token_id: TokenId::new(1).expect("token"),
-                collateral: "10".to_string(),
-                ondelta: "0".to_string(),
-                side: xln_rscore_engine::ReserveSide::Receiving,
-                block_number: 1,
-                transaction_hash: format!("0x{}", "ee".repeat(32)),
-            }],
-            "test",
-        )
-        .expect_err("out-of-profile transaction must be rejected before admission");
-    assert_eq!(
-        error.to_string(),
-        "ACCOUNT_TX_KIND_OUT_OF_PROFILE:reserve_to_collateral (profile: pay/HTLC/same-J swap/j-event/rebalance)"
-    );
-    assert!(left.account.mempool().is_empty());
-    // The account still works.
-    left.account
-        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 5)], "test")
-        .expect("admit");
-    assert_eq!(left.account.mempool().len(), 1);
-}
 
 #[test]
 fn rebalance_policy_is_hashable_at_admission_and_cross_peer_replay() {

@@ -326,7 +326,6 @@ pub(crate) fn apply_to_candidate(
         | AccountTx::LendingClosePayout { .. } => {
             crate::tx::handlers::lending::apply(candidate, tx, proposer)
         }
-        AccountTx::ReserveToCollateral { .. } => Ok(balance::reserve_to_collateral()),
         AccountTx::RequestCollateral {
             token_id,
             amount,

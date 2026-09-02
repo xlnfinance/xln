@@ -10,7 +10,7 @@ use num_bigint::BigInt;
 
 use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
 
-pub const ACCOUNT_TX_TYPES: [&str; 24] = [
+pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "direct_payment",
     "lending_fund",
     "lending_borrow_request",
@@ -20,7 +20,6 @@ pub const ACCOUNT_TX_TYPES: [&str; 24] = [
     "lending_close_payout",
     "add_delta",
     "set_credit_limit",
-    "reserve_to_collateral",
     "request_collateral",
     "rebalance_refund",
     "rebalance_policy",
@@ -53,7 +52,6 @@ pub(crate) fn account_tx_admission_error(tx: &AccountTx) -> Option<StateError> {
             | AccountTx::LendingCredit { .. }
             | AccountTx::LendingCloseRequest { .. }
             | AccountTx::LendingClosePayout { .. }
-            | AccountTx::ReserveToCollateral { .. }
     )
     .then(|| StateError::AccountTxKindOutOfProfile(tx.wire_name()))
 }
@@ -247,14 +245,6 @@ pub enum AccountTx {
         token_id: TokenId,
         amount: BigInt,
     },
-    ReserveToCollateral {
-        token_id: TokenId,
-        collateral: String,
-        ondelta: String,
-        side: ReserveSide,
-        block_number: i64,
-        transaction_hash: String,
-    },
     RequestCollateral {
         token_id: TokenId,
         amount: BigInt,
@@ -304,7 +294,6 @@ impl AccountTx {
             Self::LendingClosePayout { .. } => "lending_close_payout",
             Self::AddDelta { .. } => "add_delta",
             Self::SetCreditLimit { .. } => "set_credit_limit",
-            Self::ReserveToCollateral { .. } => "reserve_to_collateral",
             Self::RequestCollateral { .. } => "request_collateral",
             Self::RebalanceRefund { .. } => "rebalance_refund",
             Self::RebalancePolicy { .. } => "rebalance_policy",

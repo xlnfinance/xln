@@ -7,7 +7,7 @@ use xln_rscore_engine::{
     HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode,
     JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction,
     LendingTermId, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason,
-    ReserveSide, Side, SwapOffer, TokenId,
+    Side, SwapOffer, TokenId,
 };
 
 use super::account_canonical;
@@ -310,24 +310,6 @@ fn lending_close_payout(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRes
     })
 }
 
-fn reserve_to_collateral(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
-    let fields = exact(fields, 7, "reserveToCollateral")?;
-    let side = match integer(&fields[4])? {
-        0 => ReserveSide::Receiving,
-        1 => ReserveSide::Counterparty,
-        value => return Err(invalid(format!("RESERVE_SIDE:{value}"))),
-    };
-    Ok(AccountTx::ReserveToCollateral {
-        token_id: token(&fields[1])?,
-        collateral: text(&fields[2])?.to_owned(),
-        ondelta: text(&fields[3])?.to_owned(),
-        side,
-        block_number: i64::try_from(integer(&fields[5])?)
-            .map_err(|_| invalid("RESERVE_BLOCK_NUMBER"))?,
-        transaction_hash: text(&fields[6])?.to_owned(),
-    })
-}
-
 fn request_collateral(fields: &[AbiValue]) -> Result<AccountTx, AccountWireRestoreError> {
     let fields = exact(fields, 6, "requestCollateral")?;
     Ok(AccountTx::RequestCollateral {
@@ -478,7 +460,6 @@ pub fn transaction(value: &AbiValue) -> Result<AccountTx, AccountWireRestoreErro
         13 => lending_credit(fields),
         14 => lending_close_request(fields),
         15 => lending_close_payout(fields),
-        16 => reserve_to_collateral(fields),
         17 => request_collateral(fields),
         18 => rebalance_refund(fields),
         19 => canonical_tx(fields, "crossPullLock", |data| AccountTx::CrossPullLock {

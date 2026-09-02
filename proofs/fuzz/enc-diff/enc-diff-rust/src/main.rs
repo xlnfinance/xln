@@ -376,19 +376,6 @@ fn to_tx(kind: &str, data: &Json) -> Result<AccountTx, String> {
             },
             interest_bps: uint(data, "interestBps")? as i64,
         }),
-        "reserve_to_collateral" => Ok(AccountTx::ReserveToCollateral {
-            token_id: token(data, "tokenId")?,
-            collateral: text(data, "collateral")?,
-            ondelta: text(data, "ondelta")?,
-            side: match text(data, "side")?.as_str() {
-                "receiving" => xln_rscore_engine::ReserveSide::Receiving,
-                "counterparty" => xln_rscore_engine::ReserveSide::Counterparty,
-                other => return Err(format!("TX_FIELD_INVALID:side:{other}")),
-            },
-            block_number: i64::try_from(uint(data, "blockNumber")?)
-                .map_err(|_| "TX_FIELD_INVALID:blockNumber".to_string())?,
-            transaction_hash: text(data, "transactionHash")?,
-        }),
         "request_collateral" => Err("TX_KIND_NOT_MODELED_IN_RUST:request_collateral".to_string()),
         other => Err(format!("TX_KIND_UNKNOWN:{other}")),
     }

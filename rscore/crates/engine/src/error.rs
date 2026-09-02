@@ -119,7 +119,6 @@ pub enum ValidationRejection {
         required: BigInt,
         available: BigInt,
     },
-    ReserveToCollateralBlocked,
     RebalancePolicyTokenId {
         token_id: u32,
     },
@@ -211,9 +210,6 @@ impl ValidationRejection {
             Self::InsufficientCapacity { payer_suffix, required, available } => format!(
                 "Insufficient capacity for sender {payer_suffix}: need {required}, available {available}"
             ),
-            Self::ReserveToCollateralBlocked => {
-                "SECURITY: reserve_to_collateral blocked - must use j_event_claim bilateral consensus".into()
-            }
             Self::RebalancePolicyTokenId { token_id } => {
                 format!("rebalance_policy: invalid tokenId {token_id}")
             }

@@ -116,7 +116,6 @@ export const ACCOUNT_TX_SEMANTIC_CATALOG = [
   covered('account', 'lending_close_payout', 'core/account/tx/handlers/balance/lending.ts', ACCOUNT_LENDING_EVIDENCE),
   covered('account', 'add_delta', 'core/account/tx/handlers/balance/add-delta.ts', ACCOUNT_BALANCE_EVIDENCE),
   covered('account', 'set_credit_limit', 'core/account/tx/handlers/balance/set-credit-limit.ts', ACCOUNT_BALANCE_EVIDENCE),
-  covered('account', 'reserve_to_collateral', 'core/account/tx/handlers/rebalance/reserve-to-collateral.ts', ACCOUNT_BALANCE_EVIDENCE),
   covered(
     'account',
     'request_collateral',
