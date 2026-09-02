@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { parentPort } from 'node:worker_threads';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, shardRequestFingerprint } from '../primitives/spec.ts';
 

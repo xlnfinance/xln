@@ -139,17 +139,32 @@ static int run_metal(
         kernel_name = @"argon2id_fill";
     } else if (requested_kernel != NULL && strcmp(requested_kernel, "modern64") == 0) {
         kernel_name = @"argon2id_fill_modern64_segment";
+    } else if (requested_kernel != NULL && strcmp(requested_kernel, "v1special") == 0) {
+        kernel_name = @"argon2id_fill_modern64_v1_segment";
     } else if (requested_kernel != NULL && strcmp(requested_kernel, "segmented64") == 0) {
         kernel_name = @"argon2id_fill_shuffle64_segment";
     } else if (requested_kernel != NULL && strcmp(requested_kernel, "native64") == 0) {
         kernel_name = @"argon2id_fill_shuffle64";
     }
-    id<MTLFunction> function = [library newFunctionWithName:kernel_name];
-    if (function == nil) return -1;
-    id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:function error:&error];
-    if (pipeline == nil || pipeline.threadExecutionWidth != 32u) {
-        fprintf(stderr, "metal pipeline: %s\n", error.localizedDescription.UTF8String);
-        return -1;
+    BOOL v1_specialized = [kernel_name isEqualToString:@"argon2id_fill_modern64_v1_segment"];
+    id<MTLComputePipelineState> pipelines[4] = {nil, nil, nil, nil};
+    uint32_t pipeline_count = v1_specialized ? 4u : 1u;
+    for (uint32_t pipeline_index = 0u; pipeline_index < pipeline_count; ++pipeline_index) {
+        id<MTLFunction> function;
+        if (v1_specialized) {
+            MTLFunctionConstantValues *values = [MTLFunctionConstantValues new];
+            uint32_t slice_value = pipeline_index;
+            [values setConstantValue:&slice_value type:MTLDataTypeUInt atIndex:0u];
+            function = [library newFunctionWithName:kernel_name constantValues:values error:&error];
+        } else {
+            function = [library newFunctionWithName:kernel_name];
+        }
+        if (function == nil) return -1;
+        pipelines[pipeline_index] = [device newComputePipelineStateWithFunction:function error:&error];
+        if (pipelines[pipeline_index] == nil || pipelines[pipeline_index].threadExecutionWidth != 32u) {
+            fprintf(stderr, "metal pipeline: %s\n", error.localizedDescription.UTF8String);
+            return -1;
+        }
     }
     id<MTLCommandQueue> queue = [device newCommandQueue];
     if (queue == nil) return -1;
@@ -157,6 +172,7 @@ static int run_metal(
     uint32_t segment_length = memory_kib / 4u;
     uint32_t memory_blocks = segment_length * 4u;
     if (segment_length < 2u) return -1;
+    if (v1_specialized && memory_kib != 262144u) return -1;
     size_t bytes_per_shard = (size_t)memory_blocks * ARGON2_BLOCK_SIZE;
     if ((size_t)workers > SIZE_MAX / bytes_per_shard) return -1;
     size_t buffer_length = (size_t)workers * bytes_per_shard;
@@ -238,12 +254,12 @@ static int run_metal(
         }
         id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
         if (encoder == nil) goto cleanup;
-        [encoder setComputePipelineState:pipeline];
         [encoder setBuffer:memory offset:0 atIndex:0];
         BOOL segmented = [kernel_name isEqualToString:@"argon2id_fill_shuffle64_segment"] ||
-            [kernel_name isEqualToString:@"argon2id_fill_modern64_segment"];
+            [kernel_name isEqualToString:@"argon2id_fill_modern64_segment"] || v1_specialized;
         uint32_t dispatches = segmented ? 4u : 1u;
         for (uint32_t slice = 0u; slice < dispatches; ++slice) {
+            [encoder setComputePipelineState:pipelines[v1_specialized ? slice : 0u]];
             params.slice = slice;
             [encoder setBytes:&params length:sizeof(params) atIndex:1];
             [encoder dispatchThreadgroups:MTLSizeMake((active + simdgroups - 1u) / simdgroups, 1u, 1u)

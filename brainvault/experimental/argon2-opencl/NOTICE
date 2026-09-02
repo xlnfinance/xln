@@ -5,7 +5,9 @@ f5fce223d16769f202449c9b0837ad3533304acd (2018-08-17), by Ondrej
 Mosnacek and contributors. The upstream repository carries an MIT LICENSE,
 preserved as LICENSE-UPSTREAM-MIT. Several individual OpenCL host files also
 carry GPL-2.0-or-later notices. This experiment therefore conservatively treats
-the complete directory as GPL-2.0-or-later and keeps it outside the npm package.
+the complete directory as GPL-2.0-or-later. It is distributed inside the npm
+tarball as a separate optional executable together with complete corresponding
+source and COPYING-GPL-2.0-or-later; it is never linked into the MIT CLI.
 
 The compact permutation arrangement in data/kernels/argon2_kernel.cl was
 adapted from hashcat 7.1.2 OpenCL/inc_hash_argon2.cl, authored by the

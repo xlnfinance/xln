@@ -5,8 +5,10 @@ derivation on Apple Silicon by running independent shards on the CPU and GPU at
 the same time. It uses the system OpenCL framework; it does not install a
 library, contact the network, or alter the V1 byte protocol.
 
-It is not selected by the normal wallet CLI. Apple deprecated OpenCL, and the
-vendored upstream has mixed per-file licensing; read `NOTICE` before reuse.
+It is never selected automatically by the normal wallet CLI. It is nevertheless
+packaged, integrity-checked, selectable with `--engine opencl`, and included in
+the sequential parity benchmark. Apple deprecated OpenCL, and the vendored
+upstream has mixed per-file licensing; read `NOTICE` before reuse.
 
 ## Frozen operation
 
@@ -58,4 +60,5 @@ The benchmark arguments are `gpu shards`, `GPU batch`, `CPU workers`, and
 `GPU jobs per workgroup`. Direct invocation defaults to the measured fastest
 496/248/30/1 profile; the requested 32-worker comparison remains available as
 `make benchmark`, and the fastest profile as `make benchmark-fastest`.
-The binary is intentionally ignored by git and excluded from the npm allowlist.
+The reproducible Apple Silicon binary, complete source, kernel, and notices are
+included in the npm allowlist; no external OpenCL package is downloaded.

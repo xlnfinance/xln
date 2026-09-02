@@ -10,6 +10,7 @@
  *   bun run bv --lib=wasm                       # Force hash-wasm (slower, parity check)
  *   bun run bv --lib=native                     # Force portable @node-rs/argon2
  *   bun run bv --lib=neon                       # Force bundled Apple Silicon C/NEON
+ *   bun run bv --engine=metal                   # Force fastest Apple Metal hybrid
  *   bun run bv --ask                            # Ask for factor, multiplier, and workers
  *   bun run bv --allow-short-password           # Legacy recovery only: allow fewer than 8 chars
  *   bun run bv --repeat                         # Interactive: require double entry for name/pass
@@ -38,6 +39,7 @@ import { assertBrainVaultName, assertBrainVaultPassphrase, shardRequestFingerpri
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
 import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
 import { verifyBundledExecutable } from './binary-integrity.ts';
+import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } from './native-hybrid.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
   BRAINVAULT_LEVEL_NAMES,
@@ -209,14 +211,18 @@ Flags:
   Derive site-specific passwords from the master key.
 - --ask
   Advanced interactive setup: ask for level/shards, shard multiplier, workers,
-  and production engine. Engine choice never changes the derived root.
+  and engine. Engine choice never changes the derived root.
   Without this flag the recommended default is level 3 (1,000 shards),
-  multiplier 1, and all CPU cores allowed by RAM.
+  multiplier 1, and the fastest bundled backend supported by the machine.
+- --engine NAME
+  Choose auto, metal, metal-generic, opencl, c-neon, c-neon-wipe,
+  native-direct, native-sync, native, rust, rust-no-wipe, or wasm.
+  On Apple Silicon, auto uses Metal V1 hybrid for 100+ shards at multiplier 1,
+  then safely falls back to C/NEON and portable native.
 - --lib=native
   Force the portable @node-rs/argon2 worker implementation.
 - --lib=neon
-  Force the bundled C/NEON implementation (Apple Silicon, multiplier 1 only).
-  It is selected automatically when available and falls back safely elsewhere.
+  Force the bundled C/NEON implementation on Apple Silicon.
 - --lib=wasm
   Use hash-wasm worker (slower, cross-backend parity/testing path).
 - --w=N
@@ -254,7 +260,7 @@ Examples:
 - bunx brainvault
 - bunx brainvault --ask
 - bunx brainvault --bench --level 3 --multiplier 10 --workers 32
-- bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine c-neon
+- bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine metal
 - bun run bv
 - bunx brainvault --reveal
 - bunx brainvault --reveal --show-private-key
@@ -302,6 +308,9 @@ function getPositiveIntFlag(names: readonly string[], defaultValue?: number): nu
 
 const ENGINE_IDS = [
   'auto',
+  'metal',
+  'metal-generic',
+  'opencl',
   'c-neon',
   'c-neon-wipe',
   'native-direct',
@@ -462,6 +471,14 @@ function resolveNeonExecutable(): string | undefined {
   return candidates.find(candidate => existsSync(candidate));
 }
 
+function isMeasuredM3Ultra(): boolean {
+  return process.platform === 'darwin'
+    && process.arch === 'arm64'
+    && totalmem() >= 128 * 1024 ** 3
+    && cpus().length >= 24
+    && cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
+}
+
 function resolveRustExecutable(noWipe: boolean): string | undefined {
   const basename = noWipe ? 'brainvault-argon2-rust-no-wipe' : 'brainvault-argon2-rust';
   const candidates = [
@@ -475,8 +492,43 @@ function resolveRustExecutable(noWipe: boolean): string | undefined {
   return candidates.find(candidate => existsSync(candidate));
 }
 
+type AcceleratorBundle = Readonly<{
+  executable: string;
+  metalLibrary?: string;
+  openclKernel?: string;
+}>;
+
+function resolveAcceleratorBundle(engine: AcceleratorEngine): AcceleratorBundle | undefined {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return undefined;
+  if (engine === 'opencl') {
+    const openclKernel = `${import.meta.dir}/experimental/argon2-opencl/data/kernels/argon2_kernel.cl`;
+    const executable = [
+      `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-opencl`,
+      `${import.meta.dir}/experimental/argon2-opencl/brainvault-argon2-opencl`,
+    ].find(candidate => existsSync(candidate));
+    return executable !== undefined && existsSync(openclKernel) ? { executable, openclKernel } : undefined;
+  }
+  const prebuiltExecutable = `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-metal`;
+  const prebuiltLibrary = `${import.meta.dir}/prebuilds/darwin-arm64/argon2.metallib`;
+  if (existsSync(prebuiltExecutable) && existsSync(prebuiltLibrary)) {
+    return { executable: prebuiltExecutable, metalLibrary: prebuiltLibrary };
+  }
+  const executable = `${import.meta.dir}/experimental/argon2-metal/brainvault-argon2-metal`;
+  const metalLibrary = `${import.meta.dir}/experimental/argon2-metal/argon2.metallib`;
+  return existsSync(executable) && existsSync(metalLibrary) ? { executable, metalLibrary } : undefined;
+}
+
 function getInteractiveEngineChoices(multiplier: number): EngineChoice[] {
   const choices: EngineChoice[] = [];
+  if (multiplier === 1 && resolveAcceleratorBundle('metal') !== undefined && resolveNeonExecutable() !== undefined) {
+    choices.push(
+      { id: 'metal', label: 'Metal V1 + C/NEON hybrid (fastest)', referenceRate: 365.81 },
+      { id: 'metal-generic', label: '(experimental) Metal generic + C/NEON hybrid', referenceRate: 355.22 },
+    );
+  }
+  if (multiplier === 1 && resolveAcceleratorBundle('opencl') !== undefined && resolveNeonExecutable() !== undefined) {
+    choices.push({ id: 'opencl', label: '(experimental) OpenCL + C/NEON hybrid', referenceRate: 337.43 });
+  }
   if (resolveNeonExecutable() !== undefined) {
     choices.push(
       { id: 'c-neon', label: 'C/NEON final wipe (fastest)', referenceRate: 191.87 },
@@ -615,14 +667,69 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
 
   const start = Date.now();
   const neonExecutable = resolveNeonExecutable();
+  const metalBundle = resolveAcceleratorBundle('metal');
+  const autoSelectedMetal = engine === 'auto'
+    && isMeasuredM3Ultra()
+    && shardMultiplier === 1
+    && shardCount >= 100
+    && neonExecutable !== undefined
+    && metalBundle !== undefined;
   const autoSelectedC = engine === 'auto'
+    && !autoSelectedMetal
     && shardCount >= 100
     && neonExecutable !== undefined;
-  let selectedEngine: Exclude<EngineSelection, 'auto'> = autoSelectedC ? 'c-neon' : engine === 'auto' ? 'native' : engine;
+  let selectedEngine: Exclude<EngineSelection, 'auto'> = autoSelectedMetal
+    ? 'metal'
+    : autoSelectedC ? 'c-neon' : engine === 'auto' ? 'native' : engine;
   if (selectedEngine === 'wasm' && shardMultiplier > MAX_WASM_MULTIPLIER) {
     throw new Error(`BRAINVAULT_ENGINE_MULTIPLIER_UNSUPPORTED:wasm:${shardMultiplier}:wasm32-memory-limit`);
   }
   let shardResults: Uint8Array[] | undefined;
+  if (selectedEngine === 'metal' || selectedEngine === 'metal-generic' || selectedEngine === 'opencl') {
+    if (shardMultiplier !== 1) {
+      throw new Error(`BRAINVAULT_ENGINE_MULTIPLIER_UNSUPPORTED:${selectedEngine}:${shardMultiplier}`);
+    }
+    const acceleratorBundle = resolveAcceleratorBundle(selectedEngine);
+    if (acceleratorBundle === undefined || neonExecutable === undefined) {
+      throw new Error(`BRAINVAULT_ACCELERATOR_UNAVAILABLE:${selectedEngine}`);
+    }
+    const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
+    let salts: Uint8Array[] = [];
+    try {
+      salts = await Promise.all(Array.from(
+        { length: shardCount },
+        (_, index) => createShardSalt(name, index, shardCount, kdfAlgId),
+      ));
+      const planned = acceleratorPlan(selectedEngine, shardCount, actualWorkers);
+      console.log(
+        `Using ${selectedEngine === 'metal' ? 'Metal V1' : selectedEngine === 'metal-generic' ? '(experimental) Metal generic' : '(experimental) OpenCL'} + C/NEON hybrid `
+        + `(${planned.acceleratorShards} GPU / ${planned.cpuShards} CPU shards)`,
+      );
+      const accelerated = await deriveHybridNativeShards({
+        engine: selectedEngine,
+        password,
+        salts,
+        memoryKiB: shardMemoryKb,
+        requestedCpuWorkers: actualWorkers,
+        paths: {
+          packageRoot: import.meta.dir,
+          cpuExecutable: neonExecutable,
+          acceleratorExecutable: acceleratorBundle.executable,
+          metalLibrary: acceleratorBundle.metalLibrary,
+          openclKernel: acceleratorBundle.openclKernel,
+        },
+      });
+      shardResults = accelerated.shards;
+    } catch (error) {
+      if (!autoSelectedMetal) throw error;
+      console.warn(`Metal unavailable at runtime; using C/NEON fallback (${String(error)}).`);
+      selectedEngine = 'c-neon';
+    } finally {
+      password.fill(0);
+      for (const salt of salts) salt.fill(0);
+    }
+  }
+
   if (selectedEngine === 'c-neon' || selectedEngine === 'c-neon-wipe') {
     if (neonExecutable === undefined) throw new Error('BRAINVAULT_C_NEON_UNAVAILABLE');
     console.log(`Using ${selectedEngine === 'c-neon' ? 'C/NEON final wipe' : '(experimental) C/NEON per-shard wipe'} (${actualWorkers} workers)`);
@@ -876,6 +983,24 @@ async function runBenchmark(smoke = false) {
   const benchmarkNeonExecutable = resolveNeonExecutable();
   const candidates: BenchmarkBackend[] = [
     {
+      id: 'metal-v1',
+      label: 'Metal V1 + C/NEON hybrid',
+      executable: resolveAcceleratorBundle('metal')?.executable ?? '__unavailable__',
+      maxMultiplier: 1,
+    },
+    {
+      id: 'metal-generic',
+      label: '(experimental) Metal generic + C/NEON hybrid',
+      executable: resolveAcceleratorBundle('metal-generic')?.executable ?? '__unavailable__',
+      maxMultiplier: 1,
+    },
+    {
+      id: 'opencl',
+      label: '(experimental) OpenCL + C/NEON hybrid',
+      executable: resolveAcceleratorBundle('opencl')?.executable ?? '__unavailable__',
+      maxMultiplier: 1,
+    },
+    {
       id: 'c-neon',
       label: 'C/NEON final wipe',
       executable: benchmarkNeonExecutable ?? '__unavailable__',
@@ -905,6 +1030,9 @@ async function runBenchmark(smoke = false) {
     { id: 'wasm', label: 'TypeScript/WASM', maxMultiplier: MAX_WASM_MULTIPLIER },
   ];
   const engineBackend: string | undefined = ({
+    metal: 'metal-v1',
+    'metal-generic': 'metal-generic',
+    opencl: 'opencl',
     'c-neon': 'c-neon',
     'c-neon-wipe': 'c-neon-wipe',
     'native-direct': 'direct-async',

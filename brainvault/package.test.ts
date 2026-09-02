@@ -38,9 +38,22 @@ test('packed package installs inertly and runs from an audited empty directory',
     expect(files).toContain('package/MANIFEST.sha256');
     expect(files).toContain('package/SPEC-V1.md');
     expect(files).toContain('package/vectors-v1.json');
+    if (process.platform === 'darwin' && process.arch === 'arm64') {
+      expect(files).toContain('package/prebuilds/darwin-arm64/brainvault-argon2-metal');
+      expect(files).toContain('package/prebuilds/darwin-arm64/argon2.metallib');
+      expect(files).toContain('package/prebuilds/darwin-arm64/brainvault-argon2-opencl');
+      expect(files).toContain('package/experimental/argon2-opencl/data/kernels/argon2_kernel.cl');
+    }
     expect(files.some(path => path.includes('node_modules/'))).toBe(false);
     expect(files.some(path => path.includes('experimental/results/'))).toBe(false);
     expect(files.some(path => path.includes('/target/'))).toBe(false);
+
+    const manifestPaths = new Set(readFileSync(`${import.meta.dir}/MANIFEST.sha256`, 'utf8')
+      .trim().split('\n').map(line => line.match(/^[0-9a-f]{64}  (.+)$/)?.[1]));
+    for (const path of files) {
+      if (path === 'package/MANIFEST.sha256') continue;
+      expect(manifestPaths.has(path.slice('package/'.length))).toBe(true);
+    }
 
     const install = join(temp, 'install');
     mkdirSync(install);

@@ -8,9 +8,11 @@ Before a release:
 
 1. run the per-commit tests, the package/offline sandbox tests, and all twelve
    `workers=1/2/8/32` by `multiplier=1/2/10` matrix cases;
+   on accelerator platforms also run every shipped accelerator at multiplier 1
+   for 1/2/8/32 shards and the full 1,000-shard parity benchmark;
 2. rebuild each native executable twice from the locked source and require
    byte-identical SHA-256 output and equality with every shipped prebuild, then
-   regenerate `MANIFEST.sha256`; record `clang --version`, `rustc -Vv`, Cargo,
+   run `bun run manifest` to regenerate `MANIFEST.sha256`; record `clang --version`, `rustc -Vv`, Cargo,
    Bun, macOS, SDK, CPU model, and the exact build flags in signed provenance;
 3. pack with lifecycle scripts disabled and record the tarball SHA-256 and npm
    registry integrity without executing the package;

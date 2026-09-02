@@ -116,8 +116,12 @@ test('canonical manifest authenticates every listed source and native binary', a
     'primitives/spec.ts',
     'primitives/kdf.ts',
     'core.ts',
+    'native-hybrid.ts',
     'prebuilds/darwin-arm64/brainvault-argon2',
     'prebuilds/darwin-arm64/brainvault-argon2-rust',
+    'prebuilds/darwin-arm64/brainvault-argon2-metal',
+    'prebuilds/darwin-arm64/argon2.metallib',
+    'prebuilds/darwin-arm64/brainvault-argon2-opencl',
   ]) {
     expect(entries.some(entry => entry.path === required)).toBe(true);
   }
@@ -379,6 +383,21 @@ test('multi-shard derivation is deterministic', async () => {
 
   const ethAddr = await deriveEthereumAddress(mnemonic);
   expect(ethAddr).toBe(v.expect.ethAddr);
+});
+
+test('two-shard frozen smoke vector pins the public wallet projection', async () => {
+  const v = VECTORS.find(x => x.shards === 2)!;
+  const shards = await Promise.all(Array.from({ length: v.shards }, async (_, index) => {
+    const salt = await createShardSalt(v.name, index, v.shards);
+    const shard = await deriveShard(v.passphrase, salt);
+    if (index === 0) expect(bytesToHex(shard)).toBe(v.expect.shard0);
+    return shard;
+  }));
+  const masterKey = await combineShards(shards, v.factor);
+  expect(bytesToHex(masterKey)).toBe(v.expect.masterKey);
+  const mnemonic = await entropyToMnemonic(await deriveKey(masterKey, 'bip39/entropy/v1.0', 32));
+  expect(mnemonic).toBe(v.expect.mnemonic24);
+  expect(await deriveEthereumAddress(mnemonic)).toBe(v.expect.ethAddr);
 });
 
 function runCli(cliArgs: readonly string[], input = '') {

@@ -17,9 +17,9 @@ function manifestEntries(packageRoot: string): ReadonlyMap<string, string> {
   return entries;
 }
 
-export function verifyBundledExecutable(executable: string, packageRoot: string): string {
+export function verifyBundledFile(file: string, packageRoot: string): string {
   const root = realpathSync(packageRoot);
-  const target = realpathSync(executable);
+  const target = realpathSync(file);
   const path = relative(root, target).split(sep).join('/');
   if (path.startsWith('../') || path === '..') throw new Error(`BRAINVAULT_BINARY_OUTSIDE_PACKAGE:${path}`);
   const expected = manifestEntries(root).get(path);
@@ -30,4 +30,8 @@ export function verifyBundledExecutable(executable: string, packageRoot: string)
   const actual = createHash('sha256').update(readFileSync(target)).digest('hex');
   if (actual !== expected) throw new Error(`BRAINVAULT_BINARY_HASH_MISMATCH:${path}:${actual}:${expected}`);
   return target;
+}
+
+export function verifyBundledExecutable(executable: string, packageRoot: string): string {
+  return verifyBundledFile(executable, packageRoot);
 }

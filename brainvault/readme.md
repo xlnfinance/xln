@@ -9,8 +9,8 @@ Memory-hard brainwallet construction. Derive the same wallet from the exact same
 ## Usage
 
 ```bash
-# Run immediately without installing. The bundled C/NEON engine is the default
-# on Apple Silicon; other platforms fall back to portable native Argon2.
+# Run immediately without installing. The bundled Metal V1 + C/NEON hybrid is
+# the default for 100+ shards on the measured M3 Ultra; safe fallbacks are automatic.
 bunx brainvault
 
 # Or install the command globally.
@@ -33,7 +33,7 @@ bunx brainvault --reveal
 bun run bv --ask
 
 # Every advanced value can be supplied inline; --ask prompts only missing values.
-bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine c-neon
+bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine metal
 bunx brainvault --bench --level 3 --multiplier 10 --workers 32
 
 # Levels select exact shards: 1 / 100 / 1,000 / 10,000 / 100,000 / 1,000,000.
@@ -53,11 +53,12 @@ version. Future fixes must preserve every V1 root and frozen test vector.
 
 ## Hardware defaults
 
-The portable default targets the entry 14-inch MacBook Pro with M5: 16GB
+The portable C/NEON default targets the entry 14-inch MacBook Pro with M5: 16GB
 unified memory, 10 CPU cores, and 153GB/s memory bandwidth. Level 3,
 multiplier 1, and all 10 cores need 2.5GB of Argon2 arenas, so the same default
-remains practical on the least-expensive current MacBook Pro. BrainVault still
-calculates the worker ceiling from the actual CPU and RAM at runtime.
+remains practical on the least-expensive current MacBook Pro. Its GPU profile
+is deliberately not automatic until it is measured on real M5 hardware.
+BrainVault calculates the worker ceiling from the actual CPU and RAM at runtime.
 
 `--ask` keeps multiplier 1 as the recommendation on every machine. On machines
 with abundant memory it also prints a memorable power-of-two `ultra`
@@ -66,7 +67,8 @@ example, 32 workers yield multiplier 8 on 256GB (64GB arenas) and multiplier 16
 on 512GB (128GB arenas). This option is stronger but proportionally slower,
 changes the root, must be remembered for recovery, and currently uses the CPU
 engines; it is never selected automatically. Multiplier 1 is both the portable
-choice and the fastest path, including the experimental CPU/GPU hybrid.
+choice and the fastest path, including the default native Metal CPU/GPU hybrid
+on supported Macs.
 
 ## No recovery receipt by design
 
@@ -92,24 +94,31 @@ Passwords are forbidden in argv; automation must import the library API.
 This directory is the complete npm package boundary. Nothing above
 `brainvault/` is required after installation:
 
-- bundled Apple Silicon executables under `prebuilds/darwin-arm64/` are the
-  fastest default for the frozen multiplier-1 mode at 100+ shards; smaller jobs
-  use the lower-overhead portable native path;
+- bundled Apple Silicon executables and Metal library under
+  `prebuilds/darwin-arm64/` provide the fastest default for frozen multiplier-1
+  mode at 100+ shards on the measured M3 Ultra; unmeasured Apple Silicon and
+  smaller jobs use the lower-overhead native
+  path, and accelerator failure falls back to C/NEON then portable native;
 - `@node-rs/argon2` is the portable native fallback and handles custom multipliers;
 - `hash-wasm` is the cross-platform compatibility engine;
 - `experimental/argon2-c/` contains the complete C/NEON source and vendored
   Argon2/SSE2NEON dependencies;
 - `experimental/argon2-rust/` contains the complete Rust source, locked Cargo
   dependencies, and secure-wipe/no-wipe comparison variants;
-- `experimental/argon2-metal/` contains the source-only native Apple GPU
-  engine, raw parity harness, and retained upstream MIT notice. Its tuned M3
-  Ultra CPU/GPU path is the fastest measured V1 experiment, but is not yet used
-  for wallet creation because it needs roughly 78 GiB and macOS/Metal;
+- `experimental/argon2-metal/` contains the complete native Apple GPU source,
+  raw parity harness, generic kernel, frozen-V1-specialized kernel, and retained
+  upstream MIT notice. The M3 Ultra default uses 544 Metal / 456 C shards with
+  136 workers per Metal process and about 77 GiB of arenas;
+- `experimental/argon2-opencl/` contains the complete deprecated OpenCL source
+  and retained upstream notices. It remains selectable and benchmarked for
+  parity/research, but native Metal is automatic only on the measured M3 Ultra.
+  The OpenCL subtree and separate executable are conservatively distributed as
+  GPL-2.0-or-later; the CLI and other BrainVault code remain MIT;
 - `experimental/benchmark.ts` performs the canonical 1,000-shard sequential
   backend comparison; each timing includes the first four root bytes, and
   `brainvault --smoke` uses the same harness with 2 shards;
-- `--ask` exposes every available C/NEON, direct native, isolated native, Rust,
-  and WASM engine while showing the latest 1,000-shard / 32-worker Mac speed.
+- `--ask` exposes every available Metal, OpenCL, C/NEON, direct native,
+  isolated native, Rust, and WASM engine while showing the latest Mac speed.
   Research variants remain fully selectable and are prefixed `(experimental)`;
 - `--level`, `--shards`, `--factor`, `--multiplier`, `--workers`, and `--engine`
   accept both `--flag value` and `--flag=value`. `--shards` is always exact;
@@ -146,7 +155,7 @@ scripts are disabled, and BrainVault itself has no `preinstall`, `install`, or
 mkdir brainvault-audit
 cd brainvault-audit
 bun init -y
-bun add --exact --ignore-scripts brainvault@2.0.2
+bun add --exact --ignore-scripts brainvault@2.1.0
 ```
 
 The readable package is now in `./node_modules/brainvault/`; nothing has run.
@@ -233,6 +242,8 @@ traced to executable source. Report exact file and line evidence for each item.
   native source, and binaries. It intentionally does not hash itself. Release
   provenance must come separately from the signed tag/tarball and registry
   integrity; a manifest shipped beside its files is not an independent signature.
+- `manifest.ts` regenerates that manifest from the exact inert npm pack allowlist,
+  so every shipped file other than the manifest itself must be covered;
 - `bun.lock` freezes exact dependency versions and registry tarball integrity;
 - `historical-v1.json` pins retained historical release tarballs by SHA-256;
 - `release.md` defines signed, multi-archive release procedure.
@@ -256,6 +267,7 @@ physical bearer backup and undermine the memory-only recovery model.
 - `brainvault` - extensionless Bun launcher used by npm/bunx
 - `cli.ts` - CLI tool
 - `native.ts` - bounded native orchestration used by Bun nodes
+- `native-hybrid.ts` - audited CPU/GPU job splitting and ordered collection
 - `worker-browser.ts` - browser worker source
 - `worker-native.ts` - Bun worker (@node-rs/argon2)
 - `worker-wasm.ts` - Bun compatibility worker (hash-wasm)
@@ -265,7 +277,7 @@ physical bearer backup and undermine the memory-only recovery model.
 ## Canonical test ladder
 
 Every commit runs 1–2-shard frozen vectors, default-secret-output tests,
-Unicode/NFKD corpus checks, domain separation, ordered scheduling, malformed
+Unicode/NFKD/NUL corpus checks, domain separation, ordered scheduling, malformed
 worker results, native worker crash, Ctrl+C, RAM admission, manifest integrity,
 network-denied derivation, historical tarball hashes, and inert package install.
 

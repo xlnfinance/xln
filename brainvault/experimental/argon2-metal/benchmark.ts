@@ -44,10 +44,10 @@ const metalProcesses = integerFlag('metal-processes', 2, 1, 2);
 const simdgroups = integerFlag('simdgroups', 4, 1, 8);
 if (![1, 2, 4, 8].includes(simdgroups)) throw new Error(`BRAINVAULT_METAL_SIMDGROUPS_INVALID:${simdgroups}`);
 const kernel = flag('kernel', 'modern64');
-if (!['shuffle', 'native64', 'segmented64', 'modern64', 'barrier'].includes(kernel)) {
+if (!['shuffle', 'native64', 'segmented64', 'modern64', 'v1special', 'barrier'].includes(kernel)) {
   throw new Error(`BRAINVAULT_METAL_KERNEL_INVALID:${kernel}`);
 }
-if ((kernel === 'modern64' || kernel === 'segmented64') && simdgroups > 4) {
+if ((kernel === 'modern64' || kernel === 'v1special' || kernel === 'segmented64') && simdgroups > 4) {
   throw new Error('BRAINVAULT_METAL_SEGMENTED_SIMDGROUPS_INVALID');
 }
 const memory = flag('memory', 'private');

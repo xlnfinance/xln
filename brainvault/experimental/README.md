@@ -71,8 +71,9 @@ for the complete 1,000-shard CPU/GPU derivation. The best observed run was
 2.675 seconds. The frozen root remained
 `dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
 This is **1.875x** the fresh C/NEON baseline and about **1.082x** the OpenCL
-record. The 556 Metal / 444 CPU profile uses about 78 GiB at peak and remains
-an auditable M3 Ultra experiment, not the laptop or wallet-creation default.
+record. The current 544 Metal / 456 CPU profile uses about 78 GiB at peak and is
+the automatic wallet engine only on the measured M3 Ultra class. Other Macs
+retain the C/NEON default until a real-device release matrix exists.
 
 `argon2-opencl/` is the faster source-only experiment. A one-shard-per-workgroup
 layout plus concurrent C/NEON processing completed 1,000 exact V1 shards in a
@@ -85,10 +86,10 @@ shards. The required 32-worker run took 3.127 seconds; the best observed
 and host memory are explicitly erased.
 
 OpenCL is deprecated by Apple and the pinned upstream has mixed license
-notices, so this directory is excluded from the npm package and not selected by
-wallet creation. Its `NOTICE` explains provenance and the conservative GPL
-treatment. The retained source is small, builds against the macOS system
-framework, and contains no hashcat runtime or downloaded dependency.
+notices, so it is never selected automatically. Its `NOTICE` explains
+provenance and the conservative GPL treatment. The npm package contains the
+audited source, kernel, and prebuild; it builds against the macOS system
+framework and contains no hashcat runtime or downloaded dependency.
 
 ## Run
 

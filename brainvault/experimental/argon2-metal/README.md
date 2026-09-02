@@ -11,10 +11,11 @@ MIT-licensed `argon2-gpu` warp design. Its notice is retained in
 permutation already validated in the sibling OpenCL experiment. The barrier
 kernel remains an independently written readable reference.
 
-It is deliberately separate from wallet creation and is not a production
-engine. Promotion requires exact raw-shard and root parity across the canonical
-matrix, failure tests, reproducible artifacts, secure buffer erasure, and a
-repeatable speed win over C/NEON.
+The V1-specialized hybrid is now the measured M3 Ultra production engine.
+Automatic selection is restricted to that measured hardware class; the generic
+kernel remains selectable as an experimental independent implementation and all
+accelerator failures fall back to C/NEON. Promotion elsewhere still requires a
+real-device parity, memory-pressure, cancellation, and thermal matrix.
 
 ## M3 Ultra result
 
@@ -30,8 +31,9 @@ The original shared-memory Metal path completed 256 shards in 5.213 seconds
 - four SIMD groups per threadgroup;
 - two independent Metal processes, each reusing a 139-shard private arena.
 
-On the 32-CPU-core / 80-GPU-core M3 Ultra used for development, the stable
-default sends 556 shards to Metal and 444 to C/NEON. Four retained runs took
+On the 32-CPU-core / 80-GPU-core M3 Ultra used for development, the current
+default sends 544 shards to Metal and 456 to C/NEON. Earlier retained runs of
+the 556/444 profile took
 2.732, 2.740, 2.738, and 2.741 seconds: **2.739-second median** and
 **365.0 shards/s**. A later cool run of the same retained profile set the best
 observation at **2.675 seconds / 373.85 shards/s**.
@@ -40,9 +42,8 @@ faster. It is also **1.082x** faster than the 2.964-second OpenCL best while
 using Apple's native Metal API and no external runtime.
 
 The default profile needs roughly 78 GiB of unified memory at peak, so it is an
-M3 Ultra tuning, not a laptop default. Metal remains experimental and is not
-selected by wallet creation until its package/platform matrix and failure suite
-match the production C engine.
+M3 Ultra tuning, not a laptop default. The frozen-V1 function-constant kernel and
+generic kernel both retain exact raw-shard and 1,000-shard root parity.
 
 Rejected experiments are equally important: 2 MiB Mach superpages fail to
 allocate on Apple Silicon, fixed-corpus PGO was within run noise, reference

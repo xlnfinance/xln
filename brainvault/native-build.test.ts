@@ -97,7 +97,89 @@ test('locked native release builds are byte-reproducible', () => {
         `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-rust${noWipe ? '-no-wipe' : ''}`,
       ));
     }
+
+    const metalRoot = `${import.meta.dir}/experimental/argon2-metal`;
+    const metalSources = [
+      'brainvault_argon2_metal.m',
+      '../argon2-c/vendor/argon2/src/argon2.c',
+      '../argon2-c/vendor/argon2/src/core.c',
+      '../argon2-c/vendor/argon2/src/blake2/blake2b.c',
+      '../argon2-c/vendor/argon2/src/thread.c',
+      '../argon2-c/vendor/argon2/src/encoding.c',
+      '../argon2-c/vendor/argon2/src/opt.c',
+    ];
+    const compileMetalHost = (output: string) => Bun.spawnSync({
+      cmd: [
+        'clang', '-std=c11', '-O3', '-flto', '-mcpu=apple-m1', '-fobjc-arc',
+        '-D_DARWIN_C_SOURCE', '-D__SSE2__', '-I../argon2-c/compat',
+        '-I../argon2-c/vendor/sse2neon', '-I../argon2-c/vendor/argon2/include',
+        '-I../argon2-c/vendor/argon2/src', ...metalSources,
+        '-framework', 'Foundation', '-framework', 'Metal', '-pthread', '-o', output,
+      ],
+      cwd: metalRoot,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    });
+    const metalHost1 = join(temp, 'c1/brainvault-argon2-metal');
+    const metalHost2 = join(temp, 'c2/brainvault-argon2-metal');
+    expect(compileMetalHost(metalHost1).exitCode).toBe(0);
+    expect(compileMetalHost(metalHost2).exitCode).toBe(0);
+    normalize(metalHost1);
+    normalize(metalHost2);
+    expect(sha256(metalHost1)).toBe(sha256(metalHost2));
+    expect(sha256(metalHost1)).toBe(sha256(`${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-metal`));
+
+    const compileMetalLibrary = (air: string, library: string) => {
+      const compile = Bun.spawnSync({
+        cmd: ['xcrun', 'metal', '-O3', '-c', 'argon2.metal', '-o', air],
+        cwd: metalRoot, stderr: 'pipe', stdout: 'pipe',
+      });
+      if (compile.exitCode !== 0) return compile;
+      return Bun.spawnSync({
+        cmd: ['xcrun', 'metallib', air, '-o', library],
+        cwd: metalRoot, stderr: 'pipe', stdout: 'pipe',
+      });
+    };
+    const metalAir1 = join(temp, 'argon2-1.air');
+    const metalAir2 = join(temp, 'argon2-2.air');
+    const metalLib1 = join(temp, 'argon2-1.metallib');
+    const metalLib2 = join(temp, 'argon2-2.metallib');
+    expect(compileMetalLibrary(metalAir1, metalLib1).exitCode).toBe(0);
+    expect(compileMetalLibrary(metalAir2, metalLib2).exitCode).toBe(0);
+    expect(sha256(metalLib1)).toBe(sha256(metalLib2));
+    expect(sha256(metalLib1)).toBe(sha256(`${import.meta.dir}/prebuilds/darwin-arm64/argon2.metallib`));
+
+    const openclRoot = `${import.meta.dir}/experimental/argon2-opencl`;
+    const openclSources = [
+      'brainvault_argon2_opencl.cpp',
+      'lib/argon2-gpu-common/argon2params.cpp',
+      'lib/argon2-gpu-common/blake2b.cpp',
+      'lib/argon2-opencl/device.cpp',
+      'lib/argon2-opencl/globalcontext.cpp',
+      'lib/argon2-opencl/kernelloader.cpp',
+      'lib/argon2-opencl/kernelrunner.cpp',
+      'lib/argon2-opencl/processingunit.cpp',
+      'lib/argon2-opencl/programcontext.cpp',
+    ];
+    const compileOpencl = (output: string) => Bun.spawnSync({
+      cmd: [
+        'clang++', '-Iinclude', '-Iinclude/argon2-gpu-common', '-Iinclude/argon2-opencl',
+        '-Ilib/argon2-gpu-common', '-Ilib/argon2-opencl', '-O3', '-DNDEBUG',
+        '-std=c++11', ...openclSources, '-framework', 'OpenCL', '-o', output,
+      ],
+      cwd: openclRoot,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    });
+    const opencl1 = join(temp, 'c1/brainvault-argon2-opencl');
+    const opencl2 = join(temp, 'c2/brainvault-argon2-opencl');
+    expect(compileOpencl(opencl1).exitCode).toBe(0);
+    expect(compileOpencl(opencl2).exitCode).toBe(0);
+    normalize(opencl1);
+    normalize(opencl2);
+    expect(sha256(opencl1)).toBe(sha256(opencl2));
+    expect(sha256(opencl1)).toBe(sha256(`${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-opencl`));
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
-}, 28_000);
+}, 60_000);

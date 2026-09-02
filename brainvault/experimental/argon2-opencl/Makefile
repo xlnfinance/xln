@@ -13,9 +13,10 @@ SOURCES := \
 	lib/argon2-opencl/processingunit.cpp \
 	lib/argon2-opencl/programcontext.cpp
 TARGET := brainvault-argon2-opencl
+PREBUILD := ../../prebuilds/darwin-arm64/brainvault-argon2-opencl
 HEADERS := lib/argon2-gpu-common/securezero.h
 
-.PHONY: all parity benchmark benchmark-fastest clean
+.PHONY: all parity benchmark benchmark-fastest prebuild clean
 
 all: $(TARGET)
 
@@ -31,5 +32,14 @@ benchmark: $(TARGET)
 benchmark-fastest: $(TARGET)
 	bun benchmark.ts 496 248 30 1
 
+prebuild: $(PREBUILD)
+
+$(PREBUILD): $(SOURCES) $(HEADERS) data/kernels/argon2_kernel.cl
+	mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -framework OpenCL -o $@
+	codesign --remove-signature $@
+	bun ../normalize-macho.ts $@
+	codesign --force --sign - --timestamp=none $@
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(PREBUILD)

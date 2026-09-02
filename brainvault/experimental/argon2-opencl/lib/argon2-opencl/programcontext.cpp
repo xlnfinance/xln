@@ -2,6 +2,8 @@
 
 #include "kernelloader.h"
 
+#include <cstdlib>
+
 namespace argon2 {
 namespace opencl {
 
@@ -17,9 +19,12 @@ ProgramContext::ProgramContext(
     }
     context = cl::Context(this->devices);
 
+    const char *configured = std::getenv("BRAINVAULT_OPENCL_KERNEL_DIR");
+    const std::string kernelDirectory = configured == nullptr
+        ? "./data/kernels"
+        : configured;
     program = KernelLoader::loadArgon2Program(
-                // FIXME path:
-                context, "./data/kernels", type, version);
+                context, kernelDirectory, type, version);
 }
 
 } // namespace opencl

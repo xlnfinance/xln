@@ -77,6 +77,63 @@
         "mnemonic24": "inch museum panther drop celery make town mention hundred sound argue mammal resource kid point veteran asset flame great equal pink pair balcony guide",
         "ethereumAddress0": "0x0b3C4712A9838cB306357c12C12991F9aF83DCD1"
       }
+    },
+    {
+      "id": "unicode-nfkd-composed-1",
+      "input": {
+        "name": "café",
+        "nameNfkdUtf8Hex": "63616665cc81",
+        "passphrase": "secrét-password",
+        "passphraseNfkdUtf8Hex": "7365637265cc81742d70617373776f7264",
+        "shardCount": 1,
+        "factor": 1,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "491cec784873e688d382a709423dc0ecea01c760243b7bad01ef7b8317a89f5d",
+        "shard0": "6b024d1f4fa1d9dc7f6f2aebf9a3e1ec2d98d33e9560996aa2bcfbcb8b877fc3",
+        "root": "5dc635bcdfcf51f322ce5a033de0d266fea7fd3fe8d3f07b801a89bae54a0a6a",
+        "mnemonic24": "steak senior ghost install guilt blame tomorrow garlic soon wide ancient peanut dish depart crime picnic like ability verify develop improve tone view art",
+        "ethereumAddress0": "0xA77b07939e37113b82c6139335FA09e3e0d6C8c5"
+      }
+    },
+    {
+      "id": "unicode-emoji-nul-1",
+      "input": {
+        "name": "emoji-🧠",
+        "nameNfkdUtf8Hex": "656d6f6a692df09fa7a0",
+        "passphrase": "vault-\u0000-🔐-password",
+        "passphraseNfkdUtf8Hex": "7661756c742d002df09f94902d70617373776f7264",
+        "shardCount": 1,
+        "factor": 1,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "6972975ca2c4f4b98b5e331debed074679b9daa804afad2d9fac0879de88b898",
+        "shard0": "74317e0ff346276a751bcd9982791aadf719f2a8cdc6f1ce38d6ab61655f7536",
+        "root": "b3c78a0b09aeea8720f3a4cdd293f1d7408fc150d0c5a16a6ac285c9cebe347f",
+        "mnemonic24": "harsh ramp tank coyote garage ridge test talk decade lumber window capital boy ahead ensure midnight smart boss zebra wool feel draft story woman",
+        "ethereumAddress0": "0x73a06bf1ed5066dc3a319975EE19D60cc2eeCD3c"
+      }
+    },
+    {
+      "id": "benchmark-smoke-2",
+      "input": {
+        "name": "benchmark-user",
+        "nameNfkdUtf8Hex": "62656e63686d61726b2d75736572",
+        "passphrase": "benchmark-password",
+        "passphraseNfkdUtf8Hex": "62656e63686d61726b2d70617373776f7264",
+        "shardCount": 2,
+        "factor": 2,
+        "multiplier": 1
+      },
+      "expected": {
+        "salt0": "32cfd072eafa2ffec0381ee83cbd4e6590c300bea8d41682844b3565f5f1ab2a",
+        "shard0": "ce9930300ad7c907558a612d83edbb10138338c3abb2a3899ef82da6bcd4a6ca",
+        "root": "706332288bd9586f7a91447d08159ea3ce400e6f94dfc28cf7a65ca9572fb1ac",
+        "mnemonic24": "wild load canvas patrol air ready spy faint gauge repair choice chair frost gather praise end fragile flame veteran rent position travel turkey decide",
+        "ethereumAddress0": "0xa46391688D1baC88367Fd80DaC5A02eA60DE893E"
+      }
     }
   ]
 }
