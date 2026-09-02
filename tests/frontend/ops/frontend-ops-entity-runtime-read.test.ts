@@ -7,6 +7,10 @@ import {
   requireOpsEntityRemoteSession,
 } from '../../../frontend/apps/ops/src/ops-entity-workspace-source';
 import {
+  emptyEntityWorkspaceAccounts,
+  projectEntityWorkspaceAccounts,
+} from '../../../frontend/packages/runtime-client/src/entity-workspace-accounts';
+import {
   emptyEntityWorkspaceContext,
   projectEntityWorkspaceContext,
 } from '../../../frontend/packages/runtime-client/src/entity-workspace-context';
@@ -30,7 +34,7 @@ const SELECTED_CONTEXT = projectEntityWorkspaceContext({
     activeEntity: {
       summary: { entityId: '0xaaaa', label: 'Treasury' },
       core: { entityId: '0xaaaa', signerId: '0xbbbb' },
-      accounts: { items: [], totalItems: 4 },
+      accounts: { items: [], totalItems: 0 },
     },
   },
 });
@@ -48,7 +52,7 @@ const OWNERSHIP_FRAME = {
         validators: ['0xbbbb'], shares: { '0xbbbb': 1n },
       },
     },
-    accounts: { items: [], totalItems: 4 },
+    accounts: { items: [], totalItems: 0, pageIndex: 0, pageCount: 0, limit: 8 },
   },
 };
 
@@ -57,7 +61,16 @@ const SELECTED_OWNERSHIP = projectEntityWorkspaceOwnership({
   frame: OWNERSHIP_FRAME,
 });
 
-const SELECTED_PROJECTION = { context: SELECTED_CONTEXT, ownership: SELECTED_OWNERSHIP };
+const SELECTED_ACCOUNTS = projectEntityWorkspaceAccounts({
+  context: SELECTED_CONTEXT,
+  frame: OWNERSHIP_FRAME,
+});
+
+const SELECTED_PROJECTION = {
+  accounts: SELECTED_ACCOUNTS,
+  context: SELECTED_CONTEXT,
+  ownership: SELECTED_OWNERSHIP,
+};
 
 describe('React Entity workspace Runtime read boundary', () => {
   test('requires a complete tab-confined remote admin session', () => {
@@ -94,6 +107,7 @@ describe('React Entity workspace Runtime read boundary', () => {
       readState: { status: 'loading', message: 'Reading the committed Entity context…' },
     });
     expect(projectOpsEntityWorkspaceObserverSnapshot('runtime-a', {
+      accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(), ownership: emptyEntityWorkspaceOwnership(),
     }, {
       loading: false, data: SELECTED_PROJECTION, error: null, height: 18,
@@ -102,6 +116,7 @@ describe('React Entity workspace Runtime read boundary', () => {
       loading: false, data: null, error: 'ENTITY_WORKSPACE_FRAME_INVALID', height: 18,
     })).toMatchObject({
       context: { status: 'empty', runtimeId: 'runtime-a', entityId: null },
+      accounts: { status: 'empty' },
       ownership: { status: 'empty' },
       readState: { status: 'error', message: 'ENTITY_WORKSPACE_FRAME_INVALID' },
     });
@@ -120,10 +135,22 @@ describe('React Entity workspace Runtime read boundary', () => {
     expect(runtime).toContain("window.addEventListener('pagehide'");
     expect(runtime).toContain('if (!event.persisted) opsEntityWorkspaceSource.stop()');
     expect(source).toContain("await import('../../../../core/api/runtime-adapter/remote.ts')");
-    expect(source).toContain('readViewFrame({ accountsLimit: 1, booksLimit: 1 })');
+    expect(source).toContain('accountsLimit: 8');
+    expect(source).toContain('accountsPage: this.accountsPage');
+    expect(source).toContain('projectEntityWorkspaceAccounts({ context, frame })');
     expect(source).toContain('projectEntityWorkspaceOwnership({ context, frame })');
     expect(source).toContain('this.observer?.destroy()');
     expect(source).toContain('this.session?.release()');
     expect(source).not.toContain('.send(');
+  });
+
+  test('validates Account page navigation before issuing another bounded read', async () => {
+    const source = new OpsEntityWorkspaceSource({
+      mode: 'embedded', wsUrl: null, access: null, sessionKey: null,
+    });
+    expect(() => source.selectAccountsPage(0)).toThrow('OPS_ENTITY_ACCOUNT_PAGE_INVALID:0');
+    const implementation = await Bun.file('frontend/apps/ops/src/ops-entity-workspace-source.ts').text();
+    expect(implementation).toContain('page >= accounts.pageCount');
+    expect(implementation).toContain('void this.observer?.refresh()');
   });
 });

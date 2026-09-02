@@ -1,0 +1,54 @@
+.entity-workspace-accounts-panel {
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  border-left: 1px solid var(--entity-line);
+  background: rgb(255 255 255 / 1.2%);
+}
+
+.entity-workspace-accounts-panel > header { padding: 1.35rem; border-bottom: 1px solid var(--entity-line); }
+.entity-workspace-accounts-panel > header > span,
+.entity-workspace-accounts-panel > header p,
+.entity-workspace-accounts-panel li small,
+.entity-workspace-accounts-panel dt,
+.entity-workspace-accounts-panel > footer {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.entity-workspace-accounts-panel > header > span { color: #666761; }
+.entity-workspace-accounts-panel > header > strong { display: block; margin-top: 0.6rem; color: #d8d5ca; font-size: 1.1rem; }
+.entity-workspace-accounts-panel > header p { margin: 0.45rem 0 0; color: #807f78; }
+.entity-workspace-accounts-panel > header b { color: var(--entity-accent-soft); font-weight: 600; }
+
+.entity-workspace-accounts-panel > ol { min-height: 0; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.entity-workspace-accounts-panel li {
+  display: grid;
+  grid-template-columns: auto minmax(7rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.9rem 1.35rem;
+  border-bottom: 1px solid var(--entity-line);
+}
+.entity-workspace-accounts-panel li > span { color: #555650; font: 0.58rem/1 "SFMono-Regular", Consolas, monospace; }
+.entity-workspace-accounts-panel li small { display: block; color: #666761; }
+.entity-workspace-accounts-panel li strong { display: block; margin-top: 0.28rem; overflow: hidden; color: #c4c1b7; font: 500 0.72rem/1 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; }
+.entity-workspace-accounts-panel dl { display: flex; gap: 1rem; margin: 0; }
+.entity-workspace-accounts-panel dl div { min-width: 3rem; }
+.entity-workspace-accounts-panel dt { color: #555650; }
+.entity-workspace-accounts-panel dd { margin: 0.25rem 0 0; color: #99978f; font: 500 0.64rem/1 "SFMono-Regular", Consolas, monospace; }
+.entity-workspace-accounts-empty { align-self: center; margin: 0; padding: 2rem; color: #777871; font-size: 0.78rem; line-height: 1.6; }
+
+.entity-workspace-accounts-panel > footer { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.75rem; padding: 0.8rem 1.35rem; color: #666761; border-top: 1px solid var(--entity-line); }
+.entity-workspace-accounts-panel > footer span { text-align: center; }
+.entity-workspace-accounts-panel button { padding: 0; color: var(--entity-accent-soft); border: 0; background: transparent; font: inherit; cursor: pointer; text-transform: uppercase; }
+.entity-workspace-accounts-panel button:disabled { color: #484943; cursor: default; }
+.entity-workspace-accounts-panel button:focus-visible { outline: 2px solid var(--entity-accent-soft); outline-offset: 4px; }
+
+@media (max-width: 760px) {
+  .entity-workspace-accounts-panel { border-top: 1px solid var(--entity-line); border-left: 0; }
+  .entity-workspace-accounts-panel li { grid-template-columns: auto minmax(0, 1fr); }
+  .entity-workspace-accounts-panel dl { grid-column: 2; justify-content: space-between; }
+}

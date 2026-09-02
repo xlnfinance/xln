@@ -2,11 +2,13 @@ import {
   ENTITY_WORKSPACE_SECTIONS,
   type ViewTab,
 } from '../../runtime-client/src/entity-workspace-navigation';
+import type { EntityWorkspaceAccounts } from '../../runtime-client/src/entity-workspace-accounts';
 import type {
   EntityWorkspaceContext,
   EntityWorkspaceReadState,
 } from '../../runtime-client/src/entity-workspace-context';
 import type { EntityWorkspaceOwnership } from '../../runtime-client/src/entity-workspace-ownership';
+import { EntityWorkspaceAccountsPanel } from './entity-workspace-accounts-panel';
 import { formatAddress } from './entity-workspace-display';
 import './entity-workspace-shell.css';
 
@@ -28,7 +30,7 @@ const SECTION_COPY: Readonly<Record<ViewTab, SectionCopy>> = {
     eyebrow: 'Bilateral state',
     title: 'Accounts',
     summary: 'Peer balances, credit, payments, and swaps stay scoped to one selected Entity.',
-    nextBoundary: 'Account projections and transaction controls remain on the canonical workspace.',
+    nextBoundary: 'Payments, swaps, credit, and Account lifecycle commands remain on the canonical workspace.',
   },
   ownership: {
     eyebrow: 'Authority',
@@ -145,6 +147,8 @@ function OwnershipProjection({ ownership }: Readonly<{ ownership: EntityWorkspac
 }
 
 type EntityWorkspaceStageWithOwnershipProps = EntityWorkspaceStageProps & Readonly<{
+  accounts: EntityWorkspaceAccounts;
+  onSelectAccountsPage: (page: number) => void;
   ownership: EntityWorkspaceOwnership;
 }>;
 
@@ -160,7 +164,7 @@ const readFooterLabel = (
   return 'Unavailable — no remote Runtime selected';
 };
 
-function EntityWorkspaceStage({ activeTab, context, onRefresh, ownership, readState }: EntityWorkspaceStageWithOwnershipProps) {
+function EntityWorkspaceStage({ accounts, activeTab, context, onRefresh, onSelectAccountsPage, ownership, readState }: EntityWorkspaceStageWithOwnershipProps) {
   const copy = SECTION_COPY[activeTab];
   return (
     <section className="entity-workspace-stage" data-testid="entity-workspace-stage">
@@ -169,9 +173,11 @@ function EntityWorkspaceStage({ activeTab, context, onRefresh, ownership, readSt
         <h2>{copy.title}</h2>
         <p>{copy.summary}</p>
       </header>
-      {activeTab === 'ownership' && readState.status === 'ready' && context.status === 'selected'
-        ? <OwnershipProjection ownership={ownership} />
-        : <ProjectionBoundary
+      {readState.status === 'ready' && context.status === 'selected' && activeTab === 'accounts'
+        ? <EntityWorkspaceAccountsPanel accounts={accounts} onSelectPage={onSelectAccountsPage} />
+        : activeTab === 'ownership' && readState.status === 'ready' && context.status === 'selected'
+          ? <OwnershipProjection ownership={ownership} />
+          : <ProjectionBoundary
             context={context}
             emptyMessage={copy.nextBoundary}
             onRefresh={onRefresh}
@@ -183,9 +189,11 @@ function EntityWorkspaceStage({ activeTab, context, onRefresh, ownership, readSt
 }
 
 type EntityWorkspaceShellProps = Readonly<{
+  accounts: EntityWorkspaceAccounts;
   activeTab: ViewTab;
   context: EntityWorkspaceContext;
   onRefresh: () => void;
+  onSelectAccountsPage: (page: number) => void;
   ownership: EntityWorkspaceOwnership;
   readState: EntityWorkspaceReadState;
 }>;
@@ -201,7 +209,7 @@ const readModeLabel = (
   return 'Read boundary';
 };
 
-export function EntityWorkspaceShell({ activeTab, context, onRefresh, ownership, readState }: EntityWorkspaceShellProps) {
+export function EntityWorkspaceShell({ accounts, activeTab, context, onRefresh, onSelectAccountsPage, ownership, readState }: EntityWorkspaceShellProps) {
   return (
     <section
       className="entity-workspace"
@@ -236,9 +244,11 @@ export function EntityWorkspaceShell({ activeTab, context, onRefresh, ownership,
         ))}
       </nav>
       <EntityWorkspaceStage
+        accounts={accounts}
         activeTab={activeTab}
         context={context}
         onRefresh={onRefresh}
+        onSelectAccountsPage={onSelectAccountsPage}
         ownership={ownership}
         readState={readState}
       />

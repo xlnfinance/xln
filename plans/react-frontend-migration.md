@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP BOARD READY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS READY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1850,6 +1850,32 @@ all 10 soundchecks, then stops only because `cargo` is unavailable. The size
 policy still reports only the pre-existing out-of-scope `core/qa/report.ts` at
 3,001 / 3,000 lines.
 
+The next read-only Entity slice adds a strict 122-line bounded Account-page
+projection plus a 54-line React panel and 54-line responsive stylesheet. It
+preserves the adapter's canonical Account order and exposes only counterparty
+identity, committed Account frame height/state hash, and exact page metadata.
+The source requests at most eight Accounts and supports validated read-only
+page navigation; the panel labels shown and total counts separately. Malformed
+or incomplete page metadata, invalid frame headers, foreign/self Accounts, and
+duplicate counterparties fail loudly. No delta, credit, balance, capacity, or
+financial formula is read or reproduced; payments, swaps, credit, and Account
+lifecycle commands remain on canonical Svelte `/embed`. The direct
+context/ownership/Accounts/source/shell batch passes 23 tests with 84
+expectations, and the typed inventory batch passes 19 tests with 396
+expectations. Unsafe-types covers 631 files with zero findings, Svelte
+diagnostics are 0 / 0, the canonical build transforms 4,671 SSR and 6,422
+client modules, and all four React projects check and build. The ops workspace
+chunk is 12.78 kB and its lazy Runtime chunk is 15.41 kB. The full frontend
+failure-name diff remains empty against the exact 13-name baseline (1,220
+passes and 6,765 expectations). The candidate browser matrix passes 27 / 27,
+and the strict-health isolated real-H1 flow passes in 20.1s, renders two real
+Accounts, and captures clean 390×844, 1366×900, and 1920×1080 screenshots with
+no horizontal overflow. Root verification passes 26 BrainVault/runtime tests
+with 100,156 expectations, compiles 28 Solidity files, passes immutable parity
+for four contracts and all 10 soundchecks, then stops only because `cargo` is
+unavailable. The size policy still reports only the pre-existing out-of-scope
+`core/qa/report.ts` at 3,001 / 3,000 lines.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1951,8 +1977,8 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue the owner-authorized Entity workspace sub-program with the next
-   read-only section projection behind the live Runtime context. Keep the
+1. Continue the owner-authorized Entity workspace sub-program with a read-only
+   Settings/profile projection behind the live Runtime context. Keep the
    canonical Svelte `/embed` route until every workspace panel has parity
    evidence; do not expose commands before their authority and failure states
    are ported and tested, and do not present bounded Account-page values as

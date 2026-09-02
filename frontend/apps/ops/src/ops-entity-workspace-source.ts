@@ -4,6 +4,11 @@ import type {
 } from '../../../../core/api/runtime-adapter/types';
 import type { RuntimeAdapterStorageSnapshot } from '../../../packages/browser/src/runtime-adapter-session';
 import {
+  emptyEntityWorkspaceAccounts,
+  projectEntityWorkspaceAccounts,
+  type EntityWorkspaceAccounts,
+} from '../../../packages/runtime-client/src/entity-workspace-accounts';
+import {
   emptyEntityWorkspaceContext,
   projectEntityWorkspaceContext,
   type EntityWorkspaceContext,
@@ -26,12 +31,14 @@ type RuntimeReadSession = Readonly<{
 }>;
 
 export type OpsEntityWorkspaceSourceSnapshot = Readonly<{
+  accounts: EntityWorkspaceAccounts;
   context: EntityWorkspaceContext;
   ownership: EntityWorkspaceOwnership;
   readState: EntityWorkspaceReadState;
 }>;
 
 type OpsEntityWorkspaceProjection = Readonly<{
+  accounts: EntityWorkspaceAccounts;
   context: EntityWorkspaceContext;
   ownership: EntityWorkspaceOwnership;
 }>;
@@ -74,6 +81,7 @@ export const openOpsEntityRuntimeReadSession = async (
 };
 
 const unavailableSnapshot = (): OpsEntityWorkspaceSourceSnapshot => ({
+  accounts: emptyEntityWorkspaceAccounts(),
   context: emptyEntityWorkspaceContext(),
   ownership: emptyEntityWorkspaceOwnership(),
   readState: {
@@ -86,6 +94,7 @@ export const initialOpsEntityWorkspaceSnapshot = (
   config: RuntimeAdapterStorageSnapshot,
 ): OpsEntityWorkspaceSourceSnapshot => config.mode === 'remote'
   ? {
+      accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(),
       ownership: emptyEntityWorkspaceOwnership(),
       readState: { status: 'connecting', message: 'Connecting to the selected Runtime…' },
@@ -105,6 +114,7 @@ export const projectOpsEntityWorkspaceObserverSnapshot = (
   }
   if (snapshot.error) {
     return {
+      accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(runtimeId),
       ownership: emptyEntityWorkspaceOwnership(),
       readState: { status: 'error', message: snapshot.error },
@@ -112,6 +122,7 @@ export const projectOpsEntityWorkspaceObserverSnapshot = (
   }
   if (!snapshot.data) {
     return {
+      accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(runtimeId),
       ownership: emptyEntityWorkspaceOwnership(),
       readState: { status: 'error', message: 'Runtime returned no Entity workspace context.' },
@@ -127,6 +138,7 @@ export class OpsEntityWorkspaceSource {
   private observer: RuntimeQueryObserver<OpsEntityWorkspaceProjection> | null = null;
   private observerTeardown: (() => void) | null = null;
   private generation = 0;
+  private accountsPage = 0;
   private started = false;
 
   constructor(
@@ -150,6 +162,7 @@ export class OpsEntityWorkspaceSource {
     this.started = true;
     const generation = ++this.generation;
     this.publish({
+      accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(),
       ownership: emptyEntityWorkspaceOwnership(),
       readState: { status: 'connecting', message: 'Connecting to the selected Runtime…' },
@@ -167,6 +180,7 @@ export class OpsEntityWorkspaceSource {
       this.started = false;
       this.releaseRuntimeConnection();
       this.publish({
+        accounts: emptyEntityWorkspaceAccounts(),
         context: emptyEntityWorkspaceContext(),
         ownership: emptyEntityWorkspaceOwnership(),
         readState: {
@@ -179,8 +193,19 @@ export class OpsEntityWorkspaceSource {
 
   readonly refresh = (): Promise<void> => this.observer?.refresh() ?? this.start();
 
+  readonly selectAccountsPage = (page: number): void => {
+    const accounts = this.snapshot.accounts;
+    if (accounts.status !== 'selected' || !Number.isSafeInteger(page) || page < 0 || page >= accounts.pageCount) {
+      throw new Error(`OPS_ENTITY_ACCOUNT_PAGE_INVALID:${String(page)}`);
+    }
+    if (page === this.accountsPage) return;
+    this.accountsPage = page;
+    void this.observer?.refresh();
+  };
+
   readonly stop = (): void => {
     this.started = false;
+    this.accountsPage = 0;
     this.generation += 1;
     this.releaseRuntimeConnection();
     this.publish(initialOpsEntityWorkspaceSnapshot(this.config));
@@ -194,15 +219,24 @@ export class OpsEntityWorkspaceSource {
       createEmptyQuery: () => ({}),
     });
     this.publish({
+      accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(adapter.runtimeId),
       ownership: emptyEntityWorkspaceOwnership(),
       readState: { status: 'loading', message: 'Reading the committed Entity context…' },
     });
     const observer = new RuntimeQueryObserver(
       async () => {
-        const frame = await client.readViewFrame({ accountsLimit: 1, booksLimit: 1 });
+        const frame = await client.readViewFrame({
+          accountsLimit: 8,
+          accountsPage: this.accountsPage,
+          booksLimit: 1,
+        });
         const context = projectEntityWorkspaceContext({ runtimeId: adapter.runtimeId, frame });
-        return { context, ownership: projectEntityWorkspaceOwnership({ context, frame }) };
+        return {
+          accounts: projectEntityWorkspaceAccounts({ context, frame }),
+          context,
+          ownership: projectEntityWorkspaceOwnership({ context, frame }),
+        };
       },
       {
         readHeight: () => adapter.currentHeight,
@@ -221,7 +255,11 @@ export class OpsEntityWorkspaceSource {
     if (!observer || !adapter) return;
     const next = projectOpsEntityWorkspaceObserverSnapshot(
       adapter.runtimeId,
-      { context: this.snapshot.context, ownership: this.snapshot.ownership },
+      {
+        accounts: this.snapshot.accounts,
+        context: this.snapshot.context,
+        ownership: this.snapshot.ownership,
+      },
       observer.getSnapshot(),
     );
     if (next.readState.status === 'error' && adapter.status === 'error') {

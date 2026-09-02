@@ -207,17 +207,17 @@ test('React Entity workspace reads selected context from a real H1 Runtime', { t
       await installRemoteSession(context, capability);
       const candidatePage = await context.newPage();
       const response = await candidatePage.goto(
-        `${candidateServer.baseUrl}/__app/ops/entity-workspace#ownership`,
+        `${candidateServer.baseUrl}/__app/ops/entity-workspace#accounts`,
         { waitUntil: 'domcontentloaded' },
       );
       expect(response?.ok()).toBe(true);
       await assertSelectedContext(candidatePage, expectedRuntimeId);
-      const board = candidatePage.getByTestId('ownership-board-projection');
-      await expect(board).toBeVisible();
-      await expect(candidatePage.getByTestId('ownership-member-count')).not.toHaveText('0');
-      await expect(candidatePage.getByTestId('ownership-threshold')).not.toHaveText('0');
-      await expect(candidatePage.getByText('Share issuance and board actions remain on the canonical workspace.')).toBeVisible();
-      await capturePageScreenshot(candidatePage, testInfo, `react-entity-workspace-ownership-${viewport.name}.png`);
+      const accounts = candidatePage.getByTestId('accounts-page-projection');
+      await expect(accounts).toBeVisible();
+      await expect(candidatePage.getByTestId('accounts-visible-count')).not.toHaveText('0');
+      await expect(candidatePage.getByTestId('accounts-total-count')).not.toHaveText('0');
+      await expect(candidatePage.getByText('Payments, swaps, credit, and Account lifecycle commands remain on the canonical workspace.')).toBeVisible();
+      await capturePageScreenshot(candidatePage, testInfo, `react-entity-workspace-accounts-${viewport.name}.png`);
     } finally {
       await context.close();
     }

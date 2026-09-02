@@ -23,9 +23,11 @@ export function OpsEntityWorkspacePage() {
   return (
     <OpsShell activePath="/embed">
       <EntityWorkspaceShell
+        accounts={snapshot.accounts}
         activeTab={activeTab}
         context={snapshot.context}
         onRefresh={() => { void opsEntityWorkspaceSource.refresh(); }}
+        onSelectAccountsPage={opsEntityWorkspaceSource.selectAccountsPage}
         ownership={snapshot.ownership}
         readState={snapshot.readState}
       />

@@ -21,9 +21,10 @@ describe('React Entity workspace shell', () => {
   });
 
   test('uses shared navigation and a cleaned-up browser subscription without legacy imports', async () => {
-    const [page, shell] = await Promise.all([
+    const [page, shell, accounts] = await Promise.all([
       Bun.file('frontend/apps/ops/src/ops-entity-workspace.tsx').text(),
       Bun.file('frontend/packages/ui/src/entity-workspace-shell.tsx').text(),
+      Bun.file('frontend/packages/ui/src/entity-workspace-accounts-panel.tsx').text(),
     ]);
     expect(page).toContain('useSyncExternalStore');
     expect(page).toContain("removeEventListener('hashchange'");
@@ -31,7 +32,11 @@ describe('React Entity workspace shell', () => {
     expect(shell).toContain('ENTITY_WORKSPACE_SECTIONS.map');
     expect(shell).toContain('aria-current={section.id === activeTab');
     expect(shell).toContain('No Runtime projection attached');
-    for (const source of [page, shell]) {
+    expect(shell).toContain('EntityWorkspaceAccountsPanel');
+    expect(accounts).toContain('Committed frame headers only');
+    expect(accounts).not.toContain('deriveDelta');
+    expect(accounts).not.toContain('CreditLimit');
+    for (const source of [page, shell, accounts]) {
       expect(source).not.toContain('frontend/src');
       expect(source).not.toContain('$lib');
     }
