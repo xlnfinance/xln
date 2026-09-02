@@ -438,6 +438,7 @@ export const PLATFORM_INVENTORY = [
     interfaces: ['route', 'registry', 'ui'],
     sources: [
       'frontend/packages/runtime-client/src/entity-workspace-navigation.ts',
+      'frontend/packages/runtime-client/src/entity-workspace-context.ts',
       'frontend/packages/ui/src/entity-workspace-display.ts',
       'frontend/packages/ui/src/entity-workspace-shell.tsx',
       'frontend/packages/ui/src/entity-workspace-shell.css',
@@ -453,6 +454,7 @@ export const PLATFORM_INVENTORY = [
     evidence: [
       'tests/frontend/workspace/entity-panel-routing.test.ts',
       'tests/frontend/workspace/entity-panel-display.test.ts',
+      'tests/frontend/workspace/entity-workspace-context.test.ts',
       'tests/frontend/ops/frontend-ops-entity-workspace.test.ts',
       'frontend/tests/react-candidate/surfaces.spec.ts',
     ],

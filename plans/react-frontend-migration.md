@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS PREVIEW READY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + SHARED CONTEXT PROJECTION READY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1019,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS PREVIEW READY`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + SHARED CONTEXT PROJECTION READY`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1779,6 +1779,27 @@ passes immutable parity for four contracts and all 10 soundchecks, then stops
 only because `cargo` is unavailable. The size policy still reports only the
 pre-existing out-of-scope `core/qa/report.ts` 3,001 / 3,000 overage.
 
+The following nonvisual slice extracts the exact Entity workspace context from
+an untrusted Runtime adapter frame into the 111-line
+`packages/runtime-client/src/entity-workspace-context.ts`. Its strict union
+represents only empty or selected identity, Runtime id, committed height,
+signer, jurisdiction, and bounded account count; malformed height, identity,
+identity disagreement, or page metadata fails loudly. Committed Entity core
+profile and jurisdiction fields retain precedence over adapter summaries. The
+legacy `EntityPanelView` projection now consumes this shared boundary, and the
+React shell accepts the same type while its candidate adapter publishes an
+explicit empty context until a real browser Runtime session is connected. Five
+direct tests pass 14 expectations, and the Entity model/routing/React-shell
+batch passes 28 tests with 230 expectations. Unsafe-types covers 626 files with zero findings,
+Svelte diagnostics are 0 / 0, the build transforms 4,671 SSR and 6,422 client
+modules, all four React surfaces pass, and the exact 13-name baseline diff is
+empty (1,205 passes and 6,707 expectations). Current rendered behavior is
+unchanged, so new screenshot evidence is not required. Root verification again
+passes 26 BrainVault/runtime tests with 100,156 expectations, compiles 28
+Solidity files, passes immutable parity for four contracts and all 10
+soundchecks, then stops only because `cargo` is unavailable; the size policy
+still reports only `core/qa/report.ts` at 3,001 / 3,000.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1880,10 +1901,10 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue the owner-authorized Entity workspace sub-program by relocating the
-   framework-neutral Entity identity/context projection and attaching real
-   empty/selected context states to the React shell preview. Keep the canonical
-   Svelte `/embed` route until every workspace panel has parity evidence.
+1. Continue the owner-authorized Entity workspace sub-program with a real
+   browser Runtime read boundary that publishes the shared empty/selected
+   context into the React shell preview. Keep the canonical Svelte `/embed`
+   route until every workspace panel has parity evidence.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner
