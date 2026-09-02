@@ -51,19 +51,19 @@ export function acceleratorPlan(
   }
   const totalGiB = totalMemory / (1024 ** 3);
   const ultra = totalGiB >= 128 && cpuCount >= 24;
-  const acceleratorProcesses = engine !== 'opencl' && ultra && shardCount >= 8 ? 2 : 1;
+  const acceleratorProcesses = engine !== 'opencl' && ultra && shardCount >= 100 ? 8 : 1;
 
   if (ultra && shardCount >= 100) {
     const acceleratorShards = engine === 'opencl'
       ? Math.min(shardCount - 1, Math.round(shardCount * 0.496))
-      : Math.min(shardCount - 1, Math.round(shardCount * 0.588));
+      : Math.min(shardCount - 1, Math.round(shardCount * 0.64));
     return {
       cpuShards: shardCount - acceleratorShards,
       cpuWorkers: boundedWorkers(engine === 'opencl' ? Math.min(30, requestedCpuWorkers) : requestedCpuWorkers, shardCount - acceleratorShards),
       acceleratorShards,
       acceleratorWorkers: engine === 'opencl'
         ? Math.min(248, acceleratorShards)
-        : Math.min(147, Math.ceil(acceleratorShards / acceleratorProcesses)),
+        : Math.min(40, Math.ceil(acceleratorShards / acceleratorProcesses)),
       acceleratorProcesses,
     };
   }

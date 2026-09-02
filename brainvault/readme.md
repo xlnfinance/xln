@@ -10,7 +10,7 @@ Memory-hard brainwallet construction. Derive the same wallet from the exact same
 
 ```bash
 # Run immediately without installing. The bundled Metal V1 + C/NEON hybrid is
-# the default for 100+ shards on the measured M3 Ultra; safe fallbacks are automatic.
+# the default for 1,000+ shards on the measured M3 Ultra; safe fallbacks are automatic.
 bunx brainvault
 
 # Or install the command globally.
@@ -71,6 +71,43 @@ engines; it is never selected automatically. Multiplier 1 is both the portable
 choice and the fastest path, including the default native Metal CPU/GPU hybrid
 on supported Macs.
 
+## Measured M3 Ultra benchmark
+
+Canonical 1,000-shard run on 2026-09-02: Apple M3 Ultra, 32 CPU cores
+(24 performance + 8 efficiency), 80 GPU cores, 512 GiB unified memory,
+macOS 26.6.2, Bun 1.4.0. Engines ran sequentially. The production Metal profile
+was 640 GPU shards across eight processes with 40 workers each, plus 360 shards
+across 32 CPU workers.
+
+```bash
+bun run bv --bench
+```
+
+| Engine | Time | Shards/s | vs fastest |
+| --- | ---: | ---: | ---: |
+| (experimental) Metal generic + C/NEON hybrid | 2.438s | 410.18 | 1.00x |
+| **Metal V1 + C/NEON hybrid (default)** | **2.478s** | **403.62** | **1.02x** |
+| (experimental) OpenCL + C/NEON hybrid | 3.167s | 315.80 | 1.30x |
+| (experimental) C/NEON per-shard wipe | 5.448s | 183.54 | 2.23x |
+| C/NEON final wipe | 5.497s | 181.92 | 2.25x |
+| (experimental) Native direct async | 6.147s | 162.69 | 2.52x |
+| (experimental) Native sync workers | 6.379s | 156.76 | 2.62x |
+| Native isolated workers | 6.471s | 154.55 | 2.65x |
+| (experimental) Rust pool no wipe | 6.484s | 154.21 | 2.66x |
+| (experimental) Rust pool secure | 6.620s | 151.06 | 2.72x |
+| TypeScript/WASM | 12.228s | 81.78 | 5.02x |
+
+Every engine produced the frozen root
+`dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
+Times are hardware- and load-dependent; root parity is not. The 40 ms gap
+between the two Metal kernels is within observed run-to-run noise, so the
+frozen-V1-specialized implementation remains the production default.
+
+The actual `standard` default of 10,000 shards measured **22.329s** on Metal
+versus **52.560s** on C/NEON (2.35x faster). Both independently produced the
+new frozen default-work root
+`5557e8b96514ba45d0f3af0450616c68d41625731a8de9fbe54046cce1de0298`.
+
 ## No recovery receipt by design
 
 BrainVault does not create a recovery file, QR code, seed receipt, or cloud
@@ -98,7 +135,7 @@ This directory is the complete npm package boundary. Nothing above
 
 - bundled Apple Silicon executables and Metal library under
   `prebuilds/darwin-arm64/` provide the fastest default for frozen multiplier-1
-  mode at 100+ shards on the measured M3 Ultra; unmeasured Apple Silicon and
+  mode at 1,000+ shards on the measured M3 Ultra; unmeasured Apple Silicon and
   smaller jobs use the lower-overhead native
   path, and accelerator failure falls back to C/NEON then portable native;
 - `@node-rs/argon2` is the portable native fallback and handles custom multipliers;
@@ -109,8 +146,9 @@ This directory is the complete npm package boundary. Nothing above
   dependencies, and secure-wipe/no-wipe comparison variants;
 - `experimental/argon2-metal/` contains the complete native Apple GPU source,
   raw parity harness, generic kernel, frozen-V1-specialized kernel, and retained
-  upstream MIT notice. The M3 Ultra default uses 588 Metal / 412 C shards with
-  147 workers per Metal process and about 84 GiB of arenas;
+  upstream MIT notice. On the measured 80-GPU-core, 512-GiB M3 Ultra, the
+  default uses 640 Metal / 360 C shards, eight Metal processes with 40 workers
+  each, 32 CPU workers, and about 88 GiB of live arenas;
 - `experimental/argon2-opencl/` contains the complete deprecated OpenCL source
   and retained upstream notices. It remains selectable and benchmarked for
   parity/research, but native Metal is automatic only on the measured M3 Ultra.
@@ -133,6 +171,22 @@ This directory is the complete npm package boundary. Nothing above
   with shorter passwords remain recoverable via `--allow-short-password`.
 - new CLI creation accepts printable ASCII only. `--unicode-recovery` retains
   exact V1 NFKD/UTF-8 recovery for Unicode, controls, and legacy edge cases.
+
+## Repository topology
+
+The canonical editable source is this `brainvault/` directory inside the XLN
+monorepo. If `xlnfinance/brainvault` is created for discovery and independent
+auditing, it should be a one-way subtree mirror, never a second source of truth.
+That keeps normal monorepo development while making this self-contained package
+look like a standalone repository:
+
+```bash
+git subtree split --prefix=brainvault -b brainvault-publish
+git push git@github.com:xlnfinance/brainvault.git brainvault-publish:main
+```
+
+Do not convert the directory into a submodule. Changes belong in the monorepo
+and flow outward to the mirror; never merge independent mirror commits back.
 
 ```bash
 # Portable engines work immediately after npm/Bun installation.

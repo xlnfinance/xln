@@ -216,7 +216,7 @@ Flags:
 - --engine NAME
   Choose auto, metal, metal-generic, opencl, c-neon, c-neon-wipe,
   native-direct, native-sync, native, rust, rust-no-wipe, or wasm.
-  On the measured M3 Ultra class, auto uses Metal V1 hybrid for 100+ shards at
+  On the measured M3 Ultra class, auto uses Metal V1 hybrid for 1,000+ shards at
   multiplier 1; other Apple Silicon safely uses C/NEON or portable native.
 - --lib=native
   Force the portable @node-rs/argon2 worker implementation.
@@ -665,7 +665,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
   const autoSelectedMetal = engine === 'auto'
     && isMeasuredM3Ultra()
     && shardMultiplier === 1
-    && shardCount >= 100
+    && shardCount >= 1_000
     && neonExecutable !== undefined
     && metalBundle !== undefined;
   const autoSelectedC = engine === 'auto'

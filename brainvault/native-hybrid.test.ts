@@ -4,13 +4,26 @@ import { createShardSalt } from './primitives/spec.ts';
 import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } from './native-hybrid.ts';
 
 test('M3 Ultra Metal V1 profile freezes the measured balanced split', () => {
-  expect(acceleratorPlan('metal', 1_000, 32, 32, 256 * 1024 ** 3)).toEqual({
-    cpuShards: 412,
+  expect(acceleratorPlan('metal', 1_000, 32, 32, 512 * 1024 ** 3)).toEqual({
+    cpuShards: 360,
     cpuWorkers: 32,
-    acceleratorShards: 588,
-    acceleratorWorkers: 147,
-    acceleratorProcesses: 2,
+    acceleratorShards: 640,
+    acceleratorWorkers: 40,
+    acceleratorProcesses: 8,
   });
+});
+
+test('M3 Ultra standard default scales the frozen measured profile to 10,000 shards', () => {
+  const plan = acceleratorPlan('metal', 10_000, 32, 32, 512 * 1024 ** 3);
+  expect(plan).toEqual({
+    cpuShards: 3_600,
+    cpuWorkers: 32,
+    acceleratorShards: 6_400,
+    acceleratorWorkers: 40,
+    acceleratorProcesses: 8,
+  });
+  expect((plan.cpuWorkers + plan.acceleratorProcesses * plan.acceleratorWorkers) * 256 * 1024 ** 2)
+    .toBe(88 * 1024 ** 3);
 });
 
 test('unmeasured entry M5 candidate stays within its shared-memory budget', () => {

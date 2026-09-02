@@ -65,16 +65,18 @@ Both paths automatically use all CPU cores allowed by RAM.
 
 `argon2-metal/` contains the dependency-free native Metal backend for the exact
 V1 Argon2id shard. GPU-private arenas, a compact 64-bit segmented permutation,
-and two independent Metal queues raised the M3 Ultra result from the original
-49.11-shard/s pure GPU prototype to a stable **2.739 seconds / 365.0 shards/s**
-for the complete 1,000-shard CPU/GPU derivation. The best observed run was
-2.675 seconds. The frozen root remained
+and multi-process scheduling raised the M3 Ultra result from the original
+49.11-shard/s pure GPU prototype to **2.478 seconds / 403.62 shards/s** in the
+latest full sequential 11-engine run for the complete 1,000-shard CPU/GPU
+derivation. The frozen root remained
 `dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
-This is **1.875x** the fresh C/NEON baseline and about **1.082x** the OpenCL
-record. The current V1-specialized 588 Metal / 412 CPU profile produced a
-2.765-second five-run median, uses about 84 GiB at peak, and is
-the automatic wallet engine only on the measured M3 Ultra class. Other Macs
-retain the C/NEON default until a real-device release matrix exists.
+That run was **2.22x** faster than its 5.497-second C/NEON baseline and 1.28x
+faster than OpenCL. The current V1-specialized profile uses 640 Metal / 360 CPU
+shards, eight Metal processes with 40 workers each, 32 CPU workers, and about
+88 GiB of live arenas. A separate alternating sweep measured a 2.374-second
+median and 2.340-second best for this profile. It is the automatic wallet engine
+only on the measured 80-GPU-core, 512-GiB M3 Ultra class. Other Macs retain the
+C/NEON default until a real-device release matrix exists.
 
 `argon2-opencl/` is the faster source-only experiment. A one-shard-per-workgroup
 layout plus concurrent C/NEON processing completed 1,000 exact V1 shards in a
