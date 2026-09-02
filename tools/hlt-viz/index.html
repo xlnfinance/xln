@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HLT Visualizer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0a0a14; color: #d4d4e8; font: 14px/1.4 system-ui, sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+#dropzone { position: fixed; inset: 0; z-index: 1000; background: rgba(10,10,20,0.85); display: none; align-items: center; justify-content: center; font-size: 2em; border: 4px dashed #6a6aff; }
+#dropzone.active { display: flex; }
+#error-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: #c0392b; color: #fff; padding: 10px 20px; display: none; font-weight: bold; }
+#canvas-wrap { flex: 1; position: relative; min-height: 0; }
+canvas { display: block; width: 100%; height: 100%; background: #0a0a14; }
+#who-list {
+  position: absolute; top: 12px; left: 12px; z-index: 2;
+  background: rgba(10,10,20,0.78); border: 1px solid #2a2a3e; border-radius: 6px;
+  padding: 8px 10px; min-width: 240px; max-width: 340px;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
+#who-list h2 { font: 11px/1.2 system-ui, sans-serif; color: #707090; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 6px; }
+.who-row { display: flex; gap: 8px; align-items: baseline; color: #c8c8e0; white-space: nowrap; }
+.who-swatch { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; margin-top: 3px; }
+.who-path { overflow: hidden; text-overflow: ellipsis; }
+.who-amt { margin-left: auto; color: #9090b0; font-variant-numeric: tabular-nums; }
+.who-empty { color: #505068; }
+#controls { background: #12121e; border-top: 1px solid #2a2a3e; padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; user-select: none; }
+#controls label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+#controls input[type="range"] { accent-color: #6a6aff; }
+#play-btn { width: 44px; height: 44px; border: 2px solid #6a6aff; border-radius: 50%; background: transparent; color: #6a6aff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+#play-btn:hover { background: #1a1a2e; }
+#speed-val { min-width: 58px; text-align: center; font-variant-numeric: tabular-nums; }
+.speed-btn { border: 1px solid #3a3a5e; background: transparent; color: #9090b0; border-radius: 4px; padding: 4px 8px; cursor: pointer; font: 12px system-ui, sans-serif; }
+.speed-btn:hover { background: #1a1a2e; }
+.speed-btn.active { border-color: #6a6aff; color: #6a6aff; }
+#stats { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: #9090b0; }
+#stats span { white-space: nowrap; }
+.stat-num { color: #d4d4e8; font-weight: 600; font-variant-numeric: tabular-nums; }
+#load-area { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+#load-area label { cursor: pointer; padding: 6px 12px; border: 1px solid #3a3a5e; border-radius: 4px; font-size: 12px; color: #9090b0; }
+#load-area label:hover { background: #1a1a2e; }
+#load-area input { display: none; }
+#timeline-wrap { flex: 1 1 100%; display: flex; align-items: center; gap: 10px; }
+#timeline { flex: 1; }
+#time-label { min-width: 90px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: #707090; }
+@media (max-width: 700px) {
+  #controls { padding: 8px 12px; gap: 8px 12px; }
+  #stats { font-size: 11px; gap: 4px 12px; }
+}
+</style>
+</head>
+<body>
+<div id="dropzone">Drop recording JSON here</div>
+<div id="error-bar"></div>
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <aside id="who-list">
+    <h2>this second</h2>
+    <div id="who-items"><div class="who-empty">no traffic yet</div></div>
+  </aside>
+</div>
+<div id="controls">
+  <button id="play-btn" type="button" title="Play/Pause (space)">&#9654;</button>
+  <label>Speed <input type="range" id="speed-slider" min="0" max="100" value="25"> <span id="speed-val">0.010×</span></label>
+  <button type="button" class="speed-btn active" id="btn-speed-001" data-speed="0.01">0.01×</button>
+  <button type="button" class="speed-btn" id="btn-speed-01" data-speed="0.1">0.1×</button>
+  <button type="button" class="speed-btn" id="btn-speed-1" data-speed="1">1×</button>
+  <div id="stats">
+    <span>Users: <span class="stat-num" id="stat-users">0</span></span>
+    <span>Frame: <span class="stat-num" id="stat-frame">0</span></span>
+    <span>Time: <span class="stat-num" id="stat-time">0.0 / 0.0s</span></span>
+    <span>Speed: <span class="stat-num" id="stat-cur-speed">0.010</span>×</span>
+    <span>Payments: <span class="stat-num" id="stat-payments">0</span></span>
+    <span>Resolves: <span class="stat-num" id="stat-resolves">0</span></span>
+    <span>Swaps: <span class="stat-num" id="stat-swaps">0</span></span>
+    <span>TPS rec: <span class="stat-num" id="stat-tps-rec">0</span></span>
+    <span>TPS wall: <span class="stat-num" id="stat-tps-wall">0</span></span>
+  </div>
+  <div id="load-area">
+    <label for="file-picker">&#128193; Load JSON</label>
+    <input type="file" id="file-picker" accept=".json">
+  </div>
+  <div id="timeline-wrap">
+    <input type="range" id="timeline" min="0" max="1" step="0.001" value="0">
+    <span id="time-label">0.0 / 0.0s</span>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+
+// Pulse travel is 10 ms of *recording* time. At 0.01× that is 1 s of wall time
+// (slow glide); at 1× it is a 10 ms flash.
+var PULSE_REC_MS = 10;
+var HIGHLIGHT_REC_MS = 12;
+var MAX_PULSES = 2000;
+var KIND_COLORS = [
+  "#2ecc71", // lock
+  "#3498db", // resolve
+  "#f1c40f", // direct
+  "#e67e22", // swap_offer
+  "#e67e22", // swap_resolve
+  "#e67e22", // swap_cancel
+  "#e74c3c", // settle
+  "#888888"  // other
+];
+
+var frames = [];
+var users = [];
+var kinds = [];
+var startTs = 0;
+var endTs = 0;
+var totalDurationMs = 0;
+var loaded = false;
+
+var playing = false;
+var speed = 0.01;
+var playbackTime = 0;
+var currentFrameIdx = 0;
+var lastWallTs = 0;
+
+var pulses = [];
+var highlights = [];
+var wallEventTimes = [];
+var payments = 0;
+var resolves = 0;
+var swaps = 0;
+var displayFrameH = 0;
+
+var canvas = document.getElementById("canvas");
+var ctx = canvas.getContext("2d");
+var playBtn = document.getElementById("play-btn");
+var speedSlider = document.getElementById("speed-slider");
+var speedVal = document.getElementById("speed-val");
+var timeline = document.getElementById("timeline");
+var timeLabel = document.getElementById("time-label");
+var dropzone = document.getElementById("dropzone");
+var errorBar = document.getElementById("error-bar");
+var filePicker = document.getElementById("file-picker");
+var whoItems = document.getElementById("who-items");
+var statUsers = document.getElementById("stat-users");
+var statFrame = document.getElementById("stat-frame");
+var statTime = document.getElementById("stat-time");
+var statCurSpeed = document.getElementById("stat-cur-speed");
+var statPayments = document.getElementById("stat-payments");
+var statResolves = document.getElementById("stat-resolves");
+var statSwaps = document.getElementById("stat-swaps");
+var statTpsRec = document.getElementById("stat-tps-rec");
+var statTpsWall = document.getElementById("stat-tps-wall");
+var speedBtns = [
+  document.getElementById("btn-speed-001"),
+  document.getElementById("btn-speed-01"),
+  document.getElementById("btn-speed-1")
+];
+
+var userPositions = [];
+var hubPos = { x: 0, y: 0 };
+var ringRadius = 0;
+var dpr = 1;
+var clickedUser = -2;
+
+function showError(msg) {
+  errorBar.textContent = msg;
+  errorBar.style.display = "block";
+  setTimeout(function(){ errorBar.style.display = "none"; }, 5000);
+}
+
+function sliderToSpeed(val) {
+  var pct = val / 100;
+  var minLog = Math.log10(0.001);
+  var maxLog = Math.log10(10);
+  return Math.pow(10, minLog + pct * (maxLog - minLog));
+}
+function speedToSlider(s) {
+  var minLog = Math.log10(0.001);
+  var maxLog = Math.log10(10);
+  var clamped = Math.max(0.001, Math.min(10, s));
+  var pct = (Math.log10(clamped) - minLog) / (maxLog - minLog);
+  return Math.round(pct * 100);
+}
+function formatSpeed(s) {
+  if (s >= 1) return s.toFixed(2) + "×";
+  if (s >= 0.01) return s.toFixed(3) + "×";
+  return s.toFixed(4) + "×";
+}
+function setSpeed(next) {
+  speed = next;
+  speedSlider.value = String(speedToSlider(speed));
+  speedVal.textContent = formatSpeed(speed);
+  statCurSpeed.textContent = speed >= 1 ? speed.toFixed(2) : speed.toFixed(3);
+  for (var i = 0; i < speedBtns.length; i++) {
+    var btn = speedBtns[i];
+    var target = parseFloat(btn.getAttribute("data-speed"));
+    btn.classList.toggle("active", Math.abs(target - speed) / target < 0.05);
+  }
+}
+
+function userDotRadiusCss(n) {
+  if (n <= 0) return 6;
+  return Math.max(1.7, Math.min(6, 55 / Math.sqrt(n)));
+}
+
+function posOf(idx) {
+  if (idx < 0) return hubPos;
+  var p = userPositions[idx];
+  return p || hubPos;
+}
+
+function computeLayout() {
+  var rect = canvas.getBoundingClientRect();
+  var w = rect.width * dpr;
+  var h = rect.height * dpr;
+  var cx = w / 2;
+  var cy = h / 2;
+  var maxR = Math.min(w, h) * 0.42;
+  var n = users.length;
+  userPositions = new Array(n);
+  hubPos = { x: cx, y: cy };
+  ringRadius = n > 0 ? maxR : 0;
+  for (var i = 0; i < n; i++) {
+    var angle = (2 * Math.PI * i) / n - Math.PI / 2;
+    userPositions[i] = {
+      x: cx + ringRadius * Math.cos(angle),
+      y: cy + ringRadius * Math.sin(angle),
+      angle: angle
+    };
+  }
+}
+
+function resetPlayback() {
+  playing = false;
+  playBtn.innerHTML = "&#9654;";
+  playbackTime = 0;
+  currentFrameIdx = 0;
+  lastWallTs = 0;
+  pulses = [];
+  highlights = [];
+  wallEventTimes = [];
+  payments = 0;
+  resolves = 0;
+  swaps = 0;
+  displayFrameH = frames.length > 0 ? frames[0].h : 0;
+  clickedUser = -2;
+}
+
+function loadVizData(data) {
+  if (!data || typeof data !== "object" || !Array.isArray(data.frames)) {
+    showError("Invalid viz data: missing frames array");
+    return;
+  }
+  frames = data.frames;
+  users = Array.isArray(data.users) ? data.users : [];
+  kinds = Array.isArray(data.kinds) ? data.kinds : [];
+  startTs = typeof data.startTs === "number" ? data.startTs : 0;
+  endTs = typeof data.endTs === "number" ? data.endTs : 0;
+  totalDurationMs = endTs - startTs;
+  if (totalDurationMs < 0) totalDurationMs = 0;
+  loaded = true;
+  document.body.setAttribute("data-loaded", "1");
+  computeLayout();
+  resetPlayback();
+  updateHud();
+  render();
+}
+
+function countEvent(kind, fromIdx) {
+  if (kind === 0 && fromIdx >= 0) payments += 1;
+  else if (kind === 1) resolves += 1;
+  else if (kind >= 3 && kind <= 5) swaps += 1;
+}
+
+function addHighlight(idx) {
+  highlights.push({ idx: idx, startT: playbackTime });
+}
+
+function spawnPulse(fromIdx, toIdx, kindIdx, startT) {
+  if (pulses.length >= MAX_PULSES) pulses.shift();
+  pulses.push({
+    fromIdx: fromIdx,
+    toIdx: toIdx,
+    kindIdx: kindIdx,
+    startT: startT,
+    arrived: false
+  });
+  addHighlight(fromIdx);
+}
+
+function ingestFrame(fi, wallNow) {
+  var frame = frames[fi];
+  displayFrameH = frame.h;
+  var evs = frame.ev;
+  for (var i = 0; i < evs.length; i++) {
+    var ev = evs[i];
+    var kind = ev[0];
+    var fromIdx = ev[1];
+    var toIdx = ev[2];
+    countEvent(kind, fromIdx);
+    spawnPulse(fromIdx, toIdx, kind, playbackTime);
+    wallEventTimes.push(wallNow);
+  }
+  while (wallEventTimes.length > 0 && wallEventTimes[0] < wallNow - 2000) {
+    wallEventTimes.shift();
+  }
+}
+
+function frameIdxAtOrBefore(t) {
+  var lo = 0;
+  var hi = frames.length - 1;
+  var ans = -1;
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1;
+    if (frames[mid].t <= t) {
+      ans = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return ans;
+}
+
+function recountUpTo(lastFi) {
+  payments = 0;
+  resolves = 0;
+  swaps = 0;
+  displayFrameH = lastFi >= 0 ? frames[lastFi].h : (frames.length > 0 ? frames[0].h : 0);
+  for (var fi = 0; fi <= lastFi; fi++) {
+    var evs = frames[fi].ev;
+    for (var i = 0; i < evs.length; i++) {
+      countEvent(evs[i][0], evs[i][1]);
+    }
+  }
+}
+
+function seekTo(ms) {
+  if (!loaded) return;
+  playbackTime = Math.max(0, Math.min(totalDurationMs, ms));
+  var lastFi = frameIdxAtOrBefore(playbackTime);
+  currentFrameIdx = lastFi + 1;
+  pulses = [];
+  highlights = [];
+  wallEventTimes = [];
+  lastWallTs = 0;
+  recountUpTo(lastFi);
+  updateHud();
+  render();
+}
+
+function recTps() {
+  if (frames.length === 0) return 0;
+  var t0 = playbackTime - 1000;
+  var lastFi = currentFrameIdx - 1;
+  var count = 0;
+  for (var fi = lastFi; fi >= 0; fi--) {
+    if (frames[fi].t < t0) break;
+    if (frames[fi].t <= playbackTime) count += frames[fi].ev.length;
+  }
+  return count;
+}
+
+function wallTps(now) {
+  var cutoff = now - 1000;
+  var count = 0;
+  for (var i = wallEventTimes.length - 1; i >= 0; i--) {
+    if (wallEventTimes[i] >= cutoff) count += 1;
+    else break;
+  }
+  return count;
+}
+
+function partyLabel(idx) {
+  return idx < 0 ? "hub" : "user#" + idx;
+}
+
+function formatPath(fromIdx, toIdx) {
+  var a = partyLabel(fromIdx);
+  var b = partyLabel(toIdx);
+  if (fromIdx >= 0 && toIdx >= 0) return a + " → hub → " + b;
+  if (fromIdx >= 0 && toIdx < 0) return a + " → hub";
+  if (fromIdx < 0 && toIdx >= 0) return "hub → " + b;
+  return "hub";
+}
+
+function eventsThisSecond() {
+  var out = [];
+  var t0 = playbackTime - 1000;
+  var lastFi = currentFrameIdx - 1;
+  for (var fi = lastFi; fi >= 0 && out.length < 8; fi--) {
+    var fr = frames[fi];
+    if (fr.t < t0) break;
+    for (var ei = fr.ev.length - 1; ei >= 0 && out.length < 8; ei--) {
+      var ev = fr.ev[ei];
+      out.push({ kind: ev[0], from: ev[1], to: ev[2], amount: ev[3] });
+    }
+  }
+  return out;
+}
+
+function renderWhoList() {
+  var rows = eventsThisSecond();
+  if (rows.length === 0) {
+    whoItems.innerHTML = '<div class="who-empty">no traffic yet</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var color = KIND_COLORS[r.kind] || "#888";
+    var amt = r.amount ? String(r.amount) : "";
+    html += '<div class="who-row">' +
+      '<span class="who-swatch" style="background:' + color + '"></span>' +
+      '<span class="who-path">' + formatPath(r.from, r.to) + "</span>" +
+      (amt ? '<span class="who-amt">' + amt + "</span>" : "") +
+      "</div>";
+  }
+  whoItems.innerHTML = html;
+}
+
+function updateHud() {
+  var totalSec = totalDurationMs / 1000;
+  var curSec = playbackTime / 1000;
+  statUsers.textContent = String(users.length);
+  statFrame.textContent = String(displayFrameH);
+  statTime.textContent = curSec.toFixed(1) + " / " + totalSec.toFixed(1) + "s";
+  statCurSpeed.textContent = speed >= 1 ? speed.toFixed(2) : speed.toFixed(3);
+  statPayments.textContent = String(payments);
+  statResolves.textContent = String(resolves);
+  statSwaps.textContent = String(swaps);
+  statTpsRec.textContent = String(recTps());
+  statTpsWall.textContent = String(wallTps(performance.now()));
+  timeLabel.textContent = curSec.toFixed(1) + " / " + totalSec.toFixed(1) + "s";
+  if (totalDurationMs > 0) {
+    timeline.value = String(Math.max(0, Math.min(1, playbackTime / totalDurationMs)));
+  }
+  renderWhoList();
+}
+
+function isLit(idx, nowT) {
+  if (idx === clickedUser) return true;
+  for (var i = 0; i < highlights.length; i++) {
+    if (highlights[i].idx === idx && nowT - highlights[i].startT <= HIGHLIGHT_REC_MS) return true;
+  }
+  return false;
+}
+
+function pruneHighlights(nowT) {
+  var keep = [];
+  for (var i = 0; i < highlights.length; i++) {
+    if (nowT - highlights[i].startT <= HIGHLIGHT_REC_MS) keep.push(highlights[i]);
+  }
+  highlights = keep;
+}
+
+function render() {
+  var rect = canvas.getBoundingClientRect();
+  var w = Math.round(rect.width * dpr);
+  var h = Math.round(rect.height * dpr);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    computeLayout();
+  }
+  ctx.clearRect(0, 0, w, h);
+
+  var cx = hubPos.x;
+  var cy = hubPos.y;
+  var n = users.length;
+  var nowT = playbackTime;
+
+  ctx.strokeStyle = "#181830";
+  ctx.lineWidth = 1;
+  if (ringRadius > 0) {
+    for (var r = ringRadius * 0.33; r <= ringRadius + 0.5; r += ringRadius * 0.33) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  if (n > 0 && n <= 200) {
+    ctx.strokeStyle = "#1a1a30";
+    ctx.lineWidth = 1;
+    for (var s = 0; s < n; s++) {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(userPositions[s].x, userPositions[s].y);
+      ctx.stroke();
+    }
+  }
+
+  pruneHighlights(nowT);
+
+  var still = [];
+  for (var pi = 0; pi < pulses.length; pi++) {
+    var p = pulses[pi];
+    var progress = (nowT - p.startT) / PULSE_REC_MS;
+    if (progress < 0) {
+      still.push(p);
+      continue;
+    }
+    var drawP = progress > 1 ? 1 : progress;
+    var a = posOf(p.fromIdx);
+    var b = posOf(p.toIdx);
+    var x = a.x + (b.x - a.x) * drawP;
+    var y = a.y + (b.y - a.y) * drawP;
+    var color = KIND_COLORS[p.kindIdx] || "#888";
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = Math.max(1.5, 2 * dpr);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    var radius = (3.2 + 2.4 * (1 - Math.abs(drawP - 0.5) * 2)) * Math.min(dpr, 2);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.28;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (progress >= 1) {
+      if (!p.arrived) {
+        p.arrived = true;
+        addHighlight(p.toIdx);
+        still.push(p);
+      }
+    } else {
+      still.push(p);
+    }
+  }
+  pulses = still;
+
+  var hubCss = Math.max(8, Math.min(22, 260 / Math.sqrt(Math.max(n, 1))));
+  var hubR = hubCss * Math.min(dpr, 2);
+  var hubLit = isLit(-1, nowT);
+  ctx.fillStyle = hubLit ? "#9a9aff" : "#6a6aff";
+  ctx.beginPath();
+  ctx.arc(cx, cy, hubLit ? hubR * 1.18 : hubR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#d4d4e8";
+  ctx.font = "bold " + Math.max(10, hubCss * 0.8) * Math.min(dpr, 2) + "px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("H", cx, cy);
+
+  var dotCss = userDotRadiusCss(n);
+  var dotR = dotCss * Math.min(dpr, 2);
+  for (var ui = 0; ui < n; ui++) {
+    var up = userPositions[ui];
+    var lit = isLit(ui, nowT);
+    ctx.fillStyle = lit ? "#ffe566" : "#6a6a88";
+    ctx.beginPath();
+    ctx.arc(up.x, up.y, lit ? dotR * 1.7 : dotR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (n > 0 && n <= 64) {
+    ctx.fillStyle = "#707090";
+    ctx.font = Math.max(8, Math.min(11, 280 / Math.sqrt(n))) * Math.min(dpr, 2) + "px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (var li = 0; li < n; li++) {
+      var lp = userPositions[li];
+      ctx.fillText(String(li), lp.x, lp.y + dotR + 2 * dpr);
+    }
+  } else {
+    for (var hi = 0; hi < highlights.length; hi++) {
+      var hIdx = highlights[hi].idx;
+      if (hIdx < 0 || hIdx >= n) continue;
+      var hp = userPositions[hIdx];
+      ctx.fillStyle = "#d4d4e8";
+      ctx.font = 10 * Math.min(dpr, 2) + "px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText("#" + hIdx, hp.x, hp.y + dotR * 1.8 + 2);
+    }
+  }
+}
+
+function setPlaying(next) {
+  if (!loaded || frames.length === 0) {
+    showError("Load a recording first");
+    return;
+  }
+  if (next && currentFrameIdx >= frames.length) {
+    seekTo(0);
+  }
+  playing = next;
+  playBtn.innerHTML = playing ? "&#9646;&#9646;" : "&#9654;";
+  lastWallTs = 0;
+}
+
+function togglePlay() {
+  setPlaying(!playing);
+}
+
+function tick(now) {
+  if (playing && loaded && frames.length > 0) {
+    if (lastWallTs === 0) lastWallTs = now;
+    var wallDt = now - lastWallTs;
+    lastWallTs = now;
+    playbackTime = Math.min(totalDurationMs, playbackTime + wallDt * speed);
+    while (currentFrameIdx < frames.length && frames[currentFrameIdx].t <= playbackTime) {
+      ingestFrame(currentFrameIdx, now);
+      currentFrameIdx += 1;
+    }
+    if (playbackTime >= totalDurationMs) {
+      playing = false;
+      playBtn.innerHTML = "&#9654;";
+      playbackTime = totalDurationMs;
+      if (frames.length > 0) {
+        currentFrameIdx = frames.length;
+        displayFrameH = frames[frames.length - 1].h;
+      }
+    }
+    updateHud();
+  }
+  render();
+  requestAnimationFrame(tick);
+}
+
+playBtn.addEventListener("click", function(){ togglePlay(); });
+
+speedSlider.addEventListener("input", function() {
+  setSpeed(sliderToSpeed(parseFloat(speedSlider.value)));
+});
+
+for (var bi = 0; bi < speedBtns.length; bi++) {
+  speedBtns[bi].addEventListener("click", function(ev) {
+    var btn = ev.currentTarget;
+    setSpeed(parseFloat(btn.getAttribute("data-speed")));
+  });
+}
+
+timeline.addEventListener("input", function() {
+  seekTo(parseFloat(timeline.value) * totalDurationMs);
+});
+
+filePicker.addEventListener("change", function(e) {
+  var file = e.target.files && e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      loadVizData(JSON.parse(String(ev.target.result)));
+    } catch (err) {
+      showError("Failed to parse JSON: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.addEventListener("dragover", function(e) {
+  e.preventDefault();
+  dropzone.classList.add("active");
+});
+document.addEventListener("dragleave", function() {
+  dropzone.classList.remove("active");
+});
+document.addEventListener("drop", function(e) {
+  e.preventDefault();
+  dropzone.classList.remove("active");
+  var files = e.dataTransfer && e.dataTransfer.files;
+  if (!files || files.length === 0) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      loadVizData(JSON.parse(String(ev.target.result)));
+    } catch (err) {
+      showError("Failed to parse JSON: " + err.message);
+    }
+  };
+  reader.readAsText(files[0]);
+});
+
+window.addEventListener("keydown", function(e) {
+  if (e.code !== "Space") return;
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON")) {
+    if (e.target.tagName === "INPUT") return;
+  }
+  e.preventDefault();
+  togglePlay();
+});
+
+canvas.addEventListener("click", function(e) {
+  if (userPositions.length === 0) return;
+  var rect = canvas.getBoundingClientRect();
+  var scaleX = canvas.width / rect.width;
+  var scaleY = canvas.height / rect.height;
+  var mx = (e.clientX - rect.left) * scaleX;
+  var my = (e.clientY - rect.top) * scaleY;
+  var dx = mx - hubPos.x;
+  var dy = my - hubPos.y;
+  var hubCss = Math.max(8, Math.min(22, 260 / Math.sqrt(Math.max(users.length, 1))));
+  var hubR = hubCss * Math.min(dpr, 2);
+  if (dx * dx + dy * dy < (hubR + 8) * (hubR + 8)) {
+    clickedUser = -2;
+    render();
+    return;
+  }
+  var n = users.length;
+  var dotR = userDotRadiusCss(n) * Math.min(dpr, 2);
+  var closest = -2;
+  var closestDist = Math.max(14 * dpr, dotR * 3);
+  for (var i = 0; i < n; i++) {
+    var up = userPositions[i];
+    var ddx = mx - up.x;
+    var ddy = my - up.y;
+    var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+    if (dist < closestDist) {
+      closestDist = dist;
+      closest = i;
+    }
+  }
+  clickedUser = closest;
+  render();
+});
+
+window.addEventListener("resize", function() {
+  if (!loaded) return;
+  computeLayout();
+  render();
+});
+
+function loadFromUrl() {
+  var params = new URLSearchParams(window.location.search);
+  var dataUrl = params.get("data");
+  if (!dataUrl) return;
+  fetch(dataUrl)
+    .then(function(r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function(data) { loadVizData(data); })
+    .catch(function(err) { showError("Failed to load from URL: " + err.message); });
+}
+
+dpr = window.devicePixelRatio || 1;
+setSpeed(0.01);
+loadFromUrl();
+requestAnimationFrame(tick);
+
+})();
+</script>
+</body>
+</html>
