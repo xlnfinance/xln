@@ -148,6 +148,8 @@
     "native:candidate:capacitor:smoke": "bun scripts/native/smoke-capacitor-candidate.ts",
     "native:candidate:capacitor:copy": "bun scripts/native/copy-capacitor-shell-candidate.ts",
     "native:candidate:packaged:copy": "bun scripts/native/copy-packaged-shell-candidate.ts",
+    "frontend:candidate:deployment": "bun frontend/scripts/deployment-candidate-cli.ts",
+    "frontend:candidate:deployment:smoke": "cd frontend && bun run test:deployment:candidate",
     "native:package": "bun scripts/native/build-platforms.ts all --package --smoke",
     "native:mobile": "bun scripts/native/build-platforms.ts mobile",
     "native:mobile:package": "bun scripts/native/build-platforms.ts mobile --package",
