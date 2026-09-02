@@ -128,6 +128,11 @@ fails closed. `--show-private-key` adds raw keys only after that same rehearsal.
 `--reveal` remains an inert compatibility alias for older invocations.
 Passwords are forbidden in argv; automation must import the library API.
 
+Every interactive engine shows the same dependency-free terminal activity bar.
+Native batches expose elapsed time without inventing a percentage or ETA; the
+bar reports exact shards, workers, duration, and 100% only after successful
+completion.
+
 ## Self-contained package
 
 This directory is the complete npm package boundary. Nothing above

@@ -121,6 +121,39 @@ function printStep(step: number, title: string): void {
   console.log(`\n[${step}/3] ${title}`);
 }
 
+function startDerivationProgress(shards: number, workers: number): Readonly<{
+  complete: (elapsedMs: number) => void;
+  stop: () => void;
+}> {
+  if (!stdout.isTTY) return { complete: () => {}, stop: () => {} };
+  const width = 40;
+  const startedAt = Date.now();
+  let tick = 0;
+  let stopped = false;
+  const render = () => {
+    const span = 7;
+    const cycle = Math.max(1, (width - span) * 2);
+    const phase = tick++ % cycle;
+    const offset = phase <= width - span ? phase : cycle - phase;
+    const bar = '.'.repeat(offset) + '#'.repeat(span) + '.'.repeat(width - span - offset);
+    stdout.write(`\r[${bar}] deriving ${shards.toLocaleString('en-US')} shards | ${workers}w | ${formatDuration(Date.now() - startedAt)}`);
+  };
+  const timer = setInterval(render, 120);
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    stdout.write('\r\x1b[2K');
+  };
+  return {
+    complete: elapsedMs => {
+      stop();
+      console.log(`[${'#'.repeat(width)}] 100% ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} | ${workers}w | ${formatDuration(elapsedMs)}`);
+    },
+    stop,
+  };
+}
+
 async function askSecret(
   rl: readline.Interface,
   output: PromptOutput,
@@ -795,7 +828,6 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         : `Using native isolated workers (${actualWorkers} workers)`);
 
     await new Promise<void>((resolve, reject) => {
-    let lastUpdate = 0;
     const terminatePool = () => Promise.all(pool.map(worker => worker.terminate())).then(() => undefined);
     const fail = (error: unknown) => {
       if (failed) return;
@@ -834,22 +866,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         }
         completed++;
 
-        const now = Date.now();
-        const elapsed = now - start;
-
-        // Live progress bar
-        if ((now - lastUpdate > 100) || (completed % Math.max(1, Math.ceil(shardCount / 20)) === 0) || completed === shardCount) {
-          lastUpdate = now;
-          const pct = completed / shardCount;
-          const filled = Math.round(pct * 40);
-          const bar = '#'.repeat(filled) + '.'.repeat(40 - filled);
-          const rate = completed / (elapsed / 1000);
-          const eta = (shardCount - completed) / rate * 1000;
-          process.stdout.write(`\r[${bar}] ${Math.round(pct * 100)}% ${completed}/${shardCount} | ${actualWorkers}w | ${formatDuration(elapsed)} | ETA: ${formatDuration(eta)}     `);
-        }
-
         if (completed >= shardCount) {
-          console.log('');
           void terminatePool().then(resolve, reject);
         } else if (nextShard < shardCount) {
           w.postMessage({
@@ -1320,12 +1337,14 @@ async function interactive() {
   printStep(3, 'DERIVE');
 
   let rootKey: Uint8Array | undefined;
+  const progress = startDerivationProgress(shardCount, workersInput);
   try {
     const result = await derive(name, pass, selectedWork, workersInput, {
       engine: selectedEngine,
       shardMultiplier: selectedMultiplier,
     });
     rootKey = result.rootKey;
+    progress.complete(result.derivationTime);
 
     console.log(`\n[OK] Root derived in ${formatDuration(result.derivationTime)}\n`);
     console.log(`Root fingerprint: ${result.fingerprint}`);
@@ -1368,6 +1387,7 @@ async function interactive() {
     for (let i = 0; i < sensitive.ledgerLiveAddrs12.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs12[i]);
     if (sensitive.privateKey12) console.log('Private Key 1:', sensitive.privateKey12);
   } catch (err) {
+    progress.stop();
     if (isUserCancellation(err)) throw err;
     console.error('Derivation failed:', err);
     process.exitCode = 1;
