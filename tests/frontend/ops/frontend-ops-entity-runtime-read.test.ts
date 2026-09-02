@@ -18,6 +18,10 @@ import {
   emptyEntityWorkspaceOwnership,
   projectEntityWorkspaceOwnership,
 } from '../../../frontend/packages/runtime-client/src/entity-workspace-ownership';
+import {
+  emptyEntityWorkspaceProfile,
+  projectEntityWorkspaceProfile,
+} from '../../../frontend/packages/runtime-client/src/entity-workspace-profile';
 
 const REMOTE_SESSION = {
   mode: 'remote',
@@ -51,6 +55,10 @@ const OWNERSHIP_FRAME = {
         mode: 'proposer-based', threshold: 1n,
         validators: ['0xbbbb'], shares: { '0xbbbb': 1n },
       },
+      profile: {
+        name: 'Treasury', isHub: true, entityKind: 'company', sectors: ['finance'],
+        avatar: '', bio: 'Settlement infrastructure', website: 'https://xln.example',
+      },
     },
     accounts: { items: [], totalItems: 0, pageIndex: 0, pageCount: 0, limit: 8 },
   },
@@ -66,10 +74,16 @@ const SELECTED_ACCOUNTS = projectEntityWorkspaceAccounts({
   frame: OWNERSHIP_FRAME,
 });
 
+const SELECTED_PROFILE = projectEntityWorkspaceProfile({
+  context: SELECTED_CONTEXT,
+  frame: OWNERSHIP_FRAME,
+});
+
 const SELECTED_PROJECTION = {
   accounts: SELECTED_ACCOUNTS,
   context: SELECTED_CONTEXT,
   ownership: SELECTED_OWNERSHIP,
+  profile: SELECTED_PROFILE,
 };
 
 describe('React Entity workspace Runtime read boundary', () => {
@@ -109,6 +123,7 @@ describe('React Entity workspace Runtime read boundary', () => {
     expect(projectOpsEntityWorkspaceObserverSnapshot('runtime-a', {
       accounts: emptyEntityWorkspaceAccounts(),
       context: emptyEntityWorkspaceContext(), ownership: emptyEntityWorkspaceOwnership(),
+      profile: emptyEntityWorkspaceProfile(),
     }, {
       loading: false, data: SELECTED_PROJECTION, error: null, height: 18,
     })).toEqual({ ...SELECTED_PROJECTION, readState: { status: 'ready', message: '' } });
@@ -118,6 +133,7 @@ describe('React Entity workspace Runtime read boundary', () => {
       context: { status: 'empty', runtimeId: 'runtime-a', entityId: null },
       accounts: { status: 'empty' },
       ownership: { status: 'empty' },
+      profile: { status: 'empty' },
       readState: { status: 'error', message: 'ENTITY_WORKSPACE_FRAME_INVALID' },
     });
   });
@@ -139,6 +155,7 @@ describe('React Entity workspace Runtime read boundary', () => {
     expect(source).toContain('accountsPage: this.accountsPage');
     expect(source).toContain('projectEntityWorkspaceAccounts({ context, frame })');
     expect(source).toContain('projectEntityWorkspaceOwnership({ context, frame })');
+    expect(source).toContain('projectEntityWorkspaceProfile({ context, frame })');
     expect(source).toContain('this.observer?.destroy()');
     expect(source).toContain('this.session?.release()');
     expect(source).not.toContain('.send(');

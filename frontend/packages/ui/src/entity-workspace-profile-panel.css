@@ -1,0 +1,44 @@
+.entity-workspace-profile-panel {
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  border-left: 1px solid var(--entity-line);
+  background: rgb(255 255 255 / 1.2%);
+}
+
+.entity-workspace-profile-panel > header { display: flex; align-items: center; gap: 1rem; padding: 1.35rem; border-bottom: 1px solid var(--entity-line); }
+.entity-workspace-profile-panel > header > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 3.25rem;
+  height: 3.25rem;
+  color: #17130a;
+  background: var(--entity-accent);
+  font: 700 0.85rem/1 "SFMono-Regular", Consolas, monospace;
+}
+.entity-workspace-profile-panel small,
+.entity-workspace-profile-panel dt,
+.entity-workspace-profile-panel > footer {
+  color: #666761;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.entity-workspace-profile-panel > header strong { display: block; margin-top: 0.35rem; color: #d8d5ca; font-size: 1.05rem; }
+.entity-workspace-profile-panel > header p { margin: 0.25rem 0 0; color: var(--entity-accent-soft); font: 0.62rem/1.3 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+
+.entity-workspace-profile-panel dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; margin: 0; overflow: auto; }
+.entity-workspace-profile-panel dl > div { min-width: 0; padding: 1rem 1.35rem; border-bottom: 1px solid var(--entity-line); }
+.entity-workspace-profile-panel dl > div:nth-child(odd):not(.profile-wide-field) { border-right: 1px solid var(--entity-line); }
+.entity-workspace-profile-panel .profile-wide-field { grid-column: 1 / -1; }
+.entity-workspace-profile-panel dd { margin: 0.4rem 0 0; overflow: hidden; color: #aaa89f; font-size: 0.72rem; line-height: 1.5; overflow-wrap: anywhere; }
+.entity-workspace-profile-panel .profile-wide-field dd { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+
+.entity-workspace-profile-panel > footer { display: flex; justify-content: space-between; gap: 1rem; padding: 0.8rem 1.35rem; border-top: 1px solid var(--entity-line); }
+.entity-workspace-profile-panel > footer strong { color: #77766f; font-weight: 500; text-align: right; }
+
+@media (max-width: 760px) {
+  .entity-workspace-profile-panel { border-top: 1px solid var(--entity-line); border-left: 0; }
+}

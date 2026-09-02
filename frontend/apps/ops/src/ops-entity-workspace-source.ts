@@ -19,6 +19,11 @@ import {
   projectEntityWorkspaceOwnership,
   type EntityWorkspaceOwnership,
 } from '../../../packages/runtime-client/src/entity-workspace-ownership';
+import {
+  emptyEntityWorkspaceProfile,
+  projectEntityWorkspaceProfile,
+  type EntityWorkspaceProfile,
+} from '../../../packages/runtime-client/src/entity-workspace-profile';
 import { RuntimeQueryClient } from '../../../packages/runtime-client/src/runtime-query-client';
 import {
   RuntimeQueryObserver,
@@ -34,6 +39,7 @@ export type OpsEntityWorkspaceSourceSnapshot = Readonly<{
   accounts: EntityWorkspaceAccounts;
   context: EntityWorkspaceContext;
   ownership: EntityWorkspaceOwnership;
+  profile: EntityWorkspaceProfile;
   readState: EntityWorkspaceReadState;
 }>;
 
@@ -41,6 +47,7 @@ type OpsEntityWorkspaceProjection = Readonly<{
   accounts: EntityWorkspaceAccounts;
   context: EntityWorkspaceContext;
   ownership: EntityWorkspaceOwnership;
+  profile: EntityWorkspaceProfile;
 }>;
 
 export type OpsEntityWorkspaceSourceDependencies = Readonly<{
@@ -51,6 +58,13 @@ type RemoteSessionConfig = Readonly<{
   wsUrl: string;
   authKey: string;
 }>;
+
+const emptyProjection = (runtimeId: unknown = null): OpsEntityWorkspaceProjection => ({
+  accounts: emptyEntityWorkspaceAccounts(),
+  context: emptyEntityWorkspaceContext(runtimeId),
+  ownership: emptyEntityWorkspaceOwnership(),
+  profile: emptyEntityWorkspaceProfile(),
+});
 
 export const requireOpsEntityRemoteSession = (
   snapshot: RuntimeAdapterStorageSnapshot,
@@ -81,9 +95,7 @@ export const openOpsEntityRuntimeReadSession = async (
 };
 
 const unavailableSnapshot = (): OpsEntityWorkspaceSourceSnapshot => ({
-  accounts: emptyEntityWorkspaceAccounts(),
-  context: emptyEntityWorkspaceContext(),
-  ownership: emptyEntityWorkspaceOwnership(),
+  ...emptyProjection(),
   readState: {
     status: 'unavailable',
     message: 'Select a remote Runtime in the wallet before opening this candidate workspace.',
@@ -94,9 +106,7 @@ export const initialOpsEntityWorkspaceSnapshot = (
   config: RuntimeAdapterStorageSnapshot,
 ): OpsEntityWorkspaceSourceSnapshot => config.mode === 'remote'
   ? {
-      accounts: emptyEntityWorkspaceAccounts(),
-      context: emptyEntityWorkspaceContext(),
-      ownership: emptyEntityWorkspaceOwnership(),
+      ...emptyProjection(),
       readState: { status: 'connecting', message: 'Connecting to the selected Runtime…' },
     }
   : unavailableSnapshot();
@@ -114,17 +124,13 @@ export const projectOpsEntityWorkspaceObserverSnapshot = (
   }
   if (snapshot.error) {
     return {
-      accounts: emptyEntityWorkspaceAccounts(),
-      context: emptyEntityWorkspaceContext(runtimeId),
-      ownership: emptyEntityWorkspaceOwnership(),
+      ...emptyProjection(runtimeId),
       readState: { status: 'error', message: snapshot.error },
     };
   }
   if (!snapshot.data) {
     return {
-      accounts: emptyEntityWorkspaceAccounts(),
-      context: emptyEntityWorkspaceContext(runtimeId),
-      ownership: emptyEntityWorkspaceOwnership(),
+      ...emptyProjection(runtimeId),
       readState: { status: 'error', message: 'Runtime returned no Entity workspace context.' },
     };
   }
@@ -162,9 +168,7 @@ export class OpsEntityWorkspaceSource {
     this.started = true;
     const generation = ++this.generation;
     this.publish({
-      accounts: emptyEntityWorkspaceAccounts(),
-      context: emptyEntityWorkspaceContext(),
-      ownership: emptyEntityWorkspaceOwnership(),
+      ...emptyProjection(),
       readState: { status: 'connecting', message: 'Connecting to the selected Runtime…' },
     });
     try {
@@ -180,9 +184,7 @@ export class OpsEntityWorkspaceSource {
       this.started = false;
       this.releaseRuntimeConnection();
       this.publish({
-        accounts: emptyEntityWorkspaceAccounts(),
-        context: emptyEntityWorkspaceContext(),
-        ownership: emptyEntityWorkspaceOwnership(),
+        ...emptyProjection(),
         readState: {
           status: 'error',
           message: error instanceof Error ? error.message : String(error || 'Runtime connection failed'),
@@ -219,9 +221,7 @@ export class OpsEntityWorkspaceSource {
       createEmptyQuery: () => ({}),
     });
     this.publish({
-      accounts: emptyEntityWorkspaceAccounts(),
-      context: emptyEntityWorkspaceContext(adapter.runtimeId),
-      ownership: emptyEntityWorkspaceOwnership(),
+      ...emptyProjection(adapter.runtimeId),
       readState: { status: 'loading', message: 'Reading the committed Entity context…' },
     });
     const observer = new RuntimeQueryObserver(
@@ -236,6 +236,7 @@ export class OpsEntityWorkspaceSource {
           accounts: projectEntityWorkspaceAccounts({ context, frame }),
           context,
           ownership: projectEntityWorkspaceOwnership({ context, frame }),
+          profile: projectEntityWorkspaceProfile({ context, frame }),
         };
       },
       {
@@ -259,6 +260,7 @@ export class OpsEntityWorkspaceSource {
         accounts: this.snapshot.accounts,
         context: this.snapshot.context,
         ownership: this.snapshot.ownership,
+        profile: this.snapshot.profile,
       },
       observer.getSnapshot(),
     );

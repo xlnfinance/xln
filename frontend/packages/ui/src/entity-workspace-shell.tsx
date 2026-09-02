@@ -1,5 +1,6 @@
 import {
   ENTITY_WORKSPACE_SECTIONS,
+  type SettingsSubview,
   type ViewTab,
 } from '../../runtime-client/src/entity-workspace-navigation';
 import type { EntityWorkspaceAccounts } from '../../runtime-client/src/entity-workspace-accounts';
@@ -8,8 +9,10 @@ import type {
   EntityWorkspaceReadState,
 } from '../../runtime-client/src/entity-workspace-context';
 import type { EntityWorkspaceOwnership } from '../../runtime-client/src/entity-workspace-ownership';
+import type { EntityWorkspaceProfile } from '../../runtime-client/src/entity-workspace-profile';
 import { EntityWorkspaceAccountsPanel } from './entity-workspace-accounts-panel';
 import { formatAddress } from './entity-workspace-display';
+import { EntityWorkspaceProfilePanel } from './entity-workspace-profile-panel';
 import './entity-workspace-shell.css';
 
 type SectionCopy = Readonly<{
@@ -42,7 +45,7 @@ const SECTION_COPY: Readonly<Record<ViewTab, SectionCopy>> = {
     eyebrow: 'Configuration',
     title: 'Settings',
     summary: 'Wallet, consensus, recovery, display, network, and data controls stay explicit.',
-    nextBoundary: 'Settings reads and commands remain on the canonical workspace.',
+    nextBoundary: 'Profile edits and all Settings commands remain on the canonical workspace.',
   },
 };
 
@@ -150,6 +153,8 @@ type EntityWorkspaceStageWithOwnershipProps = EntityWorkspaceStageProps & Readon
   accounts: EntityWorkspaceAccounts;
   onSelectAccountsPage: (page: number) => void;
   ownership: EntityWorkspaceOwnership;
+  profile: EntityWorkspaceProfile;
+  settingsSubview: SettingsSubview;
 }>;
 
 const readFooterLabel = (
@@ -164,7 +169,7 @@ const readFooterLabel = (
   return 'Unavailable — no remote Runtime selected';
 };
 
-function EntityWorkspaceStage({ accounts, activeTab, context, onRefresh, onSelectAccountsPage, ownership, readState }: EntityWorkspaceStageWithOwnershipProps) {
+function EntityWorkspaceStage({ accounts, activeTab, context, onRefresh, onSelectAccountsPage, ownership, profile, readState, settingsSubview }: EntityWorkspaceStageWithOwnershipProps) {
   const copy = SECTION_COPY[activeTab];
   return (
     <section className="entity-workspace-stage" data-testid="entity-workspace-stage">
@@ -177,6 +182,8 @@ function EntityWorkspaceStage({ accounts, activeTab, context, onRefresh, onSelec
         ? <EntityWorkspaceAccountsPanel accounts={accounts} onSelectPage={onSelectAccountsPage} />
         : activeTab === 'ownership' && readState.status === 'ready' && context.status === 'selected'
           ? <OwnershipProjection ownership={ownership} />
+          : activeTab === 'settings' && readState.status === 'ready' && context.status === 'selected' && (settingsSubview === 'wallet' || settingsSubview === 'entity')
+            ? <EntityWorkspaceProfilePanel profile={profile} />
           : <ProjectionBoundary
             context={context}
             emptyMessage={copy.nextBoundary}
@@ -195,7 +202,9 @@ type EntityWorkspaceShellProps = Readonly<{
   onRefresh: () => void;
   onSelectAccountsPage: (page: number) => void;
   ownership: EntityWorkspaceOwnership;
+  profile: EntityWorkspaceProfile;
   readState: EntityWorkspaceReadState;
+  settingsSubview: SettingsSubview;
 }>;
 
 const readModeLabel = (
@@ -209,7 +218,7 @@ const readModeLabel = (
   return 'Read boundary';
 };
 
-export function EntityWorkspaceShell({ accounts, activeTab, context, onRefresh, onSelectAccountsPage, ownership, readState }: EntityWorkspaceShellProps) {
+export function EntityWorkspaceShell({ accounts, activeTab, context, onRefresh, onSelectAccountsPage, ownership, profile, readState, settingsSubview }: EntityWorkspaceShellProps) {
   return (
     <section
       className="entity-workspace"
@@ -250,7 +259,9 @@ export function EntityWorkspaceShell({ accounts, activeTab, context, onRefresh, 
         onRefresh={onRefresh}
         onSelectAccountsPage={onSelectAccountsPage}
         ownership={ownership}
+        profile={profile}
         readState={readState}
+        settingsSubview={settingsSubview}
       />
       <p className="entity-workspace-footnote">No inferred state · no hidden fallback · Svelte remains canonical</p>
     </section>

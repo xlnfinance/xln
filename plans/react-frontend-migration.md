@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS READY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1876,6 +1876,33 @@ for four contracts and all 10 soundchecks, then stops only because `cargo` is
 unavailable. The size policy still reports only the pre-existing out-of-scope
 `core/qa/report.ts` at 3,001 / 3,000 lines.
 
+The final read-only Entity section slice adds an 83-line committed public
+profile projection plus a 58-line React panel and 44-line responsive
+stylesheet. It reuses the same bounded `view-frame`, verifies the active
+Entity identity, preserves committed sector order, and exposes only name,
+hub/user role, Entity kind, sectors, avatar reference, bio, and website.
+Missing optional classification and empty public fields remain visibly
+undeclared or unpublished; malformed identity, role, field types, oversized
+sector lists, and duplicate sectors fail loudly. The profile renders only for
+the Settings landing and `settings/entity` deep link; every save, recovery,
+network, display, data, and consensus command remains on canonical Svelte
+`/embed`. Existing Account screenshot coverage remains in the same real-H1
+flow. The direct context/Accounts/Ownership/profile/source/shell batch passes
+28 tests with 104 expectations, and the inventory-expanded affected batch
+passes 51 tests with 523 expectations. Unsafe-types covers 633 files with zero
+findings, Svelte diagnostics are 0 / 0, and the canonical build transforms
+4,671 SSR and 6,422 client modules. The full frontend failure-name diff remains
+empty against the exact 13-name baseline (1,225 passes and 6,786
+expectations). The candidate browser matrix passes 27 / 27. The strict-health
+real-H1 flow passes in 18.8s, verifies H1 as a committed Hub profile, retains
+two real Accounts, and captures six clean Settings/Profile and Accounts
+screenshots at 390×844, 1366×900, and 1920×1080 with no horizontal overflow.
+Root verification passes 26 BrainVault/runtime tests with 100,156
+expectations, compiles 28 Solidity files, passes immutable parity for four
+contracts and all 10 soundchecks, then stops only because `cargo` is
+unavailable. The size policy still reports only the pre-existing out-of-scope
+`core/qa/report.ts` at 3,001 / 3,000 lines.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1977,12 +2004,10 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue the owner-authorized Entity workspace sub-program with a read-only
-   Settings/profile projection behind the live Runtime context. Keep the
-   canonical Svelte `/embed` route until every workspace panel has parity
-   evidence; do not expose commands before their authority and failure states
-   are ported and tested, and do not present bounded Account-page values as
-   complete Entity totals.
+1. Start the next WP8 consumer-integration slice against the assembled,
+   versioned React candidate. Preserve service-worker scope, storage origin,
+   CSP, deep links, native packaging, and whole-release rollback while Svelte
+   remains canonical in production; do not activate or cut over production.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

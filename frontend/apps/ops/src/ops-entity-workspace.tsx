@@ -19,7 +19,9 @@ export function OpsEntityWorkspacePage() {
     opsEntityWorkspaceSource.getSnapshot,
     opsEntityWorkspaceSource.getSnapshot,
   );
-  const activeTab = resolveEntityPanelDeepLinkFromLocation({ hash, search: '' }).activeTab ?? 'assets';
+  const route = resolveEntityPanelDeepLinkFromLocation({ hash, search: '' });
+  const activeTab = route.activeTab ?? 'assets';
+  const settingsSubview = route.settingsSubview ?? 'wallet';
   return (
     <OpsShell activePath="/embed">
       <EntityWorkspaceShell
@@ -29,7 +31,9 @@ export function OpsEntityWorkspacePage() {
         onRefresh={() => { void opsEntityWorkspaceSource.refresh(); }}
         onSelectAccountsPage={opsEntityWorkspaceSource.selectAccountsPage}
         ownership={snapshot.ownership}
+        profile={snapshot.profile}
         readState={snapshot.readState}
+        settingsSubview={settingsSubview}
       />
     </OpsShell>
   );

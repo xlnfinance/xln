@@ -218,6 +218,13 @@ test('React Entity workspace reads selected context from a real H1 Runtime', { t
       await expect(candidatePage.getByTestId('accounts-total-count')).not.toHaveText('0');
       await expect(candidatePage.getByText('Payments, swaps, credit, and Account lifecycle commands remain on the canonical workspace.')).toBeVisible();
       await capturePageScreenshot(candidatePage, testInfo, `react-entity-workspace-accounts-${viewport.name}.png`);
+      await candidatePage.evaluate(() => { window.location.hash = 'settings/entity'; });
+      const profile = candidatePage.getByTestId('settings-profile-projection');
+      await expect(profile).toBeVisible();
+      await expect(candidatePage.getByTestId('settings-profile-name')).not.toHaveText('');
+      await expect(candidatePage.getByTestId('settings-profile-role')).toHaveText('Hub entity');
+      await expect(candidatePage.getByText('Profile edits and all Settings commands remain on the canonical workspace.')).toBeVisible();
+      await capturePageScreenshot(candidatePage, testInfo, `react-entity-workspace-settings-profile-${viewport.name}.png`);
     } finally {
       await context.close();
     }
