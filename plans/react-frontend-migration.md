@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 WALLET PWA INPUT + CANDIDATE VERIFIER READY`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1927,7 +1927,7 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `IN PROGRESS — WALLET PWA INPUT OWNERSHIP ASSEMBLED`
+**Status:** `IN PROGRESS — WALLET PWA INPUT OWNERSHIP + SELF-CONTAINED CANDIDATE VERIFICATION READY`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
@@ -1940,11 +1940,38 @@ touch icon, both Android icons, manifest, push-wake service worker, and route
 mode bootstrap. Exact asset routes keep those files with the wallet surface;
 the React wallet entry consumes its icons, manifest, and route mode without
 embedding executable code. Focused ownership, copy, assembly, CSP, and gateway
-tests pass, and the four-app candidate assembles as
-`sha256-5b0e12e67cc85c3bdbf3617a1e00be106622fb1cc778f7c61108d7811154c566`
-with 353 files. This captures inputs only: canonical Svelte activation,
+tests pass, and the current four-app candidate assembles as
+`sha256-40f02e7074a7a3965faa04ff09baf7464d9deadd1539296c41379dbdc8480cc2`
+with 333 files. This captures inputs only: canonical Svelte activation,
 service-worker registration, native packaging, deployment, and cutover remain
 unchanged.
+
+The candidate now has a fail-closed consumer verifier that reads only the
+assembled directory and requires the current schema, exact application and
+edge-route topology, canonical manifest bytes and path ordering, matching
+directory/release identity, a complete regular-file set, and exact SHA-256 and
+size metadata. It rejects unsafe or duplicate paths, missing/extra/mixed files,
+symlinks, and copied manifests under the wrong identity. A real prepare, build,
+assemble, and CLI verification passes for the 333-file candidate above. The
+assembler also uses the repository's locale-independent text comparator, with
+mixed-case chunk-name regression coverage. No consumer activation or canonical
+output changed in this slice.
+
+Verification evidence is 19 / 19 focused assembly, verifier, and inventory
+tests (131 expectations), all four React local checks with 634 files and zero
+unsafe-type findings, and a successful self-contained verification of the real
+333-file directory. The complete frontend suite remains at its exact known
+13-name baseline (1,230 passes, 14 reported failures, 6,796 expectations across
+1,244 tests / 202 files); the three apparent localhost failures from the first
+restricted run pass 6 / 6 when ephemeral loopback listeners are available. The
+canonical frontend check reports zero Svelte errors/warnings and builds 4,671
+SSR plus 6,422 client modules. The repository gate passes 26 deterministic
+tests / 100,156 expectations, compiles 28 Solidity files, publishes 92 TypeChain
+files, confirms four-contract immutable metadata parity, and passes all ten
+soundchecks before the established missing-`cargo` environment stop. Frozen
+core is unchanged. File-size policy still reports only the known
+`core/qa/report.ts` 3,001 / 3,000 overage; both new handwritten files are below
+300 lines.
 
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
@@ -2004,10 +2031,11 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Start the next WP8 consumer-integration slice against the assembled,
-   versioned React candidate. Preserve service-worker scope, storage origin,
-   CSP, deep links, native packaging, and whole-release rollback while Svelte
-   remains canonical in production; do not activate or cut over production.
+1. Start the next WP8 native-consumer slice against an assembled, independently
+   verified React candidate. Materialize only the wallet-owned candidate files
+   into an isolated native staging destination, preserving deep links, CSP,
+   storage origin, and whole-release identity; do not activate or cut over
+   production.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

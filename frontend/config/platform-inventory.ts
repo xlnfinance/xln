@@ -544,7 +544,10 @@ export const PLATFORM_INVENTORY = [
     workPackage: 'WP8',
     status: 'owned-for-later-wp',
     interfaces: ['release-artifact'],
-    sources: ['frontend/scripts/candidate-release.ts'],
+    sources: [
+      'frontend/scripts/candidate-release.ts',
+      'frontend/scripts/candidate-release-verifier.ts',
+    ],
     consumers: [
       'scripts/release/build-xlnfinance-package.ts',
       'scripts/native/build-platforms.ts',
@@ -552,6 +555,7 @@ export const PLATFORM_INVENTORY = [
     ],
     evidence: [
       'tests/frontend/tooling/frontend-candidate-assembly.test.ts',
+      'tests/frontend/tooling/frontend-candidate-release-verifier.test.ts',
       'native/__tests__/native-build-options.test.ts',
     ],
   },

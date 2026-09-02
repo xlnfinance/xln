@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 
-import { safeStringify } from '../../core/protocol/serialization';
+import { compareStableText, safeStringify } from '../../core/protocol/serialization';
 import {
   PREPARED_GENERATED_INPUTS,
   type GeneratedInputOwner,
@@ -21,7 +21,7 @@ import {
 import { EDGE_ROUTES, SURFACES, type RouteRule, type SurfaceId } from '../config/surfaces';
 import { readPreparedGeneratedInputs } from './generated-inputs';
 
-const RELEASE_SCHEMA_VERSION = 2 as const;
+export const RELEASE_SCHEMA_VERSION = 2 as const;
 
 type CandidateFile = Readonly<{
   sourcePath: string;
@@ -71,7 +71,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const toPortablePath = (pathname: string): string => pathname.split(sep).join('/');
-const comparePaths = (left: string, right: string): number => left.localeCompare(right);
+const comparePaths = compareStableText;
 
 const hashBytes = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
