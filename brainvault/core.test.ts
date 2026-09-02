@@ -465,7 +465,7 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
   const vector = VECTORS[0]!;
   expect(launched.exitCode).toBe(0);
   expect(publicSummary(output)).toEqual({ fingerprint: vector.expect.masterKey.slice(0, 8), address: vector.expect.ethAddr });
-  expect(output).toContain('100% 1/1 | 1w');
+  expect(output).toContain('100% · 1/1 · 1w');
   expect(output).not.toContain(vector.expect.mnemonic24);
   expect(output).not.toContain('Private Key 1:');
 

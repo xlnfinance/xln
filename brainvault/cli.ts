@@ -126,19 +126,26 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   stop: () => void;
 }> {
   if (!stdout.isTTY) return { complete: () => {}, stop: () => {} };
-  const width = 40;
+  const width = 32;
+  const color = process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
+  const cyan = color ? '\x1b[38;5;45m' : '';
+  const green = color ? '\x1b[38;5;82m' : '';
+  const dim = color ? '\x1b[2m' : '';
+  const reset = color ? '\x1b[0m' : '';
   const startedAt = Date.now();
   let tick = 0;
   let stopped = false;
   const render = () => {
-    const span = 7;
+    const span = 5;
     const cycle = Math.max(1, (width - span) * 2);
     const phase = tick++ % cycle;
-    const offset = phase <= width - span ? phase : cycle - phase;
-    const bar = '.'.repeat(offset) + '#'.repeat(span) + '.'.repeat(width - span - offset);
-    stdout.write(`\r[${bar}] deriving ${shards.toLocaleString('en-US')} shards | ${workers}w | ${formatDuration(Date.now() - startedAt)}`);
+    const forward = phase <= width - span;
+    const offset = forward ? phase : cycle - phase;
+    const comet = forward ? '━━━━╸' : '╺━━━━';
+    const bar = `${dim}${'·'.repeat(offset)}${reset}${cyan}${comet}${reset}${dim}${'·'.repeat(width - span - offset)}${reset}`;
+    stdout.write(`\r  ${cyan}◇${reset} derive  [${bar}]  ${formatDuration(Date.now() - startedAt)} · ${workers}w`);
   };
-  const timer = setInterval(render, 120);
+  const timer = setInterval(render, 100);
   const stop = () => {
     if (stopped) return;
     stopped = true;
@@ -148,7 +155,7 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   return {
     complete: elapsedMs => {
       stop();
-      console.log(`[${'#'.repeat(width)}] 100% ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} | ${workers}w | ${formatDuration(elapsedMs)}`);
+      console.log(`  ${green}✓${reset} derived [${green}${'━'.repeat(width)}${reset}]  100% · ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${workers}w · ${formatDuration(elapsedMs)}`);
     },
     stop,
   };
@@ -606,32 +613,44 @@ async function deriveExecutableShards(
   const input = Buffer.alloc(header.length + password.length + (shardCount * 32));
   header.copy(input, 0);
   input.set(password, header.length);
-  let child: ReturnType<typeof spawnSync>;
+  let output = Buffer.alloc(0);
+  let stderr = '';
+  let exitCode = -1;
   try {
     for (let index = 0; index < shardCount; index += 1) {
       input.set(await createShardSalt(name, index, shardCount, algId), header.length + password.length + (index * 32));
     }
-    child = spawnSync(verifiedExecutable, [], {
-      input,
-      maxBuffer: Math.max(1024 * 1024, shardCount * 64),
-    });
+    const child = Bun.spawn([verifiedExecutable], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+    child.stdin.write(input);
+    child.stdin.end();
+    const [stdoutBytes, stderrText, status] = await Promise.all([
+      new Response(child.stdout).arrayBuffer(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    output = Buffer.from(stdoutBytes);
+    stderr = stderrText;
+    exitCode = status;
   } finally {
     password.fill(0);
     input.fill(0);
   }
-  if (child.status !== 0) {
-    throw new Error(`BRAINVAULT_EXECUTABLE_FAILED:${String(child.status)}:${child.stderr.toString().trim()}`);
+  if (exitCode !== 0) {
+    output.fill(0);
+    throw new Error(`BRAINVAULT_EXECUTABLE_FAILED:${String(exitCode)}:${stderr.trim()}`);
   }
-  if (child.stdout.length !== shardCount * BRAINVAULT_V1.SHARD_OUTPUT_BYTES) {
-    throw new Error(`BRAINVAULT_EXECUTABLE_OUTPUT_INVALID:${child.stdout.length}`);
+  if (output.length !== shardCount * BRAINVAULT_V1.SHARD_OUTPUT_BYTES) {
+    const actual = output.length;
+    output.fill(0);
+    throw new Error(`BRAINVAULT_EXECUTABLE_OUTPUT_INVALID:${actual}`);
   }
   const shards = Array.from({ length: shardCount }, (_, index) => new Uint8Array(
-    child.stdout.subarray(
+    output.subarray(
       index * BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
       (index + 1) * BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
     ),
   ));
-  child.stdout.fill(0);
+  output.fill(0);
   return shards;
 }
 
