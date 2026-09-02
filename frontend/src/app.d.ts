@@ -11,7 +11,7 @@ declare global {
 		__dockview_instance?: DockviewComponent;
 		__debugScene?: import('three').Scene;
 		__debugCamera?: import('three').PerspectiveCamera;
-		__debugRenderer?: import('$lib/view/panels/graph3d/graph3d-renderer').GraphRenderer;
+		__debugRenderer?: import('../packages/ui/src/graph3d-renderer').GraphRenderer;
 	}
 
 	interface Navigator {

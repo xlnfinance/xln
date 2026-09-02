@@ -41,7 +41,7 @@ import {
   type GraphReplicaLike,
 } from "./graph3d-helpers";
 import { buildBirdViewSettings, readBirdViewSettings, writeBirdViewSettings, type BirdViewSettings } from "./graph3d-settings";
-import { createGraphRenderer, detachGraphObject3D, disposeGraphObject3D, getGraphThemeColors, type GraphRenderer } from "./graph3d-renderer";
+import { createGraphRenderer, detachGraphObject3D, disposeGraphObject3D, getGraphThemeColors, type GraphRenderer } from "../../../../../packages/ui/src/graph3d-renderer";
 import {
   buildGraphAccountVisuals,
   createBlockContainer,
