@@ -28,9 +28,9 @@
     "gpuJobsPerWorkgroup": 1,
     "cpuShards": 520,
     "cpuWorkers": 30,
-    "timeMs": 3071.891,
-    "shardsPerSecond": 325.532,
-    "speedup": 1.672
+    "timeMs": 3053.922,
+    "shardsPerSecond": 327.448,
+    "speedup": 1.682
   },
   "parity": {
     "rawShardCounts": [1, 2, 8],

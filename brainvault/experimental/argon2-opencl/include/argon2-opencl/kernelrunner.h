@@ -16,6 +16,7 @@ private:
     std::uint32_t batchSize;
     bool bySegment;
     bool precompute;
+    bool profiling;
 
     cl::CommandQueue queue;
     cl::Kernel kernel;
@@ -41,7 +42,8 @@ public:
 
     KernelRunner(const ProgramContext *programContext,
                  const Argon2Params *params, const Device *device,
-                 std::size_t batchSize, bool bySegment, bool precompute);
+                 std::size_t batchSize, bool bySegment, bool precompute,
+                 bool profiling = false);
     ~KernelRunner() noexcept;
 
     void *mapInputMemory(std::size_t jobId);

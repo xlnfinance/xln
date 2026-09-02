@@ -166,6 +166,7 @@ int main(void) {
 
 cleanup:
     if (password != NULL) secure_zero(password, password_len);
+    if (salts != NULL) secure_zero(salts, salt_length);
     if (outputs != NULL && shard_count != 0u && (size_t)shard_count <= SIZE_MAX / OUTPUT_BYTES) {
         secure_zero(outputs, (size_t)shard_count * OUTPUT_BYTES);
     }

@@ -16,22 +16,31 @@ static bool isPowerOfTwo(std::uint32_t x)
 ProcessingUnit::ProcessingUnit(
         const ProgramContext *programContext, const Argon2Params *params,
         const Device *device, std::size_t batchSize,
-        bool bySegment, bool precomputeRefs, std::uint32_t fixedJobsPerBlock)
+        bool bySegment, bool precomputeRefs, std::uint32_t fixedJobsPerBlock,
+        bool profiling)
     : programContext(programContext), params(params), device(device),
       runner(programContext, params, device, batchSize, bySegment,
-             precomputeRefs),
+             precomputeRefs, profiling),
       bestLanesPerBlock(runner.getMinLanesPerBlock()),
       bestJobsPerBlock(fixedJobsPerBlock == 0
                        ? runner.getMinJobsPerBlock()
                        : fixedJobsPerBlock)
 {
-    /* pre-fill first blocks with pseudo-random data: */
-    for (std::size_t i = 0; i < batchSize; i++) {
-        setPassword(i, NULL, 0);
+    const bool tuneLanes = runner.getMaxLanesPerBlock()
+            > runner.getMinLanesPerBlock()
+            && isPowerOfTwo(runner.getMaxLanesPerBlock());
+    const bool tuneJobs = fixedJobsPerBlock == 0
+            && runner.getMaxJobsPerBlock() > runner.getMinJobsPerBlock()
+            && isPowerOfTwo(runner.getMaxJobsPerBlock());
+
+    /* Tuning kernels need valid first blocks. Fixed launch geometry does not. */
+    if (tuneLanes || tuneJobs) {
+        for (std::size_t i = 0; i < batchSize; i++) {
+            setPassword(i, NULL, 0);
+        }
     }
 
-    if (runner.getMaxLanesPerBlock() > runner.getMinLanesPerBlock()
-            && isPowerOfTwo(runner.getMaxLanesPerBlock())) {
+    if (tuneLanes) {
 #ifndef NDEBUG
         std::cerr << "[INFO] Tuning lanes per block..." << std::endl;
 #endif

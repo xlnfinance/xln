@@ -29,13 +29,13 @@ On the 32-CPU-core / 80-GPU-core M3 Ultra used for development:
 | --- | ---: | ---: | --- |
 | C/NEON, 32 workers | 5.136 s | 194.72 | `dc2090d6…3485` |
 | OpenCL hybrid, 32 CPU workers | 3.127 s | 319.83 | `dc2090d6…3485` |
-| OpenCL hybrid, 480 GPU + 520 CPU | **3.072 s best** | **325.53 best** | `dc2090d6…3485` |
+| OpenCL hybrid, 480 GPU + 520 CPU | **3.054 s best** | **327.45 best** | `dc2090d6…3485` |
 
-That is a measured **1.67x best / about 1.62x typical** end-to-end speedup. The best layout uses two GPU
+That is a measured **1.68x best / about 1.62x typical** end-to-end speedup. The best layout uses two GPU
 batches of 240, one shard per OpenCL workgroup, and 30 CPU workers. Thirty was
 faster than 32 in the hybrid because two fewer CPU arenas reduced unified-memory
 contention. All 80 GPU compute units remain available. Run-to-run thermal noise
-is material; the retained modern permutation repeatedly ran in about 3.07-3.25
+is material; the retained modern permutation repeatedly ran in about 3.05-3.25
 seconds, while the fresh CPU baseline was 5.136 seconds.
 
 The 2x target was not honestly reached. Hashcat's specialized hot kernel can

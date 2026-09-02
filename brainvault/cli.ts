@@ -418,12 +418,18 @@ type HardwarePlan = Readonly<{
   upperMultiplier: number;
 }>;
 
+function floorPowerOfTwo(value: number): number {
+  if (value < 1) return 1;
+  return 2 ** Math.floor(Math.log2(value));
+}
+
 function getHardwarePlan(shardCount: number, multiplier: number): HardwarePlan {
   const cpuCores = cpus().length;
   const totalGB = Math.floor(totalmem() / (1024 ** 3));
   const baseMemoryPerWorkerGb = BRAINVAULT_V1.SHARD_MEMORY_KB / (1024 * 1024);
   const memoryPerWorkerGb = baseMemoryPerWorkerGb * multiplier;
   const maxFromRAM = Math.floor((totalGB * 0.8) / memoryPerWorkerGb);
+  const maxForAllCoresAtQuarterRAM = Math.max(1, Math.floor((totalGB * 0.25) / (cpuCores * baseMemoryPerWorkerGb)));
   const maxForAllCoresAtHalfRAM = Math.max(1, Math.floor((totalGB * 0.5) / (cpuCores * baseMemoryPerWorkerGb)));
   return {
     cpuCores,
@@ -431,7 +437,7 @@ function getHardwarePlan(shardCount: number, multiplier: number): HardwarePlan {
     memoryPerWorkerGb,
     maxFromRAM,
     recommendedWorkers: Math.min(cpuCores, maxFromRAM, shardCount),
-    strongerMultiplier: Math.min(4, maxForAllCoresAtHalfRAM),
+    strongerMultiplier: floorPowerOfTwo(maxForAllCoresAtQuarterRAM),
     upperMultiplier: maxForAllCoresAtHalfRAM,
   };
 }
@@ -1125,8 +1131,9 @@ async function interactive() {
       const initialPlan = getHardwarePlan(selectedWork.shardCount, 1);
       console.log(`\nRecommended multiplier: 1 (portable frozen default).`);
       if (initialPlan.strongerMultiplier > 1) {
-        console.log(`Hardware-aware stronger option: ${initialPlan.strongerMultiplier} (${(0.25 * initialPlan.strongerMultiplier).toFixed(2)}GB per worker).`);
-        console.log(`50% RAM ceiling with all ${initialPlan.cpuCores} CPUs: multiplier ${initialPlan.upperMultiplier}.`);
+        const ultraWorkingSetGb = 0.25 * initialPlan.strongerMultiplier * initialPlan.cpuCores;
+        console.log(`Ultra memory-hard option: multiplier ${initialPlan.strongerMultiplier} (${(0.25 * initialPlan.strongerMultiplier).toFixed(2)}GB per worker; ${ultraWorkingSetGb.toFixed(0)}GB at ${initialPlan.cpuCores} workers).`);
+        console.log(`This is stronger but slower; multiplier ${initialPlan.upperMultiplier} is the 50% RAM ceiling, not a recommendation.`);
       }
       console.log('Warning: any multiplier other than 1 changes the root and must be remembered for recovery.');
       selectedMultiplier = Number((await rl.question('Shard multiplier (1): ')).trim() || '1');

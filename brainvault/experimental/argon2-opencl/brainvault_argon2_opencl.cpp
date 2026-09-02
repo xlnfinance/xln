@@ -101,6 +101,7 @@ try {
     }
     const bool by_segment = std::getenv("BRAINVAULT_OPENCL_ONESHOT") == nullptr;
     const bool precompute = std::getenv("BRAINVAULT_OPENCL_NO_PRECOMPUTE") == nullptr;
+    const bool profiling = std::getenv("BRAINVAULT_OPENCL_PROFILE") != nullptr;
 
     argon2::opencl::GlobalContext global;
     const auto &devices = global.getAllDevices();
@@ -113,7 +114,7 @@ try {
                                1, memory_kib, 1);
     argon2::opencl::ProcessingUnit unit(
         &program, &common, &device, batch, by_segment, precompute,
-        jobs_per_block);
+        jobs_per_block, profiling);
     const auto unit_ready = probe_clock::now();
 
     double initialize_ms = 0;
@@ -152,7 +153,7 @@ try {
     const auto wipe_started = probe_clock::now();
     unit.clearMemory();
     const auto finished = probe_clock::now();
-    if (std::getenv("BRAINVAULT_OPENCL_PROFILE") != nullptr) {
+    if (profiling) {
         std::cerr << "profile program="
                   << std::chrono::duration<double, std::milli>(program_ready - started).count()
                   << "ms unit="

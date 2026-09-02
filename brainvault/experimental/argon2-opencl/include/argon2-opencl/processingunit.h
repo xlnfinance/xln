@@ -26,7 +26,8 @@ public:
             const ProgramContext *programContext, const Argon2Params *params,
             const Device *device, std::size_t batchSize,
             bool bySegment = true, bool precomputeRefs = false,
-            std::uint32_t fixedJobsPerBlock = 0);
+            std::uint32_t fixedJobsPerBlock = 0,
+            bool profiling = false);
 
     void setPassword(std::size_t index, const void *pw, std::size_t pwSize);
     void setPasswordWithParams(std::size_t index, const Argon2Params &jobParams,

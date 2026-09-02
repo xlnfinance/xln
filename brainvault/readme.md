@@ -51,6 +51,23 @@ BrainVault has one frozen protocol: V1. The npm package version is only the
 immutable build/release number required by the registry; it is not a protocol
 version. Future fixes must preserve every V1 root and frozen test vector.
 
+## Hardware defaults
+
+The portable default targets the entry 14-inch MacBook Pro with M5: 16GB
+unified memory, 10 CPU cores, and 153GB/s memory bandwidth. Level 3,
+multiplier 1, and all 10 cores need 2.5GB of Argon2 arenas, so the same default
+remains practical on the least-expensive current MacBook Pro. BrainVault still
+calculates the worker ceiling from the actual CPU and RAM at runtime.
+
+`--ask` keeps multiplier 1 as the recommendation on every machine. On machines
+with abundant memory it also prints a memorable power-of-two `ultra`
+memory-hard option sized to about 25% of RAM across all CPU workers. For
+example, 32 workers yield multiplier 8 on 256GB (64GB arenas) and multiplier 16
+on 512GB (128GB arenas). This option is stronger but proportionally slower,
+changes the root, must be remembered for recovery, and currently uses the CPU
+engines; it is never selected automatically. Multiplier 1 is both the portable
+choice and the fastest path, including the experimental CPU/GPU hybrid.
+
 ## No recovery receipt by design
 
 BrainVault does not create a recovery file, QR code, seed receipt, or cloud

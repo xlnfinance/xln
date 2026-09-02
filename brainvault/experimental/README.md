@@ -72,12 +72,12 @@ research backend and is intentionally not routed into wallet creation.
 
 `argon2-opencl/` is the faster source-only experiment. A one-shard-per-workgroup
 layout plus concurrent C/NEON processing completed 1,000 exact V1 shards in a
-best 3.072 seconds (325.53 shards/s), versus a fresh 5.136-second C/NEON
-baseline: **1.67x best / about 1.62x typical end-to-end**. The frozen root remained
+best 3.054 seconds (327.45 shards/s), versus a fresh 5.136-second C/NEON
+baseline: **1.68x best / about 1.62x typical end-to-end**. The frozen root remained
 `dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
 The measured M3 Ultra split is 480 GPU shards in two batches of 240 and 520 CPU
 shards. The required 32-worker run took 3.127 seconds; the best observed
-3.072-second tuning used 30 workers to reduce unified-memory contention. GPU
+3.054-second tuning used 30 workers to reduce unified-memory contention. GPU
 and host memory are explicitly erased.
 
 OpenCL is deprecated by Apple and the pinned upstream has mixed license
@@ -104,5 +104,6 @@ make -C experimental/argon2-rust
 bun experimental/benchmark.ts --backend=rust-pool --shards=1000 --workers=8
 ```
 
-Raw run output is in `results/`. The aborted 100,000-shard log records the
+Raw run output and the independently validated Kimi K3/Qwen 3.8 Max audit are
+in `results/`. The aborted 100,000-shard log records the
 initially requested run before the benchmark size was corrected to 1,000.

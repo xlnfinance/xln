@@ -17,9 +17,10 @@ enum {
 
 KernelRunner::KernelRunner(const ProgramContext *programContext,
                            const Argon2Params *params, const Device *device,
-                           std::size_t batchSize, bool bySegment, bool precompute)
+                           std::size_t batchSize, bool bySegment, bool precompute,
+                           bool profiling)
     : programContext(programContext), params(params), batchSize(batchSize),
-      bySegment(bySegment), precompute(precompute),
+      bySegment(bySegment), precompute(precompute), profiling(profiling),
       memorySize(params->getMemorySize() * batchSize), memoryDirty(true)
 {
     auto context = programContext->getContext();
@@ -28,7 +29,7 @@ KernelRunner::KernelRunner(const ProgramContext *programContext,
     std::uint32_t segmentBlocks = params->getSegmentBlocks();
 
     queue = cl::CommandQueue(context, device->getCLDevice(),
-                             CL_QUEUE_PROFILING_ENABLE);
+                             profiling ? CL_QUEUE_PROFILING_ENABLE : 0);
 
 #ifndef NDEBUG
         std::cerr << "[INFO] Allocating " << memorySize << " bytes for memory..."
@@ -172,7 +173,7 @@ void KernelRunner::run(std::uint32_t lanesPerBlock, std::uint32_t jobsPerBlock)
     cl::NDRange globalRange { THREADS_PER_LANE * lanes, batchSize };
     cl::NDRange localRange { THREADS_PER_LANE * lanesPerBlock, jobsPerBlock };
 
-    queue.enqueueMarker(&start);
+    if (profiling) queue.enqueueMarker(&start);
 
     std::size_t shmemSize = THREADS_PER_LANE * lanesPerBlock * jobsPerBlock
             * sizeof(cl_uint) * 2;
@@ -191,11 +192,15 @@ void KernelRunner::run(std::uint32_t lanesPerBlock, std::uint32_t jobsPerBlock)
                                    globalRange, localRange);
     }
 
-    queue.enqueueMarker(&end);
+    if (profiling) queue.enqueueMarker(&end);
 }
 
 float KernelRunner::finish()
 {
+    if (!profiling) {
+        queue.finish();
+        return 0.0F;
+    }
     end.wait();
 
     cl_ulong nsStart = start.getProfilingInfo<CL_PROFILING_COMMAND_END>();
