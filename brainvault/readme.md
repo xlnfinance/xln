@@ -8,6 +8,19 @@ Memory-hard brainwallet construction. Derive the same wallet from the exact same
 
 ## Usage
 
+Run only BrainVault from a source checkout; no XLN service or frontend starts:
+
+```bash
+git clone https://github.com/xlnfinance/xln.git
+cd xln/brainvault
+bun install --frozen-lockfile --ignore-scripts
+bun ./brainvault --smoke
+bun ./brainvault
+
+# Optional: sequential 1,000-shard comparison of every compatible engine.
+bun ./brainvault --bench
+```
+
 ```bash
 # Run immediately without installing. The bundled Metal V1 + C/NEON hybrid is
 # the default for 1,000+ shards on the measured M3 Ultra; safe fallbacks are automatic.
@@ -181,19 +194,16 @@ This directory is the complete npm package boundary. Nothing above
 
 ## Repository topology
 
-The canonical editable source is this `brainvault/` directory inside the XLN
-monorepo. If `xlnfinance/brainvault` is created for discovery and independent
-auditing, it should be a one-way subtree mirror, never a second source of truth.
-That keeps normal monorepo development while making this self-contained package
-look like a standalone repository:
+The sole canonical source is `brainvault/` on the `main` branch of
+`xlnfinance/xln`. Keeping it here shares XLN's history, review, issues, and stars
+without coupling the package at runtime: the directory remains independently
+packable and needs nothing above it after installation.
 
-```bash
-git subtree split --prefix=brainvault -b brainvault-publish
-git push git@github.com:xlnfinance/brainvault.git brainvault-publish:main
-```
-
-Do not convert the directory into a submodule. Changes belong in the monorepo
-and flow outward to the mirror; never merge independent mirror commits back.
+Do not convert it into a submodule. A submodule would replace the audited files
+with a movable repository pointer, complicate fresh clones, and introduce a
+second release boundary. Do not create a mirror until independent repository
+discovery is worth that operational cost; if that decision is made later, name
+one source of truth before copying history.
 
 ```bash
 # Portable engines work immediately after npm/Bun installation.
@@ -240,6 +250,37 @@ still BrainVault V1.
 maps the ownership layers, requires a failing regression test before a bug fix,
 and routes CLI, native, package, and release changes to their exact verification
 gates. Agents should reload it after a long-session context compaction.
+
+## Exact audit surface
+
+Audit the smallest security claim first. The canonical 32-byte root is defined
+by exactly these files:
+
+1. `SPEC-V1.md` — normative byte-level protocol;
+2. `primitives/spec.ts` — frozen constants, normalization, and shard salts;
+3. `primitives/kdf.ts` — one explicitly parameterized Argon2id shard;
+4. `canonical.ts` — factor, domain string, ordered shard fold, and fingerprint;
+5. `vectors-v1.json` — external expected bytes and roots.
+
+The executable TypeScript root implementation in items 2–4 is currently 281
+lines. It has no CLI, filesystem, network, wallet UI, or native scheduler. Audit
+its two cryptographic imports against the exact versions and integrity hashes in
+`bun.lock`: `hash-wasm` for Argon2id and `@noble/hashes` for BLAKE3.
+
+Expand the audit only for the property being trusted:
+
+| Property | Additional exact files |
+| --- | --- |
+| Mnemonics and Ethereum paths | `core.ts`, `bip39-english.ts`, `primitives/encoding.ts` |
+| CLI input and secret disclosure | `cli-policy.ts`, `suggestion.ts`, `cli.ts`, `core.test.ts` |
+| Worker ordering and failure | `shard-collector.ts`, `native.ts`, `worker-native.ts`, `worker-wasm.ts` |
+| Default M3 Ultra acceleration | `binary-integrity.ts`, `native-hybrid.ts`, `native-progress.ts`, `experimental/argon2-c/brainvault_argon2.c`, `experimental/argon2-metal/brainvault_argon2_metal.m`, `experimental/argon2-metal/argon2.metal` |
+| Native build inputs | the two relevant `Makefile`s plus every source/header named by their `SOURCES` and `HEADERS` variables |
+| npm/release integrity | `package.json`, `manifest.ts`, `package.test.ts`, `native-build.test.ts`, `release.md`, `historical.test.ts` |
+
+`MANIFEST.sha256` covers every shipped file, but it is not a substitute for a
+signed release. `native-build.test.ts` independently rebuilds native artifacts
+and requires byte equality with the bundled executables.
 
 ## Invariant-style AI audit
 
@@ -375,4 +416,6 @@ Name and passphrase must each contain at least one character. They remain exact 
 The standalone BrainVault package never persists a mnemonic, root, password,
 receipt, or recovery file. Sensitive output exists only after reveal rehearsal.
 
-The repository exposes one CLI route: `bun run bv`. The implementation and every cryptographic source remain inside this directory; do not add root-level wrapper files.
+From the monorepo root the CLI route is `bun run bv`; from this package directory
+it is `bun ./brainvault`. The implementation and every cryptographic source
+remain inside this directory; do not add root-level wrapper files.
