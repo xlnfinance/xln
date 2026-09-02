@@ -49,7 +49,7 @@ import { formatAddress, isPlaceholderEntityName, shortHash } from "../entity-pan
 import { buildConfigureTokenOptions, buildMoveEntityOptions, buildMoveHubEntityOptions, buildMoveSourceAccountOptions, buildOpenAccountEntityOptions, isFullEntityId, normalizeWorkspaceAccountId, resolveConfigureTokenId, resolveMoveTargetHubEntityId } from "../entity-panel-options";
 import { type ExternalWalletReadResult, type ExternalWalletSnapshotSource } from "../../assets/external-wallet-snapshot";
 import { buildExternalWalletStateSyncSignature, buildOnchainReserves, createExternalTokenCatalogLoader, fetchExternalTokenCatalog, isExternalWalletSnapshotTransportFailure, readExternalWalletState, requestExternalWalletSnapshot, resolveExternalWalletSpender } from "../../external-wallet-reader";
-import { buildEntityPanelHashRouteFromState, canonicalizeEntityPanelRoute, getLocationHashParams, getLocationHashRoute, resolveEntityPanelDeepLinkFromLocation, type AccountWorkspaceTab, type AssetWorkspaceTab, type ConfigureWorkspaceTab, type SettingsSubview, type ViewTab } from "../entity-panel-routing";
+import { ENTITY_WORKSPACE_SECTIONS, buildEntityPanelHashRouteFromState, canonicalizeEntityPanelRoute, getLocationHashParams, getLocationHashRoute, resolveEntityPanelDeepLinkFromLocation, type AccountWorkspaceTab, type AssetWorkspaceTab, type ConfigureWorkspaceTab, type SettingsSubview, type ViewTab } from "../entity-panel-routing";
 import { openDisputedAccountNavigation, returnToAccountsWorkspace, selectAccountNavigation, selectTopLevelTabNavigation, type AccountWorkspaceNavigationPatch } from "../../account/account-workspace-navigation";
 import { buildEntityActivityAccounts, buildEntityActivityRows, filterEntityActivityRows } from "../../activity/entity-activity";
 import { emptyEntityWorkspaceRuntimeFrameContext, type EntityWorkspaceRuntimeFrameContext } from "../../core/runtime-frame-context";
@@ -2739,12 +2739,16 @@ async function rebroadcastPendingBatch(): Promise<void> {
 $: pendingBatchCount = pendingBatchState.count;
 $: pendingBatchMode = pendingBatchState.mode;
 $: pendingBatchPreview = buildPendingBatchPreview(pendingBatchState.previewBatch, getPendingBatchLabelOptions());
-const tabs: IconBadgeTabConfig<ViewTab>[] = [
-  { id: "assets", icon: Landmark, label: "Assets" },
-  { id: "accounts", icon: Users, label: "Accounts" },
-  { id: "ownership", icon: PieChart, label: "Ownership" },
-  { id: "settings", icon: Settings, label: "Settings" },
-];
+const tabIcons: Record<ViewTab, ComponentType> = {
+  assets: Landmark,
+  accounts: Users,
+  ownership: PieChart,
+  settings: Settings,
+};
+const tabs: IconBadgeTabConfig<ViewTab>[] = ENTITY_WORKSPACE_SECTIONS.map((section) => ({
+  ...section,
+  icon: tabIcons[section.id],
+}));
 $: hasAnyAccounts = accountIds.length > 0;
 $: faucetSupportsReserve = !!getPanelFaucetReserveTokenMeta(faucetAssetSymbol);
 $: canShowAccountFaucet = faucetSupportsReserve && hasAnyAccounts;
