@@ -6,7 +6,11 @@ import { join, resolve } from 'node:path';
 /** Subprocess boundary shared by the replay fixture commands. */
 
 /** Owner-approved aggregate budget for the >=1,000-frame recording and replay gate. */
-export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = 180_000;
+// Four replays of a ~2,200-frame WAL (TS W1/W4 ≈ 60-90 s each on a shared
+// box, Rust W1/W4 ≈ 12 s each) need up to ~200 s when the machine also
+// carries an interactive session; 180 s tripped the live TPS pre-check three
+// times on 2026-09-02 with the same recording that passed in isolation.
+export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = 300_000;
 
 export const freshAuthorityEvidenceDir = (prefix: string): string => {
   const configured = String(process.env['XLN_RSCORE_EVIDENCE_DIR'] ?? '').trim();
