@@ -59,9 +59,9 @@ describe('frontend platform baseline inventory', () => {
       'wallet-durable-custody-storage',
       'push-wake-service-worker',
       'ops-workspace-registries',
-      'candidate-release-consumers',
+      'canonical-release-consumers',
     ]);
-    expect(deferred.every(({ workPackage }) => ['WP7', 'WP8', 'WP9'].includes(workPackage))).toBe(true);
+    expect(deferred.every(({ workPackage }) => ['WP7', 'WP8', 'WP9', 'WP10'].includes(workPackage))).toBe(true);
   });
 
   test('records WP0, WP2, and WP5 concerns as implemented', () => {
@@ -71,6 +71,8 @@ describe('frontend platform baseline inventory', () => {
     expect(currentWork.length).toBeGreaterThan(0);
     expect(currentWork.every(({ status }) => status === 'implemented')).toBe(true);
     expect(PLATFORM_INVENTORY.find(({ id }) => id === 'native-and-packaged-consumers')?.status)
+      .toBe('implemented');
+    expect(PLATFORM_INVENTORY.find(({ id }) => id === 'candidate-release-consumers')?.status)
       .toBe('implemented');
   });
 

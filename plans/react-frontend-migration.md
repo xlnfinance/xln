@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED NATIVE/PACKAGED COPY + ISOLATED PWA LIFECYCLE READY`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 COMPLETE WITH VERIFIED NATIVE/PACKAGED COPY + ISOLATED PWA/DEPLOYMENT ROLLBACK`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1927,7 +1927,7 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + VERIFIED CAPACITOR/PACKAGED SHELL COPY + ISOLATED PWA LIFECYCLE READY`
+**Status:** `COMPLETE — VERIFIED RELEASE + NATIVE/PACKAGED CONSUMERS + ISOLATED PWA/DEPLOYMENT ACTIVATION AND ROLLBACK`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
@@ -2113,12 +2113,46 @@ environment stop. File-size policy still reports only the known
 package, signature, activation, deployment, canonical shell write, or
 production cutover ran.
 
+Deployment selection now has its own isolated consumer rather than changing the
+canonical production script. It copies only independently verified complete
+releases into an immutable store, rejects a duplicate active selection, and
+publishes one canonical active/rollback state file under an exclusive lock via
+write, file fsync, atomic rename, and directory fsync. Activation verifies the
+current release before retaining it as rollback; rollback verifies both releases
+and swaps the whole-release identities in one state replacement.
+
+The real browser harness built and staged two 334-file releases:
+`sha256-ea173909e635649b5f4ed9eee848015f82d4db7a47ef22730c5ae6a7f3275e3a`
+and
+`sha256-76016a7271fb23d0c050739d001c48071989d75b887300355568d3766e30c554`.
+Chromium rejected a corrupt release without changing selection, activated the
+update, rejected duplicate activation, then rolled back to the original at one
+origin. Wallet/docs response headers and entry hashes matched the selected
+release throughout, with zero page/console failures. The state-focused unit
+suite passes 4 / 4 with 25 expectations; the affected release/inventory batch
+passes 22 / 22 with 332 expectations.
+
+All four React local checks pass with 640 files and zero unsafe findings;
+canonical Svelte remains at zero errors/warnings and builds 4,671 SSR plus 6,422
+client modules. The full frontend suite remains at the exact 13-name baseline
+(1,239 passes, 14 reported failures, 6,858 expectations across 1,253 tests / 205
+files). All four entrypoint tests pass with 517 expectations, and dead-code
+analysis retains only its existing Dockview hint. Canonical
+`scripts/deployment/deploy-platform.sh`, `frontend/build`, service wiring, and
+production remain unchanged; those release consumers are explicitly retained
+under owner-authorized WP10 cutover. The repository gate passes 26 deterministic
+tests / 100,156 expectations, compiles 28 Solidity files, publishes 92
+TypeChain files, confirms four-contract immutable metadata parity, and passes
+all ten soundchecks before the established missing-`cargo` environment stop.
+File-size policy still reports only the known `core/qa/report.ts` 3,001 / 3,000
+overage; every new handwritten file is below 300 lines.
+
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
 
 ### WP9 — Close parity and prepare cutover
 
-**Status:** `WAITING FOR APPLICATION COMPLETION`
+**Status:** `IN PROGRESS — RETAINED-ROUTE AND CAPABILITY PARITY AUDIT NEXT`
 
 - Confirm all retained routes and capabilities have React owners and tests.
 - Run all-frontend checks and representative browser flows at required
@@ -2160,7 +2194,7 @@ any mismatch. Never compile on production.
       building unrelated apps.
 - [x] Shared packages preserve storage/lifecycle and Runtime-client boundaries.
 - [x] Generated inputs have deterministic producers and collision-free outputs.
-- [ ] Same-origin routing, redirects, proxies, assets, CSP, storage, PWA, deep
+- [x] Same-origin routing, redirects, proxies, assets, CSP, storage, PWA, deep
       links, native consumers, activation, and rollback are proven.
 - [ ] Existing behavior tests were preserved or replaced with equivalent
       behavior coverage, not weakened to fit React.
@@ -2171,18 +2205,18 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Build a fail-closed deployment release selector and exercise an isolated
-   atomic whole-release activation plus immediate rollback from verified,
-   immutable candidate directories without touching production.
+1. Run the WP9 retained-route and capability parity audit against the current
+   four-app candidate; record exact remaining Svelte-owned behavior, test, and
+   browser gaps without flipping routes or deleting either application.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner
    changes in the working tree and are collateral from that stream, not the
    frontend migration.
-3. Finish WP8 deployment selection and rollback evidence while keeping signing,
-   production activation, and canonical Svelte cutover as separate operations.
-4. Close WP9 parity only after site, docs, wallet, and ops are complete, then
-   request explicit WP10 cutover authority and prepare the upstream PR.
+3. Use the parity audit to select the next non-cutover implementation slice;
+   keep the sized Entity workspace expansion behind its explicit owner decision.
+4. When WP9 evidence is complete, request explicit WP10 cutover authority and
+   prepare the canonical-consumer change separately.
 5. Keep WP11 as a separately authorized production operation using immutable
    prebuilt artifacts.
 
