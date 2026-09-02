@@ -46,6 +46,7 @@ type ScenarioEntry = {
 const SCENARIOS: Record<string, ScenarioEntry> = {
   'rebalance': { file: './settlement/rebalance', fn: 'runRebalanceScenario' },
   'lock-ahb':  { file: './payments/lock-ahb',  fn: 'lockAhb' },
+  'htlc-lazy': { file: './payments/htlc-lazy', fn: 'htlcLazy' },
   'ahb':       { file: './consensus/ahb',       fn: 'ahb' },
   'swap':      { file: './market/swap',      fn: 'runSwapScenario' },
   'settle':    { file: './settlement/settle',    fn: 'runSettleScenario' },

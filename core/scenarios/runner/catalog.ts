@@ -36,6 +36,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     run: async (env: RuntimeReplica) => { await (await import('../payments/lock-ahb')).lockAhb(env); },
   },
   {
+    id: 'htlc-lazy',
+    name: 'HTLC A->H->B on lazy entities',
+    description: 'onion HTLC lock/resolve over credit lines between lazy 1-of-1 entities; runs on TS and Rust authority',
+    tags: ['htlc', 'routing', 'rscore'],
+    run: async (env: RuntimeReplica) => (await import('../payments/htlc-lazy')).htlcLazy(env),
+  },
+  {
     id: 'htlc-4hop',
     name: 'HTLC 4-Hop Chain',
     description: '4-hop onion routed payment through 3 hubs, fee cascade verification',
