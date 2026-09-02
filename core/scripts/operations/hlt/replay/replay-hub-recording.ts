@@ -26,7 +26,6 @@ import { resolve } from 'node:path';
 
 import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../account/crypto';
 import { computeAccountStateRootCold } from '../../../../account/commitment/state-root';
-import { projectEntityAccountLeaf } from '../../../../entity/consensus/state-root';
 import { computeBookCommitmentHash } from '../../../../orderbook/commitment';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -63,6 +62,7 @@ import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profi
 import {
   computeEntityAccountDigests,
   computeEntityConsensusSectionDigestsCold,
+  projectEntityAccountLeaf,
 } from '../../../../entity/consensus/state-root';
 import {
   beginRuntimeParityEvidence,
