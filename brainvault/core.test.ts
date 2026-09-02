@@ -410,7 +410,7 @@ function runCli(cliArgs: readonly string[], input = '') {
   });
 }
 
-function runCliTty(extraArgs: readonly string[], reveal = false, rehearsal = 'secret123456') {
+function runCliTty(extraArgs: readonly string[], rehearsal = '') {
   const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
   const script = [
     'set timeout 10',
@@ -419,8 +419,8 @@ function runCliTty(extraArgs: readonly string[], reveal = false, rehearsal = 'se
     'send "alice\\r"',
     'expect "Password: "',
     'send "secret123456\\r"',
-    reveal ? 'expect "Repeat the exact password: "' : 'expect "Type reveal"',
-    reveal ? `send "${rehearsal}\\r"` : 'send "\\r"',
+    'expect "Repeat the exact password to reveal recovery material, or press Enter to exit: "',
+    `send "${rehearsal}\\r"`,
     'expect eof',
     'catch wait result',
     'exit [lindex $result 3]',
@@ -468,9 +468,9 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
   expect(output).not.toContain(vector.expect.mnemonic24);
   expect(output).not.toContain('Private Key 1:');
 
-  const rawKeyWithoutReveal = runCli(['--show-private-key']);
-  expect(rawKeyWithoutReveal.exitCode).toBe(1);
-  expect(rawKeyWithoutReveal.stderr.toString()).toContain('--show-private-key requires --reveal');
+  const nonInteractiveRawKey = runCli(['--show-private-key']);
+  expect(nonInteractiveRawKey.exitCode).toBe(1);
+  expect(nonInteractiveRawKey.stderr.toString()).toContain('sensitive output requires an interactive TTY');
 });
 
 test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocation', () => {
@@ -518,8 +518,8 @@ test('CLI defaults to printable ASCII while preserving explicit Unicode recovery
   expect(cliPasswordError('1234567', true)).toBeUndefined();
 });
 
-test('reveal requires exact password rehearsal before sensitive output', () => {
-  const revealed = runCliTty(['--reveal'], true);
+test('exact password rehearsal reveals sensitive output without a reveal command', () => {
+  const revealed = runCliTty([], 'secret123456');
   const output = revealed.stdout.toString();
   expect(revealed.exitCode).toBe(0);
   expect(output).toContain('SENSITIVE OUTPUT');
@@ -527,7 +527,7 @@ test('reveal requires exact password rehearsal before sensitive output', () => {
 });
 
 test('wrong reveal rehearsal fails closed without a runtime stack trace', () => {
-  const rejected = runCliTty(['--reveal'], true, 'wrong-password');
+  const rejected = runCliTty([], 'wrong-password');
   const output = rejected.stdout.toString();
   expect(rejected.exitCode).toBe(1);
   expect(output).toContain('Password did not match. Nothing was revealed.');

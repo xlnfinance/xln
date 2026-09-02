@@ -26,8 +26,8 @@ bun run bv
 bunx brainvault --suggest-password
 
 # Default success output is only the root fingerprint and first address.
-# Reveal mnemonics only after an exact hidden password rehearsal.
-bunx brainvault --reveal
+# At the final hidden prompt, Enter exits; the exact password reveals mnemonics.
+bunx brainvault
 
 # Advanced path: also asks level, multiplier, workers, and any available engine.
 bun run bv --ask
@@ -85,9 +85,10 @@ bits. It displays the result once and requires exact hidden re-entry. Terminal
 scrollback may retain that display, so use it only on a trusted device.
 
 After derivation BrainVault prints only an eight-hex root fingerprint and the
-first public address. Enter exits. Typing `reveal`, or starting with
-`--reveal`, requires the exact password again before any mnemonic or address
-matrix is printed. `--show-private-key` additionally requires `--reveal`.
+first public address, then shows one hidden prompt. Enter exits; entering the
+exact password again reveals the mnemonic and address matrix. Any other input
+fails closed. `--show-private-key` adds raw keys only after that same rehearsal.
+`--reveal` remains an inert compatibility alias for older invocations.
 Passwords are forbidden in argv; automation must import the library API.
 
 ## Self-contained package
@@ -226,7 +227,7 @@ Approve only if source and frozen tests prove every invariant below:
     passwords are ten independent unbiased OS-CSPRNG selections from the exact
     62-character a-z/A-Z/0-9 alphabet and are never written by BrainVault.
 12. Default CLI output contains only the root fingerprint and first public
-    address. Mnemonics require explicit reveal plus exact hidden rehearsal;
+    address. Mnemonics require exact hidden password rehearsal after derivation;
     password argv and un-rehearsed private-key output are rejected.
 
 Reject the package if any invariant is false, is not tested, or cannot be

@@ -16,8 +16,7 @@
  *   bun run bv --repeat                         # Interactive: require double entry for name/pass
  *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256MB * multiplier per shard
  *   bun run bv --address-count=5                # Number of standard + ledger-live addresses
- *   bun run bv --reveal                         # Rehearse password, then reveal recovery material
- *   bun run bv --reveal --show-private-key      # Also reveal raw key for Address 1 (highest risk)
+ *   bun run bv --show-private-key               # Also reveal raw key for Address 1 (highest risk)
  *   bun run bv --help                           # Show usage/help
  */
 
@@ -235,16 +234,16 @@ Flags:
 - --repeat
   Interactive mode only: require second entry for Name and Passphrase.
 - --reveal
-  After derivation, require exact hidden password rehearsal before printing
-  mnemonics and the full address matrix. Without it, Enter exits and only the
-  root fingerprint plus first address are printed.
+  Backward-compatible alias. The interactive flow always offers one hidden
+  password rehearsal after printing the public fingerprint and first address.
 - --shard-multiplier=N
   Custom KDF mode. Memory per shard = 256MB * N.
   Warning: changing this changes the derived wallet.
 - --address-count=N
   Number of addresses generated per scheme (standard + Ledger Live).
 - --show-private-key
-  Requires --reveal. Also print raw private key for Address 1 (highest risk).
+  After exact hidden password rehearsal, also print the raw private key for
+  Address 1 (highest risk).
 - --allow-short-password
   Legacy recovery only. The CLI normally requires at least 8 password characters;
   this flag preserves recovery of older wallets created with a shorter password.
@@ -262,8 +261,7 @@ Examples:
 - bunx brainvault --bench --level 3 --multiplier 10 --workers 32
 - bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine metal
 - bun run bv
-- bunx brainvault --reveal
-- bunx brainvault --reveal --show-private-key
+- bunx brainvault --show-private-key
 
 Recovery rule:
 - You must use the exact same Name + Passphrase + Shard count + shard-multiplier
@@ -353,12 +351,8 @@ const inlineFactor = getPositiveIntFlag(['factor']);
 const inlineShards = getPositiveIntFlag(['shards']);
 const inlineWorkers = getPositiveIntFlag(['workers', 'w']);
 
-if (showPrivateKey && !revealRequested) {
-  console.error('Error: --show-private-key requires --reveal and exact password rehearsal.');
-  process.exit(1);
-}
-if (revealRequested && (!stdin.isTTY || !stdout.isTTY)) {
-  console.error('Error: --reveal requires an interactive TTY for hidden password rehearsal.');
+if ((revealRequested || showPrivateKey) && (!stdin.isTTY || !stdout.isTTY)) {
+  console.error('Error: sensitive output requires an interactive TTY for hidden password rehearsal.');
   process.exit(1);
 }
 
@@ -1344,21 +1338,15 @@ async function interactive() {
 
     const revealOutput = new PromptOutput();
     const revealRl = readline.createInterface({ input: stdin, output: revealOutput, terminal: true });
-    const command = revealRequested
-      ? 'reveal'
-      : (await revealRl.question('\nEnter exits. Type reveal to rehearse the password and reveal recovery material: ')).trim();
-    if (command === '') {
-      revealRl.close();
-      return;
-    }
-    if (command !== 'reveal') {
-      revealRl.close();
-      console.error('Nothing was revealed. Type exactly reveal, or press Enter to exit.');
-      process.exitCode = 1;
-      return;
-    }
-    const rehearsal = await askSecret(revealRl, revealOutput, 'Repeat the exact password: ');
+    const rehearsal = await askSecret(
+      revealRl,
+      revealOutput,
+      '\nRepeat the exact password to reveal recovery material, or press Enter to exit: ',
+    );
     revealRl.close();
+    if (rehearsal === '') {
+      return;
+    }
     if (rehearsal !== pass) {
       console.error('Password did not match. Nothing was revealed.');
       process.exitCode = 1;
