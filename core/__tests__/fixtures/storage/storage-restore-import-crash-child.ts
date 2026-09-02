@@ -16,6 +16,7 @@ import { LIMITS } from '../../../config/constants';
 import { EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
 import { deriveAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
 import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
+import { buildQuorumHanko } from '../../../hanko/signing';
 import { getEntityLeaderState } from '../../../entity/consensus/leader';
 import { generateLazyEntityId } from '../../../entity/factory';
 import {
@@ -136,9 +137,7 @@ const restoredAccount: AccountReplica = {
     accountTxs: [],
     prevFrameHash: '',
     accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
-    deltas: [],
     stateHash: '',
-    byLeft: entityId === leftEntity,
   },
   currentHeight: 0,
   rollbackCount: 0,
@@ -187,6 +186,16 @@ const commitEntityFrame = async (): Promise<void> => {
     context: `entity-frame:${entityHeight}`,
   }];
   const signature = await signAccountFrame(env, signerId, hash);
+  // Certified frames persist exactly their own quorum Hanko next to
+  // collectedSigs; see finalization.ts installCommittedState.
+  const hanko = await buildQuorumHanko(
+    env,
+    entityId,
+    hash,
+    [{ signerId, signature }],
+    postStateWithoutHead.config,
+    postStateWithoutHead,
+  );
   const link: CertifiedEntityFrameLink = {
     frame: {
       parentFrameHash,
@@ -204,6 +213,7 @@ const commitEntityFrame = async (): Promise<void> => {
       },
       hashesToSign,
       collectedSigs: new Map([[signerId, [signature]]]),
+      hankos: [hanko],
     },
     postAuthority,
   };

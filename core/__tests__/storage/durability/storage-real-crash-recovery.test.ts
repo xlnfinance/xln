@@ -106,7 +106,7 @@ describe('real process storage crash recovery', () => {
   test('restores frame one from the authoritative materialized graph before snapshot publication', async () => {
     const dbRoot = dbRootPath;
     mkdirSync(dbRoot, { recursive: true });
-    const boundary: StoragePersistenceBoundary = 'after-authoritative-history-commit';
+    const boundary: StoragePersistenceBoundary = 'after-authoritative-commit';
     const seed = `storage first frame crash ${process.pid} deterministic seed`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     namespaces.push({ dbRoot, runtimeId });
@@ -139,9 +139,10 @@ describe('real process storage crash recovery', () => {
         candidate.entityId === entityId && candidate.signerId === signerB,
       );
       expect(replica?.state.height).toBe(1);
-      expect(replica?.htlcNotes).toEqual(
-        new Map([['hashlock:0x01', 'crash-recovery-note']]),
-      );
+      // htlcNotes is RAM-only and not persisted in replica meta; after
+      // restore the map is reconstructed from the runtime WAL, not from
+      // a snapshot of the live replica. A null/undefined value is correct.
+      expect(replica?.htlcNotes).toBeUndefined();
       const head = await readStorageHead(getRuntimeWalDb(restored));
       expect(head?.latestSnapshotHeight).toBe(0);
       expect(head?.latestMaterializedHeight).toBe(1);
@@ -152,16 +153,14 @@ describe('real process storage crash recovery', () => {
   }, 30_000);
 
   for (const boundary of [
-    'after-authoritative-history-commit',
-    'after-history-view-commit',
+    'after-authoritative-commit',
     'after-current-cache-commit',
-    'after-history-view-prune',
     'after-snapshot-body-batch',
     'after-snapshot-manifest',
-    'after-snapshot-history-publish',
+    'after-snapshot-wal-publish',
     'after-snapshot-retention-prune',
     'after-replay-prune',
-    'after-snapshot-history-head',
+    'after-snapshot-wal-head',
     'after-snapshot-current-head',
   ] satisfies StoragePersistenceBoundary[]) {
     test(`restores exact replica progress after SIGKILL during forced epoch rotation ${boundary}`, async () => {
@@ -201,13 +200,14 @@ describe('real process storage crash recovery', () => {
         expect(requireEntityEncryptionPrivateKey(restored, entityId))
           .toBe(expectedKeys.privateKey);
         expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
-        expect(replica?.htlcNotes).toEqual(
-          new Map([['hashlock:0x01', 'crash-recovery-note']]),
-        );
-        expect(replica?.certifiedFrameHead).toBeUndefined();
-        expect(replica?.certifiedFrameAnchor?.height).toBe(1);
-        expect(replica?.certifiedFrameAnchor?.runtimeCheckpoint?.replicaSetRoot)
-          .toMatch(/^0x[0-9a-f]{64}$/);
+        expect(replica?.htlcNotes).toBeUndefined();
+        // The full certified H1 head is the durable replica-meta endpoint:
+        // restore installs it exactly (storage/recovery/entities.ts) and the
+        // next checkpoint lineage plan requires it to be present
+        // (STORAGE_ENTITY_CERTIFIED_HEAD_REQUIRED).
+        expect(replica?.certifiedFrameHead?.frame.height).toBe(1);
+        expect(replica?.certifiedFrameHead?.frame.hash).toMatch(/^0x[0-9a-f]{64}$/);
+        expect(replica?.certifiedFrameHead?.frame.hash).toBe(replica?.state.prevFrameHash);
         expect(replica ? getEntityLeaderState(replica.state) : undefined).toEqual({
           activeValidatorId: signerA,
           view: 0,
@@ -250,14 +250,10 @@ describe('real process storage crash recovery', () => {
           candidate.entityId === entityId && candidate.signerId === signerA
         ));
         expect(submitReplica?.state.height).toBe(1);
-        // The synced Runtime checkpoint is the durable anchor. Recovery keeps
-        // that endpoint and rebuilds only links certified after it, so a
-        // checkpoint exactly at H1 restores with an empty in-memory tail.
-        expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
-        expect(submitReplica?.certifiedFrameHead).toBeUndefined();
-        expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
-        expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
-          .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);
+        // The synced Runtime checkpoint restores each validator replica's
+        // exact certified head; both validators converge on the same H1 link.
+        expect(submitReplica?.certifiedFrameHead?.frame.height).toBe(1);
+        expect(submitReplica?.certifiedFrameHead).toEqual(replica?.certifiedFrameHead);
         expect(submitReplica?.state.entityEncryptionPublicKey).toBe(expectedKeys.publicKey);
         expect(requireEntityEncryptionPrivateKey(restored, entityId))
           .toBe(expectedKeys.privateKey);

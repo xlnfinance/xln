@@ -231,6 +231,23 @@ const certifyNextFrame = async (
     hash,
     applied.collectedHashes ?? [],
   );
+  const collectedSigs = new Map([signerA, signerB].map(signerId => [
+    signerId,
+    hashesToSign.map(hashInfo => signAccountFrame(env, signerId, hashInfo.hash)),
+  ]));
+  // Production certification keeps exactly the EntityFrame quorum Hanko on the
+  // certified frame (see finalization.ts buildCommitHankos/installCommittedState).
+  const entityFrameHanko = await buildQuorumHanko(
+    env,
+    state.entityId,
+    hash,
+    [signerA, signerB].map(signerId => ({
+      signerId,
+      signature: collectedSigs.get(signerId)![0]!,
+    })),
+    postStateWithoutHead.config,
+    postStateWithoutHead,
+  );
   return {
     state: commitEntityFrameCandidateState({ ...postStateWithoutHead, prevFrameHash: hash }),
     link: {
@@ -246,10 +263,8 @@ const certifyNextFrame = async (
         authorityRoot,
         leader: { proposerSignerId: signerA, view: getEntityLeaderState(state).view },
         hashesToSign,
-        collectedSigs: new Map([signerA, signerB].map(signerId => [
-          signerId,
-          hashesToSign.map(hashInfo => signAccountFrame(env, signerId, hashInfo.hash)),
-        ])),
+        collectedSigs,
+        hankos: [entityFrameHanko],
       },
       postAuthority,
     },
@@ -408,7 +423,6 @@ const votes = new Map([signerA, signerB].map((voterId) => {
 replica.leaderVotes = votes;
 replica.pendingLeaderCertificate = buildEntityLeaderCertificate(voteBody, votes);
 replica.lastConsensusProgressAt = 12_345;
-replica.htlcNotes = new Map([['hashlock:0x01', 'crash-recovery-note']]);
 const observedBlockHash = `0x${'ab'.repeat(32)}`;
 replica.jHistory = pruneFinalizedValidatorJHistory({
   jurisdictionRef: getJEventJurisdictionRef(jurisdiction),

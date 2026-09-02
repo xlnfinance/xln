@@ -23,7 +23,7 @@ const boundaries = [
   ['after-restore-current-clear-batch', 1],
   ['after-restore-current-body', 1],
   ['after-restore-authoritative-swap', 2],
-  ['after-restore-history-view-clear', 2],
+  ['after-restore-current-head', 2],
   ['after-restore-current-head', 2],
 ] as const satisfies ReadonlyArray<readonly [StoragePersistenceBoundary, number]>;
 
