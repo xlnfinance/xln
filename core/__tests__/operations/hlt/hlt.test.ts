@@ -51,6 +51,7 @@ import {
   deriveLoadLaneIdentities,
 } from '../../../scripts/operations/hlt/lanes/worker-lanes';
 import { parseSameLoadSchedule } from '../../../scripts/operations/hlt/workload/load-schedule';
+import { collectHltEnvironmentManifest } from '../../../scripts/operations/hlt/boundary/environment-manifest';
 import {
   assertRealisticExchangeDistribution,
   assertBalancedExchangeDistribution,
@@ -108,6 +109,28 @@ const observation = (overrides: Record<string, unknown> = {}) => decodeProductio
 });
 
 describe('production swap load evidence', () => {
+  test('environment manifest binds the selected engine Account worker count', () => {
+    const previousTs = process.env['XLN_TS_ACCOUNT_WORKERS'];
+    const previousRust = process.env['XLN_RSCORE_AUTHORITY_WORKERS'];
+    try {
+      process.env['XLN_TS_ACCOUNT_WORKERS'] = '4';
+      expect(collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }).accountWorkers)
+        .toBe(4);
+      process.env['XLN_TS_ACCOUNT_WORKERS'] = 'invalid';
+      expect(() => collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }))
+        .toThrow('HLT_ENV_MANIFEST_ACCOUNT_WORKERS_UNKNOWN');
+      delete process.env['XLN_RSCORE_AUTHORITY_WORKERS'];
+      expect(collectHltEnvironmentManifest({ engine: 'rust', rustAccountWorkers: 6 }).accountWorkers)
+        .toBe(6);
+      expect(() => collectHltEnvironmentManifest({ engine: 'rust', requireAccountWorkers: true }))
+        .toThrow('HLT_ENV_MANIFEST_ACCOUNT_WORKERS_UNKNOWN');
+    } finally {
+      if (previousTs === undefined) delete process.env['XLN_TS_ACCOUNT_WORKERS'];
+      else process.env['XLN_TS_ACCOUNT_WORKERS'] = previousTs;
+      if (previousRust === undefined) delete process.env['XLN_RSCORE_AUTHORITY_WORKERS'];
+      else process.env['XLN_RSCORE_AUTHORITY_WORKERS'] = previousRust;
+    }
+  });
   test('configuration has no protocol Account-count ceiling', () => {
     expect(decodeProductionSwapLoadConfig({
       ...defaultProductionSwapLoadConfig(),
@@ -579,7 +602,7 @@ describe('production swap load evidence', () => {
       settlementEvidence,
       environment: {
         disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
-        laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
+        laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default', accountWorkers: 4,
       },
     });
     expect(report.matchedTps).toBe(40);
@@ -595,6 +618,10 @@ describe('production swap load evidence', () => {
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
     expect(() => decodeLoadSustainedReport({ ...report, matchedSubmittedOffers: 19 }))
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_SUBMISSION_INVALID');
+    expect(() => decodeLoadSustainedReport({
+      ...report,
+      environment: { ...report.environment, accountWorkers: 'unknown' },
+    })).toThrow('PRODUCTION_SWAP_LOAD_REPORT_ENVIRONMENT_ACCOUNT_WORKERS_UNKNOWN');
   });
 
   test('settlement authority rejects pending bilateral and Runtime work', () => {

@@ -14,7 +14,7 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::LocalEntityTx;
 
 pub use authorization::{assert_signed_entity_command, current_entity_command_board_hash};
-pub use build::build_collective_entity_command;
+pub use build::build_locally_authored_entity_command;
 pub(crate) use command_codec::decode_collective_action_txs;
 pub use command_codec::decode_signed_entity_command;
 pub use nonce::{
@@ -77,6 +77,19 @@ pub enum EntityCommandDisposition {
     Next,
     Retry,
     Cancel,
+}
+
+/// Exact TypeScript `isIndividualEntityCommandTx` classification. All other
+/// non-protocol Entity transactions require one collective proposal action.
+pub const fn is_individual_entity_command_tx_kind(kind: crate::EntityTxKind) -> bool {
+    matches!(
+        kind,
+        crate::EntityTxKind::Chat
+            | crate::EntityTxKind::MaterializeCrossJurisdictionClear
+            | crate::EntityTxKind::MaterializeCrossJurisdictionSwap
+            | crate::EntityTxKind::Propose
+            | crate::EntityTxKind::Vote
+    )
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

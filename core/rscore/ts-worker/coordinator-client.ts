@@ -175,6 +175,7 @@ export const parseWorkerPhaseResult = (
   if (
     result.workerIndex !== expectedWorkerIndex
     || !Array.isArray(result.effects)
+    || !Array.isArray(result.skippedProposals)
     || !Array.isArray(result.subroots)
     || (result.postAccounts !== undefined && !Array.isArray(result.postAccounts))
     || !Number.isSafeInteger(result.operations)

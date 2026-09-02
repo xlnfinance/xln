@@ -5,14 +5,14 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountEnvelopeUpdate, AccountId, AccountInputBoardAuthority, AccountInputRow,
-    AccountInputVerdict, AccountPhaseKind, AccountSeed, CertifiedSettlementHankoDraft,
-    EngineGeneration, EntityInboundRequest, EntityOutboundRequest, FailedHtlcFollowup,
-    PendingSettlementHankoDraft, ResidentConsensusEngine,
+    AccountInputVerdict, AccountPhaseKind, AccountSeed, BatchAccountSelection, BatchError,
+    CertifiedSettlementHankoDraft, EngineGeneration, EntityInboundRequest, EntityOutboundRequest,
+    FailedHtlcFollowup, PendingSettlementHankoDraft, ResidentConsensusEngine,
 };
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, DepositoryAddress, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
-    HtlcResolveTx, SettlementHankoDraft, TokenId, WatchSeed,
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity,
+    AccountReplica, AccountState, AccountTx, Delta, DepositoryAddress, HtlcHashlock, HtlcLockTx,
+    HtlcResolveOutcome, HtlcResolveTx, SettlementHankoDraft, TokenId, WatchSeed,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -57,6 +57,16 @@ fn funded_seed() -> (AccountSeed, fixture::Pair) {
     )
 }
 
+fn funded_seed_with_mempool(txs: Vec<AccountTx>) -> (AccountSeed, fixture::Pair) {
+    let (mut seed, pair) = funded_seed();
+    let mut consensus = AccountConsensus::new(seed.replica.clone());
+    consensus
+        .admit_txs(txs, "batchSelectionTest:seed")
+        .expect("seed mempool");
+    seed.consensus = Some(consensus.consensus_snapshot());
+    (seed, pair)
+}
+
 fn mixed_txs(pair: &fixture::Pair) -> Vec<AccountTx> {
     let mut txs = fixture::payment(pair, 25).1;
     txs.extend(fixture::swap_offer(pair).1);
@@ -99,7 +109,7 @@ fn outbound_request(
         creates: Vec::new(),
         envelope_updates: Vec::new(),
         unsigned_settlement_txs: Vec::new(),
-        proposal_work: vec![(account_id, txs, false)],
+        proposal_work: vec![(account_id, txs, BatchAccountSelection::WholeMempool, false)],
         checkpoint_due: false,
         post_accounts: true,
     }
@@ -111,7 +121,7 @@ fn force_ack_request(
     txs: Vec<AccountTx>,
 ) -> EntityOutboundRequest {
     let mut request = outbound_request(owner, account_id, txs);
-    request.proposal_work[0].2 = true;
+    request.proposal_work[0].3 = true;
     request
 }
 
@@ -128,6 +138,389 @@ fn empty_checkpoint_request(owner: [u8; 32]) -> EntityOutboundRequest {
         checkpoint_due: true,
         post_accounts: false,
     }
+}
+
+#[test]
+fn selected_window_admits_once_and_preserves_unselected_fifo() {
+    let pair = fixture::pair();
+    let old_first = fixture::payment(&pair, 11).1.remove(0);
+    let old_selected = fixture::payment(&pair, 12).1.remove(0);
+    let old_last = fixture::payment(&pair, 13).1.remove(0);
+    let newly_admitted = fixture::payment(&pair, 14).1.remove(0);
+    let (seed, pair) = funded_seed_with_mempool(vec![
+        old_first.clone(),
+        old_selected.clone(),
+        old_last.clone(),
+    ]);
+    let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);
+    enter_resident(&mut engine, pair.payer_entity);
+
+    let mut request = outbound_request(
+        pair.payer_entity,
+        pair.payer_account,
+        vec![newly_admitted.clone()],
+    );
+    request.proposal_work[0].2 =
+        BatchAccountSelection::Selected(vec![old_selected.clone(), newly_admitted.clone()]);
+    request.checkpoint_due = true;
+    let result = engine.entity_outbound(request).expect("selected proposal");
+
+    assert_eq!(result.admissions.len(), 1);
+    assert_eq!(
+        result.proposals[0]
+            .incoming_ref()
+            .expect("selected frame")
+            .frame
+            .txs,
+        [old_selected, newly_admitted],
+    );
+    assert_eq!(
+        result
+            .checkpoint
+            .expect("checkpoint")
+            .accounts
+            .first()
+            .expect("account checkpoint")
+            .consensus
+            .mempool,
+        [old_first, old_last],
+        "selected removal must neither duplicate the new admission nor reorder survivors",
+    );
+}
+
+#[test]
+fn wait_for_sibling_emits_nothing_and_preserves_mempool() {
+    let pair = fixture::pair();
+    let queued = vec![
+        fixture::payment(&pair, 11).1.remove(0),
+        fixture::payment(&pair, 12).1.remove(0),
+    ];
+    let (seed, pair) = funded_seed_with_mempool(queued.clone());
+    let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);
+    let root_before = engine.accounts_root();
+    enter_resident(&mut engine, pair.payer_entity);
+
+    let mut request = outbound_request(pair.payer_entity, pair.payer_account, Vec::new());
+    request.proposal_work[0].2 = BatchAccountSelection::WaitForSibling;
+    request.checkpoint_due = true;
+    let result = engine.entity_outbound(request).expect("wait barrier");
+
+    assert!(result.proposals.is_empty());
+    assert_eq!(result.accounts_root, root_before);
+    assert_eq!(
+        result
+            .checkpoint
+            .expect("checkpoint")
+            .accounts
+            .first()
+            .expect("account checkpoint")
+            .consensus
+            .mempool,
+        queued,
+    );
+}
+
+#[test]
+fn cross_j_opening_point_read_fails_loudly_for_missing_account() {
+    let (seed, _) = funded_seed();
+    let mut engine = resident(1, "payer-0", REVISION, fixture::market(), vec![seed]);
+    let missing = AccountId::from_bytes([0xfe; 32]);
+
+    let error = engine
+        .cross_j_opening_account_views(vec![missing])
+        .expect_err("missing Account must not be omitted");
+
+    assert_eq!(error, BatchError::CandidateAccountNotFound(missing));
+}
+
+#[test]
+fn cross_j_opening_point_read_preserves_requested_positions() {
+    let (first, owner, _) = genesis_seed("payer-0", "peer-a");
+    let (second, second_owner, _) = genesis_seed("payer-0", "peer-b");
+    assert_eq!(owner, second_owner);
+    let first_id = first.account_id;
+    let second_id = second.account_id;
+    let mut engine = resident(
+        4,
+        "payer-0",
+        REVISION,
+        fixture::market(),
+        vec![first, second],
+    );
+
+    let views = engine
+        .cross_j_opening_account_views(vec![second_id, first_id])
+        .expect("bounded positional views");
+
+    assert_eq!(
+        views
+            .iter()
+            .map(|view| view.counterparty_entity_id.as_str())
+            .collect::<Vec<_>>(),
+        [format!("0x{second_id}"), format!("0x{first_id}")],
+    );
+}
+
+#[test]
+fn wait_for_sibling_routes_required_ack_without_proposing() {
+    let pair = fixture::pair();
+    let queued = fixture::payment(&pair, 25).1;
+    let (payer_seed, pair) = funded_seed_with_mempool(queued.clone());
+    let (left, right) = if pair.payer < pair.payee {
+        (pair.payer.clone(), pair.payee.clone())
+    } else {
+        (pair.payee.clone(), pair.payer.clone())
+    };
+    let payee_seed = AccountSeed {
+        account_id: pair.payee_account,
+        replica: AccountReplica::new(pair.payee.clone(), fixture::account_state(&left, &right))
+            .expect("payee replica"),
+        consensus: None,
+    };
+    let mut payee = resident(1, "payee-0", 0, fixture::market(), vec![payee_seed]);
+    enter_resident(&mut payee, pair.payee_entity);
+    let peer_input = payee
+        .entity_outbound(outbound_request(
+            pair.payee_entity,
+            pair.payee_account,
+            vec![AccountTx::DirectPayment {
+                token_id: TokenId::new(1).expect("token"),
+                amount: BigInt::from(17),
+                route: vec![pair.payer.to_string()],
+                description: None,
+                from_entity_id: pair.payee.to_string(),
+                to_entity_id: pair.payer.to_string(),
+                delivery_mode: xln_rscore_engine::DeliveryMode::Direct,
+                trusted_gateway_entity_id: None,
+            }],
+        ))
+        .expect("peer proposal")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("peer input");
+
+    let mut payer = resident(1, "payer-0", 0, fixture::market(), vec![payer_seed]);
+    payer
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: pair.payer_entity,
+            expected_accounts_root: payer.accounts_root(),
+            clock: fixture::clock(TIMESTAMP),
+            rows: vec![AccountInputRow {
+                operation_index: 0,
+                account_id: pair.payer_account,
+                genesis_policy: None,
+                certified_board_authority: AccountInputBoardAuthority::Lazy,
+                local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+                input: peer_input,
+            }],
+            post_accounts: false,
+        })
+        .expect("peer input accepted");
+    let root_before_wait = payer.accounts_root();
+    let mut request = force_ack_request(pair.payer_entity, pair.payer_account, Vec::new());
+    request.proposal_work[0].2 = BatchAccountSelection::WaitForSibling;
+    request.checkpoint_due = true;
+    let result = payer
+        .entity_outbound(request)
+        .expect("wait with required ACK");
+
+    assert_eq!(result.accounts_root, root_before_wait);
+    assert_eq!(result.proposals.len(), 1);
+    assert!(result.proposals[0].proposed.is_none());
+    assert!(matches!(
+        result.proposals[0]
+            .outbound_input
+            .as_ref()
+            .expect("required ACK")
+            .kind,
+        xln_rscore_batch::AccountInputKind::Ack(_)
+    ));
+    assert_eq!(
+        result
+            .checkpoint
+            .expect("checkpoint")
+            .accounts
+            .first()
+            .expect("account checkpoint")
+            .consensus
+            .mempool,
+        queued,
+    );
+}
+
+#[test]
+fn rebalance_work_index_follows_restore_candidate_abort_and_promotion() {
+    let (seed, pair) = funded_seed();
+    let mut engine = resident(4, "payer-0", REVISION, fixture::market(), vec![seed]);
+    assert!(engine.has_rebalance_work().expect("restored index"));
+    assert_eq!(
+        engine.rebalance_account_ids().expect("restored ids"),
+        [pair.payer_account]
+    );
+
+    enter_resident(&mut engine, pair.payer_entity);
+    engine
+        .entity_outbound(outbound_request(
+            pair.payer_entity,
+            pair.payer_account,
+            fixture::payment(&pair, 25).1,
+        ))
+        .expect("candidate proposal");
+    assert!(!engine.has_rebalance_work().expect("candidate index"));
+    assert!(
+        engine
+            .rebalance_account_ids()
+            .expect("candidate ids")
+            .is_empty()
+    );
+
+    engine.abort_entity_round().expect("candidate rollback");
+    assert!(engine.has_rebalance_work().expect("rolled back index"));
+
+    enter_resident(&mut engine, pair.payer_entity);
+    engine
+        .entity_outbound(outbound_request(
+            pair.payer_entity,
+            pair.payer_account,
+            fixture::payment(&pair, 25).1,
+        ))
+        .expect("replacement candidate");
+    let candidate_root = engine.accounts_root();
+    assert!(
+        !engine
+            .selected_has_rebalance_work(candidate_root)
+            .expect("selected candidate index")
+    );
+
+    // The next inbound selects/promotes that exact candidate root before any
+    // scheduled work is evaluated, so same-frame Stage 1 sees membership.
+    enter_resident(&mut engine, pair.payer_entity);
+    assert!(!engine.has_rebalance_work().expect("promoted inbound index"));
+}
+
+#[test]
+fn inbound_request_updates_rebalance_index_before_same_frame_scheduler() {
+    let pair = fixture::pair();
+    let (left, right) = if pair.payer < pair.payee {
+        (pair.payer.clone(), pair.payee.clone())
+    } else {
+        (pair.payee.clone(), pair.payer.clone())
+    };
+    let state = |owner: xln_rscore_engine::EntityId| {
+        let identity = AccountIdentity::new(
+            test_domain(),
+            left.clone(),
+            right.clone(),
+            WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+        )
+        .expect("identity");
+        let delta = Delta::new(
+            TokenId::new(1).expect("token"),
+            400_000_000.into(),
+            0.into(),
+            0.into(),
+            500_000_000.into(),
+            500_000_000.into(),
+            0.into(),
+            0.into(),
+            0.into(),
+            0.into(),
+        )
+        .expect("delta");
+        AccountReplica::new(
+            owner,
+            AccountState::new(
+                identity,
+                AccountDisputeConfig::new(10, 10).expect("dispute"),
+                vec![delta],
+            )
+            .expect("state"),
+        )
+        .expect("replica")
+    };
+    let payer_seed = AccountSeed {
+        account_id: pair.payer_account,
+        replica: state(pair.payer.clone()),
+        consensus: None,
+    };
+    let payee_seed = AccountSeed {
+        account_id: pair.payee_account,
+        replica: state(pair.payee.clone()),
+        consensus: None,
+    };
+    let mut payer = resident(1, "payer-0", 0, fixture::market(), vec![payer_seed]);
+    let mut payee = resident(1, "payee-0", 0, fixture::market(), vec![payee_seed]);
+    assert!(!payer.has_rebalance_work().expect("payer base"));
+    assert!(!payee.has_rebalance_work().expect("payee base"));
+
+    enter_resident(&mut payer, pair.payer_entity);
+    let input = payer
+        .entity_outbound(outbound_request(
+            pair.payer_entity,
+            pair.payer_account,
+            vec![AccountTx::RequestCollateral {
+                token_id: TokenId::new(1).expect("token"),
+                amount: 100.into(),
+                fee_token_id: Some(TokenId::new(1).expect("fee token")),
+                fee_amount: 1.into(),
+                policy_version: 1,
+            }],
+        ))
+        .expect("request proposal")
+        .proposals
+        .into_iter()
+        .next()
+        .and_then(|row| row.outbound_input)
+        .expect("request input");
+
+    payee
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: pair.payee_entity,
+            expected_accounts_root: payee.accounts_root(),
+            clock: fixture::clock(TIMESTAMP),
+            rows: vec![AccountInputRow {
+                operation_index: 0,
+                account_id: pair.payee_account,
+                genesis_policy: None,
+                certified_board_authority: AccountInputBoardAuthority::Lazy,
+                local_certified_board_authority: AccountInputBoardAuthority::Lazy,
+                input,
+            }],
+            post_accounts: false,
+        })
+        .expect("same-frame inbound request");
+    assert!(payee.has_rebalance_work().expect("same-frame index"));
+    let view = payee
+        .hub_rebalance_views(vec![pair.payee_account])
+        .expect("rebalance view")
+        .pop()
+        .expect("account view")
+        .1;
+    assert_eq!(
+        view.requested_rebalance,
+        [(TokenId::new(1).expect("token"), 99.into())]
+    );
+    let checkpoint = payee
+        .entity_outbound(empty_checkpoint_request(pair.payee_entity))
+        .expect("rebalance checkpoint")
+        .checkpoint
+        .expect("rebalance checkpoint manifest");
+    let row = checkpoint
+        .accounts
+        .first()
+        .expect("rebalance checkpoint row");
+    assert!(!row.requested_rebalance.puts.is_empty());
+    assert!(!row.requested_rebalance_fee_state.puts.is_empty());
+    assert_eq!(
+        row.header.carried.requested_rebalance_root,
+        row.sections.requested_rebalance.root,
+    );
+    assert_eq!(
+        row.header.carried.requested_rebalance_fee_state_root,
+        row.sections.requested_rebalance_fee_state.root,
+    );
 }
 
 /// A funded seed whose rebalance shadow trees are both empty, so a test can
@@ -188,7 +581,12 @@ fn entity_owned_rebalance_submitted_marker_sets_and_releases_one_token() {
                     }],
                 )],
                 unsigned_settlement_txs: Vec::new(),
-                proposal_work: vec![(pair.payer_account, Vec::new(), false)],
+                proposal_work: vec![(
+                    pair.payer_account,
+                    Vec::new(),
+                    BatchAccountSelection::WholeMempool,
+                    false,
+                )],
                 checkpoint_due: false,
                 post_accounts: true,
             })
@@ -277,7 +675,12 @@ fn entity_owned_rebalance_policy_updates_the_resident_leaf_and_checkpoint_body()
                 }],
             )],
             unsigned_settlement_txs: Vec::new(),
-            proposal_work: vec![(pair.payer_account, Vec::new(), false)],
+            proposal_work: vec![(
+                pair.payer_account,
+                Vec::new(),
+                BatchAccountSelection::WholeMempool,
+                false,
+            )],
             checkpoint_due: false,
             post_accounts: true,
         })
@@ -505,6 +908,7 @@ fn failed_htlc_uses_one_exact_continuation_and_matches_workers() {
                         delivery_mode: None,
                         envelope: None,
                     })],
+                    BatchAccountSelection::WholeMempool,
                     false,
                 )],
                 checkpoint_due: false,
@@ -1016,8 +1420,18 @@ fn create_admit_propose_and_force_ack_share_one_outbound_worker_wave() {
                 envelope_updates: Vec::new(),
                 unsigned_settlement_txs: Vec::new(),
                 proposal_work: vec![
-                    (pair.payer_account, local_tx.clone(), true),
-                    (created_account, vec![create_tx.clone()], false),
+                    (
+                        pair.payer_account,
+                        local_tx.clone(),
+                        BatchAccountSelection::WholeMempool,
+                        true,
+                    ),
+                    (
+                        created_account,
+                        vec![create_tx.clone()],
+                        BatchAccountSelection::WholeMempool,
+                        false,
+                    ),
                 ],
                 checkpoint_due: false,
                 post_accounts: false,
@@ -1083,12 +1497,11 @@ fn create_admit_propose_and_force_ack_share_one_outbound_worker_wave() {
     }
 }
 
-/// At-least-once transport retries the exact pending ACK(H1)+proposal(H2).
-/// The first delivery may already have advanced the peer to H2. A delayed,
-/// authenticated standalone ACK(H1) is therefore an exact predecessor no-op;
-/// the pending ACK(H1)+proposal(H2) retry must still preserve its full bundle.
+/// A duplicate committed proposal asks only for the ACK it may have lost.
+/// It must not publish our already-pending successor a second time: transport
+/// retries the original Runtime outbox independently of Account consensus.
 #[test]
-fn duplicate_predecessor_retries_pending_bundle_and_reacks_duplicate_successor() {
+fn duplicate_predecessor_reacks_only_and_preserves_pending_successor() {
     let (payer_seed, pair) = funded_seed();
     let (left, right) = if pair.payer < pair.payee {
         (pair.payer.clone(), pair.payee.clone())
@@ -1204,39 +1617,60 @@ fn duplicate_predecessor_retries_pending_bundle_and_reacks_duplicate_successor()
         pair.payer_account,
         predecessor,
     );
-    let retry = payer
+    let duplicate_ack = payer
         .entity_outbound(force_ack_request(
             pair.payer_entity,
             pair.payer_account,
             Vec::new(),
         ))
-        .expect("retry pending bundle")
+        .expect("re-ACK duplicate predecessor")
         .proposals
         .into_iter()
         .next()
         .and_then(|row| row.outbound_input)
-        .expect("exact pending bundle retry");
-    assert_eq!(retry.envelope, original_bundle.envelope);
-    match (&retry.kind, &original_bundle.kind) {
+        .expect("exact predecessor ACK retry");
+    assert_eq!(duplicate_ack.envelope, stale_standalone_ack.envelope);
+    match (&duplicate_ack.kind, &stale_standalone_ack.kind) {
         (
-            xln_rscore_batch::AccountInputKind::AckFrame {
-                ack: retry_ack,
-                frame: retry_frame,
-            },
-            xln_rscore_batch::AccountInputKind::AckFrame {
-                ack: original_ack,
-                frame: original_frame,
-            },
-        ) => {
-            assert_eq!(retry_ack, original_ack);
-            assert_eq!(retry_frame, original_frame);
-        }
-        _ => panic!("retry must preserve exact ACK+successor kind"),
+            xln_rscore_batch::AccountInputKind::Ack(actual),
+            xln_rscore_batch::AccountInputKind::Ack(expected),
+        ) => assert_eq!(actual, expected),
+        _ => panic!("duplicate predecessor must emit its retained ACK only"),
     }
 
-    let duplicate = receive(&mut payee, pair.payee_entity, pair.payee_account, retry);
+    let delayed_predecessor = receive(
+        &mut payee,
+        pair.payee_entity,
+        pair.payee_account,
+        duplicate_ack,
+    );
     assert!(matches!(
-        duplicate.applied[0].verdict,
+        delayed_predecessor.applied[0].verdict,
+        AccountInputVerdict::AckAccepted { height: 1 }
+    ));
+    assert_eq!(payee.accounts_root(), root_after_h2);
+
+    let successor_ack = receive(
+        &mut payer,
+        pair.payer_entity,
+        pair.payer_account,
+        first_h2_ack.clone(),
+    );
+    assert!(matches!(
+        successor_ack.applied[0].verdict,
+        AccountInputVerdict::AckCommitted { height: 2, .. }
+    ));
+
+    // A transport retry of the original outbox remains byte-identical and is
+    // independently classified as the duplicate H2 proposal it actually is.
+    let duplicate_successor = receive(
+        &mut payee,
+        pair.payee_entity,
+        pair.payee_account,
+        original_bundle,
+    );
+    assert!(matches!(
+        duplicate_successor.applied[0].verdict,
         AccountInputVerdict::FrameDuplicate { height: 2, .. }
     ));
     let repeated_h2_ack = payee
@@ -1260,18 +1694,6 @@ fn duplicate_predecessor_retries_pending_bundle_and_reacks_duplicate_successor()
         ) => assert_eq!(repeated, original),
         _ => panic!("duplicate H2 must re-emit ACK H2"),
     }
-
-    let delayed_predecessor = receive(
-        &mut payee,
-        pair.payee_entity,
-        pair.payee_account,
-        stale_standalone_ack,
-    );
-    assert!(matches!(
-        delayed_predecessor.applied[0].verdict,
-        AccountInputVerdict::AckAccepted { height: 1 }
-    ));
-    assert_eq!(payee.accounts_root(), root_after_h2);
 }
 
 #[test]
@@ -1296,8 +1718,18 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
         envelope_updates: Vec::new(),
         unsigned_settlement_txs: Vec::new(),
         proposal_work: vec![
-            (pair.payer_account, fixture::payment(&pair, 25).1, false),
-            (AccountId::from_bytes([0xfe; 32]), Vec::new(), false),
+            (
+                pair.payer_account,
+                fixture::payment(&pair, 25).1,
+                BatchAccountSelection::WholeMempool,
+                false,
+            ),
+            (
+                AccountId::from_bytes([0xfe; 32]),
+                Vec::new(),
+                BatchAccountSelection::WholeMempool,
+                false,
+            ),
         ],
         checkpoint_due: false,
         post_accounts: false,

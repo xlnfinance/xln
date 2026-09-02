@@ -8,13 +8,23 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import { AUTHORITY_EVIDENCE_GATE_BUDGET_MS } from '../replay/evidence/gate-support';
+
 const GATE_POLL_MS = 20;
 const PHASE_TIMEOUT_MS = 30_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 
-const offlineParityEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+const OFFLINE_PARITY_XLN_ALLOWLIST = new Set(['XLN_RSCORE_BINARY']);
+
+/**
+ * Offline parity is derived only from its immutable recording and explicit
+ * CLI worker counts. Inheriting a future live run's population, engine or
+ * workload switches makes the proof depend on the TPS command that invoked
+ * it and can multiply its work before the economic child even exists.
+ */
+export const offlineParityEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
   Object.fromEntries(Object.entries(env).filter(([name]) =>
-    !name.startsWith('XLN_HLT_ECONOMIC_GATE_')));
+    !name.startsWith('XLN_') || OFFLINE_PARITY_XLN_ALLOWLIST.has(name)));
 
 const gatePid = (path: string, code: string): number => {
   const pid = Number(readFileSync(path, 'utf8').trim());
@@ -135,7 +145,7 @@ export const runParityGatedHltChild = async (options: Readonly<{
     // ready/start orchestration inherited from its future HLT child.
     env: offlineParityEnv(options.env),
     stdio: 'inherit',
-    timeout: PHASE_TIMEOUT_MS,
+    timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS,
   });
   if (parity.error) throw parity.error;
   if (parity.status !== 0) {

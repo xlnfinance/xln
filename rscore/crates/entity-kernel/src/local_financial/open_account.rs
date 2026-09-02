@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountId, AccountSeed, EntityAccountGenesisPolicy, LocalGenesisSeedParams,
@@ -143,8 +141,15 @@ pub(super) fn apply(
     account_creates.push(seed);
     state.known_accounts.insert(tx.target_entity_id.clone());
 
-    let mut token_ids = BTreeSet::from(DEFAULT_TOKENS);
-    token_ids.insert(u32::from(tx.token_id.get()));
+    // Account outputs are positional protocol data. Preserve the TypeScript
+    // default-token order instead of sorting it through a BTreeSet: sorting
+    // [1, 3, 2] into [1, 2, 3] changes the signed Entity output sequence even
+    // though the same AddDelta set is eventually admitted.
+    let mut token_ids = DEFAULT_TOKENS.to_vec();
+    let requested_token_id = u32::from(tx.token_id.get());
+    if !token_ids.contains(&requested_token_id) {
+        token_ids.push(requested_token_id);
+    }
     for token_id in token_ids {
         let token = TokenId::new(token_id).map_err(|_| invalid("TOKEN_ID"))?;
         account_txs.push((

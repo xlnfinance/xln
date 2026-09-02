@@ -320,7 +320,7 @@ const attachSettlementAccountMempoolHankos = (
 export const accountTxAwaitsPostCommitHanko = (
   tx: AccountTx,
   account: AccountReplica,
-  state: AccountHankoWitnessState,
+  state: Pick<AccountHankoWitnessState, 'entityId'>,
 ): boolean => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') return false;
   if (!tx.data.postProof.hanko) return true;

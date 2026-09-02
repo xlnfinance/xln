@@ -636,6 +636,9 @@ pub struct AccountProposalWork {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntityKernelOutput {
+    Debug {
+        payload: CanonicalValue,
+    },
     /// Exact semantic projection of the TS runtimeEvent + paired REB_STEP
     /// diagnostic emitted when a bilateral J-event claim finalizes.
     AccountSettledFinalizedBilateral {

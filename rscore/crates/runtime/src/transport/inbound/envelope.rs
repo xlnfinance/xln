@@ -56,7 +56,7 @@ pub(in crate::transport) fn typed_array(value: &Value) -> Result<Vec<u8>, Runtim
         .map_err(|_| RuntimeTransportError::MessagePack("typed-array-base64".into()))
 }
 
-pub(super) fn decode_envelope(
+pub(in crate::transport) fn decode_envelope(
     plaintext: &[u8],
     peer_runtime_id: &str,
     local_runtime_id: &str,
@@ -80,9 +80,6 @@ pub(super) fn decode_envelope(
     let source_runtime_id = normalize_runtime_id(text(&envelope, "sourceRuntimeId")?)?;
     if source_runtime_id != peer_runtime_id {
         return Err(RuntimeTransportError::Inbound("source-runtime".into()));
-    }
-    if envelope.contains_key("atomicCrossJurisdictionPair") {
-        return Err(RuntimeTransportError::Inbound("cross-j-disabled".into()));
     }
     if let Some(signature) = envelope.get("sourceSignature") {
         let signature = signature
@@ -112,6 +109,7 @@ pub(super) fn decode_envelope(
             rows.len()
         )));
     }
+    let atomic_pair = decode_atomic_pair(&envelope, rows.len())?;
     let mut entity_inputs = Vec::with_capacity(rows.len());
     let mut entity_tx_count = 0_u64;
     for (index, row) in rows.into_iter().enumerate() {
@@ -152,6 +150,9 @@ pub(super) fn decode_envelope(
                 ("timestamp".into(), Value::from(source_runtime_timestamp)),
             ])),
         );
+        if let Some(pair) = atomic_pair.as_ref() {
+            row.insert("atomicCrossJurisdictionPair".into(), pair.clone());
+        }
         entity_inputs.push(
             RuntimeEntityInput::decode(Value::Object(row)).map_err(|error| {
                 RuntimeTransportError::Inbound(format!("entity-input:{index}:{error}"))
@@ -167,6 +168,37 @@ pub(super) fn decode_envelope(
         entity_tx_count,
         entity_inputs,
     })
+}
+
+fn decode_atomic_pair(
+    envelope: &Map<String, Value>,
+    input_count: usize,
+) -> Result<Option<Value>, RuntimeTransportError> {
+    let Some(value) = envelope.get("atomicCrossJurisdictionPair") else {
+        return Ok(None);
+    };
+    let pair = value
+        .as_object()
+        .ok_or_else(|| RuntimeTransportError::Inbound("atomic-pair-object".into()))?;
+    exact_fields(pair, &["phase", "pairKey"], &[], "atomic-pair")?;
+    let phase = pair
+        .get("phase")
+        .and_then(Value::as_str)
+        .filter(|phase| matches!(*phase, "proposal" | "ack"));
+    let pair_key = pair
+        .get("pairKey")
+        .and_then(Value::as_str)
+        .filter(|key| !key.is_empty());
+    let (Some(phase), Some(pair_key)) = (phase, pair_key) else {
+        return Err(RuntimeTransportError::Inbound("atomic-pair-invalid".into()));
+    };
+    if input_count != 2 {
+        return Err(RuntimeTransportError::Inbound("atomic-pair-invalid".into()));
+    }
+    Ok(Some(Value::Object(Map::from_iter([
+        ("phase".into(), Value::String(phase.to_owned())),
+        ("pairKey".into(), Value::String(pair_key.to_owned())),
+    ]))))
 }
 
 pub(in crate::transport) fn exact_fields(

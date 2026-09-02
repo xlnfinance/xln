@@ -38,7 +38,7 @@ pub(crate) struct BoundEntityOutputs {
 
 pub(crate) enum BoundEntityOutput {
     Remote { row: Vec<u8>, value: Value },
-    Local(crate::RuntimeEntityInput),
+    Local(Box<crate::RuntimeEntityInput>),
 }
 
 /// Deterministic Entity-to-Runtime routing installed outside consensus.
@@ -72,12 +72,20 @@ pub enum EntityRouteError {
     OutputField { index: usize, field: &'static str },
     #[error("RRS_ENTITY_OUTPUT_ALREADY_ROUTED:{index}:{field}")]
     AlreadyRouted { index: usize, field: &'static str },
+    #[error("RRS_ENTITY_OUTPUT_TARGET_SIGNER_MISMATCH:{index}:{expected}:{actual}")]
+    TargetSignerMismatch {
+        index: usize,
+        expected: String,
+        actual: String,
+    },
     #[error("RRS_ENTITY_OUTPUT_EMPTY:{0}")]
     Empty(usize),
     #[error("RRS_ENTITY_OUTPUT_SAFE_INTEGER:{field}:{value}")]
     SafeInteger { field: &'static str, value: u64 },
     #[error("RRS_ENTITY_OUTPUT_LOCAL_PAYLOAD:{0}")]
     LocalPayload(usize),
+    #[error("RRS_ENTITY_OUTPUT_LOCAL_CROSS_J_ESCAPED_MACHINE:{0}")]
+    LocalCrossJEscapedMachine(usize),
     #[error("RRS_ENTITY_OUTPUT_LOCAL_INPUT:{0}")]
     LocalInput(String),
     #[error(transparent)]
@@ -264,17 +272,39 @@ impl EntityRouteTable {
         )?;
         let entity_id = normalized_entity_id(raw_entity)?;
         object.insert("entityId".into(), Value::String(entity_id.clone()));
+        let supplied_signer = object
+            .get("signerId")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase());
+        if object.contains_key("signerId") && supplied_signer.is_none() {
+            return Err(EntityRouteError::OutputField {
+                index,
+                field: "signerId",
+            });
+        }
+        if supplied_signer.as_deref() == Some("") {
+            return Err(EntityRouteError::SignerId(entity_id));
+        }
         if entity_id == local_entity_id {
-            if !is_trigger_only(&object)
-                && !is_local_runtime_output(&object, &entity_id, local_entity_id, local_signer_id)
-            {
+            if is_local_runtime_output(&object, &entity_id, local_entity_id, local_signer_id) {
+                return Err(EntityRouteError::LocalCrossJEscapedMachine(index));
+            }
+            if !is_trigger_only(&object) {
                 return Err(EntityRouteError::LocalPayload(index));
             }
-            object.insert(
-                "signerId".into(),
-                Value::String(local_signer_id.to_ascii_lowercase()),
-            );
+            let local_signer_id = local_signer_id.trim().to_ascii_lowercase();
+            if let Some(actual) = supplied_signer.as_ref()
+                && actual != &local_signer_id
+            {
+                return Err(EntityRouteError::TargetSignerMismatch {
+                    index,
+                    expected: local_signer_id,
+                    actual: actual.clone(),
+                });
+            }
+            object.insert("signerId".into(), Value::String(local_signer_id));
             return crate::RuntimeEntityInput::decode(Value::Object(object))
+                .map(Box::new)
                 .map(BoundEntityOutput::Local)
                 .map_err(|error| EntityRouteError::LocalInput(error.to_string()));
         }
@@ -282,7 +312,17 @@ impl EntityRouteTable {
             .by_entity
             .get(&entity_id)
             .ok_or_else(|| EntityRouteError::Missing(entity_id.clone()))?;
-        object.insert("signerId".into(), Value::String(route.signer_id.clone()));
+        let expected_signer = route.signer_id.trim().to_ascii_lowercase();
+        if let Some(actual) = supplied_signer
+            && actual != expected_signer
+        {
+            return Err(EntityRouteError::TargetSignerMismatch {
+                index,
+                expected: expected_signer,
+                actual,
+            });
+        }
+        object.insert("signerId".into(), Value::String(expected_signer));
         object.insert("runtimeId".into(), Value::String(route.runtime_id.clone()));
         object.insert(
             "sourceRuntimeFrame".into(),
@@ -313,7 +353,7 @@ impl EntityRouteTable {
                 // canonical output order wins, later identical triggers add
                 // neither durable bytes nor another Runtime FIFO item.
                 BoundEntityOutput::Local(input) if local_continuations.is_empty() => {
-                    local_continuations.push(input);
+                    local_continuations.push(*input);
                 }
                 BoundEntityOutput::Local(_) => {}
             }
@@ -379,7 +419,6 @@ fn validate_local_output(
     index: usize,
 ) -> Result<(), EntityRouteError> {
     for field in [
-        "signerId",
         "runtimeId",
         "sourceRuntimeFrame",
         "atomicCrossJurisdictionPair",
@@ -508,7 +547,26 @@ mod tests {
     }
 
     #[test]
-    fn missing_route_and_prebound_output_fail_loud() {
+    fn canonical_target_signer_is_preserved_in_existing_wire_field() {
+        let encoded = routes()
+            .bind_and_encode(
+                vec![json!({
+                    "entityId": entity("11"),
+                    "signerId": "peer",
+                    "entityTxs": [{"type":"accountInput","data":{"kind":"ack"}}],
+                })],
+                7,
+                99,
+                &entity("44"),
+                "local",
+            )
+            .expect("bind exact signer");
+        let decoded = crate::decode_storage_payload(&encoded.rows[0]).expect("decode");
+        assert_eq!(decoded["signerId"], "peer");
+    }
+
+    #[test]
+    fn missing_route_and_wrong_target_signer_fail_loud() {
         assert!(matches!(
             routes().bind_and_encode(
                 vec![json!({"entityId":entity("33"),"entityTxs":[]})],
@@ -531,10 +589,7 @@ mod tests {
                 &entity("44"),
                 "local",
             ),
-            Err(EntityRouteError::AlreadyRouted {
-                field: "signerId",
-                ..
-            }),
+            Err(EntityRouteError::TargetSignerMismatch { .. }),
         ));
     }
 
@@ -578,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_local_runtime_output_is_requeued_without_outbox_copy() {
+    fn authenticated_local_runtime_output_must_be_consumed_by_runtime_machine() {
         let local = entity("44");
         let input = json!({
             "entityId": local,
@@ -596,16 +651,20 @@ mod tests {
                 }
             }]
         });
-        let encoded = EntityRouteTable::new([])
-            .expect("routes")
-            .bind_and_encode(vec![input], 3, 77, &local, "local-signer")
-            .expect("local runtime output");
-        assert_eq!(encoded.local_continuations.len(), 1);
-        assert!(encoded.rows.is_empty());
-        assert_eq!(
-            encoded.local_continuations[0].canonical()["entityTxs"][0]["type"],
-            "runtimeOutput"
-        );
+        let error = match EntityRouteTable::new([]).expect("routes").bind_and_encode(
+            vec![input],
+            3,
+            77,
+            &local,
+            "local-signer",
+        ) {
+            Ok(_) => panic!("machine must consume local cross-J before projection"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            EntityRouteError::LocalCrossJEscapedMachine(0)
+        ));
     }
 
     #[test]

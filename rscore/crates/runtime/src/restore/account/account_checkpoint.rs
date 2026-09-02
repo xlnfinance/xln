@@ -1,4 +1,4 @@
-//! Exact eleven-field `RestoreExact` Account-row decoder.
+//! Exact thirteen-field `RestoreExact` Account-row decoder.
 
 use serde_json::Value;
 use xln_rscore_abi::AbiValue;
@@ -7,7 +7,7 @@ use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountFrame, AccountIdentity, AccountReplica,
     AccountState, AccountStateSeed, CarriedSections, CommittedFrame, ConsensusSnapshot,
     DepositoryAddress, DisputeDraft, LendingIntentKind, OutboundAck, PendingFrameSnapshot,
-    WatchSeed,
+    RebalanceRefundReason, RebalanceRefundState, RebalanceRequestFeeState, TokenId, WatchSeed,
 };
 
 use super::account_canonical::envelope;
@@ -15,8 +15,8 @@ use super::account_tx::{
     claim_accumulator, delta, j_claim_node, lock, policy_entry, swap_offer_state, transaction,
 };
 use super::account_value::{
-    AccountWireRestoreError, abi, boolean, bytes, entity, exact, fixed_bytes, hex_fixed, integer,
-    invalid, js_number, strict_boolean, text, tuple,
+    AccountWireRestoreError, abi, bigint, boolean, bytes, entity, exact, fixed_bytes, hex_fixed,
+    integer, invalid, js_number, strict_boolean, text, token, tuple,
 };
 
 const MAX_CHECKPOINT_ACCOUNTS: usize = 65_536;
@@ -160,6 +160,53 @@ fn lending_entry(value: &AbiValue) -> Result<(String, LendingIntentKind), Accoun
     Ok((text(&fields[0])?.to_owned(), kind))
 }
 
+fn requested_rebalance_entry(
+    value: &AbiValue,
+) -> Result<(TokenId, num_bigint::BigInt), AccountWireRestoreError> {
+    let fields = exact(tuple(value)?, 2, "requestedRebalanceEntry")?;
+    Ok((
+        token(&fields[0])?,
+        bigint(&fields[1], "requestedRebalanceAmount")?,
+    ))
+}
+
+fn requested_rebalance_fee_entry(
+    value: &AbiValue,
+) -> Result<(TokenId, RebalanceRequestFeeState), AccountWireRestoreError> {
+    let fields = exact(tuple(value)?, 2, "requestedRebalanceFeeEntry")?;
+    let value = exact(tuple(&fields[1])?, 8, "requestedRebalanceFeeState")?;
+    let refund = match &value[7] {
+        AbiValue::Nil => None,
+        value => {
+            let refund = exact(tuple(value)?, 2, "requestedRebalanceRefund")?;
+            let reason = match integer(&refund[0])? {
+                0 => RebalanceRefundReason::PolicyMismatch,
+                1 => RebalanceRefundReason::Timeout,
+                2 => RebalanceRefundReason::FeeTooLow,
+                3 => RebalanceRefundReason::Manual,
+                value => return Err(invalid(format!("REBALANCE_REFUND_REASON:{value}"))),
+            };
+            Some(RebalanceRefundState {
+                reason,
+                refunded_amount: bigint(&refund[1], "refundedAmount")?,
+            })
+        }
+    };
+    Ok((
+        token(&fields[0])?,
+        RebalanceRequestFeeState {
+            request_id: text(&value[0])?.to_owned(),
+            fee_token_id: token(&value[1])?,
+            fee_paid_upfront: bigint(&value[2], "feePaidUpfront")?,
+            requested_amount: bigint(&value[3], "requestedAmount")?,
+            policy_version: js_number(&value[4], "policyVersion")?,
+            requested_at: js_number(&value[5], "requestedAt")?,
+            requested_by_left: strict_boolean(&value[6], "requestedByLeft")?,
+            refund,
+        },
+    ))
+}
+
 fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, AccountWireRestoreError> {
     let fields = exact(tuple(value)?, 10, "checkpointHeader")?;
     let identity = exact(tuple(&fields[2])?, 5, "checkpointIdentity")?;
@@ -214,7 +261,7 @@ fn header(value: &AbiValue) -> Result<AccountCheckpointHeader, AccountWireRestor
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestoreError> {
-    let fields = exact(tuple(value)?, 11, "accountRestore")?;
+    let fields = exact(tuple(value)?, 13, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -242,7 +289,15 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
         .iter()
         .map(pull_entry)
         .collect::<Result<_, _>>()?;
-    let j_claim_nodes = tuple(&fields[9])?
+    let requested_rebalance = tuple(&fields[9])?
+        .iter()
+        .map(requested_rebalance_entry)
+        .collect::<Result<_, _>>()?;
+    let requested_rebalance_fee_state = tuple(&fields[10])?
+        .iter()
+        .map(requested_rebalance_fee_entry)
+        .collect::<Result<_, _>>()?;
+    let j_claim_nodes = tuple(&fields[11])?
         .iter()
         .map(|entry| {
             let row = exact(tuple(entry)?, 2, "jClaimNodeEntry")?;
@@ -252,7 +307,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
             ))
         })
         .collect::<Result<Vec<_>, AccountWireRestoreError>>()?;
-    let consensus = consensus(&fields[10])?;
+    let consensus = consensus(&fields[12])?;
     let counterparty = if &header.owner == header.identity.left() {
         header.identity.right()
     } else if &header.owner == header.identity.right() {
@@ -263,25 +318,26 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, AccountWireRestor
     if account_id.as_bytes() != counterparty.as_bytes() {
         return Err(invalid("CHECKPOINT_ACCOUNT_IS_COUNTERPARTY"));
     }
-    let mut replica = AccountReplica::new(
-        header.owner,
-        AccountState::restore_full(AccountStateSeed {
-            identity: header.identity,
-            dispute_config: header.dispute_config,
-            deltas,
-            locks,
-            j_nonce: header.j_nonce,
-            last_finalized_j_height: header.last_finalized_j_height,
-            carried: header.carried,
-            rebalance_fee_policies,
-            swap_offers,
-            lending_intents,
-            pulls,
-            settlement_workspace: header.settlement_workspace,
-        })
-        .map_err(|error| invalid(format!("ACCOUNT_STATE:{error}")))?,
-    )
-    .map_err(|error| invalid(format!("ACCOUNT_REPLICA:{error}")))?;
+    let mut state = AccountState::restore_full(AccountStateSeed {
+        identity: header.identity,
+        dispute_config: header.dispute_config,
+        deltas,
+        locks,
+        j_nonce: header.j_nonce,
+        last_finalized_j_height: header.last_finalized_j_height,
+        carried: header.carried,
+        rebalance_fee_policies,
+        swap_offers,
+        lending_intents,
+        pulls,
+        settlement_workspace: header.settlement_workspace,
+    })
+    .map_err(|error| invalid(format!("ACCOUNT_STATE:{error}")))?;
+    state
+        .install_requested_rebalance(requested_rebalance, requested_rebalance_fee_state)
+        .map_err(|error| invalid(format!("REQUESTED_REBALANCE:{error}")))?;
+    let mut replica = AccountReplica::new(header.owner, state)
+        .map_err(|error| invalid(format!("ACCOUNT_REPLICA:{error}")))?;
     replica.set_envelope(header.envelope);
     replica
         .restore_j_claim_nodes(j_claim_nodes)
@@ -316,7 +372,7 @@ fn pull_entry(
     Ok((pull_id, pull))
 }
 
-/// Decode exactly the persisted eleven-field rows accepted by the process
+/// Decode exactly the persisted thirteen-field rows accepted by the process
 /// `RestoreExact` operation. This is the same positional ABI, not a second
 /// semantic checkpoint shape.
 pub fn decode_account_rows(rows: &[Value]) -> Result<Vec<AccountRestore>, AccountWireRestoreError> {

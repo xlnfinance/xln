@@ -19,8 +19,11 @@ import {
 } from '../flush';
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 import type { HandleAccountInputResult } from '../types';
-import { accountInputApplied, rejectAccountInput } from '../result';
-import { rejectAccountInputEvidenceError } from '../result';
+import {
+  accountInputApplied,
+  rejectAccountInput,
+  rejectAccountInputEvidenceError,
+} from '../result';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { computeFrameHash } from '../frame/hash';
 import { immediatePredecessorAckError } from './ack-commit';

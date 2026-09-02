@@ -145,7 +145,7 @@ describe('production cross-j swap load boundaries', () => {
       hubDurableBefore: frame, hubDurableAfter: frame, loadDurableBefore: frame, loadDurableAfter: frame,
       environment: {
         disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
-        laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
+        laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default', accountWorkers: 4,
       },
     };
     expect(decodeCrossLoadReport(report).routeStatus).toBe('settled');
@@ -153,6 +153,10 @@ describe('production cross-j swap load boundaries', () => {
       .toThrow('PRODUCTION_SWAP_LOAD_CROSS_REPORT_SCHEMA_INVALID');
     expect(() => decodeCrossLoadReport({ ...report, commandObservedElapsedMs: 4 }))
       .toThrow('PRODUCTION_SWAP_LOAD_CROSS_REPORT_TIMING_INVALID');
+    expect(() => decodeCrossLoadReport({
+      ...report,
+      environment: { ...report.environment, accountWorkers: 'unknown' },
+    })).toThrow('PRODUCTION_SWAP_LOAD_CROSS_REPORT_ENVIRONMENT_ACCOUNT_WORKERS_UNKNOWN');
   });
 
   test('recovery evidence requires the settled route and descendant Runtime heads', () => {

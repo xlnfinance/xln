@@ -4,15 +4,11 @@
 //! (core/__tests__/proofs/fx-admission.test.ts) — same accept/reject
 //! classification per case, different transport for the same verdict:
 //!
-//! - local admission: every canonical AccountTx kind is hashable; malformed
-//!   fields such as an unsafe policyVersion retain their exact typed error and
-//!   leave the mempool unchanged.
+//! - local admission: malformed fields and out-of-profile transaction kinds
+//!   retain their exact typed error and leave the mempool unchanged.
 //! - incoming peer frame: `apply_incoming_frame` returns `Rejected` whose
-//!   reason carries `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
-//!   `ACCOUNT_FRAME_TX_UNSUPPORTED:<kind>` (refused by `AccountFrame::hash`);
-//!   TypeScript preflight returns peer codes
-//!   `ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` /
-//!   `ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE` before replay.
+//!   reason carries the same `ACCOUNT_TX_KIND_OUT_OF_PROFILE:<kind>` message
+//!   as TypeScript before signature work or replay.
 //! - boundary accept (policyVersion 0 and MAX): both engines admit; the
 //!   golden `matches_typescript_rebalance_policy_bytes_and_hashes` in
 //!   consensus/frame/hash.rs already pins MAX hashing identically.
@@ -21,9 +17,9 @@ use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountFrame, AccountIdentity,
     AccountReplica, AccountState, AccountTx, BoardDelays, CanonicalValue, DeliveryMode, Delta,
-    DepositoryAddress, EntityId, IncomingFrame, IncomingOutcome, MAX_POLICY_VERSION,
-    ProposalOutcome, ReceiverClock, ReserveSide, SigningIdentity, TokenId, WatchSeed,
-    apply_incoming_frame, canonical_tx_value, propose_account_frame,
+    DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, IncomingFrame, IncomingOutcome,
+    MAX_POLICY_VERSION, ProposalOutcome, ReceiverClock, ReserveSide, SigningIdentity, TokenId,
+    WatchSeed, apply_incoming_frame, canonical_tx_value, propose_account_frame,
 };
 
 const CLOCK: ReceiverClock = ReceiverClock {
@@ -127,6 +123,28 @@ fn rebalance_policy(policy_version: u64) -> AccountTx {
         liquidity_fee_bps: BigInt::from(375),
         gas_fee: BigInt::from(1),
     }
+}
+
+fn set_credit_limit(amount: i64) -> AccountTx {
+    AccountTx::SetCreditLimit {
+        token_id: TokenId::new(1).expect("token"),
+        amount: BigInt::from(amount),
+    }
+}
+
+fn htlc_lock(byte: u8) -> AccountTx {
+    let hex_byte = format!("{byte:02x}");
+    let lock_id = format!("0x{}", hex_byte.repeat(32));
+    AccountTx::HtlcLock(HtlcLockTx {
+        lock_id: lock_id.clone(),
+        hashlock: HtlcHashlock::parse(&lock_id).expect("hashlock"),
+        timelock: BigInt::from(1_700_000_900_000_u64),
+        reveal_before_height: 100,
+        amount: BigInt::from(50),
+        token_id: TokenId::new(1).expect("token"),
+        delivery_mode: None,
+        envelope: None,
+    })
 }
 
 fn extended_transactions() -> Vec<(&'static str, AccountTx)> {
@@ -301,24 +319,22 @@ fn rejects_out_of_range_policy_version_before_the_mempool() {
     }
 }
 
-#[test]
-fn lifecycle_admission_is_idempotent_across_batch_queue_and_pending_frame() {
+fn assert_lifecycle_retry_is_idempotent_across_batch_queue_and_pending_frame(lifecycle: AccountTx) {
     let (mut left, _right) = parties();
-    let policy = rebalance_policy(7);
 
     let batch = left
         .account
-        .admit_txs(vec![policy.clone(), policy.clone()], "test")
+        .admit_txs(vec![lifecycle.clone(), lifecycle.clone()], "test")
         .expect("exact lifecycle retry in one batch");
     assert_eq!((batch.admitted, batch.duplicates), (1, 1));
-    assert_eq!(left.account.mempool(), std::slice::from_ref(&policy));
+    assert_eq!(left.account.mempool(), std::slice::from_ref(&lifecycle));
 
     let queued = left
         .account
-        .admit_txs(vec![policy.clone()], "test")
+        .admit_txs(vec![lifecycle.clone()], "test")
         .expect("exact queued lifecycle retry");
     assert_eq!((queued.admitted, queued.duplicates), (0, 1));
-    assert_eq!(left.account.mempool(), std::slice::from_ref(&policy));
+    assert_eq!(left.account.mempool(), std::slice::from_ref(&lifecycle));
 
     let ProposalOutcome::Proposed(_) = propose_account_frame(
         &mut left.account,
@@ -334,10 +350,46 @@ fn lifecycle_admission_is_idempotent_across_batch_queue_and_pending_frame() {
 
     let pending = left
         .account
-        .admit_txs(vec![policy], "test")
+        .admit_txs(vec![lifecycle], "test")
         .expect("exact pending-frame lifecycle retry");
     assert_eq!((pending.admitted, pending.duplicates), (0, 1));
     assert!(left.account.mempool().is_empty());
+}
+
+#[test]
+fn lifecycle_retry_vector_matches_typescript_across_all_queue_locations() {
+    for lifecycle in [set_credit_limit(750_000), rebalance_policy(7)] {
+        assert_lifecycle_retry_is_idempotent_across_batch_queue_and_pending_frame(lifecycle);
+    }
+}
+
+#[test]
+fn lifecycle_dedupe_keeps_htlc_payment_multiplicity_and_positions() {
+    let (mut left, right) = parties();
+    let lock = htlc_lock(0x31);
+    let payment = payment(&left.entity_id, &right.entity_id, 5);
+    let credit = set_credit_limit(750_000);
+
+    let admission = left
+        .account
+        .admit_txs(
+            vec![
+                lock.clone(),
+                payment.clone(),
+                lock.clone(),
+                credit.clone(),
+                payment.clone(),
+                credit.clone(),
+            ],
+            "test",
+        )
+        .expect("mixed lifecycle and payment admission");
+
+    assert_eq!((admission.admitted, admission.duplicates), (4, 2));
+    assert_eq!(
+        left.account.mempool(),
+        &[lock, payment.clone(), credit, payment],
+    );
 }
 
 #[test]
@@ -455,23 +507,41 @@ fn out_of_range_policy_version_reaching_the_hash_is_an_admission_bug() {
 }
 
 #[test]
-fn admits_every_canonical_extended_kind_and_hashes_it() {
+fn rejects_every_out_of_profile_kind_before_mempool_mutation() {
     for (kind, tx) in extended_transactions() {
         let (mut left, _right) = parties();
-        let admission = left
+        let error = left
             .account
             .admit_txs(vec![tx.clone()], "test")
-            .unwrap_or_else(|error| panic!("{kind} must admit: {error}"));
-        assert_eq!(admission.admitted, 1, "{kind}");
-        assert!(xln_rscore_engine::is_frame_hashable(&tx), "{kind}");
-        assert_eq!(left.account.mempool()[0].wire_name(), kind);
+            .expect_err("out-of-profile kind must not admit");
+        assert_eq!(
+            error,
+            xln_rscore_engine::StateError::AccountTxKindOutOfProfile(kind),
+            "{kind}",
+        );
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "ACCOUNT_TX_KIND_OUT_OF_PROFILE:{kind} \
+                 (profile: pay/HTLC/same-J swap/j-event/rebalance)"
+            ),
+        );
+        assert!(left.account.mempool().is_empty(), "{kind}");
+        assert!(
+            xln_rscore_engine::is_frame_hashable(&tx),
+            "historical {kind} frame verification must remain available",
+        );
     }
 }
 
 #[test]
-fn an_incoming_frame_with_a_supported_kind_reaches_hash_binding() {
+fn rejects_every_out_of_profile_peer_kind_before_replay_without_mutation() {
     let (left, mut right) = parties();
     for (kind, tx) in extended_transactions() {
+        let before_leaf = right
+            .account
+            .entity_account_leaf()
+            .expect("preflight Account leaf");
         let (envelope, incoming) = incoming_from_left(&left, &right, tx);
         let outcome = apply_incoming_frame(
             &mut right.account,
@@ -483,10 +553,27 @@ fn an_incoming_frame_with_a_supported_kind_reaches_hash_binding() {
         )
         .unwrap_or_else(|error| panic!("{kind} is a rejection, not a fault: {error}"));
         let IncomingOutcome::Rejected { reason } = outcome else {
-            panic!("{kind} must reach hash binding, got {outcome:?}");
+            panic!("{kind} must reject, got {outcome:?}");
         };
-        assert_eq!(reason, "ACCOUNT_INPUT_FRAME_HASH_MISMATCH", "{kind}");
+        assert_eq!(
+            reason,
+            format!(
+                "ACCOUNT_TX_KIND_OUT_OF_PROFILE:{kind} \
+                 (profile: pay/HTLC/same-J swap/j-event/rebalance)"
+            ),
+            "{kind}",
+        );
         assert_eq!(right.account.current_height(), 0);
+        assert!(right.account.mempool().is_empty(), "{kind}");
+        assert!(right.account.pending().is_none(), "{kind}");
+        assert_eq!(
+            right
+                .account
+                .entity_account_leaf()
+                .expect("unchanged Account leaf"),
+            before_leaf,
+            "{kind}",
+        );
     }
 }
 

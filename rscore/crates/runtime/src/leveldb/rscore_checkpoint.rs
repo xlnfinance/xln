@@ -29,7 +29,7 @@ pub struct StoredRscoreCheckpoint {
     pub accounts_root: [u8; 32],
     pub signer_digest: [u8; 32],
     pub account_count: usize,
-    /// Exact eleven-field rows accepted by process `RestoreExact`.
+    /// Exact thirteen-field rows accepted by process `RestoreExact`.
     pub accounts: Vec<Value>,
 }
 

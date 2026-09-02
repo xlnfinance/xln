@@ -15,7 +15,7 @@ use crate::{
 
 use super::entity_tree::{EntityTreeRestoreError, hydrate_entity_tree};
 
-const STORAGE_SCHEMA_VERSION: u64 = 4;
+const STORAGE_SCHEMA_VERSION: u64 = 5;
 const MAX_ENTITY_STORAGE_VALUE_BYTES: usize = 10_000;
 const ENTITY_PATH_TAGS: &[u8] = &[0x21, 0x36, 0x37, 0x38];
 

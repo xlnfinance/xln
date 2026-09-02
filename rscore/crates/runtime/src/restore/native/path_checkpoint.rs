@@ -203,7 +203,7 @@ fn tree_value(
                 row[3].clone(),
             ]))
         }
-        5 => {
+        5 | 8 | 9 => {
             if encoded_key.len() != 32 || encoded_key[..30].iter().any(|byte| *byte != 0) {
                 return Err(invalid(format!("POLICY_KEY:{path}")));
             }
@@ -251,7 +251,7 @@ fn account_nodes(
                 path: logical_path.to_vec(),
                 value: decoded,
             });
-        } else if (1..=6).contains(&namespace) {
+        } else if (1..=6).contains(&namespace) || matches!(namespace, 8 | 9) {
             let logical_path = if kind == 0 {
                 unpack_radix16_path(payload).map_err(invalid)?
             } else {
@@ -432,7 +432,7 @@ pub fn restore_path_checkpoint(
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
         let namespace = *key.get(65).ok_or_else(|| invalid("ACCOUNT_NODE_KEY"))?;
-        if !(1..=7).contains(&namespace) || key.len() < 68 {
+        if !matches!(namespace, 1..=9) || key.len() < 68 {
             return Err(invalid("ACCOUNT_NODE_KEY"));
         }
         nodes_by_account
@@ -461,10 +461,10 @@ pub fn restore_path_checkpoint(
             return Err(invalid("ACCOUNT_LEAF"));
         }
         let j_claim_roots = j_claim_accumulators(&account_meta[1]).map_err(invalid)?;
-        let mut row = Vec::with_capacity(11);
+        let mut row = Vec::with_capacity(13);
         row.push(tagged_bytes(&account));
         row.extend([account_meta[0].clone(), account_meta[1].clone()]);
-        for namespace in 1..=7 {
+        for namespace in [1, 2, 3, 4, 5, 6, 8, 9, 7] {
             let node_rows = nodes_by_account
                 .remove(&(account, namespace))
                 .unwrap_or_default();

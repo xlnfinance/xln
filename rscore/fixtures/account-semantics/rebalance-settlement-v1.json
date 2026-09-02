@@ -1,0 +1,158 @@
+{
+  "canonicalSource": "TypeScript applyAccountTxToMutableReplica",
+  "cases": [
+    {
+      "name": "rebalance-request-refund",
+      "steps": [
+        {
+          "accountStateRoot": "0xda5830ed845b73cc0cf6580095fcb4403e62c40a1edfd1a6a5cd3d61e0acfc17",
+          "byLeft": true,
+          "deltasRoot": "0xaa89ad372052d5f7d151e580f66c82c116dd45c3504bef17c101e674fca10c46",
+          "events": [
+            "🔄 Collateral requested: 90 token 1, prepaidFee=10 (hub will deposit R→C)"
+          ],
+          "feeStateCount": 1,
+          "input": "request",
+          "leftHold": "0",
+          "offdelta": "-10",
+          "outputCount": 0,
+          "requestedAmount": "90",
+          "requestedCount": 1,
+          "requestedRebalanceFeeStateRoot": "0x4177cf33198720777df195147627bcc8f7bde9840d69ed92aa4d2814798073e2",
+          "requestedRebalanceRoot": "0xf9a4cbd5a0fe8d2fccd0b2cfadbb09c1a64d8e408da4741fdb8cb9e3f3a2e3c7",
+          "rightHold": "0",
+          "timestamp": 1000,
+          "txType": "request_collateral"
+        },
+        {
+          "accountStateRoot": "0x9548c593abe81e5ed0ead5acc8add7043c28ec65184a3c7c82cab825eda6af33",
+          "byLeft": false,
+          "deltasRoot": "0xde91f9e7c9f2d801ad32a07ca71ddcb103cfa2a178484c01a9b1476fa7996cd1",
+          "events": [
+            "Rebalance refund rebalance:left:1:5: 3/10"
+          ],
+          "feeStateCount": 1,
+          "input": "partialRefund",
+          "leftHold": "0",
+          "offdelta": "-7",
+          "outputCount": 0,
+          "requestedAmount": "90",
+          "requestedCount": 1,
+          "requestedRebalanceFeeStateRoot": "0x71a9ae535f3427d2286113bcf278ed4e824048ad196f404c31d4e956a7b4386c",
+          "requestedRebalanceRoot": "0xf9a4cbd5a0fe8d2fccd0b2cfadbb09c1a64d8e408da4741fdb8cb9e3f3a2e3c7",
+          "rightHold": "0",
+          "timestamp": 2000,
+          "txType": "rebalance_refund"
+        },
+        {
+          "accountStateRoot": "0x4d509a7089e77511ecf3774147645bcf8a0b39c31781582b23194c957c6b914b",
+          "byLeft": false,
+          "deltasRoot": "0xd1ca61a51028e896e9cd42f7ac7ea727addbddd836189661dd527c57762919d7",
+          "events": [
+            "Rebalance refund rebalance:left:1:5: 10/10"
+          ],
+          "feeStateCount": 0,
+          "input": "finalRefund",
+          "leftHold": "0",
+          "offdelta": "0",
+          "outputCount": 0,
+          "requestedAmount": "0",
+          "requestedCount": 0,
+          "requestedRebalanceFeeStateRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "requestedRebalanceRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "rightHold": "0",
+          "timestamp": 3000,
+          "txType": "rebalance_refund"
+        }
+      ]
+    },
+    {
+      "name": "settlement-upsert",
+      "steps": [
+        {
+          "accountStateRoot": "0x20d2c335350e6d054a88ad706df107f1ed3266d2f1ed1e9a1efe70842c5bfcb0",
+          "byLeft": true,
+          "deltasRoot": "0x172aafa33fac4ce11f08acc319cb27dd9ff8a150651433686c4e873bbffa3618",
+          "events": [
+            "Settlement workspace v1 committed"
+          ],
+          "feeStateCount": 0,
+          "input": "settlementUpsert",
+          "leftHold": "20",
+          "offdelta": "0",
+          "outputCount": 0,
+          "requestedAmount": "0",
+          "requestedCount": 0,
+          "requestedRebalanceFeeStateRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "requestedRebalanceRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "rightHold": "0",
+          "timestamp": 4000,
+          "txType": "settle_transition",
+          "workspaceHash": "0x93411ce4b7bad05a8936694fae5237df8a992877a0419f68a73a02ff6f6d46e8"
+        }
+      ]
+    }
+  ],
+  "inputs": {
+    "finalRefund": {
+      "data": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "7"
+        },
+        "reason": "timeout",
+        "requestId": "rebalance:left:1:5",
+        "requestTokenId": 1
+      },
+      "type": "rebalance_refund"
+    },
+    "partialRefund": {
+      "data": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "3"
+        },
+        "reason": "timeout",
+        "requestId": "rebalance:left:1:5",
+        "requestTokenId": 1
+      },
+      "type": "rebalance_refund"
+    },
+    "request": {
+      "data": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "feeAmount": {
+          "__xlnType": "BigInt",
+          "value": "10"
+        },
+        "feeTokenId": 1,
+        "policyVersion": 3,
+        "tokenId": 1
+      },
+      "type": "request_collateral"
+    },
+    "settlementUpsert": {
+      "data": {
+        "executorIsLeft": true,
+        "kind": "upsert",
+        "memo": "shared-semantic-vector",
+        "ops": [
+          {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "20"
+            },
+            "tokenId": 1,
+            "type": "r2r"
+          }
+        ],
+        "revision": 1
+      },
+      "type": "settle_transition"
+    }
+  },
+  "version": 1
+}

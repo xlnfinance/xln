@@ -1,9 +1,10 @@
 //! Building, executing and signing our own account frame.
 //!
 //! Parity target: core/account/consensus/proposal/{propose,frame,transactions}.ts.
-//! The window is the whole mempool; a transaction that its own handler rejects
-//! is dropped from the frame rather than failing the proposal, and the frame
-//! commits the candidate state the surviving transactions produced.
+//! A caller may use the whole mempool or one exact selected sub-multiset. A
+//! transaction that its own handler rejects is dropped from the frame rather
+//! than failing the proposal, and the frame commits the candidate state the
+//! surviving transactions produced.
 
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use crate::consensus::frame::hash::AccountFrame;
 use crate::consensus::replica::{AccountConsensus, PendingFrame};
 use crate::consensus::signing::SigningIdentity;
 use crate::error::StateError;
+use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
 use crate::tx::apply::apply_to_candidate;
 use crate::tx::apply_types::{AccountConsensusEffect, MutationDecision};
 use crate::{
@@ -102,6 +104,60 @@ pub enum ProposalOutcome {
         dropped: Vec<DroppedTx>,
     },
     Proposed(Box<ProposedFrame>),
+}
+
+/// Which local Account transactions form the next proposal window.
+///
+/// Selection is an execution choice only: it never creates transactions and
+/// it never reorders the live mempool. A caller that needs to wait simply does
+/// not invoke the proposer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AccountProposalSelection {
+    WholeMempool,
+    Selected(Vec<AccountTx>),
+}
+
+enum PreparedSelection {
+    WholeMempool(Vec<AccountTx>),
+    Selected(Vec<AccountTx>),
+}
+
+impl PreparedSelection {
+    fn into_window(self) -> Vec<AccountTx> {
+        match self {
+            Self::WholeMempool(window) | Self::Selected(window) => window,
+        }
+    }
+
+    const fn preserves_mempool(&self) -> bool {
+        matches!(self, Self::Selected(_))
+    }
+}
+
+fn prepare_selection(
+    account: &mut AccountConsensus,
+    selection: AccountProposalSelection,
+) -> Result<PreparedSelection, StateError> {
+    let AccountProposalSelection::Selected(selected) = selection else {
+        return Ok(PreparedSelection::WholeMempool(account.take_mempool()));
+    };
+    if selected.is_empty() {
+        return Err(StateError::EmptyProposalSelection);
+    }
+    if selected.len() > ACCOUNT_MEMPOOL_SIZE {
+        return Err(StateError::ProposalSelectionLimitExceeded {
+            actual: selected.len(),
+            maximum: ACCOUNT_MEMPOOL_SIZE,
+        });
+    }
+    let mut available = account.mempool().to_vec();
+    for (index, tx) in selected.iter().enumerate() {
+        let Some(found) = available.iter().position(|queued| queued == tx) else {
+            return Err(StateError::ProposalSelectionNotInMempool { index });
+        };
+        available.remove(found);
+    }
+    Ok(PreparedSelection::Selected(selected))
 }
 
 /// Execute a window against a candidate, keeping the transactions that apply.
@@ -217,6 +273,25 @@ pub fn propose_account_frame(
     // in TypeScript.
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<ProposalOutcome, StateError> {
+    propose_account_frame_with_selection(
+        account,
+        identity,
+        entity_timestamp,
+        j_height,
+        AccountProposalSelection::WholeMempool,
+        swap_market,
+    )
+}
+
+/// Propose one canonical window for this account.
+pub fn propose_account_frame_with_selection(
+    account: &mut AccountConsensus,
+    identity: &SigningIdentity,
+    entity_timestamp: u64,
+    j_height: u64,
+    selection: AccountProposalSelection,
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+) -> Result<ProposalOutcome, StateError> {
     if account.pending().is_some() {
         // One proposal per height. The peer either acks it or wins the
         // collision; a second frame here would fork our own chain.
@@ -224,7 +299,9 @@ pub fn propose_account_frame(
             dropped: Vec::new(),
         });
     }
-    let window = account.take_mempool();
+    let prepared = prepare_selection(account, selection)?;
+    let preserves_mempool = prepared.preserves_mempool();
+    let window = prepared.into_window();
     if window.is_empty() {
         return Ok(ProposalOutcome::Idle {
             dropped: Vec::new(),
@@ -270,6 +347,16 @@ pub fn propose_account_frame(
             reason: dropped_tx.rejection.message(),
         });
     }
+    if preserves_mempool {
+        let mut consumed = applied.clone();
+        consumed.extend(
+            dropped
+                .iter()
+                .filter(|row| row.disposition == Disposition::Removed)
+                .map(|row| row.tx.clone()),
+        );
+        account.remove_mempool_multiplicities(&consumed)?;
+    }
     // Capacity rejections go back on the queue, in their original order and
     // ahead of anything admitted since, so the next frame retries them.
     let deferred: Vec<AccountTx> = dropped
@@ -277,7 +364,7 @@ pub fn propose_account_frame(
         .filter(|dropped| dropped.disposition == Disposition::Deferred)
         .map(|dropped| dropped.tx.clone())
         .collect();
-    if !deferred.is_empty() {
+    if !preserves_mempool && !deferred.is_empty() {
         account.restore_mempool_front(deferred)?;
     }
     if applied.is_empty() {

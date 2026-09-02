@@ -298,7 +298,11 @@ export type RustH1Metrics = Readonly<{
 }>;
 
 export type RustAccountPhaseMetric = Readonly<{
-  kind: 'inbound' | 'outboundReset' | 'outboundContinue';
+  kind:
+    | 'inbound'
+    | 'outboundReset'
+    | 'outboundFailedHtlcFollowup'
+    | 'outboundSettlementHankoAttach';
   invocations: number;
   coordinatorWallMicros: number;
   coordinatorPreDispatchMicros: number;
@@ -543,7 +547,9 @@ export const summarizeRustH1WorkerExecution = (
     return found;
   };
   const accountRootRequests =
-    phase('outboundReset').invocations + phase('outboundContinue').invocations;
+    phase('outboundReset').invocations +
+    phase('outboundFailedHtlcFollowup').invocations +
+    phase('outboundSettlementHankoAttach').invocations;
   return {
     configuredWorkers,
     activeAccountWorkers,
@@ -688,10 +694,15 @@ export const parseMetricsLine = (line: string): RustH1Metrics | null => {
     throw new Error(`HLT_RUST_H1_METRIC_INVALID:workerCardinality:${workerItems.length}:${workerNanos.length}`);
   }
   const rawAccountPhases = record['accountPhaseMetrics'];
-  if (!Array.isArray(rawAccountPhases) || rawAccountPhases.length !== 3) {
+  if (!Array.isArray(rawAccountPhases) || rawAccountPhases.length !== 4) {
     throw new Error('HLT_RUST_H1_METRIC_INVALID:accountPhaseMetrics');
   }
-  const phaseKinds = ['inbound', 'outboundReset', 'outboundContinue'] as const;
+  const phaseKinds = [
+    'inbound',
+    'outboundReset',
+    'outboundFailedHtlcFollowup',
+    'outboundSettlementHankoAttach',
+  ] as const;
   const phaseFields = [
     'invocations', 'coordinatorWallMicros', 'coordinatorPreDispatchMicros',
     'runLanesWallMicros', 'coordinatorPostJoinMicros', 'workerSamples', 'workerWorkSumMicros',

@@ -255,7 +255,6 @@ fn frame_context(replica: &RuntimeReplica, height: u64, timestamp: u64) -> Runti
     RuntimeFrameContext {
         timestamp,
         finalized_j_height: 0,
-        hub_rebalance_has_pending_work: false,
         entity_contexts: BTreeMap::from([(
             key,
             std::collections::VecDeque::from([RuntimeEntityFrameContext {
@@ -582,7 +581,6 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         entity_inputs: inbound.entity_inputs,
         timestamp: 200,
         finalized_j_height: 0,
-        hub_rebalance_has_pending_work: false,
     };
     let store = NativeRuntimeStore::open(
         &path,
@@ -1026,7 +1024,7 @@ fn canonical_hash_cadence_does_not_materialize_path_nodes() {
     assert_eq!(frame.get("materializedState"), Some(&Value::Bool(false)));
     assert!(frame.get("canonicalStateHash").is_some());
     assert!(frame.get("canonicalEntityHashes").is_some());
-    assert!(frame.get("runtimeMachineRoot").is_some());
+    assert!(frame.get("runtimeMachineRoot").is_none());
     drop(processor);
 
     let mut reopened = NativeRuntimeStore::open(

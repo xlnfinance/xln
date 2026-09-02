@@ -660,12 +660,7 @@ pub(crate) fn revealed_secret_followup(
             .checked_add(SECRET_ACK_TIMEOUT_MS)
             .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?;
         route.secret_ack_deadline_at = Some(deadline);
-        let hook = ScheduledHook::htlc_secret_ack_timeout(
-            hashlock.clone(),
-            account,
-            hashlock.clone(),
-            deadline,
-        );
+        let hook = ScheduledHook::htlc_secret_ack_timeout(hashlock.clone(), account, deadline);
         let crontab = state
             .crontab
             .as_mut()
@@ -772,12 +767,7 @@ pub(crate) fn dispute_evidence_secret(
             .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_CRONTAB_MISSING"))?;
         schedule_hook(
             crontab,
-            ScheduledHook::htlc_secret_ack_timeout(
-                hashlock.to_string(),
-                inbound,
-                hashlock.to_string(),
-                deadline,
-            ),
+            ScheduledHook::htlc_secret_ack_timeout(hashlock.to_string(), inbound, deadline),
         )?;
     }
     paybook.put(route)

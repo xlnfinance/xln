@@ -1,0 +1,469 @@
+{
+  "canonicalSource": "TypeScript Entity production handlers",
+  "cases": [
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x45a7dec9df158b0e19b009677c3e6379b13245dcc2c7a74bbe3bac98a613f849"
+      ],
+      "accountTxTypes": [
+        "lending_fund"
+      ],
+      "events": [
+        {
+          "message": "Lending pool funding requested: 10000 token=1",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "10000"
+          },
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "interestBps": 100,
+          "positionId": "lend-1111111111111111",
+          "termId": "1d",
+          "tokenId": 1
+        },
+        "type": "lendingOffer"
+      },
+      "name": "lendingOffer",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x8bf5b9b509aa5cfddeb3c9a743aa06f6ce049a220cb7b3319f4c238436ddbd27"
+      ],
+      "accountTxTypes": [
+        "lending_borrow_request"
+      ],
+      "events": [
+        {
+          "message": "Loan requested: 2500 token=1",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "2500"
+          },
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "maxInterestBps": 150,
+          "requestId": "borrow-2222222222222222",
+          "termId": "1d",
+          "tokenId": 1
+        },
+        "type": "lendingBorrow"
+      },
+      "name": "lendingBorrow",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x5ed4ae4e60fd1ff7f3766735702f6524fa02cb49c9312dea0214718b941ef246"
+      ],
+      "accountTxTypes": [
+        "lending_repay"
+      ],
+      "events": [
+        {
+          "message": "Loan repayment requested: loan-0327fd9035d42518",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "2525"
+          },
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "loanId": "loan-0327fd9035d42518",
+          "tokenId": 1
+        },
+        "type": "lendingRepay"
+      },
+      "name": "lendingRepay",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x71764c1d7e26b09012afa034dff72a3a60e7837f6f33d1fde37e07d52ea44705"
+      ],
+      "accountTxTypes": [
+        "lending_close_request"
+      ],
+      "events": [
+        {
+          "message": "Lending position close requested: lend-1111111111111111",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "positionId": "lend-1111111111111111"
+        },
+        "type": "lendingClosePosition"
+      },
+      "name": "lendingClosePosition",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0xe50f5f87d7825ee6d2604e8a4948918c18f14617bd378c4231bd6c5b944b3f22"
+      ],
+      "accountTxTypes": [
+        "swap_offer"
+      ],
+      "events": [],
+      "input": {
+        "data": {
+          "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "giveAmount": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000000"
+          },
+          "giveTokenDecimals": 18,
+          "giveTokenId": 2,
+          "maxFee": {
+            "__xlnType": "BigInt",
+            "value": "25000"
+          },
+          "minNetReceive": {
+            "__xlnType": "BigInt",
+            "value": "2475000"
+          },
+          "offerId": "offer-1",
+          "priceTicks": {
+            "__xlnType": "BigInt",
+            "value": "25000"
+          },
+          "timeInForce": 0,
+          "wantAmount": {
+            "__xlnType": "BigInt",
+            "value": "2500000"
+          },
+          "wantTokenDecimals": 6,
+          "wantTokenId": 1
+        },
+        "type": "placeSwapOffer"
+      },
+      "name": "placeSwapOffer",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x6a33fe02ad85307406c65c6b9cd1e3eb75ae043a8130c49ed743b5d2714237f2"
+      ],
+      "accountTxTypes": [
+        "swap_cancel_request"
+      ],
+      "events": [],
+      "input": {
+        "data": {
+          "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "offerId": "offer-1"
+        },
+        "type": "proposeCancelSwap"
+      },
+      "name": "proposeCancelSwap",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x901a97223dbfe1c97f48a888e371ddd102dc710f8c4c39619d16c843f18bff6e"
+      ],
+      "accountTxTypes": [
+        "request_collateral"
+      ],
+      "events": [],
+      "input": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "100"
+          },
+          "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "feeAmount": {
+            "__xlnType": "BigInt",
+            "value": "3"
+          },
+          "feeTokenId": 2,
+          "policyVersion": 7,
+          "tokenId": 1
+        },
+        "type": "requestCollateral"
+      },
+      "name": "requestCollateral",
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountIds": [],
+      "accountTxDigests": [],
+      "accountTxTypes": [],
+      "events": [],
+      "input": {
+        "data": {
+          "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "hardLimit": {
+            "__xlnType": "BigInt",
+            "value": "100"
+          },
+          "maxAcceptableFee": {
+            "__xlnType": "BigInt",
+            "value": "5"
+          },
+          "r2cRequestSoftLimit": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          },
+          "tokenId": 1
+        },
+        "type": "setRebalancePolicy"
+      },
+      "name": "setRebalancePolicy",
+      "policy": {
+        "hardLimit": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "maxAcceptableFee": {
+          "__xlnType": "BigInt",
+          "value": "5"
+        },
+        "r2cRequestSoftLimit": {
+          "__xlnType": "BigInt",
+          "value": "50"
+        }
+      },
+      "wakeTargets": []
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x2311ff77f40f1a45d72f40e7147a815024b6409288e316df9a0c7d0a7ac65509"
+      ],
+      "accountTxTypes": [
+        "htlc_lock"
+      ],
+      "events": [
+        {
+          "message": "🔒 HTLC: Recipient 100, sender lock 110 (fee 10) to 2222 via 1 hops",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "100"
+          },
+          "deliveryMode": "instant",
+          "description": "note",
+          "hashlock": "0xc30a517db8ecf1fc211fc219992fc80a7575415052543287dc5d173259cc97f8",
+          "maxSenderDebit": {
+            "__xlnType": "BigInt",
+            "value": "120"
+          },
+          "route": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+          ],
+          "startedAtMs": 1000,
+          "targetEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tokenId": 1
+        },
+        "type": "htlcPayment"
+      },
+      "name": "htlcPayment",
+      "paybookEntry": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "createdTimestamp": 1000,
+        "description": "note",
+        "hashlock": "0xc30a517db8ecf1fc211fc219992fc80a7575415052543287dc5d173259cc97f8",
+        "originated": true,
+        "outboundEntity": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "startedAtMs": 1000,
+        "tokenId": 1
+      },
+      "preparedTxHash": "0xffbd2c6abdcfee23378320bdfe0e36731183df0bc210cc6faf0bf934b0f9a1ab",
+      "runtimeEffects": [
+        {
+          "data": {
+            "amount": "100",
+            "description": "note",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "fee": "10",
+            "fromEntity": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "hashlock": "0xc30a517db8ecf1fc211fc219992fc80a7575415052543287dc5d173259cc97f8",
+            "lockId": "0xc30a517db8ecf1fc211fc219992fc80a7575415052543287dc5d173259cc97f8",
+            "route": [
+              "0x1111111111111111111111111111111111111111111111111111111111111111",
+              "0x2222222222222222222222222222222222222222222222222222222222222222"
+            ],
+            "senderAmount": "110",
+            "startedAtMs": 1000,
+            "toEntity": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "tokenId": 1
+          },
+          "eventName": "HtlcInitiated",
+          "kind": "runtimeEvent"
+        }
+      ],
+      "wakeTargets": []
+    },
+    {
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x8b5360f820f8b3e9953088dcd305ce652977c212e85d8ba16b0b614f94041a43"
+      ],
+      "accountTxTypes": [
+        "htlc_resolve"
+      ],
+      "events": [
+        {
+          "message": "🔓 HTLC resolve queued for 0x2222222222222222222222222222222222222222222222222222222222222222",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "lockId": "0xc30a517db8ecf1fc211fc219992fc80a7575415052543287dc5d173259cc97f8",
+          "secret": "0x5555555555555555555555555555555555555555555555555555555555555555"
+        },
+        "type": "resolveHtlcLock"
+      },
+      "name": "resolveHtlcLock",
+      "paybookEntry": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "7"
+        },
+        "createdTimestamp": 1000,
+        "hashlock": "0xc30a517db8ecf1fc211fc219992fc80a7575415052543287dc5d173259cc97f8",
+        "inboundEntity": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "secret": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "tokenId": 1
+      },
+      "wakeTargets": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ]
+    },
+    {
+      "accountCreateStateRoot": "0x69bb6757cb10c19a6412543561211690c129d466e2ec094c0e75c5e454894d60",
+      "accountIds": [
+        "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "accountTxDigests": [
+        "0x7dafbc53059eb1fb7d325fdc1094b4da21b2bd0429cba5743078f4b971d0618e",
+        "0x621922bc28bc6599ff26d4d98c2ce241511aba76161e187c86052e00feafb858",
+        "0x43618dbfb00bfc015ec9f451f5c3547414cf2ba904fdef50da8e0e55d1ed3d0f",
+        "0x0bd8ae4cee7981ecedb4a0756265f3196144db94f2a380bef3153ce611b4b8f5"
+      ],
+      "accountTxTypes": [
+        "add_delta",
+        "add_delta",
+        "add_delta",
+        "set_credit_limit"
+      ],
+      "events": [
+        {
+          "message": "💳 Opening account with Entity 0x2222222222222222222222222222222222222222222222222222222222222222...",
+          "type": "status"
+        },
+        {
+          "message": "✅ Account opening request sent to Entity 0x2222222222222222222222222222222222222222222222222222222222222222",
+          "type": "status"
+        }
+      ],
+      "input": {
+        "data": {
+          "accountDomain": {
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888"
+          },
+          "creditAmount": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "disputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 20
+          },
+          "pinPublic": true,
+          "targetEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "tokenId": 1,
+          "watchSeed": "0x4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        "type": "openAccount"
+      },
+      "name": "openAccount",
+      "policy": {
+        "hardLimit": {
+          "__xlnType": "BigInt",
+          "value": "10000000000"
+        },
+        "maxAcceptableFee": {
+          "__xlnType": "BigInt",
+          "value": "15000000"
+        },
+        "r2cRequestSoftLimit": {
+          "__xlnType": "BigInt",
+          "value": "500000000"
+        }
+      },
+      "wakeTargets": []
+    }
+  ],
+  "version": 1
+}

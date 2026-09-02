@@ -4,7 +4,8 @@ use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountFrame, AccountIdentity, AccountReplica,
     AccountState, AccountStateSeed, BilateralRebalanceFeePolicy, CarriedSections, CommittedFrame,
     ConsensusSnapshot, DepositoryAddress, JClaimAccumulator, LendingIntentKind,
-    PendingFrameSnapshot, RebalanceFeePolicySnapshot, TokenId, WatchSeed,
+    PendingFrameSnapshot, RebalanceFeePolicySnapshot, RebalanceRefundReason, RebalanceRefundState,
+    RebalanceRequestFeeState, TokenId, WatchSeed,
 };
 
 use crate::ProcessError;
@@ -13,8 +14,8 @@ use crate::wire_decode::{
     decode_outbound_ack, decode_swap_offer_state, decode_tx,
 };
 use crate::wire_value::{
-    bigint, bounded_u32, bytes, entity, exact, fixed_bytes, hex_fixed, integer, js_number, text,
-    tuple, unsigned,
+    bigint, boolean, bounded_u32, bytes, entity, exact, fixed_bytes, hex_fixed, integer, js_number,
+    text, token, tuple, unsigned,
 };
 
 const MAX_CHECKPOINT_ACCOUNTS: usize = 65_536;
@@ -36,7 +37,7 @@ pub fn restore_request(
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
-    let fields = exact(tuple(value)?, 11, "accountRestore")?;
+    let fields = exact(tuple(value)?, 13, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -64,7 +65,15 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         .iter()
         .map(pull_entry)
         .collect::<Result<_, _>>()?;
-    let j_claim_nodes = tuple(&fields[9])?
+    let requested_rebalance = tuple(&fields[9])?
+        .iter()
+        .map(requested_rebalance_entry)
+        .collect::<Result<_, _>>()?;
+    let requested_rebalance_fee_state = tuple(&fields[10])?
+        .iter()
+        .map(requested_rebalance_fee_entry)
+        .collect::<Result<_, _>>()?;
+    let j_claim_nodes = tuple(&fields[11])?
         .iter()
         .map(|entry| {
             let row = exact(tuple(entry)?, 2, "jClaimNodeEntry")?;
@@ -74,7 +83,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
             ))
         })
         .collect::<Result<Vec<_>, ProcessError>>()?;
-    let consensus = consensus(&fields[10])?;
+    let consensus = consensus(&fields[12])?;
     let AccountCheckpointHeader {
         owner,
         signer_id,
@@ -97,23 +106,22 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
     if account_id.as_bytes() != counterparty.as_bytes() {
         return Err(ProcessError::Expected("checkpointAccountIdIsCounterparty"));
     }
-    let mut replica = AccountReplica::new(
-        owner,
-        AccountState::restore_full(AccountStateSeed {
-            identity,
-            dispute_config,
-            deltas,
-            locks,
-            j_nonce,
-            last_finalized_j_height,
-            carried,
-            rebalance_fee_policies,
-            swap_offers,
-            lending_intents,
-            pulls,
-            settlement_workspace,
-        })?,
-    )?;
+    let mut state = AccountState::restore_full(AccountStateSeed {
+        identity,
+        dispute_config,
+        deltas,
+        locks,
+        j_nonce,
+        last_finalized_j_height,
+        carried,
+        rebalance_fee_policies,
+        swap_offers,
+        lending_intents,
+        pulls,
+        settlement_workspace,
+    })?;
+    state.install_requested_rebalance(requested_rebalance, requested_rebalance_fee_state)?;
+    let mut replica = AccountReplica::new(owner, state)?;
     replica.set_envelope(envelope);
     replica.restore_j_claim_nodes(j_claim_nodes)?;
     if let Some(address) = delta_transformer {
@@ -126,6 +134,58 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         signer_id,
         account_leaf,
     })
+}
+
+fn requested_rebalance_entry(
+    value: &AbiValue,
+) -> Result<(TokenId, num_bigint::BigInt), ProcessError> {
+    let fields = exact(tuple(value)?, 2, "requestedRebalanceEntry")?;
+    Ok((
+        token(&fields[0])?,
+        bigint(&fields[1], "requestedRebalanceAmount")?,
+    ))
+}
+
+fn requested_rebalance_fee_entry(
+    value: &AbiValue,
+) -> Result<(TokenId, RebalanceRequestFeeState), ProcessError> {
+    let fields = exact(tuple(value)?, 2, "requestedRebalanceFeeEntry")?;
+    let value = exact(tuple(&fields[1])?, 8, "requestedRebalanceFeeState")?;
+    let refund = match &value[7] {
+        AbiValue::Nil => None,
+        value => {
+            let refund = exact(tuple(value)?, 2, "requestedRebalanceRefund")?;
+            let reason = match integer(&refund[0])? {
+                0 => RebalanceRefundReason::PolicyMismatch,
+                1 => RebalanceRefundReason::Timeout,
+                2 => RebalanceRefundReason::FeeTooLow,
+                3 => RebalanceRefundReason::Manual,
+                value => {
+                    return Err(ProcessError::Tag {
+                        field: "rebalanceRefundReason",
+                        value,
+                    });
+                }
+            };
+            Some(RebalanceRefundState {
+                reason,
+                refunded_amount: bigint(&refund[1], "refundedAmount")?,
+            })
+        }
+    };
+    Ok((
+        token(&fields[0])?,
+        RebalanceRequestFeeState {
+            request_id: text(&value[0])?.to_owned(),
+            fee_token_id: token(&value[1])?,
+            fee_paid_upfront: bigint(&value[2], "feePaidUpfront")?,
+            requested_amount: bigint(&value[3], "requestedAmount")?,
+            policy_version: js_number(&value[4], "policyVersion")?,
+            requested_at: js_number(&value[5], "requestedAt")?,
+            requested_by_left: boolean(&value[6], "requestedByLeft")?,
+            refund,
+        },
+    ))
 }
 
 fn pull_entry(

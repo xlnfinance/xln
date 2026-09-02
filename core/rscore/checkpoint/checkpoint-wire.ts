@@ -99,7 +99,7 @@ export const decodeRscoreCheckpointChanges = (value: unknown): RscoreCheckpointC
   }
   const accounts = rscoreCheckpointList(tuple[2], 'ACCOUNTS')
     .map((account, index) => {
-      const row = rscoreCheckpointTuple(account, 12, `ACCOUNT_${index}`);
+      const row = rscoreCheckpointTuple(account, 14, `ACCOUNT_${index}`);
       rscoreCheckpointBytes(row[0], 32, `ACCOUNT_${index}_ID`);
       rscoreCheckpointBytes(row[1], 32, `ACCOUNT_${index}_LEAF`);
       return row;

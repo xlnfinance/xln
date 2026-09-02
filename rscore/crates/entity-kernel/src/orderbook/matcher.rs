@@ -6,11 +6,11 @@ use num_bigint::BigInt;
 use xln_rscore_engine::AccountTx;
 
 use crate::types::TargetedAccountTx;
-use crate::{DeterministicContext, EntityKernelError, LocalEntityOutput};
+use crate::{DeterministicContext, EntityKernelError, HubProfile, LocalEntityOutput};
 
 use super::book::{
     AddOrder, BookEvent, MakerDisposition, apply_gtc, apply_gtc_with_execution_price, cancel_order,
-    resume_crossed,
+    record_accepted_usd_ask_price, resume_crossed,
 };
 use super::math::{
     base_amount_from_lots, canonical_pair, exact_quote_lot_multiple, lot_scale, pair_dimensions,
@@ -54,6 +54,34 @@ pub(crate) struct OrderbookPairJob {
     pair_id: String,
     state: OrderbookState,
     commands: Vec<(usize, String, SameJOffer)>,
+    usd_quote_authority: Option<UsdQuoteAuthority>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UsdQuoteAuthority {
+    reference_token_id: u32,
+    entity_id: String,
+}
+
+struct OfferExecutionContext<'a> {
+    deterministic: &'a DeterministicContext,
+    usd_quote_authority: Option<&'a UsdQuoteAuthority>,
+}
+
+fn is_authorized_usd_reference_ask(
+    authority: Option<&UsdQuoteAuthority>,
+    materialized: &MaterializedOffer,
+    offer: &SameJOffer,
+) -> bool {
+    offer.cross_jurisdiction.is_none()
+        && authority.is_some_and(|authority| {
+            materialized.side == Side::Ask
+                && offer.give_token_id != authority.reference_token_id
+                && offer.want_token_id == authority.reference_token_id
+                && materialized
+                    .owner_id
+                    .eq_ignore_ascii_case(&authority.entity_id)
+        })
 }
 
 pub(crate) struct OrderbookPairOutcome {
@@ -86,6 +114,10 @@ impl OrderbookPairJob {
         let mut swept = BTreeSet::new();
         let mut batch = BTreeMap::new();
         let mut effects = Vec::with_capacity(self.commands.len());
+        let execution = OfferExecutionContext {
+            deterministic: context,
+            usd_quote_authority: self.usd_quote_authority.as_ref(),
+        };
         for (ordinal, account_id, offer) in &self.commands {
             let mut command_effects = OrderbookEffects::default();
             if let Err(error) = process_one_offer(
@@ -93,7 +125,7 @@ impl OrderbookPairJob {
                 &mut command_effects,
                 account_id,
                 offer,
-                context,
+                &execution,
                 &mut swept,
                 &mut batch,
             ) {
@@ -805,7 +837,7 @@ fn process_one_offer<'a>(
     effects: &mut OrderbookEffects,
     account_id: &str,
     offer: &'a SameJOffer,
-    context: &DeterministicContext,
+    execution: &OfferExecutionContext<'_>,
     swept: &mut BTreeSet<String>,
     batch: &mut BTreeMap<String, &'a SameJOffer>,
 ) -> Result<(), EntityKernelError> {
@@ -815,6 +847,7 @@ fn process_one_offer<'a>(
     {
         return Ok(());
     }
+    let context = execution.deterministic;
     let materialized = match materialize(account_id, offer, &context.minimum_trade_size) {
         Ok(value) => value,
         Err(EntityKernelError::SwapRejected { code }) => {
@@ -941,6 +974,26 @@ fn process_one_offer<'a>(
         };
         Some((materialized.order_id.clone(), events))
     };
+    let accepted = events_and_taker.as_ref().is_none_or(|(_, events)| {
+        let has_trade = events
+            .iter()
+            .any(|event| matches!(event, BookEvent::Trade { .. }));
+        let has_reject = events
+            .iter()
+            .any(|event| matches!(event, BookEvent::Reject { .. }));
+        has_trade || !has_reject
+    });
+    if accepted
+        && is_authorized_usd_reference_ask(execution.usd_quote_authority, &materialized, offer)
+    {
+        let book = state
+            .books
+            .get_mut(&materialized.pair_id)
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_PAIR_MISSING"))?;
+        // This authority-only price is consensus state: update it after the
+        // accepted command's normal book event, exactly like TypeScript.
+        record_accepted_usd_ask_price(book, &offer.price_ticks)?;
+    }
     if let Some((taker_order_id, events)) = events_and_taker {
         apply_pair_index_events(state, &materialized.pair_id, &taker_order_id, &events);
         let (taker_account, taker_offer_id) = split_order_id(&taker_order_id)?;
@@ -970,6 +1023,7 @@ pub(crate) fn prepare_orderbook_outputs(
     deltas: &[SameJOutputDelta],
     context: &DeterministicContext,
     entity_id: &str,
+    hub_profile: Option<&HubProfile>,
 ) -> Result<PreparedOrderbookStage, EntityKernelError> {
     let mut effects = OrderbookEffects::default();
     apply_final_offer_index(state, deltas, entity_id);
@@ -1062,6 +1116,10 @@ pub(crate) fn prepare_orderbook_outputs(
             pair_id,
             state: pair_state,
             commands,
+            usd_quote_authority: hub_profile.map(|profile| UsdQuoteAuthority {
+                reference_token_id: profile.reference_token_id,
+                entity_id: profile.usd_quote_authority_entity_id.clone(),
+            }),
         });
     }
 
@@ -1155,7 +1213,7 @@ fn apply_orderbook_outputs(
     context: &DeterministicContext,
     entity_id: &str,
 ) -> Result<OrderbookEffects, EntityKernelError> {
-    let mut prepared = prepare_orderbook_outputs(state, deltas, context, entity_id)?;
+    let mut prepared = prepare_orderbook_outputs(state, deltas, context, entity_id, None)?;
     let jobs = prepared.take_jobs();
     let results = jobs.into_iter().map(|job| job.apply(context)).collect();
     let validated = validate_orderbook_outputs(prepared, results)?;
@@ -1212,6 +1270,38 @@ mod tests {
             quantized_want: want_amount,
             cross_jurisdiction: None,
         }
+    }
+
+    #[test]
+    fn usd_reference_ask_authority_excludes_other_makers_and_cross_jurisdiction() {
+        let authority = UsdQuoteAuthority {
+            reference_token_id: 1,
+            entity_id: "maker".to_string(),
+        };
+        let mut offer = resting_ask("maker", "authority-ask", 2, 18, 25_000_000, 1);
+        let materialized = materialize("maker", &offer, &BigInt::from(0)).expect("same-J ask");
+        assert!(is_authorized_usd_reference_ask(
+            Some(&authority),
+            &materialized,
+            &offer
+        ));
+
+        let other_authority = UsdQuoteAuthority {
+            entity_id: "other".to_string(),
+            ..authority.clone()
+        };
+        assert!(!is_authorized_usd_reference_ask(
+            Some(&other_authority),
+            &materialized,
+            &offer
+        ));
+
+        offer.cross_jurisdiction = Some(xln_rscore_protocol::CanonicalValue::Object(Vec::new()));
+        assert!(!is_authorized_usd_reference_ask(
+            Some(&authority),
+            &materialized,
+            &offer
+        ));
     }
 
     fn book_order(order_id: &str) -> BookOrder {
@@ -1385,8 +1475,8 @@ mod tests {
         let mut mapper = ReverseOrderbookPairMapper {
             job_counts: Vec::new(),
         };
-        let mut prepared =
-            prepare_orderbook_outputs(&mut reversed, &deltas, &context, "hub").expect("prepare");
+        let mut prepared = prepare_orderbook_outputs(&mut reversed, &deltas, &context, "hub", None)
+            .expect("prepare");
         let jobs = prepared.take_jobs();
         let results = mapper
             .map_pairs(jobs, context.clone())

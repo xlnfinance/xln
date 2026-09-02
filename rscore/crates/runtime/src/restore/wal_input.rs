@@ -9,6 +9,7 @@ use crate::{
     RuntimeInput, RuntimeMempool, RuntimeTx, canonical_value_from_tagged_json,
 };
 
+use super::concrete::ExpectedEntityRoot;
 use super::{ConcreteWalSource, DecodedRuntimeWalFrame};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -313,7 +314,9 @@ fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteW
     })
 }
 
-fn expected_entity_root(frame: &Value) -> Result<Option<[u8; 32]>, ConcreteWalDecodeError> {
+fn expected_entity_root(
+    frame: &Value,
+) -> Result<Option<ExpectedEntityRoot>, ConcreteWalDecodeError> {
     let Some(value) = object(frame, "frame")?.get("canonicalEntityHashes") else {
         return Ok(None);
     };
@@ -321,11 +324,16 @@ fn expected_entity_root(frame: &Value) -> Result<Option<[u8; 32]>, ConcreteWalDe
     if rows.len() != 1 {
         return Err(invalid(format!("ENTITY_HASH_COUNT:{}", rows.len())));
     }
-    digest(
-        field(&rows[0], "hash", "frame.canonicalEntityHashes[0]")?,
-        "entityRoot",
-    )
-    .map(Some)
+    Ok(Some(ExpectedEntityRoot {
+        entity_id: digest(
+            field(&rows[0], "entityId", "frame.canonicalEntityHashes[0]")?,
+            "entityId",
+        )?,
+        root: digest(
+            field(&rows[0], "hash", "frame.canonicalEntityHashes[0]")?,
+            "entityRoot",
+        )?,
+    }))
 }
 
 /// Decode one authenticated frame/context pair without consulting TypeScript
@@ -334,7 +342,6 @@ fn expected_entity_root(frame: &Value) -> Result<Option<[u8; 32]>, ConcreteWalDe
 pub fn decode_concrete_runtime_wal_frame(
     source: &ConcreteWalSource,
     finalized_j_height: u64,
-    hub_rebalance_has_pending_work: bool,
 ) -> Result<DecodedRuntimeWalFrame, ConcreteWalDecodeError> {
     let frame = source.frame();
     let height = safe_unsigned(field(frame, "height", "frame")?, "frame.height")?;
@@ -458,7 +465,6 @@ pub fn decode_concrete_runtime_wal_frame(
             frame: RuntimeFrameContext {
                 timestamp,
                 finalized_j_height,
-                hub_rebalance_has_pending_work,
                 entity_contexts,
             },
         },

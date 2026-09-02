@@ -288,8 +288,10 @@ const runCoordinator = async (
     owningEntityIsHub: false,
     inputs: inboundInputs.map(input => ({ accountId: input.fromEntityId, input })),
   });
-  if (inbound.postAccounts !== undefined) {
-    throw new Error('PARITY_INBOUND_POST_ACCOUNTS_LEAKED');
+  if (inbound.postAccounts?.length !== inboundInputs.length) {
+    throw new Error(
+      `PARITY_INBOUND_POST_ACCOUNT_ARITY:${inbound.postAccounts?.length ?? -1}:${inboundInputs.length}`,
+    );
   }
   if (inbound.accountsRoot !== undefined || inbound.changedSubroots.length !== 0) {
     throw new Error('PARITY_INBOUND_ROOT_WAS_NOT_REQUESTED');
@@ -629,6 +631,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(digest(inbound.effects)).toBe(digest([{
       phase: 'inbound', order: 0, accountId, result: expected,
     }]));
+    expect(inbound.postAccounts?.map(row => row.accountId)).toEqual([accountId]);
     expect(outbound.accountsRoot).toBe(PersistentEntityAccountMap.fromEntries(
       [[accountId, sequential]], OWNER, computeEntityAccountValueHash,
     ).rootHash());

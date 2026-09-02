@@ -139,6 +139,22 @@ describe('hlt payment population', () => {
     expect(laneSource).not.toContain('gossipPollMs');
   });
 
+  test('payment TPS authority drains all sovereign lanes after H1 settlement without running HLT', () => {
+    const source = readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/workload/worker-payments.ts'),
+      'utf8',
+    );
+    const settlementIndex = source.indexOf('const settlements = rustSettlement');
+    const laneDrainIndex = source.indexOf('const laneQuiescence = rustSettlement?.laneQuiescence');
+    expect(settlementIndex).toBeGreaterThan(-1);
+    expect(laneDrainIndex).toBeGreaterThan(settlementIndex);
+    expect(source).toContain(
+      'await waitForLaneQuiescence(users, requireHub().adapter.runtimeId, 5_000)',
+    );
+    expect(source).toContain('drainCompleteElapsedMs,');
+    expect(source).toContain('laneQuiescence,');
+  });
+
   test('economic gate separates setup from the unchanged live load window', async () => {
     const gateDir = mkdtempSync(join(tmpdir(), 'xln-hlt-economic-gate-'));
     const previous = process.env['XLN_HLT_ECONOMIC_GATE_DIR'];
@@ -166,7 +182,11 @@ describe('hlt payment population', () => {
       'utf8',
     );
     expect(source).toContain('await runParityGatedHltChild({');
-    expect(source).toContain("parityArgs: ['core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts']");
+    expect(source).toContain("process.env['XLN_HLT_PARITY_RECORDING']");
+    expect(source).toContain("'--recording'");
+    expect(source).toContain('resolve(parityRecording)');
+    expect(source).toContain("selection.engine === 'ts' && workload === 'payments'");
+    expect(source).toContain("XLN_HLT_H1_ONLY: '1'");
     expect(source).toContain("authorityEvidence ? remainingAuthorityBudget('live') : 30_000");
     expect(source).not.toContain('timeout: 50_000');
     expect(source).not.toContain('XLN_HLT_RUNTIMES_PER_WORKER:');
@@ -528,31 +548,66 @@ describe('hlt payment report boundary', () => {
     mode: 'payments',
     runId: 'hlt-payment-test',
     completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
-    configuredUsers: 64, configuredRounds: 10, cadenceMs: 1_000,
-    senders: 32, receivers: 32, tokenId: 1, amount: '1000',
-    offeredPaymentRate: 32, submittedPayments: 320, deliveredPayments: 320,
+    configuredUsers: 1_000, configuredRounds: 20, cadenceMs: 1_000,
+    senders: 1_000, receivers: 1_000, tokenId: 1, amount: '1000',
+    offeredPaymentRate: 1_000, submittedPayments: 20_000, deliveredPayments: 20_000,
     enqueueAckElapsedMs: 10, sourceDispatchFinishedElapsedMs: 15,
-    sourceAllAckedElapsedMs: 20, commandObservedElapsedMs: 20, deliveredElapsedMs: 30,
-    deliveredTps: 10.5, roundSubmissionLagMs: Array.from({ length: 320 }, () => 1),
-    hubCompletedPaymentsBefore: 12, hubCompletedPaymentsAfter: 332,
-    hubAcceptedPaymentsBefore: 7, hubAcceptedPaymentsAfter: 327,
-    hubIngressElapsedMs: 25,
+    sourceAllAckedElapsedMs: 20, commandObservedElapsedMs: 20, deliveredElapsedMs: 20_000,
+    drainCompleteElapsedMs: 20_500,
+    deliveredTps: 1_000, roundSubmissionLagMs: Array.from({ length: 20_000 }, () => 1),
+    hubCompletedPaymentsBefore: 12, hubCompletedPaymentsAfter: 20_012,
+    hubAcceptedPaymentsBefore: 7, hubAcceptedPaymentsAfter: 20_007,
+    hubIngressElapsedMs: 19_000,
     settlementSamples: [
       { elapsedMs: 5, runtimeHeight: 12, acceptedPayments: 0, completedPayments: 0, paybookOpen: 0 },
-      { elapsedMs: 25, runtimeHeight: 20, acceptedPayments: 320, completedPayments: 100, paybookOpen: 220 },
-      { elapsedMs: 30, runtimeHeight: 40, acceptedPayments: 320, completedPayments: 320, paybookOpen: 0 },
+      { elapsedMs: 19_000, runtimeHeight: 20, acceptedPayments: 20_000, completedPayments: 10_000, paybookOpen: 10_000 },
+      { elapsedMs: 20_000, runtimeHeight: 40, acceptedPayments: 20_000, completedPayments: 20_000, paybookOpen: 0 },
     ],
+    laneQuiescence: {
+      runtimes: 1_000, openHubPeers: 1_000, pendingRuntimeWork: 0,
+      pendingAccountFrames: 0, accountMempoolTxs: 0,
+    },
     walBytesBefore: 100, walBytesAfter: 200,
     hubDurableBefore: frame, hubDurableAfter: { ...frame, height: 40 },
     environment: {
       disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
-      laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
+      laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default', accountWorkers: 4,
     },
   };
 
   test('a fully delivered run decodes', () => {
-    expect(decodeLoadPaymentReport(report).deliveredPayments).toBe(320);
+    expect(decodeLoadPaymentReport(report).deliveredPayments).toBe(20_000);
     expect(decodeLoadPaymentReport(report).environment.laneNice).toBe(0);
+    expect(decodeLoadPaymentReport(report).laneQuiescence.openHubPeers).toBe(1_000);
+  });
+
+  test('lane drain evidence fails closed on cardinality or pending work', () => {
+    const { laneQuiescence: _laneQuiescence, ...withoutLaneQuiescence } = report;
+    expect(() => decodeLoadPaymentReport(withoutLaneQuiescence))
+      .toThrow('HLT_PAYMENT_REPORT_FIELDS_INVALID');
+    expect(() => decodeLoadPaymentReport({
+      ...report,
+      laneQuiescence: { ...report.laneQuiescence, unexpected: 0 },
+    })).toThrow('HLT_PAYMENT_REPORT_LANE_QUIESCENCE_FIELDS_INVALID');
+    expect(() => decodeLoadPaymentReport({
+      ...report,
+      laneQuiescence: { ...report.laneQuiescence, runtimes: 999 },
+    })).toThrow('HLT_PAYMENT_REPORT_LANE_CARDINALITY_INVALID:999:1000:1000');
+    expect(() => decodeLoadPaymentReport({
+      ...report,
+      laneQuiescence: { ...report.laneQuiescence, openHubPeers: 999 },
+    })).toThrow('HLT_PAYMENT_REPORT_LANE_CARDINALITY_INVALID:1000:999:1000');
+    for (const field of ['pendingRuntimeWork', 'pendingAccountFrames', 'accountMempoolTxs'] as const) {
+      expect(() => decodeLoadPaymentReport({
+        ...report,
+        laneQuiescence: { ...report.laneQuiescence, [field]: 1 },
+      })).toThrow('HLT_PAYMENT_REPORT_LANE_PENDING_INVALID');
+    }
+  });
+
+  test('drain completion may not precede committed delivery', () => {
+    expect(() => decodeLoadPaymentReport({ ...report, drainCompleteElapsedMs: 19_999 }))
+      .toThrow('HLT_PAYMENT_REPORT_DRAIN_PRECEDES_DELIVERY');
   });
 
   test('a report without its environment manifest is not a result', () => {
@@ -560,6 +615,10 @@ describe('hlt payment report boundary', () => {
     expect(() => decodeLoadPaymentReport(bare)).toThrow('HLT_PAYMENT_REPORT_FIELDS_INVALID');
     expect(() => decodeLoadPaymentReport({ ...report, environment: { ...report.environment, disputeHankos: 'off' } }))
       .toThrow('HLT_PAYMENT_REPORT_ENVIRONMENT_DISPUTE_HANKOS_INVALID');
+    expect(() => decodeLoadPaymentReport({
+      ...report,
+      environment: { ...report.environment, accountWorkers: 'unknown' },
+    })).toThrow('HLT_PAYMENT_REPORT_ENVIRONMENT_ACCOUNT_WORKERS_UNKNOWN');
   });
 
   test('a result requires synced H1 WAL growth', () => {
@@ -574,8 +633,8 @@ describe('hlt payment report boundary', () => {
   });
 
   test('a partially delivered run is rejected, not averaged', () => {
-    expect(() => decodeLoadPaymentReport({ ...report, deliveredPayments: 319 }))
-      .toThrow('HLT_PAYMENT_REPORT_INCOMPLETE:319:320');
+    expect(() => decodeLoadPaymentReport({ ...report, deliveredPayments: 19_999 }))
+      .toThrow('HLT_PAYMENT_REPORT_INCOMPLETE:19999:20000');
   });
 
   test('observation may not precede the acknowledgement it reports', () => {
@@ -583,9 +642,9 @@ describe('hlt payment report boundary', () => {
       .toThrow('HLT_PAYMENT_REPORT_TIMING_INVALID');
     expect(() => decodeLoadPaymentReport({
       ...report,
-      sourceDispatchFinishedElapsedMs: 31,
-      sourceAllAckedElapsedMs: 31,
-      commandObservedElapsedMs: 31,
+      sourceDispatchFinishedElapsedMs: 20_001,
+      sourceAllAckedElapsedMs: 20_001,
+      commandObservedElapsedMs: 20_001,
     }))
       .toThrow('HLT_PAYMENT_REPORT_TIMING_INVALID');
   });
@@ -605,15 +664,37 @@ describe('hlt payment report boundary', () => {
     const coalesced = {
       ...report,
       hubIngressElapsedMs: 25,
-      deliveredElapsedMs: 30,
+      deliveredElapsedMs: 20_000,
       settlementSamples: [
         { elapsedMs: 5, runtimeHeight: 12, acceptedPayments: 0, completedPayments: 0, paybookOpen: 0 },
-        { elapsedMs: 30, runtimeHeight: 40, acceptedPayments: 320, completedPayments: 320, paybookOpen: 0 },
+        { elapsedMs: 20_000, runtimeHeight: 40, acceptedPayments: 20_000, completedPayments: 20_000, paybookOpen: 0 },
       ],
     };
     expect(decodeLoadPaymentReport(coalesced).settlementSamples).toHaveLength(2);
-    expect(() => decodeLoadPaymentReport({ ...coalesced, hubIngressElapsedMs: 31 }))
+    expect(() => decodeLoadPaymentReport({ ...coalesced, hubIngressElapsedMs: 20_001 }))
       .toThrow('HLT_PAYMENT_REPORT_SAMPLE_TERMINAL_INVALID');
+  });
+
+  test('rate-bearing authority cardinality and derived rates fail closed', () => {
+    expect(() => decodeLoadPaymentReport({ ...report, configuredUsers: 999 }))
+      .toThrow('HLT_PAYMENT_REPORT_AUTHORITY_USERS_TOO_SMALL:999');
+    expect(() => decodeLoadPaymentReport({ ...report, configuredRounds: 19 }))
+      .toThrow('HLT_PAYMENT_REPORT_WINDOW_INVALID');
+    expect(() => decodeLoadPaymentReport({ ...report, cadenceMs: 999 }))
+      .toThrow('HLT_PAYMENT_REPORT_WINDOW_INVALID');
+    expect(() => decodeLoadPaymentReport({ ...report, senders: 999 }))
+      .toThrow('HLT_PAYMENT_REPORT_PARTICIPANTS_INVALID');
+    expect(() => decodeLoadPaymentReport({
+      ...report,
+      configuredUsers: 1_001,
+      senders: 1_001,
+      receivers: 1_001,
+      laneQuiescence: { ...report.laneQuiescence, runtimes: 1_001, openHubPeers: 1_001 },
+    })).toThrow('HLT_PAYMENT_REPORT_SUBMITTED_CARDINALITY_INVALID');
+    expect(() => decodeLoadPaymentReport({ ...report, offeredPaymentRate: 999 }))
+      .toThrow('HLT_PAYMENT_REPORT_OFFERED_RATE_INVALID');
+    expect(() => decodeLoadPaymentReport({ ...report, deliveredTps: 999 }))
+      .toThrow('HLT_PAYMENT_REPORT_TPS_MISMATCH');
   });
 
   test('a non-decimal amount is rejected', () => {

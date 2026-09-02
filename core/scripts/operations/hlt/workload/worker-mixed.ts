@@ -34,6 +34,7 @@ import {
   requireConnectedLaneRuntime,
   resetLaneHostOpCounters,
   stopLaneRuntimes,
+  waitForLaneQuiescence,
 } from '../lanes/lane-runtimes';
 import {
   prepareParallelSameLoad,
@@ -532,6 +533,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         sourceAllAckedElapsedMs: submitted.sourceAllAckedElapsedMs,
         commandObservedElapsedMs: submitted.sourceAllAckedElapsedMs,
         deliveredElapsedMs: finalElapsedMs,
+        drainCompleteElapsedMs: finalElapsedMs,
         deliveredTps: submittedPayments * 1_000 / finalElapsedMs,
         hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
         hubCompletedPaymentsAfter: rustSettlement.metrics.completedPayments,
@@ -550,6 +552,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           paybookOpen: 0,
         }],
         roundSubmissionLagMs: submitted.roundSubmissionLagMs,
+        laneQuiescence: rustSettlement.laneQuiescence,
         walBytesBefore,
         walBytesAfter: rustSettlement.metrics.retainedWalBytes,
         hubDurableBefore,
@@ -557,7 +560,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           height: rustSettlement.metrics.height,
           canonicalStateHash: rustSettlement.metrics.postStateHash,
         },
-        environment: collectHltEnvironmentManifest(),
+        environment: collectHltEnvironmentManifest({
+          engine: 'rust',
+          rustAccountWorkers: requireRustH1().ready.workers,
+          requireAccountWorkers: rustTpsAuthority,
+        }),
       }) : null;
       if (paymentReport !== null) {
         persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
@@ -668,6 +675,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         paymentOperationLedger,
         laneQuiescence: rustSettlement.laneQuiescence,
         laneIo,
+        environment: collectHltEnvironmentManifest({
+          engine: 'rust',
+          rustAccountWorkers: requireRustH1().ready.workers,
+          requireAccountWorkers: rustTpsAuthority,
+        }),
         ...rateEvidence,
       };
       writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify(live, 2)}\n`);
@@ -753,6 +765,15 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const hubCountersAfter = paymentSettlement.counters;
     const hubIngressElapsedMs = paymentSettlement.hubIngressElapsedMs;
     const deliveredElapsedMs = paymentSettlement.deliveredElapsedMs;
+    const laneQuiescence = await waitForLaneQuiescence(
+      users,
+      requireHub().adapter.runtimeId,
+      5_000,
+    );
+    const drainCompleteElapsedMs = Math.max(
+      deliveredElapsedMs,
+      Math.ceil(performance.now() - startedAt),
+    );
     if (authorityEvidence) {
       const firstUser = users[0];
       const secondUser = users[1];
@@ -792,6 +813,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       sourceAllAckedElapsedMs: submitted.sourceAllAckedElapsedMs,
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       deliveredElapsedMs,
+      drainCompleteElapsedMs,
       deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
       hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
       hubCompletedPaymentsAfter: hubCountersAfter.completedPayments,
@@ -800,11 +822,12 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       hubIngressElapsedMs,
       settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
+      laneQuiescence,
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),
       hubDurableBefore,
       hubDurableAfter,
-      environment: collectHltEnvironmentManifest(),
+      environment: collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: mixedTpsAuthority }),
     }) : null;
     if (paymentReport !== null) {
       persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
@@ -851,7 +874,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       loadDurableBefore: hubDurableBefore,
       loadDurableAfter: hubDurableAfter,
       settlementEvidence,
-      environment: collectHltEnvironmentManifest(),
+      environment: collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: mixedTpsAuthority }),
     }) : null;
     if (swapReport !== null) {
       persistReport(join(args.workDir, 'production-swap-load-report.json'), swapReport);

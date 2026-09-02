@@ -39,6 +39,29 @@ export const rustH1SessionPopulationReady = (
   loadUsers: number,
 ): boolean => current === existing + loadUsers;
 
+export const rustPaymentSettlementComplete = (options: Readonly<{
+  metrics: RustH1Metrics;
+  expectedPayments: number;
+  baselineOpenSessions: number;
+  loadUsers: number;
+}>): boolean => {
+  const { metrics } = options;
+  return metrics.acceptedPayments === options.expectedPayments &&
+    metrics.completedPayments === options.expectedPayments &&
+    metrics.paybookOpen === 0 &&
+    metrics.pendingBatches === 0 &&
+    metrics.activeShards === 0 &&
+    metrics.entityTxsPending === 0 &&
+    metrics.outboxTargetsPending === 0 &&
+    metrics.outboxRowsPending === 0 &&
+    metrics.outboxBytesPending === 0 &&
+    rustH1SessionPopulationIntact(
+      metrics.openSessions,
+      options.baselineOpenSessions,
+      options.loadUsers,
+    );
+};
+
 export const waitForRustH1Metrics = async (
   rust: RustH1Handle,
   predicate: (metrics: RustH1Metrics) => boolean,
@@ -283,24 +306,15 @@ export const waitForRustPaymentSettlement = async (options: Readonly<{
           paybookOpen: metrics.paybookOpen,
         });
       }
-      if (
-        metrics.acceptedPayments === options.expectedPayments &&
-        metrics.completedPayments === options.expectedPayments &&
-        metrics.paybookOpen === 0 &&
-        metrics.outboxTargetsPending === 0 &&
-        metrics.outboxRowsPending === 0 &&
-        metrics.outboxBytesPending === 0 &&
-        // `openSessions` includes pre-existing production peers (the market
-        // maker in mixed HLT), not only load users. The baseline is captured
-        // after all 5,000 sovereign users connect, so preserving that exact
-        // count proves H1 lost no authenticated session; lane quiescence below
-        // independently proves all 5,000 user peers remain open.
-        rustH1SessionPopulationIntact(
-          metrics.openSessions,
-          options.metricsBefore.openSessions,
-          options.lanes.length,
-        )
-      ) {
+      // `openSessions` includes pre-existing production peers, not only load
+      // users. The baseline is captured after the population connects, so the
+      // exact count plus zero Runtime/Entity/Account queues is the drain gate.
+      if (rustPaymentSettlementComplete({
+        metrics,
+        expectedPayments: options.expectedPayments,
+        baselineOpenSessions: options.metricsBefore.openSessions,
+        loadUsers: options.lanes.length,
+      })) {
         const finalSample = samples.at(-1);
         if (!finalSample) throw new Error('HLT_RUST_PAYMENT_SAMPLE_MISSING');
         const laneQuiescence = await waitForLaneQuiescence(options.lanes, options.rust.ready.runtimeId, 5_000);

@@ -166,7 +166,6 @@ pub struct DisputeStartEntityTx {
     pub cross_jurisdiction_route_id: Option<String>,
     pub starter_initial_arguments: Option<String>,
     pub starter_counter_arguments: Option<String>,
-    pub starter_counter_proof_commitment: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

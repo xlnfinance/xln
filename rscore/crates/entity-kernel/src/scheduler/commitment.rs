@@ -42,16 +42,11 @@ fn hook_data(hook: &ScheduledHookKind) -> Result<CanonicalValue, EntityKernelErr
         ScheduledHookKind::HtlcSecretAckTimeout {
             hashlock,
             counterparty_entity_id,
-            inbound_lock_id,
         } => vec![
             ("hashlock", CanonicalValue::String(hashlock.clone())),
             (
                 "counterpartyEntityId",
                 CanonicalValue::String(counterparty_entity_id.clone()),
-            ),
-            (
-                "inboundLockId",
-                CanonicalValue::String(inbound_lock_id.clone()),
             ),
         ],
         ScheduledHookKind::SettlementWindow | ScheduledHookKind::Watchdog => Vec::new(),
@@ -185,4 +180,45 @@ pub(crate) fn canonical_crontab_state(
     hooks: CanonicalValue,
 ) -> Result<CanonicalValue, EntityKernelError> {
     canonical_crontab_state_from_storage(canonical_crontab_storage_state(state)?, hooks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_ack_hook_matches_exact_ts_shape_without_derivable_lock_id() {
+        let hashlock = format!("0x{}", "50".repeat(32));
+        let counterparty = format!("0x{}", "ab".repeat(32));
+        let hook = ScheduledHook::htlc_secret_ack_timeout(
+            hashlock.clone(),
+            counterparty.clone(),
+            1_700_000_030_000,
+        );
+
+        assert_eq!(
+            canonical_hook(&hook).expect("canonical secret-ack hook"),
+            object(vec![
+                (
+                    "id",
+                    CanonicalValue::String(format!("htlc-secret-ack:{hashlock}")),
+                ),
+                (
+                    "triggerAt",
+                    number("triggerAt", 1_700_000_030_000).expect("safe trigger"),
+                ),
+                (
+                    "type",
+                    CanonicalValue::String("htlc_secret_ack_timeout".to_string()),
+                ),
+                (
+                    "data",
+                    object(vec![
+                        ("hashlock", CanonicalValue::String(hashlock)),
+                        ("counterpartyEntityId", CanonicalValue::String(counterparty),),
+                    ]),
+                ),
+            ]),
+        );
+    }
 }

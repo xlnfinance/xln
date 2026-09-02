@@ -64,6 +64,14 @@ pub(crate) fn encode_local_entity_output(
     source_signer_id: &str,
 ) -> Result<Value, EntityOutputEncodingError> {
     let entity_id = output.entity_id.to_ascii_lowercase();
+    let mut target_signer_id = output
+        .target_signer_id
+        .map(|value| value.trim().to_ascii_lowercase());
+    if target_signer_id.as_deref() == Some("") {
+        return Err(EntityOutputEncodingError::RuntimeRouteMissing(
+            "targetSignerId",
+        ));
+    }
     let mut account_txs = Vec::new();
     let mut projected_txs = Vec::new();
     for tx in output.entity_txs {
@@ -115,6 +123,14 @@ pub(crate) fn encode_local_entity_output(
                 "sourceSignerId",
             ));
         }
+        if target_signer_id.is_none() {
+            if source_entity_id != entity_id {
+                return Err(EntityOutputEncodingError::RuntimeRouteMissing(
+                    "targetSignerId",
+                ));
+            }
+            target_signer_id = Some(source_signer_id.clone());
+        }
         vec![object([
             ("type", Value::String("runtimeOutput".into())),
             (
@@ -129,10 +145,14 @@ pub(crate) fn encode_local_entity_output(
             ),
         ])]
     };
-    Ok(object([
-        ("entityId", Value::String(entity_id)),
-        ("entityTxs", Value::Array(entity_txs)),
-    ]))
+    let mut output = Map::from_iter([
+        ("entityId".into(), Value::String(entity_id)),
+        ("entityTxs".into(), Value::Array(entity_txs)),
+    ]);
+    if let Some(target_signer_id) = target_signer_id {
+        output.insert("signerId".into(), Value::String(target_signer_id));
+    }
+    Ok(Value::Object(output))
 }
 
 fn encode_account_input(input: &AccountInput) -> Result<Value, EntityOutputEncodingError> {
@@ -577,6 +597,7 @@ mod tests {
         let encoded = encode_local_entity_outputs(
             vec![LocalEntityOutput {
                 entity_id: target.clone(),
+                target_signer_id: Some("target-signer".into()),
                 entity_txs: vec![LocalEntityOutputTx::Projected(projected)],
             }],
             &source,
@@ -584,6 +605,7 @@ mod tests {
         )
         .expect("encode runtime output");
         assert_eq!(encoded[0]["entityId"], target);
+        assert_eq!(encoded[0]["signerId"], "target-signer");
         assert_eq!(encoded[0]["entityTxs"].as_array().unwrap().len(), 1);
         let wrapper = &encoded[0]["entityTxs"][0];
         assert_eq!(wrapper["type"], "runtimeOutput");

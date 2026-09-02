@@ -27,9 +27,9 @@ export const assertLauncherPortAvailable = async () => {
       cache: 'no-store',
     });
     void response.body?.cancel();
-    throw new Error('PORT_8080_IS_NOT_XLND');
+    throw new Error('PORT_8080_IS_NOT_XLNFINANCE');
   } catch (error) {
-    if (error instanceof Error && error.message === 'PORT_8080_IS_NOT_XLND') throw error;
+    if (error instanceof Error && error.message === 'PORT_8080_IS_NOT_XLNFINANCE') throw error;
   }
 };
 
@@ -82,6 +82,6 @@ export const consumeCliPairing = async (controlToken) => {
   const entry = payload?.manifest?.entries?.[0];
   const wsUrl = String(entry?.wsUrl || '').trim();
   const token = String(entry?.token || '').trim();
-  if (!wsUrl || !token) throw new Error('XLND_CLI_PAIRING_MANIFEST_INVALID');
+  if (!wsUrl || !token) throw new Error('XLNFINANCE_CLI_PAIRING_MANIFEST_INVALID');
   return { wsUrl, token };
 };

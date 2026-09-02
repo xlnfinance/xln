@@ -1,0 +1,164 @@
+{
+  "canonicalSource": "TypeScript selectCrossJOpeningAccountProposalTxs",
+  "cases": [
+    {
+      "expected": {
+        "frameHash": "0xaa1bd4d309aa1f0603a3744fbf422601ccf24bc17686f92afb4ef1c21d0afec6",
+        "kind": "selected",
+        "selected": [
+          "pull:a",
+          "offer:a"
+        ],
+        "selectedTxDigests": [
+          "0x263dc0d1640e9df8f5412a73f381db95acd2d2b7ee3c9f0247aa8789f343df45",
+          "0x6644644e0dbff4c4b8e607617d51161319699bfec9f9649827e511065cc38a95"
+        ]
+      },
+      "localMempool": [
+        "pull:b",
+        "offer:b",
+        "pull:a",
+        "offer:a"
+      ],
+      "localRole": "source-user",
+      "name": "lexical-first-preserves-local-order",
+      "siblingMempool": [
+        "pull:b",
+        "pull:a"
+      ]
+    },
+    {
+      "expected": {
+        "frameHash": "0xcb8ebf98f928de82cb6d1e0b36e118d8b65fafebd98a896d870a1ab8772e12cc",
+        "kind": "selected",
+        "selected": [
+          "pull:b",
+          "offer:b"
+        ],
+        "selectedTxDigests": [
+          "0xf3503d9b374edd59c5b653d41ad369cd7d961489cda76c118315804b83542db2",
+          "0x16537ccc10ebbf66eba93272e3ff8b8b952425b66c1fbabb701d3c364478abb6"
+        ]
+      },
+      "localMempool": [
+        "pull:a",
+        "offer:a",
+        "pull:b",
+        "offer:b"
+      ],
+      "localRole": "source-user",
+      "name": "sibling-pending-freezes-order",
+      "siblingMempool": [
+        "pull:a",
+        "pull:b"
+      ],
+      "siblingPending": [
+        "pull:b"
+      ]
+    },
+    {
+      "expected": {
+        "kind": "wait",
+        "selected": [],
+        "selectedTxDigests": []
+      },
+      "localMempool": [
+        "pull:a",
+        "offer:a"
+      ],
+      "localRole": "source-user",
+      "name": "missing-reciprocal-waits",
+      "siblingMempool": [
+        "pull:other"
+      ]
+    },
+    {
+      "expected": {
+        "frameHash": "0xc291449c8a702a51be253c31de705d9a65674b2d1e71d5f4ae3a63e630c42813",
+        "kind": "selected",
+        "selected": [
+          "pull:role"
+        ],
+        "selectedTxDigests": [
+          "0x608da7100c94c74698c849d293208b94534a3f90a971a8b244e0ec6e2a178ff4"
+        ]
+      },
+      "localMempool": [
+        "pull:role"
+      ],
+      "localRole": "source-user",
+      "name": "role-source-user",
+      "siblingMempool": [
+        "pull:role"
+      ]
+    },
+    {
+      "expected": {
+        "frameHash": "0xc291449c8a702a51be253c31de705d9a65674b2d1e71d5f4ae3a63e630c42813",
+        "kind": "selected",
+        "selected": [
+          "pull:role"
+        ],
+        "selectedTxDigests": [
+          "0x608da7100c94c74698c849d293208b94534a3f90a971a8b244e0ec6e2a178ff4"
+        ]
+      },
+      "localMempool": [
+        "pull:role"
+      ],
+      "localRole": "source-hub",
+      "name": "role-source-hub",
+      "siblingMempool": [
+        "pull:role"
+      ]
+    },
+    {
+      "expected": {
+        "frameHash": "0xc1f823b63a6c72a6b236ba11034ca42b7217e464111c4f413d6264feedcd5fab",
+        "kind": "selected",
+        "selected": [
+          "pull:role"
+        ],
+        "selectedTxDigests": [
+          "0x432a2082e0d1a161151d84dfe365634fffdba0f8adfcdf8b88b1da153956f35e"
+        ]
+      },
+      "localMempool": [
+        "pull:role"
+      ],
+      "localRole": "target-hub",
+      "name": "role-target-hub",
+      "siblingMempool": [
+        "pull:role"
+      ]
+    },
+    {
+      "expected": {
+        "frameHash": "0xc1f823b63a6c72a6b236ba11034ca42b7217e464111c4f413d6264feedcd5fab",
+        "kind": "selected",
+        "selected": [
+          "pull:role"
+        ],
+        "selectedTxDigests": [
+          "0x432a2082e0d1a161151d84dfe365634fffdba0f8adfcdf8b88b1da153956f35e"
+        ]
+      },
+      "localMempool": [
+        "pull:role"
+      ],
+      "localRole": "target-user",
+      "name": "role-target-user",
+      "siblingMempool": [
+        "pull:role"
+      ]
+    }
+  ],
+  "frame": {
+    "accountStateRoot": "0x7272727272727272727272727272727272727272727272727272727272727272",
+    "height": 3,
+    "jHeight": 7,
+    "prevFrameHash": "0x7171717171717171717171717171717171717171717171717171717171717171",
+    "timestamp": 1700000000000
+  },
+  "version": 1
+}

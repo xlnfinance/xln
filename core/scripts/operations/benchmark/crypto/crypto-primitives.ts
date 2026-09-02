@@ -17,10 +17,10 @@ import { hmacSha256 } from '../../../../protocol/crypto/fast/fast-sha256';
 import { x25519PublicKey, x25519SharedSecret } from '../../../../protocol/crypto/fast/fast-x25519';
 import { safeStringify } from '../../../../protocol/serialization';
 
-const numericArgument = (name: string, fallback: number): number => {
+const numericArgument = (name: string, defaultValue: number): number => {
   const prefix = `--${name}=`;
   const raw = process.argv.find(argument => argument.startsWith(prefix))?.slice(prefix.length);
-  const value = raw === undefined ? fallback : Number(raw);
+  const value = raw === undefined ? defaultValue : Number(raw);
   if (!Number.isSafeInteger(value) || value < 1) throw new Error(`CRYPTO_BENCH_${name.toUpperCase()}_INVALID`);
   return value;
 };

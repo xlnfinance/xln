@@ -382,7 +382,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       hubWalBytesBefore, hubWalBytesAfter: directoryBytes(hubWal),
       loadWalBytesBefore, loadWalBytesAfter: directoryBytes(loadWal),
       hubDurableBefore: hubBefore, hubDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest')),
-      environment: collectHltEnvironmentManifest(),
+      environment: collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }),
       loadDurableBefore: loadBefore, loadDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest')),
     });
     persistReport(join(args.workDir, 'production-cross-swap-load-report.json'), report, decodeCrossLoadReport);

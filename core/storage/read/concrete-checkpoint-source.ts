@@ -1,13 +1,16 @@
 import type { RuntimeReplica } from '../../runtime/types';
+import { createHash } from 'node:crypto';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import { unpackRadixMerklePath } from '../../protocol/state/radix-merkle';
-import { decodeBuffer } from '../codec/codec';
+import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { readBoundedEncodedValue } from '../codec/bounded-value';
 import { iterateKeys } from '../database/level';
 import {
+  KEY_HEAD,
   KEY_RUNTIME_MACHINE_LEAF,
   decodeEntityId,
   keyFrame,
+  keyRscoreCheckpoint,
   keyRuntimeMachineTreePrefix,
   parseAccountJClaimPathNodeKey,
   parseCertifiedBoardPathNodeKey,
@@ -22,7 +25,11 @@ import {
   parseLiveEntityLeafKey,
   parseRscoreAccountJClaimPathNodeKey,
 } from '../keys';
-import { validateStorageFrameRecordValue } from '../schema/authoritative-schema';
+import { RSCORE_PROTOCOL_FINGERPRINT } from '../../rscore/client';
+import {
+  validateStorageFrameRecordValue,
+  validateStorageHeadValue,
+} from '../schema/authoritative-schema';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import type { RuntimeDbLike } from '../types';
 import { readRuntimeMachineGraph } from '../wal/runtime-machine-graph';
@@ -125,6 +132,30 @@ const requiredBounded = async (db: RuntimeDbLike, key: Buffer): Promise<Buffer> 
   return value;
 };
 
+const addCanonicalEmptyAccountAuthority = (
+  rows: Map<string, Buffer>,
+  ownerHex: string,
+): void => {
+  const accountTags = new Set([0x17, 0x18, 0x19]);
+  const present = [...rows.keys()].filter(key => accountTags.has(Number.parseInt(key.slice(0, 2), 16)));
+  if (present.some(key => key.startsWith('17'))) return;
+  if (present.length > 0) throw new Error('CHECKPOINT_RSCORE_META_MISSING');
+  const ownerEntityId = `0x${ownerHex}`;
+  const signerDigest = createHash('sha256')
+    .update('xln.rscore.signer-config.v1')
+    .digest('hex');
+  rows.set(keyRscoreCheckpoint(ownerEntityId).toString('hex'), encodeBuffer({
+    version: 1,
+    ownerEntityId,
+    protocolFingerprint: `0x${RSCORE_PROTOCOL_FINGERPRINT.toString('hex')}`,
+    baseRevision: '0',
+    revision: '0',
+    accountsRoot: `0x${'00'.repeat(32)}`,
+    signerDigest: `0x${signerDigest}`,
+    accountCount: 0,
+  }));
+};
+
 const readStateRows = async (currentDb: RuntimeDbLike, walDb: RuntimeDbLike): Promise<HexRow[]> => {
   const rows = new Map<string, Buffer>();
   const owners = new Set<string>();
@@ -152,6 +183,9 @@ const readStateRows = async (currentDb: RuntimeDbLike, walDb: RuntimeDbLike): Pr
   }
   if (rows.size === 0) throw new Error('CHECKPOINT_STATE_ROWS_EMPTY');
   if (owners.size !== 1) throw new Error(`CHECKPOINT_STATE_OWNER_COUNT:${owners.size}`);
+  const owner = [...owners][0];
+  if (!owner) throw new Error('CHECKPOINT_STATE_OWNER_MISSING');
+  addCanonicalEmptyAccountAuthority(rows, owner);
   return [...rows.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => [`0x${key}`, hex(value)] as const);
@@ -159,10 +193,9 @@ const readStateRows = async (currentDb: RuntimeDbLike, walDb: RuntimeDbLike): Pr
 
 const readMachineLeaves = async (
   walDb: RuntimeDbLike,
-  height: number,
   leafCount: number,
 ): Promise<HexRow[]> => {
-  const prefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF, height);
+  const prefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF);
   const rows: HexRow[] = [];
   for await (const key of iterateKeys(walDb, { prefix })) {
     if (key.byteLength <= prefix.byteLength) throw new Error('CHECKPOINT_MACHINE_LEAF_KEY_EMPTY');
@@ -187,6 +220,16 @@ export const exportConcreteCheckpointSource = async (
   if (!Number.isSafeInteger(height) || height < 1) throw new Error(`CHECKPOINT_HEIGHT_INVALID:${height}`);
   const currentDb = deps.getStorageDb(env, 'current');
   const walDb = deps.getRuntimeWalDb(env);
+  const head = validateStorageHeadValue(decodeBuffer(await requiredBounded(walDb, KEY_HEAD)));
+  const currentMaterializedHeight = Math.max(
+    0,
+    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
+  );
+  if (currentMaterializedHeight !== height) {
+    throw new Error(
+      `CHECKPOINT_MACHINE_NOT_CURRENT:requested=${height}:current=${currentMaterializedHeight}`,
+    );
+  }
   const frameBytes = await requiredBounded(walDb, keyFrame(height));
   const frame = validateStorageFrameRecordValue(decodeBuffer(frameBytes));
   if (frame.height !== height) throw new Error(`CHECKPOINT_FRAME_HEIGHT:${frame.height}:${height}`);
@@ -194,10 +237,9 @@ export const exportConcreteCheckpointSource = async (
     throw new Error(`CHECKPOINT_FRAME_NOT_MATERIALIZED:${height}`);
   }
   // Rebuild once here so a malformed/truncated graph never leaves TS as an artifact.
-  await readRuntimeMachineGraph(walDb, height, frame.runtimeMachineRoot);
+  await readRuntimeMachineGraph(walDb, frame.runtimeMachineRoot);
   const runtimeMachineLeaves = await readMachineLeaves(
     walDb,
-    height,
     frame.runtimeMachineRoot.leafCount,
   );
   const stateRows = await readStateRows(currentDb, walDb);

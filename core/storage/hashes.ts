@@ -16,7 +16,6 @@ import { encodeBinaryPayload } from '../protocol/serialization/binary-codec';
 import { STORAGE_FRAME_FORMAT, normalizeEntityId } from './keys';
 import { buildReplicaLookup } from './replica/replicas';
 import type { RuntimeFrame, StorageFrameEntityHash } from './types';
-import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
 
 const hashStable = (
   value: unknown,
@@ -24,13 +23,12 @@ const hashStable = (
 ): string =>
   computeIntegrityDigest(encodeBinaryPayload(value, options));
 
-/** Bounded Entity roots plus durable Runtime state form the only checkpoint root. */
+/** Frame coordinates plus bounded Entity roots form the canonical cadence hash. */
 export const prepareStorageCanonicalStateHashes = (
   env: RuntimeReplica,
   touchedEntities: string[],
   previousFrame: RuntimeFrame | null,
   replicaLookup = buildReplicaLookup(env),
-  runtimeMachine = buildStorageRuntimeMachineSnapshot(env),
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
   void touchedEntities;
   void previousFrame;
@@ -44,7 +42,6 @@ export const prepareStorageCanonicalStateHashes = (
       env.state.height,
       env.state.timestamp,
       canonicalEntityHashes,
-      runtimeMachine,
     ),
   };
 };

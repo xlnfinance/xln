@@ -814,6 +814,9 @@ fn push_timing(
 
 fn kernel_output(value: &EntityKernelOutput) -> Result<CanonicalValue, EntityKernelError> {
     Ok(match value {
+        EntityKernelOutput::Debug { payload } => {
+            object(vec![("kind", text("debug")), ("payload", payload.clone())])
+        }
         EntityKernelOutput::AccountSettledFinalizedBilateral {
             entity_id,
             account_id,

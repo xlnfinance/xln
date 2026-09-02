@@ -1,6 +1,10 @@
 /** Exact decode boundary for the payment workload's durable report. */
 
-import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from './environment-manifest';
+import {
+  decodeHltEnvironmentManifest,
+  requireHltAccountWorkerEvidence,
+  type HltEnvironmentManifest,
+} from './environment-manifest';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -28,6 +32,7 @@ export type LoadPaymentReport = Readonly<{
   sourceAllAckedElapsedMs: number;
   commandObservedElapsedMs: number;
   deliveredElapsedMs: number;
+  drainCompleteElapsedMs: number;
   deliveredTps: number;
   hubCompletedPaymentsBefore: number;
   hubCompletedPaymentsAfter: number;
@@ -36,6 +41,13 @@ export type LoadPaymentReport = Readonly<{
   hubIngressElapsedMs: number;
   settlementSamples: readonly PaymentSettlementSample[];
   roundSubmissionLagMs: readonly number[];
+  laneQuiescence: Readonly<{
+    runtimes: number;
+    openHubPeers: number;
+    pendingRuntimeWork: number;
+    pendingAccountFrames: number;
+    accountMempoolTxs: number;
+  }>;
   walBytesBefore: number;
   walBytesAfter: number;
   hubDurableBefore: Readonly<{ height: number; canonicalStateHash: string }>;
@@ -65,6 +77,43 @@ export type PaymentSettlementSample = Readonly<{
 const HASH_32 = /^0x[0-9a-f]{64}$/;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const RUN_ID = /^[A-Za-z0-9._-]+$/;
+const PAYMENT_AUTHORITY_WINDOW_MS = 20_000;
+
+type RateBearingPaymentCounts = Readonly<{
+  users: number;
+  rounds: number;
+  cadenceMs: number;
+  senders: number;
+  receivers: number;
+  offeredPerSecond: number;
+  submitted: number;
+  delivered: number;
+  deliveredElapsedMs: number;
+  deliveredTps: number;
+}>;
+
+const assertRateBearingPaymentConsistency = (counts: RateBearingPaymentCounts): void => {
+  if (counts.users < 1_000) throw new Error(`HLT_PAYMENT_REPORT_AUTHORITY_USERS_TOO_SMALL:${counts.users}`);
+  if (counts.senders !== counts.users || counts.receivers !== counts.users) {
+    throw new Error(`HLT_PAYMENT_REPORT_PARTICIPANTS_INVALID:${counts.senders}:${counts.receivers}:${counts.users}`);
+  }
+  const windowMs = counts.rounds * counts.cadenceMs;
+  if (!Number.isSafeInteger(windowMs) || windowMs !== PAYMENT_AUTHORITY_WINDOW_MS) {
+    throw new Error(`HLT_PAYMENT_REPORT_WINDOW_INVALID:${windowMs}:${PAYMENT_AUTHORITY_WINDOW_MS}`);
+  }
+  const expectedSubmitted = counts.users * counts.rounds;
+  if (!Number.isSafeInteger(expectedSubmitted) || counts.submitted !== expectedSubmitted) {
+    throw new Error(`HLT_PAYMENT_REPORT_SUBMITTED_CARDINALITY_INVALID:${counts.submitted}:${expectedSubmitted}`);
+  }
+  const expectedOffered = counts.submitted * 1_000 / windowMs;
+  if (!Number.isSafeInteger(expectedOffered) || expectedOffered < 1_000 || counts.offeredPerSecond !== expectedOffered) {
+    throw new Error(`HLT_PAYMENT_REPORT_OFFERED_RATE_INVALID:${counts.offeredPerSecond}:${expectedOffered}`);
+  }
+  const expectedTps = counts.delivered * 1_000 / counts.deliveredElapsedMs;
+  if (counts.deliveredTps !== expectedTps) {
+    throw new Error(`HLT_PAYMENT_REPORT_TPS_MISMATCH:${counts.deliveredTps}:${expectedTps}`);
+  }
+};
 
 const decodeSettlementSamples = (
   value: unknown,
@@ -126,6 +175,41 @@ const decodeFrame = (value: unknown, code: string): LoadPaymentReport['hubDurabl
   return { height: requireBoundaryInteger(record['height'], `${code}_HEIGHT_INVALID`, 0), canonicalStateHash };
 };
 
+const decodeLaneQuiescence = (
+  value: unknown,
+  configuredUsers: number,
+): LoadPaymentReport['laneQuiescence'] => {
+  const record = requireBoundaryRecord(value, 'HLT_PAYMENT_REPORT_LANE_QUIESCENCE_INVALID');
+  requireExactBoundaryKeys(record, [
+    'runtimes', 'openHubPeers', 'pendingRuntimeWork', 'pendingAccountFrames', 'accountMempoolTxs',
+  ], [], 'HLT_PAYMENT_REPORT_LANE_QUIESCENCE_FIELDS_INVALID');
+  const decoded = {
+    runtimes: requireBoundaryInteger(record['runtimes'], 'HLT_PAYMENT_REPORT_LANE_RUNTIMES_INVALID', 0),
+    openHubPeers: requireBoundaryInteger(record['openHubPeers'], 'HLT_PAYMENT_REPORT_LANE_PEERS_INVALID', 0),
+    pendingRuntimeWork: requireBoundaryInteger(
+      record['pendingRuntimeWork'], 'HLT_PAYMENT_REPORT_LANE_RUNTIME_WORK_INVALID', 0,
+    ),
+    pendingAccountFrames: requireBoundaryInteger(
+      record['pendingAccountFrames'], 'HLT_PAYMENT_REPORT_LANE_ACCOUNT_FRAMES_INVALID', 0,
+    ),
+    accountMempoolTxs: requireBoundaryInteger(
+      record['accountMempoolTxs'], 'HLT_PAYMENT_REPORT_LANE_MEMPOOL_TXS_INVALID', 0,
+    ),
+  };
+  if (decoded.runtimes !== configuredUsers || decoded.openHubPeers !== configuredUsers) {
+    throw new Error(
+      `HLT_PAYMENT_REPORT_LANE_CARDINALITY_INVALID:` +
+      `${decoded.runtimes}:${decoded.openHubPeers}:${configuredUsers}`,
+    );
+  }
+  if (
+    decoded.pendingRuntimeWork !== 0 ||
+    decoded.pendingAccountFrames !== 0 ||
+    decoded.accountMempoolTxs !== 0
+  ) throw new Error('HLT_PAYMENT_REPORT_LANE_PENDING_INVALID');
+  return decoded;
+};
+
 /**
  * A payment run is only green when every submitted payment was delivered.
  * Decoding rejects a partial run rather than letting a rate be computed from a
@@ -138,10 +222,10 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     'senders', 'receivers', 'tokenId', 'amount', 'offeredPaymentRate',
     'submittedPayments', 'deliveredPayments',
     'enqueueAckElapsedMs', 'sourceDispatchFinishedElapsedMs', 'sourceAllAckedElapsedMs',
-    'commandObservedElapsedMs', 'deliveredElapsedMs', 'deliveredTps',
+    'commandObservedElapsedMs', 'deliveredElapsedMs', 'drainCompleteElapsedMs', 'deliveredTps',
     'hubCompletedPaymentsBefore', 'hubCompletedPaymentsAfter',
     'hubAcceptedPaymentsBefore', 'hubAcceptedPaymentsAfter', 'hubIngressElapsedMs', 'settlementSamples',
-    'roundSubmissionLagMs', 'walBytesBefore', 'walBytesAfter', 'hubDurableBefore', 'hubDurableAfter',
+    'roundSubmissionLagMs', 'laneQuiescence', 'walBytesBefore', 'walBytesAfter', 'hubDurableBefore', 'hubDurableAfter',
     'environment',
   ], [], 'HLT_PAYMENT_REPORT_FIELDS_INVALID');
   if (record['schema'] !== 'xln-hlt-payment-load-v1') throw new Error('HLT_PAYMENT_REPORT_SCHEMA_INVALID');
@@ -178,6 +262,12 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     0,
   );
   const deliveredElapsedMs = requireBoundaryInteger(record['deliveredElapsedMs'], 'HLT_PAYMENT_REPORT_ELAPSED_INVALID', 1);
+  const drainCompleteElapsedMs = requireBoundaryInteger(
+    record['drainCompleteElapsedMs'], 'HLT_PAYMENT_REPORT_DRAIN_ELAPSED_INVALID', 1,
+  );
+  if (drainCompleteElapsedMs < deliveredElapsedMs) {
+    throw new Error('HLT_PAYMENT_REPORT_DRAIN_PRECEDES_DELIVERY');
+  }
   const hubCompletedPaymentsBefore = requireBoundaryInteger(
     record['hubCompletedPaymentsBefore'],
     'HLT_PAYMENT_REPORT_METRIC_BEFORE_INVALID',
@@ -227,9 +317,34 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
   const walBytesAfter = requireBoundaryInteger(
     record['walBytesAfter'], 'HLT_PAYMENT_REPORT_WAL_AFTER_INVALID', 0,
   );
+  const configuredUsers = requireBoundaryInteger(
+    record['configuredUsers'], 'HLT_PAYMENT_REPORT_USERS_INVALID', 2,
+  );
+  const configuredRounds = requireBoundaryInteger(
+    record['configuredRounds'], 'HLT_PAYMENT_REPORT_ROUNDS_INVALID', 1,
+  );
+  const cadenceMs = requireBoundaryInteger(record['cadenceMs'], 'HLT_PAYMENT_REPORT_CADENCE_INVALID', 1);
+  const senders = requireBoundaryInteger(record['senders'], 'HLT_PAYMENT_REPORT_SENDERS_INVALID', 1);
+  const receivers = requireBoundaryInteger(record['receivers'], 'HLT_PAYMENT_REPORT_RECEIVERS_INVALID', 1);
+  const offeredPaymentRate = requireBoundaryInteger(
+    record['offeredPaymentRate'], 'HLT_PAYMENT_REPORT_OFFERED_INVALID', 1,
+  );
+  assertRateBearingPaymentConsistency({
+    users: configuredUsers,
+    rounds: configuredRounds,
+    cadenceMs,
+    senders,
+    receivers,
+    offeredPerSecond: offeredPaymentRate,
+    submitted,
+    delivered,
+    deliveredElapsedMs,
+    deliveredTps,
+  });
   const environment = decodeHltEnvironmentManifest(
     record['environment'], 'HLT_PAYMENT_REPORT_ENVIRONMENT',
   );
+  requireHltAccountWorkerEvidence(environment.accountWorkers, 'HLT_PAYMENT_REPORT_ENVIRONMENT');
   assertHltWalAdvanced(walBytesBefore, walBytesAfter, environment.hubWalSync);
   return {
     schema: 'xln-hlt-payment-load-v1',
@@ -237,14 +352,14 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     mode: 'payments',
     runId,
     completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
-    configuredUsers: requireBoundaryInteger(record['configuredUsers'], 'HLT_PAYMENT_REPORT_USERS_INVALID', 2),
-    configuredRounds: requireBoundaryInteger(record['configuredRounds'], 'HLT_PAYMENT_REPORT_ROUNDS_INVALID', 1),
-    cadenceMs: requireBoundaryInteger(record['cadenceMs'], 'HLT_PAYMENT_REPORT_CADENCE_INVALID', 1),
-    senders: requireBoundaryInteger(record['senders'], 'HLT_PAYMENT_REPORT_SENDERS_INVALID', 1),
-    receivers: requireBoundaryInteger(record['receivers'], 'HLT_PAYMENT_REPORT_RECEIVERS_INVALID', 1),
+    configuredUsers,
+    configuredRounds,
+    cadenceMs,
+    senders,
+    receivers,
     tokenId: requireBoundaryInteger(record['tokenId'], 'HLT_PAYMENT_REPORT_TOKEN_INVALID', 1),
     amount,
-    offeredPaymentRate: requireBoundaryInteger(record['offeredPaymentRate'], 'HLT_PAYMENT_REPORT_OFFERED_INVALID', 1),
+    offeredPaymentRate,
     submittedPayments: submitted,
     deliveredPayments: delivered,
     enqueueAckElapsedMs,
@@ -252,6 +367,7 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     sourceAllAckedElapsedMs,
     commandObservedElapsedMs,
     deliveredElapsedMs,
+    drainCompleteElapsedMs,
     deliveredTps,
     hubCompletedPaymentsBefore,
     hubCompletedPaymentsAfter,
@@ -261,6 +377,7 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     settlementSamples,
     roundSubmissionLagMs: lags.map((lag, index) =>
       requireBoundaryInteger(lag, `HLT_PAYMENT_REPORT_LAG_INVALID:${index}`, 0)),
+    laneQuiescence: decodeLaneQuiescence(record['laneQuiescence'], configuredUsers),
     walBytesBefore,
     walBytesAfter,
     hubDurableBefore: decodeFrame(record['hubDurableBefore'], 'HLT_PAYMENT_REPORT_HUB_BEFORE'),

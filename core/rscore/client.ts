@@ -640,6 +640,7 @@ export class RscoreProcessClient {
     inboundTimestamp: number;
     inboundJHeight: number;
     inboundRows: readonly RscoreWireValue[];
+    inboundPostAccounts?: boolean;
     entityHeight: number;
     outboundTimestamp: number;
     outboundJHeight: number;
@@ -653,7 +654,7 @@ export class RscoreProcessClient {
         Buffer.from(round.expectedAccountsRoot),
         [round.inboundTimestamp, round.inboundJHeight],
         [...round.inboundRows],
-        false,
+        round.inboundPostAccounts ?? false,
       ],
       round.entityHeight,
       round.outboundTimestamp,

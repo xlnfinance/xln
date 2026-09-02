@@ -11,6 +11,7 @@ import {
   readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
 import { recordCommittedRuntimeEntityMetrics } from '../../../runtime/observability/entity-metrics';
+import { captureRuntimeParityEffectLogs } from '../../../runtime/observability/parity-evidence';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
@@ -193,6 +194,7 @@ const replayOneFrame = async (
       ));
     }
     const committedEvents = readRuntimeFrameEvents(env);
+    captureRuntimeParityEffectLogs(env, committedEvents);
     clearPendingAuditEvents(env);
     env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];

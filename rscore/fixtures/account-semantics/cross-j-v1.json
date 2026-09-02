@@ -1,0 +1,920 @@
+{
+  "canonicalSource": "TypeScript applyAccountTxToMutableReplica",
+  "cases": [
+    {
+      "name": "source-fill",
+      "steps": [
+        {
+          "accountStateRoot": "0x9425c4d96a5007fd3a57edff9adcf16e0120035b8d1433a8456587a94abae482",
+          "byLeft": false,
+          "deltasRoot": "0x6bdafbe1dd9a921110495267bf6d39c7678c703638e072bae03384797e82fd0a",
+          "events": [
+            "🪝 Pull locked: 0x219bca... amount -100 token1"
+          ],
+          "height": 10,
+          "input": "sourceLock",
+          "leftHold": "100",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 1,
+          "pullsRoot": "0x2eee2e7563bbcf45c52c2d0c9808fe8a124e1521de9b79f2884e9a35de77219d",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 1000,
+          "txType": "cross_pull_lock"
+        },
+        {
+          "accountStateRoot": "0x76a1ab60844c5c802eea4ce5ae1277667785f4e95459a06de232dc195f9b8af6",
+          "byLeft": true,
+          "deltasRoot": "0x6bdafbe1dd9a921110495267bf6d39c7678c703638e072bae03384797e82fd0a",
+          "events": [
+            "📊 Swap offer created: order-1... give 100 token1 for 200 token2"
+          ],
+          "height": 10,
+          "input": "swapOffer",
+          "leftHold": "100",
+          "offdelta": "0",
+          "offer": {
+            "createdHeight": 10,
+            "crossJurisdiction": {
+              "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+              "createdAt": 1000,
+              "domain": {
+                "hashSchema": "route-domain",
+                "protocol": "xln-cross-j",
+                "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+                "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+                "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+                "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+              },
+              "expiresAt": 61000,
+              "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+              "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+              "orderId": "order-1",
+              "riskMode": "fully_collateralized",
+              "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+              "settlementPolicy": {
+                "maxSourceDust": {
+                  "__xlnType": "BigInt",
+                  "value": "1"
+                },
+                "maxTargetDust": {
+                  "__xlnType": "BigInt",
+                  "value": "1"
+                },
+                "roundingMode": "uint16_ceil"
+              },
+              "source": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "100"
+                },
+                "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+                "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+                "tokenId": 1
+              },
+              "sourceDisputeConfig": {
+                "leftResponseSeconds": 10,
+                "rightResponseSeconds": 10
+              },
+              "sourcePull": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "100"
+                },
+                "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+                "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+                "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+                "signedAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "-100"
+                },
+                "tokenId": 1
+              },
+              "status": "resting",
+              "target": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "200"
+                },
+                "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+                "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+                "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+                "tokenId": 2
+              },
+              "targetDisputeConfig": {
+                "leftResponseSeconds": 10,
+                "rightResponseSeconds": 10
+              },
+              "targetPull": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "200"
+                },
+                "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+                "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+                "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06",
+                "signedAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "-200"
+                },
+                "tokenId": 2
+              },
+              "timePolicy": {
+                "deadlineConversion": "floor_ms_to_unix_seconds",
+                "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                "runtimeClock": "unix_ms",
+                "runtimeExpiresAtMs": 61000,
+                "settlementClock": "unix_seconds"
+              },
+              "updatedAt": 1000,
+              "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+            },
+            "giveAmount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "giveTokenDecimals": 6,
+            "giveTokenId": 1,
+            "makerIsLeft": true,
+            "maxFee": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "minNetReceive": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "offerId": "order-1",
+            "priceTicks": {
+              "__xlnType": "BigInt",
+              "value": "5000"
+            },
+            "quantizedGive": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "quantizedWant": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "wantAmount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "wantTokenDecimals": 6,
+            "wantTokenId": 2
+          },
+          "offerCount": 1,
+          "outputCount": 1,
+          "pullCount": 1,
+          "pullsRoot": "0x2eee2e7563bbcf45c52c2d0c9808fe8a124e1521de9b79f2884e9a35de77219d",
+          "rightHold": "0",
+          "swapOffersRoot": "0x61e940047fb3d15bf09855c623a1696d34f7e766e8a35b0fdab314b05dedcc4c",
+          "timestamp": 1000,
+          "txType": "swap_offer"
+        },
+        {
+          "accountStateRoot": "0x8781b3236117f858fc43ac4b16e245d480927256a1c69419f6dd126044556014",
+          "byLeft": false,
+          "deltasRoot": "0x6bdafbe1dd9a921110495267bf6d39c7678c703638e072bae03384797e82fd0a",
+          "events": [
+            "🌉 Cross-j offer order-1 filled to 32768/65535, 50 source remaining"
+          ],
+          "height": 20,
+          "input": "fillAck",
+          "leftHold": "100",
+          "offdelta": "0",
+          "offer": {
+            "createdHeight": 10,
+            "crossJurisdiction": {
+              "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+              "claimedRatio": 32768,
+              "createdAt": 1000,
+              "cumulativeFillRatio": 32768,
+              "domain": {
+                "hashSchema": "route-domain",
+                "protocol": "xln-cross-j",
+                "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+                "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+                "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+                "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+              },
+              "expiresAt": 61000,
+              "fillDenominator": {
+                "__xlnType": "BigInt",
+                "value": "2"
+              },
+              "fillNumerator": {
+                "__xlnType": "BigInt",
+                "value": "1"
+              },
+              "fillSeq": 1,
+              "filledSourceAmount": {
+                "__xlnType": "BigInt",
+                "value": "50"
+              },
+              "filledTargetAmount": {
+                "__xlnType": "BigInt",
+                "value": "100"
+              },
+              "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+              "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+              "orderId": "order-1",
+              "riskMode": "fully_collateralized",
+              "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+              "settlementPolicy": {
+                "maxSourceDust": {
+                  "__xlnType": "BigInt",
+                  "value": "1"
+                },
+                "maxTargetDust": {
+                  "__xlnType": "BigInt",
+                  "value": "1"
+                },
+                "roundingMode": "uint16_ceil"
+              },
+              "source": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "100"
+                },
+                "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+                "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+                "tokenId": 1
+              },
+              "sourceClaimed": {
+                "__xlnType": "BigInt",
+                "value": "50"
+              },
+              "sourceDisputeConfig": {
+                "leftResponseSeconds": 10,
+                "rightResponseSeconds": 10
+              },
+              "sourcePull": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "100"
+                },
+                "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+                "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+                "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+                "signedAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "-100"
+                },
+                "tokenId": 1
+              },
+              "status": "partially_filled",
+              "target": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "200"
+                },
+                "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+                "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+                "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+                "tokenId": 2
+              },
+              "targetClaimed": {
+                "__xlnType": "BigInt",
+                "value": "100"
+              },
+              "targetDisputeConfig": {
+                "leftResponseSeconds": 10,
+                "rightResponseSeconds": 10
+              },
+              "targetPull": {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "200"
+                },
+                "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+                "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+                "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06",
+                "signedAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "-200"
+                },
+                "tokenId": 2
+              },
+              "timePolicy": {
+                "deadlineConversion": "floor_ms_to_unix_seconds",
+                "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                "runtimeClock": "unix_ms",
+                "runtimeExpiresAtMs": 61000,
+                "settlementClock": "unix_seconds"
+              },
+              "updatedAt": 2000,
+              "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+            },
+            "giveAmount": {
+              "__xlnType": "BigInt",
+              "value": "50"
+            },
+            "giveTokenDecimals": 6,
+            "giveTokenId": 1,
+            "makerIsLeft": true,
+            "maxFee": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "minNetReceive": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "offerId": "order-1",
+            "priceTicks": {
+              "__xlnType": "BigInt",
+              "value": "5000"
+            },
+            "quantizedGive": {
+              "__xlnType": "BigInt",
+              "value": "50"
+            },
+            "quantizedWant": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "wantAmount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "wantTokenDecimals": 6,
+            "wantTokenId": 2
+          },
+          "offerCount": 1,
+          "outputCount": 1,
+          "pullCount": 1,
+          "pullsRoot": "0x091b45e5dfdbee8c030142245aee0c85b1d0dcc9ea82679b4c14e444fd8ded9e",
+          "rightHold": "0",
+          "swapOffersRoot": "0x7b2ade20c3263c76c19007cdb50622060a5b760c153c6cbfcd08cc9a71be9af9",
+          "timestamp": 2000,
+          "txType": "cross_swap_fill_ack"
+        }
+      ]
+    },
+    {
+      "name": "source-zero-close",
+      "steps": [
+        {
+          "accountStateRoot": "0x9425c4d96a5007fd3a57edff9adcf16e0120035b8d1433a8456587a94abae482",
+          "byLeft": false,
+          "deltasRoot": "0x6bdafbe1dd9a921110495267bf6d39c7678c703638e072bae03384797e82fd0a",
+          "events": [
+            "🪝 Pull locked: 0x219bca... amount -100 token1"
+          ],
+          "height": 10,
+          "input": "sourceLock",
+          "leftHold": "100",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 1,
+          "pullsRoot": "0x2eee2e7563bbcf45c52c2d0c9808fe8a124e1521de9b79f2884e9a35de77219d",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 1000,
+          "txType": "cross_pull_lock"
+        },
+        {
+          "accountStateRoot": "0x8d4b12da38ee4ee1309a8173d3bb64753cc613395e886dde13dca0e901d3f34a",
+          "byLeft": false,
+          "deltasRoot": "0x62704334cae4e132e9f86c3a7d7bd62a526bccec95ee7bac6ab63951f75cecd3",
+          "events": [
+            "🪝 Cross-j pull closed: 0x219bca... ratio 0/65535 claimed 0 released 100"
+          ],
+          "height": 20,
+          "input": "sourceClose",
+          "leftHold": "0",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 0,
+          "pullsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 2000,
+          "txType": "cross_pull_close"
+        }
+      ]
+    },
+    {
+      "name": "target-progress",
+      "steps": [
+        {
+          "accountStateRoot": "0x265585bc789d6986ea0eaed7feb1ca893a4888baebf2fa40423aa126ed17b9af",
+          "byLeft": true,
+          "deltasRoot": "0xcd429534356a6d0b22c0cf96c84bdee2d3e5d246bfc3fd3f54efc5d89e24b61a",
+          "events": [
+            "🪝 Pull locked: 0x9a70b0... amount -200 token2"
+          ],
+          "height": 10,
+          "input": "targetLock",
+          "leftHold": "200",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 1,
+          "pullsRoot": "0x8156363639f96202c40975a604b1105caaf77ef6a5400e0a2c15d62f8eb0babe",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 1000,
+          "txType": "cross_pull_lock"
+        },
+        {
+          "accountStateRoot": "0x44e1a8ad149557b444330c92559cef0e5fa9531603777dec5782f7bb28f8b746",
+          "byLeft": true,
+          "deltasRoot": "0xcd429534356a6d0b22c0cf96c84bdee2d3e5d246bfc3fd3f54efc5d89e24b61a",
+          "events": [
+            "🌉 Cross-j target progress order-1 32768/65535"
+          ],
+          "height": 20,
+          "input": "targetProgress",
+          "leftHold": "200",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 1,
+          "pullsRoot": "0xa1bf4b0428d37111cfb7caa4a5ce1c55e26f2d98f99f2af26770d49b83561238",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 2000,
+          "txType": "cross_pull_progress"
+        }
+      ]
+    }
+  ],
+  "inputs": {
+    "fillAck": {
+      "data": {
+        "ackKind": "fill",
+        "cumulativeFillRatio": 32768,
+        "cumulativeSourceAmount": {
+          "__xlnType": "BigInt",
+          "value": "50"
+        },
+        "cumulativeTargetAmount": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "executionSourceAmount": {
+          "__xlnType": "BigInt",
+          "value": "50"
+        },
+        "executionTargetAmount": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "fillDenominator": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "fillNumerator": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "fillSeq": 1,
+        "incrementalSourceAmount": {
+          "__xlnType": "BigInt",
+          "value": "50"
+        },
+        "incrementalTargetAmount": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "offerId": "order-1",
+        "previousFillSeq": 0,
+        "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a"
+      },
+      "type": "cross_swap_fill_ack"
+    },
+    "sourceClose": {
+      "data": {
+        "binary": "0x",
+        "proof": {
+          "binaryHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+          "closeMode": "pure_cancel",
+          "cumulativeSourceAmount": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "cumulativeTargetAmount": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "fillRatio": 0,
+          "orderId": "order-1",
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+          "sourcePullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+          "targetPullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06"
+        },
+        "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c"
+      },
+      "type": "cross_pull_close"
+    },
+    "sourceLock": {
+      "data": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "-100"
+        },
+        "crossJurisdiction": {
+          "leg": "source",
+          "orderId": "order-1",
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+          "status": "resting"
+        },
+        "crossJurisdictionRoute": {
+          "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "createdAt": 1000,
+          "domain": {
+            "hashSchema": "route-domain",
+            "protocol": "xln-cross-j",
+            "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+            "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+            "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+            "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+          },
+          "expiresAt": 61000,
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "orderId": "order-1",
+          "riskMode": "fully_collateralized",
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+          "settlementPolicy": {
+            "maxSourceDust": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "maxTargetDust": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "roundingMode": "uint16_ceil"
+          },
+          "source": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+            "tokenId": 1
+          },
+          "sourceDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "sourcePull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+            "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+            "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-100"
+            },
+            "tokenId": 1
+          },
+          "status": "resting",
+          "target": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+            "tokenId": 2
+          },
+          "targetDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "targetPull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+            "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+            "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-200"
+            },
+            "tokenId": 2
+          },
+          "timePolicy": {
+            "deadlineConversion": "floor_ms_to_unix_seconds",
+            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "runtimeClock": "unix_ms",
+            "runtimeExpiresAtMs": 61000,
+            "settlementClock": "unix_seconds"
+          },
+          "updatedAt": 1000,
+          "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+        },
+        "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+        "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+        "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+        "signedAmount": {
+          "__xlnType": "BigInt",
+          "value": "-100"
+        },
+        "tokenId": 1
+      },
+      "type": "cross_pull_lock"
+    },
+    "swapOffer": {
+      "data": {
+        "crossJurisdiction": {
+          "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "createdAt": 1000,
+          "domain": {
+            "hashSchema": "route-domain",
+            "protocol": "xln-cross-j",
+            "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+            "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+            "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+            "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+          },
+          "expiresAt": 61000,
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "orderId": "order-1",
+          "riskMode": "fully_collateralized",
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+          "settlementPolicy": {
+            "maxSourceDust": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "maxTargetDust": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "roundingMode": "uint16_ceil"
+          },
+          "source": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+            "tokenId": 1
+          },
+          "sourceDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "sourcePull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+            "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+            "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-100"
+            },
+            "tokenId": 1
+          },
+          "status": "resting",
+          "target": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+            "tokenId": 2
+          },
+          "targetDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "targetPull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+            "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+            "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-200"
+            },
+            "tokenId": 2
+          },
+          "timePolicy": {
+            "deadlineConversion": "floor_ms_to_unix_seconds",
+            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "runtimeClock": "unix_ms",
+            "runtimeExpiresAtMs": 61000,
+            "settlementClock": "unix_seconds"
+          },
+          "updatedAt": 1000,
+          "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+        },
+        "giveAmount": {
+          "__xlnType": "BigInt",
+          "value": "100"
+        },
+        "giveTokenDecimals": 6,
+        "giveTokenId": 1,
+        "maxFee": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "minNetReceive": {
+          "__xlnType": "BigInt",
+          "value": "200"
+        },
+        "offerId": "order-1",
+        "priceTicks": {
+          "__xlnType": "BigInt",
+          "value": "20000"
+        },
+        "wantAmount": {
+          "__xlnType": "BigInt",
+          "value": "200"
+        },
+        "wantTokenDecimals": 6,
+        "wantTokenId": 2
+      },
+      "type": "swap_offer"
+    },
+    "targetLock": {
+      "data": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "-200"
+        },
+        "crossJurisdiction": {
+          "leg": "target",
+          "orderId": "order-1",
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+          "status": "resting"
+        },
+        "crossJurisdictionRoute": {
+          "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "createdAt": 1000,
+          "domain": {
+            "hashSchema": "route-domain",
+            "protocol": "xln-cross-j",
+            "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+            "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+            "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+            "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+          },
+          "expiresAt": 61000,
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "orderId": "order-1",
+          "riskMode": "fully_collateralized",
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a",
+          "settlementPolicy": {
+            "maxSourceDust": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "maxTargetDust": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "roundingMode": "uint16_ceil"
+          },
+          "source": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+            "tokenId": 1
+          },
+          "sourceDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "sourcePull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "100"
+            },
+            "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+            "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+            "pullId": "0x219bcadad4e0f3e9b257a88cdbb6cb23e1cff7b3eef55d31040db8c6c5c1450c",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-100"
+            },
+            "tokenId": 1
+          },
+          "status": "resting",
+          "target": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+            "tokenId": 2
+          },
+          "targetDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "targetPull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "200"
+            },
+            "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+            "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+            "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-200"
+            },
+            "tokenId": 2
+          },
+          "timePolicy": {
+            "deadlineConversion": "floor_ms_to_unix_seconds",
+            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "runtimeClock": "unix_ms",
+            "runtimeExpiresAtMs": 61000,
+            "settlementClock": "unix_seconds"
+          },
+          "updatedAt": 1000,
+          "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+        },
+        "fullHash": "0x56bded4d25c8f0ff71eaaeafd3f600097d9a102af36f0580af099aa3986dc667",
+        "partialRoot": "0x387d5375544e972c0e4d155673fa9c61494d86ea31f88fcf5fe48e3f1218cd71",
+        "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06",
+        "signedAmount": {
+          "__xlnType": "BigInt",
+          "value": "-200"
+        },
+        "tokenId": 2
+      },
+      "type": "cross_pull_lock"
+    },
+    "targetProgress": {
+      "data": {
+        "fill": {
+          "ackKind": "fill",
+          "cumulativeFillRatio": 32768,
+          "cumulativeSourceAmount": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          },
+          "cumulativeTargetAmount": {
+            "__xlnType": "BigInt",
+            "value": "100"
+          },
+          "fillDenominator": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "fillNumerator": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "fillSeq": 1,
+          "incrementalSourceAmount": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          },
+          "incrementalTargetAmount": {
+            "__xlnType": "BigInt",
+            "value": "100"
+          },
+          "offerId": "order-1",
+          "previousFillSeq": 0,
+          "routeHash": "0xd5f9b2aed05f07995238adb56da83eebb4479610d97016303b43c13a12116e7a"
+        },
+        "pullId": "0x9a70b0610bf50188068cec9f5574c0beff23829caf59ca488b731aec7b2bdb06"
+      },
+      "type": "cross_pull_progress"
+    }
+  },
+  "version": 1
+}

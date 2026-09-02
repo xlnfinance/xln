@@ -70,25 +70,7 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
   );
   const tokenId = Number(context.tx.data.tokenId);
   const feeState = context.account.state.requestedRebalanceFeeState?.get(tokenId);
-  const debug = (payload: Record<string, unknown>): void => {
-    context.candidateEffects.push({
-      kind: 'debug',
-      payload: {
-        level: 'info',
-        code: 'REB_STEP',
-        accountId: context.counterparty,
-        ...payload,
-      },
-    });
-  };
   if (!result.ok) {
-    debug({
-      step: 1,
-      status: 'error',
-      event: 'request_collateral_rejected',
-      reason: result.rejection.message,
-      tokenId,
-    });
     return result;
   }
   const requested = context.account.state.requestedRebalance.get(tokenId) ?? 0n;
@@ -121,7 +103,6 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
       },
     });
   }
-  debug(committed);
   return result;
 };
 

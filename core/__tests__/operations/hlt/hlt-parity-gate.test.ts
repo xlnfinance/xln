@@ -9,6 +9,7 @@ import {
   copyBoundAuthorityWal,
 } from '../../../scripts/operations/hlt/replay/source-binding';
 import { hltLiveReportPath } from '../../../scripts/operations/hlt/live-report-path';
+import { offlineParityEnv } from '../../../scripts/operations/hlt/controller/live-economic-controller';
 
 const repoRoot = join(import.meta.dir, '../../../..');
 
@@ -52,18 +53,29 @@ test('one-artifact gate runs four isolated exact replays inside one three-minute
     repoRoot,
     'core/scripts/operations/hlt/workload/worker-mixed.ts',
   ), 'utf8');
+  const liveController = readFileSync(join(
+    repoRoot,
+    'core/scripts/operations/hlt/controller/live-economic-controller.ts',
+  ), 'utf8');
   expect(gate).toContain('performance.now() + AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
   expect(gate).toContain('HLT_MIXED_PARITY_RECORDING_ARGUMENT_REQUIRED');
   expect(gate).toContain('remainingParityBudget(`ts-w${workers}`)');
   expect(gate).toContain('replayTypescript(1)');
   expect(gate).toContain('replayTypescript(4)');
-  expect(gate).toContain('await replayRust(1)');
-  expect(gate).toContain('await replayRust(4)');
+  expect(gate).toContain('await replayRust(1, tsW1ReportPath)');
+  expect(gate).toContain('await replayRust(4, tsW1ReportPath)');
   expect(gate).toContain('copyBoundAuthorityWal(boundWal, wal');
   expect(gate).toContain("'--parity-evidence'");
   expect(replay).toContain('HLT_REPLAY_PARITY_EQUIVALENT');
   expect(replay).toContain('trials: parityEvidence ? trials.map(parityTrial) : trials');
   expect(build).toContain('hltLiveReportPath({');
+  expect(build).toContain('HLT_PARITY_RECORDING_REQUIRED');
+  expect(build).toContain('resolve(parityRecording)');
+  expect(liveController).toContain('timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
+  expect(liveController).toContain('const PHASE_TIMEOUT_MS = 30_000');
+  expect(liveController).toContain(
+    "new Error('HLT_ECONOMIC_GATE_RUN_TIMEOUT')), PHASE_TIMEOUT_MS",
+  );
   const paritySmoke = /HLT_MIXED_PARITY_SMOKE[\s\S]*?\}\)\}`\);/.exec(workerMixed)?.[0];
   expect(paritySmoke).toBeDefined();
   expect(paritySmoke).not.toMatch(/tps|rate|perSecond/i);
@@ -76,6 +88,23 @@ test('one-artifact gate runs four isolated exact replays inside one three-minute
   expect(missingRecording.stderr.toString()).toContain(
     'HLT_MIXED_PARITY_RECORDING_ARGUMENT_REQUIRED',
   );
+});
+
+test('offline parity cannot inherit live population, engine, workload or worker switches', () => {
+  expect(offlineParityEnv({
+    PATH: '/bin',
+    XLN_HLT_ENGINE: 'rust',
+    XLN_HLT_USERS: '1000',
+    XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'payments',
+    XLN_RSCORE_AUTHORITY_WORKERS: '4',
+    XLN_TS_ACCOUNT_WORKERS: '4',
+    XLN_STORAGE_WAL_SYNC: '1',
+    XLN_MM_CROSS_J: '0',
+    XLN_RSCORE_BINARY: '/tmp/xlnrs',
+  })).toEqual({
+    PATH: '/bin',
+    XLN_RSCORE_BINARY: '/tmp/xlnrs',
+  });
 });
 
 test('selects the functional TS mixed artifact for smoke and authority recording', () => {

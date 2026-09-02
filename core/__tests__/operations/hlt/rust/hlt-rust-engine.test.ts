@@ -25,6 +25,7 @@ import {
   decodeNativeProfileResponse,
   rustH1SessionPopulationIntact,
   rustH1SessionPopulationReady,
+  rustPaymentSettlementComplete,
 } from '../../../../scripts/operations/hlt/rust/rust-h1-settlement';
 import { hltLanePortsPerSlot } from '../../../../scripts/operations/hlt/lanes/lane-port-capacity';
 import { hltWorkloadFingerprint } from '../../../../scripts/operations/hlt/workload/workload-fingerprint';
@@ -57,13 +58,17 @@ const accountPhase = (
 
 const rustMetrics = (overrides: Partial<RustH1Metrics> = {}): RustH1Metrics => ({
   windowMs: 100, height: 1, frames: 0, acceptedBatches: 0, acceptedEntityInputs: 0,
+  pendingBatches: 0, pendingBatchesHighWater: 0, backpressureEvents: 0,
+  backpressureWaitMicros: 0, backpressureWaitMaxMicros: 0,
+  acceptedConnections: 0, authenticatedSessions: 0, rejectedSessions: 0,
   openSessions: 0, queueRejections: 0, outputsPublished: 0, outboxTargetsPending: 0,
   outboxRowsPending: 0, outboxBytesPending: 0, outboxFailures: 0, retainedWalBytes: 0,
   acceptedPayments: 0,
-  completedPayments: 0, matchedSwaps: 0, zeroFillSwapCancels: 0, lockBookOpen: 0,
+  completedPayments: 0, matchedSwaps: 0, zeroFillSwapCancels: 0, paybookOpen: 0,
   orderbookTradeCount: 0, openBookOrders: 0, openSwapOffers: 0, resolvingSwapOffers: 0,
+  openSwapOfferIds: [], openSwapOfferIdsTruncated: false, lastSessionError: null,
   lastCompletedAtUnixMicros: 0, lastAcceptedAtUnixMicros: 0, lastMatchedAtUnixMicros: 0,
-  postStateHash: `0x${'00'.repeat(32)}`, htlcFeesEarned: '0',
+  postStateHash: `0x${'00'.repeat(32)}`, paybookFeesEarned: '0',
   applyMicros: 0, projectionMicros: 0, storageMicros: 0, publicationMicros: 0,
   totalFrames: 0, totalOutputsPublished: 0, totalEnvelopesPublished: 0,
   totalApplyMicros: 0, totalProjectionMicros: 0, totalStorageMicros: 0,
@@ -92,7 +97,8 @@ const rustMetrics = (overrides: Partial<RustH1Metrics> = {}): RustH1Metrics => (
   accountPhaseMetrics: [
     accountPhase('inbound'),
     accountPhase('outboundReset'),
-    accountPhase('outboundContinue'),
+    accountPhase('outboundFailedHtlcFollowup'),
+    accountPhase('outboundSettlementHankoAttach'),
   ],
   ...overrides,
 });
@@ -113,6 +119,24 @@ test('mixed Rust drain retains baseline peers in addition to all load users', ()
   expect(rustH1SessionPopulationIntact(5_001, 5_001, 5_000)).toBe(true);
   expect(rustH1SessionPopulationIntact(5_000, 5_001, 5_000)).toBe(false);
   expect(rustH1SessionPopulationIntact(5_001, 5_001, 5_002)).toBe(false);
+});
+
+test('Rust payment settlement fails closed while any authority queue remains', () => {
+  const settled = rustMetrics({
+    acceptedPayments: 20_000,
+    completedPayments: 20_000,
+    openSessions: 1_000,
+  });
+  const complete = (metrics: RustH1Metrics): boolean => rustPaymentSettlementComplete({
+    metrics,
+    expectedPayments: 20_000,
+    baselineOpenSessions: 1_000,
+    loadUsers: 1_000,
+  });
+  expect(complete(settled)).toBe(true);
+  for (const field of ['pendingBatches', 'activeShards', 'entityTxsPending'] as const) {
+    expect(complete({ ...settled, [field]: 1 })).toBe(false);
+  }
 });
 
 test('profile plan encodes the canonical medium packing and heavy target', () => {
@@ -236,7 +260,12 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
     workerItems: [100, 100], workerNanos: [1_000, 1_100],
     workerFoldLeaves: [10, 11], workerFoldNanos: [100, 110],
     entityWorkerItems: [20, 20], entityWorkerNanos: [200, 210],
-    accountPhaseMetrics: [accountPhase('inbound', 1), accountPhase('outboundReset'), accountPhase('outboundContinue')],
+    accountPhaseMetrics: [
+      accountPhase('inbound', 1),
+      accountPhase('outboundReset'),
+      accountPhase('outboundFailedHtlcFollowup'),
+      accountPhase('outboundSettlementHankoAttach'),
+    ],
   });
   const after = rustMetrics({
     totalFrames: 14, totalOutputsPublished: 8, totalEnvelopesPublished: 4,
@@ -257,7 +286,12 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
     workerItems: [106, 105], workerNanos: [1_600, 1_650],
     workerFoldLeaves: [14, 16], workerFoldNanos: [160, 170],
     entityWorkerItems: [24, 23], entityWorkerNanos: [260, 255],
-    accountPhaseMetrics: [accountPhase('inbound', 4), accountPhase('outboundReset', 2), accountPhase('outboundContinue', 1)],
+    accountPhaseMetrics: [
+      accountPhase('inbound', 4),
+      accountPhase('outboundReset', 2),
+      accountPhase('outboundFailedHtlcFollowup', 1),
+      accountPhase('outboundSettlementHankoAttach'),
+    ],
   });
   const economic = diffRustH1EconomicMetrics(before, after);
   expect(economic).toEqual({
@@ -282,7 +316,12 @@ test('Rust live telemetry isolates the economic phase and proves worker distribu
     workerItems: [6, 5], workerNanos: [600, 550],
     workerFoldLeaves: [4, 5], workerFoldNanos: [60, 60],
     entityWorkerItems: [4, 3], entityWorkerNanos: [60, 45],
-    accountPhaseMetrics: [accountPhase('inbound', 3), accountPhase('outboundReset', 2), accountPhase('outboundContinue', 1)],
+    accountPhaseMetrics: [
+      accountPhase('inbound', 3),
+      accountPhase('outboundReset', 2),
+      accountPhase('outboundFailedHtlcFollowup', 1),
+      accountPhase('outboundSettlementHankoAttach'),
+    ],
   });
   expect(() => diffRustH1EconomicMetrics(after, before))
     .toThrow('HLT_RUST_H1_WORKER_METRIC_REGRESSION');

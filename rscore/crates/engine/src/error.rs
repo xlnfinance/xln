@@ -37,6 +37,12 @@ pub enum StateError {
     CheckpointRestore(String),
     #[error("ACCOUNT_CRITICAL_PROPOSAL_FAILED:{kind}:{reason}")]
     CriticalProposalFailure { kind: &'static str, reason: String },
+    #[error("ACCOUNT_PROPOSAL_SELECTION_EMPTY")]
+    EmptyProposalSelection,
+    #[error("ACCOUNT_PROPOSAL_SELECTION_LIMIT_EXCEEDED:{actual}:{maximum}")]
+    ProposalSelectionLimitExceeded { actual: usize, maximum: usize },
+    #[error("ACCOUNT_PROPOSAL_SELECTION_NOT_IN_MEMPOOL:{index}")]
+    ProposalSelectionNotInMempool { index: usize },
     #[error("ACCOUNT_STATE_LEAF_TOO_LARGE:{actual}:{maximum}")]
     AccountStateLeafTooLarge { actual: usize, maximum: usize },
     #[error("{0}")]
@@ -67,6 +73,8 @@ pub enum StateError {
     BoardAuthorityCounterpartyMismatch { expected: String, resolved: String },
     #[error("ACCOUNT_FRAME_TX_UNSUPPORTED:{0}")]
     UnsupportedFrameTx(&'static str),
+    #[error("ACCOUNT_TX_KIND_OUT_OF_PROFILE:{0} (profile: pay/HTLC/same-J swap/j-event/rebalance)")]
+    AccountTxKindOutOfProfile(&'static str),
     /// FX-1 (proofs/fixes.md D2): `RebalancePolicy.policyVersion` outside the
     /// protocol range `0..=MAX_POLICY_VERSION`. Distinct from
     /// `UnsupportedFrameTx`, which names an unmodelled kind, not a field range.

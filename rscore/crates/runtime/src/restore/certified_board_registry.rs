@@ -905,7 +905,6 @@ mod tests {
             frame: crate::RuntimeFrameContext {
                 timestamp: 200,
                 finalized_j_height: 9,
-                hub_rebalance_has_pending_work: false,
                 entity_contexts: BTreeMap::from([(
                     entity_key.clone(),
                     std::collections::VecDeque::from([crate::RuntimeEntityFrameContext {

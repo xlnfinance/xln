@@ -61,7 +61,7 @@ pub(crate) fn prepare_account_checkpoint(
     for row in &checkpoint.accounts {
         let encoded = encode_account_checkpoint_rows(row, true)?;
         let fields = tuple(&encoded, "account")?;
-        if fields.len() != 12 {
+        if fields.len() != 14 {
             return Err(AccountCheckpointProjectionError::Shape("account"));
         }
         let account_id = *row.account_id.as_bytes();
@@ -71,7 +71,7 @@ pub(crate) fn prepare_account_checkpoint(
             Some(encode_value(&Value::Array(vec![
                 abi_json(&fields[1])?,
                 abi_json(&fields[2])?,
-                abi_json(&fields[11])?,
+                abi_json(&fields[13])?,
             ]))?),
         );
         for tree in &nodes.trees {

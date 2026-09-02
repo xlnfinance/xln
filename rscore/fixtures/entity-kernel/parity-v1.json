@@ -237,5 +237,10 @@
     "tradeCount": 2,
     "tradeQtyLots": "2000000"
   },
+  "usdQuoteAuthorityAsk": {
+    "bookCommitmentHash": "0x5c179a092387a810bcb7bde01744c639",
+    "eventHash": "7013930761961589",
+    "lastAcceptedUsdAskPriceTicks": "25000000"
+  },
   "version": 1
 }

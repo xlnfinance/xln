@@ -1,0 +1,3032 @@
+{
+  "canonicalSource": "TypeScript production Entity control reducers",
+  "cases": [
+    {
+      "after": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "hello",
+            "type": "text",
+            "validatorId": "alice"
+          }
+        ],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x80f908ae2c9216f88876f2a61550ed8b6a2da5287386659f83d8c8b9ead2d531",
+      "name": "chat",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x1111111111111111111111111111111111111111111111111111111111111111": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "from": " Alice ",
+          "message": "hello"
+        },
+        "type": "chat"
+      }
+    },
+    {
+      "after": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "ready",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x85a3525f64fe5fab2f74e2c879e50e571b87891788333c9ef2d574b5bf2c205f",
+      "name": "chatMessage",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x1111111111111111111111111111111111111111111111111111111111111111": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "message": "ready",
+          "timestamp": 2000
+        },
+        "type": "chatMessage"
+      }
+    },
+    {
+      "after": {
+        "root": "0x74c03555c219f22f94e819a2424701694155483af9770ddafd79b626ddf1c8ed",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x3961d0b9ed77e92de06a83444d36ff6e3450ea63a84140f7423c309c5bad6ae0",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "profile"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x464773dcb8bcefb0de8a6117993099a6b8700f3f3bea87e3e813c08567efeeef",
+      "name": "profile-update",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x1111111111111111111111111111111111111111111111111111111111111111": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "profile": {
+            "avatar": "avatar",
+            "bio": "bio",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "entityKind": "company",
+            "name": "  Example  ",
+            "sectors": [
+              "finance"
+            ],
+            "website": "https://example.test"
+          }
+        },
+        "type": "profile-update"
+      }
+    },
+    {
+      "after": {
+        "root": "0x1dc6441e4f8c78d4caf634ef7c332844e444ed28e6485da15a24ef88b1d185c1",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x4b1f982dc6cd67455776d720e97e273ff0fe6ca8d91fd6cba04a72f8d6b899bd",
+            "field": "orderbookExt"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "orderbookExt"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x464773dcb8bcefb0de8a6117993099a6b8700f3f3bea87e3e813c08567efeeef",
+      "name": "initOrderbookExt",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x1111111111111111111111111111111111111111111111111111111111111111": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "minTradeSize": {
+            "__xlnType": "BigInt",
+            "value": "10"
+          },
+          "name": "H1",
+          "referenceTokenId": 1,
+          "spreadDistribution": {
+            "hubBps": 0,
+            "makerBps": 0,
+            "makerReferrerBps": 0,
+            "takerBps": 10000,
+            "takerReferrerBps": 0
+          },
+          "supportedPairs": [
+            "1/2"
+          ],
+          "usdQuoteAuthorityEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "type": "initOrderbookExt"
+      }
+    },
+    {
+      "after": {
+        "root": "0x7a55fd64f236091eab3d3d2351d5f339fcbd9374de098066549c519e980b6b40",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0xe0b4f1ca03d798f23b8a1ec0279b0270d00677aaf25a57e1e230ad19fc19593c",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "hubRebalanceConfig"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "🏦 Hub config activated: fee strategy v2, 7ppm routing fee, swapTakerFee=9bps, rebalance(base=token-default, liqBps=13, gas=token-default, c2rWithdrawSoftLimit=token-default)",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x8de3e0d85fffd65ceb689b8b943a0d273b94fe64542655f0ccbf0a2f0f89ac4f",
+      "name": "setHubConfig",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x1111111111111111111111111111111111111111111111111111111111111111": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "baseFee": {
+            "__xlnType": "BigInt",
+            "value": "3"
+          },
+          "disputeAutoFinalizeMode": "ignore",
+          "hubName": "H1",
+          "matchingStrategy": "fee",
+          "minCollateralThreshold": {
+            "__xlnType": "BigInt",
+            "value": "11"
+          },
+          "policyVersion": 2,
+          "rebalanceLiquidityFeeBps": {
+            "__xlnType": "BigInt",
+            "value": "13"
+          },
+          "rebalanceTimeoutMs": 17000,
+          "routingFeePPM": 7,
+          "swapTakerFeeBps": 9
+        },
+        "type": "setHubConfig"
+      }
+    },
+    {
+      "after": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x05ec38f27642eebc19081b42d816d42cc82c876309fe8d8051263f85b968b9e4",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x355f56f1c364b06c09ddae8eb19fdfab3e35a7f5c8596d99626ac56b027e714e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0xddca93215c683ee841c9b1865b9125c6e61e4d76d3e569a037ba0b6751a674a2",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "💰 Minting 19 of token 7",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [],
+        "jOutputs": [
+          {
+            "jTxs": [
+              {
+                "data": {
+                  "amount": {
+                    "__xlnType": "BigInt",
+                    "value": "19"
+                  },
+                  "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                  "tokenId": 7
+                },
+                "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                "timestamp": 2000,
+                "type": "mint"
+              }
+            ],
+            "jurisdictionName": "EntityControlFixture"
+          }
+        ],
+        "outputs": []
+      },
+      "evidenceDigest": "0x365baf3544bc2366ca4e1bcc7a1cc0154c6ace8fed37015687f16fd1e7876de4",
+      "name": "mintReserves",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x1111111111111111111111111111111111111111111111111111111111111111": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "19"
+          },
+          "tokenId": 7
+        },
+        "type": "mintReserves"
+      }
+    },
+    {
+      "after": {
+        "root": "0x03cb5958ffbbe36f2434f8b7c7857e05ff5d8d8d4bedbd6dad4014cbb597e250",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x55414ceaca18e830397bb1b91cb664c6252c042629e6dc7b877e99751d85db9e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x8e6cf6752206a6abaa783cebe2138d507b3afc404484d4b33af29cc59bdc2251",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x0001414b9c9690c14668607e037a94212e1c46ef6388d1fdbec3c14c791e5ba8",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x70db8ce0835be36d149eba3b55ae88f02bc2479622f684b845b9f5ca8cbf6a11",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x55414ceaca18e830397bb1b91cb664c6252c042629e6dc7b877e99751d85db9e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x8e6cf6752206a6abaa783cebe2138d507b3afc404484d4b33af29cc59bdc2251",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "proposals"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x464773dcb8bcefb0de8a6117993099a6b8700f3f3bea87e3e813c08567efeeef",
+      "name": "propose",
+      "setup": {
+        "config": {
+          "mode": "proposer-based",
+          "shares": {
+            "0x62325ae886937e98fc2b354794e3255d4a7684e3": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "0x8a710f209360faef61851abaac4288d521057576": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "validators": [
+            "0x62325ae886937e98fc2b354794e3255d4a7684e3",
+            "0x8a710f209360faef61851abaac4288d521057576"
+          ]
+        },
+        "entityId": "0x54483537f73d50259642bac92678f694bd5d441b78e057066b16e0cb579502af",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "action": {
+            "data": {
+              "message": "ship"
+            },
+            "type": "collective_message"
+          },
+          "proposer": "0x62325ae886937e98fc2b354794e3255d4a7684e3"
+        },
+        "type": "propose"
+      }
+    },
+    {
+      "after": {
+        "root": "0x70db8ce0835be36d149eba3b55ae88f02bc2479622f684b845b9f5ca8cbf6a11",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x55414ceaca18e830397bb1b91cb664c6252c042629e6dc7b877e99751d85db9e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x8e6cf6752206a6abaa783cebe2138d507b3afc404484d4b33af29cc59bdc2251",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x03cb5958ffbbe36f2434f8b7c7857e05ff5d8d8d4bedbd6dad4014cbb597e250",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x55414ceaca18e830397bb1b91cb664c6252c042629e6dc7b877e99751d85db9e",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x8e6cf6752206a6abaa783cebe2138d507b3afc404484d4b33af29cc59bdc2251",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x0001414b9c9690c14668607e037a94212e1c46ef6388d1fdbec3c14c791e5ba8",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "proposals"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "[COLLECTIVE] ship",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x4dbb76beab1c9dd5b16805aef4f5432b8c68fc3854dbbe0a9b6e0ecc4ee9d3d2",
+      "name": "vote",
+      "setup": {
+        "config": {
+          "mode": "proposer-based",
+          "shares": {
+            "0x62325ae886937e98fc2b354794e3255d4a7684e3": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "0x8a710f209360faef61851abaac4288d521057576": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "validators": [
+            "0x62325ae886937e98fc2b354794e3255d4a7684e3",
+            "0x8a710f209360faef61851abaac4288d521057576"
+          ]
+        },
+        "entityId": "0x54483537f73d50259642bac92678f694bd5d441b78e057066b16e0cb579502af",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "choice": "yes",
+          "comment": "ok",
+          "proposalId": "prop_7f456d895ebcabf00b63538f5c2893c1d6d35c3d39eb360826d72ff9d62570ee",
+          "voter": "0x8a710f209360faef61851abaac4288d521057576"
+        },
+        "type": "vote"
+      }
+    },
+    {
+      "after": {
+        "root": "0x4eb5bf86ea102aae93c9fe2c89d75ac942b8ac74db587ca611b0df79077cec2a",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x38734cc6b0029f9e77617e5ff04ec981533aaa3f292e90f54c27cf4abb241d2c",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0xff6cfc9a6554f6023bf3fcb7d360d6e5246f24f8f30b92ff35e674ed4af1c7b5",
+            "field": "entityCommandNonces"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x61b8aa5d88ce34afe18030f4d905814e8d57274b25c8a969cf191bdacb256e20",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x8d26d75f7ab447339edaf63245fa2761fc290a8ced276e1fb77d8e8290b424cb",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x38734cc6b0029f9e77617e5ff04ec981533aaa3f292e90f54c27cf4abb241d2c",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x61b8aa5d88ce34afe18030f4d905814e8d57274b25c8a969cf191bdacb256e20",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "entityCommandNonces"
+      ],
+      "evidence": {
+        "commandHash": "0x709125e218f0c30f8d57f8fc2bd491091847eec8dba3176938aa831f7a56624d",
+        "events": [
+          {
+            "message": "signed",
+            "type": "text",
+            "validatorId": "0x62325ae886937e98fc2b354794e3255d4a7684e3"
+          }
+        ]
+      },
+      "evidenceDigest": "0x4b9092db8ed439c2302d9515c32ba8ab03c2ac3e6e17e3ba4db812d72a27a210",
+      "name": "entityCommand",
+      "setup": {
+        "config": {
+          "mode": "proposer-based",
+          "shares": {
+            "0x62325ae886937e98fc2b354794e3255d4a7684e3": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x62325ae886937e98fc2b354794e3255d4a7684e3"
+          ]
+        },
+        "entityId": "0x6b96a7e399bd83a196a5af1bc41b2bc4ff678a840ef62f23c4e543d2ae1e1314",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "authorSigner": "0x62325ae886937e98fc2b354794e3255d4a7684e3",
+          "authorSignerId": "0x62325ae886937e98fc2b354794e3255d4a7684e3",
+          "boardEpoch": 0,
+          "boardHash": "0x6b96a7e399bd83a196a5af1bc41b2bc4ff678a840ef62f23c4e543d2ae1e1314",
+          "entityId": "0x6b96a7e399bd83a196a5af1bc41b2bc4ff678a840ef62f23c4e543d2ae1e1314",
+          "nonce": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "signature": "0xbb874c78fd0ecc4f5fd4f6cefc0b613e7f6a2c6a1b2e84e2b9b45db580d486793c22863253623fe3581e6192010aba7057a1d5fb7155278a6bfbfb913026ffe301",
+          "stackKey": "0xd9deb58ff75c6e30231830f739940f9f5c39f2856a5fc9a469e02e908015f824",
+          "txs": [
+            {
+              "data": {
+                "from": "0x62325ae886937e98fc2b354794e3255d4a7684e3",
+                "message": "signed"
+              },
+              "type": "chat"
+            }
+          ],
+          "txsHash": "0x709125e218f0c30f8d57f8fc2bd491091847eec8dba3176938aa831f7a56624d",
+          "version": 1
+        },
+        "type": "entityCommand"
+      }
+    },
+    {
+      "after": {
+        "root": "0xcc9b9152fa22a6a79e3e571df5867df8243105fc7eb84dfe4b1b7b90521ec4d9",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x691ac0a1893ce998cdbb1093b3ebd2ae68c5fed787c35e6c12f6c785bc63f22e",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x7400b7b9fbca64a0c8314370d64365351ea7c35d4ca29e70e9af10920b81db10",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x0baf3594526ad0ba2486eb4c6ea92f9e82b6e5cd41c01320bdea39d0688f966c",
+            "field": "entityProviderActionState"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x990ce29ec9dc9e97f13cb156e93ec5c1172b9ce9d0a16f83a6fa48a725827a37",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x691ac0a1893ce998cdbb1093b3ebd2ae68c5fed787c35e6c12f6c785bc63f22e",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x7400b7b9fbca64a0c8314370d64365351ea7c35d4ca29e70e9af10920b81db10",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "entityProviderActionState"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "📤 EntityProvider entityTransferTokens → hashesToSign [nonce=1]",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [
+          {
+            "context": "entityProviderAction:0002:entityTransferTokens:nonce:1",
+            "hash": "0xd1003f85507d3936240d94b71ac0a5f2989f5ac58ffa75fbbd606c3e0400073c",
+            "type": "entityProviderAction"
+          }
+        ],
+        "jOutputs": [
+          {
+            "jTxs": [
+              {
+                "data": {
+                  "intent": {
+                    "actionHash": "0xd1003f85507d3936240d94b71ac0a5f2989f5ac58ffa75fbbd606c3e0400073c",
+                    "actionNonce": {
+                      "__xlnType": "BigInt",
+                      "value": "1"
+                    },
+                    "boardEpoch": {
+                      "__xlnType": "BigInt",
+                      "value": "0"
+                    },
+                    "chainId": {
+                      "__xlnType": "BigInt",
+                      "value": "31337"
+                    },
+                    "createdAt": 2000,
+                    "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                    "entityNumber": {
+                      "__xlnType": "BigInt",
+                      "value": "2"
+                    },
+                    "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+                    "generation": 1,
+                    "payload": {
+                      "kind": "entityTransferTokens",
+                      "transfer": {
+                        "amount": {
+                          "__xlnType": "BigInt",
+                          "value": "11"
+                        },
+                        "to": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+                        "tokenId": {
+                          "__xlnType": "BigInt",
+                          "value": "7"
+                        }
+                      }
+                    },
+                    "version": 1
+                  },
+                  "signerId": "0x09ada59e20d6355dba8bc6ca4aac56b61fca6cc4"
+                },
+                "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "timestamp": 2000,
+                "type": "entityProviderTransfer"
+              }
+            ],
+            "jurisdictionName": "EntityControlFixture"
+          }
+        ],
+        "outputs": []
+      },
+      "evidenceDigest": "0x7b4fe49aab4fe1cb81f3e2180fac4f8f98ec39985672f832e2a284dfe1a63c7f",
+      "name": "entityProviderTransfer",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x09ada59e20d6355dba8bc6ca4aac56b61fca6cc4": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x09ada59e20d6355dba8bc6ca4aac56b61fca6cc4"
+          ]
+        },
+        "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "11"
+          },
+          "to": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+          "tokenId": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          }
+        },
+        "type": "entityProviderTransfer"
+      }
+    },
+    {
+      "after": {
+        "root": "0x50da90e45614c89d43442df9cdf9c69862765cc717a53291e63a9163d48bd8f7",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x2165ac19f7da1175f3ac66fa99df4708dad0ec8554bb4fb057e216a2ffe19db9",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0xd0f29c2fbdf8d18a56a6e6df89a5a60f16885f04ef392044d2f07d5ab2d85162",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x634e0693d9274eba3eab437bc5e742dfc4d04f1a67d89215ea30eb334c391615",
+            "field": "entityProviderActionState"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0xef88ef07013820a5b5b1cd85161fa01678b08f68c291d15a37864751a1155052",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x2165ac19f7da1175f3ac66fa99df4708dad0ec8554bb4fb057e216a2ffe19db9",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0xd0f29c2fbdf8d18a56a6e6df89a5a60f16885f04ef392044d2f07d5ab2d85162",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "entityProviderActionState"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "📤 EntityProvider releaseControlShares → hashesToSign [nonce=1]",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [
+          {
+            "context": "entityProviderAction:0002:releaseControlShares:nonce:1",
+            "hash": "0xa31902d925b58d6c821b5635612550a3f4a2e5ff2a06c1f1bb453f30e0307d90",
+            "type": "entityProviderAction"
+          }
+        ],
+        "jOutputs": [
+          {
+            "jTxs": [
+              {
+                "data": {
+                  "intent": {
+                    "actionHash": "0xa31902d925b58d6c821b5635612550a3f4a2e5ff2a06c1f1bb453f30e0307d90",
+                    "actionNonce": {
+                      "__xlnType": "BigInt",
+                      "value": "1"
+                    },
+                    "boardEpoch": {
+                      "__xlnType": "BigInt",
+                      "value": "0"
+                    },
+                    "chainId": {
+                      "__xlnType": "BigInt",
+                      "value": "31337"
+                    },
+                    "createdAt": 2000,
+                    "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                    "entityNumber": {
+                      "__xlnType": "BigInt",
+                      "value": "2"
+                    },
+                    "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+                    "generation": 1,
+                    "payload": {
+                      "kind": "releaseControlShares",
+                      "release": {
+                        "controlAmount": {
+                          "__xlnType": "BigInt",
+                          "value": "5"
+                        },
+                        "dividendAmount": {
+                          "__xlnType": "BigInt",
+                          "value": "7"
+                        },
+                        "purpose": "fixture",
+                        "recipientAddress": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                      }
+                    },
+                    "version": 1
+                  },
+                  "signerId": "0x9a9dbaea542ad9ef8485196fa057d02447f59fdf"
+                },
+                "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "timestamp": 2000,
+                "type": "entityProviderReleaseControlShares"
+              }
+            ],
+            "jurisdictionName": "EntityControlFixture"
+          }
+        ],
+        "outputs": []
+      },
+      "evidenceDigest": "0x56bf8dc6bc1f913b840692cc1e888625caeffaecf4defa0ff7f77690b2db80dd",
+      "name": "entityProviderReleaseControlShares",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x9a9dbaea542ad9ef8485196fa057d02447f59fdf": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x9a9dbaea542ad9ef8485196fa057d02447f59fdf"
+          ]
+        },
+        "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "controlAmount": {
+            "__xlnType": "BigInt",
+            "value": "5"
+          },
+          "dividendAmount": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "purpose": "fixture",
+          "recipientAddress": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+        },
+        "type": "entityProviderReleaseControlShares"
+      }
+    },
+    {
+      "after": {
+        "root": "0x9ec6a36a4880c11a861872ec1d456a8ebd71892b01f607acf4060e99db6e1018",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x0d2b21bc651d1e6b52d6afa8d61de7f693187bc16365d2471fae666bcf225f60",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x580f113ceddecea41eda0578df926fcebe9db0c5c49d4a1dddf25ced65182f72",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x94d48af75444364efde606072fbfd8aa016fa11c26dffe9abf298a6810717d32",
+            "field": "entityProviderActionState"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x2ef17721b436fa495ddfa772da6013fcc7f992291bddbe1d3ceae4669262142f",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x0d2b21bc651d1e6b52d6afa8d61de7f693187bc16365d2471fae666bcf225f60",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x580f113ceddecea41eda0578df926fcebe9db0c5c49d4a1dddf25ced65182f72",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x0baf3594526ad0ba2486eb4c6ea92f9e82b6e5cd41c01320bdea39d0688f966c",
+            "field": "entityProviderActionState"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "entityProviderActionState"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "🛑 EntityProvider cancel → hashesToSign [nonce=1]",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [
+          {
+            "context": "entityProviderAction:0002:cancel:nonce:1",
+            "hash": "0x50a83e970d747f767fc8bada677c6cf83891169806ca264583c966e51ef7a722",
+            "type": "entityProviderAction"
+          }
+        ],
+        "jOutputs": [
+          {
+            "jTxs": [
+              {
+                "data": {
+                  "intent": {
+                    "actionHash": "0x50a83e970d747f767fc8bada677c6cf83891169806ca264583c966e51ef7a722",
+                    "actionNonce": {
+                      "__xlnType": "BigInt",
+                      "value": "1"
+                    },
+                    "boardEpoch": {
+                      "__xlnType": "BigInt",
+                      "value": "0"
+                    },
+                    "chainId": {
+                      "__xlnType": "BigInt",
+                      "value": "31337"
+                    },
+                    "createdAt": 2000,
+                    "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                    "entityNumber": {
+                      "__xlnType": "BigInt",
+                      "value": "2"
+                    },
+                    "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+                    "generation": 2,
+                    "payload": {
+                      "cancel": {
+                        "cancelledActionHash": "0xd1003f85507d3936240d94b71ac0a5f2989f5ac58ffa75fbbd606c3e0400073c",
+                        "cancelledActionKind": 0
+                      },
+                      "kind": "cancelPendingAction"
+                    },
+                    "version": 1
+                  },
+                  "signerId": "0x8efd74085d99fd8dcd60ea3a2279dcf507c2d1cd"
+                },
+                "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "timestamp": 2000,
+                "type": "entityProviderCancelAction"
+              }
+            ],
+            "jurisdictionName": "EntityControlFixture"
+          }
+        ],
+        "outputs": []
+      },
+      "evidenceDigest": "0x34d9bf610550e028ed7f27bdba9f473eeddb4b6bf50edbdf15be6628e30b9fa0",
+      "name": "entityProviderCancelAction",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x8efd74085d99fd8dcd60ea3a2279dcf507c2d1cd": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x8efd74085d99fd8dcd60ea3a2279dcf507c2d1cd"
+          ]
+        },
+        "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "actionHash": "0xd1003f85507d3936240d94b71ac0a5f2989f5ac58ffa75fbbd606c3e0400073c"
+        },
+        "type": "entityProviderCancelAction"
+      }
+    },
+    {
+      "after": {
+        "root": "0x2333cfb42ca968f587df454fa69ff5632824e236db2f49fd30041499d1cb867e",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x99f5c73d55dac9b1835380ae6f666dc062770eb51539b0fdf14853b271e3b036",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0xe401265876826b53cc474ab7d351ccdba23c69535da297b5a588143679a48892",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x2333cfb42ca968f587df454fa69ff5632824e236db2f49fd30041499d1cb867e",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x99f5c73d55dac9b1835380ae6f666dc062770eb51539b0fdf14853b271e3b036",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0xe401265876826b53cc474ab7d351ccdba23c69535da297b5a588143679a48892",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "🗳️ CONTROL vote 0002 → 0003",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [
+          {
+            "context": "controlBoard:0003:nonce:7",
+            "hash": "0x72d3d522d62e26e46e16a2e4167c842e8a853d5e26d15db57149d0e1b6793f10",
+            "type": "entityProviderAction"
+          }
+        ],
+        "jOutputs": [
+          {
+            "jTxs": [
+              {
+                "data": {
+                  "actionNonce": {
+                    "__xlnType": "BigInt",
+                    "value": "7"
+                  },
+                  "boardEpoch": {
+                    "__xlnType": "BigInt",
+                    "value": "1"
+                  },
+                  "newBoardHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+                  "proposalHash": "0x72d3d522d62e26e46e16a2e4167c842e8a853d5e26d15db57149d0e1b6793f10",
+                  "signerId": "0x15cae409030f75a140768580604fe7727680df7d",
+                  "supporterVotes": [
+                    {
+                      "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002"
+                    }
+                  ],
+                  "targetEntityId": "0x0000000000000000000000000000000000000000000000000000000000000003"
+                },
+                "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "timestamp": 2000,
+                "type": "entityProviderProposeControlBoard"
+              }
+            ],
+            "jurisdictionName": "EntityControlFixture"
+          }
+        ],
+        "outputs": []
+      },
+      "evidenceDigest": "0x63728aea1150134d0908287e9a8aac8879f6c5a539bbbb61aa24ab113bb92cfa",
+      "name": "entityProviderProposeControlBoard",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x15cae409030f75a140768580604fe7727680df7d": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x15cae409030f75a140768580604fe7727680df7d"
+          ]
+        },
+        "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "actionNonce": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "newBoardHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+          "targetEntityId": "0x0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        "type": "entityProviderProposeControlBoard"
+      }
+    },
+    {
+      "after": {
+        "root": "0x02b72934ff7ec99f61ac8e679e2145955b97f2ccf4861c9d65ad7e603ec7e845",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x746bef065c848782f0364e207ef44233018c60534a3af4c5eb6ef520a5f33a99",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x556d4f7e87f551990874f0bde60cd3cdb70ca49df8018513d1db52e21f6e677f",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0x02b72934ff7ec99f61ac8e679e2145955b97f2ccf4861c9d65ad7e603ec7e845",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x746bef065c848782f0364e207ef44233018c60534a3af4c5eb6ef520a5f33a99",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x556d4f7e87f551990874f0bde60cd3cdb70ca49df8018513d1db52e21f6e677f",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [
+          {
+            "message": "🔐 Activate board 0003",
+            "type": "status"
+          }
+        ],
+        "hashesToSign": [],
+        "jOutputs": [
+          {
+            "jTxs": [
+              {
+                "data": {
+                  "signerId": "0x24dc4480778614471e635c4c4a82b6ac7d8cdac0",
+                  "targetEntityId": "0x0000000000000000000000000000000000000000000000000000000000000003"
+                },
+                "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "timestamp": 2000,
+                "type": "entityProviderActivateBoard"
+              }
+            ],
+            "jurisdictionName": "EntityControlFixture"
+          }
+        ],
+        "outputs": []
+      },
+      "evidenceDigest": "0xd1ad88a99ce6863431ae271f858256ff9a7d6ac83120290be38ddddae8d79424",
+      "name": "entityProviderActivateBoard",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x24dc4480778614471e635c4c4a82b6ac7d8cdac0": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x24dc4480778614471e635c4c4a82b6ac7d8cdac0"
+          ]
+        },
+        "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "targetEntityId": "0x0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        "type": "entityProviderActivateBoard"
+      }
+    },
+    {
+      "after": {
+        "root": "0xb90f0d650d586cd1488e40fb5c5151c0bd9f8a41f757df83227552c2b48748c5",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x25a1239b663e3a33ff090817e62828110194e70c0be66aee71f9f2bb86afe609",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x38808582be6433631cf666f84f41a3815e93ae429d4d3ce6206f98cb2c16e6e1",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x0da47631c5d275b7d3aab0790257802fe5e8a6349a77fec8746392093311019e",
+            "field": "leaderState"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "before": {
+        "root": "0xac0eb1b67a220edbbe7e2a8cf72096670a3cc677a41b47c9833482122f78b0fb",
+        "sections": [
+          {
+            "digest": "0xb7c43769a6461ee6a2fdc4a61474aa1232f5e46fdad0dd33e654690a856b4dbd",
+            "field": "accounts"
+          },
+          {
+            "digest": "0x25a1239b663e3a33ff090817e62828110194e70c0be66aee71f9f2bb86afe609",
+            "field": "certifiedBoardState"
+          },
+          {
+            "digest": "0x149fea280471bb234eb838745ded320476d7133973cbcd4537bb002fbe927842",
+            "field": "config"
+          },
+          {
+            "digest": "0x5e65d3813e8e3d52d7c18b0d27f1c8e6cd0ab26b12c4ac64e1440a6fed7906da",
+            "field": "crontabState"
+          },
+          {
+            "digest": "0x8da35fa86085acf78702493a83220be74630991737e86bc92f8ac865d40f3e1c",
+            "field": "entityEncryptionPublicKey"
+          },
+          {
+            "digest": "0x5ef01be1680ae71f821d705d1303cbb73f95696b77345e775afb3325760cb3ec",
+            "field": "entityId"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "height"
+          },
+          {
+            "digest": "0x44a7fea870a135b47d67ba1ef2cafd30a7c84292020012f690afeacfbb47eef8",
+            "field": "hubRebalanceConfig"
+          },
+          {
+            "digest": "0x6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+            "field": "lastFinalizedJHeight"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "nonces"
+          },
+          {
+            "digest": "0x102e542f25cf8b52ee024185deb49b2d140bc3033ffc1dd798e94faf771585e4",
+            "field": "paybook"
+          },
+          {
+            "digest": "0x4c7265b81d8d7f86923199a1594dee58db431aa51f434ccdee4227bb9ceb9cb1",
+            "field": "profile"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "proposals"
+          },
+          {
+            "digest": "0x76be8b528d0075f7aae98d6fa57a6d3c83ae480a8469e668d7b0af968995ac71",
+            "field": "reserves"
+          },
+          {
+            "digest": "0x0c48602e82a6a8f1f32306cf2913757129a5b17b9137130ffcc984b4dbd09710",
+            "field": "timestamp"
+          }
+        ]
+      },
+      "changedSections": [
+        "config",
+        "leaderState"
+      ],
+      "evidence": {
+        "approvedEntityTxs": [],
+        "candidateEffects": [],
+        "events": [],
+        "hashesToSign": [],
+        "jOutputs": [],
+        "outputs": []
+      },
+      "evidenceDigest": "0x464773dcb8bcefb0de8a6117993099a6b8700f3f3bea87e3e813c08567efeeef",
+      "name": "boardHandover",
+      "setup": {
+        "config": {
+          "jurisdiction": {
+            "address": "rpc://entity-control-fixture",
+            "blockTimeMs": 1000,
+            "chainId": 31337,
+            "depositoryAddress": "0x8888888888888888888888888888888888888888",
+            "entityProviderAddress": "0x9999999999999999999999999999999999999999",
+            "name": "EntityControlFixture"
+          },
+          "mode": "proposer-based",
+          "shares": {
+            "0x62f408eb75f259b567d1ff71fedae70ad9bc405e": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            }
+          },
+          "threshold": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "validators": [
+            "0x62f408eb75f259b567d1ff71fedae70ad9bc405e"
+          ]
+        },
+        "entityId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "timestamp": 2000
+      },
+      "tx": {
+        "data": {
+          "board": {
+            "mode": "proposer-based",
+            "shares": {
+              "0x11625d7a76dd6b771f8cda574dab6fd1534d0838": {
+                "__xlnType": "BigInt",
+                "value": "1"
+              }
+            },
+            "threshold": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "validators": [
+              "0x11625d7a76dd6b771f8cda574dab6fd1534d0838"
+            ]
+          }
+        },
+        "type": "boardHandover"
+      }
+    }
+  ],
+  "version": 1
+}

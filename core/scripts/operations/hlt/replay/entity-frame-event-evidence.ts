@@ -13,23 +13,27 @@ export type HltEntityFrameEventEvidence = Readonly<{
   orderedEventDigest: string;
 }>;
 
-/**
- * A Runtime frame's flat outbox is persisted and digested at the same WAL
- * commit as the Runtime state. Read its proposed EntityFrames in positional
- * output order; the next inbound proposal belongs to a later Runtime frame.
- */
-export const buildHltEntityFrameEventEvidence = (
-  frame: PersistedFrameJournal,
+export const buildHltEntityFrameEventEvidenceFromEvents = (
+  runtimeHeight: number,
+  events: readonly EntityFrameEvent[],
 ): HltEntityFrameEventEvidence => {
-  const events: EntityFrameEvent[] = (frame.runtimeOutputs ?? []).flatMap(
-    output => output.proposedFrame?.events ?? [],
-  );
   const digest = sha256.create();
   digest.update(ENTITY_EVENTS_PARITY_DOMAIN);
   digest.update(encodeBinaryPayload(events));
   return {
-    runtimeHeight: frame.height,
+    runtimeHeight,
     eventCount: events.length,
     orderedEventDigest: `0x${Buffer.from(digest.digest()).toString('hex')}`,
   };
 };
+
+/** Project EntityFrames that crossed the Runtime outbox boundary. */
+export const buildHltEntityFrameEventEvidence = (
+  frame: PersistedFrameJournal,
+): HltEntityFrameEventEvidence =>
+  buildHltEntityFrameEventEvidenceFromEvents(
+    frame.height,
+    (frame.runtimeOutputs ?? []).flatMap(
+    output => output.proposedFrame?.events ?? [],
+    ),
+  );

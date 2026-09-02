@@ -452,6 +452,9 @@ fn prepare_dispute(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Ent
 fn dispute_start(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, EntityKernelError> {
     const KIND: &str = "disputeStart";
     let data = object(frame_data(tx, KIND)?, KIND)?;
+    // `starterCounterProofCommitment` is derived from an already signed newer
+    // proof. Accepting it here would authorize a value absent from the peer
+    // Hanko and fork TS admission from native execution.
     exact_fields(
         data,
         &["counterpartyEntityId"],
@@ -459,7 +462,6 @@ fn dispute_start(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Entit
             "crossJurisdictionRouteId",
             "starterInitialArguments",
             "starterCounterArguments",
-            "starterCounterProofCommitment",
             "description",
         ],
         KIND,
@@ -488,12 +490,6 @@ fn dispute_start(tx: &CanonicalEntityTx) -> Result<LocalEntityFinancialTx, Entit
             "starterCounterArguments",
             KIND,
             "STARTER_COUNTER_ARGUMENTS",
-        )?,
-        starter_counter_proof_commitment: optional_string(
-            data,
-            "starterCounterProofCommitment",
-            KIND,
-            "STARTER_COUNTER_PROOF_COMMITMENT",
         )?,
     }))
 }

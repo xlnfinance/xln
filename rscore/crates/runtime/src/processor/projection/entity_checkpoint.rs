@@ -78,12 +78,17 @@ pub(crate) fn prepare_entity_checkpoint(
         .scalar_fields()
         .map(|(tag, value)| (tag, value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let certified_head = replica
-        .entity_consensus
-        .certified_frame_head
-        .as_ref()
-        .ok_or(EntityCheckpointProjectionError::CertifiedHeadMissing)?;
-    projected_fields.insert(8, CanonicalValue::String(certified_head.frame.hash.clone()));
+    let certified_head = replica.entity_consensus.certified_frame_head.as_ref();
+    match (state.entity.height, certified_head) {
+        (0, None) | (1.., Some(_)) => {}
+        (0, Some(_)) => {
+            return Err(EntityCheckpointProjectionError::GenesisCertifiedHeadForbidden);
+        }
+        (1.., None) => return Err(EntityCheckpointProjectionError::CertifiedHeadMissing),
+    }
+    if let Some(certified_head) = certified_head {
+        projected_fields.insert(8, CanonicalValue::String(certified_head.frame.hash.clone()));
+    }
     if let Some(tag) = projected_fields
         .keys()
         .find(|tag| !OWNED_FIELD_TAGS.contains(tag))
@@ -661,7 +666,7 @@ fn manifest_bytes(
         })
         .collect::<Result<Vec<_>, EntityCheckpointProjectionError>>()?;
     let bytes = crate::transport::msgpack::encode_framed(&object([
-        ("schemaVersion", Value::Number(4_u64.into())),
+        ("schemaVersion", Value::Number(5_u64.into())),
         ("fields", Value::Array(fields)),
         ("trees", Value::Array(trees)),
     ]))?;
@@ -809,6 +814,8 @@ pub(crate) enum EntityCheckpointProjectionError {
     MetadataOwner,
     #[error("RRS_CHECKPOINT_ENTITY_CERTIFIED_HEAD_MISSING")]
     CertifiedHeadMissing,
+    #[error("RRS_CHECKPOINT_ENTITY_GENESIS_CERTIFIED_HEAD_FORBIDDEN")]
+    GenesisCertifiedHeadForbidden,
     #[error("RRS_CHECKPOINT_ENTITY_PROJECTED_FIELD_NOT_OWNED:{0}")]
     ProjectedFieldNotOwned(u8),
     #[error("RRS_CHECKPOINT_ENTITY_ORDERBOOK:{0}")]

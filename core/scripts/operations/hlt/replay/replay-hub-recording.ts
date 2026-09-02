@@ -25,6 +25,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../account/crypto';
+import { computeAccountStateRootCold } from '../../../../account/commitment/state-root';
+import { computeBookCommitmentHash } from '../../../../orderbook/commitment';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
@@ -49,12 +51,38 @@ import {
   replayRecoveryFrameJournals,
   restoreEnvFromRecoveryBundles,
 } from '../../../../runtime';
+import {
+  buildStorageLiveReplicaMetaCommitment,
+  buildStorageReplicaMetaCommitment,
+  inspectStorageReplicaMetaEntries,
+} from '../../../../storage/replica/replicas';
 import type { RuntimeRecoveryBundleV1 } from '../../../../storage/recovery/bundle/types';
 import type { PersistedFrameJournal } from '../../../../storage/types';
 import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profile';
+import {
+  computeEntityAccountDigests,
+  computeEntityConsensusSectionDigestsCold,
+} from '../../../../entity/consensus/state-root';
+import {
+  beginRuntimeParityEvidence,
+  discardRuntimeParityEvidence,
+  finishRuntimeParityEvidence,
+} from '../../../../runtime/observability/parity-evidence';
 import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
-import { assertCompleteHltAuthorityEvidence } from './authority-evidence';
+import {
+  assertCompleteHltAuthorityEvidence,
+  type HltLocalContinuationEvidence,
+  type HltTsParityExpectations,
+} from './authority-evidence';
+import {
+  buildHltEntityFrameEventEvidenceFromEvents,
+  type HltEntityFrameEventEvidence,
+} from './entity-frame-event-evidence';
+import {
+  buildHltEntityEffectEvidence,
+  type HltEntityEffectEvidence,
+} from './entity-effect-evidence';
 import {
   canonicalTsAccountWorkerCount,
   TsAccountWorkerAuthority,
@@ -200,6 +228,11 @@ type ReplayTrial = Readonly<{
   operations: OpCounterSnapshot;
   perf: ReturnType<typeof snapshotPerfPhases>;
   accountWorkerTelemetry?: TsAccountWorkerTelemetry;
+  parityExpectations?: Readonly<{
+    entityFrameEvents: readonly HltEntityFrameEventEvidence[];
+    entityEffects: readonly HltEntityEffectEvidence[];
+    localContinuations: readonly HltLocalContinuationEvidence[];
+  }>;
 }>;
 
 const amplificationTotals = (operations: OpCounterSnapshot): ReplayAmplificationTotals => ({
@@ -276,6 +309,16 @@ const outputPath = resolve(optionalArgument('output') ?? `${recordingPath}.repla
 const mode = parseMode();
 const rates = parseRates(mode);
 const frameProfileEnabled = process.argv.includes('--frame-profile');
+const diagnosticEventsHeightRaw = optionalArgument('diagnostic-events-height');
+const diagnosticEventsHeight = diagnosticEventsHeightRaw === null
+  ? null
+  : Number(diagnosticEventsHeightRaw);
+if (
+  diagnosticEventsHeight !== null &&
+  (!Number.isSafeInteger(diagnosticEventsHeight) || diagnosticEventsHeight < 1)
+) {
+  throw new Error(`HLT_REPLAY_DIAGNOSTIC_EVENTS_HEIGHT_INVALID:${diagnosticEventsHeightRaw}`);
+}
 // Hash-format changes (leaf/preimage encoding) legitimately diverge from the
 // recorded frame hashes; terminal equivalence (height, outbox, payments) still holds.
 // Pure Hub apply cost: skips per-frame recovery equivalence checks (outbox,
@@ -442,8 +485,14 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
   const cpuStarted = process.cpuUsage();
   let cumulativeUnits = 0;
   const frameProfile: ReplayFrameProfile[] = [];
+  const entityFrameEvents: HltEntityFrameEventEvidence[] = [];
+  const entityEffects: HltEntityEffectEvidence[] = [];
+  const localContinuations: HltLocalContinuationEvidence[] = [];
   try {
-    if (offeredEntityInputsPerSecond === 0 && !frameProfileEnabled && !shadowStrictEnabled()) {
+    if (
+      offeredEntityInputsPerSecond === 0 && !frameProfileEnabled &&
+      !shadowStrictEnabled() && !parityEvidence && diagnosticEventsHeight === null
+    ) {
       // Max mode measures the canonical recovery primitive over its native WAL
       // tail shape. Re-entering the public replay boundary for every frame
       // repeatedly toggled replay metadata and revalidated Runtime config; it
@@ -456,7 +505,85 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
         await waitForOfferedRate(offeredEntityInputsPerSecond, cumulativeUnits, startedAt);
         const economicBefore = readEconomicCounters(env);
         const frameStartedAt = performance.now();
-        await replayRecoveryFrameJournals(env, [frame], { verify: recoveryVerifyEnabled });
+        if (parityEvidence) beginRuntimeParityEvidence(env);
+        try {
+          await replayRecoveryFrameJournals(env, [frame], { verify: recoveryVerifyEnabled });
+          if (parityEvidence) {
+            const capture = finishRuntimeParityEvidence(env);
+            entityFrameEvents.push(buildHltEntityFrameEventEvidenceFromEvents(
+              frame.height,
+              capture.entityFrameEvents,
+            ));
+            entityEffects.push(buildHltEntityEffectEvidence(
+              frame.height,
+              capture.entityEffectLogs,
+            ));
+            localContinuations.push({
+              runtimeHeight: frame.height,
+              inputs: capture.localContinuations,
+            });
+          }
+        } catch (error) {
+          if (parityEvidence) discardRuntimeParityEvidence(env);
+          throw error;
+        }
+        if (frame.height === diagnosticEventsHeight) {
+          const replicaMetaCommitment = buildStorageLiveReplicaMetaCommitment(env);
+          const checkpointReplicaMetaCommitment = buildStorageReplicaMetaCommitment(env);
+          console.error(`HLT_REPLAY_ENTITY_EVENTS:${frame.height}:${safeStringify(
+            {
+              replicaMetaDigest: replicaMetaCommitment.digest,
+              replicaMetaEntries: inspectStorageReplicaMetaEntries(replicaMetaCommitment.entries),
+              checkpointReplicaMetaDigest: checkpointReplicaMetaCommitment.digest,
+              checkpointReplicaMetaEntries: inspectStorageReplicaMetaEntries(
+                checkpointReplicaMetaCommitment.entries,
+              ),
+              entities: Array.from(env.state.eReplicas.entries(), ([replicaKey, replica]) => ({
+                replicaKey,
+                entityHeight: replica.state.height,
+                events: replica.certifiedFrameHead?.frame.events ?? [],
+                sectionDigests: computeEntityConsensusSectionDigestsCold(replica.state),
+                crontabState: replica.state.crontabState,
+                crontabHooks: Array.from(replica.state.crontabState?.hooks.entries() ?? []),
+                jBatchState: replica.state.jBatchState,
+                accountDigests: computeEntityAccountDigests(replica.state),
+                accountFrameRootDrift: Array.from(
+                  replica.state.accounts.entries(),
+                  ([counterpartyId, account]) => {
+                    const liveRoot = computeAccountStateRootCold(account.state);
+                    const frameRoot = account.currentFrame?.accountStateRoot ?? null;
+                    return frameRoot === null || frameRoot === liveRoot ? null : {
+                      counterpartyId,
+                      currentHeight: account.currentHeight,
+                      frameRoot,
+                      liveRoot,
+                      jNonce: account.state.jNonce,
+                      lastFinalizedJHeight: account.state.lastFinalizedJHeight,
+                      status: account.status,
+                      hasActiveDispute: account.activeDispute !== undefined,
+                    };
+                  },
+                ).filter(value => value !== null),
+                orderbookBooks: Array.from(
+                  replica.state.orderbookExt?.books.entries() ?? [],
+                  ([pairId, book]) => ({
+                    pairId,
+                    digest: computeBookCommitmentHash(book),
+                    params: book.params,
+                    bidPagesRoot: book.bidPages.rootHash(),
+                    askPagesRoot: book.askPages.rootHash(),
+                    nextSeq: book.nextSeq,
+                    tradeCount: book.tradeCount,
+                    tradeQtySum: book.tradeQtySum,
+                    lastTradePriceTicks: book.lastTradePriceTicks,
+                    lastAcceptedUsdAskPriceTicks: book.lastAcceptedUsdAskPriceTicks,
+                    eventHash: book.eventHash,
+                  }),
+                ),
+              })),
+            },
+          )}`);
+        }
         // Strict shadow: both engines have now consumed the same Runtime frame,
         // so their account trees must be identical before the next one starts.
         if (shadowStrictEnabled()) await assertShadowParity(`r-frame:${frame.height}`, env.state);
@@ -548,6 +675,9 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
       operations,
       perf: snapshotPerfPhases(),
       ...(accountWorkerTelemetry === undefined ? {} : { accountWorkerTelemetry }),
+      ...(parityEvidence
+        ? { parityExpectations: { entityFrameEvents, entityEffects, localContinuations } }
+        : {}),
     };
   } finally {
     await tsWorkerAuthority?.close();
@@ -617,7 +747,19 @@ const report = {
   createdAt: Date.now(),
   recordingPath,
   recordingManifestHash: artifact.recording.manifestHash,
-  authorityExpectations: artifact.authorityEvidence.expectations,
+  recordingSourceBinding: artifact.source.binding,
+  authorityExpectations: parityEvidence
+    ? (() => {
+        const captured = trials[0]?.parityExpectations;
+        if (!captured) throw new Error('HLT_REPLAY_PARITY_EXPECTATIONS_MISSING');
+        return {
+          ...artifact.authorityEvidence.expectations,
+          entityFrameEvents: captured.entityFrameEvents,
+          entityEffects: captured.entityEffects,
+          localContinuations: captured.localContinuations,
+        } satisfies HltTsParityExpectations;
+      })()
+    : artifact.authorityEvidence.expectations,
   mode,
   accountAuthority: replayTsAccountWorkers === null
     ? 'rust'

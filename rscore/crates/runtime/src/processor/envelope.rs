@@ -13,22 +13,34 @@ use xln_rscore_protocol::CanonicalValue;
 use crate::{TaggedJsonError, canonical_value_from_tagged_json, restore::MigrationOrigin};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
-const INFRASTRUCTURE_MAP_FIELDS: [&str; 6] = [
+const INFRASTRUCTURE_MAP_FIELDS: [&str; 7] = [
     "accountJClaimNodes",
     "certifiedBoardNodes",
     "certifiedRegistrationEvidence",
     "entityEncryptionSeeds",
     "runtimeAdapterCommandFrontiers",
     "pendingJurisdictionImports",
+    "numberedRegistrationIntents",
 ];
-const INFRASTRUCTURE_FIELDS: [&str; 7] = [
+const INFRASTRUCTURE_FIELDS: [&str; 10] = [
     "accountJClaimNodes",
     "certifiedBoardNodes",
     "certifiedRegistrationEvidence",
     "entityEncryptionSeeds",
+    "maxEntityInputsPerFrame",
+    "maxEntityTxsPerFrame",
     "runtimeAdapterCommandFrontiers",
     "pendingCommittedJOutbox",
     "pendingJurisdictionImports",
+    "numberedRegistrationIntents",
+];
+const DURABLE_INFRASTRUCTURE_COLLECTION_FIELDS: [&str; 6] = [
+    "runtimeAdapterCommandFrontiers",
+    "pendingCommittedJOutbox",
+    "pendingJurisdictionImports",
+    "numberedRegistrationIntents",
+    "certifiedRegistrationEvidence",
+    "entityEncryptionSeeds",
 ];
 const J_REPLICA_REQUIRED_FIELDS: [&str; 7] = [
     "blockDelayMs",
@@ -385,6 +397,46 @@ impl RuntimeDurableEnvelope {
     }
 }
 
+/// Project the exact durable Runtime infrastructure used by TypeScript WAL
+/// snapshots. Live reducers may retain empty collection shells after consuming
+/// their last item, but absence and an empty collection are the same durable
+/// state. Keeping the shell would create an extra path-keyed machine leaf and
+/// fork the Runtime root.
+pub(crate) fn project_durable_infrastructure(
+    value: &Value,
+) -> Result<Value, RuntimeDurableEnvelopeError> {
+    let source = object(value, "infrastructure")?;
+    let mut projected = Map::new();
+    for field in ["maxEntityInputsPerFrame", "maxEntityTxsPerFrame"] {
+        if let Some(value) = source.get(field) {
+            projected.insert(field.into(), value.clone());
+        }
+    }
+    for field in DURABLE_INFRASTRUCTURE_COLLECTION_FIELDS {
+        let Some(value) = source.get(field) else {
+            continue;
+        };
+        if has_durable_entries(value) {
+            projected.insert(field.into(), value.clone());
+        }
+    }
+    Ok(Value::Object(projected))
+}
+
+fn has_durable_entries(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => !values.is_empty(),
+        Value::Object(object) => match object.get("__xlnType").and_then(Value::as_str) {
+            Some("Map" | "Set") => object
+                .get("value")
+                .and_then(Value::as_array)
+                .is_some_and(|values| !values.is_empty()),
+            _ => !object.is_empty(),
+        },
+        _ => false,
+    }
+}
+
 /// Equality is over the committed authority only; the derived digest memo is
 /// deliberately invisible to it.
 impl PartialEq for RuntimeDurableEnvelope {
@@ -501,6 +553,8 @@ fn validate_infrastructure(value: &Value) -> Result<(), RuntimeDurableEnvelopeEr
         }
         canonical_value_from_tagged_json(value)?;
     }
+    optional_safe_u64(object, "maxEntityInputsPerFrame")?;
+    optional_safe_u64(object, "maxEntityTxsPerFrame")?;
     crate::j_submit::decode_pending_j_submit_attempts(value)
         .map_err(|error| RuntimeDurableEnvelopeError::JSubmit(error.to_string()))?;
     if let Some(frontiers) = object.get("runtimeAdapterCommandFrontiers") {
@@ -1012,6 +1066,58 @@ mod tests {
         let decoded = RuntimeDurableEnvelope::decode(&machine, [0; 32])
             .expect("optional infrastructure maps");
         assert_eq!(decoded.infrastructure(), &machine["infrastructure"]);
+    }
+
+    #[test]
+    fn durable_infrastructure_omits_every_empty_collection_shell() {
+        let mut machine = fixture();
+        machine["infrastructure"] = json!({
+            "maxEntityInputsPerFrame": 7,
+            "runtimeAdapterCommandFrontiers": map(),
+            "pendingCommittedJOutbox": [],
+            "pendingJurisdictionImports": map(),
+            "numberedRegistrationIntents": map(),
+            "certifiedRegistrationEvidence": map(),
+            "entityEncryptionSeeds": map(),
+        });
+        let decoded =
+            RuntimeDurableEnvelope::decode(&machine, [0; 32]).expect("valid live infrastructure");
+        assert_eq!(
+            project_durable_infrastructure(decoded.infrastructure()).expect("projection"),
+            json!({"maxEntityInputsPerFrame": 7}),
+        );
+
+        machine["infrastructure"]["entityEncryptionSeeds"] =
+            json!({"__xlnType":"Map","value":[["entity", "seed"]]});
+        let decoded = RuntimeDurableEnvelope::decode(&machine, [0; 32])
+            .expect("non-empty outbox infrastructure");
+        assert_eq!(
+            project_durable_infrastructure(decoded.infrastructure()).expect("projection"),
+            json!({
+                "maxEntityInputsPerFrame": 7,
+                "entityEncryptionSeeds": {
+                    "__xlnType":"Map",
+                    "value":[["entity", "seed"]],
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn runtime_frame_caps_are_exact_durable_infrastructure() {
+        let mut machine = fixture();
+        machine["infrastructure"]["maxEntityInputsPerFrame"] = json!(1);
+        machine["infrastructure"]["maxEntityTxsPerFrame"] = json!(4);
+        let decoded = RuntimeDurableEnvelope::decode(&machine, [0; 32])
+            .expect("canonical Runtime frame caps");
+        assert_eq!(decoded.infrastructure(), &machine["infrastructure"]);
+        machine["infrastructure"]["maxEntityInputsPerFrame"] = json!(-1);
+        assert!(matches!(
+            RuntimeDurableEnvelope::decode(&machine, [0; 32]),
+            Err(RuntimeDurableEnvelopeError::Number(
+                "maxEntityInputsPerFrame"
+            ))
+        ));
     }
 
     #[test]

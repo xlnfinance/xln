@@ -7,12 +7,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
+use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDomain, AccountEnvelope, AccountFrame, AccountIdentity,
     AccountInputEnvelope, AccountOutput, AccountReplica, AccountState, AccountTx, AckFrameOutcome,
     AckFramePhase, AckOutcome, BoardDelays, BoardHankoRefreshInput, CertifiedBoardAuthority,
     CommittedFrameEvidence, CounterpartyDispute, Disposition, IncomingAck, IncomingFrame,
-    IncomingFrameSecurityContext, IncomingOutcome, ProposalOutcome, SignedIncomingFrame,
+    IncomingFrameSecurityContext, IncomingOutcome, ProposalOutcome, Side, SignedIncomingFrame,
     SigningIdentity, StandaloneInputOutcome, StateError, apply_board_hanko_refresh,
     apply_incoming_ack_frame_with_authority, apply_incoming_ack_with_authority,
     apply_incoming_frame_with_authority, apply_standalone_dispute, canonical_tx_digest,
@@ -438,29 +439,6 @@ pub(crate) fn outbound_ack_input(account: &AccountConsensus) -> Option<AccountIn
             dispute: ack.dispute.as_ref().map(dispute_input),
         }),
     })
-}
-
-/// Retry the exact Account input which still owns the acknowledgement.
-///
-/// If a pending H+1 proposal originally carried ACK(H), reducing its retry to
-/// standalone ACK(H) creates new wire bytes. The peer may already have
-/// committed H+1, in which case those newly-created old bytes are necessarily
-/// unmatched. Re-carry the pending proposal until it is committed or rolled
-/// back; only the retained ACK remains after that terminal.
-pub(crate) fn outbound_ack_retry_input(account: &AccountConsensus) -> Option<AccountInput> {
-    if let Some(pending) = account.pending()
-        && let Some(bundled_ack) = pending.bundled_ack()
-    {
-        return Some(outgoing_account_input(
-            account,
-            pending.frame.clone(),
-            pending.state_hash,
-            pending.hanko.clone(),
-            pending.proposal_dispute(),
-            Some(bundled_ack),
-        ));
-    }
-    outbound_ack_input(account)
 }
 
 pub(crate) fn force_ack_directive(pure_ack: bool, verdict: &AccountInputVerdict) -> Option<bool> {
@@ -1240,6 +1218,117 @@ pub(crate) fn proposable(account: &AccountConsensus) -> Result<bool, BatchError>
         .any(|tx| !locks_full || !matches!(tx, AccountTx::HtlcLock(_))))
 }
 
+/// Exact Rust twin of `core/entity/account/account-work-flags.ts`.
+///
+/// This is deliberately derived from the resident Account replica rather than
+/// accepted from Runtime or persisted as scheduler metadata. Candidate
+/// promotion/rollback can therefore move the work index atomically with the
+/// Account leaf that authorizes it.
+pub(crate) fn has_rebalance_work(account: &AccountConsensus) -> Result<bool, BatchError> {
+    let replica = account.replica();
+    let state = replica.state();
+    let zero = BigInt::from(0_u8);
+    if state
+        .requested_rebalance_amounts()
+        .any(|amount| amount > &zero)
+    {
+        return Ok(true);
+    }
+    let has_settlement_transition = account
+        .mempool()
+        .iter()
+        .chain(
+            account
+                .pending()
+                .into_iter()
+                .flat_map(|pending| pending.frame.txs.iter()),
+        )
+        .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }));
+    if account.pending().is_some() || has_settlement_transition {
+        return Ok(false);
+    }
+    let owner_is_left = replica.owner_side() == Side::Left;
+    if let Some(workspace) = state.settlement_workspace() {
+        return settlement_workspace_has_rebalance_work(workspace, owner_is_left);
+    }
+    for delta in state.deltas() {
+        let token_id = delta.token_id();
+        if state
+            .requested_rebalance(token_id)
+            .is_some_and(|amount| amount > &zero)
+        {
+            continue;
+        }
+        let total = delta.ondelta() + delta.offdelta();
+        let collateral = delta.collateral().max(&zero);
+        let out_collateral = if owner_is_left {
+            if total > zero {
+                total.min(collateral.clone())
+            } else {
+                zero.clone()
+            }
+        } else if total > zero {
+            (collateral - total).max(zero.clone())
+        } else {
+            collateral.clone()
+        };
+        let available = out_collateral - delta.hold(replica.owner_side());
+        if available <= zero {
+            continue;
+        }
+        let decimals = match token_id.get() {
+            1 | 3 | 4 => 6_u32,
+            2 | 5 => 18_u32,
+            unknown => {
+                return Err(BatchError::FinancialView(format!(
+                    "TOKEN_METADATA_UNAVAILABLE:{unknown}"
+                )));
+            }
+        };
+        let soft_limit = BigInt::from(500_u16) * BigInt::from(10_u8).pow(decimals);
+        if available > soft_limit {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn settlement_workspace_has_rebalance_work(
+    workspace: &CanonicalValue,
+    owner_is_left: bool,
+) -> Result<bool, BatchError> {
+    let CanonicalValue::Object(fields) = workspace else {
+        return Err(BatchError::FinancialView(
+            "SETTLEMENT_WORKSPACE_OBJECT".into(),
+        ));
+    };
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find_map(|(key, value)| (key == name).then_some(value))
+    };
+    let matches_owner = matches!(field("lastModifiedByLeft"), Some(CanonicalValue::Bool(value)) if *value == owner_is_left)
+        && matches!(field("executorIsLeft"), Some(CanonicalValue::Bool(value)) if *value == owner_is_left);
+    let hanko_name = if owner_is_left {
+        "rightHanko"
+    } else {
+        "leftHanko"
+    };
+    let has_hanko =
+        matches!(field(hanko_name), Some(CanonicalValue::String(value)) if !value.is_empty());
+    let c2r_ops = matches!(field("ops"), Some(CanonicalValue::Array(ops)) if !ops.is_empty() && ops.iter().all(|op| {
+        matches!(op, CanonicalValue::Object(fields) if fields.iter().any(|(name, value)| {
+            name == "type" && value == &CanonicalValue::String("c2r".into())
+        }))
+    }));
+    Ok(matches!(
+        field("status"),
+        Some(CanonicalValue::String(value)) if value == "ready_to_submit"
+    ) && matches_owner
+        && c2r_ops
+        && has_hanko)
+}
+
 /// Rebuild one restored account using the same canonical path as the legacy
 /// forest. Resident workers call this before taking ownership of the value;
 /// keeping the constructor here prevents the two stores from drifting on
@@ -1304,9 +1393,13 @@ pub(crate) fn restore_checkpoint_account(
             .map_err(|error| state_error(account_id, &error))?;
     }
     let claimed_leaf = row.account_leaf;
-    let account =
-        AccountConsensus::restore_from_checkpoint(row.replica, row.consensus, swap_market)
-            .map_err(|error| state_error(account_id, &error))?;
+    let account = AccountConsensus::restore_from_certified_entity_checkpoint(
+        row.replica,
+        row.consensus,
+        swap_market,
+        claimed_leaf,
+    )
+    .map_err(|error| state_error(account_id, &error))?;
     let leaf = leaf_root(account_id, &account)?;
     if leaf != claimed_leaf {
         return Err(BatchError::CheckpointAccountLeaf {

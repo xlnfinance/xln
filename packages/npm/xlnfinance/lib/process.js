@@ -1,17 +1,21 @@
 import { closeSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 
-import { ensureJurisdictionsConfig, openDaemonLog, PACKAGE_ROOT, PATHS } from './state.js';
+import { ensureJurisdictionsConfig, openDaemonLog, PACKAGE_ROOT } from './state.js';
 
-export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, controlToken }) => {
-  const jurisdictionsPath = ensureJurisdictionsConfig();
-  const logDescriptor = openDaemonLog();
+export const spawnDaemon = async ({ instanceId, version, runtimeSeed, authSeed, controlToken, paths }) => {
+  const jurisdictions = await ensureJurisdictionsConfig(paths);
+  if (jurisdictions.warning) {
+    console.warn(`xlnfinance: live testnet config unavailable; using last verified cache (${jurisdictions.warning})`);
+  }
+  const arrakisRpc = String(jurisdictions.config?.jurisdictions?.arrakis?.rpc || '');
+  const logDescriptor = openDaemonLog(paths);
   const child = spawn(process.execPath, [
-    PATHS.server,
+    paths.server,
     '--host', '127.0.0.1',
     '--port', '8080',
-    '--static-dir', PATHS.app,
-    '--server-id', 'xlnd-local',
+    '--static-dir', paths.app,
+    '--server-id', paths.mode === 'dev' ? 'xlnfinance-dev' : 'xlnfinance-testnet',
   ], {
     cwd: PACKAGE_ROOT,
     detached: true,
@@ -20,20 +24,29 @@ export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, contro
       ...process.env,
       NODE_ENV: 'production',
       RUNTIME_VERBOSE_LOGS: '0',
-      XLN_DB_PATH: PATHS.database,
-      XLN_JURISDICTIONS_PATH: jurisdictionsPath,
+      XLN_DB_PATH: paths.database,
+      XLN_JURISDICTIONS_PATH: jurisdictions.path,
       XLN_DISTRIBUTION_VERSION: version,
       XLN_LOCAL_CONTROL_TOKEN: controlToken,
       XLN_LOCAL_INSTANCE_ID: instanceId,
       XLN_LOCAL_OWNER_PROFILE_NAME: 'xln',
-      XLN_BRAINVAULT_OWNER_PATH: PATHS.brainvaultOwner,
-      XLN_BRAINVAULT_WORKER_PATH: PATHS.brainvaultWorker,
+      XLN_BRAINVAULT_OWNER_PATH: paths.brainvaultOwner,
+      XLN_BRAINVAULT_WORKER_PATH: paths.brainvaultWorker,
       XLN_RADAPTER_AUTH_SEED: authSeed,
       XLN_RADAPTER_REQUIRE_AUTH_SEED: '1',
       XLN_RUNTIME_SEED: runtimeSeed,
-      // The packaged single-user daemon is an explicit local simulation. A
-      // production node must instead opt into its configured RPC adapter.
-      XLN_LOCAL_SIMULATION: 'true',
+      ...(paths.mode === 'dev' ? {
+        USE_ANVIL: 'false',
+        XLN_LOCAL_SIMULATION: 'true',
+        RELAY_URL: 'ws://localhost:8080/relay',
+      } : {
+        USE_ANVIL: 'true',
+        XLN_LOCAL_SIMULATION: 'false',
+        ANVIL_RPC: arrakisRpc,
+        XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
+        XLN_PREDEPLOYED_JURISDICTION_KEY: 'arrakis',
+        RELAY_URL: 'wss://xln.finance/relay',
+      }),
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
     },
   });

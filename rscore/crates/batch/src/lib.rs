@@ -41,11 +41,13 @@ pub use resident_consensus::{
     CertifiedSettlementHankoDraft, DeferredSettlementApproval, PendingSettlementHankoDraft,
     PreparedEntityOutbound, ResidentAccountDisputeView, ResidentAccountFinancialView,
     ResidentAccountFinancialViewRequest, ResidentAccountStatusView, ResidentConsensusEngine,
-    ResidentCrossJMaterializationView, ResidentOrderbookAccountSnapshot,
+    ResidentCrossJMaterializationView, ResidentCrossJOpeningAccountView,
+    ResidentHubRebalanceAccountView, ResidentHubRebalanceFeeState,
+    ResidentOrderbookAccountSnapshot,
 };
 pub use round::{
-    AccountEnvelopeUpdate, EntityAccountGenesisPolicy, EntityInboundRequest, EntityOutboundRequest,
-    EntityRoundResult, FailedHtlcFollowup,
+    AccountEnvelopeUpdate, BatchAccountSelection, EntityAccountGenesisPolicy, EntityInboundRequest,
+    EntityOutboundRequest, EntityRoundResult, FailedHtlcFollowup,
 };
 pub use types::{AccountId, AccountSeed, EngineGeneration};
 pub use xln_rscore_engine::CommittedFrameEvidence;

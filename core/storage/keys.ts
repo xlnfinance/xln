@@ -8,7 +8,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/bytes/integrity-checks
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 4;
+export const STORAGE_SCHEMA_VERSION = 5;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -67,9 +67,9 @@ export const KEY_SNAPSHOT_MANIFEST = 0x12;
 export const KEY_RUNTIME_OUTPUT_ROW = 0x13;
 /** Entity replay-context row at a permanent `(height, replica, kind, index)` path. */
 export const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
-/** Runtime checkpoint Patricia branch, scoped by the materialized frame height. */
+/** Latest Runtime checkpoint Patricia branch at its permanent packed path. */
 export const KEY_RUNTIME_MACHINE_BRANCH = 0x15;
-/** Runtime checkpoint Patricia leaf, scoped by the materialized frame height. */
+/** Latest Runtime checkpoint Patricia leaf at its permanent protocol-key path. */
 export const KEY_RUNTIME_MACHINE_LEAF = 0x16;
 /** Exact Rust Account-authority checkpoint token, one per owning Entity. */
 const KEY_RSCORE_CHECKPOINT = 0x17;
@@ -269,42 +269,35 @@ export const keyEntityContextPayload = (
   ]);
 };
 
-const runtimeMachineTreeOwnerKey = (
+const runtimeMachineTreeNamespace = (
   tag: typeof KEY_RUNTIME_MACHINE_BRANCH | typeof KEY_RUNTIME_MACHINE_LEAF,
-  height: number,
-): Buffer => Buffer.concat([Buffer.from([tag]), encodeHeight(height)]);
+): Buffer => Buffer.from([tag]);
 
 export const keyRuntimeMachineBranch = (
-  height: number,
   path: readonly number[],
 ): Buffer => Buffer.concat([
-  runtimeMachineTreeOwnerKey(KEY_RUNTIME_MACHINE_BRANCH, height),
+  runtimeMachineTreeNamespace(KEY_RUNTIME_MACHINE_BRANCH),
   Buffer.from(packRadixMerklePath(16, [...path])),
 ]);
 
 export const keyRuntimeMachineLeaf = (
-  height: number,
   keyBytes: Uint8Array,
 ): Buffer => Buffer.concat([
-  runtimeMachineTreeOwnerKey(KEY_RUNTIME_MACHINE_LEAF, height),
+  runtimeMachineTreeNamespace(KEY_RUNTIME_MACHINE_LEAF),
   Buffer.from(keyBytes),
 ]);
 
 export const keyRuntimeMachineTreePrefix = (
   tag: typeof KEY_RUNTIME_MACHINE_BRANCH | typeof KEY_RUNTIME_MACHINE_LEAF,
-  height: number,
-): Buffer => runtimeMachineTreeOwnerKey(tag, height);
+): Buffer => runtimeMachineTreeNamespace(tag);
 
 const parseRuntimeMachineTreeKey = (
   key: Buffer,
   tag: number,
   code: string,
-): Readonly<{ height: RuntimeHeight; payload: Buffer }> => {
-  if (key.byteLength <= 9 || key[0] !== tag) throw new Error(`${code}_KEY_INVALID`);
-  return {
-    height: toRuntimeHeight(decodeHeight(key)),
-    payload: key.subarray(9),
-  };
+): Readonly<{ payload: Buffer }> => {
+  if (key.byteLength <= 1 || key[0] !== tag) throw new Error(`${code}_KEY_INVALID`);
+  return { payload: key.subarray(1) };
 };
 
 export const parseRuntimeMachineBranchKey = (key: Buffer) => {
@@ -343,7 +336,7 @@ const keyRscoreAccountNode = (
   kind: 0 | 1,
   payload: Uint8Array,
 ): Buffer => {
-  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 7) {
+  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 9) {
     throw new Error(`STORAGE_RSCORE_NAMESPACE_INVALID:${String(namespaceTag)}`);
   }
   return Buffer.concat([

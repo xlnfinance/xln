@@ -8,7 +8,6 @@ import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/st
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
-import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
 import { buildCertifiedEntityHeadPlan } from './replica/entity-head';
 
 export type CanonicalFrameEntityHash = {
@@ -131,10 +130,9 @@ export const computeCanonicalRuntimeStateHash = (
   height: number,
   timestamp: number,
   entityHashes: CanonicalFrameEntityHash[],
-  runtimeMachine?: Record<string, unknown>,
 ): string =>
   hashCanonical({
-    kind: 'xln.storage.canonicalRuntimeHash.v1',
+    kind: 'xln.storage.canonicalRuntimeHash.v2',
     height,
     timestamp,
     entities: entityHashes
@@ -144,23 +142,12 @@ export const computeCanonicalRuntimeStateHash = (
         cellCount: entry.cellCount,
       }))
       .sort((left, right) => compareStableText(left.entityId, right.entityId)),
-    ...(runtimeMachine ? { runtimeMachine: canonicalizeStorageAuditValue(runtimeMachine) } : {}),
   });
 
-const computeCanonicalStateHashFromRuntimeMachine = (
-  env: RuntimeReplica,
-  runtimeMachine: Record<string, unknown>,
-): string =>
+export const computeCanonicalStateHashFromEnv = (env: RuntimeReplica): string =>
   computeCanonicalRuntimeStateHash(
     env.state.height,
     env.state.timestamp,
     computeCanonicalEntityHashesFromEnv(env),
-    runtimeMachine,
-  );
-
-export const computeCanonicalStateHashFromEnv = (env: RuntimeReplica): string =>
-  computeCanonicalStateHashFromRuntimeMachine(
-    env,
-    buildStorageRuntimeMachineSnapshot(env),
   );
 import { Buffer } from '../support/platform-crypto';

@@ -222,6 +222,45 @@ describe('typed Account input rejection', () => {
     expect(account.pendingFrame).toBeUndefined();
   });
 
+  test('valid bundled ACK stays committed when the successor proposal is invalid', async () => {
+    const env = createEmptyEnv('account-input-ack-frame-sequential-commit');
+    env.quietRuntimeLogs = true;
+    const account = createAccount();
+    installPendingFrame(account);
+    const successor = {
+      height: 2,
+      timestamp: 2,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: `0x${'ff'.repeat(32)}`,
+      accountStateRoot: computeAccountStateRoot(account.state),
+      deltas: [],
+      stateHash: '',
+      byLeft: false,
+    };
+    successor.stateHash = computeFrameHash(successor);
+    const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      ...ackInput(account),
+      kind: 'ack_frame',
+      proposal: {
+        frame: successor,
+        frameHanko: `0x${'77'.repeat(65)}`,
+      },
+    };
+    const context = withVerifier(
+      createAccountConsensusContext(env),
+      async (_hanko, _hash, expectedEntityId) => ({ valid: true, entityId: expectedEntityId }),
+    );
+
+    const result = await applyAccountInput(context, account, input);
+
+    expect(result.ok).toBe(false);
+    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_INPUT_FRAME_CHAIN_INVALID');
+    expect(account.currentHeight).toBe(1);
+    expect(account.currentFrame.stateHash).toBe(input.ack.frameHash);
+    expect(account.pendingFrame).toBeUndefined();
+  });
+
   test('historical ACK authority expires at the exclusive previous-board boundary', async () => {
     const previousBoardValidUntil = 1_700_604_800;
     const currentBoardHash = `0x${'77'.repeat(32)}`;

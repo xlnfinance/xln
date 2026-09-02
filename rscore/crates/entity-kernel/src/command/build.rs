@@ -7,7 +7,7 @@ use super::hash::{hash_collective_action_txs, hash_entity_command_body, hash_ent
 use super::value::{fixed_hex, hex, number, object_value};
 use super::{
     EntityCommandBoard, EntityCommandError, EntityCommandNonceState, SignedEntityCommandV1,
-    decode_signed_entity_command, invalid,
+    decode_signed_entity_command, invalid, is_individual_entity_command_tx_kind,
 };
 
 fn next_nonce(state: Option<&EntityCommandNonceState>, board: &EntityCommandBoard) -> BigInt {
@@ -97,7 +97,7 @@ fn signed_command_value(
 /// Canonical TypeScript `prepareLocallyAuthoredEntityTxs` collective lane.
 /// The outer signed command is committed in the Entity frame; its derived
 /// financial transactions execute locally but never replace the signed bytes.
-pub fn build_collective_entity_command(
+pub fn build_locally_authored_entity_command(
     signer: &EntitySingleSigner,
     board: &EntityCommandBoard,
     nonce_state: Option<&EntityCommandNonceState>,
@@ -117,7 +117,17 @@ pub fn build_collective_entity_command(
         .map(CanonicalEntityTx::canonical_value)
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| invalid("ENTITY_COMMAND_TX_FRAME_DATA_MISSING"))?;
-    let command_txs = vec![proposal_tx(board, raw)?];
+    let individual_count = txs
+        .iter()
+        .filter(|tx| is_individual_entity_command_tx_kind(tx.kind))
+        .count();
+    let command_txs = match individual_count {
+        0 => vec![proposal_tx(board, raw)?],
+        count if count == txs.len() => raw,
+        _ => {
+            return Err(invalid("ENTITY_COMMAND_AUTHORIZATION_RUN_MIXED"));
+        }
+    };
     let value = signed_command_value(
         signer,
         board,

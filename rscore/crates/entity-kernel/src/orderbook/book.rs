@@ -61,6 +61,21 @@ fn bump_hash(state: &mut BookState, tag: u32, a: &BigInt, b: &BigInt) {
     state.event_hash = next & BigInt::from(EVENT_MASK);
 }
 
+pub(crate) fn record_accepted_usd_ask_price(
+    state: &mut BookState,
+    price_ticks: &BigInt,
+) -> Result<(), EntityKernelError> {
+    if price_ticks <= &BigInt::from(0) {
+        return Err(EntityKernelError::orderbook("BOOK_USD_ASK_PRICE_INVALID"));
+    }
+    if state.last_accepted_usd_ask_price_ticks == *price_ticks {
+        return Ok(());
+    }
+    state.last_accepted_usd_ask_price_ticks = price_ticks.clone();
+    bump_hash(state, 4, price_ticks, &BigInt::from(0));
+    Ok(())
+}
+
 fn max_qty_lots() -> BigInt {
     BigInt::from(10_u8).pow(MAX_QTY_LOTS_POWER)
 }

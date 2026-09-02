@@ -76,6 +76,13 @@ pub struct RuntimeWalReader {
     database: DB,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RuntimeHeadHeights {
+    latest: u64,
+    materialized: u64,
+    snapshot: u64,
+}
+
 impl RuntimeWalReader {
     /// Open an offline/copy-once canonical Runtime WAL.
     pub fn open_owned(path: impl AsRef<Path>) -> Result<Self, RuntimeLevelDbError> {
@@ -92,6 +99,31 @@ impl RuntimeWalReader {
 
     pub fn head(&mut self) -> Result<Value, RuntimeLevelDbError> {
         self.required_decoded(KEY_HEAD)
+    }
+
+    fn head_heights(&mut self) -> Result<RuntimeHeadHeights, RuntimeLevelDbError> {
+        let head = self.head()?;
+        let object = head
+            .as_object()
+            .ok_or_else(|| RuntimeLevelDbError::Output("HEAD_OBJECT".into()))?;
+        let required = |field: &'static str, code: &'static str| {
+            object
+                .get(field)
+                .and_then(Value::as_u64)
+                .ok_or_else(|| RuntimeLevelDbError::Output(code.into()))
+        };
+        let heights = RuntimeHeadHeights {
+            latest: required("latestHeight", "HEAD_LATEST_HEIGHT")?,
+            materialized: required(
+                "latestMaterializedHeight",
+                "HEAD_LATEST_MATERIALIZED_HEIGHT",
+            )?,
+            snapshot: required("latestSnapshotHeight", "HEAD_LATEST_SNAPSHOT_HEIGHT")?,
+        };
+        if heights.materialized > heights.latest || heights.snapshot > heights.latest {
+            return Err(RuntimeLevelDbError::Output("HEAD_HEIGHT_ORDER".into()));
+        }
+        Ok(heights)
     }
 
     pub fn frame(&mut self, height: u64) -> Result<Value, RuntimeLevelDbError> {
@@ -132,13 +164,10 @@ impl RuntimeWalReader {
 
     pub fn runtime_machine(
         &mut self,
-        height: u64,
         expected_root: &str,
         expected_leaf_count: usize,
     ) -> Result<Value, RuntimeLevelDbError> {
-        let mut prefix = Vec::with_capacity(9);
-        prefix.push(0x16);
-        prefix.extend_from_slice(&height.to_be_bytes());
+        let prefix = [0x16];
         let rows = self.prefixed_rows(&prefix)?;
         let leaves = rows
             .into_iter()
@@ -155,6 +184,9 @@ impl RuntimeWalReader {
         height: u64,
     ) -> Result<Option<Value>, RuntimeLevelDbError> {
         let frame = self.frame(height)?;
+        if height != self.head_heights()?.materialized {
+            return Ok(None);
+        }
         let Some(root) = frame
             .as_object()
             .and_then(|object| object.get("runtimeMachineRoot"))
@@ -173,8 +205,7 @@ impl RuntimeWalReader {
             .and_then(Value::as_u64)
             .and_then(|value| usize::try_from(value).ok())
             .ok_or_else(|| RuntimeLevelDbError::Output("MACHINE_ROOT_LEAF_COUNT".into()))?;
-        self.runtime_machine(height, root_hash, leaf_count)
-            .map(Some)
+        self.runtime_machine(root_hash, leaf_count).map(Some)
     }
 
     /// Load one exact materialized checkpoint from an offline canonical DB.
@@ -189,6 +220,12 @@ impl RuntimeWalReader {
         state_reader: &mut RuntimeWalReader,
         height: u64,
     ) -> Result<ConcreteCheckpointSource, RuntimeLevelDbError> {
+        let current = self.head_heights()?.materialized;
+        if height != current {
+            return Err(RuntimeLevelDbError::Output(format!(
+                "CHECKPOINT_MACHINE_NOT_CURRENT:requested={height}:current={current}",
+            )));
+        }
         let frame_key = frame_key(height);
         let frame_bytes = self.required_bounded_bytes(&frame_key)?;
         let frame = decode_storage_payload(&frame_bytes)?;
@@ -211,9 +248,7 @@ impl RuntimeWalReader {
             .filter(|value| *value > 0)
             .ok_or_else(|| RuntimeLevelDbError::Output("CHECKPOINT_MACHINE_LEAF_COUNT".into()))?;
 
-        let mut machine_prefix = Vec::with_capacity(9);
-        machine_prefix.push(0x16);
-        machine_prefix.extend_from_slice(&height.to_be_bytes());
+        let machine_prefix = [0x16];
         let runtime_machine_leaves = self
             .prefixed_rows(&machine_prefix)?
             .into_iter()
@@ -1169,7 +1204,15 @@ mod tests {
             },
             crate::storage::native::EntityContextPayloadRows::empty(),
             vec![],
-            None,
+            Some(crate::storage::native::CheckpointGraph {
+                state_root: [2; 32],
+                full: false,
+                node_changes: Vec::new(),
+                runtime_machine_leaves: vec![crate::storage::native::RuntimeMachineLeafRow {
+                    path_bytes: leaf_key.clone(),
+                    value_bytes: leaf_value.clone(),
+                }],
+            }),
         )
         .expect("checkpoint frame")
         .commit
@@ -1178,10 +1221,10 @@ mod tests {
             .put(&frame_key(100), &frame)
             .expect("frame row");
         wal_database
-            .put(
-                &[vec![0x16], 100_u64.to_be_bytes().to_vec(), leaf_key].concat(),
-                &leaf_value,
-            )
+            .put(KEY_HEAD, &head_bytes(100, 100, 100))
+            .expect("HEAD row");
+        wal_database
+            .put(&[vec![0x16], leaf_key].concat(), &leaf_value)
             .expect("machine leaf");
         wal_database
             .put(
@@ -1216,6 +1259,23 @@ mod tests {
             wal_path,
             state_path,
         )
+    }
+
+    fn head_bytes(latest: u64, materialized: u64, snapshot: u64) -> Vec<u8> {
+        let value = serde_json::json!({
+            "schemaVersion": 5,
+            "latestHeight": latest,
+            "latestMaterializedHeight": materialized,
+            "latestSnapshotHeight": snapshot,
+            "snapshotPeriodFrames": 10_000,
+            "retainSnapshots": 9_007_199_254_740_991_u64,
+            "epochMaxBytes": 9_007_199_254_740_991_u64,
+            "accountMerkleRadix": 16,
+            "epochReplayBytes": 0,
+            "retainedWalBytes": 0,
+        });
+        let canonical = crate::canonical_value_from_tagged_json(&value).expect("canonical HEAD");
+        crate::encode_storage_payload(&canonical).expect("encoded HEAD")
     }
 
     fn replay_context_rows(entity: &str, signer: &str, profile: bool) -> EntityContextPayloadRows {
@@ -1356,6 +1416,58 @@ mod tests {
         assert_eq!(source.height, 100);
         assert_eq!(source.runtime_machine_leaves.len(), 1);
         assert_eq!(source.state_rows.len(), 2);
+        drop(reader);
+        drop(state_reader);
+        std::fs::remove_dir_all(wal_path).expect("clean WAL fixture");
+        std::fs::remove_dir_all(state_path).expect("clean state fixture");
+    }
+
+    #[test]
+    fn stable_runtime_machine_rows_are_visible_only_at_the_head_materialized_height() {
+        let (mut reader, mut state_reader, wal_path, state_path) = checkpoint_reader(None);
+        assert!(
+            reader
+                .runtime_machine_for_frame(100)
+                .expect("current materialized machine")
+                .is_some(),
+        );
+
+        reader
+            .database
+            .put(KEY_HEAD, &head_bytes(101, 101, 100))
+            .expect("advance materialized pointer");
+        assert!(
+            reader
+                .runtime_machine_for_frame(100)
+                .expect("historical frame omits current-only graph")
+                .is_none(),
+        );
+        let error = reader
+            .concrete_checkpoint_source(&mut state_reader, 100)
+            .expect_err("explicit historical checkpoint source must fail");
+        assert_eq!(
+            error.to_string(),
+            "RUNTIME_LEVELDB_OUTPUT:CHECKPOINT_MACHINE_NOT_CURRENT:requested=100:current=101",
+        );
+
+        let no_materialized_pointer = crate::canonical_value_from_tagged_json(
+            &serde_json::json!({"latestHeight": 101, "latestSnapshotHeight": 100}),
+        )
+        .expect("canonical HEAD without materialized pointer");
+        let no_materialized_pointer = crate::encode_storage_payload(&no_materialized_pointer)
+            .expect("encoded HEAD without materialized pointer");
+        reader
+            .database
+            .put(KEY_HEAD, &no_materialized_pointer)
+            .expect("replace HEAD without materialized pointer");
+        assert_eq!(
+            reader
+                .runtime_machine_for_frame(100)
+                .expect_err("snapshot pointer must not become a compatibility fallback")
+                .to_string(),
+            "RUNTIME_LEVELDB_OUTPUT:HEAD_LATEST_MATERIALIZED_HEIGHT",
+        );
+
         drop(reader);
         drop(state_reader);
         std::fs::remove_dir_all(wal_path).expect("clean WAL fixture");

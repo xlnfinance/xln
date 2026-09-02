@@ -10,6 +10,13 @@ use crate::{RuntimeApplyResult, RuntimeEntityKey, StorageReplicaMetaEntry};
 use super::EntityOutputEncodingError;
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const LIVE_REPLICA_META_FIELDS: [&str; 5] = [
+    "leaderVotes",
+    "pendingLeaderCertificate",
+    "jPrefixRound",
+    "jSubmitState",
+    "entityProviderActionSubmitState",
+];
 
 pub(crate) struct PreparedReplicaMeta {
     pub entry: StorageReplicaMetaEntry,
@@ -32,11 +39,12 @@ pub(crate) fn prepare_replica_meta(
         .e_replicas
         .get(key)
         .ok_or(ReplicaMetaProjectionError::CertifiedFrameMissing)?;
-    let head = live
-        .entity_consensus
-        .certified_frame_head
-        .as_ref()
-        .ok_or(ReplicaMetaProjectionError::CertifiedFrameMissing)?;
+    let head = live.entity_consensus.certified_frame_head.as_ref();
+    match (state.entity.height, head) {
+        (0, None) | (1.., Some(_)) => {}
+        (0, Some(_)) => return Err(ReplicaMetaProjectionError::GenesisCertifiedHeadForbidden),
+        (1.., None) => return Err(ReplicaMetaProjectionError::CertifiedFrameMissing),
+    }
     let entity_id = state.entity.entity_id.to_ascii_lowercase();
     let signer_id = normalize_hex(&key.signer_id, 20)
         .ok_or_else(|| ReplicaMetaProjectionError::Signer(key.signer_id.clone()))?;
@@ -61,16 +69,18 @@ pub(crate) fn prepare_replica_meta(
     );
     let committed_value = if materialized {
         let mut full = retained.clone();
-        full.insert(
-            "certifiedFrameHead".into(),
-            object([
-                ("frame", frame(&head.frame)?),
-                (
-                    "postAuthority",
-                    super::output::canonical_json(head.post_authority.state_value()?)?,
-                ),
-            ]),
-        );
+        if let Some(head) = head {
+            full.insert(
+                "certifiedFrameHead".into(),
+                object([
+                    ("frame", frame(&head.frame)?),
+                    (
+                        "postAuthority",
+                        super::output::canonical_json(head.post_authority.state_value()?)?,
+                    ),
+                ]),
+            );
+        }
         Value::Object(full)
     } else {
         live_replica_meta(state, live, head, &entity_id, &signer_id)?
@@ -94,14 +104,16 @@ pub(crate) fn prepare_replica_meta(
 fn live_replica_meta(
     state: &crate::RuntimeEntityState,
     live: &crate::RuntimeEntityReplica,
-    head: &CertifiedEntityFrameLink,
+    head: Option<&CertifiedEntityFrameLink>,
     entity_id: &str,
     signer_id: &str,
 ) -> Result<Value, ReplicaMetaProjectionError> {
-    let identity = certified_head_identity(head)?;
-    let head_digest: [u8; 32] =
-        Sha256::digest(crate::transport::msgpack::encode_framed(&identity)?).into();
-    let frame_hash = head.frame.hash.clone();
+    // TS projects `state.prevFrameHash ?? ''`. Rust keeps the certified link
+    // outside EntityStateSlice, so the exact equivalent is the head hash when
+    // present and the empty genesis sentinel before the first certification.
+    let frame_hash = head
+        .map(|certified| certified.frame.hash.clone())
+        .unwrap_or_default();
     let mut value = Map::from_iter([
         (
             "replicaKey".into(),
@@ -125,33 +137,35 @@ fn live_replica_meta(
                 ("frameHash", Value::String(frame_hash)),
             ]),
         ),
-        (
+    ]);
+    if let Some(head) = head {
+        let identity = certified_head_identity(head)?;
+        let head_digest: [u8; 32] =
+            Sha256::digest(crate::transport::msgpack::encode_framed(&identity)?).into();
+        value.insert(
             "certifiedFrameHeadDigest".into(),
             Value::String(hex(&head_digest)),
-        ),
-    ]);
+        );
+    }
     let source = live
         .replica_metadata
         .as_object()
         .ok_or_else(|| ReplicaMetaProjectionError::Envelope("OBJECT_REQUIRED".into()))?;
-    for field in [
-        "leaderVotes",
-        "pendingLeaderCertificate",
-        "jPrefixRound",
-        // Frame A's certified Entity Hanko is the only authority for sealing
-        // Frame B's durable J attempt. Dropping it here makes live submission
-        // impossible even though replay still sees the signed Entity frame.
-        "hankoWitness",
-        "jSubmitState",
-        "entityProviderActionSubmitState",
-        "jHistory",
-        "lockedFrame",
-    ] {
+    // Keep this list byte-for-byte parallel with
+    // buildStorageLiveReplicaMetaCommitment in TypeScript. Validator-private
+    // Hanko witnesses and validator history remain in RAM plus their
+    // checkpoint-owned projection. lockedFrame remains RAM-only. None belongs
+    // to each ordinary Runtime-frame commitment.
+    append_live_replica_meta_fields(&mut value, source);
+    Ok(Value::Object(value))
+}
+
+fn append_live_replica_meta_fields(value: &mut Map<String, Value>, source: &Map<String, Value>) {
+    for field in LIVE_REPLICA_META_FIELDS {
         if let Some(entry) = source.get(field) {
             value.insert(field.into(), entry.clone());
         }
     }
-    Ok(Value::Object(value))
 }
 
 fn certified_head_identity(
@@ -439,6 +453,8 @@ fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
 pub(crate) enum ReplicaMetaProjectionError {
     #[error("RRS_REPLICA_META_CERTIFIED_FRAME_MISSING")]
     CertifiedFrameMissing,
+    #[error("RRS_REPLICA_META_GENESIS_CERTIFIED_FRAME_FORBIDDEN")]
+    GenesisCertifiedHeadForbidden,
     #[error("RRS_REPLICA_META_SIGNER:{0}")]
     Signer(String),
     #[error("RRS_REPLICA_META_DIGEST:{0}")]
@@ -453,4 +469,46 @@ pub(crate) enum ReplicaMetaProjectionError {
     EntityOutput(#[from] EntityOutputEncodingError),
     #[error(transparent)]
     Authority(#[from] xln_rscore_entity_kernel::EntityAuthorityError),
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Map, Value, json};
+
+    use super::{LIVE_REPLICA_META_FIELDS, append_live_replica_meta_fields};
+
+    #[test]
+    fn ordinary_live_projection_matches_typescript_field_set() {
+        assert_eq!(
+            LIVE_REPLICA_META_FIELDS,
+            [
+                "leaderVotes",
+                "pendingLeaderCertificate",
+                "jPrefixRound",
+                "jSubmitState",
+                "entityProviderActionSubmitState",
+            ]
+        );
+        for checkpoint_or_transient in ["hankoWitness", "jHistory", "lockedFrame"] {
+            assert!(!LIVE_REPLICA_META_FIELDS.contains(&checkpoint_or_transient));
+        }
+
+        let source = json!({
+            "leaderVotes": {"kept": 1},
+            "pendingLeaderCertificate": {"kept": 2},
+            "jPrefixRound": {"kept": 3},
+            "jSubmitState": {"kept": 4},
+            "entityProviderActionSubmitState": {"kept": 5},
+            "hankoWitness": {"excluded": 1},
+            "jHistory": {"excluded": 2},
+            "lockedFrame": {"excluded": 3},
+        });
+        let mut projected = Map::new();
+        append_live_replica_meta_fields(&mut projected, source.as_object().expect("source object"));
+        assert_eq!(projected.len(), 5);
+        assert_eq!(projected.get("leaderVotes"), Some(&json!({"kept": 1})));
+        for excluded in ["hankoWitness", "jHistory", "lockedFrame"] {
+            assert_eq!(projected.get(excluded), None::<&Value>);
+        }
+    }
 }

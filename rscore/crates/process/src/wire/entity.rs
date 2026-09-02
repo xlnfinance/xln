@@ -320,10 +320,9 @@ fn decode_hook_kind(
         1 if row.len() == 2 => Ok(ScheduledHookKind::DisputeDeadline {
             account_id: text_at(1, "crontabHookAccountId")?,
         }),
-        2 if row.len() == 4 => Ok(ScheduledHookKind::HtlcSecretAckTimeout {
+        2 if row.len() == 3 => Ok(ScheduledHookKind::HtlcSecretAckTimeout {
             hashlock: text_at(1, "crontabHookHashlock")?,
             counterparty_entity_id: text_at(2, "crontabHookCounterparty")?,
-            inbound_lock_id: text_at(3, "crontabHookInboundLock")?,
         }),
         3 if row.len() == 1 => Ok(ScheduledHookKind::SettlementWindow),
         4 if row.len() == 1 => Ok(ScheduledHookKind::Watchdog),
@@ -852,6 +851,10 @@ fn optional_bigint_value(value: Option<&BigInt>) -> AbiValue {
 
 fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
     let fields = match value {
+        EntityKernelOutput::Debug { payload } => vec![
+            AbiValue::Integer(7),
+            xln_rscore_batch::encode_canonical_value(payload),
+        ],
         EntityKernelOutput::AccountSettledFinalizedBilateral {
             entity_id,
             account_id,

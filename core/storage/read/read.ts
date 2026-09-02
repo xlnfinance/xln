@@ -354,13 +354,23 @@ export const readStorageFramePayloads = async (
       frame.entityContextRefs,
     )
     : new Map();
-  const runtimeMachine = options?.includeRuntimeMachine !== false && frame.runtimeMachineRoot
-    ? await readRuntimeMachineGraph(
-      db,
-      targetHeight,
-      frame.runtimeMachineRoot,
-    )
-    : undefined;
+  let runtimeMachine: Record<string, unknown> | undefined;
+  if (options?.includeRuntimeMachine !== false && frame.runtimeMachineRoot) {
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('STORAGE_RUNTIME_MACHINE_HEAD_MISSING');
+    const currentMaterializedHeight = Math.max(
+      0,
+      Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
+    );
+    if (currentMaterializedHeight === targetHeight) {
+      runtimeMachine = await readRuntimeMachineGraph(db, frame.runtimeMachineRoot);
+    } else if (options?.includeRuntimeMachine === true) {
+      throw new Error(
+        `STORAGE_RUNTIME_MACHINE_NOT_CURRENT:` +
+        `requested=${targetHeight}:current=${currentMaterializedHeight}`,
+      );
+    }
+  }
   const payloads: RuntimeFramePayloads = {
     entityContexts,
     ...(runtimeOutputs.length > 0 ? { runtimeOutputs } : {}),

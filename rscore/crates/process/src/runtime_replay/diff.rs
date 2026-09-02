@@ -203,6 +203,14 @@ fn commitment_value(commitments: &RuntimeDurableCommitments) -> Value {
             Value::from(commitments.entity_effect_count),
         ),
         (
+            "entityFrameEventCount".into(),
+            Value::from(commitments.entity_event_count),
+        ),
+        (
+            "entityFrameEventsDigest".into(),
+            Value::String(hex_digest(&commitments.events_parity_digest)),
+        ),
+        (
             "entityEffectsDigest".into(),
             Value::String(hex_digest(&commitments.entity_effects_parity_digest)),
         ),

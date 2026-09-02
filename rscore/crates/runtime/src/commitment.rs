@@ -1,4 +1,3 @@
-use serde_json::Value as JsonValue;
 use sha2::{Digest as _, Sha256};
 use sha3::Keccak256;
 use thiserror::Error;
@@ -45,8 +44,6 @@ pub enum RuntimeCommitmentError {
     Encoding(#[from] ConsensusMessagePackError),
     #[error("RUNTIME_STORAGE_NUMBER_UNSAFE:field={field}:value={value}")]
     UnsafeNumber { field: &'static str, value: u64 },
-    #[error("RUNTIME_CANONICAL_JSON_NUMBER_INVALID:path={path}:value={value}")]
-    InvalidJsonNumber { path: String, value: String },
     #[error("RUNTIME_CANONICAL_JSON_ENCODE_FAILED:{0}")]
     JsonEncode(#[from] serde_json::Error),
 }
@@ -89,81 +86,16 @@ fn compare_utf16(left: &str, right: &str) -> std::cmp::Ordering {
     left.encode_utf16().cmp(right.encode_utf16())
 }
 
-fn js_array_index(key: &str) -> Option<u32> {
-    if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
-        return None;
-    }
-    let value = key.parse::<u32>().ok()?;
-    (value < u32::MAX && value.to_string() == key).then_some(value)
-}
-
-fn compare_js_object_keys(left: &str, right: &str) -> std::cmp::Ordering {
-    match (js_array_index(left), js_array_index(right)) {
-        (Some(left), Some(right)) => left.cmp(&right),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => compare_utf16(left, right),
-    }
-}
-
-fn append_canonical_json(
-    output: &mut String,
-    value: &JsonValue,
-    path: &str,
-) -> Result<(), RuntimeCommitmentError> {
-    match value {
-        JsonValue::Null => output.push_str("null"),
-        JsonValue::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-        JsonValue::String(value) => output.push_str(&serde_json::to_string(value)?),
-        JsonValue::Number(number) => {
-            let parsed =
-                number
-                    .as_f64()
-                    .ok_or_else(|| RuntimeCommitmentError::InvalidJsonNumber {
-                        path: path.to_string(),
-                        value: number.to_string(),
-                    })?;
-            let mut buffer = ryu_js::Buffer::new();
-            output.push_str(buffer.format(parsed));
-        }
-        JsonValue::Array(values) => {
-            output.push('[');
-            for (index, child) in values.iter().enumerate() {
-                if index > 0 {
-                    output.push(',');
-                }
-                append_canonical_json(output, child, &format!("{path}[{index}]"))?;
-            }
-            output.push(']');
-        }
-        JsonValue::Object(object) => {
-            output.push('{');
-            let mut keys = object.keys().collect::<Vec<_>>();
-            keys.sort_by(|left, right| compare_js_object_keys(left, right));
-            for (index, key) in keys.into_iter().enumerate() {
-                if index > 0 {
-                    output.push(',');
-                }
-                output.push_str(&serde_json::to_string(key)?);
-                output.push(':');
-                append_canonical_json(output, &object[key], &format!("{path}.{key}"))?;
-            }
-            output.push('}');
-        }
-    }
-    Ok(())
-}
-
 /// Exact Rust implementation of `computeCanonicalRuntimeStateHash`.
 ///
-/// `runtime_machine` is the tagged, key-sorted value produced by the canonical
-/// storage projection. Passing the previous root would add no authority, so the
-/// resident Runtime computes this directly from its owned post-state.
+/// The Runtime hash deliberately commits only the bounded Entity roots plus
+/// frame height and timestamp. Durable Runtime-machine components remain
+/// committed every frame by `postStateHash`; the full machine graph is built
+/// only at a materialized checkpoint.
 pub fn compute_canonical_runtime_state_hash(
     height: u64,
     timestamp: u64,
     entity_hashes: &[CanonicalRuntimeEntityHash],
-    runtime_machine: Option<&JsonValue>,
 ) -> Result<String, RuntimeCommitmentError> {
     number("height", height)?;
     number("timestamp", timestamp)?;
@@ -178,7 +110,7 @@ pub fn compute_canonical_runtime_state_hash(
     entities.sort_by(|left, right| compare_utf16(&left.0, &right.0));
 
     let mut preimage =
-        String::from("{\"kind\":\"xln.storage.canonicalRuntimeHash.v1\",\"height\":");
+        String::from("{\"kind\":\"xln.storage.canonicalRuntimeHash.v2\",\"height\":");
     preimage.push_str(&height.to_string());
     preimage.push_str(",\"timestamp\":");
     preimage.push_str(&timestamp.to_string());
@@ -196,10 +128,6 @@ pub fn compute_canonical_runtime_state_hash(
         preimage.push('}');
     }
     preimage.push(']');
-    if let Some(machine) = runtime_machine {
-        preimage.push_str(",\"runtimeMachine\":");
-        append_canonical_json(&mut preimage, machine, "$.runtimeMachine")?;
-    }
     preimage.push('}');
     Ok(hex(&Keccak256::digest(preimage.as_bytes())))
 }
@@ -280,10 +208,6 @@ mod tests {
 
     #[test]
     fn canonical_runtime_state_hash_matches_typescript() {
-        let runtime_machine: JsonValue = serde_json::from_str(
-            r#"{"a":{"__xlnType":"Map","value":[["a",{"__xlnType":"BigInt","value":"1"}],["b",{"__xlnType":"BigInt","value":"2"}]]},"bytes":{"__xlnType":"TypedArray","kind":"Uint8Array","value":"0001ff"},"nested":{"x":"ok","y":true},"z":3}"#,
-        )
-        .expect("canonical runtime fixture");
         let entities = vec![
             CanonicalRuntimeEntityHash {
                 entity_id: "0xBB".into(),
@@ -297,38 +221,17 @@ mod tests {
             },
         ];
         assert_eq!(
-            compute_canonical_runtime_state_hash(
-                55,
-                1_787_579_799_935,
-                &entities,
-                Some(&runtime_machine),
-            )
-            .expect("runtime state hash"),
-            "0x4a2c670c5ffd39fa8dc865ccffee2277d2dffb681f2025e1fec35c2eadfc0ebd",
+            compute_canonical_runtime_state_hash(55, 1_787_579_799_935, &entities)
+                .expect("runtime state hash"),
+            "0x34c1096b3efb7d61333ff42dab7ebaba4a875dd9f840376091185bedb4d9bc69",
         );
     }
 
     #[test]
-    fn canonical_runtime_state_hash_matches_javascript_key_and_number_order() {
-        let runtime_machine: JsonValue = serde_json::from_str(
-            r#"{"2":"two","10":"ten","":"bmp","😀":"astral","small":1e-7,"wide":100000000000000000000,"exp":1e+21}"#,
-        )
-        .expect("javascript ordering fixture");
+    fn canonical_runtime_state_hash_without_entities_matches_typescript() {
         assert_eq!(
-            compute_canonical_runtime_state_hash(1, 2, &[], Some(&runtime_machine))
-                .expect("runtime state hash"),
-            "0x432eec0ee1220efa8d301b00c20d4c13f35baf6aef749fb17f4c9642c539d642",
-        );
-    }
-
-    #[test]
-    fn canonical_runtime_state_hash_normalizes_negative_zero_like_json_stringify() {
-        let runtime_machine: JsonValue =
-            serde_json::from_str(r#"{"negzero":-0.0}"#).expect("negative zero fixture");
-        assert_eq!(
-            compute_canonical_runtime_state_hash(1, 2, &[], Some(&runtime_machine))
-                .expect("runtime state hash"),
-            "0x8a3d0ebab608f949e4c607d5635ad06f588984f652e00a3dbdc29735f41a4431",
+            compute_canonical_runtime_state_hash(1, 2, &[]).expect("runtime state hash"),
+            "0x4965a2bce9f2c9a797102e9728575d6e1fc1dfa669614328455ca43f4a191786",
         );
     }
 

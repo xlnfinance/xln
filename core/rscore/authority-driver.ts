@@ -870,6 +870,10 @@ export const runAuthorityCutoverEntityBatch = async (
     inboundTimestamp: request.entityTimestamp,
     inboundJHeight: request.finalizedJHeight,
     inboundRows: rows,
+    // Entity Stage 2 consumes Account state committed by Stage 1. The full
+    // resident round still defers root sealing, but must return the exact
+    // changed inbound Account rows to the TypeScript oracle/followup path.
+    inboundPostAccounts: true,
     entityHeight: request.entityContext.height,
     outboundTimestamp: request.entityTimestamp,
     outboundJHeight: request.finalizedJHeight,

@@ -304,7 +304,7 @@ const publishNewWalBase = async (
     key: keySnapshotGraph(options.height, row.key),
     value: row.value,
   }));
-  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(options.height, options.runtimeMachine);
+  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(options.runtimeMachine);
   if (!runtimeMachineGraph.root) throw new Error('RECOVERY_IMPORT_RUNTIME_MACHINE_ROOT_MISSING');
   const manifestEntry = {
     key: keySnapshotManifest(options.height),

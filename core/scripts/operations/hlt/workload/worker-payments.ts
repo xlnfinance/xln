@@ -44,6 +44,7 @@ import {
   readLaneRouteReadiness,
   resetLaneHostOpCounters,
   stopLaneRuntimes,
+  waitForLaneQuiescence,
   type LaneRuntime,
 } from '../lanes/lane-runtimes';
 import {
@@ -949,6 +950,11 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
           shard.users.length * args.rounds,
           startedAt,
         )));
+    const laneQuiescence = rustSettlement?.laneQuiescence ?? (
+      paymentEvidence === 'tps-authority'
+        ? await waitForLaneQuiescence(users, requireHub().adapter.runtimeId, 5_000)
+        : null
+    );
     const hubCountersAfter = {
       completedPayments: settlements.reduce((sum, row) => sum + row.counters.completedPayments, 0),
       acceptedPayments: settlements.reduce((sum, row) => sum + row.counters.acceptedPayments, 0),
@@ -997,7 +1003,11 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       ? { ...tsHubIo, H1: { native: rustSettlement.metrics } }
       : tsHubIo;
     console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo, phaseTimeline })}`);
-    const environment = collectHltEnvironmentManifest();
+    const environment = collectHltEnvironmentManifest({
+      engine: selection.engine,
+      ...(rustH1 ? { rustAccountWorkers: rustH1.ready.workers } : {}),
+      requireAccountWorkers: paymentEvidence === 'tps-authority',
+    });
     const walBytesAfter = rustSettlement
       ? rustSettlement.metrics.retainedWalBytes
       : shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
@@ -1026,6 +1036,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       sourceAllAckedElapsedMs: hostAcceptedElapsedMs,
       commandObservedElapsedMs: hostAcceptedElapsedMs,
       deliveredElapsedMs,
+      drainCompleteElapsedMs,
       deliveredTps: deliveredPayments * 1_000 / deliveredElapsedMs,
       hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
       hubCompletedPaymentsAfter: hubCountersAfter.completedPayments,
@@ -1034,6 +1045,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       hubIngressElapsedMs,
       settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs,
+      laneQuiescence,
       walBytesBefore,
       walBytesAfter,
       hubDurableBefore,
@@ -1082,6 +1094,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         laneQuiescence: rustSettlement.laneQuiescence,
         paymentOperationLedger,
         phaseTimeline,
+        environment,
         ...rateEvidence,
       }, 2)}\n`);
       if (process.env['XLN_RSCORE_PROFILE_ENTITY'] === '1') {

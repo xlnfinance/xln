@@ -21,9 +21,9 @@ use crate::paybook::{
 };
 use crate::types::{AccountProposalWork, TargetedAccountTx};
 use crate::{
-    CanonicalEntityTx, DeterministicContext, EntityKernelError, EntityKernelOutput,
-    EntityKernelResult, EntityStateSlice, EntityTxKind, JurisdictionScope, OrderedAccountCommit,
-    SchedulerCommand,
+    CanonicalEntityTx, DeterministicContext, EntityFrameEvent, EntityKernelError,
+    EntityKernelOutput, EntityKernelResult, EntityStateSlice, EntityTxKind, JurisdictionScope,
+    OrderedAccountCommit, SchedulerCommand,
 };
 use crate::{
     LocalEntityOutput, LocalEntityOutputTx, LocalEntityTx, apply_cross_jurisdiction_entity_txs,
@@ -382,6 +382,7 @@ fn apply_commit_transitions(
     account_txs: &mut Vec<TargetedAccountTx>,
     outputs: &mut Vec<EntityKernelOutput>,
     routed_entity_outputs: &mut Vec<LocalEntityOutput>,
+    entity_events: &mut Vec<EntityFrameEvent>,
     created_accounts: &BTreeSet<String>,
     timed_out: Vec<AccountOutput>,
     revealed: Vec<AccountOutput>,
@@ -443,6 +444,7 @@ fn apply_commit_transitions(
                 account_txs.extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
             }
             routed_entity_outputs.extend(applied.outputs);
+            entity_events.extend(applied.events);
             continue;
         }
         let mut effects = PaybookEffects {
@@ -469,16 +471,33 @@ fn apply_commit_transitions(
                 )?;
             }
             AccountTx::HtlcResolve(_) => unreachable!("resolve transitions were pre-applied"),
-            AccountTx::SwapOffer { offer_id, .. } => {
-                if let Some(delta) = swap_offer_delta(
-                    state,
-                    &commit.account_id,
-                    offer_id,
-                    std::mem::take(&mut transition.outputs),
-                )? {
-                    deltas.push(delta);
+            AccountTx::SwapOffer {
+                offer_id,
+                cross_jurisdiction,
+                ..
+            } => match cross_jurisdiction {
+                Some(_) => {
+                    // The cross-j route/book was committed by the owning
+                    // Entity transition. Account emits no same-j orderbook
+                    // projection for this offer.
+                    if !transition.outputs.is_empty() {
+                        return Err(EntityKernelError::output(format!(
+                            "CROSS_J_SWAP_OFFER_OUTPUTS:{}",
+                            transition.outputs.len()
+                        )));
+                    }
                 }
-            }
+                None => {
+                    if let Some(delta) = swap_offer_delta(
+                        state,
+                        &commit.account_id,
+                        offer_id,
+                        std::mem::take(&mut transition.outputs),
+                    )? {
+                        deltas.push(delta);
+                    }
+                }
+            },
             AccountTx::SwapResolve { offer_id, .. } => {
                 if let Some(delta) = swap_resolve_delta(
                     state,
@@ -643,10 +662,8 @@ fn append_scheduled_account_txs(
                 }));
             }
             SchedulerCommand::AutoFinalizeDispute { .. }
-            | SchedulerCommand::BroadcastQueuedDisputeFinalization => {}
-            SchedulerCommand::HubRebalance => {
-                return Err(EntityKernelError::HubRebalanceHandlerMissing);
-            }
+            | SchedulerCommand::BroadcastQueuedDisputeFinalization
+            | SchedulerCommand::HubRebalance => {}
         }
     }
     Ok(())
@@ -708,6 +725,7 @@ fn append_scheduled_entity_outputs(
     if !entity_txs.is_empty() {
         outputs.push(LocalEntityOutput {
             entity_id: state.entity_id.clone(),
+            target_signer_id: None,
             entity_txs,
         });
     }
@@ -799,6 +817,7 @@ pub(crate) fn apply_entity_transitions(
     let mut account_txs = Vec::new();
     let mut outputs = Vec::new();
     let mut routed_entity_outputs = Vec::new();
+    let mut committed_events = Vec::new();
     let mut consumed_htlcs = BTreeSet::new();
     let mut preapply_elapsed = Duration::ZERO;
     let mut apply_elapsed = Duration::ZERO;
@@ -828,6 +847,7 @@ pub(crate) fn apply_entity_transitions(
             &mut account_txs,
             &mut outputs,
             &mut routed_entity_outputs,
+            &mut committed_events,
             created_accounts,
             timed_out,
             revealed,
@@ -840,7 +860,7 @@ pub(crate) fn apply_entity_transitions(
     let local_started = Instant::now();
     let mut local_account_txs = Vec::new();
     let mut local_outputs = Vec::new();
-    let mut local_events = Vec::new();
+    let mut local_events = committed_events;
     let mut local_wake_targets = Vec::new();
     let mut j_outputs = Vec::new();
     let mut local_hashes_to_sign = Vec::new();
@@ -910,6 +930,7 @@ pub(crate) fn apply_entity_transitions(
                 }
                 account_envelope_mutations.extend(applied.account_envelope_mutations);
                 routed_entity_outputs.extend(applied.outputs);
+                local_events.extend(applied.events);
             }
             LocalEntityTx::RuntimeOutput(output) => {
                 // Authorization observes the pre-output state, exactly like TS
@@ -1020,6 +1041,11 @@ pub(crate) fn prepare_orderbook_stage(
             &result.orderbook_deltas,
             context,
             &result.state.entity_id,
+            result
+                .state
+                .orderbook_metadata
+                .as_ref()
+                .map(|metadata| &metadata.hub_profile),
         )?)
     } else {
         None

@@ -11,7 +11,7 @@ export type InstallChannel = Readonly<{
   command?: string;
 }>;
 
-export const LOCAL_RUNTIME_COMMAND = 'bunx --bun xlnd';
+export const LOCAL_RUNTIME_COMMAND = 'bunx --bun xlnfinance';
 
 export const INSTALL_CHANNELS: readonly InstallChannel[] = [
   {
@@ -22,7 +22,7 @@ export const INSTALL_CHANNELS: readonly InstallChannel[] = [
     platforms: ['macOS', 'Windows', 'Linux'],
     benefit: 'Runtime survives the browser and grants the local wallet full admin control.',
     tradeoff: 'Requires Bun and a terminal.',
-    href: 'https://www.npmjs.com/package/xlnd',
+    href: 'https://www.npmjs.com/package/xlnfinance',
     action: 'Package details',
     command: LOCAL_RUNTIME_COMMAND,
   },

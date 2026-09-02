@@ -98,7 +98,10 @@ const deltaWire = (value: Delta): unknown[] => [
   value.rightHold.toString(),
 ];
 
-const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; frameHash: string } => {
+const restoreFixture = (
+  liveJNonce = 4,
+  frameJNonce = liveJNonce,
+): { row: unknown[]; stateRoot: string; leaf: string; frameHash: string } => {
   const deltas = PersistentAccountStateMap.fromEntries('deltas', [[delta.tokenId, delta]]);
   const locks = PersistentAccountStateMap.fromEntries('locks', [[lock.lockId, lock]]);
   const lendingIntents = PersistentAccountStateMap.fromEntries('lendingIntents', [['intent-1', 'fund' as const]]);
@@ -121,19 +124,20 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
     rightPendingJClaims: claim,
     lastFinalizedJHeight: 5,
     disputeConfig: { leftResponseSeconds: 60, rightResponseSeconds: 120 },
-    jNonce: 4,
+    jNonce: liveJNonce,
     requestedRebalance: empty('requestedRebalance'),
     requestedRebalanceFeeState: empty('requestedRebalanceFeeState'),
     rebalanceFeePolicies,
   };
   const stateRoot = computeAccountStateRoot(state);
+  const frameStateRoot = computeAccountStateRoot({ ...state, jNonce: frameJNonce });
   const frame: AccountFrame = {
     height: 3,
     timestamp: 100,
     jHeight: 5,
     accountTxs: [],
     prevFrameHash: `0x${'aa'.repeat(32)}`,
-    accountStateRoot: stateRoot,
+    accountStateRoot: frameStateRoot,
     stateHash: '',
   };
   frame.stateHash = computeFrameHash(frame);
@@ -164,7 +168,7 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
     'h1-hub',
     [1, bytes(DEPOSITORY), bytes(LEFT), bytes(RIGHT), bytes(WATCH_SEED)],
     [60, 120],
-    4,
+    liveJNonce,
     5,
     [
       emptyRoot,
@@ -223,6 +227,8 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
     [[1, [[1, '2', '50', '3', 88], null]]],
     [],
     [],
+    [],
+    [],
     [
       [],
       [frameWire, bytes(frame.stateHash)],
@@ -266,18 +272,26 @@ describe('rscore checkpoint wire', () => {
     expect(decoded.stateSeed.lendingIntents.get('intent-1')).toBe('fund');
     expect(decoded.stateSeed.swapOffers.get(offer.offerId)).toEqual(offer);
     expect(decoded.stateSeed.rebalanceFeePolicies.get(1)).toEqual(policy);
-    expect(decoded.rootOnlyCarriedSections).toEqual([
-      'subcontracts',
-      'requestedRebalance',
-      'requestedRebalanceFeeState',
-    ]);
+    expect(decoded.rootOnlyCarriedSections).toEqual(['subcontracts']);
+  });
+
+  test('binds post-finality live state to the Entity leaf while retaining its historical frame', () => {
+    const fixture = restoreFixture(8, 4);
+    const decoded = decodeRscoreAccountRestoreRow(fixture.row);
+
+    expect(decoded.accountStateRoot).toBe(fixture.stateRoot);
+    expect(decoded.consensus.currentFrame?.accountStateRoot).not.toBe(fixture.stateRoot);
+    expect(decoded.entityAccountLeaf).toBe(fixture.leaf);
+
+    fixture.row[1] = Buffer.alloc(32, 0xdd);
+    expect(() => decodeRscoreAccountRestoreRow(fixture.row)).toThrow('ACCOUNT_LEAF_MISMATCH');
   });
 
   test('keeps exact ACK Hanko bytes outside the compact Entity leaf binding', () => {
     const first = restoreFixture();
     const firstDecoded = decodeRscoreAccountRestoreRow(first.row);
     const second = restoreFixture();
-    const consensus = second.row[10] as unknown[];
+    const consensus = second.row[12] as unknown[];
     const ack = consensus[7] as unknown[];
     ack[2] = Buffer.from([0x09, 0x08, 0x07, 0x06]);
     const secondDecoded = decodeRscoreAccountRestoreRow(second.row);
@@ -287,7 +301,7 @@ describe('rscore checkpoint wire', () => {
     expect(secondDecoded.consensus.lastOutboundAck?.frameHanko).toBe('0x09080706');
 
     const oldShape = restoreFixture().row;
-    const oldConsensus = oldShape[10] as unknown[];
+    const oldConsensus = oldShape[12] as unknown[];
     const oldAck = oldConsensus[7] as unknown[];
     oldConsensus[7] = [oldAck[0], oldAck[1], oldAck[3]];
     expect(() => decodeRscoreAccountRestoreRow(oldShape)).toThrow(
@@ -319,7 +333,7 @@ describe('rscore checkpoint wire', () => {
 
   test('rejects corrupt frame, state-root and Entity-leaf commitments', () => {
     const badFrame = restoreFixture().row;
-    ((badFrame[10] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);
+    ((badFrame[12] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);
     expect(() => decodeRscoreAccountRestoreRow(badFrame)).toThrow('CURRENT_FRAME_HASH_MISMATCH');
 
     const badRoot = restoreFixture().row;

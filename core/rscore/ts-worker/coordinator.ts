@@ -487,7 +487,7 @@ export class TsAccountWorkerCoordinator {
           },
         };
       });
-    const result = await this.#runPhase(dispatches, false, input.inputs.length, false);
+    const result = await this.#runPhase(dispatches, true, input.inputs.length, false);
     for (const [workerIndex, inputs] of buckets.entries()) {
       if (inputs.length === 0) continue;
       this.#openFrameWorkerIndexes.add(workerIndex);

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rusty_leveldb::WriteBatch;
@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use xln_rscore_protocol::{CanonicalValue, PersistentRadixMap};
 
+use super::keys::runtime_machine_leaf_key;
 use super::*;
 
 static TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -22,6 +23,21 @@ fn cleanup(path: &std::path::Path) {
     if path.exists() {
         std::fs::remove_dir_all(path).expect("remove isolated test database");
     }
+}
+
+#[test]
+fn retired_schema_four_head_is_rejected_without_compatibility() {
+    let bytes = super::codec::encode_head(&super::types::StorageHead {
+        schema_version: 4,
+        ..super::types::StorageHead::default()
+    })
+    .expect("encode retired head fixture");
+    assert_eq!(
+        super::codec::decode_head(&bytes)
+            .expect_err("schema four must be rejected")
+            .to_string(),
+        "RRS_STORAGE_HEAD:schemaVersion",
+    );
 }
 
 fn output(value: &str) -> Vec<u8> {
@@ -96,13 +112,42 @@ fn frame(
 fn runtime_machine_fixture() -> (Value, Vec<RuntimeMachineLeafRow>) {
     let path = json!([]);
     let value = json!({"kind":"container","container":"object"});
-    (
-        json!({}),
-        vec![RuntimeMachineLeafRow {
-            path_bytes: crate::transport::msgpack::encode_framed(&path).expect("machine path"),
-            value_bytes: crate::transport::msgpack::encode_framed(&value).expect("machine value"),
-        }],
+    (json!({}), vec![runtime_machine_leaf(path, value)])
+}
+
+fn runtime_machine_leaf(path: Value, value: Value) -> RuntimeMachineLeafRow {
+    RuntimeMachineLeafRow {
+        path_bytes: crate::transport::msgpack::encode_framed(&path).expect("machine path"),
+        value_bytes: crate::transport::msgpack::encode_framed(&value).expect("machine value"),
+    }
+}
+
+fn canonical_only_frame(height: u64, state_root: [u8; 32]) -> RuntimeFrameCommit {
+    build_runtime_frame_commit(
+        CanonicalRuntimeFrameDraft {
+            height,
+            timestamp: height,
+            prev_frame_hash: [0; 32],
+            replica_meta_digest: [0x11; 32],
+            runtime_component_digests: vec![],
+            materialized_state: false,
+            canonical_state: Some(CanonicalStateCommitment {
+                state_hash: state_root,
+                entity_hashes: Vec::new(),
+            }),
+            runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+            runtime_machine_root: None,
+            account_authority_checkpoints: vec![],
+            touched_entities: vec![],
+            touched_accounts: vec![],
+            touched_book_entities: vec![],
+        },
+        EntityContextPayloadRows::empty(),
+        vec![],
+        None,
     )
+    .expect("canonical-only frame")
+    .commit
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -252,6 +297,139 @@ fn native_frame_atomically_recovers_the_exact_verified_context_bundle() {
     let recovered = reopened.recover().expect("recover");
     assert_eq!(recovered.wal_frames.len(), 1);
     assert_eq!(recovered.wal_frames[0].entity_contexts, contexts);
+    drop(reopened);
+    cleanup(&path);
+}
+
+#[test]
+fn stable_runtime_machine_paths_overwrite_and_prune_only_obsolete_rows() {
+    let path = temporary_path("runtime-machine-current");
+    cleanup(&path);
+    let root = runtime_machine_leaf(json!([]), json!({"kind":"container","container":"object"}));
+    let shared_old = runtime_machine_leaf(
+        json!([{"kind":"property","name":"shared"}]),
+        json!({"kind":"atom","value":1}),
+    );
+    let old_only = runtime_machine_leaf(
+        json!([{"kind":"property","name":"old"}]),
+        json!({"kind":"atom","value":"old"}),
+    );
+    let shared_new = runtime_machine_leaf(
+        json!([{"kind":"property","name":"shared"}]),
+        json!({"kind":"atom","value":2}),
+    );
+    let new_only = runtime_machine_leaf(
+        json!([{"kind":"property","name":"new"}]),
+        json!({"kind":"atom","value":"new"}),
+    );
+    let first_leaves = vec![root.clone(), shared_old.clone(), old_only.clone()];
+    let latest_leaves = vec![root, shared_new.clone(), new_only.clone()];
+    let materialized = |state_root, runtime_machine_leaves| CheckpointGraph {
+        state_root,
+        full: false,
+        node_changes: Vec::new(),
+        runtime_machine_leaves,
+    };
+    let shared_key = runtime_machine_leaf_key(&shared_old.path_bytes).expect("shared key");
+    let old_only_key = runtime_machine_leaf_key(&old_only.path_bytes).expect("old-only key");
+    let new_only_key = runtime_machine_leaf_key(&new_only.path_bytes).expect("new-only key");
+    let adjacent_key = [vec![0x17], vec![0x77; 32]].concat();
+    let adjacent_value = output("adjacent-path-namespace");
+    let canonical = canonical_only_frame(2, [0x22; 32]);
+    let canonical_bytes = canonical.frame_bytes.clone();
+    {
+        let mut store = NativeRuntimeStore::open(
+            &path,
+            NativeStorageConfig {
+                checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
+            },
+        )
+        .expect("open");
+        store
+            .append_frame(frame(
+                1,
+                vec![],
+                Some(materialized([0x11; 32], first_leaves)),
+            ))
+            .expect("first materialized checkpoint");
+        assert_eq!(
+            store.database.get(&shared_key).map(|value| value.to_vec()),
+            Some(shared_old.value_bytes.clone()),
+        );
+        assert!(store.database.get(&old_only_key).is_some());
+        store
+            .database
+            .put(&adjacent_key, &adjacent_value)
+            .expect("adjacent namespace row");
+
+        store.append_frame(canonical).expect("canonical-only frame");
+        assert_eq!(
+            store
+                .read_durable_frame(2)
+                .expect("canonical durable frame")
+                .frame_bytes,
+            canonical_bytes,
+        );
+        assert!(store.database.get(&shared_key).is_some());
+        assert!(store.database.get(&old_only_key).is_some());
+    }
+
+    {
+        let mut store = NativeRuntimeStore::open(
+            &path,
+            NativeStorageConfig {
+                checkpoint_period_frames: 100,
+                ..NativeStorageConfig::default()
+            },
+        )
+        .expect("reopen before replacement");
+        store
+            .append_frame(frame(
+                3,
+                vec![],
+                Some(materialized([0x33; 32], latest_leaves.clone())),
+            ))
+            .expect("latest materialized checkpoint");
+        assert_eq!(
+            store.database.get(&shared_key).map(|value| value.to_vec()),
+            Some(shared_new.value_bytes.clone()),
+        );
+        assert!(store.database.get(&old_only_key).is_none());
+        assert!(store.database.get(&new_only_key).is_some());
+        assert_eq!(
+            store
+                .database
+                .get(&adjacent_key)
+                .map(|value| value.to_vec()),
+            Some(adjacent_value.clone()),
+        );
+    }
+
+    let mut reopened = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
+        },
+    )
+    .expect("reopen");
+    let recovered = reopened.recover().expect("recover");
+    let checkpoint = recovered.checkpoint.expect("latest checkpoint");
+    assert_eq!(checkpoint.height, 3);
+    assert_eq!(checkpoint.state_root, [0x33; 32]);
+    assert_eq!(
+        checkpoint
+            .runtime_machine_leaves
+            .into_iter()
+            .map(|leaf| (leaf.path_bytes, leaf.value_bytes))
+            .collect::<BTreeMap<_, _>>(),
+        latest_leaves
+            .into_iter()
+            .map(|leaf| (leaf.path_bytes, leaf.value_bytes))
+            .collect::<BTreeMap<_, _>>(),
+    );
+    assert!(recovered.wal_frames.is_empty());
     drop(reopened);
     cleanup(&path);
 }
@@ -438,6 +616,143 @@ fn materialized_frame_has_one_state_hash_and_rejects_the_retired_duplicate() {
         validate_runtime_frame(&retired),
         Err(RuntimeFrameCodecError::Fields)
     ));
+}
+
+#[test]
+fn canonical_only_frame_has_no_checkpoint_graph_or_runtime_machine_root() {
+    let commit = canonical_only_frame(2, [0x44; 32]);
+    assert!(commit.checkpoint.is_none());
+    let decoded = crate::decode_storage_payload(&commit.frame_bytes).expect("decode frame");
+    let fields = decoded.as_object().expect("frame object");
+    assert_eq!(fields.get("materializedState"), Some(&Value::Bool(false)));
+    assert!(fields.contains_key("canonicalStateHash"));
+    assert!(!fields.contains_key("runtimeMachineRoot"));
+    let validated = validate_runtime_frame(&commit.frame_bytes).expect("canonical-only frame");
+    assert_eq!(validated.canonical_state_hash, Some([0x44; 32]));
+    assert_eq!(validated.runtime_machine_root, None);
+
+    let mut invalid = decoded;
+    invalid.as_object_mut().expect("frame object").insert(
+        "runtimeMachineRoot".into(),
+        json!({"rootHash": format!("0x{}", "55".repeat(32)), "leafCount": 1}),
+    );
+    let invalid = crate::transport::msgpack::encode_framed_runtime_frame(&invalid)
+        .expect("encode invalid graph root");
+    assert!(matches!(
+        validate_runtime_frame(&invalid),
+        Err(RuntimeFrameCodecError::MachineRootMaterializedOnly),
+    ));
+}
+
+#[test]
+fn encoder_rejects_checkpoint_graph_fields_on_nonmaterialized_frames() {
+    let draft = CanonicalRuntimeFrameDraft {
+        height: 2,
+        timestamp: 2,
+        prev_frame_hash: [0; 32],
+        replica_meta_digest: [0x11; 32],
+        runtime_component_digests: vec![],
+        materialized_state: false,
+        canonical_state: Some(CanonicalStateCommitment {
+            state_hash: [0x44; 32],
+            entity_hashes: Vec::new(),
+        }),
+        runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+        runtime_machine_root: Some(RuntimeMachineGraphRoot {
+            root_hash: [0x55; 32],
+            leaf_count: 1,
+        }),
+        account_authority_checkpoints: vec![],
+        touched_entities: vec![],
+        touched_accounts: vec![],
+        touched_book_entities: vec![],
+    };
+    assert!(matches!(
+        build_runtime_frame_commit(
+            draft.clone(),
+            EntityContextPayloadRows::empty(),
+            vec![],
+            None,
+        ),
+        Err(RuntimeFrameCodecError::MachineRootMaterializedOnly),
+    ));
+
+    let graphless = CanonicalRuntimeFrameDraft {
+        runtime_machine_root: None,
+        ..draft.clone()
+    };
+    assert!(matches!(
+        build_runtime_frame_commit(
+            graphless,
+            EntityContextPayloadRows::empty(),
+            vec![],
+            Some(CheckpointGraph {
+                state_root: [0x44; 32],
+                full: false,
+                node_changes: Vec::new(),
+                runtime_machine_leaves: runtime_machine_fixture().1,
+            }),
+        ),
+        Err(RuntimeFrameCodecError::CheckpointGraphMaterializedOnly),
+    ));
+
+    let materialized_without_graph = CanonicalRuntimeFrameDraft {
+        materialized_state: true,
+        runtime_machine_root: Some(RuntimeMachineGraphRoot {
+            root_hash: [0x55; 32],
+            leaf_count: 1,
+        }),
+        ..draft
+    };
+    assert!(matches!(
+        build_runtime_frame_commit(
+            materialized_without_graph,
+            EntityContextPayloadRows::empty(),
+            vec![],
+            None,
+        ),
+        Err(RuntimeFrameCodecError::CheckpointGraphRequired),
+    ));
+}
+
+#[test]
+fn native_store_rejects_a_checkpoint_graph_on_a_canonical_only_frame() {
+    let path = temporary_path("canonical-only-graph");
+    cleanup(&path);
+    let mut store = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            checkpoint_period_frames: 100,
+            ..NativeStorageConfig::default()
+        },
+    )
+    .expect("open");
+    store
+        .append_frame(frame(
+            1,
+            vec![],
+            Some(CheckpointGraph {
+                state_root: [0x11; 32],
+                full: false,
+                node_changes: Vec::new(),
+                runtime_machine_leaves: runtime_machine_fixture().1,
+            }),
+        ))
+        .expect("materialized genesis");
+    let mut invalid = canonical_only_frame(2, [0x22; 32]);
+    invalid.checkpoint = Some(CheckpointGraph {
+        state_root: [0x22; 32],
+        full: false,
+        node_changes: Vec::new(),
+        runtime_machine_leaves: runtime_machine_fixture().1,
+    });
+    assert!(matches!(
+        store.append_frame(invalid),
+        Err(NativeStorageError::Checkpoint("non-materialized-graph")),
+    ));
+    assert_eq!(store.latest_height(), 1);
+    drop(store);
+    cleanup(&path);
 }
 
 #[test]

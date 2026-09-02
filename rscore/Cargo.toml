@@ -22,6 +22,13 @@ sha2 = { version = "0.10.9", features = ["asm"] }
 sha3 = { version = "0.10.8", features = ["asm"] }
 thiserror = "2.0.16"
 
+[patch.crates-io]
+# rusty-leveldb 4.0.1 samples iterator reads with a signed random period. A
+# negative draw turns its refill loop into an unbounded symmetric random walk,
+# making identical WAL restores randomly stall for seconds or minutes. Pin the
+# upstream one-line fix until crates.io publishes it.
+rusty-leveldb = { git = "https://github.com/dermesser/leveldb-rs.git", rev = "003fd12a3392f20ac6495dab36d8cee4ec4ff193" }
+
 [profile.release]
 codegen-units = 1
 # Whole-workspace thin LTO made the smallest H1 source edit spend more than

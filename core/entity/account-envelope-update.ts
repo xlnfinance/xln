@@ -10,8 +10,8 @@ import type { EntityRuntimeContext } from './runtime-context';
  *
  * Sequential TS mutates the live candidate directly. A resident Account
  * authority receives the same typed transition and applies it on the owning
- * shard before AccountTx admission and proposal. No state copy or root fallback
- * is permitted between these two execution modes.
+ * shard before AccountTx admission and proposal. Both modes use the same state
+ * and root transition; an alternate recovery path is not permitted.
  */
 export const applyEntityAccountEnvelopeUpdate = (
   env: EntityRuntimeContext,

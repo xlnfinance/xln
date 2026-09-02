@@ -73,12 +73,14 @@ pub enum SchedulerCommand {
 pub struct SchedulerExecution {
     pub crontab: CrontabState,
     pub commands: Vec<SchedulerCommand>,
+    /// Entity-owned Account envelope mutations produced by scheduled hooks.
+    /// They are applied by the same Account stage as ordinary Entity inputs.
+    pub account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
 }
 
 pub struct CrontabExecutionContext<'a> {
     pub expected_proposer_signer_id: &'a str,
     pub now: u64,
-    pub hub_rebalance_has_pending_work: bool,
     pub active_htlc_locks: &'a BTreeSet<(String, String)>,
     pub secret_acks_requiring_dispute: &'a BTreeSet<String>,
     pub dispute_views: &'a BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
@@ -278,6 +280,47 @@ fn object_u64(value: &CanonicalValue, field: &str) -> Option<u64> {
     })
 }
 
+fn replace_object_bool(
+    value: &CanonicalValue,
+    field: &'static str,
+    next: bool,
+) -> Result<CanonicalValue, SchedulerError> {
+    let CanonicalValue::Object(fields) = value else {
+        return Err(SchedulerError::InvalidWake {
+            detail: format!("ACTIVE_DISPUTE_{field}"),
+        });
+    };
+    let mut fields = fields.clone();
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == field) {
+        *value = CanonicalValue::Bool(next);
+    } else {
+        fields.push((field.to_string(), CanonicalValue::Bool(next)));
+    }
+    Ok(CanonicalValue::Object(fields))
+}
+
+fn dispute_finalize_queued_mutation(
+    account_id: &str,
+    view: &xln_rscore_batch::ResidentAccountDisputeView,
+    active_dispute: &CanonicalValue,
+    finalize_queued: bool,
+) -> Result<(String, crate::AccountEnvelopeMutation), SchedulerError> {
+    Ok((
+        account_id.to_string(),
+        crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+            status: view.status.clone(),
+            // TypeScript's replaceDisputeLifecycle omits disputePrepare here,
+            // which canonically deletes it rather than preserving stale setup.
+            dispute_prepare: None,
+            active_dispute: Some(replace_object_bool(
+                active_dispute,
+                "finalizeQueued",
+                finalize_queued,
+            )?),
+        },
+    ))
+}
+
 fn batch_has_dispute_finalization(batch: &JBatch, counterparty: &str) -> bool {
     let Ok(bytes) = hex::decode(counterparty.strip_prefix("0x").unwrap_or(counterparty)) else {
         return false;
@@ -304,7 +347,6 @@ pub fn execute_crontab(
     let CrontabExecutionContext {
         expected_proposer_signer_id,
         now,
-        hub_rebalance_has_pending_work,
         active_htlc_locks,
         secret_acks_requiring_dispute,
         dispute_views,
@@ -327,9 +369,10 @@ pub fn execute_crontab(
     }
 
     let mut expired_locks = Vec::new();
-    let mut force_hub_rebalance = false;
     let mut dispute_finalize_planned = false;
+    let mut dispute_broadcast_planned = false;
     let mut commands = Vec::new();
+    let mut account_envelope_mutations = Vec::new();
     for hook in &due_hooks {
         match &hook.kind {
             ScheduledHookKind::HtlcTimeout {
@@ -354,15 +397,14 @@ pub fn execute_crontab(
                     },
                 )?;
                 task.last_run = 0;
-                force_hub_rebalance = true;
             }
             // TypeScript intentionally treats these two legacy hooks as no-op.
             ScheduledHookKind::SettlementWindow | ScheduledHookKind::Watchdog => {}
             ScheduledHookKind::DisputeDeadline { account_id } => {
-                let Some(active) = dispute_views
-                    .get(account_id)
-                    .and_then(|view| view.active_dispute.as_ref())
-                else {
+                let Some(view) = dispute_views.get(account_id) else {
+                    continue;
+                };
+                let Some(active) = view.active_dispute.as_ref() else {
                     continue;
                 };
                 if !dispute_auto_finalize {
@@ -393,7 +435,14 @@ pub fn execute_crontab(
                     continue;
                 }
                 let sent = j_batch_state.and_then(|state| state.sent_batch.as_ref());
-                if sent.is_some() {
+                if let Some(sent) = sent {
+                    let sent_has_finalize = batch_has_dispute_finalization(&sent.batch, account_id);
+                    account_envelope_mutations.push(dispute_finalize_queued_mutation(
+                        account_id,
+                        view,
+                        active,
+                        sent_has_finalize || object_bool(active, "finalizeQueued") == Some(true),
+                    )?);
                     schedule_hook(
                         &mut next,
                         ScheduledHook {
@@ -419,28 +468,43 @@ pub fn execute_crontab(
                             .any(|batch| batch_has_dispute_finalization(batch, account_id))
                 });
                 if queued {
-                    commands.push(SchedulerCommand::BroadcastQueuedDisputeFinalization);
-                } else if dispute_finalize_planned {
-                    schedule_hook(
-                        &mut next,
-                        ScheduledHook {
-                            id: hook.id.clone(),
-                            trigger_at: now.checked_add(1).ok_or(
-                                SchedulerError::TimestampOverflow {
-                                    method: "disputeDeadline",
-                                },
-                            )?,
-                            kind: hook.kind.clone(),
-                        },
-                    )
-                    .map_err(|error| SchedulerError::HookCommitment {
-                        detail: error.to_string(),
-                    })?;
+                    account_envelope_mutations.push(dispute_finalize_queued_mutation(
+                        account_id, view, active, true,
+                    )?);
+                    if !dispute_broadcast_planned {
+                        dispute_broadcast_planned = true;
+                        commands.push(SchedulerCommand::BroadcastQueuedDisputeFinalization);
+                    }
                 } else {
-                    dispute_finalize_planned = true;
-                    commands.push(SchedulerCommand::AutoFinalizeDispute {
-                        counterparty_entity_id: account_id.clone(),
-                    });
+                    if object_bool(active, "finalizeQueued") == Some(true) {
+                        account_envelope_mutations.push(dispute_finalize_queued_mutation(
+                            account_id, view, active, false,
+                        )?);
+                    }
+                    if dispute_finalize_planned {
+                        schedule_hook(
+                            &mut next,
+                            ScheduledHook {
+                                id: hook.id.clone(),
+                                trigger_at: now.checked_add(1).ok_or(
+                                    SchedulerError::TimestampOverflow {
+                                        method: "disputeDeadline",
+                                    },
+                                )?,
+                                kind: hook.kind.clone(),
+                            },
+                        )
+                        .map_err(|error| {
+                            SchedulerError::HookCommitment {
+                                detail: error.to_string(),
+                            }
+                        })?;
+                    } else {
+                        dispute_finalize_planned = true;
+                        commands.push(SchedulerCommand::AutoFinalizeDispute {
+                            counterparty_entity_id: account_id.clone(),
+                        });
+                    }
                 }
             }
             ScheduledHookKind::CrossJOrderbookSweep { .. } => {
@@ -465,7 +529,10 @@ pub fn execute_crontab(
     // Periodic tasks execute after hooks, so a due kick above is visible in
     // this same pass. Updating last_run after the handler matches TypeScript.
     for task in next.tasks.values_mut() {
-        if !task.enabled || (!hub_rebalance_has_pending_work && !force_hub_rebalance) {
+        // Pending-work membership only decides whether Runtime synthesizes a
+        // wake. Once a signed due wake is accepted, TS executes the task and
+        // advances `lastRun` even if Stage 1 consumed the last Account item.
+        if !task.enabled {
             continue;
         }
         match task.method {
@@ -480,6 +547,7 @@ pub fn execute_crontab(
     Ok(SchedulerExecution {
         crontab: next,
         commands,
+        account_envelope_mutations,
     })
 }
 
@@ -561,6 +629,44 @@ mod tests {
         }
     }
 
+    fn dispute_view_with_finalize_queued(
+        finalize_queued: bool,
+    ) -> xln_rscore_batch::ResidentAccountDisputeView {
+        let mut view = dispute_view(true, 9);
+        let Some(CanonicalValue::Object(fields)) = view.active_dispute.as_mut() else {
+            panic!("active dispute fixture");
+        };
+        fields.push((
+            "finalizeQueued".into(),
+            CanonicalValue::Bool(finalize_queued),
+        ));
+        view
+    }
+
+    fn final_dispute(counterentity: [u8; 32]) -> crate::j_batch::FinalDisputeProof {
+        crate::j_batch::FinalDisputeProof {
+            counterentity,
+            initial_nonce: ethabi::ethereum_types::U256::zero(),
+            final_nonce: ethabi::ethereum_types::U256::from(1),
+            proposer_is_left: true,
+            initial_proofbody_hash: [0x44; 32],
+            final_proofbody: crate::j_batch::ProofBody {
+                watch_seed: [0x55; 32],
+                left_response_seconds: 1,
+                right_response_seconds: 1,
+                offdeltas: Vec::new(),
+                token_ids: Vec::new(),
+                transformers: Vec::new(),
+            },
+            starter_arguments: Vec::new(),
+            other_arguments: Vec::new(),
+            sig: vec![0x66; 65],
+            started_by_left: true,
+            cooperative: false,
+            submit_not_before_timestamp: None,
+        }
+    }
+
     #[test]
     fn recomputes_and_drains_all_due_hooks_not_only_diagnostic_prefix() {
         let mut state = state();
@@ -579,7 +685,6 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "HUB",
                 now: 1_000,
-                hub_rebalance_has_pending_work: false,
                 active_htlc_locks: &BTreeSet::from([
                     ("account-a".to_string(), "a".to_string()),
                     ("account-b".to_string(), "b".to_string()),
@@ -623,7 +728,6 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10,
-                hub_rebalance_has_pending_work: false,
                 active_htlc_locks: &BTreeSet::new(),
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),
@@ -656,7 +760,6 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 1_000,
-                hub_rebalance_has_pending_work: false,
                 active_htlc_locks: &BTreeSet::new(),
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([("peer".into(), dispute_view(false, 9))]),
@@ -683,7 +786,6 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10_000,
-                hub_rebalance_has_pending_work: false,
                 active_htlc_locks: &BTreeSet::new(),
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([("peer".into(), dispute_view(true, 9))]),
@@ -694,11 +796,262 @@ mod tests {
         .expect("ready deadline");
         assert_eq!(
             ready.commands,
+            vec![
+                SchedulerCommand::AutoFinalizeDispute {
+                    counterparty_entity_id: "peer".into(),
+                },
+                SchedulerCommand::HubRebalance,
+            ]
+        );
+        assert_eq!(
+            ready
+                .crontab
+                .tasks
+                .get(&CrontabTaskMethod::HubRebalance)
+                .expect("hub task")
+                .last_run,
+            10_000,
+        );
+        assert!(!ready.crontab.hooks.contains_key("dispute-deadline:peer"));
+    }
+
+    #[test]
+    fn exact_h2002_dispute_deadline_retries_without_envelope_mutation() {
+        const NOW: u64 = 1_788_305_492_894;
+        const ACCOUNT: &str = "0xaf20cc5f04ae693bc4a558e550aa391753a86d5b8faee49a5040d0c7edd75aff";
+        const PROPOSER: &str = "0xc65745c5f0bbec9cb6dd3726daf375c38f488fb6";
+        let mut state = state();
+        state.tasks.clear();
+        add_hook(
+            &mut state,
+            ScheduledHook {
+                id: format!("dispute-deadline:{ACCOUNT}"),
+                trigger_at: NOW,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: ACCOUNT.into(),
+                },
+            },
+        );
+        let jobs = collect_due_scheduled_wake_jobs(&state, NOW, false).expect("H2002 jobs");
+        let result = execute_crontab(
+            &state,
+            &ScheduledWake {
+                version: 1,
+                proposer_signer_id: PROPOSER.into(),
+                due_at: NOW,
+                jobs,
+            },
+            CrontabExecutionContext {
+                expected_proposer_signer_id: PROPOSER,
+                now: NOW,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::from([(
+                    ACCOUNT.into(),
+                    dispute_view(true, 1_788_395_489),
+                )]),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
+        )
+        .expect("exact H2002 execution");
+        assert!(result.commands.is_empty());
+        assert!(result.account_envelope_mutations.is_empty());
+        assert_eq!(
+            result
+                .crontab
+                .hooks
+                .iter()
+                .find(|(_, hook)| hook.id == format!("dispute-deadline:{ACCOUNT}"))
+                .map(|(_, hook)| hook.trigger_at),
+            Some(NOW + 1_000),
+        );
+    }
+
+    #[test]
+    fn dispute_deadline_clears_stale_finalize_latch_before_auto_finalize() {
+        let mut state = state();
+        state.tasks.clear();
+        add_hook(
+            &mut state,
+            ScheduledHook {
+                id: "dispute-deadline:peer".into(),
+                trigger_at: 10_000,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: "peer".into(),
+                },
+            },
+        );
+        let jobs = collect_due_scheduled_wake_jobs(&state, 10_000, false).expect("due jobs");
+        let result = execute_crontab(
+            &state,
+            &wake(jobs),
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 10_000,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::from([(
+                    "peer".into(),
+                    dispute_view_with_finalize_queued(true),
+                )]),
+                j_batch_state: None,
+                dispute_auto_finalize: true,
+            },
+        )
+        .expect("clear stale finalize latch");
+        assert_eq!(
+            result.commands,
             vec![SchedulerCommand::AutoFinalizeDispute {
                 counterparty_entity_id: "peer".into(),
             }]
         );
-        assert!(!ready.crontab.hooks.contains_key("dispute-deadline:peer"));
+        let [
+            (
+                account_id,
+                crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+                    status,
+                    dispute_prepare,
+                    active_dispute: Some(active),
+                },
+            ),
+        ] = result.account_envelope_mutations.as_slice()
+        else {
+            panic!("one lifecycle mutation");
+        };
+        assert_eq!(account_id, "peer");
+        assert_eq!(status, "disputed");
+        assert_eq!(dispute_prepare, &None);
+        assert_eq!(object_bool(active, "finalizeQueued"), Some(false));
+    }
+
+    #[test]
+    fn dispute_deadline_sets_latch_for_queued_draft_before_broadcast() {
+        let account_word = [0x22; 32];
+        let account_id = format!("0x{}", hex::encode(account_word));
+        let mut state = state();
+        state.tasks.clear();
+        add_hook(
+            &mut state,
+            ScheduledHook {
+                id: format!("dispute-deadline:{account_id}"),
+                trigger_at: 10_000,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: account_id.clone(),
+                },
+            },
+        );
+        let mut j_batch_state = JBatchState::default();
+        j_batch_state
+            .batch
+            .dispute_finalizations
+            .push(final_dispute(account_word));
+        let result = execute_crontab(
+            &state,
+            &wake(collect_due_scheduled_wake_jobs(&state, 10_000, false).expect("due jobs")),
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 10_000,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::from([(
+                    account_id.clone(),
+                    dispute_view_with_finalize_queued(false),
+                )]),
+                j_batch_state: Some(&j_batch_state),
+                dispute_auto_finalize: true,
+            },
+        )
+        .expect("queued draft deadline");
+        assert_eq!(
+            result.commands,
+            vec![SchedulerCommand::BroadcastQueuedDisputeFinalization]
+        );
+        let [
+            (
+                mutated_account,
+                crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+                    active_dispute: Some(active),
+                    ..
+                },
+            ),
+        ] = result.account_envelope_mutations.as_slice()
+        else {
+            panic!("one queued lifecycle mutation");
+        };
+        assert_eq!(mutated_account, &account_id);
+        assert_eq!(object_bool(active, "finalizeQueued"), Some(true));
+    }
+
+    #[test]
+    fn dispute_deadline_materializes_latch_while_any_batch_is_sent() {
+        let account_id = format!("0x{}", hex::encode([0x22; 32]));
+        let mut state = state();
+        state.tasks.clear();
+        add_hook(
+            &mut state,
+            ScheduledHook {
+                id: format!("dispute-deadline:{account_id}"),
+                trigger_at: 10_000,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: account_id.clone(),
+                },
+            },
+        );
+        let j_batch_state = JBatchState {
+            sent_batch: Some(crate::j_batch::SentJBatch {
+                batch: JBatch::default(),
+                batch_hash: [0; 32],
+                encoded_batch: Vec::new(),
+                entity_nonce: 1,
+                first_submitted_at: 1,
+                last_submitted_at: 1,
+                submit_attempts: 1,
+                fee_overrides: None,
+                transaction_hash: None,
+                last_failure: None,
+                terminal_failure: None,
+            }),
+            ..Default::default()
+        };
+        let result = execute_crontab(
+            &state,
+            &wake(collect_due_scheduled_wake_jobs(&state, 10_000, false).expect("due jobs")),
+            CrontabExecutionContext {
+                expected_proposer_signer_id: "hub",
+                now: 10_000,
+                active_htlc_locks: &BTreeSet::new(),
+                secret_acks_requiring_dispute: &BTreeSet::new(),
+                dispute_views: &BTreeMap::from([(account_id.clone(), dispute_view(true, 9))]),
+                j_batch_state: Some(&j_batch_state),
+                dispute_auto_finalize: true,
+            },
+        )
+        .expect("sent batch deadline");
+        assert!(result.commands.is_empty());
+        let [
+            (
+                mutated_account,
+                crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+                    active_dispute: Some(active),
+                    ..
+                },
+            ),
+        ] = result.account_envelope_mutations.as_slice()
+        else {
+            panic!("one sent lifecycle mutation");
+        };
+        assert_eq!(mutated_account, &account_id);
+        assert_eq!(object_bool(active, "finalizeQueued"), Some(false));
+        assert_eq!(
+            result
+                .crontab
+                .hooks
+                .iter()
+                .find(|(_, hook)| hook.id == format!("dispute-deadline:{account_id}"))
+                .map(|(_, hook)| hook.trigger_at),
+            Some(11_000),
+        );
     }
 
     #[test]
@@ -722,7 +1075,6 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 1_500,
-                hub_rebalance_has_pending_work: true,
                 active_htlc_locks: &BTreeSet::new(),
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),
@@ -759,7 +1111,6 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 1_000,
-                hub_rebalance_has_pending_work: false,
                 active_htlc_locks: &BTreeSet::new(),
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),

@@ -11,21 +11,23 @@ use std::sync::Arc;
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountTx, CanonicalValue, SigningIdentity, SwapMarketPolicy,
-    SwapOfferSnapshot, TokenId, address_of_private_key, propose_account_frame,
+    AccountConsensus, AccountProposalSelection, AccountTx, CanonicalValue, SigningIdentity,
+    SwapMarketPolicy, SwapOfferSnapshot, TokenId, address_of_private_key,
+    propose_account_frame_with_selection,
 };
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
     ProposalRow, UpstreamHtlcResolutionRow, active, apply_one, apply_one_without_mutation,
-    build_signing_identity, force_ack_directive, inbound_genesis_account, leaf_root,
-    outbound_ack_retry_input, proposable, proposal_row, restore_checkpoint_account,
+    build_signing_identity, force_ack_directive, has_rebalance_work, inbound_genesis_account,
+    leaf_root, outbound_ack_input, proposable, proposal_row, restore_checkpoint_account,
     restore_seed_account, state_error, validate_genesis_seed, verdict_commits_genesis,
 };
 use crate::parallel::{OutboundContinuationKind, ResidentAccountAction, ResidentAccountForest};
 use crate::round::{
-    EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcFollowup,
+    BatchAccountSelection, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult,
+    FailedHtlcFollowup,
 };
 use crate::{
     AccountId, AccountRestore, AccountSeed, BatchError, CheckpointToken, EngineGeneration,
@@ -41,7 +43,9 @@ struct InboundOutcome {
     applied: Vec<AccountInputResult>,
     leaf: [u8; 32],
     created_checkpoint: Option<AccountCheckpointRows>,
+    changed: bool,
     proposable: bool,
+    has_rebalance_work: bool,
 }
 
 /// Borrow the resident head until an Account transition can actually mutate.
@@ -85,10 +89,10 @@ impl<'a, T> CloneOnMutation<'a, T> {
 struct OutboundWork {
     create: Option<AccountSeed>,
     envelope_updates: Vec<crate::AccountEnvelopeUpdate>,
-    txs: Option<Vec<AccountTx>>,
-    /// This Account belongs to the one final proposal-stage worklist. The
-    /// worker derives whether to emit ACK, ACK+proposal, proposal, or nothing.
-    finish: bool,
+    admissions: Vec<AccountTx>,
+    /// `None` is envelope/admission-only work. Admissions are independent and
+    /// always applied before this exact post-admission proposal selection.
+    proposal_selection: Option<BatchAccountSelection>,
     /// Same-round response obligation only. It is never Account state.
     force_ack: bool,
     seal: bool,
@@ -97,6 +101,7 @@ struct OutboundWork {
 struct OutboundOutcome {
     proposal: Option<ProposalRow>,
     proposable: bool,
+    has_rebalance_work: bool,
 }
 
 struct MaterializedAccount {
@@ -160,6 +165,30 @@ pub struct ResidentAccountFinancialView {
     pub dispute: Option<ResidentAccountDisputeView>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentHubRebalanceFeeState {
+    pub request_id: String,
+    pub fee_paid_upfront: BigInt,
+    pub policy_version: u64,
+    pub requested_at: u64,
+    pub refund: bool,
+    pub refunded_amount: Option<BigInt>,
+}
+
+/// Bounded projection for the derived rebalance-work IDs only. It is read
+/// from the current resident head and never persisted as scheduler state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentHubRebalanceAccountView {
+    pub pending_frame: bool,
+    pub settlement_transition_pending: bool,
+    pub settlement_workspace: Option<CanonicalValue>,
+    pub requested_rebalance: Vec<(TokenId, BigInt)>,
+    pub requested_fee_state: Vec<(TokenId, ResidentHubRebalanceFeeState)>,
+    pub submitted_at_by_token: Vec<(u32, u64)>,
+    pub deltas: Vec<xln_rscore_engine::Delta>,
+    pub owner_side: xln_rscore_engine::Side,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResidentAccountFinancialViewRequest {
     pub token_ids: Vec<TokenId>,
@@ -177,6 +206,34 @@ pub struct ResidentCrossJMaterializationView {
     pub pull_ids: BTreeSet<String>,
     pub swap_offer_ids: BTreeSet<String>,
     pub pending_cross_pull_close_ids: BTreeSet<String>,
+}
+
+/// Transient sibling-Account evidence used only while choosing an atomic
+/// cross-J opening cohort. The worker returns no ordinary Account traffic and
+/// Runtime never persists this projection beside a frame or checkpoint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentCrossJOpeningAccountView {
+    pub counterparty_entity_id: String,
+    pub mempool: Vec<AccountTx>,
+    pub pending_frame_txs: Option<Vec<AccountTx>>,
+}
+
+fn cross_j_opening_txs(txs: &[AccountTx]) -> Vec<AccountTx> {
+    txs.iter()
+        .filter(|tx| match tx {
+            AccountTx::CrossPullLock {
+                data: CanonicalValue::Object(fields),
+            } => {
+                let has = |name: &str| fields.iter().any(|(field, _)| field == name);
+                has("crossJurisdiction") && has("crossJurisdictionRoute")
+            }
+            AccountTx::SwapOffer {
+                cross_jurisdiction, ..
+            } => cross_jurisdiction.is_some(),
+            _ => false,
+        })
+        .cloned()
+        .collect()
 }
 
 fn pending_cross_j_ids(account: &AccountConsensus) -> (BTreeSet<String>, BTreeSet<String>) {
@@ -290,6 +347,9 @@ pub struct ResidentConsensusEngine {
     base_proposable: BTreeSet<AccountId>,
     inbound_proposable: Option<BTreeSet<AccountId>>,
     candidate_proposable: Option<BTreeSet<AccountId>>,
+    base_rebalance_work: BTreeSet<AccountId>,
+    inbound_rebalance_work: Option<BTreeSet<AccountId>>,
+    candidate_rebalance_work: Option<BTreeSet<AccountId>>,
     /// RAM-only owner projection of every accepted Account, maintained
     /// incrementally so checkpoint metadata never rescans resident workers.
     /// Owners are written exactly once at genesis and never change, so the
@@ -397,6 +457,7 @@ impl ResidentConsensusEngine {
             .map(|seed| restore_seed_account(seed, &swap_market))
             .collect::<Result<Vec<_>, _>>()?;
         let base_proposable = proposable_from_entries(&entries)?;
+        let base_rebalance_work = rebalance_work_from_entries(&entries)?;
         let signer_owners = entries
             .iter()
             .map(|(account_id, account, _)| (*account_id, *account.replica().owner().as_bytes()))
@@ -420,6 +481,9 @@ impl ResidentConsensusEngine {
             base_proposable,
             inbound_proposable: None,
             candidate_proposable: None,
+            base_rebalance_work,
+            inbound_rebalance_work: None,
+            candidate_rebalance_work: None,
             signer_owners,
             inbound_owner_adds: BTreeMap::new(),
             candidate_owner_adds: BTreeMap::new(),
@@ -482,6 +546,7 @@ impl ResidentConsensusEngine {
         }
 
         let base_proposable = proposable_from_entries(&entries)?;
+        let base_rebalance_work = rebalance_work_from_entries(&entries)?;
         let forest = ResidentAccountForest::restore(worker_count, expected.revision, entries)?;
         if forest.len() != expected.account_count {
             return Err(BatchError::CheckpointIncomplete {
@@ -524,6 +589,9 @@ impl ResidentConsensusEngine {
             base_proposable,
             inbound_proposable: None,
             candidate_proposable: None,
+            base_rebalance_work,
+            inbound_rebalance_work: None,
+            candidate_rebalance_work: None,
             signer_owners: signer_rows
                 .iter()
                 .map(|(account_id, owner, _)| (*account_id, *owner))
@@ -553,6 +621,8 @@ impl ResidentConsensusEngine {
         self.forest.abort_entity_round()?;
         self.inbound_proposable = None;
         self.candidate_proposable = None;
+        self.inbound_rebalance_work = None;
+        self.candidate_rebalance_work = None;
         self.inbound_owner_adds.clear();
         self.candidate_owner_adds.clear();
         self.round_owner = None;
@@ -702,8 +772,119 @@ impl ResidentConsensusEngine {
         Ok(self.active_proposable()?.iter().copied().collect())
     }
 
+    /// Exact pre-round worklist selected by the parent Account root.
+    ///
+    /// The live envelope may still hold both a base and prior candidate. A
+    /// caller assembling positional Entity outputs must select the same branch
+    /// as inbound before recording the frame-start work prefix.
+    pub fn selected_proposable_account_ids(
+        &self,
+        expected_accounts_root: [u8; 32],
+    ) -> Result<Vec<AccountId>, BatchError> {
+        let selected = if self
+            .forest
+            .expected_uses_candidate(expected_accounts_root)?
+        {
+            self.candidate_proposable
+                .as_ref()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else {
+            &self.base_proposable
+        };
+        Ok(selected.iter().copied().collect())
+    }
+
     pub fn has_proposable_accounts(&self) -> Result<bool, BatchError> {
         Ok(!self.active_proposable()?.is_empty())
+    }
+
+    pub fn rebalance_account_ids(&self) -> Result<Vec<AccountId>, BatchError> {
+        Ok(self.active_rebalance_work()?.iter().copied().collect())
+    }
+
+    pub fn has_rebalance_work(&self) -> Result<bool, BatchError> {
+        Ok(!self.active_rebalance_work()?.is_empty())
+    }
+
+    pub fn hub_rebalance_views(
+        &mut self,
+        account_ids: Vec<AccountId>,
+    ) -> Result<Vec<(AccountId, ResidentHubRebalanceAccountView)>, BatchError> {
+        self.forest.read_outbound(
+            account_ids
+                .into_iter()
+                .map(|account_id| (account_id, ()))
+                .collect(),
+            |account_id, account, _, ()| {
+                let state = account.replica().state();
+                let settlement_transition_pending = account
+                    .mempool()
+                    .iter()
+                    .chain(
+                        account
+                            .pending()
+                            .into_iter()
+                            .flat_map(|pending| pending.frame.txs.iter()),
+                    )
+                    .any(|tx| matches!(tx, AccountTx::SettleTransition { .. }));
+                let requested_rebalance = state
+                    .requested_rebalance_entries()
+                    .map_err(|error| state_error(account_id, &error))?;
+                let requested_fee_state = state
+                    .requested_rebalance_fee_entries()
+                    .map_err(|error| state_error(account_id, &error))?
+                    .into_iter()
+                    .map(|(token_id, fee)| {
+                        (
+                            token_id,
+                            ResidentHubRebalanceFeeState {
+                                request_id: fee.request_id,
+                                fee_paid_upfront: fee.fee_paid_upfront,
+                                policy_version: fee.policy_version,
+                                requested_at: fee.requested_at,
+                                refund: fee.refund.is_some(),
+                                refunded_amount: fee
+                                    .refund
+                                    .as_ref()
+                                    .map(|refund| refund.refunded_amount.clone()),
+                            },
+                        )
+                    })
+                    .collect();
+                Ok(ResidentHubRebalanceAccountView {
+                    pending_frame: account.pending().is_some(),
+                    settlement_transition_pending,
+                    settlement_workspace: state.settlement_workspace().cloned(),
+                    requested_rebalance,
+                    requested_fee_state,
+                    submitted_at_by_token: account
+                        .replica()
+                        .envelope()
+                        .rebalance_shadow_submitted_rows(),
+                    deltas: state.deltas().cloned().collect(),
+                    owner_side: account.replica().owner_side(),
+                })
+            },
+        )
+    }
+
+    /// Exact work predicate for the committed Account root selected by the
+    /// parent Runtime before it derives an on-demand scheduled wake.
+    pub fn selected_has_rebalance_work(
+        &self,
+        expected_accounts_root: [u8; 32],
+    ) -> Result<bool, BatchError> {
+        let selected = if self
+            .forest
+            .expected_uses_candidate(expected_accounts_root)?
+        {
+            self.candidate_rebalance_work
+                .as_ref()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else {
+            &self.base_rebalance_work
+        };
+        Ok(!selected.is_empty())
     }
 
     /// Read the committed active/inactive bit only for Accounts named by one
@@ -777,6 +958,40 @@ impl ResidentConsensusEngine {
                 pending_cross_pull_close_ids,
             })
         })
+    }
+
+    /// Point-read the opening-only view for the exact positional worklist. A
+    /// pending frame freezes a cohort only when it contains an opening
+    /// `cross_pull_lock`; unrelated pending frames do not hide queued opening
+    /// work in the Account mempool. Missing ids fail loudly instead of being
+    /// omitted from the returned vector.
+    pub fn cross_j_opening_account_views(
+        &mut self,
+        account_ids: Vec<AccountId>,
+    ) -> Result<Vec<ResidentCrossJOpeningAccountView>, BatchError> {
+        self.forest
+            .read_head(
+                account_ids
+                    .into_iter()
+                    .map(|account_id| (account_id, ()))
+                    .collect(),
+                |account_id, account, ()| {
+                    let mempool = cross_j_opening_txs(account.mempool());
+                    let pending_frame_txs = account.pending().and_then(|pending| {
+                        let opening = cross_j_opening_txs(&pending.frame.txs);
+                        opening
+                            .iter()
+                            .any(|tx| matches!(tx, AccountTx::CrossPullLock { .. }))
+                            .then_some(opening)
+                    });
+                    Ok(ResidentCrossJOpeningAccountView {
+                        counterparty_entity_id: format!("0x{}", root_hex(*account_id.as_bytes())),
+                        mempool,
+                        pending_frame_txs,
+                    })
+                },
+            )
+            .map(|rows| rows.into_iter().map(|(_, view)| view).collect())
     }
 
     /// Read canonical Account availability and owner-perspective capacities
@@ -1205,6 +1420,14 @@ impl ResidentConsensusEngine {
             .unwrap_or(&self.base_proposable))
     }
 
+    fn active_rebalance_work(&self) -> Result<&BTreeSet<AccountId>, BatchError> {
+        Ok(self
+            .candidate_rebalance_work
+            .as_ref()
+            .or(self.inbound_rebalance_work.as_ref())
+            .unwrap_or(&self.base_rebalance_work))
+    }
+
     /// First and only inward visit for one Entity input.
     pub fn entity_inbound(
         &mut self,
@@ -1230,11 +1453,10 @@ impl ResidentConsensusEngine {
         continue_inbound: bool,
         need_accounts_root: bool,
     ) -> Result<EntityRoundResult, BatchError> {
-        if request.post_accounts {
-            return Err(BatchError::EntityInboundPostAccounts);
-        }
+        let post_accounts = request.post_accounts;
         let uses_candidate = if continue_inbound {
             if self.inbound_proposable.is_none()
+                || self.inbound_rebalance_work.is_none()
                 || self.round_owner != Some(request.owner_entity_id)
             {
                 return Err(BatchError::EntityRoundMissing);
@@ -1244,7 +1466,9 @@ impl ResidentConsensusEngine {
             let uses_candidate = self
                 .forest
                 .expected_uses_candidate(request.expected_accounts_root)?;
-            if uses_candidate && self.candidate_proposable.is_none() {
+            if uses_candidate
+                && (self.candidate_proposable.is_none() || self.candidate_rebalance_work.is_none())
+            {
                 return Err(BatchError::EntityRoundMissing);
             }
             uses_candidate
@@ -1365,7 +1589,7 @@ impl ResidentConsensusEngine {
                     verdict,
                 });
             }
-            let leaf = if need_accounts_root || created {
+            let leaf = if need_accounts_root || post_accounts || created {
                 leaf_root(account_id, account.as_ref())?
             } else {
                 // The resident Entity path consumes only the touched Account
@@ -1377,7 +1601,9 @@ impl ResidentConsensusEngine {
                 applied,
                 leaf,
                 created_checkpoint,
+                changed,
                 proposable: proposable(account.as_ref())?,
+                has_rebalance_work: has_rebalance_work(account.as_ref())?,
             };
             if changed && !need_accounts_root && !created {
                 Ok(ResidentAccountAction::PutUnsealed {
@@ -1444,6 +1670,20 @@ impl ResidentConsensusEngine {
             self.candidate_owner_adds.clear();
             self.base_proposable.clone()
         };
+        let mut inbound_rebalance_work = if continue_inbound {
+            self.inbound_rebalance_work
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else if uses_candidate {
+            let promoted = self
+                .candidate_rebalance_work
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            self.base_rebalance_work = promoted.clone();
+            promoted
+        } else {
+            self.base_rebalance_work.clone()
+        };
         let mut result = EntityRoundResult {
             revision: batch_revision,
             // Unsealed callers must never consume this pre-round root as a
@@ -1453,11 +1693,20 @@ impl ResidentConsensusEngine {
             ..EntityRoundResult::default()
         };
         let mut created_any = false;
+        let mut changed_account_ids = BTreeSet::new();
         let mut applied_by_position = std::iter::repeat_with(|| None)
             .take(applied_count)
             .collect::<Vec<Option<AccountInputResult>>>();
         for (account_id, _leaf, outcome) in batch_rows {
+            if outcome.changed {
+                changed_account_ids.insert(account_id);
+            }
             set_proposable(&mut inbound_proposable, account_id, outcome.proposable);
+            set_work_membership(
+                &mut inbound_rebalance_work,
+                account_id,
+                outcome.has_rebalance_work,
+            );
             for applied in outcome.applied {
                 let index = usize::try_from(applied.operation_index).map_err(|_| {
                     BatchError::OperationIndex {
@@ -1486,6 +1735,18 @@ impl ResidentConsensusEngine {
                 result.created_accounts.push(created);
             }
         }
+        if post_accounts {
+            result.post_accounts = self
+                .materialize(changed_account_ids, true)?
+                .into_iter()
+                .map(|(account_id, row)| {
+                    row.checkpoint.ok_or(BatchError::AccountsTree {
+                        account_id,
+                        detail: "INBOUND_POST_ACCOUNT_MISSING".to_string(),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+        }
         result.applied = applied_by_position
             .into_iter()
             .collect::<Option<Vec<_>>>()
@@ -1504,6 +1765,8 @@ impl ResidentConsensusEngine {
         }
         self.inbound_proposable = Some(inbound_proposable);
         self.candidate_proposable = None;
+        self.inbound_rebalance_work = Some(inbound_rebalance_work);
+        self.candidate_rebalance_work = None;
         self.round_owner = Some(owner);
         Ok(result)
     }
@@ -1661,13 +1924,16 @@ impl ResidentConsensusEngine {
             let entries = follow_order
                 .iter()
                 .map(|account_id| {
+                    let txs = grouped
+                        .remove(account_id)
+                        .expect("follow-up account is ordered");
                     (
                         *account_id,
                         OutboundWork {
                             create: None,
                             envelope_updates: Vec::new(),
-                            txs: grouped.remove(account_id),
-                            finish: true,
+                            admissions: txs.clone(),
+                            proposal_selection: Some(BatchAccountSelection::Selected(txs)),
                             force_ack: false,
                             seal: true,
                         },
@@ -1765,6 +2031,7 @@ impl ResidentConsensusEngine {
                 })
             })?;
         self.candidate_proposable = None;
+        self.candidate_rebalance_work = None;
         self.candidate_owner_adds.clear();
         Ok(())
     }
@@ -1810,6 +2077,16 @@ impl ResidentConsensusEngine {
                 .clone()
                 .ok_or(BatchError::EntityRoundMissing)?
         };
+        let mut next_rebalance_work = if continue_candidate {
+            self.candidate_rebalance_work
+                .take()
+                .or_else(|| self.inbound_rebalance_work.clone())
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else {
+            self.inbound_rebalance_work
+                .clone()
+                .ok_or(BatchError::EntityRoundMissing)?
+        };
         let created_ids = entries
             .iter()
             .filter(|(_, work)| work.create.is_some())
@@ -1832,12 +2109,18 @@ impl ResidentConsensusEngine {
         }
         for (account_id, leaf, outcome) in &batch.rows {
             set_proposable(&mut next_proposable, *account_id, outcome.proposable);
+            set_work_membership(
+                &mut next_rebalance_work,
+                *account_id,
+                outcome.has_rebalance_work,
+            );
             // The worker already sealed this exact leaf while applying the
             // phase; a later within-round phase overwrites it, so the final
             // map entry is always the round's closing commitment.
             round_leafs.insert(*account_id, *leaf);
         }
         self.candidate_proposable = Some(next_proposable);
+        self.candidate_rebalance_work = Some(next_rebalance_work);
         Ok(batch)
     }
 
@@ -1974,9 +2257,9 @@ fn apply_outbound_work(
     };
     assert_account_owner(account_id, &account, context.owner)?;
     account.set_local_board_authority(context.local_board_authority);
-    if let Some(txs) = work.txs {
+    if !work.admissions.is_empty() {
         account
-            .admit_txs(txs, "rscoreConsensus:admit")
+            .admit_txs(work.admissions, "rscoreConsensus:admit")
             .map_err(|error| state_error(account_id, &error))?;
         changed = true;
     }
@@ -2053,24 +2336,31 @@ fn apply_outbound_work(
             }
         }
     }
-    let proposal = if work.finish && proposable(&account)? {
-        let outcome = propose_account_frame(
+    let selection = match work.proposal_selection {
+        None | Some(BatchAccountSelection::WaitForSibling) => None,
+        Some(BatchAccountSelection::WholeMempool) => Some(AccountProposalSelection::WholeMempool),
+        Some(BatchAccountSelection::Selected(txs)) => Some(AccountProposalSelection::Selected(txs)),
+    };
+    let proposal = if let (true, Some(selection)) = (proposable(&account)?, selection) {
+        let outcome = propose_account_frame_with_selection(
             &mut account,
             &context.identity,
             context.timestamp,
             context.j_height,
+            selection,
             &context.swap_market,
         )
         .map_err(|error| state_error(account_id, &error))?;
         changed = true;
         let mut row = proposal_row(account_id, outcome, &account)?;
         if work.force_ack && row.outbound_input.is_none() {
-            row.outbound_input = Some(outbound_ack_retry_input(&account).ok_or_else(|| {
-                BatchError::AccountsTree {
-                    account_id,
-                    detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
-                }
-            })?);
+            row.outbound_input =
+                Some(
+                    outbound_ack_input(&account).ok_or_else(|| BatchError::AccountsTree {
+                        account_id,
+                        detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
+                    })?,
+                );
         }
         if work.force_ack
             && !row.outbound_input.as_ref().is_some_and(|input| {
@@ -2090,7 +2380,7 @@ fn apply_outbound_work(
     } else if work.force_ack {
         Some(ProposalRow {
             account_id,
-            outbound_input: Some(outbound_ack_retry_input(&account).ok_or_else(|| {
+            outbound_input: Some(outbound_ack_input(&account).ok_or_else(|| {
                 BatchError::AccountsTree {
                     account_id,
                     detail: "ACCOUNT_FORCE_ACK_STATE_MISSING".to_string(),
@@ -2106,6 +2396,7 @@ fn apply_outbound_work(
     let result = OutboundOutcome {
         proposal,
         proposable: proposable(&account)?,
+        has_rebalance_work: has_rebalance_work(&account)?,
     };
     if changed || work.seal {
         let leaf = leaf_root(account_id, &account)?;
@@ -2119,12 +2410,14 @@ fn apply_outbound_work(
     }
 }
 
-fn admission_results(admits: &[(AccountId, Vec<AccountTx>, bool)]) -> Vec<AccountAdmissionResult> {
+fn admission_results(
+    admits: &[(AccountId, Vec<AccountTx>, BatchAccountSelection, bool)],
+) -> Vec<AccountAdmissionResult> {
     admits
         .iter()
-        .filter(|(_, txs, _)| !txs.is_empty())
+        .filter(|(_, txs, _, _)| !txs.is_empty())
         .enumerate()
-        .map(|(index, (account_id, txs, _))| AccountAdmissionResult {
+        .map(|(index, (account_id, txs, _, _))| AccountAdmissionResult {
             operation_index: index as u64,
             account_id: *account_id,
             verdict: AccountAdmissionVerdict::Admitted { count: txs.len() },
@@ -2144,7 +2437,27 @@ fn proposable_from_entries(
     Ok(ready)
 }
 
+fn rebalance_work_from_entries(
+    entries: &[(AccountId, AccountConsensus, [u8; 32])],
+) -> Result<BTreeSet<AccountId>, BatchError> {
+    let mut ready = BTreeSet::new();
+    for (account_id, account, _) in entries {
+        if has_rebalance_work(account)? {
+            ready.insert(*account_id);
+        }
+    }
+    Ok(ready)
+}
+
 fn set_proposable(accounts: &mut BTreeSet<AccountId>, account_id: AccountId, ready: bool) {
+    if ready {
+        accounts.insert(account_id);
+    } else {
+        accounts.remove(&account_id);
+    }
+}
+
+fn set_work_membership(accounts: &mut BTreeSet<AccountId>, account_id: AccountId, ready: bool) {
     if ready {
         accounts.insert(account_id);
     } else {
@@ -2167,8 +2480,8 @@ fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet,
                 OutboundWork {
                     create: Some(seed.clone()),
                     envelope_updates: Vec::new(),
-                    txs: None,
-                    finish: false,
+                    admissions: Vec::new(),
+                    proposal_selection: None,
                     force_ack: false,
                     seal: true,
                 },
@@ -2188,18 +2501,17 @@ fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet,
             .or_insert(OutboundWork {
                 create: None,
                 envelope_updates: Vec::new(),
-                txs: Some(Vec::new()),
-                finish: false,
+                admissions: Vec::new(),
+                proposal_selection: None,
                 force_ack: false,
                 seal: true,
             })
-            .txs
-            .get_or_insert_with(Vec::new)
+            .admissions
             .push(tx);
     }
     let unsigned_accounts = selected.clone();
     let mut proposal_order = Vec::with_capacity(request.proposal_work.len());
-    for (account_id, txs, force_ack) in std::mem::take(&mut request.proposal_work) {
+    for (account_id, txs, selection, force_ack) in std::mem::take(&mut request.proposal_work) {
         if !selected.insert(account_id) {
             // A same-round ACK obligation may target the Account whose
             // settlement transition is waiting for this Entity frame's
@@ -2219,14 +2531,14 @@ fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet,
         let work = grouped.entry(account_id).or_insert(OutboundWork {
             create: None,
             envelope_updates: Vec::new(),
-            txs: Some(Vec::new()),
-            finish: true,
+            admissions: Vec::new(),
+            proposal_selection: None,
             force_ack,
             seal: true,
         });
-        work.finish = true;
+        work.admissions.extend(txs);
+        work.proposal_selection = Some(selection);
         work.force_ack |= force_ack;
-        work.txs.get_or_insert_with(Vec::new).extend(txs);
     }
     for (account_id, updates) in std::mem::take(&mut request.envelope_updates) {
         grouped
@@ -2234,8 +2546,8 @@ fn outbound_work(request: &mut EntityOutboundRequest) -> Result<OutboundWorkSet,
             .or_insert(OutboundWork {
                 create: None,
                 envelope_updates: Vec::new(),
-                txs: None,
-                finish: false,
+                admissions: Vec::new(),
+                proposal_selection: None,
                 force_ack: false,
                 seal: true,
             })
@@ -2304,9 +2616,10 @@ fn root_hex(bytes: [u8; 32]) -> String {
 
 #[cfg(test)]
 mod clone_on_mutation_tests {
-    use super::CloneOnMutation;
+    use super::{CloneOnMutation, cross_j_opening_txs};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use xln_rscore_engine::{AccountTx, CanonicalValue, TokenId};
 
     struct CloneProbe {
         value: u64,
@@ -2341,5 +2654,34 @@ mod clone_on_mutation_tests {
         candidate.make_mut().value = 8;
         assert_eq!(candidate.as_ref().value, 8);
         assert_eq!(clones.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn cross_j_opening_projection_excludes_ordinary_and_incomplete_txs() {
+        let opening = AccountTx::CrossPullLock {
+            data: CanonicalValue::Object(vec![
+                (
+                    "crossJurisdiction".into(),
+                    CanonicalValue::Object(Vec::new()),
+                ),
+                (
+                    "crossJurisdictionRoute".into(),
+                    CanonicalValue::Object(Vec::new()),
+                ),
+            ]),
+        };
+        let incomplete = AccountTx::CrossPullLock {
+            data: CanonicalValue::Object(vec![(
+                "crossJurisdiction".into(),
+                CanonicalValue::Object(Vec::new()),
+            )]),
+        };
+        let ordinary = AccountTx::AddDelta {
+            token_id: TokenId::new(1).expect("token"),
+        };
+        assert_eq!(
+            cross_j_opening_txs(&[ordinary, incomplete, opening.clone()]),
+            vec![opening]
+        );
     }
 }

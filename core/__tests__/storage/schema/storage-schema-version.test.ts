@@ -71,19 +71,22 @@ describe('storage schema boundary', () => {
       `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
     // Version 3 used the misleading `retainedHistoryBytes` field for the
-    // bounded Runtime WAL. Schema 4 rejects it instead of keeping an alias.
+    // bounded Runtime WAL. Later schemas reject it instead of keeping an alias.
     await expect(readStorageHead(memoryDbWithHead(currentHead(3)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=3:current=${STORAGE_SCHEMA_VERSION}`,
     );
-    await expect(readStorageHead(memoryDbWithHead(currentHead(5)))).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=5:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
+    // Version 4 used the retired canonical Runtime hash preimage and
+    // height-scoped Runtime-machine physical keys. It is rejected, never read
+    // through a compatibility layout.
+    await expect(readStorageHead(memoryDbWithHead(currentHead(4)))).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=4:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(4);
+    expect(STORAGE_SCHEMA_VERSION).toBe(5);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

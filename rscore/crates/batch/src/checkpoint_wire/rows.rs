@@ -5,14 +5,17 @@ use xln_rscore_engine::{
 use xln_rscore_protocol::PersistentNodeChanges;
 
 use super::nodes::{EncodedAccountCheckpointNodeAddress, encode_node_del, encode_node_put};
-use super::state_value::{encode_lending_kind, encode_lock, encode_policy, encode_swap_offer};
+use super::state_value::{
+    encode_lending_kind, encode_lock, encode_policy, encode_requested_rebalance_fee_state,
+    encode_swap_offer,
+};
 use super::{
     AccountWireEncodeError, encode_account_envelope, encode_account_tx, encode_canonical_value,
     encode_delta, encode_j_claim_node, integer, tuple,
 };
 use crate::{AccountCheckpointHeader, AccountCheckpointRows};
 
-/// Canonical twelve-field incremental checkpoint row used by both the
+/// Canonical fourteen-field incremental checkpoint row used by both the
 /// process ABI and path-keyed storage projection.
 pub fn encode_account_checkpoint_rows(
     value: &AccountCheckpointRows,
@@ -29,6 +32,11 @@ pub fn encode_account_checkpoint_rows(
         changes(&value.swap_offers, encode_swap_offer)?,
         changes(&value.rebalance_fee_policies, encode_policy)?,
         changes(&value.pulls, super::encode_canonical_value)?,
+        changes(&value.requested_rebalance, super::encode_bigint)?,
+        changes(
+            &value.requested_rebalance_fee_state,
+            encode_requested_rebalance_fee_state,
+        )?,
         j_claim_changes(&value.j_claim_nodes)?,
         consensus(&value.consensus)?,
     ]))
@@ -63,6 +71,8 @@ fn sections(value: &crate::AccountCheckpointSections) -> AbiValue {
         descriptor(&value.swap_offers),
         descriptor(&value.rebalance_fee_policies),
         descriptor(&value.pulls),
+        descriptor(&value.requested_rebalance),
+        descriptor(&value.requested_rebalance_fee_state),
     ])
 }
 

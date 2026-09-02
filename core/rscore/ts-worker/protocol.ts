@@ -134,6 +134,7 @@ export type TsAccountWorkerBatchResult = Readonly<{
   /** Absent when this intermediate phase deliberately did not seal roots. */
   accountsRoot?: string;
   effects: readonly TsAccountWorkerEffect[];
+  skippedProposals: readonly Readonly<{ order: number; accountId: string }>[];
   changedSubroots: readonly TsAccountWorkerSubroot[];
   /** Outbound only; inbound never copies Account documents back to the coordinator. */
   postAccounts?: readonly TsAccountWorkerPostAccount[];
@@ -269,6 +270,7 @@ export type TsAccountWorkerInstallHankosResult = Readonly<{
 export type TsAccountWorkerPhaseResult = Readonly<{
   workerIndex: number;
   effects: readonly TsAccountWorkerEffect[];
+  skippedProposals: readonly Readonly<{ order: number; accountId: string }>[];
   subroots: readonly TsAccountWorkerSubroot[];
   postAccounts?: readonly TsAccountWorkerPostAccount[];
   operations: number;

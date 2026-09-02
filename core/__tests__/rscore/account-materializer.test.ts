@@ -32,7 +32,11 @@ import type {
   HtlcLock,
   SwapOffer,
 } from '../../types/account';
-import type { BilateralRebalanceFeePolicy, RebalancePolicy } from '../../types/finance/rebalance';
+import type {
+  BilateralRebalanceFeePolicy,
+  RebalancePolicy,
+  RebalanceRequestFeeState,
+} from '../../types/finance/rebalance';
 
 const OWNER = `0x${'11'.repeat(32)}`;
 const PEER = `0x${'22'.repeat(32)}`;
@@ -93,6 +97,22 @@ const offerWire = (value: SwapOffer): RscoreWireValue[] => [
   value.crossJurisdiction === undefined
     ? null
     : canonicalValueWire(value.crossJurisdiction),
+];
+
+const requestedRebalanceFeeWire = (value: RebalanceRequestFeeState): RscoreWireValue[] => [
+  value.requestId,
+  value.feeTokenId,
+  value.feePaidUpfront.toString(),
+  value.requestedAmount.toString(),
+  value.policyVersion,
+  value.requestedAt,
+  value.requestedByLeft,
+  value.refund === undefined
+    ? null
+    : [
+        ['policy_mismatch', 'timeout', 'fee_too_low', 'manual'].indexOf(value.refund.reason),
+        value.refund.refundedAmount.toString(),
+      ],
 ];
 
 const policySnapshotWire = (
@@ -311,6 +331,11 @@ const restoreWire = (
       [policySnapshotWire(policy.left), policySnapshotWire(policy.right)],
     ]),
     [...(state.pulls ?? new Map()).values()].map(pull => canonicalValueWire(pull)),
+    [...state.requestedRebalance.entries()].map(([tokenId, amount]) => [tokenId, amount.toString()]),
+    [...state.requestedRebalanceFeeState.entries()].map(([tokenId, fee]) => [
+      tokenId,
+      requestedRebalanceFeeWire(fee),
+    ]),
     [],
     consensus,
   ];
@@ -331,6 +356,8 @@ const checkpointRow = (wire: RscoreWireValue[]): RscoreAccountCheckpointRow => {
       swapOffers: descriptor,
       rebalanceFeePolicies: descriptor,
       pulls: descriptor,
+      requestedRebalance: descriptor,
+      requestedRebalanceFeeState: descriptor,
     },
     nodeChanges: {
       deltas: changes,
@@ -339,9 +366,11 @@ const checkpointRow = (wire: RscoreWireValue[]): RscoreAccountCheckpointRow => {
       swapOffers: changes,
       rebalanceFeePolicies: changes,
       pulls: changes,
+      requestedRebalance: changes,
+      requestedRebalanceFeeState: changes,
     },
     jClaimNodeChanges: { puts: [], dels: [] },
-    consensus: wire[10] as readonly RscoreWireValue[],
+    consensus: wire[12] as readonly RscoreWireValue[],
     decoded,
     wire: [],
   };
@@ -467,7 +496,7 @@ describe('rscore Account materializer', () => {
     expect(computeEntityAccountValueHash(result)).toBe(computeEntityAccountValueHash(target));
   });
 
-  test('replaces all six Rust maps and restores pending/ACK/Hanko/rollback consensus', () => {
+  test('replaces all eight Rust maps and restores pending/ACK/Hanko/rollback consensus', () => {
     const state = nonemptyState();
     const target = replica(state);
     const current: AccountFrame = {
@@ -601,6 +630,24 @@ describe('rscore Account materializer', () => {
       maxAcceptableFee: 1n,
     };
     const target = replica();
+    const requestFee: RebalanceRequestFeeState = {
+      requestId: 'request-1',
+      feeTokenId: 1,
+      feePaidUpfront: 2n,
+      requestedAmount: 5n,
+      policyVersion: 3,
+      requestedAt: 99,
+      requestedByLeft: true,
+    };
+    target.state.requestedRebalance = PersistentAccountStateMap.fromEntries(
+      'requestedRebalance',
+      [[1, 5n]],
+    );
+    target.state.requestedRebalanceFeeState = PersistentAccountStateMap.fromEntries(
+      'requestedRebalanceFeeState',
+      [[1, requestFee]],
+    );
+    target.currentFrame.accountStateRoot = computeAccountStateRoot(target.state);
     target.shadow.rebalance.policy = PersistentAccountStateMap.fromEntries(
       'rebalanceShadowPolicy',
       [[1, policy]],
@@ -617,20 +664,28 @@ describe('rscore Account materializer', () => {
     expect(materializeRscoreAccountReplica(binding, PEER, row, null, noFreshWitnesses)
       .account.shadow.rebalance.policy.get(1))
       .toEqual(policy);
+    const restored = materializeRscoreAccountReplica(binding, PEER, row, null, noFreshWitnesses).account;
+    expect(restored.state.requestedRebalance.get(1)).toBe(5n);
+    expect(restored.state.requestedRebalanceFeeState.get(1)).toEqual(requestFee);
 
     const stale = replica();
     stale.state.requestedRebalance = PersistentAccountStateMap.fromEntries(
       'requestedRebalance',
       [[1, 5n]],
     );
-    expect(() => materializeRscoreAccountReplica(
+    expect(materializeRscoreAccountReplica(
       binding,
       PEER,
       checkpointRow(restoreWire(replica())),
       stale,
       noFreshWitnesses,
-    ))
-      .toThrow('RSCORE_MATERIALIZE_REQUESTED_REBALANCE_ROOT_MISMATCH');
+    ).account.state.requestedRebalance.size).toBe(0);
+
+    const tampered = restoreWire(replica());
+    const carried = ((tampered[2] as RscoreWireValue[])[6] as RscoreWireValue[]);
+    carried[2] = bytes(`0x${'ff'.repeat(32)}`);
+    expect(() => checkpointRow(tampered))
+      .toThrow('RSCORE_CHECKPOINT_RESTORE_REQUESTED_REBALANCE_BODY_ROOT_MISMATCH');
   });
 
   test('fails loud on signer and leaf bindings', () => {

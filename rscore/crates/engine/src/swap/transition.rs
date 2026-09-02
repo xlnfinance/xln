@@ -119,14 +119,23 @@ pub(crate) fn apply_offer(
         prepared.effective_want,
         tx.want_token_id,
     )];
-    let output = AccountOutput::SwapOfferUpsert {
-        offer: Box::new(offer.snapshot(
-            identity.left().as_hex(),
-            identity.entity(Side::Right).as_hex(),
-        )),
-    };
+    // Cross-j offer lifecycle is projected from the committed route by the
+    // Entity cross-j transition. Only same-j offers publish this Account
+    // orderbook output; emitting it for cross-j makes the target leg look like
+    // a source-book order and diverges from collectSameJurisdictionSwapOutputs.
+    let outputs = tx
+        .cross_jurisdiction
+        .is_none()
+        .then(|| AccountOutput::SwapOfferUpsert {
+            offer: Box::new(offer.snapshot(
+                identity.left().as_hex(),
+                identity.entity(Side::Right).as_hex(),
+            )),
+        })
+        .into_iter()
+        .collect();
     replica.state_mut().put_swap_offer(offer)?;
-    Ok(MutationDecision::with_outputs(events, vec![output]))
+    Ok(MutationDecision::with_outputs(events, outputs))
 }
 
 /// Parity target: `prepareSwapOfferAmounts`

@@ -5,8 +5,15 @@
 //! outputs; Runtime only binds transport after WAL fsync.
 
 mod committed;
+#[cfg(test)]
+mod group_d_parity;
+mod opening_proposal;
 
 pub(crate) use committed::apply_committed_account_tx_followup;
+pub use opening_proposal::{
+    CrossJOpeningProposalSelection, CrossJOpeningSelectionError, CrossJOpeningSiblingAccountView,
+    CrossJOpeningSiblingEntityView, select_cross_j_opening_proposal,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,8 +26,9 @@ use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_canonical_cons
 
 use crate::{
     AccountProposalWork, CanonicalEntityTx, CrossJurisdictionRuntimeOutput,
-    EntityCanonicalCollection, EntityFrameAuthority, EntityKernelError, EntityStateSlice,
-    EntityTxKind, LocalEntityOutput, LocalEntityOutputTx, PairDimensions, SameJOffer, Side,
+    EntityCanonicalCollection, EntityFrameAuthority, EntityFrameEvent, EntityKernelError,
+    EntityStateSlice, EntityTxKind, LocalEntityOutput, LocalEntityOutputTx, PairDimensions,
+    SameJOffer, Side,
 };
 
 use crate::local_tx::is_self_runtime_continuation_kind;
@@ -30,6 +38,7 @@ use crate::orderbook::SameJOutputDelta;
 pub struct CrossJurisdictionApplyResult {
     pub outputs: Vec<LocalEntityOutput>,
     pub proposal_work: Vec<AccountProposalWork>,
+    pub(crate) events: Vec<EntityFrameEvent>,
     pub(crate) orderbook_deltas: Vec<SameJOutputDelta>,
     pub(crate) account_envelope_mutations: Vec<(String, crate::AccountEnvelopeMutation)>,
 }
@@ -675,9 +684,10 @@ fn terminal_route(route: &CanonicalValue) -> bool {
 }
 
 fn route_runtime_expired(route: &CanonicalValue, now_ms: u64) -> bool {
-    let deadline = field(route, "timePolicy")
-        .and_then(|policy| unsigned(policy, "runtimeExpiresAtMs"))
-        .or_else(|| unsigned(route, "expiresAt"))
+    let deadline = unsigned(route, "expiresAt")
+        .or_else(|| {
+            field(route, "timePolicy").and_then(|policy| unsigned(policy, "runtimeExpiresAtMs"))
+        })
         .unwrap_or(0);
     deadline > 0 && deadline <= now_ms
 }
@@ -1234,7 +1244,12 @@ pub(crate) fn validate_cross_jurisdiction_dispute_route(
         .as_ref()
         .and_then(|routes| routes.get(route_id))
         .filter(|route| text(route, "orderId") == Some(route_id))
-        .ok_or_else(|| invalid(kind, format!("CROSS_J_ROUTE_MISSING:{route_id}")))?;
+        .ok_or_else(|| {
+            invalid(
+                kind,
+                format!("DISPUTE_START_CROSS_J_ROUTE_MISSING:{route_id}"),
+            )
+        })?;
     let local = normalized(&state.entity_id);
     let counterparty = normalized(counterparty_entity_id);
     let pair_matches = |leg: &str| {
@@ -1247,20 +1262,23 @@ pub(crate) fn validate_cross_jurisdiction_dispute_route(
     if pair_matches("source") == pair_matches("target") {
         return Err(invalid(
             kind,
-            format!("CROSS_J_ROUTE_ROLE_MISMATCH:{route_id}"),
+            format!("DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:{route_id}"),
         ));
     }
     if terminal_route(route) {
         return Err(invalid(
             kind,
             format!(
-                "CROSS_J_ROUTE_INACTIVE:{route_id}:{}",
+                "DISPUTE_START_CROSS_J_ROUTE_INACTIVE:{route_id}:{}",
                 text(route, "status").unwrap_or_default()
             ),
         ));
     }
     if field(route, "sourcePull").is_none() || field(route, "targetPull").is_none() {
-        return Err(invalid(kind, format!("CROSS_J_PULLS_MISSING:{route_id}")));
+        return Err(invalid(
+            kind,
+            format!("DISPUTE_START_CROSS_J_PULLS_MISSING:{route_id}"),
+        ));
     }
     Ok(())
 }
@@ -1367,7 +1385,7 @@ pub(crate) fn queue_sibling_dispute_fanout(
         .map(EntityCanonicalCollection::text_entries)
         .transpose()?
         .unwrap_or_default();
-    let mut batches = std::collections::BTreeMap::<String, Vec<CanonicalEntityTx>>::new();
+    let mut batches = std::collections::BTreeMap::<(String, String), Vec<CanonicalEntityTx>>::new();
     for (route_id, mut route) in routes {
         if terminal_route(&route) {
             continue;
@@ -1424,33 +1442,36 @@ pub(crate) fn queue_sibling_dispute_fanout(
                 format!("SIBLING_DISPUTE_ROLE:{route_id}:{local}"),
             ));
         };
-        if text(&route, signer_field)
+        let target_signer = text(&route, signer_field)
             .map(normalized)
-            .is_none_or(|value| value.is_empty())
-        {
-            return Err(invalid(
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                invalid(
+                    kind,
+                    format!("SIBLING_DISPUTE_SIGNER_MISSING:{route_id}:{signer_field}"),
+                )
+            })?;
+        batches
+            .entry((target, target_signer))
+            .or_default()
+            .push(projected(
                 kind,
-                format!("SIBLING_DISPUTE_SIGNER_MISSING:{route_id}:{signer_field}"),
-            ));
-        }
-        batches.entry(target).or_default().push(projected(
-            kind,
-            CanonicalValue::Object(vec![
-                ("routeId".into(), string(route_id)),
-                (
-                    "observedCounterpartyEntityId".into(),
-                    string(counterparty.clone()),
-                ),
-                (
-                    "observedAt".into(),
-                    number(observed_at, kind, "OBSERVED_AT")?,
-                ),
-            ]),
-        )?);
+                CanonicalValue::Object(vec![
+                    ("routeId".into(), string(route_id)),
+                    (
+                        "observedCounterpartyEntityId".into(),
+                        string(counterparty.clone()),
+                    ),
+                    (
+                        "observedAt".into(),
+                        number(observed_at, kind, "OBSERVED_AT")?,
+                    ),
+                ]),
+            )?);
     }
     Ok(batches
         .into_iter()
-        .map(|(entity_id, txs)| routed(&entity_id, txs))
+        .map(|((entity_id, signer_id), txs)| routed(&entity_id, Some(signer_id), txs))
         .collect())
 }
 
@@ -1526,7 +1547,8 @@ pub(crate) fn apply_hash_ladder_reveal_registered(
     let binary = (event.fill_ratio > 0 && !event.target_role).then(|| hash_ladder_binary(event));
     let mut updates = Vec::<(String, CanonicalValue)>::new();
     let mut recovery_pull_ids = Vec::new();
-    let mut port_batches = std::collections::BTreeMap::<String, Vec<CanonicalEntityTx>>::new();
+    let mut port_batches =
+        std::collections::BTreeMap::<(String, String), Vec<CanonicalEntityTx>>::new();
 
     for (order_id, found) in routes.text_entries()? {
         let role_pull_name = if event.target_role {
@@ -1608,8 +1630,11 @@ pub(crate) fn apply_hash_ladder_reveal_registered(
                     )?,
                 ),
             ]);
+            let target_signer = route_signer(&found, &target).ok_or_else(|| {
+                cross_j_event_invalid(format!("CROSS_J_REVEAL_PORT_SIGNER_MISSING:{order_id}"))
+            })?;
             port_batches
-                .entry(target)
+                .entry((target, target_signer))
                 .or_default()
                 .push(projected(EntityTxKind::CrossJurisdictionSalvage, data)?);
         }
@@ -1671,7 +1696,7 @@ pub(crate) fn apply_hash_ladder_reveal_registered(
     }
     let outputs = port_batches
         .into_iter()
-        .map(|(entity_id, txs)| routed(&entity_id, txs))
+        .map(|((entity_id, signer_id), txs)| routed(&entity_id, Some(signer_id), txs))
         .collect::<Vec<_>>();
     recovery_pull_ids.sort();
     recovery_pull_ids.dedup();
@@ -1999,12 +2024,17 @@ fn apply_materialize_clear(
             trusted_gateway_entity_id: None,
         });
     }
-    collection(&mut state.cross_jurisdiction_swaps).insert(order_id, route)?;
+    collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![target, LocalEntityOutput::non_mutating_wake(local)],
         proposal_work: vec![AccountProposalWork {
             account_id: source_user,
             txs: account_txs,
+        }],
+        events: vec![EntityFrameEvent::Status {
+            message: format!(
+                "🌉 Cross-j clear {order_id} queued atomic Hub source+target close ratio={ratio}/65535"
+            ),
         }],
         ..CrossJurisdictionApplyResult::default()
     })
@@ -2401,14 +2431,34 @@ fn projected(
         .map_err(|error| invalid(kind, error.to_string()))
 }
 
-fn routed(entity_id: &str, txs: Vec<CanonicalEntityTx>) -> LocalEntityOutput {
+fn routed(
+    entity_id: &str,
+    target_signer_id: Option<String>,
+    txs: Vec<CanonicalEntityTx>,
+) -> LocalEntityOutput {
     LocalEntityOutput {
         entity_id: normalized(entity_id),
+        target_signer_id,
         entity_txs: txs
             .into_iter()
             .map(LocalEntityOutputTx::Projected)
             .collect(),
     }
+}
+
+fn routed_for_route(
+    route: &CanonicalValue,
+    entity_id: &str,
+    txs: Vec<CanonicalEntityTx>,
+    kind: EntityTxKind,
+) -> Result<LocalEntityOutput, EntityKernelError> {
+    let signer = route_signer(route, entity_id).ok_or_else(|| {
+        invalid(
+            kind,
+            format!("CROSS_J_TARGET_SIGNER_MISSING:{}", normalized(entity_id)),
+        )
+    })?;
+    Ok(routed(entity_id, Some(signer), txs))
 }
 
 pub(crate) fn plan_dispute_book_removal(
@@ -2451,14 +2501,14 @@ pub(crate) fn plan_dispute_book_removal(
             "sourceAccountId".into(),
             CanonicalValue::String(normalized(counterparty_entity_id)),
         ),
-        ("route".into(), route),
+        ("route".into(), route.clone()),
         (
             "reason".into(),
             CanonicalValue::String("account_dispute_prepare".into()),
         ),
     ]);
     Ok(DisputeBookRemovalPlan::Remote {
-        output: routed(&book_owner, vec![projected(kind, data)?]),
+        output: routed_for_route(&route, &book_owner, vec![projected(kind, data)?], kind)?,
     })
 }
 
@@ -2565,6 +2615,7 @@ pub(crate) fn commit_cross_jurisdiction_book_fill(
                     data: fill.ack_data,
                 }],
             }],
+            events: Vec::new(),
             orderbook_deltas: Vec::new(),
             account_envelope_mutations: Vec::new(),
         });
@@ -2593,14 +2644,17 @@ pub(crate) fn commit_cross_jurisdiction_book_fill(
         }
     }
     Ok(CrossJurisdictionApplyResult {
-        outputs: vec![routed(
+        outputs: vec![routed_for_route(
+            &fill.route,
             &source_hub,
             vec![projected(
                 EntityTxKind::CrossJurisdictionFillNotice,
                 CanonicalValue::Object(notice_fields),
             )?],
-        )],
+            kind,
+        )?],
         proposal_work: Vec::new(),
+        events: Vec::new(),
         orderbook_deltas: Vec::new(),
         account_envelope_mutations: Vec::new(),
     })
@@ -2681,13 +2735,18 @@ fn apply_prepare(
             return Ok(CrossJurisdictionApplyResult::default());
         }
         return Ok(CrossJurisdictionApplyResult {
-            outputs: vec![routed(
+            outputs: vec![routed_for_route(
+                &route,
                 &source_hub,
                 vec![route_tx(
                     EntityTxKind::PrepareCrossJurisdictionSwap,
                     &route,
                 )?],
-            )],
+                tx.kind,
+            )?],
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j swap {order_id} authorized by source user"),
+            }],
             ..CrossJurisdictionApplyResult::default()
         });
     }
@@ -2750,7 +2809,7 @@ fn apply_materialize_swap(
     if materialized_bytes != prior_bytes {
         return Err(invalid(tx.kind, format!("INTENT_MISMATCH:{order_id}")));
     }
-    collection(&mut state.cross_jurisdiction_swaps).insert(order_id, route.clone())?;
+    collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route.clone())?;
     let mut ready = route;
     set(
         &mut ready,
@@ -2764,9 +2823,14 @@ fn apply_materialize_swap(
     let register = route_tx(EntityTxKind::RegisterCrossJurisdictionSwap, &ready)?;
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![
-            routed(source_hub, vec![register.clone()]),
-            routed(target_hub, vec![register]),
+            routed_for_route(&ready, source_hub, vec![register.clone()], tx.kind)?,
+            routed_for_route(&ready, target_hub, vec![register], tx.kind)?,
         ],
+        events: vec![EntityFrameEvent::Status {
+            message: format!(
+                "🌉 Cross-j swap {order_id} paired source and target proposals requested by hub"
+            ),
+        }],
         ..CrossJurisdictionApplyResult::default()
     })
 }
@@ -2828,17 +2892,17 @@ fn cross_pull_lock(
     )
     .ok_or_else(|| invalid(kind, format!("{leg_name}:PULL_MISSING")))?;
     let mut data = Vec::new();
-    for name in [
-        "pullId",
-        "tokenId",
-        "signedAmount",
-        "fullHash",
-        "partialRoot",
-    ] {
+    for name in ["pullId", "tokenId", "fullHash", "partialRoot"] {
         let value =
             field(pull, name).ok_or_else(|| invalid(kind, format!("{leg_name}.{name}:MISSING")))?;
         data.push((name.into(), value.clone()));
     }
+    let signed_amount = field(pull, "signedAmount")
+        .ok_or_else(|| invalid(kind, format!("{leg_name}.signedAmount:MISSING")))?;
+    // The committed route calls the signed leg amount `signedAmount`, while
+    // the canonical Account `cross_pull_lock` wire calls the same value
+    // `amount`. Preserve the value exactly and change only its schema key.
+    data.push(("amount".into(), signed_amount.clone()));
     data.push((
         "crossJurisdiction".into(),
         pull_binding(route, leg_name, kind)?,
@@ -2911,6 +2975,34 @@ fn registration_work(
     Ok(Vec::new())
 }
 
+/// Exact Account ids whose committed cross-J routes may hold an opening
+/// mempool or pending cohort. This transient projection never scans unrelated
+/// Accounts or reads future Entity-mempool work.
+pub fn cross_j_opening_account_ids(
+    state: &EntityStateSlice,
+) -> Result<Vec<String>, EntityKernelError> {
+    let mut account_ids = BTreeSet::new();
+    for (_, route) in state
+        .cross_jurisdiction_swaps
+        .iter()
+        .flat_map(|routes| routes.keyed_values())
+    {
+        // TS selects an opening cohort from Account mempool legs. A committed
+        // intent without its two materialized pulls has no such legs yet and
+        // must not be interpreted as registration work while the materialize
+        // Entity frame is still being prepared.
+        if field(route, "sourcePull").is_none() || field(route, "targetPull").is_none() {
+            continue;
+        }
+        account_ids.extend(
+            registration_work(state, route, EntityTxKind::RegisterCrossJurisdictionSwap)?
+                .into_iter()
+                .map(|work| work.account_id),
+        );
+    }
+    Ok(account_ids.into_iter().collect())
+}
+
 fn apply_register(
     state: &mut EntityStateSlice,
     tx: &CanonicalEntityTx,
@@ -2932,6 +3024,9 @@ fn apply_register(
     {
         return Err(invalid(tx.kind, format!("NON_PARTICIPANT:{order_id}")));
     }
+    let registered_event = EntityFrameEvent::Status {
+        message: format!("🌉 Cross-j swap {order_id} registered"),
+    };
     let proposal_work = registration_work(state, &route, tx.kind)?;
     let collection = collection(&mut state.cross_jurisdiction_swaps);
     match collection.get(&order_id) {
@@ -2950,6 +3045,7 @@ fn apply_register(
     Ok(CrossJurisdictionApplyResult {
         outputs: Vec::new(),
         proposal_work,
+        events: vec![registered_event],
         orderbook_deltas: Vec::new(),
         account_envelope_mutations: Vec::new(),
     })
@@ -3057,13 +3153,29 @@ fn apply_admit(
     }
     collection(&mut state.cross_jurisdiction_book_admissions).insert(admission_key, admission)?;
     let (account_id, offer) = cross_jurisdiction_working_offer(&selected_route)?;
+    let reason = tx
+        .frame_data()
+        .and_then(|data| text(data, "reason"))
+        .filter(|reason| !reason.is_empty());
+    let suffix = reason.map_or_else(String::new, |reason| format!(": {reason}"));
     Ok(CrossJurisdictionApplyResult {
         outputs: Vec::new(),
         proposal_work: Vec::new(),
-        orderbook_deltas: vec![SameJOutputDelta::Upsert {
-            account_id,
-            offer: Box::new(offer),
+        events: vec![EntityFrameEvent::Status {
+            message: format!("🌉 Cross-j book admit {order_id}{suffix}"),
         }],
+        // TS accepts the admission without materializing an orderbook when
+        // this Entity has no orderbook extension. The admission and route are
+        // still committed; there is simply no local matcher projection.
+        orderbook_deltas: state
+            .orderbook
+            .is_some()
+            .then(|| SameJOutputDelta::Upsert {
+                account_id,
+                offer: Box::new(offer),
+            })
+            .into_iter()
+            .collect(),
         account_envelope_mutations: Vec::new(),
     })
 }
@@ -3081,6 +3193,19 @@ fn apply_remove_book_order(
     let source_entity = required_text(data, "sourceEntityId", tx)?;
     let source_account = required_text(data, "sourceAccountId", tx)?;
     let reason = text(data, "reason").unwrap_or("cancel_request");
+    let removal_message = format!(
+        "🌉 Cross-j book remove {order_id}{} {}",
+        if reason.is_empty() {
+            String::new()
+        } else {
+            format!(": {reason}")
+        },
+        if state.orderbook.is_some() {
+            "removed"
+        } else {
+            "not-present"
+        },
+    );
     if route_order_id(tx.kind, &route)? != order_id
         || nested_text(&route, "source", "entityId").map(normalized) != Some(source_entity.clone())
         || route_book_owner(&route) != normalized(&state.entity_id)
@@ -3148,7 +3273,7 @@ fn apply_remove_book_order(
             ("orderId".into(), string(&order_id)),
             ("sourceEntityId".into(), string(&source_entity)),
             ("sourceAccountId".into(), string(&source_account)),
-            ("route".into(), route),
+            ("route".into(), route.clone()),
             ("removedAt".into(), now.clone()),
             ("reason".into(), string(reason)),
         ]),
@@ -3163,8 +3288,11 @@ fn apply_remove_book_order(
     }
     collection(&mut state.cross_jurisdiction_book_admissions).insert(admission_key, admission)?;
     Ok(CrossJurisdictionApplyResult {
-        outputs: vec![routed(&source_hub, vec![ack])],
+        outputs: vec![routed_for_route(&route, &source_hub, vec![ack], tx.kind)?],
         proposal_work: Vec::new(),
+        events: vec![EntityFrameEvent::Status {
+            message: removal_message,
+        }],
         orderbook_deltas: vec![SameJOutputDelta::Remove {
             account_id: source_entity,
             offer_id: order_id,
@@ -3175,6 +3303,10 @@ fn apply_remove_book_order(
 
 fn apply_book_order_removed(
     state: &mut EntityStateSlice,
+    account_views: &std::collections::BTreeMap<
+        String,
+        crate::local_financial::LocalAccountFinancialView,
+    >,
     tx: &CanonicalEntityTx,
 ) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
     let data = tx
@@ -3233,18 +3365,46 @@ fn apply_book_order_removed(
             set(&mut pending, "bookRemovalCommittedAt", now.clone())?;
         }
         set(&mut admission, "pendingCancel", pending)?;
+        if text(&admission, "status") != Some("closed") {
+            set(&mut admission, "status", string("resolving"))?;
+            if field(&admission, "resolvingAt").is_none() {
+                set(&mut admission, "resolvingAt", now.clone())?;
+            }
+        }
         set(&mut admission, "updatedAt", now)?;
         collection(&mut state.cross_jurisdiction_book_admissions)
             .insert(admission_key, admission)?;
     }
+    let pending_dispute_removal = account_views
+        .get(&source_account)
+        .and_then(|view| view.dispute.as_ref())
+        .filter(|dispute| dispute.status == "dispute_preparing")
+        .and_then(|dispute| dispute.dispute_prepare.as_ref())
+        .and_then(|prepare| field(prepare, "pendingOrderbookRemovalIds"))
+        .is_some_and(|ids| {
+            matches!(ids, CanonicalValue::Array(values) if values.iter().any(|value| value == &string(&order_id)))
+        });
     Ok(CrossJurisdictionApplyResult {
         outputs: Vec::new(),
         proposal_work: Vec::new(),
+        events: vec![EntityFrameEvent::Status {
+            message: format!(
+                "🌉 Cross-j {} {order_id}",
+                if pending_dispute_removal {
+                    "dispute book removal confirmed"
+                } else {
+                    "book removal committed"
+                }
+            ),
+        }],
         orderbook_deltas: Vec::new(),
-        account_envelope_mutations: vec![(
-            source_account,
-            crate::AccountEnvelopeMutation::ConfirmDisputeBookRemoval { order_id },
-        )],
+        account_envelope_mutations: pending_dispute_removal
+            .then_some((
+                source_account,
+                crate::AccountEnvelopeMutation::ConfirmDisputeBookRemoval { order_id },
+            ))
+            .into_iter()
+            .collect(),
     })
 }
 
@@ -3654,13 +3814,11 @@ fn decode_signed_proof_pulls(
     delta_transformer: [u8; 20],
     kind: EntityTxKind,
 ) -> Result<Vec<SignedProofPull>, EntityKernelError> {
-    let mut canonical_clauses = 0_usize;
     let mut pulls = Vec::new();
     for (clause_index, clause) in body.transformers.iter().enumerate() {
         if clause.transformer_address != delta_transformer {
             continue;
         }
-        canonical_clauses += 1;
         let mut decoded =
             ethabi::decode(&[delta_batch_param()], &clause.encoded_batch).map_err(|error| {
                 invalid(
@@ -3723,9 +3881,6 @@ fn decode_signed_proof_pulls(
                 target_role,
             });
         }
-    }
-    if canonical_clauses == 0 {
-        return Err(invalid(kind, "CANONICAL_DELTA_TRANSFORMER_MISSING"));
     }
     Ok(pulls)
 }
@@ -3862,6 +4017,7 @@ fn queue_registration_broadcast(
     }
     outputs.push(routed(
         &local,
+        None,
         vec![projected(
             EntityTxKind::JBroadcast,
             CanonicalValue::Object(Vec::new()),
@@ -4081,6 +4237,7 @@ pub(crate) fn flush_pending_target_reveal_for_route(
             if broadcast_now && !broadcast_present {
                 outputs.push(routed(
                     &local,
+                    None,
                     vec![projected(
                         EntityTxKind::JBroadcast,
                         CanonicalValue::Object(Vec::new()),
@@ -4372,8 +4529,15 @@ fn apply_salvage(
             "updatedAt",
             number(state.timestamp, tx.kind, "TIMESTAMP")?,
         )?;
-        collection(&mut state.cross_jurisdiction_swaps).insert(route_id, route)?;
-        return Ok(CrossJurisdictionApplyResult::default());
+        collection(&mut state.cross_jurisdiction_swaps).insert(route_id.clone(), route)?;
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!(
+                    "⏳ Cross-j reveal port {route_id}: waiting for the target dispute clock"
+                ),
+            }],
+            ..CrossJurisdictionApplyResult::default()
+        });
     }
     let registration = crate::j_batch::HashLadderRegistration {
         counterparty_entity: word(&target_hub, tx.kind, "TARGET_COUNTERPARTY")?,
@@ -4410,6 +4574,7 @@ fn apply_salvage(
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![routed(
             &local,
+            None,
             vec![projected(
                 EntityTxKind::JBroadcast,
                 CanonicalValue::Object(Vec::new()),
@@ -4503,7 +4668,8 @@ fn queue_target_close(
     let target_pull_id = text(target_pull, "pullId")
         .filter(|value| !value.is_empty())
         .ok_or_else(|| invalid(kind, "TARGET_PULL_ID_MISSING"))?;
-    Ok(routed(
+    routed_for_route(
+        route,
         target_hub,
         vec![projected(
             EntityTxKind::CrossPullClose,
@@ -4516,7 +4682,8 @@ fn queue_target_close(
                 ("description".into(), string(description)),
             ]),
         )?],
-    ))
+        kind,
+    )
 }
 
 fn apply_clear_request(
@@ -4626,6 +4793,16 @@ fn apply_clear_request(
                 account_id: source_user.clone(),
                 txs: vec![AccountTx::CrossSwapFillAck { data: ack }],
             }],
+            events: vec![EntityFrameEvent::Status {
+                message: format!(
+                    "🌉 Cross-j clear {order_id} {}",
+                    if state.orderbook.is_some() {
+                        "removed live book order and queued account offer close before pull reveal"
+                    } else {
+                        "queued account offer close before pull reveal"
+                    }
+                ),
+            }],
             orderbook_deltas: vec![SameJOutputDelta::Remove {
                 account_id: source_user,
                 offer_id: order_id,
@@ -4663,7 +4840,7 @@ fn apply_clear_request(
             format!("Cross-j {order_id} paired pure-cancel target close"),
             tx.kind,
         )?;
-        collection(&mut state.cross_jurisdiction_swaps).insert(order_id, route)?;
+        collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
         return Ok(CrossJurisdictionApplyResult {
             outputs: vec![target, LocalEntityOutput::non_mutating_wake(local)],
             proposal_work: vec![AccountProposalWork {
@@ -4675,6 +4852,9 @@ fn apply_clear_request(
                         ("proof".into(), proof),
                     ]),
                 }],
+            }],
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j clear {order_id} queued atomic Hub pure-cancel close"),
             }],
             ..CrossJurisdictionApplyResult::default()
         });
@@ -4699,9 +4879,14 @@ fn apply_clear_request(
             "full_fill"
         }),
     )?;
-    collection(&mut state.cross_jurisdiction_swaps).insert(order_id, route)?;
+    collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![LocalEntityOutput::non_mutating_wake(local)],
+        events: vec![EntityFrameEvent::Status {
+            message: format!(
+                "🌉 Cross-j clear {order_id} awaiting proposer reveal ratio={ratio}/65535"
+            ),
+        }],
         ..CrossJurisdictionApplyResult::default()
     })
 }
@@ -4712,6 +4897,7 @@ fn extend_cross_jurisdiction_result(
 ) {
     target.outputs.extend(next.outputs);
     target.proposal_work.extend(next.proposal_work);
+    target.events.extend(next.events);
     target.orderbook_deltas.extend(next.orderbook_deltas);
     target
         .account_envelope_mutations
@@ -4725,6 +4911,7 @@ fn apply_orderbook_sweep(
         crate::local_financial::LocalAccountFinancialView,
     >,
     authority: &EntityFrameAuthority,
+    tx: &CanonicalEntityTx,
 ) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
     let local = normalized(&state.entity_id);
     let routes = state
@@ -4734,10 +4921,18 @@ fn apply_orderbook_sweep(
         .transpose()?
         .unwrap_or_default();
     let mut combined = CrossJurisdictionApplyResult::default();
+    let mut expired_routes = 0_u64;
+    let mut closed_offers = 0_u64;
+    let mut waiting_routes = 0_u64;
     for (order_id, route) in routes {
-        if terminal_route(&route) || !route_runtime_expired(&route, state.timestamp) {
+        if terminal_route(&route) {
             continue;
         }
+        if !route_runtime_expired(&route, state.timestamp) {
+            waiting_routes += 1;
+            continue;
+        }
+        expired_routes += 1;
         let source_hub = nested_text(&route, "source", "counterpartyEntityId")
             .map(normalized)
             .ok_or_else(|| {
@@ -4747,6 +4942,7 @@ fn apply_orderbook_sweep(
                 )
             })?;
         if source_hub != local {
+            waiting_routes += 1;
             continue;
         }
         validate_local_route_binding(
@@ -4762,11 +4958,26 @@ fn apply_orderbook_sweep(
                 ("cancelRemainder".into(), CanonicalValue::Bool(true)),
             ]),
         )?;
-        extend_cross_jurisdiction_result(
-            &mut combined,
-            apply_clear_request(state, account_views, &clear)?,
-        );
+        let cleared = apply_clear_request(state, account_views, &clear)?;
+        if cleared.proposal_work.iter().any(|work| {
+            work.txs
+                .iter()
+                .any(|tx| matches!(tx, AccountTx::CrossSwapFillAck { .. }))
+        }) {
+            closed_offers += 1;
+        }
+        extend_cross_jurisdiction_result(&mut combined, cleared);
     }
+    let reason = tx
+        .frame_data()
+        .and_then(|data| text(data, "reason"))
+        .filter(|reason| !reason.is_empty());
+    let suffix = reason.map_or_else(String::new, |reason| format!(": {reason}"));
+    combined.events.push(EntityFrameEvent::Status {
+        message: format!(
+            "🌉 Cross-j orderbook sweep{suffix} expired={expired_routes} closedOffers={closed_offers} waiting={waiting_routes}"
+        ),
+    });
     Ok(combined)
 }
 
@@ -5248,7 +5459,12 @@ fn apply_fill_notice(
         if incoming_seq == current_seq && !same_committed()? {
             return Err(invalid(tx.kind, "STALE_CONFLICT"));
         }
-        return Ok(CrossJurisdictionApplyResult::default());
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j fill notice {order_id} duplicate seq {incoming_seq}"),
+            }],
+            ..CrossJurisdictionApplyResult::default()
+        });
     }
 
     let same_seq_cancel = cancel && incoming_seq == current_seq;
@@ -5304,14 +5520,11 @@ fn apply_fill_notice(
                 CanonicalValue::BigInt(BigInt::from(0)),
             ),
             ("cancelRemainder".into(), CanonicalValue::Bool(true)),
-            (
-                "pairId".into(),
-                field(data, "pairId")
-                    .cloned()
-                    .ok_or_else(|| invalid(tx.kind, "PAIR_ID_MISSING"))?,
-            ),
-            ("comment".into(), string("cross-j-cancel-request")),
         ]);
+        if let Some(pair_id) = field(data, "pairId") {
+            fields.push(("pairId".into(), pair_id.clone()));
+        }
+        fields.push(("comment".into(), string("cross-j-cancel-request")));
         if let Some(route_hash) = text(route, "routeHash") {
             fields.push(("routeHash".into(), string(route_hash)));
         }
@@ -5413,17 +5626,14 @@ fn apply_fill_notice(
                 CanonicalValue::BigInt(incremental_target),
             ),
             ("cancelRemainder".into(), CanonicalValue::Bool(terminal)),
-            (
-                "pairId".into(),
-                field(data, "pairId")
-                    .cloned()
-                    .ok_or_else(|| invalid(tx.kind, "PAIR_ID_MISSING"))?,
-            ),
-            (
-                "comment".into(),
-                string(format!("cross-j-hashledger-fill:{next_ratio}")),
-            ),
         ];
+        if let Some(pair_id) = field(data, "pairId") {
+            fields.push(("pairId".into(), pair_id.clone()));
+        }
+        fields.push((
+            "comment".into(),
+            string(format!("cross-j-hashledger-fill:{next_ratio}")),
+        ));
         if let Some(route_hash) = text(route, "routeHash") {
             fields.push(("routeHash".into(), string(route_hash)));
         }
@@ -5440,6 +5650,8 @@ fn apply_fill_notice(
         CanonicalValue::Object(fields)
     };
 
+    let queued_ratio = unsigned(&ack_data, "cumulativeFillRatio")
+        .ok_or_else(|| invalid(tx.kind, "FILL_RATIO_MISSING"))?;
     let tx = if source_role {
         AccountTx::CrossSwapFillAck { data: ack_data }
     } else {
@@ -5455,6 +5667,12 @@ fn apply_fill_notice(
         proposal_work: vec![AccountProposalWork {
             account_id: peer,
             txs: vec![tx],
+        }],
+        events: vec![EntityFrameEvent::Status {
+            message: format!(
+                "🌉 Cross-j {} progress {order_id} queued {queued_ratio}/65535",
+                if source_role { "source" } else { "target" }
+            ),
         }],
         orderbook_deltas: Vec::new(),
         account_envelope_mutations: Vec::new(),
@@ -5476,6 +5694,9 @@ fn apply_progress(
         .map(normalized)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| invalid(tx.kind, "SOURCE_ENTITY_MISSING"))?;
+    let reason = text(data, "reason").filter(|reason| !reason.is_empty());
+    let suffix = reason.map_or_else(String::new, |reason| format!(": {reason}"));
+    let progress_message = format!("🌉 Cross-j book progress {order_id}{suffix}");
     let admission_key = format!("{source_entity}:{order_id}");
     let mut admission = state
         .cross_jurisdiction_book_admissions
@@ -5533,7 +5754,12 @@ fn apply_progress(
         }
         collection(&mut state.cross_jurisdiction_book_admissions)
             .insert(admission_key, admission)?;
-        return Ok(CrossJurisdictionApplyResult::default());
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: progress_message,
+            }],
+            ..CrossJurisdictionApplyResult::default()
+        });
     }
     collection(&mut state.cross_jurisdiction_book_admissions).insert(admission_key, admission)?;
     let orderbook_deltas = if terminal {
@@ -5550,6 +5776,9 @@ fn apply_progress(
     };
     Ok(CrossJurisdictionApplyResult {
         orderbook_deltas,
+        events: vec![EntityFrameEvent::Status {
+            message: progress_message,
+        }],
         ..Default::default()
     })
 }
@@ -5587,12 +5816,14 @@ pub fn apply_cross_jurisdiction_entity_txs(
                 apply_clear_request(state, account_views, tx)?
             }
             EntityTxKind::OrderbookSweepCrossJurisdiction => {
-                apply_orderbook_sweep(state, account_views, authority)?
+                apply_orderbook_sweep(state, account_views, authority, tx)?
             }
             EntityTxKind::CrossJurisdictionFillNotice => apply_fill_notice(state, tx)?,
             EntityTxKind::ApplyCrossJurisdictionBookProgress => apply_progress(state, tx)?,
             EntityTxKind::RemoveCrossJurisdictionBookOrder => apply_remove_book_order(state, tx)?,
-            EntityTxKind::CrossJurisdictionBookOrderRemoved => apply_book_order_removed(state, tx)?,
+            EntityTxKind::CrossJurisdictionBookOrderRemoved => {
+                apply_book_order_removed(state, account_views, tx)?
+            }
             other => return Err(invalid(other, "HANDLER_NOT_IMPLEMENTED")),
         };
         extend_cross_jurisdiction_result(&mut combined, result);
@@ -5603,6 +5834,66 @@ pub fn apply_cross_jurisdiction_entity_txs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_account_ids_read_nothing_without_committed_routes() {
+        let state = EntityStateSlice::empty("source-hub", 1);
+        assert_eq!(
+            cross_j_opening_account_ids(&state).expect("empty projection"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn opening_account_ids_ignore_unmaterialized_intent_without_pulls() {
+        let mut state = EntityStateSlice::empty("source-hub", 1);
+        collection(&mut state.cross_jurisdiction_swaps)
+            .insert("order-1".into(), route("intent", false))
+            .expect("intent");
+        assert_eq!(
+            cross_j_opening_account_ids(&state).expect("unmaterialized intent projection"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn pull_detection_ignores_absent_and_custom_transformers_but_rejects_malformed_canonical() {
+        let canonical = [0x11; 20];
+        let bare = crate::j_batch::ProofBody {
+            watch_seed: [0; 32],
+            left_response_seconds: 1,
+            right_response_seconds: 1,
+            offdeltas: Vec::new(),
+            token_ids: Vec::new(),
+            transformers: Vec::new(),
+        };
+        assert!(!proof_body_has_signed_pulls(&bare, canonical).expect("pull-free proof"));
+
+        let mut custom_only = bare.clone();
+        custom_only
+            .transformers
+            .push(crate::j_batch::TransformerClause {
+                transformer_address: [0x22; 20],
+                encoded_batch: vec![0xff],
+                allowances: Vec::new(),
+            });
+        assert!(
+            !proof_body_has_signed_pulls(&custom_only, canonical)
+                .expect("opaque custom transformer")
+        );
+
+        let mut malformed_canonical = bare;
+        malformed_canonical
+            .transformers
+            .push(crate::j_batch::TransformerClause {
+                transformer_address: canonical,
+                encoded_batch: vec![0xff],
+                allowances: Vec::new(),
+            });
+        let error = proof_body_has_signed_pulls(&malformed_canonical, canonical)
+            .expect_err("malformed canonical transformer must fail");
+        assert!(error.to_string().contains("CANONICAL_DELTA_BATCH_INVALID"));
+    }
 
     fn obj(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
         CanonicalValue::Object(
@@ -6070,7 +6361,8 @@ mod tests {
             ]),
         )
         .expect("ack");
-        let result = apply_book_order_removed(&mut source_hub, &ack).expect("apply ack");
+        let result =
+            apply_book_order_removed(&mut source_hub, &BTreeMap::new(), &ack).expect("apply ack");
         assert!(matches!(
             result.account_envelope_mutations.as_slice(),
             [(account, crate::AccountEnvelopeMutation::ConfirmDisputeBookRemoval { order_id })]
@@ -6120,6 +6412,14 @@ mod tests {
                 .map(|output| output.entity_id.as_str())
                 .collect::<Vec<_>>(),
             ["source-hub", "target-hub"]
+        );
+        assert_eq!(
+            result
+                .outputs
+                .iter()
+                .map(|output| output.target_signer_id.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("source-hub-signer"), Some("target-hub-signer")]
         );
         assert!(result.outputs.iter().all(|output| matches!(
             output.entity_txs.as_slice(),

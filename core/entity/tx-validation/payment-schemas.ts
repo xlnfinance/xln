@@ -33,9 +33,12 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
   },
   disputeStart: {
     required: { counterpartyEntityId: 'string' },
+    // The counter commitment is derived from the higher-priority bilaterally
+    // signed proof. A wire override is not Hanko-bound and must remain an
+    // unknown field instead of becoming attacker-selected finalize evidence.
     optional: {
       crossJurisdictionRouteId: 'string', starterInitialArguments: 'string',
-      starterCounterArguments: 'string', starterCounterProofCommitment: 'string', description: 'string',
+      starterCounterArguments: 'string', description: 'string',
     },
   },
   disputeFinalize: {

@@ -23,9 +23,7 @@ use super::context_projection::{EntityContextProjectionError, prepare_entity_con
 use super::entity_checkpoint_projection::{
     EntityCheckpointProjectionError, prepare_entity_checkpoint,
 };
-use super::machine_snapshot::{
-    PreparedRuntimeMachineGraph, RuntimeMachineProjectionError, prepare_runtime_machine_graph,
-};
+use super::machine_snapshot::{RuntimeMachineProjectionError, prepare_runtime_machine_graph};
 use super::replica_meta::{PreparedReplicaMeta, ReplicaMetaProjectionError, prepare_replica_meta};
 use super::{EntityOutputEncodingError, EntityRouteError, EntityRouteTable};
 
@@ -138,6 +136,9 @@ pub(crate) struct ProjectedRuntimeFrame {
     /// transition. This is deliberately diagnostic-only: it is returned only
     /// after WAL fsync and never becomes a second consensus commitment.
     pub account_commits: Vec<crate::AccountCommitEvidence>,
+    /// Exact self-routed Runtime inputs derived during exact replay. They are
+    /// compared with the TS plan seam and never enqueued or persisted.
+    pub local_continuations: Vec<serde_json::Value>,
     pub post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
     pub accepted_payments: usize,
     pub completed_payments: usize,
@@ -292,6 +293,7 @@ pub(crate) fn project_durable_frame(
     routes: &EntityRouteTable,
     prior_checkpoint_rows: Option<&BTreeMap<Vec<u8>, Vec<u8>>>,
     capture_replay_diagnostics: bool,
+    exact_replay: bool,
 ) -> Result<DurableProjection, RuntimeFrameProjectionError> {
     let checkpoint_due = checkpoint_graph_due(&result);
     let Some(applied) = result.applied_frame.take() else {
@@ -482,16 +484,24 @@ pub(crate) fn project_durable_frame(
     };
     let mut local_outputs = Vec::new();
     for entity in &mut result.outputs.entities {
+        let atomic_pair = entity.atomic_cross_jurisdiction_pair.clone();
         local_outputs.extend(
             std::mem::take(&mut entity.local_entity_outputs)
                 .into_iter()
-                .map(|output| (entity.entity_id, entity.signer_id.clone(), output)),
+                .map(|output| {
+                    (
+                        entity.entity_id,
+                        entity.signer_id.clone(),
+                        atomic_pair.clone(),
+                        output,
+                    )
+                }),
         );
     }
     let local_output_done = prelude_started.elapsed();
     let worker_key = local_outputs
         .first()
-        .map(|(entity_id, signer_id, _)| RuntimeEntityKey {
+        .map(|(entity_id, signer_id, _, _)| RuntimeEntityKey {
             entity_id: *entity_id,
             signer_id: signer_id.clone(),
         });
@@ -501,7 +511,7 @@ pub(crate) fn project_durable_frame(
     let projection_outputs = local_outputs
         .into_iter()
         .enumerate()
-        .map(|(index, (entity_id, signer_id, output))| {
+        .map(|(index, (entity_id, signer_id, atomic_pair, output))| {
             let key = RuntimeEntityKey {
                 entity_id,
                 signer_id: signer_id.clone(),
@@ -512,7 +522,7 @@ pub(crate) fn project_durable_frame(
                 .e_replicas
                 .get(&key)
                 .map(|state| state.entity.entity_id.clone());
-            (index, source_entity_id, signer_id, output)
+            (index, source_entity_id, signer_id, atomic_pair, output)
         })
         .collect::<Vec<_>>();
     let bound = if let Some(worker_key) = worker_key {
@@ -527,7 +537,7 @@ pub(crate) fn project_durable_frame(
             .accounts
             .map_stateless_ordered(
                 projection_outputs,
-                move |(index, source_entity_id, signer_id, output)| {
+                move |(index, source_entity_id, signer_id, atomic_pair, output)| {
                     let source_entity_id = source_entity_id
                         .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
                     let value = super::output::encode_local_entity_output(
@@ -536,14 +546,32 @@ pub(crate) fn project_durable_frame(
                         &source_entity_id,
                         &signer_id,
                     )?;
-                    Ok::<_, RuntimeFrameProjectionError>(routes.bind_and_encode_one(
+                    let mut bound = routes.bind_and_encode_one(
                         value,
                         index,
                         source_height,
                         source_timestamp,
                         &source_entity_id,
                         &signer_id,
-                    )?)
+                    )?;
+                    if let Some(pair) = atomic_pair {
+                        let super::routing::BoundEntityOutput::Remote { row, value } = &mut bound
+                        else {
+                            return Err(RuntimeFrameProjectionError::AtomicPairLocalOutput);
+                        };
+                        let object = value
+                            .as_object_mut()
+                            .ok_or(RuntimeFrameProjectionError::AtomicPairOutputObject)?;
+                        object.insert(
+                            "atomicCrossJurisdictionPair".into(),
+                            serde_json::json!({
+                                "phase": pair.phase,
+                                "pairKey": pair.pair_key,
+                            }),
+                        );
+                        *row = crate::transport::msgpack::encode_framed(value)?;
+                    }
+                    Ok::<_, RuntimeFrameProjectionError>(bound)
                 },
             )?
             .into_iter()
@@ -553,10 +581,14 @@ pub(crate) fn project_durable_frame(
     };
     let bound_outputs = EntityRouteTable::collect_bound(bound);
     let bind_done = prelude_started.elapsed();
+    let local_continuations =
+        local_continuation_evidence(&bound_outputs.local_continuations, exact_replay);
     enqueue_local_continuations(
-        &mut result,
+        &mut result.replica.mempool,
+        result.replica.limits,
         bound_outputs.local_continuations,
         &applied.frame,
+        exact_replay,
     )?;
     let continuation_done = prelude_started.elapsed();
 
@@ -626,37 +658,40 @@ pub(crate) fn project_durable_frame(
     let materialized_state = checkpoint_changes.is_some();
     let canonical_due = materialized_state
         || (canonical_period > 0 && (height == 1 || height.is_multiple_of(canonical_period)));
-    let canonical_projection = if canonical_due {
-        let machine = runtime_machine(&result);
-        Some(canonical_state(&result, &machine)?)
+    let canonical_state = if canonical_due {
+        Some(canonical_state(&result)?)
     } else {
         None
     };
-    let (canonical_state, runtime_machine_root, frame_graph) = match canonical_projection {
-        Some((canonical, graph)) => {
-            let root = RuntimeMachineGraphRoot {
-                root_hash: graph.root_hash,
-                leaf_count: graph.leaf_count,
-            };
-            let checkpoint = CheckpointGraph {
-                state_root: canonical.state_hash,
-                full: false,
-                // This vector has a single owner after projection. Moving it
-                // avoids cloning every changed Account/Entity path at each
-                // materialization cadence before the same rows enter WAL.
-                node_changes: checkpoint_changes.unwrap_or_default(),
-                runtime_machine_leaves: graph
-                    .leaves
-                    .into_iter()
-                    .map(|leaf| RuntimeMachineLeafRow {
-                        path_bytes: leaf.path_bytes,
-                        value_bytes: leaf.value_bytes,
-                    })
-                    .collect(),
-            };
-            (Some(canonical), Some(root), Some(checkpoint))
-        }
-        None => (None, None, None),
+    let (runtime_machine_root, frame_graph) = if materialized_state {
+        let machine = runtime_machine(&result)?;
+        let graph = prepare_runtime_machine_graph(&machine)?;
+        let canonical = canonical_state.as_ref().ok_or(
+            RuntimeFrameProjectionError::CheckpointGraphUnavailable(height),
+        )?;
+        let root = RuntimeMachineGraphRoot {
+            root_hash: graph.root_hash,
+            leaf_count: graph.leaf_count,
+        };
+        let checkpoint = CheckpointGraph {
+            state_root: canonical.state_hash,
+            full: false,
+            // This vector has a single owner after projection. Moving it
+            // avoids cloning every changed Account/Entity path at each
+            // materialization cadence before the same rows enter WAL.
+            node_changes: checkpoint_changes.unwrap_or_default(),
+            runtime_machine_leaves: graph
+                .leaves
+                .into_iter()
+                .map(|leaf| RuntimeMachineLeafRow {
+                    path_bytes: leaf.path_bytes,
+                    value_bytes: leaf.value_bytes,
+                })
+                .collect(),
+        };
+        (Some(root), Some(checkpoint))
+    } else {
+        (None, None)
     };
     let draft = CanonicalRuntimeFrameDraft {
         height: result.replica.state.height,
@@ -771,6 +806,7 @@ pub(crate) fn project_durable_frame(
         replica: result.replica,
         commitments,
         account_commits,
+        local_continuations,
         post_commit_j_attempts,
         accepted_payments,
         completed_payments,
@@ -792,11 +828,17 @@ pub(crate) fn project_durable_frame(
 }
 
 fn enqueue_local_continuations(
-    result: &mut RuntimeApplyResult,
+    mempool: &mut crate::RuntimeMempool,
+    limits: crate::RuntimeLimits,
     entity_inputs: Vec<crate::RuntimeEntityInput>,
     frame: &crate::RuntimeFrameContext,
+    exact_replay: bool,
 ) -> Result<(), RuntimeFrameProjectionError> {
-    if entity_inputs.is_empty() {
+    // The WAL already owns the exact height and order of every locally routed
+    // continuation. Re-deriving one while replaying an earlier frame moves it
+    // ahead of ingress that TS had already accepted, producing a different
+    // RuntimeInput even though Entity/Account execution is identical.
+    if exact_replay || entity_inputs.is_empty() {
         return Ok(());
     }
     let mut input = crate::RuntimeInput {
@@ -804,9 +846,61 @@ fn enqueue_local_continuations(
         entity_inputs,
         frame: frame.clone(),
     };
-    let limits = result.replica.limits;
-    crate::enqueue_runtime_input(&mut result.replica.mempool, &mut input, limits)?;
+    crate::enqueue_runtime_input(mempool, &mut input, limits)?;
     Ok(())
+}
+
+fn local_continuation_evidence(
+    inputs: &[crate::RuntimeEntityInput],
+    exact_replay: bool,
+) -> Vec<Value> {
+    if !exact_replay {
+        return Vec::new();
+    }
+    inputs
+        .iter()
+        .map(|input| input.canonical().clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod local_continuation_tests {
+    use serde_json::json;
+
+    use super::{enqueue_local_continuations, local_continuation_evidence};
+
+    fn input(entity_txs: serde_json::Value) -> crate::RuntimeEntityInput {
+        crate::RuntimeEntityInput::decode(json!({
+            "entityId": format!("0x{}", "11".repeat(32)),
+            "signerId": "local-signer",
+            "entityTxs": entity_txs,
+        }))
+        .expect("local continuation")
+    }
+
+    #[test]
+    fn exact_replay_consumes_recorded_continuations_without_rederiving_them() {
+        let frame = crate::RuntimeFrameContext {
+            timestamp: 77,
+            finalized_j_height: 0,
+            entity_contexts: std::collections::BTreeMap::new(),
+        };
+        let limits = crate::RuntimeLimits::hlt();
+        let mut replay = crate::RuntimeMempool::empty();
+        let continuation = input(json!([]));
+        let evidence = local_continuation_evidence(std::slice::from_ref(&continuation), true);
+        assert_eq!(evidence, vec![continuation.canonical().clone()]);
+        assert!(local_continuation_evidence(std::slice::from_ref(&continuation), false).is_empty());
+        enqueue_local_continuations(&mut replay, limits, vec![continuation], &frame, true)
+            .expect("exact replay projection");
+        assert!(replay.is_empty());
+
+        let mut live = crate::RuntimeMempool::empty();
+        enqueue_local_continuations(&mut live, limits, vec![input(json!([]))], &frame, false)
+            .expect("live projection");
+        assert_eq!(live.entity_input_count(), 1);
+        assert_eq!(live.queued_at(), Some(77));
+    }
 }
 
 fn runtime_input(
@@ -932,9 +1026,9 @@ fn encode_runtime_txs<'a>(
 
 /// The Runtime mempool is ephemeral replica-envelope state: it is never a
 /// durable Runtime-machine component, so no pending queue is projected here.
-fn runtime_machine(result: &RuntimeApplyResult) -> Value {
+fn runtime_machine(result: &RuntimeApplyResult) -> Result<Value, RuntimeFrameProjectionError> {
     let envelope = &result.replica.durable;
-    object([
+    Ok(object([
         (
             "runtimeId",
             Value::String(envelope.runtime_id().to_string()),
@@ -944,30 +1038,31 @@ fn runtime_machine(result: &RuntimeApplyResult) -> Value {
             Value::String(envelope.active_jurisdiction().to_string()),
         ),
         ("runtimeConfig", envelope.runtime_config().value()),
-        ("infrastructure", envelope.infrastructure().clone()),
+        (
+            "infrastructure",
+            super::envelope::project_durable_infrastructure(envelope.infrastructure())?,
+        ),
         ("jReplicas", envelope.j_replicas().clone()),
-    ])
+    ]))
 }
 
 /// Hash the replay-verifiable machine components without first cloning them
 /// into a second serde tree. The complete machine projection is materialized
-/// only on its canonical/checkpoint cadence.
+/// only at checkpoint cadence; canonical-only frames never build it.
 fn component_digests(
     result: &RuntimeApplyResult,
 ) -> Result<Vec<RuntimeComponentDigest>, RuntimeFrameProjectionError> {
     let envelope = &result.replica.durable;
     let cache = envelope.component_digest_cache();
     let runtime_id = Value::String(envelope.runtime_id().to_string());
+    let infrastructure =
+        super::envelope::project_durable_infrastructure(envelope.infrastructure())?;
     // Each digest commits the same canonical value every frame until its
     // component mutates; the envelope clears the matching cell on mutation,
     // so a cache hit is byte-identical to recomputation.
     [
         ("runtimeId", &runtime_id, &cache.runtime_id),
-        (
-            "infrastructure",
-            envelope.infrastructure(),
-            &cache.infrastructure,
-        ),
+        ("infrastructure", &infrastructure, &cache.infrastructure),
         ("jReplicas", envelope.j_replicas(), &cache.j_replicas),
     ]
     .into_iter()
@@ -1049,8 +1144,7 @@ fn assert_certified_result(
 
 fn canonical_state(
     result: &RuntimeApplyResult,
-    machine: &Value,
-) -> Result<(CanonicalStateCommitment, PreparedRuntimeMachineGraph), RuntimeFrameProjectionError> {
+) -> Result<CanonicalStateCommitment, RuntimeFrameProjectionError> {
     let mut entity_hashes = Vec::with_capacity(result.replica.state.e_replicas.len());
     let mut stored_entity_hashes = Vec::with_capacity(result.replica.state.e_replicas.len());
     for (entity_id, state) in &result.replica.state.e_replicas {
@@ -1077,16 +1171,11 @@ fn canonical_state(
         result.replica.state.height,
         result.replica.state.timestamp,
         &entity_hashes,
-        Some(machine),
     )?;
-    let graph = prepare_runtime_machine_graph(machine)?;
-    Ok((
-        CanonicalStateCommitment {
-            state_hash: parse_digest(&state_hash)?,
-            entity_hashes: stored_entity_hashes,
-        },
-        graph,
-    ))
+    Ok(CanonicalStateCommitment {
+        state_hash: parse_digest(&state_hash)?,
+        entity_hashes: stored_entity_hashes,
+    })
 }
 
 fn merge_checkpoint_changes(
@@ -1168,6 +1257,10 @@ pub(crate) enum RuntimeFrameProjectionError {
     SwapCount(u64),
     #[error("RRS_PROCESSOR_OUTPUT_COUNT:{0}")]
     OutputCount(usize),
+    #[error("RRS_PROCESSOR_ATOMIC_PAIR_LOCAL_OUTPUT")]
+    AtomicPairLocalOutput,
+    #[error("RRS_PROCESSOR_ATOMIC_PAIR_OUTPUT_OBJECT")]
+    AtomicPairOutputObject,
     #[error("RRS_PROCESSOR_CHECKPOINT_GRAPH_UNAVAILABLE:{0}")]
     CheckpointGraphUnavailable(u64),
     #[error("RRS_PROCESSOR_CHECKPOINT_KEY_DUPLICATE:{0:?}")]
@@ -1190,6 +1283,8 @@ pub(crate) enum RuntimeFrameProjectionError {
     Machine(#[from] RuntimeMachineProjectionError),
     #[error(transparent)]
     RuntimeMachine(#[from] crate::RuntimeMachineError),
+    #[error(transparent)]
+    Envelope(#[from] super::envelope::RuntimeDurableEnvelopeError),
     #[error(transparent)]
     AccountBatch(#[from] xln_rscore_batch::BatchError),
     #[error(transparent)]

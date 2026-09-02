@@ -42,7 +42,8 @@ pub use consensus::incoming::types::{
     validate_account_input_envelope,
 };
 pub use consensus::proposal::propose::{
-    Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
+    AccountProposalSelection, Disposition, DroppedTx, ProposalOutcome, ProposedFrame,
+    propose_account_frame, propose_account_frame_with_selection,
 };
 pub use consensus::replica::{
     AccountAdmission, AccountConsensus, AccountDisputeFinality, AccountDisputeFinalityResult,
@@ -81,6 +82,7 @@ pub use j_claims::{
 };
 pub use state::account_replica_shell::{AccountEnvelope, EnvelopeError};
 pub use state::delta::{Delta, DeltaPerspective, TokenId};
+pub use state::{RebalanceRefundState, RebalanceRequestFeeState};
 pub use tx::apply::{AccountTransition, AccountVerdict, SequentialAccountEngine};
 pub use xln_rscore_hanko::BoardDelays;
 // The canonical value model is part of the engine's public boundary: the

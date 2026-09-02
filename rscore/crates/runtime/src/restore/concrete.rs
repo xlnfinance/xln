@@ -68,16 +68,21 @@ pub struct DecodedRuntimeWalFrame {
     /// same root; callers must never feed the just-computed Rust value back as
     /// fake expected evidence.
     pub expected_accounts_root: Option<[u8; 32]>,
-    /// Runtime-only frames do not create a new Entity frame and therefore
-    /// carry no canonicalEntityHashes row. Their previous certified Entity
-    /// head remains authoritative.
-    pub expected_entity_root: Option<[u8; 32]>,
+    /// Canonical Runtime hashes may re-commit an unchanged Entity on a
+    /// Runtime-only frame. Retain the Entity id with the root instead of
+    /// inferring its owner from a newly emitted Entity output.
+    pub expected_entity_root: Option<ExpectedEntityRoot>,
     pub expected_previous_frame_hash: [u8; 32],
     pub expected_frame_hash: [u8; 32],
     /// The frame's committed canonical Runtime state hash, when the frame
     /// carries one. Exposed from the one validation pass the decode already
     /// runs so callers never re-parse the frame to read it.
     pub canonical_state_hash: Option<[u8; 32]>,
+}
+
+pub struct ExpectedEntityRoot {
+    pub entity_id: [u8; 32],
+    pub root: [u8; 32],
 }
 
 pub struct RestoredRuntime {
@@ -94,6 +99,10 @@ pub enum ConcreteRestoreError {
     SignerRequired,
     #[error("RRS_RESTORE_CHECKPOINT_OWNER_MISMATCH")]
     OwnerMismatch,
+    #[error("RRS_RESTORE_WAL_ENTITY_REPLICA_MISSING:height={height}")]
+    WalEntityReplicaMissing { height: u64 },
+    #[error("RRS_RESTORE_WAL_ENTITY_REPLICA_AMBIGUOUS:height={height}:count={count}")]
+    WalEntityReplicaAmbiguous { height: u64, count: usize },
     #[error("RRS_RESTORE_CHECKPOINT_ENTITY_ROOT:expected={expected}:actual={actual}")]
     EntityRoot { expected: String, actual: String },
     #[error("RRS_RESTORE_WAL_HEIGHT:expected={expected}:actual={actual}")]
@@ -334,17 +343,25 @@ pub fn replay_decoded_runtime_wal(
             .unwrap_or([0; 32]);
         assert_accounts_root(frame.height, accounts_root, frame.expected_accounts_root)?;
         if let Some(expected) = frame.expected_entity_root {
-            let _output = entity_output.ok_or(ConcreteRestoreError::OwnerMismatch)?;
-            let live = applied
+            let matching = applied
                 .replica
                 .e_replicas
-                .get(
-                    entity_key
-                        .as_ref()
-                        .ok_or(ConcreteRestoreError::OwnerMismatch)?,
-                )
-                .ok_or(ConcreteRestoreError::OwnerMismatch)?;
-            assert_entity_root(&live.entity_consensus.state.sections, expected)?;
+                .iter()
+                .filter(|(key, _)| key.entity_id == expected.entity_id)
+                .collect::<Vec<_>>();
+            let [(_, live)] = matching.as_slice() else {
+                return Err(if matching.is_empty() {
+                    ConcreteRestoreError::WalEntityReplicaMissing {
+                        height: frame.height,
+                    }
+                } else {
+                    ConcreteRestoreError::WalEntityReplicaAmbiguous {
+                        height: frame.height,
+                        count: matching.len(),
+                    }
+                });
+            };
+            assert_entity_root(&live.entity_consensus.state.sections, expected.root)?;
         }
         let mut replica = applied.replica;
         replica.durable.advance_frame_hash(

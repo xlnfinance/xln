@@ -19,6 +19,7 @@ import { tsAccountLogicalShard } from './sharding';
 import { decodeWorkerInitPayload, decodeWorkerPhasePayload } from './worker-boundary';
 import {
   collectWorkerPostAccounts,
+  projectWorkerPostAccounts,
   computeWorkerShardCommitment,
   createWorkerConsensusContext,
   initializeWorkerState,
@@ -39,6 +40,7 @@ import type {
   TsAccountWorkerResponseEnvelope,
   TsAccountWorkerSubroot,
 } from './protocol';
+import { accountHasProposableMempoolForEntity } from '../../entity/consensus/account/mempool-eligibility';
 
 type WorkerScope = {
   postMessage(value: unknown, transfer?: Transferable[]): void;
@@ -49,6 +51,7 @@ type WorkerScope = {
 type PhaseWorkspace = Readonly<{
   working: Map<string, AccountReplica>;
   touched: Set<string>;
+  forRead(accountId: string): AccountReplica;
   forWrite(accountId: string): AccountReplica;
 }>;
 
@@ -80,6 +83,11 @@ const createWorkspace = (
   return {
     working,
     touched,
+    forRead(accountId): AccountReplica {
+      return working.get(accountId)
+        ?? worker.accounts.get(accountId)
+        ?? (() => { throw new Error(`TS_ACCOUNT_WORKER_ACCOUNT_MISSING:${accountId}`); })();
+    },
     forWrite(accountId): AccountReplica {
       const existing = working.get(accountId);
       if (existing) return existing;
@@ -195,13 +203,22 @@ const applyOutboundEnvelopeUpdates = (
 };
 
 const applyOutboundProposals = async (
+  ownerEntityId: string,
   context: AccountConsensusContext,
   input: TsAccountWorkerOutboundPayload,
   workspace: PhaseWorkspace,
-): Promise<TsAccountWorkerEffect[]> => {
+): Promise<Readonly<{
+  effects: TsAccountWorkerEffect[];
+  skippedProposals: Array<Readonly<{ order: number; accountId: string }>>;
+}>> => {
   const effects: TsAccountWorkerEffect[] = [];
+  const skippedProposals: Array<Readonly<{ order: number; accountId: string }>> = [];
   assertIncreasingOrders(input.proposals, 'TS_ACCOUNT_WORKER_OUTBOUND_PROPOSAL_ORDER');
   for (const item of input.proposals) {
+    if (!accountHasProposableMempoolForEntity(workspace.forRead(item.accountId), ownerEntityId)) {
+      skippedProposals.push({ order: item.order, accountId: item.accountId });
+      continue;
+    }
     const result = await proposeAccountFrame(
       context,
       workspace.forWrite(item.accountId),
@@ -210,7 +227,7 @@ const applyOutboundProposals = async (
     );
     effects.push({ phase: 'outbound-proposal', order: item.order, accountId: item.accountId, result });
   }
-  return effects;
+  return { effects, skippedProposals };
 };
 
 const publishWorkspace = (
@@ -257,6 +274,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   let transitionUs = 0;
   let proposalUs = 0;
   let effects: TsAccountWorkerEffect[];
+  let skippedProposals: Array<Readonly<{ order: number; accountId: string }>> = [];
   if (input.phase === 'inbound') {
     prepareWorkerAttempt(worker, input.restorePrevious);
     worker.inboundPrepared = true;
@@ -286,6 +304,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
     const proposalStartedAt = getPerfMs();
     const proposals = await applyOutboundProposals(
+      worker.ownerEntityId,
       createWorkerConsensusContext(
         worker, input.timestamp, input.jHeight, jClaims.store, certifiedBoards,
       ),
@@ -293,7 +312,8 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
       workspace,
     );
     proposalUs = Math.round((getPerfMs() - proposalStartedAt) * 1_000);
-    effects = [...admissions, ...proposals];
+    effects = [...admissions, ...proposals.effects];
+    skippedProposals = proposals.skippedProposals;
     if (input.continuation) worker.inboundPrepared = false;
   }
   // Publish only after this worker completed every canonical transition. If a
@@ -308,9 +328,14 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   }
   const rootUs = Math.round((getPerfMs() - rootStartedAt) * 1_000);
   const materializeStartedAt = getPerfMs();
-  const postAccounts = input.phase === 'outbound'
-    ? collectWorkerPostAccounts(worker)
-    : undefined;
+  // Stage 2 Entity followups consume the exact Account state committed by
+  // Stage 1.  Returning only outbound rows left those followups reading the
+  // stale coordinator-side replica even though this worker had committed the
+  // inbound frame already.  Export only the worker's touched Account IDs; the
+  // Account root remains unsealed until the final outbound phase.
+  const postAccounts = input.phase === 'inbound'
+    ? projectWorkerPostAccounts(worker)
+    : collectWorkerPostAccounts(worker);
   const materializeUs = Math.round((getPerfMs() - materializeStartedAt) * 1_000);
   const cpu = readThreadCpuUsage(cpuStartedAt);
   const shardRows = new Map<number, number>();
@@ -327,6 +352,7 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   return {
     workerIndex: worker.workerIndex,
     effects,
+    skippedProposals,
     subroots,
     ...(postAccounts ? { postAccounts } : {}),
     operations: effects.length + (input.phase === 'outbound' ? input.envelopeUpdates.length : 0),

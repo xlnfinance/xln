@@ -148,10 +148,12 @@ fn validate_canonical_roots(frame: &Map<String, Value>) -> Result<(), RuntimeFra
     if frame.get("materializedState").and_then(Value::as_bool) == Some(true) && !present[0] {
         return Err(RuntimeFrameCodecError::MaterializedRootsRequired);
     }
-    if (present[0] || frame.get("materializedState").and_then(Value::as_bool) == Some(true))
-        && !frame.contains_key("runtimeMachineRoot")
-    {
+    let materialized = frame.get("materializedState").and_then(Value::as_bool) == Some(true);
+    if materialized && !frame.contains_key("runtimeMachineRoot") {
         return Err(RuntimeFrameCodecError::MachineRootRequired);
+    }
+    if !materialized && frame.contains_key("runtimeMachineRoot") {
+        return Err(RuntimeFrameCodecError::MachineRootMaterializedOnly);
     }
     if let Some(value) = frame.get("canonicalStateHash") {
         digest(value, "canonicalStateHash")?;

@@ -13,7 +13,9 @@ import { dirname } from 'node:path';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
 import { safeParse, safeStringify, serializeTaggedJson } from '../../../../protocol/serialization';
 import {
+  buildRuntimeRecording,
   validateRuntimeRecoveryBundle,
+  validateRuntimeRecording,
   type RuntimeRecording,
   type RuntimeRecoveryBundleV1,
 } from '../../../../runtime';
@@ -46,6 +48,7 @@ export type HltHubRecordingArtifact = Readonly<{
     workload: string;
     binding: HltAuthoritySourceBinding;
   }>;
+  snapshot: RuntimeRecoveryBundleV1;
   checkpoint: ConcreteCheckpointSourceExport;
   tail: RuntimeRecoveryBundleV1;
   authorityEvidence: HltAuthorityEvidence;
@@ -54,7 +57,7 @@ export type HltHubRecordingArtifact = Readonly<{
 export type HltHubRecording = HltHubRecordingArtifact & Readonly<{
   /** Read-time summary derived from the sole canonical signed WAL tail. */
   totals: HltHubRecordingTotals;
-  /** Retired TS replay view; contains the signed tail only and cannot restore. */
+  /** Exact signed snapshot + tail consumed by the TypeScript replay engine. */
   recording: RuntimeRecording;
 }>;
 
@@ -151,7 +154,7 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   requireExactBoundaryKeys(
     root,
     [
-      'schema', 'createdAt', 'source', 'checkpoint', 'tail', 'authorityEvidence',
+      'schema', 'createdAt', 'source', 'snapshot', 'checkpoint', 'tail', 'authorityEvidence',
     ],
     [],
     'HLT_HUB_RECORDING',
@@ -164,10 +167,13 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
     [],
     'HLT_HUB_RECORDING_SOURCE',
   );
+  const snapshot = validateRuntimeRecoveryBundle(root['snapshot']);
   const checkpoint = decodeCheckpoint(root['checkpoint']);
   const tail = validateRuntimeRecoveryBundle(root['tail']);
-  if (tail.kind !== 'journal_tail' || tail.baseRuntimeHeight !== checkpoint.height ||
-      tail.baseCheckpointHash !== checkpoint.rootHash) {
+  if (snapshot.kind !== 'snapshot' || snapshot.runtimeHeight !== checkpoint.height ||
+      tail.kind !== 'journal_tail' || tail.runtimeId !== snapshot.runtimeId ||
+      tail.baseRuntimeHeight !== checkpoint.height ||
+      tail.baseCheckpointHash !== snapshot.checkpointHash) {
     throw new Error('HLT_HUB_RECORDING_CHECKPOINT_TAIL_MISMATCH');
   }
   const frames = tail.frames ?? [];
@@ -175,9 +181,16 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   if (safeStringify(root['authorityEvidence']) !== safeStringify(authorityEvidence)) {
     throw new Error('HLT_AUTHORITY_EVIDENCE_MISMATCH');
   }
+  const createdAt = Number(root['createdAt']);
+  if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
+    throw new Error('HLT_HUB_RECORDING_CREATED_AT_INVALID');
+  }
+  const recording = validateRuntimeRecording(
+    buildRuntimeRecording([snapshot, tail], createdAt),
+  );
   const decoded: HltHubRecording = {
     schema: HLT_HUB_RECORDING_SCHEMA,
-    createdAt: Number(root['createdAt']),
+    createdAt,
     source: {
       engine: source['engine'] as 'ts',
       workDir: String(source['workDir'] || ''),
@@ -185,23 +198,13 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
       workload: String(source['workload'] || ''),
       binding: decodeSourceBinding(source['binding']),
     },
+    snapshot,
     checkpoint,
     tail,
-    recording: {
-      format: 'xln-runtime-recording',
-      version: 1,
-      runtimeId: tail.runtimeId,
-      baseHeight: checkpoint.height,
-      targetHeight: tail.runtimeHeight,
-      createdAt: Number(root['createdAt']),
-      bundles: [tail],
-      bundleHashes: [],
-      manifestHash: '',
-    },
+    recording,
     totals: summarizeHltHubFrames(frames),
     authorityEvidence,
   };
-  if (!Number.isSafeInteger(decoded.createdAt) || decoded.createdAt < 0) throw new Error('HLT_HUB_RECORDING_CREATED_AT_INVALID');
   if (!decoded.source.workDir || !decoded.source.workload || !Number.isSafeInteger(decoded.source.users) || decoded.source.users < 1) {
     throw new Error('HLT_HUB_RECORDING_SOURCE_INVALID');
   }
@@ -221,6 +224,7 @@ export const writeHltHubRecording = (path: string, recording: HltHubRecordingArt
       schema: validated.schema,
       createdAt: validated.createdAt,
       source: validated.source,
+      snapshot: validated.snapshot,
       checkpoint: validated.checkpoint,
       tail: validated.tail,
       authorityEvidence: validated.authorityEvidence,

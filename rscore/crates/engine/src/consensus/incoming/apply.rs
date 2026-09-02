@@ -18,6 +18,7 @@ use crate::dispute::{
 };
 use crate::error::StateError;
 use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
+use crate::tx::account_tx_admission_error;
 use crate::{AccountExecutionContext, AccountOutput, Side};
 
 use super::types::{
@@ -553,6 +554,15 @@ pub fn apply_incoming_frame_with_authority(
         dispute,
     } = incoming;
     let current_height = account.current_height();
+
+    // Match TypeScript's FX-2 preflight: a new peer frame cannot introduce a
+    // transaction outside the production Account profile, even though its
+    // canonical bytes remain hashable for historical frame verification.
+    // This is deterministic input classification, so it precedes signature
+    // work and cannot mutate the resident replica.
+    if let Some(error) = frame.txs.iter().find_map(account_tx_admission_error) {
+        return Ok(rejected(error.to_string()));
+    }
 
     let Some(frame_hanko) = frame_hanko else {
         return Ok(rejected("ACCOUNT_INPUT_FRAME_HANKO_MISSING"));

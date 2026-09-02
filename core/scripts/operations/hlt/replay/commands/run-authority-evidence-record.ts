@@ -17,14 +17,15 @@ const env: NodeJS.ProcessEnv = {
   XLN_LOCAL_PROD_SMOKE_DIR: workDir,
   XLN_HLT_RECORDING_OUTPUT: output,
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'mixed',
-  // Twenty bounded rounds on 100 real sovereign Runtimes minimize setup while
-  // the H1 frame cap targets the >=1,000 economic RuntimeFrame gate. This is
-  // parity evidence only; the workload deliberately emits no TPS verdict.
+  // Pace twenty bounded rounds across 100 real sovereign Runtimes and admit
+  // one EntityInput per H1 frame. This prevents mempool coalescing from making
+  // a busy economic run too short for the >=1,000-frame parity gate.
+  // This is parity evidence only; the workload deliberately emits no TPS.
   XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '100',
-  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '20',
-  XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '1',
+  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '1',
+  XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '20',
   XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
-    process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '4',
+    process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1',
   XLN_HLT_MIX: '1:1',
   XLN_HLT_HUBS: 'H1',
   XLN_HLT_MARKET_MAKERS: 'MM',

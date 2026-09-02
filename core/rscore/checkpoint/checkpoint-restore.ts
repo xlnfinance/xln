@@ -4,8 +4,8 @@
  * This deliberately does not return AccountReplica: Rust checkpoints retain
  * only the roots of TS-owned carried trees, not their bodies. Fabricating
  * empty maps would create a second state with the same claimed roots. The
- * returned seed is complete for Rust-owned state and explicit about the three
- * root-only sections.
+ * returned seed is complete for Rust-owned state and explicit about the one
+ * root-only section.
  */
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
 import { computeCanonicalMerkleRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../account/commitment/state-root';
@@ -30,8 +30,6 @@ import {
 
 const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
   'subcontracts',
-  'requestedRebalance',
-  'requestedRebalanceFeeState',
 ] as const);
 
 export type RscoreDecodedAccountRestore = Readonly<{
@@ -132,8 +130,8 @@ const computeRestoredAccountStateRoot = (seed: RscoreAccountStateSeed): string =
       [
         'rebalance',
         {
-          requestedRebalanceRoot: seed.carried.requestedRebalanceRoot,
-          requestedRebalanceFeeStateRoot: seed.carried.requestedRebalanceFeeStateRoot,
+          requestedRebalanceRoot: seed.requestedRebalance.rootHash(),
+          requestedRebalanceFeeStateRoot: seed.requestedRebalanceFeeState.rootHash(),
           rebalanceFeePoliciesRoot: seed.rebalanceFeePolicies.rootHash(),
         },
       ],
@@ -247,15 +245,15 @@ const restoredMempoolRoot = (
 };
 
 export const decodeRscoreAccountRestoreRow = (value: unknown): RscoreDecodedAccountRestore => {
-  const row = rscoreCheckpointTuple(value, 11, 'RESTORE_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 13, 'RESTORE_ACCOUNT');
   return buildRscoreAccountRestore(
     checkpointHex(row[0], 32, 'ACCOUNT_ID'),
     checkpointHex(row[1], 32, 'ACCOUNT_LEAF'),
     row[2],
-    decodeRscoreAccountStateTrees(row.slice(3, 9)),
-    decodeRscoreConsensusSeed(row[10]),
+    decodeRscoreAccountStateTrees(row.slice(3, 11)),
+    decodeRscoreConsensusSeed(row[12]),
     true,
-    decodeRscoreExactJClaimNodes(row[9], 'RESTORE_J_CLAIM_NODES'),
+    decodeRscoreExactJClaimNodes(row[11], 'RESTORE_J_CLAIM_NODES'),
   );
 };
 
@@ -281,13 +279,16 @@ export const buildRscoreAccountRestore = (
   if (stateSeed.pulls.rootHash() !== stateSeed.carried.pullsRoot) {
     checkpointRestoreFail('PULL_BODY_ROOT_MISMATCH');
   }
-  const accountStateRoot = computeRestoredAccountStateRoot(stateSeed);
-  if (
-    consensus.currentFrame?.accountStateRoot !== undefined &&
-    consensus.currentFrame.accountStateRoot !== accountStateRoot
-  ) {
-    checkpointRestoreFail('CURRENT_ACCOUNT_STATE_ROOT_MISMATCH');
+  if (stateSeed.requestedRebalance.rootHash() !== stateSeed.carried.requestedRebalanceRoot) {
+    checkpointRestoreFail('REQUESTED_REBALANCE_BODY_ROOT_MISMATCH');
   }
+  if (
+    stateSeed.requestedRebalanceFeeState.rootHash()
+    !== stateSeed.carried.requestedRebalanceFeeStateRoot
+  ) {
+    checkpointRestoreFail('REQUESTED_REBALANCE_FEE_BODY_ROOT_MISMATCH');
+  }
+  const accountStateRoot = computeRestoredAccountStateRoot(stateSeed);
   const mempoolRoot = restoredMempoolRoot(stateSeed, consensus, verify);
   if (verify) {
     validateDisputeHashes(consensus, stateSeed);
@@ -296,6 +297,11 @@ export const buildRscoreAccountRestore = (
       consensus,
       accountStateRoot,
     );
+    // The signed currentFrame is historical bilateral evidence. Certified J
+    // finality can advance the live AccountState without rewriting it. The
+    // exact Entity leaf, and then the Account forest root, authenticate that
+    // newer state; comparing it to the historical frame root would reject a
+    // canonical post-finality checkpoint.
     if (entityAccountLeaf !== storedEntityAccountLeaf) checkpointRestoreFail('ACCOUNT_LEAF_MISMATCH');
   }
   return {

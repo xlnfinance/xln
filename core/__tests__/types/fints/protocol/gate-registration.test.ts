@@ -7,8 +7,25 @@ const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf
   scripts: Record<string, string>;
 };
 const harnessRel = 'core/scripts/checks/fints/check-fints-negative-types.ts';
-const srcGateNames = (): string[] =>
-  (packageJson.scripts['check:src'] ?? '').trim().split(/\s+/).slice(2);
+const parallelGateNames = (scriptName: string): string[] =>
+  (packageJson.scripts[scriptName] ?? '').trim().split(/\s+/).slice(2);
+const srcGateNames = (): string[] => parallelGateNames('check:src');
+
+describe('full check orchestration', () => {
+  test('runs independent Rust, TypeScript, and frontend gates concurrently', () => {
+    expect(packageJson.scripts['check']).toBe('bun tools/run-parallel-checks.ts check:short check:long');
+    expect(parallelGateNames('check:long')).toEqual(['check:src', 'check:frontend']);
+    expect(srcGateNames().slice(0, 2)).toEqual(['soundcheck:fast', 'rscore:check']);
+    expect(packageJson.scripts['check:src:parallel']).toBeUndefined();
+  });
+
+  test('parallel runner preserves child failure output and stops siblings', () => {
+    const runner = readFileSync(join(repoRoot, 'tools/run-parallel-checks.ts'), 'utf8');
+    expect(runner).toContain('output: stdout + stderr');
+    expect(runner).toContain('if (exitCode !== 0) stopChildren()');
+    expect(runner).toContain('console.error(result.output.trim())');
+  });
+});
 
 describe('FinTS negative-type gate registration', () => {
   test('package script points at the existing harness exactly once through soundcheck', () => {

@@ -7,10 +7,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { safeParse } from '../../../../../protocol/serialization';
+import { safeParse, safeStringify } from '../../../../../protocol/serialization';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
+  requireExactBoundaryKeys,
 } from '../../../../../protocol/boundary-validation';
 import { deriveMeshChildSeed } from '../../../../../orchestrator/mesh/mesh-seeds';
 import {
@@ -24,6 +25,10 @@ import {
 } from '../source-binding';
 
 const parityDeadline = performance.now() + AUTHORITY_EVIDENCE_GATE_BUDGET_MS;
+const parityStartedAt = performance.now();
+const parityStage = (stage: string): void => {
+  console.error(`HLT_MIXED_PARITY_STAGE stage=${stage} elapsedMs=${Math.ceil(performance.now() - parityStartedAt)}`);
+};
 
 const remainingParityBudget = (phase: string): number => {
   const remaining = Math.floor(parityDeadline - performance.now());
@@ -88,12 +93,15 @@ const replayEnvironment = (dbRoot: string): NodeJS.ProcessEnv => {
   return env;
 };
 
+const typescriptReportPath = (workers: 1 | 4): string => join(replayRoot, `ts-w${workers}.json`);
+
 const replayTypescript = (workers: 1 | 4): void => {
+  parityStage(`ts-w${workers}:start`);
   const dbRoot = join(replayRoot, `ts-w${workers}`);
   run(process.execPath, [
     'core/scripts/operations/hlt/replay/replay-hub-recording.ts',
     '--recording', recordingPath,
-    '--output', join(replayRoot, `ts-w${workers}.json`),
+    '--output', typescriptReportPath(workers),
     '--runtime-seed-file', runtimeSeedPath,
     '--entity-signer-label', 'h1-hub',
     '--mode', 'max',
@@ -101,6 +109,95 @@ const replayTypescript = (workers: 1 | 4): void => {
     '--require-complete-authority-evidence',
     '--parity-evidence',
   ], remainingParityBudget(`ts-w${workers}`), replayEnvironment(dbRoot));
+  parityStage(`ts-w${workers}:done`);
+};
+
+const AUTHORITY_EXPECTATION_FIELDS = [
+  'runtimeFrames',
+  'effects',
+  'entityEffects',
+  'entityFrameEvents',
+  'localContinuations',
+] as const;
+
+type TsParityReport = Readonly<{
+  authorityExpectations: Record<(typeof AUTHORITY_EXPECTATION_FIELDS)[number], readonly unknown[]>;
+}>;
+
+const decodeAuthorityExpectations = (
+  workers: 1 | 4,
+  value: unknown,
+): TsParityReport['authorityExpectations'] => {
+  const expectations = requireBoundaryRecord(
+    value,
+    `HLT_MIXED_PARITY_TS_W${workers}_EXPECTATIONS_INVALID`,
+  );
+  requireExactBoundaryKeys(
+    expectations,
+    AUTHORITY_EXPECTATION_FIELDS,
+    [],
+    `HLT_MIXED_PARITY_TS_W${workers}_EXPECTATIONS`,
+  );
+  const field = (name: (typeof AUTHORITY_EXPECTATION_FIELDS)[number]): readonly unknown[] => {
+    const entries = expectations[name];
+    if (!Array.isArray(entries)) {
+      throw new Error(`HLT_MIXED_PARITY_TS_W${workers}_EXPECTATIONS_${name}`);
+    }
+    if (entries.length !== artifact.totals.runtimeFrames) {
+      throw new Error(
+        `HLT_MIXED_PARITY_TS_W${workers}_EXPECTATIONS_${name}_COUNT:` +
+        `${entries.length}:${artifact.totals.runtimeFrames}`,
+      );
+    }
+    return entries;
+  };
+  return {
+    runtimeFrames: field('runtimeFrames'),
+    effects: field('effects'),
+    entityEffects: field('entityEffects'),
+    entityFrameEvents: field('entityFrameEvents'),
+    localContinuations: field('localContinuations'),
+  };
+};
+
+const decodeTsParityReport = (workers: 1 | 4): TsParityReport => {
+  const path = typescriptReportPath(workers);
+  const root = requireBoundaryRecord(
+    safeParse(readFileSync(path, 'utf8')),
+    `HLT_MIXED_PARITY_TS_W${workers}_REPORT_INVALID`,
+  );
+  if (root['schema'] !== 'xln-hlt-hub-replay-report-v1') {
+    throw new Error(`HLT_MIXED_PARITY_TS_W${workers}_REPORT_SCHEMA`);
+  }
+  if (root['recordingPath'] !== recordingPath) {
+    throw new Error(`HLT_MIXED_PARITY_TS_W${workers}_REPORT_RECORDING`);
+  }
+  if (root['recordingManifestHash'] !== artifact.recording.manifestHash) {
+    throw new Error(`HLT_MIXED_PARITY_TS_W${workers}_REPORT_MANIFEST`);
+  }
+  if (safeStringify(root['recordingSourceBinding']) !== safeStringify(artifact.source.binding)) {
+    throw new Error(`HLT_MIXED_PARITY_TS_W${workers}_REPORT_SOURCE_BINDING`);
+  }
+  if (root['accountAuthority'] !== `typescript-workers:${workers}`) {
+    throw new Error(`HLT_MIXED_PARITY_TS_W${workers}_REPORT_AUTHORITY`);
+  }
+  return { authorityExpectations: decodeAuthorityExpectations(workers, root['authorityExpectations']) };
+};
+
+const assertTsParityReportsEqual = (w1: TsParityReport, w4: TsParityReport): void => {
+  for (const field of AUTHORITY_EXPECTATION_FIELDS) {
+    if (safeStringify(w1.authorityExpectations[field]) !== safeStringify(w4.authorityExpectations[field])) {
+      throw new Error(`HLT_MIXED_PARITY_TS_W1_W4_AUTHORITY_EXPECTATIONS:${field}`);
+    }
+  }
+  for (const field of ['runtimeFrames', 'effects'] as const) {
+    if (
+      safeStringify(w1.authorityExpectations[field]) !==
+      safeStringify(artifact.authorityEvidence.expectations[field])
+    ) {
+      throw new Error(`HLT_MIXED_PARITY_TS_SOURCE_AUTHORITY_EXPECTATIONS:${field}`);
+    }
+  }
 };
 
 type RustParityReport = Readonly<{
@@ -110,6 +207,7 @@ type RustParityReport = Readonly<{
   directPayments: number;
   effectDigestsCompared: number;
   eventDigestsCompared: number;
+  localContinuationsCompared: number;
   outboxDigestsCompared: number;
   postStateHashesCompared: number;
   runtimeRootsCompared: number;
@@ -132,6 +230,7 @@ const decodeRustParityReport = (value: unknown): RustParityReport => {
     directPayments: count('directPayments'),
     effectDigestsCompared: count('effectDigestsCompared'),
     eventDigestsCompared: count('eventDigestsCompared'),
+    localContinuationsCompared: count('localContinuationsCompared'),
     outboxDigestsCompared: count('outboxDigestsCompared'),
     postStateHashesCompared: count('postStateHashesCompared'),
     runtimeRootsCompared: count('runtimeRootsCompared'),
@@ -139,30 +238,40 @@ const decodeRustParityReport = (value: unknown): RustParityReport => {
   };
 };
 
-const replayRust = async (workers: 1 | 4): Promise<RustParityReport> => {
+const replayRust = async (workers: 1 | 4, tsParityReport: string): Promise<RustParityReport> => {
   const wal = join(replayRoot, `rust-w${workers}-wal`);
+  parityStage(`rust-w${workers}:copy-start`);
   await copyBoundAuthorityWal(boundWal, wal, artifact.source.binding, runtimeSeed);
+  parityStage(`rust-w${workers}:run-start`);
   const output = run(binary, [
     'runtime-replay',
     '--wal', wal,
     '--recording', recordingPath,
+    '--ts-parity-report', tsParityReport,
+    '--recording-manifest-hash', artifact.recording.manifestHash,
     '--runtime-seed-file', runtimeSeedPath,
     '--runtime-signer-label', '1',
     '--entity-signer-label', 'h1-hub',
     '--native-db', join(replayRoot, `w${workers}`),
     '--workers', String(workers),
   ], remainingParityBudget(`rust-w${workers}`));
+  parityStage(`rust-w${workers}:done`);
   const line = output.trim().split('\n').at(-1);
   return decodeRustParityReport(safeParse(line ?? ''));
 };
 
 replayTypescript(1);
 replayTypescript(4);
-const w1 = await replayRust(1);
-const w4 = await replayRust(4);
+const tsW1 = decodeTsParityReport(1);
+const tsW4 = decodeTsParityReport(4);
+assertTsParityReportsEqual(tsW1, tsW4);
+const tsW1ReportPath = typescriptReportPath(1);
+const w1 = await replayRust(1, tsW1ReportPath);
+const w4 = await replayRust(4, tsW1ReportPath);
 const frames = artifact.totals.runtimeFrames;
 const frameCountFields = [
   'frames', 'effectDigestsCompared', 'eventDigestsCompared',
+  'localContinuationsCompared',
   'outboxDigestsCompared', 'postStateHashesCompared',
 ] as const;
 for (const [label, report] of [['w1', w1], ['w4', w4]] as const) {

@@ -15,8 +15,8 @@ use super::codec::{
 use super::entity_context::frame_entity_context_refs;
 use super::frame::{EncodedRuntimeFrame, ValidatedRuntimeFrame, validate_runtime_frame};
 use super::fsync::{DurableEnv, sync_database_directory};
-use super::keys::runtime_machine_leaf_key;
 use super::keys::{KEY_HEAD, KEY_NATIVE_CHECKPOINT, frame_key, output_key};
+use super::keys::{KEY_RUNTIME_MACHINE_LEAF, runtime_machine_leaf_key};
 use super::types::{
     DurableRuntimeFrame, NativeStorageConfig, NativeStorageTimings, PathNodeChange,
     RuntimeFrameCommit, StorageHead,
@@ -35,6 +35,11 @@ pub struct NativeRuntimeStore {
     /// stop scanning the whole LevelDB graph. Dropped on a full checkpoint
     /// rewrite; a restart rebuilds it from disk.
     checkpoint_path_nodes: Option<BTreeMap<Vec<u8>, Vec<u8>>>,
+    /// RAM mirror of the stable `0x16 || path` Runtime-machine keys. A restart
+    /// performs one bounded scan of that current namespace; later checkpoints
+    /// diff exact prior/current paths without scanning or rewriting obsolete
+    /// generations.
+    runtime_machine_keys: Option<BTreeSet<Vec<u8>>>,
 }
 
 struct PreparedRuntimeFrame {
@@ -84,6 +89,7 @@ impl NativeRuntimeStore {
             head,
             poisoned: false,
             checkpoint_path_nodes: None,
+            runtime_machine_keys: None,
         })
     }
 
@@ -288,15 +294,13 @@ impl NativeRuntimeStore {
             return Err(NativeStorageError::CheckpointRequired(height));
         }
         let Some(checkpoint) = checkpoint else {
-            if frame.canonical_state_hash.is_some() || frame.runtime_machine_root.is_some() {
+            if frame.materialized_state || frame.runtime_machine_root.is_some() {
                 return Err(NativeStorageError::Checkpoint("frame-without-graph"));
             }
             return Ok(());
         };
-        if !frame.materialized_state && (checkpoint.full || !checkpoint.node_changes.is_empty()) {
-            return Err(NativeStorageError::Checkpoint(
-                "non-materialized-node-changes",
-            ));
+        if !frame.materialized_state {
+            return Err(NativeStorageError::Checkpoint("non-materialized-graph"));
         }
         let canonical_state_hash = frame
             .canonical_state_hash
@@ -344,6 +348,9 @@ impl NativeRuntimeStore {
         mut prepared: PreparedRuntimeFrame,
         profile: bool,
     ) -> Result<(DurableRuntimeFrame, NativeStorageTimings), NativeStorageError> {
+        if prepared.materialized_state && self.runtime_machine_keys.is_none() {
+            self.runtime_machine_keys = Some(runtime_machine_keys(&mut self.database)?);
+        }
         let batch_started = profile.then(Instant::now);
         let mut batch = WriteBatch::default();
         if prepared
@@ -357,18 +364,31 @@ impl NativeRuntimeStore {
             }
         }
         put_frame_rows(&mut batch, &prepared.frame)?;
-        if let Some(checkpoint) = &prepared.frame.checkpoint {
-            put_runtime_machine_rows(&mut batch, prepared.frame.height, checkpoint)?;
-            if prepared.materialized_state {
-                put_checkpoint_rows(
-                    &mut self.database,
-                    &mut batch,
-                    prepared.frame.height,
-                    checkpoint,
-                    self.checkpoint_path_nodes.as_ref(),
-                )?;
-            }
-        }
+        let next_runtime_machine_keys = if let Some(checkpoint) = &prepared.frame.checkpoint
+            && prepared.materialized_state
+        {
+            // Stable Runtime-machine keys carry only the latest materialized
+            // checkpoint. Remove exactly paths absent from the new graph and
+            // overwrite retained paths in the same batch as frame, checkpoint
+            // pointer and HEAD.
+            let next = put_runtime_machine_rows(
+                &mut batch,
+                checkpoint,
+                self.runtime_machine_keys
+                    .as_ref()
+                    .expect("loaded for a materialized checkpoint"),
+            )?;
+            put_checkpoint_rows(
+                &mut self.database,
+                &mut batch,
+                prepared.frame.height,
+                checkpoint,
+                self.checkpoint_path_nodes.as_ref(),
+            )?;
+            Some(next)
+        } else {
+            None
+        };
         batch.put(KEY_HEAD, &encode_head(&prepared.next_head)?);
         let batch_build = elapsed(batch_started);
         let write_started = profile.then(Instant::now);
@@ -416,6 +436,9 @@ impl NativeRuntimeStore {
                 }
             }
             _ => {}
+        }
+        if let Some(keys) = next_runtime_machine_keys {
+            self.runtime_machine_keys = Some(keys);
         }
         self.head = prepared.next_head;
         let height = prepared.frame.height;
@@ -639,16 +662,45 @@ fn put_checkpoint_rows(
 
 fn put_runtime_machine_rows(
     batch: &mut WriteBatch,
-    height: u64,
     graph: &super::types::CheckpointGraph,
-) -> Result<(), NativeStorageError> {
+    prior: &BTreeSet<Vec<u8>>,
+) -> Result<BTreeSet<Vec<u8>>, NativeStorageError> {
+    let next = graph
+        .runtime_machine_leaves
+        .iter()
+        .map(|leaf| runtime_machine_leaf_key(&leaf.path_bytes))
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    for key in prior.difference(&next) {
+        batch.delete(key);
+    }
     for leaf in &graph.runtime_machine_leaves {
         batch.put(
-            &runtime_machine_leaf_key(height, &leaf.path_bytes)?,
+            &runtime_machine_leaf_key(&leaf.path_bytes)?,
             &leaf.value_bytes,
         );
     }
-    Ok(())
+    Ok(next)
+}
+
+fn runtime_machine_keys(database: &mut DB) -> Result<BTreeSet<Vec<u8>>, NativeStorageError> {
+    let mut iterator = database
+        .new_iter()
+        .map_err(|error| NativeStorageError::Database(error.to_string()))?;
+    iterator.seek(&[KEY_RUNTIME_MACHINE_LEAF]);
+    let mut keys = BTreeSet::new();
+    while let Some((key, _)) = iterator.current() {
+        if key.first() != Some(&KEY_RUNTIME_MACHINE_LEAF) {
+            break;
+        }
+        if key.len() == 1 {
+            return Err(NativeStorageError::RuntimeMachinePath);
+        }
+        keys.insert(key.to_vec());
+        if !iterator.advance() {
+            break;
+        }
+    }
+    Ok(keys)
 }
 
 fn format_hash(value: &[u8; 32]) -> String {

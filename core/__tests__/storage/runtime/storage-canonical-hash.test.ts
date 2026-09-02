@@ -158,22 +158,20 @@ test('WAL Runtime-machine snapshot cannot alias later live infrastructure mutati
 
   const durableSnapshot = buildDurableRuntimeMachineSnapshot(env);
   const durableBytes = encodeBuffer(durableSnapshot, { omitSymbolKeys: true });
-  const durableGraphBefore = prepareRuntimeMachineGraphRows(env.state.height, durableSnapshot);
+  const durableGraphBefore = prepareRuntimeMachineGraphRows(durableSnapshot);
   const snapshot = buildStorageRuntimeMachineSnapshot(env);
   const snapshotBytesBefore = encodeBuffer(snapshot, { omitSymbolKeys: true });
-  const graphBefore = prepareRuntimeMachineGraphRows(env.state.height, snapshot);
+  const graphBefore = prepareRuntimeMachineGraphRows(snapshot);
   const entityHashes = [...env.state.eReplicas.values()].map(computeCanonicalEntityHash);
   const durableCanonicalHash = computeCanonicalRuntimeStateHash(
     env.state.height,
     env.state.timestamp,
     entityHashes,
-    durableSnapshot,
   );
   const canonicalHashBefore = computeCanonicalRuntimeStateHash(
     env.state.height,
     env.state.timestamp,
     entityHashes,
-    snapshot,
   );
 
   pendingCommittedJOutbox.get('before')!.height = 70;
@@ -183,12 +181,11 @@ test('WAL Runtime-machine snapshot cannot alias later live infrastructure mutati
     pendingCommittedJOutbox: Map<string, { height: number }>;
   }).pendingCommittedJOutbox;
   const snapshotBytesAfter = encodeBuffer(snapshot, { omitSymbolKeys: true });
-  const graphAfter = prepareRuntimeMachineGraphRows(env.state.height, snapshot);
+  const graphAfter = prepareRuntimeMachineGraphRows(snapshot);
   const canonicalHashAfter = computeCanonicalRuntimeStateHash(
     env.state.height,
     env.state.timestamp,
     entityHashes,
-    snapshot,
   );
   const changedSnapshot = buildStorageRuntimeMachineSnapshot(env);
 
@@ -200,7 +197,8 @@ test('WAL Runtime-machine snapshot cannot alias later live infrastructure mutati
   expect([...snapshotBytesAfter]).toEqual([...snapshotBytesBefore]);
   expect(graphAfter).toEqual(graphBefore);
   expect(canonicalHashAfter).toBe(canonicalHashBefore);
-  expect(prepareRuntimeMachineGraphRows(env.state.height, changedSnapshot).root)
+  expect(computeCanonicalStateHashFromEnv(env)).toBe(canonicalHashBefore);
+  expect(prepareRuntimeMachineGraphRows(changedSnapshot).root)
     .not.toEqual(graphBefore.root);
 });
 
@@ -235,11 +233,11 @@ test('storage frame integrity commits Runtime checkpoint graph root, never a blo
 
   const alpha = computeStorageFrameHash({
     ...base,
-    runtimeMachineRoot: prepareRuntimeMachineGraphRows(1, { provider: 'alpha' }).root,
+    runtimeMachineRoot: prepareRuntimeMachineGraphRows({ provider: 'alpha' }).root,
   });
   const beta = computeStorageFrameHash({
     ...base,
-    runtimeMachineRoot: prepareRuntimeMachineGraphRows(1, { provider: 'beta' }).root,
+    runtimeMachineRoot: prepareRuntimeMachineGraphRows({ provider: 'beta' }).root,
   });
 
   // Current testnet storage checksum golden. Fresh deploys intentionally keep
@@ -420,8 +418,8 @@ test('validator-local HTLC notes neither diverge shared storage nor leak into En
   expect(computeCanonicalEntityHash(first).hash).toBe(computeCanonicalEntityHash(second).hash);
   expect(() => computeCanonicalStateHashFromEnv(env)).not.toThrow();
   expect('htlcNotes' in projectEntityCoreDoc(first.state)).toBeFalse();
-  expect(projectReplicaMeta(first).htlcNotes).toEqual(first.htlcNotes);
-  expect(projectReplicaMeta(second).htlcNotes).toEqual(second.htlcNotes);
+  expect('htlcNotes' in projectReplicaMeta(first)).toBeFalse();
+  expect('htlcNotes' in projectReplicaMeta(second)).toBeFalse();
 });
 
 test('canonical storage rejects conflicting validator replicas of one Entity', () => {

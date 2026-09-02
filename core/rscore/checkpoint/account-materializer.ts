@@ -489,20 +489,8 @@ const stateFromSeed = (
   const subcontracts = carriedMap(
     'subcontracts', seed.carried.subcontractsRoot, prior?.state.subcontracts, create, 'SUBCONTRACTS',
   );
-  const requestedRebalance = carriedMap(
-    'requestedRebalance',
-    seed.carried.requestedRebalanceRoot,
-    prior?.state.requestedRebalance,
-    create,
-    'REQUESTED_REBALANCE',
-  );
-  const requestedRebalanceFeeState = carriedMap(
-    'requestedRebalanceFeeState',
-    seed.carried.requestedRebalanceFeeStateRoot,
-    prior?.state.requestedRebalanceFeeState,
-    create,
-    'REQUESTED_REBALANCE_FEE_STATE',
-  );
+  const requestedRebalance = seed.requestedRebalance;
+  const requestedRebalanceFeeState = seed.requestedRebalanceFeeState;
   return {
     leftEntity: seed.leftEntity,
     rightEntity: seed.rightEntity,

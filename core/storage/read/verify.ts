@@ -102,12 +102,13 @@ export const verifyStorageSnapshotAtHeight = async (
   if (!snapshotFrame.canonicalStateHash || !snapshotFrame.canonicalEntityHashes) {
     throw new Error(`STORAGE_VERIFY_SNAPSHOT_CANONICAL_ROOTS_MISSING:height=${snapshotHeight}`);
   }
-  const payloads = await readStorageFramePayloads(db, snapshotFrame);
+  // Output and Entity-context rows are immutable frame payloads. Verify them
+  // at their historical height without consulting the latest-only machine graph.
+  await readStorageFramePayloads(db, snapshotFrame, { includeRuntimeMachine: false });
   const snapshotStateHash = computeCanonicalRuntimeStateHash(
     snapshotFrame.height,
     snapshotFrame.timestamp,
     snapshotFrame.canonicalEntityHashes,
-    payloads.runtimeMachine,
   );
   if (snapshotFrame.canonicalStateHash !== snapshotStateHash) {
     throw new Error(
@@ -124,10 +125,33 @@ export const verifyStorageSnapshotAtHeight = async (
   }
 };
 
+const verifyCurrentMaterializedMachine = async (
+  db: RuntimeDbLike,
+  head: StorageHead,
+): Promise<void> => {
+  const height = Math.max(0, Math.floor(Number(head.latestMaterializedHeight ?? 0)));
+  if (height <= 0) return;
+  if (height > head.latestHeight) {
+    throw new Error(`STORAGE_VERIFY_MATERIALIZED_AFTER_HEAD: materialized=${height} latest=${head.latestHeight}`);
+  }
+  const frame = await readStorageFrameRecord(db, height);
+  if (!frame) throw new Error(`STORAGE_VERIFY_MATERIALIZED_FRAME_MISSING: height=${height}`);
+  if (frame.materializedState !== true || !frame.runtimeMachineRoot) {
+    throw new Error(`STORAGE_VERIFY_MATERIALIZED_MACHINE_MISSING: height=${height}`);
+  }
+  await readStorageFramePayloads(db, frame, { includeRuntimeMachine: true });
+};
+
 export const verifyStorageSnapshotIntegrity = async (
   db: RuntimeDbLike,
   head: StorageHead,
-): Promise<void> => verifyStorageSnapshotAtHeight(db, head, head.latestSnapshotHeight);
+): Promise<void> => {
+  // Published snapshots retain historical Entity/Account documents. The
+  // Runtime-machine graph is one path-keyed current checkpoint, so verify it
+  // only through the distinct materialized pointer.
+  await verifyStorageSnapshotAtHeight(db, head, head.latestSnapshotHeight);
+  await verifyCurrentMaterializedMachine(db, head);
+};
 
 export const verifyStorageTailIntegrity = async (
   db: RuntimeDbLike,
@@ -177,12 +201,11 @@ export const verifyStorageTailIntegrity = async (
       if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
         throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
       }
-      const payloads = await readStorageFramePayloads(db, record);
+      await readStorageFramePayloads(db, record, { includeRuntimeMachine: false });
       const expectedCanonicalHash = computeCanonicalRuntimeStateHash(
         record.height,
         record.timestamp,
         record.canonicalEntityHashes,
-        payloads.runtimeMachine,
       );
       if (record.canonicalStateHash !== expectedCanonicalHash) {
         throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);

@@ -21,6 +21,10 @@ pub struct ObserveJRange {
     pub jurisdiction_ref: String,
     pub scanned_through_height: u64,
     pub tip_block_hash: [u8; 32],
+    /// Presence is protocol-visible: TypeScript omits `headers` on an
+    /// event-only observation but preserves an explicitly supplied empty
+    /// array. Keep that distinction through decode/replay projection.
+    pub headers_present: bool,
     pub headers: Vec<FinalizedJHeader>,
     pub batches: Vec<FinalizedJEventBatch>,
 }
@@ -534,13 +538,41 @@ pub fn encode_observe_j_range(value: &ObserveJRange) -> Result<Value, JWatcherEr
             Ok(Value::Object(object))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(serde_json::json!({
-        "entityId":value.entity_id.as_hex(),"signerId":value.signer_id,
-        "jurisdictionRef":value.jurisdiction_ref,"scannedThroughHeight":value.scanned_through_height,
-        "tipBlockHash":hex(&value.tip_block_hash),
-        "headers":value.headers.iter().map(|h|serde_json::json!({"jHeight":h.j_height,"jBlockHash":hex(&h.j_block_hash)})).collect::<Vec<_>>(),
-        "blocks":blocks,
-    }))
+    let mut encoded = Map::from_iter([
+        ("entityId".into(), Value::String(value.entity_id.as_hex())),
+        ("signerId".into(), Value::String(value.signer_id.clone())),
+        (
+            "jurisdictionRef".into(),
+            Value::String(value.jurisdiction_ref.clone()),
+        ),
+        (
+            "scannedThroughHeight".into(),
+            Value::from(value.scanned_through_height),
+        ),
+        (
+            "tipBlockHash".into(),
+            Value::String(hex(&value.tip_block_hash)),
+        ),
+        ("blocks".into(), Value::Array(blocks)),
+    ]);
+    if value.headers_present {
+        encoded.insert(
+            "headers".into(),
+            Value::Array(
+                value
+                    .headers
+                    .iter()
+                    .map(|header| {
+                        serde_json::json!({
+                            "jHeight": header.j_height,
+                            "jBlockHash": hex(&header.j_block_hash),
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    Ok(Value::Object(encoded))
 }
 
 pub fn decode_observe_j_range(value: &Value) -> Result<ObserveJRange, JWatcherError> {
@@ -683,6 +715,7 @@ pub fn decode_observe_j_range(value: &Value) -> Result<ObserveJRange, JWatcherEr
         jurisdiction_ref,
         scanned_through_height,
         tip_block_hash,
+        headers_present: data.contains_key("headers"),
         headers,
         batches,
     })
@@ -704,9 +737,46 @@ pub fn observation_from_poll(
         jurisdiction_ref,
         scanned_through_height: poll.cursor.scanned_through,
         tip_block_hash,
+        headers_present: !poll.headers.is_empty(),
         headers: poll.headers,
         batches: poll.batches,
     };
     decode_observe_j_range(&encode_observe_j_range(&value)?)?;
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn observe_range_projection_preserves_optional_headers_presence() {
+        let base = json!({
+            "entityId": format!("0x{}", "11".repeat(32)),
+            "signerId": format!("0x{}", "22".repeat(20)),
+            "jurisdictionRef": format!("stack:31337:0x{}", "33".repeat(20)),
+            "scannedThroughHeight": 7,
+            "tipBlockHash": format!("0x{}", "44".repeat(32)),
+            "blocks": [],
+        });
+        let absent = decode_observe_j_range(&base).expect("headers absent");
+        assert!(!absent.headers_present);
+        assert!(
+            encode_observe_j_range(&absent)
+                .expect("encode absent")
+                .get("headers")
+                .is_none()
+        );
+
+        let mut explicit = base;
+        explicit["headers"] = json!([]);
+        let explicit = decode_observe_j_range(&explicit).expect("headers explicit");
+        assert!(explicit.headers_present);
+        assert_eq!(
+            encode_observe_j_range(&explicit).expect("encode explicit")["headers"],
+            json!([]),
+        );
+    }
 }

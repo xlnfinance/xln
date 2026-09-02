@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
@@ -65,7 +65,14 @@ pub(super) struct PreparedEnvelopeBatch {
     pub bytes: usize,
 }
 
-type GroupKey = (String, u64, u64);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct AtomicCrossJurisdictionPair {
+    phase: String,
+    pair_key: String,
+}
+
+type GroupKey = (String, u64, u64, Option<AtomicCrossJurisdictionPair>);
+type PendingAtomicPair = (usize, String, u64, u64, AtomicCrossJurisdictionPair);
 
 pub(super) fn prepare_envelopes(
     source_runtime_id: &str,
@@ -112,6 +119,8 @@ pub(super) fn prepare_envelopes_from_values(
     }
     let source = normalize_runtime_id(source_runtime_id)?;
     let mut groups = Vec::<(GroupKey, Vec<(usize, Value)>)>::new();
+    let mut pending_atomic_pair: Option<PendingAtomicPair> = None;
+    let mut completed_atomic_pairs = BTreeSet::new();
     let mut remote_rows = 0_usize;
     let mut remote_bytes = 0_usize;
     for (index, (value, row)) in values.into_iter().zip(rows).enumerate() {
@@ -119,14 +128,20 @@ pub(super) fn prepare_envelopes_from_values(
             return Err(RuntimeTransportError::Outbox(format!("row={index}:object")));
         };
         validate_output(&object, index)?;
-        if object.contains_key("atomicCrossJurisdictionPair") {
-            return Err(RuntimeTransportError::Outbox(format!(
-                "row={index}:cross-j-disabled"
-            )));
-        }
+        let atomic_pair = decode_atomic_pair(&object, index)?;
         let entity_id = normalize_entity_id(required_text(&object, "entityId", index)?)?;
         let signer_id = required_text(&object, "signerId", index)?.to_ascii_lowercase();
         let Some(target) = object.get("runtimeId") else {
+            if pending_atomic_pair.is_some() {
+                return Err(RuntimeTransportError::Outbox(format!(
+                    "row={index}:atomic-pair-incomplete"
+                )));
+            }
+            if atomic_pair.is_some() {
+                return Err(RuntimeTransportError::Outbox(format!(
+                    "row={index}:atomic-pair-local"
+                )));
+            }
             if local_entity_signers.get(&entity_id) != Some(&signer_id) {
                 return Err(RuntimeTransportError::Outbox(format!(
                     "row={index}:local-route"
@@ -149,7 +164,45 @@ pub(super) fn prepare_envelopes_from_values(
         let timestamp = safe_u64(frame.get("timestamp"), "timestamp", index)?;
         object.remove("sourceRuntimeFrame");
         object.remove("atomicCrossJurisdictionPair");
-        let key = (target, height, timestamp);
+        match (pending_atomic_pair.take(), atomic_pair.as_ref()) {
+            (
+                Some((first_index, first_target, first_height, first_timestamp, first_pair)),
+                Some(pair),
+            ) => {
+                if pair != &first_pair {
+                    return Err(RuntimeTransportError::Outbox(format!(
+                        "row={index}:atomic-pair-mixed:first={first_index}"
+                    )));
+                }
+                if target != first_target {
+                    return Err(RuntimeTransportError::Outbox(format!(
+                        "row={index}:atomic-pair-target:first={first_index}"
+                    )));
+                }
+                if height != first_height || timestamp != first_timestamp {
+                    return Err(RuntimeTransportError::Outbox(format!(
+                        "row={index}:atomic-pair-source-frame:first={first_index}"
+                    )));
+                }
+                completed_atomic_pairs.insert(first_pair);
+            }
+            (Some((first_index, _, _, _, _)), None) => {
+                return Err(RuntimeTransportError::Outbox(format!(
+                    "row={index}:atomic-pair-incomplete:first={first_index}"
+                )));
+            }
+            (None, Some(pair)) => {
+                if completed_atomic_pairs.contains(pair) {
+                    return Err(RuntimeTransportError::Outbox(format!(
+                        "row={index}:atomic-pair-count"
+                    )));
+                }
+                pending_atomic_pair =
+                    Some((index, target.clone(), height, timestamp, pair.clone()));
+            }
+            (None, None) => {}
+        }
+        let key = (target, height, timestamp, atomic_pair);
         if groups.last().is_none_or(|(current, _)| current != &key) {
             groups.push((key, Vec::new()));
         }
@@ -165,9 +218,42 @@ pub(super) fn prepare_envelopes_from_values(
             .checked_add(row.len())
             .ok_or_else(|| RuntimeTransportError::Outbox("byte-overflow".into()))?;
     }
+    if let Some((first_index, _, _, _, _)) = pending_atomic_pair {
+        return Err(RuntimeTransportError::Outbox(format!(
+            "row={first_index}:atomic-pair-incomplete"
+        )));
+    }
 
     let mut envelopes = Vec::new();
-    for ((target, height, timestamp), values) in groups {
+    for ((target, height, timestamp, atomic_pair), values) in groups {
+        if let Some(pair) = atomic_pair {
+            if values.len() != 2 || max_rows < 2 {
+                return Err(RuntimeTransportError::Outbox(format!(
+                    "atomic-pair-size:{}:{max_rows}",
+                    values.len()
+                )));
+            }
+            let raw_bytes = values.iter().try_fold(0_usize, |total, (index, _)| {
+                total
+                    .checked_add(rows[*index].len())
+                    .ok_or_else(|| RuntimeTransportError::Outbox("byte-overflow".into()))
+            })?;
+            if raw_bytes > max_plaintext_bytes {
+                return Err(RuntimeTransportError::Outbox(format!(
+                    "atomic-pair-bytes:{raw_bytes}:{max_plaintext_bytes}"
+                )));
+            }
+            envelopes.push(build_envelope(
+                &source,
+                &target,
+                height,
+                timestamp,
+                values.into_iter().map(|(_, value)| value).collect(),
+                raw_bytes,
+                Some(&pair),
+            )?);
+            continue;
+        }
         let mut chunk = Vec::new();
         let mut raw_bytes = 0_usize;
         for (index, value) in values {
@@ -177,7 +263,7 @@ pub(super) fn prepare_envelopes_from_values(
                     || raw_bytes.saturating_add(estimate) > max_plaintext_bytes)
             {
                 envelopes.push(build_envelope(
-                    &source, &target, height, timestamp, chunk, raw_bytes,
+                    &source, &target, height, timestamp, chunk, raw_bytes, None,
                 )?);
                 chunk = Vec::new();
                 raw_bytes = 0;
@@ -189,7 +275,7 @@ pub(super) fn prepare_envelopes_from_values(
         }
         if !chunk.is_empty() {
             envelopes.push(build_envelope(
-                &source, &target, height, timestamp, chunk, raw_bytes,
+                &source, &target, height, timestamp, chunk, raw_bytes, None,
             )?);
         }
     }
@@ -207,6 +293,7 @@ fn build_envelope(
     timestamp: u64,
     entity_inputs: Vec<Value>,
     durable_bytes: usize,
+    atomic_pair: Option<&AtomicCrossJurisdictionPair>,
 ) -> Result<OutboundEnvelope, RuntimeTransportError> {
     let row_count = entity_inputs.len();
     let entity_id = (row_count == 1)
@@ -226,12 +313,22 @@ fn build_envelope(
             .checked_add(rows as u64)
             .ok_or_else(|| RuntimeTransportError::Outbox("tx-count-overflow".into()))
     })?;
-    let value = Value::Object(Map::from_iter([
+    let mut envelope = Map::from_iter([
         ("sourceRuntimeId".into(), Value::String(source.to_owned())),
         ("sourceRuntimeHeight".into(), Value::from(height)),
         ("sourceRuntimeTimestamp".into(), Value::from(timestamp)),
         ("entityInputs".into(), Value::Array(entity_inputs)),
-    ]));
+    ]);
+    if let Some(pair) = atomic_pair {
+        envelope.insert(
+            "atomicCrossJurisdictionPair".into(),
+            Value::Object(Map::from_iter([
+                ("phase".into(), Value::String(pair.phase.clone())),
+                ("pairKey".into(), Value::String(pair.pair_key.clone())),
+            ])),
+        );
+    }
+    let value = Value::Object(envelope);
     Ok(OutboundEnvelope {
         target_runtime_id: target.to_owned(),
         source_height: height,
@@ -242,6 +339,41 @@ fn build_envelope(
         row_count,
         durable_bytes,
     })
+}
+
+fn decode_atomic_pair(
+    object: &Map<String, Value>,
+    index: usize,
+) -> Result<Option<AtomicCrossJurisdictionPair>, RuntimeTransportError> {
+    let Some(value) = object.get("atomicCrossJurisdictionPair") else {
+        return Ok(None);
+    };
+    let pair = value
+        .as_object()
+        .ok_or_else(|| RuntimeTransportError::Outbox(format!("row={index}:atomic-pair")))?;
+    if pair.len() != 2
+        || pair
+            .keys()
+            .any(|key| !matches!(key.as_str(), "phase" | "pairKey"))
+    {
+        return Err(RuntimeTransportError::Outbox(format!(
+            "row={index}:atomic-pair-fields"
+        )));
+    }
+    let phase = pair
+        .get("phase")
+        .and_then(Value::as_str)
+        .filter(|phase| matches!(*phase, "proposal" | "ack"))
+        .ok_or_else(|| RuntimeTransportError::Outbox(format!("row={index}:atomic-pair-phase")))?;
+    let pair_key = pair
+        .get("pairKey")
+        .and_then(Value::as_str)
+        .filter(|pair_key| !pair_key.is_empty())
+        .ok_or_else(|| RuntimeTransportError::Outbox(format!("row={index}:atomic-pair-key")))?;
+    Ok(Some(AtomicCrossJurisdictionPair {
+        phase: phase.to_owned(),
+        pair_key: pair_key.to_owned(),
+    }))
 }
 
 fn validate_output(object: &Map<String, Value>, index: usize) -> Result<(), RuntimeTransportError> {

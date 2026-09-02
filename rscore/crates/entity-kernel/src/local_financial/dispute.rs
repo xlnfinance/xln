@@ -771,6 +771,24 @@ pub(super) fn apply_prepare(
         );
         return Ok(());
     }
+    // TS commits the prepared envelope before attempting the ready start.
+    // A missing counterparty Hanko leaves this exact preparation in place;
+    // dropping it here would make the next deterministic retry forget intent.
+    mutations.push((
+        tx.counterparty_entity_id.clone(),
+        AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+            status: "dispute_preparing".into(),
+            dispute_prepare: Some(CanonicalValue::Object(preparation)),
+            active_dispute: None,
+        },
+    ));
+    status(
+        events,
+        format!(
+            "⏳ Dispute prepared vs {}; evidence currently stable, queue disputeStart when ready",
+            &tx.counterparty_entity_id[tx.counterparty_entity_id.len() - 4..],
+        ),
+    );
     start(
         state,
         paybook,
@@ -806,14 +824,35 @@ pub(super) fn apply_start(
             "DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED",
         ));
     }
-    if tx.starter_counter_proof_commitment.is_some() {
-        return Err(invalid(
-            "disputeStart",
-            "DISPUTE_COUNTER_COMMITMENT_OVERRIDE_UNSUPPORTED",
-        ));
+    if let Some(route_id) = tx.cross_jurisdiction_route_id.as_deref() {
+        crate::cross_j::validate_cross_jurisdiction_dispute_route(
+            state,
+            &tx.counterparty_entity_id,
+            route_id,
+        )?;
+    }
+    let pending_nonce = state
+        .j_batch_state
+        .as_ref()
+        .and_then(|j_state| j_state.sent_batch.as_ref())
+        .map(|sent| sent.entity_nonce);
+    state.j_batch_state.get_or_insert_with(JBatchState::default);
+    if let Some(nonce) = pending_nonce {
+        status(
+            events,
+            format!(
+                "ℹ️ disputeStart queued to current batch while sentBatch nonce={nonce} is still pending"
+            ),
+        );
     }
     let Some(dispute) = view(account_views, &tx.counterparty_entity_id) else {
-        status(events, "❌ No account - cannot start dispute");
+        status(
+            events,
+            format!(
+                "❌ No account with {} - cannot start dispute",
+                &tx.counterparty_entity_id[tx.counterparty_entity_id.len() - 4..],
+            ),
+        );
         return Ok(());
     };
     if dispute.status != "dispute_preparing" {
@@ -838,11 +877,22 @@ pub(super) fn apply_start(
         Some(_) => return Err(invalid("disputeStart", "PENDING_REMOVALS")),
     };
     if ready_after > state.timestamp || pending > 0 {
+        let mut issues = Vec::new();
+        if ready_after > state.timestamp {
+            issues.push(format!(
+                "cooldown:{}ms",
+                ready_after.saturating_sub(state.timestamp),
+            ));
+        }
+        if pending > 0 {
+            issues.push(format!("orderbookRemovals:{pending}"));
+        }
         status(
             events,
             format!(
-                "⏳ disputeStart blocked until evidence is stable for {}",
+                "⏳ disputeStart blocked until evidence is stable for {}: {}",
                 &tx.counterparty_entity_id[tx.counterparty_entity_id.len() - 4..],
+                issues.join("; "),
             ),
         );
         return Ok(());
@@ -1186,6 +1236,7 @@ pub(super) fn apply_finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CanonicalEntityTx, EntityTxKind};
     use std::collections::BTreeMap;
     use xln_rscore_batch::ResidentAccountDisputeView;
     use xln_rscore_engine::{CounterpartyDispute, DisputeProofBody};
@@ -1202,6 +1253,28 @@ mod tests {
             token_ids: Vec::new(),
             transformers: Vec::new(),
         }
+    }
+
+    #[test]
+    fn dispute_start_wire_rejects_unauthenticated_counter_commitment_override() {
+        let tx = CanonicalEntityTx::from_frame_projection(
+            EntityTxKind::DisputeStart,
+            CanonicalValue::Object(vec![
+                (
+                    "counterpartyEntityId".into(),
+                    CanonicalValue::String(PEER.into()),
+                ),
+                (
+                    "starterCounterProofCommitment".into(),
+                    CanonicalValue::String(format!("0x{}", "11".repeat(32))),
+                ),
+            ]),
+        )
+        .expect("canonical wire projection");
+
+        let error = crate::local_financial::decode::decode_local_entity_financial_tx(&tx)
+            .expect_err("standalone counter commitment is not an EntityTx input");
+        assert!(error.to_string().contains("disputeStart:DATA_FIELDS"));
     }
 
     fn account_view(
@@ -1244,6 +1317,119 @@ mod tests {
                 }),
             },
         )])
+    }
+
+    #[test]
+    fn dispute_start_missing_account_matches_typescript_state_and_event() {
+        let mut state = state(1_000);
+        let mut mutations = Vec::new();
+        let mut routed_outputs = Vec::new();
+        let mut events = Vec::new();
+        apply_start(
+            &mut state,
+            &PaybookChanges::default(),
+            DisputeStartEntityTx {
+                counterparty_entity_id: PEER.into(),
+                description: None,
+                cross_jurisdiction_route_id: None,
+                starter_initial_arguments: None,
+                starter_counter_arguments: None,
+            },
+            &BTreeMap::new(),
+            None,
+            &mut mutations,
+            &mut routed_outputs,
+            &mut events,
+        )
+        .expect("missing Account is a deterministic no-op");
+
+        assert_eq!(state.j_batch_state, Some(JBatchState::default()));
+        assert!(mutations.is_empty());
+        assert!(routed_outputs.is_empty());
+        assert_eq!(
+            events,
+            [EntityFrameEvent::Status {
+                message: "❌ No account with 0202 - cannot start dispute".into(),
+            }],
+        );
+    }
+
+    #[test]
+    fn dispute_start_readiness_event_matches_typescript_issue_order() {
+        let prepare = CanonicalValue::Object(vec![
+            (
+                "readyAfter".into(),
+                CanonicalValue::Number(CanonicalNumber::try_from_u64(1_100).expect("number")),
+            ),
+            (
+                "pendingOrderbookRemovalIds".into(),
+                CanonicalValue::Array(vec![CanonicalValue::String("offer-1".into())]),
+            ),
+        ]);
+        let views = account_view("dispute_preparing", Some(prepare), None, None);
+        let mut state = state(1_000);
+        let mut mutations = Vec::new();
+        let mut routed_outputs = Vec::new();
+        let mut events = Vec::new();
+        apply_start(
+            &mut state,
+            &PaybookChanges::default(),
+            DisputeStartEntityTx {
+                counterparty_entity_id: PEER.into(),
+                description: None,
+                cross_jurisdiction_route_id: None,
+                starter_initial_arguments: None,
+                starter_counter_arguments: None,
+            },
+            &views,
+            None,
+            &mut mutations,
+            &mut routed_outputs,
+            &mut events,
+        )
+        .expect("not-ready dispute is a deterministic no-op");
+
+        assert_eq!(
+            events,
+            [EntityFrameEvent::Status {
+                message: "⏳ disputeStart blocked until evidence is stable for 0202: cooldown:100ms; orderbookRemovals:1".into(),
+            }],
+        );
+    }
+
+    #[test]
+    fn route_bound_dispute_start_rejects_before_no_account_state_mutation() {
+        let mut state = state(1_000);
+        let mut mutations = Vec::new();
+        let mut routed_outputs = Vec::new();
+        let mut events = Vec::new();
+        let error = apply_start(
+            &mut state,
+            &PaybookChanges::default(),
+            DisputeStartEntityTx {
+                counterparty_entity_id: PEER.into(),
+                description: None,
+                cross_jurisdiction_route_id: Some("missing-route".into()),
+                starter_initial_arguments: None,
+                starter_counter_arguments: None,
+            },
+            &BTreeMap::new(),
+            None,
+            &mut mutations,
+            &mut routed_outputs,
+            &mut events,
+        )
+        .expect_err("unknown route must reject before Account admission");
+
+        assert!(
+            error
+                .to_string()
+                .contains("DISPUTE_START_CROSS_J_ROUTE_MISSING")
+        );
+        assert!(state.j_batch_state.is_none());
+        assert!(events.is_empty());
+        assert!(mutations.is_empty());
+        assert!(routed_outputs.is_empty());
     }
 
     fn state(timestamp: u64) -> EntityStateSlice {
@@ -1302,6 +1488,20 @@ mod tests {
             AccountEnvelopeMutation::ReplaceDisputeLifecycle { status, dispute_prepare: None, active_dispute: Some(_) }
                 if status == "disputed"
         ));
+        let messages = events
+            .iter()
+            .map(|event| match event {
+                EntityFrameEvent::Status { message } => message.as_str(),
+                EntityFrameEvent::Text { .. } => panic!("unexpected text event"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            vec![
+                "⏳ Dispute prepared vs 0202; evidence currently stable, queue disputeStart when ready",
+                "⚔️ Dispute started vs 0202 (test) - account frozen, use jBroadcast to commit",
+            ],
+        );
     }
 
     #[test]
@@ -1338,7 +1538,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_pull_free_nonstarter_finalize_queues_immediately() {
+    fn h2005_pull_free_nonstarter_finalize_matches_mutual_consent_transition() {
         let body = proof_body_from_engine(proof_body()).expect("body");
         let body_hash = proof_body_hash(&body).expect("hash");
         let active = active_dispute_value(
@@ -1370,7 +1570,7 @@ mod tests {
             DisputeFinalizeEntityTx {
                 counterparty_entity_id: PEER.into(),
                 use_onchain_registry: false,
-                description: None,
+                description: Some("hlt-authority-reverse-mutual-consent".into()),
             },
             &views,
             &mut mutations,
@@ -1378,16 +1578,52 @@ mod tests {
             &mut events,
         )
         .expect("finalize");
+        let finalizations = &state
+            .j_batch_state
+            .as_ref()
+            .expect("j state")
+            .batch
+            .dispute_finalizations;
+        assert_eq!(finalizations.len(), 1);
+        let queued = &finalizations[0];
+        assert_eq!(queued.initial_nonce, U256::from(1));
+        assert_eq!(queued.final_nonce, U256::from(1));
+        assert!(!queued.proposer_is_left);
+        assert!(!queued.started_by_left);
+        assert!(!queued.cooperative);
+        assert_eq!(queued.submit_not_before_timestamp, None);
+        assert_eq!(queued.initial_proofbody_hash, body_hash);
         assert_eq!(
-            state
-                .j_batch_state
-                .as_ref()
-                .expect("j state")
-                .batch
-                .dispute_finalizations
-                .len(),
-            1
+            proof_body_hash(&queued.final_proofbody).expect("hash"),
+            body_hash
         );
+        assert!(queued.sig.is_empty());
+        assert!(queued.starter_arguments.is_empty());
+        assert!(queued.other_arguments.is_empty());
+
         assert_eq!(mutations.len(), 1);
+        let AccountEnvelopeMutation::ReplaceDisputeLifecycle {
+            status: mutation_status,
+            dispute_prepare,
+            active_dispute: Some(mutation_active),
+        } = &mutations[0].1
+        else {
+            panic!("expected dispute lifecycle replacement");
+        };
+        assert_eq!(mutation_status, "disputed");
+        assert_eq!(dispute_prepare, &None);
+        assert_eq!(
+            bool_field(
+                object(mutation_active, "test", "ACTIVE").expect("active"),
+                "finalizeQueued"
+            ),
+            Some(true),
+        );
+        assert_eq!(
+            events,
+            [EntityFrameEvent::Status {
+                message: "⚖️ Dispute finalized vs 0202 (hlt-authority-reverse-mutual-consent) - use jBroadcast to commit".into(),
+            }],
+        );
     }
 }

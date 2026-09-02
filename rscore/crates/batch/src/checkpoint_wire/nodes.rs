@@ -2,8 +2,13 @@ use xln_rscore_abi::AbiValue;
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
 use super::encode_canonical_value;
-use super::state_value::{encode_lending_kind, encode_lock, encode_policy, encode_swap_offer};
-use super::{AccountWireEncodeError, encode_delta, encode_j_claim_node, integer, tuple};
+use super::state_value::{
+    encode_lending_kind, encode_lock, encode_policy, encode_requested_rebalance_fee_state,
+    encode_swap_offer,
+};
+use super::{
+    AccountWireEncodeError, encode_bigint, encode_delta, encode_j_claim_node, integer, tuple,
+};
 use crate::AccountCheckpointRows;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,6 +20,8 @@ pub enum AccountCheckpointNamespace {
     SwapOffers = 4,
     RebalanceFeePolicies = 5,
     Pulls = 6,
+    RequestedRebalance = 8,
+    RequestedRebalanceFeeState = 9,
 }
 
 impl AccountCheckpointNamespace {
@@ -58,7 +65,7 @@ pub struct EncodedAccountJClaimChanges {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodedAccountCheckpointNodes {
-    pub trees: [EncodedAccountCheckpointTreeChanges; 6],
+    pub trees: [EncodedAccountCheckpointTreeChanges; 8],
     pub j_claims: EncodedAccountJClaimChanges,
 }
 
@@ -95,6 +102,16 @@ pub fn encode_account_checkpoint_nodes(
                 AccountCheckpointNamespace::Pulls,
                 &rows.pulls,
                 encode_canonical_value,
+            )?,
+            tree_changes(
+                AccountCheckpointNamespace::RequestedRebalance,
+                &rows.requested_rebalance,
+                encode_bigint,
+            )?,
+            tree_changes(
+                AccountCheckpointNamespace::RequestedRebalanceFeeState,
+                &rows.requested_rebalance_fee_state,
+                encode_requested_rebalance_fee_state,
             )?,
         ],
         j_claims: EncodedAccountJClaimChanges {

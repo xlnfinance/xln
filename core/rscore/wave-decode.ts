@@ -351,12 +351,10 @@ const decodeWavePayload = (value: unknown): Wave => {
       return rscoreWireDecodeFail('wave.checkpointAccounts:order');
     }
   }
-  // Final bodies are optional, but whenever present they describe this exact
-  // round head and therefore bind one-for-one to its touched leaves.
+  // Final bodies are optional and include only changed Accounts. `touched`
+  // also names unchanged inbound Accounts that must participate in the final
+  // proposal stage, so postAccounts is a bound subset rather than one-for-one.
   const touchedById = new Map(touched.map(row => [row.accountId, row]));
-  if (postAccounts.length !== 0 && touched.length !== postAccounts.length) {
-    return rscoreWireDecodeFail('wave.postAccounts:length');
-  }
   for (const [index, post] of postAccounts.entries()) {
     const touchedRow = touchedById.get(post.accountId);
     if (

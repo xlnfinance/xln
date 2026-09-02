@@ -127,7 +127,7 @@ import {
 } from './wal/outbox-payload';
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
 import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
-import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
+import { prepareRuntimeMachineGraphWrite } from './wal/runtime-machine-graph';
 import {
   preparePathKeyedAuxiliaryRows,
   type AuxiliaryTreeOwner,
@@ -1221,9 +1221,12 @@ const prepareStorageStateCommitments = async (
   const runtimeComponentDigests = computeRuntimePostStateComponentDigests(
     buildReplayVerifiableRuntimePostStateView(options.env),
   );
-  const runtimeMachine = shouldMaterialize || canonicalHashDue
+  const runtimeMachine = shouldMaterialize
     ? buildStorageRuntimeMachineSnapshot(options.env)
     : undefined;
+  const runtimeMachineGraph = runtimeMachine
+    ? await prepareRuntimeMachineGraphWrite(walDb, runtimeMachine)
+    : null;
   checkpoint('runtimeMachine');
   const canonicalStateHashes = canonicalHashDue
     ? prepareStorageCanonicalStateHashes(
@@ -1231,7 +1234,6 @@ const prepareStorageStateCommitments = async (
         [],
         previousFrame,
         replicaLookup,
-        runtimeMachine!,
       )
     : null;
   options.onPersistenceProgress?.('canonical-hashes-built');
@@ -1284,7 +1286,7 @@ const prepareStorageStateCommitments = async (
   return {
     liveStateGraph,
     runtimeComponentDigests,
-    runtimeMachine,
+    runtimeMachineGraph,
     canonicalStateHashes,
     replicaMetaCommitment,
     replicaMetaEntries,
@@ -1429,10 +1431,7 @@ const buildStorageFrameRecordPlan = (
     options.inProcessInfraValidated === true,
   );
   mark('frameEncode.entityContexts');
-  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(
-    options.env.state.height,
-    commitments.runtimeMachine,
-  );
+  const runtimeMachineGraph = commitments.runtimeMachineGraph;
   mark('frameEncode.machineGraph');
   // Canonicalized once: the frame hash and the stored record both encode
   // this multi-megabyte input log, and a canonical tree skips the walk.
@@ -1444,7 +1443,7 @@ const buildStorageFrameRecordPlan = (
     touches,
     outputPayloads.commitment,
     entityContextPayloads.refs,
-    runtimeMachineGraph.root,
+    runtimeMachineGraph?.root,
     accountAuthorityCheckpoint.refs,
   ), { omitSymbolKeys: true });
   mark('frameEncode.frameBase');
@@ -1469,10 +1468,11 @@ const buildStorageFrameRecordPlan = (
       (total, row) => total + row.key.byteLength + row.value.byteLength,
       0,
     ) +
-    runtimeMachineGraph.rows.reduce(
+    (runtimeMachineGraph?.rows ?? []).reduce(
       (total, row) => total + row.key.byteLength + row.value.byteLength,
       0,
     ) +
+    (runtimeMachineGraph?.dels ?? []).reduce((total, key) => total + key.byteLength, 0) +
     accountAuthorityCheckpoint.puts.reduce(
       (total, row) => total + row.key.byteLength + row.value.byteLength,
       0,
@@ -1492,7 +1492,8 @@ const buildStorageFrameRecordPlan = (
     frameRows,
     outputPayloadRows: outputPayloads.rows,
     entityContextPayloadRows: entityContextPayloads.rows,
-    runtimeMachineGraphRows: runtimeMachineGraph.rows,
+    runtimeMachineGraphRows: runtimeMachineGraph?.rows ?? [],
+    runtimeMachineGraphDels: runtimeMachineGraph?.dels ?? [],
     frameLogs: touches.frameLogs,
     touchedEntities: touches.touchedEntities,
     touchedAccounts: touches.touchedAccounts,
@@ -1530,6 +1531,9 @@ const buildStorageCommitBatches = (
   }
   for (const row of frame.entityContextPayloadRows) {
     walBatch.put(row.key, row.value);
+  }
+  for (const key of frame.runtimeMachineGraphDels) {
+    walBatch.del(key);
   }
   for (const row of frame.runtimeMachineGraphRows) {
     walBatch.put(row.key, row.value);

@@ -45,7 +45,6 @@ pub enum ScheduledHookKind {
     HtlcSecretAckTimeout {
         hashlock: String,
         counterparty_entity_id: String,
-        inbound_lock_id: String,
     },
     SettlementWindow,
     Watchdog,
@@ -90,7 +89,6 @@ impl ScheduledHook {
     pub fn htlc_secret_ack_timeout(
         hashlock: String,
         counterparty_entity_id: String,
-        inbound_lock_id: String,
         trigger_at: u64,
     ) -> Self {
         Self {
@@ -99,7 +97,6 @@ impl ScheduledHook {
             kind: ScheduledHookKind::HtlcSecretAckTimeout {
                 hashlock,
                 counterparty_entity_id,
-                inbound_lock_id,
             },
         }
     }

@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use thiserror::Error;
 use xln_rscore_batch::{AccountId, ResidentAccountStatusView};
 use xln_rscore_engine::TokenId;
@@ -44,6 +45,9 @@ pub struct RuntimeProcessReport {
     /// It is exposed only after WAL fsync for replay diagnostics and is not a
     /// stored or consensus-authoritative history surface.
     pub account_commits: Vec<crate::AccountCommitEvidence>,
+    /// Exact local Runtime continuations derived by replay projection. This
+    /// diagnostic-only value is neither enqueued nor written to the WAL.
+    pub local_continuations: Vec<Value>,
     /// Validator-local J writes whose exact attempts crossed WAL fsync in the
     /// `durable_height` reported here. Replay exposes but never executes them.
     pub post_commit_j_attempts: Vec<crate::j_submit::DurableJAttempt>,
@@ -711,7 +715,17 @@ impl DurableRuntimeProcessor {
         &mut self,
         input: RuntimeInput,
     ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
-        self.process_with(true, |replica| apply_runtime(replica, input))
+        self.process_with(true, false, |replica| apply_runtime(replica, input))
+    }
+
+    /// Execute one exact recorded WAL input. Locally produced continuations
+    /// are already present at their authoritative recorded heights, so replay
+    /// must not reinsert them at the height where they were first emitted.
+    pub fn process_exact_replay(
+        &mut self,
+        input: RuntimeInput,
+    ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
+        self.process_with(true, true, |replica| apply_runtime(replica, input))
     }
 
     /// Canonical production entry point: select the exact FIFO prefix, build
@@ -722,7 +736,7 @@ impl DurableRuntimeProcessor {
         input: RuntimeLiveInput,
         materializer: &mut dyn EntityInfraMaterializer,
     ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
-        self.process_with(false, |replica| {
+        self.process_with(false, false, |replica| {
             apply_runtime_live(replica, input, materializer)
         })
     }
@@ -730,6 +744,7 @@ impl DurableRuntimeProcessor {
     fn process_with(
         &mut self,
         capture_replay_diagnostics: bool,
+        exact_replay: bool,
         apply: impl FnOnce(RuntimeReplica) -> Result<RuntimeApplyResult, RuntimeMachineError>,
     ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
         self.ensure_healthy()?;
@@ -788,6 +803,7 @@ impl DurableRuntimeProcessor {
             &self.routes,
             prior_checkpoint_rows.as_ref(),
             capture_replay_diagnostics,
+            exact_replay,
         ) {
             Ok(projected) => projected,
             Err(error) => {
@@ -845,6 +861,7 @@ impl DurableRuntimeProcessor {
         report.timings.barrier_wait_for_previous_commit = barrier_wait_for_previous_commit;
         report.commitments = Some(projected.commitments);
         report.account_commits = projected.account_commits;
+        report.local_continuations = projected.local_continuations;
         report.accepted_payments = projected.accepted_payments;
         report.completed_payments = projected.completed_payments;
         report.matched_swaps = projected.matched_swaps;
@@ -930,6 +947,7 @@ fn process_report(report: PublicationReport) -> RuntimeProcessReport {
         durable_bytes_published: report.durable_bytes,
         commitments: None,
         account_commits: Vec::new(),
+        local_continuations: Vec::new(),
         post_commit_j_attempts: Vec::new(),
         accepted_payments: 0,
         completed_payments: 0,

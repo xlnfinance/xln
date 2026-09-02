@@ -202,7 +202,11 @@ const runRustSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> =>
       laneQuiescence: settlement.laneQuiescence,
       hubIo,
       laneIo,
-      environment: collectHltEnvironmentManifest(),
+      environment: collectHltEnvironmentManifest({
+        engine: 'rust',
+        rustAccountWorkers: requireRustH1().ready.workers,
+        requireAccountWorkers: evidence === 'tps-authority',
+      }),
       ...rateEvidence,
     };
     writeFileSync(join(args.workDir, 'hlt-rust-h1-live.json'), `${safeStringify(live, 2)}\n`);
@@ -358,7 +362,7 @@ const runTypescriptSameProductionSwapLoad = async (args: WorkerArgs): Promise<vo
         canonicalStateHash: laneFinalFrames[0]!.canonicalStateHash,
       },
       settlementEvidence,
-      environment: collectHltEnvironmentManifest(),
+      environment: collectHltEnvironmentManifest({ engine: 'ts', requireAccountWorkers: true }),
     });
     persistReport(join(args.workDir, 'production-swap-load-report.json'), report);
     publishHltDashboardReport('swap', report);

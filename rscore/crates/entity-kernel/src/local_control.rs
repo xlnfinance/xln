@@ -1254,9 +1254,7 @@ pub(crate) fn batch_empty(batch: &JBatch) -> bool {
 /// a finalization that reads it, and adversarial finalizers are sent FIFO one
 /// at a time so one processBatch stays below the L1 block gas limit.
 fn take_broadcast_batch(source: &JBatch) -> (JBatch, JBatch) {
-    let dispute_priority = !source.dispute_starts.is_empty()
-        || !source.counter_disputes.is_empty()
-        || !source.dispute_finalizations.is_empty();
+    let dispute_priority = has_dispute_priority(source);
     if !dispute_priority {
         return (source.clone(), JBatch::default());
     }
@@ -1274,6 +1272,12 @@ fn take_broadcast_batch(source: &JBatch) -> (JBatch, JBatch) {
             .push(remainder.dispute_finalizations.remove(0));
     }
     (selected, remainder)
+}
+
+fn has_dispute_priority(source: &JBatch) -> bool {
+    !source.dispute_starts.is_empty()
+        || !source.counter_disputes.is_empty()
+        || !source.dispute_finalizations.is_empty()
 }
 
 pub(crate) fn has_queued_batch_work(state: &JBatchState) -> bool {
@@ -1339,6 +1343,7 @@ fn broadcast(
     fees: Option<JBatchFeeOverrides>,
     rebroadcast: bool,
     authority: &EntityFrameAuthority,
+    events: &mut Vec<EntityFrameEvent>,
 ) -> Result<LocalEntityControlResult, EntityKernelError> {
     let owner = state.entity_id.clone();
     let timestamp = state.timestamp;
@@ -1357,7 +1362,7 @@ fn broadcast(
         .j_batch_state
         .as_mut()
         .ok_or_else(|| invalid("j_broadcast", "J_BATCH_MISSING"))?;
-    let (batch, remainder, from_recovery, nonce) = if rebroadcast {
+    let (batch, remainder, from_recovery, nonce, dispute_priority) = if rebroadcast {
         let sent = batch_state
             .sent_batch
             .as_ref()
@@ -1370,6 +1375,7 @@ fn broadcast(
             JBatch::default(),
             false,
             sent.entity_nonce,
+            false,
         )
     } else {
         if batch_state.sent_batch.is_some() {
@@ -1387,6 +1393,7 @@ fn broadcast(
         if batch_empty(&source) {
             return Ok(LocalEntityControlResult::default());
         }
+        let dispute_priority = has_dispute_priority(&source);
         let (selected, remainder) = take_broadcast_batch(&source);
         (
             selected,
@@ -1397,6 +1404,7 @@ fn broadcast(
                 .unwrap_or(0)
                 .checked_add(1)
                 .ok_or_else(|| invalid("j_broadcast", "NONCE_OVERFLOW"))?,
+            dispute_priority,
         )
     };
     if batch_empty(&batch) {
@@ -1409,6 +1417,7 @@ fn broadcast(
         .broadcast_count
         .checked_add(1)
         .ok_or_else(|| invalid("j_broadcast", "GENERATION_OVERFLOW"))?;
+    let op_count = crate::j_batch::batch_op_count(&batch);
     let override_present = fees.is_some();
     let applied_fees = fees.or_else(|| {
         batch_state
@@ -1455,6 +1464,16 @@ fn broadcast(
     batch_state.last_broadcast = timestamp;
     batch_state.broadcast_count = generation;
     batch_state.status = JBatchStatus::Sent;
+    if !rebroadcast {
+        events.push(EntityFrameEvent::Status {
+            message: format!("📤 Batch ({op_count} ops) → hashesToSign [nonce={nonce}]"),
+        });
+        if dispute_priority {
+            events.push(EntityFrameEvent::Status {
+                message: "⚖️ Dispute operations broadcast before ordinary queued operations".into(),
+            });
+        }
+    }
     Ok(LocalEntityControlResult {
         j_outputs: vec![EntityJOutput::BatchIntent {
             jurisdiction_name,
@@ -1976,6 +1995,12 @@ pub fn apply_local_entity_control_tx(
             let batch = state.j_batch_state.get_or_insert_with(JBatchState::default);
             batch.batch = candidate;
             batch.status = JBatchStatus::Accumulating;
+            events.push(EntityFrameEvent::Status {
+                message: format!(
+                    "📦 Queued R→R: {amount} token {token_id} to {} (use jBroadcast to commit)",
+                    &render_hex(&receiving_entity)[62..]
+                ),
+            });
         }
         LocalEntityControlTx::R2e {
             receiving_entity,
@@ -1994,6 +2019,12 @@ pub fn apply_local_entity_control_tx(
             let batch = state.j_batch_state.get_or_insert_with(JBatchState::default);
             batch.batch = candidate;
             batch.status = JBatchStatus::Accumulating;
+            events.push(EntityFrameEvent::Status {
+                message: format!(
+                    "📦 Queued R→E: {amount} token {token_id} to {} (use jBroadcast to commit)",
+                    &render_hex(&receiving_entity)[58..]
+                ),
+            });
         }
         LocalEntityControlTx::R2c {
             receiving_entity,
@@ -2004,11 +2035,29 @@ pub fn apply_local_entity_control_tx(
             let receiving_entity =
                 receiving_entity.unwrap_or(fixed_hex(&state.entity_id, "r2c", "entityId")?);
             queue_reserve_to_collateral(state, receiving_entity, counterparty, token_id, amount)?;
+            events.push(EntityFrameEvent::Status {
+                message: format!(
+                    "📦 Queued R→C: {amount} token {token_id} to {}↔{} (use j_broadcast to commit)",
+                    &render_hex(&receiving_entity)[62..],
+                    &render_hex(&counterparty)[62..]
+                ),
+            });
         }
         LocalEntityControlTx::JBroadcast { fee_overrides } => {
-            result = broadcast(state, fee_overrides, false, authority)?
+            result = broadcast(state, fee_overrides, false, authority, events)?
         }
         LocalEntityControlTx::JRebroadcast { gas_bump_bps } => {
+            if state
+                .j_batch_state
+                .as_ref()
+                .and_then(|batch| batch.sent_batch.as_ref())
+                .is_none()
+            {
+                events.push(EntityFrameEvent::Status {
+                    message: "⚠️ j_rebroadcast skipped: no sentBatch".into(),
+                });
+                return Ok(result);
+            }
             result = broadcast(
                 state,
                 Some(JBatchFeeOverrides {
@@ -2017,17 +2066,26 @@ pub fn apply_local_entity_control_tx(
                 }),
                 true,
                 authority,
+                events,
             )?
         }
         LocalEntityControlTx::JAbortSentBatch {
             reason: _,
             requeue_to_current,
         } => {
-            let batch = state
-                .j_batch_state
-                .as_mut()
-                .ok_or_else(|| invalid("j_abort_sent_batch", "J_BATCH_MISSING"))?;
+            let batch = state.j_batch_state.as_mut().or_else(|| {
+                events.push(EntityFrameEvent::Status {
+                    message: "⚠️ No sentBatch to abort".into(),
+                });
+                None
+            });
+            let Some(batch) = batch else {
+                return Ok(result);
+            };
             let Some(sent) = batch.sent_batch.take() else {
+                events.push(EntityFrameEvent::Status {
+                    message: "⚠️ No sentBatch to abort".into(),
+                });
                 return Ok(result);
             };
             if requeue_to_current {
@@ -2045,16 +2103,24 @@ pub fn apply_local_entity_control_tx(
                 };
         }
         LocalEntityControlTx::JClearBatch { reason: _ } => {
-            let batch = state
-                .j_batch_state
-                .as_mut()
-                .ok_or_else(|| invalid("j_clear_batch", "J_BATCH_MISSING"))?;
+            let batch = state.j_batch_state.as_mut().or_else(|| {
+                events.push(EntityFrameEvent::Status {
+                    message: "⚠️ No jBatchState to clear".into(),
+                });
+                None
+            });
+            let Some(batch) = batch else {
+                return Ok(result);
+            };
             batch.batch = JBatch::default();
             batch.sent_batch = None;
             batch.recovery_batches.clear();
             batch.status = JBatchStatus::Empty;
         }
         LocalEntityControlTx::MintReserves { token_id, amount } => {
+            events.push(EntityFrameEvent::Status {
+                message: format!("💰 Minting {amount} of token {token_id}"),
+            });
             result.j_outputs.push(EntityJOutput::MintReserves {
                 jurisdiction_name: authority_jurisdiction_text(authority, "mintReserves", "name")?,
                 entity_id: fixed_hex(&state.entity_id, "mintReserves", "entityId")?,
@@ -2478,6 +2544,43 @@ mod tests {
             source.dispute_finalizations[1..]
         );
         assert_eq!(remainder.reserve_to_reserve, source.reserve_to_reserve);
+    }
+
+    #[test]
+    fn broadcast_emits_typescript_status_events_in_canonical_order() {
+        let entity = format!("0x{}", "11".repeat(32));
+        let mut state = EntityStateSlice::empty(entity, 99);
+        state.j_batch_state = Some(JBatchState {
+            batch: JBatch {
+                dispute_finalizations: vec![final_dispute(0x33, 1)],
+                ..JBatch::default()
+            },
+            ..JBatchState::default()
+        });
+        let mut events = Vec::new();
+        let result = apply_local_entity_control_tx(
+            &mut state,
+            LocalEntityControlTx::JBroadcast {
+                fee_overrides: None,
+            },
+            &mut events,
+            &provider_authority(),
+            0,
+        )
+        .expect("broadcast");
+        assert_eq!(result.hashes_to_sign.len(), 1);
+        assert_eq!(
+            events,
+            [
+                EntityFrameEvent::Status {
+                    message: "📤 Batch (1 ops) → hashesToSign [nonce=1]".into(),
+                },
+                EntityFrameEvent::Status {
+                    message: "⚖️ Dispute operations broadcast before ordinary queued operations"
+                        .into(),
+                },
+            ]
+        );
     }
 
     #[test]

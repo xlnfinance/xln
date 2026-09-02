@@ -11,13 +11,13 @@ use xln_rscore_protocol::CanonicalValue;
 
 use crate::orderbook::SameJOutputDelta;
 use crate::scheduler::{ScheduledHook, ScheduledHookKind, cancel_hook, schedule_hook};
-use crate::{EntityKernelError, EntityStateSlice, EntityTxKind};
+use crate::{EntityFrameEvent, EntityKernelError, EntityStateSlice, EntityTxKind};
 
 use super::{
     CrossJurisdictionApplyResult, bigint, canonical_bool, close_binary_hash, collection,
     committed_fill, exact_fill, field, nested_text, normalized, number, projected, required_bigint,
-    required_u32, route_book_owner, route_runtime_expired, route_signer, routed, scaled_amount,
-    set, string, terminal_route, text, unsigned,
+    required_u32, route_book_owner, route_runtime_expired, route_signer, routed, routed_for_route,
+    scaled_amount, set, string, terminal_route, text, unsigned,
 };
 
 fn committed_invalid(kind: &'static str, detail: impl Into<String>) -> EntityKernelError {
@@ -228,6 +228,9 @@ fn committed_pull_lock(
         return Ok(CrossJurisdictionApplyResult::default());
     }
     schedule_route_expiry(state, &route)?;
+    let committed_event = EntityFrameEvent::Status {
+        message: format!("🌉 Cross-j swap {order_id} committed by both Account legs"),
+    };
     let owner = route_book_owner(&route);
     let admission = projected(
         EntityTxKind::AdmitCrossJurisdictionBookOrder,
@@ -237,7 +240,9 @@ fn committed_pull_lock(
         ]),
     )?;
     if owner == local {
-        return super::apply_admit(state, &admission);
+        let mut applied = super::apply_admit(state, &admission)?;
+        applied.events.insert(0, committed_event);
+        return Ok(applied);
     }
     if route_signer(&route, &owner).is_none() {
         return Err(committed_invalid(
@@ -246,7 +251,13 @@ fn committed_pull_lock(
         ));
     }
     Ok(CrossJurisdictionApplyResult {
-        outputs: vec![routed(&owner, vec![admission])],
+        outputs: vec![routed_for_route(
+            &route,
+            &owner,
+            vec![admission],
+            EntityTxKind::AdmitCrossJurisdictionBookOrder,
+        )?],
+        events: vec![committed_event],
         ..Default::default()
     })
 }
@@ -339,7 +350,12 @@ fn remove_book(
         ]),
     )?;
     Ok(CrossJurisdictionApplyResult {
-        outputs: vec![routed(&owner, vec![tx])],
+        outputs: vec![routed_for_route(
+            route,
+            &owner,
+            vec![tx],
+            EntityTxKind::RemoveCrossJurisdictionBookOrder,
+        )?],
         ..Default::default()
     })
 }
@@ -706,16 +722,8 @@ pub(super) fn apply_fill(
             "partially_filled"
         }),
     )?;
-    if terminal {
-        set(
-            &mut route,
-            "clearingPolicy",
-            string(if cancel || dust_close || ratio < 65_535 {
-                "cancel_and_clear"
-            } else {
-                "full_fill"
-            }),
-        )?;
+    if terminal && cancel {
+        set(&mut route, "clearingPolicy", string("cancel_and_clear"))?;
     }
     set(
         &mut route,
@@ -806,7 +814,12 @@ fn committed_fill_ack(
                 ));
             }
             CrossJurisdictionApplyResult {
-                outputs: vec![routed(&owner, vec![progress_tx(&route, data)?])],
+                outputs: vec![routed_for_route(
+                    &route,
+                    &owner,
+                    vec![progress_tx(&route, data)?],
+                    EntityTxKind::ApplyCrossJurisdictionBookProgress,
+                )?],
                 ..Default::default()
             }
         }
@@ -814,6 +827,7 @@ fn committed_fill_ack(
     if terminal {
         result.outputs.push(routed(
             &local,
+            None,
             vec![projected(
                 EntityTxKind::RequestCrossJurisdictionClear,
                 CanonicalValue::Object(vec![

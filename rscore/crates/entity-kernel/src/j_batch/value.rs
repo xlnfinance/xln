@@ -69,11 +69,17 @@ fn proof_body(value: &ProofBody) -> Result<CanonicalValue, JBatchError> {
         ("watchSeed", text(hex(&value.watch_seed))),
         (
             "leftResponseSeconds",
-            CanonicalValue::BigInt(BigInt::from(value.left_response_seconds)),
+            number(
+                u64::from(value.left_response_seconds),
+                "proofBody.leftResponseSeconds",
+            )?,
         ),
         (
             "rightResponseSeconds",
-            CanonicalValue::BigInt(BigInt::from(value.right_response_seconds)),
+            number(
+                u64::from(value.right_response_seconds),
+                "proofBody.rightResponseSeconds",
+            )?,
         ),
         (
             "offdeltas",
@@ -697,11 +703,11 @@ fn decode_proof(value: &CanonicalValue, context: &str) -> Result<ProofBody, JBat
         &[],
     )?;
     let seconds = |value: &CanonicalValue, name: &str| -> Result<u32, JBatchError> {
-        let v = big_uint(value, name)?;
-        if v > U256::from(u32::MAX) {
+        let v = safe_u64(value, name)?;
+        if v > u64::from(u32::MAX) {
             return Err(err(format!("U32:{name}")));
         }
-        Ok(v.low_u32())
+        Ok(v as u32)
     };
     Ok(ProofBody {
         watch_seed: fixed(f.get("watchSeed")?, &format!("{context}.watchSeed"))?,
@@ -1317,6 +1323,47 @@ pub fn decode_canonical_j_batch_state(value: &CanonicalValue) -> Result<JBatchSt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proof_response_windows_match_typescript_number_shape() {
+        let expected = ProofBody {
+            watch_seed: [0; 32],
+            left_response_seconds: 86_400,
+            right_response_seconds: 3_600,
+            offdeltas: Vec::new(),
+            token_ids: Vec::new(),
+            transformers: Vec::new(),
+        };
+        let value = proof_body(&expected).expect("proof body");
+        assert_eq!(decode_proof(&value, "proofBody").expect("decode"), expected);
+        let CanonicalValue::Object(fields) = &value else {
+            panic!("proof body object")
+        };
+        assert!(matches!(
+            fields.iter().find(|(key, _)| key == "leftResponseSeconds"),
+            Some((_, CanonicalValue::Number(value))) if value.as_str() == "86400"
+        ));
+        assert!(matches!(
+            fields.iter().find(|(key, _)| key == "rightResponseSeconds"),
+            Some((_, CanonicalValue::Number(value))) if value.as_str() == "3600"
+        ));
+
+        let mut retired = value;
+        let CanonicalValue::Object(fields) = &mut retired else {
+            panic!("proof body object")
+        };
+        let (_, left) = fields
+            .iter_mut()
+            .find(|(key, _)| key == "leftResponseSeconds")
+            .expect("left window");
+        *left = CanonicalValue::BigInt(BigInt::from(86_400));
+        assert!(
+            decode_proof(&retired, "proofBody")
+                .expect_err("canonical storage rejects retired BigInt shape")
+                .to_string()
+                .contains("NUMBER:proofBody.leftResponseSeconds")
+        );
+    }
 
     #[test]
     fn empty_state_round_trips_with_optional_fields_absent() {

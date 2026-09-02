@@ -11,9 +11,9 @@ import { LIMITS } from '../../../config/constants';
  * Keeping those transactions is required for retry safety; repeatedly waking
  * the Entity for them would only manufacture empty Entity heights.
  */
-export const accountHasProposableMempool = (
+export const accountHasProposableMempoolForEntity = (
   account: AccountReplica,
-  state: EntityState,
+  entityId: string,
 ): boolean => {
   if (account.pendingFrame || account.mempool.length === 0) return false;
   // During dispute preparation/finalization, unilateral resolve txs are
@@ -21,7 +21,7 @@ export const accountHasProposableMempool = (
   // No Account transaction can wake a non-active Account: preparation and
   // finalized disputes both close the peer ACK lane.
   if ((account.status ?? 'active') !== 'active') return false;
-  if (account.mempool.some((tx) => accountTxAwaitsPostCommitHanko(tx, account, state))) return false;
+  if (account.mempool.some((tx) => accountTxAwaitsPostCommitHanko(tx, account, { entityId }))) return false;
   // Locks past MAX_ACCOUNT_HTLC_LOCKS wait for a resolve to commit; waking the
   // Entity for them only produces idle Account proposals (100 users x every
   // Runtime input hit the cross-J cascade guard).
@@ -30,3 +30,8 @@ export const accountHasProposableMempool = (
     !(locksFull && tx.type === 'htlc_lock') &&
     getSignedSettlementWorkspaceTxError(account, tx) === undefined);
 };
+
+export const accountHasProposableMempool = (
+  account: AccountReplica,
+  state: EntityState,
+): boolean => accountHasProposableMempoolForEntity(account, state.entityId);

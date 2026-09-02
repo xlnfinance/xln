@@ -19,6 +19,18 @@ use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint};
 use crate::consensus::{AccountAdmissionResult, AccountInputResult, AccountInputRow, ProposalRow};
 use crate::types::{AccountId, AccountSeed};
 
+/// Which Account proposal window the parent Entity selected for one row.
+///
+/// `WaitForSibling` is the canonical cross-jurisdiction cohort barrier. It is
+/// not a failed proposal or a fallback: the sibling Account must first become
+/// ready, so this Account keeps its mempool in exact order and signs no frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchAccountSelection {
+    WholeMempool,
+    WaitForSibling,
+    Selected(Vec<AccountTx>),
+}
+
 /// Everything one Entity input carries inward.
 #[derive(Debug)]
 pub struct EntityInboundRequest {
@@ -101,10 +113,12 @@ pub struct EntityOutboundRequest {
     /// AccountTx projection, so that later attachment must not move the leaf.
     pub unsigned_settlement_txs: Vec<(AccountId, AccountTx)>,
     /// One canonical final Account-stage worklist. Each Account appears once;
-    /// Entity supplies only its Account transactions. The resident worker
-    /// derives ACK/proposal behavior from the Account state it exclusively
-    /// owns and seals the final leaf after that work.
-    pub proposal_work: Vec<(AccountId, Vec<AccountTx>, bool)>,
+    /// Entity supplies new admissions and its independent exact proposal
+    /// selection. The resident worker admits first, then derives ACK/proposal
+    /// behavior from the Account state it exclusively owns and seals the final
+    /// leaf. The bool is the same-round response obligation and remains
+    /// independent of selection.
+    pub proposal_work: Vec<(AccountId, Vec<AccountTx>, BatchAccountSelection, bool)>,
     /// Export every Account changed since the previous durable checkpoint.
     /// Export itself is repeatable and non-acknowledging. The next inbound
     /// expected root implicitly advances the worker-local durable baseline

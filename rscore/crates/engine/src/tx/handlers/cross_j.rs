@@ -6,7 +6,7 @@
 
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_account_state_value};
 
 use crate::swap::{MAX_ACCOUNT_CROSS_J_SWAP_OFFERS, MAX_ACCOUNT_SWAP_OFFERS};
 use crate::tx::apply_types::MutationDecision;
@@ -189,6 +189,19 @@ fn binding_from_route(route: &Fields, leg: &str) -> Result<CanonicalValue, Strin
         }
     }
     Ok(CanonicalValue::Object(binding))
+}
+
+fn same_canonical_object(left: &CanonicalValue, right: &CanonicalValue) -> Result<bool, String> {
+    // Object insertion order is not protocol state: the canonical Account
+    // encoder sorts keys in the same UTF-16 order as TypeScript. Comparing
+    // `CanonicalValue::Object` directly would reject an exact wire value just
+    // because its decoder emitted `[leg, orderId, ...]` while this module built
+    // `[orderId, routeHash, leg, ...]`.
+    let encode = |value: &CanonicalValue| {
+        encode_account_state_value(value)
+            .map_err(|error| format!("Cross-j canonical binding encode failed: {error}"))
+    };
+    Ok(encode(left)? == encode(right)?)
 }
 
 pub(crate) fn cross_market_source_is_base(
@@ -385,7 +398,10 @@ pub(crate) fn apply_pull_lock(
         if leg != "source" && leg != "target" {
             return Err("Cross-j pull binding leg invalid".into());
         }
-        if CanonicalValue::Object(binding.clone()) != binding_from_route(route, &leg)? {
+        if !same_canonical_object(
+            &CanonicalValue::Object(binding.clone()),
+            &binding_from_route(route, &leg)?,
+        )? {
             return Err("Cross-j pull binding does not match route".into());
         }
         let route_pull = pull_leg(route, &leg)?;
@@ -1525,6 +1541,39 @@ mod tests {
                 .expect("delta")
                 .hold(Side::Right),
             &BigInt::from(0),
+        );
+    }
+
+    #[test]
+    fn pull_lock_accepts_canonically_equal_reordered_binding_fields() {
+        let mut transaction = lock_tx();
+        let AccountTx::CrossPullLock {
+            data: CanonicalValue::Object(data),
+        } = &mut transaction
+        else {
+            panic!("cross-J lock fixture")
+        };
+        let binding = data
+            .iter_mut()
+            .find_map(|(key, value)| (key == "crossJurisdiction").then_some(value))
+            .expect("cross-J binding");
+        let CanonicalValue::Object(fields) = binding else {
+            panic!("cross-J binding object")
+        };
+        fields.reverse();
+
+        let context = AccountExecutionContext::new(1_000, 1_000, 10, 7, 10);
+        let applied = SequentialAccountEngine::apply_with_context(
+            &replica(),
+            Side::Left,
+            &transaction,
+            &context,
+        )
+        .expect("reordered canonical binding");
+        assert_eq!(applied.verdict(), &AccountVerdict::Applied);
+        assert_eq!(
+            applied.candidate().expect("candidate").state().pull_count(),
+            1
         );
     }
 

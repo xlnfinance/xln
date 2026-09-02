@@ -25,6 +25,7 @@ const positiveIntegerArgument = (name: string): number => {
 
 const workDir = resolve(argument('work-dir'));
 const outputPath = resolve(argument('output'));
+const snapshotPath = resolve(argument('snapshot'));
 const checkpointPath = resolve(argument('checkpoint'));
 const users = positiveIntegerArgument('users');
 const workload = argument('workload');
@@ -53,6 +54,7 @@ const {
   createEmptyEnv,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
+  validateRuntimeRecoveryBundle,
 } = runtime;
 const {
   HLT_HUB_RECORDING_SCHEMA,
@@ -75,10 +77,15 @@ if (!runtimeId) throw new Error('HLT_HUB_RECORDING_RUNTIME_ID_MISSING');
 // recovery bundle; restore the deterministic H1 label before replaying any
 // frame that may create J-prefix or Entity Hanko evidence.
 prewarmSignerLabels(runtimeSeed, ['h1-hub']);
+const snapshot = validateRuntimeRecoveryBundle(safeParse(readFileSync(snapshotPath, 'utf8')));
 const checkpoint = safeParse(readFileSync(checkpointPath, 'utf8')) as ConcreteCheckpointSourceExport;
 const baseHeight = checkpoint.height;
 if (!Number.isSafeInteger(baseHeight) || baseHeight < 1 || !/^0x[0-9a-f]{64}$/.test(checkpoint.rootHash)) {
   throw new Error(`HLT_HUB_RECORDING_SNAPSHOT_BASE_INVALID:${baseHeight}`);
+}
+if (snapshot.kind !== 'snapshot' || snapshot.runtimeHeight !== baseHeight ||
+    snapshot.runtimeId !== runtimeId || !snapshot.checkpointHash) {
+  throw new Error('HLT_HUB_RECORDING_SNAPSHOT_BUNDLE_INVALID');
 }
 
 const env = createEmptyEnv(runtimeSeed);
@@ -120,7 +127,11 @@ try {
     kind: 'journal_tail',
     signers,
     createdAt: recordingCreatedAt,
-    baseCheckpoint: { height: baseHeight, hash: checkpoint.rootHash },
+    // Recovery tails bind the signed portable snapshot. The concrete radix
+    // checkpoint has an independent root/leaves proof and is a different hash
+    // domain; overloading this field would make canonical RuntimeRecording
+    // validation impossible and could mix checkpoints from different runs.
+    baseCheckpoint: { height: baseHeight, hash: snapshot.checkpointHash },
     frames,
   });
   const authorityEvidence = buildHltAuthorityEvidence(frames);
@@ -140,6 +151,7 @@ try {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: frames.at(-1)!.timestamp,
     source: { engine: 'ts', workDir, users, workload, binding },
+    snapshot,
     checkpoint,
     tail,
     authorityEvidence,

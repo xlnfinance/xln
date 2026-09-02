@@ -139,6 +139,11 @@ pub struct RuntimeEntityInput {
     /// nested Account frame body. Admission computes this once.
     pending_work: Vec<EntityPendingWork>,
     atomic_cross_jurisdiction_pair: Option<RuntimeAtomicCrossJurisdictionPair>,
+    /// One already-signed validator J-prefix vote carried by the canonical
+    /// EntityInput. The current production board is single-signer, so one
+    /// input has exactly one vote; the complete wire value is retained for an
+    /// exact comparison with the certificate Rust derives before commit.
+    j_prefix_attestation: Option<RuntimeJPrefixAttestation>,
     /// Exact width measured once by the strict tagged-storage admission codec.
     canonical_wire_bytes: usize,
 }
@@ -147,6 +152,12 @@ pub struct RuntimeEntityInput {
 pub struct RuntimeAtomicCrossJurisdictionPair {
     pub phase: String,
     pub pair_key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RuntimeJPrefixAttestation {
+    pub observation: crate::j_watcher::ObserveJRange,
+    pub wire: Value,
 }
 
 impl RuntimeEntityInput {
@@ -163,6 +174,7 @@ impl RuntimeEntityInput {
                 "entityId"
                     | "signerId"
                     | "entityTxs"
+                    | "jPrefixAttestations"
                     | "from"
                     | "runtimeId"
                     | "sourceRuntimeFrame"
@@ -232,6 +244,11 @@ impl RuntimeEntityInput {
                 })
             })
             .transpose()?;
+        let j_prefix_attestation = decode_j_prefix_attestation(
+            object.get("jPrefixAttestations"),
+            entity_id_text,
+            &signer_id,
+        )?;
         let txs: &[Value] = match object.get("entityTxs") {
             Some(value) => value
                 .as_array()
@@ -243,6 +260,7 @@ impl RuntimeEntityInput {
         let mut pending_work = Vec::with_capacity(txs.len());
         let mut local_projected = Vec::new();
         let mut local_native = Vec::new();
+        let mut local_individual = None;
         for (index, tx) in txs.iter().enumerate() {
             let projection = crate::entity_frame::project_entity_tx(tx)?;
             if is_remote_output
@@ -310,6 +328,15 @@ impl RuntimeEntityInput {
                         projected: projection,
                     });
                 } else {
+                    let individual = xln_rscore_entity_kernel::is_individual_entity_command_tx_kind(
+                        projection.kind,
+                    );
+                    if !local_projected.is_empty() && local_individual != Some(individual) {
+                        pending_work.push(EntityPendingWork::LocalBatch {
+                            projected: std::mem::take(&mut local_projected),
+                            native: std::mem::take(&mut local_native),
+                        });
+                    }
                     let Some(local) = decode_local_entity_tx(&projection)
                         .map_err(RuntimeMachineError::EntityFinancial)?
                     else {
@@ -317,6 +344,7 @@ impl RuntimeEntityInput {
                             projection.kind.as_str(),
                         ));
                     };
+                    local_individual = Some(individual);
                     local_projected.push(projection);
                     local_native.push(local);
                 }
@@ -340,6 +368,7 @@ impl RuntimeEntityInput {
             canonical,
             pending_work,
             atomic_cross_jurisdiction_pair,
+            j_prefix_attestation,
             canonical_wire_bytes,
         })
     }
@@ -362,6 +391,10 @@ impl RuntimeEntityInput {
 
     pub(super) fn atomic_pair(&self) -> Option<&RuntimeAtomicCrossJurisdictionPair> {
         self.atomic_cross_jurisdiction_pair.as_ref()
+    }
+
+    pub(super) fn j_prefix_attestation(&self) -> Option<&RuntimeJPrefixAttestation> {
+        self.j_prefix_attestation.as_ref()
     }
 
     pub fn account_input_count(&self) -> usize {
@@ -418,6 +451,7 @@ impl RuntimeEntityInput {
                 .map(EntityPendingWork::Projected)
                 .collect(),
             atomic_cross_jurisdiction_pair: None,
+            j_prefix_attestation: None,
             canonical_wire_bytes: 1,
         }
     }
@@ -430,6 +464,7 @@ impl RuntimeEntityInput {
             canonical,
             pending_work: Vec::new(),
             atomic_cross_jurisdiction_pair: None,
+            j_prefix_attestation: None,
             canonical_wire_bytes,
         }
     }
@@ -452,9 +487,146 @@ impl RuntimeEntityInput {
                 row: Box::new(account_input),
             }],
             atomic_cross_jurisdiction_pair: None,
+            j_prefix_attestation: None,
             canonical_wire_bytes: 1,
         }
     }
+}
+
+fn decode_j_prefix_attestation(
+    value: Option<&Value>,
+    entity_id: &str,
+    signer_id: &str,
+) -> Result<Option<RuntimeJPrefixAttestation>, RuntimeMachineError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let tagged = value.as_object().ok_or_else(|| {
+        RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_MAP_OBJECT".into())
+    })?;
+    if tagged.len() != 2 || tagged.get("__xlnType").and_then(Value::as_str) != Some("Map") {
+        return Err(RuntimeMachineError::EntityInputTransportInvalid(
+            "J_PREFIX_MAP_TAG".into(),
+        ));
+    }
+    let rows = tagged
+        .get("value")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_MAP_ROWS".into())
+        })?;
+    if rows.len() != 1 {
+        return Err(RuntimeMachineError::EntityInputTransportInvalid(
+            "J_PREFIX_SINGLE_SIGNER_REQUIRED".into(),
+        ));
+    }
+    let row = rows[0]
+        .as_array()
+        .filter(|row| row.len() == 2)
+        .ok_or_else(|| {
+            RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_MAP_ROW".into())
+        })?;
+    let map_signer = row[0].as_str().ok_or_else(|| {
+        RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_MAP_SIGNER".into())
+    })?;
+    let attestation = row[1].as_object().ok_or_else(|| {
+        RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_ATTESTATION_OBJECT".into())
+    })?;
+    const FIELDS: [&str; 14] = [
+        "version",
+        "entityId",
+        "targetEntityHeight",
+        "parentFrameHash",
+        "validatorId",
+        "jurisdictionRef",
+        "baseHeight",
+        "scannedThroughHeight",
+        "tipBlockHash",
+        "eventHistoryRoot",
+        "rangeHash",
+        "headers",
+        "blocks",
+        "signature",
+    ];
+    if attestation.len() != FIELDS.len()
+        || FIELDS.iter().any(|field| !attestation.contains_key(*field))
+    {
+        return Err(RuntimeMachineError::EntityInputTransportInvalid(
+            "J_PREFIX_ATTESTATION_FIELDS".into(),
+        ));
+    }
+    let validator = attestation
+        .get("validatorId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_VALIDATOR".into())
+        })?;
+    let attested_entity = attestation
+        .get("entityId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_ENTITY".into())
+        })?;
+    if map_signer != signer_id || validator != signer_id || attested_entity != entity_id {
+        return Err(RuntimeMachineError::EntityInputTransportInvalid(
+            "J_PREFIX_IDENTITY_MISMATCH".into(),
+        ));
+    }
+    if attestation.get("version").and_then(Value::as_u64) != Some(1) {
+        return Err(RuntimeMachineError::EntityInputTransportInvalid(
+            "J_PREFIX_VERSION".into(),
+        ));
+    }
+    let jurisdiction_ref = attestation
+        .get("jurisdictionRef")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_JURISDICTION".into())
+        })?;
+    let blocks = attestation
+        .get("blocks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_BLOCKS".into()))?
+        .iter()
+        .map(|value| {
+            let source = value.as_object().ok_or_else(|| {
+                RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_BLOCK".into())
+            })?;
+            let mut block = source.clone();
+            let height = block.remove("blockNumber").ok_or_else(|| {
+                RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_BLOCK_HEIGHT".into())
+            })?;
+            let hash = block.remove("blockHash").ok_or_else(|| {
+                RuntimeMachineError::EntityInputTransportInvalid("J_PREFIX_BLOCK_HASH".into())
+            })?;
+            block.insert(
+                "jurisdictionRef".into(),
+                Value::String(jurisdiction_ref.into()),
+            );
+            block.insert("jHeight".into(), height);
+            block.insert("jBlockHash".into(), hash);
+            Ok(Value::Object(block))
+        })
+        .collect::<Result<Vec<_>, RuntimeMachineError>>()?;
+    let observation = crate::j_watcher::decode_observe_j_range(&serde_json::json!({
+        "entityId": entity_id,
+        "signerId": signer_id,
+        "jurisdictionRef": jurisdiction_ref,
+        "scannedThroughHeight": attestation.get("scannedThroughHeight").cloned().unwrap_or(Value::Null),
+        "tipBlockHash": attestation.get("tipBlockHash").cloned().unwrap_or(Value::Null),
+        "headers": attestation.get("headers").cloned().unwrap_or(Value::Null),
+        "blocks": blocks,
+    }))
+    .map_err(|error| {
+        RuntimeMachineError::EntityInputTransportInvalid(format!(
+            "J_PREFIX_OBSERVATION:{}",
+            error
+        ))
+    })?;
+    Ok(Some(RuntimeJPrefixAttestation {
+        observation,
+        wire: row[1].clone(),
+    }))
 }
 
 fn validate_entity_input_transport(
@@ -525,7 +697,6 @@ pub struct RuntimeEntityFrameContext {
 pub struct RuntimeFrameContext {
     pub timestamp: u64,
     pub finalized_j_height: u64,
-    pub hub_rebalance_has_pending_work: bool,
     /// Exact Entity-frame contexts in certified height order for each replica.
     /// One Runtime frame may advance the same Entity more than once; collapsing
     /// this to one map value loses the earlier replay input.
@@ -550,7 +721,6 @@ pub struct RuntimeLiveInput {
     pub entity_inputs: Vec<RuntimeEntityInput>,
     pub timestamp: u64,
     pub finalized_j_height: u64,
-    pub hub_rebalance_has_pending_work: bool,
 }
 
 impl RuntimeLiveInput {
@@ -563,7 +733,6 @@ impl RuntimeLiveInput {
             frame: RuntimeFrameContext {
                 timestamp: self.timestamp,
                 finalized_j_height: self.finalized_j_height,
-                hub_rebalance_has_pending_work: self.hub_rebalance_has_pending_work,
                 entity_contexts: BTreeMap::new(),
             },
         }
@@ -585,7 +754,6 @@ impl RuntimeInput {
             frame: RuntimeFrameContext {
                 timestamp,
                 finalized_j_height,
-                hub_rebalance_has_pending_work: false,
                 entity_contexts: BTreeMap::from([(
                     RuntimeEntityKey::new(entity_id, signer_id)
                         .expect("RuntimeInput signer must be non-empty"),
@@ -1041,6 +1209,10 @@ pub struct RuntimeEntityOutputs {
     /// Exact Entity-local outputs. Runtime routing may add transport metadata,
     /// but must not reconstruct Account or consensus-authorized payloads.
     pub local_entity_outputs: Vec<LocalEntityOutput>,
+    /// Atomic Account-pair envelope for ACK outputs produced by this Entity
+    /// transition. This RAM-only marker is bound into the flat Runtime outbox;
+    /// it is not Entity/Account state and never changes their roots.
+    pub atomic_cross_jurisdiction_pair: Option<RuntimeAtomicCrossJurisdictionPair>,
     pub entity_state_root: String,
     pub entity_authority_root: String,
     pub checkpoint: Option<AccountsCheckpoint>,

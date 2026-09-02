@@ -371,7 +371,7 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     expect(machine['pendingNetworkOutputs']).toBeUndefined();
     expect(machine['pendingOutputs']).toBeUndefined();
     expect(machine['networkInbox']).toBeUndefined();
-    expect(prepareRuntimeMachineGraphRows(8, machine).rows.every(
+    expect(prepareRuntimeMachineGraphRows(machine).rows.every(
       row => row.value.byteLength < 10_000,
     )).toBe(true);
     expect(buildStorageRuntimeMachineSnapshot(env)).toEqual(machine);
@@ -383,7 +383,7 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     const emptyMachine = buildDurableRuntimeMachineSnapshot(env);
     const emptyCheckpoint = buildCanonicalRuntimeStateSnapshot(env);
     const emptyView = buildReplayVerifiableRuntimePostStateView(env);
-    const emptyRoot = prepareRuntimeMachineGraphRows(3, emptyMachine).root;
+    const emptyRoot = prepareRuntimeMachineGraphRows(emptyMachine).root;
     const emptyOutbox = prepareRuntimeOutputRows(3, []);
 
     env.pendingOutputs = [queued];
@@ -393,7 +393,7 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     const queuedMachine = buildDurableRuntimeMachineSnapshot(env);
     const queuedCheckpoint = buildCanonicalRuntimeStateSnapshot(env);
     const queuedView = buildReplayVerifiableRuntimePostStateView(env);
-    const queuedRoot = prepareRuntimeMachineGraphRows(3, queuedMachine).root;
+    const queuedRoot = prepareRuntimeMachineGraphRows(queuedMachine).root;
     const queuedOutbox = prepareRuntimeOutputRows(3, [queued]);
 
     expect(queuedMachine).toEqual(emptyMachine);
@@ -422,13 +422,12 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     const machine = buildDurableRuntimeMachineSnapshot(
       createEmptyEnv('runtime-machine-fields'),
     );
-    const prepared = prepareRuntimeMachineGraphRows(1, machine);
+    const prepared = prepareRuntimeMachineGraphRows(machine);
     if (!prepared.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
     expect(prepared.root.leafCount).toBeGreaterThan(0);
     expect(prepared.rows.every(row => row.value.byteLength < 10_000)).toBe(true);
     const restored = await readRuntimeMachineGraph(
       memoryReader(prepared.rows),
-      1,
       prepared.root,
     );
     expect(restored).toEqual(machine);
@@ -445,10 +444,10 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     const machine = buildDurableRuntimeMachineSnapshot(env);
     expect(encodeBuffer(machine['infrastructure']).byteLength).toBeGreaterThan(100_000);
 
-    const prepared = prepareRuntimeMachineGraphRows(7, machine);
+    const prepared = prepareRuntimeMachineGraphRows(machine);
     if (!prepared.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
     expect(prepared.rows.every(row => row.value.byteLength < 10_000)).toBe(true);
-    expect(await readRuntimeMachineGraph(memoryReader(prepared.rows), 7, prepared.root))
+    expect(await readRuntimeMachineGraph(memoryReader(prepared.rows), prepared.root))
       .toEqual(machine);
   });
 });

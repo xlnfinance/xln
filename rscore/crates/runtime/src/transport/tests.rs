@@ -6,6 +6,7 @@ use super::crypto::{
 use super::msgpack::encode_framed;
 use super::routing::prepare_envelopes;
 use super::{DirectRoute, DirectRouteTable, RuntimeTransportError};
+mod atomic;
 mod direct;
 mod inbound;
 

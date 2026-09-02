@@ -26,6 +26,9 @@ use super::{
     select_runtime_frame,
 };
 
+#[path = "tests/cross_j_lifecycle_fixture.rs"]
+mod cross_j_lifecycle_fixture;
+
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 pub(super) const SIGNER: &str = "h1-hub";
 
@@ -208,7 +211,6 @@ fn frame_at(
         frame: RuntimeFrameContext {
             timestamp,
             finalized_j_height,
-            hub_rebalance_has_pending_work: false,
             entity_contexts: BTreeMap::from([(
                 entity_key(),
                 VecDeque::from([super::types::RuntimeEntityFrameContext {
@@ -1175,7 +1177,6 @@ fn due_hook_runs_one_live_entity_round_without_external_ingress() -> Result<(), 
             entity_inputs: Vec::new(),
             timestamp: 200,
             finalized_j_height: 0,
-            hub_rebalance_has_pending_work: false,
         },
         &mut materializer,
     )?;
@@ -1261,7 +1262,6 @@ fn exact_apply_does_not_derive_a_due_scheduled_wake() -> Result<(), RuntimeMachi
             frame: RuntimeFrameContext {
                 timestamp: 200,
                 finalized_j_height: 0,
-                hub_rebalance_has_pending_work: false,
                 entity_contexts: BTreeMap::new(),
             },
         },
@@ -1319,7 +1319,6 @@ fn recorded_scheduled_wake_replays_exactly_once() -> Result<(), RuntimeMachineEr
             entity_inputs: Vec::new(),
             timestamp: 200,
             finalized_j_height: 0,
-            hub_rebalance_has_pending_work: false,
         },
         &mut materializer,
     )?;
@@ -1463,12 +1462,16 @@ fn rejected_apply(
 }
 
 #[test]
-fn exact_replay_rejects_mutated_or_duplicate_recorded_wake() -> Result<(), RuntimeMachineError> {
-    let mutated = rejected_apply(apply_runtime(
+fn exact_replay_rejects_invalid_or_duplicate_recorded_wake() -> Result<(), RuntimeMachineError> {
+    let invalid = rejected_apply(apply_runtime(
         runtime_with_due_hook()?,
-        frame(200, vec![recorded_due_wake_input(151)?]),
+        frame(200, vec![recorded_due_wake_input(201)?]),
     ));
-    assert!(mutated.to_string().contains("RECORDED_CONFLICT"));
+    assert!(
+        invalid
+            .to_string()
+            .contains("SCHEDULED_WAKE_INVALID_PAYLOAD")
+    );
 
     let wake = recorded_due_wake_input(150)?;
     let duplicate = rejected_apply(apply_runtime(
@@ -1480,12 +1483,49 @@ fn exact_replay_rejects_mutated_or_duplicate_recorded_wake() -> Result<(), Runti
 }
 
 #[test]
-fn exact_replay_rejects_recorded_wake_without_due_crontab_state() -> Result<(), RuntimeMachineError>
+fn exact_replay_accepts_recorded_wake_that_became_stale_in_fifo() -> Result<(), RuntimeMachineError>
 {
+    let mut runtime = runtime_with_due_hook()?;
+    runtime
+        .state
+        .e_replicas
+        .get_mut(&entity_key())
+        .expect("fixture Entity state")
+        .entity
+        .crontab
+        .as_mut()
+        .expect("fixture crontab")
+        .hooks = xln_rscore_entity_kernel::ScheduledHookMap::empty();
+    let applied = apply_runtime(runtime, frame(200, vec![recorded_due_wake_input(150)?]))?;
+    assert_eq!(applied.replica.state.height, 1);
+    assert_eq!(
+        applied
+            .applied_frame
+            .expect("applied frame")
+            .entity_frame_count,
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn exact_replay_rejects_recorded_wake_without_crontab_state() -> Result<(), RuntimeMachineError> {
+    let mut runtime = replica(RuntimeLimits::hlt())?;
+    runtime
+        .state
+        .e_replicas
+        .get_mut(&entity_key())
+        .expect("fixture Entity state")
+        .entity
+        .crontab = None;
     let missing = rejected_apply(apply_runtime(
-        replica(RuntimeLimits::hlt())?,
+        runtime,
         frame(200, vec![recorded_due_wake_input(150)?]),
     ));
-    assert!(missing.to_string().contains("RECORDED_NOT_DUE"));
+    assert!(
+        missing
+            .to_string()
+            .contains("ENTITY_RESIDENT_CRONTAB_MISSING")
+    );
     Ok(())
 }

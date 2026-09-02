@@ -143,11 +143,11 @@ export type RuntimeFrame = {
   frameHash?: string;
   /** Commits the exact validator-local recovery metadata published with this frame. */
   replicaMetaDigest: string;
-  /** Required per-frame replay commitment over Entity heads and durable Runtime state. */
+  /** Required per-frame replay commitment over durable Runtime component digests. */
   postStateHash: string;
   materializedState: boolean;
   /**
-   * Independent canonical root computed directly from live EntityReplica data.
+   * Independent canonical root over frame coordinates and live Entity roots.
    * This intentionally avoids cloneEntityReplica(), project*Doc(), msgpack, and
    * coarse-doc storage cells so replay verification can catch bugs in those
    * pipelines instead of repeating them.

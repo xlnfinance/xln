@@ -1,0 +1,124 @@
+{
+  "canonicalSource": "TypeScript production EntityTx reducers",
+  "cases": [
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "📦 Queued E→R: 9 via 0x44444444... (use j_broadcast to commit)", "type": "status" }],
+      "name": "e2r-queues-external-token-deposit",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0x6be30c5ec73c9b7b5219d4fbe2cd39a7fb295c7a974e4d22dcf056f0adf525ef",
+      "txType": "e2r"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "📦 Queued R→E: 8 token 1 to 33333333 (use jBroadcast to commit)", "type": "status" }],
+      "name": "r2e-queues-external-withdrawal",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0xba16ed8a880943efe77ebfd410fc63f6423eba632fc680213fb0e478626535a5",
+      "txType": "r2e"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "📦 Queued R→R: 7 token 1 to 2222 (use jBroadcast to commit)", "type": "status" }],
+      "name": "r2r-queues-reserve-transfer",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0x73fb035360d5b8d0e645b391c3e3e7492923072f03583ec0f1b761879370371d",
+      "txType": "r2r"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "📦 Queued R→C: 6 token 1 to 2222↔3333 (use j_broadcast to commit)", "type": "status" }],
+      "name": "r2c-queues-remote-collateral",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0x80d7c8035e8b582c47b807b213a39154b19468d9e09e85cdf427691ac3779be6",
+      "txType": "r2c"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "⚠️ j_rebroadcast skipped: no sentBatch", "type": "status" }],
+      "name": "j-rebroadcast-without-sent-batch-is-a-signed-warning",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0xfd4c54266698d024fb19dcdf18c80d59dff58cea9b5f08115428bdc38d7b9804",
+      "txType": "j_rebroadcast"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "⚠️ No sentBatch to abort", "type": "status" }],
+      "name": "j-abort-without-sent-batch-is-a-signed-warning",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0xfd4c54266698d024fb19dcdf18c80d59dff58cea9b5f08115428bdc38d7b9804",
+      "txType": "j_abort_sent_batch"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [{ "message": "⚠️ No jBatchState to clear", "type": "status" }],
+      "name": "j-clear-without-batch-is-a-signed-warning",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0xfd4c54266698d024fb19dcdf18c80d59dff58cea9b5f08115428bdc38d7b9804",
+      "txType": "j_clear_batch"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "name": "runtime-output-reenters-the-canonical-reducer",
+      "events": [{ "message": "⚠️ No sentBatch to abort", "type": "status" }],
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0xfd4c54266698d024fb19dcdf18c80d59dff58cea9b5f08115428bdc38d7b9804",
+      "txType": "runtimeOutput"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [],
+      "events": [],
+      "name": "process-htlc-timeouts-preserves-input-order",
+      "outbox": {
+        "accountTxs": [
+          { "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222", "txDigest": "0x2620e71f37c5c011dfb39629575843c3a22945ab793f28524c7bc668659e114d", "txType": "htlc_resolve" },
+          { "accountId": "0x3333333333333333333333333333333333333333333333333333333333333333", "txDigest": "0x6519e14a1cb57456b9e92cc8e10eb05662cb167ac7776486d40e65744296aa50", "txType": "htlc_resolve" }
+        ],
+        "hashesToSign": [], "jOutputs": [], "outputs": []
+      },
+      "outboxDigest": "0x6926f86b092bef9ecb7be26c77092624a76378807243c6dffbcb2eee625a7f58",
+      "stateRoot": "0xfd4c54266698d024fb19dcdf18c80d59dff58cea9b5f08115428bdc38d7b9804",
+      "txType": "processHtlcTimeouts"
+    },
+    {
+      "accountsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "effects": [{
+        "data": {
+          "blockNumber": 43,
+          "entity": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "eventType": "ReserveUpdated",
+          "newBalance": "91",
+          "tokenId": 1,
+          "txHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "eventName": "JEventReceived",
+        "kind": "runtimeEvent"
+      }],
+      "events": [{ "message": "📊 RESERVE: 91 raw units of token #1 | Block 43 | Tx 0xbbbbbbbb...", "type": "status" }],
+      "name": "j-event-applies-authenticated-reserve-finality",
+      "outbox": { "accountTxs": [], "hashesToSign": [], "jOutputs": [], "outputs": [] },
+      "outboxDigest": "0x52bc6e18a252ef009c4f52a849ffc421fb2e135c6ea675dfe62a7d129cd7df3d",
+      "stateRoot": "0x0f46a827978bcb6e7799606bd95995c290d08569fa444681ae1ccf09c3e85fd5",
+      "txType": "j_event"
+    }
+  ],
+  "version": 1
+}

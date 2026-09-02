@@ -223,10 +223,10 @@ export const createWorkerConsensusContext = (
     certifiedBoardHash ?? worker.settlementBoardAuthorities.get(sourceEntityId.toLowerCase()),
 });
 
-export const collectWorkerPostAccounts = (
+export const projectWorkerPostAccounts = (
   worker: TsAccountWorkerState,
 ): readonly TsAccountWorkerPostAccount[] => {
-  const accounts = [...worker.frameTouchedAccountIds].sort().map(accountId => {
+  return [...worker.frameTouchedAccountIds].sort().map(accountId => {
     const account = worker.accounts.get(accountId);
     if (!account) throw new Error(`TS_ACCOUNT_WORKER_POST_ACCOUNT_MISSING:${accountId}`);
     const entityAccountLeaf = worker.accounts.valueHashAt(accountId);
@@ -235,6 +235,12 @@ export const collectWorkerPostAccounts = (
     }
     return { accountId, account: projectPortableAccountDoc(account), entityAccountLeaf };
   });
+};
+
+export const collectWorkerPostAccounts = (
+  worker: TsAccountWorkerState,
+): readonly TsAccountWorkerPostAccount[] => {
+  const accounts = projectWorkerPostAccounts(worker);
   worker.frameTouchedAccountIds.clear();
   return accounts;
 };

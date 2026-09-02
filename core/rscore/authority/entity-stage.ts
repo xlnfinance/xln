@@ -431,9 +431,11 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const originalProposalIds = new Set(proposalIds);
     const retainedOriginalOrder = this.preparedProposalIds.filter(accountId =>
       originalProposalIds.has(accountId));
-    if (safeStringify(retainedOriginalOrder) !== safeStringify(proposalIds)) {
+    const retainedSet = new Set(retainedOriginalOrder);
+    const expectedRetainedOrder = proposalIds.filter(accountId => retainedSet.has(accountId));
+    if (safeStringify(retainedOriginalOrder) !== safeStringify(expectedRetainedOrder)) {
       throw new Error(
-        `ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${safeStringify(proposalIds)}:${safeStringify(retainedOriginalOrder)}`,
+        `ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${safeStringify(expectedRetainedOrder)}:${safeStringify(retainedOriginalOrder)}`,
       );
     }
     const executed = this.admissionRequests.length

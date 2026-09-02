@@ -1,0 +1,160 @@
+{
+  "canonicalSource": "TypeScript applyAccountTxToMutableReplica",
+  "cases": [
+    {
+      "name": "borrower-lifecycle",
+      "steps": [
+        {
+          "accountStateRoot": "0xd52967ca99552afa84fb37ba95e4bd895e749bcff66c0f890175205d9ad574b7",
+          "byLeft": false,
+          "deltasRoot": "0xd0f6c4d2d2ecf5393b499adcbca31364f13ee59e1892455d3998e669f74eff39",
+          "events": [
+            "Lending borrow request borrow-2222222222222222 committed"
+          ],
+          "intentEntries": [
+            [
+              "borrow:borrow-2222222222222222",
+              "borrow"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0x22a0a937381062092ae37831b2e620b5771b154279048cf8b73adc515ab15538",
+          "offdelta": "0",
+          "outputCount": 0,
+          "rightCreditLimit": "20000",
+          "txType": "lending_borrow_request"
+        },
+        {
+          "accountStateRoot": "0x7fd8bbc439047ed615b2d113cabac0c5e81a71c784a252a60bde25e1b9995604",
+          "byLeft": true,
+          "deltasRoot": "0x67104d5645f8cbe8fb1126337873d8c4b6e4ec199e58b941339a0b2df76ed4dc",
+          "events": [
+            "💳 Right credit limit = 22500 for token 1"
+          ],
+          "intentEntries": [
+            [
+              "borrow:borrow-2222222222222222",
+              "borrow"
+            ],
+            [
+              "grant:loan-0327fd9035d42518",
+              "credit-grant"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0x9b2f5ad5e2aa5cf1dd9421849aa0d69f755a4074b33eef0c1f7903346146d59d",
+          "offdelta": "0",
+          "outputCount": 0,
+          "rightCreditLimit": "22500",
+          "txType": "lending_credit"
+        },
+        {
+          "accountStateRoot": "0xfeb2145a265c2661cc272fd6411258539ac2902445793bbe63b8f3e332632854",
+          "byLeft": false,
+          "deltasRoot": "0x80745f115f3476b50089a73bcde6b4640984f93919de16d12029be80acf60e2c",
+          "events": [
+            "💰 Received 2525 token 1 from Entity 3030 (xln:lending_repay)"
+          ],
+          "intentEntries": [
+            [
+              "borrow:borrow-2222222222222222",
+              "borrow"
+            ],
+            [
+              "grant:loan-0327fd9035d42518",
+              "credit-grant"
+            ],
+            [
+              "repay:loan-0327fd9035d42518",
+              "repay"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0x94bb7c3dade3df160b7012ffdab94d1c870b804fc9db8b1b9887a46753947d1f",
+          "offdelta": "2525",
+          "outputCount": 0,
+          "rightCreditLimit": "22500",
+          "txType": "lending_repay"
+        }
+      ]
+    },
+    {
+      "name": "lender-lifecycle",
+      "steps": [
+        {
+          "accountStateRoot": "0xc1594768bc3eb20861c501bdff01c2edf7382d7a1385763fee05404f3679de65",
+          "byLeft": false,
+          "deltasRoot": "0x8b2f57f5a7ff67570d909be30dc18ab49bfe3b2d1751bdedb143ae090718ee43",
+          "events": [
+            "💰 Received 10000 token 1 from Entity 2020 (xln:lending_fund)"
+          ],
+          "intentEntries": [
+            [
+              "fund:lend-1111111111111111",
+              "fund"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0x8ee49f1fb0cee4b8c22be28d6bb1ef41b29ce54f277ec21413eb420202bb77f4",
+          "offdelta": "10000",
+          "outputCount": 0,
+          "rightCreditLimit": "20000",
+          "txType": "lending_fund"
+        },
+        {
+          "accountStateRoot": "0x4291f1c50778ec7966a286d4a7890aaa20350086bc18754289d6145d3e9b9afc",
+          "byLeft": false,
+          "deltasRoot": "0x8b2f57f5a7ff67570d909be30dc18ab49bfe3b2d1751bdedb143ae090718ee43",
+          "events": [
+            "Lending close request lend-1111111111111111 committed"
+          ],
+          "intentEntries": [
+            [
+              "close:lend-1111111111111111",
+              "close-request"
+            ],
+            [
+              "fund:lend-1111111111111111",
+              "fund"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0x7ff005cebcc6692c318a048c343fbe968fa6d87f3d1dd5e946c328b30d1f6367",
+          "offdelta": "10000",
+          "outputCount": 0,
+          "rightCreditLimit": "20000",
+          "txType": "lending_close_request"
+        },
+        {
+          "accountStateRoot": "0x95b704b09fe5ebe387393e04e55cd88b1efcbb8beeab6b9ddc034e0c88dac9e7",
+          "byLeft": true,
+          "deltasRoot": "0x24bf3769ff86d5ec381efd79a77152942e63d3b702ef56d7832d27c5ef21325b",
+          "events": [
+            "💸 Sent 10025 token 1 to Entity 2020 (xln:lending_close_payout)"
+          ],
+          "intentEntries": [
+            [
+              "close:lend-1111111111111111",
+              "close-request"
+            ],
+            [
+              "fund:lend-1111111111111111",
+              "fund"
+            ],
+            [
+              "payout:lend-1111111111111111",
+              "close-payout"
+            ]
+          ],
+          "leftCreditLimit": "20000",
+          "lendingIntentsRoot": "0xa5b09d086aacb643ff5e812a9600145cb8544327fa44cde5e1e4c9f3c9108cc8",
+          "offdelta": "-25",
+          "outputCount": 0,
+          "rightCreditLimit": "20000",
+          "txType": "lending_close_payout"
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

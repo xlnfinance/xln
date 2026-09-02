@@ -163,6 +163,38 @@ fn offer_tx(offer_id: &str, ask: bool) -> AccountTx {
     offer_tx_units(offer_id, ask, 1)
 }
 
+#[test]
+fn canonical_usd_quote_authority_ask_matches_typescript_book_state() {
+    let ask = offer_tx("authority-ask", true);
+    let (_, outputs) = offered_account(MAKER, &ask, 1);
+    let mut state = entity_state(2_000);
+    state.known_accounts = BTreeSet::from([MAKER.to_string()]).into();
+    state.orderbook = Some(OrderbookState::empty(10_000));
+    let mut metadata = orderbook_metadata();
+    metadata.hub_profile.usd_quote_authority_entity_id = MAKER.to_string();
+    state.orderbook_metadata = Some(metadata);
+
+    let result = apply_entity_kernel(
+        state,
+        &[commit(MAKER, 0x40, 1, ask, outputs)],
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("authorized USD ask");
+    let book = &result.state.orderbook.expect("orderbook").books["1/2"];
+    let oracle = fixture();
+    let expected = &oracle["usdQuoteAuthorityAsk"];
+
+    assert_eq!(
+        book.last_accepted_usd_ask_price_ticks.to_string(),
+        expected["lastAcceptedUsdAskPriceTicks"]
+    );
+    assert_eq!(book.event_hash.to_string(), expected["eventHash"]);
+    assert_eq!(
+        compute_book_commitment_hash(book).expect("book commitment"),
+        expected["bookCommitmentHash"]
+    );
+}
+
 fn offered_account(
     remote: &str,
     tx: &AccountTx,

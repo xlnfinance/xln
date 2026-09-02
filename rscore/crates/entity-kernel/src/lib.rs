@@ -22,6 +22,7 @@ mod error;
 mod external_wallet;
 #[path = "support/frame_tx_effects.rs"]
 mod frame_tx_effects;
+mod hub_rebalance;
 pub mod j_batch;
 mod j_events;
 mod kernel;
@@ -55,9 +56,10 @@ pub use certified_board::{
 pub use command::{
     EntityCommandBoard, EntityCommandDisposition, EntityCommandError, EntityCommandNonceRecord,
     EntityCommandNonceState, SignedEntityCommandV1, UNREGISTERED_ENTITY_COMMAND_STACK_KEY,
-    advance_entity_command_nonce, assert_signed_entity_command, build_collective_entity_command,
-    canonical_entity_command_nonces, current_entity_command_board_hash,
-    decode_signed_entity_command, get_entity_command_disposition,
+    advance_entity_command_nonce, assert_signed_entity_command,
+    build_locally_authored_entity_command, canonical_entity_command_nonces,
+    current_entity_command_board_hash, decode_signed_entity_command,
+    get_entity_command_disposition, is_individual_entity_command_tx_kind,
     normalize_entity_command_nonce_board,
 };
 pub use commitment::{
@@ -84,9 +86,12 @@ pub use consensus::{
     measure_entity_frame_wire, project_entity_consensus_sections, sign_j_event_range,
 };
 pub use cross_j::{
-    CrossJurisdictionAccountViewRequest, CrossJurisdictionApplyResult,
-    apply_cross_jurisdiction_entity_txs, authorize_runtime_output, build_proposer_materializations,
+    CrossJOpeningProposalSelection, CrossJOpeningSelectionError, CrossJOpeningSiblingAccountView,
+    CrossJOpeningSiblingEntityView, CrossJurisdictionAccountViewRequest,
+    CrossJurisdictionApplyResult, apply_cross_jurisdiction_entity_txs, authorize_runtime_output,
+    build_proposer_materializations, cross_j_opening_account_ids,
     proposer_materialization_account_view_requests, proposer_materialization_key,
+    select_cross_j_opening_proposal,
 };
 pub use debt::{
     DebtDirection, DebtEntry, DebtEventType, DebtLedger, canonical_debt_entry,

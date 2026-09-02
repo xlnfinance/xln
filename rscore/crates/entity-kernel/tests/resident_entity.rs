@@ -18,14 +18,15 @@ use xln_rscore_engine::{
     apply_incoming_frame, derive_signer_key, propose_account_frame,
 };
 use xln_rscore_entity_kernel::{
-    AdmittedLocalEntityTx, ConsensusMode, CrontabState, DeterministicContext,
+    AdmittedLocalEntityTx, CanonicalEntityTx, ConsensusMode, CrontabState, DeterministicContext,
     DirectPaymentEntityTx, EntityConsensusConfig, EntityFrameAuthority, EntityFrameEvent,
-    EntityKernelCommitments, EntityKernelOutput, EntityLeaderState, EntityStateSlice,
+    EntityKernelCommitments, EntityKernelOutput, EntityLeaderState, EntityStateSlice, EntityTxKind,
     FinalizedJEventBatch, HtlcPaymentEntityTx, JClaimIngress, JReserveUpdate, LocalEntityControlTx,
     LocalEntityFinancialTx, LocalEntityTx, OrderbookState, OriginatedHtlcDeliveryMode,
     PreparedOriginatedHtlcPayment, ResidentEntityError, ResidentEntityOperation,
     ResidentEntityRequest, ResidentJEventProjection, ScheduledHook, ScheduledWake, SchedulerError,
-    apply_resident_entity_round, collect_due_scheduled_wake_jobs,
+    apply_resident_entity_round, apply_resident_entity_round_core, collect_due_scheduled_wake_jobs,
+    decode_local_entity_financial_tx,
 };
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
@@ -222,6 +223,169 @@ fn peer_proposal(
 }
 
 #[test]
+fn entity_owned_envelope_change_moves_root_without_account_history_touch() {
+    let hub_identity = identity("envelope-touch-hub");
+    let peer_identity = identity("envelope-touch-peer");
+    let hub = entity(&hub_identity);
+    let peer = entity(&peer_identity);
+    let peer_id = AccountId::from_bytes(*peer.as_bytes());
+    let mut initially_proposable = AccountConsensus::new(
+        AccountReplica::new(hub.clone(), account_state(&hub, &peer)).expect("replica"),
+    );
+    initially_proposable
+        .admit_txs(
+            vec![AccountTx::AddDelta {
+                token_id: TokenId::new(7).expect("token"),
+            }],
+            "envelope-freeze-test",
+        )
+        .expect("initial proposal work");
+    let seed = AccountSeed {
+        account_id: peer_id,
+        replica: initially_proposable.replica().clone(),
+        consensus: Some(initially_proposable.consensus_snapshot()),
+    };
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x57; 8]),
+        1,
+        0,
+        derive_signer_key(SEED, "envelope-touch-hub").expect("hub key"),
+        "envelope-touch-hub".to_string(),
+        support::market(),
+        vec![seed],
+    )
+    .expect("resident account");
+    let base_root = accounts.accounts_root();
+    let prepare = CanonicalEntityTx::from_frame_projection(
+        EntityTxKind::PrepareDispute,
+        CanonicalValue::Object(vec![
+            (
+                "counterpartyEntityId".into(),
+                CanonicalValue::String(peer.to_string()),
+            ),
+            (
+                "minCooldownMs".into(),
+                CanonicalValue::Number(CanonicalNumber::from_u32(50)),
+            ),
+        ]),
+    )
+    .expect("canonical prepareDispute");
+    let prepare = decode_local_entity_financial_tx(&prepare)
+        .expect("decode prepareDispute")
+        .expect("financial prepareDispute");
+    let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+    state.known_accounts.insert(peer.to_string());
+    let result = apply_resident_entity_round_core(
+        &mut accounts,
+        state,
+        ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root: base_root,
+                clock: ReceiverClock {
+                    entity_timestamp: TIMESTAMP,
+                    finalized_j_height: 100,
+                },
+                rows: Vec::new(),
+                post_accounts: false,
+            },
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: TIMESTAMP,
+            outbound_j_height: 100,
+            checkpoint_due: false,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            expected_proposer_signer_id: "envelope-touch-hub".into(),
+            finalized_j_events: None,
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
+            operations: vec![ResidentEntityOperation::Local(vec![
+                AdmittedLocalEntityTx {
+                    signer_id: "envelope-touch-hub".into(),
+                    board_epoch: 0,
+                    tx: LocalEntityTx::Financial(prepare),
+                },
+            ])],
+        },
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("envelope-only round");
+
+    assert_ne!(result.outbound.accounts_root, base_root);
+    assert!(result.outbound.touched.iter().any(|(id, _)| *id == peer_id));
+    assert!(
+        result.outbound.proposals.is_empty(),
+        "the envelope freeze suppresses the pre-existing proposal",
+    );
+    assert!(result.account_touch_order.is_empty());
+}
+
+#[test]
+fn real_account_input_remains_an_account_history_touch() {
+    let hub_identity = identity("input-touch-hub");
+    let hub = entity(&hub_identity);
+    let (seed, row, peer) = peer_proposal(
+        "input-touch-peer",
+        &hub,
+        0,
+        AccountTx::AddDelta {
+            token_id: TokenId::new(7).expect("token"),
+        },
+    );
+    let peer_id = seed.account_id;
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x58; 8]),
+        1,
+        0,
+        derive_signer_key(SEED, "input-touch-hub").expect("hub key"),
+        "input-touch-hub".to_string(),
+        support::market(),
+        vec![seed],
+    )
+    .expect("resident account");
+    let base_root = accounts.accounts_root();
+    let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+    state.known_accounts.insert(peer.to_string());
+    let result = apply_resident_entity_round_core(
+        &mut accounts,
+        state,
+        ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root: base_root,
+                clock: ReceiverClock {
+                    entity_timestamp: TIMESTAMP,
+                    finalized_j_height: 100,
+                },
+                rows: vec![row],
+                post_accounts: false,
+            },
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: TIMESTAMP,
+            outbound_j_height: 100,
+            checkpoint_due: false,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            expected_proposer_signer_id: "input-touch-hub".into(),
+            finalized_j_events: None,
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
+            operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
+        },
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("real Account input round");
+
+    assert_eq!(result.account_touch_order, vec![peer_id]);
+}
+
+#[test]
 fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
     let hub_identity = identity("hub");
     let peer_identity = identity("genesis-peer");
@@ -362,10 +526,10 @@ fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
             runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".to_string(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: Some(single_signer_authority("hub")),
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: vec![
                 ResidentEntityOperation::Local(vec![AdmittedLocalEntityTx {
                     signer_id: "hub".into(),
@@ -479,10 +643,10 @@ fn accepted_and_duplicate_account_proposals_force_the_same_pure_ack() {
                 runtime_seed: None,
                 scheduled_wake: None,
                 expected_proposer_signer_id: "force-ack-hub".to_string(),
-                hub_rebalance_has_pending_work: false,
                 finalized_j_events: None,
                 entity_authority: None,
                 local_account_genesis_policy: None,
+                cross_j_opening_sibling_views: Vec::new(),
                 operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
             },
             &DeterministicContext::hlt_default(),
@@ -731,10 +895,10 @@ fn later_pure_ack_clears_earlier_duplicate_force_in_one_inbound_batch() {
             runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "cancel-force-hub".to_string(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: None,
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 2 }],
         },
         &DeterministicContext::hlt_default(),
@@ -844,7 +1008,6 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
             runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".into(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: Some(ResidentJEventProjection {
                 scanned_through: 43,
                 runtime_seed: "runtime-seed".into(),
@@ -895,6 +1058,7 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
             }),
             entity_authority: Some(j_authority),
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: Vec::new(),
         },
         &DeterministicContext::hlt_default(),
@@ -998,10 +1162,10 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
             runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".into(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: None,
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: vec![ResidentEntityOperation::Local(vec![
                 xln_rscore_entity_kernel::AdmittedLocalEntityTx {
                     signer_id: "hub".into(),
@@ -1186,10 +1350,10 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
             runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "hub".to_string(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: None,
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
         },
         &DeterministicContext::hlt_default(),
@@ -1310,10 +1474,10 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                 runtime_seed: None,
                 scheduled_wake: None,
                 expected_proposer_signer_id: "hub".to_string(),
-                hub_rebalance_has_pending_work: false,
                 finalized_j_events: None,
                 entity_authority: Some(single_signer_authority("hub")),
                 local_account_genesis_policy: None,
+                cross_j_opening_sibling_views: Vec::new(),
                 operations: vec![
                     ResidentEntityOperation::AccountRange { start: 0, len: 1 },
                     ResidentEntityOperation::Local(vec![AdmittedLocalEntityTx {
@@ -1463,10 +1627,10 @@ fn failed_books_stage_rolls_back_account_candidate_and_exact_retry_matches_fresh
         runtime_seed: None,
         scheduled_wake: None,
         expected_proposer_signer_id: "books-rollback-hub".to_string(),
-        hub_rebalance_has_pending_work: false,
         finalized_j_events: None,
         entity_authority: None,
         local_account_genesis_policy: None,
+        cross_j_opening_sibling_views: Vec::new(),
         operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
     };
 
@@ -1610,10 +1774,10 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
                 jobs,
             }),
             expected_proposer_signer_id: "hub".to_string(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: None,
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: Vec::new(),
         },
         &DeterministicContext::hlt_default(),
@@ -1706,10 +1870,10 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
                 jobs,
             }),
             expected_proposer_signer_id: "hub".to_string(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: None,
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: Vec::new(),
         },
         &DeterministicContext::hlt_default(),
@@ -1723,6 +1887,154 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
         ResidentEntityError::Scheduler(SchedulerError::ProposerMismatch)
     ));
     assert_eq!(accounts.accounts_root(), base_root);
+}
+
+/// A signed peer lock that leaves no 30-second enforcement reserve is an
+/// authenticated input rejection, not an idle Account result. The Entity
+/// boundary must fail-stop so Runtime cannot consume the WAL position while
+/// leaving the unsafe input absent from committed state.
+#[test]
+fn short_lock_fails_the_resident_entity_round_without_account_mutation() {
+    let hub_identity = identity("short-lock-hub");
+    let peer_identity = identity("short-lock-peer");
+    let hub = entity(&hub_identity);
+    let peer = entity(&peer_identity);
+    let account_id = AccountId::from_bytes(*peer.as_bytes());
+    let transformer = [0x77_u8; 20];
+    let shared_state = account_state(&hub, &peer);
+    let hub_replica = AccountReplica::new(hub.clone(), shared_state.clone()).expect("hub replica");
+    let mut peer_replica = AccountReplica::new(peer.clone(), shared_state).expect("peer replica");
+    peer_replica.set_delta_transformer(transformer);
+    let mut peer_account = AccountConsensus::new(peer_replica);
+    let hashlock = format!("0x{}", "55".repeat(32));
+    peer_account
+        .admit_txs(
+            vec![AccountTx::HtlcLock(HtlcLockTx {
+                lock_id: hashlock.clone(),
+                hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
+                timelock: BigInt::from(TIMESTAMP + 30_000),
+                reveal_before_height: 200,
+                amount: BigInt::from(50),
+                token_id: TokenId::new(1).expect("token"),
+                delivery_mode: None,
+                envelope: None,
+            })],
+            "unsafe short lock",
+        )
+        .expect("admit lock");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut peer_account,
+        &peer_identity,
+        TIMESTAMP,
+        100,
+        &support::market(),
+    )
+    .expect("propose short lock") else {
+        panic!("peer short-lock proposal missing")
+    };
+    let proposed = *proposed;
+    let proposed_dispute = proposed.dispute.as_ref().map(|draft| CounterpartyDispute {
+        hanko: proposed.dispute_hanko.clone(),
+        hash: draft.hash,
+        proof_body_hash: draft.proof_body_hash,
+        nonce: draft.nonce,
+        proposer_is_left: draft.proposer_is_left,
+    });
+    let seed = AccountSeed {
+        account_id,
+        replica: hub_replica,
+        consensus: None,
+    };
+    let mut accounts = ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x7e; 8]),
+        4,
+        0,
+        derive_signer_key(SEED, "short-lock-hub").expect("hub key"),
+        "short-lock-hub".to_string(),
+        support::market(),
+        vec![seed],
+    )
+    .expect("resident account");
+    let accounts_root_before = accounts.accounts_root();
+    let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+    state.known_accounts.insert(peer.to_string());
+    let result = apply_resident_entity_round(
+        &mut accounts,
+        state,
+        ResidentEntityRequest {
+            inbound: EntityInboundRequest {
+                owner_entity_id: *hub.as_bytes(),
+                expected_accounts_root: accounts_root_before,
+                clock: ReceiverClock {
+                    entity_timestamp: TIMESTAMP,
+                    finalized_j_height: 100,
+                },
+                rows: vec![AccountInputRow {
+                    operation_index: 0,
+                    account_id,
+                    genesis_policy: None,
+                    certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    local_certified_board_authority:
+                        xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                    input: AccountInput {
+                        envelope: AccountInputEnvelope {
+                            from_entity_id: *peer.as_bytes(),
+                            to_entity_id: *hub.as_bytes(),
+                            domain: domain(),
+                            dispute_config: AccountDisputeConfig::new(10, 10)
+                                .expect("dispute config"),
+                            watch_seed: Some(
+                                WatchSeed::parse(&format!("0x{}", "99".repeat(32)))
+                                    .expect("watch seed"),
+                            ),
+                        },
+                        kind: AccountInputKind::AckFrame {
+                            ack: None,
+                            frame: Box::new(IncomingFrame {
+                                frame: proposed.frame,
+                                state_hash: proposed.state_hash,
+                                frame_hanko: Some(proposed.hanko),
+                                dispute: proposed_dispute,
+                            }),
+                        },
+                    },
+                }],
+                post_accounts: false,
+            },
+            local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+            entity_height: 1,
+            outbound_timestamp: TIMESTAMP,
+            outbound_j_height: 100,
+            checkpoint_due: true,
+            post_accounts: false,
+            runtime_seed: None,
+            scheduled_wake: None,
+            expected_proposer_signer_id: "short-lock-hub".to_string(),
+            finalized_j_events: None,
+            entity_authority: None,
+            local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
+            operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
+        },
+        &DeterministicContext::hlt_default(),
+    );
+    let Err(error) = result else {
+        panic!("unsafe short lock must fail the Entity/Runtime boundary")
+    };
+
+    assert!(matches!(
+        error,
+        ResidentEntityError::InboundFrameRejected { ref account_id, ref reason }
+            if account_id == &peer.to_string()
+                && reason == &format!(
+                    "HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT: lock={hashlock} localTimestamp={TIMESTAMP} localJHeight=100 frameTimestamp={TIMESTAMP} frameJHeight=100"
+                )
+    ));
+    assert_eq!(
+        accounts.accounts_root(),
+        accounts_root_before,
+        "failed Entity round must abort the staged Account candidate",
+    );
 }
 
 /// The Account deadline reducer is only half the protocol: authenticated
@@ -1962,10 +2274,10 @@ fn reserve_window_secret_is_consumed_by_the_resident_entity_dispute_flow() {
             runtime_seed: None,
             scheduled_wake: None,
             expected_proposer_signer_id: "reserve-dispute-hub".to_string(),
-            hub_rebalance_has_pending_work: false,
             finalized_j_events: None,
             entity_authority: None,
             local_account_genesis_policy: None,
+            cross_j_opening_sibling_views: Vec::new(),
             operations: vec![ResidentEntityOperation::AccountRange { start: 0, len: 1 }],
         },
         &DeterministicContext::hlt_default(),

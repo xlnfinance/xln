@@ -264,7 +264,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
       const checkpoint = checkpointRound.outbound.checkpoint;
       if (checkpoint === null) throw new Error('RSCORE_ENTITY_TEST_CHECKPOINT_REQUIRED');
       expect(checkpoint.accounts).toHaveLength(1);
-      expect(checkpoint.accounts[0]).toHaveLength(12);
+      expect(checkpoint.accounts[0]).toHaveLength(14);
       const storageRoot = mkdtempSync(join(tmpdir(), 'xln-rscore-checkpoint-'));
       const storage = new Level<Buffer, Buffer>(storageRoot, {
         keyEncoding: 'buffer',
@@ -283,7 +283,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         expect(prepared.exactCheckpoints).toHaveLength(1);
         const checkpointRow = prepared.exactCheckpoints[0]?.accounts[0];
         if (checkpointRow === undefined) throw new Error('RSCORE_ENTITY_TEST_ACCOUNT_ROW_REQUIRED');
-        expect(checkpointRow).toHaveLength(11);
+        expect(checkpointRow).toHaveLength(13);
         const decoded = decodeRscoreAccountRestoreRow(checkpointRow);
         expect(decoded.consensus.rollbackCount).toBe(3);
         expect(decoded.stateSeed.envelope?.fields['rollbackCount']).toBe(3);

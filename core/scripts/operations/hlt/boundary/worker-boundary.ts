@@ -5,7 +5,11 @@
  */
 
 import type { RuntimeAdapterEntitySummary } from '../../../../api/runtime-adapter/types';
-import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from './environment-manifest';
+import {
+  decodeHltEnvironmentManifest,
+  requireHltAccountWorkerEvidence,
+  type HltEnvironmentManifest,
+} from './environment-manifest';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
 import { validateAccountDeltas } from '../../../../account/validation/delta-validation';
 import { decodeAccountFrame } from '../../../../account/validation/frame-validation';
@@ -578,6 +582,11 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     exchangeDistribution.cancelledOffers !== cancelled) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_DISTRIBUTION_MISMATCH');
   }
+  const environment = decodeHltEnvironmentManifest(
+    report['environment'],
+    'PRODUCTION_SWAP_LOAD_REPORT_ENVIRONMENT',
+  );
+  requireHltAccountWorkerEvidence(environment.accountWorkers, 'PRODUCTION_SWAP_LOAD_REPORT_ENVIRONMENT');
   return {
     schema: report['schema'], engine, mode: report['mode'], schedule,
     configuredUsers: Number(report['configuredUsers']), configuredRounds: rounds,
@@ -606,6 +615,6 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     driverRssAfter: Number(report['driverRssAfter']), walBytesBefore: Number(report['walBytesBefore']),
     walBytesAfter: Number(report['walBytesAfter']), crossedBookAfterRun: false,
     durableBefore, durableAfter, loadDurableBefore, loadDurableAfter, settlementEvidence,
-    environment: decodeHltEnvironmentManifest(report['environment'], 'PRODUCTION_SWAP_LOAD_REPORT_ENVIRONMENT'),
+    environment,
   };
 };

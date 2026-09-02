@@ -11,18 +11,17 @@ use xln_rscore_batch::{
 use xln_rscore_entity_kernel::{
     CanonicalEntityTx, EntityCommandBoard, EntityCommandDisposition, EntityFrameEvent,
     EntityFrameWireMeasureBody, EntityTransitionCertificationRequest, EntityTransitionError,
-    EntityTxKind, HashType, JPrefixRangeClaim, LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES,
-    MAX_ENTITY_PROPOSAL_WIRE_BYTES, MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, PendingNonMutatingWake,
-    ResidentEntityOperation, ResidentEntityRequest, ScheduledWake, SchedulerError,
-    UNREGISTERED_ENTITY_COMMAND_STACK_KEY, advance_entity_command_nonce,
-    apply_resident_entity_round_core, assert_signed_entity_command,
-    build_collective_entity_command, build_proposer_materializations,
+    EntityTxKind, HashType, JPrefixRangeClaim, LocalEntityOutput, LocalEntityOutputTx,
+    LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
+    MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, PendingNonMutatingWake, ResidentEntityOperation,
+    ResidentEntityRequest, ScheduledWake, SchedulerError, UNREGISTERED_ENTITY_COMMAND_STACK_KEY,
+    advance_entity_command_nonce, apply_resident_entity_round_core, assert_signed_entity_command,
+    build_locally_authored_entity_command, build_proposer_materializations,
     build_required_j_prefix_certificate, certify_entity_transition,
     collect_due_scheduled_wake_jobs, current_entity_command_board_hash, decode_local_entity_tx,
     encode_entity_frame_context, measure_entity_frame_tx_bytes, measure_entity_frame_wire,
     normalize_entity_command_nonce_board, proposer_materialization_account_view_requests,
-    proposer_materialization_key, resolve_board_handover_authority, scheduled_wake_entity_tx,
-    sign_j_event_range,
+    resolve_board_handover_authority, sign_j_event_range,
 };
 use xln_rscore_protocol::{CanonicalValue, encode_canonical_consensus_bytes};
 
@@ -32,6 +31,7 @@ use crate::{
 };
 
 use super::inbound_genesis::{attach_inbound_genesis_policies, derive_policy};
+use super::scheduled_input::decode_recorded_scheduled_wake;
 use super::types::EntityPendingWork;
 use super::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
@@ -41,6 +41,12 @@ use super::{
     RuntimeOutputs, RuntimeReplica, RuntimeWake, enqueue_runtime_input,
     scheduled_input::{empty_entity_input, scheduled_wake_entity_input},
     select_runtime_frame,
+};
+
+mod cross_j_commit_phase;
+
+use cross_j_commit_phase::{
+    MaterializationAdmission, materialization_admission, select_commit_phase_work,
 };
 
 struct EntityApplySlot {
@@ -126,8 +132,16 @@ fn prepare_j_prefix_range(
     slot: &EntityApplySlot,
     observation: &crate::j_watcher::ObserveJRange,
 ) -> Result<PreparedJPrefixRange, RuntimeMachineError> {
-    let state = &slot.state.entity;
-    if slot.replica.entity_signer.signer_id() != observation.signer_id {
+    prepare_j_prefix_range_from_parts(&slot.state, &slot.replica, observation)
+}
+
+fn prepare_j_prefix_range_from_parts(
+    runtime_state: &crate::RuntimeEntityState,
+    runtime_replica: &crate::RuntimeEntityReplica,
+    observation: &crate::j_watcher::ObserveJRange,
+) -> Result<PreparedJPrefixRange, RuntimeMachineError> {
+    let state = &runtime_state.entity;
+    if runtime_replica.entity_signer.signer_id() != observation.signer_id {
         return Err(j_range_error("SIGNER_MISMATCH"));
     }
     let base_height = state.last_finalized_j_height;
@@ -156,7 +170,7 @@ fn prepare_j_prefix_range(
     let range_hash = xln_rscore_entity_kernel::canonical_j_event_range_hash(&blocks)
         .map_err(|error| j_range_error(error.to_string()))?;
     let signature = sign_j_event_range(
-        &slot.replica.entity_signer,
+        &runtime_replica.entity_signer,
         &state.entity_id,
         &observation.jurisdiction_ref,
         base_height,
@@ -215,6 +229,193 @@ fn prepare_j_prefix_range(
         claim,
         signature,
     })
+}
+
+/// Build the exact single-signer Entity input that TS records beside an
+/// ordered watcher observation. This is a pure admission projection: the
+/// observation remains a RuntimeTx and no Entity frame is applied until this
+/// returned input is selected into the same durable Runtime WAL frame.
+pub(crate) fn build_local_j_prefix_entity_input(
+    replica: &crate::RuntimeReplica,
+    observation: &crate::j_watcher::ObserveJRange,
+) -> Result<Option<RuntimeEntityInput>, RuntimeMachineError> {
+    let (state, live) = replica
+        .entity_slot(observation.entity_id.as_bytes(), &observation.signer_id)
+        .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+    let prior_frame_hash = live
+        .entity_consensus
+        .certified_frame_head
+        .as_ref()
+        .map_or("genesis", |head| head.frame.hash.as_str());
+    // Header-only transport progress never manufactures an Entity frame for
+    // an unregistered Entity. A semantic range is different: TS certifies its
+    // exact authenticated prefix on demand even before registration finality.
+    if observation.batches.is_empty()
+        && build_required_j_prefix_certificate(
+            &live.entity_signer,
+            &live.entity_consensus.state.authority,
+            &state.entity,
+            state
+                .entity
+                .height
+                .checked_add(1)
+                .ok_or(RuntimeMachineError::EntityHeightOverflow)?,
+            prior_frame_hash,
+            None,
+        )
+        .map_err(EntityTransitionError::from)?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let complete = complete_local_j_prefix_observation(state, live, Some(observation))?
+        .ok_or_else(|| j_range_error("LOCAL_HISTORY_MISSING"))?;
+    let prepared = prepare_j_prefix_range_from_parts(state, live, &complete)?;
+    let Some(certificate) = build_required_j_prefix_certificate(
+        &live.entity_signer,
+        &live.entity_consensus.state.authority,
+        &state.entity,
+        state
+            .entity
+            .height
+            .checked_add(1)
+            .ok_or(RuntimeMachineError::EntityHeightOverflow)?,
+        prior_frame_hash,
+        Some(&prepared.claim),
+    )
+    .map_err(EntityTransitionError::from)?
+    else {
+        return Ok(None);
+    };
+    let certificate = crate::tagged_json_from_canonical_value(&certificate)
+        .map_err(|error| RuntimeMachineError::ReplicaMetadata(error.to_string()))?;
+    let attestation = certificate
+        .get("attestations")
+        .and_then(|value| value.get("value"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|rows| rows.first())
+        .and_then(serde_json::Value::as_array)
+        .filter(|row| row.len() == 2 && row[0].as_str() == Some(&observation.signer_id))
+        .map(|row| row[1].clone())
+        .ok_or_else(|| {
+            RuntimeMachineError::ReplicaMetadata("J_PREFIX_CERTIFICATE_SIGNER_MISSING".into())
+        })?;
+    RuntimeEntityInput::decode(serde_json::json!({
+        "entityId": complete.entity_id.as_hex(),
+        "signerId": complete.signer_id,
+        "jPrefixAttestations": {
+            "__xlnType": "Map",
+            "value": [[complete.signer_id, attestation]],
+        },
+    }))
+    .map(Some)
+}
+
+pub(crate) fn build_pending_local_j_prefix_entity_input(
+    replica: &crate::RuntimeReplica,
+    entity_id: &[u8; 32],
+    signer_id: &str,
+) -> Result<Option<RuntimeEntityInput>, RuntimeMachineError> {
+    let (state, live) = replica
+        .entity_slot(entity_id, signer_id)
+        .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
+    let Some(observation) = complete_local_j_prefix_observation(state, live, None)? else {
+        return Ok(None);
+    };
+    build_local_j_prefix_entity_input(replica, &observation)
+}
+
+fn complete_local_j_prefix_observation(
+    state: &RuntimeEntityState,
+    live: &RuntimeEntityReplica,
+    suffix: Option<&crate::j_watcher::ObserveJRange>,
+) -> Result<Option<crate::j_watcher::ObserveJRange>, RuntimeMachineError> {
+    let base_height = state.entity.last_finalized_j_height;
+    let history = live
+        .replica_metadata
+        .get("jHistory")
+        .and_then(serde_json::Value::as_object);
+    let history_tip = history
+        .and_then(|value| value.get("contiguousThroughHeight"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(base_height);
+    let target = suffix.map_or(history_tip, |value| {
+        value.scanned_through_height.max(history_tip)
+    });
+    if target <= base_height {
+        return Ok(None);
+    }
+    let jurisdiction_ref = suffix
+        .map(|value| value.jurisdiction_ref.clone())
+        .or_else(|| {
+            history
+                .and_then(|value| value.get("jurisdictionRef"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| j_range_error("LOCAL_JURISDICTION_MISSING"))?;
+    let mut hashes = tagged_height_map(
+        history.and_then(|value| value.get("blockHashes")),
+        "blockHashes",
+    )?;
+    let mut blocks = tagged_height_map(
+        history.and_then(|value| value.get("eventBlocks")),
+        "eventBlocks",
+    )?;
+    if let Some(suffix) = suffix {
+        for header in &suffix.headers {
+            hashes.insert(
+                header.j_height,
+                serde_json::Value::String(render_word(&header.j_block_hash)),
+            );
+        }
+        let encoded = crate::j_watcher::encode_observe_j_range(suffix)
+            .map_err(|error| j_range_error(error.to_string()))?;
+        let suffix_blocks = encoded
+            .get("blocks")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| j_range_error("LOCAL_BLOCKS_MISSING"))?;
+        for block in suffix_blocks.iter().cloned() {
+            let height = block
+                .get("jHeight")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| j_range_error("LOCAL_BLOCK_HEIGHT"))?;
+            blocks.insert(height, block);
+        }
+    }
+    let headers = (base_height + 1..=target)
+        .map(|height| {
+            let hash = hashes
+                .get(&height)
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| j_range_error(format!("LOCAL_HEADER_MISSING:{height}")))?;
+            Ok(serde_json::json!({"jHeight":height,"jBlockHash":hash}))
+        })
+        .collect::<Result<Vec<_>, RuntimeMachineError>>()?;
+    let tip_block_hash = headers
+        .last()
+        .and_then(|header| header.get("jBlockHash"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| j_range_error("LOCAL_TIP_MISSING"))?;
+    let blocks = blocks
+        .into_iter()
+        .filter_map(|(height, block)| (height > base_height && height <= target).then_some(block))
+        .collect::<Vec<_>>();
+    if suffix.is_none() && blocks.is_empty() {
+        return Ok(None);
+    }
+    let value = serde_json::json!({
+        "entityId": state.entity.entity_id,
+        "signerId": live.signer_id,
+        "jurisdictionRef": jurisdiction_ref,
+        "scannedThroughHeight": target,
+        "tipBlockHash": tip_block_hash,
+        "headers": headers,
+        "blocks": blocks,
+    });
+    crate::j_watcher::decode_observe_j_range(&value)
+        .map(Some)
+        .map_err(|error| j_range_error(error.to_string()))
 }
 
 fn profile_runtime_apply() -> bool {
@@ -730,7 +931,21 @@ fn internal_wake(
 ) -> Result<Option<RuntimeWake>, RuntimeMachineError> {
     let entity_mempool = !replica.entity_mempool.is_empty();
     let account_mempool = replica.accounts.has_proposable_accounts()?;
-    let scheduled = scheduled_wake_from_state(state, &replica.signer_id, frame)?;
+    let hub_rebalance_has_pending_work = state.entity.hub_rebalance_config.is_some()
+        && (replica
+            .accounts
+            .selected_has_rebalance_work(state.accounts_root)?
+            || state
+                .entity
+                .j_batch_state
+                .as_ref()
+                .is_some_and(|batch| batch.sent_batch.is_some()));
+    let scheduled = scheduled_wake_from_state(
+        state,
+        &replica.signer_id,
+        frame,
+        hub_rebalance_has_pending_work,
+    )?;
     if !entity_mempool && !account_mempool && scheduled.is_none() {
         return Ok(None);
     }
@@ -745,12 +960,13 @@ fn scheduled_wake_from_state(
     state: &RuntimeEntityState,
     signer_id: &str,
     frame: &RuntimeFrameContext,
+    hub_rebalance_has_pending_work: bool,
 ) -> Result<Option<ScheduledWake>, RuntimeMachineError> {
     let jobs = match &state.entity.crontab {
         Some(crontab) => collect_due_scheduled_wake_jobs(
             crontab,
             frame.timestamp,
-            frame.hub_rebalance_has_pending_work,
+            hub_rebalance_has_pending_work,
         )?,
         None => Vec::new(),
     };
@@ -820,7 +1036,7 @@ fn prepare_entity_prefix<'a>(
                         "ENTITY_COMMAND_BOARD_CONTEXT_REQUIRED".into(),
                     )
                 })?;
-                let (command, command_projection) = build_collective_entity_command(
+                let (command, command_projection) = build_locally_authored_entity_command(
                     &slot.replica.entity_signer,
                     board,
                     command_nonces.as_ref(),
@@ -922,87 +1138,11 @@ fn accept_entity_tx_bytes(
     Ok(true)
 }
 
-fn inspect_materialization_tx(
-    tx: &CanonicalEntityTx,
-    pending_keys: &mut BTreeSet<String>,
-    commit_phase: &mut bool,
-) -> Result<(), RuntimeMachineError> {
-    if let Some(key) = proposer_materialization_key(tx) {
-        pending_keys.insert(key);
-    }
-    *commit_phase |= matches!(
-        tx.kind,
-        EntityTxKind::CrossJurisdictionFillNotice | EntityTxKind::RegisterCrossJurisdictionSwap
-    );
-    if tx.kind != EntityTxKind::RuntimeOutput {
-        return Ok(());
-    }
-    let Some(LocalEntityTx::RuntimeOutput(output)) =
-        decode_local_entity_tx(tx).map_err(RuntimeMachineError::EntityFinancial)?
-    else {
-        return Err(RuntimeMachineError::EntityTxExecutionUnsupported(
-            tx.kind.as_str(),
-        ));
-    };
-    for nested in &output.entity_txs {
-        inspect_materialization_tx(nested, pending_keys, commit_phase)?;
-    }
-    Ok(())
-}
-
-fn inspect_materialization_local_tx(
-    tx: &LocalEntityTx,
-    pending_keys: &mut BTreeSet<String>,
-    commit_phase: &mut bool,
-) -> Result<(), RuntimeMachineError> {
-    match tx {
-        LocalEntityTx::CrossJurisdiction(tx) => {
-            inspect_materialization_tx(tx, pending_keys, commit_phase)
-        }
-        LocalEntityTx::RuntimeOutput(output) => {
-            for nested in &output.entity_txs {
-                inspect_materialization_tx(nested, pending_keys, commit_phase)?;
-            }
-            Ok(())
-        }
-        LocalEntityTx::Financial(_) | LocalEntityTx::Control(_) => Ok(()),
-    }
-}
-
-fn materialization_admission(
-    work: &std::collections::VecDeque<EntityPendingWork>,
-) -> Result<(BTreeSet<String>, bool), RuntimeMachineError> {
-    let mut pending_keys = BTreeSet::new();
-    let mut commit_phase = false;
-    for work in work {
-        match work {
-            EntityPendingWork::Account { .. } => commit_phase = true,
-            EntityPendingWork::LocalBatch { native, .. } => {
-                for tx in native {
-                    inspect_materialization_local_tx(tx, &mut pending_keys, &mut commit_phase)?;
-                }
-            }
-            EntityPendingWork::Command { command, .. } => {
-                for tx in &command.native_txs {
-                    inspect_materialization_local_tx(tx, &mut pending_keys, &mut commit_phase)?;
-                }
-            }
-            EntityPendingWork::ProposerMaterialized { native, .. } => {
-                inspect_materialization_local_tx(native, &mut pending_keys, &mut commit_phase)?;
-            }
-            EntityPendingWork::Projected(projected) => {
-                inspect_materialization_tx(projected, &mut pending_keys, &mut commit_phase)?;
-            }
-        }
-    }
-    Ok((pending_keys, commit_phase))
-}
-
 fn enqueue_proposer_materializations(
     slot: &mut EntityApplySlot,
     runtime_seed: &str,
-) -> Result<(), RuntimeMachineError> {
-    let (pending_keys, commit_phase) = materialization_admission(&slot.replica.entity_mempool)?;
+) -> Result<MaterializationAdmission, RuntimeMachineError> {
+    let admission = materialization_admission(&slot.replica.entity_mempool)?;
     let mut merged =
         BTreeMap::<String, xln_rscore_entity_kernel::CrossJurisdictionAccountViewRequest>::new();
     for request in proposer_materialization_account_view_requests(&slot.state.entity)
@@ -1058,8 +1198,8 @@ fn enqueue_proposer_materializations(
         &slot.replica.signer_id,
         &slot.replica.entity_consensus.state.authority,
         &account_views,
-        &pending_keys,
-        commit_phase,
+        &admission.pending_keys,
+        admission.commit_phase,
     )
     .map_err(RuntimeMachineError::EntityFinancial)?;
     for projected in additions {
@@ -1082,7 +1222,7 @@ fn enqueue_proposer_materializations(
                 native: Box::new(native),
             });
     }
-    Ok(())
+    Ok(admission)
 }
 
 fn measure_prepared_entity_prefix(
@@ -1519,7 +1659,7 @@ fn take_entity_prefix(
                         "ENTITY_COMMAND_BOARD_CONTEXT_REQUIRED".into(),
                     )
                 })?;
-                let (command, command_projection) = build_collective_entity_command(
+                let (command, command_projection) = build_locally_authored_entity_command(
                     &slot.replica.entity_signer,
                     board,
                     selected.command_nonces.as_ref(),
@@ -1637,10 +1777,314 @@ struct PendingEntityGroup {
     wake: Option<RuntimeWake>,
     recorded_scheduled_wake: bool,
     j_observation: Option<crate::j_watcher::ObserveJRange>,
+    j_attestation_wire: Option<serde_json::Value>,
+    /// Runtime-envelope metadata copied from an admitted atomic proposal pair
+    /// onto the resulting ACK outputs. It never enters Entity consensus.
+    atomic_output_pair: Option<super::types::RuntimeAtomicCrossJurisdictionPair>,
+    cause: PendingEntityCause,
 }
 
 struct PendingEntitySegment {
     groups: Vec<PendingEntityGroup>,
+    derived: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingEntityCause {
+    External,
+    CrossJurisdiction,
+    AccountWork,
+}
+
+struct ImmediateCrossJCommand {
+    source_entity_id: String,
+    source_signer_id: String,
+    target: RuntimeEntityKey,
+    entity_txs: Vec<CanonicalEntityTx>,
+}
+
+fn canonical_entity_tx_value(
+    tx: &CanonicalEntityTx,
+) -> Result<CanonicalValue, RuntimeMachineError> {
+    Ok(CanonicalValue::Object(vec![
+        (
+            "type".into(),
+            CanonicalValue::String(tx.kind.as_str().into()),
+        ),
+        (
+            "data".into(),
+            tx.frame_data()
+                .cloned()
+                .ok_or(RuntimeMachineError::EntityTxExecutionUnsupported(
+                    tx.kind.as_str(),
+                ))?,
+        ),
+    ]))
+}
+
+fn assert_cross_j_register_pulls(
+    tx: &CanonicalEntityTx,
+    stage: &'static str,
+) -> Result<(), RuntimeMachineError> {
+    if tx.kind != EntityTxKind::RegisterCrossJurisdictionSwap {
+        return Ok(());
+    }
+    let route = match tx.frame_data() {
+        Some(CanonicalValue::Object(data)) => data
+            .iter()
+            .find_map(|(field, value)| (field == "route").then_some(value)),
+        _ => None,
+    };
+    let has_pull = |name: &str| matches!(route, Some(CanonicalValue::Object(fields)) if fields.iter().any(|(field, _)| field == name));
+    if !has_pull("sourcePull") || !has_pull("targetPull") {
+        return Err(RuntimeMachineError::EntityStateMap(format!(
+            "RUNTIME_CROSS_J_REGISTER_PULLS_LOST:{stage}"
+        )));
+    }
+    Ok(())
+}
+
+fn immediate_cross_j_group(
+    command: ImmediateCrossJCommand,
+) -> Result<PendingEntityGroup, RuntimeMachineError> {
+    let nested = command
+        .entity_txs
+        .iter()
+        .map(canonical_entity_tx_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let runtime_output = CanonicalEntityTx::from_frame_projection(
+        EntityTxKind::RuntimeOutput,
+        CanonicalValue::Object(vec![
+            ("protocol".into(), CanonicalValue::String("cross-j".into())),
+            (
+                "sourceEntityId".into(),
+                CanonicalValue::String(command.source_entity_id),
+            ),
+            (
+                "sourceSignerId".into(),
+                CanonicalValue::String(command.source_signer_id),
+            ),
+            (
+                "targetEntityId".into(),
+                CanonicalValue::String(render_word(&command.target.entity_id)),
+            ),
+            ("entityTxs".into(), CanonicalValue::Array(nested)),
+        ]),
+    )
+    .map_err(EntityTransitionError::from)?;
+    let Some(LocalEntityTx::RuntimeOutput(decoded)) =
+        decode_local_entity_tx(&runtime_output).map_err(RuntimeMachineError::EntityFinancial)?
+    else {
+        return Err(RuntimeMachineError::EntityStateMap(
+            "RUNTIME_CROSS_J_WRAPPER_DECODE_FAILED".into(),
+        ));
+    };
+    for tx in &decoded.entity_txs {
+        assert_cross_j_register_pulls(tx, "WRAPPER_DECODE")?;
+    }
+    Ok(PendingEntityGroup {
+        entity_id: command.target.entity_id,
+        signer_id: command.target.signer_id,
+        // RuntimeOutput is already the canonical direct Entity-frame tx, so
+        // wrapping it in EntityCommand would change the certified bytes. Keep
+        // that projection while executing the decoded local transition once.
+        pending: vec![EntityPendingWork::ProposerMaterialized {
+            projected: runtime_output,
+            native: Box::new(LocalEntityTx::RuntimeOutput(decoded)),
+        }],
+        input_positions: Vec::new(),
+        wake: None,
+        recorded_scheduled_wake: false,
+        j_observation: None,
+        j_attestation_wire: None,
+        atomic_output_pair: None,
+        cause: PendingEntityCause::CrossJurisdiction,
+    })
+}
+
+fn collect_immediate_cross_j_commands(
+    source_entity_id: &str,
+    source_signer_id: &str,
+    local_keys: &BTreeSet<RuntimeEntityKey>,
+    outputs: &mut Vec<LocalEntityOutput>,
+) -> Result<Vec<ImmediateCrossJCommand>, RuntimeMachineError> {
+    let mut retained = Vec::with_capacity(outputs.len());
+    let mut commands = Vec::<ImmediateCrossJCommand>::new();
+    let mut positions = BTreeMap::<RuntimeEntityKey, usize>::new();
+    for output in std::mem::take(outputs) {
+        let all_projected = !output.entity_txs.is_empty()
+            && output
+                .entity_txs
+                .iter()
+                .all(|tx| matches!(tx, LocalEntityOutputTx::Projected(_)));
+        if !all_projected {
+            retained.push(output);
+            continue;
+        }
+        let target_signer_id = output.target_signer_id.as_deref().ok_or_else(|| {
+            RuntimeMachineError::EntityStateMap("CROSS_J_LOCAL_OUTPUT_TARGET_SIGNER_MISSING".into())
+        })?;
+        let target_entity_id = parse_hex32(&output.entity_id).ok_or_else(|| {
+            RuntimeMachineError::EntityStateMap(format!(
+                "CROSS_J_LOCAL_OUTPUT_TARGET_INVALID:{}",
+                output.entity_id
+            ))
+        })?;
+        let target = RuntimeEntityKey::new(target_entity_id, target_signer_id)?;
+        if !local_keys.contains(&target) {
+            retained.push(output);
+            continue;
+        }
+        let entity_txs = output
+            .entity_txs
+            .into_iter()
+            .map(|tx| match tx {
+                LocalEntityOutputTx::Projected(tx) => Ok(tx),
+                LocalEntityOutputTx::AccountInput(_) => Err(RuntimeMachineError::EntityStateMap(
+                    "CROSS_J_LOCAL_OUTPUT_PROTOCOL_MIXED".into(),
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for tx in &entity_txs {
+            assert_cross_j_register_pulls(tx, "ENTITY_OUTPUT")?;
+        }
+        if let Some(position) = positions.get(&target).copied() {
+            commands[position].entity_txs.extend(entity_txs);
+        } else {
+            positions.insert(target.clone(), commands.len());
+            commands.push(ImmediateCrossJCommand {
+                source_entity_id: source_entity_id.to_string(),
+                source_signer_id: source_signer_id.to_string(),
+                target,
+                entity_txs,
+            });
+        }
+    }
+    *outputs = retained;
+    Ok(commands)
+}
+
+fn account_work_group(key: RuntimeEntityKey) -> PendingEntityGroup {
+    PendingEntityGroup {
+        entity_id: key.entity_id,
+        signer_id: key.signer_id,
+        pending: Vec::new(),
+        input_positions: Vec::new(),
+        wake: None,
+        recorded_scheduled_wake: false,
+        j_observation: None,
+        j_attestation_wire: None,
+        atomic_output_pair: None,
+        cause: PendingEntityCause::AccountWork,
+    }
+}
+
+fn take_entity_mempool_for_group(
+    cause: PendingEntityCause,
+    entity_mempool: &mut std::collections::VecDeque<EntityPendingWork>,
+) -> std::collections::VecDeque<EntityPendingWork> {
+    if cause == PendingEntityCause::AccountWork {
+        std::collections::VecDeque::new()
+    } else {
+        std::mem::take(entity_mempool)
+    }
+}
+
+fn account_work_selection_emits_frame(
+    selection: &xln_rscore_entity_kernel::CrossJOpeningProposalSelection,
+) -> bool {
+    !matches!(
+        selection,
+        xln_rscore_entity_kernel::CrossJOpeningProposalSelection::Wait
+    )
+}
+
+fn account_work_has_selectable_proposal(
+    slot: &mut EntityApplySlot,
+    siblings: &[xln_rscore_entity_kernel::CrossJOpeningSiblingEntityView],
+) -> Result<bool, RuntimeMachineError> {
+    if !slot.replica.accounts.has_proposable_accounts()? {
+        return Ok(false);
+    }
+    let account_ids = slot.replica.accounts.proposable_account_ids()?;
+    let views = slot
+        .replica
+        .accounts
+        .cross_j_opening_account_views(account_ids.clone())?;
+    if views.len() != account_ids.len() {
+        return Err(RuntimeMachineError::EntityStateMap(
+            "RUNTIME_ACCOUNT_WORK_VIEW_COUNT_MISMATCH".into(),
+        ));
+    }
+    for (account_id, view) in account_ids.into_iter().zip(views) {
+        if !view
+            .counterparty_entity_id
+            .eq_ignore_ascii_case(&render_account_id(&account_id))
+        {
+            return Err(RuntimeMachineError::EntityStateMap(
+                "RUNTIME_ACCOUNT_WORK_VIEW_ORDER_MISMATCH".into(),
+            ));
+        }
+        let selection = xln_rscore_entity_kernel::select_cross_j_opening_proposal(
+            &slot.state.entity.entity_id,
+            &view.counterparty_entity_id,
+            &view.mempool,
+            siblings,
+        )
+        .map_err(|error| {
+            RuntimeMachineError::EntityFinancial(
+                xln_rscore_entity_kernel::EntityKernelError::InvalidLocalEntityTx {
+                    kind: "accountWork",
+                    detail: error.to_string(),
+                },
+            )
+        })?;
+        if account_work_selection_emits_frame(&selection) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn enqueue_derived_groups(
+    segments: &mut VecDeque<PendingEntitySegment>,
+    groups: Vec<PendingEntityGroup>,
+) {
+    // Existing derived work is older and keeps its FIFO position. New work is
+    // inserted immediately before the next external segment, never at the
+    // front: source registration must not jump ahead of the target
+    // registration already emitted by the materialization frame.
+    let mut insertion = segments
+        .iter()
+        .position(|pending| !pending.derived)
+        .unwrap_or(segments.len());
+    for group in groups {
+        segments.insert(
+            insertion,
+            PendingEntitySegment {
+                groups: vec![group],
+                derived: true,
+            },
+        );
+        insertion += 1;
+    }
+}
+
+fn runtime_cross_j_sibling_views(
+    staged: &mut BTreeMap<RuntimeEntityKey, EntityApplySlot>,
+    live_states: &BTreeMap<RuntimeEntityKey, RuntimeEntityState>,
+    live_replicas: &mut BTreeMap<RuntimeEntityKey, RuntimeEntityReplica>,
+) -> Result<Vec<xln_rscore_entity_kernel::CrossJOpeningSiblingEntityView>, RuntimeMachineError> {
+    let staged_sources = staged.iter_mut().map(|(key, slot)| {
+        super::CrossJOpeningRuntimeSlot::new(key, &slot.state, &mut slot.replica)
+    });
+    let live_sources = live_replicas.iter_mut().map(|(key, replica)| {
+        let state = live_states
+            .get(key)
+            .expect("Runtime live Entity replica must have a committed state slot");
+        super::CrossJOpeningRuntimeSlot::new(key, state, replica)
+    });
+    super::collect_cross_j_opening_sibling_views(staged_sources, live_sources)
 }
 
 fn account_input_wire(work: &EntityPendingWork) -> Result<Option<Vec<u8>>, RuntimeMachineError> {
@@ -1702,6 +2146,9 @@ fn push_pending_entity_input(
                 wake: None,
                 recorded_scheduled_wake: false,
                 j_observation: None,
+                j_attestation_wire: None,
+                atomic_output_pair: None,
+                cause: PendingEntityCause::External,
             });
             index
         }
@@ -1711,39 +2158,73 @@ fn push_pending_entity_input(
     Ok(index)
 }
 
+fn attach_j_prefix_attestation(
+    group: &mut PendingEntityGroup,
+    attestation: Option<&super::types::RuntimeJPrefixAttestation>,
+) -> Result<(), RuntimeMachineError> {
+    let Some(attestation) = attestation else {
+        return Ok(());
+    };
+    if let Some(existing) = group.j_attestation_wire.as_ref() {
+        if existing != &attestation.wire {
+            return Err(RuntimeMachineError::ReplicaMetadata(
+                "J_PREFIX_ATTESTATION_COLLISION".into(),
+            ));
+        }
+        return Ok(());
+    }
+    group.j_observation = Some(attestation.observation.clone());
+    group.j_attestation_wire = Some(attestation.wire.clone());
+    Ok(())
+}
+
+fn assert_j_prefix_attestation_certified(
+    certificate: Option<&CanonicalValue>,
+    signer_id: &str,
+    expected: Option<&serde_json::Value>,
+) -> Result<(), RuntimeMachineError> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let certificate = certificate.ok_or_else(|| {
+        RuntimeMachineError::ReplicaMetadata("J_PREFIX_CERTIFICATE_MISSING".into())
+    })?;
+    let wire = crate::tagged_json_from_canonical_value(certificate)
+        .map_err(|error| RuntimeMachineError::ReplicaMetadata(error.to_string()))?;
+    let rows = wire
+        .get("attestations")
+        .and_then(|value| value.get("value"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            RuntimeMachineError::ReplicaMetadata("J_PREFIX_CERTIFICATE_ATTESTATIONS".into())
+        })?;
+    let certified = rows
+        .iter()
+        .find_map(|row| {
+            row.as_array()
+                .filter(|pair| pair.len() == 2 && pair[0].as_str() == Some(signer_id))
+                .map(|pair| &pair[1])
+        })
+        .ok_or_else(|| {
+            RuntimeMachineError::ReplicaMetadata("J_PREFIX_CERTIFICATE_SIGNER_MISSING".into())
+        })?;
+    if certified != expected {
+        return Err(RuntimeMachineError::ReplicaMetadata(
+            "J_PREFIX_ATTESTATION_CERTIFICATE_MISMATCH".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn recorded_scheduled_wake(
-    replica: &RuntimeReplica,
     input: &RuntimeEntityInput,
-    frame: &RuntimeFrameContext,
 ) -> Result<Option<ScheduledWake>, RuntimeMachineError> {
     let Some(recorded) = input.scheduled_wake() else {
         return Ok(None);
     };
-    let key = RuntimeEntityKey::new(*input.entity_id(), input.signer_id())?;
-    let state = replica
-        .state
-        .e_replicas
-        .get(&key)
-        .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
-    let expected =
-        scheduled_wake_from_state(state, input.signer_id(), frame)?.ok_or_else(|| {
-            RuntimeMachineError::Scheduler(SchedulerError::InvalidWake {
-                detail: "RECORDED_NOT_DUE".into(),
-            })
-        })?;
-    let expected_tx = scheduled_wake_entity_tx(&expected)?;
-    let expected_bytes = encode_canonical_consensus_bytes(&expected_tx.wire_data)
-        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))?;
-    let recorded_bytes = encode_canonical_consensus_bytes(recorded)
-        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))?;
-    if expected_bytes != recorded_bytes {
-        return Err(RuntimeMachineError::Scheduler(
-            SchedulerError::InvalidWake {
-                detail: "RECORDED_CONFLICT".into(),
-            },
-        ));
-    }
-    Ok(Some(expected))
+    decode_recorded_scheduled_wake(recorded)
+        .map(Some)
+        .map_err(RuntimeMachineError::from)
 }
 
 struct AppliedEntityGroup {
@@ -1858,7 +2339,7 @@ fn apply_runtime_inner(
         });
     };
     frame.receipt.wakes = wakes.clone();
-    let (mut post_commit_j_attempts, mut j_observation) =
+    let mut post_commit_j_attempts =
         apply_runtime_txs(&mut replica, &frame.runtime_txs, frame.frame.timestamp)?;
     let next_height = replica
         .state
@@ -1875,7 +2356,7 @@ fn apply_runtime_inner(
     let mut position = 0_usize;
     while let Some(input) = inputs.pop_front() {
         let recorded_wake = (!derive_internal_wakes)
-            .then(|| recorded_scheduled_wake(&replica, &input, &frame.frame))
+            .then(|| recorded_scheduled_wake(&input))
             .transpose()?
             .flatten();
         let marker = input.atomic_pair().cloned();
@@ -1890,6 +2371,7 @@ fn apply_runtime_inner(
             if !deferred_groups.is_empty() {
                 segments.push(PendingEntitySegment {
                     groups: std::mem::take(&mut deferred_groups),
+                    derived: false,
                 });
                 deferred_indexes.clear();
             }
@@ -1911,9 +2393,10 @@ fn apply_runtime_inner(
             for (input_position, input) in [(position, input), (position + 1, next)] {
                 let entity_id = *input.entity_id();
                 let signer_id = input.signer_id().to_string();
+                let j_prefix_attestation = input.j_prefix_attestation().cloned();
                 let (canonical, pending, _) = input.into_parts();
                 canonical_slots[input_position] = Some(canonical);
-                let _ = push_pending_entity_input(
+                let group_index = push_pending_entity_input(
                     &mut groups,
                     &mut indexes,
                     entity_id,
@@ -1921,26 +2404,42 @@ fn apply_runtime_inner(
                     pending,
                     input_position,
                 )?;
+                attach_j_prefix_attestation(
+                    &mut groups[group_index],
+                    j_prefix_attestation.as_ref(),
+                )?;
+                if marker.phase == "proposal" {
+                    groups[group_index].atomic_output_pair =
+                        Some(super::types::RuntimeAtomicCrossJurisdictionPair {
+                            phase: "ack".to_string(),
+                            pair_key: marker.pair_key.clone(),
+                        });
+                }
             }
-            segments.push(PendingEntitySegment { groups });
+            segments.push(PendingEntitySegment {
+                groups,
+                derived: false,
+            });
             position += 2;
             continue;
         }
         let entity_id = *input.entity_id();
         let signer_id = input.signer_id().to_string();
         let board_handover_only = input.is_board_handover_only();
+        let j_prefix_attestation = input.j_prefix_attestation().cloned();
         let (canonical, pending, _) = input.into_parts();
         canonical_slots[position] = Some(canonical);
         if board_handover_only {
             if !deferred_groups.is_empty() {
                 segments.push(PendingEntitySegment {
                     groups: std::mem::take(&mut deferred_groups),
+                    derived: false,
                 });
                 deferred_indexes.clear();
             }
             let mut groups = Vec::with_capacity(1);
             let mut indexes = BTreeMap::<RuntimeEntityKey, usize>::new();
-            let _ = push_pending_entity_input(
+            let group_index = push_pending_entity_input(
                 &mut groups,
                 &mut indexes,
                 entity_id,
@@ -1948,7 +2447,11 @@ fn apply_runtime_inner(
                 pending,
                 position,
             )?;
-            segments.push(PendingEntitySegment { groups });
+            attach_j_prefix_attestation(&mut groups[group_index], j_prefix_attestation.as_ref())?;
+            segments.push(PendingEntitySegment {
+                groups,
+                derived: false,
+            });
             position += 1;
             continue;
         }
@@ -1959,6 +2462,10 @@ fn apply_runtime_inner(
             signer_id,
             pending,
             position,
+        )?;
+        attach_j_prefix_attestation(
+            &mut deferred_groups[group_index],
+            j_prefix_attestation.as_ref(),
         )?;
         if let Some(scheduled) = recorded_wake {
             let group = &mut deferred_groups[group_index];
@@ -1981,37 +2488,12 @@ fn apply_runtime_inner(
     if !deferred_groups.is_empty() {
         segments.push(PendingEntitySegment {
             groups: deferred_groups,
+            derived: false,
         });
     }
 
-    // TS certifies a board transition only as one exact two-transaction
-    // Entity frame. Attach the authenticated J range to the isolated
-    // handover input instead of creating a second Entity height.
-    if let Some(observation) = j_observation.as_ref() {
-        let entity_id = *observation.entity_id.as_bytes();
-        let mut target = None;
-        for (segment_index, segment) in segments.iter().enumerate() {
-            for (group_index, group) in segment.groups.iter().enumerate() {
-                if group.entity_id == entity_id
-                    && group.signer_id == observation.signer_id
-                    && group.pending.len() == 1
-                    && group.pending[0].is_board_handover()
-                    && target.replace((segment_index, group_index)).is_some()
-                {
-                    return Err(RuntimeMachineError::EntityCommandContext(
-                        "BOARD_HANDOVER_COUNT_INVALID".into(),
-                    ));
-                }
-            }
-        }
-        if let Some((segment_index, group_index)) = target {
-            segments[segment_index].groups[group_index].j_observation = j_observation.take();
-        }
-    }
-
-    if !wakes.is_empty() || j_observation.is_some() {
+    if !wakes.is_empty() {
         let mut groups = Vec::<PendingEntityGroup>::new();
-        let mut indexes = BTreeMap::<RuntimeEntityKey, usize>::new();
         for entity_wake in wakes {
             let key = RuntimeEntityKey::new(entity_wake.entity_id, &entity_wake.signer_id)?;
             let signer_id = replica
@@ -2020,8 +2502,6 @@ fn apply_runtime_inner(
                 .ok_or(RuntimeMachineError::EntityOwnerMismatch)?
                 .signer_id
                 .clone();
-            let index = groups.len();
-            indexes.insert(key, index);
             groups.push(PendingEntityGroup {
                 entity_id: entity_wake.entity_id,
                 signer_id,
@@ -2030,33 +2510,18 @@ fn apply_runtime_inner(
                 wake: Some(entity_wake.wake),
                 recorded_scheduled_wake: false,
                 j_observation: None,
+                j_attestation_wire: None,
+                atomic_output_pair: None,
+                cause: PendingEntityCause::External,
             });
         }
-        if let Some(observation) = j_observation {
-            let entity_id = *observation.entity_id.as_bytes();
-            let key = RuntimeEntityKey::new(entity_id, &observation.signer_id)?;
-            if let Some(index) = indexes.get(&key).copied() {
-                if groups[index].signer_id != observation.signer_id {
-                    return Err(RuntimeMachineError::EntitySignerMismatch);
-                }
-                groups[index].j_observation = Some(observation);
-            } else {
-                indexes.insert(key, groups.len());
-                groups.push(PendingEntityGroup {
-                    entity_id,
-                    signer_id: observation.signer_id.clone(),
-                    pending: Vec::new(),
-                    input_positions: Vec::new(),
-                    wake: None,
-                    recorded_scheduled_wake: false,
-                    j_observation: Some(observation),
-                });
-            }
-        }
-        // J observations are processed before ordinary Entity inputs. A board
-        // handover above is the sole exception: its J range and handover are
-        // deliberately one atomic Entity frame.
-        segments.insert(0, PendingEntitySegment { groups });
+        segments.insert(
+            0,
+            PendingEntitySegment {
+                groups,
+                derived: false,
+            },
+        );
     }
 
     if segments.is_empty() {
@@ -2087,26 +2552,14 @@ fn apply_runtime_inner(
         });
     }
 
-    // Remove every touched committed+live Entity slot before executing the
-    // first segment. Nothing is reinstalled until every segment succeeds, so
-    // a failure in a later atomic pair cannot expose an earlier transition.
-    // `entity_order` is the only source of install/output order; maps below
-    // are lookup-only.
+    // Move every local Entity slot into one transaction-local map. Immediate
+    // cross-J outputs may target a sibling that was absent from the external
+    // Runtime input, so staging only the preselected keys makes the derived
+    // target impossible to apply atomically. Values are moved, never cloned,
+    // and no slot is reinstalled until the complete Runtime transition ends.
     let group_count = segments.iter().map(|segment| segment.groups.len()).sum();
-    let mut entity_order = Vec::<RuntimeEntityKey>::new();
-    let mut remaining_groups = BTreeMap::<RuntimeEntityKey, usize>::new();
-    for segment in &segments {
-        for group in &segment.groups {
-            let key = RuntimeEntityKey::new(group.entity_id, &group.signer_id)?;
-            if !remaining_groups.contains_key(&key) {
-                entity_order.push(key.clone());
-            }
-            let count = remaining_groups.entry(key).or_default();
-            *count = count
-                .checked_add(1)
-                .ok_or(RuntimeMachineError::InputCountOverflow)?;
-        }
-    }
+    let entity_order = replica.state.e_replicas.keys().cloned().collect::<Vec<_>>();
+    let local_keys = entity_order.iter().cloned().collect::<BTreeSet<_>>();
     let mut staged = BTreeMap::<RuntimeEntityKey, EntityApplySlot>::new();
     for key in &entity_order {
         let (state, live) = replica
@@ -2127,27 +2580,96 @@ fn apply_runtime_inner(
             ));
         }
     }
-
     let mut outputs = RuntimeOutputs {
         entities: Vec::with_capacity(group_count),
         touches: RuntimeFrameTouches::default(),
     };
     let mut account_commits = Vec::new();
     let mut synthetic_inputs = Vec::new();
-    for segment in segments {
+    let mut segments = VecDeque::from(segments);
+    let mut cascade_round = 0_usize;
+    let mut local_event_count = 0_usize;
+    let mut cascade_fingerprints = BTreeSet::<Vec<u8>>::new();
+    let mut last_output_by_entity = BTreeMap::<RuntimeEntityKey, usize>::new();
+    while let Some(segment) = segments.pop_front() {
+        if segment.derived {
+            cascade_round = cascade_round
+                .checked_add(1)
+                .ok_or(RuntimeMachineError::InputCountOverflow)?;
+            local_event_count = local_event_count
+                .checked_add(1)
+                .ok_or(RuntimeMachineError::InputCountOverflow)?;
+            let replica_count = local_keys.len();
+            if cascade_round > 64 + replica_count || local_event_count > 1_000 + 64 * replica_count
+            {
+                return Err(RuntimeMachineError::EntityStateMap(format!(
+                    "RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds={cascade_round}:events={local_event_count}"
+                )));
+            }
+        } else {
+            cascade_round = 0;
+            cascade_fingerprints.clear();
+        }
+        let mut derived_groups = Vec::<PendingEntityGroup>::new();
         for group in segment.groups {
+            let cause = group.cause;
+            if cause == PendingEntityCause::CrossJurisdiction {
+                let [
+                    EntityPendingWork::ProposerMaterialized {
+                        projected: runtime_output,
+                        native: _,
+                    },
+                ] = group.pending.as_slice()
+                else {
+                    return Err(RuntimeMachineError::EntityStateMap(
+                        "RUNTIME_CROSS_J_DERIVED_COMMAND_SHAPE".into(),
+                    ));
+                };
+                if runtime_output.kind != EntityTxKind::RuntimeOutput {
+                    return Err(RuntimeMachineError::EntityStateMap(
+                        "RUNTIME_CROSS_J_DERIVED_COMMAND_KIND".into(),
+                    ));
+                }
+                // TS fingerprints the complete transient command, including
+                // the target signer carried by the outer Entity envelope.
+                // The nested runtimeOutput wire data intentionally omits that
+                // envelope field, so hashing it alone conflates two local
+                // replicas of the same Entity under different signers.
+                let fingerprint = encode_canonical_consensus_bytes(&CanonicalValue::Object(vec![
+                    (
+                        "targetSignerId".into(),
+                        CanonicalValue::String(group.signer_id.clone()),
+                    ),
+                    ("runtimeOutput".into(), runtime_output.wire_data.clone()),
+                ]))
+                .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))?;
+                if !cascade_fingerprints.insert(fingerprint) {
+                    return Err(RuntimeMachineError::EntityStateMap(format!(
+                        "RUNTIME_CROSS_J_EVENT_CYCLE:round={cascade_round}:entity={}",
+                        render_word(&group.entity_id)
+                    )));
+                }
+            }
             let key = RuntimeEntityKey::new(group.entity_id, &group.signer_id)?;
-            let slot = staged.remove(&key).ok_or_else(|| {
+            let cross_j_opening_sibling_views = runtime_cross_j_sibling_views(
+                &mut staged,
+                &replica.state.e_replicas,
+                &mut replica.e_replicas,
+            )?;
+            let mut slot = staged.remove(&key).ok_or_else(|| {
                 RuntimeMachineError::EntityStateMap("STAGED_ENTITY_SLOT_MISSING".into())
             })?;
-            let remaining = remaining_groups.get_mut(&key).ok_or_else(|| {
-                RuntimeMachineError::EntityStateMap("ENTITY_GROUP_COUNT_MISSING".into())
-            })?;
-            let allow_checkpoint = *remaining == 1;
-            *remaining = remaining
-                .checked_sub(1)
-                .ok_or(RuntimeMachineError::InputCountOverflow)?;
-            let applied = apply_entity_group(
+            if cause == PendingEntityCause::AccountWork
+                && !account_work_has_selectable_proposal(&mut slot, &cross_j_opening_sibling_views)?
+            {
+                if staged.insert(key, slot).is_some() {
+                    return Err(RuntimeMachineError::EntityStateMap(
+                        "STAGED_ENTITY_SLOT_ALREADY_PRESENT".into(),
+                    ));
+                }
+                continue;
+            }
+            let mut applied = apply_entity_group(
                 slot,
                 group,
                 next_height,
@@ -2155,7 +2677,8 @@ fn apply_runtime_inner(
                 replica.durable.j_replicas(),
                 &replica.proposer_runtime_seed,
                 replica.limits,
-                allow_checkpoint,
+                false,
+                cross_j_opening_sibling_views,
                 &mut materializer,
                 profile_enabled,
             )?;
@@ -2182,8 +2705,12 @@ fn apply_runtime_inner(
             outputs.touches.entity_ids.push(entity_id_text.clone());
             outputs.touches.accounts.extend(applied.touched_accounts);
             if applied.book_touched {
-                outputs.touches.book_entity_ids.push(entity_id_text);
+                outputs.touches.book_entity_ids.push(entity_id_text.clone());
             }
+            // These two counters measure real fitter/Entity work, including
+            // transient cascade frames. Authority stays external-input-only:
+            // derived groups are forbidden below from adding entity_inputs,
+            // canonical_wire_bytes, or AppliedRuntimeFrame.entity_inputs.
             frame.receipt.entity_txs_selected = frame
                 .receipt
                 .entity_txs_selected
@@ -2194,6 +2721,11 @@ fn apply_runtime_inner(
                 .entity_txs_pending
                 .checked_add(applied.pending_count)
                 .ok_or(RuntimeMachineError::InputCountOverflow)?;
+            if cause != PendingEntityCause::External && applied.synthetic_input.is_some() {
+                return Err(RuntimeMachineError::EntityStateMap(
+                    "RUNTIME_CROSS_J_DERIVED_INPUT_BECAME_DURABLE".into(),
+                ));
+            }
             if let Some(canonical) = applied.synthetic_input {
                 let wire_bytes = crate::transport::msgpack::encode_transport(&canonical)
                     .map_err(|error| {
@@ -2220,10 +2752,23 @@ fn apply_runtime_inner(
                 }
             }
             post_commit_j_attempts.extend(applied.post_commit_j_actions);
+            let immediate = collect_immediate_cross_j_commands(
+                &entity_id_text,
+                &key.signer_id,
+                &local_keys,
+                &mut applied.outputs.local_entity_outputs,
+            )?;
+            derived_groups.extend(
+                immediate
+                    .into_iter()
+                    .map(immediate_cross_j_group)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+            last_output_by_entity.insert(key.clone(), outputs.entities.len());
             outputs.entities.push(applied.outputs);
             if staged
                 .insert(
-                    key,
+                    key.clone(),
                     EntityApplySlot {
                         state: applied.state,
                         replica: applied.replica,
@@ -2235,6 +2780,60 @@ fn apply_runtime_inner(
                     "STAGED_ENTITY_SLOT_ALREADY_PRESENT".into(),
                 ));
             }
+            if cause != PendingEntityCause::AccountWork {
+                for (ready_key, ready_slot) in &staged {
+                    if !ready_slot.replica.signer_id.trim().eq_ignore_ascii_case(
+                        ready_slot
+                            .replica
+                            .entity_consensus
+                            .state
+                            .authority
+                            .leader_state
+                            .active_validator_id
+                            .trim(),
+                    ) || !ready_slot.replica.accounts.has_proposable_accounts()?
+                        || derived_groups.iter().any(|group| {
+                            group.cause == PendingEntityCause::AccountWork
+                                && group.entity_id == ready_key.entity_id
+                                && group.signer_id == ready_key.signer_id
+                        })
+                        || segments.iter().any(|segment| {
+                            segment.groups.iter().any(|group| {
+                                group.cause == PendingEntityCause::AccountWork
+                                    && group.entity_id == ready_key.entity_id
+                                    && group.signer_id == ready_key.signer_id
+                            })
+                        })
+                    {
+                        continue;
+                    }
+                    derived_groups.push(account_work_group(ready_key.clone()));
+                }
+            }
+        }
+        enqueue_derived_groups(&mut segments, derived_groups);
+    }
+    // A dynamic local cascade can revisit an Entity after any earlier output,
+    // so only the final touched output may carry that Entity's checkpoint.
+    for (key, output_index) in last_output_by_entity {
+        let slot = staged.get_mut(&key).ok_or_else(|| {
+            RuntimeMachineError::EntityStateMap("FINAL_ENTITY_SLOT_MISSING".into())
+        })?;
+        if slot.replica.entity_mempool.is_empty()
+            && super::materialization_due(
+                next_height,
+                slot.replica.last_materialized_height,
+                replica.limits.checkpoint_period_frames,
+            )
+        {
+            if outputs.entities[output_index].checkpoint.is_some() {
+                return Err(RuntimeMachineError::EntityStateMap(
+                    "RUNTIME_CROSS_J_INTERMEDIATE_CHECKPOINT_PRESENT".into(),
+                ));
+            }
+            outputs.entities[output_index].checkpoint =
+                Some(slot.replica.accounts.export_checkpoint()?);
+            slot.replica.last_materialized_height = next_height;
         }
     }
     for key in entity_order {
@@ -2243,7 +2842,7 @@ fn apply_runtime_inner(
         })?;
         replica.install_entity_slot(key, slot.state, slot.replica)?;
     }
-    if !staged.is_empty() || remaining_groups.values().any(|count| *count != 0) {
+    if !staged.is_empty() {
         return Err(RuntimeMachineError::EntityStateMap(
             "ENTITY_SEGMENT_EXECUTION_INCOMPLETE".into(),
         ));
@@ -2302,6 +2901,7 @@ fn apply_entity_group(
     proposer_runtime_seed: &str,
     limits: super::RuntimeLimits,
     allow_checkpoint: bool,
+    cross_j_opening_sibling_views: Vec<xln_rscore_entity_kernel::CrossJOpeningSiblingEntityView>,
     materializer: &mut Option<&mut dyn EntityInfraMaterializer>,
     profile_enabled: bool,
 ) -> Result<AppliedEntityGroup, RuntimeMachineError> {
@@ -2384,15 +2984,45 @@ fn apply_entity_group(
         ));
     }
 
-    enqueue_proposer_materializations(&mut slot, proposer_runtime_seed)?;
-
-    let mut entity_mempool = std::mem::take(&mut slot.replica.entity_mempool);
+    // A derived AccountWork group is the TS `queueCommittedAccountWork`
+    // preview: it may propose already-admitted Account mempool work, but it
+    // never consumes or materializes an unrelated Entity intent. The latter
+    // remains FIFO for the next real Entity input.
+    let account_work_only = group.cause == PendingEntityCause::AccountWork;
+    let materialization_admission = if account_work_only {
+        MaterializationAdmission::default()
+    } else {
+        enqueue_proposer_materializations(&mut slot, proposer_runtime_seed)?
+    };
+    let has_local_authored_work = materialization_admission.requires_commit_phase_selection()
+        && slot
+            .replica
+            .entity_mempool
+            .iter()
+            .any(|work| matches!(work, EntityPendingWork::LocalBatch { .. }));
+    let local_author = has_local_authored_work
+        .then(|| command_board(&slot))
+        .transpose()?
+        .map(|board| {
+            format!(
+                "{}:{}:{}",
+                board.board_hash, board.board_epoch, board.signer_id
+            )
+            .to_lowercase()
+        });
+    let selected_entity_mempool =
+        take_entity_mempool_for_group(group.cause, &mut slot.replica.entity_mempool);
+    let mut commit_phase_work = select_commit_phase_work(
+        selected_entity_mempool,
+        &materialization_admission,
+        local_author.as_deref(),
+    )?;
     let fit_started = profile_enabled.then(Instant::now);
     let (selected_count, mut context, entity_context_bytes) = match materializer.as_deref_mut() {
         Some(materializer) => {
             let (count, materialized, entity_context_bytes) = fit_live_entity_prefix(
                 &mut slot,
-                &entity_mempool,
+                &commit_phase_work.selected,
                 frame,
                 materializer,
                 fit_j_prefix_certificate.as_ref(),
@@ -2419,7 +3049,7 @@ fn apply_entity_group(
                 })?;
             let (count, entity_context_bytes) = fit_replay_entity_prefix(
                 &slot,
-                &entity_mempool,
+                &commit_phase_work.selected,
                 frame,
                 &context.canonical,
                 fit_j_prefix_certificate.as_ref(),
@@ -2438,9 +3068,18 @@ fn apply_entity_group(
     };
     apply_profile.fit = profiled_elapsed(fit_started);
     apply_profile.entity_txs_selected = selected_count;
-    let selected = take_entity_prefix(&slot, &mut entity_mempool, selected_count)?;
-    let pending_count = entity_mempool.len();
-    slot.replica.entity_mempool = entity_mempool;
+    let selected = take_entity_prefix(&slot, &mut commit_phase_work.selected, selected_count)?;
+    commit_phase_work.consume_selected_prefix(selected_count)?;
+    if account_work_only {
+        if selected_count != 0 || !commit_phase_work.into_remaining()?.is_empty() {
+            return Err(RuntimeMachineError::EntityStateMap(
+                "RUNTIME_ACCOUNT_WORK_SELECTED_ENTITY_TX".into(),
+            ));
+        }
+    } else {
+        slot.replica.entity_mempool = commit_phase_work.into_remaining()?;
+    }
+    let pending_count = slot.replica.entity_mempool.len();
     let mut rows = selected.rows;
     for (expected, row) in rows.iter_mut().enumerate() {
         row.operation_index =
@@ -2539,10 +3178,10 @@ fn apply_entity_group(
         runtime_seed: Some(proposer_runtime_seed.to_string()),
         scheduled_wake: group.wake.as_ref().and_then(|wake| wake.scheduled.clone()),
         expected_proposer_signer_id: group.signer_id.clone(),
-        hub_rebalance_has_pending_work: frame.hub_rebalance_has_pending_work,
         finalized_j_events,
         entity_authority: Some(slot.replica.entity_consensus.state.authority.clone()),
         local_account_genesis_policy,
+        cross_j_opening_sibling_views,
         operations: selected.operations,
     };
     let prior_orderbook_digest = slot
@@ -2599,6 +3238,11 @@ fn apply_entity_group(
             .map_or(&[], |observation| observation.batches.as_slice()),
     )
     .map_err(RuntimeMachineError::EntityFinancial)?;
+    assert_j_prefix_attestation_certified(
+        fit_j_prefix_certificate.as_ref(),
+        &group.signer_id,
+        group.j_attestation_wire.as_ref(),
+    )?;
     let touched_account_ids = core.account_touch_order;
     let account_outputs = core
         .outbound
@@ -2644,6 +3288,10 @@ fn apply_entity_group(
     )?;
     apply_profile.certification = profiled_elapsed(certification_started);
     slot.replica.entity_consensus = certified.consensus;
+    prune_finalized_j_history(
+        &mut slot.replica.replica_metadata,
+        core.state.last_finalized_j_height,
+    )?;
     let certified_settlement_hankos = std::mem::take(&mut core.pending_settlement_hankos)
         .into_iter()
         .map(|pending| {
@@ -2783,6 +3431,7 @@ fn apply_entity_group(
         accounts_root,
         entity_events: core.outputs,
         local_entity_outputs: certified.local_outputs,
+        atomic_cross_jurisdiction_pair: group.atomic_output_pair,
         entity_state_root: certified.state_root,
         entity_authority_root: certified.authority_root,
         checkpoint,
@@ -2824,15 +3473,8 @@ fn apply_runtime_txs(
     replica: &mut crate::RuntimeReplica,
     txs: &[super::RuntimeTx],
     current_timestamp: u64,
-) -> Result<
-    (
-        Vec<crate::j_submit::DurableJAttempt>,
-        Option<crate::j_watcher::ObserveJRange>,
-    ),
-    RuntimeMachineError,
-> {
+) -> Result<Vec<crate::j_submit::DurableJAttempt>, RuntimeMachineError> {
     let mut attempts = Vec::new();
-    let mut observation = None;
     for tx in txs {
         match tx {
             super::RuntimeTx::CheckpointBarrier => {}
@@ -2852,11 +3494,6 @@ fn apply_runtime_txs(
                 .map_err(|error| RuntimeMachineError::ReplicaMetadata(error.to_string()))?;
             }
             super::RuntimeTx::ObserveJRange(value) => {
-                if observation.is_some() {
-                    return Err(RuntimeMachineError::ReplicaMetadata(
-                        "J_HISTORY_MULTIPLE_OBSERVATIONS".into(),
-                    ));
-                }
                 let (state, live) = replica
                     .entity_slot_mut(value.entity_id.as_bytes(), &value.signer_id)
                     .ok_or_else(|| {
@@ -2865,7 +3502,6 @@ fn apply_runtime_txs(
                         )
                     })?;
                 record_j_observation(state, live, value)?;
-                observation = Some(value.clone());
             }
             super::RuntimeTx::AdvanceJWatcherCursor {
                 depository_address,
@@ -2926,7 +3562,7 @@ fn apply_runtime_txs(
             }
         }
     }
-    Ok((attempts, observation))
+    Ok(attempts)
 }
 
 const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES: usize = 1_024;
@@ -3083,6 +3719,71 @@ fn record_j_rewind(
     Ok(())
 }
 
+/// Entity certification moves semantic J events into committed Entity state.
+/// Keep only the authenticated anchor hash and any validator-local suffix that
+/// has not yet been certified. Pruning at observation time would lose evidence
+/// needed by the current proposal; pruning here mirrors the TS post-commit
+/// seam exactly.
+fn prune_finalized_j_history(
+    metadata: &mut serde_json::Value,
+    finalized_through_height: u64,
+) -> Result<(), RuntimeMachineError> {
+    let source = metadata
+        .as_object_mut()
+        .ok_or_else(|| RuntimeMachineError::ReplicaMetadata("OBJECT_REQUIRED".into()))?;
+    let Some(history) = source
+        .get_mut("jHistory")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let scanned_through_height = history
+        .get("scannedThroughHeight")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            RuntimeMachineError::ReplicaMetadata(
+                "J_HISTORY_LOCAL_PRUNE_SCANNED_HEIGHT_INVALID".into(),
+            )
+        })?;
+    if finalized_through_height > scanned_through_height {
+        return Err(RuntimeMachineError::ReplicaMetadata(format!(
+            "J_HISTORY_LOCAL_PRUNE_HEIGHT_INVALID:{finalized_through_height}:{scanned_through_height}"
+        )));
+    }
+    let contiguous = history
+        .get("contiguousThroughHeight")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            RuntimeMachineError::ReplicaMetadata(
+                "J_HISTORY_LOCAL_PRUNE_CONTIGUOUS_HEIGHT_INVALID".into(),
+            )
+        })?
+        .max(finalized_through_height);
+    let mut blocks = tagged_height_map(history.get("eventBlocks"), "eventBlocks")?;
+    let mut hashes = tagged_height_map(history.get("blockHashes"), "blockHashes")?;
+    blocks.retain(|height, _| *height > finalized_through_height);
+    hashes.retain(|height, _| *height >= finalized_through_height);
+    history.insert(
+        "contiguousThroughHeight".into(),
+        serde_json::Value::from(contiguous),
+    );
+    history.insert(
+        "eventBlocks".into(),
+        serde_json::json!({
+            "__xlnType":"Map",
+            "value":blocks.into_iter().map(|(height,value)|serde_json::json!([height,value])).collect::<Vec<_>>(),
+        }),
+    );
+    history.insert(
+        "blockHashes".into(),
+        serde_json::json!({
+            "__xlnType":"Map",
+            "value":hashes.into_iter().map(|(height,value)|serde_json::json!([height,value])).collect::<Vec<_>>(),
+        }),
+    );
+    Ok(())
+}
+
 fn certified_j_anchor(
     state: &xln_rscore_entity_kernel::EntityStateSlice,
 ) -> Result<Option<(u64, [u8; 32], String)>, RuntimeMachineError> {
@@ -3204,6 +3905,12 @@ fn record_j_observation(
     let data = encoded.as_object().ok_or_else(|| {
         RuntimeMachineError::ReplicaMetadata("J_HISTORY_OBSERVATION_OBJECT".into())
     })?;
+    if let Some((height, hash, jurisdiction_ref)) = certified_j_anchor(&state.entity)?
+        && observation.scanned_through_height < height
+    {
+        assert_local_j_history_anchor(&replica.replica_metadata, height, hash, &jurisdiction_ref)?;
+        return Ok(());
+    }
     let source = replica
         .replica_metadata
         .as_object_mut()
@@ -3302,6 +4009,41 @@ fn record_j_observation(
     Ok(())
 }
 
+fn assert_local_j_history_anchor(
+    metadata: &serde_json::Value,
+    height: u64,
+    hash: [u8; 32],
+    jurisdiction_ref: &str,
+) -> Result<(), RuntimeMachineError> {
+    let history = metadata
+        .get("jHistory")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            RuntimeMachineError::ReplicaMetadata("J_HISTORY_CERTIFIED_ANCHOR_MISSING".into())
+        })?;
+    if history
+        .get("jurisdictionRef")
+        .and_then(serde_json::Value::as_str)
+        != Some(jurisdiction_ref)
+    {
+        return Err(RuntimeMachineError::ReplicaMetadata(
+            "J_HISTORY_CERTIFIED_ANCHOR_JURISDICTION".into(),
+        ));
+    }
+    let hashes = tagged_height_map(history.get("blockHashes"), "blockHashes")?;
+    if hashes
+        .get(&height)
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_hex32)
+        != Some(hash)
+    {
+        return Err(RuntimeMachineError::ReplicaMetadata(format!(
+            "J_HISTORY_FINALIZED_REORG:{height}"
+        )));
+    }
+    Ok(())
+}
+
 fn tagged_height_map(
     value: Option<&serde_json::Value>,
     field: &'static str,
@@ -3356,8 +4098,11 @@ mod tests {
         AccountDomain, AccountFrame, CommittedFrameEvidence, DepositoryAddress, EntityId,
         JEventMetadata, JurisdictionEvent, ReserveUpdatedEvent,
     };
-    use xln_rscore_entity_kernel::{CanonicalEntityTx, EntityTxKind};
-    use xln_rscore_protocol::CanonicalValue;
+    use xln_rscore_entity_kernel::{
+        CanonicalEntityTx, EntityTxKind, LocalEntityOutput, LocalEntityOutputTx, LocalEntityTx,
+        decode_local_entity_tx,
+    };
+    use xln_rscore_protocol::{CanonicalValue, encode_canonical_consensus_bytes};
 
     use crate::{
         FinalizedJEventBatch, FinalizedJHeader, ObserveJRange, RuntimeEntityFrameContext,
@@ -3366,10 +4111,237 @@ mod tests {
 
     use super::{
         AccountCommitSource, AccountId, AccountInputOutcomeProfile, EntityApplySlot,
-        EntityPendingWork, ProfileAccountInputKind, RuntimeFrameContext, account_commit_evidence,
-        fit_replay_entity_prefix, prepare_entity_prefix, prepare_j_prefix_range,
-        replay_compatible_prefix, take_entity_prefix,
+        EntityPendingWork, PendingEntityCause, PendingEntitySegment, ProfileAccountInputKind,
+        RuntimeEntityKey, RuntimeFrameContext, account_commit_evidence, account_work_group,
+        account_work_selection_emits_frame, collect_immediate_cross_j_commands,
+        enqueue_derived_groups, fit_replay_entity_prefix, immediate_cross_j_group,
+        prepare_entity_prefix, prepare_j_prefix_range, replay_compatible_prefix,
+        take_entity_mempool_for_group, take_entity_prefix,
     };
+
+    fn projected(kind: EntityTxKind, order_id: &str) -> CanonicalEntityTx {
+        let mut route = vec![("orderId".into(), CanonicalValue::String(order_id.into()))];
+        if kind == EntityTxKind::RegisterCrossJurisdictionSwap {
+            route.extend([
+                (
+                    "sourcePull".into(),
+                    CanonicalValue::Object(vec![(
+                        "pullId".into(),
+                        CanonicalValue::String("source-pull".into()),
+                    )]),
+                ),
+                (
+                    "targetPull".into(),
+                    CanonicalValue::Object(vec![(
+                        "pullId".into(),
+                        CanonicalValue::String("target-pull".into()),
+                    )]),
+                ),
+            ]);
+        }
+        CanonicalEntityTx::from_frame_projection(
+            kind,
+            CanonicalValue::Object(vec![("route".into(), CanonicalValue::Object(route))]),
+        )
+        .expect("projected cross-j tx")
+    }
+
+    fn key(byte: u8, signer: &str) -> RuntimeEntityKey {
+        RuntimeEntityKey::new([byte; 32], signer).expect("runtime Entity key")
+    }
+
+    fn group_name(group: &super::PendingEntityGroup) -> &'static str {
+        match group.cause {
+            PendingEntityCause::CrossJurisdiction if group.entity_id == [0x11; 32] => {
+                "source-register"
+            }
+            PendingEntityCause::CrossJurisdiction if group.entity_id == [0x22; 32] => {
+                "target-register"
+            }
+            PendingEntityCause::AccountWork if group.entity_id == [0x11; 32] => "source-work",
+            PendingEntityCause::AccountWork if group.entity_id == [0x22; 32] => "target-work",
+            _ => "unexpected",
+        }
+    }
+
+    #[test]
+    fn account_work_preserves_two_prequeued_entity_intents_and_discards_idle_preview() {
+        let first = projected(EntityTxKind::CrossJurisdictionFillNotice, "intent-1");
+        let second = projected(EntityTxKind::CrossJurisdictionFillNotice, "intent-2");
+        let mut entity_mempool = VecDeque::from([
+            EntityPendingWork::Projected(first.clone()),
+            EntityPendingWork::Projected(second.clone()),
+        ]);
+        let selected =
+            take_entity_mempool_for_group(PendingEntityCause::AccountWork, &mut entity_mempool);
+        assert!(selected.is_empty(), "AccountWork selects no Entity intent");
+        assert_eq!(entity_mempool.len(), 2);
+        assert!(matches!(
+            &entity_mempool[0],
+            EntityPendingWork::Projected(tx) if tx == &first
+        ));
+        assert!(matches!(
+            &entity_mempool[1],
+            EntityPendingWork::Projected(tx) if tx == &second
+        ));
+        assert!(!account_work_selection_emits_frame(
+            &xln_rscore_entity_kernel::CrossJOpeningProposalSelection::Wait,
+        ));
+    }
+
+    #[test]
+    fn materialize_local_cascade_preserves_ts_five_step_fifo_without_durable_inputs() {
+        let source = key(0x11, "source-signer");
+        let target = key(0x22, "target-signer");
+        let local = std::collections::BTreeSet::from([source.clone(), target.clone()]);
+        let mut outputs = vec![
+            LocalEntityOutput {
+                entity_id: super::render_word(&source.entity_id),
+                target_signer_id: Some(source.signer_id.clone()),
+                entity_txs: vec![LocalEntityOutputTx::Projected(projected(
+                    EntityTxKind::RegisterCrossJurisdictionSwap,
+                    "opening-1",
+                ))],
+            },
+            LocalEntityOutput {
+                entity_id: super::render_word(&target.entity_id),
+                target_signer_id: Some(target.signer_id.clone()),
+                entity_txs: vec![LocalEntityOutputTx::Projected(projected(
+                    EntityTxKind::RegisterCrossJurisdictionSwap,
+                    "opening-1",
+                ))],
+            },
+        ];
+        let commands = collect_immediate_cross_j_commands(
+            &super::render_word(&source.entity_id),
+            &source.signer_id,
+            &local,
+            &mut outputs,
+        )
+        .expect("local materialization outputs");
+        assert!(
+            outputs.is_empty(),
+            "local register outputs never enter flat outbox"
+        );
+
+        let groups = commands
+            .into_iter()
+            .map(immediate_cross_j_group)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("derived register groups");
+        let mut queue = VecDeque::<PendingEntitySegment>::new();
+        enqueue_derived_groups(&mut queue, groups);
+        let mut sequence = vec!["materialize"];
+
+        let source_register = queue.pop_front().expect("source register");
+        sequence.push(group_name(&source_register.groups[0]));
+        enqueue_derived_groups(&mut queue, vec![account_work_group(source.clone())]);
+        let target_register = queue.pop_front().expect("target register");
+        sequence.push(group_name(&target_register.groups[0]));
+        enqueue_derived_groups(&mut queue, vec![account_work_group(target.clone())]);
+        while let Some(segment) = queue.pop_front() {
+            let group = &segment.groups[0];
+            sequence.push(group_name(group));
+            assert!(
+                group.input_positions.is_empty(),
+                "derived frames have no durable external input position"
+            );
+            assert!(
+                group.wake.is_none(),
+                "derived frames cannot manufacture a synthetic durable input"
+            );
+        }
+        assert_eq!(
+            sequence,
+            [
+                "materialize",
+                "source-register",
+                "target-register",
+                "source-work",
+                "target-work",
+            ]
+        );
+    }
+
+    #[test]
+    fn immediate_cross_j_wrapper_preserves_register_pulls_byte_for_byte() {
+        let source = key(0x11, "source-signer");
+        let target = key(0x22, "target-signer");
+        let route = CanonicalValue::Object(vec![
+            ("orderId".into(), CanonicalValue::String("opening-1".into())),
+            (
+                "sourcePull".into(),
+                CanonicalValue::Object(vec![(
+                    "pullId".into(),
+                    CanonicalValue::String("source-pull".into()),
+                )]),
+            ),
+            (
+                "targetPull".into(),
+                CanonicalValue::Object(vec![(
+                    "pullId".into(),
+                    CanonicalValue::String("target-pull".into()),
+                )]),
+            ),
+        ]);
+        let register = CanonicalEntityTx::from_frame_projection(
+            EntityTxKind::RegisterCrossJurisdictionSwap,
+            CanonicalValue::Object(vec![("route".into(), route)]),
+        )
+        .expect("register projection");
+        let expected =
+            encode_canonical_consensus_bytes(register.frame_data().expect("register data"))
+                .expect("register bytes");
+        let mut outputs = vec![LocalEntityOutput {
+            entity_id: super::render_word(&target.entity_id),
+            target_signer_id: Some(target.signer_id.clone()),
+            entity_txs: vec![LocalEntityOutputTx::Projected(register)],
+        }];
+        let local = std::collections::BTreeSet::from([source.clone(), target]);
+        let command = collect_immediate_cross_j_commands(
+            &super::render_word(&source.entity_id),
+            &source.signer_id,
+            &local,
+            &mut outputs,
+        )
+        .expect("collect immediate output")
+        .pop()
+        .expect("immediate command");
+        assert_eq!(
+            encode_canonical_consensus_bytes(
+                command.entity_txs[0]
+                    .frame_data()
+                    .expect("command register data"),
+            )
+            .expect("command bytes"),
+            expected,
+            "LocalEntityOutput to immediate command must preserve both pull bodies",
+        );
+
+        let group = immediate_cross_j_group(command).expect("immediate group");
+        let EntityPendingWork::ProposerMaterialized {
+            projected: wrapper,
+            native: _,
+        } = &group.pending[0]
+        else {
+            panic!("derived group wrapper")
+        };
+        let Some(LocalEntityTx::RuntimeOutput(decoded)) =
+            decode_local_entity_tx(wrapper).expect("decode runtimeOutput")
+        else {
+            panic!("runtimeOutput local tx")
+        };
+        assert_eq!(
+            encode_canonical_consensus_bytes(
+                decoded.entity_txs[0]
+                    .frame_data()
+                    .expect("decoded register data"),
+            )
+            .expect("decoded bytes"),
+            expected,
+            "RuntimeOutput wrapping and decode must preserve both pull bodies",
+        );
+    }
 
     #[test]
     fn account_profile_counts_direct_and_bundled_replays() {
@@ -3427,7 +4399,6 @@ mod tests {
         let frame = RuntimeFrameContext {
             timestamp: 1,
             finalized_j_height: 0,
-            hub_rebalance_has_pending_work: false,
             entity_contexts: std::collections::BTreeMap::from([(
                 entity_key,
                 std::collections::VecDeque::from([crate::RuntimeEntityFrameContext {
@@ -3655,6 +4626,36 @@ mod tests {
     }
 
     #[test]
+    fn certified_j_history_prune_keeps_only_the_anchor_hash_at_the_tip() {
+        let mut metadata = j_history(36, 35, &[35, 36], &[35, 36]);
+        super::prune_finalized_j_history(&mut metadata, 36).expect("prune certified tip");
+        assert_eq!(metadata["jHistory"]["contiguousThroughHeight"], 36);
+        assert_eq!(
+            metadata["jHistory"]["eventBlocks"]["value"],
+            serde_json::json!([]),
+        );
+        assert_eq!(
+            metadata["jHistory"]["blockHashes"]["value"],
+            serde_json::json!([[36, "0x36"]]),
+        );
+    }
+
+    #[test]
+    fn certified_j_history_prune_retains_uncertified_tail() {
+        let mut metadata = j_history(37, 34, &[34, 35, 36, 37], &[34, 35, 36, 37]);
+        super::prune_finalized_j_history(&mut metadata, 35).expect("prune with local tail");
+        assert_eq!(metadata["jHistory"]["contiguousThroughHeight"], 35);
+        assert_eq!(
+            metadata["jHistory"]["eventBlocks"]["value"],
+            serde_json::json!([[36, {"jHeight":36}], [37, {"jHeight":37}]]),
+        );
+        assert_eq!(
+            metadata["jHistory"]["blockHashes"]["value"],
+            serde_json::json!([[35, "0x35"], [36, "0x36"], [37, "0x37"]]),
+        );
+    }
+
+    #[test]
     fn watcher_range_builds_one_signed_j_event_and_one_identical_certificate_claim() {
         let mut runtime =
             crate::machine::tests::replica(crate::RuntimeLimits::hlt()).expect("runtime replica");
@@ -3707,6 +4708,7 @@ mod tests {
             jurisdiction_ref,
             scanned_through_height: 36,
             tip_block_hash: block_hash,
+            headers_present: true,
             headers: vec![FinalizedJHeader {
                 j_height: 36,
                 j_block_hash: block_hash,
@@ -3749,7 +4751,154 @@ mod tests {
     }
 
     #[test]
-    fn observe_j_range_commits_the_signed_j_event_through_runtime_replay() {
+    fn unregistered_j_watcher_scan_has_no_entity_prefix_input() {
+        let runtime =
+            crate::machine::tests::replica(crate::RuntimeLimits::hlt()).expect("runtime replica");
+        let entity_id = crate::machine::tests::owner_bytes();
+        let observation = ObserveJRange {
+            entity_id: EntityId::parse(&super::render_word(&entity_id)).expect("entity id"),
+            signer_id: crate::machine::tests::entity_signer_id(),
+            jurisdiction_ref: format!("stack:31337:0x{}", "88".repeat(20)),
+            scanned_through_height: 1,
+            tip_block_hash: [0x44; 32],
+            headers_present: true,
+            headers: vec![FinalizedJHeader {
+                j_height: 1,
+                j_block_hash: [0x44; 32],
+            }],
+            batches: Vec::new(),
+        };
+        assert!(
+            super::build_local_j_prefix_entity_input(&runtime, &observation)
+                .expect("optional prefix")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unregistered_semantic_j_observation_certifies_on_demand_and_applies_reserve() {
+        let mut runtime =
+            crate::machine::tests::replica(crate::RuntimeLimits::hlt()).expect("runtime replica");
+        let entity_id = crate::machine::tests::owner_bytes();
+        let signer_id = crate::machine::tests::entity_signer_id();
+        let number = |value| {
+            CanonicalValue::Number(
+                xln_rscore_protocol::CanonicalNumber::try_from_u64(value).expect("safe number"),
+            )
+        };
+        runtime
+            .entity_slot_mut(&entity_id, &signer_id)
+            .expect("entity slot")
+            .1
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction = Some(CanonicalValue::Object(vec![
+            ("chainId".into(), number(31_337)),
+            (
+                "depositoryAddress".into(),
+                CanonicalValue::String(format!("0x{}", "88".repeat(20))),
+            ),
+            (
+                "entityProviderAddress".into(),
+                CanonicalValue::String(format!("0x{}", "99".repeat(20))),
+            ),
+        ]));
+        let block_hash = [0x44; 32];
+        let event = JurisdictionEvent::ReserveUpdated(ReserveUpdatedEvent {
+            metadata: JEventMetadata {
+                block_number: Some(1),
+                block_hash: Some(block_hash),
+                transaction_hash: Some([0x55; 32]),
+                log_index: Some(0),
+                event_index: None,
+            },
+            entity: super::render_word(&entity_id),
+            token_id: 1,
+            new_balance: num_bigint::BigInt::from(10_u8),
+        });
+        let observation = ObserveJRange {
+            entity_id: EntityId::parse(&super::render_word(&entity_id)).expect("entity id"),
+            signer_id: signer_id.clone(),
+            jurisdiction_ref: format!("stack:31337:0x{}", "88".repeat(20)),
+            scanned_through_height: 1,
+            tip_block_hash: block_hash,
+            headers_present: true,
+            headers: vec![FinalizedJHeader {
+                j_height: 1,
+                j_block_hash: block_hash,
+            }],
+            batches: vec![
+                xln_rscore_entity_kernel::project_finalized_j_event_batch(
+                    &EntityId::parse(&super::render_word(&entity_id)).expect("entity id"),
+                    1,
+                    block_hash,
+                    vec![event],
+                    Vec::new(),
+                )
+                .expect("projected J batch"),
+            ],
+        };
+        let prefix_input = super::build_local_j_prefix_entity_input(&runtime, &observation)
+            .expect("on-demand prefix")
+            .expect("semantic range requires a prefix");
+        let key = crate::RuntimeEntityKey::new(entity_id, &signer_id).expect("entity key");
+        let event_observation = ObserveJRange {
+            headers_present: false,
+            headers: Vec::new(),
+            ..observation.clone()
+        };
+        let header_observation = ObserveJRange {
+            batches: Vec::new(),
+            ..observation
+        };
+        let result = super::apply_runtime(
+            runtime,
+            RuntimeInput {
+                runtime_txs: vec![
+                    RuntimeTx::ObserveJRange(event_observation),
+                    RuntimeTx::ObserveJRange(header_observation),
+                ],
+                entity_inputs: vec![prefix_input],
+                frame: RuntimeFrameContext {
+                    timestamp: 100,
+                    finalized_j_height: 0,
+                    entity_contexts: std::collections::BTreeMap::from([(
+                        key.clone(),
+                        VecDeque::from([RuntimeEntityFrameContext {
+                            execution: xln_rscore_entity_kernel::DeterministicContext::hlt_default(
+                            ),
+                            canonical: CanonicalValue::Object(Vec::new()),
+                        }]),
+                    )]),
+                },
+            },
+        )
+        .expect("on-demand semantic Entity frame");
+        let (state, replica) = result
+            .replica
+            .entity_slot(&entity_id, &signer_id)
+            .expect("local replica");
+        assert_eq!(state.entity.last_finalized_j_height, 1);
+        assert_eq!(
+            state.entity.reserves.get(&1),
+            Some(&num_bigint::BigInt::from(10_u8)),
+        );
+        let history = replica
+            .replica_metadata
+            .get("jHistory")
+            .expect("durable local J history");
+        assert_eq!(history["scannedThroughHeight"], 1);
+        assert_eq!(history["contiguousThroughHeight"], 1);
+        assert_eq!(
+            history["eventBlocks"]["value"].as_array().map(Vec::len),
+            Some(0),
+        );
+    }
+
+    #[test]
+    fn ordered_observations_are_certified_only_by_the_recorded_prefix_attestation() {
         let mut runtime =
             crate::machine::tests::replica(crate::RuntimeLimits::hlt()).expect("runtime replica");
         let entity_id = crate::machine::tests::owner_bytes();
@@ -3811,6 +4960,7 @@ mod tests {
             jurisdiction_ref,
             scanned_through_height: 36,
             tip_block_hash: block_hash,
+            headers_present: true,
             headers: vec![FinalizedJHeader {
                 j_height: 36,
                 j_block_hash: block_hash,
@@ -3826,15 +4976,29 @@ mod tests {
                 .expect("projected J batch"),
             ],
         };
+        let prefix_input = super::build_local_j_prefix_entity_input(&runtime, &observation)
+            .expect("live canonical prefix input")
+            .expect("required prefix certificate");
+        let event_observation = ObserveJRange {
+            headers_present: false,
+            headers: Vec::new(),
+            ..observation.clone()
+        };
+        let header_observation = ObserveJRange {
+            batches: Vec::new(),
+            ..observation
+        };
         let input = RuntimeInput {
-            runtime_txs: vec![RuntimeTx::ObserveJRange(observation)],
-            entity_inputs: Vec::new(),
+            runtime_txs: vec![
+                RuntimeTx::ObserveJRange(event_observation),
+                RuntimeTx::ObserveJRange(header_observation),
+            ],
+            entity_inputs: vec![prefix_input],
             frame: RuntimeFrameContext {
                 timestamp: 1_001,
                 // Replay has only the prior committed Runtime height here;
                 // ObserveJRange is the canonical source for this frame.
                 finalized_j_height: 0,
-                hub_rebalance_has_pending_work: false,
                 entity_contexts: std::collections::BTreeMap::from([(
                     key.clone(),
                     VecDeque::from([RuntimeEntityFrameContext {
@@ -3845,6 +5009,20 @@ mod tests {
             },
         };
         let result = super::apply_runtime(runtime, input).expect("J range Runtime replay");
+        let applied = result
+            .applied_frame
+            .as_ref()
+            .expect("durable Runtime frame");
+        assert!(matches!(
+            applied.runtime_txs.as_slice(),
+            [RuntimeTx::ObserveJRange(_), RuntimeTx::ObserveJRange(_)]
+        ));
+        assert_eq!(applied.entity_inputs.len(), 1);
+        assert!(
+            applied.entity_inputs[0]
+                .get("jPrefixAttestations")
+                .is_some()
+        );
         let state = result.replica.state.e_replicas.get(&key).expect("state");
         let replica = result.replica.e_replicas.get(&key).expect("replica");
         let frame = &replica
@@ -3858,75 +5036,28 @@ mod tests {
         assert_eq!(frame.txs[0].kind, EntityTxKind::JEvent);
         assert!(frame.j_prefix_certificate.is_some());
 
-        let next_hash = [0x66; 32];
-        let next_event = JurisdictionEvent::ReserveUpdated(ReserveUpdatedEvent {
-            metadata: JEventMetadata {
-                block_number: Some(37),
-                block_hash: Some(next_hash),
-                transaction_hash: Some([0x77; 32]),
-                log_index: Some(0),
-                event_index: None,
-            },
-            entity: super::render_word(&entity_id),
-            token_id: 1,
-            new_balance: num_bigint::BigInt::from(11_u8),
-        });
-        let next_observation = ObserveJRange {
+        let mut committed = result.replica;
+        let before = committed
+            .entity_slot(&entity_id, &signer_id)
+            .expect("committed slot")
+            .1
+            .replica_metadata
+            .clone();
+        let stale = ObserveJRange {
             entity_id: EntityId::parse(&super::render_word(&entity_id)).expect("entity id"),
-            signer_id,
+            signer_id: signer_id.clone(),
             jurisdiction_ref: format!("stack:31337:0x{}", "88".repeat(20)),
-            scanned_through_height: 37,
-            tip_block_hash: next_hash,
-            headers: vec![FinalizedJHeader {
-                j_height: 37,
-                j_block_hash: next_hash,
-            }],
-            batches: vec![
-                xln_rscore_entity_kernel::project_finalized_j_event_batch(
-                    &EntityId::parse(&super::render_word(&entity_id)).expect("entity id"),
-                    37,
-                    next_hash,
-                    vec![next_event],
-                    Vec::new(),
-                )
-                .expect("projected J batch"),
-            ],
+            scanned_through_height: 35,
+            tip_block_hash: [0x35; 32],
+            headers_present: false,
+            headers: Vec::new(),
+            batches: Vec::new(),
         };
-        let next = super::apply_runtime(
-            result.replica,
-            RuntimeInput {
-                runtime_txs: vec![RuntimeTx::ObserveJRange(next_observation)],
-                entity_inputs: Vec::new(),
-                frame: RuntimeFrameContext {
-                    timestamp: 1_002,
-                    finalized_j_height: 36,
-                    hub_rebalance_has_pending_work: false,
-                    entity_contexts: std::collections::BTreeMap::from([(
-                        key.clone(),
-                        VecDeque::from([RuntimeEntityFrameContext {
-                            execution: xln_rscore_entity_kernel::DeterministicContext::hlt_default(
-                            ),
-                            canonical: CanonicalValue::Object(Vec::new()),
-                        }]),
-                    )]),
-                },
-            },
-        )
-        .expect("second J range Runtime replay");
-        let next_state = next.replica.state.e_replicas.get(&key).expect("next state");
-        assert_eq!(next_state.entity.last_finalized_j_height, 37);
-        let CanonicalValue::Object(finality) = next_state
-            .entity
-            .j_history_finality
-            .as_ref()
-            .expect("committed J finality")
-        else {
-            panic!("J finality object")
-        };
-        assert!(
-            finality.iter().any(|(field, value)| {
-                field == "finalizedThroughHeight" && value == &number(37)
-            })
-        );
+        let (state, replica) = committed
+            .entity_slot_mut(&entity_id, &signer_id)
+            .expect("committed mutable slot");
+        super::record_j_observation(state, replica, &stale)
+            .expect("stale observation validates without mutation");
+        assert_eq!(replica.replica_metadata, before);
     }
 }

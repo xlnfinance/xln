@@ -1,6 +1,8 @@
 import type { AccountTx } from '../../../../types/account';
+import type { EntityInput } from '../../../../entity/types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { PersistedFrameJournal } from '../../../../storage/types';
+import type { RoutedEntityInput } from '../../../../runtime/types';
 import {
   buildHltEntityEffectEvidence,
   type HltEntityEffectEvidence,
@@ -34,6 +36,16 @@ export type HltAuthorityEvidence = Readonly<{
   expectations: HltAuthorityExpectations;
 }>;
 
+export type HltLocalContinuationEvidence = Readonly<{
+  runtimeHeight: number;
+  inputs: readonly RoutedEntityInput[];
+}>;
+
+/** Replay-only facts observed at the TS Runtime output-plan seam. */
+export type HltTsParityExpectations = HltAuthorityExpectations & Readonly<{
+  localContinuations: readonly HltLocalContinuationEvidence[];
+}>;
+
 const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => {
   if (tx.type === 'entityCommand') return tx.data.txs;
   if (tx.type === 'runtimeOutput') return tx.data.entityTxs;
@@ -42,11 +54,33 @@ const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => {
 
 type MixedCoverage = {
   payments: number;
+  accountInputs: number;
+  directEntityPayments: number;
+  extendCreditCommands: number;
+  scheduledWakes: number;
+  jBroadcastCommands: number;
+  directAccountPayments: number;
   sameChainSwapOffers: number;
+  sameChainSwapResolves: number;
+  sameChainSwapCancels: number;
+  rebalancePolicies: number;
   disputePrepare: number;
   disputeFinalizeCommand: number;
   disputeStartedEvent: number;
   disputeFinalizedEvent: number;
+};
+
+const countDisputeEvent = (eventType: string, coverage: MixedCoverage): void => {
+  if (eventType === 'DisputeStarted') coverage.disputeStartedEvent += 1;
+  if (eventType === 'DisputeFinalized') coverage.disputeFinalizedEvent += 1;
+};
+
+const inspectJPrefixScope = (input: EntityInput, coverage: MixedCoverage): void => {
+  for (const attestation of input.jPrefixAttestations?.values() ?? []) {
+    for (const block of attestation.blocks) {
+      for (const event of block.events) countDisputeEvent(event.type, coverage);
+    }
+  }
 };
 
 const assertAccountScope = (tx: AccountTx, coverage: MixedCoverage): void => {
@@ -58,6 +92,10 @@ const assertAccountScope = (tx: AccountTx, coverage: MixedCoverage): void => {
     throw new Error('HLT_AUTHORITY_SCOPE_CROSS_J_SWAP_FORBIDDEN');
   }
   if (tx.type === 'swap_offer') coverage.sameChainSwapOffers += 1;
+  if (tx.type === 'swap_resolve') coverage.sameChainSwapResolves += 1;
+  if (tx.type === 'swap_cancel_request') coverage.sameChainSwapCancels += 1;
+  if (tx.type === 'direct_payment') coverage.directAccountPayments += 1;
+  if (tx.type === 'rebalance_policy') coverage.rebalancePolicies += 1;
 };
 
 const assertEntityScope = (tx: EntityTx, coverage: MixedCoverage): void => {
@@ -66,14 +104,16 @@ const assertEntityScope = (tx: EntityTx, coverage: MixedCoverage): void => {
     tx.type.startsWith('lending')
   ) throw new Error(`HLT_AUTHORITY_SCOPE_ENTITY_TX_FORBIDDEN:${tx.type}`);
   if (tx.type === 'directPayment' || tx.type === 'htlcPayment') coverage.payments += 1;
+  if (tx.type === 'accountInput') coverage.accountInputs += 1;
+  if (tx.type === 'directPayment') coverage.directEntityPayments += 1;
+  if (tx.type === 'extendCredit') coverage.extendCreditCommands += 1;
+  if (tx.type === 'scheduledWake') coverage.scheduledWakes += 1;
+  if (tx.type === 'j_broadcast') coverage.jBroadcastCommands += 1;
   if (tx.type === 'prepareDispute') coverage.disputePrepare += 1;
   if (tx.type === 'disputeFinalize') coverage.disputeFinalizeCommand += 1;
   if (tx.type === 'j_event') {
     for (const block of tx.data.blocks) {
-      for (const event of block.events) {
-        if (event.type === 'DisputeStarted') coverage.disputeStartedEvent += 1;
-        if (event.type === 'DisputeFinalized') coverage.disputeFinalizedEvent += 1;
-      }
+      for (const event of block.events) countDisputeEvent(event.type, coverage);
     }
   }
   if (tx.type === 'accountInput' && tx.data.kind === 'ack_frame') {
@@ -85,7 +125,16 @@ const assertEntityScope = (tx: EntityTx, coverage: MixedCoverage): void => {
 const inspectCanonicalScope = (frames: readonly PersistedFrameJournal[]): MixedCoverage => {
   const coverage: MixedCoverage = {
     payments: 0,
+    accountInputs: 0,
+    directEntityPayments: 0,
+    extendCreditCommands: 0,
+    scheduledWakes: 0,
+    jBroadcastCommands: 0,
+    directAccountPayments: 0,
     sameChainSwapOffers: 0,
+    sameChainSwapResolves: 0,
+    sameChainSwapCancels: 0,
+    rebalancePolicies: 0,
     disputePrepare: 0,
     disputeFinalizeCommand: 0,
     disputeStartedEvent: 0,
@@ -93,8 +142,12 @@ const inspectCanonicalScope = (frames: readonly PersistedFrameJournal[]): MixedC
   };
   for (const frame of frames) {
     for (const input of frame.runtimeInput.entityInputs) {
+      inspectJPrefixScope(input, coverage);
       for (const tx of input.entityTxs ?? []) assertEntityScope(tx, coverage);
       for (const tx of input.proposedFrame?.txs ?? []) assertEntityScope(tx, coverage);
+    }
+    for (const output of frame.runtimeOutputs ?? []) {
+      for (const tx of output.entityTxs ?? []) assertEntityScope(tx, coverage);
     }
   }
   return coverage;

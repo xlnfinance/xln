@@ -9,6 +9,7 @@ import {
 } from '../delivery/topology/output-routing';
 import { createPreparedOutputGraph } from './prepared-output';
 import { timePerfPhase } from '../../support/performance/profile';
+import { capturePlannedLocalContinuations } from '../observability/parity-evidence';
 
 export type RuntimeContinuationEnqueuer = (
   env: RuntimeReplica,
@@ -45,9 +46,14 @@ export const applyRecoveryRuntimeOutputPlan = (
   if (plan.deferredOutputs.length > 0) {
     throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
   }
+  const localContinuations = plan.localOutputs.map(({
+    sourceRuntimeFrame: _sourceRuntimeFrame,
+    ...output
+  }) => output);
+  capturePlannedLocalContinuations(env, localContinuations);
   timePerfPhase('recovery.output.enqueueLocal', () => enqueueRuntimeContinuation(
     env,
-    plan.localOutputs.map(({ sourceRuntimeFrame: _sourceRuntimeFrame, ...output }) => output),
+    localContinuations,
     undefined,
     undefined,
     env.state.timestamp,

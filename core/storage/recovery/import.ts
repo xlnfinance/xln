@@ -119,7 +119,6 @@ const persistRestoredRuntimeStateUnlocked = async (
     coordinates.height,
     coordinates.timestamp,
     materialized.canonicalEntityHashes,
-    runtimeMachine,
   );
 
   if (!(await deps.tryOpenStorageDb(env, 'current'))) {

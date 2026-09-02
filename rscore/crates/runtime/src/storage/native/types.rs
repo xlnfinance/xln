@@ -57,8 +57,8 @@ pub struct PathNodeChange {
 }
 
 /// One exact canonical Runtime-machine leaf. The physical key is derived by
-/// the store as `0x16 || checkpointHeight || path_bytes`; callers cannot
-/// smuggle another height or namespace through this row.
+/// the store as the stable `0x16 || path_bytes`; callers cannot smuggle a
+/// generation or another namespace through this row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeMachineLeafRow {
     pub path_bytes: Vec<u8>,
@@ -72,8 +72,8 @@ pub struct CheckpointGraph {
     /// normally supplies only net changes since the preceding checkpoint.
     pub full: bool,
     pub node_changes: Vec<PathNodeChange>,
-    /// Complete 0x16 leaf set for this checkpoint height. These rows are
-    /// rebuilt against the RuntimeFrame's committed root before any write.
+    /// Complete current 0x16 leaf set. These rows are rebuilt against the
+    /// RuntimeFrame's committed root before atomically replacing stable paths.
     pub runtime_machine_leaves: Vec<RuntimeMachineLeafRow>,
 }
 
@@ -171,7 +171,7 @@ pub(super) struct StorageHead {
 impl Default for StorageHead {
     fn default() -> Self {
         Self {
-            schema_version: 4,
+            schema_version: 5,
             latest_height: 0,
             latest_materialized_height: 0,
             latest_snapshot_height: 0,

@@ -1,4 +1,5 @@
-//! Independent canonical evidence extracted from the TypeScript recording.
+//! Independent canonical evidence extracted from the TypeScript recording
+//! and a replay report produced by the canonical TypeScript transition.
 //!
 //! These values are consulted only after native execution. They never select
 //! work, supply a carried root, or repair Rust state.
@@ -27,24 +28,71 @@ pub(super) struct ReplayExpectations {
     runtime_frames: BTreeMap<u64, RuntimeFrameExpectation>,
     entity_effects: BTreeMap<u64, EntityEffectExpectation>,
     entity_events: BTreeMap<u64, EntityEffectExpectation>,
+    local_continuations: BTreeMap<u64, Vec<Value>>,
+}
+
+fn local_continuation_expectations(report: &Value) -> Result<BTreeMap<u64, Vec<Value>>, String> {
+    let expectations = field(report, "authorityExpectations", "tsParityReport")?;
+    let rows = array(
+        field(
+            expectations,
+            "localContinuations",
+            "tsParityReport.authorityExpectations",
+        )?,
+        "tsParityReport.authorityExpectations.localContinuations",
+    )?;
+    let mut output = BTreeMap::new();
+    for (index, row) in rows.iter().enumerate() {
+        let path = format!("tsParityReport.authorityExpectations.localContinuations[{index}]");
+        let row_object = object(row, &path)?;
+        if row_object.len() != 2
+            || !row_object.contains_key("runtimeHeight")
+            || !row_object.contains_key("inputs")
+        {
+            return Err(format!(
+                "RUNTIME_REPLAY_EXPECTED_LOCAL_CONTINUATION_KEYS:{path}"
+            ));
+        }
+        let height = unsigned(
+            field(row, "runtimeHeight", &path)?,
+            &format!("{path}.runtimeHeight"),
+        )?;
+        let inputs = array(field(row, "inputs", &path)?, &format!("{path}.inputs"))?;
+        let mut canonical = Vec::with_capacity(inputs.len());
+        for (input_index, input) in inputs.iter().enumerate() {
+            let decoded = xln_rscore_runtime::RuntimeEntityInput::decode(input.clone()).map_err(
+                |error| {
+                    format!(
+                        "RUNTIME_REPLAY_EXPECTED_LOCAL_CONTINUATION_INPUT:{path}.inputs[{input_index}]:{error}"
+                    )
+                },
+            )?;
+            canonical.push(decoded.canonical().clone());
+        }
+        if output.insert(height, canonical).is_some() {
+            return Err(format!(
+                "RUNTIME_REPLAY_EXPECTED_LOCAL_CONTINUATION_DUPLICATE:{height}"
+            ));
+        }
+    }
+    Ok(output)
 }
 
 fn entity_event_expectations(
-    root: &Value,
+    report: &Value,
 ) -> Result<BTreeMap<u64, EntityEffectExpectation>, String> {
-    let authority = field(root, "authorityEvidence", "recordingRoot")?;
-    let expectations = field(authority, "expectations", "authorityEvidence")?;
+    let expectations = field(report, "authorityExpectations", "tsParityReport")?;
     let rows = array(
         field(
             expectations,
             "entityFrameEvents",
-            "authorityEvidence.expectations",
+            "tsParityReport.authorityExpectations",
         )?,
-        "authorityEvidence.expectations.entityFrameEvents",
+        "tsParityReport.authorityExpectations.entityFrameEvents",
     )?;
     let mut output = BTreeMap::new();
     for (index, row) in rows.iter().enumerate() {
-        let path = format!("authorityEvidence.expectations.entityFrameEvents[{index}]");
+        let path = format!("tsParityReport.authorityExpectations.entityFrameEvents[{index}]");
         let height = unsigned(
             field(row, "runtimeHeight", &path)?,
             &format!("{path}.runtimeHeight"),
@@ -67,21 +115,20 @@ fn entity_event_expectations(
 }
 
 fn entity_effect_expectations(
-    root: &Value,
+    report: &Value,
 ) -> Result<BTreeMap<u64, EntityEffectExpectation>, String> {
-    let authority = field(root, "authorityEvidence", "recordingRoot")?;
-    let expectations = field(authority, "expectations", "authorityEvidence")?;
+    let expectations = field(report, "authorityExpectations", "tsParityReport")?;
     let rows = array(
         field(
             expectations,
             "entityEffects",
-            "authorityEvidence.expectations",
+            "tsParityReport.authorityExpectations",
         )?,
-        "authorityEvidence.expectations.entityEffects",
+        "tsParityReport.authorityExpectations.entityEffects",
     )?;
     let mut output = BTreeMap::new();
     for (index, row) in rows.iter().enumerate() {
-        let path = format!("authorityEvidence.expectations.entityEffects[{index}]");
+        let path = format!("tsParityReport.authorityExpectations.entityEffects[{index}]");
         let height = unsigned(
             field(row, "runtimeHeight", &path)?,
             &format!("{path}.runtimeHeight"),
@@ -188,12 +235,104 @@ fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpect
     Ok(grouped)
 }
 
+fn exact_string<'a>(value: &'a Value, path: &str) -> Result<&'a str, String> {
+    value
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("RUNTIME_REPLAY_EXPECTED_STRING:{path}"))
+}
+
+fn source_binding(value: &Value, path: &str) -> Result<([u8; 32], [u8; 32]), String> {
+    let binding = object(value, path)?;
+    if binding.len() != 3
+        || !binding.contains_key("algorithm")
+        || !binding.contains_key("runtimeSeedHash")
+        || !binding.contains_key("walTreeHash")
+    {
+        return Err(format!("RUNTIME_REPLAY_SOURCE_BINDING_KEYS:{path}"));
+    }
+    let algorithm = exact_string(
+        field(value, "algorithm", path)?,
+        &format!("{path}.algorithm"),
+    )?;
+    if algorithm != "sha256" {
+        return Err(format!(
+            "RUNTIME_REPLAY_SOURCE_BINDING_ALGORITHM:{path}:{algorithm}"
+        ));
+    }
+    Ok((
+        digest(
+            field(value, "runtimeSeedHash", path)?,
+            &format!("{path}.runtimeSeedHash"),
+        )?,
+        digest(
+            field(value, "walTreeHash", path)?,
+            &format!("{path}.walTreeHash"),
+        )?,
+    ))
+}
+
+fn assert_ts_parity_report_binding(
+    recording: &Value,
+    report: &Value,
+    expected_manifest_hash: &str,
+) -> Result<(), String> {
+    let schema = exact_string(
+        field(report, "schema", "tsParityReport")?,
+        "tsParityReport.schema",
+    )?;
+    if schema != "xln-hlt-hub-replay-report-v1" {
+        return Err(format!("RUNTIME_REPLAY_TS_PARITY_REPORT_SCHEMA:{schema}"));
+    }
+    let recording_binding = source_binding(
+        field(
+            field(recording, "source", "recordingRoot")?,
+            "binding",
+            "recordingRoot.source",
+        )?,
+        "recordingRoot.source.binding",
+    )?;
+    let report_binding = source_binding(
+        field(report, "recordingSourceBinding", "tsParityReport")?,
+        "tsParityReport.recordingSourceBinding",
+    )?;
+    if report_binding != recording_binding {
+        return Err(format!(
+            "RUNTIME_REPLAY_TS_PARITY_REPORT_BINDING:recordingSeed={}:reportSeed={}:recordingWal={}:reportWal={}",
+            hex(&recording_binding.0),
+            hex(&report_binding.0),
+            hex(&recording_binding.1),
+            hex(&report_binding.1),
+        ));
+    }
+    let expected_manifest_value = Value::String(expected_manifest_hash.to_string());
+    let expected_manifest = digest(&expected_manifest_value, "recordingManifestHashArgument")?;
+    let report_manifest = digest(
+        field(report, "recordingManifestHash", "tsParityReport")?,
+        "tsParityReport.recordingManifestHash",
+    )?;
+    if report_manifest != expected_manifest {
+        return Err(format!(
+            "RUNTIME_REPLAY_TS_PARITY_REPORT_MANIFEST_HASH:expected={}:actual={}",
+            hex(&expected_manifest),
+            hex(&report_manifest),
+        ));
+    }
+    Ok(())
+}
+
 impl ReplayExpectations {
-    pub(super) fn from_recording(root: &Value) -> Result<Self, String> {
+    pub(super) fn from_sources(
+        recording: &Value,
+        ts_parity_report: &Value,
+        expected_manifest_hash: &str,
+    ) -> Result<Self, String> {
+        assert_ts_parity_report_binding(recording, ts_parity_report, expected_manifest_hash)?;
         Ok(Self {
-            runtime_frames: runtime_expectations(root)?,
-            entity_effects: entity_effect_expectations(root)?,
-            entity_events: entity_event_expectations(root)?,
+            runtime_frames: runtime_expectations(recording)?,
+            entity_effects: entity_effect_expectations(ts_parity_report)?,
+            entity_events: entity_event_expectations(ts_parity_report)?,
+            local_continuations: local_continuation_expectations(ts_parity_report)?,
         })
     }
 
@@ -206,9 +345,14 @@ impl ReplayExpectations {
         let runtime_frames = self.runtime_frames.range(from..=to).count();
         let entity_effects = self.entity_effects.range(from..=to).count();
         let entity_events = self.entity_events.range(from..=to).count();
-        if runtime_frames != expected || entity_effects != expected || entity_events != expected {
+        let local_continuations = self.local_continuations.range(from..=to).count();
+        if runtime_frames != expected
+            || entity_effects != expected
+            || entity_events != expected
+            || local_continuations != expected
+        {
             return Err(format!(
-                "RUNTIME_REPLAY_EXPECTED_RANGE_MISMATCH:from={from}:to={to}:frames={runtime_frames}:effects={entity_effects}:events={entity_events}",
+                "RUNTIME_REPLAY_EXPECTED_RANGE_MISMATCH:from={from}:to={to}:frames={runtime_frames}:effects={entity_effects}:events={entity_events}:localContinuations={local_continuations}",
             ));
         }
         Ok(())
@@ -260,6 +404,22 @@ impl ReplayExpectations {
                 hex(&commitments.events_parity_digest),
             ))
         }
+    }
+
+    pub(super) fn assert_local_continuations(
+        &self,
+        height: u64,
+        actual: &[Value],
+    ) -> Result<(), String> {
+        let expected = self.local_continuations.get(&height).ok_or_else(|| {
+            format!("RUNTIME_REPLAY_EXPECTED_LOCAL_CONTINUATIONS_MISSING:{height}")
+        })?;
+        if expected.as_slice() == actual {
+            return Ok(());
+        }
+        Err(format!(
+            "RUNTIME_REPLAY_LOCAL_CONTINUATIONS_MISMATCH:{height}:expected={expected:?}:actual={actual:?}"
+        ))
     }
 
     pub(super) fn expected_canonical_state_hash(&self, height: u64) -> Result<[u8; 32], String> {
@@ -323,18 +483,25 @@ mod tests {
 
     use super::*;
 
-    fn fixture() -> Value {
+    fn recording_fixture() -> Value {
         json!({
+            "source": {
+                "binding": {
+                    "algorithm": "sha256",
+                    "runtimeSeedHash": format!("0x{}", "aa".repeat(32)),
+                    "walTreeHash": format!("0x{}", "bb".repeat(32)),
+                },
+            },
             "authorityEvidence": {
                 "expectations": {
                     "entityEffects": [{
                         "runtimeHeight": 7,
-                        "effectCount": 0,
+                        "effectCount": 41,
                         "orderedEffectDigest": format!("0x{}", "88".repeat(32)),
                     }],
                     "entityFrameEvents": [{
                         "runtimeHeight": 7,
-                        "eventCount": 0,
+                        "eventCount": 42,
                         "orderedEventDigest": format!("0x{}", "99".repeat(32)),
                     }],
                 },
@@ -353,9 +520,50 @@ mod tests {
         })
     }
 
+    fn parity_report_fixture() -> Value {
+        json!({
+            "schema": "xln-hlt-hub-replay-report-v1",
+            "recordingManifestHash": recording_manifest_hash(),
+            "recordingSourceBinding": {
+                "algorithm": "sha256",
+                "runtimeSeedHash": format!("0x{}", "aa".repeat(32)),
+                "walTreeHash": format!("0x{}", "bb".repeat(32)),
+            },
+            "authorityExpectations": {
+                "entityEffects": [{
+                    "runtimeHeight": 7,
+                    "effectCount": 0,
+                    "orderedEffectDigest": format!("0x{}", "88".repeat(32)),
+                }],
+                "entityFrameEvents": [{
+                    "runtimeHeight": 7,
+                    "eventCount": 0,
+                    "orderedEventDigest": format!("0x{}", "99".repeat(32)),
+                }],
+                "localContinuations": [{
+                    "runtimeHeight": 7,
+                    "inputs": [{
+                        "entityId": format!("0x{}", "11".repeat(32)),
+                        "signerId": "local-signer",
+                        "entityTxs": [],
+                    }],
+                }],
+            },
+        })
+    }
+
+    fn recording_manifest_hash() -> String {
+        format!("0x{}", "dd".repeat(32))
+    }
+
     #[test]
     fn missing_runtime_height_is_loud() {
-        let expectations = ReplayExpectations::from_recording(&fixture()).expect("fixture");
+        let expectations = ReplayExpectations::from_sources(
+            &recording_fixture(),
+            &parity_report_fixture(),
+            &recording_manifest_hash(),
+        )
+        .expect("fixture");
         assert_eq!(
             expectations.expected_canonical_state_hash(7).unwrap(),
             [0x77; 32]
@@ -369,42 +577,109 @@ mod tests {
     }
 
     #[test]
+    fn legacy_recording_event_and_effect_rows_are_not_used_as_the_oracle() {
+        let expectations = ReplayExpectations::from_sources(
+            &recording_fixture(),
+            &parity_report_fixture(),
+            &recording_manifest_hash(),
+        )
+        .expect("fixture");
+        assert_eq!(
+            expectations.entity_effects.get(&7).expect("effect").count,
+            0
+        );
+        assert_eq!(expectations.entity_events.get(&7).expect("event").count, 0);
+    }
+
+    #[test]
+    fn local_continuation_parity_is_exact_and_fail_closed() {
+        let expectations = ReplayExpectations::from_sources(
+            &recording_fixture(),
+            &parity_report_fixture(),
+            &recording_manifest_hash(),
+        )
+        .expect("fixture");
+        let exact = vec![json!({
+            "entityId": format!("0x{}", "11".repeat(32)),
+            "signerId": "local-signer",
+            "entityTxs": [],
+        })];
+        expectations
+            .assert_local_continuations(7, &exact)
+            .expect("exact continuation must pass");
+        assert!(
+            expectations
+                .assert_local_continuations(7, &[])
+                .unwrap_err()
+                .contains("LOCAL_CONTINUATIONS_MISMATCH")
+        );
+        let different = vec![json!({
+            "entityId": format!("0x{}", "11".repeat(32)),
+            "signerId": "different-signer",
+            "entityTxs": [],
+        })];
+        assert!(
+            expectations
+                .assert_local_continuations(7, &different)
+                .unwrap_err()
+                .contains("LOCAL_CONTINUATIONS_MISMATCH")
+        );
+    }
+
+    #[test]
     fn canonical_root_is_required_and_the_retired_duplicate_is_rejected() {
-        let mut missing = fixture();
+        let mut missing = recording_fixture();
         missing["tail"]["frames"][0]
             .as_object_mut()
             .expect("frame")
             .remove("canonicalStateHash");
         assert!(
-            ReplayExpectations::from_recording(&missing)
-                .err()
-                .expect("missing canonical root must fail")
-                .contains("EXPECTED_FIELD")
+            ReplayExpectations::from_sources(
+                &missing,
+                &parity_report_fixture(),
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("missing canonical root must fail")
+            .contains("EXPECTED_FIELD")
         );
 
-        let mut null = fixture();
+        let mut null = recording_fixture();
         null["tail"]["frames"][0]["canonicalStateHash"] = Value::Null;
         assert!(
-            ReplayExpectations::from_recording(&null)
-                .err()
-                .expect("null canonical root must fail")
-                .contains("EXPECTED_DIGEST")
+            ReplayExpectations::from_sources(
+                &null,
+                &parity_report_fixture(),
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("null canonical root must fail")
+            .contains("EXPECTED_DIGEST")
         );
 
-        let mut retired = fixture();
+        let mut retired = recording_fixture();
         retired["tail"]["frames"][0]["runtimeStateHash"] =
             Value::String(format!("0x{}", "77".repeat(32)));
         assert!(
-            ReplayExpectations::from_recording(&retired)
-                .err()
-                .expect("retired duplicate must fail")
-                .contains("RETIRED_RUNTIME_STATE_HASH")
+            ReplayExpectations::from_sources(
+                &retired,
+                &parity_report_fixture(),
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("retired duplicate must fail")
+            .contains("RETIRED_RUNTIME_STATE_HASH")
         );
     }
 
     #[test]
     fn runtime_and_effect_digest_are_independent_required_evidence() {
-        let expectations = ReplayExpectations::from_recording(&fixture()).expect("fixture");
+        let expectations = ReplayExpectations::from_sources(
+            &recording_fixture(),
+            &parity_report_fixture(),
+            &recording_manifest_hash(),
+        )
+        .expect("fixture");
         let commitments = RuntimeDurableCommitments {
             height: 7,
             runtime_frame_hash: [0; 32],
@@ -434,6 +709,69 @@ mod tests {
                 .assert_events(7, &commitments)
                 .unwrap_err()
                 .contains("ENTITY_EVENTS_MISMATCH")
+        );
+    }
+
+    #[test]
+    fn ts_report_is_required_and_bound_to_the_recording() {
+        let mut wrong = parity_report_fixture();
+        wrong["recordingSourceBinding"]["walTreeHash"] =
+            Value::String(format!("0x{}", "cc".repeat(32)));
+        assert!(
+            ReplayExpectations::from_sources(
+                &recording_fixture(),
+                &wrong,
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("wrong report binding must fail")
+            .contains("TS_PARITY_REPORT_BINDING")
+        );
+
+        let mut stale = parity_report_fixture();
+        stale["recordingManifestHash"] = Value::String(format!("0x{}", "cc".repeat(32)));
+        assert!(
+            ReplayExpectations::from_sources(
+                &recording_fixture(),
+                &stale,
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("stale report manifest must fail")
+            .contains("TS_PARITY_REPORT_MANIFEST_HASH")
+        );
+
+        let mut tampered = parity_report_fixture();
+        tampered["recordingManifestHash"] = Value::String("not-a-hash".into());
+        assert!(
+            ReplayExpectations::from_sources(
+                &recording_fixture(),
+                &tampered,
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("tampered report manifest must fail")
+            .contains("EXPECTED_DIGEST:tsParityReport.recordingManifestHash")
+        );
+
+        let missing = json!({
+            "schema": "xln-hlt-hub-replay-report-v1",
+            "recordingManifestHash": recording_manifest_hash(),
+            "recordingSourceBinding": {
+                "algorithm": "sha256",
+                "runtimeSeedHash": format!("0x{}", "aa".repeat(32)),
+                "walTreeHash": format!("0x{}", "bb".repeat(32)),
+            },
+        });
+        assert!(
+            ReplayExpectations::from_sources(
+                &recording_fixture(),
+                &missing,
+                &recording_manifest_hash(),
+            )
+            .err()
+            .expect("missing report oracle must fail")
+            .contains("authorityExpectations")
         );
     }
 }

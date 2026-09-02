@@ -23,6 +23,7 @@ import { buildEntityTransactionProposalAction } from '../../../entity/auth/autho
 import { hashEntityCommandTxs } from '../../../entity/command/command-codec';
 import {
   KEY_HEAD,
+  STORAGE_SCHEMA_VERSION,
   keyAccountJClaimPathNode,
   keyCertifiedBoardPathNode,
   keyFrame,
@@ -111,6 +112,23 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       await expect(reopenDecode(family, key, validator)).rejects.toThrow();
     });
   }
+
+  test('rejects a snapshot history pointer above the current materialized pointer', async () => {
+    await expect(reopenDecodeValue('head-pointer-order', KEY_HEAD, {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      latestHeight: 4,
+      latestMaterializedHeight: 2,
+      latestSnapshotHeight: 3,
+      snapshotPeriodFrames: 10,
+      retainSnapshots: 2,
+      epochMaxBytes: Number.MAX_SAFE_INTEGER,
+      accountMerkleRadix: 16,
+      epochReplayBytes: 0,
+      retainedWalBytes: 0,
+    }, validateStorageHeadValue)).rejects.toThrow(
+      'STORAGE_HEAD_INVALID_SNAPSHOT_AFTER_MATERIALIZED',
+    );
+  });
 
   test('rejects retired runtime-machine and entity-context bodies at the frame boundary', async () => {
     const env = createEmptyEnv('storage-runtime-machine-schema');
@@ -407,7 +425,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       }],
     };
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
-    const machineGraph = prepareRuntimeMachineGraphRows(1, runtimeMachine);
+    const machineGraph = prepareRuntimeMachineGraphRows(runtimeMachine);
     if (!machineGraph.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
     const emptyOutputs = prepareRuntimeOutputRows(1, []).commitment;
     const frameBase: RuntimeFrame = {
@@ -434,6 +452,22 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     const first = new Level<Buffer, Buffer>(path, { keyEncoding: 'buffer', valueEncoding: 'buffer' });
     await first.open();
     await first.batch([
+      {
+        type: 'put',
+        key: KEY_HEAD,
+        value: encodeBuffer({
+          schemaVersion: STORAGE_SCHEMA_VERSION,
+          latestHeight: 1,
+          latestMaterializedHeight: 1,
+          latestSnapshotHeight: 1,
+          snapshotPeriodFrames: 1,
+          retainSnapshots: 1,
+          epochMaxBytes: Number.MAX_SAFE_INTEGER,
+          accountMerkleRadix: 16,
+          epochReplayBytes: 0,
+          retainedWalBytes: 0,
+        }),
+      },
       { type: 'put', key: keyFrame(1), value: encodeBuffer(frame) },
       ...machineGraph.rows.map(row => ({ type: 'put' as const, ...row })),
     ]);

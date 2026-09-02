@@ -43,6 +43,7 @@ const SAMPLE_PAYMENT = {
   sourceAllAckedElapsedMs: 70,
   commandObservedElapsedMs: 70,
   deliveredElapsedMs: 6699,
+  drainCompleteElapsedMs: 7000,
   deliveredTps: 149.27601134497687,
   hubCompletedPaymentsBefore: 50,
   hubCompletedPaymentsAfter: 1050,
@@ -54,6 +55,13 @@ const SAMPLE_PAYMENT = {
     { elapsedMs: 6699, runtimeHeight: 313, acceptedPayments: 1000, completedPayments: 1000, paybookOpen: 0 },
   ],
   roundSubmissionLagMs: Array.from({ length: 1000 }, () => 1),
+  laneQuiescence: {
+    runtimes: 200,
+    openHubPeers: 200,
+    pendingRuntimeWork: 0,
+    pendingAccountFrames: 0,
+    accountMempoolTxs: 0,
+  },
   walBytesBefore: 13268608,
   walBytesAfter: 29856693,
   hubDurableBefore: {
@@ -66,7 +74,7 @@ const SAMPLE_PAYMENT = {
   },
   environment: {
     disputeHankos: 'always', hubWalSync: true, lanePersistence: false, laneWalSync: false,
-    laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
+    laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default', accountWorkers: 4,
   },
 };
 

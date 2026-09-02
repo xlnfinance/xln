@@ -170,17 +170,31 @@ const getSignerKeyStore = (scope: SignerKeyScope, create = false): SignerKeyStor
   return created;
 };
 
+// Signer numbers are one-based while the final non-hardened BIP-32 path leg is
+// zero-based and strictly below 2^31. Every all-digit value outside this range
+// is invalid: treating it as an HMAC label would silently select another key.
+const MAX_SIGNER_NUMBER = '2147483648';
+
+const signerIndexInvalid = (signerId: string): never => {
+  throw new Error(
+    `SIGNER_INDEX_INVALID: signerId "${signerId}" must be a canonical decimal integer from 1 to ${MAX_SIGNER_NUMBER}`,
+  );
+};
+
 const parseSignerIndex = (signerId: string): number | null => {
   const trimmed = signerId.trim();
   if (/^s\d+$/.test(trimmed)) {
     throw new Error(`NONCANONICAL_SIGNER_PREFIX: signerId "${signerId}" must be numeric (e.g. "1")`);
   }
-  const match = trimmed.match(/^(\d+)$/);
-  if (!match) return null;
-  const raw = Number(match[1]);
-  if (!Number.isFinite(raw)) return null;
-  const index = raw > 0 ? raw - 1 : 0;
-  return index;
+  if (!/^\d+$/.test(trimmed)) return null;
+  if (
+    trimmed.startsWith('0')
+    || trimmed.length > MAX_SIGNER_NUMBER.length
+    || (trimmed.length === MAX_SIGNER_NUMBER.length && trimmed > MAX_SIGNER_NUMBER)
+  ) {
+    return signerIndexInvalid(signerId);
+  }
+  return Number(trimmed) - 1;
 };
 
 const resolveMnemonic = (seed: Uint8Array | string): string => {

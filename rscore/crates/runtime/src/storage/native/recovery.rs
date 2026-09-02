@@ -114,7 +114,7 @@ impl NativeRuntimeStore {
             height,
             state_root,
             path_nodes: self.path_node_rows()?.into_iter().collect(),
-            runtime_machine_leaves: self.runtime_machine_leaf_rows(height)?,
+            runtime_machine_leaves: self.runtime_machine_leaf_rows()?,
         }))
     }
 
@@ -258,9 +258,8 @@ impl NativeRuntimeStore {
 
     fn runtime_machine_leaf_rows(
         &mut self,
-        height: u64,
     ) -> Result<Vec<RuntimeMachineLeafRow>, NativeStorageError> {
-        let prefix = runtime_machine_leaf_prefix(height);
+        let prefix = runtime_machine_leaf_prefix();
         let mut iterator = self
             .database
             .new_iter()

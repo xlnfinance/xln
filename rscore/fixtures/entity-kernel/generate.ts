@@ -399,6 +399,29 @@ if (!finalBook || finalBook.tradeCount !== 1) throw new Error('ENTITY_KERNEL_FIX
 for (const update of match.bookUpdates) replaceOrderbookPair(ext, update.pairId, update.book);
 const sameJFullMatchCanonicalEntity = canonicalEntityEvidence(hubState);
 
+const usdAuthorityAsk = offer(MAKER, 'authority-ask', 1, true);
+const usdAuthorityProfile: HubProfile = {
+  ...profile,
+  usdQuoteAuthorityEntityId: MAKER,
+};
+const usdAuthorityExt = createOrderbookExtState(usdAuthorityProfile);
+const usdAuthorityState = entityState(
+  new Map([[MAKER, account(MAKER, [usdAuthorityAsk])]]),
+  usdAuthorityExt,
+);
+const usdAuthorityPass = processOrderbookSwaps(
+  usdAuthorityState,
+  [markWorkingOrderbookOffer(usdAuthorityAsk)],
+);
+const usdAuthorityBook = usdAuthorityPass.bookUpdates
+  .find((row) => row.pairId === '1/2')?.book;
+if (
+  !usdAuthorityBook ||
+  usdAuthorityBook.lastAcceptedUsdAskPriceTicks !== PRICE
+) {
+  throw new Error('ENTITY_KERNEL_FIXTURE_USD_AUTHORITY_ASK_MISSING');
+}
+
 const grouped = new Map<string, AccountTx[]>();
 for (const row of match.accountTxs) {
   const txs = grouped.get(row.accountId) ?? [];
@@ -876,6 +899,11 @@ const fixture = {
     askPagesRoot: finalBook.askPages.rootHash(),
     bookCommitmentHash: computeBookCommitmentHash(finalBook),
     canonicalEntity: sameJFullMatchCanonicalEntity,
+  },
+  usdQuoteAuthorityAsk: {
+    lastAcceptedUsdAskPriceTicks: usdAuthorityBook.lastAcceptedUsdAskPriceTicks.toString(),
+    eventHash: usdAuthorityBook.eventHash.toString(),
+    bookCommitmentHash: computeBookCommitmentHash(usdAuthorityBook),
   },
   sameJPartialMatch: {
     orderbookRoot: digest(partialOrderbookProjection),

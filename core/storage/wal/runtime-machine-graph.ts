@@ -59,6 +59,11 @@ type StorageValueGraph = PersistentRadixValueMap<
 >;
 
 export type RuntimeMachineGraphRow = Readonly<{ key: Buffer; value: Buffer }>;
+export type RuntimeMachineGraphWrite = Readonly<{
+  root?: RuntimeMachineGraphRoot;
+  rows: readonly RuntimeMachineGraphRow[];
+  dels: readonly Buffer[];
+}>;
 
 const record = (value: unknown, code: string): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -257,7 +262,6 @@ const storageValueGraphBranchValue = (branch: PersistentRadixBranchRecord) => ({
 });
 
 export const prepareRuntimeMachineGraphRows = (
-  height: number,
   machine: Readonly<Record<string, unknown>> | undefined,
 ): Readonly<{
   root?: RuntimeMachineGraphRoot;
@@ -267,11 +271,10 @@ export const prepareRuntimeMachineGraphRows = (
   assertStorageRuntimeMachineProjection(machine);
   const graph = buildStorageValueGraph(machine);
   const rows = [...graph.nodeRecords()].map(record => record.kind === 'branch'
-    ? boundedRow(keyRuntimeMachineBranch(height, record.path), storageValueGraphBranchValue(record))
-    : boundedRow(keyRuntimeMachineLeaf(height, record.keyBytes), record.value));
+    ? boundedRow(keyRuntimeMachineBranch(record.path), storageValueGraphBranchValue(record))
+    : boundedRow(keyRuntimeMachineLeaf(record.keyBytes), record.value));
   if (isRuntimePerfProfileEnabled('XLN_STORAGE_MACHINE_PROFILE')) {
     machineGraphLog.info('machine_graph.profile', {
-      height,
       leaves: graph.size,
       rows: rows.length,
       rowBytes: rows.reduce((total, row) => total + row.key.byteLength + row.value.byteLength, 0),
@@ -288,6 +291,27 @@ export const prepareRuntimeMachineGraphRows = (
     }),
     rows,
   };
+};
+
+/**
+ * Plan one latest-only Runtime-machine graph replacement. The owning Runtime
+ * is the WAL database itself; 0x15/0x16 are permanent branch/leaf namespaces.
+ * Common paths are overwritten and paths unreachable from the new root are
+ * deleted by the same authoritative batch that publishes the checkpoint.
+ */
+export const prepareRuntimeMachineGraphWrite = async (
+  db: RuntimeDbLike,
+  machine: Readonly<Record<string, unknown>>,
+): Promise<RuntimeMachineGraphWrite> => {
+  const prepared = prepareRuntimeMachineGraphRows(machine);
+  const retained = new Set(prepared.rows.map(row => row.key.toString('hex')));
+  const dels: Buffer[] = [];
+  for (const tag of [KEY_RUNTIME_MACHINE_BRANCH, KEY_RUNTIME_MACHINE_LEAF] as const) {
+    for await (const key of iterateKeys(db, { prefix: keyRuntimeMachineTreePrefix(tag) })) {
+      if (!retained.has(key.toString('hex'))) dels.push(Buffer.from(key));
+    }
+  }
+  return { ...prepared, dels };
 };
 
 export const decodeRuntimeMachineGraphRoot = (
@@ -343,19 +367,16 @@ const exactBytes = (left: Uint8Array, right: Uint8Array): boolean =>
 
 const readGraphRecords = async (
   db: RuntimeDbLike,
-  height: number,
 ): Promise<PersistentRadixNodeRecord<StorageValueGraphPath, StorageValueGraphValue>[]> => {
   const records: PersistentRadixNodeRecord<StorageValueGraphPath, StorageValueGraphValue>[] = [];
-  const branchPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_BRANCH, height);
+  const branchPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_BRANCH);
   for await (const key of iterateKeys(db, { prefix: branchPrefix })) {
     const parsed = parseRuntimeMachineBranchKey(key);
-    if (parsed.height !== height) throw new Error('STORAGE_RUNTIME_MACHINE_BRANCH_HEIGHT');
     records.push(decodeStorageValueGraphBranch(decodeBuffer(await db.get(key)), parsed.path));
   }
-  const leafPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF, height);
+  const leafPrefix = keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF);
   for await (const key of iterateKeys(db, { prefix: leafPrefix })) {
     const parsed = parseRuntimeMachineLeafKey(key);
-    if (parsed.height !== height) throw new Error('STORAGE_RUNTIME_MACHINE_LEAF_HEIGHT');
     const path = decodeStorageValueGraphPath(decodeBuffer(parsed.payload), 'STORAGE_RUNTIME_MACHINE_LEAF_PATH');
     if (!exactBytes(storageValueGraphPathBytes(path), parsed.payload)) {
       throw new Error('STORAGE_RUNTIME_MACHINE_LEAF_PATH_NON_CANONICAL');
@@ -457,14 +478,13 @@ const rebuildStorageValueGraph = (graph: StorageValueGraph): unknown => {
 
 export const readRuntimeMachineGraph = async (
   db: RuntimeDbLike,
-  height: number,
   expected: RuntimeMachineGraphRoot,
 ): Promise<Record<string, unknown>> => {
-  const records = await readGraphRecords(db, height);
+  const records = await readGraphRecords(db);
   const graph = PersistentRadixValueMap.fromNodeRecords(records, STORAGE_VALUE_GRAPH_OPTIONS);
   if (graph.rootHash() !== expected.rootHash || graph.size !== expected.leafCount) {
     throw new Error(
-      `STORAGE_RUNTIME_MACHINE_GRAPH_ROOT_MISMATCH:height=${height}:` +
+      `STORAGE_RUNTIME_MACHINE_GRAPH_ROOT_MISMATCH:` +
       `expected=${expected.rootHash}/${expected.leafCount}:` +
       `actual=${graph.rootHash()}/${graph.size}`,
     );

@@ -61,7 +61,9 @@ const emptyPostAccount = (
     accountId,
     leaf,
     emptyHeader(),
-    [descriptor, descriptor, descriptor, descriptor, descriptor, descriptor],
+    [descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor, descriptor],
+    changes,
+    changes,
     changes,
     changes,
     changes,
@@ -662,7 +664,7 @@ describe('rscore staged wave decoder', () => {
       changedConsensus[6] as RscoreWireValue[][],
       0,
       'CHANGED_CONSENSUS_POST',
-    )[11] as RscoreWireValue[];
+    )[13] as RscoreWireValue[];
     const committedLeaf = `0x${Buffer.from(
       requiredAt(
         changedConsensus[5] as RscoreWireValue[][],

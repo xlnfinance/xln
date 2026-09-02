@@ -17,6 +17,10 @@ use super::frame::{CanonicalEntityTx, HashType};
 #[derive(Clone, Debug)]
 pub struct LocalEntityOutput {
     pub entity_id: String,
+    /// Exact validator selected by the canonical cross-J route. This stays in
+    /// RAM until Runtime binds the existing outer `signerId`; it is not part
+    /// of Entity state, frame hashing, or a new wire field.
+    pub target_signer_id: Option<String>,
     pub entity_txs: Vec<LocalEntityOutputTx>,
 }
 
@@ -52,6 +56,7 @@ impl LocalEntityOutput {
     pub fn non_mutating_wake(entity_id: String) -> Self {
         Self {
             entity_id,
+            target_signer_id: None,
             entity_txs: Vec::new(),
         }
     }
@@ -63,8 +68,49 @@ impl LocalEntityOutput {
         attach_account_input_hankos(&mut input, witnesses)?;
         Ok(Self {
             entity_id: bytes32_text(&input.envelope.to_entity_id),
+            target_signer_id: None,
             entity_txs: vec![LocalEntityOutputTx::AccountInput(Box::new(input))],
         })
+    }
+
+    /// Bind self-addressed projected output to the Entity frame's exact
+    /// current authority. Remote projected outputs must already carry the
+    /// signer committed in their cross-J route; using the local signer there
+    /// would silently address a different Entity replica.
+    pub fn bind_projected_target_signer(
+        mut self,
+        current_entity_id: &str,
+        current_signer_id: &str,
+    ) -> Result<Self, EntityOutputError> {
+        if self.entity_txs.is_empty()
+            || !self
+                .entity_txs
+                .iter()
+                .all(|tx| matches!(tx, LocalEntityOutputTx::Projected(_)))
+        {
+            return Ok(self);
+        }
+        if let Some(signer) = self.target_signer_id.take() {
+            let signer = signer.trim().to_ascii_lowercase();
+            if signer.is_empty() {
+                return Err(EntityOutputError::ProjectedTargetSignerMissing {
+                    entity_id: self.entity_id,
+                });
+            }
+            self.target_signer_id = Some(signer);
+            return Ok(self);
+        }
+        if !self.entity_id.eq_ignore_ascii_case(current_entity_id) {
+            return Err(EntityOutputError::ProjectedTargetSignerMissing {
+                entity_id: self.entity_id,
+            });
+        }
+        let signer = current_signer_id.trim().to_ascii_lowercase();
+        if signer.is_empty() {
+            return Err(EntityOutputError::CurrentSignerMissing);
+        }
+        self.target_signer_id = Some(signer);
+        Ok(self)
     }
 }
 
@@ -72,6 +118,10 @@ impl LocalEntityOutput {
 pub enum EntityOutputError {
     #[error("ENTITY_OUTPUT_PROJECTED_DATA_MISSING:{0}")]
     ProjectedDataMissing(&'static str),
+    #[error("ENTITY_OUTPUT_PROJECTED_TARGET_SIGNER_MISSING:{entity_id}")]
+    ProjectedTargetSignerMissing { entity_id: String },
+    #[error("ENTITY_OUTPUT_CURRENT_SIGNER_MISSING")]
+    CurrentSignerMissing,
     #[error("ACCOUNT_OUTPUT_HANKO_WITNESS_MISSING:{kind}:{hash}")]
     AccountHankoMissing { kind: &'static str, hash: String },
     #[error("ACCOUNT_OUTPUT_HANKO_WITNESS_TYPE:{hash}:expected={expected}:actual={actual:?}")]
@@ -241,8 +291,39 @@ mod tests {
         AccountDisputeConfig, AccountDomain, AccountFrame, AccountInputEnvelope,
         CounterpartyDispute, DepositoryAddress, IncomingFrame, WatchSeed,
     };
+    use xln_rscore_protocol::CanonicalValue;
 
     use super::*;
+
+    fn projected_output(entity_id: &str) -> LocalEntityOutput {
+        LocalEntityOutput {
+            entity_id: entity_id.into(),
+            target_signer_id: None,
+            entity_txs: vec![LocalEntityOutputTx::Projected(
+                CanonicalEntityTx::from_frame_projection(
+                    crate::EntityTxKind::JBroadcast,
+                    CanonicalValue::Object(Vec::new()),
+                )
+                .expect("projected output"),
+            )],
+        }
+    }
+
+    #[test]
+    fn projected_output_binds_only_the_exact_current_entity_authority() {
+        let local = projected_output("entity-a")
+            .bind_projected_target_signer("ENTITY-A", "Signer-A")
+            .expect("self authority");
+        assert_eq!(local.target_signer_id.as_deref(), Some("signer-a"));
+
+        let error = projected_output("entity-b")
+            .bind_projected_target_signer("entity-a", "signer-a")
+            .expect_err("remote signer cannot be guessed from local authority");
+        assert!(matches!(
+            error,
+            EntityOutputError::ProjectedTargetSignerMissing { .. }
+        ));
+    }
 
     #[test]
     fn account_output_receives_the_current_frame_and_dispute_hankos() {

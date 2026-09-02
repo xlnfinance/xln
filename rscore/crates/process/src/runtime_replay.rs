@@ -107,6 +107,7 @@ pub struct RuntimeReplayMetrics {
     pub apply_profile: xln_rscore_runtime::RuntimeApplyPhaseProfile,
     pub effect_digests_compared: u64,
     pub event_digests_compared: u64,
+    pub local_continuations_compared: u64,
     pub outbox_digests_compared: u64,
     pub post_state_hashes_compared: u64,
     pub runtime_roots_compared: u64,
@@ -416,7 +417,7 @@ fn add(value: &mut u64, amount: u64, field: &'static str) -> Result<(), String> 
 }
 
 fn assert_checkpoint_runtime_root(source: &ConcreteCheckpointSource) -> Result<(), String> {
-    let machine = verify_checkpoint_source(source)
+    verify_checkpoint_source(source)
         .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_GRAPH:{error}"))?;
     let validated = validate_runtime_frame(&source.frame_bytes)
         .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_FRAME:{error}"))?;
@@ -458,7 +459,6 @@ fn assert_checkpoint_runtime_root(source: &ConcreteCheckpointSource) -> Result<(
             hash,
             cell_count,
         }],
-        Some(&machine),
     )
     .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_RUNTIME_ROOT:{error}"))?;
     let expected = hex(&expected);
@@ -475,6 +475,8 @@ fn assert_checkpoint_runtime_root(source: &ConcreteCheckpointSource) -> Result<(
 pub fn replay_runtime_wal(
     reader: &mut RuntimeWalReader,
     recording: &Value,
+    ts_parity_report: &Value,
+    recording_manifest_hash: &str,
     runtime_seed: &str,
     runtime_signer_label: &str,
     entity_signer_label: &str,
@@ -489,7 +491,8 @@ pub fn replay_runtime_wal(
     }
     let native_database = native_database.as_ref();
     let setup_started = Instant::now();
-    let expectations = ReplayExpectations::from_recording(recording)?;
+    let expectations =
+        ReplayExpectations::from_sources(recording, ts_parity_report, recording_manifest_hash)?;
     expectations.assert_exact_range(from, to)?;
     let checkpoint_height = from - 1;
     let checkpoint_source = checkpoint_from_artifact(recording)?;
@@ -503,11 +506,16 @@ pub fn replay_runtime_wal(
         .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT:{error}"))?
         .frame_hash;
     assert_checkpoint_runtime_root(&checkpoint_source)?;
+    let mut replay_limits = xln_rscore_runtime::RuntimeLimits::hlt();
+    // Complete parity evidence requires a canonical Runtime root on every
+    // recorded frame. Replay must project at that same cadence; the operator
+    // env that selected it is intentionally not durable consensus state.
+    replay_limits.canonical_hash_period_frames = 1;
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_string(),
         signer_derivation_label: entity_signer_label.to_string(),
         worker_count: workers,
-        limits: xln_rscore_runtime::RuntimeLimits::hlt(),
+        limits: replay_limits,
         swap_market: Arc::new(canonical_swap_market_policy()),
         expected_protocol_fingerprint: PAYMENT_PROFILE_BINDING.protocol_fingerprint,
         board_delays: BoardDelays::default(),
@@ -612,6 +620,7 @@ pub fn replay_runtime_wal(
         apply_profile: xln_rscore_runtime::RuntimeApplyPhaseProfile::default(),
         effect_digests_compared: 0,
         event_digests_compared: 0,
+        local_continuations_compared: 0,
         outbox_digests_compared: 0,
         post_state_hashes_compared: 0,
         // The independently verified materialized checkpoint graph is the one
@@ -645,7 +654,7 @@ pub fn replay_runtime_wal(
                         // The decoded frame context's finalized_j_height is a
                         // pass-through copy; the consumer overwrites it with
                         // the live replica value before applying.
-                        decode_concrete_runtime_wal_frame(&source, 0, false)
+                        decode_concrete_runtime_wal_frame(&source, 0)
                             .map(|decoded| (source, decoded))
                             .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))
                     });
@@ -708,7 +717,7 @@ pub fn replay_runtime_wal(
 
             let started = Instant::now();
             let report = processor
-                .process(decoded.input)
+                .process_exact_replay(decoded.input)
                 .map_err(|error| format!("RUNTIME_REPLAY_PROCESS:{height}:{error}"))?;
             metrics.engine_elapsed += started.elapsed();
             metrics.apply_elapsed += report.timings.apply;
@@ -740,8 +749,6 @@ pub fn replay_runtime_wal(
                     sole_entity_replica(replica).map_err(|error| format!("{summary}:{error}"))?;
                 let entity_state =
                     sole_entity_state(replica).map_err(|error| format!("{summary}:{error}"))?;
-                let entity_commitment = sole_entity_commitment(commitments)
-                    .map_err(|error| format!("{summary}:{error}"))?;
                 let actual_sections = entity_replica
                     .entity_consensus
                     .state
@@ -751,15 +758,68 @@ pub fn replay_runtime_wal(
                     .collect::<Vec<_>>()
                     .join(",");
                 eprintln!("RUNTIME_REPLAY_ACTUAL_ENTITY_SECTIONS:{height}:{actual_sections}");
+                if let Some(orderbook) = entity_state.entity.orderbook.as_ref() {
+                    let book_digests = orderbook
+                        .books
+                        .iter()
+                        .map(|(pair, book)| {
+                            xln_rscore_entity_kernel::compute_book_commitment_hash(book)
+                                .map(|digest| format!(
+                                    "{pair}={digest}:bucket={}:max={}:stp={}:bid={}:ask={}:next={}:trades={}:qty={}:last={}:usdAsk={}:event={}",
+                                    book.bucket_width_ticks,
+                                    book.max_orders,
+                                    book.stp_policy,
+                                    book.bid_pages_root(),
+                                    book.ask_pages_root(),
+                                    book.next_seq,
+                                    book.trade_count,
+                                    book.trade_qty_sum,
+                                    book.last_trade_price_ticks,
+                                    book.last_accepted_usd_ask_price_ticks,
+                                    book.event_hash,
+                                ))
+                                .map_err(|error| {
+                                    format!("{summary}:RUNTIME_REPLAY_ORDERBOOK_DIAGNOSTIC:{error}")
+                                })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .join(",");
+                    eprintln!("RUNTIME_REPLAY_ACTUAL_ORDERBOOK_BOOKS:{height}:{book_digests}");
+                }
                 eprintln!(
                     "RUNTIME_REPLAY_ACTUAL_ENTITY_COMMAND_NONCES:{height}:{:?}",
                     entity_state.entity.entity_command_nonces,
                 );
                 eprintln!(
-                    "RUNTIME_REPLAY_ACTUAL_ENTITY_FRAME:{height}:hash={}:root={}",
-                    hex(&entity_commitment.certified_frame_hash),
-                    hex(&entity_commitment.state_root),
+                    "RUNTIME_REPLAY_ACTUAL_ENTITY_CRONTAB:{height}:{:?}",
+                    entity_state.entity.crontab,
                 );
+                eprintln!(
+                    "RUNTIME_REPLAY_ACTUAL_ENTITY_J_BATCH:{height}:{:?}",
+                    entity_state.entity.j_batch_state,
+                );
+                if let Some(j_batch_state) = entity_state.entity.j_batch_state.as_ref() {
+                    let canonical =
+                        xln_rscore_entity_kernel::canonical_j_batch_state(j_batch_state)
+                            .map_err(|error| format!("{summary}:RUNTIME_REPLAY_J_BATCH:{error}"))?;
+                    let tagged = xln_rscore_runtime::tagged_json_from_canonical_value(&canonical)
+                        .map_err(|error| {
+                        format!("{summary}:RUNTIME_REPLAY_J_BATCH_JSON:{error}")
+                    })?;
+                    eprintln!("RUNTIME_REPLAY_ACTUAL_ENTITY_J_BATCH_JSON:{height}:{tagged}");
+                }
+                if let Ok(entity_commitment) = sole_entity_commitment(commitments) {
+                    eprintln!(
+                        "RUNTIME_REPLAY_ACTUAL_ENTITY_FRAME:{height}:hash={}:root={}",
+                        hex(&entity_commitment.certified_frame_hash),
+                        hex(&entity_commitment.state_root),
+                    );
+                } else {
+                    eprintln!(
+                        "RUNTIME_REPLAY_ACTUAL_ENTITY_COMMITMENTS:{height}:{}",
+                        commitments.entities.len(),
+                    );
+                }
                 let actual_replica_meta = entity_replica.replica_metadata().clone();
                 let actual_entity_sections = Value::Object(Map::from_iter(
                     entity_replica
@@ -794,6 +854,7 @@ pub fn replay_runtime_wal(
             expectations.assert_durable(height, commitments)?;
             expectations.assert_effects(height, commitments)?;
             expectations.assert_events(height, commitments)?;
+            expectations.assert_local_continuations(height, &report.local_continuations)?;
 
             add(&mut metrics.frames, 1, "frames")?;
             add(&mut metrics.ingress, ingress, "ingress")?;
@@ -805,9 +866,23 @@ pub fn replay_runtime_wal(
             )?;
             add(&mut metrics.effect_digests_compared, 1, "effects")?;
             add(&mut metrics.event_digests_compared, 1, "events")?;
+            add(
+                &mut metrics.local_continuations_compared,
+                1,
+                "localContinuations",
+            )?;
             add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
             add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
-            metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
+            match commitments.entities.as_slice() {
+                [] => {}
+                [entity] => metrics.accounts_root = hex(&entity.accounts_root),
+                entities => {
+                    return Err(format!(
+                        "RUNTIME_REPLAY_SOLE_ENTITY_COMMITMENT:{}",
+                        entities.len()
+                    ));
+                }
+            }
         }
         Ok(())
     });
@@ -857,16 +932,18 @@ pub fn replay_runtime_wal(
     if metrics.frames != expected_frames
         || metrics.effect_digests_compared != expected_frames
         || metrics.event_digests_compared != expected_frames
+        || metrics.local_continuations_compared != expected_frames
         || metrics.outbox_digests_compared != expected_frames
         || metrics.post_state_hashes_compared != expected_frames
         || metrics.runtime_roots_compared == 0
     {
         return Err(format!(
-            "RUNTIME_REPLAY_PARITY_UNARMED:frames={}/{}:effects={}:events={}:outbox={}:postState={}:runtimeRoots={}",
+            "RUNTIME_REPLAY_PARITY_UNARMED:frames={}/{}:effects={}:events={}:localContinuations={}:outbox={}:postState={}:runtimeRoots={}",
             metrics.frames,
             expected_frames,
             metrics.effect_digests_compared,
             metrics.event_digests_compared,
+            metrics.local_continuations_compared,
             metrics.outbox_digests_compared,
             metrics.post_state_hashes_compared,
             metrics.runtime_roots_compared,
@@ -896,7 +973,12 @@ pub fn replay_runtime_wal(
         entity_signer_label,
         workers,
         restart_routes,
-        Some(MigrationOrigin::OfflineTsImport),
+        // The migration boundary was the imported TS checkpoint above. By
+        // this point the native store owns a later materialized checkpoint;
+        // requiring the retired TS 0x22 rows again would turn an ordinary
+        // same-engine restart into a second migration and reject its one
+        // canonical path-keyed Account graph.
+        None,
     )?;
     let actual = restarted
         .processor

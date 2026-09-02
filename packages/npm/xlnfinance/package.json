@@ -1,10 +1,11 @@
 {
-  "name": "xlnd",
+  "name": "xlnfinance",
   "version": "0.1.32",
-  "description": "Local xln TypeScript runtime daemon and secure browser launcher.",
+  "description": "Self-contained xln TypeScript runtime, production-testnet client, and secure browser launcher.",
   "license": "AGPL-3.0",
   "type": "module",
   "bin": {
+    "xlnfinance": "bin/xln.js",
     "xlnd": "bin/xln.js"
   },
   "files": [

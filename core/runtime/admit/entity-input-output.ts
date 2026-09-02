@@ -24,6 +24,7 @@ import {
   applyStorageChanges,
   publishEntityCandidateEffects,
 } from '../observability/env-events.ts';
+import { captureCommittedEntityParityEvidence } from '../observability/parity-evidence.ts';
 import { hasProposableAccount } from '../../entity/consensus/account/work-index';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import type { EntityReplica, EntityState } from '../../entity/types';
@@ -292,6 +293,7 @@ export const collectCommittedEntityResult = (
 ): void => {
   env.state.eReplicas.set(replicaKey, result.nextReplica);
   applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
+  captureCommittedEntityParityEvidence(env, result.candidateEffects);
   publishEntityCandidateEffects(env, result.nextReplica, result.candidateEffects);
   routeCommittedEntityOutputs(env, result.outputs, context);
   queueCommittedAccountWork(env, result, context, causedByAccountWork);

@@ -10,7 +10,7 @@ const MAX_ROW_BYTES: usize = 10_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RuntimeMachineLeaf {
-    /// Exact 0x03/msgpack path payload. Storage prefixes it with 0x16+height.
+    /// Exact 0x03/msgpack path payload. Storage prefixes it with stable 0x16.
     pub path_bytes: Vec<u8>,
     /// Exact 0x03/msgpack `{kind, value|container}` payload.
     pub value_bytes: Vec<u8>,

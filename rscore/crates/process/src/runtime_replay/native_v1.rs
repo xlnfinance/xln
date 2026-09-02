@@ -192,7 +192,7 @@ fn replay_frame(
         .map_err(|error| format!("NATIVE_REPLAY_REPLICA:{height}:{error}"))?
         .state
         .finalized_j_height;
-    let decoded = decode_concrete_runtime_wal_frame(&source_frame, finalized_j_height, false)
+    let decoded = decode_concrete_runtime_wal_frame(&source_frame, finalized_j_height)
         .map_err(|error| format!("NATIVE_REPLAY_DECODE:{height}:{error}"))?;
     metrics.direct_payments = metrics
         .direct_payments
@@ -206,7 +206,7 @@ fn replay_frame(
     metrics.reconcile += reconcile_started.elapsed();
     let process_started = Instant::now();
     let report = processor
-        .process(decoded.input)
+        .process_exact_replay(decoded.input)
         .map_err(|error| format!("NATIVE_REPLAY_PROCESS:{height}:{error}"))?;
     metrics.processor_wall += process_started.elapsed();
     let verification_started = Instant::now();

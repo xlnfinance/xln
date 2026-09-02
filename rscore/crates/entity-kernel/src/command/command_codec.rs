@@ -12,7 +12,46 @@ use super::value::{
     canonical_hex, exact_fields, exact_number, field, fixed_hex, object, positive_bigint, safe_u64,
     signer, string,
 };
-use super::{EntityCommandError, SignedEntityCommandV1, invalid};
+use super::{
+    EntityCommandError, SignedEntityCommandV1, invalid, is_individual_entity_command_tx_kind,
+};
+
+fn decode_individual(
+    tx: &CanonicalValue,
+    kind: EntityTxKind,
+    author: &str,
+) -> Result<LocalEntityTx, EntityCommandError> {
+    let fields = object(tx, "command.tx")?;
+    exact_fields(fields, &["type", "data"], "command.tx")?;
+    let data = field(fields, "data", "command.tx")?;
+    let author_field = match kind {
+        EntityTxKind::Chat => "from",
+        EntityTxKind::MaterializeCrossJurisdictionClear
+        | EntityTxKind::MaterializeCrossJurisdictionSwap => "proposerSignerId",
+        _ => {
+            return Err(invalid(format!(
+                "ENTITY_COMMAND_INDIVIDUAL_TX_UNSUPPORTED:{}",
+                kind.as_str()
+            )));
+        }
+    };
+    let claimed = signer(field(
+        object(data, "command.tx.data")?,
+        author_field,
+        "command.tx.data",
+    )?)?;
+    if claimed != author {
+        return Err(invalid(format!(
+            "ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:{}.{author_field}:{claimed}:{author}",
+            kind.as_str()
+        )));
+    }
+    let projected = CanonicalEntityTx::from_frame_projection(kind, data.clone())
+        .map_err(|error| invalid(error.to_string()))?;
+    decode_local_entity_tx(&projected)
+        .map_err(|error| invalid(error.to_string()))?
+        .ok_or_else(|| invalid(format!("ENTITY_TX_NATIVE_UNSUPPORTED:{}", kind.as_str())))
+}
 
 fn assert_canonical_signature(signature: &[u8; 65]) -> Result<(), EntityCommandError> {
     const HALF_CURVE_ORDER: [u8; 32] = [
@@ -309,12 +348,19 @@ pub fn decode_signed_entity_command(
             field(fields, "type", "command.tx")?,
             "ENTITY_COMMAND_TX_INVALID",
         )?;
-        native_txs.push(match kind.as_str() {
-            "propose" => decode_proposal(tx, &author_signer_id, &board_hash, board_epoch, &nonce)?,
-            "vote" => decode_vote(tx, &author_signer_id, &board_hash, board_epoch)?,
-            _ => {
+        let kind = EntityTxKind::parse(&kind).map_err(|error| invalid(error.to_string()))?;
+        native_txs.push(match kind {
+            EntityTxKind::Propose => {
+                decode_proposal(tx, &author_signer_id, &board_hash, board_epoch, &nonce)?
+            }
+            EntityTxKind::Vote => decode_vote(tx, &author_signer_id, &board_hash, board_epoch)?,
+            kind if is_individual_entity_command_tx_kind(kind) => {
+                decode_individual(tx, kind, &author_signer_id)?
+            }
+            kind => {
                 return Err(invalid(format!(
-                    "ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:{kind}"
+                    "ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:{}",
+                    kind.as_str()
                 )));
             }
         });

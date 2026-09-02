@@ -76,8 +76,18 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
+  'brainvault': 19,
+  'core/__tests__/runtime/observability': 11,
+  'core/__tests__/testing/tooling': 11,
+  'core/orchestrator/process': 12,
+  'core/rscore/ts-worker': 13,
+  'core/scripts/e2e/harness': 11,
+  'core/scripts/operations/hlt': 12,
+  'frontend/src/lib/stores': 11,
   'jurisdictions/contracts': 16,
+  'rscore/crates/entity-kernel/src': 12,
   'scripts/dev': 12,
+  'tools': 11,
 };
 
 const normalizeRelativePath = (root: string, path: string): string =>

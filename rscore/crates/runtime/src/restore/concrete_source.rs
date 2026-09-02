@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// A materialized checkpoint has two independent row families. Runtime-machine
-/// leaves are height-scoped 0x16 rows and authenticate the Runtime envelope;
+/// leaves are stable latest-only 0x16 path rows and authenticate the Runtime envelope;
 /// state rows are permanent 0x17-0x38 paths that hydrate Entity/Account data.
 #[derive(Clone, Debug)]
 pub struct ConcreteCheckpointSource {
@@ -25,7 +25,7 @@ pub struct ConcreteCheckpointSource {
     pub frame_bytes: Vec<u8>,
     pub root_hash: [u8; 32],
     pub leaf_count: usize,
-    /// Exact 0x16 leaf rows with `[tag|height]` already stripped from the key.
+    /// Exact 0x16 leaf rows with the stable tag already stripped from the key.
     pub runtime_machine_leaves: Vec<(Vec<u8>, Vec<u8>)>,
     pub state_rows: BTreeMap<Vec<u8>, Vec<u8>>,
 }
@@ -350,6 +350,15 @@ mod tests {
                 .expect("fixture radix");
         }
         let root_hash = radix.root_hash();
+        let runtime_machine_leaves = rows
+            .iter()
+            .map(
+                |(path_bytes, value_bytes)| crate::storage::native::RuntimeMachineLeafRow {
+                    path_bytes: path_bytes.clone(),
+                    value_bytes: value_bytes.clone(),
+                },
+            )
+            .collect();
         let frame_bytes = crate::storage::native::build_runtime_frame_commit(
             crate::storage::native::CanonicalRuntimeFrameDraft {
                 height: 100,
@@ -378,7 +387,12 @@ mod tests {
             },
             crate::storage::native::EntityContextPayloadRows::empty(),
             vec![],
-            None,
+            Some(crate::storage::native::CheckpointGraph {
+                state_root: [2; 32],
+                full: false,
+                node_changes: Vec::new(),
+                runtime_machine_leaves,
+            }),
         )
         .expect("checkpoint frame")
         .commit
@@ -425,7 +439,7 @@ mod tests {
         .expect("verified WAL source");
         assert_eq!(crate::storage::native::runtime_frame_validation_count(), 1);
 
-        let decoded = crate::restore::decode_concrete_runtime_wal_frame(&source, 0, false)
+        let decoded = crate::restore::decode_concrete_runtime_wal_frame(&source, 0)
             .expect("decode cached verified frame");
         assert_eq!(decoded.height, checkpoint.height);
         assert_eq!(decoded.expected_frame_hash, source.validated().frame_hash);

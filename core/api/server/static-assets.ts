@@ -36,9 +36,10 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
   return null;
 };
 
-const serveRuntimeBundle = async (): Promise<Response | null> => {
+const serveRuntimeBundle = async (staticDir: string): Promise<Response | null> => {
   const path = await import('path');
   const candidates = [
+    path.join(staticDir, 'runtime.js'),
     path.join(process.cwd(), 'frontend', 'static', 'runtime.js'),
     path.join(process.cwd(), 'frontend', 'public', 'runtime.js'),
     path.join(process.cwd(), 'frontend', 'build', 'runtime.js'),
@@ -63,7 +64,7 @@ export const serveStaticApp = async (
 ): Promise<Response | null> => {
   if (request.method !== 'GET' && request.method !== 'HEAD') return null;
   if (pathname === '/runtime.js') {
-    const runtimeBundle = await serveRuntimeBundle();
+    const runtimeBundle = await serveRuntimeBundle(staticDir);
     if (runtimeBundle) return runtimeBundle;
     return Response.json(
       { error: 'RUNTIME_BUNDLE_MISSING' },

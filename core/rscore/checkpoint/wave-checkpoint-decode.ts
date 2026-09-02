@@ -74,6 +74,8 @@ export type RscoreAccountCheckpointRow = Readonly<{
     swapOffers: RscoreCheckpointTreeDescriptor;
     rebalanceFeePolicies: RscoreCheckpointTreeDescriptor;
     pulls: RscoreCheckpointTreeDescriptor;
+    requestedRebalance: RscoreCheckpointTreeDescriptor;
+    requestedRebalanceFeeState: RscoreCheckpointTreeDescriptor;
   }>;
   nodeChanges: Readonly<{
     deltas: RscoreCheckpointNodeChanges;
@@ -82,6 +84,8 @@ export type RscoreAccountCheckpointRow = Readonly<{
     swapOffers: RscoreCheckpointNodeChanges;
     rebalanceFeePolicies: RscoreCheckpointNodeChanges;
     pulls: RscoreCheckpointNodeChanges;
+    requestedRebalance: RscoreCheckpointNodeChanges;
+    requestedRebalanceFeeState: RscoreCheckpointNodeChanges;
   }>;
   jClaimNodeChanges: RscoreJClaimNodeChanges;
   /**
@@ -265,6 +269,8 @@ export const resolveRscoreWaveAccount = (
     swapOffers: treeFor('swapOffers'),
     rebalanceFeePolicies: treeFor('rebalanceFeePolicies'),
     pulls: treeFor('pulls'),
+    requestedRebalance: treeFor('requestedRebalance'),
+    requestedRebalanceFeeState: treeFor('requestedRebalanceFeeState'),
   };
   return {
     ...row,
@@ -328,10 +334,10 @@ const header = (
 };
 
 export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckpointRow => {
-  const row = rscoreCheckpointTuple(value, 12, 'WAVE_POST_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 14, 'WAVE_POST_ACCOUNT');
   const accountId = rscoreCheckpointBytes(row[0], 32, 'WAVE_POST_ACCOUNT_ID');
   const parsedHeader = header(row[2], accountId);
-  const rawSections = rscoreCheckpointTuple(row[3], 6, 'WAVE_POST_ACCOUNT_SECTIONS');
+  const rawSections = rscoreCheckpointTuple(row[3], 8, 'WAVE_POST_ACCOUNT_SECTIONS');
   const sections = {
     deltas: descriptor(rawSections[0], 'WAVE_POST_ACCOUNT_DELTAS'),
     locks: descriptor(rawSections[1], 'WAVE_POST_ACCOUNT_LOCKS'),
@@ -339,6 +345,8 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     swapOffers: descriptor(rawSections[3], 'WAVE_POST_ACCOUNT_SWAPS'),
     rebalanceFeePolicies: descriptor(rawSections[4], 'WAVE_POST_ACCOUNT_POLICIES'),
     pulls: descriptor(rawSections[5], 'WAVE_POST_ACCOUNT_PULLS'),
+    requestedRebalance: descriptor(rawSections[6], 'WAVE_POST_ACCOUNT_REQUESTED_REBALANCE'),
+    requestedRebalanceFeeState: descriptor(rawSections[7], 'WAVE_POST_ACCOUNT_REQUESTED_REBALANCE_FEE'),
   };
   const nodeChanges = {
     deltas: changes(row[4], 'postAccount.deltas'),
@@ -347,6 +355,8 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     swapOffers: changes(row[7], 'postAccount.swapOffers'),
     rebalanceFeePolicies: changes(row[8], 'postAccount.rebalanceFeePolicies'),
     pulls: changes(row[9], 'postAccount.pulls'),
+    requestedRebalance: changes(row[10], 'postAccount.requestedRebalance'),
+    requestedRebalanceFeeState: changes(row[11], 'postAccount.requestedRebalanceFeeState'),
   };
   return {
     wire: row,
@@ -357,7 +367,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     header: parsedHeader,
     sections,
     nodeChanges,
-    jClaimNodeChanges: decodeRscoreJClaimNodeChanges(row[10], 'postAccount.jClaimNodes'),
-    consensus: decodeRscoreConsensusSeed(row[11], RSCORE_CUTOVER_VERIFY),
+    jClaimNodeChanges: decodeRscoreJClaimNodeChanges(row[12], 'postAccount.jClaimNodes'),
+    consensus: decodeRscoreConsensusSeed(row[13], RSCORE_CUTOVER_VERIFY),
   };
 };

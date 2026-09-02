@@ -140,6 +140,10 @@ const executeInboundBatch = async (
   const wave = entityRound?.inbound ?? null;
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const waveIndex = indexInboundWave(full.wave);
+  const postAccountById = new Map(full.wave.postAccounts.map(row => [row.accountId, row]));
+  if (postAccountById.size !== full.wave.postAccounts.length) {
+    return halt('INBOUND_POST_ACCOUNT_DUPLICATE');
+  }
   const genesisIds = new Set(requests
     .filter(({ request }) => request.genesisPolicy !== undefined)
     .map(({ accountId }) => accountId));
@@ -155,12 +159,28 @@ const executeInboundBatch = async (
     });
   }
   const effectPriors = new Map<number, AccountReplica>();
+  const accountById = new Map<string, AccountReplica>();
+  for (const { request, accountId, operationIndex } of requests) {
+    const prior = accountById.get(accountId);
+    if (prior !== undefined && prior !== request.account) {
+      return halt('INBOUND_ACCOUNT_ALIAS', { account: accountId });
+    }
+    accountById.set(accountId, request.account);
+    if (postAccountById.has(accountId)) {
+      effectPriors.set(operationIndex, forkAccountReplicaShell(request.account));
+    }
+  }
   for (const { request, accountId, operationIndex } of requests) {
     if (request.genesisPolicy === undefined) continue;
     const row = full.wave.createdAccounts.find(created => created.accountId === accountId)
       ?? halt('INBOUND_GENESIS_POST_ACCOUNT_MISSING', { account: accountId });
     effectPriors.set(operationIndex, forkAccountReplicaShell(request.account));
     materializeCutoverAccount({ binding, account: request.account, accountId }, row);
+  }
+  for (const [accountId, row] of postAccountById) {
+    const account = accountById.get(accountId)
+      ?? halt('INBOUND_POST_ACCOUNT_MISSING', { account: accountId });
+    materializeCutoverAccount({ binding, account, accountId }, row);
   }
   return requests.map(({ accountId, input, operationIndex }) => actualRequest => {
     const slice = inboundSlice(full.wave, accountId, operationIndex, waveIndex);

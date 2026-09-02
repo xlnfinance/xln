@@ -1,7 +1,7 @@
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{
-    BilateralRebalanceFeePolicy, HtlcLock, LendingIntentKind, RebalanceFeePolicySnapshot, Side,
-    SwapOffer,
+    BilateralRebalanceFeePolicy, HtlcLock, LendingIntentKind, RebalanceFeePolicySnapshot,
+    RebalanceRefundReason, RebalanceRequestFeeState, Side, SwapOffer,
 };
 
 use super::{encode_bigint, encode_canonical_value, integer, tuple};
@@ -80,4 +80,28 @@ pub(super) fn encode_lending_kind(value: &LendingIntentKind) -> AbiValue {
         LendingIntentKind::CloseRequest => 5,
         LendingIntentKind::ClosePayout => 6,
     })
+}
+
+pub(super) fn encode_requested_rebalance_fee_state(value: &RebalanceRequestFeeState) -> AbiValue {
+    let refund = value.refund.as_ref().map_or(AbiValue::Nil, |refund| {
+        tuple(vec![
+            integer(match refund.reason {
+                RebalanceRefundReason::PolicyMismatch => 0,
+                RebalanceRefundReason::Timeout => 1,
+                RebalanceRefundReason::FeeTooLow => 2,
+                RebalanceRefundReason::Manual => 3,
+            }),
+            encode_bigint(&refund.refunded_amount),
+        ])
+    });
+    tuple(vec![
+        AbiValue::Text(value.request_id.clone()),
+        integer(value.fee_token_id.get()),
+        encode_bigint(&value.fee_paid_upfront),
+        encode_bigint(&value.requested_amount),
+        integer(value.policy_version),
+        integer(value.requested_at),
+        AbiValue::Bool(value.requested_by_left),
+        refund,
+    ])
 }

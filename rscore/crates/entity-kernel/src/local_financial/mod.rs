@@ -12,6 +12,10 @@ mod quote_r2c;
 mod request_collateral;
 #[path = "payments/resolve_htlc.rs"]
 mod resolve_htlc;
+#[cfg(test)]
+mod routing_semantic_parity;
+#[cfg(test)]
+mod same_j_semantic_parity;
 mod settlement;
 mod swap_requests;
 mod types;

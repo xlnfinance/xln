@@ -1,15 +1,33 @@
-# xlnd
+# xlnfinance
 
-Run the complete local xln TypeScript runtime and open its wallet UI:
+Run the complete xln TypeScript runtime, connect it to the current production
+testnet published by `xln.finance`, and open its wallet UI:
 
 ```sh
-bunx --bun xlnd
+bunx --bun xlnfinance
 ```
+
+Every normal start refreshes `https://xln.finance/api/jurisdictions`, verifies
+the active Arrakis deployment, connects to its RPC and
+`wss://xln.finance/relay`, and caches the last verified config for temporary
+offline restarts.
+
+Run the isolated, self-contained local development network instead:
+
+```sh
+bunx --bun xlnfinance dev
+```
+
+Production-testnet and dev state live in separate directories. When invoked
+from the root of an xln source checkout, `xlnfinance dev` is exactly `bun run dev`,
+and every other root package script maps the same way: `xlnfinance <script>` runs
+`bun run <script>` with the remaining arguments unchanged. Repo-only scripts
+remain intentionally unavailable outside a source checkout.
 
 For a first login whose BrainVault credentials never enter the browser:
 
 ```sh
-bunx --bun xlnd --derive-cli
+bunx --bun xlnfinance --derive-cli
 ```
 
 `--derive-cli` asks only for the BrainVault username and hidden password. It uses
@@ -24,8 +42,11 @@ it. State is stored with owner-only permissions in the platform state directory.
 Commands:
 
 ```text
-xlnd [start|daemon|open|status|stop|logs|version] [--derive-cli]
+xlnfinance [start|dev|daemon|open|status|stop|logs|version] [--derive-cli]
 ```
+
+Global installation also exposes `xlnd` as a short binary alias. The canonical
+npm package and `bunx` command are `xlnfinance`.
 
 The package currently ships the canonical TypeScript runtime. There is no
 `--rs` switch until the Rust runtime can provide the same complete daemon,

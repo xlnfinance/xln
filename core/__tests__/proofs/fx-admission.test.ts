@@ -52,6 +52,11 @@ const rebalancePolicy = (policyVersion: number): AccountTx => ({
   },
 });
 
+const setCreditLimit = (amount: bigint): AccountTx => ({
+  type: 'set_credit_limit',
+  data: { tokenId: 1, amount },
+});
+
 const PAYMENT: AccountTx = {
   type: 'direct_payment',
   data: {
@@ -213,6 +218,55 @@ describe('FX-1 policyVersion protocol range 0..=MAX_SAFE_INTEGER', () => {
     expect(() => computeFrameHash(frame)).toThrow(AccountTxAdmissionError);
     expect(() => computeFrameHash(frame))
       .toThrow('ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:rebalance_policy');
+  });
+});
+
+describe('FX-3 exact lifecycle retry identity', () => {
+  test.each([
+    ['set_credit_limit', setCreditLimit(750_000n)],
+    ['rebalance_policy', rebalancePolicy(7)],
+  ] as const)('deduplicates exact %s across batch, queue and pending frame', async (_kind, lifecycle) => {
+    const account = makeAccount('0xsender', '0xrecipient');
+
+    const batch = await enqueue(account, [structuredClone(lifecycle), structuredClone(lifecycle)]);
+    expect(batch).toMatchObject({ ok: true, admittedAccountTxCount: 1 });
+    expect(account.mempool).toEqual([lifecycle]);
+
+    const queued = await enqueue(account, [structuredClone(lifecycle)]);
+    expect(queued).toMatchObject({ ok: true, admittedAccountTxCount: 0 });
+    expect(account.mempool).toEqual([lifecycle]);
+
+    account.mempool = [];
+    account.pendingFrame = {
+      ...account.currentFrame,
+      height: 1,
+      accountTxs: [structuredClone(lifecycle)],
+    };
+    const pending = await enqueue(account, [structuredClone(lifecycle)]);
+    expect(pending).toMatchObject({ ok: true, admittedAccountTxCount: 0 });
+    expect(account.mempool).toEqual([]);
+  });
+
+  test('preserves positions for distinct lifecycle payloads and identical payments', async () => {
+    const account = makeAccount('0xsender', '0xrecipient');
+    const firstCredit = setCreditLimit(750_000n);
+    const secondCredit = setCreditLimit(750_001n);
+
+    const result = await enqueue(account, [
+      structuredClone(firstCredit),
+      structuredClone(PAYMENT),
+      structuredClone(firstCredit),
+      structuredClone(secondCredit),
+      structuredClone(PAYMENT),
+    ]);
+
+    expect(result).toMatchObject({ ok: true, admittedAccountTxCount: 4 });
+    expect(account.mempool).toEqual([
+      firstCredit,
+      PAYMENT,
+      secondCredit,
+      PAYMENT,
+    ]);
   });
 });
 

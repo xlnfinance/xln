@@ -17,6 +17,10 @@ use crate::hmac::{HmacSha256, hmac};
 pub enum KeyDerivationError {
     #[error("NONCANONICAL_SIGNER_PREFIX:{0}")]
     NonCanonicalSignerPrefix(String),
+    #[error(
+        "SIGNER_INDEX_INVALID: signerId \"{0}\" must be a canonical decimal integer from 1 to 2147483648"
+    )]
+    InvalidSignerIndex(String),
     #[error("SIGNER_KEY_SCOPE_REQUIRED")]
     EmptySeed,
     #[error("SIGNER_KEY_DERIVATION_FAILED:{0}")]
@@ -31,7 +35,9 @@ fn is_js_whitespace(character: char) -> bool {
 
 /// `null` in TypeScript: the id is a label, not a board index.
 fn parse_signer_index(signer_id: &str) -> Result<Option<u32>, KeyDerivationError> {
-    let trimmed = signer_id.trim();
+    const MAX_SIGNER_NUMBER: &str = "2147483648";
+
+    let trimmed = signer_id.trim_matches(is_js_whitespace);
     if trimmed.len() > 1
         && trimmed.starts_with('s')
         && trimmed[1..]
@@ -45,25 +51,21 @@ fn parse_signer_index(signer_id: &str) -> Result<Option<u32>, KeyDerivationError
     if trimmed.is_empty() || !trimmed.chars().all(|character| character.is_ascii_digit()) {
         return Ok(None);
     }
-    // TypeScript parses the digits through a float. Past ~1e309 that is
-    // `Infinity`, which `Number.isFinite` rejects and the caller then treats as
-    // a label — so an id that long is an HMAC key on both sides, not an error.
-    let raw: f64 = trimmed
-        .parse()
-        .map_err(|_| KeyDerivationError::Derivation(format!("signer index {trimmed}")))?;
-    if !raw.is_finite() {
-        return Ok(None);
+    // Signer numbers are one-based while the final non-hardened BIP-32 path
+    // leg is zero-based and strictly below 2^31. An invalid all-digit value
+    // must never fall through to HMAC label derivation and select another key.
+    if trimmed.starts_with('0')
+        || trimmed.len() > MAX_SIGNER_NUMBER.len()
+        || (trimmed.len() == MAX_SIGNER_NUMBER.len() && trimmed > MAX_SIGNER_NUMBER)
+    {
+        return Err(KeyDerivationError::InvalidSignerIndex(
+            signer_id.to_string(),
+        ));
     }
-    let index = if raw > 0.0 { raw - 1.0 } else { 0.0 };
-    if index > f64::from(u32::MAX) {
-        return Err(KeyDerivationError::Derivation(format!(
-            "signer index {trimmed}"
-        )));
-    }
-    let index = index as u64;
-    u32::try_from(index)
-        .map(Some)
-        .map_err(|_| KeyDerivationError::Derivation(format!("signer index {trimmed}")))
+    let signer_number = trimmed
+        .parse::<u32>()
+        .map_err(|_| KeyDerivationError::InvalidSignerIndex(signer_id.to_string()))?;
+    Ok(Some(signer_number - 1))
 }
 
 /// The mnemonic a seed resolves to: itself when it already is one, otherwise
@@ -123,6 +125,36 @@ pub fn derive_signer_address(seed: &str, signer_id: &str) -> Result<[u8; 20], Ke
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SIGNER_INDEX_VECTOR_SEED: &str = "signer-index-boundary-seed";
+    const SIGNER_INDEX_VECTORS: &str =
+        include_str!("../../../../core/__tests__/account/tooling/signer-index-vectors.txt");
+
+    #[test]
+    fn matches_shared_strict_signer_index_boundary_vectors() {
+        for row in SIGNER_INDEX_VECTORS
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        {
+            let (signer_id, expected) = row.split_once('|').expect("valid signer index vector");
+            let result = derive_signer_key(SIGNER_INDEX_VECTOR_SEED, signer_id);
+            if expected == "SIGNER_INDEX_INVALID" {
+                assert_eq!(
+                    result,
+                    Err(KeyDerivationError::InvalidSignerIndex(
+                        signer_id.to_string()
+                    )),
+                    "invalid signer index {signer_id}",
+                );
+                continue;
+            }
+            assert_eq!(
+                hex::encode(result.expect("signer key")),
+                expected,
+                "private key for {signer_id}",
+            );
+        }
+    }
 
     /// Vectors produced by the TypeScript deriver (scratchpad/keyvec.ts), over
     /// both seed shapes the runtime uses: hex text and a free-form phrase.
@@ -228,15 +260,9 @@ mod tests {
         }
     }
 
-    /// An id too long to be a finite number is a label on both sides, and the
-    /// label route works without a seed scope.
+    /// The label route works without a seed scope.
     #[test]
-    fn falls_back_to_the_label_route_the_way_typescript_does() {
-        let long_id = "9".repeat(400);
-        assert_eq!(
-            hex::encode(derive_signer_key("seed", &long_id).expect("label route")),
-            "ec8ad55efe259ae9ace65776b4c0d7e76bde871e7cb384dc473db9df86998119",
-        );
+    fn derives_non_numeric_labels_the_way_typescript_does() {
         assert_eq!(
             hex::encode(derive_signer_key("", "alice").expect("empty seed, label route")),
             "ce3837f76a54a635191b1704ac7672264fc17c3397ff52e7dacfc1ef3603a493",

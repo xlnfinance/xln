@@ -70,13 +70,13 @@ pub(crate) fn valid_path_key(key: &[u8]) -> bool {
             let kind = key[66];
             let payload = &key[67..];
             match (namespace, kind) {
-                (1..=5, 0) => canonical_radix16_path(payload),
-                (1..=5, 1) => !payload.is_empty(),
-                (6, 0) => {
+                (1..=6 | 8..=9, 0) => canonical_radix16_path(payload),
+                (1..=6 | 8..=9, 1) => !payload.is_empty(),
+                (7, 0) => {
                     payload.first().is_some_and(|side| *side <= 1)
                         && canonical_binary_path(&[vec![0], payload[1..].to_vec()].concat())
                 }
-                (6, 1) => payload.len() == 33 && payload[0] <= 1,
+                (7, 1) => payload.len() == 33 && payload[0] <= 1,
                 _ => false,
             }
         }
@@ -162,21 +162,15 @@ pub(super) fn output_key(height: u64, index: usize) -> Result<[u8; 13], NativeSt
     Ok(key)
 }
 
-pub(super) fn runtime_machine_leaf_prefix(height: u64) -> [u8; 9] {
-    let mut prefix = [0_u8; 9];
-    prefix[0] = KEY_RUNTIME_MACHINE_LEAF;
-    prefix[1..].copy_from_slice(&height.to_be_bytes());
-    prefix
+pub(super) fn runtime_machine_leaf_prefix() -> [u8; 1] {
+    [KEY_RUNTIME_MACHINE_LEAF]
 }
 
-pub(super) fn runtime_machine_leaf_key(
-    height: u64,
-    path_bytes: &[u8],
-) -> Result<Vec<u8>, NativeStorageError> {
+pub(super) fn runtime_machine_leaf_key(path_bytes: &[u8]) -> Result<Vec<u8>, NativeStorageError> {
     if path_bytes.is_empty() {
         return Err(NativeStorageError::RuntimeMachinePath);
     }
-    let prefix = runtime_machine_leaf_prefix(height);
+    let prefix = runtime_machine_leaf_prefix();
     let mut key = Vec::with_capacity(prefix.len().saturating_add(path_bytes.len()));
     key.extend_from_slice(&prefix);
     key.extend_from_slice(path_bytes);

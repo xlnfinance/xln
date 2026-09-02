@@ -98,6 +98,12 @@ pub enum RuntimeFrameCodecError {
     MaterializedRootsRequired,
     #[error("RRS_RUNTIME_FRAME_MACHINE_ROOT_REQUIRED")]
     MachineRootRequired,
+    #[error("RRS_RUNTIME_FRAME_MACHINE_ROOT_MATERIALIZED_ONLY")]
+    MachineRootMaterializedOnly,
+    #[error("RRS_RUNTIME_FRAME_CHECKPOINT_GRAPH_REQUIRED")]
+    CheckpointGraphRequired,
+    #[error("RRS_RUNTIME_FRAME_CHECKPOINT_GRAPH_MATERIALIZED_ONLY")]
+    CheckpointGraphMaterializedOnly,
     #[error("RRS_RUNTIME_FRAME_CHECKPOINT_OWNER_ORDER")]
     CheckpointOwnerOrder,
     #[error("RRS_RUNTIME_FRAME_CHECKPOINT_REVISION:{0}")]

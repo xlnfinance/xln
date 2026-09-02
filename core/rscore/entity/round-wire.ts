@@ -7,6 +7,7 @@ import type { PreparedHtlcEntry } from '../../types/entity/htlc-infra-context';
 import type { RscoreWireValue } from '../process-wire-value';
 import { hexToWireBytes } from '../shadow-wire';
 import { decodeWave, type Wave } from '../wave-decode';
+import { decodeRscoreCanonicalValue } from '../canonical-wire';
 
 type RscoreEntityOutput =
   | Readonly<{
@@ -33,7 +34,8 @@ type RscoreEntityOutput =
       jurisdictionId: string | null;
       finalizedAtMs: number;
     }>
-  | Readonly<{ kind: 'swapMatched'; entityId: string; count: number }>;
+  | Readonly<{ kind: 'swapMatched'; entityId: string; count: number }>
+  | Readonly<{ kind: 'debug'; payload: Readonly<Record<string, unknown>> }>;
 
 export type RscoreEntityRound = Readonly<{
   inbound: Wave;
@@ -252,6 +254,14 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
         description: optionalText(row[11], 'RSCORE_ENTITY_OUTPUT_DESCRIPTION'),
         startedAtMs: integer(row[12], 'RSCORE_ENTITY_OUTPUT_STARTED'),
       };
+    }
+    case 7: {
+      const row = tuple(value, 2, 'RSCORE_ENTITY_DEBUG');
+      const payload = decodeRscoreCanonicalValue(row[1], 'RSCORE_ENTITY_OUTPUT_DEBUG_PAYLOAD');
+      if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('RSCORE_ENTITY_OUTPUT_DEBUG_PAYLOAD');
+      }
+      return { kind: 'debug', payload: payload as Readonly<Record<string, unknown>> };
     }
     default: throw new Error(`RSCORE_ENTITY_OUTPUT_TAG:${String(value[0])}`);
   }

@@ -14,7 +14,25 @@ import {
 } from '../../../account/crypto';
 import { createEmptyEnv, prewarmRuntimeSignerCache } from '../../../runtime';
 
+const SIGNER_INDEX_VECTORS = `${import.meta.dir}/signer-index-vectors.txt`;
+const SIGNER_INDEX_VECTOR_SEED = 'signer-index-boundary-seed';
+
 describe('signer cache prewarm', () => {
+  test('matches the shared strict signer-index boundary vectors', async () => {
+    const rows = (await Bun.file(SIGNER_INDEX_VECTORS).text())
+      .split('\n')
+      .filter((line) => line && !line.startsWith('#'));
+    for (const row of rows) {
+      const [signerId, expected] = row.split('|');
+      if (!signerId || !expected) throw new Error(`SIGNER_INDEX_VECTOR_INVALID:${row}`);
+      if (expected === 'SIGNER_INDEX_INVALID') {
+        expect(() => deriveSignerKeySync(SIGNER_INDEX_VECTOR_SEED, signerId)).toThrow(expected);
+        continue;
+      }
+      expect(Buffer.from(deriveSignerKeySync(SIGNER_INDEX_VECTOR_SEED, signerId)).toString('hex')).toBe(expected);
+    }
+  });
+
   test('creates deterministic signer keys synchronously with the runtime RuntimeReplica', () => {
     const seed = 'runtime-creation-signers-ready';
     clearSignerKeys(seed);

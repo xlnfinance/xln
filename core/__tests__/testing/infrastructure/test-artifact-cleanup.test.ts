@@ -663,9 +663,12 @@ describe('test artifact cleanup', () => {
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=p2p-relay -- bun core/scenarios/network/p2p-relay.ts');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=bootstrap-soundcheck -- bun core/scripts/operations/bootstrap/bootstrap-soundcheck.ts --mode=all');
     expect(rootScripts['check:contract-invariants']).toContain('--keep-test-artifacts');
-    expect(rootPackage).toContain(
-      '"check": "bun run check:brainvault && bun run check:contract-artifact-drift && ' +
-      'bun run check:src && bun run check:frontend-file-size && bun run check:frontend"',
+    expect(rootScripts['check']).toBe('bun tools/run-parallel-checks.ts check:short check:long');
+    expect(rootScripts['check:short']).toBe(
+      'bun tools/run-parallel-checks.ts check:brainvault check:contract-artifact-drift check:frontend-file-size',
+    );
+    expect(rootScripts['check:long']).toBe(
+      'bun tools/run-parallel-checks.ts check:src check:frontend',
     );
     expect(rootPackage).not.toContain('run-with-test-cleanup.ts --reason=check');
     expect(rootPackage).not.toContain('test-artifact-cleanup.ts --reason=check &&');
@@ -690,9 +693,9 @@ describe('test artifact cleanup', () => {
     expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) })");
     expect(scenarioRunner).toContain("[TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1'");
     expect(scenarioRunner).not.toContain('core/network/relay/standalone-server.ts');
-    expect(frontendPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
-    expect(frontendPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
-    expect(contractsPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts');
-    expect(contractsPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default');
+    expect(frontendPackage).toContain('../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
+    expect(frontendPackage).toContain('../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
+    expect(contractsPackage).toContain('../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts');
+    expect(contractsPackage).toContain('../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default');
   });
 });

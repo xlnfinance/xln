@@ -34,6 +34,7 @@ export const aggregateWorkerPhaseResults = (
   const effects: Array<TsAccountWorkerEffect | undefined> = Array.from({
     length: options.expectedEffects.length,
   });
+  const skippedProposals = new Map<number, string>();
   const subroots = new Map<number, TsAccountWorkerSubroot>();
   const metrics: TsAccountWorkerPhaseMetrics[] = [];
   const postAccounts = new Map<string, Readonly<{ account: Record<string, unknown>; entityAccountLeaf: string }>>();
@@ -58,6 +59,23 @@ export const aggregateWorkerPhaseResults = (
         );
       }
       effects[effect.order] = effect;
+    }
+    for (const skipped of result.skippedProposals) {
+      const expected = options.expectedEffects[skipped.order];
+      if (
+        !Number.isSafeInteger(skipped.order)
+        || expected === undefined
+        || expected.workerIndex !== workerIndex
+        || expected.phase !== 'outbound-proposal'
+        || expected.accountId !== skipped.accountId
+        || effects[skipped.order] !== undefined
+        || skippedProposals.has(skipped.order)
+      ) {
+        throw new Error(
+          `TS_ACCOUNT_WORKER_SKIPPED_PROPOSAL_BINDING:${workerIndex}:${skipped.order}:${skipped.accountId}`,
+        );
+      }
+      skippedProposals.set(skipped.order, skipped.accountId);
     }
     for (const subroot of result.subroots) {
       if (!options.needShardRoot) {
@@ -110,11 +128,12 @@ export const aggregateWorkerPhaseResults = (
       operationsProfile: result.operationsProfile,
     });
   }
-  const missingOrder = effects.findIndex(effect => effect === undefined);
+  const missingOrder = effects.findIndex((effect, order) =>
+    effect === undefined && !skippedProposals.has(order));
   if (missingOrder >= 0) {
     throw new Error(`TS_ACCOUNT_WORKER_EFFECT_ORDER_MISSING:${missingOrder}:${effects.length}`);
   }
-  const denseEffects = effects as TsAccountWorkerEffect[];
+  const denseEffects = effects.filter((effect): effect is TsAccountWorkerEffect => effect !== undefined);
   const foldStart = getPerfMs();
   const changedSubroots: TsAccountWorkerSubroot[] = [...subroots.values()]
     .sort((left, right) => left.shardId - right.shardId);
@@ -122,6 +141,9 @@ export const aggregateWorkerPhaseResults = (
   return {
     ...(options.needShardRoot ? { accountsRoot: options.rootTree.root } : {}),
     effects: denseEffects,
+    skippedProposals: [...skippedProposals]
+      .sort(([left], [right]) => left - right)
+      .map(([order, accountId]) => ({ order, accountId })),
     changedSubroots,
     ...(options.includePostAccounts
       ? {

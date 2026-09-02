@@ -20,26 +20,46 @@ pub(crate) struct UnsafeAccountFrame {
     pub frame_hanko: Vec<u8>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) enum UnsafeAccountFrameDisposition {
+    CreatedAccountRejected { message: String },
+    Process(UnsafeAccountFrame),
+}
+
 fn collect_verdict(
     account_id: AccountId,
     verdict: &AccountInputVerdict,
-    output: &mut Vec<UnsafeAccountFrame>,
+    created_account: bool,
+    account_text: &impl Fn(AccountId) -> String,
+    output: &mut Vec<UnsafeAccountFrameDisposition>,
 ) {
     match verdict {
         AccountInputVerdict::FrameDisputeRequired {
             reason,
             evidence_secrets,
             signed_frame,
-        } => output.push(UnsafeAccountFrame {
-            account_id,
-            reason: reason.clone(),
-            evidence_secrets: evidence_secrets.clone(),
-            frame_hash: signed_frame.state_hash,
-            frame_hanko: signed_frame.frame_hanko.clone(),
-        }),
+        } => {
+            if created_account {
+                let counterparty = account_text(account_id);
+                output.push(UnsafeAccountFrameDisposition::CreatedAccountRejected {
+                    message: format!(
+                        "⚠️ Rejected uncommitted account genesis from {}",
+                        &counterparty[counterparty.len() - 8..]
+                    ),
+                });
+            } else {
+                output.push(UnsafeAccountFrameDisposition::Process(UnsafeAccountFrame {
+                    account_id,
+                    reason: reason.clone(),
+                    evidence_secrets: evidence_secrets.clone(),
+                    frame_hash: signed_frame.state_hash,
+                    frame_hanko: signed_frame.frame_hanko.clone(),
+                }));
+            }
+        }
         AccountInputVerdict::AckFrameApplied { ack, frame } => {
-            collect_verdict(account_id, ack, output);
-            collect_verdict(account_id, frame, output);
+            collect_verdict(account_id, ack, created_account, account_text, output);
+            collect_verdict(account_id, frame, created_account, account_text, output);
         }
         _ => {}
     }
@@ -49,13 +69,16 @@ pub(crate) fn collect_unsafe_account_frames(
     rows: &[AccountInputResult],
     created_accounts: &BTreeSet<String>,
     account_text: impl Fn(AccountId) -> String,
-) -> Vec<UnsafeAccountFrame> {
+) -> Vec<UnsafeAccountFrameDisposition> {
     let mut output = Vec::new();
     for row in rows {
-        if created_accounts.contains(&account_text(row.account_id)) {
-            continue;
-        }
-        collect_verdict(row.account_id, &row.verdict, &mut output);
+        collect_verdict(
+            row.account_id,
+            &row.verdict,
+            created_accounts.contains(&account_text(row.account_id)),
+            &account_text,
+            &mut output,
+        );
     }
     output
 }
@@ -98,7 +121,6 @@ pub(crate) fn consume_unsafe_account_frames(
     let mut outputs = Vec::<EntityKernelOutput>::new();
     let mut envelope_mutations = Vec::new();
     let mut local_txs = Vec::new();
-    let mut scheduled_accounts = BTreeSet::new();
     for frame in frames {
         let account = format!("0x{}", hex::encode(frame.account_id.as_bytes()));
         let view = views
@@ -130,21 +152,19 @@ pub(crate) fn consume_unsafe_account_frames(
                 frame_hanko: frame.frame_hanko.clone(),
             },
         ));
-        if scheduled_accounts.insert(frame.account_id) {
-            local_txs.push(AdmittedLocalEntityTx {
-                signer_id: signer_id.to_string(),
-                board_epoch: 0,
-                tx: LocalEntityTx::Financial(LocalEntityFinancialTx::PrepareDispute(
-                    crate::local_financial::PrepareDisputeEntityTx {
-                        counterparty_entity_id: account,
-                        description: Some(frame.reason.clone()),
-                        min_cooldown_ms: 0,
-                        cross_jurisdiction_route_id: None,
-                        starter_initial_arguments: None,
-                    },
-                )),
-            });
-        }
+        local_txs.push(AdmittedLocalEntityTx {
+            signer_id: signer_id.to_string(),
+            board_epoch: 0,
+            tx: LocalEntityTx::Financial(LocalEntityFinancialTx::PrepareDispute(
+                crate::local_financial::PrepareDisputeEntityTx {
+                    counterparty_entity_id: account,
+                    description: Some(frame.reason.clone()),
+                    min_cooldown_ms: 0,
+                    cross_jurisdiction_route_id: None,
+                    starter_initial_arguments: None,
+                },
+            )),
+        });
     }
     let mut proposal_by_account = BTreeMap::<String, Vec<xln_rscore_engine::AccountTx>>::new();
     for (account_id, tx) in account_txs {
@@ -163,4 +183,135 @@ pub(crate) fn consume_unsafe_account_frames(
             .collect(),
         envelope_mutations,
     })
+}
+
+#[cfg(test)]
+mod parity_evidence {
+    use super::*;
+    use xln_rscore_engine::{AccountFrame, Side, SignedIncomingFrame};
+
+    fn signed_frame(byte: u8) -> SignedIncomingFrame {
+        SignedIncomingFrame {
+            frame: AccountFrame {
+                height: 1,
+                timestamp: 1_700_000_000_000,
+                j_height: 0,
+                txs: Vec::new(),
+                prev_frame_hash: format!("0x{}", "00".repeat(32)),
+                account_state_root: [byte; 32],
+            },
+            state_hash: [byte; 32],
+            frame_hanko: vec![byte],
+        }
+    }
+
+    fn dispute_row(
+        account_id: AccountId,
+        operation_index: u64,
+        reason: &str,
+    ) -> AccountInputResult {
+        AccountInputResult {
+            operation_index,
+            account_id,
+            force_ack: None,
+            verdict: AccountInputVerdict::FrameDisputeRequired {
+                reason: reason.into(),
+                evidence_secrets: Vec::new(),
+                signed_frame: signed_frame(operation_index as u8),
+            },
+        }
+    }
+
+    fn empty_view() -> LocalAccountFinancialView {
+        LocalAccountFinancialView {
+            active: true,
+            owner_side: Side::Left,
+            owner_out_capacity: BTreeMap::new(),
+            owner_peer_credit_limit: BTreeMap::new(),
+            settlement_workspace: None,
+            settlement_transition_pending: false,
+            settlement_execution: Err("not requested".into()),
+            rebalance_active_quote: None,
+            htlc_locks: BTreeMap::new(),
+            pulls: BTreeMap::new(),
+            swap_offers: BTreeMap::new(),
+            pending_cross_pull_close_ids: BTreeSet::new(),
+            pending_cross_swap_ack_ids: BTreeSet::new(),
+            dispute: None,
+        }
+    }
+
+    #[test]
+    fn created_account_unsafe_frame_reaches_a_typed_disposition_seam() {
+        let account_id = AccountId::from_bytes([0x11; 32]);
+        let account = format!("0x{}", hex::encode(account_id.as_bytes()));
+        let dispositions = collect_unsafe_account_frames(
+            &[dispute_row(account_id, 1, "unsafe genesis")],
+            &BTreeSet::from([account]),
+            |id| format!("0x{}", hex::encode(id.as_bytes())),
+        );
+
+        assert!(
+            matches!(
+                dispositions.as_slice(),
+                [UnsafeAccountFrameDisposition::CreatedAccountRejected { message }]
+                    if message == "⚠️ Rejected uncommitted account genesis from 11111111"
+            ),
+            "created unsafe genesis must survive as the exact TS event-only disposition"
+        );
+    }
+
+    #[test]
+    fn same_account_unsafe_frames_preserve_one_prepare_dispute_per_input_in_order() {
+        let account_id = AccountId::from_bytes([0x22; 32]);
+        let account = format!("0x{}", hex::encode(account_id.as_bytes()));
+        let frames = vec![
+            UnsafeAccountFrame {
+                account_id,
+                reason: "first unsafe frame".into(),
+                evidence_secrets: Vec::new(),
+                frame_hash: [0x31; 32],
+                frame_hanko: vec![0x41],
+            },
+            UnsafeAccountFrame {
+                account_id,
+                reason: "second unsafe frame".into(),
+                evidence_secrets: Vec::new(),
+                frame_hash: [0x32; 32],
+                frame_hanko: vec![0x42],
+            },
+        ];
+        let mut state = EntityStateSlice::empty(format!("0x{}", "aa".repeat(32)), 1);
+        let effects = consume_unsafe_account_frames(
+            &mut state,
+            &mut PaybookChanges::default(),
+            &frames,
+            &BTreeMap::from([(account, empty_view())]),
+            &format!("0x{}", "bb".repeat(32)),
+        )
+        .expect("consume unsafe frames");
+
+        // TypeScript invokes handlePrepareDispute for every unsafe input in input
+        // order. The first can queue the dispute; the second must still reach the
+        // transition and observe the frame-local lifecycle projection as active.
+        assert_eq!(
+            effects.local_txs.len(),
+            2,
+            "same-account unsafe inputs must each reach ordered PrepareDispute handling"
+        );
+        let descriptions = effects
+            .local_txs
+            .iter()
+            .map(|admitted| match &admitted.tx {
+                LocalEntityTx::Financial(LocalEntityFinancialTx::PrepareDispute(tx)) => {
+                    tx.description.as_deref()
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            descriptions,
+            vec![Some("first unsafe frame"), Some("second unsafe frame")]
+        );
+    }
 }

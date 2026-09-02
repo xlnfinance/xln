@@ -45,9 +45,11 @@ fn account_phase_metrics(rows: &[xln_rscore_batch::AccountPhaseMetric]) -> Vec<s
 }
 
 fn arguments(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
-    const NAMES: [&str; 7] = [
+    const NAMES: [&str; 9] = [
         "--wal",
         "--recording",
+        "--recording-manifest-hash",
+        "--ts-parity-report",
         "--runtime-seed-file",
         "--runtime-signer-label",
         "--entity-signer-label",
@@ -113,6 +115,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     let args = arguments(&args)?;
     let wal_path = args["--wal"];
     let recording_path = args["--recording"];
+    let recording_manifest_hash = args["--recording-manifest-hash"];
+    let parity_report_path = args["--ts-parity-report"];
     let seed_path = args["--runtime-seed-file"];
     let runtime_signer_label = args["--runtime-signer-label"];
     let entity_signer_label = args["--entity-signer-label"];
@@ -127,6 +131,11 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             .map_err(|error| format!("RUNTIME_REPLAY_RECORDING_READ:{error}"))?,
     )
     .map_err(|error| format!("RUNTIME_REPLAY_RECORDING_JSON:{error}"))?;
+    let parity_report: Value = serde_json::from_slice(
+        &std::fs::read(parity_report_path)
+            .map_err(|error| format!("RUNTIME_REPLAY_TS_PARITY_REPORT_READ:{error}"))?,
+    )
+    .map_err(|error| format!("RUNTIME_REPLAY_TS_PARITY_REPORT_JSON:{error}"))?;
     let (from, to) = exact_range(&recording)?;
     let runtime_seed = std::fs::read_to_string(seed_path)
         .map_err(|error| format!("RUNTIME_REPLAY_SEED_READ:{error}"))?;
@@ -139,6 +148,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     let metrics = replay_runtime_wal(
         &mut reader,
         &recording,
+        &parity_report,
+        recording_manifest_hash,
         runtime_seed,
         runtime_signer_label,
         entity_signer_label,
@@ -182,6 +193,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
             "directPayments": metrics.direct_payments,
             "effectDigestsCompared": metrics.effect_digests_compared,
             "eventDigestsCompared": metrics.event_digests_compared,
+            "localContinuationsCompared": metrics.local_continuations_compared,
             "outboxDigestsCompared": metrics.outbox_digests_compared,
             "postStateHashesCompared": metrics.post_state_hashes_compared,
             "runtimeRootsCompared": metrics.runtime_roots_compared,

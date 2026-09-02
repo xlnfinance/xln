@@ -78,12 +78,24 @@ fn validate_draft(draft: &CanonicalRuntimeFrameDraft) -> Result<(), RuntimeFrame
     if draft.materialized_state && draft.canonical_state.is_none() {
         return Err(RuntimeFrameCodecError::MaterializedRootsRequired);
     }
-    if (draft.materialized_state || draft.canonical_state.is_some())
-        && draft.runtime_machine_root.is_none()
-    {
+    if draft.materialized_state && draft.runtime_machine_root.is_none() {
         return Err(RuntimeFrameCodecError::MachineRootRequired);
     }
+    if !draft.materialized_state && draft.runtime_machine_root.is_some() {
+        return Err(RuntimeFrameCodecError::MachineRootMaterializedOnly);
+    }
     Ok(())
+}
+
+fn validate_checkpoint_graph(
+    draft: &CanonicalRuntimeFrameDraft,
+    checkpoint: Option<&CheckpointGraph>,
+) -> Result<(), RuntimeFrameCodecError> {
+    match (draft.materialized_state, checkpoint.is_some()) {
+        (true, false) => Err(RuntimeFrameCodecError::CheckpointGraphRequired),
+        (false, true) => Err(RuntimeFrameCodecError::CheckpointGraphMaterializedOnly),
+        _ => Ok(()),
+    }
 }
 
 fn required_fields(
@@ -182,6 +194,7 @@ pub fn build_runtime_frame_commit(
     checkpoint: Option<CheckpointGraph>,
 ) -> Result<EncodedRuntimeFrame, RuntimeFrameCodecError> {
     validate_draft(&draft)?;
+    validate_checkpoint_graph(&draft, checkpoint.as_ref())?;
     let digest = output_digest(&outputs)
         .map_err(|_| RuntimeFrameCodecError::Field("runtimeOutputsDigest"))?;
     let post_state_hash = post_state_hash(&draft, outputs.len(), &digest)?;

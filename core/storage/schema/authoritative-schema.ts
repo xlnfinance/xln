@@ -52,6 +52,9 @@ export const validateStorageHeadValue = (value: unknown): StorageHead => {
     throw new Error('STORAGE_VERIFY_SNAPSHOT_AFTER_HEAD');
   }
   if (Number(head['latestMaterializedHeight']) > Number(head['latestHeight'])) throw new Error(`${code}_MATERIALIZED_AFTER_HEAD`);
+  if (Number(head['latestSnapshotHeight']) > Number(head['latestMaterializedHeight'])) {
+    throw new Error(`${code}_SNAPSHOT_AFTER_MATERIALIZED`);
+  }
   return head as StorageHead;
 };
 
@@ -128,6 +131,11 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     if (frame['canonicalStateHash'] === undefined || frame['canonicalEntityHashes'] === undefined) {
       throw new Error(`${code}_MATERIALIZED_CANONICAL_ROOTS_REQUIRED`);
     }
+    if (frame['runtimeMachineRoot'] === undefined) {
+      throw new Error(`${code}_MATERIALIZED_MACHINE_ROOT_REQUIRED`);
+    }
+  } else if (frame['runtimeMachineRoot'] !== undefined) {
+    throw new Error(`${code}_NONMATERIALIZED_MACHINE_ROOT`);
   }
   if (frame['accountAuthorityCheckpoints'] !== undefined) {
     frame['accountAuthorityCheckpoints'] = validateRscoreCheckpointRefs(
@@ -135,8 +143,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
       `${code}_ACCOUNT_AUTHORITY_CHECKPOINTS`,
     );
   }
-  const requiresRuntimeMachine = frame['materializedState'] === true || frame['canonicalStateHash'] !== undefined;
-  if (requiresRuntimeMachine || frame['runtimeMachineRoot'] !== undefined) {
+  if (frame['runtimeMachineRoot'] !== undefined) {
     frame['runtimeMachineRoot'] = decodeRuntimeMachineGraphRoot(
       frame['runtimeMachineRoot'],
       `${code}_MACHINE_ROOT`,

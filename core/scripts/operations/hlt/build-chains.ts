@@ -74,6 +74,15 @@ const buildEnv = {
   XLN_HLT_LANE_PORTS_PER_SLOT: String(hltLanePortsPerSlot(users)),
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE: '1',
   ...(selection.engine === 'ts' ? { XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: snapshotPath } : {}),
+  ...(selection.engine === 'ts' && workload === 'payments' ? {
+    // Payment TPS authority measures one production H1 for both engines.
+    // Booting H2/H3, MM and cross-J before the ready marker consumes the
+    // controller's setup phase without participating in any payment stage.
+    XLN_HLT_H1_ONLY: '1',
+    XLN_HUB_COUNT: '1',
+    XLN_MM_CROSS_J: '0',
+    XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1',
+  } : {}),
   ...(selection.engine === 'rust' ? {
     // Pin the exact plan already validated above. The child must not derive a
     // second default that could drift from the launcher's cardinality gate.
@@ -90,11 +99,19 @@ const buildEnv = {
   ...(authorityEvidence ? { XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1' } : {}),
 };
 const economicGateDir = String(process.env['XLN_HLT_ECONOMIC_GATE_DIR'] ?? '').trim();
+const parityRecording = String(process.env['XLN_HLT_PARITY_RECORDING'] ?? '').trim();
+if (economicGateDir && !parityRecording) {
+  throw new Error('HLT_PARITY_RECORDING_REQUIRED');
+}
 const smokeStatus = economicGateDir
   ? await runParityGatedHltChild({
       gateDir: economicGateDir,
       parityCommand: process.execPath,
-      parityArgs: ['core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts'],
+      parityArgs: [
+        'core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts',
+        '--recording',
+        resolve(parityRecording),
+      ],
       command: process.execPath,
       args: ['core/scripts/operations/production/local-prod-smoke.ts'],
       env: buildEnv,
@@ -136,6 +153,7 @@ if (selection.engine === 'rust') {
       'core/scripts/operations/hlt/replay/build-hub-recording.ts',
       '--work-dir', workDir,
       '--output', output,
+      '--snapshot', snapshotPath,
       '--checkpoint', `${snapshotPath}.concrete-checkpoint.json`,
       '--users', String(users),
       '--workload', workload,

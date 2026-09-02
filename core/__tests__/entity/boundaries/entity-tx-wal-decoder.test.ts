@@ -76,6 +76,14 @@ describe('persisted EntityTx decoder', () => {
       type: 'mintReserves',
       data: { tokenId: 1, amount: 10n, ignored: true },
     }, 'WAL_MINT')).toThrow('WAL_MINT_DATA_FIELDS');
+
+    expect(() => validateEntityTx({
+      type: 'disputeStart',
+      data: {
+        counterpartyEntityId: counterpartyId,
+        starterCounterProofCommitment: hash,
+      },
+    }, 'WAL_DISPUTE_START')).toThrow('WAL_DISPUTE_START_DATA_FIELDS');
   });
 
   test('accepts representative payment, cross-j, operation, and Account inputs', () => {

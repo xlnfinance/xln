@@ -8,7 +8,11 @@ import {
 } from '../../../../protocol/boundary-validation';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import { decodeHubCoreRecord, type LoadFrame } from '../boundary/worker-boundary';
-import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from '../boundary/environment-manifest';
+import {
+  decodeHltEnvironmentManifest,
+  requireHltAccountWorkerEvidence,
+  type HltEnvironmentManifest,
+} from '../boundary/environment-manifest';
 
 export type CrossLoadReport = Readonly<{
   schema: 'xln-production-cross-swap-load-v1';
@@ -92,6 +96,11 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
   if (enqueueAckElapsedMs > commandObservedElapsedMs || commandObservedElapsedMs > economicCompletionElapsedMs) {
     throw new Error('PRODUCTION_SWAP_LOAD_CROSS_REPORT_TIMING_INVALID');
   }
+  const environment = decodeHltEnvironmentManifest(
+    report['environment'],
+    'PRODUCTION_SWAP_LOAD_CROSS_REPORT_ENVIRONMENT',
+  );
+  requireHltAccountWorkerEvidence(environment.accountWorkers, 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_ENVIRONMENT');
   return {
     schema: report['schema'], mode: report['mode'], configuredBurstSize, configuredRounds, settledRoutes, economicTps,
     completionAuthority: report['completionAuthority'],
@@ -107,7 +116,7 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
     hubDurableAfter: decodeReportFrame(report['hubDurableAfter']),
     loadDurableBefore: decodeReportFrame(report['loadDurableBefore']),
     loadDurableAfter: decodeReportFrame(report['loadDurableAfter']),
-    environment: decodeHltEnvironmentManifest(report['environment'], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_ENVIRONMENT'),
+    environment,
   };
 };
 

@@ -20,8 +20,8 @@ use crate::transport::{
 };
 use crate::{EntityInfraMaterializer, RuntimeEntityInput, RuntimeLiveInput};
 use crate::{
-    FinalizedWatcherCursor, HttpJsonRpc, JWatcherConfig, RuntimeTx, observation_from_poll,
-    poll_finalized_j_events,
+    FinalizedJHeader, FinalizedWatcherCursor, HttpJsonRpc, JWatcherConfig, JWatcherPoll, RuntimeTx,
+    observation_from_poll, poll_finalized_j_events,
 };
 use ethabi::ethereum_types::U256;
 use xln_rscore_batch::{AccountId, ResidentAccountStatusView};
@@ -31,6 +31,8 @@ use super::{DurableRuntimeProcessor, DurableRuntimeProcessorError, RuntimeProces
 
 const TIMESTAMP_DRIFT_MS: u64 = 30_000;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const JBLOCK_LIVENESS_INTERVAL: u64 = 100;
+const J_WATCHER_MAX_BLOCKS_PER_POLL: u64 = 256;
 
 fn remaining_frame_delay(delay: Duration, started: Option<Instant>, now: Instant) -> Duration {
     started
@@ -45,7 +47,6 @@ pub struct ResidentRuntimeService {
     ingress: DirectRuntimeIngress,
     materializer: Box<dyn EntityInfraMaterializer>,
     finalized_j_height: u64,
-    hub_rebalance_has_pending_work: bool,
     held_inbound: VecDeque<InboundEntityInputs>,
     pending_runtime_txs: VecDeque<RuntimeTx>,
     /// Socket completions can arrive between Runtime frames. Carry only their
@@ -114,6 +115,15 @@ struct LiveJWatcher {
     depository_text: String,
     poll_interval: Duration,
     next_poll: Instant,
+    pending_scan: Option<PendingJScan>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingJScan {
+    base_height: u64,
+    scanned_through: u64,
+    tip_hash: [u8; 32],
+    headers: Vec<FinalizedJHeader>,
 }
 
 impl ResidentRuntimeService {
@@ -148,7 +158,6 @@ impl ResidentRuntimeService {
             ingress,
             materializer,
             finalized_j_height,
-            hub_rebalance_has_pending_work: false,
             held_inbound: VecDeque::new(),
             pending_runtime_txs: VecDeque::new(),
             deferred_publication,
@@ -205,7 +214,6 @@ impl ResidentRuntimeService {
             ingress,
             materializer,
             finalized_j_height,
-            hub_rebalance_has_pending_work: false,
             held_inbound: VecDeque::new(),
             pending_runtime_txs: VecDeque::new(),
             deferred_publication,
@@ -295,10 +303,6 @@ impl ResidentRuntimeService {
         Ok(())
     }
 
-    pub fn set_hub_rebalance_pending(&mut self, pending: bool) {
-        self.hub_rebalance_has_pending_work = pending;
-    }
-
     /// Wait for one authenticated transport batch. A timeout still checks
     /// Account mempools and deterministic scheduled wakes; if neither is due,
     /// no Runtime frame or disk write is produced.
@@ -334,6 +338,65 @@ impl ResidentRuntimeService {
                 continue;
             }
             watcher.next_poll = Instant::now() + watcher.poll_interval;
+            if let Some(prefix_input) = crate::machine::build_pending_local_j_prefix_entity_input(
+                self.processor.replica()?,
+                watcher.config.entity_id.as_bytes(),
+                &watcher.signer_id,
+            )
+            .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?
+            {
+                let report = self
+                    .process_entity_inputs_at(vec![prefix_input], None, wall_clock_ms()?)?
+                    .ok_or_else(|| {
+                        ResidentRuntimeServiceError::JWatcher(
+                            "PENDING_PREFIX_FRAME_NOT_PRODUCED".into(),
+                        )
+                    })?;
+                self.sync_committed()?.ok_or_else(|| {
+                    ResidentRuntimeServiceError::JWatcher("FSYNC_REPORT_MISSING".into())
+                })?;
+                self.j_watchers.push_back(watcher);
+                return Ok(Some(report));
+            }
+            let certified_height = self
+                .processor
+                .replica()?
+                .entity_slot(watcher.config.entity_id.as_bytes(), &watcher.signer_id)
+                .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("ENTITY_SLOT_MISSING".into()))?
+                .0
+                .entity
+                .last_finalized_j_height;
+            let durable_height = durable_watcher_cursor_height(
+                self.processor.replica()?,
+                watcher.config.chain_id,
+                &watcher.depository_text,
+            )?;
+            if let Some(cursor_height) = certified_watcher_cursor_candidate(
+                watcher.cursor.scanned_through,
+                certified_height,
+                durable_height,
+            ) {
+                self.pending_runtime_txs.push_back(watcher_cursor_tx(
+                    watcher.depository_text.clone(),
+                    watcher.config.chain_id,
+                    &FinalizedWatcherCursor {
+                        scanned_through: cursor_height,
+                        block_hash: None,
+                    },
+                ));
+                let report = self
+                    .process_entity_inputs_at(Vec::new(), None, wall_clock_ms()?)?
+                    .ok_or_else(|| {
+                        ResidentRuntimeServiceError::JWatcher(
+                            "CERTIFIED_CURSOR_FRAME_NOT_PRODUCED".into(),
+                        )
+                    })?;
+                self.sync_committed()?.ok_or_else(|| {
+                    ResidentRuntimeServiceError::JWatcher("FSYNC_REPORT_MISSING".into())
+                })?;
+                self.j_watchers.push_back(watcher);
+                return Ok(Some(report));
+            }
             let poll = poll_finalized_j_events(&watcher.rpc, &watcher.config, &watcher.cursor)
                 .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
             if poll.cursor == watcher.cursor {
@@ -347,29 +410,55 @@ impl ResidentRuntimeService {
             return Ok(None);
         };
         let next_cursor = poll.cursor.clone();
+        let has_semantic_batches = !poll.batches.is_empty();
+        let pending = extend_pending_j_scan(watcher.pending_scan.take(), &watcher.cursor, &poll)?;
+        let entity_base_height = self
+            .processor
+            .replica()?
+            .entity_slot(watcher.config.entity_id.as_bytes(), &watcher.signer_id)
+            .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("ENTITY_SLOT_MISSING".into()))?
+            .0
+            .entity
+            .last_finalized_j_height;
+        let liveness_due = j_scan_liveness_due(pending.scanned_through, entity_base_height);
+        if !has_semantic_batches && !liveness_due {
+            watcher.cursor = next_cursor;
+            watcher.pending_scan = Some(pending);
+            self.j_watchers.push_back(watcher);
+            return Ok(None);
+        }
         let observation = observation_from_poll(
             watcher.config.entity_id.clone(),
             watcher.signer_id.clone(),
             watcher.jurisdiction_ref.clone(),
-            poll,
+            JWatcherPoll {
+                cursor: next_cursor.clone(),
+                headers: pending.headers.clone(),
+                batches: poll.batches,
+            },
         )
         .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
+        let prefix_input = if has_semantic_batches {
+            crate::machine::build_local_j_prefix_entity_input(
+                self.processor.replica()?,
+                &observation,
+            )
+            .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?
+        } else {
+            None
+        };
         self.pending_runtime_txs
-            .push_back(RuntimeTx::ObserveJRange(observation));
-        self.pending_runtime_txs.push_back(watcher_cursor_tx(
-            watcher.depository_text.clone(),
-            watcher.config.chain_id,
-            &next_cursor,
-        ));
+            .extend(ordered_j_observation_txs(&observation));
         self.finalized_j_height = self.finalized_j_height.max(next_cursor.scanned_through);
         let report = self
-            .process_entity_inputs_at(Vec::new(), None, wall_clock_ms()?)?
+            .process_entity_inputs_at(prefix_input.into_iter().collect(), None, wall_clock_ms()?)?
             .ok_or_else(|| {
                 ResidentRuntimeServiceError::JWatcher("RUNTIME_FRAME_NOT_PRODUCED".into())
             })?;
         self.sync_committed()?
             .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("FSYNC_REPORT_MISSING".into()))?;
         watcher.cursor = next_cursor;
+        watcher.pending_scan = None;
         self.j_watchers.push_back(watcher);
         Ok(Some(report))
     }
@@ -570,7 +659,6 @@ impl ResidentRuntimeService {
                 entity_inputs,
                 timestamp,
                 finalized_j_height: self.finalized_j_height,
-                hub_rebalance_has_pending_work: self.hub_rebalance_has_pending_work,
             },
             self.materializer.as_mut(),
         )?;
@@ -770,6 +858,84 @@ fn recover_pending_j_actions(
             .map(DurableJAttempt::Governance),
     );
     Ok(actions)
+}
+
+fn extend_pending_j_scan(
+    pending: Option<PendingJScan>,
+    cursor: &FinalizedWatcherCursor,
+    poll: &JWatcherPoll,
+) -> Result<PendingJScan, ResidentRuntimeServiceError> {
+    if pending.as_ref().is_some_and(|value| {
+        value.scanned_through != cursor.scanned_through || cursor.block_hash != Some(value.tip_hash)
+    }) {
+        return Err(ResidentRuntimeServiceError::JWatcher(
+            "PENDING_SCAN_CURSOR_MISMATCH".into(),
+        ));
+    }
+    let base_height = pending
+        .as_ref()
+        .map_or(cursor.scanned_through, |value| value.base_height);
+    let mut headers = pending.map_or_else(Vec::new, |value| value.headers);
+    let expected_first = headers
+        .last()
+        .map_or(cursor.scanned_through + 1, |value| value.j_height + 1);
+    if poll.headers.first().map(|value| value.j_height) != Some(expected_first)
+        || poll
+            .headers
+            .windows(2)
+            .any(|pair| pair[0].j_height + 1 != pair[1].j_height)
+        || poll.headers.last().map(|value| value.j_height) != Some(poll.cursor.scanned_through)
+    {
+        return Err(ResidentRuntimeServiceError::JWatcher(
+            "PENDING_SCAN_HEADER_RANGE".into(),
+        ));
+    }
+    headers.extend(poll.headers.iter().cloned());
+    let tip_hash = poll
+        .cursor
+        .block_hash
+        .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("PENDING_SCAN_TIP_HASH".into()))?;
+    Ok(PendingJScan {
+        base_height,
+        scanned_through: poll.cursor.scanned_through,
+        tip_hash,
+        headers,
+    })
+}
+
+fn certified_watcher_cursor_candidate(
+    transient_scanned_height: u64,
+    certified_height: u64,
+    durable_height: u64,
+) -> Option<u64> {
+    let candidate = transient_scanned_height.min(certified_height);
+    (candidate > durable_height).then_some(candidate)
+}
+
+fn j_scan_liveness_due(scanned_through: u64, entity_base_height: u64) -> bool {
+    scanned_through.saturating_sub(entity_base_height) >= JBLOCK_LIVENESS_INTERVAL
+}
+
+fn ordered_j_observation_txs(observation: &crate::j_watcher::ObserveJRange) -> Vec<RuntimeTx> {
+    let mut txs = observation
+        .batches
+        .iter()
+        .map(|batch| {
+            RuntimeTx::ObserveJRange(crate::j_watcher::ObserveJRange {
+                scanned_through_height: batch.j_height,
+                tip_block_hash: batch.j_block_hash,
+                headers_present: false,
+                headers: Vec::new(),
+                batches: vec![batch.clone()],
+                ..observation.clone()
+            })
+        })
+        .collect::<Vec<_>>();
+    txs.push(RuntimeTx::ObserveJRange(crate::j_watcher::ObserveJRange {
+        batches: Vec::new(),
+        ..observation.clone()
+    }));
+    txs
 }
 
 fn coalesce_inbound_prefix(
@@ -1429,7 +1595,7 @@ fn live_j_watchers(
                 external_wallets,
                 hash_ladders,
                 confirmation_depth,
-                max_blocks_per_poll: 128,
+                max_blocks_per_poll: J_WATCHER_MAX_BLOCKS_PER_POLL,
             },
             cursor: FinalizedWatcherCursor {
                 scanned_through: cursor_height,
@@ -1440,6 +1606,7 @@ fn live_j_watchers(
             depository_text: depository_text.to_ascii_lowercase(),
             poll_interval: Duration::from_millis(block_delay.ceil().min(u64::MAX as f64) as u64),
             next_poll: Instant::now(),
+            pending_scan: None,
         });
     }
     Ok(candidates.into())
@@ -1663,6 +1830,52 @@ fn committed_entity_j_height(
             "ENTITY_CURSOR_INVALID".into(),
         )),
         None => Ok(state.last_finalized_j_height),
+    }
+}
+
+fn durable_watcher_cursor_height(
+    replica: &crate::RuntimeReplica,
+    chain_id: u64,
+    depository: &str,
+) -> Result<u64, ResidentRuntimeServiceError> {
+    let rows = replica
+        .durable
+        .j_replicas()
+        .as_array()
+        .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("J_REPLICAS_ARRAY".into()))?;
+    let matches = rows
+        .iter()
+        .filter_map(|row| {
+            let pair = row.as_array().filter(|pair| pair.len() == 2)?;
+            let value = pair[1].as_object()?;
+            let candidate_chain = value.get("chainId").and_then(Value::as_u64)?;
+            let candidate_depository = value.get("contracts")?.get("depository")?.as_str()?;
+            (candidate_chain == chain_id && candidate_depository.eq_ignore_ascii_case(depository))
+                .then_some(value)
+        })
+        .collect::<Vec<_>>();
+    let [j_replica] = matches.as_slice() else {
+        return Err(ResidentRuntimeServiceError::JWatcher(
+            if matches.is_empty() {
+                "J_REPLICA_NOT_FOUND"
+            } else {
+                "J_REPLICA_AMBIGUOUS"
+            }
+            .into(),
+        ));
+    };
+    match crate::canonical_value_from_tagged_json(
+        j_replica
+            .get("blockNumber")
+            .ok_or_else(|| ResidentRuntimeServiceError::JWatcher("CURSOR_MISSING".into()))?,
+    )
+    .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?
+    {
+        xln_rscore_protocol::CanonicalValue::BigInt(value) => u64::try_from(value)
+            .map_err(|_| ResidentRuntimeServiceError::JWatcher("CURSOR_INVALID".into())),
+        _ => Err(ResidentRuntimeServiceError::JWatcher(
+            "CURSOR_INVALID".into(),
+        )),
     }
 }
 
@@ -1895,6 +2108,130 @@ mod tests {
                 chain_id: 31338,
                 block_number: 73,
             }
+        );
+    }
+
+    fn watcher_poll(from: u64, through: u64) -> JWatcherPoll {
+        JWatcherPoll {
+            cursor: FinalizedWatcherCursor {
+                scanned_through: through,
+                block_hash: Some([u8::try_from(through).expect("small height"); 32]),
+            },
+            headers: (from..=through)
+                .map(|height| FinalizedJHeader {
+                    j_height: height,
+                    j_block_hash: [u8::try_from(height).expect("small height"); 32],
+                })
+                .collect(),
+            batches: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn transient_j_scan_keeps_the_complete_suffix_until_liveness_or_semantic_work() {
+        let base = FinalizedWatcherCursor::default();
+        let first_poll = watcher_poll(1, 21);
+        let first = extend_pending_j_scan(None, &base, &first_poll).expect("first suffix");
+        assert_eq!(first.base_height, 0);
+        assert_eq!(first.headers.len(), 21);
+        assert!(first.scanned_through < JBLOCK_LIVENESS_INTERVAL);
+
+        let second_cursor = first_poll.cursor.clone();
+        let second_poll = watcher_poll(22, 24);
+        let complete = extend_pending_j_scan(Some(first), &second_cursor, &second_poll)
+            .expect("complete suffix");
+        assert_eq!(complete.headers.len(), 24);
+        assert_eq!(
+            complete.headers.first().map(|header| header.j_height),
+            Some(1)
+        );
+        assert_eq!(
+            complete.headers.last().map(|header| header.j_height),
+            Some(24)
+        );
+    }
+
+    #[test]
+    fn transient_j_scan_rejects_a_suffix_gap_instead_of_advancing() {
+        let base = FinalizedWatcherCursor::default();
+        let first_poll = watcher_poll(1, 21);
+        let first = extend_pending_j_scan(None, &base, &first_poll).expect("first suffix");
+        let gap = watcher_poll(23, 24);
+        assert!(matches!(
+            extend_pending_j_scan(Some(first), &first_poll.cursor, &gap),
+            Err(ResidentRuntimeServiceError::JWatcher(reason))
+                if reason == "PENDING_SCAN_HEADER_RANGE"
+        ));
+    }
+
+    #[test]
+    fn rust_live_j_poll_constants_match_typescript() {
+        assert_eq!(JBLOCK_LIVENESS_INTERVAL, 100);
+        assert_eq!(J_WATCHER_MAX_BLOCKS_PER_POLL, 256);
+        assert!(!j_scan_liveness_due(99, 0));
+        assert!(j_scan_liveness_due(100, 0));
+        assert!(j_scan_liveness_due(101, 0));
+        assert!(!j_scan_liveness_due(149, 50));
+        assert!(j_scan_liveness_due(150, 50));
+    }
+
+    #[test]
+    fn certified_cursor_waits_for_authenticated_transient_rescan_after_restart() {
+        assert_eq!(certified_watcher_cursor_candidate(0, 120, 0), None);
+        assert_eq!(certified_watcher_cursor_candidate(120, 120, 0), Some(120),);
+        assert_eq!(certified_watcher_cursor_candidate(120, 120, 120), None);
+    }
+
+    #[test]
+    fn semantic_j_blocks_precede_one_header_only_scan_tip_in_chain_order() {
+        let batch = |height: u64| xln_rscore_entity_kernel::FinalizedJEventBatch {
+            j_height: height,
+            j_block_hash: [u8::try_from(height).expect("small height"); 32],
+            events: Vec::new(),
+            dispute_finalization_evidence: Vec::new(),
+            reserve_updates: Vec::new(),
+            account_claims: Vec::new(),
+        };
+        let observation = crate::j_watcher::ObserveJRange {
+            entity_id: xln_rscore_engine::EntityId::parse(&format!("0x{}", "11".repeat(32)))
+                .expect("entity id"),
+            signer_id: format!("0x{}", "22".repeat(20)),
+            jurisdiction_ref: format!("stack:31337:0x{}", "33".repeat(20)),
+            scanned_through_height: 24,
+            tip_block_hash: [24; 32],
+            headers_present: true,
+            headers: (1..=24)
+                .map(|height| FinalizedJHeader {
+                    j_height: height,
+                    j_block_hash: [u8::try_from(height).expect("small height"); 32],
+                })
+                .collect(),
+            batches: vec![batch(22), batch(24)],
+        };
+        let txs = ordered_j_observation_txs(&observation);
+        let observed = txs
+            .iter()
+            .map(|tx| match tx {
+                RuntimeTx::ObserveJRange(value) => (
+                    value.scanned_through_height,
+                    value.headers_present,
+                    value.headers.len(),
+                    value
+                        .batches
+                        .iter()
+                        .map(|batch| batch.j_height)
+                        .collect::<Vec<_>>(),
+                ),
+                _ => panic!("unexpected RuntimeTx"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed,
+            vec![
+                (22, false, 0, vec![22]),
+                (24, false, 0, vec![24]),
+                (24, true, 24, Vec::new()),
+            ],
         );
     }
 }

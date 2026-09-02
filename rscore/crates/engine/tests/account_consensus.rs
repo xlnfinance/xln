@@ -4,16 +4,18 @@
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountInputEnvelope,
-    AccountReplica, AccountSettledEvent, AccountState, AccountTx, AckFrameOutcome, BoardDelays,
+    ACCOUNT_MEMPOOL_SIZE, AccountConsensus, AccountDisputeConfig, AccountDisputeFinality,
+    AccountDomain, AccountIdentity, AccountInputEnvelope, AccountProposalSelection, AccountReplica,
+    AccountSettledEvent, AccountState, AccountTx, AckFrameOutcome, BoardDelays,
     BoardHankoRefreshInput, CanonicalValue, CertifiedBoardAuthority, CounterpartyDispute,
     DeliveryMode, Delta, DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame,
     IncomingOutcome, JEventClaimTx, JEventMetadata, JurisdictionEvent, ProposalOutcome,
     ProposedFrame, ReceiverClock, RolledBackProposal, SettlementHankoDraft, SigningIdentity,
-    StandaloneInputOutcome, TokenId, WatchSeed, apply_board_hanko_refresh,
+    StandaloneInputOutcome, StateError, TokenId, WatchSeed, apply_board_hanko_refresh,
     apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, apply_standalone_dispute,
     canonical_tx_value, dispute_proof_hash, propose_account_frame,
+    propose_account_frame_with_selection,
 };
 use xln_rscore_hanko::{
     BoardMember, SemanticClaim, build_single_signer_hanko, hash_hanko_board_claim,
@@ -2063,12 +2065,65 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
     );
 }
 
-/// Every canonical AccountTx must be hashable even when its current machine
-/// policy rejects execution. Admission and execution rejection are distinct.
 #[test]
-fn reserve_to_collateral_is_hashable_then_rejected_by_execution() {
+fn certified_checkpoint_restores_post_finality_state_with_historical_frame() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko),
+        &market(),
+    )
+    .expect("commit") else {
+        panic!("expected commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &proposed.state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("ack");
+    left.account
+        .apply_entity_dispute_finality(AccountDisputeFinality {
+            finalized_j_nonce: 8,
+            finalized_token_ids: vec![TokenId::new(1).expect("token")],
+        })
+        .expect("finality");
+
+    let replica = left.account.replica().clone();
+    let snapshot = left.account.consensus_snapshot();
+    let leaf = left.account.entity_account_leaf().expect("certified leaf");
+    AccountConsensus::restore_from_checkpoint(replica.clone(), snapshot.clone(), &market())
+        .expect_err("unbound seed must remain frame-bound");
+    AccountConsensus::restore_from_certified_entity_checkpoint(replica, snapshot, &market(), leaf)
+        .expect("Entity-certified checkpoint");
+}
+
+/// Historical signed frames remain hashable, but the live production profile
+/// rejects this kind before it can enter the mempool.
+#[test]
+fn reserve_to_collateral_is_rejected_before_live_admission() {
     let (mut left, right) = parties();
-    let admission = left
+    let error = left
         .account
         .admit_txs(
             vec![AccountTx::ReserveToCollateral {
@@ -2081,19 +2136,11 @@ fn reserve_to_collateral_is_hashable_then_rejected_by_execution() {
             }],
             "test",
         )
-        .expect("canonical transaction is hashable");
-    assert_eq!(admission.admitted, 1);
-    let ProposalOutcome::Idle { dropped } = propose_account_frame(
-        &mut left.account,
-        &left.identity,
-        1_700_000_000_000,
-        0,
-        &market(),
-    )
-    .expect("policy rejection") else {
-        panic!("blocked reserve transition must not produce a frame")
-    };
-    assert_eq!(dropped.len(), 1);
+        .expect_err("out-of-profile transaction must be rejected before admission");
+    assert_eq!(
+        error.to_string(),
+        "ACCOUNT_TX_KIND_OUT_OF_PROFILE:reserve_to_collateral (profile: pay/HTLC/same-J swap/j-event/rebalance)"
+    );
     assert!(left.account.mempool().is_empty());
     // The account still works.
     left.account
@@ -2142,6 +2189,165 @@ fn rebalance_policy_is_hashable_at_admission_and_cross_peer_replay() {
         IncomingOutcome::Committed { height: 1, .. }
     ));
     assert_eq!(right.account.current_height(), 1);
+}
+
+#[test]
+fn selected_proposal_executes_selected_order_and_preserves_unselected_fifo() {
+    let (mut left, right) = parties();
+    let first = payment(&left.entity_id, &right.entity_id, 11);
+    let middle = payment(&left.entity_id, &right.entity_id, 22);
+    let last = payment(&left.entity_id, &right.entity_id, 33);
+    left.account
+        .admit_txs(
+            vec![first.clone(), middle.clone(), last.clone()],
+            "selected-order",
+        )
+        .expect("admit");
+
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame_with_selection(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        AccountProposalSelection::Selected(vec![last.clone(), first.clone()]),
+        &market(),
+    )
+    .expect("selected proposal") else {
+        panic!("expected proposal");
+    };
+
+    assert_eq!(proposed.frame.txs, vec![last, first]);
+    assert_eq!(left.account.mempool(), [middle]);
+}
+
+#[test]
+fn selected_proposal_consumes_only_selected_multiplicity() {
+    let (mut left, right) = parties();
+    let duplicate = payment(&left.entity_id, &right.entity_id, 7);
+    let survivor = payment(&left.entity_id, &right.entity_id, 9);
+    left.account
+        .admit_txs(
+            vec![duplicate.clone(), duplicate.clone(), survivor.clone()],
+            "selected-multiplicity",
+        )
+        .expect("admit");
+
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame_with_selection(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        AccountProposalSelection::Selected(vec![duplicate.clone()]),
+        &market(),
+    )
+    .expect("selected proposal") else {
+        panic!("expected proposal");
+    };
+
+    assert_eq!(
+        proposed.frame.txs.as_slice(),
+        std::slice::from_ref(&duplicate)
+    );
+    assert_eq!(left.account.mempool(), [duplicate, survivor]);
+}
+
+#[test]
+fn selected_proposal_rejects_empty_oversize_and_non_subset_windows() {
+    let (mut left, right) = parties();
+    let absent = payment(&left.entity_id, &right.entity_id, 7);
+
+    let empty = propose_account_frame_with_selection(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        AccountProposalSelection::Selected(Vec::new()),
+        &market(),
+    )
+    .expect_err("empty selection");
+    assert_eq!(empty, StateError::EmptyProposalSelection);
+
+    let oversize = propose_account_frame_with_selection(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        AccountProposalSelection::Selected(vec![absent.clone(); ACCOUNT_MEMPOOL_SIZE + 1]),
+        &market(),
+    )
+    .expect_err("oversize selection");
+    assert_eq!(
+        oversize,
+        StateError::ProposalSelectionLimitExceeded {
+            actual: ACCOUNT_MEMPOOL_SIZE + 1,
+            maximum: ACCOUNT_MEMPOOL_SIZE,
+        }
+    );
+
+    let missing = propose_account_frame_with_selection(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        AccountProposalSelection::Selected(vec![absent]),
+        &market(),
+    )
+    .expect_err("selection must be a mempool multiset subset");
+    assert_eq!(
+        missing,
+        StateError::ProposalSelectionNotInMempool { index: 0 }
+    );
+    assert!(left.account.mempool().is_empty());
+}
+
+#[test]
+fn selected_deferred_transaction_stays_at_its_original_mempool_position() {
+    use num_bigint::BigInt as Big;
+    use xln_rscore_engine::{HtlcHashlock, HtlcLockTx};
+
+    let (mut left, right) = parties();
+    let before = payment(&left.entity_id, &right.entity_id, 1);
+    let after = payment(&left.entity_id, &right.entity_id, 2);
+    let lock = |index: usize| {
+        let hashlock = format!("0x{:02x}{}", index % 256, "11".repeat(31));
+        AccountTx::HtlcLock(HtlcLockTx {
+            lock_id: hashlock.clone(),
+            hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
+            timelock: Big::from(1_700_000_900_000_u64),
+            reveal_before_height: 100,
+            amount: Big::from(10),
+            token_id: TokenId::new(1).expect("token"),
+            delivery_mode: None,
+            envelope: None,
+        })
+    };
+    let selected = (0..33).map(lock).collect::<Vec<_>>();
+    let mut queue = Vec::with_capacity(35);
+    queue.push(before.clone());
+    queue.extend(selected.clone());
+    queue.push(after.clone());
+    left.account
+        .admit_txs(queue, "selected-deferred-position")
+        .expect("admit");
+
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame_with_selection(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        AccountProposalSelection::Selected(selected.clone()),
+        &market(),
+    )
+    .expect("selected proposal") else {
+        panic!("expected proposal");
+    };
+
+    assert_eq!(proposed.frame.txs.len(), 32);
+    assert_eq!(proposed.dropped.len(), 1);
+    assert_eq!(
+        left.account.mempool(),
+        [before, selected[32].clone(), after]
+    );
 }
 
 /// Capacity is a "not yet", not a "no": a lock the frame had no room for

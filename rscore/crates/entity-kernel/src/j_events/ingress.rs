@@ -736,6 +736,7 @@ fn queue_j_broadcast(
     .map_err(|error| invalid(format!("J_BATCH_AUTO_BROADCAST_TX:{error}")))?;
     outputs.push(LocalEntityOutput {
         entity_id: state.entity_id.clone(),
+        target_signer_id: None,
         entity_txs: vec![LocalEntityOutputTx::Projected(projected)],
     });
     Ok(())
@@ -1919,6 +1920,10 @@ fn apply_dispute_finalized(
             TokenId::new(value.low_u32()).map_err(|error| invalid(error.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // TS observes the submitting Entity's batch nonce before applying Account
+    // finality. The emitted status order is protocol-visible in EntityFrame;
+    // moving this below finality changes the frame hash even when state agrees.
+    sync_j_batch_nonce(state, &event.sender, event.batch_nonce, frame_events)?;
     mutations.push((
         counterparty.clone(),
         AccountEnvelopeMutation::ApplyDisputeFinality(AccountDisputeFinality {
@@ -1954,7 +1959,6 @@ fn apply_dispute_finalized(
             ),
         );
     }
-    sync_j_batch_nonce(state, &event.sender, event.batch_nonce, frame_events)?;
     let counterparty_word = hex_word(&counterparty, "J_EVENT_DISPUTE_COUNTERPARTY")?;
     let preserve_sent = we_are_finalizer
         && sent_batch_owns_finality_ack(state, counterparty_word, initial_hash, event.batch_nonce);
@@ -2769,6 +2773,22 @@ mod tests {
             ("orderId".into(), CanonicalValue::String("route-1".into())),
             ("status".into(), CanonicalValue::String("resting".into())),
             (
+                "sourceSignerId".into(),
+                CanonicalValue::String("source-user-signer".into()),
+            ),
+            (
+                "sourceHubSignerId".into(),
+                CanonicalValue::String("source-hub-signer".into()),
+            ),
+            (
+                "targetHubSignerId".into(),
+                CanonicalValue::String("target-hub-signer".into()),
+            ),
+            (
+                "targetSignerId".into(),
+                CanonicalValue::String("target-user-signer".into()),
+            ),
+            (
                 "source".into(),
                 CanonicalValue::Object(vec![
                     (
@@ -2945,7 +2965,7 @@ mod tests {
         .expect("port reveal");
         assert!(matches!(
             outputs.as_slice(),
-            [LocalEntityOutput { entity_id, entity_txs }]
+            [LocalEntityOutput { entity_id, entity_txs, .. }]
                 if entity_id == &target_user.as_hex()
                     && matches!(entity_txs.as_slice(), [LocalEntityOutputTx::Projected(tx)]
                         if tx.kind == EntityTxKind::CrossJurisdictionSalvage)
@@ -3242,6 +3262,10 @@ mod tests {
         let counterparty = entity(0x22);
         let mut state = EntityStateSlice::empty(owner.as_hex(), 1_000);
         state.known_accounts.insert(counterparty.as_hex());
+        state.j_batch_state = Some(crate::JBatchState {
+            entity_nonce: Some(0),
+            ..Default::default()
+        });
         let base_view = dispute_view(None);
         let start = dispute_started_event(&owner, &counterparty);
         let active = dispute_started_active_value(&start, &base_view, true, event_proof_hash(), 3)
@@ -3299,7 +3323,7 @@ mod tests {
             final_proofbody_hash: prefixed_hex(&event_proof_hash()),
             finalization_evidence_hash: prefixed_hex(&[0x77; 32]),
             final_proofbody: event_proof_body(),
-            batch_nonce: None,
+            batch_nonce: Some(1),
         };
         let evidence = xln_rscore_engine::DisputeFinalizationEvidence {
             sender: owner.as_hex(),
@@ -3314,6 +3338,7 @@ mod tests {
             started_by_left: true,
             sig: "0x12".into(),
         };
+        let mut frame_events = Vec::new();
         apply_dispute_finalized(
             &mut state,
             &finalized,
@@ -3321,7 +3346,7 @@ mod tests {
             &views,
             &mut mutations,
             &mut Vec::new(),
-            &mut Vec::new(),
+            &mut frame_events,
         )
         .expect("finality");
         assert!(matches!(
@@ -3334,5 +3359,20 @@ mod tests {
                 })
             )] if account == &counterparty.as_hex() && finalized_token_ids == &[TokenId::new(1).expect("token")]
         ));
+        assert_eq!(
+            frame_events,
+            vec![
+                EntityFrameEvent::Status {
+                    message: "↻ Synced J batch nonce from event (0 → 1)".into(),
+                },
+                EntityFrameEvent::Status {
+                    message: format!(
+                        "✅ DISPUTE FINALIZED with {} (nonce 3)",
+                        suffix(&counterparty.as_hex(), 4),
+                    ),
+                },
+            ],
+            "inside the five-event H2008 vector, sync must remain between Debt and Dispute Finalized",
+        );
     }
 }

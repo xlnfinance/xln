@@ -176,7 +176,7 @@ const inboundEffect = (
 
 const replacePostAccount = (
   ownerEntityId: string,
-  batch: AccountAuthorityEntityBatchOutbound,
+  account: AccountAuthorityInputRequest['account'],
   row: TsAccountWorkerPostAccount,
 ): void => {
   const accountId = normalize(row.accountId);
@@ -187,9 +187,10 @@ const replacePostAccount = (
     'ts-account-worker-post',
   );
   const prepared = hydrateAccountDocFromStorage(validated);
-  const live = batch.accountForWrite(accountId);
-  if (live === undefined) throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${accountId}`);
-  replaceAccountReplica(live, prepared);
+  if (normalize(account.proofHeader.toEntity) !== accountId) {
+    throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${accountId}`);
+  }
+  replaceAccountReplica(account, prepared);
   rememberEngineAccountLeaf(ownerEntityId, accountId, row.entityAccountLeaf);
 };
 
@@ -386,6 +387,23 @@ export class TsAccountWorkerAuthority {
     if (result.accountsRoot !== undefined) {
       throw new Error('TS_ACCOUNT_WORKER_PROVIDER_INBOUND_ROOT_WAS_NOT_REQUESTED');
     }
+    const accountById = new Map<string, AccountAuthorityInputRequest['account']>();
+    for (const request of batch.requests) {
+      const accountId = normalize(request.accountId);
+      const prior = accountById.get(accountId);
+      if (prior !== undefined && prior !== request.account) {
+        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_INBOUND_ACCOUNT_ALIAS:${accountId}`);
+      }
+      accountById.set(accountId, request.account);
+    }
+    for (const row of result.postAccounts ?? []) {
+      const accountId = normalize(row.accountId);
+      const account = accountById.get(accountId);
+      if (account === undefined) {
+        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${accountId}`);
+      }
+      replacePostAccount(batch.ownerEntityId, account, row);
+    }
     return batch.requests.map((request, order) => {
       const accountId = normalize(request.accountId);
       const prepared = inboundEffect(result.effects[order], accountId, order);
@@ -454,7 +472,8 @@ export class TsAccountWorkerAuthority {
       }
       return effect.result;
     });
-    const preparedProposals = proposals.map((effect, order) => {
+    const preparedProposals = proposals.map(effect => {
+      const order = effect.order - batch.admissions.length;
       const request = batch.proposals[order];
       const accountId = request && normalize(request.account.proofHeader.toEntity);
       if (accountId === undefined || effect?.phase !== 'outbound-proposal' || effect.accountId !== accountId) {
@@ -504,7 +523,8 @@ export class TsAccountWorkerAuthority {
       }
       return { ...row, result: effect.result };
     });
-    const continuationProposals = continuation?.effects.slice(generated.length).map((effect, order) => {
+    const continuationProposals = continuation?.effects.slice(generated.length).map(effect => {
+      const order = effect.order - generated.length;
       const accountId = continuationProposalIds[order];
       if (effect?.phase !== 'outbound-proposal' || effect.accountId !== accountId) {
         throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_CONTINUATION_PROPOSAL:${order}:${accountId ?? 'missing'}`);
@@ -520,7 +540,13 @@ export class TsAccountWorkerAuthority {
     const postAccounts = new Map<string, TsAccountWorkerPostAccount>();
     for (const row of result.postAccounts ?? []) postAccounts.set(row.accountId, row);
     for (const row of continuation?.postAccounts ?? []) postAccounts.set(row.accountId, row);
-    for (const row of postAccounts.values()) replacePostAccount(ownerEntityId, batch, row);
+    for (const row of postAccounts.values()) {
+      const account = batch.accountForWrite(row.accountId);
+      if (account === undefined) {
+        throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${row.accountId}`);
+      }
+      replacePostAccount(ownerEntityId, account, row);
+    }
     const finalRoot = continuation?.accountsRoot ?? result.accountsRoot;
     if (finalRoot === undefined) {
       throw new Error('TS_ACCOUNT_WORKER_PROVIDER_FINAL_ROOT_MISSING');

@@ -57,7 +57,6 @@ export const assertMarketMakerReadySnapshotParity = (
     persistedFrame.height,
     persistedFrame.timestamp,
     persistedFrame.canonicalEntityHashes,
-    runtimeMachine,
   );
   if (persistedFrame.canonicalStateHash !== persistedRuntimeStateHash) {
     throw new Error(

@@ -24,6 +24,7 @@ use crate::input::mempool::{
 };
 use crate::j_claims::{LocalClaimPlan, QueuedClaimWitness, plan_local_claim};
 use crate::state::account_replica_shell::AccountEnvelope;
+use crate::tx::account_tx_admission_error;
 use crate::{AccountRejection, AccountReplica, AccountTx};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -571,6 +572,9 @@ impl AccountConsensus {
         // failures such as an unsafe policyVersion and let admission disagree
         // with `AccountFrame::hash` about the same transaction.
         for tx in &txs {
+            if let Some(error) = account_tx_admission_error(tx) {
+                return Err(error);
+            }
             canonical_tx_value(tx)?;
         }
         let incoming_claim_heights: std::collections::BTreeSet<u64> = txs
@@ -672,6 +676,21 @@ impl AccountConsensus {
     /// could not use.
     pub(crate) fn take_mempool(&mut self) -> Vec<AccountTx> {
         std::mem::take(&mut self.mempool)
+    }
+
+    pub(crate) fn remove_mempool_multiplicities(
+        &mut self,
+        consumed: &[AccountTx],
+    ) -> Result<(), StateError> {
+        for tx in consumed {
+            let index = self.mempool.iter().position(|queued| queued == tx).ok_or(
+                StateError::TransitionFailed(
+                    "ACCOUNT_PROPOSAL_SELECTION_CONSUMED_TX_MISSING".into(),
+                ),
+            )?;
+            self.mempool.remove(index);
+        }
+        Ok(())
     }
 
     pub(crate) fn restore_mempool_front(&mut self, txs: Vec<AccountTx>) -> Result<(), StateError> {
@@ -1360,6 +1379,38 @@ impl AccountConsensus {
         snapshot: ConsensusSnapshot,
         swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     ) -> Result<Self, StateError> {
+        Self::restore_from_checkpoint_inner(replica, snapshot, swap_market, None)
+    }
+
+    /// Restore state whose live Account leaf was certified by its parent
+    /// Entity checkpoint.
+    ///
+    /// `current` is historical bilateral evidence. A later certified J event
+    /// may legitimately advance the live Account state (for example dispute
+    /// finality) without rewriting that signed frame. The caller therefore
+    /// supplies the exact parent-committed leaf; accepting the newer state
+    /// without this binding would let an offline seed bypass the bilateral
+    /// frame root.
+    pub fn restore_from_certified_entity_checkpoint(
+        replica: AccountReplica,
+        snapshot: ConsensusSnapshot,
+        swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+        certified_account_leaf: [u8; 32],
+    ) -> Result<Self, StateError> {
+        Self::restore_from_checkpoint_inner(
+            replica,
+            snapshot,
+            swap_market,
+            Some(certified_account_leaf),
+        )
+    }
+
+    fn restore_from_checkpoint_inner(
+        replica: AccountReplica,
+        snapshot: ConsensusSnapshot,
+        swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+        certified_account_leaf: Option<[u8; 32]>,
+    ) -> Result<Self, StateError> {
         let ConsensusSnapshot {
             mempool,
             current,
@@ -1440,16 +1491,23 @@ impl AccountConsensus {
                 ));
             }
             let restored_state_root = replica.state().payment_profile_account_state_root()?;
-            if committed.frame.account_state_root != restored_state_root {
+            if certified_account_leaf.is_none()
+                && committed.frame.account_state_root != restored_state_root
+            {
                 return Err(StateError::CheckpointRestore(format!(
-                    "CURRENT_STATE_ROOT_MISMATCH:expected={}:actual={}:deltas={}:locks={}:swaps={}:policies={}:pulls={}",
+                    "CURRENT_STATE_ROOT_MISMATCH:expected={}:actual={}:deltas={}:locks={}:lending={}:swaps={}:policies={}:requested={}:requestedFees={}:pulls={}:jNonce={}:lastFinalizedJHeight={}",
                     hex_of(&committed.frame.account_state_root),
                     hex_of(&restored_state_root),
                     hex_of(&replica.state().deltas_root()),
                     hex_of(&replica.state().htlc_locks_root()),
+                    hex_of(&replica.state().lending_intents_root().unwrap_or([0; 32])),
                     hex_of(&replica.state().swap_offers_root()),
                     hex_of(&replica.state().rebalance_fee_policies_root()),
+                    hex_of(&replica.state().requested_rebalance_root()),
+                    hex_of(&replica.state().requested_rebalance_fee_state_root()),
                     hex_of(&replica.state().carried().pulls_root),
+                    replica.state().j_nonce(),
+                    replica.state().last_finalized_j_height(),
                 )));
             }
         }
@@ -1483,38 +1541,47 @@ impl AccountConsensus {
         if let Some(dispute) = counterparty_dispute {
             account.store_counterparty_dispute(dispute);
         }
-        let Some(pending) = pending else {
-            return Ok(account);
-        };
-        let expected_height = account.current_height() + 1;
-        if pending.frame.height != expected_height {
-            return Err(StateError::CheckpointRestore(format!(
-                "PENDING_HEIGHT:{}:{expected_height}",
-                pending.frame.height
-            )));
+        if let Some(pending) = pending {
+            let expected_height = account.current_height() + 1;
+            if pending.frame.height != expected_height {
+                return Err(StateError::CheckpointRestore(format!(
+                    "PENDING_HEIGHT:{}:{expected_height}",
+                    pending.frame.height
+                )));
+            }
+            if pending.frame.prev_frame_hash != account.prev_frame_hash() {
+                return Err(StateError::CheckpointRestore(format!(
+                    "PENDING_PREV_FRAME_HASH:{}",
+                    pending.frame.prev_frame_hash
+                )));
+            }
+            // The replay reproduces the effects too, so a restart does not lose
+            // what the pending frame will release when it is acked.
+            let settlement = account.settlement_execution_context(None);
+            let PendingReplay {
+                candidate,
+                outputs_by_tx,
+            } = replay_pending(&account.replica, &pending, swap_market, settlement)?;
+            account.pending = Some(PendingFrame {
+                frame: pending.frame,
+                state_hash: pending.state_hash,
+                hanko: pending.hanko,
+                candidate,
+                outputs_by_tx: Arc::new(outputs_by_tx),
+                bundled_ack: pending.bundled_ack,
+                proposal_dispute: pending.proposal_dispute,
+            });
         }
-        if pending.frame.prev_frame_hash != account.prev_frame_hash() {
-            return Err(StateError::CheckpointRestore(format!(
-                "PENDING_PREV_FRAME_HASH:{}",
-                pending.frame.prev_frame_hash
-            )));
+        if let Some(expected_leaf) = certified_account_leaf {
+            let actual_leaf = account.entity_account_leaf()?;
+            if actual_leaf != expected_leaf {
+                return Err(StateError::CheckpointRestore(format!(
+                    "CERTIFIED_ACCOUNT_LEAF_MISMATCH:expected={}:actual={}",
+                    hex_of(&expected_leaf),
+                    hex_of(&actual_leaf),
+                )));
+            }
         }
-        // The replay reproduces the effects too, so a restart does not lose
-        // what the pending frame will release when it is acked.
-        let settlement = account.settlement_execution_context(None);
-        let PendingReplay {
-            candidate,
-            outputs_by_tx,
-        } = replay_pending(&account.replica, &pending, swap_market, settlement)?;
-        account.pending = Some(PendingFrame {
-            frame: pending.frame,
-            state_hash: pending.state_hash,
-            hanko: pending.hanko,
-            candidate,
-            outputs_by_tx: Arc::new(outputs_by_tx),
-            bundled_ack: pending.bundled_ack,
-            proposal_dispute: pending.proposal_dispute,
-        });
         Ok(account)
     }
 }

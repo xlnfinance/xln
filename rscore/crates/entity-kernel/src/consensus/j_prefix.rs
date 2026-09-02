@@ -393,7 +393,9 @@ pub fn build_required_j_prefix_certificate(
     range: Option<&JPrefixRangeClaim>,
 ) -> Result<Option<CanonicalValue>, JPrefixError> {
     let jurisdiction = authority.config.jurisdiction.as_ref();
-    if !entity_requires_j_prefix_certificate(jurisdiction, post_state.j_history_finality.as_ref()) {
+    if !entity_requires_j_prefix_certificate(jurisdiction, post_state.j_history_finality.as_ref())
+        && range.is_none()
+    {
         return Ok(None);
     }
     if !authority.is_single_signer()? {
@@ -623,6 +625,46 @@ mod tests {
             build_required_j_prefix_certificate(&signer, &authority, &state, 1, "genesis", None)
                 .expect("no error");
         assert_eq!(certificate, None);
+    }
+
+    #[test]
+    fn semantic_range_is_certified_on_demand_before_registration_finality() {
+        let mut state = state_with_finality();
+        state.last_finalized_j_height = 0;
+        state.j_history_finality = None;
+        let range = JPrefixRangeClaim {
+            jurisdiction_ref: "stack:31337:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853".into(),
+            base_height: 0,
+            scanned_through_height: 1,
+            tip_block_hash: format!("0x{}", "44".repeat(32)),
+            event_history_root: format!("0x{}", "55".repeat(32)),
+            range_hash: format!("0x{}", "66".repeat(32)),
+            headers: vec![CanonicalValue::Object(vec![
+                ("jHeight".into(), number(1).expect("height")),
+                (
+                    "jBlockHash".into(),
+                    CanonicalValue::String(format!("0x{}", "44".repeat(32))),
+                ),
+            ])],
+            blocks: Vec::new(),
+        };
+        let certificate = build_required_j_prefix_certificate(
+            &signer(),
+            &authority(),
+            &state,
+            1,
+            "genesis",
+            Some(&range),
+        )
+        .expect("on-demand certificate")
+        .expect("semantic range requires a certificate");
+        assert_eq!(
+            object_field(&certificate, "baseHeight").and_then(|value| match value {
+                CanonicalValue::Number(value) => value.as_str().parse::<u64>().ok(),
+                _ => None,
+            }),
+            Some(0),
+        );
     }
 
     #[test]

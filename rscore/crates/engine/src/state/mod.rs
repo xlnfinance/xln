@@ -443,6 +443,41 @@ impl AccountState {
             .get(&token_id.radix_key())
     }
 
+    /// Every requested collateral amount in ascending token order.
+    ///
+    /// The parent Entity derives its runnable rebalance work index from the
+    /// exact Account leaf. Exposing the resident values avoids a parallel
+    /// scheduler cache or a checkpoint-only projection.
+    pub fn requested_rebalance_amounts(&self) -> impl Iterator<Item = &num_bigint::BigInt> {
+        self.requested_rebalance
+            .iter()
+            .flat_map(|amounts| amounts.iter())
+            .map(|(_, amount)| amount)
+    }
+
+    pub fn requested_rebalance_entries(
+        &self,
+    ) -> Result<Vec<(TokenId, num_bigint::BigInt)>, StateError> {
+        let Some(amounts) = self.requested_rebalance.as_ref() else {
+            return Ok(Vec::new());
+        };
+        amounts
+            .iter()
+            .map(|(key, amount)| Ok((decode_token_radix_key(key)?, amount.clone())))
+            .collect()
+    }
+
+    pub fn requested_rebalance_fee_entries(
+        &self,
+    ) -> Result<Vec<(TokenId, RebalanceRequestFeeState)>, StateError> {
+        let Some(fees) = self.requested_rebalance_fee_state.as_ref() else {
+            return Ok(Vec::new());
+        };
+        fees.iter()
+            .map(|(key, fee)| Ok((decode_token_radix_key(key)?, fee.clone())))
+            .collect()
+    }
+
     pub fn requested_rebalance_fee_state(
         &self,
         token_id: TokenId,
@@ -450,6 +485,32 @@ impl AccountState {
         self.requested_rebalance_fee_state
             .as_ref()?
             .get(&token_id.radix_key())
+    }
+
+    pub fn requested_rebalance_root(&self) -> [u8; 32] {
+        self.requested_rebalance.as_ref().map_or(
+            self.carried.requested_rebalance_root,
+            PersistentRadixMap::root_hash,
+        )
+    }
+
+    pub fn requested_rebalance_count(&self) -> usize {
+        self.requested_rebalance
+            .as_ref()
+            .map_or(0, PersistentRadixMap::len)
+    }
+
+    pub fn requested_rebalance_fee_state_root(&self) -> [u8; 32] {
+        self.requested_rebalance_fee_state.as_ref().map_or(
+            self.carried.requested_rebalance_fee_state_root,
+            PersistentRadixMap::root_hash,
+        )
+    }
+
+    pub fn requested_rebalance_fee_state_count(&self) -> usize {
+        self.requested_rebalance_fee_state
+            .as_ref()
+            .map_or(0, PersistentRadixMap::len)
     }
 
     pub fn install_requested_rebalance(
@@ -596,6 +657,32 @@ impl AccountState {
             .node_changes_since(&previous.rebalance_fee_policies)
     }
 
+    pub fn requested_rebalance_node_changes_since(
+        &self,
+        previous: &Self,
+    ) -> PersistentNodeChanges<num_bigint::BigInt> {
+        let empty = PersistentRadixMap::empty();
+        let current = self.requested_rebalance.as_ref().unwrap_or(&empty);
+        let prior = previous.requested_rebalance.as_ref().unwrap_or(&empty);
+        current.node_changes_since(prior)
+    }
+
+    pub fn requested_rebalance_fee_node_changes_since(
+        &self,
+        previous: &Self,
+    ) -> PersistentNodeChanges<RebalanceRequestFeeState> {
+        let empty = PersistentRadixMap::empty();
+        let current = self
+            .requested_rebalance_fee_state
+            .as_ref()
+            .unwrap_or(&empty);
+        let prior = previous
+            .requested_rebalance_fee_state
+            .as_ref()
+            .unwrap_or(&empty);
+        current.node_changes_since(prior)
+    }
+
     /// Every node of one section, for an account the checkpoint has never
     /// seen: there is no prior tree to diff against, so the whole tree is the
     /// change.
@@ -626,6 +713,24 @@ impl AccountState {
         &self,
     ) -> Vec<PersistentNodeRecord<BilateralRebalanceFeePolicy>> {
         self.rebalance_fee_policies.node_records()
+    }
+
+    pub fn requested_rebalance_node_records(
+        &self,
+    ) -> Vec<PersistentNodeRecord<num_bigint::BigInt>> {
+        self.requested_rebalance
+            .as_ref()
+            .map(PersistentRadixMap::node_records)
+            .unwrap_or_default()
+    }
+
+    pub fn requested_rebalance_fee_node_records(
+        &self,
+    ) -> Vec<PersistentNodeRecord<RebalanceRequestFeeState>> {
+        self.requested_rebalance_fee_state
+            .as_ref()
+            .map(PersistentRadixMap::node_records)
+            .unwrap_or_default()
     }
 
     pub fn htlc_locks(&self) -> impl Iterator<Item = &HtlcLock> {

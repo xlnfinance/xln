@@ -125,6 +125,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
       },
     };
     const verifyCalls = { count: 0 };
+    const before = safeStringify(current);
 
     const result = await buildDuplicateCommittedAckFrame(
       current,
@@ -140,6 +141,7 @@ describe('duplicate committed Account ACK Hanko reuse', () => {
     expect(result?.response).toEqual(current.lastOutboundAckFrame.response);
     expect(countDraftSignerCalls(result)).toBe(0);
     expect(verifyCalls.count).toBe(1);
+    expect(safeStringify(current)).toBe(before);
   });
 
   test('H current plus pending H+1 reuses the embedded ACK, not the successor Hanko', async () => {
