@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { CONTENT_SECURITY_POLICY_DIRECTIVES } from '../../../frontend/config/content-security-policy.js';
+import svelteConfig from '../../../frontend/svelte.config.js';
 import { runtimeHttpOriginFromWsUrl } from '../../../frontend/src/lib/utils/runtime/wsUrl';
 import { readFileSync } from 'node:fs';
 
@@ -8,7 +10,6 @@ test('wallet origin ships no third-party executable code and enforces hashed scr
   const appHtml = source('frontend/src/app.html');
   const reactWalletHtml = source('frontend/apps/wallet/index.html');
   const routeMode = source('frontend/static/route-mode.js');
-  const config = source('frontend/svelte.config.js');
   const css = `${source('frontend/src/lib/styles/apple-glass.css')}\n${source('frontend/src/lib/components/Landing/landing-page.css')}`;
 
   expect(appHtml).not.toMatch(/<script[^>]+src=["']https?:\/\//i);
@@ -23,11 +24,12 @@ test('wallet origin ships no third-party executable code and enforces hashed scr
   expect(appHtml).not.toContain('plausible.io');
   expect(reactWalletHtml).not.toContain('plausible.io');
   expect(css).not.toContain('fonts.googleapis.com');
-  expect(config).toContain("mode: 'hash'");
-  expect(config).toContain("'script-src': ['self']");
-  expect(config).toContain("'script-src-attr': ['none']");
-  expect(config).toContain("'object-src': ['none']");
-  expect(config).toContain("'media-src': ['self', 'blob:']");
+  expect(svelteConfig.kit.csp?.mode).toBe('hash');
+  expect(svelteConfig.kit.csp?.directives).toBe(CONTENT_SECURITY_POLICY_DIRECTIVES);
+  expect(CONTENT_SECURITY_POLICY_DIRECTIVES['script-src']).toEqual(['self']);
+  expect(CONTENT_SECURITY_POLICY_DIRECTIVES['script-src-attr']).toEqual(['none']);
+  expect(CONTENT_SECURITY_POLICY_DIRECTIVES['object-src']).toEqual(['none']);
+  expect(CONTENT_SECURITY_POLICY_DIRECTIVES['media-src']).toEqual(['self', 'blob:']);
 });
 
 test('selected remote Runtime WebSocket pins same-origin HTTP reads', () => {
