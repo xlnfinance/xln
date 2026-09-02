@@ -284,9 +284,11 @@ const replayRust = async (workers: number, tsParityReport: string): Promise<Rust
   ], remainingParityBudget(`rust-w${workers}`));
   parityStage(`rust-w${workers}:done`);
   const line = output.trim().split('\n').at(-1);
-  const report = decodeRustParityReport(safeParse(line ?? ''));
+  const raw = safeParse(line ?? '');
+  const report = decodeRustParityReport(raw);
+  // Timing fields are diagnostics outside the typed parity report.
   const numeric = (key: string): number => {
-    const value = report[key];
+    const value = typeof raw === 'object' && raw !== null ? Reflect.get(raw, key) : undefined;
     return typeof value === 'number' ? value : Number.NaN;
   };
   engineTiming('rust', workers, {

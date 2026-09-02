@@ -10,7 +10,9 @@ import { join, resolve } from 'node:path';
 // box, Rust W1/W4 ≈ 12 s each) need up to ~200 s when the machine also
 // carries an interactive session; 180 s tripped the live TPS pre-check three
 // times on 2026-09-02 with the same recording that passed in isolation.
-export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = 300_000;
+// Larger production recordings (2,000-3,000 users) replay for minutes per
+// engine; the ladder run sets XLN_HLT_PARITY_BUDGET_MS explicitly.
+export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = Number(process.env['XLN_HLT_PARITY_BUDGET_MS'] || 0) || 300_000;
 
 export const freshAuthorityEvidenceDir = (prefix: string): string => {
   const configured = String(process.env['XLN_RSCORE_EVIDENCE_DIR'] ?? '').trim();
