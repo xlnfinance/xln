@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED CAPACITOR COPY + ISOLATED PWA LIFECYCLE READY`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED NATIVE/PACKAGED COPY + ISOLATED PWA LIFECYCLE READY`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1927,7 +1927,7 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + VERIFIED CAPACITOR COPY + ISOLATED PWA LIFECYCLE READY`
+**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + VERIFIED CAPACITOR/PACKAGED SHELL COPY + ISOLATED PWA LIFECYCLE READY`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
@@ -2076,6 +2076,43 @@ exact 13-name baseline (1,235 passes, 14 reported failures, 6,828 expectations
 across 1,249 tests / 204 files). Canonical `push-wake-sw.js`, Svelte service-
 worker registration, deployment, and production activation are unchanged.
 
+Desktop and browser-extension consumers now accept the same independently
+verified wallet stage in a disposable, content-addressed workspace. The desktop
+replica contains the exact canonical Electron shell, generated package manifest,
+and all 52 staged files. The extension replica maps the wallet entry to
+`app.html`, preserves wallet assets, replaces the Vite manifest with the exact
+Manifest V3 shell manifest, and derives `icon-128.png` from the staged wallet
+icon. It excludes candidate metadata from the extension payload.
+
+Workspace identity binds the release, complete desktop and extension shell
+digests, package bytes, and the canonical 111-file layout (57 desktop, 54
+extension), including SHA-256, size, and mode. Verification reasserts the wallet
+CSP, Manifest V3 permissions/CSP/external origins, Electron isolation, and both
+shells' `xln` deep-link ownership. Existing exact bytes are reused; corruption,
+extra files, symlinks, missing icons, manifest drift, or weakened policy fail
+loudly without repair. Canonical shells and source stage stay byte-identical.
+
+The root `native:candidate:packaged:copy` command created and reused workspace
+`sha256-0e309f6db3508c9a953be65091c335046a454513fe2c8f90c60f043aa5469660`
+from release
+`sha256-ea173909e635649b5f4ed9eee848015f82d4db7a47ef22730c5ae6a7f3275e3a`.
+Focused native, shell-policy, configuration, and inventory coverage passes 48 /
+48 with 441 expectations. All four React local checks pass with 637 files and
+zero unsafe findings; canonical Svelte remains at zero errors/warnings and
+builds 4,671 SSR plus 6,422 client modules. Chromium renders the copied
+extension entry with zero console warnings/errors and 7 / 7 static requests at
+HTTP 200. The full frontend suite remains at the exact 13-name baseline (1,235
+passes, 14 reported failures, 6,829 expectations across 1,249 tests / 204
+files). All four entrypoint tests pass with 515 expectations, and dead-code
+analysis retains only its existing Dockview hint. The repository gate passes 26
+deterministic tests / 100,156 expectations, compiles 28 Solidity files,
+publishes 92 TypeChain files, confirms four-contract immutable metadata parity,
+and passes all ten soundchecks before the established missing-`cargo`
+environment stop. File-size policy still reports only the known
+`core/qa/report.ts` 3,001 / 3,000 overage. No Electron launch, extension install,
+package, signature, activation, deployment, canonical shell write, or
+production cutover ran.
+
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
 
@@ -2134,18 +2171,16 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Materialize disposable desktop and browser-extension wallet candidates from
-   the exact verified wallet stage, then verify copied bytes, manifests,
-   permissions, CSP, and deep-link ownership without packaging, signing,
-   installing, activating, deploying, or changing canonical shells.
+1. Build a fail-closed deployment release selector and exercise an isolated
+   atomic whole-release activation plus immediate rollback from verified,
+   immutable candidate directories without touching production.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner
    changes in the working tree and are collateral from that stream, not the
    frontend migration.
-3. Execute WP8 against the versioned candidate: PWA install/update, native and
-   packaged consumers, deployment selection, and rollback remain deliberately
-   separate from production activation.
+3. Finish WP8 deployment selection and rollback evidence while keeping signing,
+   production activation, and canonical Svelte cutover as separate operations.
 4. Close WP9 parity only after site, docs, wallet, and ops are complete, then
    request explicit WP10 cutover authority and prepare the upstream PR.
 5. Keep WP11 as a separately authorized production operation using immutable

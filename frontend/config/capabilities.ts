@@ -274,6 +274,10 @@ export const CAPABILITIES = [
       'frontend/static/route-mode.js',
       'frontend/scripts/pwa-candidate.ts',
       'frontend/scripts/pwa-candidate-smoke-server.ts',
+      'scripts/native/stage-wallet-candidate.ts',
+      'scripts/native/copy-capacitor-shell-candidate.ts',
+      'scripts/native/copy-packaged-shell-candidate.ts',
+      'scripts/native/packaged-shell-candidate-manifest.ts',
     ],
     behavior: [
       'deep links',

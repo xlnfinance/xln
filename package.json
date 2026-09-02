@@ -147,6 +147,7 @@
     "native:candidate:stage": "bun scripts/native/stage-wallet-candidate.ts",
     "native:candidate:capacitor:smoke": "bun scripts/native/smoke-capacitor-candidate.ts",
     "native:candidate:capacitor:copy": "bun scripts/native/copy-capacitor-shell-candidate.ts",
+    "native:candidate:packaged:copy": "bun scripts/native/copy-packaged-shell-candidate.ts",
     "native:package": "bun scripts/native/build-platforms.ts all --package --smoke",
     "native:mobile": "bun scripts/native/build-platforms.ts mobile",
     "native:mobile:package": "bun scripts/native/build-platforms.ts mobile --package",
