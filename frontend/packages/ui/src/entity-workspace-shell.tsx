@@ -2,6 +2,8 @@ import {
   ENTITY_WORKSPACE_SECTIONS,
   type ViewTab,
 } from '../../runtime-client/src/entity-workspace-navigation';
+import type { EntityWorkspaceContext } from '../../runtime-client/src/entity-workspace-context';
+import { formatAddress } from './entity-workspace-display';
 import './entity-workspace-shell.css';
 
 type SectionCopy = Readonly<{
@@ -38,17 +40,27 @@ const SECTION_COPY: Readonly<Record<ViewTab, SectionCopy>> = {
   },
 };
 
-function EntityContextStrip() {
+const contextEntityLabel = (context: EntityWorkspaceContext): string =>
+  context.entityName || formatAddress(context.entityId || '') || 'Not selected';
+
+function EntityContextStrip({ context }: Readonly<{ context: EntityWorkspaceContext }>) {
   return (
     <dl className="entity-workspace-context" aria-label="Entity workspace context">
-      <div><dt>Runtime</dt><dd>Not attached</dd></div>
-      <div><dt>Jurisdiction</dt><dd>Unassigned</dd></div>
-      <div><dt>Entity</dt><dd>Not selected</dd></div>
+      <div><dt>Runtime</dt><dd>{formatAddress(context.runtimeId || '') || 'Not attached'}</dd></div>
+      <div><dt>Jurisdiction</dt><dd>{context.jurisdictionName || 'Unassigned'}</dd></div>
+      <div><dt>Entity</dt><dd>{contextEntityLabel(context)}</dd></div>
     </dl>
   );
 }
 
-function EntityWorkspaceStage({ activeTab }: Readonly<{ activeTab: ViewTab }>) {
+function ProjectionBoundary({ context, emptyMessage }: Readonly<{ context: EntityWorkspaceContext; emptyMessage: string }>) {
+  if (context.status === 'selected') {
+    return <div className="entity-workspace-boundary" role="status"><span>Committed projection</span><strong>Entity context attached</strong><p>Height {context.height} · {context.accountCount} accounts. Section panels remain on the canonical workspace.</p></div>;
+  }
+  return <div className="entity-workspace-boundary" role="status"><span>Integration boundary</span><strong>No Runtime projection attached</strong><p>{emptyMessage}</p></div>;
+}
+
+function EntityWorkspaceStage({ activeTab, context }: Readonly<{ activeTab: ViewTab; context: EntityWorkspaceContext }>) {
   const copy = SECTION_COPY[activeTab];
   return (
     <section className="entity-workspace-stage" data-testid="entity-workspace-stage">
@@ -57,17 +69,13 @@ function EntityWorkspaceStage({ activeTab }: Readonly<{ activeTab: ViewTab }>) {
         <h2>{copy.title}</h2>
         <p>{copy.summary}</p>
       </header>
-      <div className="entity-workspace-boundary" role="status">
-        <span>Integration boundary</span>
-        <strong>No Runtime projection attached</strong>
-        <p>{copy.nextBoundary}</p>
-      </div>
-      <footer><span>Read state</span><strong>Unavailable — no identity selected</strong></footer>
+      <ProjectionBoundary context={context} emptyMessage={copy.nextBoundary} />
+      <footer><span>Read state</span><strong>{context.status === 'selected' ? copy.nextBoundary : 'Unavailable — no identity selected'}</strong></footer>
     </section>
   );
 }
 
-export function EntityWorkspaceShell({ activeTab }: Readonly<{ activeTab: ViewTab }>) {
+export function EntityWorkspaceShell({ activeTab, context }: Readonly<{ activeTab: ViewTab; context: EntityWorkspaceContext }>) {
   return (
     <section className="entity-workspace" data-active-tab={activeTab} data-testid="entity-workspace-shell">
       <header className="entity-workspace-header">
@@ -76,9 +84,9 @@ export function EntityWorkspaceShell({ activeTab }: Readonly<{ activeTab: ViewTa
           <h1>Entity workspace</h1>
           <span>Identity first. One canonical route for every workspace section.</span>
         </div>
-        <div className="entity-workspace-mode"><i aria-hidden="true" /><span>React shell</span><strong>Read boundary</strong></div>
+        <div className="entity-workspace-mode"><i aria-hidden="true" /><span>React shell</span><strong>{context.status === 'selected' ? 'Context ready' : 'Read boundary'}</strong></div>
       </header>
-      <EntityContextStrip />
+      <EntityContextStrip context={context} />
       <nav className="entity-workspace-tabs" aria-label="Entity workspace sections">
         {ENTITY_WORKSPACE_SECTIONS.map((section, index) => (
           <a
@@ -92,7 +100,7 @@ export function EntityWorkspaceShell({ activeTab }: Readonly<{ activeTab: ViewTa
           </a>
         ))}
       </nav>
-      <EntityWorkspaceStage activeTab={activeTab} />
+      <EntityWorkspaceStage activeTab={activeTab} context={context} />
       <p className="entity-workspace-footnote">No inferred state · no hidden fallback · Svelte remains canonical</p>
     </section>
   );
