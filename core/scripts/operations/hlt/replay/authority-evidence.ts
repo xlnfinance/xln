@@ -69,9 +69,12 @@ type MixedCoverage = {
   disputeStartedEvent: number;
   disputeFinalizedEvent: number;
   settleCommands: number;
+  settleUpdates: number;
+  settleRejects: number;
   settleTransitions: number;
   jEventClaims: number;
   accountSettledEvent: number;
+  collateralRequests: number;
 };
 
 const countDisputeEvent = (eventType: string, coverage: MixedCoverage): void => {
@@ -103,6 +106,7 @@ const assertAccountScope = (tx: AccountTx, coverage: MixedCoverage): void => {
   if (tx.type === 'rebalance_policy') coverage.rebalancePolicies += 1;
   if (tx.type === 'settle_transition') coverage.settleTransitions += 1;
   if (tx.type === 'j_event_claim') coverage.jEventClaims += 1;
+  if (tx.type === 'request_collateral') coverage.collateralRequests += 1;
 };
 
 const assertEntityScope = (tx: EntityTx, coverage: MixedCoverage): void => {
@@ -119,6 +123,8 @@ const assertEntityScope = (tx: EntityTx, coverage: MixedCoverage): void => {
   if (tx.type === 'prepareDispute') coverage.disputePrepare += 1;
   if (tx.type === 'disputeFinalize') coverage.disputeFinalizeCommand += 1;
   if (tx.type === 'settle_propose' || tx.type === 'settle_execute') coverage.settleCommands += 1;
+  if (tx.type === 'settle_update') coverage.settleUpdates += 1;
+  if (tx.type === 'settle_reject') coverage.settleRejects += 1;
   if (tx.type === 'j_event') {
     for (const block of tx.data.blocks) {
       for (const event of block.events) countDisputeEvent(event.type, coverage);
@@ -148,9 +154,12 @@ const inspectCanonicalScope = (frames: readonly PersistedFrameJournal[]): MixedC
     disputeStartedEvent: 0,
     disputeFinalizedEvent: 0,
     settleCommands: 0,
+    settleUpdates: 0,
+    settleRejects: 0,
     settleTransitions: 0,
     jEventClaims: 0,
     accountSettledEvent: 0,
+    collateralRequests: 0,
   };
   for (const frame of frames) {
     for (const input of frame.runtimeInput.entityInputs) {

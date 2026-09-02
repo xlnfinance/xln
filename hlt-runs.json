@@ -287,6 +287,17 @@
       "status": "green",
       "headline": "Hook deadline index out of the Patricia map: 6302.7/s, apply −14% vs 17:11",
       "detail": "The scheduler kept its deadline index in a second persistent radix map although only the entries map is committed; every HTLC lock/resolve paid two path-copies. Plain ordered BTreeMap with the same key bytes; rec3 parity green. Main thread per frame 318→259 ms; offered 8000/s still the cap."
+    },
+    {
+      "at": "2026-09-02T22:48:00Z",
+      "commit": "07ce751ad",
+      "engine": "ts",
+      "users": 1000,
+      "paymentsTps": 723.1,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Release evidence, TS core: 723.1/s at 1000 users, rate 1/user, clean tree",
+      "detail": "Fresh authoritative run after bun run check went green on our files (only brainvault dead-code left, other owner). 20000/20000 delivered, WAL+fsync, full drain, provenance SHA/binary/lock recorded in the report. TS stays the logic reference; production-rate hubs run Rust."
     }
   ]
 }

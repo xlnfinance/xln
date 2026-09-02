@@ -79,6 +79,8 @@ import {
   hltAuthorityEvidenceEnabled,
   materializeCompleteDisputeEvidence,
   materializeCompleteSettlementEvidence,
+  materializeCollateralRequestEvidence,
+  materializeSettlementRevisionEvidence,
 } from './worker-authority-evidence';
 import {
   attachRustH1,
@@ -793,6 +795,24 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         hub: requireHub(),
         hubIdentity,
         lane: settlementUser,
+        tokenId: PAYMENT_TOKEN_ID,
+      });
+      // Revision (settle_update) and clear (settle_reject) on a fourth Account,
+      // and one lane-initiated collateral request on a fifth: the recorded
+      // WAL must carry every settlement command the Rust port implements.
+      const revisionUser = users[3];
+      const collateralUser = users[4];
+      if (!revisionUser || !collateralUser) throw new Error('HLT_AUTHORITY_EVIDENCE_COVERAGE_USER_MISSING');
+      await materializeSettlementRevisionEvidence({
+        hub: requireHub(),
+        hubIdentity,
+        lane: revisionUser,
+        tokenId: PAYMENT_TOKEN_ID,
+      });
+      await materializeCollateralRequestEvidence({
+        hub: requireHub(),
+        hubIdentity,
+        lane: collateralUser,
         tokenId: PAYMENT_TOKEN_ID,
       });
     }

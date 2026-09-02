@@ -1,5 +1,6 @@
 import type { LoadIdentity } from '../boundary/worker-boundary';
 import type { LaneRuntime } from '../lanes/lane-runtimes';
+import type { EntityTx } from '../../../../types/entity-tx';
 import {
   queueLaneRuntimeInputWave,
   readLaneAccountDetails,
@@ -408,5 +409,93 @@ export const materializeCompleteSettlementEvidence = async (options: Readonly<{
     `HLT_AUTHORITY_SETTLEMENT_EVIDENCE_OK hub=${hubEntityId} counterparty=${counterpartyEntityId} ` +
     `accountHeights=${before.currentHeight}->${ready.currentHeight}->${submitted.currentHeight}->${finalized.currentHeight} ` +
     `jNonce=${before.jNonce}->${finalized.jNonce}`,
+  );
+};
+
+/** A settlement proposal the counterparty will not auto-sign (forgiveness is
+ * always an explicit bilateral escape hatch), revised once with settle_update
+ * while unsigned, then cleared with settle_reject. Covers the upsert revision
+ * and clear transitions the plain propose/execute lifecycle never emits. */
+export const materializeSettlementRevisionEvidence = async (options: Readonly<{
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  lane: LaneRuntime;
+  tokenId: number;
+}>): Promise<void> => {
+  const { hub, hubIdentity, lane, tokenId } = options;
+  const hubEntityId = hubIdentity.entityId;
+  const counterpartyEntityId = lane.identity.entityId;
+  const hubCommand = async (label: string, entityTx: EntityTx): Promise<void> => {
+    await sendObserved(hub, label, {
+      runtimeTxs: [],
+      entityInputs: [{ entityId: hubEntityId, signerId: hubIdentity.signerId, entityTxs: [entityTx] }],
+    });
+  };
+  const before = await readHubAccountSettlementView(hub, hubEntityId, counterpartyEntityId);
+  await hubCommand('hlt-authority-settle-propose-forgive', {
+    type: 'settle_propose',
+    data: { counterpartyEntityId, ops: [{ type: 'forgive', tokenId }], memo: 'hlt-authority-revision-v1' },
+  });
+  const proposed = await waitForHubAccountQuiescence(
+    hub, hubEntityId, counterpartyEntityId, before.currentHeight + 1,
+    'HLT_AUTHORITY_SETTLEMENT_REVISION_PROPOSE_TIMEOUT',
+  );
+  await hubCommand('hlt-authority-settle-update', {
+    type: 'settle_update',
+    data: { counterpartyEntityId, ops: [{ type: 'forgive', tokenId }], memo: 'hlt-authority-revision-v2' },
+  });
+  const updated = await waitForHubAccountQuiescence(
+    hub, hubEntityId, counterpartyEntityId, proposed.currentHeight + 1,
+    'HLT_AUTHORITY_SETTLEMENT_REVISION_UPDATE_TIMEOUT',
+  );
+  await hubCommand('hlt-authority-settle-reject', {
+    type: 'settle_reject',
+    data: { counterpartyEntityId, reason: 'hlt-authority-revision-cleared' },
+  });
+  const cleared = await waitForHubAccountQuiescence(
+    hub, hubEntityId, counterpartyEntityId, updated.currentHeight + 1,
+    'HLT_AUTHORITY_SETTLEMENT_REVISION_REJECT_TIMEOUT',
+  );
+  console.log(
+    `HLT_AUTHORITY_SETTLEMENT_REVISION_EVIDENCE_OK hub=${hubEntityId} counterparty=${counterpartyEntityId} ` +
+    `accountHeights=${before.currentHeight}->${proposed.currentHeight}->${updated.currentHeight}->${cleared.currentHeight}`,
+  );
+};
+
+/** The lane asks the hub for collateral (V1 rebalance request): one
+ * request_collateral Account frame with the prepaid fee, committed on the
+ * production hub Account. */
+export const materializeCollateralRequestEvidence = async (options: Readonly<{
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  lane: LaneRuntime;
+  tokenId: number;
+}>): Promise<void> => {
+  const { hub, hubIdentity, lane, tokenId } = options;
+  const hubEntityId = hubIdentity.entityId;
+  const counterpartyEntityId = lane.identity.entityId;
+  const before = await readHubAccountSettlementView(hub, hubEntityId, counterpartyEntityId);
+  await queueLaneRuntimeInputWave(0, [{
+    lane,
+    input: {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: counterpartyEntityId,
+        signerId: lane.identity.signerId,
+        entityTxs: [{
+          type: 'requestCollateral',
+          data: { counterpartyEntityId: hubEntityId, tokenId, amount: 1n, feeAmount: 1n, policyVersion: 1 },
+        }],
+      }],
+    },
+  }], { waitForCommit: true });
+  const committed = await waitForHubAccountSettlement({
+    hub, hubEntityId, counterpartyEntityId,
+    code: 'HLT_AUTHORITY_COLLATERAL_REQUEST_TIMEOUT',
+    predicate: view => view.currentHeight > before.currentHeight,
+  });
+  console.log(
+    `HLT_AUTHORITY_COLLATERAL_REQUEST_EVIDENCE_OK hub=${hubEntityId} counterparty=${counterpartyEntityId} ` +
+    `accountHeights=${before.currentHeight}->${committed.currentHeight}`,
   );
 };
