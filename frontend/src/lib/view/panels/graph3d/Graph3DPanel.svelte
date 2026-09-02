@@ -46,8 +46,6 @@ import {
   buildGraphAccountVisuals,
   createBlockContainer,
   buildGraphConnection,
-  createBroadcastRippleMesh,
-  createDirectionalLightningMesh,
   createEntityLabel,
   createGraphEntityNode,
   createMempoolIndicator,
@@ -76,6 +74,10 @@ import {
   createGraphJMachine,
   startProportionalBroadcast,
 } from "../../../../../packages/ui/src/graph3d-scene-primitives";
+import {
+  createBroadcastRippleMesh,
+  createDirectionalLightningMesh,
+} from "../../../../../packages/ui/src/graph3d-visual-effects";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
