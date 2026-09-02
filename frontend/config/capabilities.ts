@@ -385,6 +385,7 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/workspace-dock-layout.ts',
       'frontend/packages/ui/src/workspace-dock.tsx',
       'frontend/packages/ui/src/graph3d-lifecycle.ts',
+      'frontend/packages/ui/src/graph3d-renderer.ts',
     ],
     behavior: [
       'Dockview layout',
@@ -396,6 +397,7 @@ export const CAPABILITIES = [
       'framework-neutral Graph3D runtime/jurisdiction scene inputs and recursive transaction normalization',
       'shared Svelte-compatible layout persistence and a lifecycle-safe React Dockview adapter',
       'framework-neutral Graph3D canvas, controls, resize, debug, renderer, and XR teardown boundaries',
+      'shared Three.js renderer selection plus explicit geometry, material, and texture disposal',
     ],
     status: 'in_progress',
   },

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Delta } from '@xln/core/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
-import { getGraphThemeColors } from './graph3d-renderer';
+import { getGraphThemeColors } from '../../../../../packages/ui/src/graph3d-renderer';
 import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphTransactionLike, GraphXLNRuntime } from './graph3d-types';
 import { formatGraphMempoolTxLabel, type GraphAccountViewLike, type GraphReplicaLike } from './graph3d-helpers';
 
