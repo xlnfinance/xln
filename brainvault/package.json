@@ -8,6 +8,7 @@
     "brainvault": "brainvault"
   },
   "files": [
+    "AGENTS.md",
     "LICENSE",
     "MANIFEST.sha256",
     "SPEC-V1.md",
@@ -71,6 +72,7 @@
     "readme.md"
   ],
   "scripts": {
+    "check": "bun run test",
     "bench": "bun cli.ts --bench",
     "smoke": "bun cli.ts --smoke",
     "build:c": "make -C experimental/argon2-c all",

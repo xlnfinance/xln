@@ -36,6 +36,7 @@ test('packed package installs inertly and runs from an audited empty directory',
       expect(['l', 'h'].includes(line[0] ?? '')).toBe(false);
     }
     expect(files).toContain('package/MANIFEST.sha256');
+    expect(files).toContain('package/AGENTS.md');
     expect(files).toContain('package/SPEC-V1.md');
     expect(files).toContain('package/vectors-v1.json');
     if (process.platform === 'darwin' && process.arch === 'arm64') {

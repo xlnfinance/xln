@@ -236,6 +236,11 @@ Pin both the package version and the registry integrity hash in any serious
 deployment. A newer npm build must be audited again even though the protocol is
 still BrainVault V1.
 
+`AGENTS.md` is the package-local contract for coding agents. It keeps V1 frozen,
+maps the ownership layers, requires a failing regression test before a bug fix,
+and routes CLI, native, package, and release changes to their exact verification
+gates. Agents should reload it after a long-session context compaction.
+
 ## Invariant-style AI audit
 
 Start with exactly these two files:
@@ -316,6 +321,7 @@ physical bearer backup and undermine the memory-only recovery model.
 
 ## Files
 
+- `AGENTS.md` - compact coding-agent boundaries and verification contract
 - `primitives/spec.ts` - frozen V1 constants and shard salt
 - `SPEC-V1.md` - normative byte-level V1 specification
 - `vectors-v1.json` - external frozen compatibility vectors
