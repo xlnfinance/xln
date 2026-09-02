@@ -1025,7 +1025,7 @@ fn prepare_entity_prefix<'a>(
     let mut consumed = 0_usize;
     for work in work {
         match work {
-            EntityPendingWork::Account { projected, row } => {
+            EntityPendingWork::Account { projected, row, .. } => {
                 if !accept_entity_tx_bytes(&mut tx_bytes, projected, max_tx_bytes)? {
                     break;
                 }
@@ -1648,7 +1648,7 @@ fn take_entity_prefix(
             .pop_front()
             .ok_or(RuntimeMachineError::InputCountOverflow)?;
         match work {
-            EntityPendingWork::Account { projected, row } => {
+            EntityPendingWork::Account { projected, row, .. } => {
                 selected.txs.push(projected);
                 let start = selected.rows.len();
                 selected.rows.push(*row);
@@ -2102,13 +2102,11 @@ fn runtime_cross_j_sibling_views(
     super::collect_cross_j_opening_sibling_views(staged_sources, live_sources)
 }
 
-fn account_input_wire(work: &EntityPendingWork) -> Result<Option<Vec<u8>>, RuntimeMachineError> {
-    let EntityPendingWork::Account { projected, .. } = work else {
-        return Ok(None);
-    };
-    encode_canonical_consensus_bytes(&projected.wire_data)
-        .map(Some)
-        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))
+fn account_input_wire_digest(work: &EntityPendingWork) -> Option<[u8; 32]> {
+    match work {
+        EntityPendingWork::Account { wire_digest, .. } => Some(*wire_digest),
+        _ => None,
+    }
 }
 
 pub(super) fn append_entity_pending_work(
@@ -2122,13 +2120,10 @@ pub(super) fn append_entity_pending_work(
     // reach Account duplicate handling so the peer can recover a lost ACK.
     let mut seen = mempool
         .iter()
-        .map(account_input_wire)
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
+        .filter_map(account_input_wire_digest)
         .collect::<BTreeSet<_>>();
     for work in pending {
-        let Some(wire) = account_input_wire(&work)? else {
+        let Some(wire) = account_input_wire_digest(&work) else {
             mempool.push_back(work);
             continue;
         };

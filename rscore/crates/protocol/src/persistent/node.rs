@@ -81,6 +81,18 @@ pub(super) fn make_branch<V>(
     }))
 }
 
+/// Path-copy constructor: `children` is an existing validated branch's slot
+/// array with exactly one slot rewritten by a recursive put/delete whose
+/// result keeps that slot's prefix. Re-validating all sixteen edges and
+/// rebuilding the array through a `Vec` doubled the cost of every hop.
+fn branch_with_children<V>(path: Vec<u8>, children: [Option<NodeRef<V>>; 16]) -> NodeRef<V> {
+    Arc::new(Node::Branch {
+        path,
+        children,
+        hash: OnceLock::new(),
+    })
+}
+
 pub(super) fn ensure_root_branch<V>(
     node: Option<NodeRef<V>>,
 ) -> Result<Option<NodeRef<V>>, PersistentRadixMapError> {
@@ -209,13 +221,7 @@ pub(super) fn put_node<V>(
             }
             let mut next = children.clone();
             next[slot] = Some(updated);
-            Ok((
-                make_branch(
-                    path.clone(),
-                    &next.iter().flatten().cloned().collect::<Vec<_>>(),
-                )?,
-                inserted,
-            ))
+            Ok((branch_with_children(path.clone(), next), inserted))
         }
     }
 }
@@ -260,10 +266,7 @@ pub(super) fn replace_leaf_value<V>(
             let updated = replace_leaf_value(child, path, key, value)?;
             let mut next = children.clone();
             next[slot] = Some(updated);
-            make_branch(
-                branch_path.clone(),
-                &next.iter().flatten().cloned().collect::<Vec<_>>(),
-            )
+            Ok(branch_with_children(branch_path.clone(), next))
         }
     }
 }
@@ -346,10 +349,10 @@ fn delete_from_branch<V>(
     }
     let mut next = children.clone();
     next[slot] = updated;
-    let remaining = next.iter().flatten().cloned().collect::<Vec<_>>();
-    Ok(match remaining.len() {
+    let remaining = next.iter().flatten().count();
+    Ok(match remaining {
         0 => (None, true),
-        1 => (remaining.into_iter().next(), true),
-        _ => (Some(make_branch(branch_path.to_vec(), &remaining)?), true),
+        1 => (next.iter_mut().find_map(Option::take), true),
+        _ => (Some(branch_with_children(branch_path.to_vec(), next)), true),
     })
 }

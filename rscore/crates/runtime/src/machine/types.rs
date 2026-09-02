@@ -1,3 +1,4 @@
+use sha2::Digest as _;
 use std::collections::{BTreeMap, VecDeque};
 
 use serde_json::Value;
@@ -91,6 +92,10 @@ pub(crate) enum EntityPendingWork {
     Account {
         projected: CanonicalEntityTx,
         row: Box<AccountInputRow>,
+        /// SHA-256 of the complete canonical child input (`wire_data`).
+        /// Computed once at admission so pending-only deduplication never
+        /// re-encodes the whole Entity FIFO on every append.
+        wire_digest: [u8; 32],
     },
     LocalBatch {
         projected: Vec<CanonicalEntityTx>,
@@ -105,6 +110,15 @@ pub(crate) enum EntityPendingWork {
         native: Box<LocalEntityTx>,
     },
     Projected(CanonicalEntityTx),
+}
+
+/// Exact canonical child-input digest for pending-only deduplication.
+pub(crate) fn account_input_wire_digest(
+    projected: &CanonicalEntityTx,
+) -> Result<[u8; 32], RuntimeMachineError> {
+    let wire = xln_rscore_protocol::encode_canonical_consensus_bytes(&projected.wire_data)
+        .map_err(|error| RuntimeMachineError::EntityInputEncoding(error.to_string()))?;
+    Ok(sha2::Sha256::digest(&wire).into())
 }
 
 impl EntityPendingWork {
@@ -283,6 +297,7 @@ impl RuntimeEntityInput {
                 }
                 let operation_index =
                     u64::try_from(index).map_err(|_| RuntimeMachineError::InputCountOverflow)?;
+                let wire_digest = account_input_wire_digest(&projection)?;
                 pending_work.push(EntityPendingWork::Account {
                     row: Box::new(crate::decode_entity_account_input_row(
                         entity_id_text,
@@ -290,6 +305,7 @@ impl RuntimeEntityInput {
                         tx,
                     )?),
                     projected: projection,
+                    wire_digest,
                 });
             } else {
                 if matches!(
@@ -499,13 +515,19 @@ impl RuntimeEntityInput {
             entity_id: super::tests::owner_bytes(),
             signer_id: super::tests::entity_signer_id(),
             canonical,
-            pending_work: vec![EntityPendingWork::Account {
-                projected: CanonicalEntityTx::from_frame_projection(
+            pending_work: vec![{
+                let projected = CanonicalEntityTx::from_frame_projection(
                     EntityTxKind::AccountInput,
                     CanonicalValue::Null,
                 )
-                .expect("fixture Account projection"),
-                row: Box::new(account_input),
+                .expect("fixture Account projection");
+                let wire_digest =
+                    account_input_wire_digest(&projected).expect("fixture Account digest");
+                EntityPendingWork::Account {
+                    projected,
+                    row: Box::new(account_input),
+                    wire_digest,
+                }
             }],
             atomic_cross_jurisdiction_pair: None,
             j_prefix_attestation: None,

@@ -320,7 +320,7 @@ fn entity_input_is_decoded_into_one_consistent_owned_projection() -> Result<(), 
     assert_eq!(retained, canonical);
     assert!(matches!(
         pending.as_slice(),
-        [super::types::EntityPendingWork::Account { projected, row }]
+        [super::types::EntityPendingWork::Account { projected, row, .. }]
             if projected.kind == EntityTxKind::AccountInput && row.operation_index == 0
     ));
     Ok(())
