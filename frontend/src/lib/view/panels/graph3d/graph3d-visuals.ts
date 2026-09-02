@@ -3,6 +3,7 @@ import type { Delta } from '@xln/core/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from '../../../../../packages/ui/src/graph3d-renderer';
+import { createAccountMempoolBoxes } from '../../../../../packages/ui/src/graph3d-account-visuals';
 import type { GraphConnectionData, GraphEntityData, GraphXLNRuntime } from './graph3d-types';
 import { formatGraphMempoolTxLabel, type GraphAccountViewLike, type GraphReplicaLike } from './graph3d-helpers';
 
@@ -131,96 +132,6 @@ export function deriveGraphEntry(
   return toDerivedAccountData(runtime.deriveDelta(tokenDelta as never, isLeft));
 }
 
-function createMempoolBox(
-  borderColor: number,
-  mempoolTxs: unknown[],
-  pendingTxs: unknown[],
-  direction: THREE.Vector3,
-): THREE.Group {
-  const group = new THREE.Group();
-  const width = 1.6;
-  const height = 0.8;
-  const depth = 0.4;
-  const geometry = new THREE.BoxGeometry(width, height, depth);
-  group.add(
-    new THREE.Mesh(
-      geometry,
-      new THREE.MeshPhongMaterial({
-        color: borderColor,
-        emissive: new THREE.Color(borderColor).multiplyScalar(0.3),
-        transparent: true,
-        opacity: 0.2,
-        side: THREE.DoubleSide,
-        shininess: 60,
-        depthWrite: false,
-      }),
-    ),
-  );
-  group.add(
-    new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({ color: borderColor, linewidth: 1, transparent: true, opacity: 0.6 }),
-    ),
-  );
-  const addTransactions = (transactions: unknown[], color: number, opacity: number, z: number) => {
-    transactions.slice(0, 2).forEach((_, index) => {
-      const cube = new THREE.Mesh(
-        new THREE.BoxGeometry(0.18, 0.18, 0.18),
-        new THREE.MeshLambertMaterial({
-          color,
-          transparent: true,
-          opacity,
-          emissive: color === 0x888888 ? 0x444444 : 0x0088cc,
-          emissiveIntensity: color === 0x888888 ? 0.3 : 0.7,
-        }),
-      );
-      cube.position.set(index === 0 ? -0.175 : 0.175, 0, z);
-      group.add(cube);
-    });
-  };
-  addTransactions(mempoolTxs, 0x888888, 0.7, -depth / 3);
-  addTransactions(pendingTxs, 0x00ccff, 0.95, depth / 6);
-  const quaternion = new THREE.Quaternion();
-  quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
-  group.quaternion.copy(quaternion);
-  return group;
-}
-
-/**
- * One box per OBSERVED account side. The merged graph projection materializes only the
- * policy-selected observation (see runtimeGraphRender), so an absent side means "not
- * observed" — never "not committed". Rendering a red box for it would fake a desync.
- */
-export function createAccountMempoolBoxes(options: {
-  fromEntity: GraphEntityData;
-  toEntity: GraphEntityData;
-  leftAccount: GraphAccountViewLike | null | undefined;
-  rightAccount: GraphAccountViewLike | null | undefined;
-  runtime: GraphXLNRuntime | null | undefined;
-  getEntitySize(entityId: string, tokenId: number): number;
-}): THREE.Group[] {
-  const direction = new THREE.Vector3().subVectors(options.toEntity.position, options.fromEntity.position).normalize();
-  const barRadiusAndGap = 0.4;
-  const halfBoxDepth = 0.2;
-  const sides = [
-    { account: options.leftAccount, isLeft: true, anchor: options.fromEntity, sign: 1 },
-    { account: options.rightAccount, isLeft: false, anchor: options.toEntity, sign: -1 },
-  ];
-  return sides.flatMap(({ account, isLeft, anchor, sign }) => {
-    if (!account) return [];
-    const state = options.runtime?.classifyBilateralState?.(account, 0, isLeft);
-    const box = createMempoolBox(
-      state && state.state !== 'committed' ? 0xff4444 : 0x00ff88,
-      account.mempool || [],
-      account.pendingFrame?.accountTxs || [],
-      direction,
-    );
-    const offset = sign * (options.getEntitySize(anchor.id, 1) + barRadiusAndGap - halfBoxDepth);
-    box.position.copy(anchor.position).add(direction.clone().multiplyScalar(offset));
-    return [box];
-  });
-}
-
 export function graphAccountMempoolCount(account: GraphAccountViewLike | null | undefined): number {
   const projectedCount = Number(account?.mempoolCount);
   if (Number.isSafeInteger(projectedCount) && projectedCount >= 0) return projectedCount;
@@ -341,7 +252,12 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     toEntity: options.toEntity,
     leftAccount,
     rightAccount,
-    runtime: options.runtime,
+    leftState: leftAccount
+      ? options.runtime?.classifyBilateralState?.(leftAccount, 0, true)?.state ?? null
+      : null,
+    rightState: rightAccount
+      ? options.runtime?.classifyBilateralState?.(rightAccount, 0, false)?.state ?? null
+      : null,
     getEntitySize: options.getEntitySize,
   });
   for (const box of mempoolBoxes) options.graphWorld.add(box);
