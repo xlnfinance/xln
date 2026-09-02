@@ -549,6 +549,8 @@ export const PLATFORM_INVENTORY = [
       'frontend/scripts/candidate-release-verifier.ts',
     ],
     consumers: [
+      'scripts/native/wallet-candidate-manifest.ts',
+      'scripts/native/stage-wallet-candidate.ts',
       'scripts/release/build-xlnfinance-package.ts',
       'scripts/native/build-platforms.ts',
       'scripts/deployment/deploy-platform.sh',
@@ -556,6 +558,7 @@ export const PLATFORM_INVENTORY = [
     evidence: [
       'tests/frontend/tooling/frontend-candidate-assembly.test.ts',
       'tests/frontend/tooling/frontend-candidate-release-verifier.test.ts',
+      'native/__tests__/wallet-candidate-staging.test.ts',
       'native/__tests__/native-build-options.test.ts',
     ],
   },
