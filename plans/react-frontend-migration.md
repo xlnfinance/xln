@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY VISUALS + VIEW/SCENE INPUT MODELS EXTRACTED; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY VISUALS/INTERACTION MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1019,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY VISUALS + VIEW/SCENE INPUT MODELS EXTRACTED`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY VISUALS/INTERACTION MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1551,6 +1551,27 @@ Rust remains unavailable because `cargo` is absent, and the separate size
 policy still reports only out-of-scope `core/qa/report.ts` at 3,001 / 3,000
 lines.
 
+The ninth Graph3D slice extracts normalized-device-coordinate projection,
+scene-root-bounded entity hit resolution, and canonical entity/connection
+highlight reset into `packages/ui/src/graph3d-interaction.ts`. Mouse, touch,
+double-click, and XR selection now share those mechanics while the canonical
+Svelte panel retains gesture state, dragging, camera controls, selection,
+wallet actions, tooltips, and event effects. The highlight reset uses Three.js
+material capability flags so it remains correct when application and shared
+package imports have distinct module identities. Five focused tests pin 18
+expectations; the affected Graph3D batch passes 93 tests with 358 expectations.
+The unsafe-types gate covers 619 files with zero findings, Svelte diagnostics
+are 0 errors / 0 warnings, the canonical build transforms 4,666 SSR and 6,417
+client modules, all four React surfaces pass, and the full frontend
+failure-name diff remains empty against the exact 13-test baseline (1,174
+passes and 6,519 expectations). This is a nonvisual behavior-preserving
+extraction, so screenshot evidence is not required. Root verification passes
+26 BrainVault/runtime tests with 100,156 expectations and all 10 soundcheck
+gates; contract sync remains stopped by the same host Hardhat compiler-cache
+mutex, Rust remains unavailable because `cargo` is absent, and the separate
+size policy still reports only out-of-scope `core/qa/report.ts` at 3,001 /
+3,000 lines.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1561,7 +1582,8 @@ Svelte-importing network3d file) and the `networkMachineRuntimeStore` /
 RuntimeIO → Solvency → Runtime Diagnostics → Gossip → Time Machine transport →
 Jurisdiction → Settings → Architect; the React Dockview wrapper now preserves
 the canonical Svelte layout JSON; Graph3D browser/Three.js lifecycle, renderer
-resource ownership, scene primitives/effects/entity visuals, entity mini-panel, viewport-chrome
+resource ownership, scene primitives/effects/entity visuals, interaction
+mechanics, entity mini-panel, viewport-chrome
 presentation, and scene-input projections are framework-neutral.
 Port the remaining Graph3D Account visual factory and interaction state to React around refs +
 explicit effects last; and
@@ -1657,7 +1679,8 @@ any mismatch. Never compile on production.
    → Solvency → Runtime Diagnostics → Gossip → Time Machine transport →
    Jurisdiction → Settings → Architect, and the React Dockview wrapper is now
    ready with Svelte-compatible persistence, while Graph3D lifecycle/renderer
-   ownership, scene primitives/effects/entity visuals, the entity mini-panel, viewport-chrome
+   ownership, scene primitives/effects/entity visuals, interaction mechanics,
+   the entity mini-panel, viewport-chrome
    presentation, and scene-input models are framework-neutral. Continue the
    remaining Graph3D Account visual factory and interaction state
    next, then size the Entity workspace sub-program before flipping `/embed`.

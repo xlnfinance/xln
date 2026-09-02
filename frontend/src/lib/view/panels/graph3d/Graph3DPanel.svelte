@@ -80,6 +80,11 @@ import {
   positionEntityLabel,
   positionMempoolIndicator,
 } from "../../../../../packages/ui/src/graph3d-entity-visuals";
+import {
+  findGraphEntityFromObject,
+  resetGraphObjectHighlight,
+  setGraphPointerNdc,
+} from "../../../../../packages/ui/src/graph3d-interaction";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -210,12 +215,6 @@ let connectionIndexMap: Map<string, number> = new Map();
 let animationId: number | null;
 let activeBroadcastSpheres: Array<{ sphere: THREE.Mesh; animationId: number }> = [];
 let hoveredObject: THREE.Object3D | null = null;
-function resetHoveredObjectHighlight(target: THREE.Object3D): void {
-  if (!(target instanceof THREE.Mesh) && !(target instanceof THREE.Line)) return;
-  const material = target.material;
-  if (material instanceof THREE.MeshLambertMaterial) material.emissive.setHex(0x002200);
-  else if (material instanceof THREE.LineDashedMaterial) material.color.setHex(0x00ff44);
-}
 let tooltip = { visible: false, x: 0, y: 0, content: "" };
 let dualTooltip = {
   visible: false,
@@ -987,16 +986,6 @@ function setupVRControllers() {
 }
 type VRGrab = { entity: GraphEntityData; controller: THREE.Object3D; sourceId: string; startPosition: THREE.Vector3; rayDistance: number };
 const vrGrabs = new Map<string, VRGrab>();
-function entityFromObject(object: THREE.Object3D | null | undefined): GraphEntityData | null {
-  let current = object ?? null;
-  while (current) {
-    const entity = entities.find((candidate) => candidate.mesh === current);
-    if (entity) return entity;
-    if (current.parent === graphWorld || current.parent === scene) return null;
-    current = current.parent;
-  }
-  return null;
-}
 function onVRSelectStart(event: { target: THREE.Object3D }) {
   const controller = event.target as THREE.Object3D;
   const sourceId = String(controller.userData["sourceId"] || controller.uuid);
@@ -1012,7 +1001,7 @@ function onVRSelectStart(event: { target: THREE.Object3D }) {
   );
   if (intersects.length > 0) {
     const hit = intersects[0];
-    const entity = entityFromObject(hit?.object);
+    const entity = findGraphEntityFromObject(hit?.object, entities, graphWorld, scene);
     if (entity) {
       graphGestureState = beginGraphGesture(graphGestureState, { sourceId, entityId: entity.id, at: performance.now() });
       vrGrabs.set(sourceId, { entity, controller, sourceId, startPosition: entity.position.clone(), rayDistance: hit?.distance ?? 1 });
@@ -2070,15 +2059,14 @@ function enforceSpacingConstraints() {
 function onMouseDown(event: MouseEvent) {
   if (event.button !== 0) return;
   const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  setGraphPointerNdc(mouse, event, rect);
   raycaster.setFromCamera(mouse, camera);
   const entityMeshes = entities.map((e) => e.mesh);
   const intersects = raycaster.intersectObjects(entityMeshes);
   if (intersects.length > 0) {
     const intersectedObject = intersects[0]?.object;
     if (!intersectedObject) return;
-    const entity = entityFromObject(intersectedObject);
+    const entity = findGraphEntityFromObject(intersectedObject, entities, graphWorld, scene);
     if (!entity) return;
     event.preventDefault();
     if (controls) {
@@ -2124,8 +2112,7 @@ function onMouseUp(_event: MouseEvent) {
 }
 function onMouseMove(event: MouseEvent) {
   const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  setGraphPointerNdc(mouse, event, rect);
   raycaster.setFromCamera(mouse, camera);
   if (isDragging && draggedEntity) {
     hasMoved = true; // Actual movement occurred
@@ -2145,7 +2132,7 @@ function onMouseMove(event: MouseEvent) {
     if (!intersectedObject) {
       throw new Error("FINTECH-SAFETY: No intersected object found");
     }
-    const entity = entityFromObject(intersectedObject);
+    const entity = findGraphEntityFromObject(intersectedObject, entities, graphWorld, scene);
     if (!entity) {
       tooltip.visible = false;
       dualTooltip.visible = false;
@@ -2198,11 +2185,7 @@ function onMouseMove(event: MouseEvent) {
     }
   } else {
     if (hoveredObject) {
-      try {
-        resetHoveredObjectHighlight(hoveredObject);
-      } catch (e) {
-        debug.warn("Failed to reset highlight:", e);
-      }
+      resetGraphObjectHighlight(hoveredObject);
       hoveredObject = null;
       tooltip.visible = false;
       dualTooltip.visible = false;
@@ -2211,11 +2194,7 @@ function onMouseMove(event: MouseEvent) {
 }
 function onMouseOut() {
   if (hoveredObject) {
-    try {
-      resetHoveredObjectHighlight(hoveredObject);
-    } catch (e) {
-      debug.warn("Failed to reset highlight on mouse out:", e);
-    }
+    resetGraphObjectHighlight(hoveredObject);
     hoveredObject = null;
   }
   tooltip.visible = false;
@@ -2226,8 +2205,7 @@ function onMouseClick(event: MouseEvent) {
     return;
   }
   const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  setGraphPointerNdc(mouse, event, rect);
   raycaster.setFromCamera(mouse, camera);
   const jMachineObjects: THREE.Object3D[] = [];
   jMachines.forEach((group) => {
@@ -2256,7 +2234,7 @@ function onMouseClick(event: MouseEvent) {
     if (!intersectedObject) {
       throw new Error("FINTECH-SAFETY: No intersected object in click");
     }
-    const entity = entityFromObject(intersectedObject);
+    const entity = findGraphEntityFromObject(intersectedObject, entities, graphWorld, scene);
     if (!entity || !entity.id) {
       return;
     }
@@ -2383,8 +2361,7 @@ function handleOpenFullPanel(event: CustomEvent) {
 }
 function onMouseDoubleClick(event: MouseEvent) {
   const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  setGraphPointerNdc(mouse, event, rect);
   raycaster.setFromCamera(mouse, camera);
   const entityMeshes = entities.map((e) => e.mesh);
   const intersects = raycaster.intersectObjects(entityMeshes);
@@ -2393,7 +2370,7 @@ function onMouseDoubleClick(event: MouseEvent) {
     if (!intersectedObject) {
       throw new Error("FINTECH-SAFETY: No intersected object in double-click");
     }
-    const entity = entityFromObject(intersectedObject);
+    const entity = findGraphEntityFromObject(intersectedObject, entities, graphWorld, scene);
     if (!entity) {
       console.warn("Double-click: Could not find entity for object", intersectedObject);
       return; // Gracefully ignore instead of throwing
@@ -2405,16 +2382,16 @@ function onTouchStart(event: TouchEvent) {
   event.preventDefault();
   if (event.touches.length === 1) {
     const touch = event.touches[0];
+    if (!touch) throw new Error("GRAPH_PRIMARY_TOUCH_MISSING");
     const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((touch!.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((touch!.clientY - rect.top) / rect.height) * 2 + 1;
+    setGraphPointerNdc(mouse, touch, rect);
     raycaster.setFromCamera(mouse, camera);
     const entityMeshes = entities.map((e) => e.mesh);
     const intersects = raycaster.intersectObjects(entityMeshes);
     if (intersects.length > 0) {
       const intersectedObject = intersects[0]?.object;
       if (!intersectedObject) return;
-      const entity = entityFromObject(intersectedObject);
+      const entity = findGraphEntityFromObject(intersectedObject, entities, graphWorld, scene);
       if (!entity) return;
       if (controls) {
         controls.enabled = false;
@@ -2438,9 +2415,9 @@ function onTouchMove(event: TouchEvent) {
   event.preventDefault();
   if (event.touches.length === 1) {
     const touch = event.touches[0];
+    if (!touch) throw new Error("GRAPH_PRIMARY_TOUCH_MISSING");
     const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((touch!.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((touch!.clientY - rect.top) / rect.height) * 2 + 1;
+    setGraphPointerNdc(mouse, touch, rect);
     raycaster.setFromCamera(mouse, camera);
     if (isDragging && draggedEntity) {
       hasMoved = true; // Actual movement occurred
