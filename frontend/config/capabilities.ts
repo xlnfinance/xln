@@ -272,6 +272,8 @@ export const CAPABILITIES = [
       'frontend/static/site.webmanifest',
       'frontend/static/push-wake-sw.js',
       'frontend/static/route-mode.js',
+      'frontend/scripts/pwa-candidate.ts',
+      'frontend/scripts/pwa-candidate-smoke-server.ts',
     ],
     behavior: [
       'deep links',

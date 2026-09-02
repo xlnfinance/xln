@@ -539,6 +539,23 @@ export const PLATFORM_INVENTORY = [
     ],
   },
   {
+    id: 'pwa-candidate-lifecycle',
+    owner: 'wallet',
+    workPackage: 'WP8',
+    status: 'implemented',
+    interfaces: ['cache-storage', 'release-artifact', 'service-worker', 'verification-command'],
+    sources: [
+      'frontend/scripts/pwa-candidate.ts',
+      'frontend/scripts/pwa-candidate-smoke-server.ts',
+      'frontend/playwright.pwa.config.ts',
+    ],
+    consumers: ['frontend/package.json'],
+    evidence: [
+      'tests/frontend/tooling/frontend-pwa-candidate.test.ts',
+      'frontend/tests/pwa-candidate/lifecycle.spec.ts',
+    ],
+  },
+  {
     id: 'candidate-release-consumers',
     owner: 'assembly',
     workPackage: 'WP8',
