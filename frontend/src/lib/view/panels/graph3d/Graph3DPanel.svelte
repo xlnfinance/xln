@@ -82,15 +82,20 @@ import {
 import {
   beginGraphEntityDrag,
   beginGraphGesture,
+  beginGraphXrGrab,
+  createGraphXrRaycaster,
   emptyGraphGestureState,
   endGraphEntityDrag,
   endGraphGesture,
+  endGraphXrGrab,
   findGraphEntityFromObject,
   moveGraphEntityDrag,
+  moveGraphXrGrab,
   resetGraphObjectHighlight,
   setGraphPointerNdc,
   updateGraphSelectionHighlight,
   type GraphGestureOutcome,
+  type GraphXrGrab,
 } from "../../../../../packages/ui/src/graph3d-interaction";
 import {
   applyGraphCameraPose,
@@ -985,16 +990,11 @@ function setupVRControllers() {
   }
   geometry.dispose();
 }
-type VRGrab = { entity: GraphEntityData; controller: THREE.Object3D; sourceId: string; startPosition: THREE.Vector3; rayDistance: number };
-const vrGrabs = new Map<string, VRGrab>();
+const vrGrabs = new Map<string, GraphXrGrab<GraphEntityData>>();
 function onVRSelectStart(event: { target: THREE.Object3D }) {
   const controller = event.target as THREE.Object3D;
   const sourceId = String(controller.userData["sourceId"] || controller.uuid);
-  const tempMatrix = new THREE.Matrix4();
-  tempMatrix.identity().extractRotation(controller.matrixWorld);
-  const raycaster = new THREE.Raycaster();
-  raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-  raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+  const raycaster = createGraphXrRaycaster(controller);
   if (immersiveWalletSurface?.select(raycaster)) return;
   const intersects = raycaster.intersectObjects(
     entities.map((e) => e.mesh),
@@ -1005,8 +1005,7 @@ function onVRSelectStart(event: { target: THREE.Object3D }) {
     const entity = findGraphEntityFromObject(hit?.object, entities, graphWorld, scene);
     if (entity) {
       graphGestureState = beginGraphGesture(graphGestureState, { sourceId, entityId: entity.id, at: performance.now() });
-      vrGrabs.set(sourceId, { entity, controller, sourceId, startPosition: entity.position.clone(), rayDistance: hit?.distance ?? 1 });
-      entity.isDragging = true;
+      vrGrabs.set(sourceId, beginGraphXrGrab(entity, controller, sourceId, hit?.distance ?? 1));
     }
   }
 }
@@ -1015,7 +1014,7 @@ function onVRSelectEnd(event: { target: THREE.Object3D }) {
   const sourceId = String(controller.userData["sourceId"] || controller.uuid);
   const grab = vrGrabs.get(sourceId);
   if (grab) {
-    const moved = grab.entity.position.distanceTo(grab.startPosition) > 0.5;
+    const moved = endGraphXrGrab(grab);
     const result = endGraphGesture(graphGestureState, {
       sourceId,
       entityId: grab.entity.id,
@@ -1023,7 +1022,6 @@ function onVRSelectEnd(event: { target: THREE.Object3D }) {
       moved,
     });
     graphGestureState = result.state;
-    grab.entity.isDragging = false;
     handleGraphGestureOutcome(result.outcome, grab.entity);
     if (moved) {
       grab.entity.isPinned = true;
@@ -1645,13 +1643,7 @@ function animate() {
   animateCallCount++;
   animateEntityInputStrikes();
   for (const grab of vrGrabs.values()) {
-    const controllerWorldPosition = new THREE.Vector3().setFromMatrixPosition(grab.controller.matrixWorld);
-    const controllerWorldRotation = new THREE.Matrix4().extractRotation(grab.controller.matrixWorld);
-    const rayDirection = new THREE.Vector3(0, 0, -1).applyMatrix4(controllerWorldRotation).normalize();
-    const rayPoint = controllerWorldPosition.add(rayDirection.multiplyScalar(grab.rayDistance));
-    const graphPosition = graphWorld.worldToLocal(rayPoint);
-    grab.entity.mesh.position.copy(graphPosition);
-    grab.entity.position.copy(graphPosition);
+    moveGraphXrGrab(grab, graphWorld);
     updateConnectionsForEntity(grab.entity.id);
   }
   if ((rotationX > 0 || rotationY > 0 || rotationZ > 0) && controls) {
