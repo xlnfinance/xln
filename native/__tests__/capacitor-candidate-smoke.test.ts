@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { CONTENT_SECURITY_POLICY_HTML_ATTRIBUTE } from '../../frontend/config/content-security-policy.js';
 import { safeStringify } from '../../core/protocol/serialization';
 import {
   NATIVE_CAPACITOR_CANDIDATE_MANIFEST,
@@ -13,55 +10,21 @@ import {
   verifyNativeCapacitorCandidateDirectory,
 } from '../../scripts/native/capacitor-candidate';
 import { smokeNativeCapacitorCandidate } from '../../scripts/native/smoke-capacitor-candidate';
-import { NATIVE_WALLET_CANDIDATE_MANIFEST } from '../../scripts/native/wallet-candidate-manifest';
+import {
+  createNativeWalletStageFixture,
+  fixturePathExists,
+  secureWalletCandidateHtml,
+} from './wallet-candidate-fixture';
 
 const temporaryRoots: string[] = [];
-const hash = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 const createStage = async (html: string): Promise<string> => {
-  const root = await mkdtemp(join(tmpdir(), 'xln-capacitor-candidate-'));
-  temporaryRoots.push(root);
-  const releaseId = `sha256-${hash(`release:${html}`)}`;
-  const stagingDirectory = join(root, releaseId);
-  const viteManifest = '{}\n';
-  await mkdir(stagingDirectory);
-  await writeFile(join(stagingDirectory, 'index.html'), html);
-  await writeFile(join(stagingDirectory, 'manifest.json'), viteManifest);
-  await writeFile(join(stagingDirectory, NATIVE_WALLET_CANDIDATE_MANIFEST), `${safeStringify({
-    schemaVersion: 1,
-    releaseId,
-    application: 'wallet',
-    files: [
-      {
-        sourcePath: 'apps/wallet/index.html',
-        path: 'index.html',
-        sha256: hash(html),
-        size: Buffer.byteLength(html),
-      },
-      {
-        sourcePath: 'apps/wallet/manifest.json',
-        path: 'manifest.json',
-        sha256: hash(viteManifest),
-        size: Buffer.byteLength(viteManifest),
-      },
-    ],
-  }, 2)}\n`);
-  return stagingDirectory;
+  const fixture = await createNativeWalletStageFixture(html);
+  temporaryRoots.push(fixture.root);
+  return fixture.stagingDirectory;
 };
 
-const secureHtml = (script = '<script src="/assets/wallet/index.js"></script>'): string =>
-  `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${CONTENT_SECURITY_POLICY_HTML_ATTRIBUTE}"></head>` +
-  `<body>${script}</body></html>\n`;
-
-const pathExists = async (pathname: string): Promise<boolean> => {
-  try {
-    await lstat(pathname);
-    return true;
-  } catch (error: unknown) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
-    throw error;
-  }
-};
+const secureHtml = secureWalletCandidateHtml;
 
 afterEach(async () => {
   for (const root of temporaryRoots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -83,8 +46,8 @@ describe('isolated Capacitor candidate smoke', () => {
     expect(config.appId).toBe('finance.xln.wallet');
     expect(config.webDir).toBe(`../../${result.releaseId}`);
     expect(config.server.hostname).toBe('localhost');
-    expect(await pathExists(join(result.workspaceDirectory, 'ios'))).toBe(false);
-    expect(await pathExists(join(result.workspaceDirectory, 'android'))).toBe(false);
+    expect(await fixturePathExists(join(result.workspaceDirectory, 'ios'))).toBe(false);
+    expect(await fixturePathExists(join(result.workspaceDirectory, 'android'))).toBe(false);
   });
 
   test('reuses an exact workspace and refuses corruption without repair', async () => {
@@ -104,12 +67,12 @@ describe('isolated Capacitor candidate smoke', () => {
     const missingPolicyStage = await createStage('<!doctype html><script src="/index.js"></script>\n');
     await expect(prepareNativeCapacitorCandidate(missingPolicyStage))
       .rejects.toThrow('NATIVE_CAPACITOR_CSP_META_COUNT:0');
-    expect(await pathExists(join(missingPolicyStage, '../.capacitor'))).toBe(false);
+    expect(await fixturePathExists(join(missingPolicyStage, '../.capacitor'))).toBe(false);
 
     const inlineScriptStage = await createStage(secureHtml('<script>globalThis.compromised = true</script>'));
     await expect(prepareNativeCapacitorCandidate(inlineScriptStage))
       .rejects.toThrow('NATIVE_CAPACITOR_INLINE_SCRIPT_FORBIDDEN');
-    expect(await pathExists(join(inlineScriptStage, '../.capacitor'))).toBe(false);
+    expect(await fixturePathExists(join(inlineScriptStage, '../.capacitor'))).toBe(false);
   });
 
   test('rejects extra workspace files and manifest drift', async () => {

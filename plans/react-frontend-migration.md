@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED NATIVE WALLET + CAPACITOR CSP SMOKE READY`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 VERIFIED CAPACITOR IOS/ANDROID CANDIDATE COPY READY`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1927,7 +1927,7 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + ISOLATED CAPACITOR CSP SMOKE READY`
+**Status:** `IN PROGRESS — WALLET PWA INPUT + CANDIDATE VERIFICATION + NATIVE STAGING + VERIFIED CAPACITOR IOS/ANDROID CANDIDATE COPY READY`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
@@ -2027,6 +2027,30 @@ to that baseline. Canonical `frontend/build`, iOS, Android, `webDir=build`,
 `localhost`, and both `xln` deep-link declarations remain unchanged. No iOS or
 Android copy/sync, package, signing, activation, deployment, or cutover ran.
 
+Capacitor now copies the verified wallet into disposable replicas of both
+checked-in native shells. Replica identity binds the full wallet release, the
+canonical iOS and Android shell digests, and the generated configuration hash;
+the entire 188-file result is then recorded and verified by path, SHA-256, size,
+and mode. Verification independently proves each 54-file native web root is the
+52-file staged candidate plus only Capacitor's two empty Cordova shims, checks
+the generated configuration and ten iOS plugin classes, preserves every
+non-generated shell byte, and reasserts `localhost` plus both `xln` deep links.
+Exact replicas are reused, while byte corruption, extra files, symlinks, source
+shell drift, or manifest drift fails without repair.
+
+The root `native:candidate:capacitor:copy` command created and then reused
+workspace
+`sha256-60d3164c3fde1062c328e9732a306be6f42673f5827b4772c5b6a21100020497`
+from the real `sha256-ea173909e635649b5f4ed9eee848015f82d4db7a47ef22730c5ae6a7f3275e3a`
+release. Focused native/CSP/config/inventory coverage passes 37 / 37 with 330
+expectations; all four React checks pass with 635 files and zero unsafe
+findings, all 513 entrypoint expectations pass, and dead-code analysis retains
+only its existing Dockview hint. The broad native suite reaches only the same
+three unrelated watchtower/Runtime fixture failures already recorded above.
+The canonical shell trees have zero diff. This is Capacitor `copy` evidence in
+isolated replicas only: dependency sync, IDE open, compilation, package,
+signing, activation, deployment, and production cutover remain untouched.
+
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
 
@@ -2085,11 +2109,9 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Copy the checked-in iOS and Android shells into disposable candidate
-   workspaces, run Capacitor copy against the exact verified release there, and
-   verify copied web/config bytes plus `localhost` storage and `xln` deep-link
-   invariants. Do not modify canonical shells, package, sign, activate, deploy,
-   or cut over production.
+1. Add an isolated PWA install/update/rollback smoke for one verified candidate,
+   pinning service-worker scope and whole-release cache identity without
+   activating production or changing canonical Svelte service-worker behavior.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

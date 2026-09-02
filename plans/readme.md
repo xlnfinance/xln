@@ -45,9 +45,9 @@ to finish, not a reason to block unrelated scaffolding or migration slices.
 
 | Artifact | Status | Next action |
 |---|---|---|
-| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 CAPACITOR CSP SMOKE READY` | Run candidate copy against disposable iOS/Android shell replicas without changing canonical native trees. |
+| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; WP8 CAPACITOR IOS/ANDROID COPY READY` | Add isolated PWA install/update/rollback smoke without production activation. |
 | [Technical decisions](react-frontend-migration-decisions.md) | `ACTIVE` | Use the recorded application, route, build, and coexistence decisions. |
-| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; VERIFIED CAPACITOR CSP SMOKE READY` | Prove candidate copy in disposable shell replicas while canonical Svelte `/embed` and native shells remain unchanged. |
+| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP/ACCOUNTS/PROFILE READY; VERIFIED CAPACITOR SHELL COPY READY` | Prove isolated PWA install/update/rollback while canonical Svelte `/embed` remains unchanged. |
 
 WP9 parity follows application completion; WP10 cutover and WP11 production
 activation remain separately owner-authorized.

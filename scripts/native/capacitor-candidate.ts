@@ -63,7 +63,7 @@ export const assertNativeWalletContentSecurityPolicy = (html: string): void => {
   }
 };
 
-const candidateConfig = (workspaceDirectory: string, stagingDirectory: string) => ({
+export const createNativeCapacitorConfig = (workspaceDirectory: string, stagingDirectory: string) => ({
   ...canonicalCapacitorConfig,
   webDir: toPortablePath(relative(workspaceDirectory, stagingDirectory)),
 });
@@ -71,7 +71,7 @@ const candidateConfig = (workspaceDirectory: string, stagingDirectory: string) =
 const manifestFor = (workspaceDirectory: string, stagingDirectory: string): NativeCapacitorCandidateManifest => {
   const releaseId = basename(stagingDirectory);
   if (!RELEASE_ID_PATTERN.test(releaseId)) throw new Error('NATIVE_CAPACITOR_RELEASE_ID_INVALID');
-  const config = candidateConfig(workspaceDirectory, stagingDirectory);
+  const config = createNativeCapacitorConfig(workspaceDirectory, stagingDirectory);
   const configText = `${safeStringify(config, 2)}\n`;
   return {
     schemaVersion: NATIVE_CAPACITOR_CANDIDATE_SCHEMA_VERSION,
@@ -153,7 +153,7 @@ const verifyWorkspace = async (
   if (requireReleaseBasename && basename(workspaceDirectory) !== releaseId) {
     throw new Error('NATIVE_CAPACITOR_WORKSPACE_RELEASE_MISMATCH');
   }
-  const expectedConfig = candidateConfig(workspaceDirectory, stagingDirectory);
+  const expectedConfig = createNativeCapacitorConfig(workspaceDirectory, stagingDirectory);
   if (resolve(workspaceDirectory, expectedConfig.webDir) !== resolve(stagingDirectory)) {
     throw new Error('NATIVE_CAPACITOR_WEB_DIR_MISMATCH');
   }
@@ -185,7 +185,7 @@ export const verifyNativeCapacitorCandidateDirectory = async (
 };
 
 const writeWorkspace = async (workspaceDirectory: string, stagingDirectory: string): Promise<void> => {
-  const config = candidateConfig(workspaceDirectory, stagingDirectory);
+  const config = createNativeCapacitorConfig(workspaceDirectory, stagingDirectory);
   const manifest = manifestFor(workspaceDirectory, stagingDirectory);
   await writeFile(join(workspaceDirectory, NATIVE_CAPACITOR_CONFIG), `${safeStringify(config, 2)}\n`);
   await writeFile(
