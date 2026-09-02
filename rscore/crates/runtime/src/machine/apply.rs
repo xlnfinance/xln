@@ -1003,6 +1003,9 @@ struct PreparedEntityPrefix<'a> {
     txs: Vec<PreparedFrameTx<'a>>,
     rows: Vec<&'a xln_rscore_batch::AccountInputRow>,
     local_financial_txs: Vec<&'a xln_rscore_entity_kernel::LocalEntityFinancialTx>,
+    /// Pending work items this prefix consumed. Differs from `txs.len()` when a
+    /// stale (Retry/Cancel) EntityCommand is evicted without entering the frame.
+    consumed: usize,
 }
 
 fn prepare_entity_prefix<'a>(
@@ -1016,6 +1019,7 @@ fn prepare_entity_prefix<'a>(
     let mut rows = Vec::new();
     let mut local_financial_txs = Vec::new();
     let mut tx_bytes = 0_usize;
+    let mut consumed = 0_usize;
     for work in work {
         match work {
             EntityPendingWork::Account { projected, row } => {
@@ -1075,19 +1079,22 @@ fn prepare_entity_prefix<'a>(
                     command_nonces.as_ref(),
                     command,
                 )?;
+                // Parity target: TS `mergeEntityCommandTransactions` skips an
+                // exact retry or a cancelled slot before the frame exists. The
+                // stale command is consumed (evicted) but never certified.
+                if disposition != EntityCommandDisposition::Next {
+                    consumed += 1;
+                    continue;
+                }
                 if !accept_entity_tx_bytes(&mut tx_bytes, projected, max_tx_bytes)? {
                     break;
                 }
-                if disposition == EntityCommandDisposition::Next {
-                    local_financial_txs.extend(command.native_txs.iter().filter_map(
-                        |tx| match tx {
-                            xln_rscore_entity_kernel::LocalEntityTx::Financial(tx) => Some(tx),
-                            xln_rscore_entity_kernel::LocalEntityTx::Control(_)
-                            | xln_rscore_entity_kernel::LocalEntityTx::CrossJurisdiction(_)
-                            | xln_rscore_entity_kernel::LocalEntityTx::RuntimeOutput(_) => None,
-                        },
-                    ));
-                }
+                local_financial_txs.extend(command.native_txs.iter().filter_map(|tx| match tx {
+                    xln_rscore_entity_kernel::LocalEntityTx::Financial(tx) => Some(tx),
+                    xln_rscore_entity_kernel::LocalEntityTx::Control(_)
+                    | xln_rscore_entity_kernel::LocalEntityTx::CrossJurisdiction(_)
+                    | xln_rscore_entity_kernel::LocalEntityTx::RuntimeOutput(_) => None,
+                }));
                 txs.push(PreparedFrameTx::Borrowed(projected));
                 advance_entity_command_nonce(&mut command_nonces, board, command)?;
             }
@@ -1104,11 +1111,13 @@ fn prepare_entity_prefix<'a>(
                 txs.push(PreparedFrameTx::Borrowed(projected));
             }
         }
+        consumed += 1;
     }
     Ok(PreparedEntityPrefix {
         txs,
         rows,
         local_financial_txs,
+        consumed,
     })
 }
 
@@ -1535,7 +1544,7 @@ fn fit_live_entity_prefix(
     let materialize_elapsed = materialize_started.elapsed();
     let mut measure_elapsed = std::time::Duration::ZERO;
     let mut attempts = 0_usize;
-    let mut candidate = prepared.txs.len();
+    let mut candidate = prepared.consumed;
     for _ in 0..16 {
         attempts += 1;
         let measure_started = Instant::now();
@@ -1697,20 +1706,23 @@ fn take_entity_prefix(
                     &command,
                 )?;
                 advance_entity_command_nonce(&mut selected.command_nonces, board, &command)?;
-                if disposition == EntityCommandDisposition::Next {
-                    let signer_id = command.author_signer_id.clone();
-                    selected.operations.push(ResidentEntityOperation::Local(
-                        command
-                            .native_txs
-                            .into_iter()
-                            .map(|tx| xln_rscore_entity_kernel::AdmittedLocalEntityTx {
-                                signer_id: signer_id.clone(),
-                                board_epoch: command.board_epoch,
-                                tx,
-                            })
-                            .collect(),
-                    ));
+                // Same rule as `prepare_entity_prefix`: a Retry/Cancel command
+                // is evicted here and never enters the certified frame.
+                if disposition != EntityCommandDisposition::Next {
+                    continue;
                 }
+                let signer_id = command.author_signer_id.clone();
+                selected.operations.push(ResidentEntityOperation::Local(
+                    command
+                        .native_txs
+                        .into_iter()
+                        .map(|tx| xln_rscore_entity_kernel::AdmittedLocalEntityTx {
+                            signer_id: signer_id.clone(),
+                            board_epoch: command.board_epoch,
+                            tx,
+                        })
+                        .collect(),
+                ));
                 selected.txs.push(projected);
             }
             EntityPendingWork::ProposerMaterialized { projected, native } => {
