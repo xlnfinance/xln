@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import * as THREE from '../../../frontend/node_modules/three';
 
 import {
   findGraphEntityFromObject,
   resetGraphObjectHighlight,
   setGraphPointerNdc,
+  updateGraphSelectionHighlight,
 } from '../../../frontend/packages/ui/src/graph3d-interaction';
 
 describe('Graph3D shared interaction boundary', () => {
@@ -63,6 +64,20 @@ describe('Graph3D shared interaction boundary', () => {
     expect(lineMaterial.color.getHex()).toBe(0x00ff44);
   });
 
+  test('replaces and disposes the canonical entity selection highlight', () => {
+    const alice = { id: 'alice', mesh: new THREE.Mesh() };
+    const bob = { id: 'bob', mesh: new THREE.Mesh() };
+
+    updateGraphSelectionHighlight([alice, bob], 'alice');
+    const first = alice.mesh.getObjectByName('graph-selection-highlight');
+    expect(first?.rotation.x).toBe(Math.PI / 2);
+    expect(bob.mesh.getObjectByName('graph-selection-highlight')).toBeUndefined();
+
+    updateGraphSelectionHighlight([alice, bob], 'bob');
+    expect(alice.mesh.getObjectByName('graph-selection-highlight')).toBeUndefined();
+    expect(bob.mesh.getObjectByName('graph-selection-highlight')).toBeDefined();
+  });
+
   test('moves reusable hit mechanics out of the canonical Svelte panel', () => {
     const shared = readFileSync('frontend/packages/ui/src/graph3d-interaction.ts', 'utf8');
     const panel = readFileSync('frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte', 'utf8');
@@ -70,9 +85,13 @@ describe('Graph3D shared interaction boundary', () => {
     expect(shared).toContain('export function setGraphPointerNdc');
     expect(shared).toContain('export function findGraphEntityFromObject');
     expect(shared).toContain('export function resetGraphObjectHighlight');
+    expect(shared).toContain('export const beginGraphGesture');
+    expect(shared).toContain('export function updateGraphSelectionHighlight');
     expect(panel).toContain('packages/ui/src/graph3d-interaction');
     expect(panel).not.toContain('function entityFromObject');
     expect(panel).not.toContain('function resetHoveredObjectHighlight');
+    expect(panel).not.toContain('function updateGraphSelectionVisual');
     expect(panel).not.toContain('clientX - rect.left');
+    expect(existsSync('frontend/src/lib/network3d/graphSelectionGesture.ts')).toBe(false);
   });
 });
