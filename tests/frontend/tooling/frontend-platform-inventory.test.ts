@@ -58,7 +58,6 @@ describe('frontend platform baseline inventory', () => {
     expect(deferred.map(({ id }) => id)).toEqual([
       'wallet-durable-custody-storage',
       'push-wake-service-worker',
-      'native-and-packaged-consumers',
       'ops-workspace-registries',
       'candidate-release-consumers',
     ]);
@@ -71,6 +70,8 @@ describe('frontend platform baseline inventory', () => {
 
     expect(currentWork.length).toBeGreaterThan(0);
     expect(currentWork.every(({ status }) => status === 'implemented')).toBe(true);
+    expect(PLATFORM_INVENTORY.find(({ id }) => id === 'native-and-packaged-consumers')?.status)
+      .toBe('implemented');
   });
 
   test('records the embedded Runtime browser boundary and both framework consumers', () => {

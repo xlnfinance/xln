@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir } from 'node:fs/promises';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { lstat, readFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 
 import { compareStableText, safeStringify } from '../../core/protocol/serialization';
 import { assertNativeWalletContentSecurityPolicy, createNativeCapacitorConfig } from './capacitor-candidate';
+import {
+  snapshotRegularTree as snapshotTree,
+  type RegularTreeFile,
+} from './regular-tree';
 import { verifyNativeWalletCandidateDirectory } from './wallet-candidate-manifest';
 
 export const CAPACITOR_SHELL_CANDIDATE_SCHEMA_VERSION = 1 as const;
@@ -13,12 +17,7 @@ export const CAPACITOR_SHELL_CANDIDATE_ROOT = resolve(
   '../../frontend/.artifacts/capacitor-shell-candidates',
 );
 
-export type RegularTreeFile = Readonly<{
-  path: string;
-  sha256: string;
-  size: number;
-  mode: number;
-}>;
+export type { RegularTreeFile } from './regular-tree';
 
 type SourceShellDigests = Readonly<{ ios: string; android: string }>;
 
@@ -44,7 +43,6 @@ const FRONTEND_ROOT = resolve(import.meta.dir, '../../frontend');
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_ID_PATTERN = /^sha256-[0-9a-f]{64}$/u;
 const hashBytes = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex');
-const portablePath = (pathname: string): string => pathname.split(sep).join('/');
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -59,23 +57,10 @@ const assertPlainDirectory = async (directory: string, code: string): Promise<vo
   if (!stats.isDirectory() || stats.isSymbolicLink()) throw new Error(code);
 };
 
-export const snapshotRegularTree = async (root: string, current = root): Promise<readonly RegularTreeFile[]> => {
-  await assertPlainDirectory(current, `CAPACITOR_SHELL_DIRECTORY_INVALID:${portablePath(relative(root, current))}`);
-  const entries = await readdir(current, { withFileTypes: true });
-  entries.sort(({ name: left }, { name: right }) => compareStableText(left, right));
-  const files: RegularTreeFile[] = [];
-  for (const entry of entries) {
-    const pathname = join(current, entry.name);
-    const path = portablePath(relative(root, pathname));
-    if (entry.isSymbolicLink()) throw new Error(`CAPACITOR_SHELL_SYMLINK:${path}`);
-    if (entry.isDirectory()) files.push(...await snapshotRegularTree(root, pathname));
-    else if (entry.isFile()) {
-      const [bytes, stats] = await Promise.all([readFile(pathname), lstat(pathname)]);
-      files.push({ path, sha256: hashBytes(bytes), size: bytes.byteLength, mode: stats.mode & 0o777 });
-    } else throw new Error(`CAPACITOR_SHELL_FILE_TYPE_INVALID:${path}`);
-  }
-  return files.sort(({ path: left }, { path: right }) => compareStableText(left, right));
-};
+export const snapshotRegularTree = async (
+  root: string,
+  current = root,
+): Promise<readonly RegularTreeFile[]> => snapshotTree(root, current, 'CAPACITOR_SHELL');
 
 const treeDigest = (files: readonly RegularTreeFile[]): string => hashBytes(safeStringify(files));
 
