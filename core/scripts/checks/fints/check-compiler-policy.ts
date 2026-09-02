@@ -19,14 +19,18 @@ const REQUIRED_TRUE = [
 
 const REQUIRED_FALSE = ['allowUnreachableCode', 'allowUnusedLabels'] as const;
 
-const readOptions = (configPath: string): ts.CompilerOptions => {
+const readOptions = (configPath: string, trackedOnly = false): ts.CompilerOptions => {
   const absolutePath = path.resolve(configPath);
   const loaded = ts.readConfigFile(absolutePath, ts.sys.readFile);
   if (loaded.error) {
     throw new Error(ts.flattenDiagnosticMessageText(loaded.error.messageText, '\n'));
   }
+  // Svelte's generated base is absent in a clean source checkout. Every
+  // financial safety flag is deliberately repeated in the tracked config, so
+  // this policy validates that source without introducing a build-order race.
+  const config = trackedOnly ? { ...loaded.config, extends: undefined } : loaded.config;
   const parsed = ts.parseJsonConfigFileContent(
-    loaded.config,
+    config,
     ts.sys,
     path.dirname(absolutePath),
     undefined,
@@ -40,8 +44,11 @@ const readOptions = (configPath: string): ts.CompilerOptions => {
 };
 
 const failures: string[] = [];
-for (const configPath of ['tsconfig.runtime.json', 'frontend/tsconfig.json']) {
-  const options = readOptions(configPath);
+for (const [configPath, trackedOnly] of [
+  ['tsconfig.runtime.json', false],
+  ['frontend/tsconfig.json', true],
+] as const) {
+  const options = readOptions(configPath, trackedOnly);
   for (const name of REQUIRED_TRUE) {
     if (options[name] !== true) failures.push(`${configPath}:${name}=true required`);
   }

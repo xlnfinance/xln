@@ -67,7 +67,7 @@ export type HltDashboardPreview = Readonly<{
   warning: string;
 }>;
 
-export type HltLedgerEngine = 'ts' | 'rust';
+type HltLedgerEngine = 'ts' | 'rust';
 
 export type HltLedgerRun = Readonly<{
   at: string;
@@ -324,7 +324,7 @@ type HltChartLayout = Readonly<{
   yTicks: ReadonlyArray<{ value: number; y: number; label: string }>;
 }>;
 
-export const HLT_CHART_CEILING_TPS = 10_000;
+const HLT_CHART_CEILING_TPS = 10_000;
 
 export const layoutHltTpsChart = (runs: readonly HltLedgerRun[]): HltChartLayout => {
   const width = 720;
