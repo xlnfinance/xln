@@ -42,6 +42,10 @@ bunx brainvault --suggest-password
 # At the final hidden prompt, Enter exits; the exact password reveals mnemonics.
 bunx brainvault
 
+# Optional convenience on a private screen: echo password/rehearsal input.
+# The password may remain in terminal scrollback; it is still forbidden in argv.
+bunx brainvault --show-password
+
 # Advanced path: also asks level, multiplier, workers, and any available engine.
 bun run bv --ask
 
@@ -152,6 +156,12 @@ capture, or photography. Any wrong password fails closed. `--show-private-key`
 adds raw keys only after that same rehearsal. `--reveal` remains an inert
 compatibility alias for older invocations. Passwords are forbidden in argv;
 automation must import the library API.
+
+`--show-password` is an explicit convenience trade-off for a trusted private
+screen. It echoes every password and rehearsal entry, so those characters can
+remain in ordinary terminal scrollback or a recorded session. It never accepts
+the password through argv and does not change derivation. Hidden input remains
+the default.
 
 Every interactive engine shows the same dependency-free, two-line terminal
 progress display. Native workers report completed shards over an opt-in stderr

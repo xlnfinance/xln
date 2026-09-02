@@ -14,6 +14,7 @@
  *   bun run bv --ask                            # Ask for factor, multiplier, and workers
  *   bun run bv --allow-short-password           # Legacy recovery only: allow fewer than 8 chars
  *   bun run bv --repeat                         # Interactive: require double entry for name/pass
+ *   bun run bv --show-password                  # Echo password input (unsafe on shared screens)
  *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256MB * multiplier per shard
  *   bun run bv --address-count=5                # Number of standard + ledger-live addresses
  *   bun run bv --show-private-key               # Also reveal raw key for Address 1 (highest risk)
@@ -56,7 +57,7 @@ const args = process.argv.slice(2);
 const BOOLEAN_FLAGS = new Set([
   '--help', '-h', '--bench', '--smoke', '--password', '--ask', '--repeat',
   '--show-private-key', '--reveal', '--allow-short-password',
-  '--suggest-password', '--unicode-recovery',
+  '--suggest-password', '--unicode-recovery', '--show-password',
 ]);
 const VALUE_FLAGS = new Set([
   '--level', '--shards', '--factor', '--multiplier', '--shard-multiplier',
@@ -216,6 +217,18 @@ async function askSecret(
   }
 }
 
+async function askPasswordInput(
+  rl: readline.Interface,
+  output: PromptOutput,
+  prompt: string,
+): Promise<string> {
+  if (!showPasswordInput) return await askSecret(rl, output, prompt);
+  const visiblePrompt = prompt.endsWith(': ')
+    ? `${prompt.slice(0, -2)} (visible): `
+    : `${prompt} (visible)`;
+  return await rl.question(visiblePrompt);
+}
+
 function rejectPrompt(rl: readline.Interface, message: string): void {
   console.error(`Error: ${message}`);
   process.exitCode = 1;
@@ -319,6 +332,10 @@ Flags:
   scale and should not be used for new wallets.
 - --repeat
   Interactive mode only: require second entry for Name and Passphrase.
+- --show-password
+  Echo password and rehearsal input. Explicitly unsafe on shared screens and
+  terminals whose scrollback or session is recorded. Passwords remain forbidden
+  in argv.
 - --reveal
   Backward-compatible alias. The interactive flow always offers one hidden
   password rehearsal after printing the public fingerprint and first address.
@@ -423,6 +440,7 @@ if (legacyEngineFlags.length > 1 || (inlineEngine !== undefined && legacyEngineF
 
 const flagEngine = (inlineEngine ?? legacyEngineFlags[0] ?? 'auto') as EngineSelection;
 const requireRepeat = args.includes('--repeat');
+const showPasswordInput = args.includes('--show-password');
 const showPrivateKey = args.includes('--show-private-key');
 const revealRequested = args.includes('--reveal');
 const askAdvanced = args.includes('--ask');
@@ -1287,6 +1305,9 @@ async function interactive() {
   console.log('\nHuman inputs have limited entropy. Shards make every guess pay Argon2id time + RAM;');
   console.log('waiting raises attack cost, but cannot make a weak password strong.');
   console.log('No receipt, QR, or seed file is saved. Memory is the backup.\n');
+  if (showPasswordInput) {
+    console.warn('VISIBLE INPUT: password characters will remain on screen and may enter terminal scrollback.\n');
+  }
   if (shardMultiplier > 1) {
     const memoryPerShardGb = (BRAINVAULT_V1.SHARD_MEMORY_KB * shardMultiplier) / (1024 * 1024);
     console.log(`CUSTOM MODE: shard-multiplier=${shardMultiplier} (${memoryPerShardGb.toFixed(2)}GB per shard)\n`);
@@ -1308,16 +1329,16 @@ async function interactive() {
     console.log(`\nSuggested password (${SUGGESTED_PASSWORD_CHARACTERS} random a-z/A-Z/0-9 characters / ${SUGGESTED_PASSWORD_BITS.toFixed(2)} bits):`);
     console.log(pass);
     console.log('Memorize it. It is not saved; terminal scrollback may retain what is displayed.');
-    const passRepeat = await askSecret(rl, promptOutput, 'Repeat Suggested Password: ');
+    const passRepeat = await askPasswordInput(rl, promptOutput, 'Repeat Suggested Password: ');
     if (pass !== passRepeat) {
       rejectPrompt(rl, 'Suggested password was not repeated exactly');
       return;
     }
   } else {
-    pass = await askSecret(rl, promptOutput, 'Password: ');
+    pass = await askPasswordInput(rl, promptOutput, 'Password: ');
   }
   if (requireRepeat && !suggestPassword) {
-    const passRepeat = await askSecret(rl, promptOutput, 'Repeat Password: ');
+    const passRepeat = await askPasswordInput(rl, promptOutput, 'Repeat Password: ');
     if (pass !== passRepeat) {
       rejectPrompt(rl, 'Passphrase entries do not match');
       return;
@@ -1449,7 +1470,7 @@ async function interactive() {
 
     const revealOutput = new PromptOutput();
     const revealRl = readline.createInterface({ input: stdin, output: revealOutput, terminal: true });
-    const rehearsal = await askSecret(
+    const rehearsal = await askPasswordInput(
       revealRl,
       revealOutput,
       '\nPassword to reveal recovery material · Enter exits: ',
@@ -1516,8 +1537,11 @@ async function derivePassword() {
 
   printBrand();
   console.log('\nPASSWORD MODE\n');
+  if (showPasswordInput) {
+    console.warn('VISIBLE INPUT: password characters will remain on screen and may enter terminal scrollback.\n');
+  }
   const name = await rl.question('Name: ');
-  const pass = await askSecret(rl, promptOutput, 'Password: ');
+  const pass = await askPasswordInput(rl, promptOutput, 'Password: ');
   const selectedLevel = Number((await rl.question(`Level (${BRAINVAULT_DEFAULT_LEVEL}): `)).trim() || `${BRAINVAULT_DEFAULT_LEVEL}`);
 
   const passwordError = getCliPasswordError(pass);
@@ -1550,7 +1574,7 @@ async function derivePassword() {
   console.log('\n[OK] Master key ready\n');
 
   rehearsalRl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
-  const rehearsal = await askSecret(rehearsalRl, promptOutput, 'Repeat the exact password before site-password output: ');
+  const rehearsal = await askPasswordInput(rehearsalRl, promptOutput, 'Repeat the exact password before site-password output: ');
   rehearsalRl.close();
   if (rehearsal !== pass) throw new Error('BRAINVAULT_REHEARSAL_MISMATCH');
 

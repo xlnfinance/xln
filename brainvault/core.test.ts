@@ -533,12 +533,28 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
   expect(launched.exitCode).toBe(0);
   expect(publicSummary(output)).toEqual({ fingerprint: vector.expect.masterKey.slice(0, 8), address: vector.expect.ethAddr });
   expect(output).toContain('1 / 1 shards  ·  1 workers');
+  expect(output).not.toContain('secret123456');
   expect(output).not.toContain(vector.expect.mnemonic24);
   expect(output).not.toContain('Private Key 1:');
 
   const nonInteractiveRawKey = runCli(['--show-private-key']);
   expect(nonInteractiveRawKey.exitCode).toBe(1);
   expect(nonInteractiveRawKey.stderr.toString()).toContain('sensitive output requires an interactive TTY');
+});
+
+test('--show-password visibly echoes password input only when explicitly requested', () => {
+  const visible = runCliInputTty([
+    '--show-password', '--shards', '1', '--workers', '1', '--engine', 'native',
+  ], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (visible): "', 'send "visible-secret-123\\r"',
+    'expect "Password to reveal recovery material · Enter exits (visible): "', 'send "\\r"',
+  ]);
+  const output = visible.stdout.toString();
+  expect(visible.exitCode).toBe(0);
+  expect(output).toContain('VISIBLE INPUT');
+  expect(output).toContain('visible-secret-123');
+  expect(output).not.toContain('PRIMARY (24-word)');
 });
 
 test('interactive validation failures return a nonzero status', () => {
