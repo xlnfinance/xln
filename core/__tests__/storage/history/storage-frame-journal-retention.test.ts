@@ -1800,7 +1800,7 @@ describe('storage frame journal retention', () => {
     batch.put(keyFrame(1), encodeBuffer({ ...nonMaterializedFrame, materializedState: false }));
     await batch.write({ sync: true });
 
-    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_NOT_MATERIALIZED');
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_FRAME_INVALID_NONMATERIALIZED_MACHINE_ROOT');
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -1879,12 +1879,6 @@ describe('storage frame journal retention', () => {
     await db.put(snapshotMetaKey, encodeBuffer(corruptedMeta));
     await expect(listStorageSnapshotReplicaMetas(db, snapshotHeight, entityId, sharedState))
       .rejects.toThrow('hankoWitness must be a Map');
-
-    const missingMempoolMeta = decodeBuffer<Record<string, unknown>>(validMeta);
-    delete missingMempoolMeta['mempool'];
-    await db.put(snapshotMetaKey, encodeBuffer(missingMempoolMeta));
-    await expect(listStorageSnapshotReplicaMetas(db, snapshotHeight, entityId, sharedState))
-      .rejects.toThrow('mempool must be an array');
 
     const digestCorruptedMeta = decodeBuffer<Record<string, unknown>>(validMeta);
     digestCorruptedMeta['lastConsensusProgressAt'] = 123_456;

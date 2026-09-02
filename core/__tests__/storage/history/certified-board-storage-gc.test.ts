@@ -90,7 +90,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
   };
   const env = createEmptyEnv(seed);
   env.quietRuntimeLogs = true;
-  env.runtimeConfig = { storage: { enabled: false } };
+  env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: false } };
   env.activeJurisdiction = jurisdiction.name;
   env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
@@ -132,6 +132,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
   });
   await Promise.all([currentDb.open(), historyDb.open()]);
   env.runtimeConfig = {
+    ...env.runtimeConfig,
     storage: {
       enabled: true,
       materializePeriodFrames: 1,

@@ -15,7 +15,7 @@ test('frame commit fsyncs authoritative WAL before updating the rebuildable cach
     authoritative,
   );
   const boundary = commit.indexOf(
-    "'after-authoritative-history-commit'",
+    "'after-authoritative-commit'",
     accountAuthority,
   );
   const cache = commit.indexOf(

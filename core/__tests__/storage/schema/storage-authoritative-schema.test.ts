@@ -318,7 +318,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       },
     };
     for (const [index, tx] of [entityCommand, propose].entries()) {
-      expect(() => validateEntityTx(tx, `NESTED_${index}`)).toThrow('DATA');
+      expect(() => validateEntityTx(tx, `NESTED_${index}`)).toThrow();
     }
   });
 

@@ -216,9 +216,8 @@ describe('path-addressed Entity replay contexts', () => {
         domain: { chainId: 31337, depositoryAddress: `0x${'aa'.repeat(20)}` },
         accountFrameHash: `0x${'44'.repeat(32)}`,
         accountHeight: index + 1,
-        lockId: `0x${index.toString(16).padStart(64, '0')}`,
         envelopeHash: `0x${'55'.repeat(32)}`,
-        hashlock: `0x${'66'.repeat(32)}`,
+        hashlock: `0x${index.toString(16).padStart(64, '0')}`,
         tokenId: 1,
         amount: 1_000n,
         timelock: 10n,
@@ -436,7 +435,7 @@ describe('Patricia-addressed Runtime checkpoints', () => {
   test('stores a previously oversized infrastructure map as bounded graph rows', async () => {
     const env = createEmptyEnv('runtime-machine-large-infrastructure');
     env.infrastructure = {
-      entityEncryptionSeeds: new Map(Array.from({ length: 512 }, (_, index) => [
+      entityEncryptionSeeds: new Map(Array.from({ length: 1024 }, (_, index) => [
         `0x${index.toString(16).padStart(64, '0')}`,
         `0x${index.toString(16).padStart(128, '0')}`,
       ])),
