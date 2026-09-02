@@ -26,6 +26,7 @@ export function OpsEntityWorkspacePage() {
         activeTab={activeTab}
         context={snapshot.context}
         onRefresh={() => { void opsEntityWorkspaceSource.refresh(); }}
+        ownership={snapshot.ownership}
         readState={snapshot.readState}
       />
     </OpsShell>

@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT READY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT + READ-ONLY OWNERSHIP BOARD READY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1824,6 +1824,32 @@ for four contracts and all 10 soundchecks, then stops only because `cargo` is
 unavailable. The size policy still reports only the pre-existing out-of-scope
 `core/qa/report.ts` at 3,001 / 3,000 lines.
 
+The first read-only section slice adds a strict 121-line committed-board
+projection in `packages/runtime-client/src/entity-workspace-ownership.ts` and
+renders it only for the React candidate's Ownership tab. The projection accepts
+the existing bounded `view-frame` response, preserves canonical validator
+order, and exposes only board mode, threshold, total shares, validator shares,
+and whether the attached replica signer is a board member. Malformed modes,
+empty or duplicate validators, non-positive or oversized power, foreign or
+missing shares, unreachable thresholds, and active-Entity disagreement fail
+loudly. It introduces no command path and does not reproduce proposer,
+certificate, quorum, or handover logic; share issuance and board actions remain
+on canonical Svelte `/embed`. The direct context/ownership/source/shell batch
+passes 17 tests with 64 expectations, and the affected typed inventory batch
+passes 19 tests with 395 expectations. Unsafe-types covers 629 files with zero
+findings, Svelte diagnostics are 0 / 0, the canonical build transforms 4,671
+SSR and 6,422 client modules, and all four React projects pass. The full
+frontend failure-name diff is empty against the exact 13-name baseline (1,214
+passes and 6,744 expectations). The candidate browser matrix passes 27 / 27,
+and the strict-health isolated real-H1 flow passes in 18.5s with nonzero board
+member and threshold evidence plus clean 390×844, 1366×900, and 1920×1080
+screenshots and no horizontal overflow. Root verification passes 26
+BrainVault/runtime tests with 100,156 expectations, compiles 28 Solidity files,
+generates 92 TypeChain files, passes immutable parity for four contracts and
+all 10 soundchecks, then stops only because `cargo` is unavailable. The size
+policy still reports only the pre-existing out-of-scope `core/qa/report.ts` at
+3,001 / 3,000 lines.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1925,11 +1951,12 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue the owner-authorized Entity workspace sub-program with the first
-   read-only section projection behind the now-live Runtime context. Keep the
+1. Continue the owner-authorized Entity workspace sub-program with the next
+   read-only section projection behind the live Runtime context. Keep the
    canonical Svelte `/embed` route until every workspace panel has parity
    evidence; do not expose commands before their authority and failure states
-   are ported and tested.
+   are ported and tested, and do not present bounded Account-page values as
+   complete Entity totals.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

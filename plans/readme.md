@@ -45,9 +45,9 @@ to finish, not a reason to block unrelated scaffolding or migration slices.
 
 | Artifact | Status | Next action |
 |---|---|---|
-| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + SHARED CONTEXT PROJECTION READY; WP8 PARTIAL` | Connect the real browser Runtime read boundary to the React shell context. |
+| [Migration work plan](react-frontend-migration.md) | `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH/QA/HLT/RUNS/SCENARIOS/AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP BOARD READY; WP8 PARTIAL` | Add the next read-only Entity section without presenting bounded pages as complete totals. |
 | [Technical decisions](react-frontend-migration-decisions.md) | `ACTIVE` | Use the recorded application, route, build, and coexistence decisions. |
-| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + SHARED CONTEXT PROJECTION READY` | Attach a real Runtime read session without claiming `/embed`, then execute WP8 candidate integration. |
+| Frontend implementation | `IN PROGRESS — SITE, DOCS, WALLET, AND AI CONSOLE IMPLEMENTED; OPS WORKSPACE PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D SHARED MECHANICS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE CONTEXT + READ-ONLY OWNERSHIP BOARD READY` | Continue read-only Entity section parity without claiming `/embed`, then execute WP8 candidate integration. |
 
 WP9 parity follows application completion; WP10 cutover and WP11 production
 activation remain separately owner-authorized.
