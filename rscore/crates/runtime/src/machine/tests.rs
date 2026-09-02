@@ -192,6 +192,13 @@ fn frame(timestamp: u64, entity_inputs: Vec<RuntimeEntityInput>) -> RuntimeInput
     frame_at(timestamp, 0, entity_inputs)
 }
 
+pub(crate) fn frame_for_test(
+    timestamp: u64,
+    entity_inputs: Vec<RuntimeEntityInput>,
+) -> RuntimeInput {
+    frame_at(timestamp, 0, entity_inputs)
+}
+
 fn entity_key() -> RuntimeEntityKey {
     RuntimeEntityKey::new(owner_bytes(), &entity_signer_id()).expect("fixture Entity key")
 }

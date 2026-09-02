@@ -146,6 +146,10 @@ pub struct RuntimeEntityInput {
     j_prefix_attestation: Option<RuntimeJPrefixAttestation>,
     /// Exact width measured once by the strict tagged-storage admission codec.
     canonical_wire_bytes: usize,
+    /// Transport provenance (`from`) of a remote EntityInput. Local inputs and
+    /// Runtime-derived work carry none. Parity target: the TS RoutedEntityInput
+    /// `from` field consulted by `discardRejectedEntityInput`.
+    source_runtime_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -362,6 +366,11 @@ impl RuntimeEntityInput {
         if canonical_wire_bytes == 0 {
             return Err(RuntimeMachineError::EmptyCanonicalWire);
         }
+        let source_runtime_id = object
+            .get("from")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty());
         Ok(Self {
             entity_id,
             signer_id,
@@ -370,7 +379,17 @@ impl RuntimeEntityInput {
             atomic_cross_jurisdiction_pair,
             j_prefix_attestation,
             canonical_wire_bytes,
+            source_runtime_id,
         })
+    }
+
+    /// Remote transport origin, when this input arrived from a peer Runtime.
+    pub fn source_runtime_id(&self) -> Option<&str> {
+        self.source_runtime_id.as_deref()
+    }
+
+    pub(super) fn pending_work(&self) -> &[EntityPendingWork] {
+        &self.pending_work
     }
 
     pub fn entity_id(&self) -> &[u8; 32] {
@@ -453,6 +472,7 @@ impl RuntimeEntityInput {
             atomic_cross_jurisdiction_pair: None,
             j_prefix_attestation: None,
             canonical_wire_bytes: 1,
+            source_runtime_id: None,
         }
     }
 
@@ -466,6 +486,7 @@ impl RuntimeEntityInput {
             atomic_cross_jurisdiction_pair: None,
             j_prefix_attestation: None,
             canonical_wire_bytes,
+            source_runtime_id: None,
         }
     }
 
@@ -489,6 +510,7 @@ impl RuntimeEntityInput {
             atomic_cross_jurisdiction_pair: None,
             j_prefix_attestation: None,
             canonical_wire_bytes: 1,
+            source_runtime_id: None,
         }
     }
 }

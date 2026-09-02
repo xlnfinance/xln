@@ -696,15 +696,19 @@ fn j_prefix_pending_local_event(
 }
 
 fn command_board(slot: &EntityApplySlot) -> Result<EntityCommandBoard, RuntimeMachineError> {
-    let authority = slot
-        .replica
+    command_board_for_replica(&slot.replica)
+}
+
+fn command_board_for_replica(
+    replica: &RuntimeEntityReplica,
+) -> Result<EntityCommandBoard, RuntimeMachineError> {
+    let authority = replica
         .entity_consensus
         .state
         .authority
         .validate_and_normalize()
         .map_err(|error| RuntimeMachineError::EntityCommandContext(error.to_string()))?;
-    let signer = slot
-        .replica
+    let signer = replica
         .entity_signer
         .signer_address()
         .map(|value| render_bytes(&value))
@@ -724,17 +728,16 @@ fn command_board(slot: &EntityApplySlot) -> Result<EntityCommandBoard, RuntimeMa
         .map(jurisdiction_stack_key)
         .transpose()?
         .unwrap_or_else(|| UNREGISTERED_ENTITY_COMMAND_STACK_KEY.to_string());
-    let board_epoch = if slot.replica.entity_id == board_bytes {
+    let board_epoch = if replica.entity_id == board_bytes {
         0
     } else {
-        let record = slot
-            .replica
+        let record = replica
             .certified_board_registry
-            .entity_command_board(&slot.replica.entity_id)
+            .entity_command_board(&replica.entity_id)
             .ok_or_else(|| {
                 RuntimeMachineError::EntityCommandContext(format!(
                     "ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED:{}",
-                    render_word(&slot.replica.entity_id)
+                    render_word(&replica.entity_id)
                 ))
             })?;
         if record.board_hash != board_bytes {
@@ -746,7 +749,7 @@ fn command_board(slot: &EntityApplySlot) -> Result<EntityCommandBoard, RuntimeMa
         }
         record.board_epoch
     };
-    let signer_id = slot.replica.entity_signer.signer_id().to_string();
+    let signer_id = replica.entity_signer.signer_id().to_string();
     if !authority.config.validators.contains(&signer_id) {
         return Err(RuntimeMachineError::EntityCommandContext(format!(
             "ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:{signer_id}"
@@ -2253,6 +2256,93 @@ struct AppliedEntityGroup {
     apply_profile: RuntimeApplyPhaseProfile,
 }
 
+/// Untrusted remote EntityCommands are checked against the committed board
+/// and nonce state before any frame mutation. One invalid command rejects
+/// every input of the same origin (Entity, signer, source Runtime), logs it,
+/// and leaves the rest of the frame untouched; local input stays fail-stop.
+///
+/// Parity target: TS `restoreUndurableRuntimeInput` +
+/// `discardRejectedEntityInput` (core/runtime/frame/intake/discard.ts), which
+/// roll the candidate frame back and remove exactly that origin.
+fn reject_invalid_remote_commands(
+    replica: &RuntimeReplica,
+    input: &mut RuntimeInput,
+) -> Result<(), RuntimeMachineError> {
+    let mut rejected: BTreeSet<(RuntimeEntityKey, String)> = BTreeSet::new();
+    let mut boards: BTreeMap<
+        RuntimeEntityKey,
+        (
+            EntityCommandBoard,
+            Option<xln_rscore_entity_kernel::EntityCommandNonceState>,
+        ),
+    > = BTreeMap::new();
+    for entity_input in &input.entity_inputs {
+        let Some(source) = entity_input.source_runtime_id() else {
+            continue;
+        };
+        if !entity_input
+            .pending_work()
+            .iter()
+            .any(|work| matches!(work, EntityPendingWork::Command { .. }))
+        {
+            continue;
+        }
+        let key = RuntimeEntityKey::new(*entity_input.entity_id(), entity_input.signer_id())?;
+        if rejected.contains(&(key.clone(), source.to_string())) {
+            continue;
+        }
+        let (Some(entity_replica), Some(entity_state)) = (
+            replica.e_replicas.get(&key),
+            replica.state.e_replicas.get(&key),
+        ) else {
+            continue;
+        };
+        if !boards.contains_key(&key) {
+            let board = command_board_for_replica(entity_replica)?;
+            let mut nonce_state = entity_state.entity.entity_command_nonces.clone();
+            normalize_entity_command_nonce_board(&mut nonce_state, &board)?;
+            boards.insert(key.clone(), (board, nonce_state));
+        }
+        let (board, nonce_state) = boards.get_mut(&key).expect("board inserted above");
+        let entity_id = render_word(&key.entity_id);
+        for work in entity_input.pending_work() {
+            let EntityPendingWork::Command { command, .. } = work else {
+                continue;
+            };
+            let verdict = assert_signed_entity_command(
+                &entity_id,
+                &entity_replica.entity_consensus.state.authority,
+                &board.signer,
+                board.board_epoch,
+                &board.stack_key,
+                nonce_state.as_ref(),
+                command,
+            )
+            .and_then(|_| advance_entity_command_nonce(nonce_state, board, command));
+            if let Err(error) = verdict {
+                eprintln!(
+                    "RSCORE_RUNTIME_INGRESS_REJECTED entity={entity_id} signer={} from={source} reason={error}",
+                    key.signer_id
+                );
+                rejected.insert((key.clone(), source.to_string()));
+                break;
+            }
+        }
+    }
+    if rejected.is_empty() {
+        return Ok(());
+    }
+    input.entity_inputs.retain(|entity_input| {
+        let Some(source) = entity_input.source_runtime_id() else {
+            return true;
+        };
+        RuntimeEntityKey::new(*entity_input.entity_id(), entity_input.signer_id())
+            .map(|key| !rejected.contains(&(key, source.to_string())))
+            .unwrap_or(true)
+    });
+    Ok(())
+}
+
 fn apply_runtime_inner(
     mut replica: RuntimeReplica,
     mut input: RuntimeInput,
@@ -2279,6 +2369,11 @@ fn apply_runtime_inner(
         debug_assert_eq!(&slot.entity_id, entity_input.entity_id());
     }
 
+    // Live ingress only: exact replay re-applies the WAL, which never holds a
+    // rejected input on either engine.
+    if derive_internal_wakes {
+        reject_invalid_remote_commands(&replica, &mut input)?;
+    }
     enqueue_runtime_input(&mut replica.mempool, &mut input, replica.limits)?;
     let entity_heights = replica
         .state
@@ -5071,5 +5166,79 @@ mod tests {
         super::record_j_observation(state, replica, &stale)
             .expect("stale observation validates without mutation");
         assert_eq!(replica.replica_metadata, before);
+    }
+
+    #[test]
+    fn stale_remote_entity_command_is_rejected_by_origin_without_touching_local_input() {
+        let mut replica =
+            crate::machine::tests::replica(crate::RuntimeLimits::hlt()).expect("runtime replica");
+        let signer_id = crate::machine::tests::entity_signer_id();
+        let owner = crate::machine::tests::owner_bytes();
+        let entity_key = crate::RuntimeEntityKey::new(owner, &signer_id).expect("key");
+        let (state, entity_replica) = replica
+            .take_entity_slot(&entity_key.entity_id, &entity_key.signer_id)
+            .expect("fixture Entity slot");
+        let slot = super::EntityApplySlot {
+            state,
+            replica: entity_replica,
+        };
+        let board = super::command_board(&slot).expect("board");
+        let entity_id = super::render_word(&owner);
+        let tx = CanonicalEntityTx::from_frame_projection(
+            EntityTxKind::Chat,
+            CanonicalValue::Object(vec![
+                ("from".into(), CanonicalValue::String(signer_id.clone())),
+                ("message".into(), CanonicalValue::String("stale".into())),
+            ]),
+        )
+        .expect("chat tx");
+        // Nonce 1 is the only admissible first command; advance a private
+        // nonce state so the remote command claims nonce 2.
+        let mut advanced = slot.state.entity.entity_command_nonces.clone();
+        super::normalize_entity_command_nonce_board(&mut advanced, &board).expect("board");
+        let (first, _) = xln_rscore_entity_kernel::build_locally_authored_entity_command(
+            &slot.replica.entity_signer,
+            &board,
+            advanced.as_ref(),
+            &entity_id,
+            std::slice::from_ref(&tx),
+        )
+        .expect("first command");
+        xln_rscore_entity_kernel::advance_entity_command_nonce(&mut advanced, &board, &first)
+            .expect("advance");
+        let (_, stale) = xln_rscore_entity_kernel::build_locally_authored_entity_command(
+            &slot.replica.entity_signer,
+            &board,
+            advanced.as_ref(),
+            &entity_id,
+            std::slice::from_ref(&tx),
+        )
+        .expect("stale command");
+        replica
+            .install_entity_slot(entity_key.clone(), slot.state, slot.replica)
+            .expect("restore slot");
+        let remote = RuntimeEntityInput::decode(serde_json::json!({
+            "entityId": entity_id,
+            "signerId": signer_id,
+            "from": format!("0x{}", "ab".repeat(20)),
+            "runtimeId": format!("0x{}", "cd".repeat(20)),
+            "sourceRuntimeFrame": {"height": 1, "timestamp": 1},
+            "entityTxs": [{
+                "type": "entityCommand",
+                "data": crate::tagged_json_from_canonical_value(&stale.wire_data)
+                    .expect("tagged command"),
+            }],
+        }))
+        .expect("remote input");
+        let local = RuntimeEntityInput::decode(serde_json::json!({
+            "entityId": entity_id,
+            "signerId": signer_id,
+            "entityTxs": [{"type": "chat", "data": {"from": signer_id, "message": "local"}}],
+        }))
+        .expect("local input");
+        let mut input = crate::machine::tests::frame_for_test(1, vec![remote, local]);
+        super::reject_invalid_remote_commands(&replica, &mut input).expect("preflight");
+        assert_eq!(input.entity_inputs.len(), 1);
+        assert!(input.entity_inputs[0].source_runtime_id().is_none());
     }
 }
