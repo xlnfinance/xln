@@ -431,6 +431,26 @@ export const PLATFORM_INVENTORY = [
     ],
   },
   {
+    id: 'ops-entity-workspace-navigation',
+    owner: 'ops',
+    workPackage: 'WP7',
+    status: 'implemented',
+    interfaces: ['route', 'registry'],
+    sources: [
+      'frontend/packages/runtime-client/src/entity-workspace-navigation.ts',
+      'frontend/packages/ui/src/entity-workspace-display.ts',
+    ],
+    consumers: [
+      'frontend/src/lib/components/Entity/workspace/entity-panel-routing.ts',
+      'frontend/src/lib/components/Entity/workspace/entity-panel-display.ts',
+      'frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte',
+    ],
+    evidence: [
+      'tests/frontend/workspace/entity-panel-routing.test.ts',
+      'tests/frontend/workspace/entity-panel-display.test.ts',
+    ],
+  },
+  {
     id: 'ops-workspace-dock-layout',
     owner: 'ops',
     workPackage: 'WP7',
