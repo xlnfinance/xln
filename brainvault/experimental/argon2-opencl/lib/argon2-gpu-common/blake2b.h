@@ -25,6 +25,7 @@ private:
 
 public:
     Blake2b() : h(), t(), buf(), bufLen(0) { }
+    ~Blake2b() noexcept;
 
     void init(std::size_t outlen);
     void update(const void *in, std::size_t inLen);

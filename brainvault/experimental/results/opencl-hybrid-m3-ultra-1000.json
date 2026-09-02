@@ -23,14 +23,18 @@
     "speedup": 1.642
   },
   "bestObservedHybrid": {
-    "gpuShards": 480,
-    "gpuBatch": 240,
+    "gpuShards": 496,
+    "gpuBatch": 248,
     "gpuJobsPerWorkgroup": 1,
-    "cpuShards": 520,
+    "cpuShards": 504,
     "cpuWorkers": 30,
-    "timeMs": 3053.922,
-    "shardsPerSecond": 327.448,
-    "speedup": 1.682
+    "cpuMs": 2911.468,
+    "gpuMs": 2962.926,
+    "timeMs": 2963.581,
+    "shardsPerSecond": 337.43,
+    "speedup": 1.733,
+    "repeatMedianMs": 2981.436,
+    "repeatRunsMs": [2963.581, 3021.173, 2999.027, 2963.844]
   },
   "parity": {
     "rawShardCounts": [1, 2, 8],

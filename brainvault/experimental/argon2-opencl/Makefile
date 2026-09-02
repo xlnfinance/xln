@@ -13,12 +13,13 @@ SOURCES := \
 	lib/argon2-opencl/processingunit.cpp \
 	lib/argon2-opencl/programcontext.cpp
 TARGET := brainvault-argon2-opencl
+HEADERS := lib/argon2-gpu-common/securezero.h
 
 .PHONY: all parity benchmark benchmark-fastest clean
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCES) data/kernels/argon2_kernel.cl
+$(TARGET): $(SOURCES) $(HEADERS) data/kernels/argon2_kernel.cl
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -framework OpenCL -o $@
 
 parity: $(TARGET)
@@ -28,7 +29,7 @@ benchmark: $(TARGET)
 	bun benchmark.ts 480 240 32 1
 
 benchmark-fastest: $(TARGET)
-	bun benchmark.ts 480 240 30 1
+	bun benchmark.ts 496 248 30 1
 
 clean:
 	rm -f $(TARGET)

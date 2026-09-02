@@ -1,6 +1,7 @@
 #include "argon2params.h"
 
 #include "blake2b.h"
+#include "securezero.h"
 
 #include <cstring>
 #include <algorithm>
@@ -73,6 +74,7 @@ void Argon2Params::digestLong(void *out, std::size_t outLen,
         blake.init(toProduce);
         blake.update(out_buffer, Blake2b::OUT_BYTES);
         blake.final(bout, toProduce);
+        secureZero(out_buffer, sizeof(out_buffer));
     }
 }
 
@@ -159,6 +161,8 @@ void Argon2Params::fillFirstBlocks(
 
         bmemory += ARGON2_BLOCK_SIZE;
     }
+
+    secureZero(initHash, sizeof(initHash));
 }
 
 void Argon2Params::finalize(void *out, const void *memory) const
@@ -189,6 +193,7 @@ void Argon2Params::finalize(void *out, const void *memory) const
     }
 
     digestLong(out, outLen, &xored, ARGON2_BLOCK_SIZE);
+    secureZero(&xored, sizeof(xored));
 }
 
 } // namespace argon2

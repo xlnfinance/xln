@@ -72,12 +72,12 @@ research backend and is intentionally not routed into wallet creation.
 
 `argon2-opencl/` is the faster source-only experiment. A one-shard-per-workgroup
 layout plus concurrent C/NEON processing completed 1,000 exact V1 shards in a
-best 3.054 seconds (327.45 shards/s), versus a fresh 5.136-second C/NEON
-baseline: **1.68x best / about 1.62x typical end-to-end**. The frozen root remained
+best 2.964 seconds (337.43 shards/s), versus a fresh 5.136-second C/NEON
+baseline: **1.73x best / about 1.72x median end-to-end**. The frozen root remained
 `dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
-The measured M3 Ultra split is 480 GPU shards in two batches of 240 and 520 CPU
+The measured M3 Ultra split is 496 GPU shards in two batches of 248 and 504 CPU
 shards. The required 32-worker run took 3.127 seconds; the best observed
-3.054-second tuning used 30 workers to reduce unified-memory contention. GPU
+2.964-second tuning used 30 workers to reduce unified-memory contention. GPU
 and host memory are explicitly erased.
 
 OpenCL is deprecated by Apple and the pinned upstream has mixed license

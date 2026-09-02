@@ -19,8 +19,8 @@ impossible sub-200ms run and used the wrong CPU topology. Qwen initially read
 speedup percentages were rejected. Recommendations below survived comparison
 with source and retained measurements.
 
-- M3 Ultra: retain multiplier 1 and the measured 480 GPU / 520 CPU split,
-  batches of 240, one job per workgroup, and 30 CPU workers.
+- M3 Ultra: retain multiplier 1 and tune around the then-measured 480 GPU /
+  520 CPU split, batches of 240, one job per workgroup, and 30 CPU workers.
 - Entry M5 MacBook Pro: keep CPU-only C/NEON as the production default until
   the exact hardware is measured. Test 4/6/8/10 CPU workers first.
 - A 16GB M5 OpenCL experiment must begin conservatively. Test GPU batches
@@ -40,12 +40,35 @@ plausible benefit.
 
 ## Measured follow-up
 
-The narrow M3 Ultra sweep confirmed the existing layout. The best observed
-1,000-shard run was 3.053922s (327.448 shards/s), with the frozen root
+The first narrow M3 Ultra sweep confirmed the 480/240 layout. A later
+CPU/GPU-tail measurement showed CPU finishing about 170ms later, leading to a
+balanced 496 GPU / 504 CPU split in two batches of 248. The best observed
+1,000-shard run was 2.963581s (337.430 shards/s), with the frozen root
 `dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
-Against the fresh 5.135514s C/NEON baseline, that is 1.682x. Runs around the
-optimum remain thermally noisy, so this is a best observation, not a guaranteed
-rate.
+Against the fresh 5.135514s C/NEON baseline, that is 1.733x. Four final-profile
+runs had a 2.981436s median. Runs remain thermally noisy, so the fastest value
+is a best observation, not a guaranteed rate.
+
+## Additional model review
+
+The same frozen constraints were reviewed by exact models
+`anthropic/claude-fable-5.1`, `z-ai/glm-5.3`, and `x-ai/grok-4.6`. Grok's own
+CLI stalled twice, so the exact same model was reached through Pi/OpenRouter.
+All three independently favored measuring CPU/GPU completion separately and
+retuning the split. They also identified temporary password-derived OpenCL host
+stack state that was not explicitly erased; the retained implementation now
+uses non-elidable cleanup for Blake2 state, compression temporaries, the Argon2
+prehash, long-hash buffer, and final block.
+
+More speculative proposals remain experiments only: two simultaneous 60GB GPU
+arenas, OpenCL scatter/gather staging, subgroup shuffles, and a native-worker
+binary protocol. No model supplied evidence for another 2x gain, and incorrect
+claims about SSSE3 on arm64, M5 timing, OpenCL persistence, and automatic
+multiplier scaling were rejected.
+
+The dual-queue proposal was implemented as a disposable probe and rejected:
+two concurrent 62GB arenas took 5.261247s at the final 496/248 split, versus
+2.964–3.021s for the retained single queue. The probe code was removed.
 
 The entry M5 target is deliberately unmeasured. Before changing its default,
 run at least five warm sequential trials per candidate, report median and p95,

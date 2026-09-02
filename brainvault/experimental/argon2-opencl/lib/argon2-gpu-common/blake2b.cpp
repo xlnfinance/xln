@@ -1,8 +1,17 @@
 #include "blake2b.h"
+#include "securezero.h"
 
 #include <cstring>
 
 namespace argon2 {
+
+Blake2b::~Blake2b() noexcept
+{
+    secureZero(h, sizeof(h));
+    secureZero(t, sizeof(t));
+    secureZero(buf, sizeof(buf));
+    bufLen = 0;
+}
 
 static const std::uint64_t blake2b_IV[8] = {
     UINT64_C(0x6a09e667f3bcc908), UINT64_C(0xbb67ae8584caa73b),
@@ -152,6 +161,9 @@ void Blake2b::compress(const void *block, std::uint64_t f0)
     h[5] ^= v[5] ^ v[13];
     h[6] ^= v[6] ^ v[14];
     h[7] ^= v[7] ^ v[15];
+
+    secureZero(m, sizeof(m));
+    secureZero(v, sizeof(v));
 }
 
 void Blake2b::incrementCounter(std::uint64_t inc)
@@ -200,6 +212,7 @@ void Blake2b::final(void *out, std::size_t outLen)
     }
 
     std::memcpy(out, buffer, outLen);
+    secureZero(buffer, sizeof(buffer));
 }
 
 } // namespace argon2
