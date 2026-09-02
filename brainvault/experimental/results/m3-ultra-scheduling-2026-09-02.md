@@ -52,22 +52,58 @@ which is retained as `s10000-m1` in `matrix-v1.json`.
 - Sharp scheduling cliffs were reproducible: 8x40 was fast while 8x41 and 8x42
   regressed. A measured profile is safer than an analytical extrapolation.
 
-## Bound and next experiments
+## Bound and rejected micro-optimizations
 
 The exact V1 work implies about 549.8 GB of mandatory traffic for 1,000 shards.
 At a measured 555 GB/s ceiling, 0.99 seconds is a hardware traffic floor, not an
 attainable end-to-end target. Around 2.0 seconds appears plausible; approaching
 1.5 seconds would require eliminating much of cold page-in and process startup.
 
+Two under-100-line changes were tested on 2026-09-03 and deliberately not
+retained:
+
+- A private-arena Metal blit prefault regressed the alternating three-run
+  median from 2.410 seconds to 2.473 seconds (2.6%). It added another complete
+  memory pass without hiding page-in behind useful work.
+- Command buffers with unretained references were tested in both alternating
+  orders. All twelve runs retained the frozen root, but pairwise differences
+  changed sign and the aggregate median delta was only about 1.8%, below the
+  large thermal/load variance observed in the second sweep. The extra mode was
+  removed rather than presenting noise as a production optimization.
+
 The next experiments must remain isolated until each proves parity, failure
-semantics, and an end-to-end gain:
+semantics, and a repeatable end-to-end gain:
 
-1. Parallel prefault of shared Metal arenas before derivation.
-2. An offline per-hardware autotuner for process count, worker count, and split;
+1. An offline per-hardware autotuner for process count, worker count, and split;
    no machine-dependent value may enter V1 derivation.
-3. Emit result bytes before secure arena wipe, while retaining a nonzero child
-   exit on wipe failure and ensuring the parent never accepts output from a
-   failed child.
+2. A persistent helper that reuses already-resident arenas without retaining
+   passwords, salts, outputs, or roots between independent requests.
+3. A device matrix for entry MacBook Pro, Max, and Ultra machines; scheduling
+   cliffs make extrapolation from one M3 Ultra unsafe.
 
-Hashcat's public Argon2 benchmark uses different memory parameters and is not a
-valid speed comparison. No claim of a public world record is made.
+## Public implementation comparison
+
+The three useful public reference families solve different parts of this
+problem:
+
+1. [hashcat 7](https://github.com/hashcat/hashcat/blob/master/docs/releases_notes_v7.0.0.md)
+   uses a warp-shuffle Argon2 kernel, supports Metal on Apple Silicon, and
+   reports about a 5% gain from JIT specialization when all parameters are
+   fixed. BrainVault already uses the same register/SIMD-shuffle design and a
+   frozen-V1 specialized Metal kernel; its specialization showed no repeatable
+   gain over the generic control on this machine.
+2. [Mosnacek argon2-gpu](https://gitlab.com/omos/argon2-gpu) is the original
+   CUDA/OpenCL warp design underlying both hashcat's approach and BrainVault's
+   retained Metal/OpenCL experiments. It is a design reference, not a faster
+   drop-in Apple backend.
+3. The [PHC reference C implementation](https://github.com/P-H-C/phc-winner-argon2)
+   is the compatibility baseline. BrainVault vendors it and compiles the
+   optimized path through SSE2NEON for Apple Silicon; Yandex's SIMD-focused
+   [Argonishche](https://github.com/yandex/argon2) reinforces the value of
+   CPU-specific vectorization, but publishes Argon2d numbers at a 2-MiB memory
+   cost and therefore is not speed-comparable to V1.
+
+Hashcat's published benchmark likewise uses different memory/time parameters.
+No public exact-match result was found for Argon2id v19 with 256 MiB, time cost
+1, parallelism 1, and 1,000 independently salted shards on Apple Silicon. No
+claim of a public world record is made.

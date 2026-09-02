@@ -74,3 +74,21 @@ The entry M5 target is deliberately unmeasured. Before changing its default,
 run at least five warm sequential trials per candidate, report median and p95,
 and test plugged-in and battery operation, memory pressure/swap, sustained
 thermals, parity, OOM, Ctrl+C, and secure erasure.
+
+## Final CLI review — 2026-09-03
+
+Pi/OpenRouter did not list a model named Gemini 3.8 Flash. The read-only final
+review therefore used OpenRouter's explicit `google/gemini-flash-latest` alias
+instead of silently substituting a numbered model. It received the local agent
+contract, CLI, CLI tests, and measured M3 Ultra report, with all editing tools
+disabled and instructions to reject unmeasured speed claims.
+
+The review scored the candidate 98/100 and agreed that the exact native progress,
+alternate-screen reveal cleanup, `NO_COLOR`, rejected micro-optimizations, and
+frozen roots were production-ready. It found one concrete issue: several local
+interactive validation branches printed an error and returned without setting a
+nonzero exit status. That finding was reproduced and fixed through one shared
+`rejectPrompt` path. Pseudo-TTY regressions now cover empty username, short
+password, repeated-name mismatch, and an unsafe worker request; all return code
+1. The final package suite passed 47/47, the XLN integration suite passed 50/50,
+native builds passed byte reproduction, and the release matrix passed 12/12.

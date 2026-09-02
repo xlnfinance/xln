@@ -410,6 +410,21 @@ function runCli(cliArgs: readonly string[], input = '') {
   });
 }
 
+function runCliInputTty(extraArgs: readonly string[], interactions: readonly string[]) {
+  const command = ['bun', 'cli.ts', ...extraArgs].join(' ');
+  const script = [
+    'set timeout 10',
+    `spawn ${command}`,
+    ...interactions,
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  return Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+}
+
 function runCliTty(extraArgs: readonly string[], rehearsal = '') {
   const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
   const script = [
@@ -419,8 +434,12 @@ function runCliTty(extraArgs: readonly string[], rehearsal = '') {
     'send "alice\\r"',
     'expect "Password: "',
     'send "secret123456\\r"',
-    'expect "Repeat the exact password to reveal recovery material, or press Enter to exit: "',
+    'expect "Password to reveal recovery material · Enter exits: "',
     `send "${rehearsal}\\r"`,
+    ...(rehearsal !== 'secret123456' ? [] : [
+      'expect "Press Enter when recorded — this screen will be erased: "',
+      'send "\\r"',
+    ]),
     'expect eof',
     'catch wait result',
     'exit [lindex $result 3]',
@@ -442,7 +461,7 @@ function runAnimatedCliTty(noColor: boolean) {
     'send "progress-audit\\r"',
     'expect "Password: "',
     'send "secret123456\\r"',
-    'expect "Repeat the exact password to reveal recovery material, or press Enter to exit: "',
+    'expect "Password to reveal recovery material · Enter exits: "',
     'send "\\r"',
     'expect eof',
     'catch wait result',
@@ -467,7 +486,7 @@ function runAskCliTty() {
     'expect "work level (up/down or j/k, Enter confirms)"',
     // The default is level 4. Three k presses select level 1 before Enter.
     'send "kkk\\r"',
-    'expect "Repeat the exact password to reveal recovery material, or press Enter to exit: "',
+    'expect "Password to reveal recovery material · Enter exits: "',
     'send "\\r"',
     'expect eof',
     'catch wait result',
@@ -513,13 +532,43 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
   const vector = VECTORS[0]!;
   expect(launched.exitCode).toBe(0);
   expect(publicSummary(output)).toEqual({ fingerprint: vector.expect.masterKey.slice(0, 8), address: vector.expect.ethAddr });
-  expect(output).toContain('100% · 1/1 · 1 cpu');
+  expect(output).toContain('1 / 1 shards  ·  1 workers');
   expect(output).not.toContain(vector.expect.mnemonic24);
   expect(output).not.toContain('Private Key 1:');
 
   const nonInteractiveRawKey = runCli(['--show-private-key']);
   expect(nonInteractiveRawKey.exitCode).toBe(1);
   expect(nonInteractiveRawKey.stderr.toString()).toContain('sensitive output requires an interactive TTY');
+});
+
+test('interactive validation failures return a nonzero status', () => {
+  const emptyName = runCliInputTty([], [
+    'expect "Username: "', 'send "\\r"',
+    'expect "Password: "', 'send "secret123456\\r"',
+  ]);
+  expect(emptyName.exitCode).toBe(1);
+  expect(emptyName.stdout.toString()).toContain('Username cannot be empty');
+
+  const shortPassword = runCliInputTty([], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password: "', 'send "short\\r"',
+  ]);
+  expect(shortPassword.exitCode).toBe(1);
+  expect(shortPassword.stdout.toString()).toContain('BRAINVAULT_PASSPHRASE_TOO_SHORT');
+
+  const repeatedName = runCliInputTty(['--repeat'], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Repeat Name: "', 'send "bob\\r"',
+  ]);
+  expect(repeatedName.exitCode).toBe(1);
+  expect(repeatedName.stdout.toString()).toContain('Name entries do not match');
+
+  const excessiveWorkers = runCliInputTty(['--shards', '1', '--workers', '2'], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password: "', 'send "secret123456\\r"',
+  ]);
+  expect(excessiveWorkers.exitCode).toBe(1);
+  expect(excessiveWorkers.stdout.toString()).toContain('workers exceed the safe hardware limit');
 });
 
 test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocation', () => {
@@ -572,7 +621,7 @@ test('CLI advanced menu accepts keyboard navigation and derives the selected lev
   const output = selected.stdout.toString();
   expect(selected.exitCode).toBe(0);
   expect(output).toContain('work level (up/down or j/k, Enter confirms)');
-  expect(output).toContain('1 shards x 1 workers');
+  expect(output).toContain('1 shards × 1 workers');
   expect(output).toContain('Using native isolated workers (1 workers)');
   expect(publicSummary(output)).toEqual({
     fingerprint: VECTORS[0]!.expect.masterKey.slice(0, 8),
@@ -584,8 +633,41 @@ test('exact password rehearsal reveals sensitive output without a reveal command
   const revealed = runCliTty([], 'secret123456');
   const output = revealed.stdout.toString();
   expect(revealed.exitCode).toBe(0);
-  expect(output).toContain('SENSITIVE OUTPUT');
+  expect(output).toContain('SENSITIVE VIEW');
   expect(output).toContain(VECTORS[0]!.expect.mnemonic24);
+  expect(output).toContain('\x1b[?1049h');
+  expect(output).toContain('\x1b[3J');
+  expect(output).toContain('\x1b[?1049l');
+  expect(output).toContain('Sensitive view erased.');
+});
+
+test('Ctrl+C inside sensitive view erases it and exits the entire CLI', () => {
+  const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native'].join(' ');
+  const script = [
+    'set timeout 10',
+    `spawn ${command}`,
+    'expect "Username: "',
+    'send "alice\\r"',
+    'expect "Password: "',
+    'send "secret123456\\r"',
+    'expect "Password to reveal recovery material · Enter exits: "',
+    'send "secret123456\\r"',
+    'expect "Press Enter when recorded — this screen will be erased: "',
+    'send "\\003"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const result = Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  const output = result.stdout.toString();
+  expect(result.exitCode).toBe(130);
+  expect(output).toContain('\x1b[?1049h');
+  expect(output).toContain('\x1b[3J');
+  expect(output).toContain('\x1b[?1049l');
+  expect(output).toContain('Exited.');
+  expect(output).not.toContain('AbortError');
 });
 
 test('wrong reveal rehearsal fails closed without a runtime stack trace', () => {
@@ -603,19 +685,19 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
   const colored = runAnimatedCliTty(false);
   const coloredOutput = colored.stdout.toString();
   expect(colored.exitCode).toBe(0);
-  expect(coloredOutput).toContain('◇');
-  expect(coloredOutput).toContain('shards/s · eta ');
-  expect(coloredOutput).toMatch(/(?:[1-9]|[1-9][0-9])% · [1-9][0-9]*\/100/);
-  expect(coloredOutput).toContain('100% · 100/100 · 32 cpu');
+  expect(coloredOutput).toContain('◇ DERIVING');
+  expect(coloredOutput).toContain('shards/s  ·  ETA ');
+  expect(coloredOutput).toMatch(/(?:[1-9]|[1-9][0-9])%.*[1-9][0-9]* \/ 100 shards/s);
+  expect(coloredOutput).toContain('100 / 100 shards  ·  32 workers');
   expect(coloredOutput).toContain('\x1b[38;5;45m');
 
   const plain = runAnimatedCliTty(true);
   const plainOutput = plain.stdout.toString();
   expect(plain.exitCode).toBe(0);
-  expect(plainOutput).toContain('◇');
-  expect(plainOutput).toContain('shards/s · eta ');
-  expect(plainOutput).toMatch(/(?:[1-9]|[1-9][0-9])% · [1-9][0-9]*\/100/);
-  expect(plainOutput).toContain('100% · 100/100 · 32 cpu');
+  expect(plainOutput).toContain('◇ DERIVING');
+  expect(plainOutput).toContain('shards/s  ·  ETA ');
+  expect(plainOutput).toMatch(/(?:[1-9]|[1-9][0-9])%.*[1-9][0-9]* \/ 100 shards/s);
+  expect(plainOutput).toContain('100 / 100 shards  ·  32 workers');
   expect(plainOutput).not.toContain('\x1b[38;5;45m');
 });
 

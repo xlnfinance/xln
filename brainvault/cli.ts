@@ -93,7 +93,7 @@ function validateArgv(argv: readonly string[]): void {
 validateArgv(args);
 const showHelp = args.includes('--help') || args.includes('-h');
 
-const UI_INNER_WIDTH = 70;
+const UI_INNER_WIDTH = 68;
 const MAX_WASM_MULTIPLIER = 7;
 
 class PromptOutput extends Writable {
@@ -110,16 +110,28 @@ class PromptOutput extends Writable {
 }
 
 function printBrand(): void {
-  const border = `+${'-'.repeat(UI_INNER_WIDTH + 2)}+`;
-  const row = (text: string) => `| ${text.padEnd(UI_INNER_WIDTH)} |`;
-  console.log(border);
-  console.log(row('BRAINVAULT v1  /  MEMORY-HARD BRAIN WALLET'));
-  console.log(row('Same exact inputs. Same root. Any supported engine.'));
-  console.log(border);
+  const tty = stdout.isTTY;
+  const color = tty && process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
+  const cyan = color ? '\x1b[38;5;45m' : '';
+  const reset = color ? '\x1b[0m' : '';
+  const [topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical] = tty
+    ? ['╭', '╮', '╰', '╯', '─', '│']
+    : ['+', '+', '+', '+', '-', '|'];
+  const top = `${cyan}${topLeft}${horizontal.repeat(UI_INNER_WIDTH + 2)}${topRight}${reset}`;
+  const bottom = `${cyan}${bottomLeft}${horizontal.repeat(UI_INNER_WIDTH + 2)}${bottomRight}${reset}`;
+  const row = (text: string) => `${cyan}${vertical}${reset} ${text.padEnd(UI_INNER_WIDTH)} ${cyan}${vertical}${reset}`;
+  console.log(top);
+  console.log(row('brainvault v1  ·  memory-hard deterministic wallet'));
+  console.log(row('same exact inputs → same root · no seed file'));
+  console.log(bottom);
 }
 
 function printStep(step: number, title: string): void {
-  console.log(`\n[${step}/3] ${title}`);
+  const color = stdout.isTTY && process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
+  const cyan = color ? '\x1b[38;5;45m' : '';
+  const dim = color ? '\x1b[2m' : '';
+  const reset = color ? '\x1b[0m' : '';
+  console.log(`\n${cyan}◆${reset} ${title.toLowerCase()} ${dim}[${step}/3]${reset}`);
 }
 
 function startDerivationProgress(shards: number, workers: number): Readonly<{
@@ -128,7 +140,7 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   stop: () => void;
 }> {
   if (!stdout.isTTY) return { update: () => {}, complete: () => {}, stop: () => {} };
-  const width = 32;
+  const width = 40;
   const color = process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
   const cyan = color ? '\x1b[38;5;45m' : '';
   const green = color ? '\x1b[38;5;82m' : '';
@@ -137,6 +149,7 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   const startedAt = Date.now();
   let completed = 0;
   let stopped = false;
+  let rendered = false;
   const render = () => {
     const elapsedMs = Math.max(1, Date.now() - startedAt);
     const ratio = Math.min(1, completed / shards);
@@ -145,17 +158,18 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
     const percent = Math.floor(ratio * 100);
     const rate = completed / (elapsedMs / 1000);
     const eta = completed > 0 && completed < shards ? (shards - completed) / rate * 1000 : 0;
-    const tail = completed >= shards
-      ? 'finalizing'
-      : `${rate.toFixed(rate >= 100 ? 0 : 1)} shards/s · ${completed > 0 ? `eta ${formatDuration(eta)}` : 'eta --'}`;
-    stdout.write(`\r  ${cyan}◇${reset} derive [${bar}] ${percent}% · ${completed.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${tail}`);
+    const etaText = completed >= shards ? 'finalizing' : completed > 0 ? `ETA ${formatDuration(eta)}` : 'ETA --';
+    if (rendered) stdout.write('\x1b[2A');
+    stdout.write(`\r\x1b[2K  ${cyan}◇ DERIVING${reset}  ${String(percent).padStart(3)}%  [${bar}]\n`);
+    stdout.write(`\r\x1b[2K     ${completed.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${rate.toFixed(rate >= 100 ? 0 : 1)} shards/s  ·  ${etaText}  ·  ${workers} workers\n`);
+    rendered = true;
   };
   const timer = setInterval(render, 100);
   const stop = () => {
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
-    stdout.write('\r\x1b[2K');
+    if (rendered) stdout.write('\x1b[2A\r\x1b[2K\n\r\x1b[2K\x1b[1A\r');
   };
   return {
     update: value => {
@@ -163,11 +177,29 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
     },
     complete: elapsedMs => {
       stop();
-      console.log(`  ${green}✓${reset} derived [${green}${'━'.repeat(width)}${reset}]  100% · ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${workers} cpu · ${formatDuration(elapsedMs)}`);
+      console.log(`  ${green}✓ DERIVED${reset}  100%  [${green}${'━'.repeat(width)}${reset}]`);
+      console.log(`     ${shards.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${workers} workers  ·  ${formatDuration(elapsedMs)}`);
     },
     stop,
   };
 }
+
+let sensitiveScreenOpen = false;
+
+function openSensitiveScreen(): void {
+  sensitiveScreenOpen = true;
+  stdout.write('\x1b[?1049h\x1b[2J\x1b[H');
+}
+
+function eraseSensitiveScreen(): void {
+  if (!sensitiveScreenOpen) return;
+  // Alternate-screen teardown keeps recovery material out of normal scrollback
+  // on conventional terminals. It cannot defeat recordings or terminal logging.
+  stdout.write('\x1b[2J\x1b[3J\x1b[H\x1b[?1049l');
+  sensitiveScreenOpen = false;
+}
+
+process.once('exit', eraseSensitiveScreen);
 
 async function askSecret(
   rl: readline.Interface,
@@ -182,6 +214,12 @@ async function askSecret(
     output.muted = false;
     stdout.write('\n');
   }
+}
+
+function rejectPrompt(rl: readline.Interface, message: string): void {
+  console.error(`Error: ${message}`);
+  process.exitCode = 1;
+  rl.close();
 }
 
 async function selectOption(title: string, options: readonly string[], initial = 0): Promise<number> {
@@ -456,7 +494,7 @@ function workFromLegacyFactor(factor: number): WorkSpec {
 }
 
 function recoveryRuleText(shardCount: number, shardMultiplierValue: number): string {
-  return `Recovery rule: use the exact same Name + Passphrase + Shards (${shardCount}) + shard-multiplier (${shardMultiplierValue}) to reproduce the same master key.`;
+  return `Recovery: exact username + password + ${shardCount.toLocaleString('en-US')} shards + multiplier ${shardMultiplierValue}.`;
 }
 
 type HardwarePlan = Readonly<{
@@ -1246,10 +1284,9 @@ async function interactive() {
   let rl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
 
   printBrand();
-  console.log('\nHuman inputs have limited entropy; shards make every guess pay Argon2id time and RAM.');
-  console.log('More shards buy more resistance through waiting. They do not make a weak password strong.');
-  console.log('NO RECEIPT: no seed file, QR, or recovery secret is saved. Your memory is the backup.');
-  console.log('Remember the exact username, password, level, and multiplier.\n');
+  console.log('\nHuman inputs have limited entropy. Shards make every guess pay Argon2id time + RAM;');
+  console.log('waiting raises attack cost, but cannot make a weak password strong.');
+  console.log('No receipt, QR, or seed file is saved. Memory is the backup.\n');
   if (shardMultiplier > 1) {
     const memoryPerShardGb = (BRAINVAULT_V1.SHARD_MEMORY_KB * shardMultiplier) / (1024 * 1024);
     console.log(`CUSTOM MODE: shard-multiplier=${shardMultiplier} (${memoryPerShardGb.toFixed(2)}GB per shard)\n`);
@@ -1260,8 +1297,7 @@ async function interactive() {
   if (requireRepeat) {
     const nameRepeat = await rl.question('Repeat Name: ');
     if (name !== nameRepeat) {
-      console.log('Error: Name entries do not match');
-      rl.close();
+      rejectPrompt(rl, 'Name entries do not match');
       return;
     }
   }
@@ -1274,8 +1310,7 @@ async function interactive() {
     console.log('Memorize it. It is not saved; terminal scrollback may retain what is displayed.');
     const passRepeat = await askSecret(rl, promptOutput, 'Repeat Suggested Password: ');
     if (pass !== passRepeat) {
-      console.log('Error: Suggested password was not repeated exactly');
-      rl.close();
+      rejectPrompt(rl, 'Suggested password was not repeated exactly');
       return;
     }
   } else {
@@ -1284,27 +1319,23 @@ async function interactive() {
   if (requireRepeat && !suggestPassword) {
     const passRepeat = await askSecret(rl, promptOutput, 'Repeat Password: ');
     if (pass !== passRepeat) {
-      console.log('Error: Passphrase entries do not match');
-      rl.close();
+      rejectPrompt(rl, 'Passphrase entries do not match');
       return;
     }
   }
 
   if (!name) {
-    console.log('Error: Username cannot be empty');
-    rl.close();
+    rejectPrompt(rl, 'Username cannot be empty');
     return;
   }
   const passwordError = getCliPasswordError(pass);
   if (passwordError !== undefined) {
-    console.log(`Error: ${passwordError}`);
-    rl.close();
+    rejectPrompt(rl, passwordError);
     return;
   }
   const characterError = getCliCreationCharacterError(name, pass);
   if (characterError !== undefined) {
-    console.log(`Error: ${characterError}`);
-    rl.close();
+    rejectPrompt(rl, characterError);
     return;
   }
 
@@ -1342,8 +1373,7 @@ async function interactive() {
       console.log('Warning: any multiplier other than 1 changes the root and must be remembered for recovery.');
       selectedMultiplier = Number((await rl.question('Shard multiplier (1): ')).trim() || '1');
       if (!Number.isSafeInteger(selectedMultiplier) || selectedMultiplier < 1) {
-        console.log('Error: multiplier must be a positive integer');
-        rl.close();
+        rejectPrompt(rl, 'multiplier must be a positive integer');
         return;
       }
     }
@@ -1376,28 +1406,24 @@ async function interactive() {
       console.log(`Inline workers: ${workersInput}`);
     }
   } else {
-    console.log('\nRecommended defaults:');
-    console.log(`  Level: ${selectedWork.level ?? 'custom'} (${shardCount.toLocaleString('en-US')} exact shards)`);
-    console.log(`  Shard multiplier: ${selectedMultiplier}`);
-    console.log(`  Workers: ${workersInput} (all available CPUs allowed by RAM)`);
-    console.log('  Use --ask for advanced setup.');
+    const level = selectedWork.level === undefined ? 'custom' : `${selectedWork.level} ${BRAINVAULT_LEVEL_NAMES[selectedWork.level - 1]}`;
+    console.log(`\n${level}  ·  ${shardCount.toLocaleString('en-US')} shards  ·  multiplier ${selectedMultiplier}  ·  ${workersInput} workers`);
+    console.log('Recommended defaults · use --ask for advanced setup.');
   }
   if (!Number.isSafeInteger(workersInput) || workersInput < 1) {
-    console.log('Error: workers must be a positive integer');
-    rl.close();
+    rejectPrompt(rl, 'workers must be a positive integer');
     return;
   }
   if (workersInput > plan.recommendedWorkers) {
-    console.log(`Error: workers exceed the safe hardware limit (${plan.recommendedWorkers}) for this shard count/multiplier.`);
-    rl.close();
+    rejectPrompt(rl, `workers exceed the safe hardware limit (${plan.recommendedWorkers}) for this shard count/multiplier.`);
     return;
   }
 
   rl.close();
 
-  console.log(`\n${shardCount} shards x ${workersInput} workers`);
+  console.log(`\n${shardCount.toLocaleString('en-US')} shards × ${workersInput} workers`);
   console.log(recoveryRuleText(shardCount, selectedMultiplier));
-  console.log(`Address matrix: ${addressCount} standard + ${addressCount} Ledger Live`);
+  console.log(`Addresses: ${addressCount} standard + ${addressCount} Ledger Live`);
   printStep(3, 'DERIVE');
 
   let rootKey: Uint8Array | undefined;
@@ -1411,9 +1437,10 @@ async function interactive() {
     rootKey = result.rootKey;
     progress.complete(result.derivationTime);
 
-    console.log('');
-    console.log(`Root fingerprint: ${result.fingerprint}`);
-    console.log(`First address:    ${result.ethAddr24}`);
+    console.log('\n╭─ PUBLIC RESULT');
+    console.log(`│ Root fingerprint: ${result.fingerprint}`);
+    console.log(`│ First address:    ${result.ethAddr24}`);
+    console.log('╰─ safe to leave on screen');
 
     if (!stdin.isTTY || !stdout.isTTY) {
       if (revealRequested) throw new Error('BRAINVAULT_REVEAL_TTY_REQUIRED');
@@ -1425,7 +1452,7 @@ async function interactive() {
     const rehearsal = await askSecret(
       revealRl,
       revealOutput,
-      '\nRepeat the exact password to reveal recovery material, or press Enter to exit: ',
+      '\nPassword to reveal recovery material · Enter exits: ',
     );
     revealRl.close();
     if (rehearsal === '') {
@@ -1438,19 +1465,32 @@ async function interactive() {
     }
 
     const sensitive = await deriveSensitiveMaterial(result.rootKey, addressCount, showPrivateKey);
+    openSensitiveScreen();
+    try {
+      console.log('SENSITIVE VIEW · disappears when you press Enter');
+      console.log('Screen recording, tmux logging, and photographs can still capture it.');
+      console.log('\nPRIMARY (24-word):');
+      console.log(sensitive.mnemonic24);
+      for (let i = 0; i < sensitive.standardAddrs24.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs24[i]);
+      for (let i = 0; i < sensitive.ledgerLiveAddrs24.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs24[i]);
+      if (sensitive.privateKey24) console.log('Private Key 1:', sensitive.privateKey24);
 
-    console.log('\nSENSITIVE OUTPUT — terminal scrollback may retain everything below.');
-    console.log('\nPRIMARY (24-word):');
-    console.log(sensitive.mnemonic24);
-    for (let i = 0; i < sensitive.standardAddrs24.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs24[i]);
-    for (let i = 0; i < sensitive.ledgerLiveAddrs24.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs24[i]);
-    if (sensitive.privateKey24) console.log('Private Key 1:', sensitive.privateKey24);
+      console.log('\nSECONDARY (12-word):');
+      console.log(sensitive.mnemonic12);
+      for (let i = 0; i < sensitive.standardAddrs12.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs12[i]);
+      for (let i = 0; i < sensitive.ledgerLiveAddrs12.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs12[i]);
+      if (sensitive.privateKey12) console.log('Private Key 1:', sensitive.privateKey12);
 
-    console.log('\nSECONDARY (12-word):');
-    console.log(sensitive.mnemonic12);
-    for (let i = 0; i < sensitive.standardAddrs12.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs12[i]);
-    for (let i = 0; i < sensitive.ledgerLiveAddrs12.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs12[i]);
-    if (sensitive.privateKey12) console.log('Private Key 1:', sensitive.privateKey12);
+      const dismissRl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
+      try {
+        await dismissRl.question('\nPress Enter when recorded — this screen will be erased: ');
+      } finally {
+        dismissRl.close();
+      }
+    } finally {
+      eraseSensitiveScreen();
+    }
+    console.log('Sensitive view erased. Public result remains above.');
   } catch (err) {
     progress.stop();
     if (isUserCancellation(err)) throw err;
@@ -1482,20 +1522,17 @@ async function derivePassword() {
 
   const passwordError = getCliPasswordError(pass);
   if (passwordError !== undefined) {
-    console.error(`Error: ${passwordError}`);
-    rl.close();
+    rejectPrompt(rl, passwordError);
     return;
   }
   const characterError = getCliCreationCharacterError(name, pass);
   if (characterError !== undefined) {
-    console.error(`Error: ${characterError}`);
-    rl.close();
+    rejectPrompt(rl, characterError);
     return;
   }
 
   if (!Number.isSafeInteger(selectedLevel) || selectedLevel < 1 || selectedLevel > BRAINVAULT_LEVEL_SHARDS.length) {
-    console.error(`Error: level must be an integer in 1..${BRAINVAULT_LEVEL_SHARDS.length}`);
-    rl.close();
+    rejectPrompt(rl, `level must be an integer in 1..${BRAINVAULT_LEVEL_SHARDS.length}`);
     return;
   }
 

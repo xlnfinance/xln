@@ -64,6 +64,14 @@ BrainVault has one frozen protocol: V1. The npm package version is only the
 immutable build/release number required by the registry; it is not a protocol
 version. Future fixes must preserve every V1 root and frozen test vector.
 
+## Live terminal demo
+
+[Watch the real 21-second CLI recording](media/brainvault-terminal-live.mp4).
+It was captured from macOS Terminal running the actual Metal/C/NEON engine;
+`satoshi` / `hard2guess` and every displayed seed are public demo material and
+must never receive funds. The recording shows real shard progress, public-only
+default output, hidden password rehearsal, and the isolated sensitive view.
+
 ## Hardware defaults
 
 The portable C/NEON path targets the entry 14-inch MacBook Pro with M5: 16GB
@@ -136,16 +144,21 @@ scrollback may retain that display, so use it only on a trusted device.
 
 After derivation BrainVault prints only an eight-hex root fingerprint and the
 first public address, then shows one hidden prompt. Enter exits; entering the
-exact password again reveals the mnemonic and address matrix. Any other input
-fails closed. `--show-private-key` adds raw keys only after that same rehearsal.
-`--reveal` remains an inert compatibility alias for older invocations.
-Passwords are forbidden in argv; automation must import the library API.
+exact password again opens the mnemonic and address matrix in the terminal's
+alternate screen. Enter or Ctrl+C erases that view and returns to the ordinary
+scrollback, which still contains only the public result. This reduces accidental
+scrollback retention, but cannot defeat screen recording, tmux logging, terminal
+capture, or photography. Any wrong password fails closed. `--show-private-key`
+adds raw keys only after that same rehearsal. `--reveal` remains an inert
+compatibility alias for older invocations. Passwords are forbidden in argv;
+automation must import the library API.
 
-Every interactive engine shows the same dependency-free, single-line terminal
-progress bar. Native workers report completed shards over an opt-in stderr
-protocol, so the displayed count and percentage are exact; rate and ETA are
-live estimates. The bar respects `NO_COLOR`, turns green, and reports 100% only
-after every shard is validated and the root has been derived successfully.
+Every interactive engine shows the same dependency-free, two-line terminal
+progress display. Native workers report completed shards over an opt-in stderr
+protocol, so the prominent percentage and exact completed/total count are real;
+rate and ETA are live estimates. The display respects `NO_COLOR`, turns green,
+and reports 100% only after every shard is validated and the root has been
+derived successfully.
 
 ## Self-contained package
 
