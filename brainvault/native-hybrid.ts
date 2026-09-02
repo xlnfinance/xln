@@ -1,5 +1,6 @@
 import { cpus, totalmem } from 'node:os';
 import { verifyBundledExecutable, verifyBundledFile } from './binary-integrity.ts';
+import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native-progress.ts';
 
 const INPUT_MAGIC = 0x32435642;
 const HEADER_BYTES = 24;
@@ -118,9 +119,29 @@ type NativeJob = Readonly<{
   environment?: Readonly<Record<string, string>>;
 }>;
 
-async function runJob(job: NativeJob, input: Buffer): Promise<Readonly<{ first: number; output: Buffer }>> {
+async function runJob(
+  job: NativeJob,
+  input: Buffer,
+  onProgress?: (completed: number) => void,
+): Promise<Readonly<{ first: number; output: Buffer }>> {
+  let lastProgress = 0;
+  const acceptProgress = onProgress === undefined ? undefined : (completed: number) => {
+    if (!Number.isSafeInteger(completed) || completed < 1 || completed > job.count) {
+      throw new Error(`BRAINVAULT_NATIVE_PROGRESS_INVALID:${completed}:${lastProgress}:${job.count}`);
+    }
+    // Parallel native workers can reach stderr out of order. The largest
+    // observed counter is the exact completed lower bound; older lines add no
+    // information and must not make aggregate progress move backwards.
+    if (completed <= lastProgress) return;
+    lastProgress = completed;
+    onProgress(completed);
+  };
   const child = Bun.spawn([job.executable], {
-    env: { ...process.env, ...job.environment },
+    env: {
+      ...process.env,
+      ...job.environment,
+      ...(onProgress === undefined ? {} : { [BRAINVAULT_NATIVE_PROGRESS_ENV]: '1' }),
+    },
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -129,13 +150,17 @@ async function runJob(job: NativeJob, input: Buffer): Promise<Readonly<{ first: 
   child.stdin.end();
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).arrayBuffer(),
-    new Response(child.stderr).text(),
+    readNativeProgress(child.stderr, acceptProgress),
     child.exited,
   ]);
   const output = Buffer.from(stdout);
   if (exitCode !== 0) {
     output.fill(0);
     throw new Error(`BRAINVAULT_ACCELERATOR_CHILD_FAILED:${exitCode}:${stderr.trim()}`);
+  }
+  if (onProgress !== undefined && lastProgress !== job.count) {
+    output.fill(0);
+    throw new Error(`BRAINVAULT_NATIVE_PROGRESS_INCOMPLETE:${lastProgress}:${job.count}`);
   }
   const expected = job.count * OUTPUT_BYTES;
   if (output.length !== expected) {
@@ -153,8 +178,9 @@ export async function deriveHybridNativeShards(options: Readonly<{
   memoryKiB: number;
   requestedCpuWorkers: number;
   paths: NativeHybridPaths;
+  onProgress?: (completed: number, total: number) => void;
 }>): Promise<Readonly<{ shards: Uint8Array[]; plan: AcceleratorPlan }>> {
-  const { engine, password, salts, memoryKiB, requestedCpuWorkers, paths } = options;
+  const { engine, password, salts, memoryKiB, requestedCpuWorkers, paths, onProgress } = options;
   if (memoryKiB !== 262144) throw new Error(`BRAINVAULT_ACCELERATOR_MEMORY_UNSUPPORTED:${memoryKiB}`);
   const shardCount = salts.length;
   const plan = acceleratorPlan(engine, shardCount, requestedCpuWorkers);
@@ -207,7 +233,15 @@ export async function deriveHybridNativeShards(options: Readonly<{
     for (const input of inputs) input.fill(0);
     throw error;
   }
-  const settled = await Promise.allSettled(jobs.map((job, index) => runJob(job, inputs[index]!)));
+  let totalCompleted = 0;
+  const settled = await Promise.allSettled(jobs.map((job, index) => {
+    let jobCompleted = 0;
+    return runJob(job, inputs[index]!, onProgress === undefined ? undefined : completed => {
+      totalCompleted += completed - jobCompleted;
+      jobCompleted = completed;
+      onProgress(totalCompleted, shardCount);
+    });
+  }));
   for (const input of inputs) input.fill(0);
   const failure = settled.find(result => result.status === 'rejected');
   if (failure !== undefined) {

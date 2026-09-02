@@ -202,6 +202,7 @@ static int run_metal(
         : (uint8_t *)memory.contents;
     setup_ms = monotonic_ms() - total_started;
     FLAG_clear_internal_memory = 1;
+    BOOL progress_enabled = getenv("BRAINVAULT_NATIVE_PROGRESS") != NULL;
 
     for (uint32_t first = 0u; first < shard_count; first += workers) {
         uint32_t active = shard_count - first;
@@ -304,6 +305,7 @@ static int run_metal(
             (void)memset_s(final_block, sizeof(final_block), 0, sizeof(final_block));
         }
         finalize_ms += monotonic_ms() - finalize_started;
+        if (progress_enabled) fprintf(stderr, "BVP1 %u\n", first + active);
     }
     result = 0;
 

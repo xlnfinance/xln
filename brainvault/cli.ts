@@ -39,6 +39,7 @@ import { acceptShard, createShardSlots, finalizeShards } from './shard-collector
 import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
 import { verifyBundledExecutable } from './binary-integrity.ts';
 import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } from './native-hybrid.ts';
+import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native-progress.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
   BRAINVAULT_LEVEL_NAMES,
@@ -122,10 +123,11 @@ function printStep(step: number, title: string): void {
 }
 
 function startDerivationProgress(shards: number, workers: number): Readonly<{
+  update: (completed: number) => void;
   complete: (elapsedMs: number) => void;
   stop: () => void;
 }> {
-  if (!stdout.isTTY) return { complete: () => {}, stop: () => {} };
+  if (!stdout.isTTY) return { update: () => {}, complete: () => {}, stop: () => {} };
   const width = 32;
   const color = process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
   const cyan = color ? '\x1b[38;5;45m' : '';
@@ -133,17 +135,20 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   const dim = color ? '\x1b[2m' : '';
   const reset = color ? '\x1b[0m' : '';
   const startedAt = Date.now();
-  let tick = 0;
+  let completed = 0;
   let stopped = false;
   const render = () => {
-    const span = 5;
-    const cycle = Math.max(1, (width - span) * 2);
-    const phase = tick++ % cycle;
-    const forward = phase <= width - span;
-    const offset = forward ? phase : cycle - phase;
-    const comet = forward ? '━━━━╸' : '╺━━━━';
-    const bar = `${dim}${'·'.repeat(offset)}${reset}${cyan}${comet}${reset}${dim}${'·'.repeat(width - span - offset)}${reset}`;
-    stdout.write(`\r  ${cyan}◇${reset} derive  [${bar}]  ${formatDuration(Date.now() - startedAt)} · ${workers} cpu`);
+    const elapsedMs = Math.max(1, Date.now() - startedAt);
+    const ratio = Math.min(1, completed / shards);
+    const filled = Math.floor(ratio * width);
+    const bar = `${cyan}${'━'.repeat(filled)}${reset}${filled < width ? `${cyan}╸${reset}${dim}${'·'.repeat(width - filled - 1)}${reset}` : ''}`;
+    const percent = Math.floor(ratio * 100);
+    const rate = completed / (elapsedMs / 1000);
+    const eta = completed > 0 && completed < shards ? (shards - completed) / rate * 1000 : 0;
+    const tail = completed >= shards
+      ? 'finalizing'
+      : `${rate.toFixed(rate >= 100 ? 0 : 1)} shards/s · ${completed > 0 ? `eta ${formatDuration(eta)}` : 'eta --'}`;
+    stdout.write(`\r  ${cyan}◇${reset} derive [${bar}] ${percent}% · ${completed.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${tail}`);
   };
   const timer = setInterval(render, 100);
   const stop = () => {
@@ -153,6 +158,9 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
     stdout.write('\r\x1b[2K');
   };
   return {
+    update: value => {
+      if (Number.isSafeInteger(value) && value >= 0 && value <= shards) completed = value;
+    },
     complete: elapsedMs => {
       stop();
       console.log(`  ${green}✓${reset} derived [${green}${'━'.repeat(width)}${reset}]  100% · ${shards.toLocaleString('en-US')}/${shards.toLocaleString('en-US')} · ${workers} cpu · ${formatDuration(elapsedMs)}`);
@@ -492,6 +500,7 @@ function getHardwarePlan(shardCount: number, multiplier: number): HardwarePlan {
 interface DeriveOptions {
   engine?: EngineSelection;
   shardMultiplier?: number;
+  onProgress?: (completed: number, total: number) => void;
 }
 
 function resolveNeonExecutable(): string | undefined {
@@ -600,6 +609,7 @@ async function deriveExecutableShards(
   wipePerShard = false,
   shardMemoryKb = BRAINVAULT_V1.SHARD_MEMORY_KB,
   algId = BRAINVAULT_V1.ALG_ID,
+  onProgress?: (completed: number) => void,
 ): Promise<Uint8Array[]> {
   const verifiedExecutable = verifyBundledExecutable(executable, import.meta.dir);
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
@@ -616,16 +626,33 @@ async function deriveExecutableShards(
   let output = Buffer.alloc(0);
   let stderr = '';
   let exitCode = -1;
+  let lastProgress = 0;
+  const acceptProgress = onProgress === undefined ? undefined : (completed: number) => {
+    if (!Number.isSafeInteger(completed) || completed < 1 || completed > shardCount) {
+      throw new Error(`BRAINVAULT_NATIVE_PROGRESS_INVALID:${completed}:${lastProgress}:${shardCount}`);
+    }
+    if (completed <= lastProgress) return;
+    lastProgress = completed;
+    onProgress(completed);
+  };
   try {
     for (let index = 0; index < shardCount; index += 1) {
       input.set(await createShardSalt(name, index, shardCount, algId), header.length + password.length + (index * 32));
     }
-    const child = Bun.spawn([verifiedExecutable], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+    const child = Bun.spawn([verifiedExecutable], {
+      env: {
+        ...process.env,
+        ...(onProgress === undefined ? {} : { [BRAINVAULT_NATIVE_PROGRESS_ENV]: '1' }),
+      },
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     child.stdin.write(input);
     child.stdin.end();
     const [stdoutBytes, stderrText, status] = await Promise.all([
       new Response(child.stdout).arrayBuffer(),
-      new Response(child.stderr).text(),
+      readNativeProgress(child.stderr, acceptProgress),
       child.exited,
     ]);
     output = Buffer.from(stdoutBytes);
@@ -638,6 +665,10 @@ async function deriveExecutableShards(
   if (exitCode !== 0) {
     output.fill(0);
     throw new Error(`BRAINVAULT_EXECUTABLE_FAILED:${String(exitCode)}:${stderr.trim()}`);
+  }
+  if (onProgress !== undefined && lastProgress !== shardCount) {
+    output.fill(0);
+    throw new Error(`BRAINVAULT_NATIVE_PROGRESS_INCOMPLETE:${lastProgress}:${shardCount}`);
   }
   if (output.length !== shardCount * BRAINVAULT_V1.SHARD_OUTPUT_BYTES) {
     const actual = output.length;
@@ -661,10 +692,12 @@ async function deriveDirectAsyncShards(
   workers: number,
   shardMemoryKb: number,
   algId: string,
+  onProgress?: (completed: number) => void,
 ): Promise<Uint8Array[]> {
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
   const shards = new Array<Uint8Array>(shardCount);
   let nextShard = 0;
+  let completed = 0;
   try {
     await Promise.all(Array.from({ length: workers }, async () => {
       for (;;) {
@@ -680,6 +713,8 @@ async function deriveDirectAsyncShards(
           algorithm: 2,
           version: 1,
         }));
+        completed += 1;
+        onProgress?.(completed);
       }
     }));
     return shards;
@@ -692,6 +727,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
   const {
     engine = 'auto',
     shardMultiplier = 1,
+    onProgress,
   } = options;
 
   assertBrainVaultName(name);
@@ -759,6 +795,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         salts,
         memoryKiB: shardMemoryKb,
         requestedCpuWorkers: actualWorkers,
+        onProgress,
         paths: {
           packageRoot: import.meta.dir,
           cpuExecutable: neonExecutable,
@@ -771,6 +808,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     } catch (error) {
       if (!autoSelectedMetal) throw error;
       console.warn(`Metal unavailable at runtime; using C/NEON backend (${String(error)}).`);
+      onProgress?.(0, shardCount);
       selectedEngine = 'c-neon';
     } finally {
       password.fill(0);
@@ -791,10 +829,12 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         selectedEngine === 'c-neon-wipe',
         shardMemoryKb,
         kdfAlgId,
+        completed => onProgress?.(completed, shardCount),
       );
     } catch (error) {
       if (!fallbackFromC) throw error;
       console.warn(`C/NEON unavailable at runtime; using portable native fallback (${String(error)}).`);
+      onProgress?.(0, shardCount);
       selectedEngine = 'native';
     }
   }
@@ -815,6 +855,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
       false,
       shardMemoryKb,
       kdfAlgId,
+      completed => onProgress?.(completed, shardCount),
     );
   }
 
@@ -827,6 +868,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
       actualWorkers,
       shardMemoryKb,
       kdfAlgId,
+      completed => onProgress?.(completed, shardCount),
     );
   }
 
@@ -886,6 +928,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
           return;
         }
         completed++;
+        onProgress?.(completed, shardCount);
 
         if (completed >= shardCount) {
           void terminatePool().then(resolve, reject);
@@ -1363,6 +1406,7 @@ async function interactive() {
     const result = await derive(name, pass, selectedWork, workersInput, {
       engine: selectedEngine,
       shardMultiplier: selectedMultiplier,
+      onProgress: completed => progress.update(completed),
     });
     rootKey = result.rootKey;
     progress.complete(result.derivationTime);

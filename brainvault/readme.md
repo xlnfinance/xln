@@ -129,10 +129,10 @@ fails closed. `--show-private-key` adds raw keys only after that same rehearsal.
 Passwords are forbidden in argv; automation must import the library API.
 
 Every interactive engine shows the same dependency-free, single-line terminal
-activity bar. Its small cyan comet respects `NO_COLOR`. Native batches expose
-elapsed time without inventing a percentage or ETA; the bar turns green and
-reports exact shards, CPU workers, duration, and 100% only after successful
-completion.
+progress bar. Native workers report completed shards over an opt-in stderr
+protocol, so the displayed count and percentage are exact; rate and ETA are
+live estimates. The bar respects `NO_COLOR`, turns green, and reports 100% only
+after every shard is validated and the root has been derived successfully.
 
 ## Self-contained package
 

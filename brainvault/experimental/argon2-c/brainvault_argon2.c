@@ -26,7 +26,10 @@ typedef struct {
     uint32_t memory_kib;
     size_t memory_bytes;
     atomic_uint next_index;
+    atomic_uint completed;
     atomic_int error_code;
+    uint32_t progress_step;
+    int progress_enabled;
 } shared_state;
 
 static _Thread_local uint8_t *thread_memory;
@@ -86,6 +89,11 @@ static void *derive_worker(void *opaque) {
         if (result != ARGON2_OK) {
             atomic_store(&shared->error_code, result);
             break;
+        }
+        uint32_t completed = atomic_fetch_add(&shared->completed, 1u) + 1u;
+        if (shared->progress_enabled &&
+            (completed == shared->shard_count || completed % shared->progress_step == 0u)) {
+            fprintf(stderr, "BVP1 %u\n", completed);
         }
     }
 
@@ -147,7 +155,11 @@ int main(void) {
     shared.outputs = outputs;
     shared.memory_kib = memory_kib;
     shared.memory_bytes = memory_bytes;
+    shared.progress_enabled = getenv("BRAINVAULT_NATIVE_PROGRESS") != NULL;
+    shared.progress_step = shard_count / 500u;
+    if (shared.progress_step == 0u) shared.progress_step = 1u;
     atomic_init(&shared.next_index, 0u);
+    atomic_init(&shared.completed, 0u);
     atomic_init(&shared.error_code, ARGON2_OK);
 
     for (started_threads = 0u; started_threads < worker_count; ++started_threads) {

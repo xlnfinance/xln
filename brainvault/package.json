@@ -25,7 +25,9 @@
     "native.ts",
     "native-hybrid.ts",
     "native-hybrid.test.ts",
+    "native-progress.test.ts",
     "native-build.test.ts",
+    "native-progress.ts",
     "package.test.ts",
     "presets.ts",
     "release-matrix.test.ts",
@@ -82,7 +84,7 @@
     "build:opencl:prebuild": "make -C experimental/argon2-opencl prebuild",
     "build:experimental": "bun run build:c && bun run build:rust && bun run build:metal && bun run build:opencl",
     "manifest": "bun manifest.ts",
-    "test": "bun test core.test.ts native-hybrid.test.ts sandbox.test.ts package.test.ts historical.test.ts",
+    "test": "bun test core.test.ts native-hybrid.test.ts native-progress.test.ts sandbox.test.ts package.test.ts historical.test.ts",
     "test:matrix": "bun test release-matrix.test.ts",
     "test:native-release": "bun test native-build.test.ts"
   },

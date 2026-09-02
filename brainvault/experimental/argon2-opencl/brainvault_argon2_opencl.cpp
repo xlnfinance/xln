@@ -102,6 +102,7 @@ try {
     const bool by_segment = std::getenv("BRAINVAULT_OPENCL_ONESHOT") == nullptr;
     const bool precompute = std::getenv("BRAINVAULT_OPENCL_NO_PRECOMPUTE") == nullptr;
     const bool profiling = std::getenv("BRAINVAULT_OPENCL_PROFILE") != nullptr;
+    const bool progress_enabled = std::getenv("BRAINVAULT_NATIVE_PROGRESS") != nullptr;
 
     argon2::opencl::GlobalContext global;
     const auto &devices = global.getAllDevices();
@@ -148,6 +149,7 @@ try {
             finalize_started - kernel_started).count();
         finalize_ms += std::chrono::duration<double, std::milli>(
             chunk_finished - finalize_started).count();
+        if (progress_enabled) std::cerr << "BVP1 " << first + active << '\n';
     }
 
     const auto wipe_started = probe_clock::now();

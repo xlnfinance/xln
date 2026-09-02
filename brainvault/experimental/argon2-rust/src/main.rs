@@ -60,12 +60,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let salts = Arc::new(input[HEADER_BYTES + password_len..].to_vec());
     input.fill(0);
     let next = Arc::new(AtomicU32::new(0));
+    let progress = Arc::new(AtomicU32::new(0));
+    let progress_enabled = std::env::var_os("BRAINVAULT_NATIVE_PROGRESS").is_some();
+    let progress_step = std::cmp::max(1, shard_count / 500) as u32;
 
     let mut handles = Vec::with_capacity(worker_count);
     for _ in 0..worker_count {
         let password = Arc::clone(&password);
         let salts = Arc::clone(&salts);
         let next = Arc::clone(&next);
+        let progress = Arc::clone(&progress);
         let params = params.clone();
         handles.push(thread::spawn(
             move || -> Result<Vec<(usize, [u8; OUTPUT_BYTES])>, argon2_rust::Error> {
@@ -83,6 +87,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &salts[salt_offset..salt_offset + SALT_BYTES],
                         &mut output,
                     )?;
+                    let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                    if progress_enabled &&
+                        (done as usize == shard_count || done % progress_step == 0) {
+                        eprintln!("BVP1 {done}");
+                    }
                     completed.push((index, output));
                 }
                 Ok(completed)

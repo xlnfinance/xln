@@ -55,7 +55,7 @@ export function getShardCount(factor: number): number {
  * Format milliseconds to human readable
  */
 export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   if (ms < 3600000) {
     const mins = Math.floor(ms / 60000);

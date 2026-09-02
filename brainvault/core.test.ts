@@ -566,6 +566,8 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
   const coloredOutput = colored.stdout.toString();
   expect(colored.exitCode).toBe(0);
   expect(coloredOutput).toContain('◇');
+  expect(coloredOutput).toContain('shards/s · eta ');
+  expect(coloredOutput).toMatch(/(?:[1-9]|[1-9][0-9])% · [1-9][0-9]*\/100/);
   expect(coloredOutput).toContain('100% · 100/100 · 32 cpu');
   expect(coloredOutput).toContain('\x1b[38;5;45m');
 
@@ -573,6 +575,8 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
   const plainOutput = plain.stdout.toString();
   expect(plain.exitCode).toBe(0);
   expect(plainOutput).toContain('◇');
+  expect(plainOutput).toContain('shards/s · eta ');
+  expect(plainOutput).toMatch(/(?:[1-9]|[1-9][0-9])% · [1-9][0-9]*\/100/);
   expect(plainOutput).toContain('100% · 100/100 · 32 cpu');
   expect(plainOutput).not.toContain('\x1b[38;5;45m');
 });

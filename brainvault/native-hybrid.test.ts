@@ -107,6 +107,7 @@ test('every accelerator reproduces frozen ASCII, Unicode/NUL, and ordered smoke 
         (_, index) => createShardSalt(vector.input.name, index, vector.input.shardCount),
       ));
       let shards: Uint8Array[] = [];
+      const progress: number[] = [];
       try {
         const result = await deriveHybridNativeShards({
           engine,
@@ -114,6 +115,7 @@ test('every accelerator reproduces frozen ASCII, Unicode/NUL, and ordered smoke 
           salts,
           memoryKiB: 262144,
           requestedCpuWorkers: 2,
+          onProgress: completed => progress.push(completed),
           paths: {
             packageRoot: import.meta.dir,
             cpuExecutable,
@@ -127,6 +129,8 @@ test('every accelerator reproduces frozen ASCII, Unicode/NUL, and ordered smoke 
           },
         });
         shards = result.shards as Uint8Array[];
+        expect(progress.at(-1)).toBe(vector.input.shardCount);
+        expect(progress.every((completed, index) => index === 0 || completed > progress[index - 1]!)).toBe(true);
         expect(bytesToHex(await combineShards(shards, vector.input.factor))).toBe(vector.expected.root);
       } finally {
         password.fill(0);
