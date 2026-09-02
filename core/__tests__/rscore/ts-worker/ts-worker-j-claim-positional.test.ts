@@ -69,6 +69,7 @@ const response = (
     value: {
       workerIndex,
       effects,
+      skippedProposals: [],
       subroots: [],
       operations: effects.length,
       shardRows: [[workerIndex, effects.length]],
