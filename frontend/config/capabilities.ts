@@ -387,6 +387,7 @@ export const CAPABILITIES = [
       'frontend/packages/ui/src/graph3d-lifecycle.ts',
       'frontend/packages/ui/src/graph3d-renderer.ts',
       'frontend/packages/ui/src/graph3d-scene-primitives.ts',
+      'frontend/packages/ui/src/graph3d-visual-effects.ts',
     ],
     behavior: [
       'Dockview layout',
@@ -400,6 +401,7 @@ export const CAPABILITIES = [
       'framework-neutral Graph3D canvas, controls, resize, debug, renderer, and XR teardown boundaries',
       'shared Three.js renderer selection plus explicit geometry, material, and texture disposal',
       'shared Graph3D grid, Jurisdiction mesh, broadcast animation, and deterministic radial layout primitives',
+      'shared directional-lightning and transaction-ripple visual effects',
     ],
     status: 'in_progress',
   },

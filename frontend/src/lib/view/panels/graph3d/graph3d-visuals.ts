@@ -3,7 +3,7 @@ import type { Delta } from '@xln/core/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from '../../../../../packages/ui/src/graph3d-renderer';
-import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphTransactionLike, GraphXLNRuntime } from './graph3d-types';
+import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphXLNRuntime } from './graph3d-types';
 import { formatGraphMempoolTxLabel, type GraphAccountViewLike, type GraphReplicaLike } from './graph3d-helpers';
 
 function createTxLabelSprite(text: string): THREE.Sprite {
@@ -301,16 +301,6 @@ export function graphAccountMempoolCount(account: GraphAccountViewLike | null | 
   return Array.isArray(account?.mempool) ? account.mempool.length : 0;
 }
 
-export function createGraphRippleMesh(position: THREE.Vector3): THREE.Mesh {
-  const mesh = new THREE.Mesh(
-    new THREE.RingGeometry(0.1, 0.2, 32),
-    new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
-  );
-  mesh.position.copy(position);
-  mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-  return mesh;
-}
-
 type GraphConnectionOptions = {
   graphWorld: THREE.Group;
   fromEntity: GraphEntityData;
@@ -430,65 +420,6 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   });
   for (const box of mempoolBoxes) options.graphWorld.add(box);
   return { bars, mempoolBoxes };
-}
-
-export function createDirectionalLightningMesh(connection: GraphConnectionData, accountTx: GraphTransactionLike | null | undefined): THREE.Mesh {
-  const positions = connection.line.geometry.getAttribute('position');
-  const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
-  const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
-  const amountUsd = accountTx?.data?.amount ? Number(accountTx.data.amount) / 1e18 : 0;
-  const radius = amountUsd > 0 ? Math.max(0.05, Math.min(Math.log10(amountUsd) * 0.08, 0.8)) : 0.08;
-  const color =
-    amountUsd <= 0
-      ? 0x00ccff
-      : amountUsd < 1_000
-        ? 0x0088ff
-        : amountUsd < 100_000
-          ? 0x00ccff
-          : amountUsd < 1_000_000
-            ? 0x00ff88
-            : amountUsd < 10_000_000
-              ? 0xffff00
-              : 0xff4444;
-  const bolt = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, start.distanceTo(end), 16),
-    new THREE.MeshLambertMaterial({
-      color,
-      transparent: true,
-      opacity: 0.95,
-      emissive: color,
-      emissiveIntensity: 2,
-    }),
-  );
-  bolt.position.copy(start.clone().lerp(end, 0.5));
-  bolt.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3().subVectors(end, start).normalize(),
-  );
-  return bolt;
-}
-
-export function createBroadcastRippleMesh(position: THREE.Vector3, txType: string): THREE.Mesh {
-  const colors: Record<string, number> = {
-    r2c: 0x00ff88,
-    reserve_to_collateral: 0x00ff88,
-    deposit_reserve: 0x00ff00,
-    withdraw_reserve: 0xff0000,
-    credit_from_reserve: 0xffaa00,
-    debit_to_reserve: 0xff44ff,
-  };
-  const ripple = new THREE.Mesh(
-    new THREE.TorusGeometry(0.5, 0.05, 16, 32),
-    new THREE.MeshBasicMaterial({
-      color: colors[txType] ?? 0x00ffff,
-      transparent: true,
-      opacity: 0.8,
-      side: THREE.DoubleSide,
-    }),
-  );
-  ripple.position.copy(position);
-  ripple.rotation.x = Math.PI / 2;
-  return ripple;
 }
 
 export function createGraphEntityNode(options: {
