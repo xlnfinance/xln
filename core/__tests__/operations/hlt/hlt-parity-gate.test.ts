@@ -73,8 +73,9 @@ test('one-artifact gate runs four isolated exact replays inside one three-minute
   expect(build).toContain('resolve(parityRecording)');
   expect(liveController).toContain('timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
   expect(liveController).toContain('const PHASE_TIMEOUT_MS = 30_000');
+  expect(liveController).toContain('const RUN_PHASE_TIMEOUT_MS = AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
   expect(liveController).toContain(
-    "new Error('HLT_ECONOMIC_GATE_RUN_TIMEOUT')), PHASE_TIMEOUT_MS",
+    "new Error('HLT_ECONOMIC_GATE_RUN_TIMEOUT')), RUN_PHASE_TIMEOUT_MS",
   );
   const paritySmoke = /HLT_MIXED_PARITY_SMOKE[\s\S]*?\}\)\}`\);/.exec(workerMixed)?.[0];
   expect(paritySmoke).toBeDefined();

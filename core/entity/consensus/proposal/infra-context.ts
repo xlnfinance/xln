@@ -42,24 +42,26 @@ const entityTxNeedsHtlcInfra = (tx: EntityTx): boolean =>
     tx.data.proposal.frame.accountTxs.some(accountTx =>
       accountTx.type === 'htlc_lock' || accountTx.type === 'htlc_resolve'));
 
-/** WAL contexts are bound to the exact applying replica and certified height. */
-const resolveReplayEntityContext = (
+/** True while journal replay owns this frame: every proposer commit must then
+ * consume its persisted context; nothing is materialized from live infra. */
+export const replayEntityContextsInstalled = (env: EntityRuntimeContext): boolean =>
+  env.infrastructure?.replayEntityContexts !== undefined;
+
+/** WAL contexts are bound to the exact applying replica and certified height.
+ * Replay never falls back to live materialization: a missing context means the
+ * journal is incomplete, and re-materializing would be a second source of
+ * truth that native replay cannot reproduce. */
+const requireReplayEntityContext = (
   env: EntityRuntimeContext,
   replicaId: string,
   height: number,
-): EntityInfraContext | undefined => {
+): EntityInfraContext => {
   const contexts = env.infrastructure?.replayEntityContexts;
-  if (!contexts) return undefined;
-  return contexts.get(`${replicaId}:${height}`);
+  if (!contexts) throw new Error(`ENTITY_REPLAY_CONTEXTS_NOT_INSTALLED:${replicaId}:${height}`);
+  const context = contexts.get(`${replicaId}:${height}`);
+  if (!context) throw new Error(`ENTITY_REPLAY_CONTEXT_MISSING:${replicaId}:${height}`);
+  return context;
 };
-
-/** True when the WAL holds the persisted context for this replica's next frame (replay). */
-export const hasReplayEntityContext = (env: EntityRuntimeContext, replica: EntityReplica): boolean =>
-  resolveReplayEntityContext(
-    env,
-    `${replica.entityId.trim().toLowerCase()}:${replica.signerId.trim().toLowerCase()}`,
-    replica.state.height + 1,
-  ) !== undefined;
 
 const createOnlineObservation = (
   hasProfile: (entityId: string) => boolean,
@@ -214,10 +216,12 @@ export const materializeEntityInfraContext = async (
 ): Promise<EntityInfraContext> => timePerfPhase('entity.infraMaterialize', async () => {
   const entityId = replica.entityId.trim().toLowerCase();
   const proposerSignerId = replica.signerId.trim().toLowerCase();
-  const replayContext = !options.usePersistedReplayContext
-    ? undefined
-    : resolveReplayEntityContext(env, `${entityId}:${proposerSignerId}`, replica.state.height + 1);
-  if (replayContext) {
+  if (options.usePersistedReplayContext && replayEntityContextsInstalled(env)) {
+    const replayContext = requireReplayEntityContext(
+      env,
+      `${entityId}:${proposerSignerId}`,
+      replica.state.height + 1,
+    );
     const decodedReplayContext = validateEntityInfraContext(replayContext);
     await assertEntityInfraContextAuthority(env, decodedReplayContext, replica.state);
     return structuredClone(decodedReplayContext);

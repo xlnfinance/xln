@@ -78,6 +78,7 @@ import type { LaneRuntime } from '../lanes/lane-runtimes';
 import {
   hltAuthorityEvidenceEnabled,
   materializeCompleteDisputeEvidence,
+  materializeCompleteSettlementEvidence,
 } from './worker-authority-evidence';
 import {
   attachRustH1,
@@ -783,6 +784,16 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         hubIdentity,
         lane: firstUser,
         reverseLane: secondUser,
+      });
+      // Dispute owns users 0 and 1. Settle on an independent Account so the
+      // recording carries one complete bilateral settlement lifecycle.
+      const settlementUser = users[2];
+      if (!settlementUser) throw new Error('HLT_AUTHORITY_EVIDENCE_SETTLEMENT_USER_MISSING');
+      await materializeCompleteSettlementEvidence({
+        hub: requireHub(),
+        hubIdentity,
+        lane: settlementUser,
+        tokenId: PAYMENT_TOKEN_ID,
       });
     }
     const [hubIo, laneIo] = await Promise.all([

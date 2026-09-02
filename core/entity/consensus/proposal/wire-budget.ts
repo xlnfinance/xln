@@ -16,7 +16,7 @@ import { timePerfPhase } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
 import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
 import { collectInboundHtlcBindingKeys } from '../../paybook/materialize-context';
-import { hasReplayEntityContext, materializeEntityInfraContext } from './infra-context';
+import { materializeEntityInfraContext, replayEntityContextsInstalled } from './infra-context';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
 const MAX_FIT_ATTEMPTS = 16;
@@ -242,7 +242,7 @@ export const fitEntityProposalToWireBudget = async (
   // Reuse the WAL context so replay does not rematerialize gossip/HTLC, but
   // still defer the mempool tail. Taking every current mempool tx here can
   // make live-head replica metadata diverge from the certified replay head.
-  if (usePersistedReplayContext && hasReplayEntityContext(env, replica)) {
+  if (usePersistedReplayContext && replayEntityContextsInstalled(env)) {
     const entityContext = await materializeEntityInfraContext(env, replica, params.proposalTxs, {
       usePersistedReplayContext: true,
     });

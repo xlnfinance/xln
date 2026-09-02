@@ -1814,6 +1814,49 @@ impl AccountConsensus {
                 CanonicalValue::String(digest.clone()),
             ));
         }
+        // Parity target: `counterpartySettlementHankos`
+        // (core/account/settlement/witness-projection.ts). The peer's exact
+        // settlement witnesses, selected by its proposer, are deterministic
+        // input evidence and enter the Entity leaf as their raw hex; our own
+        // independently assembled subset stays shadow. Empty strings count as
+        // absent exactly like the TypeScript truthiness check.
+        if let Some(CanonicalValue::Object(workspace)) = self.replica.state().settlement_workspace()
+        {
+            let local_is_left = self.replica.owner_side() == crate::state::identity::Side::Left;
+            let peer_key = if local_is_left {
+                "rightHanko"
+            } else {
+                "leftHanko"
+            };
+            let peer_hanko = |object: &[(String, CanonicalValue)]| {
+                object.iter().find_map(|(name, value)| match value {
+                    CanonicalValue::String(text) if name == peer_key && !text.is_empty() => {
+                        Some(text.clone())
+                    }
+                    _ => None,
+                })
+            };
+            let settlement_hanko = peer_hanko(workspace);
+            let post_proof_hanko = workspace.iter().find_map(|(name, value)| match value {
+                CanonicalValue::Object(proof) if name == "postSettlementDisputeProof" => {
+                    peer_hanko(proof)
+                }
+                _ => None,
+            });
+            if settlement_hanko.is_some() || post_proof_hanko.is_some() {
+                let mut hankos = Vec::with_capacity(2);
+                if let Some(hanko) = settlement_hanko {
+                    hankos.push(("settlementHanko".to_string(), CanonicalValue::String(hanko)));
+                }
+                if let Some(hanko) = post_proof_hanko {
+                    hankos.push(("postProofHanko".to_string(), CanonicalValue::String(hanko)));
+                }
+                fields.push((
+                    "counterpartySettlementHankos".to_string(),
+                    CanonicalValue::Object(hankos),
+                ));
+            }
+        }
         self.replica
             .envelope()
             .reproject(fields, mempool)
@@ -1938,7 +1981,8 @@ impl std::fmt::Debug for AccountConsensus {
 /// Fields the engine owns or intentionally excludes from the Entity leaf. A
 /// carried copy must never override live consensus or reintroduce transient
 /// coordination into the committed projection.
-const DERIVED_CONSENSUS_FIELDS: [&str; 18] = [
+const DERIVED_CONSENSUS_FIELDS: [&str; 19] = [
+    "counterpartySettlementHankos",
     "counterpartyDisputeHash",
     "counterpartyDisputeProofBodyHash",
     "counterpartyDisputeProofNonce",

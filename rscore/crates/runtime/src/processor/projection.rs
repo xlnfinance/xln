@@ -707,18 +707,30 @@ pub(crate) fn project_durable_frame(
         // specific Account-engine handle. Path-keyed node changes at the
         // materialization cadence are sufficient for either engine.
         account_authority_checkpoints: Vec::new(),
-        touched_entities: result.outputs.touches.entity_ids.clone(),
-        touched_accounts: result
-            .outputs
-            .touches
-            .accounts
-            .iter()
-            .map(|account| TouchedAccount {
-                entity_id: account.entity_id.clone(),
-                counterparty_id: account.counterparty_id.clone(),
-            })
-            .collect(),
-        touched_book_entities: result.outputs.touches.book_entity_ids.clone(),
+        // Parity target: `storageRefsFromOverlay` (core/storage/schema/
+        // overlay-docs.ts) keys touches by ref, so an Account or Entity that
+        // committed twice inside one Runtime frame (an external input plus its
+        // derived account-work frame) is recorded once, in first-touch order.
+        touched_entities: dedup_first_touch(result.outputs.touches.entity_ids.iter().cloned()),
+        touched_accounts: {
+            let mut seen = std::collections::BTreeSet::new();
+            result
+                .outputs
+                .touches
+                .accounts
+                .iter()
+                .filter(|account| {
+                    seen.insert((account.entity_id.clone(), account.counterparty_id.clone()))
+                })
+                .map(|account| TouchedAccount {
+                    entity_id: account.entity_id.clone(),
+                    counterparty_id: account.counterparty_id.clone(),
+                })
+                .collect()
+        },
+        touched_book_entities: dedup_first_touch(
+            result.outputs.touches.book_entity_ids.iter().cloned(),
+        ),
     };
     let pre_encode_done = phase_started.elapsed();
     let projection_checkpoint = pre_encode_done.saturating_sub(context_done);
@@ -1315,4 +1327,9 @@ impl From<EntityCheckpointProjectionError> for RuntimeFrameProjectionError {
     fn from(error: EntityCheckpointProjectionError) -> Self {
         Self::EntityCheckpoint(Box::new(error))
     }
+}
+
+fn dedup_first_touch(values: impl Iterator<Item = String>) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    values.filter(|value| seen.insert(value.clone())).collect()
 }

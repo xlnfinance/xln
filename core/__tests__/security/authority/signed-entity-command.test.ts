@@ -370,7 +370,8 @@ describe('signed Entity command admission', () => {
       ['author-eoa', { authorSigner: address('eb') }, 'ENTITY_COMMAND_AUTHOR_EOA_MISMATCH'],
       ['nonce', wrongNonce, 'ENTITY_COMMAND_NONCE_MISMATCH'],
       ['tx-hash', { txsHash: entityId('ea') }, 'ENTITY_COMMAND_TXS_HASH_MISMATCH'],
-      ['signature', { signature: `0x${'00'.repeat(65)}` }, 'ENTITY_COMMAND_SIGNATURE_MISMATCH'],
+      ['signature', { signature: `0x${'00'.repeat(65)}` }, 'ENTITY_COMMAND_SIGNATURE_INVALID'],
+      ['signature-mismatch', { signature: `0x${'55'.repeat(64)}01` }, 'ENTITY_COMMAND_SIGNATURE_MISMATCH'],
     ];
     for (const [label, mutation, error] of cases) {
       expect(() => assertSignedEntityCommand(env, state, { ...command, ...mutation }), label).toThrow(error);

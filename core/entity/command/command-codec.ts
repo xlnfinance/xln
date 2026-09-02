@@ -1,4 +1,5 @@
 import { RecencyMemo } from '../../support/collections/recency-memo';
+import { isCanonicalCompactSignatureHex } from '../../account/crypto';
 import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 import { ethers } from 'ethers';
@@ -205,7 +206,11 @@ export const normalizeSignedEntityCommand = (value: unknown): SignedEntityComman
   const signature = String(raw['signature'] ?? '')
     .trim()
     .toLowerCase();
-  if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('ENTITY_COMMAND_SIGNATURE_INVALID');
+  // Rejection, never a local bug: a non-canonical signature is malformed
+  // ingress and evicts only this command, matching the Rust command codec.
+  if (!isCanonicalCompactSignatureHex(signature)) {
+    throw new EntityCommandRejectionError('ENTITY_COMMAND_SIGNATURE_INVALID');
+  }
   return { ...body, signature };
 };
 

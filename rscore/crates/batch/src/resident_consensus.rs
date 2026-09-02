@@ -1412,6 +1412,26 @@ impl ResidentConsensusEngine {
         Ok(rows.pop().map(|(_, status)| status))
     }
 
+    /// Diagnostic read of one Account's projected leaf fields: the exact
+    /// values hashed into its Entity account leaf. Replay mismatch reporting only;
+    /// no durable read model and no full forest scan.
+    pub fn account_envelope_fields(
+        &mut self,
+        account_id: AccountId,
+    ) -> Result<Option<Vec<(String, CanonicalValue)>>, BatchError> {
+        if !self.signer_owners.contains_key(&account_id) {
+            return Ok(None);
+        }
+        let mut rows =
+            self.forest
+                .read_head(vec![(account_id, ())], |account_id, account, ()| {
+                    account
+                        .projected_leaf_fields()
+                        .map_err(|error| crate::consensus::state_error(account_id, &error))
+                })?;
+        Ok(rows.pop().map(|(_, fields)| fields))
+    }
+
     fn active_proposable(&self) -> Result<&BTreeSet<AccountId>, BatchError> {
         Ok(self
             .candidate_proposable

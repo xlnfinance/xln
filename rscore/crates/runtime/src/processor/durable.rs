@@ -622,6 +622,30 @@ impl DurableRuntimeProcessor {
             .map_err(Into::into)
     }
 
+    /// Diagnostic projection of one Account's Entity leaf envelope fields.
+    pub fn account_envelope_fields(
+        &mut self,
+        entity_key: &crate::RuntimeEntityKey,
+        account_id: AccountId,
+    ) -> Result<
+        Option<Vec<(String, xln_rscore_protocol::CanonicalValue)>>,
+        DurableRuntimeProcessorError,
+    > {
+        self.ensure_healthy()?;
+        let replica = self
+            .replica
+            .as_mut()
+            .ok_or(DurableRuntimeProcessorError::Poisoned)?;
+        let Some(entity) = replica.e_replicas.get_mut(entity_key) else {
+            return Ok(None);
+        };
+        entity
+            .accounts
+            .account_envelope_fields(account_id)
+            .map_err(RuntimeMachineError::Account)
+            .map_err(Into::into)
+    }
+
     /// Prefer authenticated inbound sessions for committed outbox publication.
     /// Hub-to-hub peers that never dialed us still use DirectOutboxPublisher.
     pub fn attach_inbound_sessions(&mut self, sessions: InboundSessionTable) {

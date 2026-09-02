@@ -1,4 +1,8 @@
 import type { EntityTx } from '../../types/entity-tx.ts';
+import {
+  collectRuntimeEntityContext,
+  describeEntityInputCommitShape,
+} from './entity-context-collection';
 import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
 import { safeStringify } from '../../protocol/serialization';
 import { getPerfMs } from '../../support/time.ts';
@@ -376,6 +380,23 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       );
     }
     await acceptAuthorityEntityStage(env, result.authorityStage);
+    // A local-event commit (account-work preview or immediate cross-J) is an
+    // Entity frame like any other: its EntityInfraContext is part of the frame
+    // hash and exact replay (native Rust included) consumes one persisted
+    // context per committed frame. Journal it exactly as staged inputs do.
+    if (result.entityContext && !result.entityFrameCommitted) {
+      throw new Error(`RUNTIME_ENTITY_CONTEXT_WITHOUT_COMMITTED_FRAME:${replicaKey}`);
+    }
+    if (result.entityFrameCommitted && result.entityContext) {
+      collectRuntimeEntityContext(
+        context.entityContexts,
+        input.entityId,
+        replicaKey,
+        result.entityContext,
+        describeEntityInputCommitShape({ ...input, from: command.kind }),
+        context.entityCommitInputShapes,
+      );
+    }
     context.localCrossJurisdictionEventTrace.push(result.appliedInput);
     context.entityFrameCommitted ||= result.entityFrameCommitted;
     const elapsedMs = Math.round(getPerfMs() - startedAt);

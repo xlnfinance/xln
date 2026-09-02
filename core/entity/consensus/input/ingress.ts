@@ -145,11 +145,11 @@ export const prepareEntityInputIngress = (
       storageChanges: [],
       frameHash,
       promoteCandidateState,
-      // WAL stores the public context of the external Entity input. Any
-      // Runtime-derived H+1 frame in the same transition must deterministically
-      // materialize its own height/parent-bound context; reusing the external
-      // context makes replay advance from the wrong Entity head.
-      usePersistedReplayContext: trustedLocalRuntimeProtocol === undefined,
+      // The WAL journals one context per committed proposer frame, keyed by
+      // replica and height, for external inputs and for Runtime-derived
+      // account-work / immediate cross-J frames alike. Replay consumes the
+      // exact height-bound context of each frame and never re-materializes.
+      usePersistedReplayContext: true,
     },
     entityDisplay,
     quietRuntimeLogs: env.quietRuntimeLogs === true,

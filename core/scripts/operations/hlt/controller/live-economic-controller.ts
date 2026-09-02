@@ -12,6 +12,10 @@ import { AUTHORITY_EVIDENCE_GATE_BUDGET_MS } from '../replay/evidence/gate-suppo
 
 const GATE_POLL_MS = 20;
 const PHASE_TIMEOUT_MS = 30_000;
+// The live economic window plus its five-second drain and report exceed the
+// 30-second process wall at high offered rates. The owner-approved exception
+// for the live economic stand under the machine lock is the 180-second budget.
+const RUN_PHASE_TIMEOUT_MS = AUTHORITY_EVIDENCE_GATE_BUDGET_MS;
 const sleep = (ms: number): Promise<void> => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 
 const OFFLINE_PARITY_XLN_ALLOWLIST = new Set(['XLN_RSCORE_BINARY']);
@@ -102,7 +106,7 @@ const runGatedHltChild = async (options: Readonly<{
     }
     return await new Promise<number>((resolveExit, reject) => {
       if (child.exitCode !== null) return resolveExit(child.exitCode);
-      const timeout = setTimeout(() => reject(new Error('HLT_ECONOMIC_GATE_RUN_TIMEOUT')), PHASE_TIMEOUT_MS);
+      const timeout = setTimeout(() => reject(new Error('HLT_ECONOMIC_GATE_RUN_TIMEOUT')), RUN_PHASE_TIMEOUT_MS);
       child.once('error', error => {
         clearTimeout(timeout);
         reject(error);

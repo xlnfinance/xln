@@ -761,25 +761,35 @@ type CanonicalDigestSignature = {
   recovery: 0 | 1;
 };
 
+/** Canonical 65-byte compact signature: recovery byte 0/1, non-zero scalars,
+ * low-s. Enforced at every wire boundary (command codec) exactly like the Rust
+ * command codec, so both engines reject the same bytes before any state. */
+export const isCanonicalCompactSignatureHex = (signatureHex: string): boolean => {
+  if (!/^0x[0-9a-f]{130}$/i.test(signatureHex)) return false;
+  const bytes = Buffer.from(signatureHex.slice(2), 'hex');
+  const recovery = bytes[64];
+  if (recovery !== 0 && recovery !== 1) return false;
+  try {
+    const parsed = secp256k1.Signature.fromCompact(bytes.slice(0, 64));
+    if (parsed.r === 0n || parsed.s === 0n || parsed.hasHighS()) return false;
+  } catch {
+    return false;
+  }
+  return true;
+};
+
 const parseCanonicalDigestSignature = (
   digestHex: string,
   signatureHex: string,
 ): CanonicalDigestSignature | null => {
-  if (!/^0x[0-9a-f]{64}$/i.test(digestHex) || !/^0x[0-9a-f]{130}$/i.test(signatureHex)) {
+  if (!/^0x[0-9a-f]{64}$/i.test(digestHex) || !isCanonicalCompactSignatureHex(signatureHex)) {
     return null;
   }
   const bytes = Buffer.from(signatureHex.slice(2), 'hex');
-  const recovery = bytes[64];
-  if (recovery !== 0 && recovery !== 1) return null;
-  try {
-    if (secp256k1.Signature.fromCompact(bytes.slice(0, 64)).hasHighS()) return null;
-  } catch {
-    return null;
-  }
   return {
     compact: bytes.slice(0, 64),
     digest: Buffer.from(digestHex.slice(2), 'hex'),
-    recovery,
+    recovery: bytes[64] as 0 | 1,
   };
 };
 

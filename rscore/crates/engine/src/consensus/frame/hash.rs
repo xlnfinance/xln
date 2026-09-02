@@ -113,31 +113,38 @@ fn projected_tx_value(
 ) -> Result<CanonicalValue, StateError> {
     let (kind, data) = match tx {
         AccountTx::JEventClaim(tx) => {
-            let events_hash = crate::canonical_events_hash(&tx.events)?;
-            let mut fields = vec![
-                (
+            // Wire form is the plain TypeScript `j_event_claim` data
+            // (validateJEventClaim: jHeight, jBlockHash, events, optional
+            // proofs). Only the signed frame preimage adds the version tag and
+            // the events digest (`canonicalJEventClaimForFrameHash`).
+            let mut fields = Vec::with_capacity(7);
+            if !include_post_commit_witnesses {
+                fields.push((
                     "version".to_string(),
                     text("xln:account-j-event-claim-frame:v1"),
-                ),
-                ("jHeight".to_string(), number(tx.j_height)?),
-                (
-                    "jBlockHash".to_string(),
-                    text(&crate::state::identity::render_hex(&tx.j_block_hash)),
-                ),
-                (
+                ));
+            }
+            fields.push(("jHeight".to_string(), number(tx.j_height)?));
+            fields.push((
+                "jBlockHash".to_string(),
+                text(&crate::state::identity::render_hex(&tx.j_block_hash)),
+            ));
+            if !include_post_commit_witnesses {
+                let events_hash = crate::canonical_events_hash(&tx.events)?;
+                fields.push((
                     "eventsHash".to_string(),
                     text(&crate::state::identity::render_hex(&events_hash)),
+                ));
+            }
+            fields.push((
+                "events".to_string(),
+                CanonicalValue::Array(
+                    tx.events
+                        .iter()
+                        .map(crate::j_claims::canonical_event_value)
+                        .collect::<Result<Vec<_>, _>>()?,
                 ),
-                (
-                    "events".to_string(),
-                    CanonicalValue::Array(
-                        tx.events
-                            .iter()
-                            .map(crate::j_claims::canonical_event_value)
-                            .collect::<Result<Vec<_>, _>>()?,
-                    ),
-                ),
-            ];
+            ));
             push_optional(
                 &mut fields,
                 "leftProof",

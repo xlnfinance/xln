@@ -83,13 +83,11 @@ fn every_typescript_entity_tx_decodes_and_reencodes_byte_identically() {
                 }
                 // This vector deliberately places an ordinary action inside
                 // EntityCommand; collective actions must first be proposed.
-                // Its placeholder signature (recovery byte 0x55) is also
-                // non-canonical: Rust rejects it in the command codec, while
-                // TypeScript parseCanonicalDigestSignature rejects the same
-                // bytes at verification. Both reject before any state change.
+                // The shared vector carries a canonical placeholder signature
+                // (low-s, recovery byte 1) so both command codecs reach this
+                // exact rule instead of stopping at signature canonicality.
                 "entityCommand" => {
                     detail.starts_with("ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:")
-                        || detail.contains("ENTITY_COMMAND_SIGNATURE_INVALID")
                 }
                 // The shared codec vector covers every optional field, while
                 // canonical TS execution rejects these tokenless values too.

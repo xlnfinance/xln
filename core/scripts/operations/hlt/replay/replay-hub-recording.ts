@@ -26,6 +26,7 @@ import { resolve } from 'node:path';
 
 import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../account/crypto';
 import { computeAccountStateRootCold } from '../../../../account/commitment/state-root';
+import { projectEntityAccountLeaf } from '../../../../entity/consensus/state-root';
 import { computeBookCommitmentHash } from '../../../../orderbook/commitment';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -310,6 +311,9 @@ const mode = parseMode();
 const rates = parseRates(mode);
 const frameProfileEnabled = process.argv.includes('--frame-profile');
 const diagnosticEventsHeightRaw = optionalArgument('diagnostic-events-height');
+// Optional counterparty whose full Entity account leaf projection is dumped at
+// the diagnostic height, for side-by-side diffs against the native replay.
+const diagnosticAccount = (optionalArgument('diagnostic-account') ?? '').trim().toLowerCase() || null;
 const diagnosticEventsHeight = diagnosticEventsHeightRaw === null
   ? null
   : Number(diagnosticEventsHeightRaw);
@@ -547,6 +551,14 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
                 crontabHooks: Array.from(replica.state.crontabState?.hooks.entries() ?? []),
                 jBatchState: replica.state.jBatchState,
                 accountDigests: computeEntityAccountDigests(replica.state),
+                diagnosticAccountLeaf: diagnosticAccount === null ? null : Array.from(
+                  replica.state.accounts.entries(),
+                  ([counterpartyId, account]) => (
+                    counterpartyId.toLowerCase() === diagnosticAccount
+                      ? { counterpartyId, leaf: projectEntityAccountLeaf(account) }
+                      : null
+                  ),
+                ).filter(value => value !== null),
                 accountFrameRootDrift: Array.from(
                   replica.state.accounts.entries(),
                   ([counterpartyId, account]) => {

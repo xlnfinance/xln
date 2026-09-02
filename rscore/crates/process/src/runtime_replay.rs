@@ -64,16 +64,28 @@ fn sole_entity_replica(replica: &RuntimeReplica) -> Result<&RuntimeEntityReplica
     Ok(entity)
 }
 
+/// The single replayed Entity's final commitment in this Runtime frame. One
+/// frame may commit that Entity more than once (an external input followed by
+/// its derived account-work frame); the last commitment carries the frame's
+/// canonical Entity hash and accounts root, exactly like the TS frame record.
 fn sole_entity_commitment(
     commitments: &RuntimeDurableCommitments,
 ) -> Result<&RuntimeDurableEntityCommitment, String> {
-    let [entity] = commitments.entities.as_slice() else {
+    let (Some(first), Some(last)) = (commitments.entities.first(), commitments.entities.last())
+    else {
+        return Err("RUNTIME_REPLAY_SOLE_ENTITY_COMMITMENT:0".to_string());
+    };
+    if commitments
+        .entities
+        .iter()
+        .any(|entity| entity.entity_id != first.entity_id)
+    {
         return Err(format!(
             "RUNTIME_REPLAY_SOLE_ENTITY_COMMITMENT:{}",
             commitments.entities.len()
         ));
-    };
-    Ok(entity)
+    }
+    Ok(last)
 }
 
 pub struct RuntimeReplayMetrics {
@@ -745,6 +757,12 @@ pub fn replay_runtime_wal(
                 let replica = processor
                     .replica()
                     .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_REPLICA:{error}"))?;
+                let diagnostic_entity_key = replica.e_replicas.keys().next().cloned();
+                let diagnostic_account_ids = report
+                    .account_commits
+                    .iter()
+                    .map(|commit| commit.account_id)
+                    .collect::<Vec<_>>();
                 let entity_replica =
                     sole_entity_replica(replica).map_err(|error| format!("{summary}:{error}"))?;
                 let entity_state =
@@ -845,6 +863,27 @@ pub fn replay_runtime_wal(
                     actual_account_commits: &report.account_commits,
                 })
                 .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_WRITE:{error}"))?;
+                // Side-by-side leaf diagnostics: TypeScript prints the same
+                // projection with `--diagnostic-account` at this height.
+                if let Some(entity_key) = diagnostic_entity_key {
+                    for account_id in diagnostic_account_ids {
+                        let rendered =
+                            match processor.account_envelope_fields(&entity_key, account_id) {
+                                Ok(Some(fields)) => {
+                                    xln_rscore_runtime::tagged_json_from_canonical_value(
+                                        &xln_rscore_protocol::CanonicalValue::Object(fields),
+                                    )
+                                    .map(|value| value.to_string())
+                                    .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
+                                }
+                                Ok(None) => "null".to_string(),
+                                Err(error) => format!("{{\"error\":\"{error}\"}}"),
+                            };
+                        eprintln!(
+                            "RUNTIME_REPLAY_ACTUAL_ACCOUNT_LEAF:{height}:{account_id:?}:{rendered}"
+                        );
+                    }
+                }
                 return Err(format!(
                     "{summary}:first={}:diff={}",
                     diagnostic.first_difference,
@@ -873,15 +912,8 @@ pub fn replay_runtime_wal(
             )?;
             add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
             add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
-            match commitments.entities.as_slice() {
-                [] => {}
-                [entity] => metrics.accounts_root = hex(&entity.accounts_root),
-                entities => {
-                    return Err(format!(
-                        "RUNTIME_REPLAY_SOLE_ENTITY_COMMITMENT:{}",
-                        entities.len()
-                    ));
-                }
+            if !commitments.entities.is_empty() {
+                metrics.accounts_root = hex(&sole_entity_commitment(commitments)?.accounts_root);
             }
         }
         Ok(())

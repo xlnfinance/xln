@@ -23,7 +23,8 @@ const H = `0x${'11'.repeat(32)}`;
 const H2 = `0x${'22'.repeat(32)}`;
 const ADDRESS = `0x${'33'.repeat(20)}`;
 const SIGNER = `0x${'44'.repeat(20)}`;
-const SIGNATURE = `0x${'55'.repeat(65)}`;
+// Canonical placeholder: non-zero low-s scalars with recovery byte 1.
+const SIGNATURE = `0x${'55'.repeat(64)}01`;
 
 const proof: CrossJurisdictionCloseProof = {
   orderId: 'order-1', routeHash: H, sourcePullId: 'source-pull', targetPullId: 'target-pull',
