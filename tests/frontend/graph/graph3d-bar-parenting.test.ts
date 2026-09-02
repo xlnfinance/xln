@@ -5,7 +5,7 @@ import * as THREE from '../../../frontend/node_modules/three';
 
 import { createAccountBars } from '../../../frontend/src/lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData } from '../../../frontend/src/lib/network3d/derivedAccount';
-import { createGraphGrid } from '../../../frontend/src/lib/view/panels/graph3d/graph3d-visuals';
+import { createGraphGrid } from '../../../frontend/packages/ui/src/graph3d-scene-primitives';
 
 const endpoint = (id: string, x: number) => ({ id, position: new THREE.Vector3(x, 0, 0) });
 
