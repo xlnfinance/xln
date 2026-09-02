@@ -11,7 +11,10 @@ import { join, resolve } from 'node:path';
 import { AUTHORITY_EVIDENCE_GATE_BUDGET_MS } from '../replay/evidence/gate-support';
 
 const GATE_POLL_MS = 20;
-const PHASE_TIMEOUT_MS = 30_000;
+// Economic preparation (swap population, realistic exchange plan, routes) for
+// 1,000 users takes ~35-40 s in mixed mode before the child signals ready;
+// 30 s aborted every mixed authority run on 2026-09-02.
+const PHASE_TIMEOUT_MS = 120_000;
 // The live economic window plus its five-second drain and report exceed the
 // 30-second process wall at high offered rates. The owner-approved exception
 // for the live economic stand under the machine lock is the 180-second budget.
