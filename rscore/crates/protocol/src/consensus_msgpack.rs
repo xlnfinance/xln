@@ -30,7 +30,9 @@ fn canonical_hex_bytes(value: &str) -> Option<Vec<u8>> {
         return None;
     }
     payload
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| Some(hex_nibble(pair[0])? << 4 | hex_nibble(pair[1])?))
         .collect()
 }
