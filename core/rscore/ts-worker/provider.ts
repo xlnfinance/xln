@@ -178,6 +178,15 @@ const inboundEffect = (
 
 const TS_WORKER_VALIDATE_POST_DOCS = process.env['XLN_TS_WORKER_VALIDATE_POST_DOCS'] === '1';
 
+const isWorkerPostDocShape = (value: unknown): value is StorageAccountDoc =>
+  typeof value === 'object' && value !== null && 'proofHeader' in value && 'state' in value;
+
+/** Own-process worker rows are trusted like Rust resident rows; only the shape gate stays. */
+const trustedWorkerPostDoc = (value: unknown): StorageAccountDoc => {
+  if (!isWorkerPostDocShape(value)) throw new Error('TS_ACCOUNT_WORKER_POST_DOC_SHAPE');
+  return value;
+};
+
 const replacePostAccount = (
   ownerEntityId: string,
   account: AccountAuthorityInputRequest['account'],
@@ -193,7 +202,7 @@ const replacePostAccount = (
   const validated = assertStorageAccountDocBinding(
     TS_WORKER_VALIDATE_POST_DOCS
       ? validateStorageAccountDocValue(row.account)
-      : (row.account as unknown as StorageAccountDoc),
+      : trustedWorkerPostDoc(row.account),
     ownerEntityId,
     accountId,
     'ts-account-worker-post',
