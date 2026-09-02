@@ -2,7 +2,10 @@ import {
   ENTITY_WORKSPACE_SECTIONS,
   type ViewTab,
 } from '../../runtime-client/src/entity-workspace-navigation';
-import type { EntityWorkspaceContext } from '../../runtime-client/src/entity-workspace-context';
+import type {
+  EntityWorkspaceContext,
+  EntityWorkspaceReadState,
+} from '../../runtime-client/src/entity-workspace-context';
 import { formatAddress } from './entity-workspace-display';
 import './entity-workspace-shell.css';
 
@@ -53,14 +56,75 @@ function EntityContextStrip({ context }: Readonly<{ context: EntityWorkspaceCont
   );
 }
 
-function ProjectionBoundary({ context, emptyMessage }: Readonly<{ context: EntityWorkspaceContext; emptyMessage: string }>) {
-  if (context.status === 'selected') {
-    return <div className="entity-workspace-boundary" role="status"><span>Committed projection</span><strong>Entity context attached</strong><p>Height {context.height} · {context.accountCount} accounts. Section panels remain on the canonical workspace.</p></div>;
+type ProjectionBoundaryProps = Readonly<{
+  context: EntityWorkspaceContext;
+  emptyMessage: string;
+  onRefresh: () => void;
+  readState: EntityWorkspaceReadState;
+}>;
+
+function ProjectionBoundary({ context, emptyMessage, onRefresh, readState }: ProjectionBoundaryProps) {
+  if (readState.status === 'error') {
+    return (
+      <div className="entity-workspace-boundary" data-tone="error" role="alert">
+        <span>Runtime read failed</span>
+        <strong>Entity context unavailable</strong>
+        <p>{readState.message}</p>
+        <button onClick={onRefresh} type="button">Retry read</button>
+      </div>
+    );
   }
-  return <div className="entity-workspace-boundary" role="status"><span>Integration boundary</span><strong>No Runtime projection attached</strong><p>{emptyMessage}</p></div>;
+  if (readState.status === 'connecting' || readState.status === 'loading') {
+    return (
+      <div className="entity-workspace-boundary" role="status">
+        <span>{readState.status === 'connecting' ? 'Runtime connection' : 'Committed read'}</span>
+        <strong>{readState.status === 'connecting' ? 'Connecting to Runtime' : 'Reading Entity context'}</strong>
+        <p>{readState.message}</p>
+      </div>
+    );
+  }
+  if (readState.status === 'ready' && context.status === 'selected') {
+    return (
+      <div className="entity-workspace-boundary" role="status">
+        <span>Committed projection</span>
+        <strong>Entity context attached</strong>
+        <p>Height {context.height} · {context.accountCount} accounts. Section panels remain on the canonical workspace.</p>
+      </div>
+    );
+  }
+  if (readState.status === 'ready') {
+    return (
+      <div className="entity-workspace-boundary" role="status">
+        <span>Runtime connected</span>
+        <strong>No active Entity selected</strong>
+        <p>Committed height {context.height}. Select an Entity in the canonical workspace before opening this preview.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="entity-workspace-boundary" role="status">
+      <span>Integration boundary</span>
+      <strong>No Runtime projection attached</strong>
+      <p>{readState.message || emptyMessage}</p>
+    </div>
+  );
 }
 
-function EntityWorkspaceStage({ activeTab, context }: Readonly<{ activeTab: ViewTab; context: EntityWorkspaceContext }>) {
+type EntityWorkspaceStageProps = Omit<ProjectionBoundaryProps, 'emptyMessage'> & Readonly<{ activeTab: ViewTab }>;
+
+const readFooterLabel = (
+  copy: SectionCopy,
+  context: EntityWorkspaceContext,
+  readState: EntityWorkspaceReadState,
+): string => {
+  if (readState.status === 'error') return 'Runtime read failed';
+  if (readState.status === 'connecting' || readState.status === 'loading') return readState.message;
+  if (readState.status === 'ready' && context.status === 'selected') return copy.nextBoundary;
+  if (readState.status === 'ready') return 'Runtime attached — no Entity selected';
+  return 'Unavailable — no remote Runtime selected';
+};
+
+function EntityWorkspaceStage({ activeTab, context, onRefresh, readState }: EntityWorkspaceStageProps) {
   const copy = SECTION_COPY[activeTab];
   return (
     <section className="entity-workspace-stage" data-testid="entity-workspace-stage">
@@ -69,22 +133,54 @@ function EntityWorkspaceStage({ activeTab, context }: Readonly<{ activeTab: View
         <h2>{copy.title}</h2>
         <p>{copy.summary}</p>
       </header>
-      <ProjectionBoundary context={context} emptyMessage={copy.nextBoundary} />
-      <footer><span>Read state</span><strong>{context.status === 'selected' ? copy.nextBoundary : 'Unavailable — no identity selected'}</strong></footer>
+      <ProjectionBoundary
+        context={context}
+        emptyMessage={copy.nextBoundary}
+        onRefresh={onRefresh}
+        readState={readState}
+      />
+      <footer><span>Read state</span><strong>{readFooterLabel(copy, context, readState)}</strong></footer>
     </section>
   );
 }
 
-export function EntityWorkspaceShell({ activeTab, context }: Readonly<{ activeTab: ViewTab; context: EntityWorkspaceContext }>) {
+type EntityWorkspaceShellProps = Readonly<{
+  activeTab: ViewTab;
+  context: EntityWorkspaceContext;
+  onRefresh: () => void;
+  readState: EntityWorkspaceReadState;
+}>;
+
+const readModeLabel = (
+  context: EntityWorkspaceContext,
+  readState: EntityWorkspaceReadState,
+): string => {
+  if (readState.status === 'error') return 'Read failed';
+  if (readState.status === 'connecting') return 'Connecting';
+  if (readState.status === 'loading') return 'Reading';
+  if (readState.status === 'ready') return context.status === 'selected' ? 'Context ready' : 'Runtime ready';
+  return 'Read boundary';
+};
+
+export function EntityWorkspaceShell({ activeTab, context, onRefresh, readState }: EntityWorkspaceShellProps) {
   return (
-    <section className="entity-workspace" data-active-tab={activeTab} data-testid="entity-workspace-shell">
+    <section
+      className="entity-workspace"
+      data-active-tab={activeTab}
+      data-read-status={readState.status}
+      data-testid="entity-workspace-shell"
+    >
       <header className="entity-workspace-header">
         <div>
           <p>operator / entity</p>
           <h1>Entity workspace</h1>
           <span>Identity first. One canonical route for every workspace section.</span>
         </div>
-        <div className="entity-workspace-mode"><i aria-hidden="true" /><span>React shell</span><strong>{context.status === 'selected' ? 'Context ready' : 'Read boundary'}</strong></div>
+        <div className="entity-workspace-mode">
+          <i aria-hidden="true" />
+          <span>React shell</span>
+          <strong>{readModeLabel(context, readState)}</strong>
+        </div>
       </header>
       <EntityContextStrip context={context} />
       <nav className="entity-workspace-tabs" aria-label="Entity workspace sections">
@@ -100,7 +196,12 @@ export function EntityWorkspaceShell({ activeTab, context }: Readonly<{ activeTa
           </a>
         ))}
       </nav>
-      <EntityWorkspaceStage activeTab={activeTab} context={context} />
+      <EntityWorkspaceStage
+        activeTab={activeTab}
+        context={context}
+        onRefresh={onRefresh}
+        readState={readState}
+      />
       <p className="entity-workspace-footnote">No inferred state · no hidden fallback · Svelte remains canonical</p>
     </section>
   );

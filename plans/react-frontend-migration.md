@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + SHARED CONTEXT PROJECTION READY; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS + LIVE RUNTIME CONTEXT READY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1800,6 +1800,30 @@ Solidity files, passes immutable parity for four contracts and all 10
 soundchecks, then stops only because `cargo` is unavailable; the size policy
 still reports only `core/qa/report.ts` at 3,001 / 3,000.
 
+The next Entity workspace slice connects that shared projection to the real,
+tab-confined remote Runtime session already selected by the wallet. The ops
+route dynamically loads a 233-line read-only source only for the internal
+candidate path, opens the canonical `RemoteRuntimeAdapter`, and observes one
+bounded `view-frame` query (`accountsLimit: 1`, `booksLimit: 1`) through the
+shared query client/observer. It exposes explicit unavailable, connecting,
+loading, selected/empty-ready, and fail-loud retry states, disconnects on page
+exit, and contains no command/send path. A process-local Vite cache root keeps
+concurrent isolated browser runs from invalidating optimizer output. Seventeen
+focused tests pass with 99 expectations. Unsafe-types covers 628 files with
+zero findings, Svelte diagnostics are 0 / 0, the canonical build transforms
+4,671 SSR and 6,422 client modules, and all four React projects pass. The full
+frontend failure-name diff remains empty against the exact 13-name baseline
+(1,209 passes and 6,730 expectations). The candidate browser matrix passes
+27 / 27, and a new strict-health isolated E2E connects to real H1 in 19.0s,
+publishes H1 / Testnet / committed height and account count, and captures clean
+390×844, 1366×900, and 1920×1080 selected-state screenshots with no horizontal
+overflow. Canonical Svelte `/embed` remains unchanged and production cutover
+is still out of scope. Root verification passes 26 BrainVault/runtime tests
+with 100,156 expectations, compiles 28 Solidity files, passes immutable parity
+for four contracts and all 10 soundchecks, then stops only because `cargo` is
+unavailable. The size policy still reports only the pre-existing out-of-scope
+`core/qa/report.ts` at 3,001 / 3,000 lines.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1901,10 +1925,11 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue the owner-authorized Entity workspace sub-program with a real
-   browser Runtime read boundary that publishes the shared empty/selected
-   context into the React shell preview. Keep the canonical Svelte `/embed`
-   route until every workspace panel has parity evidence.
+1. Continue the owner-authorized Entity workspace sub-program with the first
+   read-only section projection behind the now-live Runtime context. Keep the
+   canonical Svelte `/embed` route until every workspace panel has parity
+   evidence; do not expose commands before their authority and failure states
+   are ported and tested.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

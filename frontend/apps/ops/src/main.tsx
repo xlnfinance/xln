@@ -21,6 +21,9 @@ if (page.kind === 'hlt') void import('./ops-hlt-runtime').then(module => module.
 if (page.kind === 'runs') void import('./ops-runs-runtime').then(module => module.startOpsRunsRuntime());
 if (page.kind === 'scenarios') void import('./ops-scenarios-runtime').then(module => module.startOpsScenariosRuntime());
 if (page.kind === 'ai') void import('./ops-ai-runtime').then(module => module.startOpsAiRuntime());
+if (page.kind === 'workspace') {
+  void import('./ops-entity-workspace-runtime').then(module => module.startOpsEntityWorkspaceRuntime());
+}
 
 createRoot(rootElement).render(
   <StrictMode>

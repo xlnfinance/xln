@@ -141,6 +141,25 @@
 .entity-workspace-boundary strong { max-width: 14rem; margin-top: 1rem; color: #d8d5ca; font-size: 1.15rem; line-height: 1.35; }
 .entity-workspace-boundary p { max-width: 19rem; margin: 0.75rem 0 0; color: #74756f; font-size: 0.78rem; line-height: 1.6; }
 
+.entity-workspace-boundary[data-tone="error"] > span { color: #ef896f; }
+
+.entity-workspace-boundary button {
+  align-self: flex-start;
+  margin-top: 1.25rem;
+  padding: 0.65rem 0.85rem;
+  color: #17130a;
+  border: 0;
+  background: var(--entity-accent);
+  font: 600 0.7rem/1 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.entity-workspace-boundary button:hover { background: var(--entity-accent-soft); transform: translateY(-1px); }
+.entity-workspace-boundary button:focus-visible { outline: 2px solid var(--entity-accent-soft); outline-offset: 3px; }
+
 .entity-workspace-stage footer {
   grid-column: 1 / -1;
   display: flex;
@@ -178,5 +197,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .entity-workspace-tabs a { transition: none; }
+  .entity-workspace-tabs a,
+  .entity-workspace-boundary button { transition: none; }
 }

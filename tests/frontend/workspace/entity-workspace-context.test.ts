@@ -68,14 +68,16 @@ describe('Entity workspace context projection', () => {
   });
 
   test('feeds both legacy projection and React shell contracts from the shared boundary', async () => {
-    const [legacyModel, reactShell, reactPage] = await Promise.all([
+    const [legacyModel, reactShell, reactPage, reactSource] = await Promise.all([
       Bun.file('frontend/src/lib/components/Entity/core/entity-panel-model.ts').text(),
       Bun.file('frontend/packages/ui/src/entity-workspace-shell.tsx').text(),
       Bun.file('frontend/apps/ops/src/ops-entity-workspace.tsx').text(),
+      Bun.file('frontend/apps/ops/src/ops-entity-workspace-source.ts').text(),
     ]);
     expect(legacyModel).toContain('projectEntityWorkspaceContext({ runtimeId: getRuntimeId(sourceEnv), frame })');
     expect(reactShell).toContain('context.status === \'selected\'');
-    expect(reactPage).toContain('context={emptyEntityWorkspaceContext()}');
+    expect(reactPage).toContain('context={snapshot.context}');
+    expect(reactSource).toContain('projectEntityWorkspaceContext({');
     expect(legacyModel).not.toContain('as unknown as');
   });
 });

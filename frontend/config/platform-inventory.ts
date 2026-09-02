@@ -435,7 +435,7 @@ export const PLATFORM_INVENTORY = [
     owner: 'ops',
     workPackage: 'WP7',
     status: 'implemented',
-    interfaces: ['route', 'registry', 'ui'],
+    interfaces: ['route', 'registry', 'session-storage', 'ui'],
     sources: [
       'frontend/packages/runtime-client/src/entity-workspace-navigation.ts',
       'frontend/packages/runtime-client/src/entity-workspace-context.ts',
@@ -443,12 +443,15 @@ export const PLATFORM_INVENTORY = [
       'frontend/packages/ui/src/entity-workspace-shell.tsx',
       'frontend/packages/ui/src/entity-workspace-shell.css',
       'frontend/apps/ops/src/ops-entity-workspace.tsx',
+      'frontend/apps/ops/src/ops-entity-workspace-source.ts',
+      'frontend/apps/ops/src/ops-entity-workspace-runtime.ts',
     ],
     consumers: [
       'frontend/src/lib/components/Entity/workspace/entity-panel-routing.ts',
       'frontend/src/lib/components/Entity/workspace/entity-panel-display.ts',
       'frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte',
       'frontend/apps/ops/src/ops-app.tsx',
+      'frontend/apps/ops/src/main.tsx',
       'frontend/apps/ops/src/ops-model.ts',
     ],
     evidence: [
@@ -456,6 +459,8 @@ export const PLATFORM_INVENTORY = [
       'tests/frontend/workspace/entity-panel-display.test.ts',
       'tests/frontend/workspace/entity-workspace-context.test.ts',
       'tests/frontend/ops/frontend-ops-entity-workspace.test.ts',
+      'tests/frontend/ops/frontend-ops-entity-runtime-read.test.ts',
+      'tests/e2e/runtime/e2e-react-entity-workspace.spec.ts',
       'frontend/tests/react-candidate/surfaces.spec.ts',
     ],
   },
