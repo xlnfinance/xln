@@ -388,6 +388,7 @@ export const CAPABILITIES = [
       'frontend/packages/ui/src/graph3d-renderer.ts',
       'frontend/packages/ui/src/graph3d-scene-primitives.ts',
       'frontend/packages/ui/src/graph3d-visual-effects.ts',
+      'frontend/packages/ui/src/graph3d-entity-visuals.ts',
     ],
     behavior: [
       'Dockview layout',
@@ -402,6 +403,7 @@ export const CAPABILITIES = [
       'shared Three.js renderer selection plus explicit geometry, material, and texture disposal',
       'shared Graph3D grid, Jurisdiction mesh, broadcast animation, and deterministic radial layout primitives',
       'shared directional-lightning and transaction-ripple visual effects',
+      'shared Graph3D entity labels, mempool indicators, and node construction',
     ],
     status: 'in_progress',
   },

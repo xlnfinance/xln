@@ -46,15 +46,10 @@ import {
   buildGraphAccountVisuals,
   createBlockContainer,
   buildGraphConnection,
-  createEntityLabel,
-  createGraphEntityNode,
-  createMempoolIndicator,
   createMempoolTxCube,
   deriveGraphEntry,
   getAccountTokenDelta,
   graphAccountMempoolCount,
-  positionEntityLabel,
-  positionMempoolIndicator,
 } from "./graph3d-visuals";
 import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphTransactionLike, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
@@ -78,6 +73,13 @@ import {
   createBroadcastRippleMesh,
   createDirectionalLightningMesh,
 } from "../../../../../packages/ui/src/graph3d-visual-effects";
+import {
+  createEntityLabel,
+  createGraphEntityNode,
+  createMempoolIndicator,
+  positionEntityLabel,
+  positionMempoolIndicator,
+} from "../../../../../packages/ui/src/graph3d-entity-visuals";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
