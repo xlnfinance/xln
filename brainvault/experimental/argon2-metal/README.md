@@ -7,8 +7,9 @@ Apple GPU. One 32-thread SIMD group cooperates on each independent shard.
 
 The register/SIMD-shuffle layout is a Metal adaptation of Ondrej Mosnacek's
 MIT-licensed `argon2-gpu` warp design. Its notice is retained in
-`LICENSE-ARGON2-GPU`. The barrier kernel is an independently written readable
-reference used to cross-check the faster register kernel.
+`LICENSE-ARGON2-GPU`. The fastest `modern64` kernel uses the equivalent compact
+permutation already validated in the sibling OpenCL experiment. The barrier
+kernel remains an independently written readable reference.
 
 It is deliberately separate from wallet creation and is not a production
 engine. Promotion requires exact raw-shard and root parity across the canonical
@@ -17,15 +18,36 @@ repeatable speed win over C/NEON.
 
 ## M3 Ultra result
 
-Every tested raw shard matched the canonical C/NEON output at batch sizes
-1, 2, 8, 32, 64, 128, and 256. Four SIMD groups per Metal threadgroup was the
-best packing tested. Throughput saturated near 50 shards/s, while the 36-thread
-C experiment reached about 192.5 shards/s. A concurrent 800 C + 200 Metal split
-reached 193.2 shards/s: unified-memory contention erased the theoretical hybrid
-gain. Metal is therefore research-only and must not be selected for wallets.
+Every tested raw shard matches the canonical C/NEON output. The final
+1,000-shard root is
+`dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
+
+The original shared-memory Metal path completed 256 shards in 5.213 seconds
+(49.11 shards/s). The retained native path adds four measured changes:
+
+- a GPU-private arena with small upload/download staging buffers;
+- a 64-bit modern register permutation split into four Argon2 segments;
+- four SIMD groups per threadgroup;
+- two independent Metal processes, each reusing a 139-shard private arena.
+
+On the 32-CPU-core / 80-GPU-core M3 Ultra used for development, the stable
+default sends 556 shards to Metal and 444 to C/NEON. Four retained runs took
+2.732, 2.740, 2.738, and 2.741 seconds: **2.739-second median** and
+**365.0 shards/s**. A later cool run of the same retained profile set the best
+observation at **2.675 seconds / 373.85 shards/s**.
+Against the fresh 5.136-second C/NEON baseline, the stable profile is **1.875x**
+faster. It is also **1.082x** faster than the 2.964-second OpenCL best while
+using Apple's native Metal API and no external runtime.
+
+The default profile needs roughly 78 GiB of unified memory at peak, so it is an
+M3 Ultra tuning, not a laptop default. Metal remains experimental and is not
+selected by wallet creation until its package/platform matrix and failure suite
+match the production C engine.
 
 Rejected experiments are equally important: 2 MiB Mach superpages fail to
-allocate on Apple Silicon, and fixed-corpus PGO was within run noise.
+allocate on Apple Silicon, fixed-corpus PGO was within run noise, reference
+precomputation did not improve a saturated batch, and marking the erased arena
+purgeable made cleanup slower.
 
 ```bash
 make -C experimental/argon2-metal
@@ -33,3 +55,10 @@ make -C experimental/argon2-c oversubscribed
 make -C experimental/argon2-metal parity
 make -C experimental/argon2-metal benchmark
 ```
+
+`benchmark.ts` accepts `--cpu-workers`, `--metal-workers`, `--metal-processes`,
+`--gpu-shards`, `--simdgroups`, `--kernel`, and `--memory`. With no flags it
+runs the retained fastest profile. Set `BRAINVAULT_METAL_PROFILE=1` to include
+host-stage timing. All child outputs and input material are erased on success
+and failure; the private GPU arenas are zero-filled and synchronized before
+release.

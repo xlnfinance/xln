@@ -17,7 +17,7 @@ SOURCES := brainvault_argon2_metal.m \
 all: brainvault-argon2-metal argon2.metallib
 
 benchmark: all
-	bun benchmark.ts --mode=hybrid --shards=1000 --cpu-workers=36 --metal-workers=256 --gpu-shards=200
+	bun benchmark.ts
 
 parity: all
 	bun benchmark.ts --mode=parity --shards=2

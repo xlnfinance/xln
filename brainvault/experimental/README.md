@@ -63,12 +63,16 @@ Both paths automatically use all CPU cores allowed by RAM.
 
 ## Apple GPU research
 
-`argon2-metal/` contains a dependency-free Metal prototype for the exact V1
-Argon2id shard. It reached raw byte parity at batch sizes through 256, but the
-M3 Ultra saturated near 50 shards/s versus about 192.5 shards/s for C/NEON.
-Running CPU and GPU concurrently did not materially improve total throughput
-because they contend for unified-memory service. It remains an auditable
-research backend and is intentionally not routed into wallet creation.
+`argon2-metal/` contains the dependency-free native Metal backend for the exact
+V1 Argon2id shard. GPU-private arenas, a compact 64-bit segmented permutation,
+and two independent Metal queues raised the M3 Ultra result from the original
+49.11-shard/s pure GPU prototype to a stable **2.739 seconds / 365.0 shards/s**
+for the complete 1,000-shard CPU/GPU derivation. The best observed run was
+2.675 seconds. The frozen root remained
+`dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485`.
+This is **1.875x** the fresh C/NEON baseline and about **1.082x** the OpenCL
+record. The 556 Metal / 444 CPU profile uses about 78 GiB at peak and remains
+an auditable M3 Ultra experiment, not the laptop or wallet-creation default.
 
 `argon2-opencl/` is the faster source-only experiment. A one-shard-per-workgroup
 layout plus concurrent C/NEON processing completed 1,000 exact V1 shards in a

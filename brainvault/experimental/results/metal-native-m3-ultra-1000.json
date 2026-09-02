@@ -1,0 +1,60 @@
+{
+  "date": "2026-09-02",
+  "machine": "Mac Studio M3 Ultra",
+  "cpuCoresAvailable": 32,
+  "gpuCores": 80,
+  "shards": 1000,
+  "memoryKiBPerShard": 262144,
+  "timeCost": 1,
+  "lanes": 1,
+  "root": "dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485",
+  "originalMetal": {
+    "shards": 256,
+    "timeMs": 5212.536,
+    "shardsPerSecond": 49.112
+  },
+  "productionCNeonBaseline": {
+    "workers": 32,
+    "timeMs": 5135.514,
+    "shardsPerSecond": 194.722
+  },
+  "previousOpenClRecord": {
+    "timeMs": 2963.581,
+    "shardsPerSecond": 337.43
+  },
+  "retainedNativeMetal": {
+    "cpuShards": 444,
+    "cpuWorkers": 32,
+    "metalShards": 556,
+    "metalProcesses": 2,
+    "metalWorkersPerProcess": 139,
+    "simdgroupsPerThreadgroup": 4,
+    "kernel": "modern64",
+    "memory": "private",
+    "repeatRunsMs": [2674.853, 2731.712, 2739.965, 2737.96, 2741.453],
+    "repeatMedianMs": 2737.96,
+    "bestMs": 2674.853,
+    "bestShardsPerSecond": 373.852,
+    "medianShardsPerSecond": 365.235,
+    "speedupVsCNeonBest": 1.92,
+    "speedupVsCNeonMedian": 1.876,
+    "speedupVsOpenClBest": 1.108,
+    "speedupVsOpenClMedian": 1.082
+  },
+  "bestObservedNearby": {
+    "cpuShards": 440,
+    "cpuWorkers": 32,
+    "metalShards": 560,
+    "metalProcesses": 2,
+    "metalWorkersPerProcess": 140,
+    "simdgroupsPerThreadgroup": 4,
+    "timeMs": 2710.832,
+    "shardsPerSecond": 368.89,
+    "speedupVsCNeon": 1.894,
+    "speedupVsOpenCl": 1.093
+  },
+  "parity": {
+    "rawShardCounts": [1, 2, 8, 32, 64],
+    "fullRoot1000": true
+  }
+}

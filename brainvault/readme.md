@@ -101,9 +101,10 @@ This directory is the complete npm package boundary. Nothing above
   Argon2/SSE2NEON dependencies;
 - `experimental/argon2-rust/` contains the complete Rust source, locked Cargo
   dependencies, and secure-wipe/no-wipe comparison variants;
-- `experimental/argon2-metal/` contains the source-only Apple GPU research
-  engine, raw parity harness, and retained upstream MIT notice. It is slower
-  than C/NEON on M3 Ultra and is not used for wallet creation;
+- `experimental/argon2-metal/` contains the source-only native Apple GPU
+  engine, raw parity harness, and retained upstream MIT notice. Its tuned M3
+  Ultra CPU/GPU path is the fastest measured V1 experiment, but is not yet used
+  for wallet creation because it needs roughly 78 GiB and macOS/Metal;
 - `experimental/benchmark.ts` performs the canonical 1,000-shard sequential
   backend comparison; each timing includes the first four root bytes, and
   `brainvault --smoke` uses the same harness with 2 shards;

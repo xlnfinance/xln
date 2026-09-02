@@ -10,6 +10,7 @@ struct KernelParams {
     uint segment_length;
     uint active_shards;
     uint simdgroups_per_threadgroup;
+    uint slice;
 };
 
 inline ulong rotate_right(ulong value, uint amount) {
@@ -139,13 +140,15 @@ inline void next_addresses(
     fill_threadgroup_block(zero, address, address, state, copy, thread_index);
 }
 
-inline uint reference_index(uint slice, uint index, uint pseudo_random, uint segment_length, uint lane_length) {
+inline uint reference_index(uint slice, uint index, uint pseudo_random, uint segment_length) {
     uint reference_area = slice == 0u
         ? index - 1u
         : (slice * segment_length) + index - 1u;
     uint relative = mulhi(pseudo_random, pseudo_random);
     relative = reference_area - 1u - mulhi(reference_area, relative);
-    return relative % lane_length;
+    // Frozen V1 is pass 0 with one lane, so start_position is zero and
+    // relative is already strictly below lane_length. Avoid a device divide.
+    return relative;
 }
 
 kernel void argon2id_fill(
@@ -205,8 +208,7 @@ kernel void argon2id_fill(
                 slice,
                 index,
                 uint(pseudo_random),
-                params.segment_length,
-                params.lane_length
+                params.segment_length
             );
             fill_device_block(
                 arena + (ulong(previous) * WORDS_PER_BLOCK),
@@ -451,8 +453,7 @@ kernel void argon2id_fill_shuffle(
                     slice,
                     offset,
                     random.x,
-                    params.segment_length,
-                    params.lane_length
+                    params.segment_length
                 );
             } else {
                 uint2 random = shuffle_u64(previous.a, 0u);
@@ -460,8 +461,7 @@ kernel void argon2id_fill_shuffle(
                     slice,
                     offset,
                     random.x,
-                    params.segment_length,
-                    params.lane_length
+                    params.segment_length
                 );
             }
             register_fill(arena, current, previous, temporary, reference, thread_index);
@@ -470,5 +470,439 @@ kernel void argon2id_fill_shuffle(
         simdgroup_barrier(mem_flags::mem_device);
         if (thread_index == 2u) input_word += 1u;
         if (thread_index == 6u) input_word = 0u;
+    }
+}
+
+struct RegisterBlock64 {
+    ulong a;
+    ulong b;
+    ulong c;
+    ulong d;
+};
+
+inline ulong shuffle_ulong(ulong value, uint source) {
+    return as_type<ulong>(simd_shuffle(as_type<uint2>(value), ushort(source)));
+}
+
+inline ulong register64_get(thread RegisterBlock64 &block, uint index) {
+    switch (index) {
+        case 0u: return block.a;
+        case 1u: return block.b;
+        case 2u: return block.c;
+        default: return block.d;
+    }
+}
+
+inline void register64_set(thread RegisterBlock64 &block, uint index, ulong value) {
+    switch (index) {
+        case 0u: block.a = value; break;
+        case 1u: block.b = value; break;
+        case 2u: block.c = value; break;
+        default: block.d = value; break;
+    }
+}
+
+inline void register64_xor(thread RegisterBlock64 &left, thread RegisterBlock64 &right) {
+    left.a ^= right.a;
+    left.b ^= right.b;
+    left.c ^= right.c;
+    left.d ^= right.d;
+}
+
+inline void register64_load(thread RegisterBlock64 &block, device ulong *source, uint thread_index) {
+    block.a = source[thread_index];
+    block.b = source[32u + thread_index];
+    block.c = source[64u + thread_index];
+    block.d = source[96u + thread_index];
+}
+
+inline void register64_load_xor(thread RegisterBlock64 &block, device ulong *source, uint thread_index) {
+    block.a ^= source[thread_index];
+    block.b ^= source[32u + thread_index];
+    block.c ^= source[64u + thread_index];
+    block.d ^= source[96u + thread_index];
+}
+
+inline void register64_store(device ulong *destination, thread RegisterBlock64 &block, uint thread_index) {
+    destination[thread_index] = block.a;
+    destination[32u + thread_index] = block.b;
+    destination[64u + thread_index] = block.c;
+    destination[96u + thread_index] = block.d;
+}
+
+inline void register64_g(thread RegisterBlock64 &block) {
+    block.a = blamka(block.a, block.b);
+    block.d = rotate_right(block.d ^ block.a, 32u);
+    block.c = blamka(block.c, block.d);
+    block.b = rotate_right(block.b ^ block.c, 24u);
+    block.a = blamka(block.a, block.b);
+    block.d = rotate_right(block.d ^ block.a, 16u);
+    block.c = blamka(block.c, block.d);
+    block.b = rotate_right(block.b ^ block.c, 63u);
+}
+
+inline void register64_shift1(thread RegisterBlock64 &block, uint thread_index, bool inverse) {
+    block.b = shuffle_ulong(block.b, inverse
+        ? shuffle_unshift1_source(thread_index, 1u)
+        : shuffle_shift1_source(thread_index, 1u));
+    block.c = shuffle_ulong(block.c, inverse
+        ? shuffle_unshift1_source(thread_index, 2u)
+        : shuffle_shift1_source(thread_index, 2u));
+    block.d = shuffle_ulong(block.d, inverse
+        ? shuffle_unshift1_source(thread_index, 3u)
+        : shuffle_shift1_source(thread_index, 3u));
+}
+
+inline void register64_shift2(thread RegisterBlock64 &block, uint thread_index, bool inverse) {
+    block.b = shuffle_ulong(block.b, inverse
+        ? shuffle_unshift2_source(thread_index, 1u)
+        : shuffle_shift2_source(thread_index, 1u));
+    block.c = shuffle_ulong(block.c, inverse
+        ? shuffle_unshift2_source(thread_index, 2u)
+        : shuffle_shift2_source(thread_index, 2u));
+    block.d = shuffle_ulong(block.d, inverse
+        ? shuffle_unshift2_source(thread_index, 3u)
+        : shuffle_shift2_source(thread_index, 3u));
+}
+
+inline void register64_transpose(thread RegisterBlock64 &block, uint thread_index) {
+    uint group = (thread_index & 0x0cu) >> 2u;
+    #pragma unroll
+    for (uint word = 1u; word < 4u; ++word) {
+        uint source = (word << 2u) ^ thread_index;
+        uint index = group ^ word;
+        register64_set(block, index, shuffle_ulong(register64_get(block, index), source));
+    }
+}
+
+__attribute__((always_inline)) inline void register64_permute(
+    thread RegisterBlock64 &block,
+    uint thread_index
+) {
+    register64_transpose(block, thread_index);
+    register64_g(block);
+    register64_shift1(block, thread_index, false);
+    register64_g(block);
+    register64_shift1(block, thread_index, true);
+    register64_transpose(block, thread_index);
+    register64_g(block);
+    register64_shift2(block, thread_index, false);
+    register64_g(block);
+    register64_shift2(block, thread_index, true);
+}
+
+inline void register64_next_addresses(
+    thread RegisterBlock64 &address,
+    thread RegisterBlock64 &temporary,
+    ulong input_word,
+    uint thread_index
+) {
+    address.a = input_word;
+    address.b = 0ul;
+    address.c = 0ul;
+    address.d = 0ul;
+    register64_permute(address, thread_index);
+    address.a ^= input_word;
+    temporary = address;
+    register64_permute(address, thread_index);
+    register64_xor(address, temporary);
+}
+
+inline void register64_fill(
+    device ulong *arena,
+    device ulong *current,
+    thread RegisterBlock64 &previous,
+    thread RegisterBlock64 &temporary,
+    uint reference,
+    uint thread_index
+) {
+    register64_load_xor(previous, arena + (ulong(reference) * WORDS_PER_BLOCK), thread_index);
+    temporary = previous;
+    register64_permute(previous, thread_index);
+    register64_xor(previous, temporary);
+    register64_store(current, previous, thread_index);
+}
+
+inline void register64_swap(thread ulong &left, thread ulong &right) {
+    ulong value = left;
+    left = right;
+    right = value;
+}
+
+inline void register64_private_transpose(thread RegisterBlock64 &block, uint thread_index) {
+    if ((thread_index & 0x08u) != 0u) {
+        register64_swap(block.a, block.c);
+        register64_swap(block.b, block.d);
+    }
+    if ((thread_index & 0x04u) != 0u) {
+        register64_swap(block.a, block.b);
+        register64_swap(block.c, block.d);
+    }
+}
+
+inline uint register64_shift2_modern(uint index, uint thread_index) {
+    uint delta = ((index & 0x02u) << 3u) + (index & 0x01u);
+    return (thread_index & 0x0eu) | (((thread_index & 0x11u) + delta + 0x0eu) & 0x11u);
+}
+
+__attribute__((always_inline)) inline void register64_permute_modern(
+    thread RegisterBlock64 &block,
+    uint thread_index
+) {
+    block.b = shuffle_ulong(block.b, thread_index ^ 4u);
+    block.c = shuffle_ulong(block.c, thread_index ^ 8u);
+    block.d = shuffle_ulong(block.d, thread_index ^ 12u);
+    register64_private_transpose(block, thread_index);
+    block.b = shuffle_ulong(block.b, thread_index ^ 4u);
+    block.c = shuffle_ulong(block.c, thread_index ^ 8u);
+    block.d = shuffle_ulong(block.d, thread_index ^ 12u);
+    register64_g(block);
+
+    block.b = shuffle_ulong(block.b, (thread_index & 0x1cu) | ((thread_index + 1u) & 0x03u));
+    block.c = shuffle_ulong(block.c, (thread_index & 0x1cu) | ((thread_index + 2u) & 0x03u));
+    block.d = shuffle_ulong(block.d, (thread_index & 0x1cu) | ((thread_index + 3u) & 0x03u));
+    register64_g(block);
+
+    block.b = shuffle_ulong(block.b,
+        ((thread_index & 0x1cu) | ((thread_index - 1u) & 0x03u)) ^ 4u);
+    block.c = shuffle_ulong(block.c,
+        ((thread_index & 0x1cu) | ((thread_index - 2u) & 0x03u)) ^ 8u);
+    block.d = shuffle_ulong(block.d,
+        ((thread_index & 0x1cu) | ((thread_index - 3u) & 0x03u)) ^ 12u);
+    register64_private_transpose(block, thread_index);
+    block.b = shuffle_ulong(block.b, thread_index ^ 4u);
+    block.c = shuffle_ulong(block.c, thread_index ^ 8u);
+    block.d = shuffle_ulong(block.d, thread_index ^ 12u);
+    register64_g(block);
+
+    block.b = shuffle_ulong(block.b, register64_shift2_modern(1u, thread_index));
+    block.c = shuffle_ulong(block.c, register64_shift2_modern(2u, thread_index));
+    block.d = shuffle_ulong(block.d, register64_shift2_modern(3u, thread_index));
+    register64_g(block);
+    block.b = shuffle_ulong(block.b, register64_shift2_modern(3u, thread_index));
+    block.c = shuffle_ulong(block.c, register64_shift2_modern(2u, thread_index));
+    block.d = shuffle_ulong(block.d, register64_shift2_modern(1u, thread_index));
+}
+
+inline void register64_next_addresses_modern(
+    thread RegisterBlock64 &address,
+    thread RegisterBlock64 &temporary,
+    ulong input_word,
+    uint thread_index
+) {
+    address.a = input_word;
+    address.b = 0ul;
+    address.c = 0ul;
+    address.d = 0ul;
+    register64_permute_modern(address, thread_index);
+    address.a ^= input_word;
+    temporary = address;
+    register64_permute_modern(address, thread_index);
+    register64_xor(address, temporary);
+}
+
+inline void register64_fill_modern(
+    device ulong *arena,
+    device ulong *current,
+    thread RegisterBlock64 &previous,
+    thread RegisterBlock64 &temporary,
+    uint reference,
+    uint thread_index
+) {
+    register64_load_xor(previous, arena + (ulong(reference) * WORDS_PER_BLOCK), thread_index);
+    temporary = previous;
+    register64_permute_modern(previous, thread_index);
+    register64_xor(previous, temporary);
+    register64_store(current, previous, thread_index);
+}
+
+kernel void argon2id_fill_shuffle64(
+    device ulong *memory [[buffer(0)]],
+    constant KernelParams &params [[buffer(1)]],
+    uint threadgroup_index [[threadgroup_position_in_grid]],
+    uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_simdgroup]],
+    uint simd_width [[threads_per_simdgroup]]
+) {
+    uint shard = (threadgroup_index * params.simdgroups_per_threadgroup) + simdgroup_index;
+    if (shard >= params.active_shards || simd_width != 32u) return;
+    device ulong *arena = memory + (size_t(shard) * size_t(params.memory_blocks) * WORDS_PER_BLOCK);
+    RegisterBlock64 previous, temporary, address;
+    ulong input_word;
+    switch (thread_index) {
+        case 3u: input_word = params.memory_blocks; break;
+        case 4u: input_word = 1ul; break;
+        case 5u: input_word = 2ul; break;
+        default: input_word = 0ul; break;
+    }
+    if (params.segment_length > 2u) {
+        if (thread_index == 6u) input_word += 1ul;
+        register64_next_addresses(address, temporary, input_word, thread_index);
+    }
+
+    register64_load(previous, arena + WORDS_PER_BLOCK, thread_index);
+    device ulong *current = arena + (2u * WORDS_PER_BLOCK);
+    uint skip = 2u;
+    for (uint slice = 0u; slice < SYNC_POINTS; ++slice) {
+        for (uint offset = 0u; offset < params.segment_length; ++offset) {
+            if (skip != 0u) {
+                --skip;
+                continue;
+            }
+            uint reference;
+            if (slice < 2u) {
+                uint address_index = offset % WORDS_PER_BLOCK;
+                if (address_index == 0u) {
+                    if (thread_index == 6u) input_word += 1ul;
+                    register64_next_addresses(address, temporary, input_word, thread_index);
+                }
+                uint source_thread = address_index % 32u;
+                uint source_word = address_index / 32u;
+                ulong random = shuffle_ulong(register64_get(address, source_word), source_thread);
+                reference = reference_index(
+                    slice,
+                    offset,
+                    uint(random),
+                    params.segment_length
+                );
+            } else {
+                ulong random = shuffle_ulong(previous.a, 0u);
+                reference = reference_index(
+                    slice,
+                    offset,
+                    uint(random),
+                    params.segment_length
+                );
+            }
+            register64_fill(arena, current, previous, temporary, reference, thread_index);
+            current += WORDS_PER_BLOCK;
+        }
+        simdgroup_barrier(mem_flags::mem_device);
+        if (thread_index == 2u) input_word += 1ul;
+        if (thread_index == 6u) input_word = 0ul;
+    }
+}
+
+[[max_total_threads_per_threadgroup(128)]] kernel void argon2id_fill_shuffle64_segment(
+    device ulong *memory [[buffer(0)]],
+    constant KernelParams &params [[buffer(1)]],
+    uint threadgroup_index [[threadgroup_position_in_grid]],
+    uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_simdgroup]],
+    uint simd_width [[threads_per_simdgroup]]
+) {
+    uint shard = (threadgroup_index * params.simdgroups_per_threadgroup) + simdgroup_index;
+    if (shard >= params.active_shards || simd_width != 32u || params.slice >= SYNC_POINTS) return;
+    device ulong *arena = memory + (size_t(shard) * size_t(params.memory_blocks) * WORDS_PER_BLOCK);
+    RegisterBlock64 previous, temporary, address;
+    ulong input_word;
+    switch (thread_index) {
+        case 2u: input_word = params.slice; break;
+        case 3u: input_word = params.memory_blocks; break;
+        case 4u: input_word = 1ul; break;
+        case 5u: input_word = 2ul; break;
+        default: input_word = 0ul; break;
+    }
+
+    uint start = params.slice == 0u ? 2u : 0u;
+    if (params.slice == 0u && params.segment_length > 2u) {
+        if (thread_index == 6u) input_word = 1ul;
+        register64_next_addresses(address, temporary, input_word, thread_index);
+    }
+    uint current_index = (params.slice * params.segment_length) + start;
+    uint previous_index = current_index == 0u ? params.lane_length - 1u : current_index - 1u;
+    register64_load(previous, arena + (ulong(previous_index) * WORDS_PER_BLOCK), thread_index);
+    device ulong *current = arena + (ulong(current_index) * WORDS_PER_BLOCK);
+
+    for (uint offset = start; offset < params.segment_length; ++offset) {
+        uint reference;
+        if (params.slice < 2u) {
+            uint address_index = offset % WORDS_PER_BLOCK;
+            if (address_index == 0u) {
+                if (thread_index == 6u) input_word += 1ul;
+                register64_next_addresses(address, temporary, input_word, thread_index);
+            }
+            uint source_thread = address_index % 32u;
+            uint source_word = address_index / 32u;
+            ulong random = shuffle_ulong(register64_get(address, source_word), source_thread);
+            reference = reference_index(
+                params.slice,
+                offset,
+                uint(random),
+                params.segment_length
+            );
+        } else {
+            ulong random = shuffle_ulong(previous.a, 0u);
+            reference = reference_index(
+                params.slice,
+                offset,
+                uint(random),
+                params.segment_length
+            );
+        }
+        register64_fill(arena, current, previous, temporary, reference, thread_index);
+        current += WORDS_PER_BLOCK;
+    }
+}
+
+[[max_total_threads_per_threadgroup(128)]] kernel void argon2id_fill_modern64_segment(
+    device ulong *memory [[buffer(0)]],
+    constant KernelParams &params [[buffer(1)]],
+    uint threadgroup_index [[threadgroup_position_in_grid]],
+    uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_simdgroup]],
+    uint simd_width [[threads_per_simdgroup]]
+) {
+    uint shard = (threadgroup_index * params.simdgroups_per_threadgroup) + simdgroup_index;
+    if (shard >= params.active_shards || simd_width != 32u || params.slice >= SYNC_POINTS) return;
+    device ulong *arena = memory + (size_t(shard) * size_t(params.memory_blocks) * WORDS_PER_BLOCK);
+    RegisterBlock64 previous, temporary, address;
+    ulong input_word;
+    switch (thread_index) {
+        case 2u: input_word = params.slice; break;
+        case 3u: input_word = params.memory_blocks; break;
+        case 4u: input_word = 1ul; break;
+        case 5u: input_word = 2ul; break;
+        default: input_word = 0ul; break;
+    }
+
+    uint start = params.slice == 0u ? 2u : 0u;
+    if (params.slice == 0u && params.segment_length > 2u) {
+        if (thread_index == 6u) input_word = 1ul;
+        register64_next_addresses_modern(address, temporary, input_word, thread_index);
+    }
+    uint current_index = (params.slice * params.segment_length) + start;
+    uint previous_index = current_index == 0u ? params.lane_length - 1u : current_index - 1u;
+    register64_load(previous, arena + (ulong(previous_index) * WORDS_PER_BLOCK), thread_index);
+    device ulong *current = arena + (ulong(current_index) * WORDS_PER_BLOCK);
+
+    for (uint offset = start; offset < params.segment_length; ++offset) {
+        uint reference;
+        if (params.slice < 2u) {
+            uint address_index = offset % WORDS_PER_BLOCK;
+            if (address_index == 0u) {
+                if (thread_index == 6u) input_word += 1ul;
+                register64_next_addresses_modern(address, temporary, input_word, thread_index);
+            }
+            uint source_thread = address_index % 32u;
+            uint source_word = address_index / 32u;
+            ulong random = shuffle_ulong(register64_get(address, source_word), source_thread);
+            reference = reference_index(
+                params.slice,
+                offset,
+                uint(random),
+                params.segment_length
+            );
+        } else {
+            ulong random = shuffle_ulong(previous.a, 0u);
+            reference = reference_index(
+                params.slice,
+                offset,
+                uint(random),
+                params.segment_length
+            );
+        }
+        register64_fill_modern(arena, current, previous, temporary, reference, thread_index);
+        current += WORDS_PER_BLOCK;
     }
 }
