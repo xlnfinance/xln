@@ -10,6 +10,7 @@ import {
   validateStorageAccountDocValue,
 } from '../../storage/schema/schema-state-docs';
 import type { RuntimeReplica } from '../../runtime/types';
+import type { StorageAccountDoc } from '../../storage/types';
 import type { AccountInput, AccountTxBatch } from '../../types/account';
 import type { AccountJClaimNode } from '../../types/finance/account-j-claims';
 import { collectReachableAccountJClaimNodes } from '../../account/j-claims/j-claim-accumulator';
@@ -22,6 +23,7 @@ import type {
 } from '../authority/entity-stage';
 import type { AccountAuthorityInputRequest } from '../../account/consensus/context';
 import { safeStringify } from '../../protocol/serialization';
+import { getPerfMs } from '../../support/time';
 import {
   countOp,
   OP_COUNTERS_ENABLED,
@@ -174,24 +176,41 @@ const inboundEffect = (
   return effect.result;
 };
 
+const TS_WORKER_VALIDATE_POST_DOCS = process.env['XLN_TS_WORKER_VALIDATE_POST_DOCS'] === '1';
+
 const replacePostAccount = (
   ownerEntityId: string,
   account: AccountAuthorityInputRequest['account'],
   row: TsAccountWorkerPostAccount,
 ): void => {
   const accountId = normalize(row.accountId);
+  const validateStartedAt = getPerfMs();
+  // The document comes from this process's own Account worker over a private
+  // channel, exactly like a Rust resident row crossing a lane; Rust never
+  // re-validates its own rows. Full storage schema validation of that trusted
+  // projection cost ~5% of replay wall, so it is a diagnostic switch only.
+  // The endpoint/owner binding is always asserted.
   const validated = assertStorageAccountDocBinding(
-    validateStorageAccountDocValue(row.account),
+    TS_WORKER_VALIDATE_POST_DOCS
+      ? validateStorageAccountDocValue(row.account)
+      : (row.account as unknown as StorageAccountDoc),
     ownerEntityId,
     accountId,
     'ts-account-worker-post',
   );
+  const hydrateStartedAt = getPerfMs();
   const prepared = hydrateAccountDocFromStorage(validated);
+  const replaceStartedAt = getPerfMs();
   if (normalize(account.proofHeader.toEntity) !== accountId) {
     throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_POST_ACCOUNT_MISSING:${accountId}`);
   }
   replaceAccountReplica(account, prepared);
   rememberEngineAccountLeaf(ownerEntityId, accountId, row.entityAccountLeaf);
+  const doneAt = getPerfMs();
+  countOp('tsWorker.post.validate', 0, Math.round((hydrateStartedAt - validateStartedAt) * 1_000));
+  countOp('tsWorker.post.hydrate', 0, Math.round((replaceStartedAt - hydrateStartedAt) * 1_000));
+  countOp('tsWorker.post.replace', 0, Math.round((doneAt - replaceStartedAt) * 1_000));
+  countOp('tsWorker.post.rows', 1);
 };
 
 /**
@@ -302,6 +321,8 @@ export class TsAccountWorkerAuthority {
       countOp(`${prefix}.join`, 0, Math.round(result.timings.joinMs * 1_000));
       countOp(`${prefix}.fold`, 0, Math.round(result.timings.foldMs * 1_000));
       countOp(`${prefix}.encodeSum`, 0, Math.round(result.timings.encodeMs * 1_000));
+      countOp(`${prefix}.ipcRequestBytes`, result.ipc.requestBytes);
+      countOp(`${prefix}.ipcResponseBytes`, result.ipc.responseBytes);
       countOp(`${prefix}.decodeSum`, 0, Math.round(result.timings.decodeMs * 1_000));
       countOp(`${prefix}.workerEncodeSum`, 0, Math.round(result.workers
         .reduce((sum, metric) => sum + metric.workerEncodeMs, 0) * 1_000));
