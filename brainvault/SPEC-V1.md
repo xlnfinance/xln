@@ -65,10 +65,10 @@ Levels are creation UX only. They map to exact shard counts:
 
 ```text
 level 1 / test     =         1 shard
-level 2 / quick    =       100 shards
-level 3 / standard =     1,000 shards (default)
-level 4 / strong   =    10,000 shards
-level 5 / vault    =   100,000 shards
+level 2 / unsafe   =       100 shards
+level 3 / quick    =     1,000 shards
+level 4 / standard =    10,000 shards (default)
+level 5 / hard     =   100,000 shards
 level 6 / million  = 1,000,000 shards
 ```
 
@@ -81,7 +81,7 @@ factor(n) = decimal_digit_count(n - 1) + 1, for n > 1
 ```
 
 This is exactly `ceil(log10(n)) + 1` without floating-point arithmetic.
-Therefore level 3 is 1,000 shards with frozen factor 4.
+Therefore level 4 is 10,000 shards with frozen factor 5.
 
 Legacy factor recovery remains normative:
 

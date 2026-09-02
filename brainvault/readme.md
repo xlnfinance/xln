@@ -18,7 +18,7 @@ bun add --global brainvault
 brainvault
 
 # Recommended interactive path: asks only username + password, then uses
-# level 3 (exactly 1,000 shards), multiplier 1, and all CPUs allowed by RAM.
+# level 4 (exactly 10,000 shards), multiplier 1, and all CPUs allowed by RAM.
 bun run bv
 
 # Optional: generate ten random a-z/A-Z/0-9 characters (59.54 bits) with
@@ -53,10 +53,11 @@ version. Future fixes must preserve every V1 root and frozen test vector.
 
 ## Hardware defaults
 
-The portable C/NEON default targets the entry 14-inch MacBook Pro with M5: 16GB
-unified memory, 10 CPU cores, and 153GB/s memory bandwidth. Level 3,
-multiplier 1, and all 10 cores need 2.5GB of Argon2 arenas, so the same default
-remains practical on the least-expensive current MacBook Pro. Its GPU profile
+The portable C/NEON path targets the entry 14-inch MacBook Pro with M5: 16GB
+unified memory, 10 CPU cores, and 153GB/s memory bandwidth. Default level 4,
+multiplier 1, and all 10 cores need 2.5GB of live Argon2 arenas; its 10,000
+shards deliberately take about 10x longer than the quick 1,000-shard level.
+Its GPU profile
 is deliberately not automatic until it is measured on real M5 hardware.
 BrainVault calculates the worker ceiling from the actual CPU and RAM at runtime.
 
@@ -76,7 +77,7 @@ BrainVault does not create a recovery file, QR code, seed receipt, or cloud
 record. Such an artifact would become a bearer backup with the same loss,
 theft, photography, and copying risks BrainVault is designed to avoid. Recovery
 means remembering the exact username and passphrase plus the level and
-multiplier. The default is deliberately memorable: level 3, multiplier 1.
+multiplier. The default is deliberately memorable: level 4, multiplier 1.
 
 `--suggest-password` is opt-in. It makes ten independent unbiased choices from
 `a-zA-Z0-9` using the operating-system CSPRNG: 62^10 possibilities, or 59.54
@@ -219,8 +220,8 @@ Approve only if source and frozen tests prove every invariant below:
 9. The CLI's eight-character minimum is UX policy only. Protocol V1 accepts
    every non-empty legacy password, recoverable with --allow-short-password.
 10. User levels map only to exact shard counts: 1/100/1,000/10,000/100,000/
-    1,000,000. They never renumber the frozen factor: level 3 uses 1,000 shards
-    and internal factor 4. Exact 10-shard legacy recovery remains reproducible.
+    1,000,000. They never renumber the frozen factor: default level 4 uses
+    10,000 shards and internal factor 5. Exact 10-shard legacy recovery remains reproducible.
 11. No recovery receipt, seed file, QR, or network record is created. Suggested
     passwords are ten independent unbiased OS-CSPRNG selections from the exact
     62-character a-z/A-Z/0-9 alphabet and are never written by BrainVault.

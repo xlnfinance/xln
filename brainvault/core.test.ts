@@ -161,13 +161,13 @@ test('factor mapping is integer-only and preserves the V1 formula', () => {
 });
 
 test('user levels skip 10 shards without renumbering the frozen V1 factor', () => {
-  expect(BRAINVAULT_DEFAULT_LEVEL).toBe(3);
-  expect([...BRAINVAULT_LEVEL_NAMES]).toEqual(['test', 'quick', 'standard', 'strong', 'vault', 'million']);
+  expect(BRAINVAULT_DEFAULT_LEVEL).toBe(4);
+  expect([...BRAINVAULT_LEVEL_NAMES]).toEqual(['test', 'unsafe', 'quick', 'standard', 'hard', 'million']);
   expect([...BRAINVAULT_LEVEL_SHARDS]).toEqual([1, 100, 1_000, 10_000, 100_000, 1_000_000]);
   for (const [index, shardCount] of BRAINVAULT_LEVEL_SHARDS.entries()) {
     expect(getShardCountForLevel(index + 1)).toBe(shardCount);
   }
-  expect(factorForShardCount(getShardCountForLevel(3))).toBe(4);
+  expect(factorForShardCount(getShardCountForLevel(4))).toBe(5);
   expect(getShardCount(2)).toBe(10);
   expect(() => getShardCountForLevel(0)).toThrow('BRAINVAULT_LEVEL_INVALID:0');
   expect(() => getShardCountForLevel(7)).toThrow('BRAINVAULT_LEVEL_INVALID:7');
@@ -410,7 +410,7 @@ function runCli(cliArgs: readonly string[], input = '') {
   });
 }
 
-function runCliTty(extraArgs: readonly string[], reveal = false) {
+function runCliTty(extraArgs: readonly string[], reveal = false, rehearsal = 'secret123456') {
   const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
   const script = [
     'set timeout 10',
@@ -420,8 +420,10 @@ function runCliTty(extraArgs: readonly string[], reveal = false) {
     'expect "Password: "',
     'send "secret123456\\r"',
     reveal ? 'expect "Repeat the exact password: "' : 'expect "Type reveal"',
-    reveal ? 'send "secret123456\\r"' : 'send "\\r"',
+    reveal ? `send "${rehearsal}\\r"` : 'send "\\r"',
     'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
   ].join('\n');
   return Bun.spawnSync({
     cmd: ['expect', '-c', script],
@@ -522,6 +524,16 @@ test('reveal requires exact password rehearsal before sensitive output', () => {
   expect(revealed.exitCode).toBe(0);
   expect(output).toContain('SENSITIVE OUTPUT');
   expect(output).toContain(VECTORS[0]!.expect.mnemonic24);
+});
+
+test('wrong reveal rehearsal fails closed without a runtime stack trace', () => {
+  const rejected = runCliTty(['--reveal'], true, 'wrong-password');
+  const output = rejected.stdout.toString();
+  expect(rejected.exitCode).toBe(1);
+  expect(output).toContain('Password did not match. Nothing was revealed.');
+  expect(output).not.toContain(VECTORS[0]!.expect.mnemonic24);
+  expect(output).not.toContain('BRAINVAULT_REHEARSAL_MISMATCH');
+  expect(output).not.toContain('cli.ts:');
 });
 
 test('CLI benchmark honors inline advanced parameters', () => {

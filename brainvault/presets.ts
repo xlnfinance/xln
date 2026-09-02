@@ -15,13 +15,13 @@ export const BRAINVAULT_LEVEL_SHARDS = Object.freeze([
   1_000_000,
 ] as const);
 
-export const BRAINVAULT_DEFAULT_LEVEL = 3;
+export const BRAINVAULT_DEFAULT_LEVEL = 4;
 export const BRAINVAULT_LEVEL_NAMES = Object.freeze([
   'test',
+  'unsafe',
   'quick',
   'standard',
-  'strong',
-  'vault',
+  'hard',
   'million',
 ] as const);
 

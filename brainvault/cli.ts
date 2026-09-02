@@ -212,13 +212,13 @@ Flags:
 - --ask
   Advanced interactive setup: ask for level/shards, shard multiplier, workers,
   and engine. Engine choice never changes the derived root.
-  Without this flag the recommended default is level 3 (1,000 shards),
+  Without this flag the recommended wallet default is level 4 (10,000 shards),
   multiplier 1, and the fastest bundled backend supported by the machine.
 - --engine NAME
   Choose auto, metal, metal-generic, opencl, c-neon, c-neon-wipe,
   native-direct, native-sync, native, rust, rust-no-wipe, or wasm.
-  On Apple Silicon, auto uses Metal V1 hybrid for 100+ shards at multiplier 1,
-  then safely falls back to C/NEON and portable native.
+  On the measured M3 Ultra class, auto uses Metal V1 hybrid for 100+ shards at
+  multiplier 1; other Apple Silicon safely uses C/NEON or portable native.
 - --lib=native
   Force the portable @node-rs/argon2 worker implementation.
 - --lib=neon
@@ -1353,11 +1353,17 @@ async function interactive() {
     }
     if (command !== 'reveal') {
       revealRl.close();
-      throw new Error('BRAINVAULT_REVEAL_CONFIRMATION_INVALID');
+      console.error('Nothing was revealed. Type exactly reveal, or press Enter to exit.');
+      process.exitCode = 1;
+      return;
     }
     const rehearsal = await askSecret(revealRl, revealOutput, 'Repeat the exact password: ');
     revealRl.close();
-    if (rehearsal !== pass) throw new Error('BRAINVAULT_REHEARSAL_MISMATCH');
+    if (rehearsal !== pass) {
+      console.error('Password did not match. Nothing was revealed.');
+      process.exitCode = 1;
+      return;
+    }
 
     const sensitive = await deriveSensitiveMaterial(result.rootKey, addressCount, showPrivateKey);
 
