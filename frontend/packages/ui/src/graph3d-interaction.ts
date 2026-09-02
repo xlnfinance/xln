@@ -34,11 +34,21 @@ type GraphSelectableEntity = Readonly<{
   mesh: THREE.Object3D;
 }>;
 
-type GraphDraggableEntity = {
+export type GraphDraggableEntity = {
   position: THREE.Vector3;
   mesh: THREE.Object3D;
   isDragging?: boolean;
 };
+
+export type GraphXrEntity = GraphDraggableEntity & Readonly<{ id: string }>;
+
+export type GraphXrGrab<T extends GraphXrEntity = GraphXrEntity> = Readonly<{
+  entity: T;
+  controller: THREE.Object3D;
+  sourceId: string;
+  startPosition: THREE.Vector3;
+  rayDistance: number;
+}>;
 
 export const emptyGraphGestureState = (): GraphGestureState => ({ active: {}, lastTap: {} });
 
@@ -135,6 +145,39 @@ export function moveGraphEntityDrag(
 export function endGraphEntityDrag(entity: GraphDraggableEntity): void {
   entity.isDragging = false;
   setGraphDragEmissive(entity, 0x002200);
+}
+
+export function createGraphXrRaycaster(controller: THREE.Object3D): THREE.Raycaster {
+  const controllerRotation = new THREE.Matrix4().extractRotation(controller.matrixWorld);
+  const raycaster = new THREE.Raycaster();
+  raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+  raycaster.ray.direction.set(0, 0, -1).applyMatrix4(controllerRotation);
+  return raycaster;
+}
+
+export function beginGraphXrGrab<T extends GraphXrEntity>(
+  entity: T,
+  controller: THREE.Object3D,
+  sourceId: string,
+  rayDistance: number,
+): GraphXrGrab<T> {
+  entity.isDragging = true;
+  return { entity, controller, sourceId, startPosition: entity.position.clone(), rayDistance };
+}
+
+export function moveGraphXrGrab(grab: GraphXrGrab, graphWorld: THREE.Object3D): void {
+  const controllerPosition = new THREE.Vector3().setFromMatrixPosition(grab.controller.matrixWorld);
+  const controllerRotation = new THREE.Matrix4().extractRotation(grab.controller.matrixWorld);
+  const rayDirection = new THREE.Vector3(0, 0, -1).applyMatrix4(controllerRotation).normalize();
+  const graphPosition = graphWorld.worldToLocal(controllerPosition.add(rayDirection.multiplyScalar(grab.rayDistance)));
+  grab.entity.mesh.position.copy(graphPosition);
+  grab.entity.position.copy(graphPosition);
+}
+
+export function endGraphXrGrab(grab: GraphXrGrab): boolean {
+  const moved = grab.entity.position.distanceTo(grab.startPosition) > 0.5;
+  grab.entity.isDragging = false;
+  return moved;
 }
 
 export function setGraphPointerNdc(

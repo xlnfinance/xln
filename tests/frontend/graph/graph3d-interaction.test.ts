@@ -4,9 +4,13 @@ import * as THREE from '../../../frontend/node_modules/three';
 
 import {
   beginGraphEntityDrag,
+  beginGraphXrGrab,
+  createGraphXrRaycaster,
   endGraphEntityDrag,
+  endGraphXrGrab,
   findGraphEntityFromObject,
   moveGraphEntityDrag,
+  moveGraphXrGrab,
   resetGraphObjectHighlight,
   setGraphPointerNdc,
   updateGraphSelectionHighlight,
@@ -113,6 +117,53 @@ describe('Graph3D shared interaction boundary', () => {
     expect(material.emissive.getHex()).toBe(0x002200);
   });
 
+  test('projects XR controller rays and grab movement into graph-local coordinates', () => {
+    const graphWorld = new THREE.Group();
+    graphWorld.position.set(10, 0, 0);
+    graphWorld.updateMatrixWorld(true);
+    const controller = new THREE.Group();
+    controller.position.set(12, 3, 10);
+    controller.updateMatrixWorld(true);
+    const raycaster = createGraphXrRaycaster(controller);
+    const entity = {
+      id: 'alice',
+      position: new THREE.Vector3(2, 3, 0),
+      mesh: new THREE.Mesh(),
+      isDragging: false,
+    };
+
+    expect(raycaster.ray.origin.toArray()).toEqual([12, 3, 10]);
+    expect(raycaster.ray.direction.toArray()).toEqual([0, 0, -1]);
+    const grab = beginGraphXrGrab(entity, controller, 'xr:tracked-pointer:left', 10);
+    expect(grab.startPosition.toArray()).toEqual([2, 3, 0]);
+    expect(grab.startPosition).not.toBe(entity.position);
+    expect(entity.isDragging).toBe(true);
+
+    controller.position.x = 13;
+    controller.updateMatrixWorld(true);
+    moveGraphXrGrab(grab, graphWorld);
+    expect(entity.position.toArray()).toEqual([3, 3, 0]);
+    expect(entity.mesh.position.toArray()).toEqual([3, 3, 0]);
+    expect(endGraphXrGrab(grab)).toBe(true);
+    expect(entity.isDragging).toBe(false);
+  });
+
+  test('uses a strict half-unit XR movement threshold', () => {
+    const controller = new THREE.Group();
+    const entity = {
+      id: 'alice',
+      position: new THREE.Vector3(),
+      mesh: new THREE.Mesh(),
+      isDragging: false,
+    };
+    const grab = beginGraphXrGrab(entity, controller, 'xr:slot-0', 1);
+
+    entity.position.x = 0.5;
+
+    expect(endGraphXrGrab(grab)).toBe(false);
+    expect(entity.isDragging).toBe(false);
+  });
+
   test('moves reusable hit mechanics out of the canonical Svelte panel', () => {
     const shared = readFileSync('frontend/packages/ui/src/graph3d-interaction.ts', 'utf8');
     const panel = readFileSync('frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte', 'utf8');
@@ -124,6 +175,10 @@ describe('Graph3D shared interaction boundary', () => {
     expect(shared).toContain('export function beginGraphEntityDrag');
     expect(shared).toContain('export function moveGraphEntityDrag');
     expect(shared).toContain('export function endGraphEntityDrag');
+    expect(shared).toContain('export function createGraphXrRaycaster');
+    expect(shared).toContain('export function beginGraphXrGrab');
+    expect(shared).toContain('export function moveGraphXrGrab');
+    expect(shared).toContain('export function endGraphXrGrab');
     expect(shared).toContain('export function updateGraphSelectionHighlight');
     expect(panel).toContain('packages/ui/src/graph3d-interaction');
     expect(panel).not.toContain('function entityFromObject');
@@ -132,6 +187,8 @@ describe('Graph3D shared interaction boundary', () => {
     expect(panel).not.toContain('clientX - rect.left');
     expect(panel).not.toContain('dragPlane.setFromNormalAndCoplanarPoint');
     expect(panel).not.toContain('raycaster.ray.intersectPlane(dragPlane');
+    expect(panel).not.toContain('const controllerWorldPosition =');
+    expect(panel).not.toContain('distanceTo(grab.startPosition)');
     expect(existsSync('frontend/src/lib/network3d/graphSelectionGesture.ts')).toBe(false);
   });
 });
