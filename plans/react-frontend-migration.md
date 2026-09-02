@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE NAVIGATION/DISPLAY SHARED; WP8 INTEGRATION PARTIAL`
+**Status:** `IN PROGRESS — WP0–WP6 COMPLETE; WP7 HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED, WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG + HOVER MECHANICS + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS PREVIEW READY; WP8 INTEGRATION PARTIAL`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -1019,7 +1019,7 @@ and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
-**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE NAVIGATION/DISPLAY SHARED`
+**Status:** `IN PROGRESS — REACT HEALTH + QA + HLT + RUNS + SCENARIOS + AI IMPLEMENTED; WORKSPACE STATE LAYER SVELTE-FREE, PANEL PORTS THROUGH ARCHITECT, REACT DOCKVIEW WRAPPER READY, GRAPH3D LIFECYCLE + RENDERER/PRIMITIVES/EFFECTS/ENTITY/ACCOUNT VISUAL FACTORY/INTERACTION/SELECTION/CAMERA/POINTER+XR DRAG STATE + VIEW/SCENE INPUT MODELS EXTRACTED, ENTITY WORKSPACE REACT SHELL/TABS PREVIEW READY`
 
 - Migrate health, QA/HLT, evidence, runs, scenarios, AI, embed, and their
   authority/error states.
@@ -1758,6 +1758,27 @@ the unchanged host limitation that `cargo` is unavailable. The separate size
 policy still reports only out-of-scope `core/qa/report.ts` at 3,001 / 3,000
 lines.
 
+The next visual Entity slice adds a 99-line shared React shell and 182-line
+responsive stylesheet plus a 22-line ops adapter. The shell consumes the same
+section registry and deep-link parser as Svelte, presents explicit unattached
+Runtime / jurisdiction / Entity context, and changes sections through canonical
+hash routes without inventing projection data or command availability. It is
+mounted only at the internal candidate preview path
+`/__app/ops/entity-workspace`; the production `/embed` route remains unclaimed
+by React and canonical in Svelte. Three direct tests pass 16 expectations; the
+targeted Entity/ops/Dockview/gateway batch passes 37 tests with 230 expectations.
+The unsafe-types gate covers 625 files with zero findings, Svelte diagnostics
+are 0 errors / 0 warnings, the build transforms 4,670 SSR and 6,421 client
+modules, all four React surfaces pass, and the exact 13-name failure baseline
+remains unchanged (1,200 passes and 6,692 expectations). The React browser
+candidate passes 27 / 27 at 390×844, 1366×900, and 1920×1080; the shell tab
+flow has zero page errors, zero console errors, no horizontal overflow, and all
+three screenshots pass visual review. Root verification again passes 26
+BrainVault/runtime tests with 100,156 expectations, compiles 28 Solidity files,
+passes immutable parity for four contracts and all 10 soundchecks, then stops
+only because `cargo` is unavailable. The size policy still reports only the
+pre-existing out-of-scope `core/qa/report.ts` 3,001 / 3,000 overage.
+
 Workspace port order recorded from the live tree (View 487 lines, DockRoot
 790, panels 11,630; the data layer — `network3d` minus the frame cache,
 `panelBridge`, `perfMonitor`, `command-palette-view`,
@@ -1859,10 +1880,10 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Continue the owner-authorized Entity workspace sub-program with the shared
-   React shell/chrome and top-level tab interaction around the new navigation
-   and display models. Keep the canonical Svelte `/embed` route until every
-   workspace panel has parity evidence.
+1. Continue the owner-authorized Entity workspace sub-program by relocating the
+   framework-neutral Entity identity/context projection and attaching real
+   empty/selected context states to the React shell preview. Keep the canonical
+   Svelte `/embed` route until every workspace panel has parity evidence.
 2. Owner to assign: two `network-timeline-source` failures
    (`NETWORK_TRAIL_FRAME_INVALID:1` in the JSON-safe-frame and trail
    round-trip tests) appeared with the in-flight `core/scenarios` runner

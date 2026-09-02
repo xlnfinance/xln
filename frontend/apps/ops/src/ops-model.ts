@@ -5,6 +5,7 @@ export type OpsPage =
   | Readonly<{ kind: 'runs'; pathname: '/runs' }>
   | Readonly<{ kind: 'scenarios'; pathname: '/scenarios' }>
   | Readonly<{ kind: 'ai'; pathname: string }>
+  | Readonly<{ kind: 'workspace'; pathname: '/__app/ops/entity-workspace' }>
   | Readonly<{ kind: 'pending'; pathname: string }>;
 
 export const OPS_LINKS = [
@@ -30,6 +31,8 @@ export const resolveOpsPage = (pathname: string): OpsPage =>
       ? { kind: 'scenarios', pathname }
     : pathname === '/ai' || pathname.startsWith('/ai/')
       ? { kind: 'ai', pathname }
+    : pathname === '/__app/ops/entity-workspace'
+      ? { kind: 'workspace', pathname }
       : { kind: 'pending', pathname };
 
 export const opsPageMetadata = (page: OpsPage): Readonly<{ title: string; description: string }> => {
@@ -67,6 +70,12 @@ export const opsPageMetadata = (page: OpsPage): Readonly<{ title: string; descri
     return {
       title: 'xln AI Console',
       description: 'Local AI chat, council deliberation, agent tools, voice, and camera vision for xln operators.',
+    };
+  }
+  if (page.kind === 'workspace') {
+    return {
+      title: 'xln Entity Workspace',
+      description: 'Identity-first Entity workspace navigation for xln operators.',
     };
   }
   return {

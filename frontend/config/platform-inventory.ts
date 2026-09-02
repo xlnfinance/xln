@@ -435,19 +435,26 @@ export const PLATFORM_INVENTORY = [
     owner: 'ops',
     workPackage: 'WP7',
     status: 'implemented',
-    interfaces: ['route', 'registry'],
+    interfaces: ['route', 'registry', 'ui'],
     sources: [
       'frontend/packages/runtime-client/src/entity-workspace-navigation.ts',
       'frontend/packages/ui/src/entity-workspace-display.ts',
+      'frontend/packages/ui/src/entity-workspace-shell.tsx',
+      'frontend/packages/ui/src/entity-workspace-shell.css',
+      'frontend/apps/ops/src/ops-entity-workspace.tsx',
     ],
     consumers: [
       'frontend/src/lib/components/Entity/workspace/entity-panel-routing.ts',
       'frontend/src/lib/components/Entity/workspace/entity-panel-display.ts',
       'frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte',
+      'frontend/apps/ops/src/ops-app.tsx',
+      'frontend/apps/ops/src/ops-model.ts',
     ],
     evidence: [
       'tests/frontend/workspace/entity-panel-routing.test.ts',
       'tests/frontend/workspace/entity-panel-display.test.ts',
+      'tests/frontend/ops/frontend-ops-entity-workspace.test.ts',
+      'frontend/tests/react-candidate/surfaces.spec.ts',
     ],
   },
   {
