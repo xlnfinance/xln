@@ -102,6 +102,10 @@ import {
   applyGraphCameraTarget,
   fitGraphCameraToEntities,
 } from "../../../../../packages/ui/src/graph3d-camera";
+import {
+  highlightGraphHoverTarget,
+  resolveGraphHoverHit,
+} from "../../../../../packages/ui/src/graph3d-hover";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -2083,23 +2087,11 @@ function onMouseMove(event: MouseEvent) {
     updateConnectionsForEntity(draggedEntity.id);
     return; // Skip hover logic while dragging
   }
-  const entityMeshes = entities.map((e) => e.mesh);
-  const entityIntersects = raycaster.intersectObjects(entityMeshes);
-  const connectionLines = connections.map((c) => c.line);
-  const lineIntersects = raycaster.intersectObjects(connectionLines);
-  if (entityIntersects.length > 0) {
-    const intersectedObject = entityIntersects[0]?.object;
-    if (!intersectedObject) {
-      throw new Error("FINTECH-SAFETY: No intersected object found");
-    }
-    const entity = findGraphEntityFromObject(intersectedObject, entities, graphWorld, scene);
-    if (!entity) {
-      tooltip.visible = false;
-      dualTooltip.visible = false;
-      return;
-    }
-    if (hoveredObject !== entity.mesh) {
-      hoveredObject = entity.mesh;
+  const hoverHit = resolveGraphHoverHit(raycaster, entities, connections, graphWorld, scene);
+  if (hoverHit.kind === "entity") {
+    const { entity } = hoverHit;
+    if (hoveredObject !== hoverHit.target) {
+      hoveredObject = hoverHit.target;
       const balanceInfo = getEntityBalanceInfo(entity.id);
       tooltip = {
         visible: true,
@@ -2107,24 +2099,16 @@ function onMouseMove(event: MouseEvent) {
         y: event.clientY,
         content: balanceInfo || "No reserves",
       };
-      const mesh = entity.mesh;
-      const material = mesh.material as THREE.MeshLambertMaterial;
-      if (!material?.emissive) {
-        throw new Error("FINTECH-SAFETY: Entity material missing emissive property");
-      }
-      material.emissive.setHex(0x444400);
+      highlightGraphHoverTarget("entity", hoverHit.target);
     }
-  } else if (lineIntersects.length > 0) {
-    const intersectedLine = lineIntersects[0]?.object;
-    if (!intersectedLine) {
-      throw new Error("FINTECH-SAFETY: No intersected line found");
-    }
-    const connection = connections.find((c) => c.line === intersectedLine);
-    if (!connection) {
-      throw new Error("FINTECH-SAFETY: Connection not found for intersected line");
-    }
-    if (hoveredObject !== intersectedLine) {
-      hoveredObject = intersectedLine;
+  } else if (hoverHit.kind === "unresolved-entity") {
+    tooltip.visible = false;
+    dualTooltip.visible = false;
+    return;
+  } else if (hoverHit.kind === "connection") {
+    const { connection } = hoverHit;
+    if (hoveredObject !== hoverHit.target) {
+      hoveredObject = hoverHit.target;
       const dualInfo = getDualConnectionAccountInfo(connection.from, connection.to);
       dualTooltip = {
         visible: true,
@@ -2136,12 +2120,7 @@ function onMouseMove(event: MouseEvent) {
         rightEntity: dualInfo.rightEntity,
       };
       tooltip.visible = false;
-      const lineMesh = intersectedLine as THREE.Line;
-      const lineMaterial = lineMesh.material as THREE.LineDashedMaterial;
-      if (!lineMaterial?.color) {
-        throw new Error("FINTECH-SAFETY: Connection material missing color property");
-      }
-      lineMaterial.color.setHex(0xffff00);
+      highlightGraphHoverTarget("connection", hoverHit.target);
     }
   } else {
     if (hoveredObject) {
