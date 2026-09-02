@@ -7,11 +7,23 @@ import { dirname, normalize, resolve } from 'node:path';
 
 import type { AuditModule, AuditRegistry } from './types';
 
+const runGitLsFiles = (root: string): string => {
+  try {
+    return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+      cwd: root,
+      encoding: 'utf8',
+      // A CI checkout with build outputs present can exceed Node's 1 MB default.
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const stderr = error instanceof Error && 'stderr' in error ? String(error.stderr ?? '') : '';
+    throw new Error(`AUDIT_GIT_LS_FILES_FAILED:${root}:${stderr.trim() || (error instanceof Error ? error.message : String(error))}`);
+  }
+};
+
 export const listCurrentSourceFiles = (root: string): string[] =>
-  execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
-    cwd: root,
-    encoding: 'utf8',
-  })
+  runGitLsFiles(root)
     .split('\0')
     .filter(Boolean)
     .filter(path => {
