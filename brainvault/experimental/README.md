@@ -61,6 +61,15 @@ modes remain under `experimental/`; the publishable CLI bundles release builds
 as its fast Apple Silicon default and falls back to the portable native binding.
 Both paths automatically use all CPU cores allowed by RAM.
 
+## Apple GPU research
+
+`argon2-metal/` contains a dependency-free Metal prototype for the exact V1
+Argon2id shard. It reached raw byte parity at batch sizes through 256, but the
+M3 Ultra saturated near 50 shards/s versus about 192.5 shards/s for C/NEON.
+Running CPU and GPU concurrently did not materially improve total throughput
+because they contend for unified-memory service. It remains an auditable
+research backend and is intentionally not routed into wallet creation.
+
 ## Run
 
 ```bash

@@ -13,6 +13,9 @@
 #define HEADER_WORDS 6u
 #define SALT_BYTES 32u
 #define OUTPUT_BYTES 32u
+#ifndef BRAINVAULT_MAX_WORKERS
+#define BRAINVAULT_MAX_WORKERS 32u
+#endif
 
 typedef struct {
     uint32_t shard_count;
@@ -107,7 +110,7 @@ int main(void) {
     uint32_t shard_count, worker_count, password_len, flags, memory_kib;
     size_t salt_length, output_length, memory_bytes;
     uint8_t *password = NULL, *salts = NULL, *outputs = NULL;
-    pthread_t threads[32];
+    pthread_t threads[BRAINVAULT_MAX_WORKERS];
     shared_state shared;
     uint32_t started_threads = 0u;
     int exit_code = 1;
@@ -119,7 +122,7 @@ int main(void) {
     password_len = read_u32le(header + 12u);
     flags = read_u32le(header + 16u);
     memory_kib = read_u32le(header + 20u);
-    if (shard_count == 0u || worker_count == 0u || worker_count > 32u || password_len == 0u ||
+    if (shard_count == 0u || worker_count == 0u || worker_count > BRAINVAULT_MAX_WORKERS || password_len == 0u ||
         password_len > (1u << 20u) || memory_kib < 8u || (size_t)memory_kib > SIZE_MAX / 1024u) {
         goto cleanup;
     }

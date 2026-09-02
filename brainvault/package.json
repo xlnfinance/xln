@@ -59,6 +59,7 @@
     "experimental/argon2-rust/Cargo.toml",
     "experimental/argon2-rust/Makefile",
     "experimental/argon2-rust/src/",
+    "experimental/argon2-metal/",
     "primitives/",
     "readme.md"
   ],

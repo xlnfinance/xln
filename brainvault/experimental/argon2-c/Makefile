@@ -21,9 +21,14 @@ HEADERS := compat/emmintrin.h vendor/sse2neon/sse2neon.h \
 	$(ARGON2)/src/blake2/blake2.h $(ARGON2)/src/blake2/blake2-impl.h \
 	$(ARGON2)/src/blake2/blamka-round-opt.h $(ARGON2)/src/blake2/blamka-round-ref.h
 
-.PHONY: all prebuild prebuild-m3 clean
+.PHONY: all oversubscribed prebuild prebuild-m3 clean
 
 all: brainvault-argon2
+
+oversubscribed: brainvault-argon2-oversubscribed
+
+brainvault-argon2-oversubscribed: $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) -DBRAINVAULT_MAX_WORKERS=64u $(SOURCES) -o $@
 
 brainvault-argon2: $(SOURCES) $(HEADERS)
 	$(CC) $(CFLAGS) $(SOURCES) -o $@
@@ -49,4 +54,4 @@ $(PREBUILD_M3): $(SOURCES) $(HEADERS)
 	codesign --force --sign - --timestamp=none $@
 
 clean:
-	rm -f brainvault-argon2 $(PREBUILD) $(PREBUILD_M3)
+	rm -f brainvault-argon2 brainvault-argon2-oversubscribed $(PREBUILD) $(PREBUILD_M3)
