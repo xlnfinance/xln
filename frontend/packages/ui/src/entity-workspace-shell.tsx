@@ -6,6 +6,7 @@ import type {
   EntityWorkspaceContext,
   EntityWorkspaceReadState,
 } from '../../runtime-client/src/entity-workspace-context';
+import type { EntityWorkspaceOwnership } from '../../runtime-client/src/entity-workspace-ownership';
 import { formatAddress } from './entity-workspace-display';
 import './entity-workspace-shell.css';
 
@@ -33,7 +34,7 @@ const SECTION_COPY: Readonly<Record<ViewTab, SectionCopy>> = {
     eyebrow: 'Authority',
     title: 'Ownership',
     summary: 'Signer thresholds and Entity control must come from committed Runtime evidence.',
-    nextBoundary: 'Ownership evidence remains on the canonical workspace.',
+    nextBoundary: 'Share issuance and board actions remain on the canonical workspace.',
   },
   settings: {
     eyebrow: 'Configuration',
@@ -112,6 +113,41 @@ function ProjectionBoundary({ context, emptyMessage, onRefresh, readState }: Pro
 
 type EntityWorkspaceStageProps = Omit<ProjectionBoundaryProps, 'emptyMessage'> & Readonly<{ activeTab: ViewTab }>;
 
+function OwnershipProjection({ ownership }: Readonly<{ ownership: EntityWorkspaceOwnership }>) {
+  if (ownership.status !== 'selected') return null;
+  return (
+    <section className="entity-workspace-board" data-testid="ownership-board-projection">
+      <header>
+        <span>Committed board</span>
+        <strong>{ownership.mode === 'proposer-based' ? 'Proposer based' : 'Gossip based'}</strong>
+        <p>Threshold <b data-testid="ownership-threshold">{ownership.threshold.toString()}</b> of <b data-testid="ownership-total-shares">{ownership.totalShares.toString()}</b> voting shares</p>
+      </header>
+      <div className="entity-workspace-board-members">
+        <div><span>Validators</span><strong data-testid="ownership-member-count">{ownership.members.length}</strong></div>
+        <ol>
+          {ownership.members.map((member, index) => (
+            <li data-attached={member.isAttachedSigner || undefined} key={member.signerId}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{formatAddress(member.signerId)}</strong>
+              <em>{member.shares.toString()} {member.shares === 1n ? 'share' : 'shares'}</em>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <footer>
+        <span>Attached signer</span>
+        <strong>{ownership.attachedSignerId
+          ? ownership.members.some((member) => member.isAttachedSigner) ? 'Board member' : 'Observer'
+          : 'Not exposed'}</strong>
+      </footer>
+    </section>
+  );
+}
+
+type EntityWorkspaceStageWithOwnershipProps = EntityWorkspaceStageProps & Readonly<{
+  ownership: EntityWorkspaceOwnership;
+}>;
+
 const readFooterLabel = (
   copy: SectionCopy,
   context: EntityWorkspaceContext,
@@ -124,7 +160,7 @@ const readFooterLabel = (
   return 'Unavailable — no remote Runtime selected';
 };
 
-function EntityWorkspaceStage({ activeTab, context, onRefresh, readState }: EntityWorkspaceStageProps) {
+function EntityWorkspaceStage({ activeTab, context, onRefresh, ownership, readState }: EntityWorkspaceStageWithOwnershipProps) {
   const copy = SECTION_COPY[activeTab];
   return (
     <section className="entity-workspace-stage" data-testid="entity-workspace-stage">
@@ -133,12 +169,14 @@ function EntityWorkspaceStage({ activeTab, context, onRefresh, readState }: Enti
         <h2>{copy.title}</h2>
         <p>{copy.summary}</p>
       </header>
-      <ProjectionBoundary
-        context={context}
-        emptyMessage={copy.nextBoundary}
-        onRefresh={onRefresh}
-        readState={readState}
-      />
+      {activeTab === 'ownership' && readState.status === 'ready' && context.status === 'selected'
+        ? <OwnershipProjection ownership={ownership} />
+        : <ProjectionBoundary
+            context={context}
+            emptyMessage={copy.nextBoundary}
+            onRefresh={onRefresh}
+            readState={readState}
+          />}
       <footer><span>Read state</span><strong>{readFooterLabel(copy, context, readState)}</strong></footer>
     </section>
   );
@@ -148,6 +186,7 @@ type EntityWorkspaceShellProps = Readonly<{
   activeTab: ViewTab;
   context: EntityWorkspaceContext;
   onRefresh: () => void;
+  ownership: EntityWorkspaceOwnership;
   readState: EntityWorkspaceReadState;
 }>;
 
@@ -162,7 +201,7 @@ const readModeLabel = (
   return 'Read boundary';
 };
 
-export function EntityWorkspaceShell({ activeTab, context, onRefresh, readState }: EntityWorkspaceShellProps) {
+export function EntityWorkspaceShell({ activeTab, context, onRefresh, ownership, readState }: EntityWorkspaceShellProps) {
   return (
     <section
       className="entity-workspace"
@@ -200,6 +239,7 @@ export function EntityWorkspaceShell({ activeTab, context, onRefresh, readState 
         activeTab={activeTab}
         context={context}
         onRefresh={onRefresh}
+        ownership={ownership}
         readState={readState}
       />
       <p className="entity-workspace-footnote">No inferred state · no hidden fallback · Svelte remains canonical</p>

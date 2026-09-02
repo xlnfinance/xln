@@ -176,7 +176,6 @@ const installRemoteSession = async (
 const assertSelectedContext = async (page: Page, expectedRuntimeId: string): Promise<void> => {
   const shell = page.getByTestId('entity-workspace-shell');
   await expect(shell).toHaveAttribute('data-read-status', 'ready', { timeout: 30_000 });
-  await expect(page.getByRole('status').filter({ hasText: 'Entity context attached' })).toBeVisible();
   await expect(page.getByText('Not attached')).toHaveCount(0);
   await expect(page.getByText(expectedRuntimeId.slice(0, 8), { exact: false })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBe(true);
@@ -208,12 +207,17 @@ test('React Entity workspace reads selected context from a real H1 Runtime', { t
       await installRemoteSession(context, capability);
       const candidatePage = await context.newPage();
       const response = await candidatePage.goto(
-        `${candidateServer.baseUrl}/__app/ops/entity-workspace#accounts`,
+        `${candidateServer.baseUrl}/__app/ops/entity-workspace#ownership`,
         { waitUntil: 'domcontentloaded' },
       );
       expect(response?.ok()).toBe(true);
       await assertSelectedContext(candidatePage, expectedRuntimeId);
-      await capturePageScreenshot(candidatePage, testInfo, `react-entity-workspace-selected-${viewport.name}.png`);
+      const board = candidatePage.getByTestId('ownership-board-projection');
+      await expect(board).toBeVisible();
+      await expect(candidatePage.getByTestId('ownership-member-count')).not.toHaveText('0');
+      await expect(candidatePage.getByTestId('ownership-threshold')).not.toHaveText('0');
+      await expect(candidatePage.getByText('Share issuance and board actions remain on the canonical workspace.')).toBeVisible();
+      await capturePageScreenshot(candidatePage, testInfo, `react-entity-workspace-ownership-${viewport.name}.png`);
     } finally {
       await context.close();
     }
