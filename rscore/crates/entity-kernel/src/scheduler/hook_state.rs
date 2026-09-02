@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use sha2::{Digest as _, Sha256};
 use xln_rscore_protocol::{PersistentRadixMutation, SlotWork};
 
 use crate::{
@@ -56,27 +55,21 @@ impl ScheduledHookFrame {
                 None => entry_mutations.push(PersistentRadixMutation::Remove { key }),
             }
         }
-        let due_mutations = due
-            .into_iter()
-            .map(|(key, value)| match value {
-                Some(hook_id) => PersistentRadixMutation::Put {
-                    key,
-                    value_digest: Sha256::digest(hook_id.as_bytes()).into(),
-                    value: hook_id,
-                },
-                None => PersistentRadixMutation::Remove { key },
-            })
-            .collect();
         let entries = state
             .entries
             .mutated_batch_two_levels(entry_mutations, |slots| slots.map(SlotWork::apply))
             .map_err(map_radix_error)?;
-        let due = state
-            .due
-            .mutated_batch_two_levels(due_mutations, |slots| slots.map(SlotWork::apply))
-            .map_err(map_radix_error)?;
         state.entries = entries;
-        state.due = due;
+        for (key, value) in due {
+            match value {
+                Some(hook_id) => {
+                    state.due.insert(key, hook_id);
+                }
+                None => {
+                    state.due.remove(&key);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -97,26 +90,22 @@ impl ScheduledHookMap {
 
     pub(crate) fn put(&mut self, hook: ScheduledHook) -> Result<(), EntityKernelError> {
         let key = raw_text_key(&hook.id)?;
-        let mut next_due = self.due.clone();
-        if let Some(previous) = self.entries.get(&key) {
-            next_due = next_due
-                .removed(&deadline_key(previous.trigger_at, &previous.id)?)
-                .map_err(map_radix_error)?;
-        }
+        let previous_deadline = match self.entries.get(&key) {
+            Some(previous) => Some(deadline_key(previous.trigger_at, &previous.id)?),
+            None => None,
+        };
         let digest = consensus_digest_bytes(&canonical_hook(&hook)?)?;
-        next_due = next_due
-            .updated(
-                deadline_key(hook.trigger_at, &hook.id)?,
-                hook.id.clone(),
-                Sha256::digest(hook.id.as_bytes()).into(),
-            )
-            .map_err(map_radix_error)?;
+        let next_deadline = deadline_key(hook.trigger_at, &hook.id)?;
+        let hook_id = hook.id.clone();
         let next_entries = self
             .entries
             .updated(key, hook, digest)
             .map_err(map_radix_error)?;
         self.entries = next_entries;
-        self.due = next_due;
+        if let Some(previous_deadline) = previous_deadline {
+            self.due.remove(&previous_deadline);
+        }
+        self.due.insert(next_deadline, hook_id);
         Ok(())
     }
 
@@ -125,13 +114,10 @@ impl ScheduledHookMap {
         let Some(previous) = self.entries.get(&key) else {
             return Ok(());
         };
-        let next_due = self
-            .due
-            .removed(&deadline_key(previous.trigger_at, &previous.id)?)
-            .map_err(map_radix_error)?;
+        let previous_deadline = deadline_key(previous.trigger_at, &previous.id)?;
         let next_entries = self.entries.removed(&key).map_err(map_radix_error)?;
         self.entries = next_entries;
-        self.due = next_due;
+        self.due.remove(&previous_deadline);
         Ok(())
     }
 }
@@ -220,7 +206,7 @@ mod tests {
         frame.commit(&mut batched).expect("batch");
 
         assert_eq!(batched.entries.root_hash(), sequential.entries.root_hash());
-        assert_eq!(batched.due.root_hash(), sequential.due.root_hash());
+        assert_eq!(batched.due, sequential.due);
         assert_eq!(
             batched
                 .due(u64::MAX)

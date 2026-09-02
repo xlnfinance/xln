@@ -105,14 +105,18 @@ impl ScheduledHook {
 #[derive(Clone)]
 pub struct ScheduledHookMap {
     pub(crate) entries: PersistentRadixMap<ScheduledHook>,
-    pub(crate) due: PersistentRadixMap<String>,
+    /// Deadline index `trigger_at(be) ++ id-key -> hook id`. Only `entries`
+    /// is committed (see `root_hash`), so this is plain ordered RAM: a
+    /// second Patricia map here doubled every hook mutation's path-copy
+    /// cost on the Entity's serial thread for no consensus value.
+    pub(crate) due: BTreeMap<Vec<u8>, String>,
 }
 
 impl ScheduledHookMap {
     pub fn empty() -> Self {
         Self {
             entries: PersistentRadixMap::empty(),
-            due: PersistentRadixMap::empty(),
+            due: BTreeMap::new(),
         }
     }
 
