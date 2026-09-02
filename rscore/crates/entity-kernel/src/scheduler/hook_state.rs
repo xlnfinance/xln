@@ -218,4 +218,175 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
     }
+
+    #[test]
+    fn restore_rebuilds_deadline_index_exactly() {
+        let mut state = CrontabState {
+            tasks: BTreeMap::new(),
+            hooks: ScheduledHookMap::empty(),
+        };
+
+        // 20 hooks with varied trigger_at, many sharing the same deadline
+        // to exercise duplicate deadline-key handling.
+        let spec = [
+            ("peer-a", "alpha", 10),
+            ("peer-b", "bravo", 10), // same trigger as alpha
+            ("peer-c", "charlie", 25),
+            ("peer-d", "delta", 15),
+            ("peer-e", "echo", 30),
+            ("peer-f", "foxtrot", 25), // same trigger as charlie
+            ("peer-g", "golf", 5),
+            ("peer-h", "hotel", 20),
+            ("peer-i", "india", 35),
+            ("peer-j", "juliett", 15), // same trigger as delta
+            ("peer-k", "kilo", 40),
+            ("peer-l", "lima", 45),
+            ("peer-m", "mike", 10), // same trigger as alpha, bravo
+            ("peer-n", "november", 50),
+            ("peer-o", "oscar", 55),
+            ("peer-p", "papa", 60),
+            ("peer-q", "quebec", 20), // same trigger as hotel
+            ("peer-r", "romeo", 35),  // same trigger as india
+            ("peer-s", "sierra", 70),
+            ("peer-t", "tango", 65),
+        ];
+
+        for (account_id, lock_id, trigger_at) in &spec {
+            schedule_hook(
+                &mut state,
+                ScheduledHook::htlc_timeout(
+                    account_id.to_string(),
+                    lock_id.to_string(),
+                    *trigger_at,
+                ),
+            )
+            .expect("schedule_hook");
+        }
+
+        // Cancel four hooks so that entries and due no longer cover the
+        // exact initial set.
+        cancel_hook(&mut state, "htlc-timeout:charlie").expect("cancel charlie");
+        cancel_hook(&mut state, "htlc-timeout:hotel").expect("cancel hotel");
+        cancel_hook(&mut state, "htlc-timeout:mike").expect("cancel mike");
+        cancel_hook(&mut state, "htlc-timeout:romeo").expect("cancel romeo");
+
+        let original = state.hooks.clone();
+
+        // Rebuild from map.iter() exactly as a consumer would.
+        let collected: BTreeMap<String, ScheduledHook> = original
+            .iter()
+            .map(|(id, hook)| (id.clone(), hook.clone()))
+            .collect();
+        let restored = ScheduledHookMap::restore(collected).expect("restore");
+
+        assert_eq!(
+            restored.entries.root_hash(),
+            original.entries.root_hash(),
+            "root_hash mismatch after restore"
+        );
+        assert_eq!(
+            restored.due, original.due,
+            "due index mismatch after restore"
+        );
+    }
+
+    #[test]
+    fn frame_overlay_and_sequential_agree_under_random_mutations() {
+        const POOL_SIZE: usize = 40;
+        const STEPS: usize = 300;
+
+        // Minimal LCG for deterministic pseudo-random sequences.
+        fn lcg(state: &mut u64) -> u64 {
+            *state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            *state
+        }
+
+        // Pre-generate the full operation list so both timelines see exactly
+        // the same sequence.
+        let mut rng = 123_456_789u64;
+        let mut ops: Vec<(usize, bool, u64)> = Vec::with_capacity(STEPS);
+        for _ in 0..STEPS {
+            let idx = (lcg(&mut rng) as usize) % POOL_SIZE;
+            let is_remove = lcg(&mut rng) % 4 == 3;
+            let trigger = if is_remove { 0 } else { lcg(&mut rng) % 200 };
+            ops.push((idx, is_remove, trigger));
+        }
+
+        fn make_hook(idx: usize, trigger: u64) -> ScheduledHook {
+            ScheduledHook::htlc_timeout(format!("peer-{idx}"), format!("lock-{idx}"), trigger)
+        }
+
+        let mut sequential = ScheduledHookMap::empty();
+        let mut batched = ScheduledHookMap::empty();
+
+        // Buffer operations into batches whose size is drawn from the same
+        // deterministic stream.
+        let mut batch_start = 0;
+        while batch_start < STEPS {
+            let batch_size = ((lcg(&mut rng) as usize) % 10)
+                .min(STEPS - batch_start)
+                .max(1);
+            let batch_end = (batch_start + batch_size).min(STEPS);
+
+            // --- sequential: apply each op individually ---
+            for (idx, is_remove, trigger) in &ops[batch_start..batch_end] {
+                if *is_remove {
+                    sequential
+                        .remove(&make_hook(*idx, 0).id)
+                        .expect("seq remove");
+                } else {
+                    sequential.put(make_hook(*idx, *trigger)).expect("seq put");
+                }
+            }
+
+            // --- batched: apply the same ops through a frame ---
+            let mut frame = ScheduledHookFrame::default();
+            for (idx, is_remove, trigger) in &ops[batch_start..batch_end] {
+                if *is_remove {
+                    frame.remove(&make_hook(*idx, 0).id).expect("frame remove");
+                } else {
+                    frame.put(make_hook(*idx, *trigger)).expect("frame put");
+                }
+            }
+            frame.commit(&mut batched).expect("frame commit");
+
+            // --- assert full agreement after this batch ---
+            assert_eq!(
+                batched.entries.root_hash(),
+                sequential.entries.root_hash(),
+                "root_hash mismatch at batch {batch_start}..{batch_end}"
+            );
+            assert_eq!(
+                batched.due, sequential.due,
+                "due mismatch at batch {batch_start}..{batch_end}"
+            );
+
+            let seq_order: Vec<&str> = sequential.due(u64::MAX).map(|h| h.id.as_str()).collect();
+            let bat_order: Vec<&str> = batched.due(u64::MAX).map(|h| h.id.as_str()).collect();
+            assert_eq!(
+                bat_order, seq_order,
+                "due(u64::MAX) order mismatch at batch {batch_start}..{batch_end}"
+            );
+
+            // Every key in due maps to a hook id present in entries.
+            let due_ids: std::collections::HashSet<&str> =
+                batched.due.values().map(|s| s.as_str()).collect();
+            for id in &due_ids {
+                assert!(
+                    batched.contains_key(id),
+                    "due key missing from entries: {id}"
+                );
+            }
+            // Mirror check: every entry has its id in due.
+            assert_eq!(
+                batched.due.len(),
+                batched.entries.len(),
+                "due.len != entries.len at batch {batch_start}..{batch_end}"
+            );
+
+            batch_start = batch_end;
+        }
+    }
 }
