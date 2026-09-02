@@ -605,6 +605,21 @@ export const PLATFORM_INVENTORY = [
     ],
   },
   {
+    id: 'retained-parity-audit',
+    owner: 'assembly',
+    workPackage: 'WP9',
+    status: 'implemented',
+    interfaces: ['registry', 'route', 'verification-command'],
+    sources: [
+      'frontend/config/capabilities.ts',
+      'frontend/config/parity-audit.ts',
+      'frontend/config/surfaces.ts',
+      'frontend/config/wallet-flow-audit.ts',
+    ],
+    consumers: ['frontend/scripts/parity-audit.ts'],
+    evidence: ['tests/frontend/tooling/frontend-parity-audit.test.ts'],
+  },
+  {
     id: 'canonical-release-consumers',
     owner: 'assembly',
     workPackage: 'WP10',

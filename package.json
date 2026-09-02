@@ -150,6 +150,7 @@
     "native:candidate:packaged:copy": "bun scripts/native/copy-packaged-shell-candidate.ts",
     "frontend:candidate:deployment": "bun frontend/scripts/deployment-candidate-cli.ts",
     "frontend:candidate:deployment:smoke": "cd frontend && bun run test:deployment:candidate",
+    "frontend:parity:audit": "bun frontend/scripts/parity-audit.ts",
     "native:package": "bun scripts/native/build-platforms.ts all --package --smoke",
     "native:mobile": "bun scripts/native/build-platforms.ts mobile",
     "native:mobile:package": "bun scripts/native/build-platforms.ts mobile --package",

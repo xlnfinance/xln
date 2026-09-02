@@ -12,7 +12,7 @@ export type WalletFlowAuditEntry = Readonly<{
 
 export type WalletFlowDeferral = Readonly<{
   id: string;
-  destination: 'WP8' | 'WP9' | 'WP10';
+  destination: 'WP9' | 'WP10';
   evidenceSource: string;
   evidenceMarker: string;
   reason: string;
@@ -188,7 +188,7 @@ export const WALLET_FLOW_DEFERRALS = [
   },
   {
     id: 'external-wallet-provider',
-    destination: 'WP8',
+    destination: 'WP9',
     evidenceSource: 'frontend/apps/wallet/src/wallet-payments.tsx',
     evidenceMarker: 'External-wallet moves are excluded until the React provider boundary is live',
     reason: 'Provider, native, and offline authority must be integrated with artifact consumers.',
