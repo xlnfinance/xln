@@ -3,6 +3,7 @@
 /** Prove one bound production TS transcript with isolated TS/Rust W1/W4 replays. */
 
 import { spawnSync } from 'node:child_process';
+import { collectHltRunProvenance } from '../../boundary/environment-manifest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -285,7 +286,10 @@ for (const [label, report] of [['w1', w1], ['w4', w4]] as const) {
 for (const field of ['frames', 'ingress', 'egress', 'directPayments', 'accountsRoot'] as const) {
   if (w1[field] !== w4[field]) throw new Error(`HLT_MIXED_PARITY_W1_W4:${field}:${String(w1[field])}:${String(w4[field])}`);
 }
+const provenance = collectHltRunProvenance('rust');
 console.log(
   `HLT_MIXED_TS_RUST_PARITY_OK recording=${recordingPath} frames=${frames} ` +
-  `engines=ts-w1,ts-w4,rust-w1,rust-w4 accountsRoot=${String(w1['accountsRoot'])}`,
+  `engines=ts-w1,ts-w4,rust-w1,rust-w4 accountsRoot=${String(w1['accountsRoot'])} ` +
+  `gitSha=${provenance.gitSha} gitDirtyFiles=${provenance.gitDirtyFiles} ` +
+  `rustBinarySha256=${String(provenance.rustBinarySha256)} standLockToken=${String(provenance.standLockToken)}`,
 );

@@ -8,7 +8,7 @@
  * and a deliberate resting tail which is explicitly cancelled after matching.
  */
 
-import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
+import { collectHltEnvironmentManifest, collectHltRunProvenance } from '../boundary/environment-manifest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -906,6 +906,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       offeredWindowMs,
       fullySettledElapsedMs: settlementEvidence.fullySettledElapsedMs,
       workloadFingerprint,
+      provenance: collectHltRunProvenance('ts'),
     };
     writeFileSync(join(args.workDir, 'hlt-ts-h1-live.json'), `${safeStringify(functionalEvidence, 2)}\n`);
     if (authorityEvidence) {

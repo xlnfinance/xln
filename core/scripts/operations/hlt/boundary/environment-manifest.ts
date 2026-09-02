@@ -5,10 +5,29 @@
  * production-equivalent run (all WALs on, lanes at nice 0)
  * from an isolated-Hub measurement (lanes niced) at a glance.
  */
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
 import { canonicalTsAccountWorkerCount } from '../../../../rscore/ts-worker/provider';
 
 export type HltAccountWorkerEvidence = number | 'unknown';
+
+/**
+ * What exactly produced a number: the tree, the engine binary, the parity
+ * recording it was gated on, and the stand-lock grant it ran under. Missing
+ * pieces are recorded as `unknown`/`null`, never invented.
+ */
+export type HltRunProvenance = Readonly<{
+  gitSha: string;
+  /** Modified tracked files at run time; -1 when git was unavailable. */
+  gitDirtyFiles: number;
+  rustBinarySha256: string | null;
+  parityRecordingSha256: string | null;
+  standLockToken: string | null;
+}>;
 
 export type HltEnvironmentManifest = Readonly<{
   /** Account dispute Hankos are unconditional consensus; recorded so a reader never has to wonder. */
@@ -23,6 +42,7 @@ export type HltEnvironmentManifest = Readonly<{
   cryptoSignWorkers: number | 'default';
   /** Active Account transition workers on the selected H1 engine. */
   accountWorkers: HltAccountWorkerEvidence;
+  provenance?: HltRunProvenance;
 }>;
 
 type HltEnvironmentManifestOptions = Readonly<{
@@ -74,6 +94,63 @@ const resolveAccountWorkers = (
   return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : 'unknown';
 };
 
+const gitText = (args: readonly string[]): string | null => {
+  try {
+    return execFileSync('git', [...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+};
+
+const fileSha256 = (path: string | undefined): string | null => {
+  if (!path) return null;
+  const resolved = resolve(path);
+  if (!existsSync(resolved)) return null;
+  return `0x${createHash('sha256').update(readFileSync(resolved)).digest('hex')}`;
+};
+
+export const collectHltRunProvenance = (engine: 'ts' | 'rust'): HltRunProvenance => {
+  const sha = gitText(['rev-parse', 'HEAD']);
+  const dirty = gitText(['status', '--short', '--untracked-files=no']);
+  return {
+    gitSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : 'unknown',
+    gitDirtyFiles: dirty === null ? -1 : dirty.split('\n').filter(line => line.trim()).length,
+    rustBinarySha256: engine === 'rust'
+      ? fileSha256(process.env['XLN_RSCORE_BINARY'] ?? 'rscore/target/release/xlnrs')
+      : null,
+    parityRecordingSha256: fileSha256(process.env['XLN_HLT_PARITY_RECORDING']),
+    standLockToken: process.env['XLN_STAND_LOCK_TOKEN'] || null,
+  };
+};
+
+const decodeHltRunProvenance = (value: unknown, code: string): HltRunProvenance => {
+  const record = requireBoundaryRecord(value, `${code}_PROVENANCE_INVALID`);
+  requireExactBoundaryKeys(record, [
+    'gitSha', 'gitDirtyFiles', 'rustBinarySha256', 'parityRecordingSha256', 'standLockToken',
+  ], [], `${code}_PROVENANCE_FIELDS_INVALID`);
+  const gitSha = record['gitSha'];
+  if (typeof gitSha !== 'string' || !(gitSha === 'unknown' || /^[0-9a-f]{40}$/.test(gitSha))) {
+    throw new Error(`${code}_PROVENANCE_GIT_SHA_INVALID`);
+  }
+  const gitDirtyFiles = record['gitDirtyFiles'];
+  if (typeof gitDirtyFiles !== 'number' || !Number.isSafeInteger(gitDirtyFiles) || gitDirtyFiles < -1) {
+    throw new Error(`${code}_PROVENANCE_GIT_DIRTY_INVALID`);
+  }
+  const nullableText = (key: string): string | null => {
+    const raw = record[key];
+    if (raw === null) return null;
+    if (typeof raw !== 'string' || raw === '') throw new Error(`${code}_PROVENANCE_${key.toUpperCase()}_INVALID`);
+    return raw;
+  };
+  return {
+    gitSha,
+    gitDirtyFiles,
+    rustBinarySha256: nullableText('rustBinarySha256'),
+    parityRecordingSha256: nullableText('parityRecordingSha256'),
+    standLockToken: nullableText('standLockToken'),
+  };
+};
+
 export const requireHltAccountWorkerEvidence = (
   workers: HltAccountWorkerEvidence,
   code: string,
@@ -92,7 +169,8 @@ export const collectHltEnvironmentManifest = (
   if (!Number.isSafeInteger(laneNice) || laneNice < 0 || laneNice > 20) {
     throw new Error(`HLT_ENV_MANIFEST_LANE_NICE_INVALID:${String(laneNiceRaw)}`);
   }
-  const accountWorkers = resolveAccountWorkers(selectedEngine(options.engine), options.rustAccountWorkers);
+  const engine = selectedEngine(options.engine);
+  const accountWorkers = resolveAccountWorkers(engine, options.rustAccountWorkers);
   if (options.requireAccountWorkers) {
     requireHltAccountWorkerEvidence(accountWorkers, 'HLT_ENV_MANIFEST');
   }
@@ -105,6 +183,7 @@ export const collectHltEnvironmentManifest = (
     cryptoPoolWorkers: workerCount('XLN_CRYPTO_POOL_WORKERS'),
     cryptoSignWorkers: workerCount('XLN_CRYPTO_SIGN_WORKERS'),
     accountWorkers,
+    provenance: collectHltRunProvenance(engine),
   };
 };
 
@@ -113,7 +192,7 @@ export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltE
   requireExactBoundaryKeys(record, [
     'disputeHankos', 'hubWalSync', 'lanePersistence', 'laneWalSync', 'laneNice', 'cryptoPoolWorkers', 'cryptoSignWorkers',
     'accountWorkers',
-  ], [], `${code}_FIELDS_INVALID`);
+  ], ['provenance'], `${code}_FIELDS_INVALID`);
   if (record['disputeHankos'] !== 'always') throw new Error(`${code}_DISPUTE_HANKOS_INVALID`);
   const bool = (key: string): boolean => {
     const raw = record[key];
@@ -145,6 +224,9 @@ export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltE
     cryptoPoolWorkers: workers('cryptoPoolWorkers'),
     cryptoSignWorkers: workers('cryptoSignWorkers'),
     accountWorkers,
+    ...(record['provenance'] === undefined
+      ? {}
+      : { provenance: decodeHltRunProvenance(record['provenance'], code) }),
   };
 };
 
