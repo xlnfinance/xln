@@ -320,6 +320,50 @@
       "status": "green",
       "headline": "Authority Rust H1, rate 2/user: 1891.8/s at 1000 users (40000/40000), offered-bound",
       "detail": "Same rule and gate as the TS row. Rust delivers 95% of the 2000/s offered with apply at ~88 ms per frame (12.2 s over 138 frames); headroom is shown by the users ladder, not by per-user rate."
+    },
+    {
+      "at": "2026-09-03T00:00:00Z",
+      "commit": "2f89749e0",
+      "engine": "rust",
+      "users": 2000,
+      "paymentsTps": 3333.3,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Users ladder, Rust: 2000 users x rate 2 = 3333.3/s (80000/80000)",
+      "detail": "Owner rule: scale users, not per-user rate. Offered 4000/s; apply ~390 ms per frame over 38 frames, i.e. the hub is already past its 100 ms frame budget and delivers through the drain tail."
+    },
+    {
+      "at": "2026-09-03T00:06:00Z",
+      "commit": "2f89749e0",
+      "engine": "rust",
+      "users": 3000,
+      "paymentsTps": 3465.2,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Users ladder, Rust: 3000 users x rate 2 = 3465.2/s (120000/120000), saturated",
+      "detail": "Offered 6000/s; apply ~786 ms per frame over 28 frames. More users cost more than more rate: 1000 users x 8/s reached 6303/s on the same binary, so per-account work (onion decrypt, account frames, gossip) is the next wall, not payments per frame."
+    },
+    {
+      "at": "2026-09-03T00:13:00Z",
+      "commit": "2f89749e0",
+      "engine": "rust",
+      "users": 4000,
+      "paymentsTps": 0,
+      "swapsTps": 0,
+      "status": "red",
+      "headline": "Users ladder, Rust: 4000 users x rate 2 — not all 160000 delivered within the drain deadline",
+      "detail": "Offered 8000/s across 4000 users; completed 156692 payments by the drain deadline (HLT_RUST_PAYMENT_NOT_DELIVERED). The per-account wall (4000 live bilateral accounts, onion decrypt and account frames per user) caps the hub around 3.5k/s at this user count; 1000 users x 8/s delivers 6.3k/s on the same binary."
+    },
+    {
+      "at": "2026-09-03T00:20:00Z",
+      "commit": "3cbd4b549",
+      "engine": "ts",
+      "users": 1000,
+      "paymentsTps": 854.7,
+      "swapsTps": 341.9,
+      "status": "green",
+      "headline": "Mixed r2, TS core: 20000 payments + 8000 matched swaps fully settled in 23.4 s",
+      "detail": "2 payments/s and 2 swap orders/s per user for 10 s (the 10 s window is forced by MAX_ACCOUNT_SAME_J_SWAP_OFFERS=20 open offers per account). 20000/20000 payments, 16000/20000 orders matched into 8000 economic swaps, everything settled 23.4 s after the first submit; rates here are per settled window, not per offered window."
     }
   ]
 }

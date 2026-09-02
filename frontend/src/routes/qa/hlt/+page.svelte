@@ -476,7 +476,7 @@
         <span style="color:#e4695f">● Rust H1 pay/s</span>
         <span style="color:#c49b47">● TS core pay/s</span>
         <span style="color:#5d7ea8">● TS same-J swaps/s</span>
-        <span>log scale · hover a row for what changed</span>
+        <span>linear 0–10 000/s · hover a row for what changed</span>
       </p>
       <svg class="chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img">
         {#each chart.yTicks as tick}

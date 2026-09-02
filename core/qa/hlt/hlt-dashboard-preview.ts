@@ -332,15 +332,14 @@ export const layoutHltTpsChart = (runs: readonly HltLedgerRun[]): HltChartLayout
   const pad = { top: 16, right: 18, bottom: 28, left: 44 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
-  const floor = 1;
+  // Linear 0..ceiling: a run at 3 000/s sits a third of the way to 10 000/s,
+  // so the distance to the target reads directly off the picture.
   const ceiling = HLT_CHART_CEILING_TPS;
-  const logSpan = Math.log10(ceiling) - Math.log10(floor);
   const x = (index: number): number =>
     runs.length <= 1 ? pad.left + plotWidth / 2 : pad.left + (index / (runs.length - 1)) * plotWidth;
   const y = (value: number): number => {
-    const clamped = Math.max(floor, Math.min(ceiling, value));
-    const position = (Math.log10(clamped) - Math.log10(floor)) / logSpan;
-    return pad.top + plotHeight - position * plotHeight;
+    const clamped = Math.max(0, Math.min(ceiling, value));
+    return pad.top + plotHeight - (clamped / ceiling) * plotHeight;
   };
   // Every engine shares the x axis (run order) but draws its own line, so a
   // Rust point never bends the TS trend and vice versa.
@@ -370,6 +369,6 @@ export const layoutHltTpsChart = (runs: readonly HltLedgerRun[]): HltChartLayout
     payPoints: tsPay.points,
     swapPoints: tsSwap.points,
     rustPayPoints: rustPay.points,
-    yTicks: [1, 10, 100, 1_000, 10_000].map(value => ({ value, y: y(value), label: String(value) })),
+    yTicks: [0, 2_000, 4_000, 6_000, 8_000, 10_000].map(value => ({ value, y: y(value), label: String(value) })),
   };
 };

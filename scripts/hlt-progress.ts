@@ -70,19 +70,15 @@ const layout = (runs: readonly HltRun[]) => {
   const padding = { top: 32, right: 64, bottom: 76, left: 72 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  // Progress happens in doublings, so the axis is logarithmic: on a linear
-  // scale every run under forty per second collapses onto the baseline while
-  // the thousand-per-second target eats the whole canvas.
-  const floor = 1;
+  // Linear 0..target: the picture shows how far each run is from 10 000/s in
+  // proportion, which is the question the chart exists to answer.
   const ceiling = RUST_TARGET_TPS;
-  const logSpan = Math.log10(ceiling) - Math.log10(floor);
   const x = (index: number): number =>
     runs.length <= 1 ? padding.left + plotWidth / 2
       : padding.left + (index / (runs.length - 1)) * plotWidth;
   const y = (value: number): number => {
-    const clamped = Math.max(floor, Math.min(ceiling, value));
-    const position = (Math.log10(clamped) - Math.log10(floor)) / logSpan;
-    return padding.top + plotHeight - position * plotHeight;
+    const clamped = Math.max(0, Math.min(ceiling, value));
+    return padding.top + plotHeight - (clamped / ceiling) * plotHeight;
   };
   return { width, height, padding, plotWidth, plotHeight, ceiling, x, y };
 };
@@ -108,7 +104,7 @@ const seriesPath = (
 export const renderProgressPage = (ledger: Ledger): string => {
   const runs = ledger.runs;
   const frame = layout(runs);
-  const gridValues = [1, 10, 100, 1_000, 10_000];
+  const gridValues = [0, 2_000, 4_000, 6_000, 8_000, 10_000];
   const latest = runs[runs.length - 1];
 
   const grid = gridValues.map(value => `
@@ -147,11 +143,14 @@ export const renderProgressPage = (ledger: Ledger): string => {
       <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
     </g>`])).join('');
 
-  const ticks = runs.map((run, index) => `
+  // Label every k-th run so a long ledger keeps a readable axis; the table
+  // below carries every run anyway.
+  const labelEvery = Math.max(1, Math.ceil(runs.length / 12));
+  const ticks = runs.map((run, index) => (index % labelEvery !== 0 && index !== runs.length - 1 ? '' : `
     <text class="tick" x="${frame.x(index).toFixed(1)}" y="${frame.height - frame.padding.bottom + 24}"
           text-anchor="middle" data-run="${index}">${escapeHtml(clockLabel(run.at))}</text>
     <text class="tick faint" x="${frame.x(index).toFixed(1)}" y="${frame.height - frame.padding.bottom + 42}"
-          text-anchor="middle">${run.users}u</text>`).join('');
+          text-anchor="middle">${run.users}u</text>`)).join('');
 
   const rows = [...runs].reverse().map(run => `
     <tr class="${run.status}">
