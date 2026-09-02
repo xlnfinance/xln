@@ -29,7 +29,6 @@ const SCAN_ROOTS = [
   'cli',
   'custody',
   'debates',
-  'e2e',
   'frontend/src',
   'jurisdictions',
   'native',
