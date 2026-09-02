@@ -1,6 +1,6 @@
 {
   "schema": "xln-hlt-progress-v1",
-  "note": "Append one entry per completed HLT load run. Temporary tracking file for the 1000 TPS push.",
+  "note": "Append one entry per completed authoritative HLT load run (economic gate + stand-lock). engine = ts (reference core) or rust (high-tps hub). TS target 1000/s, Rust target 10000/s.",
   "runs": [
     {
       "at": "2026-08-17T00:00:00Z",
@@ -10,7 +10,8 @@
       "users": 8,
       "paymentsTps": 0,
       "swapsTps": 229,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T15:27:00Z",
@@ -20,7 +21,8 @@
       "users": 100,
       "paymentsTps": 0,
       "swapsTps": 0,
-      "status": "red"
+      "status": "red",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T18:37:00Z",
@@ -30,7 +32,8 @@
       "users": 100,
       "paymentsTps": 0,
       "swapsTps": 0,
-      "status": "red"
+      "status": "red",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T19:36:00Z",
@@ -40,7 +43,8 @@
       "users": 32,
       "paymentsTps": 17.6,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T19:52:00Z",
@@ -50,7 +54,8 @@
       "users": 64,
       "paymentsTps": 32.5,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T20:14:00Z",
@@ -60,7 +65,8 @@
       "users": 64,
       "paymentsTps": 0,
       "swapsTps": 32.2,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T20:25:00Z",
@@ -70,7 +76,8 @@
       "users": 128,
       "paymentsTps": 29.1,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T20:45:00Z",
@@ -80,7 +87,8 @@
       "users": 100,
       "paymentsTps": 49.5,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T22:18:00Z",
@@ -90,7 +98,8 @@
       "users": 100,
       "paymentsTps": 49.5,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T22:22:00Z",
@@ -100,7 +109,8 @@
       "users": 200,
       "paymentsTps": 53.0,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T22:24:00Z",
@@ -110,7 +120,8 @@
       "users": 200,
       "paymentsTps": 92.6,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T22:28:00Z",
@@ -120,7 +131,8 @@
       "users": 200,
       "paymentsTps": 0,
       "swapsTps": 100,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T21:01:05Z",
@@ -130,7 +142,8 @@
       "users": 500,
       "paymentsTps": 54.5,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-18T23:30:00Z",
@@ -140,7 +153,8 @@
       "users": 200,
       "paymentsTps": 149.3,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-19T00:20:00Z",
@@ -150,7 +164,8 @@
       "users": 500,
       "paymentsTps": 130.5,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-19T03:20:00Z",
@@ -160,7 +175,8 @@
       "users": 500,
       "paymentsTps": 186.7,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
     },
     {
       "at": "2026-08-19T03:35:00Z",
@@ -170,7 +186,107 @@
       "users": 500,
       "paymentsTps": 248.8,
       "swapsTps": 0,
-      "status": "green"
+      "status": "green",
+      "engine": "ts"
+    },
+    {
+      "at": "2026-09-02T16:32:00Z",
+      "commit": "c2d413d81",
+      "engine": "ts",
+      "users": 1000,
+      "paymentsTps": 727.5,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "TS core authority: 727.5/s at 1000 users, rate 1/user, WAL+fsync, full drain",
+      "detail": "First authoritative 1000-user run behind the economic gate (4-way TS/Rust parity pre-check on a 2468-frame WAL, stand-lock held). 20000/20000 delivered. TS H1 is the logic reference; this is its ceiling at rate 1."
+    },
+    {
+      "at": "2026-09-02T16:39:00Z",
+      "commit": "c2d413d81",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 956.8,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Rust H1 authority: 956.8/s at 1000 users, rate 1/user — same WAL, same roots as TS",
+      "detail": "Same gate as the TS run. Rust replays the TS-recorded WAL frame-for-frame (2468/2468 post-state hashes, effects, outbox) before it is allowed to publish a number. Offered 1000/s caps this point."
+    },
+    {
+      "at": "2026-09-02T17:04:00Z",
+      "commit": "c2d413d81",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 1881.9,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Rust rate ladder 2/user: 1881.9/s, 40000/40000 delivered",
+      "detail": "Offered 2000/s. Clean drain, mempool/paybook empty at the end."
+    },
+    {
+      "at": "2026-09-02T17:07:00Z",
+      "commit": "c2d413d81",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 3674.6,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Rust rate ladder 4/user: 3674.6/s, 80000/80000 delivered",
+      "detail": "Offered 4000/s. Still offered-bound: apply time per frame well under the 100 ms frame delay."
+    },
+    {
+      "at": "2026-09-02T17:11:00Z",
+      "commit": "c2d413d81",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 5779.9,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Rust rate ladder 8/user: 5779.9/s, 160000/160000 delivered",
+      "detail": "Offered 8000/s. The hub main thread is now the wall: 96% of the window inside apply (entity kernel serial fold), Account workers ~11% busy."
+    },
+    {
+      "at": "2026-09-02T17:15:00Z",
+      "commit": "c2d413d81",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 5792.6,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Rust rate ladder 10/user: 5792.6/s — ceiling ≈5.8k with the serial entity fold",
+      "detail": "Offered 10000/s, 200000/200000 delivered but at 5.8k/s: more offered load does not help until the main thread is cheaper."
+    },
+    {
+      "at": "2026-09-02T20:40:00Z",
+      "commit": "f07fbb6ac",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 5927.0,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Radix path-copy without re-validation: 5927/s, apply −4.8%",
+      "detail": "xctrace profile of the live hub showed persistent radix put/delete rebuilding every branch through a Vec and re-validating all 16 edges per hop. Rebuild from the cloned slot array; hashes and layout unchanged; rec3 4-way parity green."
+    },
+    {
+      "at": "2026-09-02T21:38:00Z",
+      "commit": "f07fbb6ac",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 5940.7,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Entity FIFO dedup by admission digest: 5940.7/s, apply −7.7% vs 17:11",
+      "detail": "Pending-only AccountInput dedup re-encoded the whole Entity FIFO on every append. Each Account work item now carries a SHA-256 of its canonical wire input computed once at admission. Offered 8000/s still caps delivered tps; apply per frame 318→294 ms."
+    },
+    {
+      "at": "2026-09-02T22:06:00Z",
+      "commit": "b81a2a702",
+      "engine": "rust",
+      "users": 1000,
+      "paymentsTps": 6302.7,
+      "swapsTps": 0,
+      "status": "green",
+      "headline": "Hook deadline index out of the Patricia map: 6302.7/s, apply −14% vs 17:11",
+      "detail": "The scheduler kept its deadline index in a second persistent radix map although only the entries map is committed; every HTLC lock/resolve paid two path-copies. Plain ordered BTreeMap with the same key bytes; rec3 parity green. Main thread per frame 318→259 ms; offered 8000/s still the cap."
     }
   ]
 }

@@ -67,6 +67,8 @@ export type HltDashboardPreview = Readonly<{
   warning: string;
 }>;
 
+export type HltLedgerEngine = 'ts' | 'rust';
+
 export type HltLedgerRun = Readonly<{
   at: string;
   commit: string;
@@ -76,6 +78,8 @@ export type HltLedgerRun = Readonly<{
   paymentsTps: number;
   swapsTps: number;
   status: 'green' | 'red';
+  /** Which H1 engine produced the number; rows recorded before the Rust port are TS. */
+  engine: HltLedgerEngine;
 }>;
 
 export type HltPaymentCard = Readonly<{
@@ -309,12 +313,18 @@ export const previewHltDashboard = (config: HltDashboardConfig): HltDashboardPre
 type HltChartLayout = Readonly<{
   width: number;
   height: number;
+  /** TS H1 payments series. */
   payPath: string;
   swapPath: string;
+  /** Rust H1 payments series, drawn in its own colour. */
+  rustPayPath: string;
   payPoints: ReadonlyArray<{ x: number; y: number }>;
   swapPoints: ReadonlyArray<{ x: number; y: number }>;
+  rustPayPoints: ReadonlyArray<{ x: number; y: number }>;
   yTicks: ReadonlyArray<{ value: number; y: number; label: string }>;
 }>;
+
+export const HLT_CHART_CEILING_TPS = 10_000;
 
 export const layoutHltTpsChart = (runs: readonly HltLedgerRun[]): HltChartLayout => {
   const width = 720;
@@ -323,7 +333,7 @@ export const layoutHltTpsChart = (runs: readonly HltLedgerRun[]): HltChartLayout
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const floor = 1;
-  const ceiling = 1_000;
+  const ceiling = HLT_CHART_CEILING_TPS;
   const logSpan = Math.log10(ceiling) - Math.log10(floor);
   const x = (index: number): number =>
     runs.length <= 1 ? pad.left + plotWidth / 2 : pad.left + (index / (runs.length - 1)) * plotWidth;
@@ -332,19 +342,34 @@ export const layoutHltTpsChart = (runs: readonly HltLedgerRun[]): HltChartLayout
     const position = (Math.log10(clamped) - Math.log10(floor)) / logSpan;
     return pad.top + plotHeight - position * plotHeight;
   };
-  const pathFor = (pick: (run: HltLedgerRun) => number): string =>
-    runs
-      .map((run, index) => `${index === 0 ? 'M' : 'L'}${x(index).toFixed(1)},${y(pick(run)).toFixed(1)}`)
-      .join(' ');
-  const pointsFor = (pick: (run: HltLedgerRun) => number): ReadonlyArray<{ x: number; y: number }> =>
-    runs.map((run, index) => ({ x: x(index), y: y(pick(run)) }));
+  // Every engine shares the x axis (run order) but draws its own line, so a
+  // Rust point never bends the TS trend and vice versa.
+  const indexed = runs.map((run, index) => ({ run, index }));
+  const series = (
+    engine: HltLedgerEngine,
+    pick: (run: HltLedgerRun) => number,
+  ): Readonly<{ path: string; points: ReadonlyArray<{ x: number; y: number }> }> => {
+    const rows = indexed.filter(({ run }) => run.engine === engine && pick(run) > 0);
+    return {
+      path: rows
+        .map(({ run, index }, position) =>
+          `${position === 0 ? 'M' : 'L'}${x(index).toFixed(1)},${y(pick(run)).toFixed(1)}`)
+        .join(' '),
+      points: rows.map(({ run, index }) => ({ x: x(index), y: y(pick(run)) })),
+    };
+  };
+  const tsPay = series('ts', run => run.paymentsTps);
+  const tsSwap = series('ts', run => run.swapsTps);
+  const rustPay = series('rust', run => run.paymentsTps);
   return {
     width,
     height,
-    payPath: pathFor(run => run.paymentsTps),
-    swapPath: pathFor(run => run.swapsTps),
-    payPoints: pointsFor(run => run.paymentsTps).filter((_, index) => (runs[index]?.paymentsTps ?? 0) > 0),
-    swapPoints: pointsFor(run => run.swapsTps).filter((_, index) => (runs[index]?.swapsTps ?? 0) > 0),
-    yTicks: [1, 10, 100, 1_000].map(value => ({ value, y: y(value), label: String(value) })),
+    payPath: tsPay.path,
+    swapPath: tsSwap.path,
+    rustPayPath: rustPay.path,
+    payPoints: tsPay.points,
+    swapPoints: tsSwap.points,
+    rustPayPoints: rustPay.points,
+    yTicks: [1, 10, 100, 1_000, 10_000].map(value => ({ value, y: y(value), label: String(value) })),
   };
 };

@@ -90,6 +90,8 @@ const decodeLedgerRun = (value: unknown, index: number): HltLedgerRun => {
   if (typeof swapsTps !== 'number' || !Number.isFinite(swapsTps) || swapsTps < 0) {
     throw new Error(`HLT_LEDGER_SWAP_TPS_INVALID:${index}`);
   }
+  const engine = record['engine'] ?? 'ts';
+  if (engine !== 'ts' && engine !== 'rust') throw new Error(`HLT_LEDGER_ENGINE_INVALID:${index}`);
   return {
     at,
     commit,
@@ -99,6 +101,7 @@ const decodeLedgerRun = (value: unknown, index: number): HltLedgerRun => {
     paymentsTps,
     swapsTps,
     status,
+    engine,
   };
 };
 

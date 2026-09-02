@@ -471,7 +471,13 @@
 
   {#if activeTab === 'progress' && snapshot}
     <section class="panel" data-testid="hlt-ledger">
-      <h2>Progress to 1000/s</h2>
+      <h2>Progress to 10 000/s</h2>
+      <p class="ledger-legend" data-testid="hlt-ledger-legend">
+        <span style="color:#e4695f">● Rust H1 pay/s</span>
+        <span style="color:#c49b47">● TS core pay/s</span>
+        <span style="color:#5d7ea8">● TS same-J swaps/s</span>
+        <span>log scale · hover a row for what changed</span>
+      </p>
       <svg class="chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img">
         {#each chart.yTicks as tick}
           <text x="8" y={tick.y + 4} fill="#8e8a80" font-size="11">{tick.label}</text>
@@ -479,18 +485,23 @@
         {/each}
         <path d={chart.payPath} fill="none" stroke="#c49b47" stroke-width="2" />
         <path d={chart.swapPath} fill="none" stroke="#5d7ea8" stroke-width="2" />
+        <path d={chart.rustPayPath} fill="none" stroke="#e4695f" stroke-width="2.5" />
         {#each chart.payPoints as point}
           <circle cx={point.x} cy={point.y} r="4" fill="#c49b47" />
         {/each}
         {#each chart.swapPoints as point}
           <circle cx={point.x} cy={point.y} r="3.5" fill="#5d7ea8" />
         {/each}
+        {#each chart.rustPayPoints as point}
+          <circle cx={point.x} cy={point.y} r="4.5" fill="#e4695f" />
+        {/each}
       </svg>
       <div class="ledger-list">
-        {#each [...snapshot.ledger].reverse().slice(0, 8) as run}
-          <article class="ledger-item" data-status={run.status} data-testid="hlt-ledger-row">
-            <h3>{run.headline}</h3>
-            <p>{formatTps(run.paymentsTps)} pay · {formatTps(run.swapsTps)} swap · {run.users} users · {run.commit}</p>
+        {#each [...snapshot.ledger].reverse().slice(0, 12) as run}
+          <article class="ledger-item" data-status={run.status} data-engine={run.engine} data-testid="hlt-ledger-row" title={run.detail}>
+            <h3><span class="engine-tag" style={`color:${run.engine === 'rust' ? '#e4695f' : '#c49b47'}`}>{run.engine === 'rust' ? 'Rust' : 'TS'}</span> {run.headline}</h3>
+            <p>{formatTps(run.paymentsTps)} pay · {formatTps(run.swapsTps)} swap · {run.users} users · {run.commit} · {run.at.slice(0, 16).replace('T', ' ')}</p>
+            <p class="ledger-detail">{run.detail}</p>
           </article>
         {/each}
       </div>

@@ -30,11 +30,17 @@ export type HltRun = Readonly<{
   /** Settled swaps per second, or 0 when the run carried no swaps. */
   swapsTps: number;
   status: 'green' | 'red';
+  /** Which H1 engine produced the number; rows before the Rust port carry no field and are TS. */
+  engine?: 'ts' | 'rust';
 }>;
+
+type Engine = 'ts' | 'rust';
+const engineOf = (run: HltRun): Engine => run.engine ?? 'ts';
 
 type Ledger = Readonly<{ schema: string; note: string; runs: readonly HltRun[] }>;
 
 const TARGET_TPS = 1_000;
+const RUST_TARGET_TPS = 10_000;
 
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, character => ({
@@ -68,7 +74,7 @@ const layout = (runs: readonly HltRun[]) => {
   // scale every run under forty per second collapses onto the baseline while
   // the thousand-per-second target eats the whole canvas.
   const floor = 1;
-  const ceiling = TARGET_TPS;
+  const ceiling = RUST_TARGET_TPS;
   const logSpan = Math.log10(ceiling) - Math.log10(floor);
   const x = (index: number): number =>
     runs.length <= 1 ? padding.left + plotWidth / 2
@@ -88,10 +94,13 @@ const layout = (runs: readonly HltRun[]) => {
  */
 const seriesPath = (
   runs: readonly HltRun[],
+  engine: Engine,
   pick: (run: HltRun) => number,
   frame: ReturnType<typeof layout>,
 ): string => runs
-  .flatMap((run, index) => (run.status === 'green' && pick(run) > 0 ? [{ run, index }] : []))
+  .flatMap((run, index) => (
+    run.status === 'green' && engineOf(run) === engine && pick(run) > 0 ? [{ run, index }] : []
+  ))
   .map(({ run, index }, position) =>
     `${position === 0 ? 'M' : 'L'}${frame.x(index).toFixed(1)},${frame.y(pick(run)).toFixed(1)}`)
   .join(' ');
@@ -99,7 +108,7 @@ const seriesPath = (
 export const renderProgressPage = (ledger: Ledger): string => {
   const runs = ledger.runs;
   const frame = layout(runs);
-  const gridValues = [1, 10, 100, 1_000];
+  const gridValues = [1, 10, 100, 1_000, 10_000];
   const latest = runs[runs.length - 1];
 
   const grid = gridValues.map(value => `
@@ -108,13 +117,13 @@ export const renderProgressPage = (ledger: Ledger): string => {
     <text class="axis" x="${frame.padding.left - 12}" y="${(frame.y(value) + 4).toFixed(1)}"
           text-anchor="end">${value}</text>`).join('');
 
-  const targetLine = `
+  const targetLine = [[TARGET_TPS, 'TS target'], [RUST_TARGET_TPS, 'Rust target']].map(([value, label]) => `
     <line class="target" x1="${frame.padding.left}" x2="${frame.width - frame.padding.right}"
-          y1="${frame.y(TARGET_TPS).toFixed(1)}" y2="${frame.y(TARGET_TPS).toFixed(1)}" />
-    <text class="target-label" x="${(frame.padding.left + 6).toFixed(1)}" y="${(frame.y(TARGET_TPS) - 8).toFixed(1)}">target ${TARGET_TPS}</text>`;
+          y1="${frame.y(Number(value)).toFixed(1)}" y2="${frame.y(Number(value)).toFixed(1)}" />
+    <text class="target-label" x="${(frame.padding.left + 6).toFixed(1)}" y="${(frame.y(Number(value)) - 8).toFixed(1)}">${label} ${value}</text>`).join('');
 
   const points = runs.flatMap((run, index) => ([
-    { run, index, value: run.paymentsTps, kind: 'payments' as const },
+    { run, index, value: run.paymentsTps, kind: engineOf(run) === 'rust' ? 'rust' as const : 'payments' as const },
     { run, index, value: run.swapsTps, kind: 'swaps' as const },
   ])).filter(point => point.value > 0).map(point => `
     <circle class="dot ${point.kind}" tabindex="0"
@@ -122,7 +131,7 @@ export const renderProgressPage = (ledger: Ledger): string => {
             data-when="${escapeHtml(clockLabel(point.run.at))}"
             data-commit="${escapeHtml(point.run.commit.slice(0, 7))}"
             data-users="${point.run.users}"
-            data-metric="${point.kind} ${point.value}/s"
+            data-metric="${point.kind === 'rust' ? 'rust payments' : point.kind} ${point.value}/s"
             data-headline="${escapeHtml(point.run.headline)}"
             data-detail="${escapeHtml(point.run.detail)}"></circle>`).join('');
 
@@ -148,6 +157,7 @@ export const renderProgressPage = (ledger: Ledger): string => {
     <tr class="${run.status}">
       <td class="mono">${escapeHtml(run.at.replace('T', ' ').replace(/\..*$/, ''))}</td>
       <td class="mono"><a href="${COMMIT_URL}${escapeHtml(run.commit)}">${escapeHtml(run.commit.slice(0, 7))}</a></td>
+      <td class="engine ${engineOf(run)}">${engineOf(run) === 'rust' ? 'Rust' : 'TS'}</td>
       <td class="num">${run.users}</td>
       <td class="num">${run.paymentsTps || '—'}</td>
       <td class="num">${run.swapsTps || '—'}</td>
@@ -158,17 +168,17 @@ export const renderProgressPage = (ledger: Ledger): string => {
 <style>
   :root {
     --bg: #f7f7f5; --panel: #ffffff; --ink: #16150f; --muted: #6b6a63; --line: #dedcd4;
-    --payments: #2f6f4f; --swaps: #8a4b1f; --target: #b3271e; --red: #b3271e;
+    --payments: #2f6f4f; --swaps: #8a4b1f; --rust: #c2410c; --target: #b3271e; --red: #b3271e;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #14140f; --panel: #1c1c16; --ink: #f2f1e8; --muted: #9a988d; --line: #33322a;
-      --payments: #6fc296; --swaps: #e0a066; --target: #e4695f; --red: #e4695f;
+      --payments: #6fc296; --swaps: #e0a066; --rust: #ff8a5b; --target: #e4695f; --red: #e4695f;
     }
   }
   :root[data-theme="dark"] {
     --bg: #14140f; --panel: #1c1c16; --ink: #f2f1e8; --muted: #9a988d; --line: #33322a;
-    --payments: #6fc296; --swaps: #e0a066; --target: #e4695f; --red: #e4695f;
+    --payments: #6fc296; --swaps: #e0a066; --rust: #ff8a5b; --target: #e4695f; --red: #e4695f;
   }
   body { background: var(--bg); color: var(--ink); margin: 0; padding: 40px 24px 72px;
          font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
@@ -186,6 +196,11 @@ export const renderProgressPage = (ledger: Ledger): string => {
   path.line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
   path.payments { stroke: var(--payments); }
   path.swaps { stroke: var(--swaps); }
+  path.rust { stroke: var(--rust); stroke-width: 3; }
+  circle.rust { fill: var(--rust); }
+  td.engine { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600; }
+  td.engine.rust { color: var(--rust); }
+  td.engine.ts { color: var(--payments); }
   circle.dot { stroke: var(--panel); stroke-width: 2; cursor: help; }
   circle.payments { fill: var(--payments); }
   circle.swaps { fill: var(--swaps); }
@@ -210,6 +225,7 @@ export const renderProgressPage = (ledger: Ledger): string => {
   #tip .tip-metric { font-family: ui-monospace, monospace; font-weight: 600; font-size: 15px; margin-bottom: 2px; }
   #tip .tip-metric.payments { color: var(--payments); }
   #tip .tip-metric.swaps { color: var(--swaps); }
+  #tip .tip-metric.rust { color: var(--rust); }
   #tip .tip-metric.halted { color: var(--red); }
   #tip .tip-headline { font-weight: 600; margin-bottom: 5px; }
   #tip .tip-detail { color: var(--muted); }
@@ -228,7 +244,7 @@ export const renderProgressPage = (ledger: Ledger): string => {
 </style>
 <main>
   <h1>HLT throughput ledger</h1>
-  <p class="sub">Every recorded high-load run on the way to 1000 payments/s and 1000 same-J swaps/s.
+  <p class="sub">Every authoritative high-load run: TS core on the way to 1000 payments/s, Rust H1 on the way to 10 000/s.
      Hover a point for what that commit changed.${latest ? ` Latest: ${escapeHtml(latest.headline)}.` : ''}</p>
   <div class="card">
     ${runs.length === 0 ? '<p class="empty">No runs recorded yet.</p>' : `
@@ -236,23 +252,25 @@ export const renderProgressPage = (ledger: Ledger): string => {
       <svg viewBox="0 0 ${frame.width} ${frame.height}" role="img" aria-label="Throughput per run">
         ${grid}
         ${targetLine}
-        <path class="line payments" d="${seriesPath(runs, run => run.paymentsTps, frame)}" />
-        <path class="line swaps" d="${seriesPath(runs, run => run.swapsTps, frame)}" />
+        <path class="line payments" d="${seriesPath(runs, 'ts', run => run.paymentsTps, frame)}" />
+        <path class="line swaps" d="${seriesPath(runs, 'ts', run => run.swapsTps, frame)}" />
+        <path class="line rust" d="${seriesPath(runs, 'rust', run => run.paymentsTps, frame)}" />
         ${points}
         ${halted}
         ${ticks}
       </svg>
     </div>
     <div class="legend">
-      <span><i class="swatch" style="background: var(--payments)"></i>payments /s</span>
-      <span><i class="swatch" style="background: var(--swaps)"></i>same-J swaps /s</span>
+      <span><i class="swatch" style="background: var(--rust)"></i>Rust H1 payments /s</span>
+      <span><i class="swatch" style="background: var(--payments)"></i>TS core payments /s</span>
+      <span><i class="swatch" style="background: var(--swaps)"></i>TS same-J swaps /s</span>
       <span><i class="swatch" style="background: var(--target)"></i>target</span>
       <span style="color: var(--red)">&#10005; halted run</span>
     </div>`}
   </div>
   ${runs.length === 0 ? '' : `
   <table>
-    <thead><tr><th>when</th><th>commit</th><th>users</th><th>pay/s</th><th>swap/s</th><th>what changed</th></tr></thead>
+    <thead><tr><th>when</th><th>commit</th><th>engine</th><th>users</th><th>pay/s</th><th>swap/s</th><th>what changed</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`}
 </main>
@@ -273,7 +291,8 @@ export const renderProgressPage = (ledger: Ledger): string => {
   };
 
   const show = (target, event) => {
-    const kind = target.dataset.metric.startsWith('payments') ? 'payments'
+    const kind = target.dataset.metric.startsWith('rust') ? 'rust'
+      : target.dataset.metric.startsWith('payments') ? 'payments'
       : target.dataset.metric.startsWith('swaps') ? 'swaps' : 'halted';
     tip.innerHTML = ''
       + '<div class="tip-meta">' + target.dataset.when + ' &middot; ' + target.dataset.commit

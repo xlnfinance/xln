@@ -67,6 +67,8 @@ const decodeLedgerRun = (value: unknown, index: number): HltLedgerRun => {
   const record = requireUnknownRecord(value, `HLT_LEDGER_RUN_INVALID:${index}`);
   const status = record['status'];
   if (status !== 'green' && status !== 'red') throw new Error(`HLT_LEDGER_STATUS_INVALID:${index}`);
+  const engine = record['engine'] ?? 'ts';
+  if (engine !== 'ts' && engine !== 'rust') throw new Error(`HLT_LEDGER_ENGINE_INVALID:${index}`);
   return {
     at: requireString(record, 'at', `HLT_LEDGER_AT_INVALID:${index}`),
     commit: requireString(record, 'commit', `HLT_LEDGER_COMMIT_INVALID:${index}`),
@@ -76,6 +78,7 @@ const decodeLedgerRun = (value: unknown, index: number): HltLedgerRun => {
     paymentsTps: requireNumber(record, 'paymentsTps', `HLT_LEDGER_PAY_TPS_INVALID:${index}`),
     swapsTps: requireNumber(record, 'swapsTps', `HLT_LEDGER_SWAP_TPS_INVALID:${index}`),
     status,
+    engine,
   };
 };
 

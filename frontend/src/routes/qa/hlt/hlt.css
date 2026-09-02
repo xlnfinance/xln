@@ -510,3 +510,28 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+.ledger-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #8e8a80;
+}
+
+.ledger-item .engine-tag {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+
+.ledger-item .ledger-detail {
+  color: #8e8a80;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
