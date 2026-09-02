@@ -19,6 +19,7 @@
 		"prepare:react": "bun scripts/prepare.ts --all",
 		"build:react": "bun scripts/build.ts --all",
 		"assemble:react": "bun scripts/assemble.ts",
+		"verify:react": "bun scripts/candidate-release-verifier.ts",
 		"dev:react": "bun scripts/dev.ts",
 		"dev:react:gateway": "bun scripts/run-dev-gateway.ts",
 		"test:react:candidate": "playwright test --config playwright.react.config.ts",
