@@ -70,6 +70,10 @@ import {
   bindGraphViewportLifecycle,
   type GraphLifecycleBinding,
 } from "../../../../../packages/ui/src/graph3d-lifecycle";
+import {
+  createGraph3dSceneInputView,
+  graph3dSceneTransactionOf,
+} from "../../../../../packages/runtime-client/src/graph3d-scene-input";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -109,30 +113,7 @@ $: if ($runtimeGraphScope !== "merged" && !graphProjections.some((item) => item.
 }
 $: mergedRuntimeGraph = mergeRuntimeGraphProjections(graphProjections, $runtimeGraphCanonicity, $runtimeGraphScope);
 $: graphReplicaProjection = materializeRuntimeGraphReplicas(mergedRuntimeGraph);
-$: graphRuntimeOptions = [
-  { value: "merged", label: `Merged (${graphProjections.length})` },
-  ...graphProjections.map((projection) => ({
-    value: projection.source.runtimeId,
-    label: `${projection.source.label} · ${projection.source.adapterKind}`,
-  })),
-];
-$: graphDesyncCount = mergedRuntimeGraph.nodes.filter((node) => node.desynchronized).length + mergedRuntimeGraph.accounts.filter((account) => account.desynchronized).length + mergedRuntimeGraph.jMachines.filter((machine) => machine.desynchronized).length;
-$: activeJurisdictionName = mergedRuntimeGraph.jMachines[0]?.selected.name ?? null;
-$: jurisdictionsData = mergedRuntimeGraph.jMachines.map((projection) => {
-  const jr = projection.selected.machine && typeof projection.selected.machine === 'object'
-    ? projection.selected.machine as { mempool?: unknown[] }
-    : null;
-  return {
-    name: projection.selected.name,
-    jMachine: {
-      position: projection.selected.position || { x: 0, y: 600, z: 0 },
-      capacity: 3,
-      jHeight: Number(projection.selected.height || 0),
-      mempool: jr?.mempool || [],
-      provenance: projection.provenance,
-    },
-  };
-});
+$: graphSceneInput = createGraph3dSceneInputView(graphProjections, mergedRuntimeGraph);
 function getTimeAwareReplicas(): Map<string, GraphReplicaLike> {
   return graphReplicaProjection;
 }
@@ -159,28 +140,6 @@ const debug = {
 };
 const reportGraphInitError = (error: unknown) => {
   debug.error("Graph initialization failed:", error);
-};
-const recordOf = (value: unknown): Record<string, unknown> | null =>
-  value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
-const graphTransactionOf = (value: unknown): GraphTransactionLike => {
-  const tx = recordOf(value);
-  if (!tx) return {};
-  const data = recordOf(tx['data']);
-  const amount = tx['amount'] ?? data?.['amount'];
-  return {
-    ...(typeof tx['type'] === 'string' ? { type: tx['type'] } : {}),
-    ...(typeof tx['kind'] === 'string' ? { kind: tx['kind'] } : {}),
-    ...(typeof tx['targetEntityId'] === 'string' ? { targetEntityId: tx['targetEntityId'] } : {}),
-    ...(typeof amount === 'string' || typeof amount === 'number' || typeof amount === 'bigint' ? { amount } : {}),
-    ...(data ? { data: {
-      ...(typeof data['amount'] === 'string' || typeof data['amount'] === 'number' || typeof data['amount'] === 'bigint' ? { amount: data['amount'] } : {}),
-      ...(typeof data['tokenId'] === 'number' ? { tokenId: data['tokenId'] } : {}),
-      ...(typeof data['targetEntityId'] === 'string' ? { targetEntityId: data['targetEntityId'] } : {}),
-      ...(typeof data['fromEntityId'] === 'string' ? { fromEntityId: data['fromEntityId'] } : {}),
-      ...(typeof data['toEntityId'] === 'string' ? { toEntityId: data['toEntityId'] } : {}),
-      ...(data['accountTx'] !== undefined ? { accountTx: graphTransactionOf(data['accountTx']) } : {}),
-    } } : {}),
-  };
 };
 const settingNumber = (value: unknown, key: string): number => {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`GRAPH_SETTING_NUMBER_INVALID:${key}`);
@@ -211,7 +170,7 @@ let raycaster: THREE.Raycaster;
 let mouse: THREE.Vector2;
 let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
 let jMachines: Map<string, THREE.Group> = new Map(); // jurisdiction name → J-Machine mesh
-$: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
+$: jMachine = graphSceneInput.activeJurisdictionName ? jMachines.get(graphSceneInput.activeJurisdictionName) || null : null;
 let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine (current mempool)
 let jBlockHistory: GraphJBlockHistoryEntry[] = []; // Last 3 committed blocks stacked above J-machine
 let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
@@ -371,8 +330,8 @@ $: if (scene && settings.theme) {
   const themeColors = getGraphThemeColors(settings.theme);
   scene.background = new THREE.Color(themeColors.background);
 }
-$: if (scene && jurisdictionsData) {
-  const jurisdictionsArray = jurisdictionsData;
+$: if (scene && graphSceneInput.jurisdictions) {
+  const jurisdictionsArray = graphSceneInput.jurisdictions;
   const currentJurisdictionNames = new Set(jurisdictionsArray.map((x) => x.name));
   for (const [name, mesh] of jMachines.entries()) {
     if (!currentJurisdictionNames.has(name)) {
@@ -409,7 +368,7 @@ $: if (scene && jurisdictionsData) {
       }
     }
   });
-  const activeJurisdiction = jurisdictionsArray.find((x) => x.name === activeJurisdictionName);
+  const activeJurisdiction = jurisdictionsArray.find((x) => x.name === graphSceneInput.activeJurisdictionName);
   const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;
   if (activeJurisdiction && activeJMachine) {
     const timeIdx = $runtimeFrameTimeIndex;
@@ -559,7 +518,7 @@ $: if (jMachine && $runtimeFrameTimeIndex === -1) {
       entityInputs.forEach((entityInput) => {
         const txs = entityInput.entityTxs ?? [];
         txs.forEach((tx) => {
-          const graphTx = graphTransactionOf(tx);
+          const graphTx = graph3dSceneTransactionOf(tx);
           const txKind = graphTx.kind || graphTx.type;
           if (txKind === "payFromReserve" || txKind === "payToReserve" || txKind === "settleToReserve") {
             addTxToJMachine(entityInput.entityId);
@@ -1439,7 +1398,7 @@ function createTransactionParticles() {
         currentFrameActivity.activeEntities.add(processingEntityId);
         if (entityInput.entityTxs) {
           entityInput.entityTxs.forEach((tx) => {
-            const graphTx = graphTransactionOf(tx);
+            const graphTx = graph3dSceneTransactionOf(tx);
             if (graphTx.type === "accountInput" && graphTx.data?.fromEntityId && graphTx.data.toEntityId) {
               const fromEntityId = graphTx.data.fromEntityId;
               const toEntityId = graphTx.data.toEntityId;
@@ -2657,8 +2616,8 @@ function handleVrAutoRotateClick(): void {
   {renderFps} {frameTime}
   entityCount={entities.length} connectionCount={connections.length} particleCount={particles.length}
   {barsMode} {isVRActive} {tooltip} {dualTooltip}
-  runtimeScope={$runtimeGraphScope} runtimeScopeOptions={graphRuntimeOptions} canonicity={$runtimeGraphCanonicity} sourceCount={mergedRuntimeGraph.sources.length}
-  desyncCount={graphDesyncCount} projectionError={graphProjectionError} runtimeNodeLabels={mergedRuntimeGraph.nodes.map((node) => node.selected.label)} timelineRuntimeId={$networkMachineRuntime.selectedStep?.activeRuntimeId ?? ''}
+  runtimeScope={$runtimeGraphScope} runtimeScopeOptions={graphSceneInput.runtimeOptions} canonicity={$runtimeGraphCanonicity} sourceCount={mergedRuntimeGraph.sources.length}
+  desyncCount={graphSceneInput.desyncCount} projectionError={graphProjectionError} runtimeNodeLabels={mergedRuntimeGraph.nodes.map((node) => node.selected.label)} timelineRuntimeId={$networkMachineRuntime.selectedStep?.activeRuntimeId ?? ''}
   timelineRuntimeColor={$networkMachineRuntime.selectedStep?.activeRuntimeColor ?? ''} timelineHeight={$networkMachineRuntime.selectedStep?.event.height ?? 0} timelineTimestamp={$networkMachineRuntime.selectedStep?.event.timestamp ?? 0}
   onRuntimeScopeChange={(scope) => { void selectGraphRuntimeScope(scope).catch(reportGraphInitError); }}
   onCanonicityChange={selectGraphCanonicity}

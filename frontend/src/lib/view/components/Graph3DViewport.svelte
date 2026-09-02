@@ -34,7 +34,7 @@
     leftContent: string; rightContent: string; leftEntity: string; rightEntity: string;
   } = { visible: false, x: 0, y: 0, leftContent: '', rightContent: '', leftEntity: '', rightEntity: '' };
   export let runtimeScope = 'merged';
-  export let runtimeScopeOptions: Array<{ value: string; label: string }> = [];
+  export let runtimeScopeOptions: ReadonlyArray<{ value: string; label: string }> = [];
   export let canonicity: Graph3dViewportCanonicity = 'timestamp';
   export let sourceCount = 0;
   export let desyncCount = 0;
