@@ -13,6 +13,8 @@ import {
   KEY_LIVE_ENTITY_BRANCH,
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
+  KEY_RUNTIME_MACHINE_BRANCH,
+  KEY_RUNTIME_MACHINE_LEAF,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   keySnapshotAccount,
@@ -37,6 +39,7 @@ import {
   parseSnapshotGraphKey,
   parseSnapshotEntityKey,
 } from '../../keys';
+import { createSnapshotRuntimeMachineGraphView } from '../../database/snapshot-graph-view';
 import { decodeValidatedBuffer } from '../../codec/codec';
 import { iterateKeys } from '../../database/level';
 import { ACCOUNT_TREE_NAMESPACE_TAG } from '../../schema/account-graph-codec';
@@ -50,7 +53,8 @@ import {
 } from '../../schema/authoritative-schema';
 import { hashCertifiedBoardNode } from '../../../jurisdiction/machine/board-registry';
 import { hashAccountJClaimNode } from '../../../account/j-claims/j-claim-accumulator';
-import type { RuntimeDbLike } from '../../types';
+import type { RuntimeDbLike, RuntimeMachineGraphRoot } from '../../types';
+import { readRuntimeMachineGraph } from '../../wal/runtime-machine-graph';
 
 const ownerKey = (key: Buffer): string => key.toString('hex');
 
@@ -183,12 +187,29 @@ const validateAuxiliaryRow = (tag: number | undefined, value: Buffer): void => {
 export const inspectSnapshotGraphRows = async (
   db: RuntimeDbLike,
   height: number,
+  runtimeMachineRoot?: RuntimeMachineGraphRoot,
 ): Promise<number> => {
+  if (runtimeMachineRoot) {
+    await readRuntimeMachineGraph(
+      createSnapshotRuntimeMachineGraphView(db, height),
+      runtimeMachineRoot,
+    );
+  }
   const owners = await collectSnapshotOwners(db, height);
   let count = 0;
   for await (const key of iterateKeys(db, { prefix: keySnapshotGraphPrefix(height) })) {
     const parsed = parseSnapshotGraphKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_GRAPH_HEIGHT_MISMATCH');
+    if (
+      parsed.liveKey[0] === KEY_RUNTIME_MACHINE_BRANCH ||
+      parsed.liveKey[0] === KEY_RUNTIME_MACHINE_LEAF
+    ) {
+      if (!runtimeMachineRoot) {
+        throw new Error('STORAGE_SNAPSHOT_RUNTIME_MACHINE_ROOT_MISSING');
+      }
+      count += 1;
+      continue;
+    }
     const ownership = graphOwner(height, parsed.liveKey);
     validateAuxiliaryRow(parsed.liveKey[0], await db.get(key));
     const owner = owners.get(ownerKey(ownership.key));

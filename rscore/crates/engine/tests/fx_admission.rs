@@ -496,18 +496,72 @@ fn out_of_range_policy_version_reaching_the_hash_is_an_admission_bug() {
 }
 
 #[test]
-fn admits_every_lending_kind_into_bilateral_consensus() {
+fn rejects_every_lending_kind_before_mempool_mutation() {
     for (kind, tx) in extended_transactions() {
         let (mut left, _right) = parties();
-        let admission = left
+        let error = left
             .account
             .admit_txs(vec![tx.clone()], "test")
-            .unwrap_or_else(|error| panic!("{kind} must admit: {error}"));
-        assert_eq!((admission.admitted, admission.duplicates), (1, 0), "{kind}");
-        assert_eq!(left.account.mempool(), std::slice::from_ref(&tx), "{kind}");
+            .expect_err("lending kind must not admit");
+        assert_eq!(
+            error,
+            xln_rscore_engine::StateError::AccountTxKindOutOfProfile(kind),
+            "{kind}",
+        );
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "ACCOUNT_TX_KIND_OUT_OF_PROFILE:{kind} \
+                 (profile: pay/HTLC/same-J swap/j-event/rebalance)"
+            ),
+        );
+        assert!(left.account.mempool().is_empty(), "{kind}");
         assert!(
             xln_rscore_engine::is_frame_hashable(&tx),
-            "{kind} must remain canonically hashable",
+            "historical {kind} frame verification must remain available",
+        );
+    }
+}
+
+#[test]
+fn rejects_every_lending_peer_kind_before_replay_without_mutation() {
+    let (left, mut right) = parties();
+    for (kind, tx) in extended_transactions() {
+        let before_leaf = right
+            .account
+            .entity_account_leaf()
+            .expect("preflight Account leaf");
+        let (envelope, incoming) = incoming_from_left(&left, &right, tx);
+        let outcome = apply_incoming_frame(
+            &mut right.account,
+            &right.identity,
+            &envelope,
+            CLOCK,
+            incoming,
+            &market(),
+        )
+        .unwrap_or_else(|error| panic!("{kind} is a rejection, not a fault: {error}"));
+        let IncomingOutcome::Rejected { reason } = outcome else {
+            panic!("{kind} must reject, got {outcome:?}");
+        };
+        assert_eq!(
+            reason,
+            format!(
+                "ACCOUNT_TX_KIND_OUT_OF_PROFILE:{kind} \
+                 (profile: pay/HTLC/same-J swap/j-event/rebalance)"
+            ),
+            "{kind}",
+        );
+        assert_eq!(right.account.current_height(), 0);
+        assert!(right.account.mempool().is_empty(), "{kind}");
+        assert!(right.account.pending().is_none(), "{kind}");
+        assert_eq!(
+            right
+                .account
+                .entity_account_leaf()
+                .expect("unchanged Account leaf"),
+            before_leaf,
+            "{kind}",
         );
     }
 }

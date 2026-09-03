@@ -8,7 +8,7 @@ pub(crate) mod handlers;
 
 use num_bigint::BigInt;
 
-use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, TokenId};
+use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
 
 pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "direct_payment",
@@ -35,6 +35,24 @@ pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "settle_transition",
     "j_event_claim",
 ];
+
+/// Canonical live Account admission profile shared with TypeScript.
+///
+/// Lending variants remain canonically hashable for historical signed-frame
+/// verification. They are not accepted into new local or peer RRS work until
+/// lending is deliberately promoted into the production profile.
+pub(crate) fn account_tx_admission_error(tx: &AccountTx) -> Option<StateError> {
+    matches!(
+        tx,
+        AccountTx::LendingFund { .. }
+            | AccountTx::LendingBorrowRequest { .. }
+            | AccountTx::LendingRepay { .. }
+            | AccountTx::LendingCredit { .. }
+            | AccountTx::LendingCloseRequest { .. }
+            | AccountTx::LendingClosePayout { .. }
+    )
+    .then(|| StateError::AccountTxKindOutOfProfile(tx.wire_name()))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliveryMode {

@@ -144,7 +144,8 @@ const createPersistedStorageNavigationApi = (
       return readStorageFramePayloads(
         handle.db,
         frame,
-        frame.height === handle.latestMaterializedHeight
+        frame.height === handle.latestMaterializedHeight ||
+          handle.snapshotHeights.includes(frame.height)
           ? (options ?? {})
           : { includeRuntimeMachine: false },
       );

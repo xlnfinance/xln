@@ -4,9 +4,9 @@ import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
  * XLN Event Emission System (EVM-style)
  *
  * Attaches event emission methods to RuntimeReplica (like Ethereum blocks have logs).
- * Events are buffered only for the active Runtime frame. WAL persists that
- * one frame's activity atomically. UI timelines are derived from the bounded
- * Runtime WAL instead of retaining a second R/E/A archive on RuntimeReplica.
+ * Events are buffered only for the active Runtime frame. After the
+ * authoritative WAL commit, deterministic env.emit facts are copied into a
+ * disposable history view. RuntimeFrame itself never stores activity logs.
  *
  * Usage:
  *   env.info('consensus', 'Frame committed', { entityId, height });
@@ -349,9 +349,8 @@ export function attachEventEmitters(env: RuntimeReplica): void {
       },
       'EVENT',
     );
-    // The frame log is attached only to this Runtime WAL frame.
-    // Mirroring every machine fact to the relay duplicated the durable stream
-    // as one signed socket frame per Runtime frame. Only explicit warn/error
-    // and candidate debug effects use the relay audit lane.
+    // The active-frame buffer is consumed after the authoritative WAL commit.
+    // Only this env.emit shape enters the disposable activity view; explicit
+    // warn/error and candidate debug effects stay on the relay audit lane.
   };
 }

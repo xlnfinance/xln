@@ -19,6 +19,8 @@ import {
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
+  KEY_RUNTIME_MACHINE_BRANCH,
+  KEY_RUNTIME_MACHINE_LEAF,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_SNAPSHOT_ACCOUNT,
@@ -337,6 +339,20 @@ export const createSnapshot = async (
   ] as const) {
     const copied = await copyKeyRange(
       sourceDb,
+      targetDb,
+      { prefix: Buffer.from([graphTag]) },
+      key => keySnapshotGraph(height, key),
+      async () => onPersistenceBoundary?.('after-snapshot-body-batch'),
+    );
+    written += copied.count;
+    bytes += copied.bytes;
+  }
+  for (const graphTag of [
+    KEY_RUNTIME_MACHINE_BRANCH,
+    KEY_RUNTIME_MACHINE_LEAF,
+  ] as const) {
+    const copied = await copyKeyRange(
+      targetDb,
       targetDb,
       { prefix: Buffer.from([graphTag]) },
       key => keySnapshotGraph(height, key),

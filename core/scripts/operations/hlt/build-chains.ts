@@ -134,7 +134,7 @@ if (selection.engine === 'ts' && authorityEvidence && !existsSync(`${snapshotPat
   throw new Error(`HLT_BUILD_CONCRETE_CHECKPOINT_MISSING:${snapshotPath}.concrete-checkpoint.json`);
 }
 const output = resolve(
-  String(process.env['XLN_HLT_RECORDING_OUTPUT'] || join(workDir, 'hlt-hub-recording.json')),
+  String(process.env['XLN_HLT_RECORDING_OUTPUT'] || join(workDir, 'recording-manifest.json')),
 );
 if (selection.engine === 'rust') {
   const liveReport = join(workDir, 'hlt-rust-h1-live.json');

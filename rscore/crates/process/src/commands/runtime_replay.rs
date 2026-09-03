@@ -105,10 +105,10 @@ fn exact_range(root: &Value) -> Result<(u64, u64), String> {
         .checked_add(1)
         .ok_or_else(|| "RUNTIME_REPLAY_HEIGHT_OVERFLOW".to_string())?;
     let to = unsigned(tail.get("runtimeHeight"), "tail.runtimeHeight")?;
-    // Production framing coalesces a busy second into few Runtime frames
-    // (1,000 users x rate 2 ~ 70 frames per 10 s); exactness is measured in
-    // Account inputs by the TS recorder gate, this floor only rejects toy tails.
-    if to < from || to - from + 1 < 50 {
+    // One evidence tail must cross the 100-frame checkpoint cadence with real
+    // economic frames. The owner-selected 110-frame floor rejects a run that
+    // only proves one side of that recovery boundary.
+    if to < from || to - from + 1 < 110 {
         return Err(format!("RUNTIME_REPLAY_EXACT_RANGE:from={from}:to={to}"));
     }
     Ok((from, to))

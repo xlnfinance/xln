@@ -226,7 +226,6 @@ test('storage frame integrity commits Runtime checkpoint graph root, never a blo
     postStateHash: `0x${'44'.repeat(32)}`,
     stateHash: `0x${'33'.repeat(32)}`,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    logs: [],
     touchedEntities: [],
     touchedAccounts: [],
     touchedBookEntities: [],

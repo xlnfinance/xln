@@ -14,6 +14,7 @@ import {
   keyAccountJClaimNodePrefix,
   keyAccountJClaimPathNode,
   keySnapshotGraphPrefix,
+  keySnapshotManifest,
   parseSnapshotGraphKey,
   keyFrame,
   keyLiveAccount,
@@ -41,6 +42,7 @@ import { readEntityStorageLayout } from '../schema/entity/layout';
 import {
   createSnapshotAccountGraphView,
   createSnapshotEntityGraphView,
+  createSnapshotRuntimeMachineGraphView,
 } from '../database/snapshot-graph-view';
 import { iterateKeys, readValidatedOrNull } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
@@ -69,6 +71,7 @@ import {
   validateStorageAccountDocValue,
   validateStorageFrameRecordValue,
   validateStorageHeadValue,
+  validateStorageSnapshotManifestValue,
 } from '../schema/authoritative-schema';
 import { readSnapshotBookGraph, readStorageBookGraph } from './book-graph';
 import { readRuntimeOutputRows } from '../wal/outbox-payload';
@@ -364,11 +367,23 @@ export const readStorageFramePayloads = async (
     );
     if (currentMaterializedHeight === targetHeight) {
       runtimeMachine = await readRuntimeMachineGraph(db, frame.runtimeMachineRoot);
-    } else if (options?.includeRuntimeMachine === true) {
-      throw new Error(
-        `STORAGE_RUNTIME_MACHINE_NOT_CURRENT:` +
-        `requested=${targetHeight}:current=${currentMaterializedHeight}`,
+    } else {
+      const snapshotManifest = await readValidatedOrNull(
+        db,
+        keySnapshotManifest(targetHeight),
+        validateStorageSnapshotManifestValue,
       );
+      if (snapshotManifest?.height === targetHeight) {
+        runtimeMachine = await readRuntimeMachineGraph(
+          createSnapshotRuntimeMachineGraphView(db, targetHeight),
+          frame.runtimeMachineRoot,
+        );
+      } else if (options?.includeRuntimeMachine === true) {
+        throw new Error(
+          `STORAGE_RUNTIME_MACHINE_NOT_CURRENT:` +
+          `requested=${targetHeight}:current=${currentMaterializedHeight}`,
+        );
+      }
     }
   }
   const payloads: RuntimeFramePayloads = {

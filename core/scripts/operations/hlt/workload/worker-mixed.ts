@@ -99,6 +99,7 @@ import {
 } from '../rust/rust-h1-settlement';
 import type { HltPaymentOperationLedgerSnapshot } from '../../../../support/performance/account-delivery-trace';
 import { hltWorkloadFingerprint } from './workload-fingerprint';
+import { extendAuthorityFrameTail } from '../replay/evidence/authority-frame-tail';
 
 type HltSwapTerminalLedger = Readonly<{
   accepted: number;
@@ -930,6 +931,18 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     };
     writeFileSync(join(args.workDir, 'hlt-ts-h1-live.json'), `${safeStringify(functionalEvidence, 2)}\n`);
     if (authorityEvidence) {
+      const frameTail = await extendAuthorityFrameTail({
+        workDir: args.workDir,
+        hub: requireHub(),
+        hubIdentity,
+        users,
+        amountRange,
+        workloadRounds: args.rounds,
+      });
+      writeFileSync(
+        join(args.workDir, 'hlt-authority-frame-tail.json'),
+        `${safeStringify(frameTail, 2)}\n`,
+      );
       console.log(`HLT_MIXED_PARITY_SMOKE ${safeStringify({
         users: users.length,
         rounds: args.rounds,
@@ -937,7 +950,9 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         submittedOffers: expectedSubmittedOffers,
         matchedTrades: expectedMatchedTrades,
         cancelledOffers: cancellation.cancelledOffers,
-        finalRuntimeHeight: hubDurableAfter.height,
+        finalRuntimeHeight: frameTail.finalHeight,
+        recordedFrames: frameTail.recordedFrames,
+        tailPayments: frameTail.payments,
       })}`);
     }
     console.log(safeStringify({ live: functionalEvidence, payment: paymentReport, swap: swapReport }));

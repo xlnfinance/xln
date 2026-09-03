@@ -11,7 +11,7 @@
  *        `ACCOUNT_TX_KIND_OUT_OF_PROFILE`, mempool unchanged.
  *   Rust `AccountConsensus::admit_txs` returns
  *        `Err(StateError::PolicyVersionOutOfRange)` /
- *        `Err(StateError::UnsupportedFrameTx(kind))`, mempool unchanged.
+ *        `Err(StateError::AccountTxKindOutOfProfile(kind))`, mempool unchanged.
  * - incoming counterparty frame:
  *   TS   preflight returns a typed Account input rejection
  *        `ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` /
@@ -19,7 +19,7 @@
  *        before signature work, replay, or mutation.
  *   Rust `apply_incoming_frame` returns `Rejected` whose reason carries
  *        `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
- *        `ACCOUNT_FRAME_TX_UNSUPPORTED:<kind>` from `AccountFrame::hash`.
+ *        `ACCOUNT_TX_KIND_OUT_OF_PROFILE:<kind>` before replay.
  * - boundary accept (policyVersion 0 and MAX): TS admits (ok result) and
  *   Rust admits (Ok, frame hashable) — the golden
  *   `matches_typescript_rebalance_policy_bytes_and_hashes` already pins
@@ -34,7 +34,7 @@ import {
   AccountTxAdmissionError,
   MAX_POLICY_VERSION,
 } from '../../account/tx/admission-policy';
-import { accountInputPeerRejectionCode } from '../../account/consensus/result';
+import { accountInputFailureMessage, accountInputPeerRejectionCode } from '../../account/consensus/result';
 import { createEmptyEnv } from '../../runtime';
 import { createAccountConsensusContext } from '../../entity/account/account-consensus-context';
 import { makeAccount } from '../helpers/cross-j';
@@ -76,7 +76,7 @@ const TWO_POW_54 = 2 ** 54;
 // precisely the divergence FX-1 exists to reject before hashing.
 const U64_MAX_APPROXIMATE = 18_446_744_073_709_551_615;
 
-const LENDING_TXS: Array<[string, AccountTx]> = [
+const OUT_OF_PROFILE_TXS: Array<[string, AccountTx]> = [
   ['lending_fund', {
     type: 'lending_fund',
     data: {
@@ -259,14 +259,27 @@ describe('FX-3 exact lifecycle retry identity', () => {
   });
 });
 
-describe('lending transactions use canonical Account consensus', () => {
-  test.each(LENDING_TXS)('enqueue admits %s into the bilateral Account mempool', async (_kind, tx) => {
+describe('FX-2 lending kinds are out of the production RRS profile', () => {
+  test.each(OUT_OF_PROFILE_TXS)('enqueue rejects %s before mempool mutation', async (kind, tx) => {
     const account = makeAccount('0xsender', '0xrecipient');
 
     await expect(enqueue(account, [structuredClone(tx)]))
-      .resolves
-      .toMatchObject({ ok: true, admittedAccountTxCount: 1 });
-    expect(account.mempool).toEqual([tx]);
+      .rejects
+      .toThrow(`ACCOUNT_TX_KIND_OUT_OF_PROFILE:${kind}`);
+    expect(account.mempool).toEqual([]);
+  });
+
+  test('typed rejection names the kind and production profile', async () => {
+    const account = makeAccount('0xsender', '0xrecipient');
+    const [kind, tx] = OUT_OF_PROFILE_TXS[0]!;
+
+    const rejection = enqueue(account, [structuredClone(tx)]);
+    await expect(rejection).rejects.toMatchObject({
+      name: 'AccountTxAdmissionError',
+      code: 'ACCOUNT_TX_KIND_OUT_OF_PROFILE',
+      txType: kind,
+    });
+    await expect(rejection).rejects.toThrow('pay/HTLC/same-J swap/j-event/rebalance');
   });
 });
 
@@ -298,6 +311,30 @@ describe('incoming counterparty frames reject before replay', () => {
       proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
     };
   };
+
+  test.each(OUT_OF_PROFILE_TXS)(
+    'incoming %s is rejected before replay without mutation',
+    async (kind, tx) => {
+      const account = makeAccount('0xsender', '0xrecipient');
+      const input = buildFrameInput(account, tx, '');
+      input.proposal.frame.stateHash = computeFrameHash(input.proposal.frame);
+      const context = {
+        ...createAccountConsensusContext(createEmptyEnv('fx-admission-incoming')),
+        verifyHanko: async (_hanko: unknown, _hash: unknown, expectedEntityId: string) => ({
+          valid: true,
+          entityId: expectedEntityId,
+        }),
+      } as Parameters<typeof applyAccountInput>[0];
+      const before = safeStringify(account);
+
+      const result = await applyAccountInput(context, account, input);
+
+      expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE');
+      expect(accountInputFailureMessage(result)).toContain(`ACCOUNT_TX_KIND_OUT_OF_PROFILE:${kind}`);
+      expect(account.currentHeight).toBe(0);
+      expect(safeStringify(account)).toBe(before);
+    },
+  );
 
   test('an out-of-range policyVersion frame is a typed range rejection without mutation', async () => {
     const account = makeAccount('0xsender', '0xrecipient');

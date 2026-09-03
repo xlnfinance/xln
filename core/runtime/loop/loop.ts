@@ -12,6 +12,7 @@ import {
   closeStorageDb,
   releaseRetainedStorageWriterLock,
 } from '../../storage/runtime-dbs.ts';
+import { closeRuntimeActivityViewDb } from '../../storage/history/runtime-activity-view.ts';
 import {
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
@@ -109,6 +110,7 @@ const createRuntimeDbCloser = (
     closeStorageDb(env, 'current'),
     closeStorageDb(env, 'previous'),
     closeRuntimeWalDb(env),
+    ...(!borrowedWal ? [closeRuntimeActivityViewDb(env)] : []),
   ]);
   throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
   if (!borrowedWal) await releaseRetainedStorageWriterLock(env);

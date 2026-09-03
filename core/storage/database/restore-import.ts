@@ -306,6 +306,10 @@ const publishNewWalBase = async (
   }));
   const runtimeMachineGraph = prepareRuntimeMachineGraphRows(options.runtimeMachine);
   if (!runtimeMachineGraph.root) throw new Error('RECOVERY_IMPORT_RUNTIME_MACHINE_ROOT_MISSING');
+  const snapshotRuntimeMachineRows = runtimeMachineGraph.rows.map(row => ({
+    key: keySnapshotGraph(options.height, row.key),
+    value: row.value,
+  }));
   const manifestEntry = {
     key: keySnapshotManifest(options.height),
     value: encodeBuffer({
@@ -314,7 +318,8 @@ const publishNewWalBase = async (
       docCount:
         snapshotEntries.length +
         snapshotReplicaMetaEntries.length +
-        snapshotAuxiliaryRows.length,
+        snapshotAuxiliaryRows.length +
+        snapshotRuntimeMachineRows.length,
     } satisfies StorageSnapshotManifest),
   };
   const touchedAccounts = options.docs
@@ -336,7 +341,6 @@ const publishNewWalBase = async (
     runtimeOutputCount: outputPayloads.commitment.count,
     runtimeOutputsDigest: outputPayloads.commitment.digest,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    logs: [],
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts,
     touchedBookEntities,
@@ -347,6 +351,7 @@ const publishNewWalBase = async (
     ...snapshotEntries,
     ...snapshotReplicaMetaEntries,
     ...snapshotAuxiliaryRows,
+    ...snapshotRuntimeMachineRows,
     manifestEntry,
     ...frameRows,
     ...options.replicaMetas,

@@ -150,7 +150,9 @@ describe('restored checkpoint conflict policy', () => {
     base.env.state.timestamp = 1_000;
     base.replica.lastConsensusProgressAt = 1_111;
     await persistRestoredEnvToDB(base.env);
-    expect(await readPersistedRuntimeActivityJournal(base.env, 1)).not.toBeNull();
+    await expect(readPersistedRuntimeActivityJournal(base.env, 1)).rejects.toThrow(
+      'RUNTIME_ACTIVITY_VIEW_UNAVAILABLE:height=1:through=1',
+    );
     await closeRecoveryEnv(base.env);
 
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -178,7 +180,9 @@ describe('restored checkpoint conflict policy', () => {
     advancedReplica.lastConsensusProgressAt = 2_222;
     await persistRestoredEnvToDB(restored);
     expect(await readPersistedRuntimeActivityJournal(restored, 1)).toBeNull();
-    expect(await readPersistedRuntimeActivityJournal(restored, 2)).not.toBeNull();
+    await expect(readPersistedRuntimeActivityJournal(restored, 2)).rejects.toThrow(
+      'RUNTIME_ACTIVITY_VIEW_UNAVAILABLE:height=2:through=2',
+    );
     await closeRecoveryEnv(restored);
 
     await assertFreshState(seed, { height: 2, progress: 2_222, profileName: 'advanced-base' });

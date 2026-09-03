@@ -5,14 +5,10 @@ import { join, resolve } from 'node:path';
 
 /** Subprocess boundary shared by the replay fixture commands. */
 
-/** Owner-approved aggregate budget for the >=1,000-frame recording and replay gate. */
-// Four replays of a ~2,200-frame WAL (TS W1/W4 ≈ 60-90 s each on a shared
-// box, Rust W1/W4 ≈ 12 s each) need up to ~200 s when the machine also
-// carries an interactive session; 180 s tripped the live TPS pre-check three
-// times on 2026-09-02 with the same recording that passed in isolation.
-// Larger production recordings (2,000-3,000 users) replay for minutes per
-// engine; the ladder run sets XLN_HLT_PARITY_BUDGET_MS explicitly.
-export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = Number(process.env['XLN_HLT_PARITY_BUDGET_MS'] || 0) || 300_000;
+/** Owner-approved aggregate budget for the >=110-frame recording and replay gate. */
+// The owner-approved wall is three minutes. Larger explicitly requested
+// ladders may override it; the canonical release artifact may not silently do so.
+export const AUTHORITY_EVIDENCE_GATE_BUDGET_MS = Number(process.env['XLN_HLT_PARITY_BUDGET_MS'] || 0) || 180_000;
 
 export const freshAuthorityEvidenceDir = (prefix: string): string => {
   const configured = String(process.env['XLN_RSCORE_EVIDENCE_DIR'] ?? '').trim();

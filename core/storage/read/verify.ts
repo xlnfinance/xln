@@ -24,12 +24,16 @@ import {
 } from './read';
 import type { RuntimeDbLike, RuntimeFrame, StorageHead } from '../types';
 
-const countSnapshotDocs = async (db: RuntimeDbLike, height: number): Promise<number> => {
+const countSnapshotDocs = async (
+  db: RuntimeDbLike,
+  frame: RuntimeFrame,
+): Promise<number> => {
+  const height = frame.height;
   const [entities, accounts, books, graphRows, replicaMetas] = await Promise.all([
     countKeys(db, { prefix: keySnapshotEntityPrefix(height) }),
     countKeys(db, { prefix: keySnapshotAccountPrefix(height) }),
     countKeys(db, { prefix: keySnapshotBookPrefix(height) }),
-    inspectSnapshotGraphRows(db, height),
+    inspectSnapshotGraphRows(db, height, frame.runtimeMachineRoot),
     countKeys(db, { prefix: keySnapshotReplicaMetaPrefix(height) }),
   ]);
   return entities + accounts + books + graphRows + replicaMetas;
@@ -82,18 +86,20 @@ export const verifyStorageSnapshotAtHeight = async (
     throw new Error(`STORAGE_VERIFY_SNAPSHOT_MANIFEST_HEIGHT_MISMATCH: key=${snapshotHeight} manifest=${manifest.height}`);
   }
 
-  const actualDocCount = await countSnapshotDocs(db, snapshotHeight);
+  const snapshotFrame = await readStorageFrameRecord(db, snapshotHeight);
+  if (!snapshotFrame) throw new Error(`STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING: height=${snapshotHeight}`);
+  if (snapshotFrame.materializedState === false) {
+    throw new Error(`STORAGE_VERIFY_SNAPSHOT_NOT_MATERIALIZED: height=${snapshotHeight}`);
+  }
+  if (!snapshotFrame.runtimeMachineRoot) {
+    throw new Error(`STORAGE_VERIFY_SNAPSHOT_RUNTIME_MACHINE_ROOT_MISSING:height=${snapshotHeight}`);
+  }
+  const actualDocCount = await countSnapshotDocs(db, snapshotFrame);
   const expectedDocCount = Math.max(0, Math.floor(Number(manifest.docCount ?? -1)));
   if (actualDocCount !== expectedDocCount) {
     throw new Error(
       `STORAGE_VERIFY_SNAPSHOT_DOC_COUNT_MISMATCH: height=${snapshotHeight} expected=${expectedDocCount} actual=${actualDocCount}`,
     );
-  }
-
-  const snapshotFrame = await readStorageFrameRecord(db, snapshotHeight);
-  if (!snapshotFrame) throw new Error(`STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING: height=${snapshotHeight}`);
-  if (snapshotFrame.materializedState === false) {
-    throw new Error(`STORAGE_VERIFY_SNAPSHOT_NOT_MATERIALIZED: height=${snapshotHeight}`);
   }
   // This hydrates and verifies every declared Account/Book Patricia root.
   // The replay loader then compares the reconstructed Entity roots with the
@@ -102,9 +108,9 @@ export const verifyStorageSnapshotAtHeight = async (
   if (!snapshotFrame.canonicalStateHash || !snapshotFrame.canonicalEntityHashes) {
     throw new Error(`STORAGE_VERIFY_SNAPSHOT_CANONICAL_ROOTS_MISSING:height=${snapshotHeight}`);
   }
-  // Output and Entity-context rows are immutable frame payloads. Verify them
-  // at their historical height without consulting the latest-only machine graph.
-  await readStorageFramePayloads(db, snapshotFrame, { includeRuntimeMachine: false });
+  // Output/Entity-context rows and the height-scoped Runtime-machine graph are
+  // immutable snapshot payloads. The machine root was verified above.
+  await readStorageFramePayloads(db, snapshotFrame, { includeRuntimeMachine: true });
   const snapshotStateHash = computeCanonicalRuntimeStateHash(
     snapshotFrame.height,
     snapshotFrame.timestamp,
@@ -146,9 +152,8 @@ export const verifyStorageSnapshotIntegrity = async (
   db: RuntimeDbLike,
   head: StorageHead,
 ): Promise<void> => {
-  // Published snapshots retain historical Entity/Account documents. The
-  // Runtime-machine graph is one path-keyed current checkpoint, so verify it
-  // only through the distinct materialized pointer.
+  // Published snapshots retain the exact Runtime/Entity/Account checkpoint;
+  // the current materialized graph remains a separately verified live copy.
   await verifyStorageSnapshotAtHeight(db, head, head.latestSnapshotHeight);
   await verifyCurrentMaterializedMachine(db, head);
 };

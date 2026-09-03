@@ -17,7 +17,7 @@ if (!process.env['XLN_RSCORE_EVIDENCE_DIR']) {
   );
 }
 const workDir = freshAuthorityEvidenceDir('xln-runtime-replay-v1-');
-const output = join(workDir, 'hlt-hub-recording.json');
+const output = join(workDir, 'recording-manifest.json');
 const env: NodeJS.ProcessEnv = {
   ...process.env,
   XLN_HLT_ENGINE: 'ts',
@@ -28,12 +28,14 @@ const env: NodeJS.ProcessEnv = {
   XLN_HLT_RECORDING_OUTPUT: output,
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'mixed',
   // Parity evidence is the production load itself: the canonical 1,000
-  // sovereign Runtimes at the production rate (2 payments + 2 swap actions
-  // per user per second) with production frame coalescing. A selective
+  // sovereign Runtimes at the production rate (1 payment + 1 swap action
+  // per user per second) with production frame coalescing. Twenty offers per
+  // Account stay below the protocol's 32-live-offer bound while still
+  // supplying 20,000 payments and 20,000 swap actions to the parity gate. A selective
   // one-input-per-frame transcript would prove parity on a shape the hub
-  // never runs; the >=1,000-frame gate is met by the real frame cadence.
+  // never runs; the 110-frame gate is met by real economic frame cadence.
   XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '1000',
-  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '2',
+  XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '1',
   XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '20',
   XLN_HLT_MIX: '1:1',
   XLN_HLT_HUBS: 'H1',
@@ -55,7 +57,7 @@ for (const key of [
 
 const startedAt = new Date().toISOString();
 runAuthorityEvidenceGate({
-  label: 'HLT_RUNTIME_REPLAY_V1_RECORD_GATE',
+  label: 'HLT_RUNTIME_REPLAY_V2_RECORD_GATE',
   script: 'core/scripts/operations/hlt/build-chains.ts',
   env,
 });
@@ -72,4 +74,4 @@ writeEvidenceBundleProvenance({
     swapLoadMode: env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] ?? '',
   },
 });
-console.log(`HLT_RUNTIME_REPLAY_V1 path=${output}`);
+console.log(`HLT_RUNTIME_REPLAY_V2 path=${output}`);

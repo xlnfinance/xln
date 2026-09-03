@@ -191,20 +191,41 @@ fn digest(value: &Value, path: &str) -> Result<[u8; 32], String> {
 }
 
 fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpectation>, String> {
-    let tail = field(root, "tail", "recordingRoot")?;
-    if field(tail, "kind", "tail")?.as_str() != Some("journal_tail") {
-        return Err("RUNTIME_REPLAY_EXPECTED_TAIL_KIND".into());
+    let authority = field(root, "authorityEvidence", "recordingRoot")?;
+    let expectations = field(authority, "expectations", "authorityEvidence")?;
+    let frames = array(
+        field(
+            expectations,
+            "runtimeFrames",
+            "authorityEvidence.expectations",
+        )?,
+        "authorityEvidence.expectations.runtimeFrames",
+    )?;
+    let effects = array(
+        field(expectations, "effects", "authorityEvidence.expectations")?,
+        "authorityEvidence.expectations.effects",
+    )?;
+    if frames.len() != effects.len() {
+        return Err(format!(
+            "RUNTIME_REPLAY_EXPECTED_FRAME_EFFECT_COUNT:{}:{}",
+            frames.len(),
+            effects.len()
+        ));
     }
-    let frames = array(field(tail, "frames", "tail")?, "tail.frames")?;
     let mut grouped = BTreeMap::new();
-    for (index, frame) in frames.iter().enumerate() {
-        let path = format!("tail.frames[{index}]");
-        if object(frame, &path)?.contains_key("runtimeStateHash") {
+    for (index, (frame, effect)) in frames.iter().zip(effects).enumerate() {
+        let path = format!("authorityEvidence.expectations.runtimeFrames[{index}]");
+        let effect_path = format!("authorityEvidence.expectations.effects[{index}]");
+        let height = unsigned(field(frame, "height", &path)?, &format!("{path}.height"))?;
+        let effect_height = unsigned(
+            field(effect, "runtimeHeight", &effect_path)?,
+            &format!("{effect_path}.runtimeHeight"),
+        )?;
+        if effect_height != height {
             return Err(format!(
-                "RUNTIME_REPLAY_EXPECTED_RETIRED_RUNTIME_STATE_HASH:{path}"
+                "RUNTIME_REPLAY_EXPECTED_FRAME_EFFECT_HEIGHT:{height}:{effect_height}"
             ));
         }
-        let height = unsigned(field(frame, "height", &path)?, &format!("{path}.height"))?;
         let canonical_state_hash = digest(
             field(frame, "canonicalStateHash", &path)?,
             &format!("{path}.canonicalStateHash"),
@@ -220,12 +241,12 @@ fn runtime_expectations(root: &Value) -> Result<BTreeMap<u64, RuntimeFrameExpect
             )?,
             canonical_state_hash,
             output_count: unsigned(
-                field(frame, "runtimeOutputCount", &path)?,
-                &format!("{path}.runtimeOutputCount"),
+                field(effect, "outputCount", &effect_path)?,
+                &format!("{effect_path}.outputCount"),
             )?,
             output_digest: digest(
-                field(frame, "runtimeOutputsDigest", &path)?,
-                &format!("{path}.runtimeOutputsDigest"),
+                field(effect, "orderedOutputDigest", &effect_path)?,
+                &format!("{effect_path}.orderedOutputDigest"),
             )?,
         };
         if grouped.insert(height, expected).is_some() {
@@ -494,28 +515,21 @@ mod tests {
             },
             "authorityEvidence": {
                 "expectations": {
-                    "entityEffects": [{
-                        "runtimeHeight": 7,
-                        "effectCount": 41,
-                        "orderedEffectDigest": format!("0x{}", "88".repeat(32)),
+                    "runtimeFrames": [{
+                        "height": 7,
+                        "timestamp": 9,
+                        "postStateHash": format!("0x{}", "55".repeat(32)),
+                        "canonicalStateHash": format!("0x{}", "77".repeat(32)),
                     }],
-                    "entityFrameEvents": [{
+                    "effects": [{
                         "runtimeHeight": 7,
-                        "eventCount": 42,
-                        "orderedEventDigest": format!("0x{}", "99".repeat(32)),
+                        "outputCount": 0,
+                        "orderedOutputDigest": format!("0x{}", "66".repeat(32)),
                     }],
                 },
             },
             "tail": {
                 "kind": "journal_tail",
-                "frames": [{
-                        "height": 7,
-                        "timestamp": 9,
-                        "postStateHash": format!("0x{}", "55".repeat(32)),
-                        "canonicalStateHash": format!("0x{}", "77".repeat(32)),
-                        "runtimeOutputCount": 0,
-                        "runtimeOutputsDigest": format!("0x{}", "66".repeat(32)),
-                    }],
             },
         })
     }
@@ -627,9 +641,9 @@ mod tests {
     }
 
     #[test]
-    fn canonical_root_is_required_and_the_retired_duplicate_is_rejected() {
+    fn canonical_root_and_matching_effect_height_are_required() {
         let mut missing = recording_fixture();
-        missing["tail"]["frames"][0]
+        missing["authorityEvidence"]["expectations"]["runtimeFrames"][0]
             .as_object_mut()
             .expect("frame")
             .remove("canonicalStateHash");
@@ -645,7 +659,8 @@ mod tests {
         );
 
         let mut null = recording_fixture();
-        null["tail"]["frames"][0]["canonicalStateHash"] = Value::Null;
+        null["authorityEvidence"]["expectations"]["runtimeFrames"][0]["canonicalStateHash"] =
+            Value::Null;
         assert!(
             ReplayExpectations::from_sources(
                 &null,
@@ -656,19 +671,18 @@ mod tests {
             .expect("null canonical root must fail")
             .contains("EXPECTED_DIGEST")
         );
-
-        let mut retired = recording_fixture();
-        retired["tail"]["frames"][0]["runtimeStateHash"] =
-            Value::String(format!("0x{}", "77".repeat(32)));
+        let mut mismatched = recording_fixture();
+        mismatched["authorityEvidence"]["expectations"]["effects"][0]["runtimeHeight"] =
+            Value::from(8);
         assert!(
             ReplayExpectations::from_sources(
-                &retired,
+                &mismatched,
                 &parity_report_fixture(),
                 &recording_manifest_hash(),
             )
             .err()
-            .expect("retired duplicate must fail")
-            .contains("RETIRED_RUNTIME_STATE_HASH")
+            .expect("mismatched effect height must fail")
+            .contains("FRAME_EFFECT_HEIGHT")
         );
     }
 

@@ -208,7 +208,7 @@ bun core/scripts/operations/production/local-prod-smoke.ts
 # op-counter call sites: XLN_RUNTIME_OP_CALLSITES=1
 # recording + replay:
 XLN_HLT_USERS=1000 ... XLN_LOCAL_PROD_SMOKE_DIR=/tmp/xr bun core/scripts/operations/hlt/build-chains.ts
-bun core/scripts/operations/hlt/replay/replay-hub-recording.ts --recording /tmp/xr/hlt-hub-recording.json --mode max
+bun core/scripts/operations/hlt/replay/replay-hub-recording.ts --recording /tmp/xr/recording-manifest.json --wal /tmp/xr/prod-mesh/h1/<runtime-id>-wal --mode max
 ```
 Never set `XLN_LOCAL_PROD_SMOKE_PORT_BASE`. Do not edit tracked files while a
 run is in progress (the lanes import source at spawn; a half-edited file fails

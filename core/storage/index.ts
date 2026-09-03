@@ -133,6 +133,7 @@ import {
   type AuxiliaryTreeOwner,
 } from './schema/nodes/path-keyed-auxiliary-nodes';
 import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
+import { appendRuntimeActivityViewFrame } from './history/runtime-activity-view';
 export { resolveStorageRuntimeConfig } from './database/config';
 export {
   inspectStorage,
@@ -1361,7 +1362,6 @@ const buildStorageRuntimeFrame = (
         }
       : {}),
     runtimeInput: appliedRuntimeInput,
-    logs: touches.frameLogs,
     ...(entityContextRefs.size > 0
       ? { entityContextRefs: new Map(entityContextRefs) }
       : {}),
@@ -1480,6 +1480,7 @@ const buildStorageFrameRecordPlan = (
     ) +
     accountAuthorityCheckpoint.dels.reduce((total, key) => total + key.byteLength, 0);
   return {
+    record: frameRecord,
     frameKey,
     frameHash: frameRecord.frameHash,
     authoritativeIdentity: {
@@ -1605,6 +1606,34 @@ const buildStorageCommitBatches = (
 
 type StorageCommitBatches = ReturnType<typeof buildStorageCommitBatches>;
 
+const scheduleDisposableActivityView = (
+  options: StorageFrameSaveOptions,
+  frame: RuntimeFramePlan,
+): void => {
+  const events = structuredClone(frame.frameLogs);
+  void appendRuntimeActivityViewFrame(options.env, frame.record, events).then(outcome => {
+    if (outcome === 'gap') throw new Error(`RUNTIME_ACTIVITY_VIEW_GAP:height=${frame.record.height}`);
+    const failure = options.env.infrastructure?.runtimeActivityViewFailure;
+    if (failure && failure.height <= frame.record.height) {
+      delete options.env.infrastructure?.runtimeActivityViewFailure;
+    }
+  }).catch(error => {
+    const message = error instanceof Error ? error.message : String(error);
+    options.env.infrastructure ??= {};
+    const failure = options.env.infrastructure.runtimeActivityViewFailure;
+    if (!failure || failure.height <= frame.record.height) {
+      options.env.infrastructure.runtimeActivityViewFailure = {
+        height: frame.record.height,
+        message,
+      };
+    }
+    storageLog.warn('activity_view.write_failed', {
+      height: frame.record.height,
+      error: message,
+    });
+  });
+};
+
 // Load-test user Runtimes may trade durability for I/O (XLN_STORAGE_WAL_SYNC=0);
 // a Hub keeps the fsync.
 const writeAuthoritativeWalBatch = (batches: StorageCommitBatches): Promise<void> =>
@@ -1614,6 +1643,7 @@ const commitStorageFrame = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
+  frame: RuntimeFramePlan,
   batches: StorageCommitBatches,
   writeStartedAt: number,
   prepareMarks: Record<string, number>,
@@ -1634,6 +1664,7 @@ const commitStorageFrame = async (
   }
   options.onPersistenceProgress?.('account-authority-committed');
   await options.onPersistenceBoundary?.('after-authoritative-commit');
+  scheduleDisposableActivityView(options, frame);
 
   const currentWriteStartedAt = options.getPerfMs();
   options.onPersistenceProgress?.('current-cache-write-start');
@@ -1891,6 +1922,7 @@ export const saveRuntimeFrameToStorage = async (
     options,
     prepared,
     commitments,
+    framePlan,
     batches,
     writeStartedAt,
     prepareMarks,

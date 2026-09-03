@@ -4,6 +4,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { PersistedFrameJournal } from './types';
 import type { StorageDbRole } from './runtime-dbs';
 import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
+import type { RecoveryReplayOptions } from './recovery/journal';
 
 type RuntimeModule = typeof import('../runtime');
 
@@ -34,6 +35,7 @@ export type RuntimeStorageApiDeps =
     replayRecoveryFrameJournals(
       env: RuntimeReplica,
       frames: PersistedFrameJournal[],
+      options?: RecoveryReplayOptions,
     ): Promise<void>;
     restoreAccountAuthorityExact(
       env: RuntimeReplica,

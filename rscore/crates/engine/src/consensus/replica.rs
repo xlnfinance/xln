@@ -24,6 +24,7 @@ use crate::input::mempool::{
 };
 use crate::j_claims::{LocalClaimPlan, QueuedClaimWitness, plan_local_claim};
 use crate::state::account_replica_shell::AccountEnvelope;
+use crate::tx::account_tx_admission_error;
 use crate::{AccountRejection, AccountReplica, AccountTx};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -555,8 +556,8 @@ impl AccountConsensus {
     /// Admit local intentions. The limit counts the proposed frame too, so an
     /// unresponsive peer cannot be used to grow the queue.
     ///
-    /// FX-3 (proofs/fixes.md, decision D4): malformed input (unhashable kind,
-    /// out-of-range policyVersion) rejects the whole batch loudly, but a
+    /// FX-2/FX-3 (proofs/fixes.md, decisions D3/D4): out-of-profile lending or
+    /// out-of-range policyVersion rejects the whole batch loudly, but a
     /// j-claim that conflicts with committed or earlier queued evidence
     /// rejects only its own row, as typed data — the account continues.
     /// Parity target: `applyAccountEnqueue`'s `admissionRejections`
@@ -571,6 +572,9 @@ impl AccountConsensus {
         // failures such as an unsafe policyVersion and let admission disagree
         // with `AccountFrame::hash` about the same transaction.
         for tx in &txs {
+            if let Some(error) = account_tx_admission_error(tx) {
+                return Err(error);
+            }
             canonical_tx_value(tx)?;
         }
         let incoming_claim_heights: std::collections::BTreeSet<u64> = txs

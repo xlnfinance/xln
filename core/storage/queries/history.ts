@@ -18,15 +18,21 @@ import type {
   RuntimeFramePayloads,
 } from '../types';
 import type { PersistenceQueryDeps } from './deps';
+import { ensureRuntimeActivityView } from '../history/runtime-activity-repair';
+import {
+  readRuntimeActivityViewFrame,
+  readRuntimeActivityViewStatus,
+} from '../history/runtime-activity-view';
 
 /**
- * Runtime WAL is the only timeline. Entity and Account histories are derived
- * from accepted Runtime inputs and the flat outbox on demand; they are never
- * written to a second database or retained in live machine state.
+ * Runtime WAL remains the only authority. Entity and Account histories are
+ * derived on demand; Runtime activity uses a disposable view repaired only
+ * from verified WAL replay and never feeds live machine state.
  */
 export const buildRecoveryJournalFromStorageFrame = (
   frame: RuntimeFrame,
   payloads: RuntimeFramePayloads,
+  logs: FrameLogEntry[] = [],
 ): PersistedFrameJournal => ({
   height: frame.height,
   timestamp: frame.timestamp,
@@ -34,13 +40,13 @@ export const buildRecoveryJournalFromStorageFrame = (
   postStateHash: frame.postStateHash,
   materializedState: frame.materializedState,
   runtimeInput: frame.runtimeInput,
-  logs: structuredClone(frame.logs),
   runtimeOutputCount: frame.runtimeOutputCount,
   runtimeOutputsDigest: frame.runtimeOutputsDigest,
   entityContexts: structuredClone(payloads.entityContexts),
   ...(payloads.runtimeOutputs?.length ? { runtimeOutputs: payloads.runtimeOutputs } : {}),
   ...(payloads.runtimeMachine ? { runtimeMachine: payloads.runtimeMachine } : {}),
   ...(frame.canonicalStateHash ? { canonicalStateHash: frame.canonicalStateHash } : {}),
+  logs,
 });
 
 export type PersistedRuntimeActivityPage = {
@@ -54,6 +60,9 @@ export type PersistedRuntimeActivityPage = {
   limit: number;
   scanLimit: number;
   nextBeforeHeight: number | null;
+  availability: 'complete' | 'partial';
+  availableFromHeight: number;
+  unavailableThroughHeight: number;
   filters: RuntimeActivityFilters;
   events: RuntimeActivityEvent[];
 };
@@ -358,28 +367,46 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     return buildRecoveryJournalFromStorageFrame(frame, payloads);
   };
 
-  const readPersistedRuntimeActivityJournal = async (
+  const readReadyRuntimeActivityJournal = async (
     env: RuntimeReplica,
     height: number,
   ): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
-    return frame ? {
+    if (!frame) return null;
+    const activity = await readRuntimeActivityViewFrame(env, height);
+    if (!activity) throw new Error(`RUNTIME_ACTIVITY_VIEW_FRAME_MISSING:${height}`);
+    if (activity.marker.frameHash !== frame.frameHash) {
+      throw new Error(`RUNTIME_ACTIVITY_VIEW_FRAME_HASH_MISMATCH:${height}`);
+    }
+    return {
       height: frame.height,
       timestamp: frame.timestamp,
       runtimeInput: frame.runtimeInput,
-      logs: structuredClone(frame.logs),
-    } : null;
+      logs: structuredClone(activity.logs),
+    };
+  };
+
+  const readPersistedRuntimeActivityJournal = async (
+    env: RuntimeReplica,
+    height: number,
+  ): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
+    await ensureRuntimeActivityView(deps, env, buildRecoveryJournalFromStorageFrame);
+    return readReadyRuntimeActivityJournal(env, height);
   };
 
   const readPersistedRuntimeActivityRecord = async (env: RuntimeReplica, height: number) => {
+    await ensureRuntimeActivityView(deps, env, buildRecoveryJournalFromStorageFrame);
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
-    return frame ? {
+    if (!frame) return null;
+    const activity = await readRuntimeActivityViewFrame(env, height);
+    if (!activity) throw new Error(`RUNTIME_ACTIVITY_VIEW_FRAME_MISSING:${height}`);
+    return {
       timestamp: frame.timestamp,
-      logs: structuredClone(frame.logs),
+      logs: structuredClone(activity.logs),
       touchedEntities: [...frame.touchedEntities],
       touchedAccounts: frame.touchedAccounts.map(account => ({ ...account })),
       touchedBookEntities: [...frame.touchedBookEntities],
-    } : null;
+    };
   };
 
   const readPersistedRuntimeActivityPage = async (
@@ -391,14 +418,24 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     } = {},
   ): Promise<PersistedRuntimeActivityPage> => {
     const latestHeight = await deps.resolvePersistedLatestHeight(env);
+    await ensureRuntimeActivityView(deps, env, buildRecoveryJournalFromStorageFrame);
+    const status = await readRuntimeActivityViewStatus(env);
     const limit = Math.max(1, Math.min(500, Math.floor(Number(opts.limit ?? 100))));
     const scanLimit = Math.max(1, Math.min(1000, Math.floor(Number(opts.scanLimit ?? 100))));
     const start = latestHeight <= 0 ? 0 : Math.max(1, Math.min(latestHeight, Math.floor(Number(opts.beforeHeight ?? latestHeight))));
+    const unavailableThroughHeight = status?.unavailableThroughHeight ?? 0;
+    const availableFromHeight = status?.availableFromHeight ?? 0;
+    if (start > 0 && start <= unavailableThroughHeight) {
+      throw new Error(`RUNTIME_ACTIVITY_VIEW_UNAVAILABLE:height=${start}:through=${unavailableThroughHeight}`);
+    }
     const events: RuntimeActivityEvent[] = [];
     let scannedFrames = 0;
     let height = start;
-    for (; height >= 1 && scannedFrames < scanLimit; height -= 1) {
-      const activity = await readPersistedRuntimeActivityJournal(env, height);
+    let lastScannedHeight = 0;
+    const floor = Math.max(1, availableFromHeight);
+    for (; height >= floor && scannedFrames < scanLimit; height -= 1) {
+      lastScannedHeight = height;
+      const activity = await readReadyRuntimeActivityJournal(env, height);
       scannedFrames += 1;
       if (activity) events.push(...buildRuntimeActivityEvents(activity, opts));
       if (dedupeRuntimeActivityEvents(events).length >= limit) break;
@@ -411,13 +448,16 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
       ok: true,
       runtimeId: env.runtimeId,
       latestHeight,
-      fromHeight: start === 0 ? 0 : Math.max(1, height),
+      fromHeight: lastScannedHeight,
       toHeight: start,
       scannedFrames,
       returned: returned.length,
       limit,
       scanLimit,
-      nextBeforeHeight: height > 1 ? height - 1 : null,
+      nextBeforeHeight: lastScannedHeight > floor ? lastScannedHeight - 1 : null,
+      availability: unavailableThroughHeight > 0 ? 'partial' : 'complete',
+      availableFromHeight,
+      unavailableThroughHeight,
       filters: opts,
       events: returned,
     };

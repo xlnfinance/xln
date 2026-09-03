@@ -35,7 +35,7 @@ test('binds one closed WAL and runtime seed before creating pristine replay copi
   }
 });
 
-test('one-artifact gate runs four isolated exact replays inside one three-minute budget', () => {
+test('one-artifact gate runs six isolated exact replays in bounded resumable stages', () => {
   const gatePath = join(
     repoRoot,
     'core/scripts/operations/hlt/replay/commands/run-mixed-ts-rust-parity.ts',
@@ -64,6 +64,9 @@ test('one-artifact gate runs four isolated exact replays inside one three-minute
   expect(gate).toContain('replayTypescript(4)');
   expect(gate).toContain('await replayRust(1, tsW1ReportPath)');
   expect(gate).toContain('await replayRust(4, tsW1ReportPath)');
+  expect(gate).toContain('await replayRust(8, tsW1ReportPath)');
+  expect(gate).toContain("optionalArgument('resume-ts-report-dir')");
+  expect(gate).toContain('HLT_MIXED_PARITY_RESUME_REQUIRES_CLEAN_TREE');
   expect(gate).toContain('copyBoundAuthorityWal(boundWal, wal');
   expect(gate).toContain("'--parity-evidence'");
   expect(replay).toContain('HLT_REPLAY_PARITY_EQUIVALENT');
@@ -72,6 +75,8 @@ test('one-artifact gate runs four isolated exact replays inside one three-minute
   expect(build).toContain('HLT_PARITY_RECORDING_REQUIRED');
   expect(build).toContain('resolve(parityRecording)');
   expect(liveController).toContain('timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
+  expect(liveController).toContain("'--ts-only', '--ts-report-dir'");
+  expect(liveController).toContain("'--resume-ts-report-dir'");
   expect(liveController).toContain('const PHASE_TIMEOUT_MS = 120_000');
   expect(liveController).toContain('const RUN_PHASE_TIMEOUT_MS = AUTHORITY_EVIDENCE_GATE_BUDGET_MS');
   expect(liveController).toContain(

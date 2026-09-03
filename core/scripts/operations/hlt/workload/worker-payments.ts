@@ -92,6 +92,7 @@ import type {
   AccountDeliveryHop,
   HltPaymentOperationLedgerSnapshot,
 } from '../../../../support/performance/account-delivery-trace';
+import { assertHltW4ReleaseTpsFloor } from '../metrics';
 
 /** Payments move the quote token; the swap workload owns the base token. */
 export const PAYMENT_TOKEN_ID = 1;
@@ -104,7 +105,7 @@ const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 /** Credit headroom over the exact total, so a fee cannot starve the last round. */
 export const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
-// Overridable: 20s covers the 5s smoke; the ≥1000-frame authority-evidence
+// Overridable: 20s covers the 5s smoke; the ≥110-frame authority-evidence
 // recording pushes 10-20k payments through the same gate and needs minutes.
 const DELIVERY_TIMEOUT_MS = Number(process.env['XLN_HLT_DELIVERY_TIMEOUT_MS'] || 0) || 20_000;
 
@@ -1162,6 +1163,12 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     }
     const authoritativeCardinality = paymentEvidence === 'tps-authority';
     if (authoritativeCardinality && report) {
+      assertHltW4ReleaseTpsFloor({
+        engine: selection.engine,
+        accountWorkers: report.environment.accountWorkers,
+        productionEquivalent: isProductionEquivalentHltEnvironment(report.environment),
+        deliveredTps: report.deliveredTps,
+      });
       publishHltDashboardReport('payment', report);
       publishHltDashboardPerfFromWorkDir(args.workDir);
     }

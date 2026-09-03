@@ -22,7 +22,6 @@ import { toRuntimeOutputsDigest } from '../../protocol/hashes';
 import { MAX_RUNTIME_OUTPUT_ROWS } from '../wal/outbox-payload';
 import { decodeEntityContextPayloadRefs } from '../wal/entity-context-payload';
 import { decodeRuntimeMachineGraphRoot } from '../wal/runtime-machine-graph';
-import type { FrameLogEntry } from '../../types/logging';
 
 export * from './schema-state-docs';
 export * from './nodes/schema-merkle-nodes';
@@ -108,7 +107,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest',
-    'postStateHash', 'materializedState', 'runtimeInput', 'logs',
+    'postStateHash', 'materializedState', 'runtimeInput',
     'runtimeOutputCount', 'runtimeOutputsDigest',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
@@ -154,7 +153,6 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     frame['runtimeInput'],
     `${code}_RUNTIME_INPUT`,
   );
-  frame['logs'] = validateFrameLogs(frame['logs'], `${code}_LOGS`);
   if (frame['entityContextRefs'] !== undefined) {
     frame['entityContextRefs'] = decodeEntityContextPayloadRefs(
       frame['entityContextRefs'],
@@ -167,49 +165,6 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   validateOptionalFrameFields(frame, code);
   return frame as RuntimeFrame;
 };
-
-const requireFrameLogLevel = (value: unknown, code: string): FrameLogEntry['level'] => {
-  const level = requireStorageString(value, code);
-  switch (level) {
-    case 'trace': case 'debug': case 'info': case 'warn': case 'error': return level;
-    default: throw new Error(code);
-  }
-};
-
-const requireFrameLogCategory = (value: unknown, code: string): FrameLogEntry['category'] => {
-  const category = requireStorageString(value, code);
-  switch (category) {
-    case 'consensus': case 'account': case 'jurisdiction': case 'evm':
-    case 'network': case 'ui': case 'system': return category;
-    default: throw new Error(code);
-  }
-};
-
-const validateFrameLogs = (value: unknown, code: string): FrameLogEntry[] =>
-  requireStorageArray(value, code).map((raw, index) => {
-    const itemCode = `${code}_${index}`;
-    const item = requireBoundaryRecord(raw, itemCode);
-    requireExactBoundaryKeys(
-      item,
-      ['id', 'timestamp', 'level', 'category', 'message'],
-      ['entityId', 'data'],
-      `${itemCode}_FIELDS`,
-    );
-    const entry: FrameLogEntry = {
-      id: requireBoundaryInteger(item['id'], `${itemCode}_ID`),
-      timestamp: requireBoundaryInteger(item['timestamp'], `${itemCode}_TIMESTAMP`),
-      level: requireFrameLogLevel(item['level'], `${itemCode}_LEVEL`),
-      category: requireFrameLogCategory(item['category'], `${itemCode}_CATEGORY`),
-      message: requireStorageString(item['message'], `${itemCode}_MESSAGE`),
-    };
-    if (item['entityId'] !== undefined) {
-      entry.entityId = requireStorageString(item['entityId'], `${itemCode}_ENTITY_ID`);
-    }
-    if (item['data'] !== undefined) {
-      entry.data = requireBoundaryRecord(item['data'], `${itemCode}_DATA`);
-    }
-    return entry;
-  });
 
 const validateTouchedAccounts = (value: unknown, code: string): void => {
   for (const [index, raw] of requireStorageArray(value, code).entries()) {

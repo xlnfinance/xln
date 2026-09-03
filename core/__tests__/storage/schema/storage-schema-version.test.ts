@@ -81,17 +81,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(4)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=4:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    // Version 5 did not commit Runtime event bodies in the WAL frame, so
-    // payment receipts disappeared after commit/restart.
-    await expect(readStorageHead(memoryDbWithHead(currentHead(5)))).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=5:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
-    );
-    expect(STORAGE_SCHEMA_VERSION).toBe(6);
+    expect(STORAGE_SCHEMA_VERSION).toBe(5);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 6,
+      schemaVersion: 5,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

@@ -10,6 +10,27 @@ import {
   type ProductionSwapLoadObservation,
 } from './schema';
 
+export const HLT_W4_TPS_POLICY = Object.freeze({
+  ts: Object.freeze({ releaseFloor: 700, performanceTarget: 2_000 }),
+  rust: Object.freeze({ releaseFloor: 5_000, performanceTarget: 8_000 }),
+});
+
+export const assertHltW4ReleaseTpsFloor = (options: Readonly<{
+  engine: 'ts' | 'rust';
+  accountWorkers: number | 'unknown';
+  productionEquivalent: boolean;
+  deliveredTps: number;
+}>): void => {
+  if (!options.productionEquivalent || options.accountWorkers !== 4) return;
+  const floor = HLT_W4_TPS_POLICY[options.engine].releaseFloor;
+  if (options.deliveredTps < floor) {
+    throw new Error(
+      `HLT_W4_RELEASE_TPS_REGRESSION:engine=${options.engine}:` +
+      `actual=${options.deliveredTps.toFixed(1)}:floor=${floor}`,
+    );
+  }
+};
+
 export type ProductionSwapLoadStepResult = Readonly<{
   offeredRate: number;
   completedTps: number;

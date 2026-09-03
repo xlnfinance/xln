@@ -9,6 +9,8 @@ import {
 } from '../../../scripts/operations/hlt/schema';
 import {
   assertExactCrashRecovery,
+  assertHltW4ReleaseTpsFloor,
+  HLT_W4_TPS_POLICY,
   summarizeProductionSwapLoadStep,
 } from '../../../scripts/operations/hlt/metrics';
 import { decodeProductionSwapLoadTopology } from '../../../scripts/operations/hlt/topology';
@@ -75,6 +77,7 @@ import { makeAccount as makeCanonicalAccount } from '../../helpers/cross-j';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountTx } from '../../../types/account';
+import { LIMITS } from '../../../config/constants';
 
 const root = (byte: string): string => `0x${byte.repeat(64)}`;
 const histogram = (...counts: Array<readonly [number, number]>): number[] => {
@@ -109,6 +112,22 @@ const observation = (overrides: Record<string, unknown> = {}) => decodeProductio
 });
 
 describe('production swap load evidence', () => {
+  test('W4 production TPS floors remain below their explicit performance targets', () => {
+    expect(HLT_W4_TPS_POLICY).toEqual({
+      ts: { releaseFloor: 700, performanceTarget: 2_000 },
+      rust: { releaseFloor: 5_000, performanceTarget: 8_000 },
+    });
+    expect(() => assertHltW4ReleaseTpsFloor({
+      engine: 'ts', accountWorkers: 4, productionEquivalent: true, deliveredTps: 699.9,
+    })).toThrow('HLT_W4_RELEASE_TPS_REGRESSION:engine=ts:actual=699.9:floor=700');
+    expect(() => assertHltW4ReleaseTpsFloor({
+      engine: 'rust', accountWorkers: 4, productionEquivalent: true, deliveredTps: 5_000,
+    })).not.toThrow();
+    expect(() => assertHltW4ReleaseTpsFloor({
+      engine: 'ts', accountWorkers: 8, productionEquivalent: true, deliveredTps: 1,
+    })).not.toThrow();
+  });
+
   test('environment manifest binds the selected engine Account worker count', () => {
     const previousTs = process.env['XLN_TS_ACCOUNT_WORKERS'];
     const previousRust = process.env['XLN_RSCORE_AUTHORITY_WORKERS'];
@@ -505,9 +524,11 @@ describe('production swap load evidence', () => {
   });
 
   test('open-loop load scales with users before it can exceed the production Account offer bound', () => {
-    expect(() => assertOpenLoopOfferBudget(20)).not.toThrow();
-    expect(() => assertOpenLoopOfferBudget(21)).toThrow(
-      'HLT_OPEN_LOOP_OFFER_CAP_EXCEEDED:perAccount=21:cap=20:increase-users-or-split-settled-windows',
+    const cap = LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS;
+    expect(() => assertOpenLoopOfferBudget(cap)).not.toThrow();
+    expect(() => assertOpenLoopOfferBudget(cap + 1)).toThrow(
+      `HLT_OPEN_LOOP_OFFER_CAP_EXCEEDED:perAccount=${cap + 1}:cap=${cap}:` +
+      'increase-users-or-split-settled-windows',
     );
   });
 

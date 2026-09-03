@@ -11,7 +11,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import { basename, dirname, join } from 'node:path';
 
 import { safeStringify } from '../../../../../protocol/serialization';
-import { readHltHubRecording } from '../recording';
+import { readHltHubRecordingManifest } from '../recording';
 
 const git = (args: readonly string[]): string => {
   try {
@@ -60,8 +60,8 @@ export const writeEvidenceBundleProvenance = (options: Readonly<{
   startedAt: string;
   knobs: Readonly<Record<string, string>>;
 }>): EvidenceBundleProvenance => {
-  const artifact = readHltHubRecording(options.recordingPath);
-  const heights = (artifact.tail.frames ?? []).map(frame => frame.height);
+  const artifact = readHltHubRecordingManifest(options.recordingPath);
+  const heights = artifact.authorityEvidence.expectations.runtimeFrames.map(frame => frame.height);
   const provenance: EvidenceBundleProvenance = {
     schema: 'xln-hlt-evidence-bundle-v1',
     createdAt: new Date().toISOString(),
@@ -78,15 +78,15 @@ export const writeEvidenceBundleProvenance = (options: Readonly<{
       file: basename(options.recordingPath),
       bytes: statSync(options.recordingPath).size,
       sha256: fileSha256Sync(options.recordingPath),
-      manifestHash: artifact.recording.manifestHash,
+      manifestHash: artifact.runtimeRecordingManifestHash,
       runtimeId: artifact.tail.runtimeId,
       frames: artifact.totals.runtimeFrames,
       entityInputs: artifact.totals.runtimeEntityInputs,
       outboxEnvelopes: artifact.totals.outboxEnvelopes,
       heights: { first: Math.min(...heights), last: Math.max(...heights) },
     },
-    hubWalDir: join('prod-mesh', 'h1', `${artifact.tail.runtimeId}-wal`),
-    meshSeedFile: join('secrets', 'mesh-root.seed'),
+    hubWalDir: artifact.source.hubWalDir,
+    meshSeedFile: artifact.source.meshSeedFile,
     replays: [],
   };
   writeFileSync(join(options.bundleDir, 'PROVENANCE.json'), `${safeStringify(provenance, 2)}\n`, { mode: 0o600 });
@@ -101,10 +101,11 @@ export const writeEvidenceBundleProvenance = (options: Readonly<{
     `- hub WAL: ${provenance.hubWalDir}; mesh seed: ${provenance.meshSeedFile}`,
     `- load: ${Object.entries(provenance.knobs).map(([key, value]) => `${key}=${value}`).join(' ')}`,
     '',
-    'Replay the 4-way TS/Rust parity gate on this bundle (reports land in replays/):',
+    'Replay the six-way TS/Rust parity gate in two bounded stages:',
     '',
     '```bash',
-    `XLN_HLT_REPLAY_BENCH_WORKERS=8 bun tools/stand-lock.ts run --reason evidence-replay -- bun run rscore:evidence:replay --recording <bundle>/${provenance.recording.file}`,
+    `bun tools/stand-lock.ts run --reason evidence-ts-replay -- bun run rscore:evidence:replay --recording <bundle>/${provenance.recording.file} --ts-only --ts-report-dir <bundle>/replays/ts-stage`,
+    `bun tools/stand-lock.ts run --reason evidence-rust-replay -- bun run rscore:evidence:replay --recording <bundle>/${provenance.recording.file} --resume-ts-report-dir <bundle>/replays/ts-stage`,
     '```',
     '',
   ].join('\n'), { mode: 0o600 });

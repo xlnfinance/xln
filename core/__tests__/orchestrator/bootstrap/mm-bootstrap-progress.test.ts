@@ -29,7 +29,6 @@ const buildReadyFrame = (
     canonicalEntityHashes,
     canonicalStateHash: computeCanonicalRuntimeStateHash(165, 1_000, canonicalEntityHashes),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    logs: [],
     runtimeOutputCount: 0,
     runtimeOutputsDigest: `0x${'00'.repeat(32)}`,
     touchedEntities: [],

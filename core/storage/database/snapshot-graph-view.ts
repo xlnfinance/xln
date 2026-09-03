@@ -14,6 +14,8 @@ import {
   KEY_LIVE_ENTITY_BRANCH,
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
+  KEY_RUNTIME_MACHINE_BRANCH,
+  KEY_RUNTIME_MACHINE_LEAF,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_ENTITY,
   encodeHeight,
@@ -53,6 +55,9 @@ const isEntityGraphKey = (key: Buffer): boolean =>
   key[0] === KEY_LIVE_ENTITY_FIELD ||
   key[0] === KEY_LIVE_ENTITY_BRANCH ||
   key[0] === KEY_LIVE_ENTITY_LEAF;
+
+const isRuntimeMachineGraphKey = (key: Buffer): boolean =>
+  key[0] === KEY_RUNTIME_MACHINE_BRANCH || key[0] === KEY_RUNTIME_MACHINE_LEAF;
 
 const snapshotKey = (height: number, liveKey: Buffer): Buffer =>
   liveKey[0] === KEY_LIVE_ACCOUNT
@@ -122,6 +127,42 @@ export const createSnapshotEntityGraphView = (
       const parsed = parseSnapshotGraphKey(Buffer.isBuffer(rawKey) ? rawKey : Buffer.from(rawKey));
       if (parsed.height !== height || !isEntityGraphKey(parsed.liveKey)) {
         throw new Error('STORAGE_SNAPSHOT_ENTITY_GRAPH_RANGE_KEY_INVALID');
+      }
+      yield parsed.liveKey;
+    }
+  },
+});
+
+/** Historical Runtime-machine equivalent of the latest-only live graph. */
+export const createSnapshotRuntimeMachineGraphView = (
+  db: RuntimeDbLike,
+  height: number,
+): RuntimeDbLike => ({
+  get: (key: Buffer) => {
+    if (!isRuntimeMachineGraphKey(key)) {
+      throw new Error(`STORAGE_SNAPSHOT_RUNTIME_MACHINE_KEY_UNSUPPORTED:${key.toString('hex')}`);
+    }
+    return db.get(keySnapshotGraph(height, key));
+  },
+  batch: () => { throw new Error('STORAGE_SNAPSHOT_GRAPH_VIEW_READ_ONLY'); },
+  keys: async function* (options) {
+    const gte = options?.gte;
+    const lt = options?.lt;
+    if (!gte || !isRuntimeMachineGraphKey(gte)) {
+      throw new Error('STORAGE_SNAPSHOT_RUNTIME_MACHINE_RANGE_INVALID');
+    }
+    const range = {
+      gte: keySnapshotGraph(height, gte),
+      ...(lt ? { lt: keySnapshotGraph(height, lt) } : {}),
+      ...(options?.reverse ? { reverse: true } : {}),
+    };
+    if (typeof db.keys !== 'function') return;
+    for await (const rawKey of db.keys(range)) {
+      const parsed = parseSnapshotGraphKey(
+        Buffer.isBuffer(rawKey) ? rawKey : Buffer.from(rawKey),
+      );
+      if (parsed.height !== height || !isRuntimeMachineGraphKey(parsed.liveKey)) {
+        throw new Error('STORAGE_SNAPSHOT_RUNTIME_MACHINE_RANGE_KEY_INVALID');
       }
       yield parsed.liveKey;
     }

@@ -18,6 +18,7 @@ use crate::dispute::{
 };
 use crate::error::StateError;
 use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
+use crate::tx::account_tx_admission_error;
 use crate::{AccountExecutionContext, AccountOutput, Side};
 
 use super::types::{
@@ -553,6 +554,13 @@ pub fn apply_incoming_frame_with_authority(
         dispute,
     } = incoming;
     let current_height = account.current_height();
+
+    // FX-2 peer direction: an authenticated sender still cannot introduce a
+    // transaction outside the production RRS profile. Classify this before
+    // signature work or replay and leave the resident Account untouched.
+    if let Some(error) = frame.txs.iter().find_map(account_tx_admission_error) {
+        return Ok(rejected(error.to_string()));
+    }
 
     let Some(frame_hanko) = frame_hanko else {
         return Ok(rejected("ACCOUNT_INPUT_FRAME_HANKO_MISSING"));

@@ -33,6 +33,7 @@ import type {
 import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
 import type { RuntimeOutputRoutingDeps } from '../../../runtime/delivery/topology/output-routing';
 import type { PersistedFrameJournal } from '../../types';
+import type { FrameLogEntry } from '../../../types/logging';
 import {
 } from '../../wal/snapshot';
 import { createStructuredLogger } from '../../../support/logger';
@@ -128,6 +129,11 @@ export type RecoveryReplayOptions = Readonly<{
    * verify.
    */
   verify: boolean;
+  /** Receives events only after this frame's roots and ordered outbox match. */
+  onVerifiedFrame?: (
+    frame: PersistedFrameJournal,
+    events: readonly FrameLogEntry[],
+  ) => void | Promise<void>;
 }>;
 
 const replayOneFrame = async (
@@ -201,6 +207,10 @@ const replayOneFrame = async (
     if (options.verify) {
       timePerfPhase('recovery.frame.verifyJournal', () =>
         verifyRecoveryJournalFrame(env, frame, height, result));
+    }
+    if (options.onVerifiedFrame) {
+      if (!options.verify) throw new Error('RECOVERY_FRAME_OBSERVER_REQUIRES_VERIFICATION');
+      await options.onVerifiedFrame(frame, committedEvents);
     }
     // Production consumes exactly one event buffer after each authoritative
     // WAL commit. Replay previously retained every earlier frame's events,

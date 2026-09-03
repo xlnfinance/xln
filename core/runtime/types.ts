@@ -605,10 +605,16 @@ interface RuntimeInfrastructure {
   };
   /**
    * Uncommitted events produced by the single active Runtime frame. This is an
-   * execution buffer, not a timeline: WAL persists it once with that frame and
-   * the buffer is cleared immediately after durable publication.
+   * execution buffer, not a timeline. The authoritative RuntimeFrame never
+   * contains activity logs; a rebuildable history projection may copy them
+   * only after that frame is durably committed.
    */
   frameEvents?: FrameLogEntry[];
+  /** Visible failure of the disposable activity projection; queries repair it from WAL. */
+  runtimeActivityViewFailure?: {
+    height: number;
+    message: string;
+  };
   /** Process-local aggregate of exact committed Entity events. */
   entityMetricStats?: Map<string, RuntimeEntityMetricStats>;
   /** Exact frame-local event set keyed by canonical bytes; preserves insertion order. */

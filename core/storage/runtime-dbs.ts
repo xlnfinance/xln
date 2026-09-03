@@ -1,5 +1,4 @@
 import { Level } from 'level';
-import { deriveSignerAddressSync } from '../account/crypto';
 import { createStructuredLogger } from '../support/logger';
 import { nodeProcess } from '../support/process/runtime-process';
 import {
@@ -7,7 +6,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
-import { dbRootPath } from '../runtime/replica/platform';
+import { safeStringify } from '../protocol/serialization';
 import type { RuntimeReplica } from '../runtime/types';
 import {
   readStorageHead,
@@ -19,6 +18,7 @@ import {
   fsyncStorageParentDirectory,
   writeDurableFile,
 } from './fs-durability';
+import { resolveDbNamespace, resolveDbPath } from './runtime-db-path';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'runtime-wal' | 'infra';
@@ -65,42 +65,12 @@ export type RuntimeStorageDbDeps = {
   ensureRuntimeInfrastructure(env: RuntimeReplica): RuntimeLifecycleState;
 };
 
-const DEFAULT_DB_NAMESPACE = 'default';
-type RuntimeDbKind = 'core' | 'infra';
-
-export const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
-
-export const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => {
-  if (!seed) return null;
-  try {
-    return deriveSignerAddressSync(seed, '1').toLowerCase();
-  } catch (error) {
-    storageLog.warn('namespace.derive_runtime_id_failed', { error: formatStorageError(error) });
-    return null;
-  }
-};
-
-export const resolveDbNamespace = (
-  options: { env?: RuntimeReplica | null; runtimeId?: string | null; runtimeSeed?: string | null } = {},
-): string => {
-  const explicit = options.env?.dbNamespace;
-  if (explicit) return normalizeDbNamespace(explicit);
-  const runtimeId = options.runtimeId ?? options.env?.runtimeId;
-  if (runtimeId) return normalizeDbNamespace(runtimeId);
-  const seed = options.runtimeSeed ?? options.env?.runtimeSeed;
-  const derived = deriveRuntimeIdFromSeed(seed ?? null);
-  if (derived) return derived;
-  return DEFAULT_DB_NAMESPACE;
-};
-
-export const resolveDbPath = (env: RuntimeReplica, kind: RuntimeDbKind = 'core'): string => {
-  const namespace = resolveDbNamespace({ env });
-  const suffix = kind === 'core' ? '' : '-infra';
-  if (nodeProcess) {
-    return `${dbRootPath}/${namespace}${suffix}`;
-  }
-  return `${dbRootPath}-${namespace}${suffix}`;
-};
+export {
+  deriveRuntimeIdFromSeed,
+  normalizeDbNamespace,
+  resolveDbNamespace,
+  resolveDbPath,
+} from './runtime-db-path';
 
 export type StorageDbRole = 'current' | 'previous';
 
@@ -450,7 +420,7 @@ const tryAcquireStorageWriterLock = async (
   await cleanupDeadStorageWriterCandidates(lockPath, fs, path);
   const handle = await fs.open(candidatePath, 'wx');
   try {
-    await handle.writeFile(`${JSON.stringify(body)}\n`, 'utf8');
+    await handle.writeFile(`${safeStringify(body)}\n`, 'utf8');
     await handle.sync();
   } finally {
     await handle.close();
@@ -782,7 +752,7 @@ const readStorageRotationMarker = async (env: RuntimeReplica): Promise<StorageEp
 const writeStorageRotationMarker = async (env: RuntimeReplica, marker: StorageEpochRotationMarker): Promise<void> => {
   if (!nodeProcess) return;
   const markerPath = resolveStorageRotationMarkerPath(env);
-  await writeDurableFile(markerPath, `${JSON.stringify(marker)}\n`);
+  await writeDurableFile(markerPath, `${safeStringify(marker)}\n`);
 };
 
 const removeStorageRotationMarker = async (env: RuntimeReplica): Promise<void> => {

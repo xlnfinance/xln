@@ -4,18 +4,26 @@ import {
   drainPendingCrossJurisdictionFillAcks,
   stashPendingCrossJurisdictionFillAck,
 } from '../../../entity/consensus/account/cross-j-fill-ack';
+import { buildSignedEntityCommand } from '../../../entity/command';
+import { signedEntityCommandTx } from '../../../entity/command/command-codec';
+import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
+import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import type { EntityCandidateEffect } from '../../../entity/types';
 import { createEmptyEnv } from '../../../runtime';
 import { buildPreparedCrossJurisdictionRoute } from '../../../extensions/cross-j';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import {
   addr,
   entity,
+  installJurisdictions,
   jref,
+  makeConfig,
   makeJurisdiction,
   makeState,
   getTestAccountForWrite,
   putTestAccountSwapOffer,
+  registerTestSigner,
   secret,
 } from '../../helpers/cross-j';
 
@@ -153,4 +161,89 @@ test('pending fill ack drains once admission succeeds', async () => {
   // Sanity for the retention twin: whatever the account machine decides, the
   // entry must leave only through a committed admission, never silently.
   expect(typeof drainPendingCrossJurisdictionFillAcks).toBe('function');
+});
+
+test('prior cross-j ACK backlog precedes current EntityTx-generated Account work', async () => {
+  const env = createEmptyEnv('cross-fill-ack-prime-order');
+  env.state.timestamp = 10_000;
+  env.quietRuntimeLogs = true;
+  const jurisdiction = makeJurisdiction('Ethereum', 1, '11', '12');
+  const targetJurisdiction = makeJurisdiction('Tron', 2, '21', '22');
+  installJurisdictions(env, jurisdiction, targetJurisdiction);
+  const signerId = registerTestSigner(env, 'cross-fill-ack-prime-order');
+  const hubEntity = hashBoard(encodeBoard(makeConfig(signerId, jurisdiction))).toLowerCase();
+  const userEntity = entity('82');
+  const targetHubEntity = entity('83');
+  const state = makeState(hubEntity, signerId, jurisdiction, userEntity);
+  const account = getTestAccountForWrite(state, userEntity);
+  const route = buildPreparedCrossJurisdictionRoute({
+    orderId: 'backlog-offer',
+    makerEntityId: userEntity,
+    hubEntityId: hubEntity,
+    sourceHubSignerId: signerId,
+    targetHubSignerId: addr('84'),
+    sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+    targetDisputeConfig: TEST_DISPUTE_CONFIG,
+    source: {
+      jurisdiction: jref(jurisdiction),
+      entityId: userEntity,
+      counterpartyEntityId: hubEntity,
+      tokenId: 1,
+      amount: 100n,
+    },
+    target: {
+      jurisdiction: jref(targetJurisdiction),
+      entityId: targetHubEntity,
+      counterpartyEntityId: entity('85'),
+      tokenId: 2,
+      amount: 90n,
+    },
+    status: 'resting',
+    createdAt: env.state.timestamp,
+    updatedAt: env.state.timestamp,
+  }, { runtimeSeed: 'cross-fill-ack-prime-order', now: env.state.timestamp });
+  state.crossJurisdictionSwaps!.set(route.orderId, route);
+  putTestAccountSwapOffer(account, {
+    offerId: 'backlog-offer',
+    giveTokenId: 1,
+    giveAmount: 100n,
+    wantTokenId: 2,
+    wantAmount: 90n,
+    maxFee: 0n,
+    minNetReceive: 90n,
+    makerIsLeft: account.state.leftEntity === userEntity,
+    createdHeight: 1,
+    crossJurisdiction: route,
+  });
+  stashPendingCrossJurisdictionFillAck(env, state, userEntity, {
+    type: 'cross_swap_fill_ack',
+    data: {
+      offerId: 'backlog-offer',
+      routeHash: route.routeHash,
+      fillSeq: 1,
+      previousFillSeq: 0,
+      cumulativeFillRatio: 65_535,
+      cumulativeSourceAmount: 100n,
+      cumulativeTargetAmount: 90n,
+      incrementalSourceAmount: 100n,
+      incrementalTargetAmount: 90n,
+      fillNumerator: 1n,
+      fillDenominator: 1n,
+      ackKind: 'fill',
+    },
+  }, 'test-prime-order');
+
+  const command = buildSignedEntityCommand(env, state, signerId, [buildCollectiveEntityProposalTx(signerId, [{
+    type: 'extendCredit',
+    data: { counterpartyEntityId: userEntity, tokenId: 1, amount: 25n },
+  }])]);
+  const applied = await applyEntityFrameWithMaterializedTestInfraContext(
+    env,
+    state,
+    [signedEntityCommandTx(command)],
+  );
+  const accountTxs = applied.newState.accounts.get(userEntity)?.pendingFrame?.accountTxs ?? [];
+
+  expect(accountTxs.map(tx => tx.type)).toEqual(['cross_swap_fill_ack', 'set_credit_limit']);
+  expect(applied.newState.pendingCrossJurisdictionFillAcks?.size ?? 0).toBe(0);
 });

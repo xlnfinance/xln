@@ -3,20 +3,14 @@ import type { EntityInput } from '../../../../entity/types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { PersistedFrameJournal } from '../../../../storage/types';
 import type { RoutedEntityInput } from '../../../../runtime/types';
-import {
-  buildHltEntityEffectEvidence,
-  type HltEntityEffectEvidence,
-} from './entity-effect-evidence';
-import {
-  buildHltEntityFrameEventEvidence,
-  type HltEntityFrameEventEvidence,
-} from './entity-frame-event-evidence';
+import type { HltEntityEffectEvidence } from './entity-effect-evidence';
+import type { HltEntityFrameEventEvidence } from './entity-frame-event-evidence';
+import { HLT_AUTHORITY_MIN_RUNTIME_FRAMES } from '../authority-evidence-policy';
 
 // Production framing coalesces a busy second into a handful of Runtime
-// frames (1,000 users × rate 2 ≈ 70 frames of ~300 EntityInputs per 10 s), so
-// exactness is measured in admitted bilateral Account inputs, with a floor on frames only to
-// keep frame-boundary effects (hooks, coalescing, outputs) represented.
-const MIN_EXACT_REPLAY_FRAMES = 50;
+// frames, so exactness is measured in admitted bilateral Account inputs. The
+// real-frame floor exercises a long dirty WAL tail after the explicit
+// parity base checkpoint without replacing production checkpoint cadence.
 const MIN_EXACT_REPLAY_ACCOUNT_INPUTS = 10_000;
 
 export type HltAuthorityExpectations = Readonly<{
@@ -31,10 +25,6 @@ export type HltAuthorityExpectations = Readonly<{
     outputCount: number;
     orderedOutputDigest: string;
   }>[];
-  /** Ordered Entity economic effects projected from the Runtime WAL frame logs. */
-  entityEffects: readonly HltEntityEffectEvidence[];
-  /** Exact ordered events from the signed EntityFrames carried by Runtime input. */
-  entityFrameEvents: readonly HltEntityFrameEventEvidence[];
 }>;
 
 export type HltAuthorityEvidence = Readonly<{
@@ -48,6 +38,10 @@ export type HltLocalContinuationEvidence = Readonly<{
 
 /** Replay-only facts observed at the TS Runtime output-plan seam. */
 export type HltTsParityExpectations = HltAuthorityExpectations & Readonly<{
+  /** Ordered Entity economic effects observed from the replayed transition. */
+  entityEffects: readonly HltEntityEffectEvidence[];
+  /** Exact ordered events from signed EntityFrames emitted by the replay. */
+  entityFrameEvents: readonly HltEntityFrameEventEvidence[];
   localContinuations: readonly HltLocalContinuationEvidence[];
 }>;
 
@@ -196,25 +190,24 @@ export const buildHltAuthorityEvidence = (
         outputCount: frame.runtimeOutputCount,
         orderedOutputDigest: frame.runtimeOutputsDigest,
       })),
-      entityEffects: frames.map(frame => buildHltEntityEffectEvidence(frame.height, frame.logs)),
-      entityFrameEvents: frames.map(buildHltEntityFrameEventEvidence),
     },
   };
 };
 
 export const assertCompleteHltAuthorityEvidence = (evidence: HltAuthorityEvidence): void => {
-  const { runtimeFrames, effects, entityEffects, entityFrameEvents } = evidence.expectations;
-  if (runtimeFrames.length < MIN_EXACT_REPLAY_FRAMES) {
-    throw new Error(`HLT_AUTHORITY_EVIDENCE_RUNTIME_FRAMES_MINIMUM:${runtimeFrames.length}:${MIN_EXACT_REPLAY_FRAMES}`);
+  const { runtimeFrames, effects } = evidence.expectations;
+  if (runtimeFrames.length < HLT_AUTHORITY_MIN_RUNTIME_FRAMES) {
+    throw new Error(
+      `HLT_AUTHORITY_EVIDENCE_RUNTIME_FRAMES_MINIMUM:${runtimeFrames.length}:` +
+      String(HLT_AUTHORITY_MIN_RUNTIME_FRAMES),
+    );
   }
   if (
-    effects.length !== runtimeFrames.length || entityEffects.length !== runtimeFrames.length ||
-    entityFrameEvents.length !== runtimeFrames.length
+    effects.length !== runtimeFrames.length
   ) {
     throw new Error(
       `HLT_AUTHORITY_EVIDENCE_FRAME_COUNT_MISMATCH:` +
-      `runtime=${runtimeFrames.length}:effects=${effects.length}:entityEffects=${entityEffects.length}:` +
-      `entityFrameEvents=${entityFrameEvents.length}`,
+      `runtime=${runtimeFrames.length}:effects=${effects.length}`,
     );
   }
   const missingRoot = runtimeFrames.find(frame => frame.canonicalStateHash === null);

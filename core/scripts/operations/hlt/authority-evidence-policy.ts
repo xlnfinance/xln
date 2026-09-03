@@ -7,6 +7,9 @@ export const hltAuthorityEvidenceRecording = (env: NodeJS.ProcessEnv): boolean =
   return true;
 };
 
+/** Owner-approved real-frame tail after the explicit parity base checkpoint. */
+export const HLT_AUTHORITY_MIN_RUNTIME_FRAMES = 110;
+
 /** Authority users keep the production relay session alive. Ordinary TPS HLT
  * deliberately measures the direct path only and therefore owns no relay. */
 export const hltAuthorityEvidenceRelayUrls = (env: NodeJS.ProcessEnv): readonly string[] => {

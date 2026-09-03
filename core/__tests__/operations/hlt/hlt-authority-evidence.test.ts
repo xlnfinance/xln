@@ -7,6 +7,7 @@ import {
 import { buildHltEntityFrameEventEvidence } from '../../../scripts/operations/hlt/replay/entity-frame-event-evidence';
 import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixture';
 import {
+  HLT_AUTHORITY_MIN_RUNTIME_FRAMES,
   hltAuthorityEvidenceRecording,
   hltAuthorityEvidenceRelayUrls,
 } from '../../../scripts/operations/hlt/authority-evidence-policy';
@@ -55,7 +56,7 @@ describe('HLT Rust Runtime authority evidence', () => {
 
   test('binds canonical Runtime roots and ordered effects without an eager Account-history oracle', () => {
     const evidence = buildHltAuthorityEvidence(Array.from(
-      { length: 1_000 },
+      { length: HLT_AUTHORITY_MIN_RUNTIME_FRAMES },
       (_, index) => journal([], 41 + index),
     ));
     expect(() => assertCompleteHltAuthorityEvidence(evidence)).not.toThrow();
@@ -66,12 +67,7 @@ describe('HLT Rust Runtime authority evidence', () => {
       outputCount: 2,
       orderedOutputDigest: `0x${'07'.repeat(32)}`,
     });
-    expect(evidence.expectations.entityFrameEvents).toHaveLength(1_000);
-    // Shared TS/Rust empty-list vector. This catches drift in either the
-    // parity domain or the canonical event-array encoding.
-    expect(evidence.expectations.entityFrameEvents[0]?.orderedEventDigest).toBe(
-      '0x701d6f37973653c3cd817e7c8b7cbc401a10bdad404170e7cda85a02f605d656',
-    );
+    expect(Object.keys(evidence.expectations)).toEqual(['runtimeFrames', 'effects']);
   });
 
   test('rejects disabled lending from the canonical Runtime WAL input', () => {

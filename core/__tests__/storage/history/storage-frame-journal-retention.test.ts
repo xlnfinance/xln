@@ -4,6 +4,7 @@ import { requireEntityEncryptionPrivateKey } from '../../../entity/auth/crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { Level } from 'level';
+import { safeStringify } from '../../../protocol/serialization';
 
 import {
   closeInfraDb,
@@ -38,9 +39,10 @@ import {
 } from '../../../storage';
 import { getPerfMs } from '../../../support/time';
 import { decodeBuffer, decodeValidatedBuffer, encodeBuffer, writeBatch } from '../../../storage/codec/codec';
-import { readRawOrNull } from '../../../storage/database/level';
+import { iterateKeys, readRawOrNull } from '../../../storage/database/level';
 import {
   KEY_HEAD,
+  KEY_RUNTIME_MACHINE_LEAF,
   keyFrame,
   keyRuntimeOutputRow,
   keyEntityContextPayload,
@@ -209,7 +211,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('commits ordered Runtime events in the hashed WAL frame', async () => {
+  test('keeps Runtime activity logs outside the authoritative WAL frame', async () => {
     const env = await createSavedEmptyEnv('frame-event-journal');
     env.state.height = 2;
     env.state.timestamp = 2_000;
@@ -227,7 +229,7 @@ describe('storage frame journal retention', () => {
     }]);
 
     const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
-    expect(frame?.logs).toEqual(journal?.logs);
+    expect(frame).not.toHaveProperty('logs');
     expect(frame?.frameHash).toBe(computeStorageFrameHash(frame!));
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -609,10 +611,10 @@ describe('storage frame journal retention', () => {
     expect(checkpoint).toBeTruthy();
     const replicas = checkpoint?.['eReplicas'];
     expect(replicas).toBeInstanceOf(Array);
-    const restoredReplica = (replicas as Array<[string, { certifiedFrameAnchor?: unknown }]>).find(
+    const restoredReplica = (replicas as Array<[string, { certifiedFrameHead?: unknown }]>).find(
       ([key]) => key.toLowerCase() === `${entityId}:${signer.toLowerCase()}`,
     )?.[1];
-    expect(restoredReplica?.certifiedFrameAnchor).toBeTruthy();
+    expect(restoredReplica?.certifiedFrameHead).toBeTruthy();
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -622,6 +624,31 @@ describe('storage frame journal retention', () => {
       keyEncoding: 'binary',
     }) as unknown as Level<Buffer, Buffer>;
     await historyDb.open();
+    const machineLeafPrefix = keySnapshotGraph(
+      checkpointHeight,
+      Buffer.from([KEY_RUNTIME_MACHINE_LEAF]),
+    );
+    let machineLeafKey: Buffer | undefined;
+    for await (const key of iterateKeys(historyDb, { prefix: machineLeafPrefix })) {
+      machineLeafKey = key;
+      break;
+    }
+    expect(machineLeafKey).toBeTruthy();
+    const machineLeafValue = await historyDb.get(machineLeafKey!);
+    await historyDb.del(machineLeafKey!);
+    await historyDb.close();
+
+    const corruptMachineEnv = createEmptyEnv(seed);
+    corruptMachineEnv.runtimeId = runtimeId;
+    corruptMachineEnv.dbNamespace = runtimeId;
+    await expect(readPersistedCheckpointSnapshot(corruptMachineEnv, checkpointHeight)).rejects.toThrow(
+      'PERSISTENT_RADIX_CHILD_MISSING',
+    );
+    await closeRuntimeDb(corruptMachineEnv);
+    await closeInfraDb(corruptMachineEnv);
+
+    await historyDb.open();
+    await historyDb.put(machineLeafKey!, machineLeafValue);
     const snapshotMetaKey = keySnapshotReplicaMeta(checkpointHeight, entityId, signer);
     const validMeta = await historyDb.get(snapshotMetaKey);
     const corruptedMeta = decodeBuffer<Record<string, unknown>>(validMeta);
@@ -863,7 +890,7 @@ describe('storage frame journal retention', () => {
     const env = await createSavedEmptyEnv('storage-writer-lock-held');
     await releaseRetainedStorageWriterLock(env);
     const lockPath = resolveStorageWriterLockPath(env);
-    writeFileSync(lockPath, `${JSON.stringify({
+    writeFileSync(lockPath, `${safeStringify({
       owner: 'test-writer',
       pid: process.pid,
       runtimeId: env.runtimeId,
@@ -891,7 +918,7 @@ describe('storage frame journal retention', () => {
     const env = await createSavedEmptyEnv('storage-writer-live-expired-lock');
     await releaseRetainedStorageWriterLock(env);
     const lockPath = resolveStorageWriterLockPath(env);
-    writeFileSync(lockPath, `${JSON.stringify({
+    writeFileSync(lockPath, `${safeStringify({
       owner: 'test-live-writer',
       pid: process.pid,
       runtimeId: env.runtimeId,

@@ -1,9 +1,10 @@
 import type { Level } from 'level';
 
 import type { RuntimeRecoveryBundleV1 } from '../recovery/bundle/types';
-import type { RuntimeFrame, RuntimeFramePayloads } from '../types';
+import type { PersistedFrameJournal, RuntimeFrame, RuntimeFramePayloads } from '../types';
 import type { StorageDbRole } from '../runtime-dbs';
 import type { RuntimeReplica } from '../../runtime/types';
+import type { RecoveryReplayOptions } from '../recovery/journal';
 
 type RuntimeDb = Level<Buffer, Buffer>;
 
@@ -30,7 +31,13 @@ export type PersistenceQueryDeps = {
       readOnly?: boolean;
     },
   ): Promise<{ env: RuntimeReplica } | null>;
+  replayRecoveryFrameJournals(
+    env: RuntimeReplica,
+    frames: PersistedFrameJournal[],
+    options?: RecoveryReplayOptions,
+  ): Promise<void>;
   closeRuntimeDb(env: RuntimeReplica): Promise<void>;
+  closeInfraDb(env: RuntimeReplica): Promise<void>;
   restoreEnvFromRecoveryBundles(
     bundles: RuntimeRecoveryBundleV1[],
     options: {

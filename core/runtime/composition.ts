@@ -337,7 +337,9 @@ export const {
   readPersistedStorageFrameRecord,
   readPersistedStorageFramePayloads,
   loadEnvFromStorageByReplay,
+  replayRecoveryFrameJournals,
   closeRuntimeDb,
+  closeInfraDb,
   restoreEnvFromRecoveryBundles,
   withStorageConsistentRead,
 });

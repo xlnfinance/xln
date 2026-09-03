@@ -15,10 +15,28 @@ import type { AccountTx } from '../../types/account';
  */
 export const MAX_POLICY_VERSION = 9_007_199_254_740_991;
 
+/**
+ * FX-2 (proofs/fixes.md, decision D3): lending is outside the production RRS
+ * profile (pay / HTLC / same-J swap / j-event / rebalance). These variants
+ * remain hashable so historical signed frames can still be verified, but new
+ * local or peer admission must reject them before any Account mutation.
+ */
+const OUT_OF_PROFILE_TX_KINDS: ReadonlySet<AccountTx['type']> = new Set<AccountTx['type']>([
+  'lending_fund',
+  'lending_borrow_request',
+  'lending_repay',
+  'lending_credit',
+  'lending_close_request',
+  'lending_close_payout',
+]);
+
 const ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE =
   'ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE' as const;
+const ACCOUNT_TX_KIND_OUT_OF_PROFILE = 'ACCOUNT_TX_KIND_OUT_OF_PROFILE' as const;
 
-export type AccountTxAdmissionErrorCode = typeof ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE;
+export type AccountTxAdmissionErrorCode =
+  | typeof ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE
+  | typeof ACCOUNT_TX_KIND_OUT_OF_PROFILE;
 
 /** Typed local-admission violation. Thrown before any mempool mutation. */
 export class AccountTxAdmissionError extends Error {
@@ -32,10 +50,11 @@ export class AccountTxAdmissionError extends Error {
     txType: AccountTx['type'],
     policyVersion?: number,
   ) {
-    super(
-      `${ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE}:${txType}:${String(policyVersion)} `
-        + `(protocol range 0..=${MAX_POLICY_VERSION})`,
-    );
+    super(code === ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE
+      ? `${ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE}:${txType}:${String(policyVersion)} `
+        + `(protocol range 0..=${MAX_POLICY_VERSION})`
+      : `${ACCOUNT_TX_KIND_OUT_OF_PROFILE}:${txType} `
+        + '(profile: pay/HTLC/same-J swap/j-event/rebalance)');
     this.name = 'AccountTxAdmissionError';
     this.code = code;
     this.txType = txType;
@@ -49,7 +68,8 @@ const isPolicyVersionInRange = (policyVersion: number): boolean =>
 
 /**
  * FX-1 alone: an out-of-range `RebalancePolicy.policyVersion`. The frame-hash
- * layer uses this narrower probe as its admission-bug tripwire.
+ * layer uses this narrower probe as its admission-bug tripwire. Lending stays
+ * hashable for historical verification and is rejected only at live admission.
  */
 export const policyVersionOutOfRangeError = (
   tx: AccountTx,
@@ -64,7 +84,9 @@ export const policyVersionOutOfRangeError = (
 
 /** First admission violation in the batch, or `undefined` if all are admissible. */
 export const accountTxAdmissionError = (tx: AccountTx): AccountTxAdmissionError | undefined =>
-  policyVersionOutOfRangeError(tx);
+  OUT_OF_PROFILE_TX_KINDS.has(tx.type)
+    ? new AccountTxAdmissionError(ACCOUNT_TX_KIND_OUT_OF_PROFILE, tx.type)
+    : policyVersionOutOfRangeError(tx);
 
 /**
  * Loud local-admission gate for the enqueue path. Nothing is admitted when
@@ -82,9 +104,6 @@ export const assertAccountTxsAdmissible = (txs: readonly AccountTx[]): void => {
 /** Peer-frame counterpart of a local admission violation. */
 export const accountTxAdmissionInputCode = (
   error: AccountTxAdmissionError,
-): AccountInputRejectionCode => {
-  if (error.code !== ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE) {
-    throw new Error(`ACCOUNT_TX_ADMISSION_ERROR_CODE_UNKNOWN:${String(error.code)}`);
-  }
-  return 'ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE';
-};
+): AccountInputRejectionCode => error.code === ACCOUNT_TX_KIND_OUT_OF_PROFILE
+  ? 'ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE'
+  : 'ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE';

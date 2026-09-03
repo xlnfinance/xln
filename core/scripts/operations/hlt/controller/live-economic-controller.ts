@@ -1,11 +1,14 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { AUTHORITY_EVIDENCE_GATE_BUDGET_MS } from '../replay/evidence/gate-support';
@@ -146,19 +149,29 @@ export const runParityGatedHltChild = async (options: Readonly<{
   args: readonly string[];
   env: NodeJS.ProcessEnv;
 }>): Promise<number> => {
-  const parity = spawnSync(options.parityCommand, [...options.parityArgs], {
-    cwd: process.cwd(),
-    // Offline parity owns no live process and must never recursively enter
-    // ready/start orchestration inherited from its future HLT child.
-    env: offlineParityEnv(options.env),
-    stdio: 'inherit',
-    timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS,
-  });
-  if (parity.error) throw parity.error;
-  if (parity.status !== 0) {
-    throw new Error(
-      `HLT_OFFLINE_MIXED_PARITY_FAILED:${String(parity.status)}:${String(parity.signal)}`,
-    );
+  const reports = mkdtempSync(join(tmpdir(), 'xln-economic-parity-ts-'));
+  try {
+    for (const stageArgs of [
+      [...options.parityArgs, '--ts-only', '--ts-report-dir', reports],
+      [...options.parityArgs, '--resume-ts-report-dir', reports],
+    ]) {
+      const parity = spawnSync(options.parityCommand, stageArgs, {
+        cwd: process.cwd(),
+        // Offline parity owns no live process and must never recursively enter
+        // ready/start orchestration inherited from its future HLT child.
+        env: offlineParityEnv(options.env),
+        stdio: 'inherit',
+        timeout: AUTHORITY_EVIDENCE_GATE_BUDGET_MS,
+      });
+      if (parity.error) throw parity.error;
+      if (parity.status !== 0) {
+        throw new Error(
+          `HLT_OFFLINE_MIXED_PARITY_FAILED:${String(parity.status)}:${String(parity.signal)}`,
+        );
+      }
+    }
+  } finally {
+    rmSync(reports, { recursive: true, force: true });
   }
   return runGatedHltChild(options);
 };

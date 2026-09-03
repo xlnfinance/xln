@@ -145,7 +145,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       canonicalStateHash: hash,
       canonicalEntityHashes: [],
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      logs: [],
       entityContexts: new Map([[`0x${'aa'.repeat(32)}:signer-b`, {
         version: 1,
         proposerReplicaId: `0x${'aa'.repeat(32)}:signer-a`,
@@ -439,7 +438,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       canonicalStateHash: hash,
       canonicalEntityHashes: [],
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      logs: [],
       runtimeMachineRoot: machineGraph.root,
       runtimeOutputCount: emptyOutputs.count,
       runtimeOutputsDigest: emptyOutputs.digest,

@@ -24,6 +24,8 @@ import { configureCryptoPoolEntry } from '../../../../protocol/crypto/crypto-poo
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { collectHltRunProvenance } from '../boundary/environment-manifest';
+
 import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../account/crypto';
 import { computeAccountStateRootCold } from '../../../../account/commitment/state-root';
 import { computeBookCommitmentHash } from '../../../../orderbook/commitment';
@@ -69,7 +71,8 @@ import {
   discardRuntimeParityEvidence,
   finishRuntimeParityEvidence,
 } from '../../../../runtime/observability/parity-evidence';
-import { readHltHubRecording } from './recording';
+import { resolveHltHubRecordingPath } from './recording';
+import { loadHltHubRecording } from './recording-wal';
 import { summarizePaymentWork } from './payment-work-ledger';
 import {
   assertCompleteHltAuthorityEvidence,
@@ -306,6 +309,7 @@ const parseRates = (mode: ReplayMode): number[] => {
 };
 
 const recordingPath = resolve(requiredArgument('recording'));
+const walPath = resolve(requiredArgument('wal'));
 const outputPath = resolve(optionalArgument('output') ?? `${recordingPath}.replay.json`);
 const mode = parseMode();
 const rates = parseRates(mode);
@@ -343,7 +347,7 @@ if (parityEvidence && (mode !== 'max' || !completeAuthorityEvidenceRequired)) {
   throw new Error('HLT_REPLAY_PARITY_EVIDENCE_REQUIRES_MAX_COMPLETE');
 }
 await installGlobalOpCounters('hlt-replay');
-const artifact = readHltHubRecording(recordingPath);
+const artifact = await loadHltHubRecording(recordingPath, walPath);
 const replayTsAccountWorkers = tsAccountWorkers ?? (
   authorityDriverEnabled({ runtimeId: artifact.recording.runtimeId })
     ? null
@@ -366,7 +370,10 @@ const runtimeSeed = runtimeSeedFileArgument
     return directSeed;
   })()
   : (() => {
-    const seedPath = resolve(seedFileArgument ?? `${artifact.source.workDir}/secrets/mesh-root.seed`);
+    const seedPath = resolve(seedFileArgument ?? resolveHltHubRecordingPath(
+      recordingPath,
+      artifact.source.meshSeedFile,
+    ));
     const meshRootSeed = readFileSync(seedPath, 'utf8').trim();
     if (!meshRootSeed) throw new Error('HLT_REPLAY_MESH_ROOT_SEED_MISSING');
     return deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
@@ -757,6 +764,7 @@ const parityTrial = (trial: ReplayTrial) => ({
 const report = {
   schema: 'xln-hlt-hub-replay-report-v1',
   createdAt: Date.now(),
+  gate: collectHltRunProvenance('ts'),
   recordingPath,
   recordingManifestHash: artifact.recording.manifestHash,
   recordingSourceBinding: artifact.source.binding,

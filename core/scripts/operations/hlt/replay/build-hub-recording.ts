@@ -30,6 +30,9 @@ const checkpointPath = resolve(argument('checkpoint'));
 const users = positiveIntegerArgument('users');
 const workload = argument('workload');
 const requireCompleteAuthorityEvidence = process.argv.includes('--require-complete-authority-evidence');
+if (dirname(outputPath) !== workDir) {
+  throw new Error(`HLT_HUB_RECORDING_OUTPUT_NOT_PORTABLE:${dirname(outputPath)}:${workDir}`);
+}
 if (process.env['XLN_MM_CROSS_J'] !== '0') {
   throw new Error('HLT_AUTHORITY_RECORDING_MM_CROSS_J_MUST_BE_ZERO');
 }
@@ -48,6 +51,7 @@ const [meshSeeds, runtime, { deriveRuntimeIdFromSeed }, recordingApi] = await Pr
 const { prewarmSignerLabels } = await import('../../../../account/crypto');
 const { deriveMeshChildSeed } = meshSeeds;
 const {
+  buildRuntimeRecording,
   buildRuntimeRecoveryBundle,
   closeInfraDb,
   closeRuntimeDb,
@@ -58,9 +62,9 @@ const {
 } = runtime;
 const {
   HLT_HUB_RECORDING_SCHEMA,
-  summarizeHltHubFrames,
   writeHltHubRecording,
 } = recordingApi;
+const { summarizeHltHubFrames } = await import('./recording-wal');
 const {
   buildHltAuthorityEvidence,
   assertCompleteHltAuthorityEvidence,
@@ -134,6 +138,10 @@ try {
     baseCheckpoint: { height: baseHeight, hash: snapshot.checkpointHash },
     frames,
   });
+  if (tail.kind !== 'journal_tail' || tail.baseRuntimeHeight === undefined ||
+      tail.baseCheckpointHash === undefined) {
+    throw new Error('HLT_HUB_RECORDING_TAIL_BUILD_INVALID');
+  }
   const authorityEvidence = buildHltAuthorityEvidence(frames);
   if (requireCompleteAuthorityEvidence) {
     assertCompleteHltAuthorityEvidence(authorityEvidence);
@@ -147,13 +155,39 @@ try {
   const walPath = join(workDir, 'prod-mesh', 'h1', `${runtimeId}-wal`);
   const binding = await buildHltAuthoritySourceBinding(walPath, runtimeSeed);
   const totals = summarizeHltHubFrames(frames);
+  const runtimeRecordingManifestHash = buildRuntimeRecording(
+    [snapshot, tail],
+    recordingCreatedAt,
+  ).manifestHash;
+  const compactTail: HltHubRecordingArtifact['tail'] = {
+    version: 1,
+    kind: 'journal_tail',
+    runtimeId: tail.runtimeId,
+    runtimeHeight: tail.runtimeHeight,
+    runtimeTimestamp: tail.runtimeTimestamp,
+    createdAt: tail.createdAt,
+    signers: tail.signers,
+    baseRuntimeHeight: tail.baseRuntimeHeight,
+    baseCheckpointHash: tail.baseCheckpointHash,
+    signature: tail.signature,
+    ...(tail.meta === undefined ? {} : { meta: tail.meta }),
+  };
   const artifact: HltHubRecordingArtifact = {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: frames.at(-1)!.timestamp,
-    source: { engine: 'ts', workDir, users, workload, binding },
+    source: {
+      engine: 'ts',
+      hubWalDir: join('prod-mesh', 'h1', `${runtimeId}-wal`),
+      meshSeedFile: join('secrets', 'mesh-root.seed'),
+      users,
+      workload,
+      binding,
+    },
     snapshot,
     checkpoint,
-    tail,
+    tail: compactTail,
+    totals,
+    runtimeRecordingManifestHash,
     authorityEvidence,
   };
   mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
