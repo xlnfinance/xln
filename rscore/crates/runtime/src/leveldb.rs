@@ -437,8 +437,8 @@ impl RuntimeWalReader {
             entity_context_height_prefix(height).map_err(NativeStorageError::EntityContext)?;
         let mut rows = Vec::new();
         for (key, value) in self.prefixed_rows(&prefix)? {
-            let (_, _, kind, _) =
-                parse_entity_context_payload_key(&key).map_err(NativeStorageError::EntityContext)?;
+            let (_, _, kind, _) = parse_entity_context_payload_key(&key)
+                .map_err(NativeStorageError::EntityContext)?;
             let value = if kind == crate::storage::native::EntityContextPayloadKind::Manifest {
                 self.bounded_bytes_from_owner(&key, value)?
             } else {
@@ -1582,7 +1582,9 @@ mod tests {
     #[test]
     fn concrete_wal_source_reassembles_bounded_outbox_rows() {
         let (mut reader, path) = wal_reader(WalCorruption::BoundedOutputRow);
-        let source = reader.concrete_wal_source(7).expect("bounded outbox row reassembled");
+        let source = reader
+            .concrete_wal_source(7)
+            .expect("bounded outbox row reassembled");
         assert_eq!(source.outputs().len(), 1);
         assert!(source.outputs()[0].len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES);
         let raw = reader.raw_concrete_wal_rows(7).expect("raw rows");

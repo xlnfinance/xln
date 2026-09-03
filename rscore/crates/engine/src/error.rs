@@ -192,11 +192,17 @@ impl ValidationRejection {
     pub fn message(&self) -> String {
         match self {
             Self::AccountTx { message } => message.clone(),
-            Self::CreditLimitNegative { amount } => format!("Credit limit cannot be negative: {amount}"),
+            Self::CreditLimitNegative { amount } => {
+                format!("Credit limit cannot be negative: {amount}")
+            }
             Self::CreditLimitAboveMaximum { amount, maximum } => {
                 format!("Credit limit exceeds maximum: {amount} > {maximum}")
             }
-            Self::PaymentAmount { amount, minimum, maximum } => {
+            Self::PaymentAmount {
+                amount,
+                minimum,
+                maximum,
+            } => {
                 format!("Invalid payment amount: {amount} (min {minimum}, max {maximum})")
             }
             Self::RouteLength { length, maximum } => {
@@ -204,10 +210,20 @@ impl ValidationRejection {
             }
             Self::DirectGatewayForbidden => "Direct payment forbids a trusted gateway".into(),
             Self::TrustedGatewayRequired => "Trusted payment requires one declared gateway".into(),
-            Self::PaymentDirection => "FATAL: Payment direction must match the frame proposer".into(),
-            Self::DirectRoute => "Direct payment route must contain only the bilateral recipient".into(),
-            Self::TrustedRoute => "Trusted payment must be source → declared gateway → recipient".into(),
-            Self::InsufficientCapacity { payer_suffix, required, available } => format!(
+            Self::PaymentDirection => {
+                "FATAL: Payment direction must match the frame proposer".into()
+            }
+            Self::DirectRoute => {
+                "Direct payment route must contain only the bilateral recipient".into()
+            }
+            Self::TrustedRoute => {
+                "Trusted payment must be source → declared gateway → recipient".into()
+            }
+            Self::InsufficientCapacity {
+                payer_suffix,
+                required,
+                available,
+            } => format!(
                 "Insufficient capacity for sender {payer_suffix}: need {required}, available {available}"
             ),
             Self::RebalancePolicyTokenId { token_id } => {
@@ -225,9 +241,15 @@ impl ValidationRejection {
             Self::RebalancePolicyMissingDelta { token_id } => {
                 format!("rebalance_policy: no delta for token {token_id}")
             }
-            Self::RebalancePolicyEquivocation { side, token_id, version } => {
+            Self::RebalancePolicyEquivocation {
+                side,
+                token_id,
+                version,
+            } => {
                 let side = if *side == Side::Left { "left" } else { "right" };
-                format!("REBALANCE_POLICY_EQUIVOCATION: side={side} token={token_id} version={version}")
+                format!(
+                    "REBALANCE_POLICY_EQUIVOCATION: side={side} token={token_id} version={version}"
+                )
             }
             Self::SwapOfferId { offer_id } => {
                 format!("Invalid offerId: colons not allowed (got {offer_id})")

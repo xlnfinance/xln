@@ -6,8 +6,8 @@ use xln_rscore_engine::{
     AccountTx, BilateralRebalanceFeePolicy, DeliveryMode, Delta, HtlcDeliveryMode, HtlcHashlock,
     HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, JClaimNode,
     JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx, JurisdictionEvent, LendingAction,
-    LendingTermId, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason,
-    Side, SwapOffer, TokenId,
+    LendingTermId, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, RebalanceRefundReason, Side,
+    SwapOffer, TokenId,
 };
 
 use super::account_canonical;

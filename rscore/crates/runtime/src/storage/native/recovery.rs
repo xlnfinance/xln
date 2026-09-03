@@ -202,7 +202,9 @@ impl NativeRuntimeStore {
             } else {
                 value.to_vec()
             };
-            rows.push(EntityContextPayloadRow::new(replica_id, kind, index, value)?);
+            rows.push(EntityContextPayloadRow::new(
+                replica_id, kind, index, value,
+            )?);
             if !iterator.advance() {
                 break;
             }

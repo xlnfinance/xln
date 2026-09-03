@@ -11,7 +11,6 @@ use serde_json::Value;
 use thiserror::Error;
 use xln_rscore_entity_kernel::{CanonicalEntityTx, EntityTxKind};
 
-
 #[derive(Debug, Error)]
 pub enum EntityFrameError {
     #[error("RUNTIME_ENTITY_FRAME_VALUE:{0}")]

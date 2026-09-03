@@ -33,6 +33,13 @@ const config = defineConfig({
         runs: 1,
       },
       viaIR: true,
+      // No CBOR metadata trailer: the committed artifacts must be byte-identical
+      // on every platform (CI Linux vs local macOS produced different ipfs
+      // metadata hashes for identical sources).
+      metadata: {
+        bytecodeHash: "none",
+        appendCBOR: false,
+      },
     },
   },
   typechain: {

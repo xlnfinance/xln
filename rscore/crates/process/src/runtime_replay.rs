@@ -778,13 +778,22 @@ pub fn replay_runtime_wal(
                 eprintln!("RUNTIME_REPLAY_ACTUAL_ENTITY_SECTIONS:{height}:{actual_sections}");
                 // XLN_RSCORE_DEBUG_EVENTS=1 dumps the certified frame's events so a
                 // TS `--diagnostic-events-height` run can be diffed line by line.
-                let debug_events = std::env::var_os("XLN_RSCORE_DEBUG_EVENTS")
-                    .and(entity_replica.entity_consensus.certified_frame_head.as_ref());
+                let debug_events = std::env::var_os("XLN_RSCORE_DEBUG_EVENTS").and(
+                    entity_replica
+                        .entity_consensus
+                        .certified_frame_head
+                        .as_ref(),
+                );
                 if let Some(head) = debug_events {
                     for event in &head.frame.events {
                         let message = match event {
-                            xln_rscore_entity_kernel::EntityFrameEvent::Status { message } => message.clone(),
-                            xln_rscore_entity_kernel::EntityFrameEvent::Text { validator_id, message } => {
+                            xln_rscore_entity_kernel::EntityFrameEvent::Status { message } => {
+                                message.clone()
+                            }
+                            xln_rscore_entity_kernel::EntityFrameEvent::Text {
+                                validator_id,
+                                message,
+                            } => {
                                 format!("{validator_id}:{message}")
                             }
                         };

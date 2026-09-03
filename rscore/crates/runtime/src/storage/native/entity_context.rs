@@ -385,7 +385,10 @@ struct Manifest {
     htlc_originated_pages: Vec<EntityContextPayloadDigest>,
 }
 
-fn validate_canonical_row(bytes: &[u8], max_bytes: usize) -> Result<Value, EntityContextPayloadError> {
+fn validate_canonical_row(
+    bytes: &[u8],
+    max_bytes: usize,
+) -> Result<Value, EntityContextPayloadError> {
     if bytes.is_empty() || bytes.len() >= max_bytes {
         return Err(EntityContextPayloadError::RowBytes(bytes.len()));
     }

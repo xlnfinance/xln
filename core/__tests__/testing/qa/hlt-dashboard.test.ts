@@ -19,6 +19,7 @@ import {
   resetHltIsolatedRunForTests,
 } from '../../../qa/hlt/hlt-run';
 import { summarizeRuntimePerfLines } from '../../../scripts/operations/benchmark/analyze-runtime-perf';
+import { safeStringify } from '../../../protocol/serialization';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -171,7 +172,7 @@ describe('hlt dashboard snapshot', () => {
       elapsedMs: 8753.9, cpuMs: 4713.9, accountInputTps: 2090.9, accountTxTps: 3883.4, cpuAccountTxTps: 3883.4,
       finalHeight: 81, finalPendingOutbox: 1, equivalent: true,
     };
-    writeFileSync(join(replays, '1-parity.json'), JSON.stringify({
+    writeFileSync(join(replays, '1-parity.json'), safeStringify({
       schema: 'xln-hlt-hub-replay-report-v1',
       createdAt: 1,
       recordingManifestHash: `0x${'ab'.repeat(32)}`,
@@ -184,7 +185,7 @@ describe('hlt dashboard snapshot', () => {
     }));
     const snapshot = readHltDashboardSnapshot(root);
     expect(snapshot.replay?.trials.map(row => [row.engine, row.workers])).toEqual([['ts', 1], ['rust', 8], [null, null]]);
-    writeFileSync(join(replays, '2-parity.json'), JSON.stringify({
+    writeFileSync(join(replays, '2-parity.json'), safeStringify({
       schema: 'xln-hlt-hub-replay-report-v1', createdAt: 2, recordingManifestHash: `0x${'ab'.repeat(32)}`, mode: 'max',
       trials: [{ ...trial, engine: 'go', workers: 1 }],
     }));

@@ -981,7 +981,6 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-
     #[test]
     fn settlement_post_commit_hankos_do_not_move_the_frame_or_mempool_root() {
         let unsigned_post = CanonicalValue::Object(vec![
