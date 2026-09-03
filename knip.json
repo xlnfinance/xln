@@ -11,6 +11,7 @@
     "core/__tests__/types/fints/**/*.ts",
     "scripts/**/*.ts",
     "tools/*.ts",
+    "tools/hlt-viz/*.ts",
     "tests/**/*.spec.ts",
     "tests/**/*.test.ts",
     "custody/**/*.ts",
