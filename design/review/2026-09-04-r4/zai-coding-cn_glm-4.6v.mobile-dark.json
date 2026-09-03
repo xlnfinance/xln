@@ -1,0 +1,320 @@
+{
+  "reviewer": "zai-coding-cn/glm-4.6v",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 750,
+        "color": 900,
+        "data_legibility": 800,
+        "layout": 850,
+        "visceral_value": 950,
+        "responsive": 900,
+        "consistency": 850,
+        "trust": 900
+      },
+      "total": 855,
+      "top_issues": [
+        "Home: The 'Alice synced' status is too small and low contrast; increase size and use mint for synced state",
+        "Home: The tier legend under the total repeats the three numbers already shown in the bar tooltip; drop it or make it the bar's caption"
+      ],
+      "fixes": [
+        "Increase 'Alice synced' text size to 16pt and use mint color",
+        "Remove tier legend or integrate it as bar caption"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home-bottom.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 750,
+        "color": 900,
+        "data_legibility": 800,
+        "layout": 850,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 900
+      },
+      "total": 865,
+      "top_issues": [
+        "Home (bottom): The bottom tab bar covers important content when visible; ensure safe area padding",
+        "Home (bottom): The 'Recent' section is truncated by the tab bar in some viewports"
+      ],
+      "fixes": [
+        "Add proper safe area padding for bottom tab bar",
+        "Adjust recent section height to account for tab bar"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/02-pay.png",
+      "scores": {
+        "hierarchy": 900,
+        "premium": 850,
+        "typography": 800,
+        "color": 900,
+        "data_legibility": 850,
+        "layout": 900,
+        "visceral_value": 950,
+        "responsive": 900,
+        "consistency": 900,
+        "trust": 950
+      },
+      "total": 890,
+      "top_issues": [
+        "Pay: The route visualization is excellent but could use slightly more contrast",
+        "Pay: The 'Up to 60,000.00 instantly' text is important but gets lost in the interface"
+      ],
+      "fixes": [
+        "Increase route node contrast by 10%",
+        "Make 'Up to X instantly' text bold and mint colored"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt.png",
+      "scores": {
+        "hierarchy": 950,
+        "premium": 900,
+        "typography": 850,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 950,
+        "visceral_value": 950,
+        "responsive": 900,
+        "consistency": 950,
+        "trust": 1000
+      },
+      "total": 935,
+      "top_issues": [
+        "Receipt: The proof text is too small for verification; increase size",
+        "Receipt: Frame number could be more prominent for quick reference"
+      ],
+      "fixes": [
+        "Increase proof text to 14pt monospace",
+        "Make frame number 18pt bold"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt-bottom.png",
+      "scores": {
+        "hierarchy": 950,
+        "premium": 900,
+        "typography": 850,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 950,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 950,
+        "trust": 1000
+      },
+      "total": 940,
+      "top_issues": [
+        "Receipt (bottom): No issues specific to this variant"
+      ],
+      "fixes": []
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 750,
+        "color": 900,
+        "data_legibility": 800,
+        "layout": 850,
+        "visceral_value": 900,
+        "responsive": 900,
+        "consistency": 850,
+        "trust": 850
+      },
+      "total": 845,
+      "top_issues": [
+        "Receive: The QR code contrast is good but the white background creates visual noise",
+        "Receive: The 'receive up to' text is important but lacks emphasis"
+      ],
+      "fixes": [
+        "Add subtle shadow to QR code container",
+        "Make 'receive up to' text bold and mint colored"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive-bottom.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 750,
+        "color": 900,
+        "data_legibility": 800,
+        "layout": 850,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 850
+      },
+      "total": 855,
+      "top_issues": [
+        "Receive (bottom): The bottom tab bar creates unnecessary visual separation",
+        "Receive (bottom): The entity ID text is too small for sharing"
+      ],
+      "fixes": [
+        "Adjust layout to integrate better with tab bar",
+        "Increase entity ID text size to 12pt"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/05-swap.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 750,
+        "typography": 700,
+        "color": 850,
+        "data_legibility": 750,
+        "layout": 800,
+        "visceral_value": 900,
+        "responsive": 900,
+        "consistency": 800,
+        "trust": 800
+      },
+      "total": 805,
+      "top_issues": [
+        "Swap: The swap button is disabled but lacks clear indication why",
+        "Swap: The 'from Hub One' text is secondary but too prominent"
+      ],
+      "fixes": [
+        "Add disabled state tooltip explaining requirements",
+        "Reduce 'from Hub One' text opacity to 60%"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/06-account.png",
+      "scores": {
+        "hierarchy": 900,
+        "premium": 900,
+        "typography": 850,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 950,
+        "visceral_value": 1000,
+        "responsive": 900,
+        "consistency": 950,
+        "trust": 950
+      },
+      "total": 930,
+      "top_issues": [
+        "Account: The legend colors need better differentiation",
+        "Account: Collateral showing 0.00 could be more elegant"
+      ],
+      "fixes": [
+        "Adjust legend colors for better contrast",
+        "Replace 0.00 with 'None' or dash for zero values"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/07-activity.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 800,
+        "color": 900,
+        "data_legibility": 850,
+        "layout": 850,
+        "visceral_value": 900,
+        "responsive": 900,
+        "consistency": 850,
+        "trust": 850
+      },
+      "total": 855,
+      "top_issues": [
+        "Activity: Transaction types lack consistent visual hierarchy",
+        "Activity: The '4 movements' count is too subtle"
+      ],
+      "fixes": [
+        "Add icons to transaction types",
+        "Make movement count bold and indigo colored"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 950,
+        "premium": 950,
+        "typography": 900,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 950,
+        "visceral_value": 950,
+        "responsive": 900,
+        "consistency": 950,
+        "trust": 1000
+      },
+      "total": 945,
+      "top_issues": [
+        "Activity detail: No significant issues"
+      ],
+      "fixes": []
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 750,
+        "typography": 700,
+        "color": 850,
+        "data_legibility": 750,
+        "layout": 800,
+        "visceral_value": 900,
+        "responsive": 900,
+        "consistency": 800,
+        "trust": 800
+      },
+      "total": 805,
+      "top_issues": [
+        "Settings: The scale explanation text is too small",
+        "Settings: Toggle switches lack visual feedback"
+      ],
+      "fixes": [
+        "Increase scale explanation to 12pt",
+        "Add subtle on/off state colors to toggles"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings-bottom.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 750,
+        "typography": 700,
+        "color": 850,
+        "data_legibility": 750,
+        "layout": 800,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 800
+      },
+      "total": 820,
+      "top_issues": [
+        "Settings (bottom): Runtime section text is too technical",
+        "Settings (bottom): The scale card takes too much vertical space"
+      ],
+      "fixes": [
+        "Simplify runtime section language",
+        "Condense scale card to 3 lines maximum"
+      ]
+    }
+  ],
+  "overall": {
+    "total": 855,
+    "verdict": "The mobile dark variant demonstrates strong execution of the visceral value concept and maintains excellent consistency across screens. The premium dark aesthetic is largely successful though some text elements lack sufficient contrast and hierarchy. The responsive design effectively adapts to mobile constraints while preserving the core visual language.",
+    "priority_fixes": [
+      "Increase text contrast and size for better readability",
+      "Refine the home screen hierarchy and remove redundant elements",
+      "Improve visual feedback for interactive elements",
+      "Simplify technical language in settings",
+      "Enhance the swap screen user experience and clarity"
+    ]
+  }
+}

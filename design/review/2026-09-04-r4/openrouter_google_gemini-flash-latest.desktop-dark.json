@@ -1,0 +1,250 @@
+{
+  "reviewer": "openrouter/google/gemini-flash-latest",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/01-home.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 820,
+        "typography": 860,
+        "color": 880,
+        "data_legibility": 830,
+        "layout": 740,
+        "visceral_value": 780,
+        "responsive": 680,
+        "consistency": 850,
+        "trust": 860
+      },
+      "total": 814,
+      "top_issues": [
+        "Home desktop: severe dead space on the bottom half of the wide viewport; the primary column terminates abruptly under the USDC balance item while the right rail terminates under Recent activity.",
+        "Home desktop: the dual-bar breakdown under the total balance is visually detached from the balance tier legend below it, requiring vertical eye scanning between colors and numbers.",
+        "Home desktop: 'send up to 60,000.00 / receive up to 40,000.00' text under the account bar has low optical contrast against the dark card surface (#12131A)."
+      ],
+      "fixes": [
+        "Home desktop: wrap the two-column grid in a container max-width of 1120px or expand lower module content (e.g. detailed account matrix / extended transaction feed) to balance vertical rhythm across viewports.",
+        "Home desktop: align the tier legend (On-chain, Reserve, Accounts) directly beneath each corresponding colored bar segment as micro-labels or a unified segmented breakdown component.",
+        "Home desktop: bump secondary sub-bar caption contrast from rgba(255,255,255,0.4) to rgba(255,255,255,0.65)."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/02-pay.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 850,
+        "typography": 880,
+        "color": 860,
+        "data_legibility": 850,
+        "layout": 810,
+        "visceral_value": 900,
+        "responsive": 760,
+        "consistency": 880,
+        "trust": 920
+      },
+      "total": 858,
+      "top_issues": [
+        "Pay desktop: 'This payment' 25.00 bar in the amount input card renders as an almost imperceptible 0.5px line at the current scale ($50/px), making zero vs active entry indistinguishable.",
+        "Pay desktop: 'Add a note >' link floats with excessive detached whitespace above the primary CTA button.",
+        "Pay desktop: Right column 'YOUR ACCOUNT WITH HUB ONE' Before/After comparison is exceptionally clear, but the small descriptive footnote '25.00 nets what Hub One owes you...' lacks visual prominence given its critical settlement context."
+      ],
+      "fixes": [
+        "Pay desktop: enforce a min-width of 2px with an active glow/marker for non-zero payment amounts on the visceral bar to guarantee visual feedback.",
+        "Pay desktop: integrate 'Add note' as an inline expandable input within the payment spec table rather than a floating bottom-left text trigger.",
+        "Pay desktop: move the explanation text ('25.00 nets what Hub One owes you...') into an explicit callout block matching the Provable panel styling."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/03-receipt.png",
+      "scores": {
+        "hierarchy": 910,
+        "premium": 890,
+        "typography": 900,
+        "color": 920,
+        "data_legibility": 900,
+        "layout": 880,
+        "visceral_value": 720,
+        "responsive": 860,
+        "consistency": 910,
+        "trust": 950
+      },
+      "total": 884,
+      "top_issues": [
+        "Receipt desktop: modal omits the visceral value bar entirely, missing the chance to anchor the committed $25 reduction against the remaining balance scale visually.",
+        "Receipt desktop: execution duration 'in 2044 ms' uses mint accent identical to the settlement status, visually conflating operational latency with cryptographic success.",
+        "Receipt desktop: background backdrop scrim blur is slightly dark/opaque, completely occluding the updated background state which would otherwise reinforce instant ledger balance adjustment."
+      ],
+      "fixes": [
+        "Receipt desktop: add a mini post-settlement delta bar under '25.00 USDC' depicting the committed slice moving out of bilateral capacity.",
+        "Receipt desktop: change 'in 2044 ms' styling to muted monospace text (rgba(255,255,255,0.5)) next to the timestamp.",
+        "Receipt desktop: tune backdrop filter to `backdrop-blur-md bg-black/40` so the updated background balance ($11,475.00) remains subtly readable behind the modal."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/04-receive.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 760,
+        "typography": 810,
+        "color": 830,
+        "data_legibility": 840,
+        "layout": 680,
+        "visceral_value": 720,
+        "responsive": 650,
+        "consistency": 820,
+        "trust": 870
+      },
+      "total": 778,
+      "top_issues": [
+        "Receive desktop: QR code container is stark raw off-white (#F5F5F0) without a framing border or subtle inset, creating an aggressive optical glare in dark mode.",
+        "Receive desktop: vast empty void between the form inputs and the bottom of the viewport; layout feels like an unanchored mobile card centered on a 1440p monitor.",
+        "Receive desktop: 'Copy xln:// app link' text button sits awkwardly separated below the two primary pill buttons ('Copy invoice', 'Copy link')."
+      ],
+      "fixes": [
+        "Receive desktop: restyle QR card with a dedicated dark container, 16px padding, subtle border (#222433), and inverted high-contrast quiet QR code or refined warm-white card with inner shadow.",
+        "Receive desktop: consolidate 'Copy invoice', 'Copy link', and deep link into a unified segmented action group or dropdown trigger.",
+        "Receive desktop: bring the left column inputs directly into an aligned cohesive panel card matching the dimensions of the right column SHARE panels."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/05-swap.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 830,
+        "typography": 860,
+        "color": 840,
+        "data_legibility": 840,
+        "layout": 720,
+        "visceral_value": 810,
+        "responsive": 690,
+        "consistency": 860,
+        "trust": 850
+      },
+      "total": 815,
+      "top_issues": [
+        "Swap desktop: extreme empty space under the Swap primary action button across the entire lower screen.",
+        "Swap desktop: swap direction toggle icon button between the two token cards has zero container elevation or hover target boundary.",
+        "Swap desktop: secondary helper text ('The order rests on this account at that price until Hub One fills it') lacks rate clarity—there is no explicit exchange rate (e.g. 1 WETH = X USDC) displayed."
+      ],
+      "fixes": [
+        "Swap desktop: display an explicit dynamic exchange rate row (e.g. '1 WETH ≈ 3,240.50 USDC · Fee 0.05%') directly above the Swap button.",
+        "Swap desktop: enclose the switch arrow icon in a circular pill button with 1px border (#2A2D3D) and surface background (#161822).",
+        "Swap desktop: add an open orders / resting orderbook summary widget in the lower area to balance vertical height against the viewport."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/06-account.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 880,
+        "typography": 890,
+        "color": 900,
+        "data_legibility": 890,
+        "layout": 780,
+        "visceral_value": 930,
+        "responsive": 730,
+        "consistency": 900,
+        "trust": 920
+      },
+      "total": 869,
+      "top_issues": [
+        "Account desktop: the multi-color visceral value bar (collateral/credit line/owed/in flight) is rich, but the legend items above it sit on a detached single line with minimal spacing distinction between colors.",
+        "Account desktop: 'Show 2 empty lanes · WETH, USDT' is a raw blue text string with insufficient hit affordance.",
+        "Account desktop: right card 'THIS ACCOUNT' has high informational value but terminates halfway down, leaving the bottom half of the right column empty."
+      ],
+      "fixes": [
+        "Account desktop: format the legend directly as interactive indicators with monetary values (e.g., green dot + 'Collateral: $0.00', amber dot + 'Owed: $9,975.00').",
+        "Account desktop: convert 'Show 2 empty lanes' into a bordered outline button or table footer accordion item.",
+        "Account desktop: anchor an Account History / Recent Account Frames list directly beneath the primary account card to utilize desktop height."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/07-activity.png",
+      "scores": {
+        "hierarchy": 860,
+        "premium": 850,
+        "typography": 870,
+        "color": 880,
+        "data_legibility": 860,
+        "layout": 770,
+        "visceral_value": 700,
+        "responsive": 740,
+        "consistency": 890,
+        "trust": 910
+      },
+      "total": 833,
+      "top_issues": [
+        "Activity desktop: list items contain no inline visceral bars to show proportional transfer magnitudes against the account scale.",
+        "Activity desktop: entire lower half of the page is completely empty when the transaction list is short (4 items), making the fixed right inspection panel feel bottom-heavy.",
+        "Activity desktop: filter chips ('All', 'Payments', 'Swaps', 'Settlement', 'Accounts') have subtle boundaries that blend excessively into the background when unselected."
+      ],
+      "fixes": [
+        "Activity desktop: add a 4px horizontal micro-bar on each row under the amount reflecting its relative size at the global scale.",
+        "Activity desktop: give the left feed list a min-height or sticky relationship to the detail panel, adding pagination / frame-range selectors at the bottom.",
+        "Activity desktop: give unselected filter pills a subtle 1px border (#232636) and text color rgba(255,255,255,0.7) for clear interactivity cues."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 860,
+        "premium": 850,
+        "typography": 870,
+        "color": 880,
+        "data_legibility": 860,
+        "layout": 770,
+        "visceral_value": 700,
+        "responsive": 740,
+        "consistency": 890,
+        "trust": 910
+      },
+      "total": 833,
+      "top_issues": [
+        "Activity Detail desktop: identical state to 07-activity with active selection; the right drawer inspection card lacks a direct action button (e.g. 'View on explorer', 'Copy frame receipt', or 'Export dispute proof').",
+        "Activity Detail desktop: selected row in the left list has very faint visual affordance (minimal background tint difference) to signal which item is active.",
+        "Activity Detail desktop: 'Proof 0x2837ecf8...c263ce' truncation hides whether this is clickable to inspect or copy."
+      ],
+      "fixes": [
+        "Activity Detail desktop: add a distinct active state indicator (2px left indigo border `#6E7CFF` and surface highlight `#181A26`) on the selected feed row.",
+        "Activity Detail desktop: add an explicit copy icon and tooltip to the Proof hash row.",
+        "Activity Detail desktop: provide an action footer inside the detail panel: 'Download cryptographic frame receipt' button."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/09-settings.png",
+      "scores": {
+        "hierarchy": 890,
+        "premium": 870,
+        "typography": 880,
+        "color": 890,
+        "data_legibility": 880,
+        "layout": 810,
+        "visceral_value": 940,
+        "responsive": 780,
+        "consistency": 880,
+        "trust": 900
+      },
+      "total": 872,
+      "top_issues": [
+        "Settings desktop: scale slider and preview widget are exceptional, but preset chips ('Auto', '$1', '$2', '$5'...) wrap tightly under the slider track without clear separation from the Home section.",
+        "Settings desktop: Runtime ID hash (0xf39fd6e...) is not truncated and spans an awkward line length without an inline copy affordance.",
+        "Settings desktop: 'Reveal recovery phrase' and 'Lock' buttons sit at the very bottom left with inconsistent pill border weight compared to CTA buttons on Pay/Receive."
+      ],
+      "fixes": [
+        "Settings desktop: format the scale presets with equal-width segmented buttons or a unified compact selector bar with clear active indicator.",
+        "Settings desktop: truncate Runtime ID with an inline copy icon (`0xf39f...2266` + icon) matching account address patterns.",
+        "Settings desktop: add 32px bottom margin and elevate 'Reveal recovery phrase' to secondary button style with subtle warning accent on hover."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 839,
+    "verdict": "The design achieves an elite, disciplined fintech aesthetic with authoritative typography, restraint in accent color, and an innovative absolute-scale visceral bar concept. Its primary weakness is responsive desktop spatial composition: generous vertical whitespace turns into empty dead voids on wider viewports across almost every secondary flow.",
+    "priority_fixes": [
+      "Constrain desktop layout max-width or balance two-column modules to eliminate dead empty space across the lower halves of Home, Receive, Swap, and Activity.",
+      "Add a min-width (2px) and active state indicator for low-dollar entries on the visceral bar in Pay and Home so small transactions remain perceptible at $50/px.",
+      "Redesign the Receive screen QR code surface to eliminate dark-mode glare and harmonize its container styling with the rest of the dark card system.",
+      "Refactor visceral bar legends across Home, Pay, and Account from passive plain text into structured, data-dense metric captions directly bound to the bar segments.",
+      "Establish active selection states on Activity feed items and provide concrete cryptographic proof actions (copy frame proof, inspect signature) on transaction detail cards."
+    ]
+  }
+}
