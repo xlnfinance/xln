@@ -4,7 +4,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { collectHltRunProvenance } from '../../boundary/environment-manifest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -111,9 +111,58 @@ const replayEnvironment = (dbRoot: string): NodeJS.ProcessEnv => {
 
 const typescriptReportPath = (workers: number): string => join(replayRoot, `ts-w${workers}.json`);
 
+type EngineTiming = Readonly<{ engine: 'ts' | 'rust'; workers: number; wallMs: number; applyMs: number }>;
+const engineTimings: EngineTiming[] = [];
 const engineTiming = (engine: 'ts' | 'rust', workers: number, fields: Record<string, number | string>): void => {
   const rendered = Object.entries(fields).map(([key, value]) => `${key}=${typeof value === 'number' ? value.toFixed(1) : value}`).join(' ');
   console.error(`HLT_MIXED_PARITY_ENGINE engine=${engine} workers=${workers} ${rendered}`);
+  const wallMs = Number(fields['wallMs']);
+  const applyMs = Number(fields['applyMs']);
+  if (Number.isFinite(wallMs) && Number.isFinite(applyMs)) engineTimings.push({ engine, workers, wallMs, applyMs });
+};
+
+/**
+ * The gate's engine ladder is the hub-only replay throughput evidence; publish
+ * it where /qa/hlt already renders replay trials (.logs/qa/hlt/replays), one
+ * trial per engine x workers, so the page shows TS vs Rust on one recording.
+ */
+const publishQaReplayReport = (tsTrial: Record<string, unknown>): void => {
+  const number = (key: string): number => {
+    const value = tsTrial[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+  const accountInputs = number('runtimeEntityInputs');
+  const trials = engineTimings.map(timing => ({
+    engine: timing.engine,
+    workers: timing.workers,
+    offeredTps: null,
+    frames: number('frames'),
+    accountInputs,
+    accountTxs: accountInputs,
+    outboxEnvelopes: number('outboxEnvelopes'),
+    elapsedMs: timing.wallMs,
+    cpuMs: timing.applyMs,
+    accountInputTps: timing.wallMs > 0 ? accountInputs * 1_000 / timing.wallMs : 0,
+    accountTxTps: timing.applyMs > 0 ? accountInputs * 1_000 / timing.applyMs : 0,
+    cpuAccountTxTps: timing.applyMs > 0 ? accountInputs * 1_000 / timing.applyMs : 0,
+    finalHeight: number('finalHeight'),
+    finalPendingOutbox: number('finalPendingOutbox'),
+    equivalent: true,
+  }));
+  const directory = join(process.cwd(), '.logs', 'qa', 'hlt', 'replays');
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const createdAt = Date.now();
+  const path = join(directory, `${createdAt}-parity.json`);
+  writeFileSync(path, `${safeStringify({
+    schema: 'xln-hlt-hub-replay-report-v1',
+    createdAt,
+    recordingPath,
+    recordingManifestHash: artifact.recording.manifestHash,
+    mode: 'max',
+    accountAuthority: 'parity-gate',
+    trials,
+  }, 2)}\n`, { mode: 0o600 });
+  console.error(`HLT_MIXED_PARITY_QA_REPLAY_REPORT path=${path} trials=${trials.length}`);
 };
 
 const replayTypescript = (workers: number): void => {
@@ -343,6 +392,12 @@ for (const workers of benchWorkers) {
   if (bench['accountsRoot'] !== w1['accountsRoot']) {
     throw new Error(`HLT_MIXED_PARITY_BENCH_ROOT:w${workers}:${String(bench['accountsRoot'])}:${String(w1['accountsRoot'])}`);
   }
+}
+{
+  const raw = safeParse(readFileSync(tsW1ReportPath, 'utf8'));
+  const trial = typeof raw === 'object' && raw !== null ? (Reflect.get(raw, 'trials') as unknown[])?.[0] : undefined;
+  if (typeof trial !== 'object' || trial === null) throw new Error('HLT_MIXED_PARITY_TS_TRIAL_MISSING');
+  publishQaReplayReport(trial as Record<string, unknown>);
 }
 const provenance = collectHltRunProvenance('rust');
 console.log(

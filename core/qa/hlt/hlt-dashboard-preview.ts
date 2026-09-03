@@ -128,6 +128,9 @@ export type HltHubPerfCard = Readonly<{
 
 export type HltReplayTrialCard = Readonly<{
   offeredTps: number | null;
+  /** Replay engine and Account worker count when the report came from the TS/Rust parity gate. */
+  engine: 'ts' | 'rust' | null;
+  workers: number | null;
   frames: number;
   accountInputs: number;
   accountTxs: number;

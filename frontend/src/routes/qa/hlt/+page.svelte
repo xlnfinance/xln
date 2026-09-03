@@ -345,10 +345,14 @@
         <div class="replay-trials">
           {#each snapshot.replay.trials as trial}
             <article class="result-card">
-              <span>{trial.offeredTps === null ? 'Max throughput' : `Offered ${trial.offeredTps}/s`}</span>
+              <span>{trial.engine
+                ? `${trial.engine === 'rust' ? 'Rust' : 'TS'} · ${trial.workers} worker${trial.workers === 1 ? '' : 's'}`
+                : trial.offeredTps === null ? 'Max throughput' : `Offered ${trial.offeredTps}/s`}</span>
               <strong>{formatTps(trial.accountTxTps)}</strong>
               <p>{trial.frames} frames · {trial.outboxEnvelopes} outbox · pending {trial.finalPendingOutbox}</p>
-              <small>state + ordered outbox hashes identical</small>
+              <small>{trial.engine
+                ? `engine ${formatMs(trial.cpuMs)} · wall ${formatMs(trial.elapsedMs)} · ${trial.accountInputs} account inputs`
+                : 'state + ordered outbox hashes identical'}</small>
             </article>
           {/each}
         </div>

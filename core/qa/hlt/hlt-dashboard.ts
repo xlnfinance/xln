@@ -217,8 +217,16 @@ const decodeReplayTrial = (value: unknown, index: number): HltReplayTrialCard =>
     throw new Error(`HLT_REPLAY_TRIAL_OFFERED_INVALID:${index}`);
   }
   if (record['equivalent'] !== true) throw new Error(`HLT_REPLAY_TRIAL_NOT_EQUIVALENT:${index}`);
+  const engine = record['engine'] ?? null;
+  if (engine !== null && engine !== 'ts' && engine !== 'rust') throw new Error(`HLT_REPLAY_TRIAL_ENGINE_INVALID:${index}`);
+  const workers = record['workers'] ?? null;
+  if (workers !== null && (!Number.isSafeInteger(workers) || (workers as number) < 1)) {
+    throw new Error(`HLT_REPLAY_TRIAL_WORKERS_INVALID:${index}`);
+  }
   return {
     offeredTps,
+    engine,
+    workers: workers as number | null,
     frames: numeric('frames'),
     accountInputs: numeric('accountInputs'),
     accountTxs: numeric('accountTxs'),

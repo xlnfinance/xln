@@ -1,6 +1,6 @@
 import { describe, expect, test, afterEach } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
@@ -160,6 +160,35 @@ describe('hlt dashboard snapshot', () => {
     expect(snapshot.perf.parsedProfiles).toBe(1);
     expect(snapshot.hubPerf[0]?.hubLabel).toBe('H1');
     expect(snapshot.hubPerf[0]?.cpuTps).toBeCloseTo(1000 * 1000 / 12);
+  });
+
+  test('replay card carries the parity gate engine ladder', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-hlt-dash-'));
+    const replays = join(root, '.logs/qa/hlt/replays');
+    mkdirSync(replays, { recursive: true });
+    const trial = {
+      offeredTps: null, frames: 73, accountInputs: 18304, accountTxs: 18304, outboxEnvelopes: 14009,
+      elapsedMs: 8753.9, cpuMs: 4713.9, accountInputTps: 2090.9, accountTxTps: 3883.4, cpuAccountTxTps: 3883.4,
+      finalHeight: 81, finalPendingOutbox: 1, equivalent: true,
+    };
+    writeFileSync(join(replays, '1-parity.json'), JSON.stringify({
+      schema: 'xln-hlt-hub-replay-report-v1',
+      createdAt: 1,
+      recordingManifestHash: `0x${'ab'.repeat(32)}`,
+      mode: 'max',
+      trials: [
+        { ...trial, engine: 'ts', workers: 1 },
+        { ...trial, engine: 'rust', workers: 8 },
+        trial,
+      ],
+    }));
+    const snapshot = readHltDashboardSnapshot(root);
+    expect(snapshot.replay?.trials.map(row => [row.engine, row.workers])).toEqual([['ts', 1], ['rust', 8], [null, null]]);
+    writeFileSync(join(replays, '2-parity.json'), JSON.stringify({
+      schema: 'xln-hlt-hub-replay-report-v1', createdAt: 2, recordingManifestHash: `0x${'ab'.repeat(32)}`, mode: 'max',
+      trials: [{ ...trial, engine: 'go', workers: 1 }],
+    }));
+    expect(() => readHltDashboardSnapshot(root)).toThrow('HLT_REPLAY_TRIAL_ENGINE_INVALID:0');
   });
 });
 
