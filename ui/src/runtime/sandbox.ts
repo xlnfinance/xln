@@ -80,6 +80,30 @@ export type VaultRuntimeOptions = {
  * restored runtime. All effects go through the same RuntimeAdapter command
  * lane the rest of the UI uses.
  */
+const FUNDED_KEY = 'xln-ui-sandbox-funded';
+const fundedKey = (runtimeId: string): string => `${FUNDED_KEY}:${String(runtimeId || '').toLowerCase()}`;
+const sandboxFunded = (runtimeId: string): boolean => {
+	try {
+		return localStorage.getItem(fundedKey(runtimeId)) === '1';
+	} catch {
+		return false;
+	}
+};
+const markSandboxFunded = (runtimeId: string): void => {
+	try {
+		localStorage.setItem(fundedKey(runtimeId), '1');
+	} catch {
+		// Without storage the next entry re-checks balances and only tops up what is missing.
+	}
+};
+const forgetSandboxFunded = (runtimeId: string): void => {
+	try {
+		localStorage.removeItem(fundedKey(runtimeId));
+	} catch {
+		// Nothing stored, nothing to forget.
+	}
+};
+
 export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOptions): Promise<DemoTopology> {
 	useApp.getState().setBooting(true);
 	try {
@@ -94,7 +118,10 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
 				// Stop the live loop before wiping its storage, otherwise the next
 				// frame append fails against an empty head and halts the runtime.
 				disconnectAdapter();
-				if (env) await xln.clearDB(env);
+				if (env) {
+					forgetSandboxFunded(String(env.runtimeId || ''));
+					await xln.clearDB(env);
+				}
 			} catch {
 				// Reset is best-effort; surface the original failure.
 			}
@@ -210,11 +237,6 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 		]);
 	}
 
-	// No mintReserves here: a mint's J event reproducibly halts the live loop
-	// with J_PREFIX_LOCAL_PREFIX_MISMATCH on the receiving entity (runtime
-	// prefix-consensus issue, reported upstream). The demo runs entirely on
-	// bilateral credit lines, which payments do not need reserves for.
-
 	step('Configuring hub');
 	// The hub publishes its fee policy through the same setHubConfig every
 	// production hub uses; that commits profile.isHub and the swap taker fee the
@@ -257,6 +279,33 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 		);
 	}
 
+	step('Setting rebalance policy');
+	// The demo hub has no reserve to collateralize with, so a spoke's automatic
+	// collateral request could never be filled and would only prepay fees. The
+	// spokes therefore run the manual policy (soft limit equal to hard limit),
+	// the same user-level setRebalancePolicy any wallet can send.
+	const manualLimit = usd(1_000_000);
+	const rebalanceIsManual = (entityId: string, counterpartyId: string): boolean => {
+		const policy = findReplicaState(env, entityId)?.state?.accounts?.get?.(counterpartyId)?.shadow?.rebalance?.policy?.get?.(USDC);
+		return Boolean(policy && policy.r2cRequestSoftLimit === policy.hardLimit);
+	};
+	for (const spoke of [self, merchant]) {
+		if (rebalanceIsManual(spoke.entityId, hub.entityId)) continue;
+		await sendEntity(spoke.entityId, spoke.signerId, [
+			{
+				type: 'setRebalancePolicy',
+				data: {
+					counterpartyEntityId: hub.entityId,
+					tokenId: USDC,
+					r2cRequestSoftLimit: manualLimit,
+					hardLimit: manualLimit,
+					maxAcceptableFee: usd(10),
+				},
+			},
+		]);
+		await waitFor(() => rebalanceIsManual(spoke.entityId, hub.entityId), `demo rebalance policy ${spoke.label}`, 45_000);
+	}
+
 	step('Extending credit lines');
 	const creditLine = usd(50_000);
 	const creditPairs: Array<[DemoActor, DemoActor]> = [
@@ -280,38 +329,56 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 		);
 	}
 
-	step('Placing opening balances');
-	// Hub pays the spokes their starting balances over the fresh credit lines —
-	// an off-chain money source that works while on-chain minting is blocked
-	// by the reported J-prefix runtime bug.
-	const openingBalances: Array<[DemoActor, bigint]> = [
-		[self, usd(10_000)],
-		[merchant, usd(5_000)],
-	];
-	for (const [recipient, amount] of openingBalances) {
-		const received = (): bigint => {
-			const replica = findReplicaState(env, recipient.entityId);
-			const delta = replica?.state?.accounts?.get?.(hub.entityId)?.state?.deltas?.get?.(USDC);
-			if (!delta) return 0n;
-			const total = delta.ondelta + delta.offdelta;
-			const isLeft = recipient.entityId.toLowerCase() < hub.entityId.toLowerCase();
-			return isLeft ? total : -total;
-		};
-		if (received() >= amount) continue;
-		await sendEntity(hub.entityId, hub.signerId, [
-			{
-				type: 'directPayment',
-				data: {
-					targetEntityId: recipient.entityId,
-					tokenId: USDC,
-					amount: amount - received(),
-					route: [hub.entityId, recipient.entityId],
-					deliveryMode: 'direct',
-					description: 'Opening balance',
+	// Starting money is placed once per runtime database. Re-entering the sandbox
+	// after the user spent some of it must not top the balances back up: the
+	// restored runtime is the user's money, and the wallet has to show it as is.
+	const runtimeId = String(env.runtimeId || '');
+	if (!runtimeId) throw new Error('DEMO_RUNTIME_ID_MISSING');
+	if (!sandboxFunded(runtimeId)) {
+		step('Placing opening balances');
+		// Hub pays the spokes their starting balances over the fresh credit lines.
+		const openingBalances: Array<[DemoActor, bigint]> = [
+			[self, usd(10_000)],
+			[merchant, usd(5_000)],
+		];
+		for (const [recipient, amount] of openingBalances) {
+			const received = (): bigint => {
+				const replica = findReplicaState(env, recipient.entityId);
+				const delta = replica?.state?.accounts?.get?.(hub.entityId)?.state?.deltas?.get?.(USDC);
+				if (!delta) return 0n;
+				const total = delta.ondelta + delta.offdelta;
+				const isLeft = recipient.entityId.toLowerCase() < hub.entityId.toLowerCase();
+				return isLeft ? total : -total;
+			};
+			if (received() >= amount) continue;
+			await sendEntity(hub.entityId, hub.signerId, [
+				{
+					type: 'directPayment',
+					data: {
+						targetEntityId: recipient.entityId,
+						tokenId: USDC,
+						amount: amount - received(),
+						route: [hub.entityId, recipient.entityId],
+						deliveryMode: 'direct',
+						description: 'Opening balance',
+					},
 				},
-			},
-		]);
-		await waitFor(() => received() >= amount, `demo opening balance ${recipient.label}`, 45_000);
+			]);
+			await waitFor(() => received() >= amount, `demo opening balance ${recipient.label}`, 45_000);
+		}
+
+		step('Funding reserve');
+		// A small Depository reserve for the user so the wallet shows all three
+		// places money lives. Minted through the jurisdiction like any testnet faucet.
+		const selfReserve = usd(1_500);
+		const reserveOf = (entityId: string): bigint => findReplicaState(env, entityId)?.state?.reserves?.get?.(USDC) ?? 0n;
+		if (reserveOf(self.entityId) < selfReserve) {
+			await sendEntity(self.entityId, self.signerId, [
+				{ type: 'mintReserves', data: { tokenId: USDC, amount: selfReserve - reserveOf(self.entityId) } },
+			]);
+			await waitFor(() => reserveOf(self.entityId) >= selfReserve, 'demo reserve mint', 45_000);
+		}
+		markSandboxFunded(runtimeId);
 	}
 
 	step('Ready');

@@ -1,11 +1,9 @@
-import { useMemo } from 'react';
-import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
 import { Icon } from './Icons';
 import { Sheet } from './Sheet';
-import { useAdapterRead } from '../runtime/hooks';
+import { useApp } from '../runtime/store';
 import { useReceipts } from '../runtime/financial/receipts';
 import { formatMoney, getTokenMeta } from '../runtime/format';
-import { displayEntityName } from '../runtime/views';
+import { displayEntityName, useWallet } from '../runtime/views';
 
 /**
  * The receipt for a terminal HTLC event. Shown from the durable frame log the
@@ -14,14 +12,9 @@ import { displayEntityName } from '../runtime/views';
 export function PaymentReceiptSheet() {
 	const receipt = useReceipts(s => s.latest);
 	const dismiss = useReceipts(s => s.dismiss);
-	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>(receipt ? 'entities' : null);
-	const names = useMemo(() => {
-		const map = new Map<string, string>();
-		for (const summary of entities.data ?? []) {
-			if (summary.entityId && summary.label) map.set(summary.entityId.toLowerCase(), summary.label);
-		}
-		return map;
-	}, [entities.data]);
+	const entityId = useApp(s => s.activeEntityId);
+	// Same name source as Home: the entity's own view frame.
+	const { names } = useWallet(receipt ? entityId : null);
 
 	if (!receipt) return null;
 
@@ -35,7 +28,9 @@ export function PaymentReceiptSheet() {
 		amount = 0n;
 	}
 	const sent = receipt.name === 'HtlcFinalized';
-	const counterparty = String((sent ? data['toEntity'] : data['fromEntity']) || '').toLowerCase();
+	const hop = String((sent ? data['toEntity'] : data['fromEntity']) || '').toLowerCase();
+	const counterparty = receipt.recipientId ?? hop;
+	const via = sent && receipt.recipientId && hop && hop !== receipt.recipientId ? displayEntityName(names, hop) : '';
 	const elapsedRaw = Number(data['finalizedInMs'] ?? data['elapsedMs'] ?? 0);
 	const elapsed = Number.isFinite(elapsedRaw) && elapsedRaw > 0 ? Math.max(1, Math.floor(elapsedRaw)) : null;
 	const description = String(data['description'] || '').trim();
@@ -55,6 +50,7 @@ export function PaymentReceiptSheet() {
 				</div>
 				<div className="to" data-testid="receipt-title">
 					{sent ? 'to' : 'from'} {counterparty ? displayEntityName(names, counterparty) : '—'}
+					{via ? <span className="faint"> via {via}</span> : null}
 					{description ? ` · ${description}` : ''}
 				</div>
 			</div>

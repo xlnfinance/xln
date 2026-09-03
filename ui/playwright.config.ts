@@ -20,6 +20,7 @@ export default defineConfig({
 		headless: process.env['HEADED'] !== 'true',
 		viewport: { width: 1280, height: 860 },
 		deviceScaleFactor: 1,
+		colorScheme: 'dark',
 		trace: 'retain-on-failure',
 		screenshot: 'only-on-failure',
 		video: 'retain-on-failure',

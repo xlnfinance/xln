@@ -42,8 +42,12 @@ test.describe('wallet UI payment', () => {
 		page.on('console', message => {
 			if (message.type() === 'error') process.stdout.write(`[browser] ${message.text()}\n`);
 		});
+		page.on('response', response => {
+			if (response.status() >= 400) process.stdout.write(`[http ${response.status()}] ${response.url()}\n`);
+		});
 
 		await enterSandbox(page);
+		await page.screenshot({ path: 'tests/test-results/ui-home.png', fullPage: true });
 		const netBefore = await readUsdcNet(page);
 		expect(netBefore, 'the sandbox funds the user through the hub').toBeGreaterThan(Number(PAYMENT_AMOUNT));
 
@@ -53,6 +57,7 @@ test.describe('wallet UI payment', () => {
 		const submit = page.getByTestId('pay-submit');
 		await expect(submit).toBeEnabled({ timeout: CONSENSUS_TIMEOUT });
 		await expect(submit).toHaveText(new RegExp(`Pay ${PAYMENT_AMOUNT}\\.00 USDC`));
+		await page.screenshot({ path: 'tests/test-results/ui-pay.png', fullPage: true });
 		await submit.click();
 
 		const receipt = page.getByTestId('payment-receipt');
@@ -60,6 +65,8 @@ test.describe('wallet UI payment', () => {
 		await expect(receipt.getByTestId('receipt-kicker')).toHaveText('Paid');
 		await expect(receipt.getByTestId('receipt-amount')).toContainText(`${PAYMENT_AMOUNT}.00`);
 		await expect(receipt.getByTestId('receipt-title')).toContainText('Meridian Desk');
+		await page.waitForTimeout(400);
+		await page.screenshot({ path: 'tests/test-results/ui-receipt.png', fullPage: true });
 		await receipt.getByTestId('receipt-done').click();
 		await expect(receipt).toHaveCount(0);
 
@@ -68,8 +75,11 @@ test.describe('wallet UI payment', () => {
 			.toBeCloseTo(netBefore - Number(PAYMENT_AMOUNT), 2);
 		const netAfter = await readUsdcNet(page);
 
-		await page.goto('/activity');
+		// In-app navigation: a full page load would drop the embedded runtime.
+		await page.getByRole('link', { name: 'Activity' }).first().click();
+		await expect(page).toHaveURL(/\/activity$/);
 		await expect(page.getByTestId('activity-row').filter({ hasText: 'Meridian Desk' }).first()).toBeVisible({ timeout: CONSENSUS_TIMEOUT });
+		await page.screenshot({ path: 'tests/test-results/ui-activity.png', fullPage: true });
 
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await enterSandbox(page);

@@ -59,6 +59,11 @@ export type TokenTotals = {
 	/** Sum of negative account positions: what we owe. Never positive. */
 	owed: bigint;
 	net: bigint;
+	/** Instant send / receive room across every account holding this token. */
+	sendCapacity: bigint;
+	receiveCapacity: bigint;
+	/** False when nothing about this token is non-zero: no money, no debt, no credit room. */
+	active: boolean;
 	jurisdictions: string[];
 };
 
@@ -191,13 +196,19 @@ export function useWallet(entityId: string | null): WalletView {
 				const pending = reserves.filter(row => row.tokenId === tokenId).reduce((sum, row) => sum + row.pending, 0n);
 				let receivable = 0n;
 				let owed = 0n;
+				let sendCapacity = 0n;
+				let receiveCapacity = 0n;
 				for (const account of accounts) {
 					for (const token of account.tokens) {
 						if (token.tokenId !== tokenId) continue;
 						if (token.signed > 0n) receivable += token.signed;
 						else owed += token.signed;
+						sendCapacity += token.derived.outCapacity;
+						receiveCapacity += token.derived.inCapacity;
 					}
 				}
+				const active =
+					onchainAmount > 0n || reserveAmount > 0n || pending > 0n || receivable > 0n || owed < 0n || sendCapacity > 0n || receiveCapacity > 0n;
 				return {
 					tokenId,
 					onchain: onchainAmount,
@@ -206,6 +217,9 @@ export function useWallet(entityId: string | null): WalletView {
 					receivable,
 					owed,
 					net: onchainAmount + reserveAmount + receivable + owed,
+					sendCapacity,
+					receiveCapacity,
+					active,
 					jurisdictions: jurisdiction ? [jurisdiction] : [],
 				};
 			});

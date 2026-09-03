@@ -48,14 +48,19 @@ export function formatAmount(amount: bigint, decimals: number, maxFraction = 6):
 	return fractionText ? `${sign}${wholeText}.${fractionText}` : `${sign}${wholeText}`;
 }
 
-/** Fixed two decimals for money rows: "2,200.00". */
+/** Rounds a raw amount to `fraction` decimals, half away from zero; never truncates. */
+function roundToFraction(abs: bigint, decimals: number, fraction: number): { whole: bigint; digits: string } {
+	const keep = Math.min(decimals, fraction);
+	const drop = decimals - keep;
+	const unit = 10n ** BigInt(drop);
+	const scaled = drop > 0 ? (abs + unit / 2n) / unit : abs;
+	const base = 10n ** BigInt(keep);
+	return { whole: scaled / base, digits: (scaled % base).toString().padStart(keep, '0').padEnd(fraction, '0') };
+}
+
 export function formatMoney(amount: bigint, decimals: number, fraction = 2): string {
 	const negative = amount < 0n;
-	const abs = negative ? -amount : amount;
-	const base = 10n ** BigInt(decimals);
-	const whole = abs / base;
-	const rest = abs % base;
-	const digits = rest.toString().padStart(decimals, '0').slice(0, Math.min(decimals, fraction)).padEnd(fraction, '0');
+	const { whole, digits } = roundToFraction(negative ? -amount : amount, decimals, fraction);
 	const sign = negative ? '−' : '';
 	return fraction > 0 && decimals > 0 ? `${sign}${whole.toLocaleString('en-US')}.${digits}` : `${sign}${whole.toLocaleString('en-US')}`;
 }
@@ -69,12 +74,8 @@ export function formatSigned(amount: bigint, decimals: number, fraction = 2): st
 /** Big-numeral split for the display font: ["12,480", ".20"]. */
 export function splitAmountForDisplay(amount: bigint, decimals: number): [string, string] {
 	const negative = amount < 0n;
-	const abs = negative ? -amount : amount;
-	const base = 10n ** BigInt(decimals);
-	const whole = abs / base;
-	const fraction = abs % base;
-	const fractionText = decimals > 0 ? fraction.toString().padStart(decimals, '0').slice(0, 2) : '';
-	return [`${negative ? '−' : ''}${whole.toLocaleString('en-US')}`, fractionText ? `.${fractionText}` : ''];
+	const { whole, digits } = roundToFraction(negative ? -amount : amount, decimals, 2);
+	return [`${negative ? '−' : ''}${whole.toLocaleString('en-US')}`, decimals > 0 ? `.${digits}` : ''];
 }
 
 export function formatUsd(value: number): string {

@@ -1,24 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { RuntimeActivityEvent } from '@xln/core/api/public/runtime-module';
 import { Icon, type IconName } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
-import { useAdapterRead } from '../runtime/hooks';
 import { useApp } from '../runtime/store';
 import { dayLabel, formatClock, formatMoney, getTokenMeta, shortId, timeAgo } from '../runtime/format';
 import { displayEntityName, useWallet } from '../runtime/views';
+import { USER_ACTIVITY_TYPES, useMovements, type Movement } from '../runtime/financial/movements';
 
-type ActivityPage = { events?: RuntimeActivityEvent[]; latestHeight?: number };
-
-/** User-relevant money movements; consensus internals stay in the developer workspace. */
-export const USER_ACTIVITY_TYPES = ['payment', 'htlc', 'swap', 'cross_swap', 'settlement', 'account'];
-
-// Swap handlers emit a raw internal log line and a structured entry for the same
-// frame. Hide the raw duplicate so each swap action shows once.
-const RAW_SWAP_LOG = /^(?:📊 Swap offer|📨 Swap cancel requested)/;
-
-export function isDisplayableActivityEvent(event: RuntimeActivityEvent): boolean {
-	return !RAW_SWAP_LOG.test(String(event.title || ''));
-}
+export { USER_ACTIVITY_TYPES };
 
 const FILTERS: Array<{ id: string; label: string; types: string[] }> = [
 	{ id: 'all', label: 'All', types: USER_ACTIVITY_TYPES },
@@ -28,55 +16,54 @@ const FILTERS: Array<{ id: string; label: string; types: string[] }> = [
 	{ id: 'accounts', label: 'Accounts', types: ['account'] },
 ];
 
-type StateTone = 'settled' | 'inflight' | 'pending' | 'neutral' | 'dispute';
+const TONE_CLASS: Record<Movement['tone'], string> = {
+	settled: 'st-settled',
+	inflight: 'st-inflight',
+	pending: 'st-pending',
+	failed: 'st-dispute',
+	neutral: 'st-neutral',
+};
 
-function eventTone(event: RuntimeActivityEvent): { tone: StateTone; label: string } {
-	const status = String(event.status || '').toLowerCase();
-	if (/fail|reject|dispute|error|timeout/.test(status)) return { tone: 'dispute', label: status || 'failed' };
-	if (/pending|await|queued|submitted|proposed/.test(status)) return { tone: 'pending', label: status };
-	if (/progress|lock|flight|open|partial/.test(status)) return { tone: 'inflight', label: status };
-	if (/settle|final|commit|confirm|done|filled|complete|resolved|ok/.test(status)) return { tone: 'settled', label: 'settled' };
-	return { tone: 'neutral', label: status || 'signed' };
-}
-
-function eventIcon(event: RuntimeActivityEvent): { icon: IconName; cls: string } {
-	const type = String(event.type || '');
-	if (type === 'swap' || type === 'cross_swap') return { icon: 'swap', cls: 'swap' };
-	if (type === 'settlement') return { icon: 'bank', cls: 'reserve' };
-	if (type === 'account') return { icon: 'shield', cls: 'account' };
-	if (event.direction === 'in') return { icon: 'receive', cls: 'in' };
+function movementIcon(movement: Movement): { icon: IconName; cls: string } {
+	if (movement.kind === 'swap') return { icon: 'swap', cls: 'swap' };
+	if (movement.kind === 'settlement') return { icon: 'bank', cls: 'reserve' };
+	if (movement.kind === 'account') return { icon: 'shield', cls: 'account' };
+	if (movement.direction === 'in') return { icon: 'receive', cls: 'in' };
 	return { icon: 'pay', cls: 'out' };
 }
 
-export function formatEventAmount(event: RuntimeActivityEvent): string | null {
-	if (!event.amount || !event.tokenId) return null;
-	try {
-		const meta = getTokenMeta(Number(event.tokenId));
-		const value = BigInt(event.amount);
-		const sign = event.direction === 'out' ? '−' : event.direction === 'in' ? '+' : '';
-		return `${sign}${formatMoney(value < 0n ? -value : value, meta.decimals)} ${meta.symbol}`;
-	} catch {
-		return null;
-	}
+export function formatMovementAmount(movement: Movement): string | null {
+	if (movement.amount === null || movement.tokenId === null) return null;
+	const meta = getTokenMeta(movement.tokenId);
+	const sign = movement.kind === 'payment' ? (movement.direction === 'out' ? '−' : movement.direction === 'in' ? '+' : '') : '';
+	return `${sign}${formatMoney(movement.amount, meta.decimals)} ${meta.symbol}`;
+}
+
+/** "to Meridian Desk via Hub One" / "from Hub One" / "with Hub One". */
+export function movementParty(movement: Movement, names: Map<string, string>): string {
+	if (!movement.counterpartyId) return '';
+	const name = displayEntityName(names, movement.counterpartyId);
+	const preposition = movement.kind === 'payment' ? (movement.direction === 'out' ? 'to' : movement.direction === 'in' ? 'from' : 'via') : 'with';
+	const via = movement.viaId ? ` via ${displayEntityName(names, movement.viaId)}` : '';
+	return `${preposition} ${name}${via}`;
 }
 
 export function ActivityRow({
-	event,
+	movement,
 	names,
 	first,
 	selected,
 	onClick,
 }: {
-	event: RuntimeActivityEvent;
+	movement: Movement;
 	names: Map<string, string>;
 	first: boolean;
 	selected?: boolean;
 	onClick?: () => void;
 }) {
-	const amount = formatEventAmount(event);
-	const { tone, label } = eventTone(event);
-	const { icon, cls } = eventIcon(event);
-	const counterparty = event.counterpartyId ? displayEntityName(names, event.counterpartyId) : '';
+	const amount = formatMovementAmount(movement);
+	const { icon, cls } = movementIcon(movement);
+	const party = movementParty(movement, names);
 	const Tag = onClick ? 'button' : 'div';
 	return (
 		<Tag
@@ -89,15 +76,13 @@ export function ActivityRow({
 					<Icon name={icon} size={15} />
 				</span>
 				<span className="tx">
-					<span className="t">{String(event.title || event.type || 'Frame')}</span>
-					<span className="s">
-						{[counterparty ? `with ${counterparty}` : '', event.subtitle || ''].filter(Boolean).join(' · ') || `frame #${event.height}`}
-					</span>
+					<span className="t">{movement.title}</span>
+					<span className="s">{[party, movement.detail].filter(Boolean).join(' · ') || `frame #${movement.height}`}</span>
 				</span>
 				<span className="r">
 					{amount ? <span className="v num">{amount}</span> : null}
 					<span className="u">
-						<span className={`state st-${tone}`}>{label}</span>
+						<span className={`state ${TONE_CLASS[movement.tone]}`}>{movement.state}</span>
 					</span>
 				</span>
 			</span>
@@ -105,54 +90,65 @@ export function ActivityRow({
 	);
 }
 
-function EventDetail({ event, names }: { event: RuntimeActivityEvent; names: Map<string, string> }) {
-	const amount = formatEventAmount(event);
-	const { tone, label } = eventTone(event);
-	const counterparty = event.counterpartyId ? displayEntityName(names, event.counterpartyId) : '';
+function MovementDetail({ movement, names }: { movement: Movement; names: Map<string, string> }) {
+	const amount = formatMovementAmount(movement);
+	const party = movementParty(movement, names);
 	return (
 		<>
 			<div className="rcpt" style={{ textAlign: 'left', padding: 0 }}>
 				<div className="caps">
-					{String(event.type || 'event').replace('_', ' ')} · <span className={`st-${tone}`}>{label}</span>
+					{movement.kind} · <span className={TONE_CLASS[movement.tone]}>{movement.state}</span>
 				</div>
 				<div className="a num" style={{ fontSize: 30, marginTop: 10 }}>
-					{amount ?? String(event.title || '')}
+					{amount ?? movement.title}
 				</div>
-				{amount ? <div className="to">{String(event.title || '')}</div> : null}
+				{amount ? <div className="to">{[movement.title, party].filter(Boolean).join(' ')}</div> : null}
 			</div>
 			<div>
-				{counterparty ? (
+				{movement.counterpartyId ? (
 					<div className="kv">
-						<span className="k">With</span>
+						<span className="k">{movement.direction === 'out' ? 'To' : movement.direction === 'in' ? 'From' : 'With'}</span>
 						<span className="v">
-							{counterparty} <span className="mono faint">{shortId(event.counterpartyId ?? '', 8, 4)}</span>
+							{displayEntityName(names, movement.counterpartyId)} <span className="mono faint">{shortId(movement.counterpartyId, 8, 4)}</span>
 						</span>
 					</div>
 				) : null}
-				{event.subtitle ? (
+				{movement.viaId ? (
+					<div className="kv">
+						<span className="k">Via</span>
+						<span className="v">{displayEntityName(names, movement.viaId)}</span>
+					</div>
+				) : null}
+				{movement.detail ? (
 					<div className="kv">
 						<span className="k">Detail</span>
 						<span className="v" style={{ fontWeight: 400 }}>
-							{event.subtitle}
+							{movement.detail}
 						</span>
 					</div>
 				) : null}
 				<div className="kv">
 					<span className="k">Frame</span>
-					<span className="v num">#{event.height.toLocaleString('en-US')}</span>
+					<span className="v num">#{movement.height.toLocaleString('en-US')}</span>
 				</div>
 				<div className="kv">
 					<span className="k">Time</span>
 					<span className="v mono" style={{ color: 'var(--ink-2)' }}>
-						{event.timestamp ? formatClock(event.timestamp) : '—'}
+						{movement.timestamp ? formatClock(movement.timestamp) : '—'}
 					</span>
 				</div>
-				{event.hash ? (
+				{movement.hash ? (
 					<div className="kv">
 						<span className="k">Proof</span>
 						<span className="v mono" style={{ color: 'var(--ink-2)' }}>
-							{shortId(event.hash, 10, 6)}
+							{shortId(movement.hash, 10, 6)}
 						</span>
+					</div>
+				) : null}
+				{movement.events.length > 1 ? (
+					<div className="kv">
+						<span className="k">Frames</span>
+						<span className="v num">{movement.events.length} committed entries</span>
 					</div>
 				) : null}
 			</div>
@@ -169,21 +165,16 @@ export function ActivityScreen() {
 	const [filter, setFilter] = useState('all');
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const types = FILTERS.find(entry => entry.id === filter)?.types ?? USER_ACTIVITY_TYPES;
-
-	const activity = useAdapterRead<ActivityPage>('activity', {
-		limit: 100,
-		types,
-		...(entityId ? { entityId } : {}),
-	});
-	const events = useMemo(() => (activity.data?.events ?? []).filter(isDisplayableActivityEvent), [activity.data]);
-	const selected = events.find(event => event.id === selectedId) ?? null;
+	const accountIds = useMemo(() => wallet.accounts.map(account => account.counterpartyId), [wallet.accounts]);
+	const { movements, loading, error } = useMovements(entityId, types, 200, accountIds);
+	const selected = movements.find(movement => movement.id === selectedId) ?? null;
 
 	let lastDay = '';
-	const rows = events.map(event => {
-		const day = event.timestamp ? dayLabel(event.timestamp) : `Frame ${event.height}`;
+	const rows = movements.map(movement => {
+		const day = movement.timestamp ? dayLabel(movement.timestamp) : `Frame ${movement.height}`;
 		const first = day !== lastDay;
 		lastDay = day;
-		return { event, day, first };
+		return { movement, day, first };
 	});
 
 	return (
@@ -191,7 +182,7 @@ export function ActivityScreen() {
 			<div className="screen-header">
 				<span className="screen-title">Activity</span>
 				<span className="faint" style={{ fontSize: 12 }}>
-					{events.length} events
+					{movements.length} movements
 				</span>
 			</div>
 			<div className="two-col" style={{ gridTemplateColumns: 'minmax(0,1fr) 400px' }}>
@@ -203,23 +194,23 @@ export function ActivityScreen() {
 							</button>
 						))}
 					</div>
-					{rows.map(({ event, day, first }) => (
-						<div key={event.id}>
+					{rows.map(({ movement, day, first }) => (
+						<div key={movement.id}>
 							{first ? <div className="caps day">{day}</div> : null}
-							<ActivityRow event={event} names={wallet.names} first={first} selected={event.id === selectedId} onClick={() => setSelectedId(event.id)} />
+							<ActivityRow movement={movement} names={wallet.names} first={first} selected={movement.id === selectedId} onClick={() => setSelectedId(movement.id)} />
 						</div>
 					))}
-					{events.length === 0 && !activity.loading && (
+					{movements.length === 0 && !loading && (
 						<p className="note" style={{ padding: '18px 0' }}>
 							Nothing here for this filter yet.
 						</p>
 					)}
-					{activity.error && <p style={{ color: 'var(--dispute)', fontSize: 13 }}>{activity.error}</p>}
+					{error && <p style={{ color: 'var(--dispute)', fontSize: 13 }}>{error}</p>}
 				</div>
 				<div className="aside desktop-only">
 					{selected ? (
 						<div className="card">
-							<EventDetail event={selected} names={wallet.names} />
+							<MovementDetail movement={selected} names={wallet.names} />
 						</div>
 					) : (
 						<div className="card">
@@ -231,7 +222,7 @@ export function ActivityScreen() {
 			{selected && (
 				<div className="mobile-only">
 					<Sheet title="Receipt" onClose={() => setSelectedId(null)}>
-						<EventDetail event={selected} names={wallet.names} />
+						<MovementDetail movement={selected} names={wallet.names} />
 					</Sheet>
 				</div>
 			)}

@@ -1,20 +1,17 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { RuntimeActivityEvent } from '@xln/core/api/public/runtime-module';
 import { UsdAmount } from '../components/Amount';
 import { Bar, DeltaBar, DeltaCaption } from '../components/Bars';
 import { Icon } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { TokenIcon } from '../components/TokenPicker';
-import { useAdapterRead } from '../runtime/hooks';
 import { useApp } from '../runtime/store';
 import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, sendEntityTxs } from '../runtime/tx';
 import { formatMoney, formatSigned, formatUsd, getTokenMeta, parseAmount, shortId } from '../runtime/format';
 import { isUsdStable, usdOf } from '../runtime/financial/prices';
 import { useWallet, type AccountView, type TokenTotals, type WalletView } from '../runtime/views';
-import { ActivityRow, isDisplayableActivityEvent, USER_ACTIVITY_TYPES } from './Activity';
-
-type ActivityPage = { events?: RuntimeActivityEvent[] };
+import { USER_ACTIVITY_TYPES, useMovements } from '../runtime/financial/movements';
+import { ActivityRow } from './Activity';
 
 export function Home() {
 	const entityId = useApp(s => s.activeEntityId);
@@ -24,15 +21,11 @@ export function Home() {
 	const [open, setOpen] = useState<Set<number>>(() => new Set());
 	const [opening, setOpening] = useState(false);
 
-	const recent = useAdapterRead<ActivityPage>('activity', {
-		limit: 6,
-		types: USER_ACTIVITY_TYPES,
-		...(entityId ? { entityId } : {}),
-	});
-	const recentEvents = useMemo(
-		() => (recent.data?.events ?? []).filter(isDisplayableActivityEvent).slice(0, 4),
-		[recent.data],
-	);
+	const accountIds = useMemo(() => wallet.accounts.map(account => account.counterpartyId), [wallet.accounts]);
+	const recent = useMovements(entityId, USER_ACTIVITY_TYPES, 40, accountIds);
+	const recentMovements = recent.movements.slice(0, 4);
+
+	const activeTotals = useMemo(() => wallet.totals.filter(total => total.active), [wallet.totals]);
 
 	const toggle = (tokenId: number): void =>
 		setOpen(current => {
@@ -137,9 +130,12 @@ export function Home() {
 
 					<div className="sect">
 						<h3 className="caps">Balances</h3>
-						<span className="more">{wallet.totals.length} tokens</span>
+						<span className="more">
+							{activeTotals.length} {activeTotals.length === 1 ? 'token' : 'tokens'}
+							{wallet.totals.length > activeTotals.length ? ` · ${wallet.totals.length - activeTotals.length} empty hidden` : ''}
+						</span>
 					</div>
-					{wallet.totals.map((total, index) => (
+					{activeTotals.map((total, index) => (
 						<TokenRow
 							key={total.tokenId}
 							total={total}
@@ -150,7 +146,7 @@ export function Home() {
 							onAccount={counterpartyId => navigate(`/accounts/${counterpartyId}`)}
 						/>
 					))}
-					{wallet.totals.length === 0 && !wallet.loading && (
+					{activeTotals.length === 0 && !wallet.loading && (
 						<p className="note" style={{ padding: '18px 0' }}>
 							Nothing here yet. Receive a payment or open an account with a hub to start.
 						</p>
@@ -176,15 +172,15 @@ export function Home() {
 
 					<div className="card">
 						<h3 className="caps">Recent</h3>
-						{recentEvents.map((event, index) => (
-							<ActivityRow key={event.id} event={event} names={wallet.names} first={index === 0} />
+						{recentMovements.map((movement, index) => (
+							<ActivityRow key={movement.id} movement={movement} names={wallet.names} first={index === 0} />
 						))}
-						{recentEvents.length === 0 && !recent.loading && (
+						{recentMovements.length === 0 && !recent.loading && (
 							<p className="note" style={{ padding: '6px 0' }}>
 								Quiet so far.
 							</p>
 						)}
-						{recentEvents.length > 0 && (
+						{recentMovements.length > 0 && (
 							<button type="button" className="btn quiet" style={{ marginTop: 10 }} onClick={() => navigate('/activity')}>
 								All activity
 							</button>

@@ -8,6 +8,23 @@ import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN } from './xln-loader';
 import { useApp } from './store';
 
+/**
+ * Liveness is a host-observed fact the runtime asks its transport for. Every
+ * entity this runtime hosts is reachable without a socket, so the embedded host
+ * reports them online the same way the hub orchestrator reports its directly
+ * connected peers. When a relay connection starts later, the runtime composes
+ * relay presence with this direct set; without one, hosted peers are all it knows.
+ */
+function installHostedLivenessObserver(env: RuntimeReplica): void {
+	const infrastructure = env.infrastructure ?? (env.infrastructure = {});
+	const hosted = (entityIds: readonly string[]): ReadonlySet<string> => {
+		const local = new Set(Array.from(env.state.eReplicas.values(), replica => replica.entityId.toLowerCase()));
+		return new Set(entityIds.map(entityId => entityId.toLowerCase()).filter(entityId => local.has(entityId)));
+	};
+	infrastructure.observeDirectOnlineEntityIds = hosted;
+	if (!infrastructure.observeOnlineEntityIds) infrastructure.observeOnlineEntityIds = hosted;
+}
+
 let currentAdapter: RuntimeAdapter | null = null;
 let currentEnv: RuntimeReplica | null = null;
 let detach: (() => void) | null = null;
@@ -56,6 +73,7 @@ export async function connectEmbedded(seed: string): Promise<RuntimeAdapter> {
 		getEnv: () => env,
 		main: async (runtimeSeed?: string | null) => {
 			env = await xln.main(runtimeSeed ?? seed);
+			installHostedLivenessObserver(env);
 			currentEnv = env;
 			return env;
 		},

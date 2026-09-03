@@ -78,9 +78,6 @@ export function Legend() {
 	return (
 		<div className="legend">
 			<span>
-				<i className="c-slate" /> on-chain
-			</span>
-			<span>
 				<i className="c-coll" /> collateral
 			</span>
 			<span>
