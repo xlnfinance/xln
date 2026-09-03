@@ -11,6 +11,7 @@ import { AccountDetail } from './screens/AccountDetail';
 import { Pay } from './screens/Pay';
 import { Swap } from './screens/Swap';
 import { Receive } from './screens/Receive';
+import { Move } from './screens/Move';
 import { ActivityScreen } from './screens/Activity';
 import { SettingsScreen } from './screens/Settings';
 
@@ -56,6 +57,7 @@ export default function App() {
 				<Route path="/pay" element={<Pay />} />
 				<Route path="/swap" element={<Swap />} />
 				<Route path="/receive" element={<Receive />} />
+				<Route path="/move" element={<Move />} />
 				<Route path="/activity" element={<ActivityScreen />} />
 				<Route path="/settings" element={<SettingsScreen />} />
 				<Route path="*" element={<Home />} />

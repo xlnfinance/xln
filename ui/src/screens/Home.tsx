@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { UsdAmount } from '../components/Amount';
 import { Bar, DeltaBar, DeltaCaption } from '../components/Bars';
 import { Icon } from '../components/Icons';
+import { PendingBatch } from '../components/PendingBatch';
 import { Sheet } from '../components/Sheet';
 import { TokenIcon } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
@@ -140,8 +141,13 @@ export function Home() {
 						</button>
 					</div>
 
+					<PendingBatch wallet={wallet} compact />
+
 					<div className="sect">
 						<h3 className="caps">Balances</h3>
+						<button type="button" className="more" style={{ marginRight: 12 }} onClick={() => navigate('/move')} data-testid="home-move">
+							Move
+						</button>
 						<button type="button" className="more" onClick={() => navigate('/settings')} title="Every bar is drawn to this scale. Change it in Settings.">
 							<span className="num">1 px = ${usdPerPx.toLocaleString('en-US')}{scaleMode === 'auto' ? ' · auto' : ''}</span>
 							{wallet.totals.length > activeTotals.length ? ` · ${wallet.totals.length - activeTotals.length} empty hidden` : ''}

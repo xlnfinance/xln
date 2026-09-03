@@ -4,6 +4,8 @@ import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/pu
 import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
 import { buildCrossSwapSetupSteps } from '$lib/components/Entity/swap/swap-panel-helpers';
 import { DeltaBar, DeltaCaption } from '../components/Bars';
+import { Orderbook, type BookSide } from '../components/Orderbook';
+import { quoteForBase, useOrderbook, type BookLevel } from '../runtime/financial/orderbook';
 import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
@@ -35,6 +37,8 @@ export function Swap() {
 	const [giveText, setGiveText] = useState('');
 	const [wantText, setWantText] = useState('');
 	const [submitting, setSubmitting] = useState(false);
+	// The hub's book stays open, as in the SvelteKit panel; a level fills the ticket.
+	const [showBook, setShowBook] = useState(true);
 	const [cancelingId, setCancelingId] = useState<string | null>(null);
 
 	// Cross-network: our entity on the other network and a hub that lives there.
@@ -78,6 +82,30 @@ export function Swap() {
 
 	const giveMeta = getTokenMeta(giveTokenId);
 	const wantMeta = getTokenMeta(wantTokenId);
+	const book = useOrderbook({
+		hubId: hub?.counterpartyId ?? '',
+		tokenA: giveTokenId,
+		tokenB: wantTokenId,
+		ownEntityId: wallet.entityId,
+		baseDecimals: getTokenMeta(xln?.getSwapPairOrientation?.(giveTokenId, wantTokenId).baseTokenId ?? Math.max(giveTokenId, wantTokenId)).decimals,
+	});
+	const pickLevel = (side: BookSide, level: BookLevel): void => {
+		const base = getTokenMeta(book.baseTokenId);
+		const quote = getTokenMeta(book.quoteTokenId);
+		const quoteAmount = quoteForBase(level.size, level.priceTicks, base.decimals, quote.decimals);
+		if (side === 'ask') {
+			// Someone sells base at this price: we pay quote, we get base.
+			setGiveTokenId(book.quoteTokenId);
+			setWantTokenId(book.baseTokenId);
+			setGiveText(plainAmount(quoteAmount, quote.decimals));
+			setWantText(plainAmount(level.size, base.decimals));
+		} else {
+			setGiveTokenId(book.baseTokenId);
+			setWantTokenId(book.quoteTokenId);
+			setGiveText(plainAmount(level.size, base.decimals));
+			setWantText(plainAmount(quoteAmount, quote.decimals));
+		}
+	};
 	const giveToken = hub?.tokens.find(token => token.tokenId === giveTokenId) ?? null;
 	const giveSpendable = giveToken?.derived.outCapacity ?? 0n;
 
@@ -411,6 +439,18 @@ export function Swap() {
 						{submitting ? 'Placing…' : prepared ? `Swap ${giveMeta.symbol} for ${wantMeta.symbol}` : 'Swap'}
 					</button>
 
+					{hub && mode === 'same' ? (
+						<div className="mobile-only card">
+							<div className="sect" style={{ marginTop: 0 }}>
+								<h3 className="caps">Book</h3>
+								<button type="button" className="more" onClick={() => setShowBook(value => !value)}>
+									{showBook ? 'Hide' : 'Show'}
+								</button>
+							</div>
+							{showBook ? <Orderbook book={book} hubLabel={hub.label} onPick={pickLevel} /> : null}
+						</div>
+					) : null}
+
 					{mine.length > 0 && (
 						<div>
 							<div className="sect">
@@ -451,6 +491,17 @@ export function Swap() {
 				</div>
 
 				<div className="aside desktop-only">
+					{hub && mode === 'same' ? (
+						<div className="card">
+							<div className="sect" style={{ marginTop: 0 }}>
+								<h3 className="caps">Book</h3>
+								<button type="button" className="more" onClick={() => setShowBook(value => !value)}>
+									{showBook ? 'Hide' : 'Show'}
+								</button>
+							</div>
+							{showBook ? <Orderbook book={book} hubLabel={hub.label} onPick={pickLevel} /> : null}
+						</div>
+					) : null}
 					{mode === 'cross' ? (
 						<div className="card">
 							<h3 className="caps">Legs</h3>
@@ -493,6 +544,14 @@ export function Swap() {
 			</div>
 		</div>
 	);
+}
+
+/** Decimal text for an input field: no grouping, trailing zeros trimmed. */
+function plainAmount(amount: bigint, decimals: number): string {
+	const unit = 10n ** BigInt(decimals);
+	const whole = amount / unit;
+	const fraction = (amount % unit).toString().padStart(decimals, '0').replace(/0+$/, '');
+	return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
 export type { RuntimeAdapterEntitySummary };

@@ -14,14 +14,14 @@ const NAV: Array<{ to: string; label: string; icon: IconName; match: (pathname: 
 		to: '/',
 		label: 'Home',
 		icon: 'home',
-		match: pathname => pathname === '/' || pathname.startsWith('/accounts') || pathname === '/pay' || pathname === '/receive' || pathname === '/swap',
+		match: pathname => pathname === '/' || pathname.startsWith('/accounts') || pathname === '/pay' || pathname === '/receive' || pathname === '/swap' || pathname === '/move',
 	},
 	{ to: '/activity', label: 'Activity', icon: 'activity', match: pathname => pathname.startsWith('/activity') },
 	{ to: '/settings', label: 'Settings', icon: 'settings', match: pathname => pathname.startsWith('/settings') },
 ];
 
 /** Screens with their own back control and one primary action; the tab bar would compete with them on a phone. */
-const FLOW_ROUTES = new Set(['/pay', '/receive', '/swap']);
+const FLOW_ROUTES = new Set(['/pay', '/receive', '/swap', '/move']);
 
 export function Shell({ children }: { children: ReactNode }) {
 	const { pathname } = useLocation();

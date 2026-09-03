@@ -250,6 +250,7 @@
 
 .bw {
 	position: relative;
+	display: block;
 	width: 100%;
 	overflow: hidden;
 }
@@ -382,6 +383,86 @@
 	margin-top: 6px;
 	font-variant-numeric: tabular-nums;
 	gap: 12px;
+}
+
+/* ---------- orderbook ---------- */
+
+.book {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.bk-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 6px;
+}
+
+.bk-cols {
+	display: grid;
+	grid-template-columns: 96px 96px 1fr;
+	gap: 10px;
+	padding: 0 0 4px;
+	border-bottom: 1px solid var(--line);
+}
+
+.bk-side {
+	display: flex;
+	flex-direction: column;
+}
+
+.bk-row {
+	display: grid;
+	grid-template-columns: 96px 96px 1fr;
+	gap: 10px;
+	align-items: center;
+	height: 26px;
+	padding: 0;
+	background: none;
+	border: 0;
+	border-radius: 6px;
+	font: inherit;
+	color: var(--ink);
+	text-align: left;
+}
+
+button.bk-row {
+	cursor: pointer;
+}
+
+button.bk-row:hover {
+	background: var(--surface-2);
+}
+
+.bk-row.own .bk-size::after {
+	content: ' ·';
+	color: var(--accent);
+}
+
+.bk-price {
+	font-size: 13px;
+}
+
+.bk-size {
+	font-size: 13px;
+	color: var(--ink-2);
+}
+
+.bk-bar {
+	display: block;
+	min-width: 0;
+}
+
+.bk-spread {
+	padding: 6px 0;
+	margin: 2px 0;
+	border-top: 1px solid var(--line);
+	border-bottom: 1px solid var(--line);
+	font-size: 12px;
+	color: var(--ink-2);
+	text-align: center;
 }
 
 .legend {
@@ -1626,20 +1707,34 @@ textarea.input.boxed {
 
 .mode-grid {
 	display: grid;
-	grid-template-columns: 1fr 1fr;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 8px;
+}
+
+.mode-grid.places {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .mode-card {
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
+	min-width: 0;
+	overflow: hidden;
 	text-align: left;
 	padding: 10px 12px;
 	border-radius: 10px;
 	border: 1px solid var(--line);
 	background: var(--surface);
 	font-size: 13px;
+}
+
+.mode-card .v {
+	margin-top: 4px;
+	font-size: 13px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .mode-card.active {

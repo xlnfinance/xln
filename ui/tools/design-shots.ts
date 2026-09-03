@@ -142,6 +142,16 @@ async function captureVariant(browser: Browser, variant: Variant): Promise<strin
 		await page.waitForTimeout(300);
 	}
 
+	await page.getByRole('link', { name: 'Home' }).first().click();
+	await page.getByTestId('home-total').waitFor();
+	await page.getByTestId('home-move').click();
+	await page.getByTestId('move-amount').waitFor();
+	await page.getByTestId('move-amount').fill('250');
+	files.push(...(await shot(page, dir, '10-move', variant)));
+	// Flows hide the phone tab bar; leave through the back control.
+	await page.goBack();
+	await page.getByTestId('home-total').waitFor();
+
 	await page.getByRole('link', { name: 'Settings' }).first().click();
 	await page.getByText('Dollars per pixel').waitFor();
 	files.push(...(await shot(page, dir, '09-settings', variant)));

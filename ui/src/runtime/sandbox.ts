@@ -3,6 +3,8 @@ import { getXLN, peekXLN } from './xln-loader';
 import { connectEmbedded, disconnectAdapter, getEmbeddedEnv, requireAdapter } from './adapter';
 import { deriveAddress, derivePrivateKeyBytes } from './keys';
 import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, waitFor } from './tx';
+import { jurisdictionRef, planSwap, submitSwapPlan } from './financial/swap';
+import type { AccountState, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 import { useApp, type VaultKind } from './store';
 
 /** Anvil's well-known dev mnemonic — sandbox only, never a real vault. */
@@ -10,6 +12,8 @@ export const SANDBOX_SEED = 'test test test test test test test test test test t
 export const SANDBOX_VAULT_ID = 'sandbox';
 const DEMO_J = 'sandbox';
 const USDC = 1;
+const WETH = 2;
+const weth = (value: number): bigint => BigInt(Math.round(value * 1_000_000)) * 10n ** 12n;
 
 export type DemoActor = {
 	label: string;
@@ -48,10 +52,10 @@ function accountReady(env: RuntimeReplica, entityId: string, counterpartyId: str
 	return Boolean(replica?.state?.accounts?.get?.(counterpartyId));
 }
 
-function creditApplied(env: RuntimeReplica, entityId: string, counterpartyId: string, minTotal: bigint): boolean {
+function creditApplied(env: RuntimeReplica, entityId: string, counterpartyId: string, minTotal: bigint, tokenId: number = USDC): boolean {
 	const replica = findReplicaState(env, entityId);
 	const account = replica?.state?.accounts?.get?.(counterpartyId);
-	const delta = account?.state?.deltas?.get?.(USDC);
+	const delta = account?.state?.deltas?.get?.(tokenId);
 	const xln = peekXLN();
 	if (!delta || !replica || !xln) return false;
 	const isLeft = xln.isLeftEntity(entityId, counterpartyId);
@@ -61,6 +65,70 @@ function creditApplied(env: RuntimeReplica, entityId: string, counterpartyId: st
 
 async function sendEntity(entityId: string, signerId: string, entityTxs: EntityTx[]): Promise<void> {
 	await requireAdapter().send({ runtimeTxs: [], entityInputs: [{ entityId, signerId, entityTxs }] });
+}
+
+/** Resting offers on the hub's accounts for one pair, counted from the hub's own replica. */
+function restingOffers(env: RuntimeReplica, hubEntityId: string, tokenA: number, tokenB: number): number {
+	const replica = findReplicaState(env, hubEntityId);
+	let count = 0;
+	for (const account of replica?.state?.accounts?.values?.() ?? []) {
+		for (const offer of account?.state?.swapOffers?.values?.() ?? []) {
+			const pair = [offer.giveTokenId, offer.wantTokenId];
+			if (pair.includes(tokenA) && pair.includes(tokenB)) count += 1;
+		}
+	}
+	return count;
+}
+
+type MerchantOrder = { give: number; giveAmount: bigint; want: number; wantAmount: bigint };
+
+/** A small two-sided WETH/USDC market around 2,500, made by the merchant. */
+const MERCHANT_ORDERS: MerchantOrder[] = [
+	{ give: WETH, giveAmount: weth(0.5), want: USDC, wantAmount: usd(1_255) },
+	{ give: WETH, giveAmount: weth(0.5), want: USDC, wantAmount: usd(1_260) },
+	{ give: WETH, giveAmount: weth(1), want: USDC, wantAmount: usd(2_540) },
+	{ give: USDC, giveAmount: usd(1_245), want: WETH, wantAmount: weth(0.5) },
+	{ give: USDC, giveAmount: usd(1_240), want: WETH, wantAmount: weth(0.5) },
+	{ give: USDC, giveAmount: usd(2_460), want: WETH, wantAmount: weth(1) },
+];
+
+async function placeMerchantOrders(
+	adapter: ReturnType<typeof requireAdapter>,
+	env: RuntimeReplica,
+	merchant: DemoActor,
+	hub: DemoActor,
+): Promise<void> {
+	if (restingOffers(env, hub.entityId, WETH, USDC) >= MERCHANT_ORDERS.length) return;
+	const xln = await getXLN();
+	for (const order of MERCHANT_ORDERS) {
+		const before = restingOffers(env, hub.entityId, WETH, USDC);
+		const frame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', { entityId: merchant.entityId, accountsLimit: 50, booksLimit: 10 });
+		const account =
+			(frame.activeEntity?.accounts.items.find(doc => {
+				const left = String(doc.state.leftEntity || '').toLowerCase();
+				const right = String(doc.state.rightEntity || '').toLowerCase();
+				return (left === merchant.entityId ? right : left) === hub.entityId;
+			})?.state as AccountState | undefined) ?? null;
+		const prepared = xln.prepareSwapOrder(order.give, order.want, order.giveAmount, order.wantAmount);
+		if (!prepared) throw new Error('DEMO_SWAP_ORDER_UNPREPARABLE');
+		const giveMeta = xln.getTokenInfo(order.give);
+		const wantMeta = xln.getTokenInfo(order.want);
+		const plan = await planSwap({
+			mode: 'same',
+			frame,
+			source: { entityId: merchant.entityId, signerId: merchant.signerId, hubEntityId: hub.entityId, jurisdiction: jurisdictionRef(frame), account },
+			giveTokenId: order.give,
+			giveTokenDecimals: giveMeta.decimals,
+			wantTokenId: order.want,
+			wantTokenDecimals: wantMeta.decimals,
+			giveAmount: prepared.effectiveGive,
+			priceTicks: prepared.priceTicks,
+			expectedWantAmount: prepared.effectiveWant,
+			routeValue: `same:${hub.entityId}`,
+		});
+		await submitSwapPlan(plan);
+		await waitFor(() => restingOffers(env, hub.entityId, WETH, USDC) > before, 'demo resting order', 45_000);
+	}
 }
 
 export type VaultRuntimeOptions = {
@@ -252,6 +320,26 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 		await waitFor(hubConfigured, 'demo hub config', 45_000);
 	}
 
+	// The hub matches offers only once its orderbook extension exists; the same
+	// initOrderbookExt the market scenario sends. All spread to the taker.
+	const bookReady = (): boolean => Boolean(findReplicaState(env, hub.entityId)?.state?.orderbookExt);
+	if (!bookReady()) {
+		await sendEntity(hub.entityId, hub.signerId, [
+			{
+				type: 'initOrderbookExt',
+				data: {
+					name: hub.label,
+					spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+					referenceTokenId: USDC,
+					usdQuoteAuthorityEntityId: hub.entityId,
+					minTradeSize: 0n,
+					supportedPairs: ['1/2', '1/3', '2/3'],
+				},
+			},
+		]);
+		await waitFor(bookReady, 'demo hub orderbook', 45_000);
+	}
+
 	step('Opening accounts');
 	const spokes: Array<[DemoActor, DemoActor]> = [
 		[self, hub],
@@ -328,6 +416,20 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 			45_000,
 		);
 	}
+	// A second lane so the book has something to trade: WETH credit both ways.
+	const wethLine = weth(10);
+	for (const [index, [creditor, debtor]] of creditPairs.entries()) {
+		const minTotal = wethLine * BigInt((index % 2) + 1);
+		if (creditApplied(env, creditor.entityId, debtor.entityId, minTotal, WETH)) continue;
+		await sendEntity(creditor.entityId, creditor.signerId, [
+			{ type: 'extendCredit', data: { counterpartyEntityId: debtor.entityId, tokenId: WETH, amount: wethLine } },
+		]);
+		await waitFor(
+			() => creditApplied(env, creditor.entityId, debtor.entityId, minTotal, WETH),
+			`demo WETH credit ${creditor.label}→${debtor.label}`,
+			45_000,
+		);
+	}
 
 	// Starting money is placed once per runtime database. Re-entering the sandbox
 	// after the user spent some of it must not top the balances back up: the
@@ -378,6 +480,17 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 			]);
 			await waitFor(() => reserveOf(self.entityId) >= selfReserve, 'demo reserve mint', 45_000);
 		}
+		step('Funding the signer wallet');
+		// A little on-chain USDC in the signer's own wallet, so Move can show the
+		// external → reserve path with real approvals against the local chain.
+		const jadapter = (await getXLN()).getEntityJAdapter(env, self.entityId, self.signerId);
+		if (jadapter?.fundSignerWallet) await jadapter.fundSignerWallet(self.signerId, usd(2_500), 'USDC');
+
+		step('Placing resting orders');
+		// The merchant makes a small two-sided WETH/USDC market on the hub's book,
+		// through the same planner the wallet uses. Without it the Swap page shows
+		// an empty book and nothing to take.
+		await placeMerchantOrders(adapter, env, merchant, hub);
 		markSandboxFunded(runtimeId);
 	}
 

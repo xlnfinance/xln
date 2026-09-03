@@ -13,13 +13,13 @@ export type BarSegment = { usd: number; kind: SegmentKind };
 export function Bar({ segments, height = 6 }: { segments: BarSegment[]; height?: 4 | 6 | 8 }) {
 	const heightClass = height === 4 ? ' h4' : height === 8 ? ' h8' : '';
 	return (
-		<div className="bw" aria-hidden>
-			<div className={`bar${heightClass}`}>
+		<span className="bw" aria-hidden>
+			<span className={`bar${heightClass}`}>
 				{segments.map((segment, index) =>
 					segment.usd > 0 ? <i key={index} className={`seg c-${segment.kind}`} style={{ ['--u' as string]: segment.usd }} /> : null,
 				)}
-			</div>
-		</div>
+			</span>
+		</span>
 	);
 }
 
