@@ -13,8 +13,9 @@ kernel remains an independently written readable reference.
 
 The V1-specialized hybrid is now the measured M3 Ultra production engine.
 Automatic selection is restricted to that measured hardware class; the generic
-kernel remains selectable as an experimental independent implementation and all
-accelerator failures fall back to C/NEON. Promotion elsewhere still requires a
+kernel remains selectable as an experimental independent implementation. Only
+an automatically selected accelerator may fall back to C/NEON; an explicitly
+selected accelerator fails closed. Promotion elsewhere still requires a
 real-device parity, memory-pressure, cancellation, and thermal matrix.
 
 ## M3 Ultra result
@@ -29,25 +30,23 @@ The original shared-memory Metal path completed 256 shards in 5.213 seconds
 - a GPU-private arena with small upload/download staging buffers;
 - a 64-bit modern register permutation split into four Argon2 segments;
 - four SIMD groups per threadgroup;
-- two independent Metal processes, each reusing a 139-shard private arena.
+- eight independent Metal processes, each reusing a 40-shard private arena.
 
 On the 32-CPU-core / 80-GPU-core M3 Ultra used for development, the current
-default sends 588 shards to Metal and 412 to C/NEON, with 147 workers in each
-of two Metal processes. Earlier retained runs of
-the 556/444 profile took
-2.732, 2.740, 2.738, and 2.741 seconds: **2.739-second median** and
-**365.0 shards/s**. A later cool run of the same retained profile set the best
-observation at **2.675 seconds / 373.85 shards/s**.
-Against the fresh 5.136-second C/NEON baseline, the stable profile is **1.875x**
-faster. It is also **1.082x** faster than the 2.964-second OpenCL best while
-using Apple's native Metal API and no external runtime.
+default sends 640 shards to Metal and 360 to C/NEON, using eight Metal
+processes with 40 workers each and 32 CPU workers. Eight retained runs took
+2.422–2.623 seconds with a **2.472-second median**. The generic kernel's
+2.514-second median differed by only 0.39%, which is noise; the frozen-V1
+kernel remains the canonical production choice. The profile needs roughly
+88 GiB of unified memory at peak, so it is an M3 Ultra tuning, not a laptop
+default.
 
-Five retained V1-specialized runs of the final 588/412 profile took 2.735,
-2.747, 2.765, 2.786, and 2.889 seconds: **2.765-second median**. CPU and GPU
-completion differed by only 39–152 ms. The profile needs roughly 84 GiB of
-unified memory at peak, so it is an
-M3 Ultra tuning, not a laptop default. The frozen-V1 function-constant kernel and
-generic kernel both retain exact raw-shard and 1,000-shard root parity.
+The exact 10,000-shard level-4 default uses a separately measured 8,000 Metal /
+2,000 C/NEON split with the same process and worker counts. Three alternating
+runs improved the prior plan's 20.169-second median to 14.064 seconds while
+preserving the frozen root. Other shard counts do not extrapolate this split.
+The frozen-V1 function-constant and generic kernels both retain exact raw-shard
+and 1,000-shard root parity.
 
 Rejected experiments are equally important: 2 MiB Mach superpages fail to
 allocate on Apple Silicon, fixed-corpus PGO was within run noise, reference

@@ -74,5 +74,7 @@ export function verifyBundledFile(file: string, packageRoot: string): string {
 }
 
 export function verifyBundledExecutable(executable: string, packageRoot: string): string {
-  return verifyBundledFile(executable, packageRoot);
+  const target = verifyBundledFile(executable, packageRoot);
+  if ((lstatSync(target).mode & 0o111) === 0) throw new Error('BRAINVAULT_BINARY_NOT_EXECUTABLE');
+  return target;
 }

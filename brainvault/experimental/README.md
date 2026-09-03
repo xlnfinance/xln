@@ -27,7 +27,7 @@ dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485
 | Native binding, synchronous isolated workers | 16.433 s | 60.85 | Same Rust binding |
 | Native binding, direct async pool | 15.233 s | 65.65 | Best 8-worker run; not promoted due historical same-isolate corruption |
 | Official C Argon2 through SSE2NEON | 15.992 s | 62.53 | Reused 256 MiB arena per worker |
-| Native Rust pooled, secure wipe | 18.150 s | 55.10 | `argon2-rust` 1.1.0, `target-cpu=native` |
+| Native Rust pooled, secure wipe | 18.150 s | 55.10 | `argon2-rust` 1.1.0 |
 | Native Rust pooled, final wipe only | 18.003 s | 55.55 | Experimental security trade-off; not for production |
 | TypeScript/WASM (`hash-wasm`) | 28.430 s | 35.18 | Browser-compatible parity path |
 
@@ -88,6 +88,14 @@ shards. The required 32-worker run took 3.127 seconds; the best observed
 2.964-second tuning used 30 workers to reduce unified-memory contention. GPU
 and host memory are explicitly erased.
 
+The exact 10,000-shard user default has its own measured Metal plan rather than
+scaling the 1,000-shard ratio. A 3+3 alternating comparison moved from 6,400
+GPU / 3,600 CPU shards at a 20.169-second median to 8,000 GPU / 2,000 CPU at a
+14.064-second median, a 30.27% improvement with the same 88 GiB active-arena
+budget and frozen root. See the source-only
+`experimental/results/m3-ultra-re-audit-2026-09-03.md`; release evidence is
+kept in the source repository and is not nested in the npm artifact.
+
 OpenCL is deprecated by Apple and the pinned upstream has mixed license
 notices, so it is never selected automatically. Its `NOTICE` explains
 provenance and the conservative GPL treatment. The npm package contains the
@@ -107,11 +115,12 @@ bun experimental/benchmark.ts --backend=wasm --shards=1000 --workers=8
 make -C experimental/argon2-c
 bun experimental/benchmark.ts --backend=c-neon --shards=1000 --workers=8
 
-# Build and run both native Rust variants
+# Build secure/no-wipe Apple M1 baseline and M3-family prebuilds entirely offline
 make -C experimental/argon2-rust
 bun experimental/benchmark.ts --backend=rust-pool --shards=1000 --workers=8
 ```
 
-Raw run output and the independently validated Kimi K3/Qwen 3.8 Max audit are
-in `results/`. The aborted 100,000-shard log records the
-initially requested run before the benchmark size was corrected to 1,000.
+Raw run output and prior model-review notes are source-only under
+`experimental/results/`; they are not part of the npm artifact. The aborted
+100,000-shard log records the initially requested run before the benchmark size
+was corrected to 1,000.

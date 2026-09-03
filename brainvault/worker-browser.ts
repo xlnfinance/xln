@@ -12,6 +12,7 @@
  */
 
 import { argon2id } from 'hash-wasm';
+import { publicErrorCode } from './cli-policy.ts';
 import { bytesToHex } from './primitives/encoding.ts';
 import { deriveShardWithParams } from './primitives/kdf.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, shardRequestFingerprint } from './primitives/spec.ts';
@@ -85,7 +86,7 @@ self.onmessage = async function(e: MessageEvent) {
     self.postMessage({
       type: 'error',
       id,
-      data: { message: error instanceof Error ? error.message : String(error) }
+      data: { message: publicErrorCode(error, 'BRAINVAULT_WORKER_FAILURE') }
     });
   }
 };

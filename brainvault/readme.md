@@ -25,6 +25,9 @@ bun ./brainvault --bench
 ```bash
 # Run immediately without installing. The bundled Metal V1 + C/NEON hybrid is
 # the default for 1,000+ shards on the measured M3 Ultra; safe fallbacks are automatic.
+# BrainVault has no install/build lifecycle script. On supported Apple Silicon it
+# hash-verifies its bundled prebuild before use. bunx still registry-resolves npm
+# dependencies; audit them against dependency-lock.audit or use the source flow below.
 bunx brainvault
 
 # Or install the command globally.
@@ -118,7 +121,7 @@ bun ./brainvault --bench
 | (experimental) OpenCL + C/NEON hybrid | 3.167s | 315.80 | 1.30x |
 | (experimental) C/NEON per-shard wipe | 5.448s | 183.54 | 2.23x |
 | C/NEON final wipe | 5.497s | 181.92 | 2.25x |
-| (experimental) Native direct async | 6.147s | 162.69 | 2.52x |
+| (research-only) Native direct async | 6.147s | 162.69 | 2.52x |
 | (experimental) Native sync workers | 6.379s | 156.76 | 2.62x |
 | Native isolated workers | 6.471s | 154.55 | 2.65x |
 | (experimental) Rust pool no wipe | 6.484s | 154.21 | 2.66x |
@@ -131,10 +134,15 @@ Times are hardware- and load-dependent; root parity is not. The 40 ms gap
 between the two Metal kernels is within observed run-to-run noise, so the
 frozen-V1-specialized implementation remains the production default.
 
-The actual `standard` default of 10,000 shards measured **22.329s** on Metal
-versus **52.560s** on C/NEON (2.35x faster). Both independently produced the
-new frozen default-work root
+The exact `standard` default of 10,000 shards now uses a separately measured
+8,000 Metal / 2,000 C split while retaining eight Metal processes, 40 Metal
+workers per process, 32 CPU workers, private storage, and 88 GiB of live arenas.
+In a 3+3 alternating comparison it reduced the median from **20.169s** to
+**14.064s** (**30.27% faster**); the production CLI then completed in 14.379s.
+Every run produced the frozen default-work root
 `5557e8b96514ba45d0f3af0450616c68d41625731a8de9fbe54046cce1de0298`.
+This profile is exact rather than extrapolated: 1,000 shards remain 640/360,
+and unmeasured custom, level-5, and level-6 counts retain their prior plan.
 
 ## No recovery receipt by design
 
@@ -221,12 +229,15 @@ This directory is the complete npm package boundary. Nothing above
 - `hash-wasm` is the cross-platform compatibility engine;
 - `experimental/argon2-c/` contains the complete C/NEON source and vendored
   Argon2/SSE2NEON dependencies;
-- `experimental/argon2-rust/` contains the complete Rust source, locked Cargo
-  dependencies, and secure-wipe/no-wipe comparison variants;
+- `experimental/argon2-rust/` contains the complete Rust source, vendored locked
+  Cargo dependencies, and secure-wipe/no-wipe comparison variants. Its offline
+  build emits an Apple M1 baseline plus a separate M3-family prebuild; M3 Macs
+  select the latter and other Apple Silicon Macs use the M1-compatible binary;
 - `experimental/argon2-metal/` contains the complete native Apple GPU source,
   raw parity harness, generic kernel, frozen-V1-specialized kernel, and retained
   upstream MIT notice. On the measured 80-GPU-core, 512-GiB M3 Ultra, the
-  default uses 640 Metal / 360 C shards, eight Metal processes with 40 workers
+  1,000-shard benchmark uses 640 Metal / 360 C shards and the exact 10,000-shard
+  default uses 8,000 / 2,000. Both use eight Metal processes with 40 workers
   each, 32 CPU workers, and about 88 GiB of live arenas;
 - `experimental/argon2-opencl/` contains the complete deprecated OpenCL source
   and retained upstream notices. It remains selectable and benchmarked for
@@ -275,6 +286,10 @@ bunx brainvault --bench
 # Quick 2-shard cross-engine root-parity check.
 bunx brainvault --smoke
 
+# Explicit trust check from a source checkout: build every native artifact
+# offline in clean temporary directories and compare bytes with every prebuild.
+bun run verify:source
+
 # Optional: build every local experimental native backend, then benchmark all.
 bun run build:experimental
 bun run bench
@@ -309,6 +324,68 @@ Pin both the package version and the registry integrity hash in any serious
 deployment. A newer npm build must be audited again even though the protocol is
 still BrainVault V1.
 
+## Ultra-paranoid source verification
+
+Do not use `bunx` for the first run when the native binary itself is inside the
+threat model: `bunx` intentionally downloads and executes in one operation.
+Start from an immutable source commit authenticated by a signed release tag
+through an independent channel. Treat the npm tarball only as a delivery
+artifact: compare its complete manifest with a package made from that audited
+source before trusting it. Never regenerate `MANIFEST.sha256` during an audit;
+doing so would replace the release evidence with hashes of the current files.
+
+1. Audit the frozen root path first: `SPEC-V1.md`, `vectors-v1.json`,
+   `primitives/spec.ts`, `primitives/kdf.ts`, `canonical.ts`, then the wallet
+   projection and disclosure files listed below.
+2. Audit `package.json` and `bun.lock`, including every exact version and
+   registry integrity. For native code, inspect the complete C, Rust, Metal,
+   and OpenCL source plus licenses and checksums under `experimental/**/vendor/`.
+   BrainVault has no install lifecycle script.
+3. Populate a clean Bun cache only with packages whose source and integrity
+   match the audited `bun.lock`, then disconnect the network. Install from that
+   cache with lifecycle scripts disabled and the lock frozen; a cache miss must
+   fail instead of reaching the registry.
+4. On Apple Silicon, run the source verifier. It uses locked vendored inputs,
+   an empty Cargo home, and clean temporary output directories; it builds every
+   M1/M3 native artifact twice and requires byte-for-byte equality with every
+   bundled prebuild. A missing toolchain or any mismatch is a hard failure,
+   never an automatic fallback.
+5. Run the complete deterministic and release matrices, then the cross-engine
+   smoke. Only after all of them pass should the audited package see a real
+   Username or Password.
+
+```bash
+cd brainvault
+bun install --offline --frozen-lockfile --ignore-scripts
+bun test historical.test.ts
+bun run verify:source
+bun run check
+bun run test:matrix
+bun ./brainvault --smoke --workers 32
+
+# macOS: keep the actual recovery run offline as an additional boundary.
+bv_bun="$(command -v bun)"
+/usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network*)' "$bv_bun" ./brainvault
+```
+
+There is intentionally no generic `bun run build` trust shortcut. TypeScript is
+executed directly by Bun, while a successful native compile proves only that a
+compiler emitted bytes. `bun run verify:source` is the stronger gate: build
+twice from the audited vendored source, normalize the Mach-O signatures, compare
+the builds to each other, and compare them with the shipped prebuilds.
+
+After `verify:source`, running the bundled executable is running the same bytes
+that were just rebuilt: the verifier compared the normalized, ad-hoc-signed
+Mach-O files exactly, and the CLI rechecks their release-manifest hashes before
+execution. It deliberately does not copy an unverified local build into place.
+
+This procedure proves source/artifact reproducibility on that toolchain; it
+does not prove that the reviewed source is correct or that the compiler, OS,
+firmware, terminal, camera environment, swap, or crash-dump policy is trusted.
+For the strongest practical recovery, use a clean private machine, no tmux or
+recording, an independently authenticated release, and a second fresh
+derivation that compares the complete first receiving address before funding.
+
 `AGENTS.md` is the package-local contract for coding agents. It keeps V1 frozen,
 maps the ownership layers, requires a failing regression test before a bug fix,
 and routes CLI, native, package, and release changes to their exact verification
@@ -325,10 +402,13 @@ by exactly these files:
 4. `canonical.ts` — factor, domain string, ordered shard fold, and fingerprint;
 5. `vectors-v1.json` — external expected bytes and roots.
 
-The executable TypeScript root implementation in items 2–4 is currently 281
+The executable TypeScript root implementation in items 2–4 is currently 284
 lines. It has no CLI, filesystem, network, wallet UI, or native scheduler. Audit
 its two cryptographic imports against the exact versions and integrity hashes in
-`bun.lock`: `hash-wasm` for Argon2id and `@noble/hashes` for BLAKE3.
+the source checkout's `bun.lock`: `hash-wasm` for Argon2id and
+`@noble/hashes` for BLAKE3. npm pack omits lockfiles by design, so the shipped
+`dependency-lock.audit` is a byte-identical, manifest-covered audit copy;
+`package.test.ts` fails if it differs from `bun.lock`.
 
 Expand the audit only for the property being trusted:
 
@@ -339,11 +419,20 @@ Expand the audit only for the property being trusted:
 | Worker ordering and failure | `shard-collector.ts`, `native.ts`, `worker-native.ts`, `worker-wasm.ts` |
 | Default M3 Ultra acceleration | `binary-integrity.ts`, `native-hybrid.ts`, `native/progress.ts`, `experimental/argon2-c/brainvault_argon2.c`, `experimental/argon2-metal/brainvault_argon2_metal.m`, `experimental/argon2-metal/argon2.metal` |
 | Native build inputs | the two relevant `Makefile`s plus every source/header named by their `SOURCES` and `HEADERS` variables |
-| npm/release integrity | `package.json`, `manifest.ts`, `package.test.ts`, `native-build.test.ts`, `release.md`, `historical.test.ts` |
+| npm/release integrity | `package.json`, `manifest.ts`, `package.test.ts`, `native-build.test.ts`, `release.md`; in a source checkout only, `historical.test.ts` |
 
 `MANIFEST.sha256` covers every shipped file, but it is not a substitute for a
 signed release. `native-build.test.ts` independently rebuilds native artifacts
 and requires byte equality with the bundled executables.
+
+## Licensing
+
+The BrainVault core and CLI are MIT-licensed. The tarball also carries a
+separate optional OpenCL experiment and its corresponding source under
+GPL-2.0-or-later, as documented in `experimental/argon2-opencl/NOTICE`; package
+metadata therefore declares the aggregate distribution as
+`MIT AND GPL-2.0-or-later`. Each bundled third-party component retains its own
+license and notices.
 
 ## Invariant-style AI audit
 
@@ -417,8 +506,10 @@ traced to executable source. Report exact file and line evidence for each item.
   integrity; a manifest shipped beside its files is not an independent signature.
 - `manifest.ts` regenerates that manifest from the exact inert npm pack allowlist,
   so every shipped file other than the manifest itself must be covered;
-- `bun.lock` freezes exact dependency versions and registry tarball integrity;
-- `historical-v1.json` pins retained historical release tarballs by SHA-256;
+- source `bun.lock` freezes exact dependency versions and registry tarball
+  integrity; shipped `dependency-lock.audit` is its byte-identical audit copy;
+- source-only `historical-v1.json` pins retained historical release tarballs by
+  SHA-256; historical archives are deliberately not nested inside the npm package;
 - `release.md` defines signed, multi-archive release procedure.
 
 There is deliberately no recovery-receipt artifact. A secret-bearing receipt
@@ -451,10 +542,11 @@ the CLI's deliberately memory-only recovery model.
 
 ## Canonical test ladder
 
-Every commit runs 1–2-shard frozen vectors, default-secret-output tests,
+The shipped default test command runs 1–2-shard frozen vectors, default-secret-output tests,
 Unicode/NFKD/NUL corpus checks, domain separation, ordered scheduling, malformed
 worker results, native worker crash, Ctrl+C, RAM admission, manifest integrity,
-network-denied derivation, historical tarball hashes, and inert package install.
+network-denied derivation, and inert package install. A source checkout additionally
+runs `bun test historical.test.ts` as a release gate over retained archives.
 
 Release candidates additionally run `release-matrix.test.ts` against frozen
 roots in `matrix-v1.json` once for every pair in workers `1/2/8/32` and
@@ -466,9 +558,10 @@ and OOM evidence rather than a per-commit gate.
 The canonical 1,000-shard benchmark root is also frozen there, so even a
 single-engine production timing fails rather than merely printing a changed root.
 
-`historical.test.ts` hashes each archived tarball and extracts pinned source and
-vector artifacts strictly as inert data; historical package code is never
-executed. `package.test.ts` packs a real `.tgz`, installs it into an
+Source-only `historical.test.ts` hashes each archived tarball and extracts pinned
+source and vector artifacts strictly as inert data; historical package code is
+never executed, and nested historical archives are excluded from npm.
+`package.test.ts` packs a real `.tgz`, installs it into an
 empty directory with `--offline --ignore-scripts`, checks the allowlist and
 lifecycle-script absence, then runs its launcher and two-shard smoke test.
 

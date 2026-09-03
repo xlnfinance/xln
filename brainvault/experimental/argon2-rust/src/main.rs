@@ -60,20 +60,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args_os().count() != 1 {
         return Err("invalid BrainVault native invocation".into());
     }
-    let mut input = SecretVec(Vec::new());
-    io::stdin().read_to_end(&mut input.0)?;
-    if input.len() < HEADER_BYTES || read_u32le(&input[0..4]) != INPUT_MAGIC {
+    let mut stdin = io::stdin().lock();
+    let mut header = [0u8; HEADER_BYTES];
+    stdin.read_exact(&mut header)?;
+    if read_u32le(&header[0..4]) != INPUT_MAGIC {
         return Err("invalid BrainVault native input".into());
     }
-    let shard_count = read_u32le(&input[4..8]) as usize;
-    let worker_count = read_u32le(&input[8..12]) as usize;
-    let password_len = read_u32le(&input[12..16]) as usize;
-    let flags = read_u32le(&input[16..20]);
-    let memory_kib = read_u32le(&input[20..24]) as u64;
-    let expected = HEADER_BYTES
-        .checked_add(password_len)
-        .and_then(|value| value.checked_add(shard_count.checked_mul(SALT_BYTES)?))
-        .ok_or("input size overflow")?;
+    let shard_count = read_u32le(&header[4..8]) as usize;
+    let worker_count = read_u32le(&header[8..12]) as usize;
+    let password_len = read_u32le(&header[12..16]) as usize;
+    let flags = read_u32le(&header[16..20]);
+    let memory_kib = read_u32le(&header[20..24]) as u64;
+    let salt_len = shard_count.checked_mul(SALT_BYTES).ok_or("input size overflow")?;
     if shard_count == 0
         || worker_count == 0
         || worker_count > shard_count
@@ -81,7 +79,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || password_len == 0
         || flags != 0
         || memory_kib < 8
-        || input.len() != expected
     {
         return Err("invalid BrainVault native dimensions".into());
     }
@@ -97,9 +94,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(params) => params,
         Err(error) => return Err(error.into()),
     };
-    let password = Arc::new(SecretVec(input[HEADER_BYTES..HEADER_BYTES + password_len].to_vec()));
-    let salts = Arc::new(SecretVec(input[HEADER_BYTES + password_len..].to_vec()));
-    drop(input);
+    let mut password = SecretVec(vec![0u8; password_len]);
+    let mut salts = SecretVec(vec![0u8; salt_len]);
+    stdin.read_exact(&mut password.0)?;
+    stdin.read_exact(&mut salts.0)?;
+    let mut trailing = SecretVec(vec![0u8; 1]);
+    if stdin.read(&mut trailing.0)? != 0 {
+        return Err("invalid BrainVault native input length".into());
+    }
+    drop(stdin);
+    let password = Arc::new(password);
+    let salts = Arc::new(salts);
     let next = Arc::new(AtomicU32::new(0));
     let progress = Arc::new(AtomicU32::new(0));
     let progress_enabled = std::env::var_os("BRAINVAULT_NATIVE_PROGRESS").is_some();

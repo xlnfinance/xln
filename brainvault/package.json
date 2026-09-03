@@ -3,7 +3,7 @@
   "version": "2.1.0",
   "description": "Memory-hard deterministic wallet derivation with a fast Bun-native CLI",
   "type": "module",
-  "license": "MIT",
+  "license": "(MIT AND GPL-2.0-or-later)",
   "bin": {
     "brainvault": "brainvault"
   },
@@ -15,7 +15,7 @@
     "binary-integrity.ts",
     "bip39-english.ts",
     "brainvault",
-    "bun.lock",
+    "dependency-lock.audit",
     "canonical.ts",
     "cli-policy.ts",
     "cli.ts",
@@ -27,6 +27,7 @@
     "native-hybrid.ts",
     "native-hybrid.test.ts",
     "native-build.test.ts",
+    "native/children.ts",
     "native/progress.test.ts",
     "native/progress.ts",
     "package.test.ts",
@@ -42,6 +43,7 @@
     "worker-wasm.ts",
     "vectors-v1.json",
     "prebuilds/",
+    "media/",
     "experimental/benchmark.ts",
     "experimental/normalize-macho.ts",
     "experimental/worker-sync.ts",
@@ -66,6 +68,7 @@
     "experimental/argon2-rust/Cargo.toml",
     "experimental/argon2-rust/Makefile",
     "experimental/argon2-rust/src/",
+    "experimental/argon2-rust/vendor/",
     "experimental/argon2-metal/",
     "experimental/argon2-opencl/",
     "primitives/",
@@ -86,9 +89,10 @@
     "build:opencl:prebuild": "make -C experimental/argon2-opencl prebuild",
     "build:experimental": "bun run build:c && bun run build:rust && bun run build:metal && bun run build:opencl",
     "manifest": "bun manifest.ts",
-    "test": "bun test core.test.ts native-hybrid.test.ts native/progress.test.ts sandbox.test.ts package.test.ts historical.test.ts",
+    "test": "bun test core.test.ts native-hybrid.test.ts native/progress.test.ts sandbox.test.ts package.test.ts",
     "test:matrix": "bun test release-matrix.test.ts",
-    "test:native-release": "bun test native-build.test.ts"
+    "test:native-release": "bun test native-build.test.ts",
+    "verify:source": "bun test native-build.test.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",

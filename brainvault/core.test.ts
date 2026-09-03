@@ -11,7 +11,12 @@
 import { test, expect } from 'bun:test';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import { Worker } from 'node:worker_threads';
-import { cpus } from 'node:os';
+import { cpus, tmpdir, totalmem } from 'node:os';
+import {
+  chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
 import {
   createShardSalt, deriveShard, deriveShardWithParams, combineShards, combineShardsWithParams, deriveKey,
   entropyToMnemonic, deriveEthereumAddress, deriveEthereumAddressMatrix,
@@ -22,7 +27,10 @@ import { BIP39_ENGLISH } from './bip39-english.ts';
 import { resolveKdfParams } from './primitives/kdf.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, shardRequestFingerprint } from './primitives/spec.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
-import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
+import {
+  cliCreationCharacterError, cliPasswordError, cliProgressStatusLine,
+  publicErrorCode, publicErrorMessage,
+} from './cli-policy.ts';
 import { deriveBrainVaultNative } from './native.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
@@ -104,6 +112,26 @@ test('external V1 vectors freeze input bytes and spec identity', () => {
   }
 });
 
+test('public errors retain codes without disclosing diagnostics', () => {
+  expect(publicErrorCode(
+    new Error('BRAINVAULT_NATIVE_FAILURE:/Users/example/SENSITIVE-PATH'),
+    'BRAINVAULT_UNEXPECTED_FAILURE',
+  )).toBe('BRAINVAULT_NATIVE_FAILURE');
+  expect(publicErrorCode(
+    new Error('failure at /Users/example/SENSITIVE-PATH'),
+    'BRAINVAULT_UNEXPECTED_FAILURE',
+  )).toBe('BRAINVAULT_UNEXPECTED_FAILURE');
+  expect(publicErrorMessage(
+    new Error('BRAINVAULT_PASSWORD_MODE_TERMINAL_REQUIRED:/Users/example/SENSITIVE-PATH'),
+    'BRAINVAULT_UNEXPECTED_FAILURE',
+  )).toBe('BRAINVAULT_PASSWORD_MODE_TERMINAL_REQUIRED: site passwords require alternate-screen support');
+});
+
+test('full progress status never wraps at its non-compact terminal boundary', () => {
+  const line = cliProgressStatusLine(10_000, 10_000, 99.9, 'ETA 16m 59s', 32, 72);
+  expect(line.length).toBeLessThanOrEqual(72);
+});
+
 test('canonical manifest authenticates every listed source and native binary', async () => {
   const manifest = await Bun.file(`${import.meta.dir}/MANIFEST.sha256`).text();
   const entries = manifest.trim().split('\n').map(line => {
@@ -120,7 +148,11 @@ test('canonical manifest authenticates every listed source and native binary', a
     'core.ts',
     'native-hybrid.ts',
     'prebuilds/darwin-arm64/brainvault-argon2',
+    'prebuilds/darwin-arm64/brainvault-argon2-m3',
     'prebuilds/darwin-arm64/brainvault-argon2-rust',
+    'prebuilds/darwin-arm64/brainvault-argon2-rust-m3',
+    'prebuilds/darwin-arm64/brainvault-argon2-rust-no-wipe',
+    'prebuilds/darwin-arm64/brainvault-argon2-rust-no-wipe-m3',
     'prebuilds/darwin-arm64/brainvault-argon2-metal',
     'prebuilds/darwin-arm64/argon2.metallib',
     'prebuilds/darwin-arm64/brainvault-argon2-opencl',
@@ -546,6 +578,8 @@ function runCliTty(extraArgs: readonly string[], confirmation = '') {
     'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
     `send "${confirmation}\\r"`,
     ...(confirmation !== 'secret123456' ? [] : [
+      'expect "Press Enter for the SECONDARY wallet: "',
+      'send "\\r"',
       'expect "Press Enter to clear and exit: "',
       'send "\\r"',
     ]),
@@ -561,10 +595,10 @@ function runCliTty(extraArgs: readonly string[], confirmation = '') {
   });
 }
 
-function runAnimatedCliTty(noColor: boolean) {
+function runAnimatedCliTty(noColor: boolean, columns = 80) {
   const environment = noColor
-    ? 'env NO_COLOR=1 TERM=xterm-256color COLUMNS=80'
-    : 'env -u NO_COLOR TERM=xterm-256color COLUMNS=80';
+    ? `env NO_COLOR=1 TERM=xterm-256color COLUMNS=${columns}`
+    : `env -u NO_COLOR TERM=xterm-256color COLUMNS=${columns}`;
   const script = [
     'set timeout 10',
     `spawn ${environment} bun cli.ts --shards 100 --workers 32 --engine c-neon`,
@@ -584,6 +618,122 @@ function runAnimatedCliTty(noColor: boolean) {
     stderr: 'pipe',
     stdout: 'pipe',
   });
+}
+
+function runBrokenAcceleratorCliTty() {
+  const temp = mkdtempSync(join(tmpdir(), 'brainvault-broken-accelerator-tty-'));
+  try {
+    const packed = Bun.spawnSync({
+      cmd: ['bun', 'pm', 'pack', '--ignore-scripts', '--destination', temp, '--quiet'],
+      cwd: import.meta.dir,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    });
+    if (packed.exitCode !== 0) throw new Error(`BRAINVAULT_TEST_PACK_FAILED:${packed.stderr.toString()}`);
+    const tarball = packed.stdout.toString().trim();
+    const archive = tarball.startsWith('/') ? tarball : join(temp, tarball);
+    const extract = join(temp, 'extract');
+    mkdirSync(extract);
+    const unpacked = Bun.spawnSync({ cmd: ['tar', '-xzf', archive, '-C', extract], stderr: 'pipe' });
+    if (unpacked.exitCode !== 0) throw new Error(`BRAINVAULT_TEST_UNPACK_FAILED:${unpacked.stderr.toString()}`);
+
+    const packageRoot = join(extract, 'package');
+    const localModules = join(import.meta.dir, 'node_modules');
+    symlinkSync(existsSync(localModules) ? localModules : join(import.meta.dir, '..'), join(packageRoot, 'node_modules'));
+    const executablePath = join(packageRoot, 'prebuilds/darwin-arm64/brainvault-argon2-metal');
+    const failureFixture = join(import.meta.dir, 'test-fixtures/native-failure.ts');
+    copyFileSync(failureFixture, executablePath);
+    chmodSync(executablePath, 0o755);
+    const digest = new Bun.CryptoHasher('sha256').update(readFileSync(executablePath)).digest('hex');
+    const manifestPath = join(packageRoot, 'MANIFEST.sha256');
+    const manifest = readFileSync(manifestPath, 'utf8').replace(
+      /^[0-9a-f]{64}  prebuilds\/darwin-arm64\/brainvault-argon2-metal$/m,
+      `${digest}  prebuilds/darwin-arm64/brainvault-argon2-metal`,
+    );
+    writeFileSync(manifestPath, manifest);
+
+    const script = [
+      'set timeout 30',
+      `spawn env NO_COLOR=1 TERM=xterm-256color COLUMNS=80 bun ${join(packageRoot, 'cli.ts')} --shards 1000 --workers 32`,
+      'expect "Username: "', 'send "broken-accelerator-audit\\r"',
+      'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+      // A broken accelerator ends the CLI before any prompt; a healthy one reaches the reveal prompt.
+      'expect { "or press Enter to exit: " { send "\\r"; exp_continue } eof {} }',
+      'catch wait result',
+      'exit [lindex $result 3]',
+    ].join('\n');
+    return Bun.spawnSync({
+      cmd: ['expect', '-c', script], cwd: packageRoot, stderr: 'pipe', stdout: 'pipe',
+    });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function runSignalDuringNativeDerivation(signal: 'TERM' | 'HUP') {
+  const temp = mkdtempSync(join(tmpdir(), 'brainvault-signal-child-'));
+  try {
+    const packed = Bun.spawnSync({
+      cmd: ['bun', 'pm', 'pack', '--ignore-scripts', '--destination', temp, '--quiet'],
+      cwd: import.meta.dir,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    });
+    if (packed.exitCode !== 0) throw new Error(`BRAINVAULT_TEST_PACK_FAILED:${packed.stderr.toString()}`);
+    const packedPath = packed.stdout.toString().trim();
+    const archive = packedPath.startsWith('/') ? packedPath : join(temp, packedPath);
+    const extract = join(temp, 'extract');
+    mkdirSync(extract);
+    const unpacked = Bun.spawnSync({ cmd: ['tar', '-xzf', archive, '-C', extract], stderr: 'pipe' });
+    if (unpacked.exitCode !== 0) throw new Error(`BRAINVAULT_TEST_UNPACK_FAILED:${unpacked.stderr.toString()}`);
+
+    const packageRoot = join(extract, 'package');
+    const localModules = join(import.meta.dir, 'node_modules');
+    symlinkSync(existsSync(localModules) ? localModules : join(import.meta.dir, '..'), join(packageRoot, 'node_modules'));
+    const executablePaths = [
+      join(packageRoot, 'prebuilds/darwin-arm64/brainvault-argon2'),
+      join(packageRoot, 'prebuilds/darwin-arm64/brainvault-argon2-m3'),
+    ];
+    const fixturePath = join(import.meta.dir, 'test-fixtures/native-hang.ts');
+    for (const executablePath of executablePaths) {
+      copyFileSync(fixturePath, executablePath);
+      chmodSync(executablePath, 0o755);
+    }
+    const digest = new Bun.CryptoHasher('sha256').update(readFileSync(fixturePath)).digest('hex');
+    const manifestPath = join(packageRoot, 'MANIFEST.sha256');
+    writeFileSync(manifestPath, readFileSync(manifestPath, 'utf8')
+      .replace(
+        /^[0-9a-f]{64}  prebuilds\/darwin-arm64\/brainvault-argon2$/m,
+        `${digest}  prebuilds/darwin-arm64/brainvault-argon2`,
+      )
+      .replace(
+        /^[0-9a-f]{64}  prebuilds\/darwin-arm64\/brainvault-argon2-m3$/m,
+        `${digest}  prebuilds/darwin-arm64/brainvault-argon2-m3`,
+      ));
+    const cliPidFile = join(temp, 'cli.pid');
+    const nativePidFile = join(temp, 'native.pid');
+    const wrapper = join(import.meta.dir, 'test-fixtures/cli-signal-wrapper.ts');
+    const script = [
+      'set timeout 10',
+      `spawn env NO_COLOR=1 TERM=xterm-256color bun ${wrapper} ${join(packageRoot, 'cli.ts')} ${cliPidFile} ${nativePidFile} --shards 100 --workers 32 --engine c-neon`,
+      'expect "Username: "', 'send "signal-audit\\r"',
+      'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+      'expect "1 / 100 shards"',
+      `set handle [open ${cliPidFile} r]`,
+      'set cli_pid [string trim [read $handle]]',
+      'close $handle',
+      `exec kill -${signal} $cli_pid`,
+      'expect "NATIVE_ALIVE:"',
+      'exit 0',
+    ].join('\n');
+    const result = Bun.spawnSync({
+      cmd: ['expect', '-c', script], cwd: packageRoot, stderr: 'pipe', stdout: 'pipe',
+    });
+    const childAlive = result.stdout.toString().includes('NATIVE_ALIVE:1');
+    return { result, childAlive };
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 }
 
 function runAskCliTty() {
@@ -830,6 +980,12 @@ test('CLI defaults to printable ASCII while preserving explicit Unicode recovery
   expect(cliPasswordError('1234567', true)).toBeUndefined();
 });
 
+test('known-corrupt same-isolate engine is research-only outside benchmark modes', () => {
+  const blocked = runCli(['--shards', '1', '--workers', '1', '--engine', 'native-direct']);
+  expect(blocked.exitCode).toBe(1);
+  expect(blocked.stderr.toString()).toContain('BRAINVAULT_ENGINE_RESEARCH_ONLY:native-direct');
+});
+
 test('CLI advanced menu accepts keyboard navigation and derives the selected level', () => {
   const selected = runAskCliTty();
   const output = selected.stdout.toString();
@@ -878,11 +1034,52 @@ test('exact password confirmation reveals sensitive output without a reveal comm
   const output = revealed.stdout.toString();
   expect(revealed.exitCode).toBe(0);
   expect(output).toContain('RECOVERY WORDS · SECRET');
-  expect(output).toContain(VECTORS[0]!.expect.mnemonic24);
+  expect(output.replaceAll(/\s+/g, ' ')).toContain(VECTORS[0]!.expect.mnemonic24);
   expect(output).toContain('\x1b[?1049h');
   expect(output).toContain('\x1b[3J');
   expect(output).toContain('\x1b[?1049l');
   expect(output).toContain('Sensitive view erased.');
+});
+
+test('24-row sensitive output pages before the secondary wallet can displace the primary', () => {
+  const script = [
+    'set timeout 10',
+    'set stty_init "rows 24 cols 80"',
+    'spawn env TERM=xterm-256color COLUMNS=80 LINES=24 bun cli.ts --shards 1 --workers 1 --engine native',
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+    'send "secret123456\\r"',
+    'expect "Press Enter for the SECONDARY wallet: "', 'send "\\r"',
+    'expect "Press Enter to clear and exit: "', 'send "\\r"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const result = Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  const output = result.stdout.toString();
+  expect(result.exitCode).toBe(0);
+  expect(output.indexOf('PRIMARY WALLET')).toBeLessThan(output.indexOf('Press Enter for the SECONDARY wallet'));
+  expect(output.indexOf('Press Enter for the SECONDARY wallet')).toBeLessThan(output.indexOf('SECONDARY WALLET'));
+  expect(output).toContain('\x1b[2J\x1b[H');
+});
+
+test('input typed during derivation is neither echoed nor accepted as confirmation', () => {
+  const result = runCliInputTty([
+    '--shards', '100', '--workers', '32', '--engine', 'c-neon',
+  ], [
+    'expect "Username: "', 'send "typeahead-audit\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "DERIVING"', 'send "secret123456\\r"',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+    'after 100', 'send "\\r"',
+  ]);
+  const output = result.stdout.toString();
+  expect(result.exitCode).toBe(0);
+  expect(output).not.toContain('secret123456');
+  expect(output).not.toContain('RECOVERY WORDS · SECRET');
 });
 
 test('Ctrl+C inside sensitive view erases it and exits the entire CLI', () => {
@@ -896,7 +1093,7 @@ test('Ctrl+C inside sensitive view erases it and exits the entire CLI', () => {
     'send "secret123456\\r"',
     'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
     'send "secret123456\\r"',
-    'expect "Press Enter to clear and exit: "',
+    'expect "Press Enter for the SECONDARY wallet: "',
     'send "\\003"',
     'expect eof',
     'catch wait result',
@@ -923,7 +1120,7 @@ test('SIGTERM and SIGHUP erase the sensitive screen before exiting', () => {
       'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
       'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
       'send "secret123456\\r"',
-      'expect "Press Enter to clear and exit: "',
+      'expect "Press Enter for the SECONDARY wallet: "',
       `exec kill -${signal} [exp_pid]`,
       'expect eof',
       'catch wait result',
@@ -939,6 +1136,15 @@ test('SIGTERM and SIGHUP erase the sensitive screen before exiting', () => {
     expect(output).toContain('\x1b[?1049l');
   }
 });
+
+test('SIGTERM and SIGHUP terminate an active native child', () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  for (const signal of ['TERM', 'HUP'] as const) {
+    const { result, childAlive } = runSignalDuringNativeDerivation(signal);
+    expect(result.stdout.toString()).toContain('NATIVE_ALIVE:');
+    expect(childAlive).toBe(false);
+  }
+}, 30_000);
 
 test('TERM=dumb refuses recovery-word disclosure after a public derivation', () => {
   const script = [
@@ -960,6 +1166,29 @@ test('TERM=dumb refuses recovery-word disclosure after a public derivation', () 
   const passwordMode = runCliInputTty(['--password'], [], 'env TERM=dumb NO_COLOR=1 ');
   expect(passwordMode.exitCode).toBe(1);
   expect(passwordMode.stdout.toString()).toContain('site passwords require alternate-screen support');
+
+  const progress = runCliInputTty([
+    '--shards', '100', '--workers', '32', '--engine', 'c-neon',
+  ], [
+    'expect "Username: "', 'send "dumb-progress-audit\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "Recovery words unavailable"',
+  ], 'env TERM=dumb NO_COLOR=1 ');
+  expect(progress.exitCode).toBe(0);
+  expect(progress.stdout.toString()).not.toContain('\x1b[2A');
+  expect(progress.stdout.toString()).not.toContain('\x1b[2K');
+
+  const menu = runCliInputTty([
+    '--ask', '--engine', 'native', '--workers', '1', '--multiplier', '1',
+  ], [
+    'expect "Username: "', 'send "dumb-menu-audit\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "work level (enter a number; default 4): "', 'send "1\\r"',
+    'expect "Recovery words unavailable"',
+  ], 'env TERM=dumb NO_COLOR=1 ');
+  expect(menu.exitCode).toBe(0);
+  expect(menu.stdout.toString()).not.toContain('\x1b[2A');
+  expect(menu.stdout.toString()).not.toContain('\x1b[2K');
 });
 
 test('missing TERM refuses recovery-word disclosure after a public derivation', () => {
@@ -1030,6 +1259,15 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
   expect(plainOutput).toContain('100 / 100 shards  ·  32 workers');
   expect(plainOutput).not.toContain('\x1b[38;5;45m');
 
+  const edge = runAnimatedCliTty(true, 72);
+  expect(edge.exitCode).toBe(0);
+  const edgeRows = edge.stdout.toString()
+    .replaceAll(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .split(/[\r\n]+/)
+    .filter(line => line.includes('shards/s'));
+  expect(edgeRows.length).toBeGreaterThan(0);
+  for (const row of edgeRows) expect(row.length).toBeLessThanOrEqual(72);
+
   const narrow = runCliInputTty([
     '--shards', '100', '--workers', '32', '--engine', 'c-neon',
   ], [
@@ -1057,7 +1295,19 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
     .filter(line => line.includes('%'));
   expect(visibleFrames.length).toBeGreaterThan(0);
   for (const frame of visibleFrames) expect(frame.length).toBeLessThanOrEqual(20);
-});
+}, 30_000);
+
+test('a broken accelerator fails loudly instead of switching engines', () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64'
+    || totalmem() < 500 * 1024 ** 3 || cpus().length !== 32
+    || !cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'))) return;
+  const broken = runBrokenAcceleratorCliTty();
+  const output = broken.stdout.toString() + broken.stderr.toString();
+  expect(broken.exitCode).not.toBe(0);
+  expect(output).toContain('Derivation failed: BRAINVAULT_ACCELERATOR_CHILD_FAILED');
+  expect(output).not.toContain('using C/NEON backend');
+  expect(output).not.toContain('│ Engine used:');
+}, 30_000);
 
 test('CLI benchmark honors inline advanced parameters', () => {
   const benchmark = Bun.spawnSync({

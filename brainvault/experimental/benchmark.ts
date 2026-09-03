@@ -18,7 +18,7 @@ import { deriveHybridNativeShards, type AcceleratorEngine } from '../native-hybr
 type Backend = 'metal-v1' | 'metal-generic' | 'opencl' | 'baseline' | 'sync' | 'wasm' | 'direct-async' | 'c-neon' | 'c-neon-wipe' | 'rust-pool' | 'rust-pool-no-wipe';
 
 const benchmarkArgs = process.argv.slice(2);
-const allowedPrefixes = ['--backend=', '--shards=', '--workers=', '--multiplier='];
+const allowedPrefixes = ['--backend=', '--shards=', '--workers=', '--multiplier=', '--c-cpu=', '--rust-cpu='];
 if (benchmarkArgs.some(argument => !allowedPrefixes.some(prefix => argument.startsWith(prefix))
   || argument.endsWith('=')
   || /^--(?:name|password|passphrase|pass|secret|unsafe-password)(?:=|$)/.test(argument))) {
@@ -34,6 +34,8 @@ const backend = readFlag('backend', 'baseline') as Backend;
 const shardCount = Number(readFlag('shards', '1000'));
 const requestedWorkers = Number(readFlag('workers', '8'));
 const multiplier = Number(readFlag('multiplier', '1'));
+const cCpu = readFlag('c-cpu', 'auto') as 'auto' | 'm1' | 'm3';
+const rustCpu = readFlag('rust-cpu', 'auto') as 'auto' | 'm1' | 'm3';
 const name = 'benchmark-user';
 const passphrase = 'benchmark-password';
 
@@ -47,6 +49,16 @@ if (!Number.isSafeInteger(requestedWorkers) || requestedWorkers < 1 || requested
 if (!Number.isSafeInteger(multiplier) || multiplier < 1) {
   throw new Error(`Multiplier must be a positive integer: ${multiplier}`);
 }
+if (!['auto', 'm1', 'm3'].includes(cCpu)) throw new Error('BRAINVAULT_BENCHMARK_C_CPU_INVALID');
+if (!['auto', 'm1', 'm3'].includes(rustCpu)) throw new Error('BRAINVAULT_BENCHMARK_RUST_CPU_INVALID');
+const isAppleM3 = process.platform === 'darwin'
+  && process.arch === 'arm64'
+  && cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
+if ((cCpu === 'm3' || rustCpu === 'm3') && !isAppleM3) {
+  throw new Error('BRAINVAULT_BENCHMARK_M3_UNAVAILABLE');
+}
+const useM3C = cCpu === 'm3' || (cCpu === 'auto' && isAppleM3);
+const useM3Rust = rustCpu === 'm3' || (rustCpu === 'auto' && isAppleM3);
 
 const workers = Math.min(requestedWorkers, shardCount);
 const factor = factorForShardCount(shardCount);
@@ -62,9 +74,8 @@ if (backend === 'metal-v1' || backend === 'metal-generic' || backend === 'opencl
     : backend === 'metal-generic' ? 'metal-generic' : 'opencl';
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
   let salts: Uint8Array[] = [];
-  const isAppleM3 = cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
   const cpuExecutable = [
-    ...(isAppleM3 ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-m3`] : []),
+    ...(useM3C ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-m3`] : []),
     `${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2`,
     `${import.meta.dir}/argon2-c/brainvault-argon2`,
   ].find(candidate => existsSync(candidate));
@@ -198,26 +209,29 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
   for (let index = 0; index < shardCount; index += 1) {
     input.set(await createShardSalt(name, index, shardCount, kdfAlgId), header.length + password.length + (index * 32));
   }
-  const isAppleM3 = cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
   const cExecutable = process.platform === 'darwin' && process.arch === 'arm64'
     ? [
-      ...(isAppleM3 ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-m3`] : []),
+      ...(useM3C ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-m3`] : []),
       `${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2`,
       `${import.meta.dir}/argon2-c/brainvault-argon2`,
     ].find(candidate => existsSync(candidate))
     : undefined;
   const rustPrebuilds = process.platform === 'darwin' && process.arch === 'arm64';
+  const rustBasename = backend === 'rust-pool'
+    ? 'brainvault-argon2-rust'
+    : 'brainvault-argon2-rust-no-wipe';
   const executable = backend === 'c-neon' || backend === 'c-neon-wipe'
     ? cExecutable
-    : backend === 'rust-pool'
-      ? [
-        ...(rustPrebuilds ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-rust`] : []),
-        `${import.meta.dir}/argon2-rust/target/release/brainvault-argon2-rust`,
-      ].find(candidate => existsSync(candidate))
-      : [
-        ...(rustPrebuilds ? [`${import.meta.dir}/../prebuilds/darwin-arm64/brainvault-argon2-rust-no-wipe`] : []),
-        `${import.meta.dir}/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`,
-      ].find(candidate => existsSync(candidate));
+    : [
+      ...(rustPrebuilds && useM3Rust
+        ? [`${import.meta.dir}/../prebuilds/darwin-arm64/${rustBasename}-m3`]
+        : []),
+      ...(rustPrebuilds ? [`${import.meta.dir}/../prebuilds/darwin-arm64/${rustBasename}`] : []),
+      ...(useM3Rust
+        ? [`${import.meta.dir}/argon2-rust/target-m3${backend === 'rust-pool-no-wipe' ? '-no-wipe' : ''}/release/brainvault-argon2-rust`]
+        : []),
+      `${import.meta.dir}/argon2-rust/target-m1${backend === 'rust-pool-no-wipe' ? '-no-wipe' : ''}/release/brainvault-argon2-rust`,
+    ].find(candidate => existsSync(candidate));
   if (executable === undefined) throw new Error(`Backend executable unavailable: ${backend}`);
   const verifiedExecutable = verifyBundledExecutable(executable, `${import.meta.dir}/..`);
   const native = spawnSync(verifiedExecutable, [], {
@@ -243,6 +257,10 @@ if (backend === 'c-neon' || backend === 'c-neon-wipe' || backend === 'rust-pool'
     workers,
     memoryKiBPerShard: shardMemoryKb,
     multiplier,
+    cpuVariant: backend === 'c-neon' || backend === 'c-neon-wipe'
+      ? (useM3C ? 'm3' : 'm1') : undefined,
+    rustCpuVariant: backend === 'rust-pool' || backend === 'rust-pool-no-wipe'
+      ? (useM3Rust ? 'm3' : 'm1') : undefined,
     derivationTimeMs: Number(derivationTimeMs.toFixed(3)),
     totalTimeMs: Number(totalTimeMs.toFixed(3)),
     shardsPerSecond: Number((shardCount / (derivationTimeMs / 1000)).toFixed(3)),

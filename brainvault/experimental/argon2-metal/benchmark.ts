@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { existsSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { combineShardsWithParams, bytesToHex, factorForShardCount } from '../../core.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from '../../primitives/spec.ts';
 
@@ -39,11 +40,11 @@ if (!['cpu', 'metal', 'hybrid', 'parity'].includes(mode)) throw new Error(`BRAIN
 const explicitShards = args.some(value => value.startsWith('--shards='));
 const shardCount = integerFlag('shards', mode === 'parity' && !explicitShards ? 2 : 1_000, 1, 1_000_000);
 const cpuWorkers = integerFlag('cpu-workers', 32, 1, 64);
-const metalWorkers = integerFlag('metal-workers', 147, 1, 256);
-const metalProcesses = integerFlag('metal-processes', 2, 1, 2);
+const metalWorkers = integerFlag('metal-workers', 40, 1, 256);
+const metalProcesses = integerFlag('metal-processes', 8, 1, 16);
 const simdgroups = integerFlag('simdgroups', 4, 1, 8);
 if (![1, 2, 4, 8].includes(simdgroups)) throw new Error(`BRAINVAULT_METAL_SIMDGROUPS_INVALID:${simdgroups}`);
-const kernel = flag('kernel', 'modern64');
+const kernel = flag('kernel', 'v1special');
 if (!['shuffle', 'native64', 'segmented64', 'modern64', 'v1special', 'barrier'].includes(kernel)) {
   throw new Error(`BRAINVAULT_METAL_KERNEL_INVALID:${kernel}`);
 }
@@ -52,11 +53,14 @@ if ((kernel === 'modern64' || kernel === 'v1special' || kernel === 'segmented64'
 }
 const memory = flag('memory', 'private');
 if (!['shared', 'private'].includes(memory)) throw new Error(`BRAINVAULT_METAL_MEMORY_INVALID:${memory}`);
-const defaultGpuShards = Math.min(shardCount - 1, Math.round(shardCount * 0.588));
+const defaultGpuFraction = shardCount === 10_000 ? 0.80 : 0.64;
+const defaultGpuShards = Math.min(shardCount - 1, Math.round(shardCount * defaultGpuFraction));
 const gpuShards = integerFlag('gpu-shards', Math.max(0, defaultGpuShards), 0, shardCount);
 
 const cpuExecutable = [
-  `${import.meta.dir}/../../prebuilds/darwin-arm64/brainvault-argon2-m3`,
+  ...(cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'))
+    ? [`${import.meta.dir}/../../prebuilds/darwin-arm64/brainvault-argon2-m3`]
+    : []),
   `${import.meta.dir}/../../prebuilds/darwin-arm64/brainvault-argon2`,
   `${import.meta.dir}/../argon2-c/brainvault-argon2-oversubscribed`,
 ].find(candidate => existsSync(candidate)) ?? `${import.meta.dir}/../argon2-c/brainvault-argon2-oversubscribed`;

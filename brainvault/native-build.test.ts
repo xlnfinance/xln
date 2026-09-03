@@ -38,7 +38,7 @@ test('locked native release builds are byte-reproducible', () => {
       'vendor/argon2/src/blake2/blake2b.c', 'vendor/argon2/src/thread.c',
       'vendor/argon2/src/encoding.c', 'vendor/argon2/src/opt.c',
     ];
-    const compileC = (output: string, cpu: 'apple-m1' | 'native') => Bun.spawnSync({
+    const compileC = (output: string, cpu: 'apple-m1' | 'apple-m3') => Bun.spawnSync({
       cmd: [
         'clang', '-std=c11', '-O3', '-flto', `-mcpu=${cpu}`, '-pthread',
         '-D_DARWIN_C_SOURCE', '-D__SSE2__', '-Icompat', '-Ivendor/sse2neon',
@@ -61,41 +61,47 @@ test('locked native release builds are byte-reproducible', () => {
 
     const m3First = join(temp, 'c1/brainvault-argon2-m3');
     const m3Second = join(temp, 'c2/brainvault-argon2-m3');
-    expect(compileC(m3First, 'native').exitCode).toBe(0);
-    expect(compileC(m3Second, 'native').exitCode).toBe(0);
+    expect(compileC(m3First, 'apple-m3').exitCode).toBe(0);
+    expect(compileC(m3Second, 'apple-m3').exitCode).toBe(0);
     normalize(m3First);
     normalize(m3Second);
     expect(sha256(m3First)).toBe(sha256(m3Second));
     expect(sha256(m3First)).toBe(sha256(`${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-m3`));
 
     const rustRoot = `${import.meta.dir}/experimental/argon2-rust`;
-    const buildRust = (target: string, noWipe: boolean) => Bun.spawnSync({
+    const cargoHome = join(temp, 'empty-cargo-home');
+    mkdirSync(cargoHome);
+    const buildRust = (target: string, noWipe: boolean, cpu: 'apple-m1' | 'apple-m3') => Bun.spawnSync({
       cmd: [
-        'cargo', 'build', '--release', '--locked',
+        'cargo', 'build', '--offline', '--release', '--locked',
         ...(noWipe ? ['--no-default-features'] : []), '--target-dir', target,
       ],
       cwd: rustRoot,
+      env: {
+        ...process.env,
+        CARGO_HOME: cargoHome,
+        RUSTFLAGS: `-C target-cpu=${cpu}`,
+      },
       stderr: 'pipe',
       stdout: 'pipe',
     });
-    for (const noWipe of [false, true]) {
-      const first = join(temp, noWipe ? 'rust-no-wipe-1' : 'rust-1');
-      const second = join(temp, noWipe ? 'rust-no-wipe-2' : 'rust-2');
-      expect(buildRust(first, noWipe).exitCode).toBe(0);
-      expect(buildRust(second, noWipe).exitCode).toBe(0);
-      const finalName = `brainvault-argon2-rust${noWipe ? '-no-wipe' : ''}`;
-      const firstBinary = join(first, `release/${finalName}`);
-      const secondBinary = join(second, `release/${finalName}`);
-      if (noWipe) {
+    for (const cpu of ['apple-m1', 'apple-m3'] as const) {
+      for (const noWipe of [false, true]) {
+        const variant = `${cpu === 'apple-m3' ? 'm3' : 'm1'}${noWipe ? '-no-wipe' : ''}`;
+        const first = join(temp, `rust-${variant}-1`);
+        const second = join(temp, `rust-${variant}-2`);
+        expect(buildRust(first, noWipe, cpu).exitCode).toBe(0);
+        expect(buildRust(second, noWipe, cpu).exitCode).toBe(0);
+        const prebuildName = `brainvault-argon2-rust${noWipe ? '-no-wipe' : ''}${cpu === 'apple-m3' ? '-m3' : ''}`;
+        const firstBinary = join(first, `release/${prebuildName}`);
+        const secondBinary = join(second, `release/${prebuildName}`);
         renameSync(join(first, 'release/brainvault-argon2-rust'), firstBinary);
         renameSync(join(second, 'release/brainvault-argon2-rust'), secondBinary);
+        normalize(firstBinary);
+        normalize(secondBinary);
+        expect(sha256(firstBinary)).toBe(sha256(secondBinary));
+        expect(sha256(firstBinary)).toBe(sha256(`${import.meta.dir}/prebuilds/darwin-arm64/${prebuildName}`));
       }
-      normalize(firstBinary);
-      normalize(secondBinary);
-      expect(sha256(firstBinary)).toBe(sha256(secondBinary));
-      expect(sha256(firstBinary)).toBe(sha256(
-        `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2-rust${noWipe ? '-no-wipe' : ''}`,
-      ));
     }
 
     const metalRoot = `${import.meta.dir}/experimental/argon2-metal`;

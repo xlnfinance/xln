@@ -1,2 +1,5 @@
-[build]
-rustflags = ["-C", "target-cpu=native"]
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"

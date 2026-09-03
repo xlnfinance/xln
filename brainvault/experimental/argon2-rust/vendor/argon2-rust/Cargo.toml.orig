@@ -1,0 +1,172 @@
+[package]
+name = "argon2-rust"
+version = "1.1.0"
+edition = "2024"
+# Set by ONE thing: `stdarch_x86_avx512` (AVX-512 intrinsics + the `avx512f`
+# target feature) stabilized in 1.89. Nothing else here needs newer than 1.88.
+# Verified, not guessed — the `msrv` job in ci.yml builds with exactly this
+# toolchain on x86_64 and aarch64. Raise it only with a reason.
+rust-version = "1.89"
+description = "Pure-Rust port of the reference Argon2 implementation (phc-winner-argon2), with runtime-dispatched SIMD backends"
+license = "MIT"
+repository = "https://github.com/Brooooooklyn/argon2-rust"
+homepage = "https://github.com/Brooooooklyn/argon2-rust"
+documentation = "https://docs.rs/argon2-rust"
+readme = "README.md"
+exclude = ["/.github", "/benches", "/tests", "/fuzz", "/vm.sh", "/renovate.json"]
+keywords = ["argon2", "password-hash", "kdf", "simd", "crypto"]
+categories = ["cryptography", "no-std"]
+# Every bench target is declared explicitly below. Without this, Cargo would
+# also auto-discover anything matching `benches/*.rs`, and `benches/support/`
+# holds a module both benches `#[path]`-include rather than a bench of its own.
+autobenches = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# The library target is `argon2_rust` (dashes become underscores).
+# Tests and benches use `use argon2_rust::...`.
+
+[features]
+default = ["std", "parallel", "zeroize-memory"]
+
+# Enables runtime CPU feature detection (needs `std::arch::is_*_feature_detected!`).
+# Without it, backend selection falls back to compile-time `target_feature` cfgs.
+# Also turns on `memchr/std` so PHC field scans use its runtime SIMD cascade.
+std = ["memchr/std"]
+
+# Multi-threaded `fill_memory_blocks` via `std::thread::scope`. Implies `std`.
+parallel = ["std"]
+
+# Securely wipe internal buffers (mirrors `FLAG_clear_internal_memory` in core.c).
+zeroize-memory = []
+
+# Internal benchmark/control for a reusable `bumpalo::Bump` inside `Workspace`.
+# `Workspace` is reachable only through the unstable `internal-api`; enabling
+# this feature alone does not change any stable hashing or encoding path. OFF BY
+# DEFAULT ON PURPOSE — see the dependency note below for the measurement.
+bump-alloc = ["dep:bumpalo"]
+
+# Exposes `argon2_rust::__internal` so tests/benches can drive individual
+# backends. Not part of the stable API; enabled for dev builds via the
+# self-dev-dependency below.
+internal-api = []
+
+[dependencies]
+# `memchr` is the one mandatory dependency: PHC `$` / `,` / `=` scans go
+# through it so we do not maintain a second SIMD memchr. `default-features =
+# false` keeps it `#![no_std]`; the `std` feature below turns on its runtime
+# CPU detection, matching this crate's other cascades. Without `std` it uses
+# compile-time `target_feature` cfgs, same as our fill/Base64/BLAKE2b.
+memchr = { version = "2.8.3", default-features = false }
+
+# `bumpalo` is optional and off by default, and that is a measured decision,
+# not timidity:
+#
+#   * The hot path makes EXACTLY ONE heap allocation per hash (the block
+#     arena). At m=1 GiB it costs 1.7 us out of a 306 ms hash — 0.0006%. There
+#     is no allocator traffic there for a bump allocator to remove, and a
+#     `Bump` cannot hold the arena anyway: it is `!Sync`, and the parallel fill
+#     shares the arena across `std::thread::scope` workers.
+#   * Where a bump *does* win is the small encoding buffers. One hash's worth
+#     of them is 98 B + 51 B + 33 B, allocated and dropped inside the call.
+#     Measured here (interleaved A/B, min of 400 x 4096, control subtracted):
+#         3x Vec::try_reserve + resize        24.30 ns
+#         3x reused Bump + wiped reset         7.34 ns   -17.0 ns
+#     Real, and worth 17 ns per hash. That is 0.16% of the smallest Argon2
+#     hash that exists (m=8 KiB, 10.75 us) and 0.00013% of an RFC 9106 hash
+#     (m=64 MiB), i.e. four orders of magnitude below this machine's 1-9%
+#     run-to-run noise.
+#   * Only a long-lived, reset-between-uses bump is ahead. `Bump::new()` plus
+#     one 98 B buffer costs 18.5 ns against that `Vec`'s 9.0 ns, so a fresh
+#     bump per call is a regression. The benchmark control therefore keeps its
+#     bump inside a reusable `Workspace`.
+#
+# 17 ns does not justify a second stable-path dependency. It does justify
+# retaining the measured counterfactual for internal tests and benches.
+# Hence: optional, default off, and not wired into `Hasher` or the encoding API.
+#
+# `default-features = false` is belt and braces: bumpalo's default feature set
+# is already empty (verified in bumpalo-3.20.3/Cargo.toml) and it is
+# `#![no_std]` unless its own `std` feature is on, so this is exactly the
+# no_std + alloc configuration this crate needs.
+bumpalo = { version = "3.20.3", default-features = false, optional = true }
+
+[dev-dependencies]
+# Self-dev-dependency: makes `cargo test` / `cargo bench` build the lib with
+# `internal-api` on, without leaking it into a plain `cargo build`.
+# `default-features = false` keeps `cargo test --no-default-features` honest.
+argon2-rust = { path = ".", default-features = false, features = ["internal-api"] }
+
+# Criterion (through rayon) does not build for wasi, and no bench or test
+# target runs there anyway — `cargo test --target wasm32-wasip1` covers the
+# library and the integration tests, never the benches.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+codspeed-criterion-compat = "5.0.1"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "argon2"
+harness = false
+
+# The CI regression net, measured by CodSpeed's simulation instrument. Small,
+# hermetic and single-threaded on purpose — see the module docs in
+# `benches/codspeed.rs` for why it does not simply reuse the sweep above.
+[[bench]]
+name = "codspeed"
+harness = false
+
+# The fast iteration harness. Criterion is the right tool for a publishable
+# number and the wrong one for a five-second edit-measure loop, so this is a
+# plain `fn main()` that times `fill_memory_blocks` directly. See the module
+# docs in `benches/micro.rs` for the invocation.
+[[bench]]
+name = "micro"
+harness = false
+
+# Isolates the three BLAKE2b shapes Argon2 actually uses and compares every
+# executable compression backend against scalar in the same process.
+[[bench]]
+name = "blake2b"
+harness = false
+
+# Isolates the PHC string's unpadded standard-Base64 codec. The production
+# hash sizes are deliberately included alongside larger buffers so a SIMD
+# backend cannot look good only on bulk data it never sees in normal Argon2
+# records.
+[[bench]]
+name = "base64"
+harness = false
+
+# Dependency-free paired scalar/SIMD timing harness. Unlike the Criterion
+# sweep above, this also runs under Wasmtime and inside minimal Linux
+# containers, and reports both the production auto-dispatch path and each
+# executable backend explicitly.
+[[bench]]
+name = "base64_shootout"
+harness = false
+
+# Resident-set-size checks, which are a property of a *process* and therefore
+# cannot live in a libtest binary: `cargo test` runs that binary's tests
+# concurrently in one process, so `ps -o rss=` charges every sibling's
+# allocations to whichever test happens to be sampling. It did exactly that, and
+# failed the x86_64 gate deterministically, while the library allocated nothing.
+# `harness = false` makes this file its own `fn main()` in its own process, so
+# the measurement is contamination-free by construction rather than by slack.
+[[test]]
+name = "rss_isolation"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# `panic` deliberately left at the default: the library must not panic on any
+# input reachable through the public API, so `abort` would buy nothing and it
+# would break `cargo test`.
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

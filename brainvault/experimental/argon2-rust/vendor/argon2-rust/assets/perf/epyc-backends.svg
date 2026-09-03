@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="310" viewBox="0 0 900 310" role="img" aria-label="EPYC Genoa — same-ISA whole-hash speedup">
+  <title>EPYC Genoa — same-ISA whole-hash speedup</title>
+  <desc>Each Rust backend vs C built for the same ISA tier · two runs × five configs</desc>
+  <rect width="900" height="310" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <text x="22" y="26" fill="#e6edf3" font-size="15" font-weight="600" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">EPYC Genoa — same-ISA whole-hash speedup</text>
+  <text x="22" y="44" fill="#8b949e" font-size="11" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Each Rust backend vs C built for the same ISA tier · two runs × five configs</text>
+    <line x1="189.2" y1="74" x2="189.2" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="189.2" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">0.9×</text>
+  <line x1="278.4" y1="74" x2="278.4" y2="272" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="" opacity="0.9"/>
+  <text x="278.4" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.0×</text>
+  <line x1="456.8" y1="74" x2="456.8" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="456.8" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.2×</text>
+  <line x1="635.1" y1="74" x2="635.1" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="635.1" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.4×</text>
+  <text x="88" y="103" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">scalar</text>
+  <rect x="100" y="88" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="180.3" y="88" width="133.8" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="104.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">0.89× – 1.04×</text>
+  <text x="88" y="151" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">sse2</text>
+  <rect x="100" y="136" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="358.6" y="136" width="196.2" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="152.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.09× – 1.31×</text>
+  <text x="88" y="199" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">avx2</text>
+  <rect x="100" y="184" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="323.0" y="184" width="231.9" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="200.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.05× – 1.31×</text>
+  <text x="88" y="247" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">avx512</text>
+  <rect x="100" y="232" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="438.9" y="232" width="231.9" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="248.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.18× – 1.44×</text>
+  <text x="22" y="296" fill="#8b949e" font-size="10" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">C / rust ratio range · solid line = 1.0× parity · higher is better for this crate</text>
+</svg>

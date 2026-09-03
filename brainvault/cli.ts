@@ -38,10 +38,14 @@ import {
 } from './core.ts';
 import { assertBrainVaultName, assertBrainVaultPassphrase, shardRequestFingerprint } from './primitives/spec.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
-import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
+import {
+  cliCreationCharacterError, cliPasswordError, cliProgressStatusLine,
+  fitTerminal, publicErrorCode, publicErrorMessage,
+} from './cli-policy.ts';
 import { verifyBundledExecutable } from './binary-integrity.ts';
 import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } from './native-hybrid.ts';
 import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native/progress.ts';
+import { terminateNativeChildren, trackNativeChild } from './native/children.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
   BRAINVAULT_LEVEL_NAMES,
@@ -138,9 +142,23 @@ function terminalColumns(): number {
     : reported;
 }
 
-function fitTerminal(text: string, width: number): string {
-  if (text.length <= width) return text;
-  return width <= 1 ? text.slice(0, width) : `${text.slice(0, width - 1)}…`;
+function terminalRows(): number {
+  const environmentRows = Number(process.env.LINES);
+  const reported = Number.isSafeInteger(stdout.rows) && (stdout.rows ?? 0) >= 10
+    ? stdout.rows!
+    : 24;
+  return Number.isSafeInteger(environmentRows) && environmentRows >= 10
+    ? Math.min(reported, environmentRows)
+    : reported;
+}
+
+function supportsCursorControl(): boolean {
+  const term = process.env.TERM?.trim().toLowerCase();
+  return stdout.isTTY === true
+    && term !== undefined
+    && term !== ''
+    && term !== 'dumb'
+    && term !== 'unknown';
 }
 
 class PromptOutput extends Writable {
@@ -211,10 +229,16 @@ async function showPromoScreen(outro = false): Promise<void> {
 
 function startDerivationProgress(shards: number, workers: number): Readonly<{
   update: (completed: number) => void;
+  notice: (message: string, warning?: boolean) => void;
   complete: (elapsedMs: number) => void;
   stop: () => void;
 }> {
-  if (!stdout.isTTY) return { update: () => {}, complete: () => {}, stop: () => {} };
+  if (!stdout.isTTY || !supportsCursorControl()) return {
+    update: () => {},
+    notice: (message, warning = false) => (warning ? console.warn(message) : console.log(message)),
+    complete: elapsedMs => console.log(`Derived ${shards.toLocaleString('en-US')} shards in ${formatDuration(elapsedMs)}.`),
+    stop: () => {},
+  };
   const columns = terminalColumns();
   const compact = columns < 72;
   const width = 40;
@@ -249,24 +273,32 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
       const bar = `${cyan}${'━'.repeat(filled)}${reset}${filled < width ? `${cyan}╸${reset}${dim}${'·'.repeat(width - filled - 1)}${reset}` : ''}`;
       if (rendered) stdout.write('\x1b[2A');
       stdout.write(`\r\x1b[2K  ${cyan}◇ DERIVING${reset}  ${String(percent).padStart(3)}%  [${bar}]\n`);
-      stdout.write(`\r\x1b[2K     ${completed.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${rate.toFixed(rate >= 100 ? 0 : 1)} shards/s  ·  ${etaText}  ·  ${workers} workers\n`);
+      stdout.write(`\r\x1b[2K${cliProgressStatusLine(completed, shards, rate, etaText, workers, columns)}\n`);
     }
     rendered = true;
   };
   const timer = setInterval(render, 100);
+  const clearRendered = () => {
+    if (!rendered) return;
+    stdout.write(compact
+      ? '\r\x1b[2K'
+      : '\x1b[2A\r\x1b[2K\n\r\x1b[2K\x1b[1A\r');
+    rendered = false;
+  };
   const stop = () => {
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
-    if (rendered) {
-      stdout.write(compact
-        ? '\r\x1b[2K'
-        : '\x1b[2A\r\x1b[2K\n\r\x1b[2K\x1b[1A\r');
-    }
+    clearRendered();
   };
   return {
     update: value => {
       if (Number.isSafeInteger(value) && value >= 0 && value <= shards) completed = value;
+    },
+    notice: (message, warning = false) => {
+      clearRendered();
+      if (warning) console.warn(message);
+      else console.log(message);
     },
     complete: elapsedMs => {
       stop();
@@ -276,7 +308,10 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
         console.log(`${green}${fitTerminal(detailed.length <= columns ? detailed : concise, columns)}${reset}`);
       } else {
         console.log(`  ${green}✓ DERIVED${reset}  100%  [${green}${'━'.repeat(width)}${reset}]`);
-        console.log(`     ${shards.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${workers} workers  ·  ${formatDuration(elapsedMs)}`);
+        console.log(fitTerminal(
+          `     ${shards.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${workers} workers  ·  ${formatDuration(elapsedMs)}`,
+          columns,
+        ));
       }
     },
     stop,
@@ -286,13 +321,8 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
 let sensitiveScreenOpen = false;
 
 function canUseSensitiveScreen(): boolean {
-  const term = process.env.TERM?.trim().toLowerCase();
   return stdin.isTTY === true
-    && stdout.isTTY === true
-    && term !== undefined
-    && term !== ''
-    && term !== 'dumb'
-    && term !== 'unknown';
+    && supportsCursorControl();
 }
 
 function openSensitiveScreen(): void {
@@ -309,15 +339,37 @@ function eraseSensitiveScreen(): void {
   sensitiveScreenOpen = false;
 }
 
+let signalExitStarted = false;
+
+function exitFromSignal(exitCode: number): void {
+  if (signalExitStarted) process.exit(exitCode);
+  signalExitStarted = true;
+  eraseSensitiveScreen();
+  void terminateNativeChildren().finally(() => process.exit(exitCode));
+}
+
 process.once('exit', eraseSensitiveScreen);
-process.once('SIGHUP', () => {
-  eraseSensitiveScreen();
-  process.exit(129);
-});
-process.once('SIGTERM', () => {
-  eraseSensitiveScreen();
-  process.exit(143);
-});
+process.once('SIGHUP', () => exitFromSignal(129));
+process.once('SIGTERM', () => exitFromSignal(143));
+
+function ignoreInputDuringDerivation(): () => void {
+  if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') return () => {};
+  const previousRaw = stdin.isRaw ?? false;
+  let active = true;
+  const onData = (chunk: Buffer) => {
+    if (chunk.includes(3)) exitFromSignal(130);
+  };
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.on('data', onData);
+  return () => {
+    if (!active) return;
+    active = false;
+    stdin.off('data', onData);
+    stdin.pause();
+    stdin.setRawMode(previousRaw);
+  };
+}
 
 async function askSecret(
   rl: readline.Interface,
@@ -360,6 +412,22 @@ function rejectPrompt(rl: readline.Interface, message: string): void {
 
 async function selectOption(title: string, options: readonly string[], initial = 0): Promise<number> {
   if (!stdin.isTTY || !stdout.isTTY) return initial;
+  if (!supportsCursorControl()) {
+    console.log(`${title}:`);
+    for (const [index, option] of options.entries()) console.log(`${index + 1}. ${option}`);
+    const plain = readline.createInterface({ input: stdin, output: stdout, terminal: false });
+    try {
+      const answer = (await plain.question(`${title} (enter a number; default ${initial + 1}): `)).trim();
+      if (answer === '') return initial;
+      const selected = Number(answer);
+      if (!Number.isSafeInteger(selected) || selected < 1 || selected > options.length) {
+        throw new Error('BRAINVAULT_MENU_SELECTION_INVALID');
+      }
+      return selected - 1;
+    } finally {
+      plain.close();
+    }
+  }
   let selected = Math.max(0, Math.min(initial, options.length - 1));
   let drawn = false;
   const previousRaw = stdin.isRaw ?? false;
@@ -440,6 +508,8 @@ Flags:
 - --engine NAME
   Choose auto, metal, metal-generic, opencl, c-neon, c-neon-wipe,
   native-direct, native-sync, native, rust, rust-no-wipe, or wasm.
+  native-direct is benchmark/smoke-only: wallet and site-password derivation
+  refuse it because same-isolate corruption was observed.
   On the measured M3 Ultra class, auto uses Metal V1 hybrid for 1,000+ shards at
   multiplier 1; other Apple Silicon safely uses C/NEON or portable native.
 - --lib=native
@@ -572,6 +642,10 @@ if (legacyEngineFlags.length > 1 || (inlineEngine !== undefined && legacyEngineF
 }
 
 const flagEngine = (inlineEngine ?? legacyEngineFlags[0] ?? 'auto') as EngineSelection;
+if (flagEngine === 'native-direct' && !args.includes('--bench') && !args.includes('--smoke')) {
+  console.error('Error: BRAINVAULT_ENGINE_RESEARCH_ONLY:native-direct');
+  process.exit(1);
+}
 const requireRepeat = args.includes('--repeat');
 const showPasswordInput = args.includes('--show-password');
 const showPrivateKey = args.includes('--show-private-key');
@@ -708,6 +782,7 @@ interface DeriveOptions {
   engine?: EngineSelection;
   shardMultiplier?: number;
   onProgress?: (completed: number, total: number) => void;
+  onNotice?: (message: string, warning: boolean) => void;
 }
 
 function resolveNeonExecutable(): string | undefined {
@@ -731,13 +806,20 @@ function isMeasuredM3Ultra(): boolean {
 
 function resolveRustExecutable(noWipe: boolean): string | undefined {
   const basename = noWipe ? 'brainvault-argon2-rust-no-wipe' : 'brainvault-argon2-rust';
+  const isAppleM3 = process.platform === 'darwin'
+    && process.arch === 'arm64'
+    && cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
   const candidates = [
     ...(process.platform === 'darwin' && process.arch === 'arm64'
-      ? [`${import.meta.dir}/prebuilds/darwin-arm64/${basename}`]
+      ? [
+        ...(isAppleM3 ? [`${import.meta.dir}/prebuilds/darwin-arm64/${basename}-m3`] : []),
+        `${import.meta.dir}/prebuilds/darwin-arm64/${basename}`,
+      ]
       : []),
-    noWipe
-      ? `${import.meta.dir}/experimental/argon2-rust/target-no-wipe/release/brainvault-argon2-rust`
-      : `${import.meta.dir}/experimental/argon2-rust/target/release/brainvault-argon2-rust`,
+    ...(isAppleM3
+      ? [`${import.meta.dir}/experimental/argon2-rust/target-m3${noWipe ? '-no-wipe' : ''}/release/brainvault-argon2-rust`]
+      : []),
+    `${import.meta.dir}/experimental/argon2-rust/target-m1${noWipe ? '-no-wipe' : ''}/release/brainvault-argon2-rust`,
   ];
   return candidates.find(candidate => existsSync(candidate));
 }
@@ -786,7 +868,6 @@ function getInteractiveEngineChoices(multiplier: number): EngineChoice[] {
     );
   }
   choices.push(
-    { id: 'native-direct', label: '(experimental) Native direct async', referenceRate: 167.10 },
     { id: 'native-sync', label: '(experimental) Native sync workers', referenceRate: 165.12 },
     { id: 'native', label: 'Native isolated workers', referenceRate: 159.61 },
   );
@@ -831,7 +912,6 @@ async function deriveExecutableShards(
   header.copy(input, 0);
   input.set(password, header.length);
   let output = Buffer.alloc(0);
-  let stderr = '';
   let exitCode = -1;
   let lastProgress = 0;
   const acceptProgress = onProgress === undefined ? undefined : (completed: number) => {
@@ -846,7 +926,7 @@ async function deriveExecutableShards(
     for (let index = 0; index < shardCount; index += 1) {
       input.set(await createShardSalt(name, index, shardCount, algId), header.length + password.length + (index * 32));
     }
-    const child = Bun.spawn([verifiedExecutable], {
+    const child = trackNativeChild(Bun.spawn([verifiedExecutable], {
       env: {
         ...process.env,
         ...(onProgress === undefined ? {} : { [BRAINVAULT_NATIVE_PROGRESS_ENV]: '1' }),
@@ -854,16 +934,23 @@ async function deriveExecutableShards(
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-    });
+    }));
     child.stdin.write(input);
     child.stdin.end();
-    const [stdoutBytes, stderrText, status] = await Promise.all([
-      new Response(child.stdout).arrayBuffer(),
-      readNativeProgress(child.stderr, acceptProgress),
-      child.exited,
-    ]);
+    let stdoutBytes: ArrayBuffer;
+    let status: number;
+    try {
+      [stdoutBytes, , status] = await Promise.all([
+        new Response(child.stdout).arrayBuffer(),
+        readNativeProgress(child.stderr, acceptProgress),
+        child.exited,
+      ]);
+    } catch (error) {
+      child.kill();
+      await child.exited;
+      throw error;
+    }
     output = Buffer.from(stdoutBytes);
-    stderr = stderrText;
     exitCode = status;
   } finally {
     password.fill(0);
@@ -871,7 +958,7 @@ async function deriveExecutableShards(
   }
   if (exitCode !== 0) {
     output.fill(0);
-    throw new Error(`BRAINVAULT_EXECUTABLE_FAILED:${String(exitCode)}:${stderr.trim()}`);
+    throw new Error(`BRAINVAULT_EXECUTABLE_FAILED:${String(exitCode)}`);
   }
   if (onProgress !== undefined && lastProgress !== shardCount) {
     output.fill(0);
@@ -944,7 +1031,13 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     engine = 'auto',
     shardMultiplier = 1,
     onProgress,
+    onNotice,
   } = options;
+  const reportNotice = (message: string, warning = false): void => {
+    if (onNotice !== undefined) onNotice(message, warning);
+    else if (warning) console.warn(message);
+    else console.log(message);
+  };
 
   assertBrainVaultName(name);
   assertBrainVaultPassphrase(passphrase);
@@ -976,8 +1069,10 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     && !autoSelectedMetal
     && shardCount >= 100
     && neonExecutable !== undefined;
-  const allowAutoRecovery = autoSelectedC || autoSelectedMetal;
-  let selectedEngine: Exclude<EngineSelection, 'auto'> = autoSelectedMetal
+  // `auto` picks exactly one backend before derivation from what is
+  // installed; a backend that then fails at runtime is an error, never a
+  // silent switch to another engine.
+  const selectedEngine: Exclude<EngineSelection, 'auto'> = autoSelectedMetal
     ? 'metal'
     : autoSelectedC ? 'c-neon' : engine === 'auto' ? 'native' : engine;
   if (selectedEngine === 'wasm' && shardMultiplier > MAX_WASM_MULTIPLIER) {
@@ -994,7 +1089,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     }
     const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
     const planned = acceleratorPlan(selectedEngine, shardCount, actualWorkers);
-    console.log(
+    reportNotice(
       `Using ${selectedEngine === 'metal' ? 'Metal V1' : selectedEngine === 'metal-generic' ? '(experimental) Metal generic' : '(experimental) OpenCL'} + C/NEON hybrid `
       + `(${planned.acceleratorShards} GPU / ${planned.cpuShards} CPU shards · `
       + `${planned.acceleratorProcesses}×${planned.acceleratorWorkers} GPU / ${planned.cpuWorkers} CPU workers)`,
@@ -1021,11 +1116,6 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         },
       });
       shardResults = accelerated.shards;
-    } catch (error) {
-      if (!autoSelectedMetal) throw error;
-      console.warn(`Metal unavailable at runtime; using C/NEON backend (${String(error)}).`);
-      onProgress?.(0, shardCount);
-      selectedEngine = 'c-neon';
     } finally {
       password.fill(0);
       for (const salt of salts) salt.fill(0);
@@ -1034,34 +1124,27 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
 
   if (selectedEngine === 'c-neon' || selectedEngine === 'c-neon-wipe') {
     if (neonExecutable === undefined) throw new Error('BRAINVAULT_C_NEON_UNAVAILABLE');
-    console.log(`Using ${selectedEngine === 'c-neon' ? 'C/NEON final wipe' : '(experimental) C/NEON per-shard wipe'} (${actualWorkers} workers)`);
-    try {
-      shardResults = await deriveExecutableShards(
-        neonExecutable,
-        name,
-        passphrase,
-        shardCount,
-        actualWorkers,
-        selectedEngine === 'c-neon-wipe',
-        shardMemoryKb,
-        kdfAlgId,
-        completed => onProgress?.(completed, shardCount),
-      );
-    } catch (error) {
-      if (!allowAutoRecovery) throw error;
-      console.warn(`C/NEON unavailable at runtime; using portable native fallback (${String(error)}).`);
-      onProgress?.(0, shardCount);
-      selectedEngine = 'native';
-    }
+    reportNotice(`Using ${selectedEngine === 'c-neon' ? 'C/NEON final wipe' : '(experimental) C/NEON per-shard wipe'} (${actualWorkers} workers)`);
+    shardResults = await deriveExecutableShards(
+      neonExecutable,
+      name,
+      passphrase,
+      shardCount,
+      actualWorkers,
+      selectedEngine === 'c-neon-wipe',
+      shardMemoryKb,
+      kdfAlgId,
+      completed => onProgress?.(completed, shardCount),
+    );
   }
 
   if (selectedEngine === 'rust' || selectedEngine === 'rust-no-wipe') {
     const rustExecutable = resolveRustExecutable(selectedEngine === 'rust-no-wipe');
     if (rustExecutable === undefined) throw new Error(`BRAINVAULT_RUST_UNAVAILABLE:${selectedEngine}`);
     if (selectedEngine === 'rust-no-wipe') {
-      console.warn('WARNING: Rust no-wipe is parity/performance mode; sensitive Argon memory is not zeroized.');
+      reportNotice('WARNING: Rust no-wipe is parity/performance mode; sensitive Argon memory is not zeroized.', true);
     }
-    console.log(`Using ${selectedEngine === 'rust' ? '(experimental) Rust secure-wipe pool' : '(experimental) Rust no-wipe pool'} (${actualWorkers} workers)`);
+    reportNotice(`Using ${selectedEngine === 'rust' ? '(experimental) Rust secure-wipe pool' : '(experimental) Rust no-wipe pool'} (${actualWorkers} workers)`);
     shardResults = await deriveExecutableShards(
       rustExecutable,
       name,
@@ -1076,7 +1159,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
   }
 
   if (selectedEngine === 'native-direct') {
-    console.log(`Using (experimental) native direct async (${actualWorkers} workers)`);
+    reportNotice(`Using (experimental) native direct async (${actualWorkers} workers)`);
     shardResults = await deriveDirectAsyncShards(
       name,
       passphrase,
@@ -1100,7 +1183,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         : `${import.meta.dir}/worker-native.ts`;
     const pool: Worker[] = [];
 
-    console.log(selectedEngine === 'wasm'
+    reportNotice(selectedEngine === 'wasm'
       ? `Using TypeScript/WASM reference (${actualWorkers} workers)`
       : selectedEngine === 'native-sync'
         ? `Using (experimental) native sync workers (${actualWorkers} workers)`
@@ -1240,6 +1323,89 @@ async function deriveSensitiveMaterial(rootKey: Uint8Array, count: number, inclu
   } finally {
     entropy24?.fill(0);
     entropy12?.fill(0);
+  }
+}
+
+type SensitivePage = Readonly<{ destination: string; lines: readonly string[] }>;
+
+function wrapSensitiveLine(text: string, width: number): string[] {
+  if (text.length <= width) return [text];
+  const lines: string[] = [];
+  let remaining = text;
+  while (remaining.length > width) {
+    const space = remaining.lastIndexOf(' ', width);
+    const cut = space > 0 ? space : width;
+    lines.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut + (space > 0 ? 1 : 0));
+  }
+  if (remaining !== '') lines.push(remaining);
+  return lines;
+}
+
+function sensitivePages(
+  primary: readonly string[],
+  secondary: readonly string[],
+): Readonly<{ header: readonly string[]; pages: readonly SensitivePage[] }> {
+  const columns = terminalColumns();
+  const header = [
+    'RECOVERY WORDS · SECRET',
+    'Anyone who sees these words can spend the wallet funds.',
+    'This view clears on Enter or Ctrl+C; recordings, terminal logs, and photographs cannot be erased.',
+  ];
+  const headerRows = header.flatMap(line => wrapSensitiveLine(line, columns)).length;
+  const longestPrompt = 'Press Enter for the SECONDARY wallet (continued): ';
+  const reservedRows = headerRows + 3 + wrapSensitiveLine(longestPrompt, columns).length;
+  const capacity = terminalRows() - reservedRows;
+  if (capacity < 3) throw new Error('BRAINVAULT_SENSITIVE_TERMINAL_TOO_SHORT');
+
+  const pages: SensitivePage[] = [];
+  for (const block of [
+    { name: 'PRIMARY', lines: primary },
+    { name: 'SECONDARY', lines: secondary },
+  ]) {
+    const content = block.lines.flatMap(line => wrapSensitiveLine(line, columns));
+    let offset = 0;
+    let first = true;
+    while (offset < content.length) {
+      const heading = wrapSensitiveLine(
+        first
+          ? `${block.name} WALLET · ${block.name === 'PRIMARY' ? '24 words · matches the public first receiving address' : '12 words · separate wallet and addresses'}:`
+          : `${block.name} WALLET (continued):`,
+        columns,
+      );
+      const count = Math.max(1, capacity - heading.length);
+      pages.push({
+        destination: `the ${block.name} wallet${first ? '' : ' (continued)'}`,
+        lines: [...heading, ...content.slice(offset, offset + count)],
+      });
+      offset += count;
+      first = false;
+    }
+  }
+  return { header, pages };
+}
+
+async function showSensitiveMaterial(
+  primary: readonly string[],
+  secondary: readonly string[],
+): Promise<void> {
+  const { header, pages } = sensitivePages(primary, secondary);
+  openSensitiveScreen();
+  const dismissRl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
+  try {
+    for (let index = 0; index < pages.length; index += 1) {
+      if (index > 0) stdout.write('\x1b[2J\x1b[H');
+      for (const line of header) console.log(line);
+      console.log(`Page ${index + 1}/${pages.length}\n`);
+      for (const line of pages[index]!.lines) console.log(line);
+      const next = pages[index + 1];
+      await dismissRl.question(next === undefined
+        ? '\nPress Enter to clear and exit: '
+        : `\nPress Enter for ${next.destination}: `);
+    }
+  } finally {
+    dismissRl.close();
+    eraseSensitiveScreen();
   }
 }
 
@@ -1386,8 +1552,7 @@ async function runBenchmark(smoke = false) {
     });
     if (child.status !== 0) {
       console.log('FAILED');
-      const details = child.stderr.trim() || child.stdout.trim() || `exit ${String(child.status)}`;
-      throw new Error(`BRAINVAULT_BENCHMARK_ENGINE_FAILED:${candidate.id}:${details}`);
+      throw new Error(`BRAINVAULT_BENCHMARK_ENGINE_FAILED:${candidate.id}:${String(child.status)}`);
     }
     const parsed = JSON.parse(child.stdout) as {
       backend?: unknown;
@@ -1642,27 +1807,35 @@ async function interactive() {
   printStep(3, 'DERIVE');
 
   let rootKey: Uint8Array | undefined;
+  let stopIgnoringInput: (() => void) | undefined;
   const progress = startDerivationProgress(shardCount, workersInput);
   try {
+    stopIgnoringInput = ignoreInputDuringDerivation();
     const result = await derive(name, pass, selectedWork, workersInput, {
       engine: selectedEngine,
       shardMultiplier: selectedMultiplier,
       onProgress: completed => progress.update(completed),
+      onNotice: (message, warning) => progress.notice(message, warning),
     });
     rootKey = result.rootKey;
     progress.complete(result.derivationTime);
 
     console.log('\n╭─ PUBLIC RESULT · no private material shown');
+    console.log(`│ Engine used:              ${result.engine}  (speed only)`);
     console.log(`│ Wallet fingerprint:       ${result.fingerprint}  (quick visual check)`);
     console.log(`│ First receiving address:  ${result.ethAddr24}`);
     console.log('│ 24-word primary · authoritative recovery check');
     console.log('╰─ The address is public, but may still be privacy-sensitive.');
 
     if (!canUseSensitiveScreen()) {
+      stopIgnoringInput();
+      stopIgnoringInput = undefined;
       console.log('\nRecovery words unavailable: this terminal cannot safely isolate the sensitive view.');
       return;
     }
 
+    stopIgnoringInput();
+    stopIgnoringInput = undefined;
     const revealOutput = new PromptOutput();
     const revealRl = readline.createInterface({ input: stdin, output: revealOutput, terminal: true });
     const confirmation = await askPasswordInput(
@@ -1682,32 +1855,20 @@ async function interactive() {
     }
 
     const sensitive = await deriveSensitiveMaterial(result.rootKey, addressCount, showPrivateKey);
-    openSensitiveScreen();
-    try {
-      console.log('RECOVERY WORDS · SECRET');
-      console.log('Anyone who sees these words can spend the wallet funds.');
-      console.log('This view clears on Enter or Ctrl+C; recordings, terminal logs, and photographs cannot be erased.');
-      console.log('\nPRIMARY WALLET · 24 words · matches the public first receiving address:');
-      console.log(sensitive.mnemonic24);
-      for (let i = 0; i < sensitive.standardAddrs24.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs24[i]);
-      for (let i = 0; i < sensitive.ledgerLiveAddrs24.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs24[i]);
-      if (sensitive.privateKey24) console.log('Private Key 1:', sensitive.privateKey24);
-
-      console.log('\nSECONDARY WALLET · 12 words · separate wallet and addresses:');
-      console.log(sensitive.mnemonic12);
-      for (let i = 0; i < sensitive.standardAddrs12.length; i++) console.log(`Address ${i + 1}:`, sensitive.standardAddrs12[i]);
-      for (let i = 0; i < sensitive.ledgerLiveAddrs12.length; i++) console.log(`Ledger Live ${i + 1}:`, sensitive.ledgerLiveAddrs12[i]);
-      if (sensitive.privateKey12) console.log('Private Key 1:', sensitive.privateKey12);
-
-      const dismissRl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
-      try {
-        await dismissRl.question('\nPress Enter to clear and exit: ');
-      } finally {
-        dismissRl.close();
-      }
-    } finally {
-      eraseSensitiveScreen();
-    }
+    await showSensitiveMaterial(
+      [
+        sensitive.mnemonic24,
+        ...sensitive.standardAddrs24.map((address, index) => `Address ${index + 1}: ${address}`),
+        ...sensitive.ledgerLiveAddrs24.map((address, index) => `Ledger Live ${index + 1}: ${address}`),
+        ...(sensitive.privateKey24 === undefined ? [] : [`Private Key 1: ${sensitive.privateKey24}`]),
+      ],
+      [
+        sensitive.mnemonic12,
+        ...sensitive.standardAddrs12.map((address, index) => `Address ${index + 1}: ${address}`),
+        ...sensitive.ledgerLiveAddrs12.map((address, index) => `Ledger Live ${index + 1}: ${address}`),
+        ...(sensitive.privateKey12 === undefined ? [] : [`Private Key 1: ${sensitive.privateKey12}`]),
+      ],
+    );
     console.log('Sensitive view erased. The privacy-sensitive public address remains above.');
   } catch (err) {
     progress.stop();
@@ -1716,6 +1877,7 @@ async function interactive() {
     console.error(`Derivation failed: ${message}`);
     process.exitCode = 1;
   } finally {
+    stopIgnoringInput?.();
     rootKey?.fill(0);
   }
 }
@@ -1730,6 +1892,7 @@ async function derivePassword() {
   let confirmationRl: readline.Interface | undefined;
   let rlPassword: readline.Interface | undefined;
   let rootKey: Uint8Array | undefined;
+  let stopIgnoringInput: (() => void) | undefined;
 
   try {
 
@@ -1777,11 +1940,13 @@ async function derivePassword() {
 
   const progress = startDerivationProgress(selectedWork.shardCount, workers);
   let result: Awaited<ReturnType<typeof derive>>;
+  stopIgnoringInput = ignoreInputDuringDerivation();
   try {
     result = await derive(name, pass, selectedWork, workers, {
       engine: flagEngine,
       shardMultiplier,
       onProgress: completed => progress.update(completed),
+      onNotice: (message, warning) => progress.notice(message, warning),
     });
     progress.complete(result.derivationTime);
   } catch (error) {
@@ -1790,8 +1955,10 @@ async function derivePassword() {
   }
   rootKey = result.rootKey;
 
-  console.log('\n[OK] Master key ready\n');
+  console.log(`\n[OK] Master key ready · engine: ${result.engine} (speed only)\n`);
 
+  stopIgnoringInput();
+  stopIgnoringInput = undefined;
   confirmationRl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
   const confirmation = await askPasswordInput(
     confirmationRl,
@@ -1828,6 +1995,7 @@ async function derivePassword() {
     rl.close();
     confirmationRl?.close();
     rlPassword?.close();
+    stopIgnoringInput?.();
     rootKey?.fill(0);
   }
 }
@@ -1864,7 +2032,7 @@ try {
     console.log('\nExited.');
     process.exitCode = 130;
   } else {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = publicErrorMessage(error, 'BRAINVAULT_UNEXPECTED_FAILURE');
     console.error(`Error: ${message}`);
     process.exitCode = 1;
   }

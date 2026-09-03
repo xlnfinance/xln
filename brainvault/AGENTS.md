@@ -76,7 +76,8 @@ and boolean parameters remain unchanged unless the task explicitly owns them.
 - Scheduler/native change: malformed-output tests and cross-engine root parity.
 - CLI change: pseudo-TTY user simulation, secret-output, Ctrl+C, and `NO_COLOR`.
 - Package change: inert offline install, allowlist, manifest, and launcher smoke.
-- Native release: byte-reproducible builds and bundled-binary hash equality.
+- Native release: `bun run verify:source` proves byte-reproducible builds and
+  bundled-binary hash equality without running during package installation.
 - Release: the full `workers=1/2/8/32` by `multiplier=1/2/10` matrix.
 
 Never approve from comments or benchmark output alone. Report the exact command,

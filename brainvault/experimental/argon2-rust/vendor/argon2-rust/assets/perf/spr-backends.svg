@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="310" viewBox="0 0 900 310" role="img" aria-label="Sapphire Rapids — same-ISA whole-hash speedup">
+  <title>Sapphire Rapids — same-ISA whole-hash speedup</title>
+  <desc>Rust backend vs C built for the same tier · 60+ cells, all three variants</desc>
+  <rect width="900" height="310" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <text x="22" y="26" fill="#e6edf3" font-size="15" font-weight="600" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Sapphire Rapids — same-ISA whole-hash speedup</text>
+  <text x="22" y="44" fill="#8b949e" font-size="11" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Rust backend vs C built for the same tier · 60+ cells, all three variants</text>
+    <line x1="148.9" y1="74" x2="148.9" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="148.9" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">0.9×</text>
+  <line x1="197.8" y1="74" x2="197.8" y2="272" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="" opacity="0.9"/>
+  <text x="197.8" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.0×</text>
+  <line x1="295.6" y1="74" x2="295.6" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="295.6" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.2×</text>
+  <line x1="393.3" y1="74" x2="393.3" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="393.3" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.4×</text>
+  <line x1="491.1" y1="74" x2="491.1" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="491.1" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.6×</text>
+  <line x1="588.9" y1="74" x2="588.9" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="588.9" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">1.8×</text>
+  <line x1="686.7" y1="74" x2="686.7" y2="272" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="686.7" y="66" text-anchor="middle" fill="#8b949e" font-size="10" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">2.0×</text>
+  <text x="88" y="103" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">scalar</text>
+  <rect x="100" y="88" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="251.6" y="88" width="200.4" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="104.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.11× – 1.52×</text>
+  <text x="88" y="151" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">sse2</text>
+  <rect x="100" y="136" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="266.2" y="136" width="195.6" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="152.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.14× – 1.54×</text>
+  <text x="88" y="199" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">avx2</text>
+  <rect x="100" y="184" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="310.2" y="184" width="161.3" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="200.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.23× – 1.56×</text>
+  <text x="88" y="247" text-anchor="end" fill="#e6edf3" font-size="13" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">avx512</text>
+  <rect x="100" y="232" width="660" height="22" rx="11" fill="#21262d"/>
+  <rect x="412.9" y="232" width="298.2" height="22" rx="11" fill="#3fb950"></rect>
+  <text x="884.0" y="248.0" text-anchor="end" fill="#e6edf3" font-size="12" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.44× – 2.05×</text>
+  <text x="22" y="296" fill="#8b949e" font-size="10" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">whole-hash C / rust ratio range · solid line = 1.0× · higher is better for this crate</text>
+</svg>

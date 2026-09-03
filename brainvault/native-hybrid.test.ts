@@ -29,6 +29,27 @@ function longPasswordInput(): Buffer {
   return input;
 }
 
+function singleShardInput(password: Uint8Array, salt: Uint8Array, memoryKiB: number): Buffer {
+  const input = Buffer.alloc(24 + password.length + 32);
+  input.writeUInt32LE(0x32435642, 0);
+  input.writeUInt32LE(1, 4);
+  input.writeUInt32LE(1, 8);
+  input.writeUInt32LE(password.length, 12);
+  input.writeUInt32LE(0, 16);
+  input.writeUInt32LE(memoryKiB, 20);
+  input.set(password, 24);
+  input.set(salt, 24 + password.length);
+  return input;
+}
+
+test('Rust native input uses fixed validated allocations so secret bytes are not reallocated', async () => {
+  const source = await Bun.file(`${import.meta.dir}/experimental/argon2-rust/src/main.rs`).text();
+  expect(source).not.toContain('read_to_end');
+  expect(source).toContain('read_exact(&mut header)');
+  expect(source).toContain('SecretVec(vec![0u8; password_len])');
+  expect(source).toContain('SecretVec(vec![0u8; salt_len])');
+});
+
 test('every bundled native executable rejects malformed wire input', () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
   const prebuildRoot = `${import.meta.dir}/prebuilds/darwin-arm64`;
@@ -36,7 +57,9 @@ test('every bundled native executable rejects malformed wire input', () => {
     ['c-portable', `${prebuildRoot}/brainvault-argon2`, 8],
     ['c-native', `${prebuildRoot}/brainvault-argon2-m3`, 8],
     ['rust-secure', `${prebuildRoot}/brainvault-argon2-rust`, 8],
+    ['rust-secure-m3', `${prebuildRoot}/brainvault-argon2-rust-m3`, 8],
     ['rust-no-wipe', `${prebuildRoot}/brainvault-argon2-rust-no-wipe`, 8],
+    ['rust-no-wipe-m3', `${prebuildRoot}/brainvault-argon2-rust-no-wipe-m3`, 8],
     ['metal', `${prebuildRoot}/brainvault-argon2-metal`, 8],
     ['opencl', `${prebuildRoot}/brainvault-argon2-opencl`, BRAINVAULT_V1.SHARD_MEMORY_KB],
   ] as const;
@@ -72,7 +95,11 @@ test('native engines do not impose a non-V1 password length cap', () => {
   const outputs: Buffer[] = [];
   for (const executable of [
     `${prebuildRoot}/brainvault-argon2`,
+    `${prebuildRoot}/brainvault-argon2-m3`,
     `${prebuildRoot}/brainvault-argon2-rust`,
+    `${prebuildRoot}/brainvault-argon2-rust-m3`,
+    `${prebuildRoot}/brainvault-argon2-rust-no-wipe`,
+    `${prebuildRoot}/brainvault-argon2-rust-no-wipe-m3`,
     `${prebuildRoot}/brainvault-argon2-metal`,
   ]) {
     const input = longPasswordInput();
@@ -87,10 +114,39 @@ test('native engines do not impose a non-V1 password length cap', () => {
     }
   }
   try {
-    expect(outputs[1]).toEqual(outputs[0]);
-    expect(outputs[2]).toEqual(outputs[0]);
+    for (const output of outputs.slice(1)) expect(output).toEqual(outputs[0]);
   } finally {
     for (const output of outputs) output.fill(0);
+  }
+}, 20_000);
+
+test('Apple M1 and M3 CPU prebuilds reproduce the frozen V1 shard', async () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const prebuildRoot = `${import.meta.dir}/prebuilds/darwin-arm64`;
+  const password = new TextEncoder().encode('secret123456');
+  const salt = await createShardSalt('alice', 0, 1);
+  try {
+    for (const executable of [
+      `${prebuildRoot}/brainvault-argon2`,
+      `${prebuildRoot}/brainvault-argon2-m3`,
+      `${prebuildRoot}/brainvault-argon2-rust`,
+      `${prebuildRoot}/brainvault-argon2-rust-m3`,
+      `${prebuildRoot}/brainvault-argon2-rust-no-wipe`,
+      `${prebuildRoot}/brainvault-argon2-rust-no-wipe-m3`,
+    ]) {
+      const input = singleShardInput(password, salt, BRAINVAULT_V1.SHARD_MEMORY_KB);
+      try {
+        const result = Bun.spawnSync({ cmd: [executable], stdin: input, stdout: 'pipe', stderr: 'pipe' });
+        expect(result.exitCode).toBe(0);
+        expect(bytesToHex(result.stdout)).toBe('d7057a04c5441e8246db71a98c94148b6306d810c5a5382ee5d3fd15655927b4');
+        result.stdout.fill(0);
+      } finally {
+        input.fill(0);
+      }
+    }
+  } finally {
+    password.fill(0);
+    salt.fill(0);
   }
 }, 20_000);
 
@@ -104,12 +160,12 @@ test('M3 Ultra Metal V1 profile freezes the measured balanced split', () => {
   });
 });
 
-test('M3 Ultra standard default scales the frozen measured profile to 10,000 shards', () => {
+test('M3 Ultra standard default uses the measured balanced 10,000-shard profile', () => {
   const plan = acceleratorPlan('metal', 10_000, 32, 32, 512 * 1024 ** 3);
   expect(plan).toEqual({
-    cpuShards: 3_600,
+    cpuShards: 2_000,
     cpuWorkers: 32,
-    acceleratorShards: 6_400,
+    acceleratorShards: 8_000,
     acceleratorWorkers: 40,
     acceleratorProcesses: 8,
   });
@@ -173,6 +229,71 @@ test('accelerator orchestration fails closed on truncated native output', async 
     salt.fill(0);
   }
 });
+
+test('accelerator child failures never disclose stderr or local paths', async () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const password = new TextEncoder().encode('benchmark-password');
+  const salt = await createShardSalt('benchmark-user', 0, 1);
+  let message = '';
+  try {
+    await deriveHybridNativeShards({
+      engine: 'metal',
+      password,
+      salts: [salt],
+      memoryKiB: 262144,
+      requestedCpuWorkers: 1,
+      paths: {
+        packageRoot: import.meta.dir,
+        cpuExecutable: `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2`,
+        acceleratorExecutable: `${import.meta.dir}/test-fixtures/native-failure.ts`,
+        metalLibrary: `${import.meta.dir}/prebuilds/darwin-arm64/argon2.metallib`,
+      },
+    });
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  } finally {
+    password.fill(0);
+    salt.fill(0);
+  }
+  expect(message).toBe('BRAINVAULT_ACCELERATOR_CHILD_FAILED:7');
+});
+
+test('invalid accelerator progress terminates the native child', async () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const fixture = `${import.meta.dir}/test-fixtures/native-invalid-progress.ts`;
+  const password = new TextEncoder().encode('benchmark-password');
+  const salt = await createShardSalt('benchmark-user', 0, 1);
+  let message = '';
+  try {
+    await deriveHybridNativeShards({
+      engine: 'metal',
+      password,
+      salts: [salt],
+      memoryKiB: 262144,
+      requestedCpuWorkers: 1,
+      onProgress: () => {},
+      paths: {
+        packageRoot: import.meta.dir,
+        cpuExecutable: `${import.meta.dir}/prebuilds/darwin-arm64/brainvault-argon2`,
+        acceleratorExecutable: fixture,
+        metalLibrary: `${import.meta.dir}/prebuilds/darwin-arm64/argon2.metallib`,
+      },
+    });
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  } finally {
+    password.fill(0);
+    salt.fill(0);
+  }
+  await Bun.sleep(50);
+  const found = Bun.spawnSync({ cmd: ['pgrep', '-f', fixture], stderr: 'pipe', stdout: 'pipe' });
+  const pids = found.exitCode === 0
+    ? found.stdout.toString().trim().split('\n').filter(Boolean).map(Number)
+    : [];
+  for (const pid of pids) if (Number.isSafeInteger(pid) && pid > 1) process.kill(pid, 'SIGKILL');
+  expect(message).toBe('BRAINVAULT_NATIVE_PROGRESS_INVALID');
+  expect(pids).toEqual([]);
+}, 5_000);
 
 test('every accelerator reproduces frozen ASCII, Unicode/NUL, and ordered smoke vectors', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return;

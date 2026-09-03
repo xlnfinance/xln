@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="291" viewBox="0 0 900 291" role="img" aria-label="Does dlopen bias the C?  No.">
+  <title>Does dlopen bias the C?  No.</title>
+  <desc>Self-timed C harness · three link modes · midpoints of measured ranges. normalized to static = 1.0 · midpoints shown · noise, not a systematic cost</desc>
+  <rect width="900" height="291" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <rect x="1" y="1" width="898" height="289" rx="11" fill="#161b22" opacity="0.4"/>
+  <text x="22" y="26" fill="#e6edf3" font-size="15" font-weight="600" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Does dlopen bias the C?  No.</text>
+  <text x="22" y="46" fill="#8b949e" font-size="11" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Self-timed C harness · three link modes · midpoints of measured ranges</text>
+  <rect x="170" y="62" width="12" height="12" rx="2" fill="#79c0ff"/><text x="190" y="72" fill="#8b949e" font-size="12" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">M5 Max</text><rect x="260" y="62" width="12" height="12" rx="2" fill="#d2a8ff"/><text x="280" y="72" fill="#8b949e" font-size="12" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">EPYC Genoa</text>
+    <text x="158" y="116.5" text-anchor="end" fill="#e6edf3" font-size="12" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">static  libargon2.a</text>
+  <rect x="170.0" y="96.0" width="662.9" height="14" rx="3" fill="#79c0ff"><//rect>
+  <text x="878.0" y="108.0" text-anchor="end" fill="#8b949e" font-size="11" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.000×</text>
+  <rect x="170.0" y="115.0" width="662.9" height="14" rx="3" fill="#d2a8ff"><//rect>
+  <text x="878.0" y="127.0" text-anchor="end" fill="#8b949e" font-size="11" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">1.000×</text>
+  <line x1="170" y1="139.0" x2="866" y2="139.0" stroke="#30363d" stroke-width="1" opacity="0.5"/>
+  <text x="158" y="167.5" text-anchor="end" fill="#e6edf3" font-size="12" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">shared  -largon2 PLT</text>
+  <rect x="170.0" y="147.0" width="658.9" height="14" rx="3" fill="#79c0ff"><//rect>
+  <text x="878.0" y="159.0" text-anchor="end" fill="#8b949e" font-size="11" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">0.994×</text>
+  <rect x="170.0" y="166.0" width="659.5" height="14" rx="3" fill="#d2a8ff"><//rect>
+  <text x="878.0" y="178.0" text-anchor="end" fill="#8b949e" font-size="11" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">0.995×</text>
+  <line x1="170" y1="190.0" x2="866" y2="190.0" stroke="#30363d" stroke-width="1" opacity="0.5"/>
+  <text x="158" y="218.5" text-anchor="end" fill="#e6edf3" font-size="12" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">dlopen  (as the bench)</text>
+  <rect x="170.0" y="198.0" width="658.9" height="14" rx="3" fill="#79c0ff"><//rect>
+  <text x="878.0" y="210.0" text-anchor="end" fill="#8b949e" font-size="11" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">0.994×</text>
+  <rect x="170.0" y="217.0" width="646.3" height="14" rx="3" fill="#d2a8ff"><//rect>
+  <text x="878.0" y="229.0" text-anchor="end" fill="#8b949e" font-size="11" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="1">0.975×</text>
+  <text x="22" y="277" fill="#8b949e" font-size="10" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">normalized to static = 1.0 · midpoints shown · noise, not a systematic cost</text>
+</svg>

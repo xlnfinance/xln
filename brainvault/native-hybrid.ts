@@ -1,6 +1,7 @@
 import { cpus, totalmem } from 'node:os';
 import { verifyBundledExecutable, verifyBundledFile } from './binary-integrity.ts';
 import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native/progress.ts';
+import { trackNativeChild } from './native/children.ts';
 
 const INPUT_MAGIC = 0x32435642;
 const HEADER_BYTES = 24;
@@ -55,9 +56,15 @@ export function acceleratorPlan(
   const acceleratorProcesses = engine !== 'opencl' && ultra && shardCount >= 100 ? 8 : 1;
 
   if (ultra && shardCount >= 100) {
-    const acceleratorShards = engine === 'opencl'
-      ? Math.min(shardCount - 1, Math.round(shardCount * 0.496))
-      : Math.min(shardCount - 1, Math.round(shardCount * 0.64));
+    // The measured 1,000-shard profile is exactly two 40-arena waves in each
+    // of eight Metal processes. Even one extra shard can create a third wave;
+    // keep the frozen split until a repeated end-to-end profile proves better.
+    const acceleratorFraction = engine === 'opencl'
+      ? 0.496
+      // The exact level-4 profile was separately measured end to end. Do not
+      // extrapolate it to unmeasured custom/level-5/level-6 shard counts.
+      : engine === 'metal' && shardCount === 10_000 ? 0.80 : 0.64;
+    const acceleratorShards = Math.min(shardCount - 1, Math.round(shardCount * acceleratorFraction));
     return {
       cpuShards: shardCount - acceleratorShards,
       cpuWorkers: boundedWorkers(engine === 'opencl' ? Math.min(30, requestedCpuWorkers) : requestedCpuWorkers, shardCount - acceleratorShards),
@@ -136,7 +143,7 @@ async function runJob(
     lastProgress = completed;
     onProgress(completed);
   };
-  const child = Bun.spawn([job.executable], {
+  const child = trackNativeChild(Bun.spawn([job.executable], {
     env: {
       ...process.env,
       ...job.environment,
@@ -145,18 +152,26 @@ async function runJob(
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
-  });
+  }));
   child.stdin.write(input);
   child.stdin.end();
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).arrayBuffer(),
-    readNativeProgress(child.stderr, acceptProgress),
-    child.exited,
-  ]);
+  let stdout: ArrayBuffer;
+  let exitCode: number;
+  try {
+    [stdout, , exitCode] = await Promise.all([
+      new Response(child.stdout).arrayBuffer(),
+      readNativeProgress(child.stderr, acceptProgress),
+      child.exited,
+    ]);
+  } catch (error) {
+    child.kill();
+    await child.exited;
+    throw error;
+  }
   const output = Buffer.from(stdout);
   if (exitCode !== 0) {
     output.fill(0);
-    throw new Error(`BRAINVAULT_ACCELERATOR_CHILD_FAILED:${exitCode}:${stderr.trim()}`);
+    throw new Error(`BRAINVAULT_ACCELERATOR_CHILD_FAILED:${exitCode}`);
   }
   if (onProgress !== undefined && lastProgress !== job.count) {
     output.fill(0);
