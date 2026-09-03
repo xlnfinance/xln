@@ -1361,6 +1361,7 @@ const buildStorageRuntimeFrame = (
         }
       : {}),
     runtimeInput: appliedRuntimeInput,
+    logs: touches.frameLogs,
     ...(entityContextRefs.size > 0
       ? { entityContextRefs: new Map(entityContextRefs) }
       : {}),

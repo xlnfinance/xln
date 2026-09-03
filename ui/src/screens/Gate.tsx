@@ -1,16 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icons';
-import { useApp } from '../core/store';
-import { bootEmbeddedDemo, connectSandbox } from '../core/sandbox';
+import { useApp } from '../runtime/store';
+import { bootEmbeddedDemo, connectSandbox } from '../runtime/sandbox';
 import {
 	FACTOR_PRESETS,
 	customWork,
 	deriveBrainvaultMnemonic,
 	type BrainvaultProgress,
 	type BrainvaultWork,
-} from '../core/brainvault';
-import { isValidMnemonic, runtimeIdForSeed } from '../core/keys';
-import { connectRemote } from '../core/adapter';
+} from '../runtime/brainvault';
+import { isValidMnemonic, runtimeIdForSeed } from '../runtime/keys';
+import { connectRemote } from '../runtime/adapter';
 
 type GateMode = 'landing' | 'create' | 'import' | 'remote';
 
@@ -68,13 +68,7 @@ export function Gate() {
 			deriveAbort.current = new AbortController();
 			let result;
 			try {
-				result = await deriveBrainvaultMnemonic(
-					name.trim(),
-					passphrase,
-					work,
-					p => setProgress(p),
-					deriveAbort.current.signal,
-				);
+				result = await deriveBrainvaultMnemonic(name.trim(), passphrase, work, p => setProgress(p), deriveAbort.current.signal);
 			} catch (deriveError) {
 				if (deriveError instanceof Error && deriveError.message === 'BRAINVAULT_ABORTED') {
 					setBusyStep(null);
@@ -94,7 +88,7 @@ export function Gate() {
 				selfLabel: name.trim(),
 				onStep: step => setBusyStep(step),
 			});
-			toast('Vault created — write nothing down, your name and passphrase are the backup');
+			toast('Vault created. Write nothing down: your name and passphrase are the backup.');
 		});
 	};
 
@@ -136,7 +130,7 @@ export function Gate() {
 				? Math.max(0, Math.round(((progress.elapsedMs / progress.completed) * (progress.total - progress.completed)) / 1000))
 				: null;
 		return (
-			<div className="gate">
+			<div className="gate" data-testid="gate-busy">
 				<GateMark />
 				<div className="gate-busy fade-in">
 					<p className="caps">{busyStep}</p>
@@ -152,7 +146,7 @@ export function Gate() {
 							</p>
 							<button
 								type="button"
-								className="btn btn-ghost"
+								className="btn ghost sm"
 								onClick={() => {
 									deriveAbort.current?.abort();
 								}}
@@ -173,7 +167,7 @@ export function Gate() {
 	return (
 		<div className="gate">
 			<GateMark />
-			<h1 className="gate-title display">Sovereign asset terminal</h1>
+			<h1 className="gate-title">xln</h1>
 			<p className="gate-sub muted">Your runtime. Your proofs. Your money.</p>
 
 			{error ? (
@@ -185,7 +179,7 @@ export function Gate() {
 			{mode === 'landing' && (
 				<div className="gate-cards fade-in">
 					{vaults.map(vault => (
-						<button key={vault.id} type="button" className="glass gate-card" onClick={() => unlockVault(vault.kind)}>
+						<button key={vault.id} type="button" className="gate-card" onClick={() => unlockVault(vault.kind)}>
 							<span className="gate-card-icon">
 								<Icon name={vault.kind === 'remote' ? 'bank' : 'lock'} size={18} />
 							</span>
@@ -199,7 +193,7 @@ export function Gate() {
 						</button>
 					))}
 
-					<button type="button" className="glass gate-card" onClick={() => setMode('create')}>
+					<button type="button" className="gate-card" onClick={() => setMode('create')}>
 						<span className="gate-card-icon">
 							<Icon name="shield" size={18} />
 						</span>
@@ -210,18 +204,18 @@ export function Gate() {
 						<Icon name="chevronRight" size={16} />
 					</button>
 
-					<button type="button" className="glass gate-card" onClick={() => setMode('import')}>
+					<button type="button" className="gate-card" onClick={() => setMode('import')}>
 						<span className="gate-card-icon">
-							<Icon name="request" size={18} />
+							<Icon name="receive" size={18} />
 						</span>
 						<span>
 							<span className="gate-card-title">Import a phrase</span>
-							<span className="gate-card-sub muted">24 words, standard BIP39</span>
+							<span className="gate-card-sub muted">12 or 24 words, standard BIP39</span>
 						</span>
 						<Icon name="chevronRight" size={16} />
 					</button>
 
-					<button type="button" className="glass gate-card" onClick={() => setMode('remote')}>
+					<button type="button" className="gate-card" onClick={() => setMode('remote')}>
 						<span className="gate-card-icon">
 							<Icon name="bank" size={18} />
 						</span>
@@ -232,8 +226,8 @@ export function Gate() {
 						<Icon name="chevronRight" size={16} />
 					</button>
 
-					<button type="button" className="btn btn-quiet gate-sandbox" onClick={enterSandbox}>
-						Enter the sandbox — three actors, funded, instant
+					<button type="button" className="btn quiet gate-sandbox" onClick={enterSandbox} data-testid="gate-sandbox">
+						Enter the sandbox: three actors, funded, instant
 					</button>
 				</div>
 			)}
@@ -252,13 +246,7 @@ export function Gate() {
 					</label>
 					<label className="field">
 						<span className="field-label">Passphrase</span>
-						<input
-							className="input"
-							type="password"
-							value={passphrase}
-							onChange={e => setPassphrase(e.target.value)}
-							placeholder="Long and memorable"
-						/>
+						<input className="input" type="password" value={passphrase} onChange={e => setPassphrase(e.target.value)} placeholder="Long and memorable" />
 					</label>
 					<div className="field">
 						<span className="field-label">Security work factor</span>
@@ -283,7 +271,7 @@ export function Gate() {
 								);
 							})}
 						</div>
-						<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+						<div className="field-row">
 							<input
 								className="input num"
 								style={{ maxWidth: 200 }}
@@ -293,25 +281,18 @@ export function Gate() {
 								onChange={e => setCustomShards(e.target.value.replace(/[^\d]/g, ''))}
 							/>
 							<span className="faint" style={{ fontSize: 12 }}>
-								{work
-									? `${work.tier} · ${work.shardCount.toLocaleString('en-US')} shards · factor ${work.factor}`
-									: 'At least 6 shards'}
+								{work ? `${work.tier} · ${work.shardCount.toLocaleString('en-US')} shards · factor ${work.factor}` : 'At least 6 shards'}
 							</span>
 						</div>
-						<span className="faint" style={{ fontSize: 12 }}>
-							Each shard is one unit of Argon2 memory-hard work. The same name, passphrase, and work reopen this vault
-							on any device — cancel any time.
+						<span className="note">
+							Each shard is one unit of Argon2 memory-hard work. The same name, passphrase, and work reopen this vault on any device.
 						</span>
 					</div>
 					<div className="gate-form-actions">
-						<button type="button" className="btn btn-quiet" onClick={() => setMode('landing')}>
+						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
 							Back
 						</button>
-						<button
-							type="submit"
-							className="btn btn-primary"
-							disabled={name.trim().length < 2 || passphrase.length < 8 || !work}
-						>
+						<button type="submit" className="btn" disabled={name.trim().length < 2 || passphrase.length < 8 || !work}>
 							Derive vault
 						</button>
 					</div>
@@ -328,20 +309,13 @@ export function Gate() {
 				>
 					<label className="field">
 						<span className="field-label">Recovery phrase</span>
-						<textarea
-							className="input"
-							rows={3}
-							value={phrase}
-							onChange={e => setPhrase(e.target.value)}
-							placeholder="twenty four words separated by spaces"
-							autoFocus
-						/>
+						<textarea className="input boxed" rows={3} value={phrase} onChange={e => setPhrase(e.target.value)} placeholder="words separated by spaces" autoFocus />
 					</label>
 					<div className="gate-form-actions">
-						<button type="button" className="btn btn-quiet" onClick={() => setMode('landing')}>
+						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
 							Back
 						</button>
-						<button type="submit" className="btn btn-primary" disabled={phrase.trim().split(/\s+/).length < 12}>
+						<button type="submit" className="btn" disabled={phrase.trim().split(/\s+/).length < 12}>
 							Unlock
 						</button>
 					</div>
@@ -365,10 +339,10 @@ export function Gate() {
 						<input className="input mono" type="password" value={authKey} onChange={e => setAuthKey(e.target.value)} />
 					</label>
 					<div className="gate-form-actions">
-						<button type="button" className="btn btn-quiet" onClick={() => setMode('landing')}>
+						<button type="button" className="btn quiet" onClick={() => setMode('landing')}>
 							Back
 						</button>
-						<button type="submit" className="btn btn-primary" disabled={!wsUrl.trim()}>
+						<button type="submit" className="btn" disabled={!wsUrl.trim()}>
 							Connect
 						</button>
 					</div>
@@ -381,7 +355,7 @@ export function Gate() {
 function GateMark() {
 	return (
 		<div className="rail-mark gate-mark" aria-hidden>
-			<span />
+			△
 		</div>
 	);
 }

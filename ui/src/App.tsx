@@ -1,10 +1,12 @@
-import { Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Shell } from './components/Shell';
 import { Toasts } from './components/Toasts';
-import { useApp } from './core/store';
+import { PaymentReceiptSheet } from './components/PaymentReceipt';
+import { useApp } from './runtime/store';
+import { startPaymentTerminal } from './runtime/financial/receipts';
 import { Gate } from './screens/Gate';
 import { Home } from './screens/Home';
-import { Accounts } from './screens/Accounts';
 import { AccountDetail } from './screens/AccountDetail';
 import { Pay } from './screens/Pay';
 import { Swap } from './screens/Swap';
@@ -12,11 +14,32 @@ import { Receive } from './screens/Receive';
 import { ActivityScreen } from './screens/Activity';
 import { SettingsScreen } from './screens/Settings';
 
+/** `/#pay/<invoice>` is the canonical wallet link; it opens Pay with the invoice applied. */
+function useInvoiceDeepLink(): void {
+	const navigate = useNavigate();
+	const { hash } = useLocation();
+	useEffect(() => {
+		const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+		if (!raw.toLowerCase().startsWith('pay/')) return;
+		navigate('/pay', { replace: true, state: { invoice: window.location.href } });
+	}, [hash, navigate]);
+}
+
 export default function App() {
 	const status = useApp(s => s.adapterStatus);
 	const booting = useApp(s => s.booting);
+	const activeEntityId = useApp(s => s.activeEntityId);
+	// The wallet needs a connected runtime and a chosen entity; anything less stays on the gate.
+	const connected = status === 'connected' && !booting && Boolean(activeEntityId);
 
-	if (status !== 'connected' || booting) {
+	useInvoiceDeepLink();
+
+	useEffect(() => {
+		if (!connected) return;
+		return startPaymentTerminal();
+	}, [connected]);
+
+	if (!connected) {
 		return (
 			<>
 				<Gate />
@@ -29,7 +52,6 @@ export default function App() {
 		<Shell>
 			<Routes>
 				<Route path="/" element={<Home />} />
-				<Route path="/accounts" element={<Accounts />} />
 				<Route path="/accounts/:counterpartyId" element={<AccountDetail />} />
 				<Route path="/pay" element={<Pay />} />
 				<Route path="/swap" element={<Swap />} />
@@ -38,6 +60,7 @@ export default function App() {
 				<Route path="/settings" element={<SettingsScreen />} />
 				<Route path="*" element={<Home />} />
 			</Routes>
+			<PaymentReceiptSheet />
 		</Shell>
 	);
 }

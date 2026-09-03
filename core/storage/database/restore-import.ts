@@ -336,6 +336,7 @@ const publishNewWalBase = async (
     runtimeOutputCount: outputPayloads.commitment.count,
     runtimeOutputsDigest: outputPayloads.commitment.digest,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    logs: [],
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts,
     touchedBookEntities,

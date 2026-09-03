@@ -173,7 +173,7 @@ type WaveSwapOffer = {
  * of the account afterwards would mean the account body has to come back
  * across the wire for every operation, which is the whole cost this avoids.
  */
-export type WaveDisputeDraft = {
+type WaveDisputeDraft = {
   hanko?: string;
   hash: string;
   proofBodyHash: string;

@@ -46,6 +46,18 @@ test('machine events stay in the durable Runtime WAL without relay duplication',
   expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
 });
 
+test('frame event payloads are detached from producers and readers', () => {
+  const env = createEmptyEnv('env-events-detached-payload-seed');
+  const data = { nested: { amount: 10 } };
+  env.emit('DetachedFact', data);
+  data.nested.amount = 20;
+
+  const read = readRuntimeFrameEvents(env);
+  expect(read[0]?.data).toEqual({ nested: { amount: 10 } });
+  (read[0]!.data!['nested'] as { amount: number }).amount = 30;
+  expect(readRuntimeFrameEvents(env)[0]?.data).toEqual({ nested: { amount: 10 } });
+});
+
 test('diagnostic info and log messages stay transient while machine events are durable', () => {
   const env = createEmptyEnv('env-events-transient-diagnostics-seed');
   env.state.timestamp = 321;

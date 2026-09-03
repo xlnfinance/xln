@@ -42,7 +42,7 @@ const getFrameEvents = (env: RuntimeReplica): FrameLogEntry[] => {
 
 /** Read a detached copy so callers cannot mutate the active frame buffer. */
 export const readRuntimeFrameEvents = (env: RuntimeReplica): FrameLogEntry[] =>
-  getFrameEvents(env).map(entry => ({ ...entry }));
+  structuredClone(getFrameEvents(env));
 
 /** Remove only events produced after a known frame boundary. */
 export const truncateRuntimeFrameEvents = (env: RuntimeReplica, length: number): void => {
@@ -117,11 +117,11 @@ const appendFrameLog = (
   cleanLevel: string,
 ): void => {
   const logState = getLogState(env);
-  getFrameEvents(env).push({
+  getFrameEvents(env).push(structuredClone({
     id: logState.nextId++,
     timestamp: env.state.timestamp,
     ...entry,
-  });
+  }));
   addCleanLog(env, cleanLevel, entry.message);
 };
 

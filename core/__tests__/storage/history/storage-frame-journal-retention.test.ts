@@ -22,6 +22,7 @@ import {
   readPersistedAccountFrameHistory,
   readPersistedCheckpointSnapshot,
   readPersistedFrameJournal,
+  readPersistedRuntimeActivityJournal,
   saveEnvToDB,
   verifyRuntimeChain,
 } from '../../../runtime.ts';
@@ -204,6 +205,30 @@ describe('storage frame journal retention', () => {
     expect(stats).toBeTruthy();
     expect(head.retainedWalBytes).toBe(stats!.walBytes);
 
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('commits ordered Runtime events in the hashed WAL frame', async () => {
+    const env = await createSavedEmptyEnv('frame-event-journal');
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
+    env.emit('HtlcReceived', { lockId: 'lock-1', amount: 7n });
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
+
+    const journal = await readPersistedRuntimeActivityJournal(env, 2);
+    expect(journal?.logs).toEqual([{
+      id: 0,
+      timestamp: 2_000,
+      level: 'info',
+      category: 'system',
+      message: 'HtlcReceived',
+      data: { lockId: 'lock-1', amount: 7n },
+    }]);
+
+    const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
+    expect(frame?.logs).toEqual(journal?.logs);
+    expect(frame?.frameHash).toBe(computeStorageFrameHash(frame!));
     await closeRuntimeDb(env);
     await closeInfraDb(env);
   });

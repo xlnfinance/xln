@@ -1,6 +1,10 @@
 type RuntimeProcessLike = { env?: Record<string, string | undefined> };
 
-export const runtimeIsBrowser = typeof window !== 'undefined';
+// Web Workers do not expose `window`, but they are still browser runtimes and
+// need the same minimal process shim as the page bundle. Bun/Node workers keep
+// their real global process, so this does not misclassify server workers.
+export const runtimeIsBrowser =
+  typeof window !== 'undefined' || typeof globalThis.process === 'undefined';
 
 export const readRuntimeEnv = (name: string): string | undefined => {
   try {

@@ -1,6 +1,6 @@
 import type { EntityTx, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN, peekXLN } from './xln-loader';
-import { connectEmbedded, getEmbeddedEnv, requireAdapter } from './adapter';
+import { connectEmbedded, disconnectAdapter, getEmbeddedEnv, requireAdapter } from './adapter';
 import { deriveAddress, derivePrivateKeyBytes } from './keys';
 import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, waitFor } from './tx';
 import { useApp, type VaultKind } from './store';
@@ -91,6 +91,9 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
 			try {
 				const xln = await getXLN();
 				const env = getEmbeddedEnv();
+				// Stop the live loop before wiping its storage, otherwise the next
+				// frame append fails against an empty head and halts the runtime.
+				disconnectAdapter();
 				if (env) await xln.clearDB(env);
 			} catch {
 				// Reset is best-effort; surface the original failure.
@@ -211,6 +214,21 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 	// with J_PREFIX_LOCAL_PREFIX_MISMATCH on the receiving entity (runtime
 	// prefix-consensus issue, reported upstream). The demo runs entirely on
 	// bilateral credit lines, which payments do not need reserves for.
+
+	step('Configuring hub');
+	// The hub publishes its fee policy through the same setHubConfig every
+	// production hub uses; that commits profile.isHub and the swap taker fee the
+	// canonical swap planner requires. Idempotent on a restored runtime.
+	const hubConfigured = (): boolean => findReplicaState(env, hub.entityId)?.state?.profile?.isHub === true;
+	if (!hubConfigured()) {
+		await sendEntity(hub.entityId, hub.signerId, [
+			{
+				type: 'setHubConfig',
+				data: { hubName: hub.label, routingFeePPM: 1, swapTakerFeeBps: 1 },
+			},
+		]);
+		await waitFor(hubConfigured, 'demo hub config', 45_000);
+	}
 
 	step('Opening accounts');
 	const spokes: Array<[DemoActor, DemoActor]> = [

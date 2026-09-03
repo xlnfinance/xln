@@ -27,7 +27,6 @@ import type { PersistenceQueryDeps } from './deps';
 export const buildRecoveryJournalFromStorageFrame = (
   frame: RuntimeFrame,
   payloads: RuntimeFramePayloads,
-  logs: FrameLogEntry[] = [],
 ): PersistedFrameJournal => ({
   height: frame.height,
   timestamp: frame.timestamp,
@@ -35,13 +34,13 @@ export const buildRecoveryJournalFromStorageFrame = (
   postStateHash: frame.postStateHash,
   materializedState: frame.materializedState,
   runtimeInput: frame.runtimeInput,
+  logs: structuredClone(frame.logs),
   runtimeOutputCount: frame.runtimeOutputCount,
   runtimeOutputsDigest: frame.runtimeOutputsDigest,
   entityContexts: structuredClone(payloads.entityContexts),
   ...(payloads.runtimeOutputs?.length ? { runtimeOutputs: payloads.runtimeOutputs } : {}),
   ...(payloads.runtimeMachine ? { runtimeMachine: payloads.runtimeMachine } : {}),
   ...(frame.canonicalStateHash ? { canonicalStateHash: frame.canonicalStateHash } : {}),
-  logs,
 });
 
 export type PersistedRuntimeActivityPage = {
@@ -179,8 +178,15 @@ export type PersistedAccountSwapHistoryPage = Readonly<{
 
 type PersistedAccountSwapResolve = Readonly<{
   fillRatio: number;
+  fillNumerator: bigint | null;
+  fillDenominator: bigint | null;
   height: number;
   cancelRemainder: boolean;
+  executionGiveAmount: bigint | null;
+  executionWantAmount: bigint | null;
+  feeTokenId: number | null;
+  feeAmount: bigint | null;
+  comment: string;
 }>;
 
 type PersistedAccountSwapLifecycle = Readonly<{
@@ -189,6 +195,8 @@ type PersistedAccountSwapLifecycle = Readonly<{
   wantTokenId: number;
   originalGiveAmount: bigint;
   originalWantAmount: bigint;
+  liveGiveAmount: bigint | null;
+  liveWantAmount: bigint | null;
   priceTicks: bigint;
   createdHeight: number;
   lastUpdatedHeight: number;
@@ -239,12 +247,32 @@ const applySwapTx = (
     row.cancelRequested = true;
     return;
   }
+  if (tx.type === 'swap_resolve') {
+    row.resolves.push({
+      fillRatio: tx.data.fillRatio,
+      fillNumerator: tx.data.fillNumerator ?? null,
+      fillDenominator: tx.data.fillDenominator ?? null,
+      height,
+      cancelRemainder: tx.data.cancelRemainder,
+      executionGiveAmount: tx.data.executionGiveAmount ?? null,
+      executionWantAmount: tx.data.executionWantAmount ?? null,
+      feeTokenId: tx.data.feeTokenId ?? null,
+      feeAmount: tx.data.feeAmount ?? null,
+      comment: tx.data.comment ?? '',
+    });
+    return;
+  }
   row.resolves.push({
-    fillRatio: tx.type === 'swap_resolve' ? tx.data.fillRatio : tx.data.cumulativeFillRatio,
+    fillRatio: tx.data.cumulativeFillRatio,
+    fillNumerator: tx.data.fillNumerator,
+    fillDenominator: tx.data.fillDenominator,
     height,
-    cancelRemainder: tx.type === 'swap_resolve'
-      ? tx.data.cancelRemainder
-      : (tx.data.cancelRemainder ?? tx.data.ackKind === 'cancel'),
+    cancelRemainder: tx.data.cancelRemainder ?? tx.data.ackKind === 'cancel',
+    executionGiveAmount: tx.data.executionSourceAmount ?? null,
+    executionWantAmount: tx.data.executionTargetAmount ?? null,
+    feeTokenId: null,
+    feeAmount: null,
+    comment: tx.data.comment ?? '',
   });
 };
 
@@ -277,11 +305,16 @@ const readAccountSwapHistoryPage = async (
   candidates.sort((left, right) =>
     right.lastUpdatedHeight - left.lastUpdatedHeight || right.offerId.localeCompare(left.offerId));
   const selected = candidates.slice(0, limit);
-  const items = selected.map(row => ({
-    ...row,
-    closed: !account.state.swapOffers.has(row.offerId) && row.resolves.length > 0,
-    resolves: row.resolves.map(resolve => ({ ...resolve })),
-  }));
+  const items = selected.map(row => {
+    const liveOffer = account.state.swapOffers.get(row.offerId);
+    return {
+      ...row,
+      liveGiveAmount: liveOffer?.giveAmount ?? null,
+      liveWantAmount: liveOffer?.wantAmount ?? null,
+      closed: !liveOffer && row.resolves.length > 0,
+      resolves: row.resolves.map(resolve => ({ ...resolve })),
+    };
+  });
   const last = selected.at(-1);
   return {
     entityId: normalize(entityId),
@@ -330,14 +363,19 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     height: number,
   ): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
-    return frame ? { height: frame.height, timestamp: frame.timestamp, runtimeInput: frame.runtimeInput, logs: [] } : null;
+    return frame ? {
+      height: frame.height,
+      timestamp: frame.timestamp,
+      runtimeInput: frame.runtimeInput,
+      logs: structuredClone(frame.logs),
+    } : null;
   };
 
   const readPersistedRuntimeActivityRecord = async (env: RuntimeReplica, height: number) => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
     return frame ? {
       timestamp: frame.timestamp,
-      logs: [] as FrameLogEntry[],
+      logs: structuredClone(frame.logs),
       touchedEntities: [...frame.touchedEntities],
       touchedAccounts: frame.touchedAccounts.map(account => ({ ...account })),
       touchedBookEntities: [...frame.touchedBookEntities],

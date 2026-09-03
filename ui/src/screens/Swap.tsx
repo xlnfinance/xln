@@ -1,116 +1,85 @@
-import { useMemo, useState } from 'react';
-import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import type { AccountState, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
+import { getJurisdictionStackId } from '@xln/core/api/public/runtime-module';
+import { buildCrossSwapSetupSteps } from '$lib/components/Entity/swap/swap-panel-helpers';
+import { DeltaBar, DeltaCaption } from '../components/Bars';
 import { Icon } from '../components/Icons';
-import { peekXLN } from '../core/xln-loader';
-import { useAdapterRead } from '../core/hooks';
-import { useApp } from '../core/store';
-import { sendEntityTxs } from '../core/tx';
-import { formatAmount, getTokenMeta, knownTokenIds, parseAmount } from '../core/format';
-import { useAccounts, useEntityCore, useOpenSwapOffers, type AccountView } from '../core/views';
+import { TokenPicker } from '../components/TokenPicker';
+import { useApp } from '../runtime/store';
+import { peekXLN } from '../runtime/xln-loader';
+import { sendEntityTxs } from '../runtime/tx';
+import { hubTakerFeeBps, jurisdictionRef, planSwap, readAccountState, submitSwapPlan } from '../runtime/financial/swap';
+import { amountInputText, formatMoney, getTokenMeta, parseAmount } from '../runtime/format';
+import { openSwapOffers, useWallet } from '../runtime/views';
 
-type TifOption = { value: 0 | 1 | 2; label: string; description: string };
+type Mode = 'same' | 'cross';
 
-const TIF_OPTIONS: TifOption[] = [
-	{ value: 0, label: 'Good til canceled', description: 'Rests on the book until filled or canceled' },
-	{ value: 1, label: 'Immediate or cancel', description: 'Fills what it can now, cancels the rest' },
-	{ value: 2, label: 'Fill or kill', description: 'Fills completely now, or not at all' },
-];
-
-function rawAmountText(value: bigint, decimals: number): string {
-	const base = 10n ** BigInt(decimals);
-	const whole = value / base;
-	const fraction = (value % base).toString().padStart(decimals, '0').replace(/0+$/, '');
-	return fraction ? `${whole}.${fraction}` : whole.toString();
-}
-
-function TokenPicker({
-	tokenId,
-	onChange,
-	open,
-	setOpen,
-	exclude,
-}: {
-	tokenId: number;
-	onChange: (id: number) => void;
-	open: boolean;
-	setOpen: (open: boolean) => void;
-	exclude?: number;
-}) {
-	const meta = getTokenMeta(tokenId);
-	return (
-		<div className="picker" style={{ flex: 'none' }}>
-			<button type="button" className="picker-control" style={{ height: '100%', minWidth: 120 }} onClick={() => setOpen(!open)}>
-				{meta.symbol}
-				<Icon name="chevronDown" size={14} />
-			</button>
-			{open && (
-				<div className="picker-menu glass" style={{ minWidth: 220, right: 0, left: 'auto' }}>
-					{knownTokenIds()
-						.filter(id => id !== exclude)
-						.map(id => {
-							const tokenMeta = getTokenMeta(id);
-							return (
-								<button
-									key={id}
-									type="button"
-									className="picker-option"
-									onClick={() => {
-										onChange(id);
-										setOpen(false);
-									}}
-								>
-									<span style={{ fontSize: 13.5 }}>
-										{tokenMeta.symbol}
-										{id === tokenId ? ' ·' : ''}
-									</span>
-									<span className="faint" style={{ fontSize: 11.5 }}>
-										{tokenMeta.name}
-									</span>
-								</button>
-							);
-						})}
-				</div>
-			)}
-		</div>
-	);
-}
+const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export function Swap() {
+	const navigate = useNavigate();
+	const [params] = useSearchParams();
 	const entityId = useApp(s => s.activeEntityId);
 	const toast = useApp(s => s.toast);
-	const core = useEntityCore(entityId);
-	const { accounts } = useAccounts(entityId);
-	const { offers } = useOpenSwapOffers(entityId);
-	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
+	const wallet = useWallet(entityId);
+	const xln = peekXLN();
 
-	const names = useMemo(() => {
-		const map = new Map<string, string>();
-		for (const summary of entities.data ?? []) {
-			if (summary.entityId) map.set(summary.entityId.toLowerCase(), summary.label || '');
-		}
-		return map;
-	}, [entities.data]);
+	const hubs = useMemo(() => wallet.accounts.filter(account => account.isHub && !account.disputed), [wallet.accounts]);
+	const [mode, setMode] = useState<Mode>('same');
+	const [hubId, setHubId] = useState(params.get('hub')?.toLowerCase() ?? '');
+	const hub = hubs.find(account => account.counterpartyId === hubId) ?? hubs[0] ?? null;
 
-	const [counterpartyId, setCounterpartyId] = useState('');
-	const [counterpartyOpen, setCounterpartyOpen] = useState(false);
 	const [giveTokenId, setGiveTokenId] = useState(1);
 	const [wantTokenId, setWantTokenId] = useState(2);
 	const [giveText, setGiveText] = useState('');
 	const [wantText, setWantText] = useState('');
-	const [giveTokenOpen, setGiveTokenOpen] = useState(false);
-	const [wantTokenOpen, setWantTokenOpen] = useState(false);
-	const [tif, setTif] = useState<0 | 1 | 2>(0);
-	const [advancedOpen, setAdvancedOpen] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 	const [cancelingId, setCancelingId] = useState<string | null>(null);
 
-	const activeCounterpartyId = counterpartyId || accounts[0]?.counterpartyId || '';
-	const counterparty: AccountView | undefined = accounts.find(a => a.counterpartyId === activeCounterpartyId);
+	// Cross-network: our entity on the other network and a hub that lives there.
+	const otherEntities = useMemo(
+		() =>
+			wallet.summaries.filter(
+				summary => summary.signerId && normalizeId(summary.entityId) !== wallet.entityId && (summary.jurisdiction?.name || '') !== wallet.jurisdiction,
+			),
+		[wallet.summaries, wallet.entityId, wallet.jurisdiction],
+	);
+	const [targetEntityId, setTargetEntityId] = useState('');
+	const targetEntity = otherEntities.find(summary => normalizeId(summary.entityId) === targetEntityId) ?? otherEntities[0] ?? null;
+	const targetHubs = useMemo(
+		() =>
+			wallet.summaries.filter(
+				summary => summary.isHub && targetEntity && (summary.jurisdiction?.name || '') === (targetEntity.jurisdiction?.name || '') && normalizeId(summary.entityId) !== normalizeId(targetEntity.entityId),
+			),
+		[wallet.summaries, targetEntity],
+	);
+	const [targetHubId, setTargetHubId] = useState('');
+	const targetHub = targetHubs.find(summary => normalizeId(summary.entityId) === targetHubId) ?? targetHubs[0] ?? null;
+	const [targetAccount, setTargetAccount] = useState<AccountState | null | undefined>(undefined);
+
+	useEffect(() => {
+		if (mode !== 'cross' || !targetEntity || !targetHub) {
+			setTargetAccount(undefined);
+			return;
+		}
+		let cancelled = false;
+		readAccountState(targetEntity.entityId, targetHub.entityId)
+			.then(state => {
+				if (!cancelled) setTargetAccount(state);
+			})
+			.catch(() => {
+				if (!cancelled) setTargetAccount(null);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [mode, targetEntity, targetHub, wallet.frameHeight]);
 
 	const giveMeta = getTokenMeta(giveTokenId);
 	const wantMeta = getTokenMeta(wantTokenId);
-
-	const giveSpendable = counterparty?.tokens.find(t => t.tokenId === giveTokenId)?.derived.outCapacity ?? 0n;
+	const giveToken = hub?.tokens.find(token => token.tokenId === giveTokenId) ?? null;
+	const giveSpendable = giveToken?.derived.outCapacity ?? 0n;
 
 	const parsedGive = useMemo(() => {
 		try {
@@ -120,7 +89,6 @@ export function Swap() {
 			return null;
 		}
 	}, [giveText, giveMeta.decimals]);
-
 	const parsedWant = useMemo(() => {
 		try {
 			const value = parseAmount(wantText || '0', wantMeta.decimals);
@@ -131,55 +99,103 @@ export function Swap() {
 	}, [wantText, wantMeta.decimals]);
 
 	const prepared = useMemo(() => {
-		const xln = peekXLN();
 		if (!xln || !parsedGive || !parsedWant || giveTokenId === wantTokenId) return null;
 		try {
 			return xln.prepareSwapOrder(giveTokenId, wantTokenId, parsedGive, parsedWant);
 		} catch {
 			return null;
 		}
-	}, [giveTokenId, wantTokenId, parsedGive, parsedWant]);
+	}, [xln, giveTokenId, wantTokenId, parsedGive, parsedWant]);
+
+	const feeBps = useMemo(() => {
+		if (!hub || mode !== 'same') return null;
+		try {
+			return hubTakerFeeBps(hub.counterpartyId);
+		} catch {
+			return null;
+		}
+	}, [hub, mode, wallet.frameHeight]);
 
 	const sameToken = giveTokenId === wantTokenId;
-	const noAccount = !counterparty;
 	const overCapacity = Boolean(prepared && prepared.effectiveGive > giveSpendable);
 
+	// Inbound room on the target account for what we want to receive.
+	const targetInbound = useMemo(() => {
+		if (!xln || !targetAccount || !targetEntity || !targetHub) return 0n;
+		const delta = targetAccount.deltas.get(wantTokenId);
+		if (!delta) return 0n;
+		const isLeft = xln.isLeftEntity(targetEntity.entityId, targetHub.entityId);
+		return xln.deriveDelta(delta, isLeft).inCapacity;
+	}, [xln, targetAccount, targetEntity, targetHub, wantTokenId]);
+
+	const setupSteps = useMemo(() => {
+		if (mode !== 'cross' || !targetHub || !targetEntity) return [];
+		const want = prepared?.effectiveWant ?? parsedWant ?? 0n;
+		return buildCrossSwapSetupSteps({
+			routeMode: 'cross',
+			targetAccountReady: targetAccount !== null && targetAccount !== undefined,
+			canOpenTargetAccount: true,
+			needsCreditLimit: want > 0n && targetInbound < want,
+			targetHubLabel: targetHub.label,
+			targetJurisdictionLabel: targetEntity.jurisdiction?.name || 'target network',
+			creditLimitLabel: want > 0n ? formatMoney(want, wantMeta.decimals) : '',
+			creditIncreaseLabel: want > targetInbound ? `+${formatMoney(want - targetInbound, wantMeta.decimals)}` : '',
+			tokenSymbol: wantMeta.symbol,
+		});
+	}, [mode, targetHub, targetEntity, targetAccount, targetInbound, prepared, parsedWant, wantMeta.decimals, wantMeta.symbol]);
+
 	const flip = (): void => {
-		const g = giveTokenId;
-		const w = wantTokenId;
-		const gt = giveText;
-		const wt = wantText;
-		setGiveTokenId(w);
-		setWantTokenId(g);
-		setGiveText(wt);
-		setWantText(gt);
+		setGiveTokenId(wantTokenId);
+		setWantTokenId(giveTokenId);
+		setGiveText(wantText);
+		setWantText(giveText);
 	};
 
 	const place = async (): Promise<void> => {
-		const xln = peekXLN();
-		if (!xln || !entityId || !core.data?.signerId || !counterparty || !prepared) return;
+		if (!wallet.frame || !hub || !prepared || !wallet.signerId) return;
 		setSubmitting(true);
 		try {
-			const auth = xln.deriveSwapNetAuthorization(prepared.effectiveWant, 1);
-			const offerId = crypto.randomUUID();
-			await sendEntityTxs(entityId, core.data.signerId, [
-				{
-					type: 'placeSwapOffer',
-					data: {
-						counterpartyEntityId: counterparty.counterpartyId,
-						offerId,
-						giveTokenId,
-						giveAmount: prepared.effectiveGive,
-						wantTokenId,
-						wantAmount: prepared.effectiveWant,
-						maxFee: auth.maxFee,
-						minNetReceive: auth.minNetReceive,
-						priceTicks: prepared.priceTicks,
-						timeInForce: tif,
-					},
-				},
-			]);
-			toast(`Offer placed — ${formatAmount(prepared.effectiveGive, giveMeta.decimals, 4)} ${giveMeta.symbol} for ${formatAmount(prepared.effectiveWant, wantMeta.decimals, 4)} ${wantMeta.symbol}`);
+			const source = {
+				entityId: wallet.entityId,
+				signerId: wallet.signerId,
+				hubEntityId: hub.counterpartyId,
+				jurisdiction: jurisdictionRef(wallet.frame),
+				account: (wallet.frame.activeEntity?.accounts.items.find(doc => {
+					const left = normalizeId(doc.state.leftEntity);
+					const right = normalizeId(doc.state.rightEntity);
+					return (left === wallet.entityId ? right : left) === hub.counterpartyId;
+				})?.state as AccountState | undefined) ?? null,
+			};
+			const target =
+				mode === 'cross' && targetEntity && targetHub
+					? {
+							entityId: normalizeId(targetEntity.entityId),
+							signerId: normalizeId(targetEntity.signerId),
+							hubEntityId: normalizeId(targetHub.entityId),
+							jurisdiction: getJurisdictionStackId(targetEntity.jurisdiction),
+							account: targetAccount ?? null,
+						}
+					: undefined;
+			const plan = await planSwap({
+				mode,
+				frame: wallet.frame,
+				source,
+				...(target ? { target } : {}),
+				giveTokenId,
+				giveTokenDecimals: giveMeta.decimals,
+				wantTokenId,
+				wantTokenDecimals: wantMeta.decimals,
+				giveAmount: prepared.effectiveGive,
+				priceTicks: prepared.priceTicks,
+				expectedWantAmount: prepared.effectiveWant,
+				routeValue: target ? `cross:${hub.counterpartyId}>${target.hubEntityId}` : `same:${hub.counterpartyId}`,
+			});
+			await submitSwapPlan(plan);
+			toast(
+				mode === 'cross'
+					? `Cross-network swap submitted: ${formatMoney(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${formatMoney(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`
+					: `Order placed: ${formatMoney(prepared.effectiveGive, giveMeta.decimals)} ${giveMeta.symbol} for ${formatMoney(prepared.effectiveWant, wantMeta.decimals)} ${wantMeta.symbol}`,
+			);
 			setGiveText('');
 			setWantText('');
 		} catch (error) {
@@ -190,10 +206,10 @@ export function Swap() {
 	};
 
 	const cancel = async (offerCounterpartyId: string, offerId: string): Promise<void> => {
-		if (!entityId || !core.data?.signerId) return;
+		if (!wallet.entityId || !wallet.signerId) return;
 		setCancelingId(offerId);
 		try {
-			await sendEntityTxs(entityId, core.data.signerId, [
+			await sendEntityTxs(wallet.entityId, wallet.signerId, [
 				{ type: 'proposeCancelSwap', data: { counterpartyEntityId: offerCounterpartyId, offerId } },
 			]);
 			toast('Cancellation requested');
@@ -204,209 +220,274 @@ export function Swap() {
 		}
 	};
 
-	const mine = offers.filter(o => o.mine);
+	const mine = openSwapOffers(wallet.frame, wallet.entityId).filter(offer => offer.mine);
+	const disabledReason = !hub ? 'No hub account to swap through' : sameToken ? 'Choose two different tokens' : overCapacity ? 'Exceeds what you can send' : null;
 
 	return (
-		<div className="screen screen-narrow fade-in">
+		<div className="screen fade-in">
 			<div className="screen-header">
-				<span className="screen-title">Swap</span>
+				<span className="screen-title">
+					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back">
+						<Icon name="chevronLeft" size={18} />
+					</button>
+					Swap
+				</span>
+				<span className="segc">
+					<button type="button" className={mode === 'same' ? 'active' : ''} onClick={() => setMode('same')}>
+						Same network
+					</button>
+					<button type="button" className={mode === 'cross' ? 'active' : ''} onClick={() => setMode('cross')} disabled={otherEntities.length === 0}>
+						Across networks
+					</button>
+				</span>
 			</div>
 
-			<div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-				<div className="field">
-					<span className="field-label">With</span>
-					<div className="picker">
-						<button type="button" className="picker-control" style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => setCounterpartyOpen(!counterpartyOpen)}>
-							<span>{counterparty ? names.get(counterparty.counterpartyId) || 'Account' : 'Select a counterparty'}</span>
-							<Icon name="chevronDown" size={14} />
+			<div className="two-col pay">
+				<div className="stack">
+					<div className="field">
+						<div className="field-head">
+							<span>You pay</span>
+							<button type="button" className="btn quiet num" style={{ fontSize: 12 }} disabled={giveSpendable <= 0n} onClick={() => setGiveText(amountInputText(giveSpendable, giveMeta.decimals))}>
+								Up to {formatMoney(giveSpendable, giveMeta.decimals)}
+								{hub ? ` with ${hub.label}` : ''}
+							</button>
+						</div>
+						<div className="field-row">
+							<input className="input big" placeholder="0.00" inputMode="decimal" value={giveText} onChange={event => setGiveText(event.target.value)} data-testid="swap-give" />
+							<TokenPicker tokenId={giveTokenId} onChange={setGiveTokenId} exclude={wantTokenId} {...(wallet.jurisdiction ? { chip: wallet.jurisdiction } : {})} />
+						</div>
+					</div>
+					<div className="flip">
+						<button type="button" onClick={flip} aria-label="Flip">
+							<Icon name="swap" size={16} />
 						</button>
-						{counterpartyOpen && (
-							<div className="picker-menu glass">
-								{accounts.length === 0 && (
-									<p className="faint" style={{ padding: '10px 14px', fontSize: 12.5 }}>
-										No bilateral accounts yet — open one first.
-									</p>
-								)}
-								{accounts.map(account => (
-									<button
-										key={account.counterpartyId}
-										type="button"
-										className="picker-option"
-										onMouseDown={e => {
-											e.preventDefault();
-											setCounterpartyId(account.counterpartyId);
-											setCounterpartyOpen(false);
-										}}
-									>
-										<span style={{ fontSize: 13.5 }}>{names.get(account.counterpartyId) || 'Account'}</span>
-										<span className="hash">{account.counterpartyId}</span>
-									</button>
-								))}
-							</div>
-						)}
 					</div>
-					{counterparty && <span className="hash">{counterparty.counterpartyId}</span>}
-				</div>
-
-				<div className="field">
-					<span className="field-label">You give</span>
-					<div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
-						<input
-							className="input display"
-							style={{ fontSize: 32, fontWeight: 300, padding: '10px 16px', minWidth: 0 }}
-							placeholder="0"
-							inputMode="decimal"
-							value={giveText}
-							onChange={e => setGiveText(e.target.value)}
-						/>
-						<TokenPicker tokenId={giveTokenId} onChange={setGiveTokenId} open={giveTokenOpen} setOpen={setGiveTokenOpen} exclude={wantTokenId} />
+					<div className="field">
+						<div className="field-head">
+							<span>You receive</span>
+							<span>{mode === 'cross' && targetEntity ? `into your ${targetEntity.jurisdiction?.name || 'other'} account` : hub ? `from ${hub.label}` : ''}</span>
+						</div>
+						<div className="field-row">
+							<input
+								className="input big"
+								style={{ color: 'var(--accent-2)' }}
+								placeholder="0.00"
+								inputMode="decimal"
+								value={wantText}
+								onChange={event => setWantText(event.target.value)}
+								data-testid="swap-want"
+							/>
+							<TokenPicker
+								tokenId={wantTokenId}
+								onChange={setWantTokenId}
+								exclude={giveTokenId}
+								{...(mode === 'cross' && targetEntity?.jurisdiction?.name ? { chip: targetEntity.jurisdiction.name } : {})}
+							/>
+						</div>
 					</div>
-					<button
-						type="button"
-						className="btn-quiet btn"
-						style={{ alignSelf: 'flex-start', padding: '2px 0', fontSize: 12 }}
-						disabled={giveSpendable <= 0n}
-						onClick={() => setGiveText(rawAmountText(giveSpendable, giveMeta.decimals))}
-					>
-						{formatAmount(giveSpendable, giveMeta.decimals, 2)} {giveMeta.symbol} available
-					</button>
-				</div>
 
-				<button
-					type="button"
-					className="btn-quiet btn"
-					aria-label="Flip give and receive"
-					style={{ alignSelf: 'center', padding: 6, borderRadius: 999, border: '1px solid var(--hairline-2)' }}
-					onClick={flip}
-				>
-					<Icon name="swap" size={15} />
-				</button>
+					{hubs.length > 1 && (
+						<div className="chips">
+							{hubs.map(account => (
+								<button key={account.counterpartyId} type="button" className={hub?.counterpartyId === account.counterpartyId ? 'active' : ''} onClick={() => setHubId(account.counterpartyId)}>
+									{account.label}
+								</button>
+							))}
+						</div>
+					)}
 
-				<div className="field">
-					<span className="field-label">You receive</span>
-					<div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
-						<input
-							className="input display"
-							style={{ fontSize: 32, fontWeight: 300, padding: '10px 16px', minWidth: 0 }}
-							placeholder="0"
-							inputMode="decimal"
-							value={wantText}
-							onChange={e => setWantText(e.target.value)}
-						/>
-						<TokenPicker tokenId={wantTokenId} onChange={setWantTokenId} open={wantTokenOpen} setOpen={setWantTokenOpen} exclude={giveTokenId} />
-					</div>
-				</div>
-
-				{sameToken && (
-					<p style={{ color: 'var(--danger)', fontSize: 12.5 }}>Choose two different tokens.</p>
-				)}
-				{!sameToken && overCapacity && (
-					<p style={{ color: 'var(--danger)', fontSize: 12.5 }}>
-						Exceeds spendable capacity ({formatAmount(giveSpendable, giveMeta.decimals, 2)} {giveMeta.symbol}).
-					</p>
-				)}
-
-				{prepared && (
-					<div className="route-card active" style={{ cursor: 'default' }}>
-						<span className="route-meta">
-							<span>
-								Limit price {formatAmount(prepared.priceTicks, 4, 4)} {getTokenMeta(prepared.quoteTokenId).symbol} per{' '}
-								{getTokenMeta(prepared.baseTokenId).symbol}
-							</span>
-							<span>
-								Order books at {formatAmount(prepared.effectiveGive, giveMeta.decimals, 4)} {giveMeta.symbol} for{' '}
-								{formatAmount(prepared.effectiveWant, wantMeta.decimals, 4)} {wantMeta.symbol}
-							</span>
-						</span>
-						{prepared.unspentGiveAmount > 0n && (
-							<span className="route-hop-fees">
-								<span className="faint">
-									{formatAmount(prepared.unspentGiveAmount, giveMeta.decimals, 6)} {giveMeta.symbol} left unspent — lot size rounding
+					{mode === 'cross' && (
+						<div className="card tight">
+							<div className="kv">
+								<span className="k">Your other account</span>
+								<span className="v">
+									<select className="input" style={{ width: 'auto', textAlign: 'right' }} value={targetEntity ? normalizeId(targetEntity.entityId) : ''} onChange={event => setTargetEntityId(event.target.value)}>
+										{otherEntities.map(summary => (
+											<option key={summary.entityId} value={normalizeId(summary.entityId)}>
+												{summary.label || summary.entityId.slice(0, 10)} · {summary.jurisdiction?.name || 'unknown'}
+											</option>
+										))}
+									</select>
 								</span>
-							</span>
-						)}
-					</div>
-				)}
-
-				<div>
-					<button
-						type="button"
-						className="btn btn-quiet"
-						style={{ padding: '2px 0', fontSize: 12.5 }}
-						onClick={() => setAdvancedOpen(open => !open)}
-					>
-						Advanced
-						<Icon name={advancedOpen ? 'chevronDown' : 'chevronRight'} size={13} />
-					</button>
-					{advancedOpen && (
-						<div style={{ marginTop: 14 }} className="fade-in field">
-							<span className="field-label">Time in force</span>
-							<div className="mode-grid" role="radiogroup" aria-label="Time in force">
-								{TIF_OPTIONS.map(option => (
-									<button
-										key={option.value}
-										type="button"
-										role="radio"
-										aria-checked={tif === option.value}
-										className={`mode-card${tif === option.value ? ' active' : ''}`}
-										onClick={() => setTif(option.value)}
-									>
-										<span className="mode-card-name">
-											<span className="mode-radio" aria-hidden />
-											{option.label}
-											{option.value === 0 && <span className="mode-default">Default</span>}
-										</span>
-										<span className="mode-card-desc">{option.description}</span>
-									</button>
-								))}
 							</div>
+							<div className="kv">
+								<span className="k">Hub there</span>
+								<span className="v">
+									<select className="input" style={{ width: 'auto', textAlign: 'right' }} value={targetHub ? normalizeId(targetHub.entityId) : ''} onChange={event => setTargetHubId(event.target.value)}>
+										{targetHubs.map(summary => (
+											<option key={summary.entityId} value={normalizeId(summary.entityId)}>
+												{summary.label || summary.entityId.slice(0, 10)}
+											</option>
+										))}
+									</select>
+								</span>
+							</div>
+						</div>
+					)}
+
+					{prepared && (
+						<div className="card tight">
+							<div className="kv">
+								<span className="k">Limit price</span>
+								<span className="v num">
+									{formatMoney(prepared.priceTicks, 4, 4)} {getTokenMeta(prepared.quoteTokenId).symbol} per {getTokenMeta(prepared.baseTokenId).symbol}
+								</span>
+							</div>
+							{mode === 'same' && (
+								<div className="kv">
+									<span className="k">Hub fee</span>
+									<span className={`v num ${feeBps === null ? 'st-pending' : ''}`}>
+										{feeBps === null ? 'not published yet' : `${feeBps} bps · up to ${formatMoney((prepared.effectiveWant * BigInt(feeBps)) / 10_000n, wantMeta.decimals, 4)} ${wantMeta.symbol}`}
+									</span>
+								</div>
+							)}
+							<div className="kv">
+								<span className="k">Route</span>
+								<span className="hops">
+									<span className="hop">{wallet.jurisdiction || 'here'}</span>
+									<Icon name="arrow" size={12} />
+									<span className="hop me">{hub?.label ?? 'hub'}</span>
+									{mode === 'cross' && targetEntity ? (
+										<>
+											<Icon name="arrow" size={12} />
+											<span className="hop">{targetEntity.jurisdiction?.name || 'there'}</span>
+										</>
+									) : null}
+								</span>
+							</div>
+							<div className="kv">
+								<span className="k">Settlement</span>
+								<span className="v" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+									<Icon name="link" size={14} />
+									{mode === 'cross' ? 'Atomic · both legs or neither' : 'Bilateral · signed by both sides'}
+								</span>
+							</div>
+							{prepared.unspentGiveAmount > 0n && (
+								<div className="kv">
+									<span className="k">Lot rounding</span>
+									<span className="v num muted" style={{ fontWeight: 400 }}>
+										{formatMoney(prepared.unspentGiveAmount, giveMeta.decimals, 6)} {giveMeta.symbol} stays with you
+									</span>
+								</div>
+							)}
+						</div>
+					)}
+
+					{mode === 'cross' && setupSteps.length > 0 && (
+						<div>
+							{setupSteps.map(step => (
+								<div key={step.id} className="check">
+									<span className="ck todo">
+										<Icon name="plus" size={11} />
+									</span>
+									<span>
+										<b style={{ fontWeight: 600 }}>{step.label}.</b> <span className="muted">{step.detail}</span>
+									</span>
+								</div>
+							))}
+							<p className="note">These happen automatically as part of the swap.</p>
+						</div>
+					)}
+					{mode === 'cross' && targetAccount && setupSteps.length === 0 && targetEntity && targetHub && (
+						<div className="check">
+							<span className="ck">
+								<Icon name="check" size={11} />
+							</span>
+							<span>
+								{targetEntity.jurisdiction?.name} account with {targetHub.label} is ready to receive {wantMeta.symbol}
+							</span>
+						</div>
+					)}
+
+					{disabledReason && (giveText || wantText) ? <p style={{ color: 'var(--dispute)', fontSize: 12.5 }}>{disabledReason}</p> : null}
+
+					<button type="button" className="btn" data-testid="swap-submit" disabled={!prepared || Boolean(disabledReason) || submitting || !wallet.signerId} onClick={() => void place()}>
+						<Icon name="swap" size={15} />
+						{submitting ? 'Placing…' : prepared ? `Swap ${giveMeta.symbol} for ${wantMeta.symbol}` : 'Swap'}
+					</button>
+
+					{mine.length > 0 && (
+						<div>
+							<div className="sect">
+								<h3 className="caps">Your open orders</h3>
+								<span className="more">{mine.length}</span>
+							</div>
+							{mine.map((offer, index) => {
+								const gMeta = getTokenMeta(offer.giveTokenId);
+								const wMeta = getTokenMeta(offer.wantTokenId);
+								return (
+									<div key={`${offer.counterpartyId}-${offer.offerId}`} className={`row${index === 0 ? ' first' : ''}`}>
+										<div className="rt">
+											<span className="ev-ic swap">
+												<Icon name="swap" size={15} />
+											</span>
+											<span className="tx">
+												<span className="t num">
+													{formatMoney(offer.giveAmount, gMeta.decimals, 4)} {gMeta.symbol} for {formatMoney(offer.wantAmount, wMeta.decimals, 4)} {wMeta.symbol}
+												</span>
+												<span className="s">
+													with {wallet.names.get(offer.counterpartyId) || 'hub'} · height {offer.createdHeight}
+												</span>
+											</span>
+											<span className="r">
+												<span className="state st-inflight">open</span>
+												<div>
+													<button type="button" className="btn quiet" style={{ fontSize: 12 }} disabled={cancelingId === offer.offerId} onClick={() => void cancel(offer.counterpartyId, offer.offerId)}>
+														{cancelingId === offer.offerId ? 'Canceling…' : 'Cancel'}
+													</button>
+												</div>
+											</span>
+										</div>
+									</div>
+								);
+							})}
 						</div>
 					)}
 				</div>
 
-				<button
-					type="button"
-					className="btn btn-primary btn-lg btn-block"
-					disabled={!prepared || noAccount || overCapacity || submitting || !core.data?.signerId}
-					onClick={() => void place()}
-				>
-					<Icon name="swap" size={15} />
-					{submitting ? 'Placing…' : noAccount ? 'No account to swap through' : prepared ? `Swap ${giveMeta.symbol} → ${wantMeta.symbol}` : 'Swap'}
-				</button>
-
-				{mine.length > 0 && (
-					<div className="field">
-						<span className="field-label">
-							Your open orders · {mine.length}
-						</span>
-						{mine.map(offer => {
-							const gMeta = getTokenMeta(offer.giveTokenId);
-							const wMeta = getTokenMeta(offer.wantTokenId);
-							return (
-								<div key={`${offer.counterpartyId}-${offer.offerId}`} className="row" style={{ flexWrap: 'wrap' }}>
-									<span style={{ flex: '1 1 100%', display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-										<span style={{ fontSize: 13.5 }}>
-											{formatAmount(offer.giveAmount, gMeta.decimals, 4)} {gMeta.symbol} → {formatAmount(offer.wantAmount, wMeta.decimals, 4)} {wMeta.symbol}
-										</span>
-										<button
-											type="button"
-											className="btn-quiet btn"
-											style={{ fontSize: 12 }}
-											disabled={cancelingId === offer.offerId}
-											onClick={() => void cancel(offer.counterpartyId, offer.offerId)}
-										>
-											{cancelingId === offer.offerId ? 'Canceling…' : 'Cancel'}
-										</button>
-									</span>
-									<span className="faint" style={{ fontSize: 11 }}>
-										#{offer.offerId.slice(0, 8)} · height {offer.createdHeight}
-									</span>
+				<div className="aside desktop-only">
+					{mode === 'cross' ? (
+						<div className="card">
+							<h3 className="caps">Legs</h3>
+							<div className="tl">
+								<div className="ev">
+									<div className="t">1 · {wallet.jurisdiction || 'here'}</div>
+									<div className="s">
+										You lock {prepared ? formatMoney(prepared.effectiveGive, giveMeta.decimals) : '…'} {giveMeta.symbol} with {hub?.label ?? 'the hub'}
+									</div>
 								</div>
-							);
-						})}
-					</div>
-				)}
+								<div className="ev">
+									<div className="t">2 · {targetEntity?.jurisdiction?.name || 'there'}</div>
+									<div className="s">
+										{targetHub?.label ?? 'The hub'} pays {prepared ? formatMoney(prepared.effectiveWant, wantMeta.decimals) : '…'} {wantMeta.symbol} into your account there
+									</div>
+								</div>
+								<div className="ev">
+									<div className="t">Clear</div>
+									<div className="s">One secret releases both legs. If it never appears, both unlock.</div>
+								</div>
+							</div>
+						</div>
+					) : null}
+					{hub && giveToken ? (
+						<div className="card">
+							<h3 className="caps">Your account with {hub.label}</h3>
+							<DeltaBar derived={giveToken.derived} tokenId={giveTokenId} />
+							<DeltaCaption derived={giveToken.derived} format={value => formatMoney(value, giveMeta.decimals)} />
+							<p className="note" style={{ marginTop: 12 }}>
+								The order rests on this account. Filled amounts move Δ, nothing moves on-chain.
+							</p>
+						</div>
+					) : null}
+					{hubs.length === 0 && (
+						<div className="card">
+							<p className="note">Open an account with a hub to swap. Hubs run the order books.</p>
+						</div>
+					)}
+				</div>
 			</div>
 		</div>
 	);
 }
+
+export type { RuntimeAdapterEntitySummary };

@@ -60,7 +60,7 @@ test('native derivation rejects a worker built for another BrainVault spec', asy
       passphrase: 'secret123456',
       shardInput: 1,
       workers: 1,
-    }, { workerPath })).rejects.toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH:brainvault/stale-v0');
+    }, { workerPath })).rejects.toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

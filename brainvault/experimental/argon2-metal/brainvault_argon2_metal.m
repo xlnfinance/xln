@@ -353,8 +353,8 @@ int main(int argc, const char *argv[]) {
         password_length = read_u32le(header + 12u);
         flags = read_u32le(header + 16u);
         memory_kib = read_u32le(header + 20u);
-        if (shard_count == 0u || workers == 0u || workers > MAX_WORKERS || password_length == 0u ||
-            password_length > (1u << 20u) || flags != 0u || memory_kib < 8u || memory_kib % 4u != 0u) {
+        if (shard_count == 0u || workers == 0u || workers > shard_count || workers > MAX_WORKERS ||
+            password_length == 0u || flags != 0u || memory_kib < 8u || memory_kib % 4u != 0u) {
             goto cleanup;
         }
         if ((size_t)shard_count > SIZE_MAX / SALT_BYTES || (size_t)shard_count > SIZE_MAX / OUTPUT_BYTES) goto cleanup;
@@ -365,8 +365,9 @@ int main(int argc, const char *argv[]) {
         outputs = malloc(output_length);
         if (password == NULL || salts == NULL || outputs == NULL) goto cleanup;
         if (read_exact(password, password_length) != 0 || read_exact(salts, salt_length) != 0) goto cleanup;
+        if (fgetc(stdin) != EOF || ferror(stdin)) goto cleanup;
         if (run_metal(argv[0], shard_count, workers, password, password_length, salts, outputs, memory_kib) != 0) goto cleanup;
-        if (fwrite(outputs, 1u, output_length, stdout) != output_length) goto cleanup;
+        if (fwrite(outputs, 1u, output_length, stdout) != output_length || fflush(stdout) != 0) goto cleanup;
         exit_code = 0;
 
 cleanup:

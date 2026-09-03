@@ -15,24 +15,10 @@ body {
 	background: var(--bg);
 	color: var(--ink);
 	font-family: var(--font-ui);
-	font-size: 15px;
+	font-size: 14px;
 	line-height: 1.45;
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
-}
-
-body::before {
-	content: '';
-	position: fixed;
-	inset: 0;
-	background: var(--glow);
-	pointer-events: none;
-	z-index: 0;
-}
-
-#root {
-	position: relative;
-	z-index: 1;
 }
 
 h1,
@@ -69,29 +55,35 @@ textarea {
 }
 
 input[type='range'] {
-	accent-color: var(--champagne);
+	accent-color: var(--accent);
 }
 
 ::selection {
-	background: var(--champagne-dim);
+	background: var(--accent-dim);
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent-2);
+	outline-offset: 2px;
+	border-radius: 6px;
+}
+
+svg {
+	display: inline-block;
+	vertical-align: middle;
+	flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		transition: none !important;
+		animation: none !important;
+	}
 }
 
 /* ---------- typography ---------- */
-
-.caps {
-	font-size: 11px;
-	letter-spacing: 1.8px;
-	text-transform: uppercase;
-	color: var(--ink-3);
-	font-weight: 400;
-}
-
-.display {
-	font-family: var(--font-display);
-	font-weight: 300;
-	font-variant-numeric: tabular-nums;
-	letter-spacing: -0.02em;
-}
 
 .num {
 	font-variant-numeric: tabular-nums;
@@ -99,8 +91,23 @@ input[type='range'] {
 
 .mono {
 	font-family: var(--font-mono);
-	font-size: 0.86em;
-	color: var(--ink-2);
+	font-size: 12px;
+}
+
+.hash {
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	color: var(--ink-3);
+	overflow-wrap: anywhere;
+	word-break: break-all;
+}
+
+.caps {
+	font-size: 11px;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+	font-weight: 600;
 }
 
 .muted {
@@ -111,209 +118,67 @@ input[type='range'] {
 	color: var(--ink-3);
 }
 
-/* ---------- buttons ---------- */
+.display {
+	font-weight: 600;
+	letter-spacing: -0.03em;
+	line-height: 1;
+	color: var(--display);
+}
 
-.btn {
+.display .dec {
+	color: var(--ink-2);
+}
+
+.note {
+	font-size: 12.5px;
+	color: var(--ink-2);
+	line-height: 1.5;
+}
+
+/* ---------- money states ---------- */
+
+.st-settled {
+	color: var(--coll);
+}
+.st-inflight {
+	color: var(--hold);
+}
+.st-pending {
+	color: var(--debt);
+}
+.st-neutral {
+	color: var(--ink-2);
+}
+.st-dispute {
+	color: var(--dispute);
+}
+
+.state {
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	gap: 8px;
-	border-radius: var(--radius-pill);
-	padding: 11px 22px;
-	font-size: 14px;
+	gap: 6px;
+	font-size: 11.5px;
 	font-weight: 500;
-	border: 1px solid transparent;
-	transition:
-		transform var(--dur-fast) var(--ease),
-		opacity var(--dur-fast) var(--ease),
-		background var(--dur-fast) var(--ease);
-	user-select: none;
 	white-space: nowrap;
 }
 
-.btn:active:not(:disabled) {
-	transform: scale(0.97);
-}
-
-.btn-primary {
-	background: var(--btn-primary-bg);
-	color: var(--btn-primary-ink);
-}
-
-.btn-ghost {
-	border-color: var(--hairline-2);
-	color: var(--ink);
-}
-
-.btn-ghost:hover:not(:disabled) {
-	background: var(--glass);
-}
-
-.btn-quiet {
-	color: var(--ink-2);
-	padding: 8px 14px;
-}
-
-.btn-quiet:hover:not(:disabled) {
-	color: var(--ink);
-}
-
-.btn-danger {
-	border-color: var(--danger);
-	color: var(--danger);
-}
-
-.btn-block {
-	width: 100%;
-}
-
-.btn-lg {
-	padding: 15px 28px;
-	font-size: 15px;
-}
-
-/* ---------- fields ---------- */
-
-.field {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-.field-label {
-	font-size: 11px;
-	letter-spacing: 1.8px;
-	text-transform: uppercase;
-	color: var(--ink-3);
-}
-
-.input {
-	background: var(--glass);
-	border: 1px solid var(--glass-border);
-	border-radius: var(--radius-m);
-	padding: 13px 16px;
-	font-size: 15px;
-	outline: none;
-	width: 100%;
-	transition: border-color var(--dur-fast) var(--ease);
-}
-
-.input::placeholder {
-	color: var(--ink-3);
-}
-
-.input:focus {
-	border-color: var(--hairline-2);
-}
-
-.input-error {
-	border-color: var(--danger);
-}
-
-/* ---------- surfaces ---------- */
-
-.glass {
-	background: var(--glass);
-	border: 1px solid var(--glass-border);
-	border-radius: var(--radius-l);
-	backdrop-filter: blur(24px);
-	-webkit-backdrop-filter: blur(24px);
-	box-shadow: var(--shadow-card);
-}
-
-.hairline-top {
-	border-top: 1px solid var(--hairline);
-}
-
-.row {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	gap: 16px;
-	padding: 15px 0;
-	border-top: 1px solid var(--hairline);
-}
-
-.row:last-child {
-	border-bottom: 1px solid var(--hairline);
-}
-
-.row-tappable {
-	width: 100%;
-	text-align: left;
-	transition: opacity var(--dur-fast) var(--ease);
-}
-
-.row-tappable:hover {
-	opacity: 0.75;
-}
-
-/* ---------- capacity bar ---------- */
-
-.capbar {
-	height: 2px;
-	border-radius: 1px;
-	background: var(--hairline-2);
-	overflow: hidden;
-	display: flex;
-}
-
-.capbar-collateral {
-	background: var(--ink);
-	height: 100%;
-}
-
-.capbar-credit {
-	background: var(--champagne);
-	height: 100%;
-}
-
-/* ---------- accent details ---------- */
-
-.champagne-rule {
-	width: 38px;
-	height: 1px;
-	background: var(--champagne);
-}
-
-.dot {
-	width: 5px;
-	height: 5px;
+.state::before {
+	content: '';
+	width: 6px;
+	height: 6px;
 	border-radius: 50%;
-	background: var(--champagne);
+	background: currentColor;
 	flex: none;
 }
 
-.dot-idle {
-	background: var(--ink-3);
-}
-
-.dot-danger {
-	background: var(--danger);
-}
-
-/* ---------- skeleton ---------- */
-
-.skeleton {
-	border-radius: 6px;
-	background: var(--glass-2);
-	animation: skeleton-breathe 1.6s var(--ease) infinite;
-}
-
-@keyframes skeleton-breathe {
-	0%,
-	100% {
-		opacity: 0.5;
-	}
+@keyframes pulse {
 	50% {
-		opacity: 1;
+		opacity: 0.35;
 	}
 }
 
-/* ---------- transitions ---------- */
-
-.fade-in {
-	animation: fade-in var(--dur-slow) var(--ease);
+.state.st-inflight::before {
+	animation: pulse 1.4s ease-in-out infinite;
 }
 
 @keyframes fade-in {
@@ -321,17 +186,8 @@ input[type='range'] {
 		opacity: 0;
 		transform: translateY(6px);
 	}
-	to {
-		opacity: 1;
-		transform: none;
-	}
 }
 
-@media (prefers-reduced-motion: reduce) {
-	*,
-	*::before,
-	*::after {
-		animation-duration: 0.01ms !important;
-		transition-duration: 0.01ms !important;
-	}
+.fade-in {
+	animation: fade-in var(--dur-slow) var(--ease);
 }

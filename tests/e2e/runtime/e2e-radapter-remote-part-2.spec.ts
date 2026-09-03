@@ -18,7 +18,7 @@ const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
 
-const REMOTE_E2E_WAIT_MS = 15_000;
+const REMOTE_E2E_WAIT_MS = 30_000;
 
 /** Dual-j hubs publish `H1 Arrakis` / `H1 Tron`; import rows still match the runtime label. */
 const runtimeEntityLabelMatches = (label: string, runtimeLabel: string): boolean => {

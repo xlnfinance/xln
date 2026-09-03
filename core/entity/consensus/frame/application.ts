@@ -1257,28 +1257,10 @@ const createEntityFrameApplyContext = (
   };
 };
 
-const primeEntityFrameAccountWork = async (
+const primeEntityFrameAccountWork = (
   context: ApplyEntityTxsInOrderContext,
-): Promise<void> => {
+): void => {
   const state = context.currentEntityState;
-  markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-fill-acks');
-  await drainPendingCrossJurisdictionFillAcks(
-    context.env,
-    context.accountConsensusContext,
-    state,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.candidateEffects,
-    context.allOutputs,
-  );
-  markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-cancel-acks');
-  await drainCommittedCrossJurisdictionCancelAcks(
-    context.accountConsensusContext,
-    state,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.allOutputs,
-  );
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-account-index');
   for (const accountId of getProposableAccountIds(state)) {
     markProposableAccount(context.proposableAccounts, accountId);
@@ -1403,7 +1385,7 @@ const prepareEntityFrameWorkingSet = async (
   });
   if (!authorityTransitionOnly) {
     markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.prime');
-    await primeEntityFrameAccountWork(context);
+    primeEntityFrameAccountWork(context);
   }
   return {
     authorityTransitionOnly,

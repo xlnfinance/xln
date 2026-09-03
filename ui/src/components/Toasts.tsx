@@ -1,4 +1,4 @@
-import { useApp } from '../core/store';
+import { useApp } from '../runtime/store';
 
 export function Toasts() {
 	const toasts = useApp(s => s.toasts);

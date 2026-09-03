@@ -62,6 +62,7 @@ const prepareCommitProof = (
     postStateHash,
     materializedState: false,
     runtimeInput,
+    logs: [],
     touchedEntities: [],
     touchedAccounts: [],
     touchedBookEntities: [],

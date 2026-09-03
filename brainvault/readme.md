@@ -33,7 +33,7 @@ brainvault
 
 # Recommended interactive path: asks only username + password, then uses
 # level 4 (exactly 10,000 shards), multiplier 1, and all CPUs allowed by RAM.
-bun run bv
+bun ./brainvault
 
 # Optional: generate ten random a-z/A-Z/0-9 characters (59.54 bits while
 # undisclosed) with unbiased OS-CSPRNG choices. A same-run repeat checks only transcription.
@@ -48,7 +48,7 @@ bunx brainvault
 bunx brainvault --show-password
 
 # Advanced path: also asks level, multiplier, workers, and any available engine.
-bun run bv --ask
+bun ./brainvault --ask
 
 # Every advanced value can be supplied inline; --ask prompts only missing values.
 bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine metal
@@ -73,11 +73,11 @@ version. Future fixes must preserve every V1 root and frozen test vector.
 
 ## Live terminal demo
 
-[Watch the real 21-second CLI recording](media/brainvault-terminal-live.mp4).
-It was captured from macOS Terminal running the actual Metal/C/NEON engine;
+[Watch the real 19-second Ghostty recording](https://github.com/xlnfinance/xln/blob/main/brainvault/media/brainvault-terminal-demo.mp4).
+It runs the actual CLI and default Metal/C/NEON engine with 1,000 real shards;
 `satoshi` / `hard2guess` and every displayed seed are public demo material and
-must never receive funds. The recording shows real shard progress, public-only
-default output, hidden password confirmation, and the isolated sensitive view.
+must never receive funds. The optional `--promo` flag adds only the opening and
+closing `brainvault.sh` cards; it is off by default and never changes derivation.
 
 ## Hardware defaults
 
@@ -108,7 +108,7 @@ was 640 GPU shards across eight processes with 40 workers each, plus 360 shards
 across 32 CPU workers.
 
 ```bash
-bun run bv --bench
+bun ./brainvault --bench
 ```
 
 | Engine | Time | Shards/s | vs fastest |

@@ -10,19 +10,23 @@ import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, shardRequestFing
 
 parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   if (specId !== BRAINVAULT_V1_SPEC_ID) {
-    throw new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(specId)}:${BRAINVAULT_V1_SPEC_ID}`);
+    throw new Error('BRAINVAULT_WORKER_SPEC_MISMATCH');
   }
-  const memoryKb = shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB;
-  const effectiveAlgId = algId ?? BRAINVAULT_V1.ALG_ID;
+  const memoryKb = shardMemoryKb === undefined ? BRAINVAULT_V1.SHARD_MEMORY_KB : shardMemoryKb;
+  const effectiveAlgId = algId === undefined ? BRAINVAULT_V1.ALG_ID : algId;
   const salt = await createShardSalt(name, shardIndex, shardCount, effectiveAlgId);
   const result = await deriveShardWithParams(passphrase, salt, {
     shardMemoryKb: memoryKb,
     algId: effectiveAlgId,
   });
-  parentPort?.postMessage({
-    specId: BRAINVAULT_V1_SPEC_ID,
-    requestId: shardRequestFingerprint(shardIndex, shardCount, effectiveAlgId, memoryKb),
-    shardIndex,
-    result: bytesToHex(result),
-  });
+  try {
+    parentPort?.postMessage({
+      specId: BRAINVAULT_V1_SPEC_ID,
+      requestId: shardRequestFingerprint(shardIndex, shardCount, effectiveAlgId, memoryKb),
+      shardIndex,
+      result: bytesToHex(result),
+    });
+  } finally {
+    result.fill(0);
+  }
 });

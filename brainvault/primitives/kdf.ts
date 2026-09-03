@@ -26,18 +26,18 @@ export interface BrainvaultKdfParams {
 
 export function resolveKdfParams(params: BrainvaultKdfParams = {}) {
   const resolved = {
-    algId: params.algId ?? BRAINVAULT_V1.ALG_ID,
-    shardMemoryKb: params.shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB,
-    argonTimeCost: params.argonTimeCost ?? BRAINVAULT_V1.ARGON_TIME_COST,
-    argonParallelism: params.argonParallelism ?? BRAINVAULT_V1.ARGON_PARALLELISM,
-    shardOutputBytes: params.shardOutputBytes ?? BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+    algId: params.algId === undefined ? BRAINVAULT_V1.ALG_ID : params.algId,
+    shardMemoryKb: params.shardMemoryKb === undefined ? BRAINVAULT_V1.SHARD_MEMORY_KB : params.shardMemoryKb,
+    argonTimeCost: params.argonTimeCost === undefined ? BRAINVAULT_V1.ARGON_TIME_COST : params.argonTimeCost,
+    argonParallelism: params.argonParallelism === undefined ? BRAINVAULT_V1.ARGON_PARALLELISM : params.argonParallelism,
+    shardOutputBytes: params.shardOutputBytes === undefined ? BRAINVAULT_V1.SHARD_OUTPUT_BYTES : params.shardOutputBytes,
   };
   if (typeof resolved.algId !== 'string' || resolved.algId.length === 0) {
     throw new Error('BRAINVAULT_ALG_ID_INVALID');
   }
   for (const [name, value] of Object.entries(resolved).slice(1)) {
     if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 0xffff_ffff) {
-      throw new Error(`BRAINVAULT_KDF_PARAMETER_INVALID:${name}:${value}`);
+      throw new Error(`BRAINVAULT_KDF_PARAMETER_INVALID:${name}`);
     }
   }
   return resolved;

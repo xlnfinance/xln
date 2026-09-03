@@ -218,8 +218,29 @@ test.describe('E2E Lending Flow', () => {
       [TOKEN_ID],
       { requireOnline: true },
     );
-    for (let request = 0; request < 20; request += 1) {
+    let expectedOutCapacity = await accountOutCapacity(
+      page,
+      identity!.entityId,
+      hubId,
+      TOKEN_ID,
+    );
+    for (let request = 0; request < 11; request += 1) {
       await faucetOffchain(page, identity!.entityId, hubId, TOKEN_ID, '100');
+      const previousOutCapacity = expectedOutCapacity;
+      await expect.poll(
+        async () => accountOutCapacity(page, identity!.entityId, hubId, TOKEN_ID),
+        {
+          timeout: 20_000,
+          intervals: [250, 500, 1000],
+          message: `faucet payment ${request + 1} must commit before the next identical payment`,
+        },
+      ).toBeGreaterThan(previousOutCapacity);
+      expectedOutCapacity = await accountOutCapacity(
+        page,
+        identity!.entityId,
+        hubId,
+        TOKEN_ID,
+      );
     }
     await expect
       .poll(

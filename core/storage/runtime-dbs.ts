@@ -147,7 +147,31 @@ export const resolveStorageWriterLockPath = (env: RuntimeReplica): string => {
 };
 
 const activeStorageWriterLocks = new Set<string>();
+const storageWriterIdleWaiters = new Map<string, Set<() => void>>();
 const retainedStorageWriterLocks = new Map<string, StorageWriterLockBody>();
+
+const markStorageWriterIdle = (lockPath: string): void => {
+  activeStorageWriterLocks.delete(lockPath);
+  const waiters = storageWriterIdleWaiters.get(lockPath);
+  if (!waiters) return;
+  storageWriterIdleWaiters.delete(lockPath);
+  for (const resolve of waiters) resolve();
+};
+
+const waitForLocalStorageWriter = async (lockPath: string): Promise<void> => {
+  while (activeStorageWriterLocks.has(lockPath)) {
+    await new Promise<void>(resolve => {
+      const waiters = storageWriterIdleWaiters.get(lockPath) ?? new Set();
+      waiters.add(resolve);
+      storageWriterIdleWaiters.set(lockPath, waiters);
+      if (!activeStorageWriterLocks.has(lockPath)) {
+        waiters.delete(resolve);
+        if (waiters.size === 0) storageWriterIdleWaiters.delete(lockPath);
+        resolve();
+      }
+    });
+  }
+};
 
 type StorageWriterLockBody = {
   owner: string;
@@ -518,7 +542,7 @@ const withStorageWriterLockMode = async <T>(
     try {
       return await fn();
     } finally {
-      activeStorageWriterLocks.delete(lockPath);
+      markStorageWriterIdle(lockPath);
     }
   }
 
@@ -581,7 +605,7 @@ const withStorageWriterLockMode = async <T>(
     } else if (acquired) {
       await releaseStorageWriterLock(lockPath, acquired, fs);
     }
-    activeStorageWriterLocks.delete(lockPath);
+    markStorageWriterIdle(lockPath);
   }
 };
 
@@ -620,7 +644,21 @@ export const releaseRetainedStorageWriterLock = async (
 export const withStorageConsistentRead = async <T>(
   env: RuntimeReplica,
   fn: () => Promise<T>,
-): Promise<T> => withStorageWriterLock(env, fn);
+): Promise<T> => {
+  if (!nodeProcess) return withStorageWriterLock(env, fn);
+  const lockPath = resolveStorageWriterLockPath(env);
+  for (;;) {
+    await waitForLocalStorageWriter(lockPath);
+    try {
+      return await withStorageWriterLock(env, fn);
+    } catch (error) {
+      // A writer may claim the local lock between the idle notification and
+      // this read. Queue behind that same-process writer; an external lease
+      // remains a loud STORAGE_WRITER_LOCK_HELD failure.
+      if (!activeStorageWriterLocks.has(lockPath)) throw error;
+    }
+  }
+};
 
 const resolveStorageRotationMarkerPath = (env: RuntimeReplica): string => {
   const base = resolveDbPath(env, 'core');

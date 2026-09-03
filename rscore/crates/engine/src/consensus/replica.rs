@@ -24,7 +24,6 @@ use crate::input::mempool::{
 };
 use crate::j_claims::{LocalClaimPlan, QueuedClaimWitness, plan_local_claim};
 use crate::state::account_replica_shell::AccountEnvelope;
-use crate::tx::account_tx_admission_error;
 use crate::{AccountRejection, AccountReplica, AccountTx};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -572,9 +571,6 @@ impl AccountConsensus {
         // failures such as an unsafe policyVersion and let admission disagree
         // with `AccountFrame::hash` about the same transaction.
         for tx in &txs {
-            if let Some(error) = account_tx_admission_error(tx) {
-                return Err(error);
-            }
             canonical_tx_value(tx)?;
         }
         let incoming_claim_heights: std::collections::BTreeSet<u64> = txs

@@ -1,119 +1,91 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
-import { DeltaBar, DeltaLegend } from '../components/DeltaBar';
-import { Sheet } from '../components/Sheet';
+import { DeltaBar, DeltaCaption, Legend } from '../components/Bars';
 import { Icon } from '../components/Icons';
-import { useAdapterRead } from '../core/hooks';
-import { useApp } from '../core/store';
-import { sendEntityTxs } from '../core/tx';
-import { formatAmount, getTokenMeta, parseAmount } from '../core/format';
-import { useAccounts, useEntityCore, type AccountTokenView } from '../core/views';
-
-function TokenAmount({ value, decimals, tone }: { value: bigint; decimals: number; tone?: 'coll' | 'debt' }) {
-	const color = tone === 'coll' ? '#7fae8e' : tone === 'debt' ? 'var(--danger)' : undefined;
-	return (
-		<span className="num" style={{ fontSize: 13, textAlign: 'right', ...(color ? { color } : {}) }}>
-			{formatAmount(value, decimals, 6)}
-		</span>
-	);
-}
-
-function PerspectiveRow({
-	label,
-	out,
-	inn,
-	decimals,
-	tone,
-}: {
-	label: string;
-	out: bigint;
-	inn: bigint;
-	decimals: number;
-	tone?: 'coll' | 'debt';
-}) {
-	return (
-		<div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) 1fr 1fr', gap: 12, padding: '8px 0', borderTop: '1px solid var(--hairline)' }}>
-			<span className="muted" style={{ fontSize: 12.5 }}>
-				{label}
-			</span>
-			<TokenAmount value={out} decimals={decimals} {...(tone ? { tone } : {})} />
-			<TokenAmount value={inn} decimals={decimals} {...(tone ? { tone } : {})} />
-		</div>
-	);
-}
+import { Sheet } from '../components/Sheet';
+import { TokenIcon } from '../components/TokenPicker';
+import { useApp } from '../runtime/store';
+import { sendEntityTxs } from '../runtime/tx';
+import { formatMoney, formatSigned, getTokenMeta, parseAmount } from '../runtime/format';
+import { useWallet, type AccountTokenView } from '../runtime/views';
 
 function TokenSection({ token }: { token: AccountTokenView }) {
 	const meta = getTokenMeta(token.tokenId);
 	const d = token.derived;
+	const money = (value: bigint): string => formatMoney(value, meta.decimals);
+	const [details, setDetails] = useState(false);
 	return (
-		<section style={{ marginBottom: 44 }}>
-			<div className="section-head" style={{ marginTop: 0, marginBottom: 12 }}>
-				<span>
-					<span className="caps">{meta.symbol}</span>
-					<span className="faint" style={{ fontSize: 11.5, marginLeft: 10 }}>
-						{meta.name}
+		<section className="card" style={{ marginBottom: 14 }}>
+			<div className="rt" style={{ marginBottom: 14 }}>
+				<TokenIcon tokenId={token.tokenId} />
+				<span className="tx">
+					<span className="t">{meta.symbol}</span>
+					<span className="s">{token.signed > 0n ? 'they owe you' : token.signed < 0n ? 'you owe them' : 'even'}</span>
+				</span>
+				<span className="r">
+					<span className="v num display" style={{ fontSize: 22 }}>
+						{formatSigned(token.signed, meta.decimals)}
 					</span>
 				</span>
-				<span className="display num" style={{ fontSize: 20 }}>
-					{formatAmount(token.signed, meta.decimals, 2)}
-				</span>
 			</div>
-
-			<DeltaBar derived={d} height={8} />
-			<div style={{ marginTop: 8 }}>
-				<DeltaLegend />
+			<DeltaBar derived={d} tokenId={token.tokenId} />
+			<DeltaCaption derived={d} format={money} />
+			<div style={{ marginTop: 12 }}>
+				<Legend />
 			</div>
-
-			<div className="glass" style={{ padding: '14px 18px', marginTop: 16, borderRadius: 16 }}>
-				<div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) 1fr 1fr', gap: 12, paddingBottom: 8 }}>
-					<span className="caps" style={{ fontSize: 10 }}>
-						Perspective
-					</span>
-					<span className="caps" style={{ fontSize: 10, textAlign: 'right' }}>
-						Out
-					</span>
-					<span className="caps" style={{ fontSize: 10, textAlign: 'right' }}>
-						In
-					</span>
+			<div style={{ marginTop: 14 }}>
+				<div className="kv">
+					<span className="k">Their credit line to you</span>
+					<span className="v num">{money(d.ownCreditLimit)}</span>
 				</div>
-				<PerspectiveRow label="Capacity" out={d.outCapacity} inn={d.inCapacity} decimals={meta.decimals} />
-				<PerspectiveRow label="Credit limit" out={d.ownCreditLimit} inn={d.peerCreditLimit} decimals={meta.decimals} />
-				<PerspectiveRow label="Own credit component" out={d.outOwnCredit} inn={d.inOwnCredit} decimals={meta.decimals} />
-				<PerspectiveRow label="Peer credit component" out={d.outPeerCredit} inn={d.inPeerCredit} decimals={meta.decimals} tone="debt" />
-				<PerspectiveRow label="Collateral component" out={d.outCollateral} inn={d.inCollateral} decimals={meta.decimals} tone="coll" />
-				<PerspectiveRow label="Hold deduction" out={d.outTotalHold ?? 0n} inn={d.inTotalHold ?? 0n} decimals={meta.decimals} tone="debt" />
+				<div className="kv">
+					<span className="k">Your credit line to them</span>
+					<span className="v num">{money(d.peerCreditLimit)}</span>
+				</div>
+				<div className="kv">
+					<span className="k">Collateral</span>
+					<span className="v num st-settled">{money(d.collateral)}</span>
+				</div>
+				{(d.outTotalHold ?? 0n) > 0n || (d.inTotalHold ?? 0n) > 0n ? (
+					<div className="kv">
+						<span className="k">In flight</span>
+						<span className="v num st-inflight">
+							{money(d.outTotalHold ?? 0n)} out · {money(d.inTotalHold ?? 0n)} in
+						</span>
+					</div>
+				) : null}
 			</div>
-
-			<div className="glass" style={{ padding: '14px 18px', marginTop: 10, borderRadius: 16 }}>
-				<span className="caps" style={{ fontSize: 10 }}>
-					Canonical state
-				</span>
-				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0', gap: 12 }}>
-					<span className="muted" style={{ fontSize: 12.5 }}>
-						delta
-					</span>
-					<TokenAmount value={d.delta} decimals={meta.decimals} />
+			<button type="button" className="btn quiet" style={{ marginTop: 10 }} onClick={() => setDetails(value => !value)}>
+				Canonical state <Icon name={details ? 'chevronDown' : 'chevronRight'} size={13} />
+			</button>
+			{details && (
+				<div className="fade-in" style={{ marginTop: 6 }}>
+					<div className="kv">
+						<span className="k">Δ</span>
+						<span className="v num mono" style={{ color: 'var(--ink-2)' }}>
+							{formatMoney(d.delta, meta.decimals, 6)}
+						</span>
+					</div>
+					<div className="kv">
+						<span className="k">offdelta</span>
+						<span className="v num mono" style={{ color: 'var(--ink-2)' }}>
+							{formatMoney(token.delta.offdelta, meta.decimals, 6)}
+						</span>
+					</div>
+					<div className="kv">
+						<span className="k">ondelta</span>
+						<span className="v num mono" style={{ color: 'var(--ink-2)' }}>
+							{formatMoney(token.delta.ondelta, meta.decimals, 6)}
+						</span>
+					</div>
+					<div className="kv">
+						<span className="k">Total capacity</span>
+						<span className="v num mono" style={{ color: 'var(--ink-2)' }}>
+							{formatMoney(d.totalCapacity, meta.decimals, 6)}
+						</span>
+					</div>
 				</div>
-				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', gap: 12 }}>
-					<span className="muted" style={{ fontSize: 12.5 }}>
-						offdelta
-					</span>
-					<TokenAmount value={token.delta.offdelta} decimals={meta.decimals} />
-				</div>
-				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', gap: 12 }}>
-					<span className="muted" style={{ fontSize: 12.5 }}>
-						ondelta
-					</span>
-					<TokenAmount value={token.delta.ondelta} decimals={meta.decimals} />
-				</div>
-				<div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', gap: 12 }}>
-					<span className="muted" style={{ fontSize: 12.5 }}>
-						collateral
-					</span>
-					<TokenAmount value={d.collateral} decimals={meta.decimals} tone="coll" />
-				</div>
-			</div>
+			)}
 		</section>
 	);
 }
@@ -124,15 +96,9 @@ export function AccountDetail() {
 	const entityId = useApp(s => s.activeEntityId);
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
-	const core = useEntityCore(entityId);
-	const { accounts } = useAccounts(entityId);
-	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
-
-	const account = accounts.find(a => a.counterpartyId === counterpartyId.toLowerCase()) ?? null;
-	const label = useMemo(() => {
-		const summary = (entities.data ?? []).find(s => s.entityId?.toLowerCase() === counterpartyId.toLowerCase());
-		return summary?.label || 'Account';
-	}, [entities.data, counterpartyId]);
+	const wallet = useWallet(entityId);
+	const account = wallet.accounts.find(entry => entry.counterpartyId === counterpartyId.toLowerCase()) ?? null;
+	const label = account?.label ?? 'Account';
 
 	const [extending, setExtending] = useState(false);
 	const [creditText, setCreditText] = useState('');
@@ -140,15 +106,15 @@ export function AccountDetail() {
 	const meta = getTokenMeta(selectedTokenId);
 
 	const extendCredit = async (): Promise<void> => {
-		if (!entityId || !core.data?.signerId) return;
+		if (!wallet.entityId || !wallet.signerId) return;
 		setSubmitting(true);
 		try {
 			const amount = parseAmount(creditText, meta.decimals);
 			if (amount <= 0n) throw new Error('Enter a positive amount');
-			await sendEntityTxs(entityId, core.data.signerId, [
+			await sendEntityTxs(wallet.entityId, wallet.signerId, [
 				{ type: 'extendCredit', data: { counterpartyEntityId: counterpartyId.toLowerCase(), tokenId: selectedTokenId, amount } },
 			]);
-			toast(`Extended ${formatAmount(amount, meta.decimals, 2)} ${meta.symbol} of credit to ${label}`);
+			toast(`Extended ${formatMoney(amount, meta.decimals)} ${meta.symbol} of credit to ${label}`);
 			setExtending(false);
 			setCreditText('');
 		} catch (error) {
@@ -159,54 +125,68 @@ export function AccountDetail() {
 	};
 
 	return (
-		<div className="screen fade-in" style={{ maxWidth: 760 }}>
-			<div className="screen-header" style={{ marginBottom: 10 }}>
-				<span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-					<button type="button" className="btn btn-quiet" onClick={() => navigate(-1)} aria-label="Back">
-						<Icon name="chevronLeft" size={16} strokeWidth={1.6} />
+		<div className="screen screen-narrow fade-in">
+			<div className="screen-header">
+				<span className="screen-title">
+					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back">
+						<Icon name="chevronLeft" size={18} />
 					</button>
-					<span className="screen-title">{label}</span>
-				</span>
-				<span style={{ display: 'flex', gap: 10 }}>
-					<button type="button" className="btn btn-primary" onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}>
-						<Icon name="pay" size={15} /> Pay
-					</button>
-					<button type="button" className="btn btn-ghost" onClick={() => setExtending(true)}>
-						Extend credit
-					</button>
+					<span>
+						<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+							{label}
+							{account?.isHub ? <span className="chip hub">hub</span> : null}
+						</span>
+						<span className="hash" style={{ display: 'block' }}>
+							{counterpartyId.toLowerCase()}
+						</span>
+					</span>
 				</span>
 			</div>
-			<p className="hash" style={{ marginBottom: 30 }}>
-				{counterpartyId.toLowerCase()}
-			</p>
 
-			{!account && <p className="muted">No account with this counterparty yet.</p>}
+			<div className="actions" style={{ margin: '0 0 18px' }}>
+				<button type="button" className="btn primary" onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}>
+					<Icon name="pay" size={18} />
+					Pay
+				</button>
+				<button type="button" className="btn" onClick={() => setExtending(true)}>
+					<Icon name="plus" size={18} />
+					Extend credit
+				</button>
+				{account?.isHub ? (
+					<button type="button" className="btn" onClick={() => navigate(`/swap?hub=${counterpartyId.toLowerCase()}`)}>
+						<Icon name="swap" size={18} />
+						Swap
+					</button>
+				) : (
+					<button type="button" className="btn" onClick={() => navigate(`/receive`)}>
+						<Icon name="receive" size={18} />
+						Receive
+					</button>
+				)}
+			</div>
 
-			{account?.tokens.map(token => (
-				<TokenSection key={token.tokenId} token={token} />
-			))}
+			{!account && !wallet.loading && <p className="note">No account with this counterparty yet.</p>}
+			{account?.disputed ? (
+				<p className="state st-dispute" style={{ marginBottom: 14 }}>
+					Dispute in progress. Payments through this account are paused.
+				</p>
+			) : null}
+			{account?.tokens.map(token => <TokenSection key={token.tokenId} token={token} />)}
 
 			{extending && (
 				<Sheet title="Extend credit" onClose={() => setExtending(false)}>
-					<p className="muted" style={{ fontSize: 13 }}>
-						You allow {label} to owe you up to this amount in {meta.symbol}. It widens their spendable capacity toward
-						you — and what they can route through you.
+					<p className="note">
+						You allow {label} to owe you up to this amount in {meta.symbol}. It widens what you can receive from them and what they can route
+						through you. Your risk is capped at this line.
 					</p>
 					<div className="field">
 						<span className="field-label">Credit line</span>
-						<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-							<input
-								className="input"
-								placeholder="0.00"
-								inputMode="decimal"
-								value={creditText}
-								onChange={e => setCreditText(e.target.value)}
-								autoFocus
-							/>
+						<div className="field-row">
+							<input className="input big" placeholder="0.00" inputMode="decimal" value={creditText} onChange={event => setCreditText(event.target.value)} autoFocus />
 							<span className="muted">{meta.symbol}</span>
 						</div>
 					</div>
-					<button type="button" className="btn btn-primary btn-block" disabled={submitting} onClick={() => void extendCredit()}>
+					<button type="button" className="btn" disabled={submitting || !creditText.trim()} onClick={() => void extendCredit()}>
 						{submitting ? 'Extending…' : 'Extend credit'}
 					</button>
 				</Sheet>

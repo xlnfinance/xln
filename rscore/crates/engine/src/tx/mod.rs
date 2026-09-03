@@ -8,7 +8,7 @@ pub(crate) mod handlers;
 
 use num_bigint::BigInt;
 
-use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
+use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, TokenId};
 
 pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "direct_payment",
@@ -35,26 +35,6 @@ pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "settle_transition",
     "j_event_claim",
 ];
-
-/// Canonical Account admission profile shared with
-/// `core/account/tx/admission-policy.ts`.
-///
-/// These variants remain hashable so historical signed frames can still be
-/// verified, but neither local admission nor a new peer frame may introduce
-/// them into live bilateral consensus. Reserve movement uses `j_event_claim`;
-/// lending is not part of the production RRS Account profile.
-pub(crate) fn account_tx_admission_error(tx: &AccountTx) -> Option<StateError> {
-    matches!(
-        tx,
-        AccountTx::LendingFund { .. }
-            | AccountTx::LendingBorrowRequest { .. }
-            | AccountTx::LendingRepay { .. }
-            | AccountTx::LendingCredit { .. }
-            | AccountTx::LendingCloseRequest { .. }
-            | AccountTx::LendingClosePayout { .. }
-    )
-    .then(|| StateError::AccountTxKindOutOfProfile(tx.wire_name()))
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliveryMode {

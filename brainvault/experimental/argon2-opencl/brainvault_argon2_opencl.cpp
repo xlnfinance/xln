@@ -51,18 +51,22 @@ static void read_exact(void *dst, std::size_t size)
     }
 }
 
-int main()
+int main(int argc, char **argv)
 try {
+    (void)argv;
+    if (argc != 1) throw std::runtime_error("invalid invocation");
     typedef std::chrono::steady_clock probe_clock;
     const auto started = probe_clock::now();
     std::uint8_t header[24];
     read_exact(header, sizeof(header));
     const std::uint32_t magic = read_u32le(header);
     const std::uint32_t count = read_u32le(header + 4);
+    const std::uint32_t workers = read_u32le(header + 8);
     const std::uint32_t password_size = read_u32le(header + 12);
     const std::uint32_t flags = read_u32le(header + 16);
     const std::uint32_t memory_kib = read_u32le(header + 20);
-    if (magic != 0x32435642u || count == 0 || password_size == 0
+    if (magic != 0x32435642u || count == 0 || workers == 0 || workers > count
+            || workers > 256 || password_size == 0
             || flags != 0 || memory_kib != 262144u) {
         throw std::runtime_error("invalid V1 input");
     }
@@ -75,8 +79,11 @@ try {
     WipeOnExit wipe_outputs(outputs);
     read_exact(password.data(), password.size());
     read_exact(salts.data(), salts.size());
+    if (std::fgetc(stdin) != EOF || std::ferror(stdin)) {
+        throw std::runtime_error("trailing input");
+    }
 
-    std::size_t requested_batch = 336;
+    std::size_t requested_batch = workers;
     if (const char *batch_env = std::getenv("BRAINVAULT_OPENCL_BATCH")) {
         char *end = nullptr;
         const unsigned long parsed = std::strtoul(batch_env, &end, 10);
@@ -170,7 +177,8 @@ try {
                   << "ms\n";
     }
 
-    if (std::fwrite(outputs.data(), 1, outputs.size(), stdout) != outputs.size()) {
+    if (std::fwrite(outputs.data(), 1, outputs.size(), stdout) != outputs.size()
+            || std::fflush(stdout) != 0) {
         throw std::runtime_error("output failed");
     }
     return 0;

@@ -8,11 +8,13 @@
 		"dev": "bun run runtime:bundle && vite",
 		"build": "bun run runtime:bundle && vite build",
 		"preview": "vite preview",
-		"check": "tsc --noEmit"
+		"check": "tsc --noEmit -p tsconfig.json",
+		"test:e2e": "bunx playwright test -c playwright.config.ts"
 	},
 	"dependencies": {
 		"ethers": "^6.13.4",
 		"hash-wasm": "^4.12.0",
+		"jsqr": "^1.4.0",
 		"lucide-react": "^0.544.0",
 		"qrcode": "^1.5.4",
 		"react": "^19.2.8",
@@ -21,6 +23,7 @@
 		"zustand": "^5.0.2"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.62.1",
 		"@types/bun": "^1.3.14",
 		"@types/node": "^26.1.2",
 		"@types/qrcode": "^1.5.5",

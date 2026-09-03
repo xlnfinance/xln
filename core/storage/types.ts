@@ -155,6 +155,8 @@ export type RuntimeFrame = {
   canonicalStateHash?: string;
   canonicalEntityHashes?: StorageFrameEntityHash[];
   runtimeInput: RuntimeInput;
+  /** Ordered committed machine events for this exact Runtime frame. */
+  logs: FrameLogEntry[];
   /** Replica-id to manifest digest; physical rows are keyed by this frame height + replica path. */
   entityContextRefs?: Map<string, EntityContextPayloadHash>;
   /** Root of the exact typed Runtime checkpoint Patricia graph for this height. */
@@ -198,10 +200,11 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'postStateHash'
   | 'materializedState'
   | 'runtimeInput'
+  | 'logs'
   | 'runtimeOutputCount'
   | 'runtimeOutputsDigest'
   | 'canonicalStateHash'
-> & RuntimeFramePayloads & { logs: FrameLogEntry[] };
+> & RuntimeFramePayloads;
 
 export type StorageFrameEntityHash = {
   entityId: string;

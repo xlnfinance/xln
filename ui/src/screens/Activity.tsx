@@ -1,194 +1,243 @@
 import { useMemo, useState } from 'react';
-import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
-import { useApp } from '../core/store';
-import { useAdapterRead } from '../core/hooks';
-import { useAccounts } from '../core/views';
-import { formatAmount, getTokenMeta, timeAgo } from '../core/format';
+import type { RuntimeActivityEvent } from '@xln/core/api/public/runtime-module';
+import { Icon, type IconName } from '../components/Icons';
+import { Sheet } from '../components/Sheet';
+import { useAdapterRead } from '../runtime/hooks';
+import { useApp } from '../runtime/store';
+import { dayLabel, formatClock, formatMoney, getTokenMeta, shortId, timeAgo } from '../runtime/format';
+import { displayEntityName, useWallet } from '../runtime/views';
 
-export type ActivityEventView = {
-	id?: string;
-	height?: number;
-	timestamp?: number;
-	kind?: string;
-	type?: string;
-	direction?: string;
-	title?: string;
-	subtitle?: string;
-	status?: string;
-	entityId?: string;
-	counterpartyId?: string;
-	tokenId?: number;
-	amount?: string;
-};
+type ActivityPage = { events?: RuntimeActivityEvent[]; latestHeight?: number };
 
-type ActivityPage = { events?: ActivityEventView[]; latestHeight?: number; scannedFrames?: number };
+/** User-relevant money movements; consensus internals stay in the developer workspace. */
+export const USER_ACTIVITY_TYPES = ['payment', 'htlc', 'swap', 'cross_swap', 'settlement', 'account'];
 
-export function formatEventAmount(event: ActivityEventView): string | null {
+// Swap handlers emit a raw internal log line and a structured entry for the same
+// frame. Hide the raw duplicate so each swap action shows once.
+const RAW_SWAP_LOG = /^(?:📊 Swap offer|📨 Swap cancel requested)/;
+
+export function isDisplayableActivityEvent(event: RuntimeActivityEvent): boolean {
+	return !RAW_SWAP_LOG.test(String(event.title || ''));
+}
+
+const FILTERS: Array<{ id: string; label: string; types: string[] }> = [
+	{ id: 'all', label: 'All', types: USER_ACTIVITY_TYPES },
+	{ id: 'payments', label: 'Payments', types: ['payment', 'htlc'] },
+	{ id: 'swaps', label: 'Swaps', types: ['swap', 'cross_swap'] },
+	{ id: 'settlement', label: 'Settlement', types: ['settlement'] },
+	{ id: 'accounts', label: 'Accounts', types: ['account'] },
+];
+
+type StateTone = 'settled' | 'inflight' | 'pending' | 'neutral' | 'dispute';
+
+function eventTone(event: RuntimeActivityEvent): { tone: StateTone; label: string } {
+	const status = String(event.status || '').toLowerCase();
+	if (/fail|reject|dispute|error|timeout/.test(status)) return { tone: 'dispute', label: status || 'failed' };
+	if (/pending|await|queued|submitted|proposed/.test(status)) return { tone: 'pending', label: status };
+	if (/progress|lock|flight|open|partial/.test(status)) return { tone: 'inflight', label: status };
+	if (/settle|final|commit|confirm|done|filled|complete|resolved|ok/.test(status)) return { tone: 'settled', label: 'settled' };
+	return { tone: 'neutral', label: status || 'signed' };
+}
+
+function eventIcon(event: RuntimeActivityEvent): { icon: IconName; cls: string } {
+	const type = String(event.type || '');
+	if (type === 'swap' || type === 'cross_swap') return { icon: 'swap', cls: 'swap' };
+	if (type === 'settlement') return { icon: 'bank', cls: 'reserve' };
+	if (type === 'account') return { icon: 'shield', cls: 'account' };
+	if (event.direction === 'in') return { icon: 'receive', cls: 'in' };
+	return { icon: 'pay', cls: 'out' };
+}
+
+export function formatEventAmount(event: RuntimeActivityEvent): string | null {
 	if (!event.amount || !event.tokenId) return null;
 	try {
 		const meta = getTokenMeta(Number(event.tokenId));
 		const value = BigInt(event.amount);
 		const sign = event.direction === 'out' ? '−' : event.direction === 'in' ? '+' : '';
-		return `${sign}${formatAmount(value < 0n ? -value : value, meta.decimals, 2)} ${meta.symbol}`;
+		return `${sign}${formatMoney(value < 0n ? -value : value, meta.decimals)} ${meta.symbol}`;
 	} catch {
 		return null;
 	}
 }
 
-/** User-relevant money movements; consensus internals stay in dev tools. */
-export const USER_ACTIVITY_TYPES = ['payment', 'htlc', 'swap', 'cross_swap', 'settlement', 'account'];
-
-// Swap handlers emit both a raw internal log line and a structured, formatted
-// entry for the same frame — hide the raw duplicate so each swap action shows once.
-const RAW_SWAP_LOG = /^(?:📊 Swap offer|📨 Swap cancel requested)/;
-
-export function isDisplayableActivityEvent(event: ActivityEventView): boolean {
-	return !RAW_SWAP_LOG.test(String(event.title || ''));
+export function ActivityRow({
+	event,
+	names,
+	first,
+	selected,
+	onClick,
+}: {
+	event: RuntimeActivityEvent;
+	names: Map<string, string>;
+	first: boolean;
+	selected?: boolean;
+	onClick?: () => void;
+}) {
+	const amount = formatEventAmount(event);
+	const { tone, label } = eventTone(event);
+	const { icon, cls } = eventIcon(event);
+	const counterparty = event.counterpartyId ? displayEntityName(names, event.counterpartyId) : '';
+	const Tag = onClick ? 'button' : 'div';
+	return (
+		<Tag
+			{...(onClick ? { type: 'button' as const, onClick } : {})}
+			className={`row${onClick ? ' tappable' : ''}${selected ? ' sel' : ''}${first ? ' first' : ''}`}
+			data-testid="activity-row"
+		>
+			<span className="rt">
+				<span className={`ev-ic ${cls}`}>
+					<Icon name={icon} size={15} />
+				</span>
+				<span className="tx">
+					<span className="t">{String(event.title || event.type || 'Frame')}</span>
+					<span className="s">
+						{[counterparty ? `with ${counterparty}` : '', event.subtitle || ''].filter(Boolean).join(' · ') || `frame #${event.height}`}
+					</span>
+				</span>
+				<span className="r">
+					{amount ? <span className="v num">{amount}</span> : null}
+					<span className="u">
+						<span className={`state st-${tone}`}>{label}</span>
+					</span>
+				</span>
+			</span>
+		</Tag>
+	);
 }
 
-const ALL = 'all';
-
-function FilterChips({
-	value,
-	onChange,
-	options,
-}: {
-	value: string;
-	onChange: (next: string) => void;
-	options: Array<{ id: string; label: string }>;
-}) {
+function EventDetail({ event, names }: { event: RuntimeActivityEvent; names: Map<string, string> }) {
+	const amount = formatEventAmount(event);
+	const { tone, label } = eventTone(event);
+	const counterparty = event.counterpartyId ? displayEntityName(names, event.counterpartyId) : '';
 	return (
-		<div className="token-switch" style={{ flexWrap: 'wrap' }}>
-			{options.map(option => (
-				<button
-					key={option.id}
-					type="button"
-					className={value === option.id ? 'active' : ''}
-					onClick={() => onChange(option.id)}
-				>
-					{option.label}
-				</button>
-			))}
-		</div>
+		<>
+			<div className="rcpt" style={{ textAlign: 'left', padding: 0 }}>
+				<div className="caps">
+					{String(event.type || 'event').replace('_', ' ')} · <span className={`st-${tone}`}>{label}</span>
+				</div>
+				<div className="a num" style={{ fontSize: 30, marginTop: 10 }}>
+					{amount ?? String(event.title || '')}
+				</div>
+				{amount ? <div className="to">{String(event.title || '')}</div> : null}
+			</div>
+			<div>
+				{counterparty ? (
+					<div className="kv">
+						<span className="k">With</span>
+						<span className="v">
+							{counterparty} <span className="mono faint">{shortId(event.counterpartyId ?? '', 8, 4)}</span>
+						</span>
+					</div>
+				) : null}
+				{event.subtitle ? (
+					<div className="kv">
+						<span className="k">Detail</span>
+						<span className="v" style={{ fontWeight: 400 }}>
+							{event.subtitle}
+						</span>
+					</div>
+				) : null}
+				<div className="kv">
+					<span className="k">Frame</span>
+					<span className="v num">#{event.height.toLocaleString('en-US')}</span>
+				</div>
+				<div className="kv">
+					<span className="k">Time</span>
+					<span className="v mono" style={{ color: 'var(--ink-2)' }}>
+						{event.timestamp ? formatClock(event.timestamp) : '—'}
+					</span>
+				</div>
+				{event.hash ? (
+					<div className="kv">
+						<span className="k">Proof</span>
+						<span className="v mono" style={{ color: 'var(--ink-2)' }}>
+							{shortId(event.hash, 10, 6)}
+						</span>
+					</div>
+				) : null}
+			</div>
+			<div className="state st-settled" style={{ justifyContent: 'center', display: 'flex' }}>
+				From your runtime's committed frames
+			</div>
+		</>
 	);
 }
 
 export function ActivityScreen() {
-	const activeEntityId = useApp(s => s.activeEntityId);
-	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
-	const [entityFilter, setEntityFilter] = useState<string>(activeEntityId?.toLowerCase() ?? ALL);
-	const [accountFilter, setAccountFilter] = useState<string>(ALL);
+	const entityId = useApp(s => s.activeEntityId);
+	const wallet = useWallet(entityId);
+	const [filter, setFilter] = useState('all');
+	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const types = FILTERS.find(entry => entry.id === filter)?.types ?? USER_ACTIVITY_TYPES;
 
-	const names = useMemo(() => {
-		const map = new Map<string, string>();
-		for (const summary of entities.data ?? []) {
-			if (summary.entityId) map.set(summary.entityId.toLowerCase(), summary.label || '');
-		}
-		return map;
-	}, [entities.data]);
-
-	const nameOf = (id: string | undefined): string => {
-		const key = (id ?? '').toLowerCase();
-		return names.get(key) || (key ? `${key.slice(0, 10)}…` : '');
-	};
-
-	const { accounts } = useAccounts(entityFilter === ALL ? null : entityFilter);
-
-	// Runtime-side filter: entityId narrows the journal projection to that
-	// entity's frames. Account scoping is client-side over the same real page —
-	// RuntimeActivityFilters has no counterparty filter yet.
 	const activity = useAdapterRead<ActivityPage>('activity', {
 		limit: 100,
-		types: USER_ACTIVITY_TYPES,
-		...(entityFilter !== ALL ? { entityId: entityFilter } : {}),
+		types,
+		...(entityId ? { entityId } : {}),
+	});
+	const events = useMemo(() => (activity.data?.events ?? []).filter(isDisplayableActivityEvent), [activity.data]);
+	const selected = events.find(event => event.id === selectedId) ?? null;
+
+	let lastDay = '';
+	const rows = events.map(event => {
+		const day = event.timestamp ? dayLabel(event.timestamp) : `Frame ${event.height}`;
+		const first = day !== lastDay;
+		lastDay = day;
+		return { event, day, first };
 	});
 
-	const events = (activity.data?.events ?? []).filter(
-		event =>
-			(accountFilter === ALL || (event.counterpartyId ?? '').toLowerCase() === accountFilter) &&
-			isDisplayableActivityEvent(event),
-	);
-
-	const entityOptions = [
-		{ id: ALL, label: 'All entities' },
-		...(entities.data ?? [])
-			.map(summary => summary.entityId?.toLowerCase() ?? '')
-			.filter(Boolean)
-			.map(id => ({ id, label: nameOf(id) })),
-	];
-
-	const accountOptions = [
-		{ id: ALL, label: 'All accounts' },
-		...accounts.map(account => ({ id: account.counterpartyId, label: nameOf(account.counterpartyId) })),
-	];
-
 	return (
-		<div className="screen fade-in" style={{ maxWidth: 760 }}>
-			<div className="screen-header" style={{ marginBottom: 20 }}>
+		<div className="screen fade-in">
+			<div className="screen-header">
 				<span className="screen-title">Activity</span>
 				<span className="faint" style={{ fontSize: 12 }}>
-					{events.length} events · frames from local db
+					{events.length} events
 				</span>
 			</div>
-
-			<div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 26 }}>
-				<FilterChips
-					value={entityFilter}
-					options={entityOptions}
-					onChange={next => {
-						setEntityFilter(next);
-						setAccountFilter(ALL);
-					}}
-				/>
-				{entityFilter !== ALL && accounts.length > 0 && (
-					<FilterChips value={accountFilter} options={accountOptions} onChange={setAccountFilter} />
-				)}
-			</div>
-
-			<div>
-				{events.map((event, index) => {
-					const amount = formatEventAmount(event);
-					const counterparty = event.counterpartyId ? nameOf(event.counterpartyId) : '';
-					return (
-						<div key={event.id ?? index} className="row" style={{ padding: '13px 0' }}>
-							<span style={{ minWidth: 0 }}>
-								<span
-									style={{
-										display: 'block',
-										fontSize: 13.5,
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap',
-									}}
-								>
-									{String(event.title || event.type || 'Frame')}
-								</span>
-								<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
-									frame #{event.height ?? '—'}
-									{counterparty ? ` · with ${counterparty}` : ''}
-									{event.subtitle ? ` · ${event.subtitle}` : ''}
-								</span>
-							</span>
-							<span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-								{amount && (
-									<span className="display num" style={{ display: 'block', fontSize: 14 }}>
-										{amount}
-									</span>
-								)}
-								<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
-									{event.timestamp ? timeAgo(Number(event.timestamp)) : `#${event.height ?? ''}`}
-								</span>
-							</span>
+			<div className="two-col" style={{ gridTemplateColumns: 'minmax(0,1fr) 400px' }}>
+				<div>
+					<div className="chips">
+						{FILTERS.map(entry => (
+							<button key={entry.id} type="button" className={filter === entry.id ? 'active' : ''} onClick={() => setFilter(entry.id)}>
+								{entry.label}
+							</button>
+						))}
+					</div>
+					{rows.map(({ event, day, first }) => (
+						<div key={event.id}>
+							{first ? <div className="caps day">{day}</div> : null}
+							<ActivityRow event={event} names={wallet.names} first={first} selected={event.id === selectedId} onClick={() => setSelectedId(event.id)} />
 						</div>
-					);
-				})}
-				{events.length === 0 && !activity.loading && (
-					<p className="muted" style={{ padding: '18px 0', fontSize: 13 }}>
-						Nothing here for this filter yet.
-					</p>
-				)}
-				{activity.error && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{activity.error}</p>}
+					))}
+					{events.length === 0 && !activity.loading && (
+						<p className="note" style={{ padding: '18px 0' }}>
+							Nothing here for this filter yet.
+						</p>
+					)}
+					{activity.error && <p style={{ color: 'var(--dispute)', fontSize: 13 }}>{activity.error}</p>}
+				</div>
+				<div className="aside desktop-only">
+					{selected ? (
+						<div className="card">
+							<EventDetail event={selected} names={wallet.names} />
+						</div>
+					) : (
+						<div className="card">
+							<p className="note">Select a movement to see its receipt.</p>
+						</div>
+					)}
+				</div>
 			</div>
+			{selected && (
+				<div className="mobile-only">
+					<Sheet title="Receipt" onClose={() => setSelectedId(null)}>
+						<EventDetail event={selected} names={wallet.names} />
+					</Sheet>
+				</div>
+			)}
+			<span className="faint" style={{ fontSize: 11, display: 'block', marginTop: 24 }}>
+				{selected ? timeAgo(selected.timestamp) : ''}
+			</span>
 		</div>
 	);
 }

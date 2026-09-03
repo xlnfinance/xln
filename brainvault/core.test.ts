@@ -14,10 +14,12 @@ import { Worker } from 'node:worker_threads';
 import { cpus } from 'node:os';
 import {
   createShardSalt, deriveShard, deriveShardWithParams, combineShards, combineShardsWithParams, deriveKey,
-  entropyToMnemonic, deriveEthereumAddress, bytesToHex,
+  entropyToMnemonic, deriveEthereumAddress, deriveEthereumAddressMatrix,
+  deriveEthereumPrivateKeyAtPath, bytesToHex,
   deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs, rootDomain,
 } from './core.ts';
 import { BIP39_ENGLISH } from './bip39-english.ts';
+import { resolveKdfParams } from './primitives/kdf.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, shardRequestFingerprint } from './primitives/spec.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
 import { cliCreationCharacterError, cliPasswordError } from './cli-policy.ts';
@@ -187,6 +189,10 @@ test('suggested passwords use ten unbiased alphanumeric CSPRNG choices', () => {
 test('wallet boundaries fail loudly on malformed bytes', async () => {
   const salt = await createShardSalt('alice', 0, 1);
   await expect(deriveShard('', salt)).rejects.toThrow('BRAINVAULT_PASSPHRASE_INVALID');
+  expect(() => resolveKdfParams({ algId: null as unknown as string })).toThrow('BRAINVAULT_ALG_ID_INVALID');
+  expect(() => resolveKdfParams({ shardMemoryKb: null as unknown as number }))
+    .toThrow('BRAINVAULT_KDF_PARAMETER_INVALID:shardMemoryKb');
+  await expect(createShardSalt('alice', 0, 1, null as unknown as string)).rejects.toThrow('BRAINVAULT_ALG_ID_INVALID');
   expect(() => hexToBytes('zz')).toThrow('BRAINVAULT_HEX_INVALID');
   expect(() => hexToBytes('abc')).toThrow('BRAINVAULT_HEX_INVALID');
   expect(() => hexToBytes('0xff')).toThrow('BRAINVAULT_HEX_INVALID');
@@ -208,14 +214,37 @@ test('worker shard collection fails closed on malformed scheduling results', () 
   expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId, shardIndex: 1, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_SHARD_DUPLICATE:1');
   expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId, shardIndex: -1, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
-    .toThrow('BRAINVAULT_WORKER_SHARD_INDEX_INVALID:-1');
+    .toThrow('BRAINVAULT_WORKER_SHARD_INDEX_INVALID');
   expect(() => acceptShard(slots, { specId: 'wrong', requestId, shardIndex: 0, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
-    .toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH:wrong');
+    .toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH');
   expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId: 'wrong', shardIndex: 0, result }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_REQUEST_MISMATCH:0');
   expect(() => acceptShard(slots, { specId: BRAINVAULT_V1_SPEC_ID, requestId: expectedRequest(0), shardIndex: 0, result: result.slice(2) }, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest))
     .toThrow('BRAINVAULT_WORKER_RESULT_INVALID:0');
   expect(() => finalizeShards(slots)).toThrow('BRAINVAULT_WORKER_SHARD_MISSING:0');
+});
+
+test('malformed worker output never reflects attacker-controlled bytes in errors', () => {
+  const marker = 'SENSITIVE1234567';
+  const expectedRequest = (index: number) => shardRequestFingerprint(
+    index, 1, BRAINVAULT_V1.ALG_ID, BRAINVAULT_V1.SHARD_MEMORY_KB,
+  );
+  const capture = (message: Parameters<typeof acceptShard>[1]): string => {
+    try {
+      acceptShard(createShardSlots(1), message, BRAINVAULT_V1_SPEC_ID, 32, expectedRequest);
+      throw new Error('worker message unexpectedly accepted');
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+  const base = { requestId: expectedRequest(0), shardIndex: 0, result: '00'.repeat(32) };
+  expect(capture({ ...base, specId: marker })).not.toContain(marker);
+  expect(capture({ ...base, specId: BRAINVAULT_V1_SPEC_ID, shardIndex: marker })).not.toContain(marker);
+  expect(capture({
+    ...base,
+    specId: BRAINVAULT_V1_SPEC_ID,
+    result: `${marker}${'0'.repeat(48)}`,
+  })).not.toContain(marker);
 });
 
 test('native worker crashes closed on a wrong spec handshake', async () => {
@@ -229,6 +258,30 @@ test('native worker crashes closed on a wrong spec handshake', async () => {
   });
   expect(error.message).toContain('BRAINVAULT_WORKER_SPEC_MISMATCH');
   await worker.terminate();
+});
+
+test('browser worker rejects malformed KDF fields without returning a stack', async () => {
+  const worker = new globalThis.Worker(new URL('./worker-browser.ts', import.meta.url));
+  try {
+    const message = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      worker.onmessage = event => resolve(event.data as Record<string, unknown>);
+      worker.onerror = reject;
+      worker.postMessage({
+        type: 'derive_shard',
+        id: 'malformed-kdf',
+        data: {
+          name: 'alice', passphrase: 'secret123456', shardIndex: 0, shardCount: 1,
+          shardMemoryKb: 8, algId: 123,
+        },
+      });
+    });
+    expect(message['type']).toBe('error');
+    const data = message['data'] as Record<string, unknown>;
+    expect(data['message']).toBe('BRAINVAULT_ALG_ID_INVALID');
+    expect(data['stack']).toBeUndefined();
+  } finally {
+    worker.terminate();
+  }
 });
 
 test('native orchestration rejects worker crash, truncation, and unsafe concurrency', async () => {
@@ -360,6 +413,58 @@ test('full derivation produces correct wallet (1 shard)', async () => {
 
     const ethAddr = await deriveEthereumAddress(mnemonic);
     expect(ethAddr).toBe(v.expect.ethAddr);
+  }
+});
+
+test('frozen primary and secondary wallet projections require an empty BIP-39 passphrase', async () => {
+  const root = hexToBytes(VECTORS[0]!.expect.masterKey);
+  let entropy24: Uint8Array | undefined;
+  let entropy12: Uint8Array | undefined;
+  let deviceKey: Uint8Array | undefined;
+  try {
+    entropy24 = await deriveKey(root, 'bip39/entropy/v1.0', 32);
+    entropy12 = await deriveKey(root, 'bip39/entropy-128/v1.0', 16);
+    deviceKey = await deriveKey(root, 'bip39/passphrase/v1.0', 32);
+    expect(bytesToHex(entropy24)).toBe('8c85565c5b802462d9192ed6f214c9c87bee6f815d80e5d550cfc585a38fb2db');
+    expect(bytesToHex(entropy12)).toBe('ae9bf95d7efd2d6fc90b6bd946987cb0');
+    expect(bytesToHex(deviceKey)).toBe('11df7157aca9601b068f4d1db9250c8cf57280e67cb2d0613272d237957bdf79');
+
+    const mnemonic24 = await entropyToMnemonic(entropy24);
+    const mnemonic12 = await entropyToMnemonic(entropy12);
+    expect(mnemonic24).toBe(VECTORS[0]!.expect.mnemonic24);
+    expect(mnemonic12).toBe('purse thank firm worth spot retire category hope sun crumble busy genre');
+    expect(await deriveEthereumAddressMatrix(mnemonic24, '', 2)).toEqual({
+      standard: [
+        '0x93bAb14eD871462D414a7c0357BF1a76DE741397',
+        '0x1793b08bf6e9c0799a42549675d76C5A83b5d594',
+      ],
+      ledgerLive: [
+        '0x93bAb14eD871462D414a7c0357BF1a76DE741397',
+        '0xd2eF9B8B9D4bc50402699568934090213191755E',
+      ],
+    });
+    expect(await deriveEthereumAddressMatrix(mnemonic12, '', 2)).toEqual({
+      standard: [
+        '0xA46b8748D14619c77DC1f12eBD6bE4c4cE4cfF5a',
+        '0xa4D112B638ABe3c4bA85b804C4631FB1FB0e0f90',
+      ],
+      ledgerLive: [
+        '0xA46b8748D14619c77DC1f12eBD6bE4c4cE4cfF5a',
+        '0x27fB8485414AC7188a0182F3C82d36955C437E90',
+      ],
+    });
+    expect(await deriveEthereumPrivateKeyAtPath(mnemonic24, "m/44'/60'/0'/0/0", ''))
+      .toBe('0x341c055336e121ee7b59c44a17a14ab54c7fbe91af3b863fcf034436dfd0e1bc');
+    expect(await deriveEthereumPrivateKeyAtPath(mnemonic12, "m/44'/60'/0'/0/0", ''))
+      .toBe('0x0629efa17a38592ea767eb43c679da13f7d28248ed518c7b3f400e5a09871264');
+    expect(await deriveEthereumAddress(mnemonic24, 'BrainVault password'))
+      .toBe('0x4F1557BCc80C24b23A58D88e690a405597601cfB');
+    expect(await deriveEthereumAddress(mnemonic24, '')).toBe(VECTORS[0]!.expect.ethAddr);
+  } finally {
+    root.fill(0);
+    entropy24?.fill(0);
+    entropy12?.fill(0);
+    deviceKey?.fill(0);
   }
 });
 
@@ -533,10 +638,21 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
     expect(rejected.stderr.toString()).not.toContain('secret123456');
   }
 
+  for (const recognizedValue of ['engine', 'workers']) {
+    const rejected = runCli([`--${recognizedValue}`, 'secret123456']);
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.stderr.toString()).not.toContain('secret123456');
+  }
+
+  const duplicateRecoverySetting = runCli(['--shards', '1', '--shards', '2']);
+  expect(duplicateRecoverySetting.exitCode).toBe(1);
+  expect(duplicateRecoverySetting.stderr.toString()).toContain('duplicate CLI option');
+
   const launched = runCliTty([]);
   const output = launched.stdout.toString();
   const vector = VECTORS[0]!;
   expect(launched.exitCode).toBe(0);
+  expect(output).toContain('fresh independent derivation and compare the complete first receiving address');
   expect(publicSummary(output)).toEqual({ fingerprint: vector.expect.masterKey.slice(0, 8), address: vector.expect.ethAddr });
   expect(output).toContain('1 / 1 shards  ·  1 workers');
   expect(output).not.toContain('secret123456');
@@ -609,6 +725,34 @@ test('--show-password covers repeat and password-manager confirmation explicitly
   expect(managedOutput).toContain(expectedSitePassword);
   expect(managedOutput).toContain('\x1b[?1049h');
   expect(managedOutput).toContain('\x1b[?1049l');
+});
+
+test('password mode honors inline exact recovery work instead of prompting for a level', async () => {
+  const expectedSitePassword = await deriveSitePassword(VECTORS[0]!.expect.masterKey, 'example.com');
+  const script = [
+    'set timeout 10',
+    'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --password --shards 1 --workers 1 --engine native',
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect {',
+    '  "Level (4): " { send "\\003"; expect eof; exit 42 }',
+    '  "Re-enter password to enable site-password output (hidden; typing works): " {}',
+    '}',
+    'send "secret123456\\r"',
+    'expect "Domain (or Enter to exit): "', 'send "example.com\\r"',
+    'expect "Press Enter to clear and continue: "', 'send "\\r"',
+    'expect "Domain (or Enter to exit): "', 'send "\\r"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const result = Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  const output = result.stdout.toString();
+  expect(result.exitCode).toBe(0);
+  expect(output).not.toContain('Level (4):');
+  expect(output).toContain(expectedSitePassword);
 });
 
 test('interactive validation failures return a nonzero status', () => {
@@ -713,6 +857,22 @@ test('CLI advanced menu accepts keyboard navigation and derives the selected lev
   expect(narrow.stdout.toString()).toContain('1 shards × 1 workers');
 });
 
+test('inline unsafe work levels are visibly marked DO NOT FUND', () => {
+  for (const [level, workers] of [[1, 1], [2, 32]] as const) {
+    const selected = runCliInputTty([
+      '--level', String(level), '--workers', String(workers),
+      '--engine', level === 1 ? 'native' : 'c-neon',
+    ], [
+      'expect "Username: "', 'send "unsafe-level-audit\\r"',
+      'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+      'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+      'send "\\r"',
+    ]);
+    expect(selected.exitCode).toBe(0);
+    expect(selected.stdout.toString()).toContain('DO NOT FUND');
+  }
+});
+
 test('exact password confirmation reveals sensitive output without a reveal command', () => {
   const revealed = runCliTty([], 'secret123456');
   const output = revealed.stdout.toString();
@@ -802,6 +962,30 @@ test('TERM=dumb refuses recovery-word disclosure after a public derivation', () 
   expect(passwordMode.stdout.toString()).toContain('site passwords require alternate-screen support');
 });
 
+test('missing TERM refuses recovery-word disclosure after a public derivation', () => {
+  const script = [
+    'set timeout 10',
+    'spawn env -u TERM NO_COLOR=1 bun cli.ts --shards 1 --workers 1 --engine native',
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect {',
+    '  "Recovery words unavailable" {}',
+    '  "Re-enter password to show recovery words" { send "\\r" }',
+    '}',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const result = Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  const output = result.stdout.toString();
+  expect(result.exitCode).toBe(0);
+  expect(output).toContain('Recovery words unavailable');
+  expect(output).not.toContain('Re-enter password to show recovery words');
+  expect(output).not.toContain(VECTORS[0]!.expect.mnemonic24);
+});
+
 test('wrong reveal confirmation fails closed without a runtime stack trace', () => {
   const rejected = runCliTty([], 'wrong-password');
   const output = rejected.stdout.toString();
@@ -857,6 +1041,22 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
   expect(narrow.exitCode).toBe(0);
   expect(narrow.stdout.toString()).toContain('100/100');
   expect(narrow.stdout.toString()).not.toContain('shards/s');
+
+  const ultraNarrow = runCliInputTty([
+    '--shards', '100', '--workers', '32', '--engine', 'c-neon',
+  ], [
+    'expect "Username: "', 'send "ultra-narrow-audit\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+    'send "\\r"',
+  ], 'env COLUMNS=20 NO_COLOR=1 TERM=xterm-256color ');
+  expect(ultraNarrow.exitCode).toBe(0);
+  const visibleFrames = ultraNarrow.stdout.toString()
+    .replaceAll(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .split(/[\r\n]+/)
+    .filter(line => line.includes('%'));
+  expect(visibleFrames.length).toBeGreaterThan(0);
+  for (const frame of visibleFrames) expect(frame.length).toBeLessThanOrEqual(20);
 });
 
 test('CLI benchmark honors inline advanced parameters', () => {
@@ -886,6 +1086,8 @@ test('npm launcher preserves the BrainVault v1 CLI entrypoint', () => {
   });
   expect(launched.exitCode).toBe(0);
   expect(launched.stdout.toString()).toStartWith('BrainVault v1 (bv)');
+  expect(launched.stdout.toString()).toContain('bun ./brainvault');
+  expect(launched.stdout.toString()).not.toContain('bun run bv');
   expect(launched.stdout.toString()).toContain('Leave the optional BIP-39 passphrase empty');
   expect(launched.stdout.toString()).toContain('Never enter your BrainVault password into that field');
 });

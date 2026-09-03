@@ -23,7 +23,7 @@ import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from '../../utils/runtime/e2e-account-ui';
-import { runBrainvaultCli } from '../../utils/runtime/e2e-brainvault';
+import { deriveBrainvaultOracle } from '../../utils/runtime/e2e-brainvault';
 import { connectRuntimeToHub } from '../../utils/e2e-connect';
 import { deriveSignerAddressFromMnemonic, gotoApp } from '../../utils/e2e-demo-users';
 import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
@@ -808,13 +808,13 @@ test.describe('watchtower runtime recovery', () => {
 
       const passphrase = randomBrainvaultPassphrase();
       const label = `tower-restore-${Date.now()}`;
-      const brainvault = runBrainvaultCli(label, passphrase, 1);
+      const brainvault = await deriveBrainvaultOracle(label, passphrase, 1);
       const runtime = await withTimeout(
         createRuntimeViaUi(page, label, passphrase),
         75_000,
         async () => await readRecoveryUiDiagnostics(page),
       );
-      expect(runtime.runtimeId.toLowerCase(), 'BrainVault UI must match the independent CLI oracle').toBe(
+      expect(runtime.runtimeId.toLowerCase(), 'BrainVault UI must match the independent native oracle').toBe(
         deriveSignerAddressFromMnemonic(brainvault.mnemonic24),
       );
       await expectPersistedRuntimeSeedProtected(page, runtime.runtimeId);

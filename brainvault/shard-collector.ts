@@ -22,11 +22,11 @@ export function acceptShard(
   expectedRequestId: (index: number) => string,
 ): number {
   if (message.specId !== expectedSpecId) {
-    throw new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(message.specId)}:${expectedSpecId}`);
+    throw new Error('BRAINVAULT_WORKER_SPEC_MISMATCH');
   }
   const index = message.shardIndex;
   if (!Number.isSafeInteger(index) || (index as number) < 0 || (index as number) >= slots.length) {
-    throw new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${String(index)}`);
+    throw new Error('BRAINVAULT_WORKER_SHARD_INDEX_INVALID');
   }
   if (slots[index as number] !== undefined) {
     throw new Error(`BRAINVAULT_WORKER_SHARD_DUPLICATE:${String(index)}`);

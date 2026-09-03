@@ -1,47 +1,45 @@
-import { execFileSync } from 'node:child_process';
+import {
+  combineShards,
+  createShardSalt,
+  deriveKey,
+  deriveShard,
+  entropyToMnemonic,
+  factorForShardCount,
+} from '../../../brainvault/core';
 
 export type BrainvaultCliOutput = {
   mnemonic24: string;
-  mnemonic12: string;
 };
 
 export const normalizeBrainvaultMnemonic = (value: string): string =>
   value.trim().split(/\s+/).join(' ');
 
-export function runBrainvaultCli(
+export async function deriveBrainvaultOracle(
   name: string,
   passphrase: string,
   shards: number,
-): BrainvaultCliOutput {
+): Promise<BrainvaultCliOutput> {
   if (!Number.isInteger(shards) || shards < 1) {
     throw new Error(`BRAINVAULT_CLI_SHARDS_INVALID:${String(shards)}`);
   }
-  const output = execFileSync(
-    'bun',
-    ['brainvault/cli.ts', name, passphrase, String(shards), '--w=4'],
-    {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-      },
-    },
-  );
-  const jsonStart = output.lastIndexOf('\n{');
-  const objectStart = jsonStart >= 0 ? jsonStart + 1 : output.indexOf('{');
-  if (objectStart < 0) throw new Error('BRAINVAULT_CLI_OUTPUT_MISSING');
-  const parsed: unknown = JSON.parse(output.slice(objectStart).trim());
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('BRAINVAULT_CLI_OUTPUT_INVALID');
+  // Automation imports the canonical library so recovery secrets never enter
+  // argv or process listings. Pseudo-TTY disclosure stays in the CLI tests.
+  const shardResults: Uint8Array[] = [];
+  let root: Uint8Array | undefined;
+  let entropy: Uint8Array | undefined;
+  try {
+    for (let index = 0; index < shards; index += 1) {
+      shardResults.push(await deriveShard(
+        passphrase,
+        await createShardSalt(name, index, shards),
+      ));
+    }
+    root = await combineShards(shardResults, factorForShardCount(shards));
+    entropy = await deriveKey(root, 'bip39/entropy/v1.0', 32);
+    return { mnemonic24: normalizeBrainvaultMnemonic(await entropyToMnemonic(entropy)) };
+  } finally {
+    for (const shard of shardResults) shard.fill(0);
+    root?.fill(0);
+    entropy?.fill(0);
   }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record['mnemonic24'] !== 'string' || typeof record['mnemonic12'] !== 'string') {
-    throw new Error('BRAINVAULT_CLI_MNEMONICS_MISSING');
-  }
-  return {
-    mnemonic24: normalizeBrainvaultMnemonic(record['mnemonic24']),
-    mnemonic12: normalizeBrainvaultMnemonic(record['mnemonic12']),
-  };
 }

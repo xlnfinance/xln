@@ -113,25 +113,27 @@ static int read_exact(void *buffer, size_t length) {
     return fread(buffer, 1u, length, stdin) == length ? 0 : -1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     uint8_t header[HEADER_WORDS * sizeof(uint32_t)];
-    uint32_t shard_count, worker_count, password_len, flags, memory_kib;
-    size_t salt_length, output_length, memory_bytes;
+    uint32_t shard_count = 0u, worker_count = 0u, password_len = 0u, flags = 0u, memory_kib = 0u;
+    size_t salt_length = 0u, output_length = 0u, memory_bytes = 0u;
     uint8_t *password = NULL, *salts = NULL, *outputs = NULL;
     pthread_t threads[BRAINVAULT_MAX_WORKERS];
     shared_state shared;
     uint32_t started_threads = 0u;
     int exit_code = 1;
 
-    if (read_exact(header, sizeof(header)) != 0) goto cleanup;
+    (void)argv;
+    if (argc != 1 || read_exact(header, sizeof(header)) != 0) goto cleanup;
     if (read_u32le(header) != INPUT_MAGIC) goto cleanup;
     shard_count = read_u32le(header + 4u);
     worker_count = read_u32le(header + 8u);
     password_len = read_u32le(header + 12u);
     flags = read_u32le(header + 16u);
     memory_kib = read_u32le(header + 20u);
-    if (shard_count == 0u || worker_count == 0u || worker_count > BRAINVAULT_MAX_WORKERS || password_len == 0u ||
-        password_len > (1u << 20u) || memory_kib < 8u || (size_t)memory_kib > SIZE_MAX / 1024u) {
+    if (shard_count == 0u || worker_count == 0u || worker_count > shard_count ||
+        worker_count > BRAINVAULT_MAX_WORKERS || password_len == 0u || (flags & ~1u) != 0u ||
+        memory_kib < 8u || (size_t)memory_kib > SIZE_MAX / 1024u) {
         goto cleanup;
     }
     memory_bytes = (size_t)memory_kib * 1024u;
@@ -143,6 +145,7 @@ int main(void) {
     outputs = (uint8_t *)malloc(output_length);
     if (password == NULL || salts == NULL || outputs == NULL) goto cleanup;
     if (read_exact(password, password_len) != 0 || read_exact(salts, salt_length) != 0) goto cleanup;
+    if (fgetc(stdin) != EOF || ferror(stdin)) goto cleanup;
 
     /* Reused memory is fully overwritten by every t=1 invocation. Wipe once at
        thread shutdown unless the comparison mode requests a wipe per shard. */
@@ -173,7 +176,7 @@ int main(void) {
         fprintf(stderr, "argon2 error: %s\n", argon2_error_message(atomic_load(&shared.error_code)));
         goto cleanup;
     }
-    if (fwrite(outputs, 1u, output_length, stdout) != output_length) goto cleanup;
+    if (fwrite(outputs, 1u, output_length, stdout) != output_length || fflush(stdout) != 0) goto cleanup;
     exit_code = 0;
 
 cleanup:

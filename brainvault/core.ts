@@ -125,21 +125,25 @@ export async function entropyToMnemonic(entropy: Uint8Array): Promise<string> {
 
   // Add checksum: SHA256 of entropy, take first entropy.length/32 bits
   const checksumHash = sha256(entropy);
-  const checksumBits = bytesToBits(checksumHash).slice(0, entropy.length * 8 / 32);
+  try {
+    const checksumBits = bytesToBits(checksumHash).slice(0, entropy.length * 8 / 32);
 
-  // Combine entropy bits + checksum bits
-  const entropyBits = bytesToBits(entropy);
-  const allBits = entropyBits + checksumBits;
+    // Combine entropy bits + checksum bits
+    const entropyBits = bytesToBits(entropy);
+    const allBits = entropyBits + checksumBits;
 
-  // Split into 11-bit chunks, each maps to a word
-  const words: string[] = [];
-  for (let i = 0; i < allBits.length; i += 11) {
-    const chunk = allBits.slice(i, i + 11);
-    const index = parseInt(chunk, 2);
-    words.push(BIP39_ENGLISH[index]!);
+    // Split into 11-bit chunks, each maps to a word
+    const words: string[] = [];
+    for (let i = 0; i < allBits.length; i += 11) {
+      const chunk = allBits.slice(i, i + 11);
+      const index = parseInt(chunk, 2);
+      words.push(BIP39_ENGLISH[index]!);
+    }
+
+    return words.join(' ');
+  } finally {
+    checksumHash.fill(0);
   }
-
-  return words.join(' ');
 }
 
 /**

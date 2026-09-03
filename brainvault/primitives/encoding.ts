@@ -8,7 +8,7 @@
 
 export function hexToBytes(hex: string): Uint8Array {
   if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) {
-    throw new Error(`BRAINVAULT_HEX_INVALID:${hex.slice(0, 16)}`);
+    throw new Error('BRAINVAULT_HEX_INVALID');
   }
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {

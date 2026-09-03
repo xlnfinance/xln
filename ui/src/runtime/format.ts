@@ -24,7 +24,15 @@ export function knownTokenIds(): number[] {
 	}
 }
 
-/** "12,480.2" — grouped integer part, trailing zeros trimmed, never exponent. */
+/** Token glyph for the round icon: currency sign where one exists, first letter otherwise. */
+export function tokenGlyph(symbol: string): string {
+	const upper = symbol.toUpperCase();
+	if (upper === 'USDC' || upper === 'USDT') return '$';
+	if (upper === 'WETH' || upper === 'ETH') return 'Ξ';
+	return upper.slice(0, 1) || '?';
+}
+
+/** "12,480.2" grouped integer part, trailing zeros trimmed, never exponent. */
 export function formatAmount(amount: bigint, decimals: number, maxFraction = 6): string {
 	const negative = amount < 0n;
 	const abs = negative ? -amount : amount;
@@ -40,6 +48,24 @@ export function formatAmount(amount: bigint, decimals: number, maxFraction = 6):
 	return fractionText ? `${sign}${wholeText}.${fractionText}` : `${sign}${wholeText}`;
 }
 
+/** Fixed two decimals for money rows: "2,200.00". */
+export function formatMoney(amount: bigint, decimals: number, fraction = 2): string {
+	const negative = amount < 0n;
+	const abs = negative ? -amount : amount;
+	const base = 10n ** BigInt(decimals);
+	const whole = abs / base;
+	const rest = abs % base;
+	const digits = rest.toString().padStart(decimals, '0').slice(0, Math.min(decimals, fraction)).padEnd(fraction, '0');
+	const sign = negative ? '−' : '';
+	return fraction > 0 && decimals > 0 ? `${sign}${whole.toLocaleString('en-US')}.${digits}` : `${sign}${whole.toLocaleString('en-US')}`;
+}
+
+/** Signed money: "+230.00" / "−120.00" / "0.00". */
+export function formatSigned(amount: bigint, decimals: number, fraction = 2): string {
+	const body = formatMoney(amount < 0n ? -amount : amount, decimals, fraction);
+	return amount > 0n ? `+${body}` : amount < 0n ? `−${body}` : body;
+}
+
 /** Big-numeral split for the display font: ["12,480", ".20"]. */
 export function splitAmountForDisplay(amount: bigint, decimals: number): [string, string] {
 	const negative = amount < 0n;
@@ -49,6 +75,12 @@ export function splitAmountForDisplay(amount: bigint, decimals: number): [string
 	const fraction = abs % base;
 	const fractionText = decimals > 0 ? fraction.toString().padStart(decimals, '0').slice(0, 2) : '';
 	return [`${negative ? '−' : ''}${whole.toLocaleString('en-US')}`, fractionText ? `.${fractionText}` : ''];
+}
+
+export function formatUsd(value: number): string {
+	const abs = Math.abs(value);
+	const sign = value < 0 ? '−' : '';
+	return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function parseAmount(input: string, decimals: number): bigint {
@@ -63,6 +95,14 @@ export function parseAmount(input: string, decimals: number): bigint {
 	const whole = BigInt(wholeText || '0');
 	const fraction = BigInt((fractionText || '').padEnd(decimals, '0') || '0');
 	return whole * 10n ** BigInt(decimals) + fraction;
+}
+
+/** Exact input text for a bigint amount: "730.5" (no grouping, no trailing zeros). */
+export function amountInputText(value: bigint, decimals: number): string {
+	const base = 10n ** BigInt(decimals);
+	const whole = value / base;
+	const fraction = (value % base).toString().padStart(decimals, '0').replace(/0+$/, '');
+	return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
 export function shortId(value: string, head = 6, tail = 4): string {
@@ -80,4 +120,20 @@ export function timeAgo(timestamp: number): string {
 	if (hours < 24) return `${hours} hr ago`;
 	const days = Math.floor(hours / 24);
 	return `${days} d ago`;
+}
+
+export function formatClock(timestamp: number): string {
+	return new Date(timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+export function dayLabel(timestamp: number): string {
+	const date = new Date(timestamp);
+	const today = new Date();
+	const yesterday = new Date(today);
+	yesterday.setDate(today.getDate() - 1);
+	const sameDay = (a: Date, b: Date): boolean =>
+		a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+	if (sameDay(date, today)) return 'Today';
+	if (sameDay(date, yesterday)) return 'Yesterday';
+	return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

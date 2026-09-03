@@ -65,7 +65,7 @@ rm -f "$DEV_OWNER_FILE" "$DEV_PID_DIR"/*.pid
 # dev setup script.
 echo "[dev:setup] resetting ephemeral local JDB/RDB"
 rm -rf -- "$DEV_RDB_ROOT" "$DEV_JDB_ROOT"
-rm -f -- "$ROOT_DIR/frontend/static/runtime.js"
+rm -f -- "$ROOT_DIR/frontend/static/runtime.js" "$ROOT_DIR/frontend/static/account-worker.js"
 
 mkdir -p "$DEV_RDB_ROOT" "$DEV_JDB_ROOT" "$DEV_PID_DIR"
 cp "$CANONICAL_J_PATH" "$DEV_RDB_ROOT/jurisdictions.json"

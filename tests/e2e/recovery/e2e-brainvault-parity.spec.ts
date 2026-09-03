@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '../../global-setup.mts';
 
-import { runBrainvaultCli } from '../../utils/runtime/e2e-brainvault';
+import { deriveBrainvaultOracle } from '../../utils/runtime/e2e-brainvault';
 
 import {
   APP_BASE_URL,
@@ -162,7 +162,9 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await openVaultButton.click();
   await createFreshWalletWhenNoBackupExists(page);
 
-  const expectedRuntimeId = deriveSignerAddressFromMnemonic(runBrainvaultCli(name, passphrase, shards).mnemonic24);
+  const expectedRuntimeId = deriveSignerAddressFromMnemonic(
+    (await deriveBrainvaultOracle(name, passphrase, shards)).mnemonic24,
+  );
   const runtime = await waitForRuntimeMetadata(page, expectedRuntimeId);
   expect(runtime.label).toBe(name);
   expect(runtime.seed).toBeUndefined();
@@ -343,14 +345,14 @@ async function readAdvertisedHubIds(page: Page): Promise<string[]> {
 
 test.describe('brainvault parity', () => {
   for (const currentCase of CASES) {
-    test(`browser brainvault matches local CLI for ${currentCase.shards} shards`, { tag: '@functional' }, async ({ page }) => {
+    test(`browser brainvault matches native oracle for ${currentCase.shards} shards`, { tag: '@functional' }, async ({ page }) => {
       test.slow();
 
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
 
-      const cli = runBrainvaultCli(currentCase.name, currentCase.passphrase, currentCase.shards);
+      const oracle = await deriveBrainvaultOracle(currentCase.name, currentCase.passphrase, currentCase.shards);
       const uiRuntimeId = await deriveBrainvaultInUi(page, currentCase.name, currentCase.passphrase, currentCase.shards);
-      expect(uiRuntimeId).toBe(deriveSignerAddressFromMnemonic(cli.mnemonic24));
+      expect(uiRuntimeId).toBe(deriveSignerAddressFromMnemonic(oracle.mnemonic24));
     });
   }
 
@@ -359,7 +361,7 @@ test.describe('brainvault parity', () => {
 
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
 
-    const cli = runBrainvaultCli('standalone vault', 'ced-export-42', 1);
+    const oracle = await deriveBrainvaultOracle('standalone vault', 'ced-export-42', 1);
     await waitForBrainvaultCreateForm(page);
     await page.locator('#name').fill('standalone vault');
     await page.locator('#passphrase').fill('ced-export-42');
@@ -372,7 +374,7 @@ test.describe('brainvault parity', () => {
     await openVaultButton.click();
     await createFreshWalletWhenNoBackupExists(page);
 
-    const expectedRuntimeId = deriveSignerAddressFromMnemonic(cli.mnemonic24);
+    const expectedRuntimeId = deriveSignerAddressFromMnemonic(oracle.mnemonic24);
     const runtime = await waitForRuntimeMetadata(page, expectedRuntimeId);
     expect(runtime.label).toBe('standalone vault');
     expect(runtime.seed).toBeUndefined();

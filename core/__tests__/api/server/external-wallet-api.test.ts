@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { deriveSignerKeySync } from '../../../account/crypto';
 import { createExternalWalletApi, type ExternalWalletApiContext } from '../../../api/public/external-wallet-api';
+import { provisionFaucetWalletFunding } from '../../../api/public/external-wallet/faucet-wallet';
 import {
   MAX_WALLET_SNAPSHOT_BODY_BYTES,
   MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES,
@@ -102,6 +104,41 @@ const createBlockingFaucetFund = () => {
 };
 
 describe('external wallet API faucet transaction gate', () => {
+  test('funds a dev-chain faucet without consuming the shared contract-admin nonce', async () => {
+    const calls: Array<{ method: string; params: unknown[] }> = [];
+    const provider = {
+      getBalance: async () => 0n,
+      send: async (method: string, params: unknown[]) => {
+        calls.push({ method, params });
+        return null;
+      },
+    } as unknown as ethers.Provider;
+    const adapter = {
+      mode: 'rpc',
+      chainId: 31337,
+      provider,
+      signer: {
+        sendTransaction: async () => {
+          throw new Error('DEV_CHAIN_ADMIN_NONCE_MUST_NOT_BE_CONSUMED');
+        },
+      },
+    } as unknown as JAdapter;
+    const context = makeContext(adapter, async () => false);
+
+    await provisionFaucetWalletFunding(context, adapter, [], {
+      ensureEth: true,
+      ensureTokens: false,
+    });
+
+    const faucetAddress = new ethers.Wallet(
+      ethers.hexlify(deriveSignerKeySync(context.faucetSeed, context.faucetSignerLabel)),
+    ).address;
+    expect(calls).toEqual([{
+      method: 'anvil_setBalance',
+      params: [faucetAddress, '0x1'],
+    }]);
+  });
+
   test('BrowserVM faucet targets only the requested token in its trusted raw units', async () => {
     const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);

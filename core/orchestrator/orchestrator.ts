@@ -2968,10 +2968,8 @@ const requestShutdown = (signal: NodeJS.Signals): void => {
   }
   void shutdown();
 };
-
 process.on('SIGTERM', () => { requestShutdown('SIGTERM'); });
 process.on('SIGINT', () => { requestShutdown('SIGINT'); });
-
 console.log(
   `CONTROL_READY host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,
 );

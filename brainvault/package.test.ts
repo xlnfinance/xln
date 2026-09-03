@@ -1,7 +1,24 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { verifyBundledFile } from './binary-integrity.ts';
+
+test('bundled-file verification rejects symlink path aliases', () => {
+  const temp = mkdtempSync(join(tmpdir(), 'brainvault-integrity-'));
+  try {
+    const target = join(temp, 'target.bin');
+    const alias = join(temp, 'expected.bin');
+    const bytes = Buffer.from('audited binary');
+    writeFileSync(target, bytes, { mode: 0o644 });
+    const digest = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+    writeFileSync(join(temp, 'MANIFEST.sha256'), `${digest}  target.bin\n`, { mode: 0o644 });
+    symlinkSync('target.bin', alias);
+    expect(() => verifyBundledFile(alias, temp)).toThrow('BRAINVAULT_BINARY_NOT_REGULAR');
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
 
 test('packed package installs inertly and runs from an audited empty directory', () => {
   const temp = mkdtempSync(join(tmpdir(), 'brainvault-package-'));

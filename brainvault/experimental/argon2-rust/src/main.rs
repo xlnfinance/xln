@@ -3,9 +3,10 @@ use argon2_rust::{
     params::{Memory, TagLen},
 };
 use std::io::{self, Read, Write};
+use std::ops::{Deref, DerefMut};
 use std::sync::{
     Arc,
-    atomic::{AtomicU32, Ordering},
+    atomic::{AtomicU32, Ordering, compiler_fence},
 };
 use std::thread;
 
@@ -14,19 +15,60 @@ const HEADER_BYTES: usize = 24;
 const SALT_BYTES: usize = 32;
 const OUTPUT_BYTES: usize = 32;
 
+fn secure_zero(bytes: &mut [u8]) {
+    for byte in bytes {
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    compiler_fence(Ordering::SeqCst);
+}
+
+struct SecretVec(Vec<u8>);
+
+impl Deref for SecretVec {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SecretVec {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for SecretVec {
+    fn drop(&mut self) {
+        secure_zero(&mut self.0);
+    }
+}
+
+struct SecretOutput([u8; OUTPUT_BYTES]);
+
+impl Drop for SecretOutput {
+    fn drop(&mut self) {
+        secure_zero(&mut self.0);
+    }
+}
+
 fn read_u32le(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().expect("four-byte header field"))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut input = Vec::new();
-    io::stdin().read_to_end(&mut input)?;
+    if std::env::args_os().count() != 1 {
+        return Err("invalid BrainVault native invocation".into());
+    }
+    let mut input = SecretVec(Vec::new());
+    io::stdin().read_to_end(&mut input.0)?;
     if input.len() < HEADER_BYTES || read_u32le(&input[0..4]) != INPUT_MAGIC {
         return Err("invalid BrainVault native input".into());
     }
     let shard_count = read_u32le(&input[4..8]) as usize;
     let worker_count = read_u32le(&input[8..12]) as usize;
     let password_len = read_u32le(&input[12..16]) as usize;
+    let flags = read_u32le(&input[16..20]);
     let memory_kib = read_u32le(&input[20..24]) as u64;
     let expected = HEADER_BYTES
         .checked_add(password_len)
@@ -34,8 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("input size overflow")?;
     if shard_count == 0
         || worker_count == 0
+        || worker_count > shard_count
         || worker_count > 32
         || password_len == 0
+        || flags != 0
         || memory_kib < 8
         || input.len() != expected
     {
@@ -51,14 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
     {
         Ok(params) => params,
-        Err(error) => {
-            input.fill(0);
-            return Err(error.into());
-        }
+        Err(error) => return Err(error.into()),
     };
-    let password = Arc::new(input[HEADER_BYTES..HEADER_BYTES + password_len].to_vec());
-    let salts = Arc::new(input[HEADER_BYTES + password_len..].to_vec());
-    input.fill(0);
+    let password = Arc::new(SecretVec(input[HEADER_BYTES..HEADER_BYTES + password_len].to_vec()));
+    let salts = Arc::new(SecretVec(input[HEADER_BYTES + password_len..].to_vec()));
+    drop(input);
     let next = Arc::new(AtomicU32::new(0));
     let progress = Arc::new(AtomicU32::new(0));
     let progress_enabled = std::env::var_os("BRAINVAULT_NATIVE_PROGRESS").is_some();
@@ -72,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let progress = Arc::clone(&progress);
         let params = params.clone();
         handles.push(thread::spawn(
-            move || -> Result<Vec<(usize, [u8; OUTPUT_BYTES])>, argon2_rust::Error> {
+            move || -> Result<Vec<(usize, SecretOutput)>, argon2_rust::Error> {
                 let mut hasher = Argon2::new(Algorithm::Argon2id, Version::V0x13, params).hasher();
                 let mut completed = Vec::new();
                 loop {
@@ -80,12 +121,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if index >= shard_count {
                         break;
                     }
-                    let mut output = [0u8; OUTPUT_BYTES];
+                    let mut output = SecretOutput([0u8; OUTPUT_BYTES]);
                     let salt_offset = index * SALT_BYTES;
                     hasher.hash_into(
                         &password,
                         &salts[salt_offset..salt_offset + SALT_BYTES],
-                        &mut output,
+                        &mut output.0,
                     )?;
                     let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
                     if progress_enabled &&
@@ -99,13 +140,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     }
 
-    let mut outputs = vec![[0u8; OUTPUT_BYTES]; shard_count];
+    let mut outputs: Vec<SecretOutput> = (0..shard_count)
+        .map(|_| SecretOutput([0u8; OUTPUT_BYTES]))
+        .collect();
     let mut worker_error: Option<String> = None;
     for handle in handles {
         match handle.join() {
             Ok(Ok(completed)) => {
                 for (index, output) in completed {
-                    outputs[index] = output;
+                    outputs[index].0.copy_from_slice(&output.0);
                 }
             }
             Ok(Err(error)) => {
@@ -116,22 +159,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    let mut password = Arc::try_unwrap(password).map_err(|_| "native password still shared")?;
-    let mut salts = Arc::try_unwrap(salts).map_err(|_| "native salts still shared")?;
-    password.fill(0);
-    salts.fill(0);
+    drop(password);
+    drop(salts);
     if let Some(error) = worker_error {
-        outputs.fill([0u8; OUTPUT_BYTES]);
         return Err(error.into());
     }
     let mut stdout = io::stdout().lock();
     let write_result = (|| -> io::Result<()> {
         for output in &outputs {
-            stdout.write_all(output)?;
+            stdout.write_all(&output.0)?;
         }
         stdout.flush()
     })();
-    outputs.fill([0u8; OUTPUT_BYTES]);
     write_result?;
     Ok(())
 }

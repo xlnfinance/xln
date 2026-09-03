@@ -60,6 +60,7 @@ type RuntimeAdapterRequestBody =
 
 const BRAINVAULT_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 const NUMBERED_REGISTRATION_REQUEST_TIMEOUT_MS = 15 * 60 * 1_000;
+const HISTORICAL_READ_REQUEST_TIMEOUT_MS = 15_000;
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
@@ -285,7 +286,14 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   }
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T> {
-    return this.request<T>({ op: 'read', path, ...(query ? { query } : {}) });
+    // Historical views replay/materialize persisted state on demand and are
+    // intentionally slower than live reads. Keep commands and live reads on
+    // the caller's fail-fast budget without applying that budget to replay.
+    const historicalRead = query?.atHeight !== undefined || path === 'history-frame-batch';
+    const timeoutMs = !historicalRead
+      ? undefined
+      : Math.max(this.config?.requestTimeoutMs ?? 0, HISTORICAL_READ_REQUEST_TIMEOUT_MS);
+    return this.request<T>({ op: 'read', path, ...(query ? { query } : {}) }, timeoutMs);
   }
 
   async ensureOwnerCommandLane(): Promise<void> {

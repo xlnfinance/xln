@@ -49,28 +49,32 @@ self.onmessage = async function(e: MessageEvent) {
 
       case 'derive_shard': {
         const { name, passphrase, shardIndex, shardCount, shardMemoryKb, algId } = data;
-        const memorySizeKb = typeof shardMemoryKb === 'number' ? shardMemoryKb : BRAINVAULT_V1.SHARD_MEMORY_KB;
-        const effectiveAlgId = typeof algId === 'string' && algId.length > 0 ? algId : BRAINVAULT_V1.ALG_ID;
+        const memorySizeKb = shardMemoryKb === undefined ? BRAINVAULT_V1.SHARD_MEMORY_KB : shardMemoryKb;
+        const effectiveAlgId = algId === undefined ? BRAINVAULT_V1.ALG_ID : algId;
 
         const startTime = performance.now();
         const salt = await createShardSalt(name, shardIndex, shardCount, effectiveAlgId);
-        const result = await deriveShardWithParams(passphrase, salt, {
-          algId: effectiveAlgId,
-          shardMemoryKb: memorySizeKb,
-        });
-        const elapsed = performance.now() - startTime;
-
-        self.postMessage({
-          type: 'shard_complete',
-          id,
-          data: {
-            specId: BRAINVAULT_V1_SPEC_ID,
-            requestId: shardRequestFingerprint(shardIndex, shardCount, effectiveAlgId, memorySizeKb),
-            shardIndex,
-            resultHex: bytesToHex(result),
-            elapsedMs: elapsed,
-          }
-        });
+        let result: Uint8Array | undefined;
+        try {
+          result = await deriveShardWithParams(passphrase, salt, {
+            algId: effectiveAlgId,
+            shardMemoryKb: memorySizeKb,
+          });
+          const elapsed = performance.now() - startTime;
+          self.postMessage({
+            type: 'shard_complete',
+            id,
+            data: {
+              specId: BRAINVAULT_V1_SPEC_ID,
+              requestId: shardRequestFingerprint(shardIndex, shardCount, effectiveAlgId, memorySizeKb),
+              shardIndex,
+              resultHex: bytesToHex(result),
+              elapsedMs: elapsed,
+            }
+          });
+        } finally {
+          result?.fill(0);
+        }
         break;
       }
 
@@ -81,7 +85,7 @@ self.onmessage = async function(e: MessageEvent) {
     self.postMessage({
       type: 'error',
       id,
-      data: { message: (error as Error).message, stack: (error as Error).stack }
+      data: { message: error instanceof Error ? error.message : String(error) }
     });
   }
 };

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { XLN_PROTOCOL_VERSION } from '../../core/protocol/version';
 
 declare global {
 	  interface Window {
@@ -74,7 +75,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	          bumpStat('noMarketDispatches');
 	          socket.dispatchEvent(new MessageEvent('message', {
             data: JSON.stringify({
-              v: 2,
+              v: ${XLN_PROTOCOL_VERSION},
               type: 'market_status',
               inReplyTo: subscribeMessage.id || 'market_subscribe',
               status: 'no_market',
@@ -106,7 +107,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	              bumpStat('snapshotDispatches');
 	              socket.dispatchEvent(new MessageEvent('message', {
                 data: JSON.stringify({
-                  v: 2,
+                  v: ${XLN_PROTOCOL_VERSION},
                   type: 'market_snapshot',
                   id: 'synthetic_market_snapshot',
                   timestamp: now,
@@ -241,7 +242,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
               socket.sentMessages.push(rawData);
               if (window.__relayErrorOnSubscribe && rawData.includes('"market_subscribe"')) {
                 const errorMessage = {
-                  v: 2,
+                  v: ${XLN_PROTOCOL_VERSION},
                   type: 'error',
                   inReplyTo: 'market_subscribe',
                   code: 'E_UNKNOWN_HUB',

@@ -118,6 +118,9 @@ export async function createShardSalt(
   if (!Number.isSafeInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
     throw new Error(`BRAINVAULT_SHARD_INDEX_INVALID:${shardIndex}`);
   }
+  if (typeof algId !== 'string' || algId.length === 0) {
+    throw new Error('BRAINVAULT_ALG_ID_INVALID');
+  }
   const nameBytes = new TextEncoder().encode(name.normalize('NFKD'));
   const algIdBytes = new TextEncoder().encode(algId);
   const countBytes = new Uint8Array(4);

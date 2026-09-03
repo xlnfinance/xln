@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xln Wallet Sketches</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --page:#0A0B0E;
+  --bg:#0E1014; --surface:#15181E; --surface-2:#1C2028; --surface-3:#242935;
+  --line:rgba(236,237,239,.08); --line-2:rgba(236,237,239,.15);
+  --ink:#ECEDEF; --ink-2:#8D929B; --ink-3:#5B6069;
+  --accent:#6E7CFF; --accent-2:#9AA4FF; --accent-dim:rgba(110,124,255,.16);
+  --credit:#6E7CFF; --coll:#34D399; --slate:#6E788A; --debt:#E8B04B; --hold:#B58CFF; --dispute:#F26D6D;
+  --font:'Instrument Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ppu:.1;
+  --fade:var(--bg);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--page);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px;border-radius:6px}
+svg{display:inline-block;vertical-align:middle;flex:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- the sketch document around the frames ---------- */
+.wrap{max-width:1360px;margin:0 auto;padding:0 28px}
+.doc-head{padding:56px 0 22px}
+.doc-head h1{font-size:34px;font-weight:600;letter-spacing:-.02em;margin:0 0 10px;text-wrap:balance}
+.doc-head p{max-width:66ch;color:var(--ink-2);margin:0;font-size:15px}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.scalebar{position:sticky;top:0;z-index:50;background:rgba(10,11,14,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-block:1px solid var(--line)}
+.scalebar .in{display:flex;align-items:center;gap:18px;min-height:56px;flex-wrap:wrap;padding:8px 0}
+.scalebar input[type=range]{width:220px;accent-color:var(--accent)}
+.scalebar output{font-weight:600;min-width:112px;font-variant-numeric:tabular-nums}
+.scalebar .hint{color:var(--ink-3);font-size:12.5px}
+.presets{display:flex;gap:6px}
+.presets button{height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line-2);color:var(--ink-2);font-size:12px}
+.presets button.on{background:var(--accent-dim);color:var(--accent-2);border-color:transparent}
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:26px 0 8px}
+.pcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px}
+.pcard h3{margin:0 0 6px;font-size:15px;font-weight:600}
+.pcard p{margin:0;color:var(--ink-2);font-size:13px}
+.legend{display:flex;flex-wrap:wrap;gap:10px 22px;margin:18px 0 6px;font-size:13px;color:var(--ink-2)}
+.legend i{display:inline-block;width:16px;height:6px;border-radius:2px;margin-right:8px;vertical-align:middle}
+section.screen{padding:52px 0 30px;border-top:1px solid var(--line)}
+section.screen h2{font-size:22px;font-weight:600;letter-spacing:-.015em;margin:8px 0 8px}
+section.screen .lede{color:var(--ink-2);max-width:72ch;margin:0 0 26px;font-size:15px}
+.desk-wrap{overflow-x:auto;padding-bottom:6px}
+.phones{display:flex;gap:28px;margin-top:26px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.cap{font-size:12px;color:var(--ink-3);margin:10px 0 0}
+.frame-col{flex:none}
+
+/* ---------- device frames ---------- */
+.desktop{width:1280px;height:820px;background:var(--bg);border:1px solid var(--line-2);border-radius:16px;display:flex;overflow:hidden;flex:none}
+.rail{width:72px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:22px 0;gap:6px;flex:none}
+.mark{width:28px;height:28px;border-radius:9px;background:var(--accent-dim);display:grid;place-items:center;color:var(--accent-2);margin-bottom:22px;font-weight:700;font-size:14px}
+.rail .ri{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:var(--ink-3)}
+.rail .ri.on{color:var(--ink);background:var(--surface-2)}
+.rail .sp{flex:1}
+.dmain{flex:1;overflow:auto;padding:36px 44px 48px}
+.dgrid{max-width:1080px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:44px;align-items:start}
+.dhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:26px;min-height:36px}
+.dhead h1{font-size:17px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px}
+
+.phone{width:390px;height:844px;background:var(--bg);border:1px solid var(--line-2);border-radius:44px;display:flex;flex-direction:column;overflow:hidden;flex:none;position:relative}
+.status{height:50px;display:flex;justify-content:space-between;align-items:center;padding:12px 30px 0;font-size:14px;font-weight:600}
+.status .sig{display:flex;gap:4px;align-items:flex-end}
+.status .sig i{width:3px;background:var(--ink);border-radius:1px;display:block}
+.pbody{flex:1;overflow:auto;padding:6px 20px 20px;display:flex;flex-direction:column;scrollbar-width:none}
+.pbody::-webkit-scrollbar{display:none}
+.tabbar{height:82px;border-top:1px solid var(--line);display:flex;padding:8px 6px 22px;background:var(--bg)}
+.tabbar .ti{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:10.5px;color:var(--ink-3);letter-spacing:.02em}
+.tabbar .ti.on{color:var(--ink)}
+.phead{display:flex;justify-content:space-between;align-items:center;min-height:52px}
+.phead h1{font-size:17px;font-weight:600;margin:0}
+.phead .ib{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;color:var(--ink-2);background:var(--surface)}
+
+/* ---------- money components ---------- */
+.hero{padding:20px 0 6px}
+.hero .lbl{font-size:12px;color:var(--ink-2);margin-bottom:6px}
+.amt{font-weight:600;letter-spacing:-.03em;line-height:1;color:#fff}
+.amt .dec{color:var(--ink-2)}
+.tiers{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--ink-2);margin-top:10px;align-items:center}
+.tiers b{color:var(--ink);font-weight:500}
+.tiers i.sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+.bw{position:relative;width:100%;overflow:hidden}
+.bw::after{content:'';position:absolute;right:0;top:0;bottom:0;width:44px;background:linear-gradient(90deg,transparent,var(--fade));pointer-events:none}
+.bar{display:flex;width:max-content;height:6px;gap:1px}
+.bar.h4{height:4px}.bar.h8{height:8px}
+.seg{flex:none;height:100%;width:calc(var(--u)*var(--ppu)*1px);border-radius:1.5px;transition:width .35s cubic-bezier(.32,.72,0,1)}
+.c-slate{background:var(--slate)} .c-coll{background:var(--coll)} .c-credit{background:var(--credit)} .c-debt{background:var(--debt)} .c-this{background:#fff}
+.c-pend{background:repeating-linear-gradient(135deg,var(--coll) 0 3px,rgba(52,211,153,.22) 3px 6px)}
+.dbar{display:grid;grid-template-columns:minmax(0,1fr) 10px minmax(0,1fr);align-items:center;height:6px}
+.dbar .half{position:relative;height:100%;overflow:hidden;display:flex}
+.dbar .half.out{justify-content:flex-end}
+.dbar .half::after{content:'';position:absolute;top:0;bottom:0;width:36px;pointer-events:none}
+.dbar .half.out::after{left:0;background:linear-gradient(90deg,var(--fade),transparent)}
+.dbar .half.in::after{right:0;background:linear-gradient(90deg,transparent,var(--fade))}
+.dbar .hold{position:absolute;top:0;bottom:0;width:calc(var(--u)*var(--ppu)*1px);background:repeating-linear-gradient(135deg,var(--hold) 0 3px,rgba(181,140,255,.28) 3px 6px);transition:width .35s cubic-bezier(.32,.72,0,1)}
+.dbar .half.out .hold{right:0}.dbar .half.in .hold{left:0}
+.dbar .notch{width:2px;height:12px;background:var(--ink-2);border-radius:1px;justify-self:center}
+.dcap{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-top:6px;font-variant-numeric:tabular-nums}
+
+.row{padding:12px 0;border-top:1px solid var(--line)}
+.row.first{border-top:0}
+.rt{display:flex;align-items:center;gap:12px}
+.rt .tx{flex:1;min-width:0}
+.rt .t{font-size:14.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt .s{font-size:12px;color:var(--ink-2);margin-top:2px}
+.rt .r{text-align:right;white-space:nowrap}
+.rt .r .v{font-size:14.5px;font-weight:500}
+.rt .r .u{font-size:11.5px;color:var(--ink-2);margin-top:2px}
+.rt .chev{color:var(--ink-3)}
+.rb{margin-top:9px}
+.sub{padding:9px 0 9px 46px;border-top:1px dashed var(--line)}
+.tk{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff;flex:none}
+.av{width:34px;height:34px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;font-weight:600;color:var(--accent-2);flex:none}
+.chip{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:6px;background:var(--surface-2);color:var(--ink-2);font-size:11px;font-weight:500;vertical-align:1px}
+.chip.hub{color:var(--accent-2);background:var(--accent-dim)}
+.pill{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 10px 0 6px;border-radius:999px;background:var(--surface-3);font-weight:600;font-size:13px;flex:none}
+.pill .tk{width:22px;height:22px;font-size:10px}
+.state{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500}
+.state::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.st-settled{color:var(--coll)} .st-inflight{color:var(--hold)} .st-pending{color:var(--debt)} .st-neutral{color:var(--ink-2)} .st-dispute{color:var(--dispute)}
+@keyframes pulse{50%{opacity:.35}}
+.st-inflight::before{animation:pulse 1.4s ease-in-out infinite}
+
+.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0 6px}
+.btn{height:48px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:15px;background:var(--accent);color:#fff;width:100%}
+.btn.ghost{background:var(--surface-2);color:var(--ink)}
+.btn.sm{height:36px;font-size:13px;border-radius:10px;width:auto;padding:0 14px}
+.btn.quiet{background:none;color:var(--accent-2);height:auto;width:auto;font-size:13px;font-weight:500}
+.actions .btn{flex-direction:column;height:64px;gap:6px;font-size:12.5px;font-weight:500;background:var(--surface);border:1px solid var(--line);color:var(--ink)}
+.actions .btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+
+.sect{display:flex;justify-content:space-between;align-items:center;margin:22px 0 4px;min-height:28px}
+.sect h3{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0;font-weight:600}
+.sect .more{font-size:12px;color:var(--ink-2)}
+.segc{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:2px}
+.segc button{height:24px;padding:0 10px;border-radius:6px;font-size:12px;color:var(--ink-2)}
+.segc button.on{background:var(--surface-3);color:var(--ink)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;--fade:var(--surface)}
+.card h3{margin:0 0 10px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;font-size:13px;align-items:center}
+.kv .k{color:var(--ink-2);flex:none}
+.kv .v{font-weight:500;text-align:right}
+.kv+.kv{border-top:1px solid var(--line)}
+.note{font-size:12.5px;color:var(--ink-2);margin:12px 0 0;line-height:1.5}
+
+.field{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;--fade:var(--surface)}
+.field .fl{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-2);margin-bottom:8px;gap:10px}
+.field .fv{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.field .big{font-size:30px;font-weight:600;letter-spacing:-.02em;color:#fff;line-height:1}
+.stack{display:flex;flex-direction:column;gap:12px}
+.flip{display:flex;justify-content:center;margin:-17px 0;position:relative;z-index:1}
+.flip span{width:34px;height:34px;border-radius:50%;background:var(--bg);border:1px solid var(--line-2);display:grid;place-items:center;color:var(--accent-2)}
+.hops{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;color:var(--ink-3)}
+.hop{height:26px;padding:0 9px;border-radius:8px;background:var(--surface-2);font-size:12.5px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+.hop.me{background:var(--accent-dim);color:var(--accent-2)}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13px;padding:5px 0}
+.check .ck{width:18px;height:18px;border-radius:50%;background:rgba(52,211,153,.18);color:var(--coll);display:grid;place-items:center;flex:none;margin-top:1px}
+.check .ck.todo{background:var(--surface-3);color:var(--ink-3)}
+
+.sheet-scrim{position:absolute;inset:0;background:rgba(6,7,9,.66);z-index:5}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border:1px solid var(--line-2);border-radius:28px 28px 44px 44px;padding:14px 22px 30px;z-index:6;--fade:var(--surface)}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--line-2);margin:0 auto 18px}
+.rcpt{text-align:center;padding:6px 0 4px}
+.rcpt .ok{width:56px;height:56px;border-radius:50%;background:rgba(52,211,153,.16);color:var(--coll);display:grid;place-items:center;margin:0 auto 14px}
+.rcpt .k{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.rcpt .a{font-size:36px;font-weight:600;letter-spacing:-.03em;margin:8px 0 4px;color:#fff;line-height:1}
+.rcpt .a small{font-size:16px;color:var(--ink-2);font-weight:500;letter-spacing:0}
+.rcpt .to{font-size:14px;color:var(--ink-2)}
+
+.tl{position:relative;padding-left:22px}
+.tl::before{content:'';position:absolute;left:5px;top:10px;bottom:10px;width:1px;background:var(--line-2)}
+.tl .ev{position:relative;padding:6px 0}
+.tl .ev::before{content:'';position:absolute;left:-22px;top:11px;width:11px;height:11px;border-radius:50%;background:var(--surface);border:2px solid var(--ink-3)}
+.tl .ev.done::before{background:var(--coll);border-color:var(--coll)}
+.tl .ev.now::before{border-color:var(--hold);animation:pulse 1.4s infinite}
+.tl .ev .t{font-size:13.5px;font-weight:500}
+.tl .ev .s{font-size:12px;color:var(--ink-2)}
+.tl .ev .tm{font-size:11px;color:var(--ink-3);font-family:var(--mono);margin-top:2px}
+
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0}
+.chips::-webkit-scrollbar{display:none}
+.chips button{height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line-2);font-size:12.5px;color:var(--ink-2);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.chips button.on{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:600}
+.day{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600;margin:18px 0 2px}
+.ev-ic{width:34px;height:34px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;color:var(--ink-2);flex:none}
+.ev-ic.in{color:var(--coll)} .ev-ic.out{color:var(--ink)} .ev-ic.swap{color:var(--hold)} .ev-ic.acc{color:var(--accent-2)} .ev-ic.res{color:var(--debt)}
+.row.sel{background:var(--surface);margin:0 -12px;padding:12px;border-radius:12px;border-top-color:transparent;--fade:var(--surface)}
+.row.sel+.row{border-top-color:transparent}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M7 17L17 7M8 7h9v9"/></symbol>
+  <symbol id="i-receive" viewBox="0 0 24 24"><path d="M17 7L7 17M16 17H7V8"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 20V5M3 9l4-4 4 4M17 4v15M13 15l4 4 4-4"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h7M17 7h3M4 17h3M11 17h9"/><circle cx="14" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+</svg>
+
+<header class="wrap doc-head">
+  <div class="eyebrow">Premium dark · consumer wallet · direction, not final</div>
+  <h1>xln wallet, four screens</h1>
+  <p>Phone and desktop rendered from the same components and the same demo data. Every bar on this page shares one scale. Drag the slider: a dollar is one pixel, or ten, or a hundred. Long money runs off the screen until you zoom out. That is the point.</p>
+</header>
+
+<div class="scalebar"><div class="wrap in">
+  <span class="eyebrow">Scale</span>
+  <input type="range" id="ppu" min="0" max="100" value="50" aria-label="Dollars per pixel">
+  <output id="ppuOut" for="ppu">1 px = $10</output>
+  <span class="presets" id="presets">
+    <button data-usd="1">$1</button><button data-usd="2">$2</button><button data-usd="5">$5</button><button data-usd="10">$10</button><button data-usd="25">$25</button><button data-usd="100">$100</button>
+  </span>
+  <span class="hint">Applies to every bar in every frame below. In the product this lives in Settings.</span>
+</div></div>
+
+<main class="wrap">
+
+  <div class="principles">
+    <div class="pcard"><h3>Visceral value</h3><p>A bar is exactly as long as the money is. No percentages, no per-row normalisation. Two rows are comparable at a glance because they are drawn to the same rule.</p></div>
+    <div class="pcard"><h3>Three places money lives</h3><p>On-chain wallet (yours, slow), reserve in the Depository (escrowed, enforceable), bilateral accounts (instant, credit-backed). Folded by default into one number per token and one total.</p></div>
+    <div class="pcard"><h3>Color is a money state</h3><p>Never decoration. Slate is on-chain, mint is collateral and settled, indigo is credit and instant, amber is pending or owed, violet is in flight, red is dispute.</p></div>
+    <div class="pcard"><h3>One code, every screen</h3><p>Under 840 px: tab bar and bottom sheets. Above: icon rail and two columns. Same components, same data, same scale. Native shells only wrap it.</p></div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--slate)"></i>on-chain</span>
+    <span><i style="background:var(--coll)"></i>collateral · settled</span>
+    <span><i class="c-pend"></i>reserve pending</span>
+    <span><i style="background:var(--credit)"></i>credit · instant</span>
+    <span><i style="background:var(--debt)"></i>owed · pending</span>
+    <span><i style="background:repeating-linear-gradient(135deg,var(--hold) 0 3px,rgba(181,140,255,.28) 3px 6px)"></i>in flight</span>
+    <span><i style="background:var(--dispute)"></i>dispute</span>
+  </div>
+
+  <section class="screen" id="home">
+    <div class="eyebrow">01 · Home</div>
+    <h2>Total first, then where it lives</h2>
+    <p class="lede">One number, one stacked bar for the three places, then balances by token. Opening a token shows the places, and inside them the bilateral accounts with the deriveDelta bar: left half is what you can send, right half what you can receive, the notch is Δ. Striped violet is money locked in flight.</p>
+    <div class="desk-wrap"><div class="desktop" id="home-desktop"></div></div>
+    <p class="cap">Desktop 1280 · USDC expanded · accounts and recent activity in the right column</p>
+    <div class="phones">
+      <div class="frame-col"><div class="phone" id="home-phone"></div><p class="cap">Phone 390 · default, everything folded</p></div>
+      <div class="frame-col"><div class="phone" id="home-phone-2"></div><p class="cap">Phone 390 · USDC opened</p></div>
+    </div>
+  </section>
+
+  <section class="screen" id="pay">
+    <div class="eyebrow">02 · Pay</div>
+    <h2>Recipient, amount, route</h2>
+    <p class="lede">The amount is drawn against your real capacity with the hub before you sign, on the same scale as everything else. Desktop shows what the line with Hub One looks like after: collateral is used first, then your credit line. Nothing touches the chain.</p>
+    <div class="desk-wrap"><div class="desktop" id="pay-desktop"></div></div>
+    <p class="cap">Desktop 1280 · form left, review right with the account before and after</p>
+    <div class="phones">
+      <div class="frame-col"><div class="phone" id="pay-phone"></div><p class="cap">Phone 390 · form</p></div>
+      <div class="frame-col"><div class="phone" id="pay-phone-2"></div><p class="cap">Phone 390 · receipt sheet after signing</p></div>
+    </div>
+  </section>
+
+  <section class="screen" id="swap">
+    <div class="eyebrow">03 · Swap</div>
+    <h2>One ticket, same network or across</h2>
+    <p class="lede">Cross-network is the same ticket with a route line and two legs. Setup steps appear only when something is missing, here both are already satisfied. The progress sheet says exactly what happens if the hub never fills: the locked leg unlocks by itself.</p>
+    <div class="desk-wrap"><div class="desktop" id="swap-desktop"></div></div>
+    <p class="cap">Desktop 1280 · ticket left, legs, target account and open orders right</p>
+    <div class="phones">
+      <div class="frame-col"><div class="phone" id="swap-phone"></div><p class="cap">Phone 390 · ticket</p></div>
+      <div class="frame-col"><div class="phone" id="swap-phone-2"></div><p class="cap">Phone 390 · in progress, leg 2 of 2</p></div>
+    </div>
+  </section>
+
+  <section class="screen" id="activity">
+    <div class="eyebrow">04 · Activity</div>
+    <h2>Money movements only</h2>
+    <p class="lede">No consensus internals. Each row carries its settlement state as a colored dot; the detail is a receipt with route, frame, proof and a timeline of who signed when.</p>
+    <div class="desk-wrap"><div class="desktop" id="act-desktop"></div></div>
+    <p class="cap">Desktop 1280 · list left, receipt right</p>
+    <div class="phones">
+      <div class="frame-col"><div class="phone" id="act-phone"></div><p class="cap">Phone 390 · list with filters</p></div>
+      <div class="frame-col"><div class="phone" id="act-phone-2"></div><p class="cap">Phone 390 · receipt sheet</p></div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+// ---------- demo data (USD prices are the same static table the frontend uses today) ----------
+const PRICE={USDC:1,USDT:1,WETH:3500,TRX:.12};
+const DEC={USDC:2,USDT:2,WETH:4,TRX:2};
+const TOKEN={USDC:{name:'USD Coin',bg:'#2775CA',g:'$'},USDT:{name:'Tether USD',bg:'#26A17B',g:'₮'},WETH:{name:'Wrapped Ether',bg:'#627EEA',g:'Ξ'},TRX:{name:'Tron',bg:'#EF0027',g:'T'}};
+const me={name:'alice',id:'0x7a1c4e0b…c39e42',frame:12480};
+const bob={name:'bob',id:'0x4d8e51a7…b077c1'};
+const external=[{sym:'USDC',j:'Ethereum',amt:1240},{sym:'WETH',j:'Ethereum',amt:.32},{sym:'USDT',j:'Tron',amt:142}];
+const reserve=[{sym:'USDC',j:'Ethereum',amt:850,pending:200},{sym:'USDT',j:'Tron',amt:300}];
+// deriveDelta fields only: out* is what we can send, in* is what we can receive. signed > 0 means they owe us.
+const accounts=[
+  {peer:'Hub One',j:'Ethereum',sym:'USDC',hub:true,signed:230,d:{outOwnCredit:1000,outCollateral:230,outPeerCredit:0,inOwnCredit:0,inCollateral:770,inPeerCredit:2000,outHold:500,inHold:0}},
+  {peer:'Meridian Desk',j:'Ethereum',sym:'USDC',signed:-120,d:{outOwnCredit:380,outCollateral:0,outPeerCredit:0,inOwnCredit:120,inCollateral:0,inPeerCredit:250,outHold:0,inHold:0}},
+  {peer:'Hub One',j:'Tron',sym:'USDT',hub:true,signed:0,d:{outOwnCredit:0,outCollateral:0,outPeerCredit:0,inOwnCredit:0,inCollateral:0,inPeerCredit:1000,outHold:0,inHold:0}},
+];
+const PAY=320;
+const acts=[
+  {day:'Today',time:'12:41',type:'swap',title:'Swap 500 USDC for 499.20 USDT',sub:'Ethereum to Tron · via Hub One',amt:'',state:'inflight',sl:'in progress'},
+  {day:'Today',time:'11:02',type:'out',title:'Paid grace',sub:'via Hub One · instant',amt:'−250.00 USDC',state:'settled',sl:'settled'},
+  {day:'Today',time:'09:15',type:'in',title:'Received from grace',sub:'direct · instant',amt:'+40.00 USDC',state:'settled',sl:'settled'},
+  {day:'Yesterday',time:'18:20',type:'res',title:'Deposit to reserve',sub:'Ethereum · waiting for the block',amt:'200.00 USDC',state:'pending',sl:'pending'},
+  {day:'Yesterday',time:'16:05',type:'out',title:'Paid Meridian Desk',sub:'direct · on your credit line',amt:'−120.00 USDC',state:'settled',sl:'settled'},
+  {day:'Yesterday',time:'10:30',type:'acc',title:'Credit line for Hub One',sub:'set to 2,000 USDC · Ethereum',amt:'',state:'neutral',sl:'signed'},
+  {day:'Yesterday',time:'09:02',type:'acc',title:'Settled with Hub One',sub:'1,000 USDC collateral · Ethereum',amt:'',state:'settled',sl:'on-chain'},
+];
+const orders=[
+  {t:'500.00 USDC for 499.20 USDT',s:'Cross-network · Ethereum to Tron · good til canceled',state:'inflight',sl:'leg 1 locked'},
+  {t:'0.10 WETH for 352.00 USDC',s:'Limit 3,520.00 · good til canceled · Ethereum',state:'neutral',sl:'open · 0% filled'},
+];
+
+// ---------- helpers ----------
+const nf=(n,d=2)=>n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const usd=n=>'$'+nf(n);
+const sgn=n=>n>0?'+':n<0?'−':'';
+const derive=d=>({...d,outCapacity:d.outOwnCredit+d.outCollateral+d.outPeerCredit-(d.outHold||0),inCapacity:d.inOwnCredit+d.inCollateral+d.inPeerCredit-(d.inHold||0)});
+const I=(n,s=16)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const seg=(u,c)=>u>0?`<i class="seg ${c}" style="--u:${u}"></i>`:'';
+const bar=(segs,h='')=>`<div class="bw"><div class="bar ${h}">${segs.join('')}</div></div>`;
+const tk=sym=>`<span class="tk" style="background:${TOKEN[sym].bg}">${TOKEN[sym].g}</span>`;
+const hops=(...names)=>`<span class="hops">${names.map((n,i)=>`${i?I('arrow',12):''}<span class="hop ${n==='You'?'me':''}">${n}</span>`).join('')}</span>`;
+
+function dbar(a){
+  const d=derive(a.d),p=PRICE[a.sym];
+  const out=seg(d.outOwnCredit*p,'c-credit')+seg(d.outCollateral*p,'c-coll')+seg(d.outPeerCredit*p,'c-debt');
+  const inn=seg(d.inOwnCredit*p,'c-debt')+seg(d.inCollateral*p,'c-coll')+seg(d.inPeerCredit*p,'c-credit');
+  const ho=d.outHold?`<i class="hold" style="--u:${d.outHold*p}"></i>`:'';
+  const hi=d.inHold?`<i class="hold" style="--u:${d.inHold*p}"></i>`:'';
+  return `<div class="dbar"><div class="half out"><div class="bar">${out}</div>${ho}</div><i class="notch"></i><div class="half in"><div class="bar">${inn}</div>${hi}</div></div>`;
+}
+const dcap=a=>{const d=derive(a.d);return `<div class="dcap"><span>send up to ${nf(d.outCapacity)}</span><span>receive up to ${nf(d.inCapacity)}</span></div>`};
+
+// ---------- totals: three places, folded per token and overall ----------
+const sum=(xs,f)=>xs.reduce((s,x)=>s+f(x),0);
+function tokenTotals(sym){
+  const ext=sum(external.filter(x=>x.sym===sym),x=>x.amt);
+  const res=sum(reserve.filter(x=>x.sym===sym),x=>x.amt);
+  const pend=sum(reserve.filter(x=>x.sym===sym),x=>x.pending||0);
+  const recv=sum(accounts.filter(a=>a.sym===sym&&a.signed>0),a=>a.signed);
+  const owe=sum(accounts.filter(a=>a.sym===sym&&a.signed<0),a=>a.signed);
+  return {sym,ext,res,pend,recv,owe,net:ext+res+recv+owe};
+}
+const SYMS=[...new Set([...external,...reserve,...accounts].map(x=>x.sym))];
+const totals=SYMS.map(tokenTotals);
+const T={ext:0,res:0,pend:0,recv:0,owe:0,net:0};
+for(const t of totals) for(const k in T) T[k]+=t[k]*PRICE[t.sym];
+const sendCap=sum(accounts,a=>derive(a.d).outCapacity*PRICE[a.sym]);
+const recvCap=sum(accounts,a=>derive(a.d).inCapacity*PRICE[a.sym]);
+
+// ---------- components ----------
+function hero(size){
+  return `<div class="hero"><div class="lbl">Total balance</div>
+  <div class="amt num" style="font-size:${size}px">${usd(T.net).replace(/\.(\d\d)$/,'<span class="dec">.$1</span>')}</div>
+  <div class="rb">${bar([seg(T.ext,'c-slate'),seg(T.res,'c-coll'),seg(T.pend,'c-pend'),seg(T.recv,'c-credit')],'h8')}</div>
+  <div class="tiers"><span><i class="sw" style="background:var(--slate)"></i>On-chain <b class="num">${usd(T.ext)}</b></span><span><i class="sw" style="background:var(--coll)"></i>Reserve <b class="num">${usd(T.res)}</b> <span class="st-pending num">+${usd(T.pend)} pending</span></span><span><i class="sw" style="background:var(--credit)"></i>Accounts <b class="num">${usd(T.recv)}</b> <span class="num" style="color:var(--ink-3)">owed ${usd(-T.owe)}</span></span></div>
+  <div class="tiers" style="margin-top:8px"><span style="display:inline-flex;align-items:center;gap:6px;color:var(--accent-2)">${I('bolt',13)}<span style="color:var(--ink-2)">Instant: send up to <b class="num">${usd(sendCap)}</b>, receive up to <b class="num">${usd(recvCap)}</b></span></span></div></div>`;
+}
+function subRow(t,s,v,b){
+  return `<div class="sub"><div class="rt"><div class="tx"><div class="t" style="font-size:13.5px">${t}</div><div class="s">${s}</div></div><div class="r"><div class="v num" style="font-size:13.5px">${v}</div></div></div><div class="rb">${b}</div></div>`;
+}
+function tokenRow(t,open,first){
+  const tok=TOKEN[t.sym],p=PRICE[t.sym],d=DEC[t.sym];
+  const chains=[...new Set([...external,...reserve,...accounts].filter(x=>x.sym===t.sym).map(x=>x.j))].join(' · ');
+  const segs=[seg(t.ext*p,'c-slate'),seg(t.res*p,'c-coll'),seg(t.pend*p,'c-pend'),seg(t.recv*p,'c-credit')];
+  let html=`<div class="row ${first?'first':''}"><div class="rt">${tk(t.sym)}<div class="tx"><div class="t">${t.sym} <span class="chip">${chains}</span></div><div class="s">${tok.name}${t.owe<0?` · <span class="st-pending num">you owe ${nf(-t.owe,d)}</span>`:''}</div></div><div class="r"><div class="v num">${nf(t.net,d)}</div><div class="u num">${p===1?'':'≈ '+usd(t.net*p)}${t.pend?`<span class="st-pending"> +${nf(t.pend,d)} pending</span>`:''}</div></div><span class="chev">${I(open?'chev-d':'chev-r',16)}</span></div><div class="rb">${bar(segs)}</div>`;
+  if(open){
+    html+=external.filter(x=>x.sym===t.sym).map(x=>subRow('On-chain · '+x.j,'Your wallet · <span class="mono">'+me.id+'</span>',nf(x.amt,d),bar([seg(x.amt*p,'c-slate')],'h4'))).join('');
+    html+=reserve.filter(x=>x.sym===t.sym).map(x=>subRow('Reserve · '+x.j,'Depository escrow'+(x.pending?` · <span class="st-pending num">${nf(x.pending,d)} depositing</span>`:''),nf(x.amt,d),bar([seg(x.amt*p,'c-coll'),seg((x.pending||0)*p,'c-pend')],'h4'))).join('');
+    html+=accounts.filter(a=>a.sym===t.sym).map(a=>subRow(a.peer+(a.hub?' <span class="chip hub">hub</span>':'')+' · '+a.j,a.signed>0?'owes you':a.signed<0?'you owe':'even',sgn(a.signed)+nf(Math.abs(a.signed),d),dbar(a)+dcap(a))).join('');
+  }
+  return html+'</div>';
+}
+function accountRow(a,first){
+  const d=derive(a.d);
+  return `<div class="row ${first?'first':''}"><div class="rt"><span class="av">${a.peer[0]}</span><div class="tx"><div class="t">${a.peer} ${a.hub?'<span class="chip hub">hub</span>':''}</div><div class="s">${a.j} · ${a.sym}${d.outHold?` · <span class="st-inflight num">${nf(d.outHold)} in flight</span>`:''}</div></div><div class="r"><div class="v num">${sgn(a.signed)}${nf(Math.abs(a.signed),DEC[a.sym])}</div><div class="u">${a.signed>0?'owes you':a.signed<0?'you owe':'even'}</div></div></div><div class="rb">${dbar(a)}${dcap(a)}</div></div>`;
+}
+function evRow(e,sel,first){
+  const ic={in:'receive',out:'send',swap:'swap',res:'plus',acc:'shield'}[e.type];
+  return `<div class="row ${sel?'sel':''} ${first?'first':''}"><div class="rt"><span class="ev-ic ${e.type}">${I(ic,15)}</span><div class="tx"><div class="t">${e.title}</div><div class="s">${e.sub}</div></div><div class="r">${e.amt?`<div class="v num">${e.amt}</div>`:''}<div class="u"><span class="state st-${e.state}">${e.sl}</span></div></div></div></div>`;
+}
+function orderRow(o,first){
+  return `<div class="row ${first?'first':''}"><div class="rt"><span class="ev-ic swap">${I('swap',15)}</span><div class="tx"><div class="t num">${o.t}</div><div class="s">${o.s}</div></div><div class="r"><span class="state st-${o.state}">${o.sl}</span><div><button class="btn quiet" style="font-size:12px;margin-top:4px">Cancel</button></div></div></div></div>`;
+}
+const actions=(cols='')=>`<div class="actions" style="${cols}"><button class="btn primary">${I('send',18)}Pay</button><button class="btn">${I('receive',18)}Receive</button><button class="btn">${I('swap',18)}Swap</button></div>`;
+const syncPill=()=>`<span class="state st-settled">synced · frame ${nf(me.frame,0)}</span>`;
+
+// ---------- shells ----------
+const TABS=[['home','Home'],['send','Pay'],['swap','Swap'],['activity','Activity']];
+function phone(body,tab,overlay=''){
+  return `<div class="status"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></span></div><div class="pbody">${body}</div><div class="tabbar">${TABS.map(([i,l])=>`<span class="ti ${i===tab?'on':''}">${I(i,20)}<span>${l}</span></span>`).join('')}</div>${overlay}`;
+}
+function desktop(body,tab){
+  return `<nav class="rail"><span class="mark">△</span>${TABS.map(([i,l])=>`<span class="ri ${i===tab?'on':''}" title="${l}">${I(i,19)}</span>`).join('')}<span class="sp"></span><span class="ri" title="Settings">${I('settings',19)}</span></nav><div class="dmain">${body}</div>`;
+}
+
+// ---------- 01 home ----------
+function homeMobile(openFirst){
+  return `<div class="phead"><div style="display:flex;align-items:center;gap:10px"><span class="av" style="width:30px;height:30px;font-size:12px">A</span><div><div style="font-weight:600;font-size:14px;line-height:1.2">${me.name}</div>${syncPill()}</div></div><span class="ib">${I('settings',17)}</span></div>
+  ${hero(40)}
+  ${actions()}
+  <div class="sect"><h3>Balances</h3><span class="segc"><button class="on">By token</button><button>By place</button></span></div>
+  ${totals.map((t,i)=>tokenRow(t,openFirst&&i===0,i===0)).join('')}
+  <div class="sect"><h3>Recent</h3><span class="more">All activity</span></div>
+  ${acts.slice(0,3).map((e,i)=>evRow(e,false,i===0)).join('')}`;
+}
+function homeDesktop(){
+  return `<div class="dgrid"><div>
+    <div class="dhead"><h1>${me.name} <span class="mono" style="color:var(--ink-3)">${me.id}</span></h1>${syncPill()}</div>
+    ${hero(52)}
+    ${actions('grid-template-columns:repeat(3,140px);margin-top:22px')}
+    <div class="sect"><h3>Balances</h3><span class="segc"><button class="on">By token</button><button>By place</button></span></div>
+    ${totals.map((t,i)=>tokenRow(t,i===0,i===0)).join('')}
+  </div><div class="stack" style="gap:18px">
+    <div class="card"><h3>Accounts</h3>${accounts.map((a,i)=>accountRow(a,i===0)).join('')}<button class="btn ghost sm" style="margin-top:12px">${I('plus',15)}Open account</button></div>
+    <div class="card"><h3>Recent</h3>${acts.slice(0,4).map((e,i)=>evRow(e,false,i===0)).join('')}</div>
+  </div></div>`;
+}
+
+// ---------- 02 pay ----------
+function payBody(){
+  const hub=accounts[0],d=derive(hub.d);
+  return `<div class="stack" style="margin-top:6px">
+    <div class="field"><div class="fl"><span>To</span><span class="st-settled" style="display:inline-flex;gap:4px;align-items:center">${I('check',12)} reachable via Hub One</span></div><div class="fv"><div style="display:flex;align-items:center;gap:10px"><span class="av">B</span><div><div style="font-weight:600">${bob.name}</div><div class="mono" style="color:var(--ink-3)">${bob.id}</div></div></div><button class="btn quiet">Change</button></div></div>
+    <div class="chips"><button>grace</button><button>Meridian Desk</button><button>Hub One</button><button>${I('scan',13)} Scan</button><button>Paste id</button></div>
+    <div class="field"><div class="fl"><span>Amount</span><span class="num">Up to ${nf(d.outCapacity)} instantly</span></div><div class="fv"><span class="big num">${nf(PAY)}</span><span class="pill">${tk('USDC')}USDC ${I('chev-d',14)}</span></div>
+      <div style="margin-top:16px"><div class="dcap" style="margin:0 0 5px"><span>This payment</span><span>${nf(PAY)}</span></div>${bar([seg(PAY,'c-this')],'h4')}
+      <div class="dcap" style="margin:10px 0 5px"><span>Your account with Hub One</span><span>${sgn(hub.signed)}${nf(hub.signed)} · owes you</span></div>${dbar(hub)}${dcap(hub)}</div></div>
+    <div class="card" style="padding:6px 18px"><div class="kv"><span class="k">Route</span>${hops('You','Hub One','bob')}</div><div class="kv"><span class="k">Fee</span><span class="v st-settled">Free</span></div><div class="kv"><span class="k">Arrives</span><span class="v st-settled">Instantly</span></div><div class="kv"><span class="k">Delivery</span><span class="v">Instant · atomic <button class="btn quiet" style="margin-left:6px">Change</button></span></div></div>
+    <button class="btn quiet" style="align-self:flex-start">Add a note ${I('chev-d',13)}</button>
+    <button class="btn">Pay ${nf(PAY)} USDC</button>
+  </div>`;
+}
+const payMobile=()=>`<div class="phead"><span class="ib">${I('back',18)}</span><h1>Pay</h1><span class="ib">${I('scan',18)}</span></div>${payBody()}`;
+function payDesktop(){
+  const hub=accounts[0];
+  const after={...hub,signed:-90,d:{outOwnCredit:910,outCollateral:0,outPeerCredit:0,inOwnCredit:90,inCollateral:1000,inPeerCredit:2000,outHold:500,inHold:0}};
+  return `<div class="dgrid" style="grid-template-columns:minmax(0,520px) minmax(0,1fr)">
+    <div><div class="dhead"><h1>Pay</h1>${syncPill()}</div>${payBody()}</div>
+    <div class="stack" style="gap:18px;padding-top:62px">
+      <div class="card"><h3>Route</h3><div class="tl"><div class="ev done"><div class="t">You</div><div class="s">${me.name} · Ethereum</div></div><div class="ev done"><div class="t">Hub One <span class="chip hub">hub</span></div><div class="s">forwards atomically · fee 0.00</div></div><div class="ev done"><div class="t">${bob.name}</div><div class="s mono">${bob.id}</div></div></div></div>
+      <div class="card"><h3>Your account with Hub One</h3>
+        <div class="kv" style="padding-top:0"><span class="k">Before</span><span class="v num">+${nf(hub.signed)} <span style="color:var(--ink-2);font-weight:400">owes you</span></span></div>${dbar(hub)}${dcap(hub)}
+        <div class="kv" style="margin-top:14px"><span class="k">After</span><span class="v num">−${nf(90)} <span style="color:var(--ink-2);font-weight:400">you owe</span></span></div>${dbar(after)}${dcap(after)}
+        <p class="note">230.00 is covered by collateral, 90.00 goes on your 1,000.00 credit line. Nothing moves on-chain.</p></div>
+      <div class="card" style="display:flex;gap:12px;align-items:flex-start"><span style="color:var(--coll)">${I('shield',20)}</span><div style="font-size:13px;color:var(--ink-2);line-height:1.5"><b style="color:var(--ink);font-weight:600">Provable.</b> This payment is a frame signed by you and Hub One. If Hub One ever defaults, the 1,000.00 USDC collateral is enforceable on Ethereum.</div></div>
+    </div></div>`;
+}
+function receipt(){
+  return `<div class="sheet-scrim"></div><div class="sheet"><div class="grab"></div>
+    <div class="rcpt"><div class="ok">${I('check',26)}</div><div class="k">Paid</div><div class="a num">${nf(PAY)} <small>USDC</small></div><div class="to">to ${bob.name} · via Hub One</div></div>
+    <div style="margin-top:16px"><div class="kv"><span class="k">Fee</span><span class="v st-settled">Free</span></div><div class="kv"><span class="k">Arrived</span><span class="v">Instantly · 0.4 s</span></div><div class="kv"><span class="k">Frame</span><span class="v num">#${nf(me.frame+1,0)}</span></div><div class="kv"><span class="k">Proof</span><span class="v mono">0x8c1f…a2d2</span></div></div>
+    <div class="state st-settled" style="margin:14px 0 18px;justify-content:center;display:flex">Verified by your runtime</div>
+    <button class="btn ghost">Done</button></div>`;
+}
+
+// ---------- 03 swap ----------
+function swapTicket(){
+  const hub=accounts[0],d=derive(hub.d);
+  return `<div class="stack">
+    <div class="field"><div class="fl"><span>You pay</span><span class="num">Up to ${nf(d.outCapacity)} with Hub One</span></div><div class="fv"><span class="big num">500.00</span><span class="pill">${tk('USDC')}USDC <span class="chip">Ethereum</span></span></div></div>
+    <div class="flip"><span>${I('swap',16)}</span></div>
+    <div class="field"><div class="fl"><span>You receive</span><span>into your Tron account</span></div><div class="fv"><span class="big num" style="color:var(--accent-2)">499.20</span><span class="pill">${tk('USDT')}USDT <span class="chip">Tron</span></span></div></div>
+    <div class="card" style="padding:6px 18px"><div class="kv"><span class="k">Rate</span><span class="v num">1 USDC ≈ 0.9984 USDT</span></div><div class="kv"><span class="k">Hub fee</span><span class="v num">0.16% · 0.80 USDC</span></div><div class="kv"><span class="k">Route</span>${hops('Ethereum','Hub One','Tron')}</div><div class="kv"><span class="k">Settlement</span><span class="v" style="display:inline-flex;gap:6px;align-items:center">${I('link',14)}Atomic · both legs or neither</span></div></div>
+    <div><div class="check"><span class="ck">${I('check',11)}</span><span>Tron account with Hub One is open</span></div><div class="check"><span class="ck">${I('check',11)}</span><span>Inbound USDT credit of 1,000.00 covers 499.20</span></div></div>
+    <button class="btn quiet" style="align-self:flex-start">Limit price · good til canceled ${I('chev-d',13)}</button>
+    <button class="btn">Review swap</button>
+  </div>`;
+}
+const swapMobile=()=>`<div class="phead"><span class="ib">${I('back',18)}</span><h1>Swap</h1><span class="segc"><button class="on">Across</button><button>Same</button></span></div><div style="height:6px"></div>${swapTicket()}<div class="sect"><h3>Open orders</h3><span class="more">1</span></div>${orderRow(orders[1],true)}`;
+function swapProgress(){
+  return `<div class="sheet-scrim"></div><div class="sheet"><div class="grab"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><h2 style="margin:0;font-size:17px;font-weight:600">Swap in progress</h2><span class="state st-inflight">leg 2 of 2</span></div>
+    <div class="num" style="font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:16px">500.00 USDC <span style="color:var(--ink-3);font-weight:400">for</span> 499.20 USDT</div>
+    <div class="tl"><div class="ev done"><div class="t">Ethereum leg</div><div class="s">500.00 USDC locked with Hub One</div><div class="tm">12:41:03</div></div><div class="ev now"><div class="t">Tron leg</div><div class="s">Waiting for Hub One to fill 499.20 USDT</div><div class="tm">expires 12:56:03</div></div><div class="ev"><div class="t">Clear</div><div class="s">Both legs settle together, or both revert</div></div></div>
+    <p class="note" style="margin:14px 0 14px">If Hub One does not fill in time, your 500.00 USDC unlocks by itself. Nothing to do.</p>
+    <div class="kv" style="padding-top:0"><span class="k">Proof</span><span class="v mono">hash ladder · 0x3be7…91f0</span></div>
+    <button class="btn ghost" style="margin-top:14px">Hide</button></div>`;
+}
+function swapDesktop(){
+  return `<div class="dgrid" style="grid-template-columns:minmax(0,520px) minmax(0,1fr)">
+    <div><div class="dhead"><h1>Swap</h1><span class="segc"><button class="on">Across networks</button><button>Same network</button></span></div>${swapTicket()}</div>
+    <div class="stack" style="gap:18px;padding-top:62px">
+      <div class="card"><h3>Legs</h3><div class="tl"><div class="ev"><div class="t">1 · Ethereum</div><div class="s">You lock 500.00 USDC with Hub One</div></div><div class="ev"><div class="t">2 · Tron</div><div class="s">Hub One pays 499.20 USDT into your Tron account</div></div><div class="ev"><div class="t">Clear</div><div class="s">One secret releases both legs. If it never appears, both unlock.</div></div></div></div>
+      <div class="card"><h3>Your Tron account with Hub One</h3>${dbar(accounts[2])}${dcap(accounts[2])}<p class="note">Receive-only today. You extended 1,000.00 USDT of credit to Hub One, so it can pay you without you pre-funding anything.</p></div>
+      <div class="card"><h3>Open orders</h3>${orders.map((o,i)=>orderRow(o,i===0)).join('')}</div>
+    </div></div>`;
+}
+
+// ---------- 04 activity ----------
+const FILTERS=['All','Payments','Swaps','Reserve','Accounts'];
+const filterChips=()=>`<div class="chips">${FILTERS.map((f,i)=>`<button class="${i===0?'on':''}">${f}</button>`).join('')}</div>`;
+function activityList(sel){
+  let html='',last='';
+  acts.forEach((e,i)=>{const first=e.day!==last;if(first){html+=`<div class="day">${e.day}</div>`;last=e.day}html+=evRow(e,i===sel,first)});
+  return html;
+}
+function actDetail(){
+  return `<div class="rcpt" style="text-align:left;padding:0"><div class="k">Payment · settled</div><div class="a num" style="font-size:30px;margin-top:10px">−250.00 <small style="font-size:14px">USDC</small></div><div class="to">to grace · <span class="mono">0x9f3c…1118</span></div></div>
+    <div style="margin-top:14px"><div class="kv"><span class="k">Route</span>${hops('You','Hub One','grace')}</div><div class="kv"><span class="k">Fee</span><span class="v st-settled">Free</span></div><div class="kv"><span class="k">Delivery</span><span class="v">Instant · atomic</span></div><div class="kv"><span class="k">Frame</span><span class="v num">#12,478</span></div><div class="kv"><span class="k">Proof</span><span class="v mono">0x8c1f…a2d2</span></div></div>
+    <div class="tl" style="margin-top:16px"><div class="ev done"><div class="t">Sent</div><div class="tm">11:02:14.120</div></div><div class="ev done"><div class="t">Hub One forwarded</div><div class="tm">11:02:14.310</div></div><div class="ev done"><div class="t">grace accepted</div><div class="tm">11:02:14.540</div></div><div class="ev done"><div class="t">Settled</div><div class="s">signed by both sides · verified by your runtime</div></div></div>`;
+}
+const actMobile=(sel)=>`<div class="phead"><h1>Activity</h1><span class="ib">${I('filter',17)}</span></div>${filterChips()}${activityList(sel)}`;
+const actSheet=()=>`<div class="sheet-scrim"></div><div class="sheet">${'<div class="grab"></div>'}${actDetail()}<button class="btn ghost" style="margin-top:18px">Done</button></div>`;
+function actDesktop(){
+  return `<div class="dgrid" style="grid-template-columns:minmax(0,1fr) 420px">
+    <div><div class="dhead"><h1>Activity</h1>${filterChips()}</div>${activityList(1)}</div>
+    <div class="card" style="margin-top:62px">${actDetail()}</div></div>`;
+}
+
+// ---------- mount ----------
+const mount=(id,html)=>{document.getElementById(id).innerHTML=html};
+mount('home-desktop',desktop(homeDesktop(),'home'));
+mount('home-phone',phone(homeMobile(false),'home'));
+mount('home-phone-2',phone(homeMobile(true),'home'));
+mount('pay-desktop',desktop(payDesktop(),'send'));
+mount('pay-phone',phone(payMobile(),'send'));
+mount('pay-phone-2',phone(payMobile(),'send',receipt()));
+mount('swap-desktop',desktop(swapDesktop(),'swap'));
+mount('swap-phone',phone(swapMobile(),'swap'));
+mount('swap-phone-2',phone(swapMobile(),'swap',swapProgress()));
+mount('act-desktop',desktop(actDesktop(),'activity'));
+mount('act-phone',phone(actMobile(-1),'activity'));
+mount('act-phone-2',phone(actMobile(1),'activity',actSheet()));
+
+// ---------- global scale: dollars per pixel, log slider ----------
+const range=document.getElementById('ppu'),out=document.getElementById('ppuOut'),presets=document.getElementById('presets');
+function setUsdPerPx(u,fromSlider){
+  document.documentElement.style.setProperty('--ppu',String(1/u));
+  out.textContent=`1 px = $${u>=10?Math.round(u):Math.round(u*10)/10}`;
+  presets.querySelectorAll('button').forEach(b=>b.classList.toggle('on',Number(b.dataset.usd)===u));
+  if(!fromSlider) range.value=String(Math.round(Math.log10(u)/2*100));
+}
+range.addEventListener('input',()=>{const u=Math.pow(10,Number(range.value)/100*2);setUsdPerPx(u>=10?Math.round(u):Math.round(u*10)/10,true)});
+presets.addEventListener('click',e=>{const b=e.target.closest('button');if(b)setUsdPerPx(Number(b.dataset.usd))});
+setUsdPerPx(10);
+
+// ---------- fit the 1280 desktop frames into the page ----------
+function fit(){const w=document.querySelector('.wrap').clientWidth;const z=Math.min(1,w/1280);document.querySelectorAll('.desk-wrap').forEach(el=>{el.style.zoom=String(z)})}
+window.addEventListener('resize',fit);fit();
+</script>
+</body>
+</html>

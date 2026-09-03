@@ -1,7 +1,6 @@
 :root {
-	--font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
-	--font-display: ui-serif, 'New York', Georgia, 'Times New Roman', serif;
-	--font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	--font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
 	--radius-s: 10px;
 	--radius-m: 14px;
@@ -12,57 +11,70 @@
 	--dur-slow: 320ms;
 	--ease: cubic-bezier(0.32, 0.72, 0, 1);
 
-	--rail-w: 76px;
-	--tabbar-h: 72px;
+	--rail-w: 72px;
+	--tabbar-h: 82px;
+
+	/* Visceral value: pixels per dollar. Every bar in the app is drawn from this one number. */
+	--ppu: 0.1;
 }
 
+:root,
 :root[data-theme='dark'] {
 	color-scheme: dark;
-	--bg: #09090b;
-	--bg-elevated: #101013;
-	--glow: radial-gradient(56% 40% at 50% -6%, rgba(201, 169, 106, 0.07), transparent 70%),
-		radial-gradient(70% 52% at 88% 112%, rgba(122, 132, 160, 0.05), transparent 60%);
-	--ink: #f2f1ed;
-	--ink-2: rgba(242, 241, 237, 0.52);
-	--ink-3: rgba(242, 241, 237, 0.32);
-	--hairline: rgba(242, 241, 237, 0.08);
-	--hairline-2: rgba(242, 241, 237, 0.16);
-	--glass: rgba(255, 255, 255, 0.04);
-	--glass-2: rgba(255, 255, 255, 0.07);
-	--glass-border: rgba(255, 255, 255, 0.09);
-	--champagne: #c9a96a;
-	--champagne-ink: #1a1508;
-	--champagne-dim: rgba(201, 169, 106, 0.16);
-	--danger: #c97a6d;
-	--danger-dim: rgba(201, 122, 109, 0.14);
-	--btn-primary-bg: #f2f1ed;
-	--btn-primary-ink: #0b0b0d;
+	--bg: #0e1014;
+	--surface: #15181e;
+	--surface-2: #1c2028;
+	--surface-3: #242935;
+	--line: rgba(236, 237, 239, 0.08);
+	--line-2: rgba(236, 237, 239, 0.15);
+	--ink: #ecedef;
+	--ink-2: #8d929b;
+	--ink-3: #5b6069;
+	--display: #ffffff;
+	--accent: #6e7cff;
+	--accent-2: #9aa4ff;
+	--accent-dim: rgba(110, 124, 255, 0.16);
+	--credit: #6e7cff;
+	--coll: #34d399;
+	--coll-dim: rgba(52, 211, 153, 0.16);
+	--slate: #6e788a;
+	--debt: #e8b04b;
+	--hold: #b58cff;
+	--hold-dim: rgba(181, 140, 255, 0.28);
+	--dispute: #f26d6d;
+	--dispute-dim: rgba(242, 109, 109, 0.14);
+	--btn-ink: #ffffff;
+	--scrim: rgba(6, 7, 9, 0.66);
 	--shadow-sheet: 0 -18px 60px rgba(0, 0, 0, 0.55);
-	--shadow-card: none;
-	--scrim: rgba(0, 0, 0, 0.6);
+	--fade: var(--bg);
 }
 
 :root[data-theme='light'] {
 	color-scheme: light;
-	--bg: #f4f2ed;
-	--bg-elevated: #ffffff;
-	--glow: radial-gradient(56% 40% at 50% -6%, rgba(201, 169, 106, 0.1), transparent 70%);
-	--ink: #17150f;
-	--ink-2: rgba(23, 21, 15, 0.52);
-	--ink-3: rgba(23, 21, 15, 0.34);
-	--hairline: rgba(23, 21, 15, 0.09);
-	--hairline-2: rgba(23, 21, 15, 0.18);
-	--glass: rgba(255, 255, 255, 0.62);
-	--glass-2: rgba(255, 255, 255, 0.85);
-	--glass-border: rgba(23, 21, 15, 0.08);
-	--champagne: #a5813d;
-	--champagne-ink: #ffffff;
-	--champagne-dim: rgba(165, 129, 61, 0.14);
-	--danger: #b25a4c;
-	--danger-dim: rgba(178, 90, 76, 0.12);
-	--btn-primary-bg: #17150f;
-	--btn-primary-ink: #f4f2ed;
-	--shadow-sheet: 0 -18px 60px rgba(23, 21, 15, 0.18);
-	--shadow-card: 0 1px 3px rgba(23, 21, 15, 0.04);
-	--scrim: rgba(23, 21, 15, 0.35);
+	--bg: #f4f5f8;
+	--surface: #ffffff;
+	--surface-2: #eef0f4;
+	--surface-3: #e4e7ee;
+	--line: rgba(20, 23, 30, 0.08);
+	--line-2: rgba(20, 23, 30, 0.16);
+	--ink: #14171e;
+	--ink-2: #5f6672;
+	--ink-3: #9aa0ab;
+	--display: #0b0d12;
+	--accent: #5b69f0;
+	--accent-2: #4653d6;
+	--accent-dim: rgba(91, 105, 240, 0.14);
+	--credit: #5b69f0;
+	--coll: #1fa97a;
+	--coll-dim: rgba(31, 169, 122, 0.14);
+	--slate: #8b94a5;
+	--debt: #c98a16;
+	--hold: #8e5cf5;
+	--hold-dim: rgba(142, 92, 245, 0.26);
+	--dispute: #d9484f;
+	--dispute-dim: rgba(217, 72, 79, 0.12);
+	--btn-ink: #ffffff;
+	--scrim: rgba(20, 23, 30, 0.4);
+	--shadow-sheet: 0 -18px 60px rgba(20, 23, 30, 0.18);
+	--fade: var(--bg);
 }

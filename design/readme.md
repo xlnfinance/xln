@@ -144,12 +144,34 @@ light alternative. They share structure → ship as one themeable UI.
 
 ---
 
+## wallet sketch (2026-09-03)
+
+`sketches/wallet-premium-dark.html` — the consumer wallet on the premium-dark direction,
+four screens (Home, Pay, Swap incl. cross-network, Activity), each as a 1280 desktop
+frame and 390 phone frames rendered from one set of components and one demo dataset.
+
+- **Visceral value.** Every bar shares one absolute scale, `1 px = $N`, with a slider at the
+  top of the page. A long line runs off the screen until you zoom out. In the product this is
+  a setting (the old frontend already has `accountBarUsdPerPx`).
+- **Three places money lives.** On-chain wallet (slate), reserve in the Depository (mint,
+  striped while a deposit is pending), bilateral accounts (indigo). Folded by default into one
+  total per token and one grand total; open a token to see the places and the accounts.
+- **deriveDelta bar kept exactly.** Left half = what you can send, right half = what you can
+  receive, notch = Δ. Segments are the `out*/in*` fields (own credit, collateral, peer debt).
+  Striped violet over the inner end is a hold (HTLC in flight). No alternate balance math.
+- **Color = money state**, never decoration: slate on-chain, mint collateral/settled, indigo
+  credit/instant, amber owed/pending, violet in flight, red dispute.
+- Type: Instrument Sans + JetBrains Mono for ids and proofs. Tabular numerals everywhere.
+
+---
+
 ## files
 
 ```
 design/
   readme.md
   sketches/
+    wallet-premium-dark.html       ← wallet, four screens (2026-09-03)
     screens-premium-dark.html      ← recommended hero
     screens-coinbase.html
     screens-stripe-light.html

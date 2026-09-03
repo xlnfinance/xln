@@ -20,9 +20,19 @@ export type Toast = {
 	kind: 'info' | 'danger';
 };
 
+/** The three places money lives. Each can be hidden from Home. */
+export type PlaceKey = 'onchain' | 'reserve' | 'accounts';
+export type PlaceVisibility = Record<PlaceKey, boolean>;
+
 const VAULTS_KEY = 'xln-ui-vaults';
 const ACTIVE_VAULT_KEY = 'xln-ui-active-vault';
 const THEME_KEY = 'xln-ui-theme';
+const USD_PER_PX_KEY = 'xln-ui-usd-per-px';
+const PLACES_KEY = 'xln-ui-places';
+
+export const USD_PER_PX_MIN = 1;
+export const USD_PER_PX_MAX = 1000;
+const USD_PER_PX_DEFAULT = 10;
 
 function readStoredVaults(): VaultMeta[] {
 	try {
@@ -49,11 +59,50 @@ function readInitialTheme(): ThemeName {
 	return document.documentElement.dataset['theme'] === 'light' ? 'light' : 'dark';
 }
 
+export function clampUsdPerPx(value: number): number {
+	if (!Number.isFinite(value)) return USD_PER_PX_DEFAULT;
+	return Math.min(USD_PER_PX_MAX, Math.max(USD_PER_PX_MIN, value));
+}
+
+function applyUsdPerPx(usdPerPx: number): void {
+	document.documentElement.style.setProperty('--ppu', String(1 / usdPerPx));
+}
+
+function readInitialUsdPerPx(): number {
+	const stored = Number(localStorage.getItem(USD_PER_PX_KEY));
+	const value = stored > 0 ? clampUsdPerPx(stored) : USD_PER_PX_DEFAULT;
+	applyUsdPerPx(value);
+	return value;
+}
+
+function readInitialPlaces(): PlaceVisibility {
+	const defaults: PlaceVisibility = { onchain: true, reserve: true, accounts: true };
+	try {
+		const raw = localStorage.getItem(PLACES_KEY);
+		if (!raw) return defaults;
+		const parsed = JSON.parse(raw) as Partial<Record<PlaceKey, unknown>>;
+		return {
+			onchain: parsed.onchain !== false,
+			reserve: parsed.reserve !== false,
+			accounts: parsed.accounts !== false,
+		};
+	} catch {
+		return defaults;
+	}
+}
+
 let toastSeq = 0;
 
 type AppState = {
 	theme: ThemeName;
 	setTheme: (theme: ThemeName) => void;
+
+	/** Dollars per pixel for every bar. Persisted; drives the --ppu CSS variable. */
+	usdPerPx: number;
+	setUsdPerPx: (usdPerPx: number) => void;
+
+	places: PlaceVisibility;
+	setPlaceVisible: (place: PlaceKey, visible: boolean) => void;
 
 	vaults: VaultMeta[];
 	activeVaultId: string | null;
@@ -69,7 +118,7 @@ type AppState = {
 	adapterStatus: RuntimeAdapterStatus;
 	height: number;
 	commandReady: boolean;
-	/** True while an embedded runtime is booting/seeding — keep the gate up. */
+	/** True while an embedded runtime is booting or seeding: keep the gate up. */
 	booting: boolean;
 	setBooting: (booting: boolean) => void;
 	setAdapterState: (state: { status?: RuntimeAdapterStatus; height?: number; commandReady?: boolean }) => void;
@@ -91,6 +140,21 @@ export const useApp = create<AppState>((set, get) => ({
 		localStorage.setItem(THEME_KEY, theme);
 		document.documentElement.dataset['theme'] = theme;
 		set({ theme });
+	},
+
+	usdPerPx: readInitialUsdPerPx(),
+	setUsdPerPx: value => {
+		const usdPerPx = clampUsdPerPx(value);
+		localStorage.setItem(USD_PER_PX_KEY, String(usdPerPx));
+		applyUsdPerPx(usdPerPx);
+		set({ usdPerPx });
+	},
+
+	places: readInitialPlaces(),
+	setPlaceVisible: (place, visible) => {
+		const places = { ...get().places, [place]: visible };
+		localStorage.setItem(PLACES_KEY, JSON.stringify(places));
+		set({ places });
 	},
 
 	vaults: readStoredVaults(),

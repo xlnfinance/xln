@@ -43,6 +43,8 @@ const pageWire = () => ({
     resolves: [
       {
         fillRatio: 32768,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
         cancelRemainder: false,
         height: 2,
         executionGiveAmount: 2n * WEI / 100n,
@@ -53,6 +55,8 @@ const pageWire = () => ({
       },
       {
         fillRatio: 0,
+        fillNumerator: 0n,
+        fillDenominator: 1n,
         cancelRemainder: true,
         height: 3,
         executionGiveAmount: null,

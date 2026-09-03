@@ -189,15 +189,13 @@ export const deriveBrainVaultNative = async (
             const record = message && typeof message === 'object' ? message as Record<string, unknown> : null;
             const workerSpecId = record?.['specId'];
             if (workerSpecId !== BRAINVAULT_V1_SPEC_ID) {
-              fail(new Error(
-                `BRAINVAULT_WORKER_SPEC_MISMATCH:${String(workerSpecId)}:${BRAINVAULT_V1_SPEC_ID}`,
-              ));
+              fail(new Error('BRAINVAULT_WORKER_SPEC_MISMATCH'));
               return;
             }
             const shardIndex = record?.['shardIndex'];
             const result = record?.['result'];
             if (!Number.isSafeInteger(shardIndex) || Number(shardIndex) < 0 || Number(shardIndex) >= shardCount) {
-              fail(new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${String(shardIndex)}`));
+              fail(new Error('BRAINVAULT_WORKER_SHARD_INDEX_INVALID'));
               return;
             }
             const exactIndex = Number(shardIndex);
@@ -269,7 +267,7 @@ export const deriveBrainVaultNative = async (
       const entropy24 = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
       try {
         const mnemonic24 = await entropyToMnemonic(entropy24);
-        const ethereumAddress = await deriveEthereumAddress(mnemonic24);
+        const ethereumAddress = await deriveEthereumAddress(mnemonic24, '');
         return {
           specId: BRAINVAULT_V1_SPEC_ID,
           backend: 'native-node',

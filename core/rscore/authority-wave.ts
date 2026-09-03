@@ -1044,7 +1044,7 @@ const authorityBoardWire = (
   ];
 };
 
-export const authorityAccountInputRow = (
+const authorityAccountInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
   payload: Extract<RecordedPayload, { kind: 'ack' | 'ack_frame' }>,

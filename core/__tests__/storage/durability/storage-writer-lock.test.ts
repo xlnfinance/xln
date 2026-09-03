@@ -7,6 +7,7 @@ import {
   STORAGE_WRITER_LOCK_TTL_MS,
   releaseRetainedStorageWriterLock,
   withRetainedStorageWriterLock,
+  withStorageConsistentRead,
   withStorageWriterLock,
   type StorageWriterLockBoundary,
 } from '../../../storage/runtime-dbs';
@@ -41,6 +42,39 @@ test('live Runtime retains one durable namespace lease across frame writes', asy
     await releaseRetainedStorageWriterLock(env);
     expect(existsSync(lockPath)).toBe(false);
   } finally {
+    await releaseRetainedStorageWriterLock(env);
+    rmSync(lockPath, { force: true });
+  }
+});
+
+test('same-process historical read queues behind an active retained writer', async () => {
+  const namespace = `storage-reader-retained-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, state: { height: 1 } } as RuntimeReplica;
+  const lockPath = resolveStorageWriterLockPath(env);
+  let releaseWriter!: () => void;
+  let writerStarted!: () => void;
+  const writerGate = new Promise<void>(resolve => { releaseWriter = resolve; });
+  const started = new Promise<void>(resolve => { writerStarted = resolve; });
+  const order: string[] = [];
+  try {
+    await withRetainedStorageWriterLock(env, async () => {});
+    const writer = withRetainedStorageWriterLock(env, async () => {
+      order.push('writer-start');
+      writerStarted();
+      await writerGate;
+      order.push('writer-end');
+    });
+    await started;
+    const reader = withStorageConsistentRead(env, async () => {
+      order.push('reader');
+    });
+    await Bun.sleep(10);
+    expect(order).toEqual(['writer-start']);
+    releaseWriter();
+    await Promise.all([writer, reader]);
+    expect(order).toEqual(['writer-start', 'writer-end', 'reader']);
+  } finally {
+    releaseWriter?.();
     await releaseRetainedStorageWriterLock(env);
     rmSync(lockPath, { force: true });
   }

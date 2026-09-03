@@ -35,6 +35,8 @@
 		"baseUrl": ".",
 		"paths": {
 			"@xln/core/*": ["../core/*"],
+			"@xln/frontend/*": ["../frontend/src/*"],
+			"$lib/*": ["../frontend/src/lib/*"],
 			"@/*": ["src/*"]
 		}
 	},

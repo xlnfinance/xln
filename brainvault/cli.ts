@@ -3,22 +3,23 @@
  * BrainVault CLI - Production wallet derivation
  *
  * Usage:
- *   bun run bv                                  # Interactive
+ *   bun ./brainvault                            # Interactive from this package
  *   bun test brainvault/core.test.ts            # Run deterministic tests
- *   bun run bv --bench                          # Benchmark performance
- *   bun run bv --smoke                          # Fast 2-shard backend parity check
- *   bun run bv --lib=wasm                       # Force hash-wasm (slower, parity check)
- *   bun run bv --lib=native                     # Force portable @node-rs/argon2
- *   bun run bv --lib=neon                       # Force bundled Apple Silicon C/NEON
- *   bun run bv --engine=metal                   # Force fastest Apple Metal hybrid
- *   bun run bv --ask                            # Ask for factor, multiplier, and workers
- *   bun run bv --allow-short-password           # Legacy recovery only: allow fewer than 8 chars
- *   bun run bv --repeat                         # Interactive: require double entry for name/pass
- *   bun run bv --show-password                  # Echo password input (unsafe on shared screens)
- *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256 MiB * multiplier per shard
- *   bun run bv --address-count=5                # Number of standard + ledger-live addresses
- *   bun run bv --show-private-key               # Also reveal raw key for Address 1 (highest risk)
- *   bun run bv --help                           # Show usage/help
+ *   bun ./brainvault --bench                    # Benchmark performance
+ *   bun ./brainvault --smoke                    # Fast 2-shard backend parity check
+ *   bun ./brainvault --lib=wasm                 # Force hash-wasm (slower, parity check)
+ *   bun ./brainvault --lib=native               # Force portable @node-rs/argon2
+ *   bun ./brainvault --lib=neon                 # Force bundled Apple Silicon C/NEON
+ *   bun ./brainvault --engine=metal             # Force fastest Apple Metal hybrid
+ *   bun ./brainvault --ask                      # Ask for factor, multiplier, and workers
+ *   bun ./brainvault --allow-short-password     # Legacy recovery only: allow fewer than 8 chars
+ *   bun ./brainvault --repeat                   # Interactive: require double entry for name/pass
+ *   bun ./brainvault --show-password            # Echo password input (unsafe on shared screens)
+ *   bun ./brainvault --promo                    # Optional recording intro/outro cards
+ *   bun ./brainvault --shard-multiplier=4       # Custom KDF mode: 256 MiB * multiplier per shard
+ *   bun ./brainvault --address-count=5          # Number of standard + ledger-live addresses
+ *   bun ./brainvault --show-private-key         # Also reveal raw key for Address 1 (highest risk)
+ *   bun ./brainvault --help                     # Show usage/help
  */
 
 import { stdin, stdout } from 'process';
@@ -57,11 +58,22 @@ const args = process.argv.slice(2);
 const BOOLEAN_FLAGS = new Set([
   '--help', '-h', '--bench', '--smoke', '--password', '--ask', '--repeat',
   '--show-private-key', '--reveal', '--allow-short-password',
-  '--suggest-password', '--unicode-recovery', '--show-password',
+  '--suggest-password', '--unicode-recovery', '--show-password', '--promo',
 ]);
 const VALUE_FLAGS = new Set([
   '--level', '--shards', '--factor', '--multiplier', '--shard-multiplier',
   '--workers', '--w', '--engine', '--address-count',
+]);
+const VALUE_FLAG_GROUPS = new Map([
+  ['--level', 'level'],
+  ['--shards', 'shards'],
+  ['--factor', 'factor'],
+  ['--multiplier', 'multiplier'],
+  ['--shard-multiplier', 'multiplier'],
+  ['--workers', 'workers'],
+  ['--w', 'workers'],
+  ['--engine', 'engine'],
+  ['--address-count', 'address-count'],
 ]);
 const LEGACY_ENGINE_FLAGS = new Set(['--lib=wasm', '--lib=native', '--lib=neon']);
 
@@ -70,20 +82,39 @@ function rejectUnsafeArgv(): never {
   process.exit(1);
 }
 
+function rejectDuplicateArgv(): never {
+  console.error('Error: duplicate CLI options are refused; provide each setting once.');
+  process.exit(1);
+}
+
 function validateArgv(argv: readonly string[]): void {
+  const seenValueGroups = new Set<string>();
+  const acceptValueFlag = (flag: string): void => {
+    const group = VALUE_FLAG_GROUPS.get(flag);
+    if (group === undefined) rejectUnsafeArgv();
+    if (seenValueGroups.has(group)) rejectDuplicateArgv();
+    seenValueGroups.add(group);
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]!;
     if (/^--(?:unsafe-password|passphrase|pass|secret)(?:=|$)/.test(argument)
       || argument.startsWith('--password=')) rejectUnsafeArgv();
-    if (BOOLEAN_FLAGS.has(argument) || LEGACY_ENGINE_FLAGS.has(argument)) continue;
+    if (BOOLEAN_FLAGS.has(argument)) continue;
+    if (LEGACY_ENGINE_FLAGS.has(argument)) {
+      acceptValueFlag('--engine');
+      continue;
+    }
     const equals = argument.indexOf('=');
     if (equals !== -1) {
-      if (!VALUE_FLAGS.has(argument.slice(0, equals)) || equals === argument.length - 1) rejectUnsafeArgv();
+      const flag = argument.slice(0, equals);
+      if (!VALUE_FLAGS.has(flag) || equals === argument.length - 1) rejectUnsafeArgv();
+      acceptValueFlag(flag);
       continue;
     }
     if (VALUE_FLAGS.has(argument)) {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) rejectUnsafeArgv();
+      acceptValueFlag(argument);
       index += 1;
       continue;
     }
@@ -151,14 +182,42 @@ function printStep(step: number, title: string): void {
   console.log(`\n${cyan}◆${reset} ${title.toLowerCase()} ${dim}[${step}/3]${reset}`);
 }
 
+async function showPromoScreen(outro = false): Promise<void> {
+  if (!stdout.isTTY) throw new Error('BRAINVAULT_PROMO_TERMINAL_REQUIRED');
+  const color = process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
+  const cyan = color ? '\x1b[38;5;45m' : '';
+  const warning = color ? '\x1b[38;5;214m' : '';
+  const bold = color ? '\x1b[1m' : '';
+  const dim = color ? '\x1b[2m' : '';
+  const reset = color ? '\x1b[0m' : '';
+  const indent = '      ';
+  const innerWidth = 52;
+  const border = (left: string, right: string): string =>
+    `${indent}${cyan}${left}${'─'.repeat(innerWidth)}${right}${reset}`;
+  const row = (text: string): string =>
+    `${indent}${cyan}│${reset} ${fitTerminal(text, innerWidth - 2).padEnd(innerWidth - 2)} ${cyan}│${reset}`;
+  stdout.write('\x1b[2J\x1b[H\n\n');
+  console.log(border('╭', '╮'));
+  console.log(row(outro ? 'no account · no seed file · no cloud' : 'brainvault v1'));
+  console.log(row(outro ? 'open source · auditable · deterministic' : 'memory-hard deterministic wallet'));
+  if (!outro) console.log(row('same exact inputs → same wallet'));
+  console.log(border('╰', '╯'));
+  if (!outro) console.log(`\n${dim}                  remember. derive. recover.${reset}`);
+  console.log(`\n${bold}${cyan}                       brainvault.sh${reset}`);
+  console.log(`\n${warning}              demo wallet · never fund addresses shown${reset}`);
+  await new Promise(resolve => setTimeout(resolve, outro ? 4_000 : 3_000));
+  stdout.write('\x1b[2J\x1b[H');
+}
+
 function startDerivationProgress(shards: number, workers: number): Readonly<{
   update: (completed: number) => void;
   complete: (elapsedMs: number) => void;
   stop: () => void;
 }> {
   if (!stdout.isTTY) return { update: () => {}, complete: () => {}, stop: () => {} };
-  const compact = terminalColumns() < 72;
-  const width = compact ? Math.max(6, terminalColumns() - 24) : 40;
+  const columns = terminalColumns();
+  const compact = columns < 72;
+  const width = 40;
   const color = process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
   const cyan = color ? '\x1b[38;5;45m' : '';
   const green = color ? '\x1b[38;5;82m' : '';
@@ -171,15 +230,23 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
   const render = () => {
     const elapsedMs = Math.max(1, Date.now() - startedAt);
     const ratio = Math.min(1, completed / shards);
-    const filled = Math.floor(ratio * width);
-    const bar = `${cyan}${'━'.repeat(filled)}${reset}${filled < width ? `${cyan}╸${reset}${dim}${'·'.repeat(width - filled - 1)}${reset}` : ''}`;
     const percent = Math.floor(ratio * 100);
     const rate = completed / (elapsedMs / 1000);
     const eta = completed > 0 && completed < shards ? (shards - completed) / rate * 1000 : 0;
     const etaText = completed >= shards ? 'finalizing' : completed > 0 ? `ETA ${formatDuration(eta)}` : 'ETA --';
     if (compact) {
-      stdout.write(`\r\x1b[2K${cyan}◇${reset} ${String(percent).padStart(3)}% [${bar}] ${completed}/${shards}`);
+      const count = `${completed}/${shards}`;
+      const barWidth = Math.max(0, columns - count.length - 10);
+      if (barWidth === 0) {
+        stdout.write(`\r\x1b[2K${fitTerminal(`${String(percent).padStart(3)}% ${count}`, columns)}`);
+      } else {
+        const filled = Math.floor(ratio * barWidth);
+        const bar = `${cyan}${'━'.repeat(filled)}${reset}${filled < barWidth ? `${cyan}╸${reset}${dim}${'·'.repeat(barWidth - filled - 1)}${reset}` : ''}`;
+        stdout.write(`\r\x1b[2K${cyan}◇${reset} ${String(percent).padStart(3)}% [${bar}] ${count}`);
+      }
     } else {
+      const filled = Math.floor(ratio * width);
+      const bar = `${cyan}${'━'.repeat(filled)}${reset}${filled < width ? `${cyan}╸${reset}${dim}${'·'.repeat(width - filled - 1)}${reset}` : ''}`;
       if (rendered) stdout.write('\x1b[2A');
       stdout.write(`\r\x1b[2K  ${cyan}◇ DERIVING${reset}  ${String(percent).padStart(3)}%  [${bar}]\n`);
       stdout.write(`\r\x1b[2K     ${completed.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${rate.toFixed(rate >= 100 ? 0 : 1)} shards/s  ·  ${etaText}  ·  ${workers} workers\n`);
@@ -204,7 +271,9 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
     complete: elapsedMs => {
       stop();
       if (compact) {
-        console.log(`${green}✓ DERIVED${reset} 100% · ${shards}/${shards} · ${formatDuration(elapsedMs)}`);
+        const detailed = `✓ DERIVED 100% · ${shards}/${shards} · ${formatDuration(elapsedMs)}`;
+        const concise = `✓ ${shards}/${shards} 100% ${formatDuration(elapsedMs)}`;
+        console.log(`${green}${fitTerminal(detailed.length <= columns ? detailed : concise, columns)}${reset}`);
       } else {
         console.log(`  ${green}✓ DERIVED${reset}  100%  [${green}${'━'.repeat(width)}${reset}]`);
         console.log(`     ${shards.toLocaleString('en-US')} / ${shards.toLocaleString('en-US')} shards  ·  ${workers} workers  ·  ${formatDuration(elapsedMs)}`);
@@ -217,7 +286,13 @@ function startDerivationProgress(shards: number, workers: number): Readonly<{
 let sensitiveScreenOpen = false;
 
 function canUseSensitiveScreen(): boolean {
-  return stdin.isTTY === true && stdout.isTTY === true && process.env.TERM !== 'dumb';
+  const term = process.env.TERM?.trim().toLowerCase();
+  return stdin.isTTY === true
+    && stdout.isTTY === true
+    && term !== undefined
+    && term !== ''
+    && term !== 'dumb'
+    && term !== 'unknown';
 }
 
 function openSensitiveScreen(): void {
@@ -340,11 +415,11 @@ What is BrainVault?
 Usage:
 - bunx brainvault
 - bunx brainvault --ask
-- bun run bv
-- bun run bv --ask
-- bun run bv --bench
-- bun run bv --smoke
-- bun run bv --password
+- bun ./brainvault
+- bun ./brainvault --ask
+- bun ./brainvault --bench
+- bun ./brainvault --smoke
+- bun ./brainvault --password
 
 Flags:
 - --help, -h
@@ -386,6 +461,9 @@ Flags:
   Echo password and confirmation input. Explicitly unsafe: characters appear on
   screen and may be retained by scrollback, recordings, logs, tmux, or photos.
   Passwords remain forbidden in argv.
+- --promo
+  Show short brainvault.sh intro and outro cards for terminal recordings.
+  Off by default; wallet derivation and recovery semantics are unchanged.
 - --reveal
   Backward-compatible alias. The interactive flow always offers one password
   confirmation after printing the public fingerprint and first address.
@@ -398,14 +476,14 @@ Flags:
   After exact interactive password confirmation, also print the raw private key for
   Address 1 (highest risk).
 - --allow-short-password
-  Unsafe override intended only for legacy recovery. Eight characters is input
+  Unsafe override intended only for existing V1 wallet recovery. Eight characters is input
   hygiene, not a security recommendation; weak or reused passwords remain unsafe.
 - --suggest-password
   Interactive creation only: generate ${SUGGESTED_PASSWORD_CHARACTERS} random
   a-z/A-Z/0-9 characters (${SUGGESTED_PASSWORD_BITS.toFixed(2)} bits) with the
   operating-system CSPRNG. It is shown once and must be repeated.
 - --unicode-recovery
-  Permit non-ASCII input for legacy recovery using V1 NFKD/UTF-8 semantics.
+  Permit non-ASCII input for existing V1 wallet recovery using NFKD/UTF-8 semantics.
   For values a terminal cannot represent exactly, use the library API and verify
   the remembered first address. New CLI wallet creation accepts printable ASCII.
 
@@ -414,7 +492,7 @@ Examples:
 - bunx brainvault --ask
 - bunx brainvault --bench --level 3 --multiplier 10 --workers 32
 - bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine metal
-- bun run bv
+- bun ./brainvault
 - bunx brainvault --show-private-key
 
 Recovery rule:
@@ -456,7 +534,7 @@ function getPositiveIntFlag(names: readonly string[], defaultValue?: number): nu
   if (raw === undefined) return defaultValue;
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1) {
-    console.error(`Error: invalid --${names[0]} value: ${raw}. Expected a positive integer.`);
+    console.error(`Error: invalid --${names[0]} value. Expected a positive integer.`);
     process.exit(1);
   }
   return value;
@@ -485,7 +563,7 @@ const legacyEngineFlags: EngineSelection[] = [
 ];
 const inlineEngine = getFlagValue(['engine']);
 if (inlineEngine !== undefined && !ENGINE_IDS.includes(inlineEngine as EngineSelection)) {
-  console.error(`Error: invalid --engine value: ${inlineEngine}. Expected one of: ${ENGINE_IDS.join(', ')}.`);
+  console.error(`Error: invalid --engine value. Expected one of: ${ENGINE_IDS.join(', ')}.`);
   process.exit(1);
 }
 if (legacyEngineFlags.length > 1 || (inlineEngine !== undefined && legacyEngineFlags.length > 0)) {
@@ -569,6 +647,19 @@ function workFromExactShards(shardCount: number): WorkSpec {
 
 function workFromLegacyFactor(factor: number): WorkSpec {
   return { shardCount: getShardCount(factor), factor };
+}
+
+function workFromInlineSettings(): WorkSpec | undefined {
+  if (inlineLevel !== undefined) return workFromLevel(inlineLevel);
+  if (inlineFactor !== undefined) return workFromLegacyFactor(inlineFactor);
+  if (inlineShards !== undefined) return workFromExactShards(inlineShards);
+  return undefined;
+}
+
+function printWorkSafety(work: WorkSpec): void {
+  if (work.shardCount <= 100) {
+    console.warn('DO NOT FUND: this test/low-work setting is unsafe for funded wallets.');
+  }
 }
 
 function recoveryRuleText(shardCount: number, shardMultiplierValue: number): string {
@@ -814,26 +905,35 @@ async function deriveDirectAsyncShards(
   const shards = new Array<Uint8Array>(shardCount);
   let nextShard = 0;
   let completed = 0;
+  let failure: unknown;
   try {
     await Promise.all(Array.from({ length: workers }, async () => {
-      for (;;) {
+      while (failure === undefined) {
         const shardIndex = nextShard++;
         if (shardIndex >= shardCount) return;
-        const salt = await createShardSalt(name, shardIndex, shardCount, algId);
-        shards[shardIndex] = new Uint8Array(await argon2Native(password, {
-          salt,
-          memoryCost: shardMemoryKb,
-          timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
-          parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
-          outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
-          algorithm: 2,
-          version: 1,
-        }));
-        completed += 1;
-        onProgress?.(completed);
+        try {
+          const salt = await createShardSalt(name, shardIndex, shardCount, algId);
+          shards[shardIndex] = new Uint8Array(await argon2Native(password, {
+            salt,
+            memoryCost: shardMemoryKb,
+            timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
+            parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
+            outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+            algorithm: 2,
+            version: 1,
+          }));
+          completed += 1;
+          onProgress?.(completed);
+        } catch (error) {
+          failure ??= error instanceof Error ? error : new Error('BRAINVAULT_NATIVE_DIRECT_FAILURE');
+        }
       }
     }));
+    if (failure !== undefined) throw failure;
     return shards;
+  } catch (error) {
+    for (const shard of shards) shard?.fill(0);
+    throw error;
   } finally {
     password.fill(0);
   }
@@ -1006,75 +1106,79 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
         ? `Using (experimental) native sync workers (${actualWorkers} workers)`
         : `Using native isolated workers (${actualWorkers} workers)`);
 
-    await new Promise<void>((resolve, reject) => {
-    const terminatePool = () => Promise.all(pool.map(worker => worker.terminate())).then(() => undefined);
-    const fail = (error: unknown) => {
-      if (failed) return;
-      failed = true;
-      const cause = error instanceof Error ? error : new Error(String(error));
-      void terminatePool().then(
-        () => reject(cause),
-        terminationError => reject(new AggregateError([cause, terminationError], 'BrainVault worker failure')),
-      );
-    };
-
-    for (let i = 0; i < actualWorkers; i++) {
-      const w = new Worker(workerPath);
-      pool.push(w);
-
-      w.on('error', fail);
-      w.on('exit', code => {
-        if (!failed && completed < shardCount) {
-          fail(new Error(`BRAINVAULT_WORKER_EXITED:${code}`));
-        }
-      });
-
-      w.on('message', (message) => {
-        if (failed) return;
-        try {
-          acceptShard(
-            workerShardResults,
-            message,
-            BRAINVAULT_V1_SPEC_ID,
-            BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
-            index => shardRequestFingerprint(index, shardCount, kdfAlgId, shardMemoryKb),
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const terminatePool = () => Promise.all(pool.map(worker => worker.terminate())).then(() => undefined);
+        const fail = (error: unknown) => {
+          if (failed) return;
+          failed = true;
+          const cause = error instanceof Error ? error : new Error('BRAINVAULT_WORKER_FAILURE');
+          void terminatePool().then(
+            () => reject(cause),
+            terminationError => reject(new AggregateError([cause, terminationError], 'BRAINVAULT_WORKER_FAILURE')),
           );
-        } catch (error) {
-          fail(error);
-          return;
-        }
-        completed++;
-        onProgress?.(completed, shardCount);
+        };
 
-        if (completed >= shardCount) {
-          void terminatePool().then(resolve, reject);
-        } else if (nextShard < shardCount) {
-          w.postMessage({
-            specId: BRAINVAULT_V1_SPEC_ID,
-            name,
-            passphrase,
-            shardIndex: nextShard++,
-            shardCount,
-            shardMemoryKb,
-            algId: kdfAlgId,
+        for (let i = 0; i < actualWorkers; i++) {
+          const w = new Worker(workerPath);
+          pool.push(w);
+
+          w.on('error', fail);
+          w.on('exit', code => {
+            if (!failed && completed < shardCount) {
+              fail(new Error(`BRAINVAULT_WORKER_EXITED:${code}`));
+            }
           });
+
+          w.on('message', (message) => {
+            if (failed) return;
+            try {
+              acceptShard(
+                workerShardResults,
+                message,
+                BRAINVAULT_V1_SPEC_ID,
+                BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+                index => shardRequestFingerprint(index, shardCount, kdfAlgId, shardMemoryKb),
+              );
+              completed++;
+              onProgress?.(completed, shardCount);
+
+              if (completed >= shardCount) {
+                void terminatePool().then(resolve, reject);
+              } else if (nextShard < shardCount) {
+                w.postMessage({
+                  specId: BRAINVAULT_V1_SPEC_ID,
+                  name,
+                  passphrase,
+                  shardIndex: nextShard++,
+                  shardCount,
+                  shardMemoryKb,
+                  algId: kdfAlgId,
+                });
+              }
+            } catch (error) {
+              fail(error);
+            }
+          });
+
+          if (nextShard < shardCount) {
+            w.postMessage({
+              specId: BRAINVAULT_V1_SPEC_ID,
+              name,
+              passphrase,
+              shardIndex: nextShard++,
+              shardCount,
+              shardMemoryKb,
+              algId: kdfAlgId,
+            });
+          }
         }
       });
-
-      if (nextShard < shardCount) {
-        w.postMessage({
-          specId: BRAINVAULT_V1_SPEC_ID,
-          name,
-          passphrase,
-          shardIndex: nextShard++,
-          shardCount,
-          shardMemoryKb,
-          algId: kdfAlgId,
-        });
-      }
+      shardResults = finalizeShards(workerShardResults);
+    } catch (error) {
+      for (const shard of workerShardResults) shard?.fill(0);
+      throw error;
     }
-    });
-    shardResults = finalizeShards(workerShardResults);
   }
 
   const derivationTime = Date.now() - start;
@@ -1095,7 +1199,7 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
     const entropy24 = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
     try {
       const mnemonic24 = await entropyToMnemonic(entropy24);
-      const ethAddr24 = await deriveEthereumAddress(mnemonic24);
+      const ethAddr24 = await deriveEthereumAddress(mnemonic24, '');
       return {
         name, shardCount, factor, workers, engine: selectedEngine, derivationTime, shardMultiplier,
         fingerprint, ethAddr24, rootKey: masterKey,
@@ -1127,10 +1231,10 @@ async function deriveSensitiveMaterial(rootKey: Uint8Array, count: number, inclu
       standardAddrs12: matrix12.standard,
       ledgerLiveAddrs12: matrix12.ledgerLive,
       privateKey24: includePrivateKeys
-        ? await deriveEthereumPrivateKeyAtPath(mnemonic24, "m/44'/60'/0'/0/0")
+        ? await deriveEthereumPrivateKeyAtPath(mnemonic24, "m/44'/60'/0'/0/0", '')
         : undefined,
       privateKey12: includePrivateKeys
-        ? await deriveEthereumPrivateKeyAtPath(mnemonic12, "m/44'/60'/0'/0/0")
+        ? await deriveEthereumPrivateKeyAtPath(mnemonic12, "m/44'/60'/0'/0/0", '')
         : undefined,
     };
   } finally {
@@ -1368,7 +1472,7 @@ async function interactive() {
   console.log('BrainVault writes no recovery file.');
   console.log('Remember the exact Username, Password, Shard count, and Multiplier.');
   console.log('Forget any recovery input and the wallet cannot be recovered.');
-  console.log('Before funding, repeat a fresh run and verify the same first receiving address.\n');
+  console.log('Before funding, perform a fresh independent derivation and compare the complete first receiving address.\n');
   printVisibleInputWarning();
   if (shardMultiplier > 1) {
     const memoryPerShardGb = (BRAINVAULT_V1.SHARD_MEMORY_KB * shardMultiplier) / (1024 * 1024);
@@ -1439,13 +1543,7 @@ async function interactive() {
     return;
   }
 
-  let selectedWork = inlineLevel !== undefined
-    ? workFromLevel(inlineLevel)
-    : inlineFactor !== undefined
-      ? workFromLegacyFactor(inlineFactor)
-      : inlineShards !== undefined
-        ? workFromExactShards(inlineShards)
-        : workFromLevel(BRAINVAULT_DEFAULT_LEVEL);
+  let selectedWork = workFromInlineSettings() ?? workFromLevel(BRAINVAULT_DEFAULT_LEVEL);
   let selectedMultiplier = shardMultiplier;
   let selectedEngine = flagEngine;
 
@@ -1534,6 +1632,7 @@ async function interactive() {
     return;
   }
 
+  printWorkSafety(selectedWork);
   rl.close();
 
   console.log(`\n${shardCount.toLocaleString('en-US')} shards × ${workersInput} workers`);
@@ -1644,7 +1743,10 @@ async function derivePassword() {
     'Password (hidden; typing works): ',
     'Password (VISIBLE): ',
   );
-  const selectedLevel = Number((await rl.question(`Level (${BRAINVAULT_DEFAULT_LEVEL}): `)).trim() || `${BRAINVAULT_DEFAULT_LEVEL}`);
+  const inlineWork = workFromInlineSettings();
+  const selectedLevel = inlineWork === undefined
+    ? Number((await rl.question(`Level (${BRAINVAULT_DEFAULT_LEVEL}): `)).trim() || `${BRAINVAULT_DEFAULT_LEVEL}`)
+    : undefined;
 
   const passwordError = getCliPasswordError(pass);
   if (passwordError !== undefined) {
@@ -1657,15 +1759,22 @@ async function derivePassword() {
     return;
   }
 
-  if (!Number.isSafeInteger(selectedLevel) || selectedLevel < 1 || selectedLevel > BRAINVAULT_LEVEL_SHARDS.length) {
+  if (selectedLevel !== undefined
+    && (!Number.isSafeInteger(selectedLevel) || selectedLevel < 1 || selectedLevel > BRAINVAULT_LEVEL_SHARDS.length)) {
     rejectPrompt(rl, `level must be an integer in 1..${BRAINVAULT_LEVEL_SHARDS.length}`);
     return;
   }
 
+  const selectedWork = inlineWork ?? workFromLevel(selectedLevel!);
+  const plan = getHardwarePlan(selectedWork.shardCount, shardMultiplier);
+  const workers = inlineWorkers ?? plan.recommendedWorkers;
+  if (workers > plan.recommendedWorkers) {
+    rejectPrompt(rl, `workers exceed the safe hardware limit (${plan.recommendedWorkers}) for this shard count/multiplier.`);
+    return;
+  }
+  printWorkSafety(selectedWork);
   rl.close();
 
-  const selectedWork = workFromLevel(selectedLevel);
-  const workers = getHardwarePlan(selectedWork.shardCount, shardMultiplier).recommendedWorkers;
   const progress = startDerivationProgress(selectedWork.shardCount, workers);
   let result: Awaited<ReturnType<typeof derive>>;
   try {
@@ -1728,6 +1837,10 @@ async function derivePassword() {
 // ============================================================================
 
 async function main(): Promise<void> {
+  const promo = args.includes('--promo');
+  if (promo && (args.includes('--bench') || args.includes('--smoke') || args.includes('--password'))) {
+    throw new Error('BRAINVAULT_PROMO_INTERACTIVE_ONLY');
+  }
   if (args.includes('--bench') || args.includes('--smoke')) {
     if (suggestPassword) throw new Error('BRAINVAULT_SUGGEST_PASSWORD_INTERACTIVE_ONLY');
     await runBenchmark(args.includes('--smoke'));
@@ -1738,7 +1851,9 @@ async function main(): Promise<void> {
     }
     await derivePassword();
   } else {
+    if (promo) await showPromoScreen();
     await interactive();
+    if (promo && (process.exitCode === undefined || process.exitCode === 0)) await showPromoScreen(true);
   }
 }
 

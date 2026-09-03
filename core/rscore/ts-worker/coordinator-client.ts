@@ -40,10 +40,17 @@ export class TsAccountWorkerClient {
 
   constructor(workerIndex: number) {
     this.#workerIndex = workerIndex;
-    // Crypto lanes already refuse to spawn from a worker isolate. Keeping the
-    // constructor Web Worker-compatible also avoids copying the entire process
-    // environment into every long-lived Account owner.
-    this.#worker = new Worker(new URL('./worker.ts', import.meta.url));
+    // Bun resolves the source module beside this file. A production browser
+    // loads the separately bundled worker from the same public origin; using
+    // the source-relative URL there incorrectly requested `/worker.ts`.
+    const location = Reflect.get(globalThis, 'location') as { origin?: unknown } | undefined;
+    const workerUrl = typeof location?.origin === 'string'
+      ? new URL('/account-worker.js', location.origin)
+      : new URL('./worker.ts', import.meta.url);
+    // The browser bundle intentionally retains import.meta in the optional
+    // shadow instrumentation path. A classic worker rejects that syntax before
+    // initialization; module workers accept it and Bun supports the same mode.
+    this.#worker = new Worker(workerUrl, { type: 'module' });
     this.#worker.onmessage = event => this.#handleResponse(event.data as TsAccountWorkerResponseEnvelope);
     this.#worker.onerror = event => this.#retire(new Error(
       `TS_ACCOUNT_WORKER_ERROR:${workerIndex}:${event.message}:${event.filename}:${event.lineno}:${event.colno}`,

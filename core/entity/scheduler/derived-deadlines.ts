@@ -12,7 +12,7 @@ import type { ScheduledHookBase } from './types';
 import { isSecretAckPendingPayment } from '../paybook/views';
 import { compareStableText } from '../../protocol/serialization';
 
-export type DerivedHtlcTimeout = ScheduledHookBase<'htlc_timeout', {
+type DerivedHtlcTimeout = ScheduledHookBase<'htlc_timeout', {
   accountId: string;
   lockId: string;
 }>;
