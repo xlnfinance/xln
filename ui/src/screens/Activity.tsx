@@ -170,7 +170,9 @@ export function ActivityScreen() {
 	const types = FILTERS.find(entry => entry.id === filter)?.types ?? USER_ACTIVITY_TYPES;
 	const accountIds = useMemo(() => wallet.accounts.map(account => account.counterpartyId), [wallet.accounts]);
 	const { movements, loading, error } = useMovements(entityId, types, 200, accountIds);
-	const selected = movements.find(movement => movement.id === selectedId) ?? null;
+	// Desktop shows the latest movement's receipt until the user picks another; on a phone the sheet opens only on tap.
+	const desktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 1101px)').matches;
+	const selected = movements.find(movement => movement.id === selectedId) ?? (desktop ? (movements[0] ?? null) : null);
 
 	let lastDay = '';
 	const rows = movements.map(movement => {
@@ -200,7 +202,7 @@ export function ActivityScreen() {
 					{rows.map(({ movement, day, first }) => (
 						<div key={movement.id}>
 							{first ? <div className="caps day">{day}</div> : null}
-							<ActivityRow movement={movement} names={wallet.names} first={first} selected={movement.id === selectedId} onClick={() => setSelectedId(movement.id)} />
+							<ActivityRow movement={movement} names={wallet.names} first={first} selected={movement.id === selected?.id} onClick={() => setSelectedId(movement.id)} />
 						</div>
 					))}
 					{movements.length === 0 && !loading && (

@@ -55,11 +55,11 @@
 	--surface: #ffffff;
 	--surface-2: #eef0f4;
 	--surface-3: #e4e7ee;
-	--line: rgba(20, 23, 30, 0.08);
-	--line-2: rgba(20, 23, 30, 0.16);
+	--line: rgba(20, 23, 30, 0.1);
+	--line-2: rgba(20, 23, 30, 0.18);
 	--ink: #14171e;
 	--ink-2: #5f6672;
-	--ink-3: #9aa0ab;
+	--ink-3: #858c98;
 	--display: #0b0d12;
 	--accent: #5b69f0;
 	--accent-2: #4653d6;

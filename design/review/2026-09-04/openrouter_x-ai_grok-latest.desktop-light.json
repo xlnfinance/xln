@@ -1,0 +1,268 @@
+{
+  "reviewer": "openrouter/x-ai/grok-latest",
+  "screens": [
+    {
+      "file": "01-home.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 590,
+        "typography": 670,
+        "color": 680,
+        "data_legibility": 630,
+        "layout": 710,
+        "visceral_value": 360,
+        "mobile": 500,
+        "consistency": 680,
+        "trust": 730
+      },
+      "total": 634,
+      "top_issues": [
+        "Home desktop-light: the Total balance bar is a width-filling green+blue stack with a fade tail, not 1 px = $N; it cannot be compared to the Hub One send/receive bar on the same screen.",
+        "Home desktop-light: On-chain $0.00 / Reserve $1,500.00 / Accounts $10,000.00 under the total restates the bar, then Instant restates Hub One’s $60,000 / $40,000 — three captions for one number.",
+        "Home desktop-light + Account desktop-light: bilateral bars fade to transparent, so send $60,000 vs receive $40,000 is not readable as 3:2 (the blue tail looks longer than the amber).",
+        "Home desktop-light: “1 token · 2 empty hidden”, sandbox, and hub chips are chrome; Recent lists two identical Credit limit updated 50,000.00 rows."
+      ],
+      "fixes": [
+        "Home total + USDC row: paint each tier at Settings scale with a hard stop (no fade); leave unused track empty so $11,500 is visibly shorter than the Hub One $100,000 capacity bar.",
+        "Delete the On-chain/Reserve/Accounts legend and the Instant duplicate; if a caption is needed, one line under the bar: “Reserve $1,500 · Accounts $10,000”.",
+        "Bilateral bars (Home Accounts, Pay, Account): hard-edged left/right from the notch; length(send)=$60,000 and length(receive)=$40,000 at the same px/$ as Home.",
+        "Drop sandbox/hub chips and “N empty hidden”; collapse duplicate Credit limit updated rows into one."
+      ]
+    },
+    {
+      "file": "02-pay.png",
+      "scores": {
+        "hierarchy": 700,
+        "premium": 540,
+        "typography": 600,
+        "color": 690,
+        "data_legibility": 520,
+        "layout": 670,
+        "visceral_value": 300,
+        "mobile": 480,
+        "consistency": 610,
+        "trust": 470
+      },
+      "total": 558,
+      "top_issues": [
+        "Pay desktop-light: Fee is 0.000050 USDC in the form table and 0.000025 in the ROUTE panel — two fees for one payment.",
+        "Pay desktop-light: route is drawn three times (You → Hub One → Meridian Desk chips, right ROUTE list, Arrives/Delivery).",
+        "Pay desktop-light: $25 is not marked on the 60k/40k bar; Before 10,000.00 and After 9,975.00 bars are visually identical.",
+        "Pay desktop-light: To dumps the full 0x499d… hex; a stray bullet sits under This payment; Delivery “Instant Change” reads as a contradiction."
+      ],
+      "fixes": [
+        "Single fee source: show 0.000025 USDC (or the real figure) once, next to the route, never again.",
+        "Delete the Route chip row; keep the right ROUTE list as the only path diagram.",
+        "On both Before/After bars, hatch or overlay a $25 hard segment at scale; do not redraw the full 60k/40k bar inside the Amount card.",
+        "To: name + 0x499d…f2bd on one line; remove the bullet; Delivery = “Instant” only, move Change into a quiet text button."
+      ]
+    },
+    {
+      "file": "03-receipt.png",
+      "scores": {
+        "hierarchy": 750,
+        "premium": 660,
+        "typography": 710,
+        "color": 730,
+        "data_legibility": 680,
+        "layout": 700,
+        "visceral_value": 180,
+        "mobile": 620,
+        "consistency": 560,
+        "trust": 610
+      },
+      "total": 620,
+      "top_issues": [
+        "Receipt desktop-light + Receive/Swap/Account: toast “Payment submitted: 25.00 USDC…” while the modal says PAID / Settled instantly — submitted vs settled, and the toast then sticks on unrelated screens.",
+        "Receipt desktop-light vs Activity detail: Frame #42 vs #43; “2023 ms” vs “00:15:23”.",
+        "Receipt desktop-light: no bar; $25 vs $11,475 is numerals only.",
+        "Receipt desktop-light: X and Done both dismiss; Done is a large gray brick under a generic mint check."
+      ],
+      "fixes": [
+        "If the frame is committed, no toast, or toast = “Settled · frame 42”; never “submitted” after PAID; auto-dismiss so it cannot appear on Receive/Swap/Account.",
+        "One frame id and one clock: Frame #42 (or #43, not both) and “2023 ms”; reuse that pair on Activity detail.",
+        "Under 25.00, a 25 px-at-scale hard bar beside a ghost track of the $11,475 total.",
+        "Remove X; Done as a text button. Keep the mint check at 40 px, not a hero orb."
+      ]
+    },
+    {
+      "file": "04-receive.png",
+      "scores": {
+        "hierarchy": 620,
+        "premium": 490,
+        "typography": 640,
+        "color": 660,
+        "data_legibility": 520,
+        "layout": 450,
+        "visceral_value": 240,
+        "mobile": 600,
+        "consistency": 450,
+        "trust": 470
+      },
+      "total": 514,
+      "top_issues": [
+        "Receive desktop-light: stale “Payment submitted…” toast on an invoice screen.",
+        "Receive desktop-light: indigo fade under Amount 0.00 reads as a filled value, not a $0 request (caption says receive up to 40,025.00).",
+        "Receive desktop-light: single centered column (QR + form) while Pay uses two columns — desktop width unused.",
+        "Receive desktop-light: Copy invoice, Copy link, and Copy xln:// app link are three copy actions; YOUR ENTITY ID is a raw hex dump."
+      ],
+      "fixes": [
+        "Kill the toast on route change (see Receipt).",
+        "Amount 0.00: no bar. If a request is entered, draw only that amount at scale; put “receive up to 40,025” as caption, not a full-width indigo strip.",
+        "Desktop: QR + entity id in the right column; amount/note/copy in the left, same 2-col shell as Pay.",
+        "One primary: Copy link. Invoice and xln:// as overflow. Entity id: truncated with a copy glyph, not 64 hex chars."
+      ]
+    },
+    {
+      "file": "05-swap.png",
+      "scores": {
+        "hierarchy": 560,
+        "premium": 580,
+        "typography": 660,
+        "color": 690,
+        "data_legibility": 400,
+        "layout": 620,
+        "visceral_value": 220,
+        "mobile": 540,
+        "consistency": 600,
+        "trust": 360
+      },
+      "total": 523,
+      "top_issues": [
+        "Swap desktop-light: You pay 100 USDC / You receive 0.00 WETH with a disabled Swap and no rate, impact, or reason — looks broken, not empty.",
+        "Swap desktop-light: no After-state (Pay has Before/After); the Hub One bar does not mark the $100.",
+        "Swap desktop-light: stale payment toast; sandbox chip on USDC.",
+        "Swap desktop-light: Same network / Across networks floats top-right; right column is one short card over a blank canvas."
+      ],
+      "fixes": [
+        "If unquoted: receive = “—” not 0.00; one line under the CTA: “No WETH on this account” (or the real reason); do not imply 100→0.",
+        "When quoted: show rate + min receive, and Before/After bars with the $100 hard segment at scale (same widget as Pay).",
+        "Remove toast and sandbox chip.",
+        "Pin Same network into the left card header; fill the right column with the after-bar, not a lecture paragraph."
+      ]
+    },
+    {
+      "file": "06-account.png",
+      "scores": {
+        "hierarchy": 620,
+        "premium": 400,
+        "typography": 640,
+        "color": 580,
+        "data_legibility": 540,
+        "layout": 470,
+        "visceral_value": 440,
+        "mobile": 520,
+        "consistency": 560,
+        "trust": 580
+      },
+      "total": 535,
+      "top_issues": [
+        "Account desktop-light: WETH and USDT render full cards (legend, Canonical state, zero rows) for 0.00; Home already hides empty tokens.",
+        "Account desktop-light: each card legends collateral / credit line / owed / in flight (green, blue, amber, purple) but the bar is only amber|blue — the legend is false.",
+        "Account desktop-light: toast covers the USDT card; header is Hub One + hub chip + full hex.",
+        "Account desktop-light: single-column stack; Pay/Extend credit/Swap repeats Home’s 3-up chrome. Holds are not hatched."
+      ],
+      "fixes": [
+        "Hide tokens at 0.00 (same rule as Home “empty hidden”); show a quiet “WETH, USDT — even” text if needed.",
+        "Legend only for colors actually in the bar; in-flight hatched; collateral 0.00 not mint.",
+        "Truncate header id to 0x5725…8d47; drop hub chip; toast must not overlay cards.",
+        "Desktop two-column: token stack left, movements right; hatch holds; keep Pay as the only filled action, Extend credit as text."
+      ]
+    },
+    {
+      "file": "07-activity.png",
+      "scores": {
+        "hierarchy": 680,
+        "premium": 620,
+        "typography": 690,
+        "color": 710,
+        "data_legibility": 580,
+        "layout": 600,
+        "visceral_value": 140,
+        "mobile": 560,
+        "consistency": 640,
+        "trust": 660
+      },
+      "total": 588,
+      "top_issues": [
+        "Activity desktop-light: Sent sits on the page gray while the four rows below read as a grouped list — first-row alignment bug.",
+        "Activity desktop-light: Credit limit updated 50,000.00 USDC is typeset like a transfer (same weight/position as +10,000.00 / −25.00); two identical rows.",
+        "Activity desktop-light: five filter chips for five rows; right pane is an empty “Select a movement…” card wasting the master-detail.",
+        "Activity desktop-light + detail: no bars, so −25 vs +10,000 vs 50,000 limits are distinguished only by digit count."
+      ],
+      "fixes": [
+        "One list surface: every row on the same bg; selected = fill, not a different parent.",
+        "Limits: “Credit line → 50,000 USDC” in secondary type, one row, no +/−; payments keep signed tabular amounts.",
+        "Filters: All + a More overflow until a type has counts; empty detail = no card, just the sentence.",
+        "Right of each amount, a hard bar at the global scale (10,000 px-at-scale vs 25)."
+      ]
+    },
+    {
+      "file": "08-activity-detail.png",
+      "scores": {
+        "hierarchy": 730,
+        "premium": 660,
+        "typography": 670,
+        "color": 720,
+        "data_legibility": 560,
+        "layout": 730,
+        "visceral_value": 140,
+        "mobile": 500,
+        "consistency": 540,
+        "trust": 600
+      },
+      "total": 585,
+      "top_issues": [
+        "Activity detail desktop-light: Time 00:15:23 is not a wall-clock, a duration, or the receipt’s 2023 ms — unreadable as proof.",
+        "Activity detail desktop-light: Frame #43 vs receipt #42; “Frame” and “Frames · 5 committed entries” collide.",
+        "Activity detail desktop-light: subtitle “Sent to Meridian Desk via Hub One” repeats To and Via rows; “just now” hangs under the list with no row.",
+        "Activity detail desktop-light: master-detail is desktop-only; no sheet pattern is shown for the shared mobile codebase."
+      ],
+      "fixes": [
+        "Time = “2023 ms · frame 42” (same as receipt); drop 00:15:23.",
+        "One Frame row; rename the other “Batch · 5 entries” or delete it.",
+        "Delete the subtitle or the To/Via rows; bind “just now” to the Sent row, not the canvas.",
+        "On < desktop, this panel is a sheet from the row; do not leave a dead right column on mobile."
+      ]
+    },
+    {
+      "file": "09-settings.png",
+      "scores": {
+        "hierarchy": 710,
+        "premium": 690,
+        "typography": 730,
+        "color": 750,
+        "data_legibility": 660,
+        "layout": 690,
+        "visceral_value": 390,
+        "mobile": 620,
+        "consistency": 700,
+        "trust": 690
+      },
+      "total": 663,
+      "top_issues": [
+        "Settings desktop-light: “1 px = $10” appears three times (section meta, slider value, $10 chip) with no live preview bar — the scale is explained, not shown.",
+        "Settings desktop-light: SCALE chips $1…$1000 plus a slider are two controls for one integer.",
+        "Settings desktop-light: VAULT reads “Sandbox / sandbox”; Runtime id is a raw hex row among non-editable status (Mode, Frame).",
+        "Settings desktop-light: Home toggles can keep On-chain $0.00 on Home (and they do), which is the legend noise on 01-home."
+      ],
+      "fixes": [
+        "One value: chips only (or slider only). Beside it, a 200 px track with a $2,000 hard bar labeled “this is $2,000 at 1 px = $10”.",
+        "Hide On-chain when $0 even if the toggle is on, or default the On-chain toggle off.",
+        "Vault: “Network · sandbox” once. Runtime id truncated + copy. Frame stays as status, not a faux setting.",
+        "Reveal recovery phrase stays secondary; Lock as the only filled button in VAULT."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 580,
+    "verdict": "Light is calmer than typical crypto chrome, but the product thesis — one absolute money scale — is not drawn: bars fill, fade, and cannot be compared, while $25 is invisible on $60k tracks. Trust then slips on a sticky “submitted” toast, two fees, and two frame ids for one payment.",
+    "priority_fixes": [
+      "Paint every bar at Settings’ 1 px = $N with hard stops (no fade): Home total, token row, and account send/receive become comparable; mark the $25 on Pay Before/After.",
+      "Settled payments: no “Payment submitted” toast; dismiss on navigation so Receive/Swap/Account never show it.",
+      "Pay: one fee (table 0.000050 vs route 0.000025) and one route diagram.",
+      "Account: hide 0.00 WETH/USDT cards; legend only colors actually in the bar; hatch in-flight.",
+      "Receipt ↔ Activity detail: one frame id, clock = “2023 ms”, never 00:15:23; add at-scale bars to the activity amounts."
+    ]
+  }
+}

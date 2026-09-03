@@ -1,0 +1,348 @@
+{
+  "reviewer": "openrouter/google/gemini-flash-latest",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home.png",
+      "scores": {
+        "hierarchy": 780,
+        "premium": 640,
+        "typography": 720,
+        "color": 650,
+        "data_legibility": 680,
+        "layout": 710,
+        "visceral_value": 310,
+        "responsive": 720,
+        "consistency": 670,
+        "trust": 710
+      },
+      "total": 659,
+      "top_issues": [
+        "Home: Total balance ($11,500.00) and USDC breakdown bars stretch across 100% of the container width, ignoring the global 1px=$10 scale where $11,500 should be 1150px and visibly distinguishable from $100,000 capacity.",
+        "Home: Mint (#34D399) is overloaded on the synced status dot, the Reserve balance legend, and transaction states, eroding its designated semantic meaning for settled/positive balances.",
+        "Home: The three-item legend row (On-chain $0.00, Reserve $1,500.00, Accounts $10,000.00) repeats values already encoded directly into the horizontal bar segments above it.",
+        "Home: Pay button is styled in high-emphasis solid indigo (#6E7CFF) while Receive and Swap are muted dark cards, producing an asymmetric action trio that over-indexes on outbound transfers."
+      ],
+      "fixes": [
+        "Home: Draw the balance bar using the global scale (width = amount / scale px) with right-edge container clipping and an overflow numeric tag instead of width: 100%.",
+        "Home: Restrict mint (#34D399) strictly to settled/positive financial amounts; change the synced dot to neutral zinc (#71717A) and reserve bar segment to Depository purple.",
+        "Home: Remove the three-item text legend under Total balance and replace it with a single quiet caption: Instant · send up to $60,000 · receive up to $40,000.",
+        "Home: Standardize the action bar with uniform secondary dark card surfaces for Pay, Receive, and Swap, accented with subtle indigo icon glyphs."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home-bottom.png",
+      "scores": {
+        "hierarchy": 700,
+        "premium": 620,
+        "typography": 670,
+        "color": 680,
+        "data_legibility": 590,
+        "layout": 660,
+        "visceral_value": 320,
+        "responsive": 700,
+        "consistency": 640,
+        "trust": 620
+      },
+      "total": 620,
+      "top_issues": [
+        "Home bottom: Two consecutive identical rows labeled 'Credit limit updated · with Hub One · 50,000.00 USDC • updated' omit directionality, resembling an unhandled duplicate event or sync replay bug.",
+        "Home bottom: Scrolled view abruptly clips the top BALANCES section header mid-text without a sticky background anchor or scroll threshold delimiter.",
+        "Home bottom: The '+ Open account' button inside the Accounts card occupies substantial vertical padding and mimics an empty state CTA rather than a secondary creation tool.",
+        "Home bottom: Hub One bilateral bar fills 100% of card width with a solid amber left half and blue right half, failing to visualize the three constituent parts (credit line, collateral, owed)."
+      ],
+      "fixes": [
+        "Home bottom: Disambiguate credit limit updates with directional copy: 'Their credit line to you · 50,000.00 USDC' and 'Your credit line to them · 50,000.00 USDC'.",
+        "Home bottom: Add a sticky blurred navigation sub-header during vertical scroll to preserve section context.",
+        "Home bottom: Replace the full-width '+ Open account' button with a compact ghost button or a header '+' action icon.",
+        "Home bottom: Render the bilateral bar's left half as stacked segments: amber for owed balance ($10,000) and indigo for available credit line ($50,000)."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/02-pay.png",
+      "scores": {
+        "hierarchy": 810,
+        "premium": 660,
+        "typography": 650,
+        "color": 730,
+        "data_legibility": 670,
+        "layout": 740,
+        "visceral_value": 340,
+        "responsive": 690,
+        "consistency": 690,
+        "trust": 760
+      },
+      "total": 674,
+      "top_issues": [
+        "Pay: Full 66-character hex address wraps across two messy lines under Meridian Desk, creating visual noise below an already verified contact.",
+        "Pay: Under Amount, 'This payment 25.00' is rendered as an unreadable 2.5px dot while the account capacity bar below it is stretched to full card width, destroying relative scale comparability.",
+        "Pay: 'Delivery' row places the link 'Change' immediately adjacent to 'Instant' without delimiter or column alignment, reading awkwardly as 'Instant Change'.",
+        "Pay: 'Add a note >' floats disconnected between the route card and the bottom Pay CTA button."
+      ],
+      "fixes": [
+        "Pay: Truncate verified contact address to middle-ellipsis (0x499d...f2bd) with a tap-to-copy interaction.",
+        "Pay: Enforce an 8px minimum visible bar width for small payments with an explicit scale multiplier callout.",
+        "Pay: Reformat Delivery row into distinct columns: label 'Delivery', value 'Instant', and action button 'Change' right-aligned.",
+        "Pay: Move 'Add a note' into the route/fee details card as a dedicated interactive line item."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 580,
+        "typography": 740,
+        "color": 710,
+        "data_legibility": 620,
+        "layout": 590,
+        "visceral_value": 290,
+        "responsive": 730,
+        "consistency": 540,
+        "trust": 600
+      },
+      "total": 622,
+      "top_issues": [
+        "Receipt: A floating black toast 'Payment submitted: 25.00 USDC to Meridian Desk' collides over the bottom of the modal, partially occluding the 'Verified by your runtime' trust guarantee.",
+        "Receipt: Conflicting state messaging: Modal header confirms 'PAID' and 'Settled Instantly · 2698 ms' from committed Frame #42, while the floating toast uses tentative uncommitted phrasing ('Payment submitted').",
+        "Receipt: Settlement latency of 2698 ms (nearly 2.7 seconds) is paired directly with the label 'Instantly', creating an immediate semantic contradiction.",
+        "Receipt: Background balance already reflects the post-settlement balance ($11,475.00), making the persistent asynchronous submission toast feel contradictory."
+      ],
+      "fixes": [
+        "Receipt: Immediately dismiss or suppress submission toasts when opening a committed frame receipt sheet.",
+        "Receipt: Eliminate the phrase 'Payment submitted' everywhere; once committed to the local WAL, display only 'Committed' or 'Settled'.",
+        "Receipt: Change settlement timing label to 'Settled in 2.7s · Frame #42' instead of 'Instantly · 2698 ms'.",
+        "Receipt: Unify receipt data with Activity Detail by including the cryptographic proof hash (0xde50da...) and committed timestamp directly on the sheet."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt-bottom.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 570,
+        "typography": 720,
+        "color": 700,
+        "data_legibility": 580,
+        "layout": 570,
+        "visceral_value": 280,
+        "responsive": 720,
+        "consistency": 530,
+        "trust": 590
+      },
+      "total": 606,
+      "top_issues": [
+        "Receipt bottom: The lingering submission toast directly overlays the bottom verification text '• Verified by your runtime', blocking the cryptographic proof indicator.",
+        "Receipt bottom: Redundant dismissal mechanisms: Modal contains both a top-right '✕' icon and a primary 'Done' button.",
+        "Receipt bottom: Lacks state transition evidence (e.g. proof hash and committed frame log count) that is available on the activity detail receipt."
+      ],
+      "fixes": [
+        "Receipt bottom: Pin floating notifications to top-of-screen or disable toasts completely while modal sheets have focus.",
+        "Receipt bottom: Remove top-right '✕' button and use bottom 'Done' button and sheet swipe-down as canonical dismiss actions.",
+        "Receipt bottom: Add full proof metadata: Proof hash 0xde50da... and a link to runtime frame verification."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive.png",
+      "scores": {
+        "hierarchy": 730,
+        "premium": 590,
+        "typography": 640,
+        "color": 680,
+        "data_legibility": 610,
+        "layout": 620,
+        "visceral_value": 300,
+        "responsive": 670,
+        "consistency": 510,
+        "trust": 640
+      },
+      "total": 599,
+      "top_issues": [
+        "Receive: Stale toast 'Payment submitted: 25.00 USDC to Meridian Desk' persists across screen navigation, lingering at the bottom of the Receive flow.",
+        "Receive: Three competing copy actions stacked vertically ('Copy invoice', 'Copy link', 'Copy xln:// app link') generate friction and clutter.",
+        "Receive: Capacity bar under Amount is drawn 100% filled with a blue gradient despite the amount input being 0.00, misrepresenting account state.",
+        "Receive: Monospace Entity ID wraps as raw hex across two lines without a clear copy chip or visual boundary."
+      ],
+      "fixes": [
+        "Receive: Automatically clear active toast state on route change.",
+        "Receive: Consolidate copy options into one primary 'Copy invoice' button with a segmented format selector (Invoice / Link / URI).",
+        "Receive: Render capacity bar as an empty track when amount is 0.00, filling progressively toward 'receive up to 40,025.00' as digits are typed.",
+        "Receive: Reduce QR container height by 15% and truncate Entity ID to middle-ellipsis with a one-tap copy button."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/05-swap.png",
+      "scores": {
+        "hierarchy": 710,
+        "premium": 530,
+        "typography": 650,
+        "color": 630,
+        "data_legibility": 520,
+        "layout": 510,
+        "visceral_value": 210,
+        "responsive": 660,
+        "consistency": 500,
+        "trust": 430
+      },
+      "total": 535,
+      "top_issues": [
+        "Swap: Stale payment submission toast persists for a third consecutive screen, demonstrating unmanaged global toast state.",
+        "Swap: 100 USDC quote returns 0.00 WETH with no exchange rate, slippage tolerance, routing path, or liquidity provider disclosure.",
+        "Swap: Complete absence of visceral value bars; neither token card visualizes source balance, capacity, or post-swap balances.",
+        "Swap: Lower 40% of the screen between the disabled Swap CTA and bottom navigation is an unstyled empty black void."
+      ],
+      "fixes": [
+        "Swap: Purge stale toasts on view mount.",
+        "Swap: Add live quote breakdown: Rate (1 WETH = X,XXX USDC), Provider (Hub One Orderbook), Price impact, and Estimated network fee.",
+        "Swap: Introduce before/after proportional balance bars for both USDC and WETH to visualize asset deltas before execution.",
+        "Swap: Dock Swap CTA above the bottom navigation bar and insert an order routing and liquidity depth card in the center."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/06-account.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 630,
+        "typography": 690,
+        "color": 610,
+        "data_legibility": 680,
+        "layout": 590,
+        "visceral_value": 360,
+        "responsive": 680,
+        "consistency": 650,
+        "trust": 720
+      },
+      "total": 637,
+      "top_issues": [
+        "Account: Bilateral capacity bar ($100,000 total) stretches to 100% card width, visually indistinguishable in scale from the $11,500 total balance bar on Home.",
+        "Account: Legend displays four color tokens (collateral mint, credit line blue, owed amber, in-flight purple hatched), but the bar below only renders solid amber and blue, disconnecting legend from graphic.",
+        "Account: Large dead space across the bottom 40% of the viewport below 'Show 2 empty lanes'.",
+        "Account: 'Show 2 empty lanes · WETH, USDT' is rendered as an uncontained floating text link without container grouping or chevron."
+      ],
+      "fixes": [
+        "Account: Render the bilateral bar to the global 1px=$10 scale with center zero-notch, side-overflow clipping, and explicit numerical bounds.",
+        "Account: Segment the left send-bar into stacked fills: amber for owed balance ($9,975), indigo for available credit line ($50,000), and purple for collateral ($0).",
+        "Account: Populate lower screen space with recent bilateral settlements and committed frame entries with Hub One.",
+        "Account: Convert 'Show 2 empty lanes' into an expandable card container with subtle borders and toggle chevron."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/07-activity.png",
+      "scores": {
+        "hierarchy": 780,
+        "premium": 670,
+        "typography": 690,
+        "color": 720,
+        "data_legibility": 620,
+        "layout": 650,
+        "visceral_value": 320,
+        "responsive": 640,
+        "consistency": 660,
+        "trust": 650
+      },
+      "total": 640,
+      "top_issues": [
+        "Activity: Filter chips row truncates the fifth pill mid-word ('Accou...') against the right screen edge without a scroll indicator or gradient fade mask.",
+        "Activity: Total lack of visceral value cues; a 25.00 USDC payment and a 10,000.00 USDC receipt carry identical visual weight.",
+        "Activity: Identical consecutive rows ('Credit limit updated · with Hub One · 50,000.00 USDC • updated') fail to communicate whether credit was extended to or received from the hub.",
+        "Activity: Counter '5 movements' is subdued and disconnected from the active category filter."
+      ],
+      "fixes": [
+        "Activity: Apply a right-edge gradient fade mask to the horizontal filter row and add padding-right: 16px to prevent harsh edge clipping.",
+        "Activity: Render a proportional micro-bar beneath each amount scaled to the global 1px=$N setting.",
+        "Activity: Clarify credit limit entries: 'Their credit line updated to 50,000.00 USDC' vs 'Your credit line updated to 50,000.00 USDC'.",
+        "Activity: Embed item counts directly inside filter pills (e.g. 'All (5)', 'Payments (2)', 'Accounts (3)')."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 720,
+        "typography": 760,
+        "color": 740,
+        "data_legibility": 750,
+        "layout": 710,
+        "visceral_value": 330,
+        "responsive": 720,
+        "consistency": 560,
+        "trust": 660
+      },
+      "total": 679,
+      "top_issues": [
+        "Activity detail: Deterministic frame index mismatch: Payment is recorded as Frame #43 here, whereas the post-payment receipt sheet (03-receipt.png) displayed Frame #42 for the identical transaction.",
+        "Activity detail: Modal lacks a bottom action button (Done, Close, or Share), relying exclusively on the small top-right '✕' or backdrop dismiss.",
+        "Activity detail: Cryptographic proof hash (0xde50daa2...78f208) is not tappable and provides no copy icon or verification explorer link.",
+        "Activity detail: Lacks a before/after balance delta bar showing the account balance shift from 10,000.00 to 9,975.00."
+      ],
+      "fixes": [
+        "Activity detail: Fix off-by-one frame indexing: harmonize the committed frame counter between the live receipt modal and the activity ledger store.",
+        "Activity detail: Add a bottom sticky action bar with 'Done' and 'Share proof' buttons.",
+        "Activity detail: Add a one-touch copy icon next to Proof hash with copy-to-clipboard confirmation toast.",
+        "Activity detail: Add a mini bilateral transition bar illustrating the -25.00 USDC reduction in available sending capacity."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 640,
+        "typography": 710,
+        "color": 710,
+        "data_legibility": 700,
+        "layout": 520,
+        "visceral_value": 410,
+        "responsive": 510,
+        "consistency": 670,
+        "trust": 730
+      },
+      "total": 636,
+      "top_issues": [
+        "Settings: Severe layout collision: The fixed bottom navigation bar directly overlays and clips the RUNTIME section title and 'Runtime id' label.",
+        "Settings: Presets row overflows horizontally and clips the final pill ('$1000...') abruptly at the screen boundary.",
+        "Settings: Scale section explains 'Dollars per pixel' but provides no interactive preview bar showing how a $100 or $1,000 bar scales under the chosen setting.",
+        "Settings: Home tier toggles (On-chain, Reserve, Accounts) lack immediate visual feedback showing current balance per tier."
+      ],
+      "fixes": [
+        "Settings: Add padding-bottom: 96px to the scrollable container so content fully clears the fixed bottom tab bar.",
+        "Settings: Wrap preset scale pills into a two-row flex grid or add horizontal scroll indicators with edge masks.",
+        "Settings: Place a dynamic sample bar directly beneath the scale slider that resizes in real time as the thumb moves.",
+        "Settings: Append current aggregate balance to each tier label (e.g. 'Reserve · $1,500.00')."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings-bottom.png",
+      "scores": {
+        "hierarchy": 750,
+        "premium": 670,
+        "typography": 680,
+        "color": 710,
+        "data_legibility": 690,
+        "layout": 680,
+        "visceral_value": 380,
+        "responsive": 690,
+        "consistency": 680,
+        "trust": 750
+      },
+      "total": 668,
+      "top_issues": [
+        "Settings bottom: Runtime id is printed as a raw 42-character hex string without a quick copy action or QR code display option.",
+        "Settings bottom: Appearance theme selector is stranded between functional Home toggles and low-level cryptographic runtime status.",
+        "Settings bottom: Reveal recovery phrase button uses a generic eye icon and neutral outline, lacking the cautionary emphasis required for seed phrase exposure."
+      ],
+      "fixes": [
+        "Settings bottom: Add a copy icon and QR action next to Runtime id with truncated display (0xf39f...92266).",
+        "Settings bottom: Group Appearance and Theme into a dedicated section alongside Scale at the top of Settings.",
+        "Settings bottom: Style Reveal recovery phrase with an amber outline/accent and key/shield icon to signal elevated security sensitivity."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 631,
+    "verdict": "The mobile dark interface delivers strong native ergonomic foundations with clear dark surfaces, legible tabular typography, and provable runtime cryptographic primitives. However, visceral value is almost completely unrealized due to full-width bar stretching that ignores the global scale, while persistent toast leakage, off-by-one frame discrepancies (#42 vs #43), and bottom-sheet layout collisions erode fintech-grade polish and trust.",
+    "priority_fixes": [
+      "Enforce the global 1px = $N scale strictly across all horizontal bars on Home, Pay, Receive, and Account: replace width: 100% with container clipping, directional gradient fades, and numeric remainder chips so visual lengths represent real proportional value.",
+      "Fix the asynchronous toast leak and decouple settlement receipts: dismiss or suppress Payment submitted toasts on frame commitment, prevent cross-screen toast bleed (seen on Receive and Swap), and eliminate conflicting optimistic messaging on committed modals.",
+      "Resolve the deterministic frame counter discrepancy between screens: ensure the payment receipt sheet (currently #42) and the activity ledger detail (currently #43) display the identical committed frame index and include full proof hashes on both.",
+      "Add proper safe-area and bottom navigation scroll clearance (padding-bottom: 96px) across scrollable views to eliminate the severe overlap of fixed bottom tabs over the Settings runtime section and Activity filters.",
+      "Disambiguate credit limit updates in Activity and Home feeds by labeling directionality explicitly (Their credit line vs Your credit line), and add complete quote execution mechanics (exchange rate, provider, network fee) to the Swap screen."
+    ]
+  }
+}

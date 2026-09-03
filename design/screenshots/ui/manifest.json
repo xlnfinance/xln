@@ -1,0 +1,58 @@
+{
+  "baseUrl": "http://localhost:5183",
+  "takenAt": "2026-09-03T21:43:40.450Z",
+  "variants": {
+    "desktop-dark": [
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/01-home.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/02-pay.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/03-receipt.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/04-receive.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/05-swap.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/06-account.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/07-activity.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/08-activity-detail.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-dark/09-settings.png"
+    ],
+    "desktop-light": [
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/01-home.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/02-pay.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/03-receipt.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/04-receive.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/05-swap.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/06-account.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/07-activity.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/08-activity-detail.png",
+      "/Users/zigota/xln/design/screenshots/ui/desktop-light/09-settings.png"
+    ],
+    "mobile-dark": [
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home-bottom.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/02-pay.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt-bottom.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive-bottom.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/05-swap.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/06-account.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/07-activity.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/08-activity-detail.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings-bottom.png"
+    ],
+    "mobile-light": [
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/01-home.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/01-home-bottom.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/02-pay.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/03-receipt.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/03-receipt-bottom.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/04-receive.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/04-receive-bottom.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/05-swap.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/06-account.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/07-activity.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/08-activity-detail.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/09-settings.png",
+      "/Users/zigota/xln/design/screenshots/ui/mobile-light/09-settings-bottom.png"
+    ]
+  }
+}

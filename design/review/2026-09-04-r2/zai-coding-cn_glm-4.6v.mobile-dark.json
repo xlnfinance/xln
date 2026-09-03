@@ -1,0 +1,304 @@
+{
+  "reviewer": "zai-coding-cn/glm-4.6v",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 750,
+        "color": 800,
+        "data_legibility": 900,
+        "layout": 850,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 950
+      },
+      "total": 865,
+      "top_issues": [
+        "Home: The tier legend under the total repeats the three numbers already shown in the bar tooltip; drop it or make it the bar's caption",
+        "Home: The '2 empty hidden' text is too small and low contrast"
+      ],
+      "fixes": [
+        "Home: Remove redundant tier legend or integrate it into the bar tooltip",
+        "Home: Increase contrast and size of '2 empty hidden' text"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home-bottom.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 850,
+        "typography": 800,
+        "color": 850,
+        "data_legibility": 900,
+        "layout": 850,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 950
+      },
+      "total": 875,
+      "top_issues": [
+        "Home-bottom: The '2 empty hidden' text is inconsistent with the top version",
+        "Home-bottom: Recent activity items have inconsistent spacing"
+      ],
+      "fixes": [
+        "Home-bottom: Standardize '2 empty hidden' text across all home views",
+        "Home-bottom: Apply consistent spacing between recent activity items"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/02-pay.png",
+      "scores": {
+        "hierarchy": 900,
+        "premium": 850,
+        "typography": 850,
+        "color": 900,
+        "data_legibility": 950,
+        "layout": 900,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 950
+      },
+      "total": 910,
+      "top_issues": [
+        "Pay: The 'Up to 60,000.00 instantly' text is too small",
+        "Pay: Account bar tooltip is inconsistent with home view"
+      ],
+      "fixes": [
+        "Pay: Increase size of 'Up to 60,000.00 instantly' text",
+        "Pay: Standardize account bar tooltip formatting with home view"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt.png",
+      "scores": {
+        "hierarchy": 950,
+        "premium": 900,
+        "typography": 900,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 900,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 950,
+        "trust": 1000
+      },
+      "total": 940,
+      "top_issues": [
+        "Receipt: The 'vermed by your runtime' text has a typo",
+        "Receipt: The 'Done' button could be more prominent"
+      ],
+      "fixes": [
+        "Receipt: Fix typo to 'verified by your runtime'",
+        "Receipt: Make 'Done' button more visually distinct"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt-bottom.png",
+      "scores": {
+        "hierarchy": 900,
+        "premium": 900,
+        "typography": 900,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 900,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 950,
+        "trust": 950
+      },
+      "total": 930,
+      "top_issues": [
+        "Receipt-bottom: The 'vermed by your runtime' text has a typo",
+        "Receipt-bottom: The payment status indicator is too small"
+      ],
+      "fixes": [
+        "Receipt-bottom: Fix typo to 'verified by your runtime'",
+        "Receipt-bottom: Increase size of payment status indicator"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 900,
+        "typography": 850,
+        "color": 900,
+        "data_legibility": 900,
+        "layout": 900,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 900
+      },
+      "total": 895,
+      "top_issues": [
+        "Receive: The QR code contrast is too high for dark theme",
+        "Receive: The 'receive up to 40,025.00 instantly' text is too small"
+      ],
+      "fixes": [
+        "Receive: Reduce QR code contrast for better dark theme integration",
+        "Receive: Increase size of 'receive up to 40,025.00 instantly' text"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/05-swap.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 850,
+        "typography": 850,
+        "color": 900,
+        "data_legibility": 900,
+        "layout": 900,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 900
+      },
+      "total": 890,
+      "top_issues": [
+        "Swap: The 'Up to 59,975.00 with Hub One' text is too small",
+        "Swap: The swap button could be more prominent"
+      ],
+      "fixes": [
+        "Swap: Increase size of 'Up to 59,975.00 with Hub One' text",
+        "Swap: Make swap button more visually distinct"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/06-account.png",
+      "scores": {
+        "hierarchy": 900,
+        "premium": 900,
+        "typography": 900,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 900,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 950,
+        "trust": 950
+      },
+      "total": 930,
+      "top_issues": [
+        "Account: The legend colors don't match the bar colors",
+        "Account: The 'Show 2 empty lanes' text is too small"
+      ],
+      "fixes": [
+        "Account: Match legend colors to actual bar colors",
+        "Account: Increase size of 'Show 2 empty lanes' text"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/07-activity.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 900,
+        "typography": 900,
+        "color": 900,
+        "data_legibility": 900,
+        "layout": 900,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 900
+      },
+      "total": 900,
+      "top_issues": [
+        "Activity: The '5 movements' text is too small",
+        "Activity: Inconsistent spacing between activity items"
+      ],
+      "fixes": [
+        "Activity: Increase size of '5 movements' text",
+        "Activity: Apply consistent spacing between activity items"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 950,
+        "premium": 950,
+        "typography": 950,
+        "color": 950,
+        "data_legibility": 950,
+        "layout": 950,
+        "visceral_value": 950,
+        "responsive": 950,
+        "consistency": 950,
+        "trust": 1000
+      },
+      "total": 955,
+      "top_issues": [
+        "Activity-detail: The 'From your runtime's committed frames' text is too small",
+        "Activity-detail: The receipt overlay could be more prominent"
+      ],
+      "fixes": [
+        "Activity-detail: Increase size of 'From your runtime's committed frames' text",
+        "Activity-detail: Make receipt overlay more visually distinct"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 900,
+        "typography": 900,
+        "color": 900,
+        "data_legibility": 900,
+        "layout": 900,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 900
+      },
+      "total": 900,
+      "top_issues": [
+        "Settings: The 'embedded' text is too small",
+        "Settings: Inconsistent spacing between settings sections"
+      ],
+      "fixes": [
+        "Settings: Increase size of 'embedded' text",
+        "Settings: Apply consistent spacing between settings sections"
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings-bottom.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 900,
+        "typography": 900,
+        "color": 900,
+        "data_legibility": 900,
+        "layout": 900,
+        "visceral_value": 900,
+        "responsive": 950,
+        "consistency": 900,
+        "trust": 900
+      },
+      "total": 900,
+      "top_issues": [
+        "Settings-bottom: The '1 px = $10' text is too small",
+        "Settings-bottom: The 'Reveal recovery phrase' button could be more prominent"
+      ],
+      "fixes": [
+        "Settings-bottom: Increase size of '1 px = $10' text",
+        "Settings-bottom: Make 'Reveal recovery phrase' button more visually distinct"
+      ]
+    }
+  ],
+  "overall": {
+    "total": 900,
+    "verdict": "The mobile dark variant demonstrates strong visual design with excellent visceral value implementation and high trust factors. The design successfully implements the one-scale bar principle and maintains good consistency across screens. However, there are several typography and hierarchy issues that reduce the premium feel and data legibility in certain areas.",
+    "priority_fixes": [
+      "Standardize typography sizes across all screens, particularly for secondary information",
+      "Improve hierarchy by reducing redundant information and ensuring the eye lands on the most important data first",
+      "Increase contrast and legibility for small text elements",
+      "Fix inconsistent spacing and layout patterns",
+      "Ensure visual consistency of bars, legends, and tooltips across all screens"
+    ]
+  }
+}

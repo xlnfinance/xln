@@ -80,7 +80,7 @@ export function PaymentReceiptSheet() {
 			<div className="state st-settled" style={{ justifyContent: 'center', display: 'flex' }}>
 				Verified by your runtime
 			</div>
-			<button type="button" className="btn ghost" onClick={dismiss} data-testid="receipt-done">
+			<button type="button" className="btn" onClick={dismiss} data-testid="receipt-done">
 				Done
 			</button>
 		</Sheet>

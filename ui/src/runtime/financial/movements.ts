@@ -144,6 +144,9 @@ export const usePaymentIntents = create<IntentState>((set, get) => ({
 const RAW_SWAP_LOG = /^(?:📊 Swap offer|📨 Swap cancel requested)/;
 const DIRECT_PAYMENT_TYPES = new Set(['directPayment', 'direct_payment']);
 const MERGE_WINDOW = 6;
+// Both sides set their line in their own frames, often many frames apart; they are one event to the user.
+const SETTING_MERGE_WINDOW = 40;
+const PAIRED_SETTINGS = new Set(['set_credit_limit']);
 // Opening a token lane is plumbing under a credit limit or a payment, not a movement.
 const PLUMBING_TYPES = new Set(['add_delta']);
 
@@ -273,11 +276,11 @@ export function walletMovements(
 		}
 	};
 	// Both sides of a bilateral frame commit the same entry; fold copies that land within a few frames.
-	const nearKey = (keys: Iterable<string>, base: string, height: number): string | undefined => {
+	const nearKey = (keys: Iterable<string>, base: string, height: number, window = MERGE_WINDOW): string | undefined => {
 		for (const key of keys) {
 			if (!key.startsWith(`${base}@`)) continue;
 			const anchor = Number(key.slice(key.lastIndexOf('@') + 1));
-			if (Math.abs(anchor - height) <= MERGE_WINDOW) return key;
+			if (Math.abs(anchor - height) <= window) return key;
 		}
 		return undefined;
 	};
@@ -295,10 +298,11 @@ export function walletMovements(
 			const single = singleMovement(event, kind);
 			if (!onOwnAccount(single.counterpartyId)) continue;
 			const base = `${kind}:${rawType}:${single.counterpartyId ?? ''}:${single.tokenId ?? ''}:${single.amount?.toString() ?? ''}:${event.orderId ?? ''}`;
-			const near = nearKey(singles.keys(), base, single.height);
+			const near = nearKey(singles.keys(), base, single.height, PAIRED_SETTINGS.has(rawType) ? SETTING_MERGE_WINDOW : MERGE_WINDOW);
 			if (near) {
 				const kept = singles.get(near)!;
 				kept.events.push(event);
+				if (PAIRED_SETTINGS.has(rawType) && kept.events.length === 2) kept.detail = 'both ways';
 				continue;
 			}
 			singles.set(`${base}@${single.height}`, single);

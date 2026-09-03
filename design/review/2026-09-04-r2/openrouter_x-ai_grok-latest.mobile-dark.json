@@ -1,0 +1,356 @@
+{
+  "reviewer": "openrouter/x-ai/grok-latest",
+  "screens": [
+    {
+      "file": "01-home.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 540,
+        "typography": 780,
+        "color": 710,
+        "data_legibility": 680,
+        "layout": 700,
+        "visceral_value": 340,
+        "responsive": 810,
+        "consistency": 600,
+        "trust": 700
+      },
+      "total": 668,
+      "top_issues": [
+        "Home: the On-chain $0.00 / Reserve $1,500.00 / Accounts $10,000.00 legend under the total restates the composition bar; On-chain $0.00 is dead chrome",
+        "Home: 'Instant: send up to $60,000.00, receive up to $40,000.00' duplicates the Hub One captions two scrolls below",
+        "Home: the USDC row draws the same green/blue bar as the total (one token), so two heroes say $11,500",
+        "Home + Account + Pay: at Settings 1 px = $10 the Hub One 60k/40k bar clips both halves to the card edges, so size lives only in captions",
+        "Home + Account: the 'hub' chip beside Hub One is a second label next to the name"
+      ],
+      "fixes": [
+        "Home: delete the three-swatch legend; if needed, one quiet caption 'Reserve $1,500 · Accounts $10,000' and omit $0 tiers",
+        "Home: delete the Instant send/receive line; the account row is the capacity statement",
+        "Home: on a single-token book, do not repeat the total composition bar on the USDC row — amount + chevron only",
+        "Home/Account/Pay: either default scale so 60k send is not full-clip on a 390 px phone (≈1 px = $200) or keep $10 and add an overflow tick plus remainder numeral",
+        "Home/Account: drop the hub chip; avatar + 'Hub One' is enough"
+      ]
+    },
+    {
+      "file": "01-home-bottom.png",
+      "scores": {
+        "hierarchy": 600,
+        "premium": 500,
+        "typography": 690,
+        "color": 700,
+        "data_legibility": 700,
+        "layout": 650,
+        "visceral_value": 360,
+        "responsive": 750,
+        "consistency": 620,
+        "trust": 540
+      },
+      "total": 611,
+      "top_issues": [
+        "Home bottom + Activity: two identical 'Credit limit updated · 50,000.00 USDC' rows read as a duplicate-event bug",
+        "Home bottom: RECENT is a stroked card with hairline rules; Activity (07) is loose rows — same list, two skins",
+        "Home bottom: '+ Open account' is a large filled pill for a rare action, competing with Hub One +10,000.00",
+        "Home bottom: recent rows have no time; 'updated' / 'created' dots are the only meta"
+      ],
+      "fixes": [
+        "Collapse duplicate credit-limit updates to one row with the latest limit",
+        "One activity-row component: no enclosing card on Home RECENT, same spacing as Activity",
+        "Open account: 13 px text button, not a 44 pt filled pill",
+        "Each recent row: quiet HH:MM under the counterparty; drop 'updated'/'created' status dots"
+      ]
+    },
+    {
+      "file": "02-pay.png",
+      "scores": {
+        "hierarchy": 740,
+        "premium": 480,
+        "typography": 630,
+        "color": 730,
+        "data_legibility": 650,
+        "layout": 600,
+        "visceral_value": 280,
+        "responsive": 540,
+        "consistency": 580,
+        "trust": 760
+      },
+      "total": 599,
+      "top_issues": [
+        "Pay: Meridian Desk appears three times (mint ✓, title, route chip) and the 80-char hex wraps two lines",
+        "Pay: Arrives Instantly and Delivery Instant Change are the same fact twice",
+        "Pay + Receive + Swap + Account: the Home/Activity/Settings tab bar stays up on a back-stack screen and sits under the primary CTA",
+        "Pay: the amount glyph is '25' while 'This payment' and the CTA are 25.00",
+        "Pay: at 1 px = $10 the $25 'This payment' mark is ~3 px, invisible on the Hub One bar"
+      ],
+      "fixes": [
+        "Pay To: one name + 0x499d…f2bd on a single line; delete the mint '✓ Meridian Desk' duplicate",
+        "Pay: keep Arrives · Instantly; delete Delivery and hang Change off Arrives",
+        "Hide the tab bar on Pay, Receive, Swap, Account, and every sheet",
+        "Amount field always 25.00 with dimmed decimals, matching Home",
+        "Pay: show the $25 as a hatched delta callout plus before/after 10,000.00 → 9,975.00, not a 3 px tick"
+      ]
+    },
+    {
+      "file": "03-receipt.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 470,
+        "typography": 700,
+        "color": 650,
+        "data_legibility": 600,
+        "layout": 680,
+        "visceral_value": 180,
+        "responsive": 800,
+        "consistency": 450,
+        "trust": 560
+      },
+      "total": 588,
+      "top_issues": [
+        "Receipt + Receive + Swap: sticky toast 'Payment submitted: 25.00 USDC to Meridian Desk' repeats the hero, contradicts PAID, and leaks onto other routes",
+        "Receipt: 'Instantly · 2698 ms' denies Instantly and is engineer-brag",
+        "Receipt: Done is a low-contrast gray pill that looks disabled",
+        "Live receipt Frame #42 vs Activity-detail Frame #43 for the same −25 USDC; proof exists only on the Activity sheet",
+        "Receipt: no bar or before/after for the $25 debit while Home behind already shows $11,475.00"
+      ],
+      "fixes": [
+        "Delete the global payment toast; the sheet is the confirmation",
+        "Settled value: 'Instantly' or '2.7s', never both",
+        "Done: primary indigo, same height as Pay 25.00 USDC",
+        "One receipt object everywhere: amount, counterparty, Frame #, proof hash, 'from committed frames' — use the Activity-detail kv, not this PAID/submitted hybrid",
+        "In-sheet Hub One bar with a 25-wide hatch and 9,975.00 end state"
+      ]
+    },
+    {
+      "file": "03-receipt-bottom.png",
+      "scores": {
+        "hierarchy": 750,
+        "premium": 470,
+        "typography": 700,
+        "color": 640,
+        "data_legibility": 590,
+        "layout": 650,
+        "visceral_value": 170,
+        "responsive": 790,
+        "consistency": 450,
+        "trust": 560
+      },
+      "total": 577,
+      "top_issues": [
+        "Receipt-bottom: the sheet covers the only useful post-pay evidence (USDC 11,475.00 and Hub One +9,975.00) and replaces it with the same PAID block",
+        "Receipt-bottom: Done still reads disabled against the dimmed balances",
+        "Receipt-bottom: grab-handle sheet plus X plus Done is three dismissals for one confirmation"
+      ],
+      "fixes": [
+        "Anchor the sheet lower so the updated Hub One bar stays visible above the fold, or peek 72 px of that row",
+        "Single dismiss: indigo Done; keep X, drop the grab handle or drop Done",
+        "Same receipt object as 03-receipt / 08-activity-detail"
+      ]
+    },
+    {
+      "file": "04-receive.png",
+      "scores": {
+        "hierarchy": 770,
+        "premium": 430,
+        "typography": 660,
+        "color": 680,
+        "data_legibility": 500,
+        "layout": 580,
+        "visceral_value": 220,
+        "responsive": 560,
+        "consistency": 420,
+        "trust": 450
+      },
+      "total": 527,
+      "top_issues": [
+        "Receive: three copy verbs (Copy invoice, Copy link, Copy xln:// app link) for one request",
+        "Receive: YOUR ENTITY ID dumps 80 hex chars across two lines",
+        "Receive: the blue bar under 0.00 is full-width, so optional $0 reads as 'full'",
+        "Receive: 0.00 for an optional amount looks like a zero invoice, not 'any'"
+      ],
+      "fixes": [
+        "One primary Copy link; Invoice and xln:// live in a ⋯ sheet",
+        "Entity id: 0xf581…476b, copy-on-tap, 12 px muted",
+        "If amount is empty, draw no bar (0 px), never a clipped 40,025 fade",
+        "Empty amount placeholder: 'Any', not 0.00"
+      ]
+    },
+    {
+      "file": "05-swap.png",
+      "scores": {
+        "hierarchy": 480,
+        "premium": 360,
+        "typography": 640,
+        "color": 580,
+        "data_legibility": 340,
+        "layout": 400,
+        "visceral_value": 120,
+        "responsive": 500,
+        "consistency": 430,
+        "trust": 300
+      },
+      "total": 415,
+      "top_issues": [
+        "Swap: You pay 100 / You receive 0.00 WETH with a muted Swap and no rate — reads as a broken quote, not a hold",
+        "Swap: Same network / Across networks collides with the title and truncates the control",
+        "Swap: 'sandbox' chip on the USDC picker is environment chrome in the money path",
+        "Swap: ~50% of the viewport is empty; no route, fee, or bar (Pay has all three)"
+      ],
+      "fixes": [
+        "Block the pay-side amount until a quote exists; skeleton the receive amount, never 0.00 next to 100",
+        "Network mode: full-width segmented control under the title, 44 pt height",
+        "Drop the sandbox chip; network/env lives in Settings",
+        "Reuse Pay's route / fee / Hub One bar block under the pair; do not leave a dead 400 pt void"
+      ]
+    },
+    {
+      "file": "06-account.png",
+      "scores": {
+        "hierarchy": 710,
+        "premium": 520,
+        "typography": 730,
+        "color": 380,
+        "data_legibility": 660,
+        "layout": 600,
+        "visceral_value": 360,
+        "responsive": 700,
+        "consistency": 440,
+        "trust": 640
+      },
+      "total": 574,
+      "top_issues": [
+        "Account: legend is collateral=green, credit line=purple, owed=amber, in flight=hatch — the bar is only amber|indigo, and the product tokens are purple collateral / amber credit",
+        "Account: the whole left half is solid amber to the notch even though owed is $9,975 of $59,975 send",
+        "Account: 0x5725acab…ff8d47 is truncated here while Pay dumps the full Meridian hex — two address formats",
+        "Account: Extend credit is equal-weight with Pay on a screen whose bar already fails to show unused credit"
+      ],
+      "fixes": [
+        "Legend = bar = intent: purple collateral, amber credit, indigo receive-side, mint settled, hatch holds; omit unused swatches",
+        "Segment the left half: amber $9,975 owed + credit remainder, with overflow tick if clipped",
+        "One address format everywhere: 0x5725…8d47, copy-on-tap",
+        "Demote Extend credit to a text action under the ledger; keep Pay as the only filled tile"
+      ]
+    },
+    {
+      "file": "07-activity.png",
+      "scores": {
+        "hierarchy": 730,
+        "premium": 540,
+        "typography": 680,
+        "color": 650,
+        "data_legibility": 620,
+        "layout": 520,
+        "visceral_value": 160,
+        "responsive": 420,
+        "consistency": 580,
+        "trust": 600
+      },
+      "total": 550,
+      "top_issues": [
+        "Activity: filter chip 'Accou' is clipped; five filters for five rows",
+        "Activity: selected All is a white pill, the only white fill in the dark app besides the QR",
+        "Activity: no timestamps; TODAY is the only time cue",
+        "Activity: +10,000.00 vs −25.00 have no bars, so the one-scale principle is absent on the screen that would prove it"
+      ],
+      "fixes": [
+        "Filter row: horizontal scroll-snap with 16 px peek of the next chip, or drop Settlement/Accounts until those lists exist",
+        "Selected filter: indigo fill, white 13 px label — not a white pill",
+        "Each row: HH:MM under the counterparty",
+        "A 4 pt-tall absolute-scale bar under each money row so 10,000 vs 25 is visible at 1 px = $N"
+      ]
+    },
+    {
+      "file": "08-activity-detail.png",
+      "scores": {
+        "hierarchy": 750,
+        "premium": 680,
+        "typography": 660,
+        "color": 740,
+        "data_legibility": 690,
+        "layout": 730,
+        "visceral_value": 160,
+        "responsive": 810,
+        "consistency": 380,
+        "trust": 740
+      },
+      "total": 634,
+      "top_issues": [
+        "Activity-detail: Time 00:27:51 has no date and reads as a duration or stopwatch",
+        "Activity-detail: To jams 'Meridian Desk 0x499d0d…f2bd' onto one row",
+        "Activity-detail: '5 committed entries' is jargon next to Frame #43",
+        "Activity-detail: −25.00 USDC is one weight; no bar, no $ dimming, weaker than the Home total treatment"
+      ],
+      "fixes": [
+        "Time: '27 May, 00:27' (or local 12-hour with date); never a bare 00:27:51",
+        "To: name on the value line, hash on a second 12 px muted line",
+        "Drop 'Frames · 5 committed entries'; keep 'Frame #43' and the mint 'From your runtime's committed frames' footer",
+        "Amount: −25.00 with dimmed decimals + small USDC, plus a 25-wide hatch on a Hub One bar"
+      ]
+    },
+    {
+      "file": "09-settings.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 580,
+        "typography": 750,
+        "color": 690,
+        "data_legibility": 740,
+        "layout": 600,
+        "visceral_value": 520,
+        "responsive": 480,
+        "consistency": 540,
+        "trust": 720
+      },
+      "total": 642,
+      "top_issues": [
+        "Settings: '1 px = $10' is in the SCALE header and again beside the slider",
+        "Settings + Activity: the $1000 chip is clipped the same way as Accou",
+        "Settings: selected $10 is a white pill; selected Theme Dark is a quiet outline — two selected states",
+        "Settings: default 1 px = $10 makes a 50k credit line clip on a ~390 px phone (viewport ≈ $3,900), so the control explains a principle the other screens cannot show"
+      ],
+      "fixes": [
+        "Show 1 px = $10 once, right of the slider; empty the SCALE header",
+        "Scale chips: scroll-snap, 16 px peek of $1000, 8 px gap",
+        "Selected scale chip: indigo fill, matching the Home-visibility toggles, not white",
+        "Default scale to a value where Home send 60k is not double-clipped, or ship overflow ticks on every bar before this default"
+      ]
+    },
+    {
+      "file": "09-settings-bottom.png",
+      "scores": {
+        "hierarchy": 500,
+        "premium": 340,
+        "typography": 560,
+        "color": 660,
+        "data_legibility": 540,
+        "layout": 620,
+        "visceral_value": 80,
+        "responsive": 680,
+        "consistency": 460,
+        "trust": 380
+      },
+      "total": 482,
+      "top_issues": [
+        "Settings bottom: Vault row is label 'Sandbox' / value 'sandbox' — broken duplicate copy",
+        "Settings bottom: Mode embedded, Runtime id hex dump, and Frame #43 are developer fields in the user vault",
+        "Settings bottom: Reveal recovery phrase is a persistent sibling of Lock, one tap from the seed",
+        "Settings bottom: Runtime id wraps 66 hex chars as body text"
+      ],
+      "fixes": [
+        "Vault: one status line 'Sandbox', not a key/value of the same word",
+        "Move Mode / Runtime id / Frame into a closed Developer group; do not sit them on the Lock row",
+        "Reveal recovery phrase: nested screen with re-auth, never a settings-row button next to Lock",
+        "Runtime id: 0xf39f…2266, copy-on-tap, 12 px muted"
+      ]
+    }
+  ],
+  "overall": {
+    "total": 572,
+    "verdict": "The home total (dimmed cents, indigo Pay) and the Activity committed-frame sheet are the only shipping-grade moments; everywhere else the 1 px = $N bar language collapses into clipped full-width fades and captions. Stacked flows keep a tab bar and a stale 'Payment submitted' toast, Account's color legend lies about the bar, and the same −25 USDC has two receipts (PAID / Frame #42 vs proof / Frame #43).",
+    "priority_fixes": [
+      "Draw every money bar on one 1 px = $N scale with an overflow tick; show the $25 pay as a hatch/delta on Hub One (Home, Pay, Account, both receipts) and change the default scale so 50–60k credit lines are not full-clip on a 390 px phone",
+      "Kill the sticky 'Payment submitted…' toast so it cannot sit inside the receipt or on Receive/Swap",
+      "Hide the tab bar on Pay/Receive/Swap/Account/sheets; ship one receipt (Activity-detail kv + proof + one frame number, indigo Done, no 2698 ms, no 'submitted' under PAID)",
+      "Make Account legend = bar = product tokens (purple collateral, amber credit, indigo receive, mint settled, hatch holds) and segment owed vs credit on the left half instead of painting the whole send side amber",
+      "Fix clipped chip rows (Activity 'Accou', Settings '$1000') with scroll-snap + 16 px peek; drop hub/sandbox chips; delete Home's $0 On-chain legend and Instant send/receive line"
+    ]
+  }
+}

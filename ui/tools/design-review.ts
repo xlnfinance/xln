@@ -8,6 +8,7 @@
  *                                                      # 2. ask the reviewers
  *   → design/review/<date>/<model>.<variant>.json + summary.md
  *
+ * `--resummarize` rebuilds summary.md from the JSON already in the run dir.
  * Default reviewers (all accept images, all cheap): GLM-4.6V on the zai plan,
  * Gemini Flash and Grok on OpenRouter. pi is `-p --mode json`; the model's
  * final message is parsed as JSON per design/review/rubric.md.
@@ -94,7 +95,8 @@ const ATTEMPTS = 2;
 async function callReviewer(model: string, variant: { name: string; files: string[] }, attempt: number): Promise<{ stdout: string; stderr: string; code: number }> {
 	const prompt = `Review the attached wallet screenshots (variant: ${variant.name}) exactly per the attached rubric. Reply with the JSON object only, nothing else.`;
 	// Low thinking: the answer is the scored JSON, not a chain of reasoning; some models otherwise spend the output budget thinking.
-	const args = ['-p', '--mode', 'json', '--model', model, '--thinking', 'low', ...variant.files.map(f => `@${f}`), `@${RUBRIC}`, prompt];
+	// No tools: the reviewer must answer inline. With tools on, some models write the JSON to a file and reply with nothing.
+	const args = ['-p', '--mode', 'json', '--no-tools', '--model', model, '--thinking', 'low', ...variant.files.map(f => `@${f}`), `@${RUBRIC}`, prompt];
 	const proc = Bun.spawn(['pi', ...args], { cwd: REPO_ROOT, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' });
 	const timer = setTimeout(() => proc.kill(), REVIEW_TIMEOUT_MS);
 	const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
@@ -170,8 +172,21 @@ function summarize(results: Array<{ model: string; variant: string; review: Revi
 	return lines.join('\n');
 }
 
+/** Rebuild summary.md from the review JSON files already in the run directory. */
+async function resummarize(): Promise<void> {
+	const results: Array<{ model: string; variant: string; review: Review }> = [];
+	for (const file of (await readdir(runDir)).filter(f => f.endsWith('.json')).sort()) {
+		const review = JSON.parse(await readFile(join(runDir, file), 'utf8')) as Review;
+		const variant = file.replace(/\.json$/, '').split('.').pop() ?? '';
+		results.push({ model: review.reviewer, variant, review });
+	}
+	await writeFile(join(runDir, 'summary.md'), summarize(results));
+	process.stdout.write(`summary rebuilt from ${results.length} reviews → ${join(runDir, 'summary.md')}\n`);
+}
+
 async function main(): Promise<void> {
 	await mkdir(runDir, { recursive: true });
+	if (process.argv.includes('--resummarize')) return resummarize();
 	const variants = await listVariants();
 	const jobs = models.flatMap(model => variants.map(variant => ({ model, variant })));
 	process.stdout.write(`${jobs.length} review calls (${models.length} models × ${variants.length} variants) → ${runDir}\n`);

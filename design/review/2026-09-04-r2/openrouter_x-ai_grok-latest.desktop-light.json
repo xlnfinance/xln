@@ -1,0 +1,270 @@
+{
+  "reviewer": "openrouter/x-ai/grok-latest",
+  "screens": [
+    {
+      "file": "01-home.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 580,
+        "typography": 680,
+        "color": 690,
+        "data_legibility": 650,
+        "layout": 730,
+        "visceral_value": 260,
+        "responsive": 740,
+        "consistency": 650,
+        "trust": 650
+      },
+      "total": 639,
+      "top_issues": [
+        "Home + Pay + Account + Swap: bilateral bars are not on one absolute scale — Home's $11,500 composition bar is roughly the same drawn length as Hub One's $60,000 / $40,000 capacity bar; 1 px = $N from Settings is not applied.",
+        "Home + Pay + Account + Swap: left half is labeled send-up-to 60,000.00 (59,975.00 later) but draws shorter than the right half labeled receive-up-to 40,000.00 — bigger money is not a bigger bar.",
+        "Home desktop: the On-chain / Reserve / Accounts legend under the total repeats the three numbers already encoded in the composition bar; the Instant send/receive line then repeats the same 60k/40k already on the Hub One card.",
+        "Home + Activity: two identical 'Credit limit updated · with Hub One · 50,000.00 USDC' rows cannot be told apart (no time, no old→new, no frame).",
+        "Home BALANCES: 11,500.00 has no $ while Total balance is $11,500.00; Accounts card shows +10,000.00 with currency only in the tiny USDC caption."
+      ],
+      "fixes": [
+        "Draw every bar at the Settings scale with a hard clip/fade when it overflows the column; do not fit-to-width. At 1 px = $10, $11,500 = 1,150 px clipped; $60,000 send = 6,000 px clipped — the $11.5k bar must read as a stub next to capacity.",
+        "Left/right halves: length(left) / sendCapacity === length(right) / receiveCapacity, notch at 0. 60k left must be 1.5× 40k right.",
+        "Delete the three-color legend under Total balance. Keep one caption: 'On-chain $0 · Reserve $1,500 · Accounts $10,000' as the bar's own label, or only on hover.",
+        "Replace '2 empty hidden' with a text button 'Show 2 empty' in the same 12px caption style as Settings section labels.",
+        "One money format everywhere: $11,500.00 on Total, Balances, Accounts, and Recents when the unit is USD-pegged; otherwise 11,500.00 USDC with tabular figures, never mixed."
+      ]
+    },
+    {
+      "file": "02-pay.png",
+      "scores": {
+        "hierarchy": 740,
+        "premium": 550,
+        "typography": 630,
+        "color": 700,
+        "data_legibility": 600,
+        "layout": 730,
+        "visceral_value": 300,
+        "responsive": 770,
+        "consistency": 620,
+        "trust": 760
+      },
+      "total": 640,
+      "top_issues": [
+        "Pay desktop: route is drawn three times — You→Hub One→Meridian Desk chips, the Route/Fee/Arrives table, and the right-hand ROUTE timeline.",
+        "Pay Amount card: a stray bullet under 'This payment' with no icon/label; reads as a broken row.",
+        "Pay: fee disagrees with itself — ROUTE says 'fee 0.000025', table says 0.000050 USDC.",
+        "Pay To: full 40-byte hex on one line (0x499d0dc46b549f…ef2bd) in 12px gray; it is a dump, not a field.",
+        "Pay Before/After: the two Hub One bars are visually identical for a $25 delta, so the comparison does no work (honest at true scale, but then the second bar is decoration)."
+      ],
+      "fixes": [
+        "Keep the right ROUTE timeline; delete the chip row and the Route table row. Fee, Arrives, Delivery stay as a 3-row spec under Amount.",
+        "Remove the orphan bullet. 'This payment 25.00' should be one caption+tabular pair, 13/15px, no glyph.",
+        "One fee: show 0.000025 USDC (or 0.000050) in both the timeline and the spec; never both.",
+        "To card: Meridian Desk + copyable 0x499d…f2bd (6+4), 13px, trailing copy glyph. Full hex only in a click-to-expand.",
+        "Before/After: keep one bar (After). Put '−25.00' on the notch and '9,975.00 owes you' as the headline; drop the duplicate Before bar."
+      ]
+    },
+    {
+      "file": "03-receipt.png",
+      "scores": {
+        "hierarchy": 810,
+        "premium": 710,
+        "typography": 740,
+        "color": 770,
+        "data_legibility": 690,
+        "layout": 710,
+        "visceral_value": 400,
+        "responsive": 660,
+        "consistency": 560,
+        "trust": 630
+      },
+      "total": 668,
+      "top_issues": [
+        "Receipt + Receive + Swap + Account: toast 'Payment submitted: 25.00 USDC to Meridian Desk' stays up after the modal already says PAID / Settled — two states for one payment.",
+        "Receipt Frame #40 vs Activity detail / Settings Frame #41 for the same −25.00 USDC payment.",
+        "Receipt: 'Instantly · 2041ms' is a debug timer in the settled row; Instant and 2.0s are the product words.",
+        "Receipt desktop: a phone-sized centered sheet plus a toast sitting on the same vertical axis; Done and the X both dismiss."
+      ],
+      "fixes": [
+        "Dismiss the submitted toast when the committed receipt opens. If a toast is needed, 'Paid 25.00 USDC to Meridian Desk' once, then never again on Receive/Swap/Account.",
+        "One frame id per payment: the receipt, the activity panel, and Settings Frame must print the same #.",
+        "Settled row: 'Instant' in mint; move '2.041s' next to Proof as secondary evidence.",
+        "Desktop receipt: 480px modal, no second dismiss. X or Done, not both. Keep Proof + 'Verified by your runtime'."
+      ]
+    },
+    {
+      "file": "04-receive.png",
+      "scores": {
+        "hierarchy": 680,
+        "premium": 530,
+        "typography": 630,
+        "color": 650,
+        "data_legibility": 560,
+        "layout": 430,
+        "visceral_value": 240,
+        "responsive": 330,
+        "consistency": 490,
+        "trust": 510
+      },
+      "total": 505,
+      "top_issues": [
+        "Receive desktop: a single centered phone column (QR, amount, note, hex, three copy actions) on a wide canvas — Pay's two-column pattern is abandoned.",
+        "Receive Amount 0.00 sits on a full-width indigo fade that reads as a money bar for zero; it is neither the $0 amount nor a labeled send/receive capacity bar with a notch.",
+        "Receive: three copy CTAs — Copy invoice, Copy link, Copy xln:// app link — with no hierarchy of what the payer should actually open.",
+        "Receive: YOUR ENTITY ID dumps the full 0xf581ad…e476b string with no copy control on the field itself."
+      ],
+      "fixes": [
+        "Reuse Pay's two-column grid: left QR + amount + note + one primary copy; right 'YOUR ACCOUNTS' with the Hub One send/receive bar at the same px scale.",
+        "If amount is 0.00, draw no bar. If the line is 'receive up to 40,025', use the standard notched bilateral bar, not a decorative underline.",
+        "One primary: 'Copy link'. Invoice and xln:// as 13px text links under it, not a second 48px button.",
+        "Entity id: 0xf581…476b + copy glyph, 13px. Kill the raw 64-char row."
+      ]
+    },
+    {
+      "file": "05-swap.png",
+      "scores": {
+        "hierarchy": 610,
+        "premium": 510,
+        "typography": 660,
+        "color": 630,
+        "data_legibility": 390,
+        "layout": 590,
+        "visceral_value": 280,
+        "responsive": 610,
+        "consistency": 550,
+        "trust": 350
+      },
+      "total": 518,
+      "top_issues": [
+        "Swap: You pay 100 USDC / You receive 0.00 WETH with a still-visible Swap CTA — no rate, no min received, no 'no quote' reason. Unsafe to move money.",
+        "Swap CTA is washed lavender (#B8C0FF-like) on light gray; it is neither a disabled state with a reason nor the indigo Pay treatment.",
+        "Swap: 100 USDC has no bar; Receive's 0.00 had a bar; Hub One card on the right is a stub over a desert of empty canvas.",
+        "Swap copy: 'Filled amounts move Δ, nothing moves on-chain.' is protocol jargon in the only explanation."
+      ],
+      "fixes": [
+        "No quote: disable Swap, 40% opacity, caption under the button 'No WETH quote from Hub One'. Never show 0.00 as a receivable amount.",
+        "When a quote exists: You receive N.NNNN WETH, rate 1 USDC = x WETH, min received, then indigo 'Swap 100.00 USDC'.",
+        "Draw the 100 USDC you-pay amount as a bar at the same 1 px = $N as Home; keep the Hub One capacity bar on that same scale.",
+        "Replace the Δ sentence with: 'This order sits on your Hub One account. Nothing is broadcast on-chain until it fills.'"
+      ]
+    },
+    {
+      "file": "06-account.png",
+      "scores": {
+        "hierarchy": 710,
+        "premium": 570,
+        "typography": 690,
+        "color": 530,
+        "data_legibility": 630,
+        "layout": 490,
+        "visceral_value": 230,
+        "responsive": 390,
+        "consistency": 550,
+        "trust": 610
+      },
+      "total": 540,
+      "top_issues": [
+        "Account desktop: Hub One is a narrow centered stack (actions + one token card) — same unused-width failure as Receive.",
+        "Account legend (collateral green / credit line blue / owed amber / in flight hatch) is a 4-color key for a bar that is flat amber|blue; collateral 0.00 and in-flight are not drawn, and owed +9,975 is not a segment of the 59,975 left half.",
+        "Account: +9,975.00 'they owe you' is the headline, but the bar's amber reads as the whole send capacity, so the owed slice is invisible.",
+        "Account actions: Pay / Extend credit / Swap as three equal 48px cards; Extend credit is the only account-specific verb and is visually equal to Swap."
+      ],
+      "fixes": [
+        "Two-column: left = identity, actions, USDC lane; right = ledger preview + last 5 movements with this counterparty (same master-detail as Activity).",
+        "Drop the four-swatch legend, or actually paint the left half as stacked segments: owed 9,975 amber + your credit remaining 50,000 indigo + collateral 0, hatch in-flight. Right half = their remaining credit 40,025.",
+        "Put 'they owe you +9,975.00' as a labeled tick on the left half, not only as a headline that the bar ignores.",
+        "Primary: Pay (indigo). Extend credit and Swap as ghost buttons, 44px, not a third twin of Pay."
+      ]
+    },
+    {
+      "file": "07-activity.png",
+      "scores": {
+        "hierarchy": 660,
+        "premium": 630,
+        "typography": 710,
+        "color": 740,
+        "data_legibility": 630,
+        "layout": 690,
+        "visceral_value": 170,
+        "responsive": 760,
+        "consistency": 690,
+        "trust": 610
+      },
+      "total": 629,
+      "top_issues": [
+        "Activity desktop: right column is an empty 'Select a movement to see its receipt.' card while −25.00 Sent is sitting right there — master-detail with no default selection.",
+        "Activity list: −25.00 and +10,000.00 are the same row height, same type size, same mint 'settled' — no bar, so the $10k is not bigger than $25.",
+        "Activity filters: All is a black pill on a light canvas (heavy, off-accent); Settlement as a filter name collides with the settled status on payment rows."
+      ],
+      "fixes": [
+        "On desktop load, select the latest movement and open its receipt in the right column (the 08 state). Empty copy only when the filtered list is empty.",
+        "Each payment row gets a 4px-tall bar at 1 px = $N before the amount: +10,000.00 is 400× the −25.00 mark. Non-money events (credit limit, opened) get no bar.",
+        "All = indigo outline or 13px medium, not black fill. Rename the filter 'On-chain' or 'Settlements' so it does not equal the mint 'settled' cue."
+      ]
+    },
+    {
+      "file": "08-activity-detail.png",
+      "scores": {
+        "hierarchy": 770,
+        "premium": 690,
+        "typography": 660,
+        "color": 750,
+        "data_legibility": 610,
+        "layout": 770,
+        "visceral_value": 190,
+        "responsive": 800,
+        "consistency": 550,
+        "trust": 690
+      },
+      "total": 648,
+      "top_issues": [
+        "Activity detail Time is '00:27:40' with no date or timezone — it reads as a stopwatch, not a payment time; a 'just now' caption is also stranded under the list.",
+        "Activity detail vs Receipt: Frame #41 vs #40; Proof ellipsis …b19265 vs …9265; title PAYMENT · SETTLED vs PAID — same movement, three encodings.",
+        "Activity detail To row crams 'Meridian Desk 0x499d0d…f2bd' into one line; Proof and address are not copyable.",
+        "Detail panel has no bar for −25.00, so the receipt still does not participate in visceral scale."
+      ],
+      "fixes": [
+        "Time: 'Today, 00:27:40 UTC' (or local). Delete the orphan 'just now' under the list.",
+        "Receipt modal and this panel share one spec: amount, counterparty, Via, Frame #, time, Proof, 'From your runtime's committed frames'. Same #, same truncation (8+6).",
+        "To / Proof: trailing copy glyph, 13px tabular hex. Name and hex on separate rows if needed.",
+        "Under −25.00 USDC, a 4px bar at 1 px = $N (2.5 px at $10 — so at this scale show a 1px tick plus the numeric; do not stretch it)."
+      ]
+    },
+    {
+      "file": "09-settings.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 750,
+        "typography": 740,
+        "color": 780,
+        "data_legibility": 710,
+        "layout": 720,
+        "visceral_value": 490,
+        "responsive": 740,
+        "consistency": 690,
+        "trust": 690
+      },
+      "total": 711,
+      "top_issues": [
+        "Settings SCALE: '1 px = $10' is printed three times (section header right, beside the slider, and on the $10 chip) — the one unique control in the product is noisy.",
+        "Settings: the scale slider has no sample bar, so the user cannot see 100 px = $1,000 before Home/Pay fail to honor it.",
+        "Settings VAULT: label 'Sandbox' with value 'sandbox'; Reveal recovery phrase and Lock are equal gray pills — recovery is a dangerous peer of Lock.",
+        "Settings HOME toggles can hide On-chain / Reserve / Accounts with no preview of how Total balance will change."
+      ],
+      "fixes": [
+        "One readout: '1 px = $10' to the right of the slider. Delete the duplicate in the SCALE header.",
+        "Under the presets, draw a 120 px sample bar labeled '$1,200 at this scale' plus a 12 px tick. This is the only place a bar may be a legend.",
+        "Sandbox: single line 'Vault · sandbox'. Recovery phrase behind a confirm; Lock as the only always-visible footer button.",
+        "Toggling a HOME layer live-updates a 40px composition bar in the section so hiding Reserve immediately drops $1,500 from the sample total."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 611,
+    "verdict": "Light desktop is an acceptable two-column shell (Home, Pay, Activity) with calm type and a real scale control, but it does not ship the product thesis: bars fit their cards, 60k draws shorter than 40k, and Receive/Account are phone columns. Trust is then spent on a leftover 'submitted' toast, a 0.00 Swap quote, and Frame #40 vs #41.",
+    "priority_fixes": [
+      "Apply 1 px = $N everywhere with clip-not-stretch; left send half must be longer than right receive half whenever sendCapacity > receiveCapacity (Home, Pay, Account, Swap).",
+      "Kill the 'Payment submitted' toast the moment the receipt is PAID/Settled, and never replay it on Receive/Swap/Account.",
+      "Give Receive and Account the Pay/Activity two-column desktop grid; stop centering a 420px phone stack.",
+      "Block Swap when You receive is 0.00 — disabled CTA + 'No quote' — and never show a lavender button that looks tappable.",
+      "One frame id and one money format: Receipt/Activity/Settings share Frame #; $ vs USDC vs +10,000.00 stop mixing on Home."
+    ]
+  }
+}

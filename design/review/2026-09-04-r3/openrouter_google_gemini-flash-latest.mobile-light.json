@@ -1,0 +1,354 @@
+{
+  "reviewer": "openrouter/google/gemini-flash-latest",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/01-home.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 760,
+        "typography": 810,
+        "color": 780,
+        "data_legibility": 790,
+        "layout": 780,
+        "visceral_value": 770,
+        "responsive": 800,
+        "consistency": 820,
+        "trust": 830
+      },
+      "total": 798,
+      "top_issues": [
+        "Home: the three-part balance breakdown ('On-chain $0.00', 'Reserve $1,500.00', 'Accounts $10,000.00') uses tiny square indicators with weak visual association to the segmented bar directly above it.",
+        "Home: the card background (#FFFFFF) against the app canvas (#F8FAFC / #F1F5F9) has very low edge separation without a crisp border or elevation, making card boundaries look washed out in sunlight.",
+        "Home: the 'Instant: send up to $60,000.00, receive up to $40,000.00' text runs long and feels like unformatted prose rather than structured capacity indicators."
+      ],
+      "fixes": [
+        "Home: align the multi-tier balance legend horizontally or into a structured 3-column micro-grid directly below the bar, replacing square icons with color pill tags matching bar segment hues exactly (#34D399, #6E7CFF, #94A3B8).",
+        "Home: add subtle 1px border `rgba(15, 23, 42, 0.06)` to cards (`Accounts`, `Recent`) to define containers cleanly on light backgrounds.",
+        "Home: break send/receive capacity into two distinct compact pill metrics ('Send up to $60k' / 'Receive up to $40k') with explicit directional glyphs."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/01-home-bottom.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 740,
+        "typography": 770,
+        "color": 750,
+        "data_legibility": 760,
+        "layout": 760,
+        "visceral_value": 780,
+        "responsive": 770,
+        "consistency": 800,
+        "trust": 810
+      },
+      "total": 773,
+      "top_issues": [
+        "Home bottom: the 'Recent' list repeats identical 'Credit limit updated' events with zero distinguishing counterparty context or delta signifier, looking like deduplication failure.",
+        "Home bottom: '+ Open account' button inside the Hub One card feels misplaced and intrusive as a secondary action inside a specific counterparty card.",
+        "Home bottom: '1 px = $50 · auto · 2 empty hidden' header text is extremely pale gray and lacks tabular alignment with the list items below."
+      ],
+      "fixes": [
+        "Home bottom: consolidate duplicate consecutive events in Recent into collapsed state or show previous vs new limit delta ('Credit limit: 0 -> 50,000 USDC').",
+        "Home bottom: move '+ Open account' out of the individual Hub One card and place it as an outline action button in the section header or beneath the accounts list.",
+        "Home bottom: darken section sub-label metadata to slate-500 (#64748B) and ensure contrast ratio exceeds 4.5:1."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/02-pay.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 810,
+        "typography": 830,
+        "color": 820,
+        "data_legibility": 840,
+        "layout": 820,
+        "visceral_value": 850,
+        "responsive": 840,
+        "consistency": 850,
+        "trust": 880
+      },
+      "total": 841,
+      "top_issues": [
+        "Pay: the bilateral bar preview under 'This payment 25.00' is so tiny (approx 1px wide delta) that the visceral scale is virtually invisible at $25 against a $60k line.",
+        "Pay: counterparty hex address in 'To' card takes up two dense lines of raw hash, creating visual friction before payment confirmation.",
+        "Pay: 'Arrives: Instantly' and 'Delivery: Instant Change' rows in the routing breakdown are redundant repetitions of the same concept."
+      ],
+      "fixes": [
+        "Pay: combine 'Arrives' and 'Delivery' into a single row: 'Delivery: Instant' with a tertiary 'Change' text button right-aligned.",
+        "Pay: truncate the recipient address to `0x499d...ef2bd` on mobile with a tap-to-expand or copy icon instead of 2-line wrapped monospace text.",
+        "Pay: when delta is < 2px on the visceral bar, render an accentuated indicator pip (min-width 3px) with an animated preview highlight."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/03-receipt.png",
+      "scores": {
+        "hierarchy": 880,
+        "premium": 830,
+        "typography": 840,
+        "color": 850,
+        "data_legibility": 850,
+        "layout": 840,
+        "visceral_value": 720,
+        "responsive": 860,
+        "consistency": 860,
+        "trust": 900
+      },
+      "total": 843,
+      "top_issues": [
+        "Receipt: background scrim behind the bottom sheet is very weak, letting the Home screen balance and buttons show through with distracting high contrast.",
+        "Receipt: 'Settled in 2736 ms' highlights millisecond latency prominently in mint green, which is technical jargon rather than calm fintech reassurance.",
+        "Receipt: the modal entirely drops the visceral value bar, missing the opportunity to show the new committed state on the bilateral scale."
+      ],
+      "fixes": [
+        "Receipt: increase backdrop overlay scrim from rgba(0,0,0,0.15) to `rgba(15, 23, 42, 0.45)` with `backdrop-filter: blur(4px)` to isolate the receipt.",
+        "Receipt: format execution time cleanly as 'Settled instantly (2.7s)' with standard slate-500 typography rather than bright green raw milliseconds.",
+        "Receipt: include a miniature post-settlement account bar showing the updated balance distribution."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/03-receipt-bottom.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 830,
+        "typography": 840,
+        "color": 850,
+        "data_legibility": 850,
+        "layout": 840,
+        "visceral_value": 760,
+        "responsive": 860,
+        "consistency": 860,
+        "trust": 900
+      },
+      "total": 846,
+      "top_issues": [
+        "Receipt bottom: identical sheet content to 03-receipt.png except positioned over scrolled home bottom; still suffers from see-through backdrop clutter.",
+        "Receipt bottom: 'Verified by your runtime' with green dot floats loosely above the Done button without a container anchoring its cryptographic weight.",
+        "Receipt bottom: 'Done' button background (#F1F5F9) is very light, lacking primary tap affordance against the white sheet surface."
+      ],
+      "fixes": [
+        "Receipt bottom: change 'Done' button style from low-contrast off-white to solid dark slate (`#0F172A`) with white text, or brand indigo (`#6E7CFF`).",
+        "Receipt bottom: enclose 'Verified by your runtime' and Proof hash into a dedicated inset verification badge box with subtle 1px border.",
+        "Receipt bottom: ensure backdrop blur is consistent across all scroll positions."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/04-receive.png",
+      "scores": {
+        "hierarchy": 860,
+        "premium": 820,
+        "typography": 830,
+        "color": 810,
+        "data_legibility": 840,
+        "layout": 810,
+        "visceral_value": 820,
+        "responsive": 850,
+        "consistency": 850,
+        "trust": 860
+      },
+      "total": 835,
+      "top_issues": [
+        "Receive: QR code card sits inside a heavy rounded off-white background with excessive padding, pushing input fields too far down the screen.",
+        "Receive: 'Copy xln:// app link' text link sits awkwardly orphaned under the two main pill action buttons ('Copy invoice', 'Copy link').",
+        "Receive: bilateral bar under the amount input has an awkward blue-to-white right fade that blends directly into the card background."
+      ],
+      "fixes": [
+        "Receive: reduce QR code container vertical padding by 16px to bring amount input field well above mobile keyboard threshold.",
+        "Receive: consolidate copy options into an icon button beside the share pills or incorporate 'xln://' protocol directly into the 'Copy link' dropdown/sheet.",
+        "Receive: give the receive bar container a defined track background (`#E2E8F0`) so the white gradient doesn't bleed into the card body."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/04-receive-bottom.png",
+      "scores": {
+        "hierarchy": 810,
+        "premium": 780,
+        "typography": 790,
+        "color": 800,
+        "data_legibility": 780,
+        "layout": 800,
+        "visceral_value": 750,
+        "responsive": 810,
+        "consistency": 830,
+        "trust": 850
+      },
+      "total": 800,
+      "top_issues": [
+        "Receive bottom: QR code is scrolled halfway off-screen at the top, creating an awkward cut-off graphic while viewing 'YOUR ENTITY ID'.",
+        "Receive bottom: Entity ID card shows 64-character raw hex unbroken across two lines without a quick tap-to-copy button inside its card.",
+        "Receive bottom: descriptive paragraph 'The link opens this wallet with the amount and note...' is verbose and reduces clean fintech feel."
+      ],
+      "fixes": [
+        "Receive bottom: add an explicit copy icon button directly inside the 'YOUR ENTITY ID' card header.",
+        "Receive bottom: condense explanatory copy in SHARE card to one short sentence: 'Shareable link and invoice text with embedded amount.'",
+        "Receive bottom: pin QR code or keep screen unscrollable by making the share options modal/collapsible."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/05-swap.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 800,
+        "typography": 820,
+        "color": 820,
+        "data_legibility": 830,
+        "layout": 820,
+        "visceral_value": 680,
+        "responsive": 850,
+        "consistency": 840,
+        "trust": 830
+      },
+      "total": 814,
+      "top_issues": [
+        "Swap: completely missing the visceral value bars on both 'You pay' and 'You receive' input cards, breaking the core product principle.",
+        "Swap: 'Swap' primary button is rendered in a washed-out, disabled-looking light indigo tint (#C7D2FE) despite values being entered.",
+        "Swap: network segmentation toggle ('Same network' / 'Across networks') at top right is cramped inside the top bar beside the back arrow."
+      ],
+      "fixes": [
+        "Swap: integrate the 1px-scale visceral bar into both token cards to show pay capacity depletion and receive room impact.",
+        "Swap: make primary CTA button high-contrast brand indigo (#6E7CFF) with white text when valid, or clearly grayed out with helper label when disabled.",
+        "Swap: move network scope segmented control into a full-width selector directly above the swap cards."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/06-account.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 810,
+        "typography": 820,
+        "color": 840,
+        "data_legibility": 830,
+        "layout": 810,
+        "visceral_value": 890,
+        "responsive": 820,
+        "consistency": 840,
+        "trust": 860
+      },
+      "total": 836,
+      "top_issues": [
+        "Account: the top tier legend ('collateral', 'credit line', 'owed', 'in flight') sits divorced between the top button row and the USDC card with no bounding relationship.",
+        "Account: 'Show 2 empty lanes · WETH, USDT' is a raw blue text link floating in an awkward empty void between two large cards.",
+        "Account: three main action buttons ('Pay', 'Extend credit', 'Swap') have uneven visual weight—'Pay' is filled solid indigo while others are ghost borders."
+      ],
+      "fixes": [
+        "Account: move the 4-part bar legend inside the USDC card directly above the bilateral bar, keeping explanation adjacent to data.",
+        "Account: convert 'Show 2 empty lanes' into a clean accordion row or card footer styled consistently with table cells.",
+        "Account: unify the top action trio with equal visual treatment (subtle filled slate containers or consistent pill buttons)."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/07-activity.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 790,
+        "typography": 810,
+        "color": 820,
+        "data_legibility": 830,
+        "layout": 810,
+        "visceral_value": 700,
+        "responsive": 840,
+        "consistency": 860,
+        "trust": 860
+      },
+      "total": 817,
+      "top_issues": [
+        "Activity: filter pills ('All', 'Payments', 'Swaps', 'Settlement', 'Accou...') truncate horizontally off screen edge with no fade mask cue.",
+        "Activity: list items do not display visceral micro-bars for amounts, reducing transaction rows to generic text lists.",
+        "Activity: repeated 'Credit limit updated with Hub One 50,000.00 USDC' entries offer no hint of what actually changed between them."
+      ],
+      "fixes": [
+        "Activity: add right-edge gradient fade to filter scroll view to indicate horizontal scrollability cleanly.",
+        "Activity: include a 2px proportional visceral bar beneath amount numbers for payments and transfers.",
+        "Activity: display delta or previous value on limit events (e.g. 'Credit limit set to 50,000 USDC (+10,000)')."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 830,
+        "typography": 830,
+        "color": 840,
+        "data_legibility": 840,
+        "layout": 830,
+        "visceral_value": 710,
+        "responsive": 850,
+        "consistency": 850,
+        "trust": 880
+      },
+      "total": 833,
+      "top_issues": [
+        "Activity detail: backdrop dimming on mobile light is too transparent, creating visual noise from the activity list underneath.",
+        "Activity detail: does not show the counterparty avatar or route hop visualization that Pay (02-pay.png) uses.",
+        "Activity detail: 'Frames: 5 committed entries' is ambiguous—it is unclear if this refers to consensus frames, receipt depth, or batching."
+      ],
+      "fixes": [
+        "Activity detail: deepen backdrop scrim to `rgba(15, 23, 42, 0.4)` and apply backdrop blur.",
+        "Activity detail: add route breadcrumb chip (`You -> Hub One -> Meridian Desk`) consistent with the Pay flow.",
+        "Activity detail: clarify 'Frames: 5 committed entries' with a helper tooltip or label as 'Consensus: 5 committed frames'."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/09-settings.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 800,
+        "typography": 820,
+        "color": 830,
+        "data_legibility": 830,
+        "layout": 800,
+        "visceral_value": 890,
+        "responsive": 830,
+        "consistency": 850,
+        "trust": 860
+      },
+      "total": 835,
+      "top_issues": [
+        "Settings: scale selector pill row ('Auto', '$1', '$2', '$5', '$10', '$25', '$100') collides with the slider above it, offering two competing controls for the identical setting.",
+        "Settings: theme segmented control ('Dark' / 'Light') is pushed to the bottom of the first fold and feels like an afterthought.",
+        "Settings: descriptive copy under each toggle ('Tokens held by your signer on the chain itself. Slow, fully yours.') is overly informal compared to core fintech tone."
+      ],
+      "fixes": [
+        "Settings: combine slider and preset pills into a single unified control where slider snaps smoothly to preset markers.",
+        "Settings: move Appearance/Theme selector into the top section or account profile header.",
+        "Settings: refine explanation copy to crisp concise definitions ('On-chain: Non-custodial base L1 balance')."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-light/09-settings-bottom.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 800,
+        "typography": 810,
+        "color": 820,
+        "data_legibility": 820,
+        "layout": 800,
+        "visceral_value": 910,
+        "responsive": 820,
+        "consistency": 840,
+        "trust": 860
+      },
+      "total": 830,
+      "top_issues": [
+        "Settings bottom: 'AT THIS SCALE' calibration card is visually stellar for understanding visceral value, but is buried at the very bottom of Settings where users will rarely encounter it.",
+        "Settings bottom: Runtime id value is shown in very low-contrast light gray monospace on white (`#94A3B8`), failing accessibility standards.",
+        "Settings bottom: 'Reveal recovery phrase' and 'Lock' buttons look identical in hierarchy despite having radically different risk profiles."
+      ],
+      "fixes": [
+        "Settings bottom: elevate the 'AT THIS SCALE' legend card into an expandable preview dialog accessible directly from the scale slider on Home/Settings.",
+        "Settings bottom: darken Runtime ID text to `#475569` and add copy button.",
+        "Settings bottom: style 'Reveal recovery phrase' as a secure secondary action and 'Lock' as an outline warning/destructive action."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 825,
+    "verdict": "The mobile light theme establishes an exceptionally clean, authentic fintech foundation with rigorous mathematical backing and refreshing lack of crypto fluff. However, it suffers from anemic card contrast against the canvas, overly washed-out modal scrims, and inconsistent application of the flagship visceral bar across Swaps and Activity.",
+    "priority_fixes": [
+      "Strengthen light-mode surface contrast by adding 1px subtle slate borders (rgba(15, 23, 42, 0.06)) to white cards and increasing modal sheet scrim opacity to rgba(15, 23, 42, 0.45) with backdrop blur.",
+      "Bring the 'visceral value' 1px-scale bars into the Swap screen (both pay and receive inputs) and Activity row items so the core product signature is never absent.",
+      "Fix CTA hierarchy on Swap ('Swap' button is washed out) and Receipt modals ('Done' button is low-contrast gray instead of high-emphasis slate/indigo).",
+      "Clean up duplicate and uninformative activity entries by consolidating consecutive credit-line updates into single explicit delta states.",
+      "Relocate the bar color legend inside the bilateral account card directly adjacent to the bar itself, rather than floating detached at the top of the screen."
+    ]
+  }
+}

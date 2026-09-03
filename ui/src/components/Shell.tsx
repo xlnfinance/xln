@@ -20,6 +20,9 @@ const NAV: Array<{ to: string; label: string; icon: IconName; match: (pathname: 
 	{ to: '/settings', label: 'Settings', icon: 'settings', match: pathname => pathname.startsWith('/settings') },
 ];
 
+/** Screens with their own back control and one primary action; the tab bar would compete with them on a phone. */
+const FLOW_ROUTES = new Set(['/pay', '/receive', '/swap']);
+
 export function Shell({ children }: { children: ReactNode }) {
 	const { pathname } = useLocation();
 	const clearToasts = useApp(s => s.clearToasts);
@@ -48,7 +51,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
 			<main className="main">{children}</main>
 
-			<nav className="tabbar" aria-label="Primary">
+			<nav className={`tabbar${FLOW_ROUTES.has(pathname) ? ' flow' : ''}`} aria-label="Primary">
 				{NAV.map(item => (
 					<NavLink key={item.to} to={item.to} className={`tabbar-item${item.match(pathname) ? ' active' : ''}`}>
 						<Icon name={item.icon} size={20} />

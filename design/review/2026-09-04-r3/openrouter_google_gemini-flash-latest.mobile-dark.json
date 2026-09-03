@@ -1,0 +1,348 @@
+{
+  "reviewer": "openrouter/google/gemini-flash-latest",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 820,
+        "typography": 810,
+        "color": 840,
+        "data_legibility": 830,
+        "layout": 780,
+        "visceral_value": 810,
+        "responsive": 760,
+        "consistency": 850,
+        "trust": 860
+      },
+      "total": 820,
+      "top_issues": [
+        "Home mobile: the three breakdown items (On-chain, Reserve, Accounts) sit in an awkward horizontal wrap under the total with mismatched dot shapes, adding visual clutter directly under the hero amount.",
+        "Home mobile: the primary action trio (Pay, Receive, Swap) gives Pay solid indigo background while Receive and Swap are dark cards, skewing visual balance heavily to the left rather than presenting a cohesive action tier.",
+        "Home mobile: '1 px = $50 · auto · 2 empty hidden' in the section header has low contrast and collides in priority with the 'BALANCES' section title."
+      ],
+      "fixes": [
+        "Home mobile: convert the On-chain/Reserve/Accounts legend into a clean single-row segmented metadata strip or compact inline pills with fixed tabular figures.",
+        "Home mobile: give Pay, Receive, and Swap uniform surface treatments (e.g. subtle dark glass background with high-contrast glyphs), reserving saturated indigo fill for confirming destructive or final monetary actions.",
+        "Home mobile: move scale metadata ('1 px = $50') into a discrete subtle badge or right-aligned caption with text-tertiary color."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/01-home-bottom.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 770,
+        "typography": 780,
+        "color": 810,
+        "data_legibility": 790,
+        "layout": 760,
+        "visceral_value": 830,
+        "responsive": 750,
+        "consistency": 810,
+        "trust": 830
+      },
+      "total": 792,
+      "top_issues": [
+        "Home bottom mobile: the card-in-card nesting for ACCOUNTS and RECENT creates redundant inset borders and heavy rounded container stacking that wastes vertical viewport space on narrow screens.",
+        "Home bottom mobile: '+ Open account' secondary button is trapped inside the ACCOUNTS card with generic dashed/outlined appearance and inconsistent margin.",
+        "Home bottom mobile: duplicate identical event rows ('Credit limit updated with Hub One · 50,000.00 USDC') appear back-to-back without sequence numbers or delta differentiation."
+      ],
+      "fixes": [
+        "Home bottom mobile: remove the nested outer card wrappers around ACCOUNTS and RECENT on mobile; use flat list rows separated by 1px hairline dividers (#1F2430).",
+        "Home bottom mobile: style '+ Open account' as an edge-to-edge quiet list action row or place an icon action button directly in the ACCOUNTS section header.",
+        "Home bottom mobile: collapse repetitive systemic updates into an aggregated feed item or display explicit frame/nonce indicators (#41, #40) to clarify progression."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/02-pay.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 840,
+        "typography": 860,
+        "color": 860,
+        "data_legibility": 820,
+        "layout": 800,
+        "visceral_value": 850,
+        "responsive": 760,
+        "consistency": 830,
+        "trust": 880
+      },
+      "total": 837,
+      "top_issues": [
+        "Pay mobile: the bottom tab navigation bar remains visible while presenting a dedicated full-screen transactional payment flow, creating conflicting navigation roots (back chevron vs tab bar).",
+        "Pay mobile: the recipient address '0x499d...ef2bd' under 'Meridian Desk' displays 4 lines of un-truncated raw hex wrapped awkwardly, breaking typographic rhythm.",
+        "Pay mobile: the inline scale bar under 'This payment 25.00' is so tiny (a 1-pixel hairline sliver) that it looks like a rendering artifact rather than an intentional scale comparison."
+      ],
+      "fixes": [
+        "Pay mobile: hide the bottom tab bar when entering Pay, Receive, or Swap screens; make payment an isolated modal flow with clear cancel/back affordance.",
+        "Pay mobile: truncate counterparty address to standard middle ellipsis (e.g. '0x499d…ef2bd') in tabular mono font on a single line.",
+        "Pay mobile: provide a minimum visual marker width (e.g. 3px pill) for small values with a tooltip indicator so scale representation does not appear broken."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt.png",
+      "scores": {
+        "hierarchy": 910,
+        "premium": 880,
+        "typography": 870,
+        "color": 890,
+        "data_legibility": 870,
+        "layout": 860,
+        "visceral_value": 750,
+        "responsive": 880,
+        "consistency": 880,
+        "trust": 920
+      },
+      "total": 871,
+      "top_issues": [
+        "Receipt mobile: 'in 2739 ms' sits in bright mint text adjacent to the timestamp, drawing disproportionate attention to a transient debug metric rather than financial finality.",
+        "Receipt mobile: the proof hex hash is truncated to '0xd102bd0d...af24' without an explicit copy affordance or link to verify the committed state frame.",
+        "Receipt mobile: lacks any proportional scale bar reflecting the deducted balance or bilateral shift."
+      ],
+      "fixes": [
+        "Receipt mobile: style settlement latency ('in 2.7s') in neutral tertiary text (#64748B) and keep mint strictly for the settled status dot.",
+        "Receipt mobile: make the Proof row an interactive copyable chip with an icon indicating committed WAL verification.",
+        "Receipt mobile: add a compact one-scale delta bar showing the $25 movement relative to the Hub One bilateral capacity."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/03-receipt-bottom.png",
+      "scores": {
+        "hierarchy": 890,
+        "premium": 860,
+        "typography": 860,
+        "color": 880,
+        "data_legibility": 860,
+        "layout": 840,
+        "visceral_value": 740,
+        "responsive": 860,
+        "consistency": 870,
+        "trust": 910
+      },
+      "total": 857,
+      "top_issues": [
+        "Receipt bottom mobile: background dim scrim does not blur or sufficiently darken the underlying scrolled accounts list, causing visual competition with the bottom sheet header.",
+        "Receipt bottom mobile: 'Done' button sits very low with tight bottom sheet padding, risking interference with the OS home indicator."
+      ],
+      "fixes": [
+        "Receipt bottom mobile: increase background scrim opacity to 70% with a backdrop-filter blur (8px) to cleanly isolate the confirmation modal.",
+        "Receipt bottom mobile: add safe-area bottom padding (min 24px) below the 'Done' action button."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 820,
+        "typography": 830,
+        "color": 850,
+        "data_legibility": 840,
+        "layout": 780,
+        "visceral_value": 810,
+        "responsive": 730,
+        "consistency": 820,
+        "trust": 860
+      },
+      "total": 819,
+      "top_issues": [
+        "Receive mobile: the massive white QR card pushes critical invoice and entity ID fields below the fold, requiring immediate scrolling on standard mobile screens.",
+        "Receive mobile: the stark solid-white rounded square holding the QR code creates excessive harsh contrast against the deep charcoal background.",
+        "Receive mobile: duplicate share mechanisms ('Copy invoice', 'Copy link', 'Copy xln:// app link') crowd the bottom card and dilute primary action hierarchy."
+      ],
+      "fixes": [
+        "Receive mobile: reduce QR code container footprint to 180x180px with a gentle off-white surface (#F8FAFC) so amount input and share buttons fit above the fold.",
+        "Receive mobile: consolidate sharing actions into one primary 'Share link' button and a secondary 'Copy' icon group, moving 'xln://' protocol URI to an advanced disclosure.",
+        "Receive mobile: hide the bottom tab bar on the Receive screen to maximize vertical canvas."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/04-receive-bottom.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 780,
+        "typography": 790,
+        "color": 810,
+        "data_legibility": 780,
+        "layout": 760,
+        "visceral_value": 750,
+        "responsive": 740,
+        "consistency": 810,
+        "trust": 840
+      },
+      "total": 785,
+      "top_issues": [
+        "Receive bottom mobile: scrolling down awkwardly decapitates the QR code at the top edge without a pinned compact preview or sticky header.",
+        "Receive bottom mobile: 'YOUR ENTITY ID' displays two full lines of unbroken hex ('0xf581ad...') with poor scanning legibility and no tap-to-copy cue on the container."
+      ],
+      "fixes": [
+        "Receive bottom mobile: lock the QR code and amount into a unified non-scrolling card, placing Entity ID and route details into a toggleable bottom sheet.",
+        "Receive bottom mobile: wrap the Entity ID in an explicit copyable card with an inline copy icon, truncated middle hex, and a prominent badge: 'Your receiving address'."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/05-swap.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 810,
+        "typography": 830,
+        "color": 840,
+        "data_legibility": 810,
+        "layout": 820,
+        "visceral_value": 680,
+        "responsive": 790,
+        "consistency": 840,
+        "trust": 830
+      },
+      "total": 809,
+      "top_issues": [
+        "Swap mobile: 'visceral_value' is completely absent here—neither the 'You pay' input nor 'You receive' output features the absolute scale bars that govern the rest of the wallet.",
+        "Swap mobile: the floating circular invert button between 'You pay' and 'You receive' has low contrast and no hover/active elevation, looking like an ornament rather than a high-frequency action.",
+        "Swap mobile: the explanatory text ('Set the amount you want. The order rests on your account at that price...') occupies 3 lines of dense body text inside the input card, diluting data legibility."
+      ],
+      "fixes": [
+        "Swap mobile: introduce proportional capacity bars under both pay and receive amount rows to show account headroom before and after swap fill.",
+        "Swap mobile: increase the invert button's surface contrast and border prominence (#2A3142 background with 1px #3E485E border).",
+        "Swap mobile: replace verbose resting order text with a succinct order type badge (e.g. 'Limit order · Peer fill') accompanied by an info tooltip."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/06-account.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 850,
+        "typography": 840,
+        "color": 870,
+        "data_legibility": 840,
+        "layout": 810,
+        "visceral_value": 910,
+        "responsive": 800,
+        "consistency": 860,
+        "trust": 890
+      },
+      "total": 854,
+      "top_issues": [
+        "Account mobile: the four-item color legend (collateral, credit line, owed, in flight) floats detached between the top button bar and the USDC card without clear bounding or direct proximity to the bar it describes.",
+        "Account mobile: 'Show 2 empty lanes · WETH, USDT' is styled as a plain blue text link floating awkwardly between two heavy card containers.",
+        "Account mobile: 'THIS ACCOUNT' metadata card is truncated at the bottom of the viewport with body text cut off abruptly behind the tab bar."
+      ],
+      "fixes": [
+        "Account mobile: anchor the bar legend directly beneath the bilateral bar inside the card, using compact labels with colored indicators.",
+        "Account mobile: format 'Show 2 empty lanes' as a subtle disclosure button or quiet secondary card row rather than floating text.",
+        "Account mobile: provide sufficient bottom scroll padding (min 96px) above the tab bar so the entire legal/agreement explanation is fully readable."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/07-activity.png",
+      "scores": {
+        "hierarchy": 880,
+        "premium": 860,
+        "typography": 860,
+        "color": 870,
+        "data_legibility": 850,
+        "layout": 840,
+        "visceral_value": 690,
+        "responsive": 820,
+        "consistency": 870,
+        "trust": 880
+      },
+      "total": 842,
+      "top_issues": [
+        "Activity mobile: horizontal filter chips are clipped at the right screen edge ('Accou...'), with no fade mask or scroll indicator showing more filters exist.",
+        "Activity mobile: activity rows lack any visual representation of value magnitude—a $25 payment and a $10,000 credit adjustment look almost identical in visual weight.",
+        "Activity mobile: secondary status indicators ('• updated', '• created') use identical neutral dots, making systemic protocol transitions indistinguishable from financial settlements."
+      ],
+      "fixes": [
+        "Activity mobile: add a right-edge gradient fade mask on the horizontal filter list to signal scrollability.",
+        "Activity mobile: incorporate subtle proportional mini-bars or weighted numeral styling to reflect payment scale at a glance.",
+        "Activity mobile: use distinct semantic badge treatments or subtle icon accents for administrative events (shield) versus economic transfers (arrows)."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 900,
+        "premium": 890,
+        "typography": 880,
+        "color": 890,
+        "data_legibility": 880,
+        "layout": 860,
+        "visceral_value": 730,
+        "responsive": 870,
+        "consistency": 890,
+        "trust": 930
+      },
+      "total": 872,
+      "top_issues": [
+        "Activity detail mobile: 'Frames: 5 committed entries' is slightly ambiguous—it is unclear whether this refers to consensus height, transaction batch index, or bilateral state.",
+        "Activity detail mobile: missing an explicit 'Share receipt' or 'Export proof' action button; closing the modal via the 'X' icon is the only action."
+      ],
+      "fixes": [
+        "Activity detail mobile: clarify 'Frames: 5 committed entries' to 'Runtime sequence: Frame #41 (5 entries)'.",
+        "Activity detail mobile: add a primary 'Copy proof' or 'Share receipt' button at the bottom of the sheet above safe area."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings.png",
+      "scores": {
+        "hierarchy": 860,
+        "premium": 840,
+        "typography": 850,
+        "color": 860,
+        "data_legibility": 840,
+        "layout": 830,
+        "visceral_value": 890,
+        "responsive": 810,
+        "consistency": 860,
+        "trust": 870
+      },
+      "total": 851,
+      "top_issues": [
+        "Settings mobile: the preset scale pills (Auto, $1, $2, $5, $10, $25, $100) are small, tightly packed, and force precise thumb tapping on standard mobile displays.",
+        "Settings mobile: 'Dollars per pixel' description is wordy (3 lines) and creates dead space before the interactive slider.",
+        "Settings mobile: theme switcher segmented control is isolated under APPEARANCE with only Dark selected, feeling slightly sparse compared to the dense list toggles above."
+      ],
+      "fixes": [
+        "Settings mobile: increase preset button tap targets to 44px height and display them in a 4x2 grid or horizontal carousel with generous padding.",
+        "Settings mobile: streamline the scale explanation to a concise single line ('All bars wallet-wide scale to this ratio').",
+        "Settings mobile: group Appearance together with system display preferences into a standardized settings row layout."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/mobile-dark/09-settings-bottom.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 830,
+        "typography": 840,
+        "color": 860,
+        "data_legibility": 830,
+        "layout": 810,
+        "visceral_value": 940,
+        "responsive": 790,
+        "consistency": 840,
+        "trust": 880
+      },
+      "total": 847,
+      "top_issues": [
+        "Settings bottom mobile: 'AT THIS SCALE' legend card is exceptional in communicating the core concept, but the $100,000 2,000px bar simply truncates with a harsh fade that doesn't clearly convey the 10x multiplier over $10,000.",
+        "Settings bottom mobile: 'Reveal recovery phrase' and 'Lock' sit side-by-side with identical button weights; revealing sensitive key material should feel significantly more guarded than session locking.",
+        "Settings bottom mobile: the full Runtime id hex string breaks into an unformatted block without copy button or mono styling."
+      ],
+      "fixes": [
+        "Settings bottom mobile: add an explicit numeric overflow badge (e.g. '→ 10x screen width') at the right edge of the $100,000 ruler bar.",
+        "Settings bottom mobile: differentiate 'Reveal recovery phrase' using an outline/danger style with biometric authentication prompt, keeping 'Lock' as neutral secondary.",
+        "Settings bottom mobile: truncate Runtime id to 12 chars with an inline copy icon."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 835,
+    "verdict": "xln wallet has an exceptionally rigorous fintech foundation, pairing uncompromising cryptographic provability with an inventive absolute-scale data visualization model. To reach top-tier polish on mobile, it must eliminate flow navigation conflicts like persistent tab bars inside subflows, tighten nested card sprawl, and treat tiny bar fractions with graceful minimums.",
+    "priority_fixes": [
+      "Hide the bottom navigation tab bar in active transaction and flow sheets (Pay, Receive, Swap) to eliminate conflicting navigation hierarchies and reclaim thumb-zone canvas.",
+      "Flatten nested card containers on mobile screens into edge-to-edge list groups separated by clean 1px hairline borders, eliminating wasted horizontal padding.",
+      "Implement a minimum visual threshold (e.g. 3px pill or indicator pip) for sub-pixel scale values on the one-scale bar so small payments do not look like rendering glitches.",
+      "Rebalance primary action aesthetics on Home and Receive: standardize the Pay/Receive/Swap action trio styling and tone down the stark white QR container.",
+      "Add right-edge gradient fade masks to horizontal scrollable surfaces (Activity filter pills, Scale presets) to prevent awkward word truncation and clearly indicate overflow."
+    ]
+  }
+}

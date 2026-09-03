@@ -1,0 +1,286 @@
+{
+  "reviewer": "openrouter/google/gemini-flash-latest",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/01-home.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 750,
+        "typography": 780,
+        "color": 800,
+        "data_legibility": 760,
+        "layout": 760,
+        "visceral_value": 600,
+        "responsive": 700,
+        "consistency": 800,
+        "trust": 810
+      },
+      "total": 760,
+      "top_issues": [
+        "Home desktop: Total balance bar ($11,500) and Hub One account bar ($100,000 capacity) both stretch to fill their container widths, making $11.5k appear physically wider than $100k and violating the 1 px = $N visceral value principle.",
+        "Home desktop: The total balance breakdown bar and USDC row bar terminate with an artificial gradient fade to black, obscuring true scale boundaries and appearing as an unrendered asset clip.",
+        "Home desktop: The Recent activity list shows two consecutive identical 'Credit limit updated / with Hub One · 50,000.00 USDC' entries with no indication of whether the credit was granted to or by the user.",
+        "Home desktop: Bilateral capacity captions ('send up to 60,000.00' and 'receive up to 40,000.00') use low-contrast muted text (#52525B) on dark card backgrounds, making account limits difficult to read.",
+        "Home desktop: Left column leaves massive vertical dead space beneath the single USDC row while the right column stacks densely, creating an unbalanced desktop grid."
+      ],
+      "fixes": [
+        "Home desktop: Render balance and account bars using strict 1 px = $10 global scale widths rather than width: 100%, clipping overflow with a sharp notch indicator and explicit numeric cap.",
+        "Home desktop: Remove the right-edge gradient fade mask on balance bars; terminate bars with a crisp 2px end cap.",
+        "Home desktop: Disambiguate credit limit activity rows by updating labels to 'Their credit line updated · 50,000.00 USDC' and 'Your credit line updated · 50,000.00 USDC'.",
+        "Home desktop: Increase contrast of bilateral capacity captions ('send up to...' / 'receive up to...') to #94A3B8.",
+        "Home desktop: Expand the Balances card into a structured desktop table displaying columns for Asset, On-chain, Reserve, Bilateral, and Total to balance column heights."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/02-pay.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 760,
+        "typography": 770,
+        "color": 810,
+        "data_legibility": 740,
+        "layout": 810,
+        "visceral_value": 640,
+        "responsive": 780,
+        "consistency": 790,
+        "trust": 750
+      },
+      "total": 770,
+      "top_issues": [
+        "Pay desktop: Main payment card lists 'Fee: 0.000050 USDC' while the Route card in the right rail states 'forwards atomically · fee 0.000025', displaying conflicting cost data that damages financial trust.",
+        "Pay desktop: The recipient input displays a raw, unformatted 66-character hex string wrapped across two lines ('0x499d0dc46b549fcf...'), adding noise compared to the cleanly truncated format in the Route card.",
+        "Pay desktop: Routing is displayed redundantly as an interactive pill row in the main form card and as a full vertical stepper in the right rail Route card.",
+        "Pay desktop: A $25.00 payment on a $60,000 capacity bar renders as an imperceptible 2.5px tick with no perceptible difference between Before and After bars at 1 px = $10 scale, failing to convey transaction magnitude.",
+        "Pay desktop: Delivery row concatenates status and action into 'Instant Change' without spacing, button styling, or visual separation."
+      ],
+      "fixes": [
+        "Pay desktop: Reconcile fee calculation so the main form fee (0.000050 USDC) matches the sum of individual route hop fees displayed in the right rail.",
+        "Pay desktop: Truncate recipient address to '0x499d...ef2bd' with an inline copy button and tooltip revealing the full address on hover.",
+        "Pay desktop: Remove the redundant inline route pill row from the main card, delegating routing details solely to the dedicated right-rail Route card.",
+        "Pay desktop: Add a minimum visual width (6px) with an expanded localized delta callout on Before/After bars for small payments (<$100).",
+        "Pay desktop: Separate 'Instant' and 'Change' into distinct elements with flex justify-between, styling 'Change' as an explicit secondary text button."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/03-receipt.png",
+      "scores": {
+        "hierarchy": 830,
+        "premium": 740,
+        "typography": 780,
+        "color": 800,
+        "data_legibility": 780,
+        "layout": 750,
+        "visceral_value": 450,
+        "responsive": 780,
+        "consistency": 690,
+        "trust": 750
+      },
+      "total": 735,
+      "top_issues": [
+        "Receipt desktop & Pay desktop: A floating bottom toast ('Payment submitted: 25.00 USDC to Meridian Desk') renders concurrently with the modal receipt, creating conflicting confirmation surfaces ('submitted' vs 'PAID').",
+        "Receipt desktop: The Settled row reads 'Instantly · 2038 ms', which is semantically contradictory because a 2.04-second duration is not instantaneous.",
+        "Receipt desktop & Activity detail desktop: Frame counter in the receipt displays 'Frame #40' whereas Activity detail for the same 25.00 USDC payment records 'Frame #41', breaking state continuity.",
+        "Receipt desktop: The modal lacks any visceral value bar, dropping the product's primary financial metaphor and failing to contextualize the post-settlement account position.",
+        "Receipt desktop: The primary 'Done' action is rendered as a dark ghost button (#1E2028) with low contrast, making dismissal intent weak for a success dialog."
+      ],
+      "fixes": [
+        "Receipt desktop: Suppress and dismiss all toast notifications when the settlement receipt modal is presented.",
+        "Receipt desktop: Replace 'Instantly · 2038 ms' with an exact cryptographic metric like 'Committed in 2,038 ms' or 'Settled in frame #40'.",
+        "Receipt desktop & Activity detail desktop: Harmonize frame indexing across components so identical transactions reference the identical frame number (#40).",
+        "Receipt desktop: Include a compact bilateral account bar in the receipt modal showing post-settlement balance and capacity headroom at 1 px = $10.",
+        "Receipt desktop: Style the 'Done' button with high-contrast text and a defined border (#3F3F46) or muted accent to clearly anchor completion."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/04-receive.png",
+      "scores": {
+        "hierarchy": 740,
+        "premium": 650,
+        "typography": 720,
+        "color": 700,
+        "data_legibility": 680,
+        "layout": 580,
+        "visceral_value": 450,
+        "responsive": 520,
+        "consistency": 670,
+        "trust": 680
+      },
+      "total": 639,
+      "top_issues": [
+        "Receive desktop: Single-column mobile container (440px wide) is centered in an expansive desktop viewport, leaving over 65% of the screen as dead black space.",
+        "Receive desktop: The QR code is rendered as an unpadded pure white (#FFFFFF) block that glares harshly against the pitch-black background, breaking dark mode harmony.",
+        "Receive desktop & Swap desktop: The stale toast banner ('Payment submitted: 25.00 USDC to Meridian Desk') leaks into this view and lingers indefinitely.",
+        "Receive desktop: Your Entity ID displays a raw 66-character hex string in low-contrast muted text (#71717A) with no inline copy affordance or visual grouping.",
+        "Receive desktop: The blue line under Amount 0.00 is an arbitrary decorative gradient rather than an absolute-scale visceral value bar representing inbound channel capacity ($40,025.00)."
+      ],
+      "fixes": [
+        "Receive desktop: Restructure into a two-column desktop layout with QR code and quick-share actions on the left, and invoice parameters and receiving channel capacity on the right.",
+        "Receive desktop: Wrap the QR code in an off-white/muted slate card with generous padding (p-6) and rounded corners to soften harsh white contrast.",
+        "Receive desktop: Auto-dismiss transaction toasts on navigation away from the payment flow.",
+        "Receive desktop: Truncate Entity ID with a visual chip format ('0xf581...476b') with a dedicated 'Copy ID' button and QR toggle.",
+        "Receive desktop: Replace the decorative blue gradient beneath the amount field with a true visceral bar showing requested amount against remaining inbound capacity ($40,025.00) at 1 px = $10."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/05-swap.png",
+      "scores": {
+        "hierarchy": 740,
+        "premium": 670,
+        "typography": 730,
+        "color": 750,
+        "data_legibility": 610,
+        "layout": 650,
+        "visceral_value": 550,
+        "responsive": 660,
+        "consistency": 700,
+        "trust": 580
+      },
+      "total": 664,
+      "top_issues": [
+        "Swap desktop: Entering 100 USDC yields '0.00 WETH' with no exchange rate, price impact, or liquidity warning, making the swap interface look non-functional and untrustworthy.",
+        "Swap desktop: The right column contains only a single small card ('Your account with Hub One') leaving over 75% of the right column completely blank.",
+        "Swap desktop: The sticky toast ('Payment submitted: 25.00 USDC to Meridian Desk') continues to persist across views at the bottom of the screen.",
+        "Swap desktop: The Swap CTA button is visually ambiguous, using a dark muted slate color that obscures whether the button is disabled or clickable.",
+        "Swap desktop: The right rail shows only USDC capacity; it lacks a corresponding WETH channel capacity bar to visualize whether inbound capacity exists to receive the swapped token."
+      ],
+      "fixes": [
+        "Swap desktop: Display real-time quote metrics beneath the inputs, including exchange rate (e.g. '1 WETH = 2,640.50 USDC'), slippage tolerance, and estimated minimum received.",
+        "Swap desktop: Balance the right column by adding an Orderbook / Market Depth card and a Before/After comparison for both traded tokens.",
+        "Swap desktop: Ensure route change handlers clear previous transaction toasts from the DOM.",
+        "Swap desktop: Use an explicit disabled button state with a descriptive tooltip ('Enter amount to fetch quote') and high-contrast active accent (#6E7CFF) when valid.",
+        "Swap desktop: Show dual visceral value bars in the right rail representing both sold token outflow capacity and acquired token inflow capacity."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/06-account.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 680,
+        "typography": 750,
+        "color": 700,
+        "data_legibility": 720,
+        "layout": 590,
+        "visceral_value": 660,
+        "responsive": 520,
+        "consistency": 710,
+        "trust": 750
+      },
+      "total": 684,
+      "top_issues": [
+        "Account desktop: Squeezes all content into a narrow single column on the left, abandoning over 55% of the desktop viewport as unused black space.",
+        "Account desktop: The color legend displays 4 statuses (collateral: mint, credit line: blue, owed: amber, in flight: purple hatched) directly above a bar that contains only amber and blue, introducing distracting clutter for inactive states.",
+        "Account desktop: The sticky bottom toast ('Payment submitted: 25.00 USDC to Meridian Desk') remains pinned to the bottom of the screen across this route.",
+        "Account desktop: Bilateral capacity numbers ('send up to 59,975.00' and 'receive up to 40,025.00') use dim low-contrast text (#71717A) below the bar.",
+        "Account desktop: Multi-asset accounts are hidden behind a text link ('Show 2 empty lanes · WETH, USDT') rather than visible in a structured multi-asset overview."
+      ],
+      "fixes": [
+        "Account desktop: Transition to a desktop two-column layout: left column for Hub entity credentials, bilateral positions, and credit adjustments; right column for bilateral transaction history and ledger proof states.",
+        "Account desktop: Filter the legend dynamically so only states actively rendered in the current bar are shown, or move state definitions to a hover tooltip.",
+        "Account desktop: Unmount persistent toast notifications when switching between tabs/screens.",
+        "Account desktop: Brighten capacity text below the bar to #A1A1AA and append currency symbols ('send up to $59,975.00 USDC').",
+        "Account desktop: Render inactive token lanes (WETH, USDT) as collapsed rows with zero-balance capacity indicators within the main card container."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/07-activity.png",
+      "scores": {
+        "hierarchy": 780,
+        "premium": 770,
+        "typography": 780,
+        "color": 820,
+        "data_legibility": 740,
+        "layout": 750,
+        "visceral_value": 450,
+        "responsive": 720,
+        "consistency": 790,
+        "trust": 770
+      },
+      "total": 737,
+      "top_issues": [
+        "Activity desktop: Right pane displays an empty, unhelpful placeholder card ('Select a movement to see its receipt.') on initial desktop load instead of auto-selecting the latest movement.",
+        "Activity desktop: Activity rows completely lack visceral value magnitude bars, making a +$10,000.00 transfer look visually indistinguishable in scale from a -$25.00 payment.",
+        "Activity desktop: Two identical 'Credit limit updated / with Hub One · 50,000.00 USDC' rows appear back-to-back with no distinguishing label between inbound and outbound credit terms.",
+        "Activity desktop: Movement rows omit relative timestamps (e.g. '14:20' or '2h ago'), grouping all items solely under a single coarse 'TODAY' header.",
+        "Activity desktop: The persistent 'Payment submitted' toast from earlier actions remains pinned to the bottom of the viewport."
+      ],
+      "fixes": [
+        "Activity desktop: Auto-select the most recent transaction on desktop viewports so the detail panel immediately displays receipt data without requiring an extra click.",
+        "Activity desktop: Add a proportional micro-bar beneath each transaction amount rendered at the 1 px = $N scale to immediately reflect transaction magnitude.",
+        "Activity desktop: Disambiguate credit limit entries by updating labels to 'Their credit line: 50,000.00 USDC' and 'Your credit line: 50,000.00 USDC'.",
+        "Activity desktop: Add explicit right-aligned timestamps (e.g. '00:27:30') or relative time badges to each list row.",
+        "Activity desktop: Dismiss toast notifications upon mounting the Activity view."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 790,
+        "typography": 780,
+        "color": 830,
+        "data_legibility": 770,
+        "layout": 810,
+        "visceral_value": 470,
+        "responsive": 780,
+        "consistency": 710,
+        "trust": 810
+      },
+      "total": 759,
+      "top_issues": [
+        "Activity detail desktop & Receipt desktop: Inconsistency in cryptographic state—Receipt modal in 03-receipt.png records 'Frame #40' for this payment, whereas Activity detail reports 'Frame #41'.",
+        "Activity detail desktop: An orphaned, unstyled 'just now' text string floats below the activity list on the left, appearing as a rendering bug or misplaced timestamp.",
+        "Activity detail desktop & Receipt desktop: Execution timing is formatted inconsistently: 'Instantly · 2038 ms' in the receipt modal versus '00:27:30' wall clock in the detail pane.",
+        "Activity detail desktop: The detail panel provides rich cryptographic proof but completely omits a visceral value bar showing the post-transaction account balance or channel headroom.",
+        "Activity detail desktop: In the activity list, the selected row has only subtle background elevation, making visual connection to the right detail panel weaker than desirable."
+      ],
+      "fixes": [
+        "Activity detail desktop: Align frame indexing with the settlement receipt so identical transactions reference the identical frame number (#40).",
+        "Activity detail desktop: Remove or properly nest the orphan 'just now' label into the corresponding transaction row component.",
+        "Activity detail desktop: Standardize timestamp display to include both wall clock time and transition execution duration (e.g. '00:27:30 (committed in 2.04s)').",
+        "Activity detail desktop: Insert a post-settlement bilateral capacity bar at 1 px = $10 into the detail card showing the account balance and remaining send/receive headroom.",
+        "Activity detail desktop: Strengthen active selection indicator on the left row using an indigo left border accent (border-l-2 border-[#6E7CFF])."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-dark/09-settings.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 770,
+        "typography": 800,
+        "color": 820,
+        "data_legibility": 800,
+        "layout": 660,
+        "visceral_value": 780,
+        "responsive": 600,
+        "consistency": 780,
+        "trust": 830
+      },
+      "total": 763,
+      "top_issues": [
+        "Settings desktop: Single-column layout (approx 520px wide) is centered in the desktop viewport, leaving over 60% of the screen as dead black margin.",
+        "Settings desktop: The 'Dollars per pixel' scale selector provides no interactive live preview bar, forcing the user to guess how selecting $1, $10, or $100 alters bar representations across the app.",
+        "Settings desktop: Runtime ID displays a raw 42-character hex address ('0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266') with no copy button or truncation.",
+        "Settings desktop: The scale slider thumb and presets duplicate the current value label ('1 px = $10' is displayed in the section header, above the slider, and on the selected pill).",
+        "Settings desktop: Vault actions ('Reveal recovery phrase' and 'Lock') are placed at the bottom without distinct destructive/security warning styling."
+      ],
+      "fixes": [
+        "Settings desktop: Convert to a two-column desktop layout: left column for controls (Scale, Home components, Appearance, Vault) and right column for a live interactive Scale Preview showing sample bars for $100, $1,000, and $10,000.",
+        "Settings desktop: Add an interactive sample bar below the Dollars per pixel slider that instantly expands/contracts as the user adjusts the scale.",
+        "Settings desktop: Truncate Runtime ID to '0xf39f...92266' with an inline copy icon.",
+        "Settings desktop: Consolidate redundant scale labels by removing '1 px = $10' from the section header and keeping it cleanly anchored to the active preset pill.",
+        "Settings desktop: Style 'Reveal recovery phrase' with amber/warning border and require secondary re-authentication prompt."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 719,
+    "verdict": "The desktop dark interface establishes an exceptionally calm, high-trust fintech aesthetic with disciplined typography, subtle card surfaces, and robust cryptographic verification cues. However, it suffers from severe desktop viewport underutilization where mobile single columns float in vast black space, lingering toast notifications leak across screens, and the core 'visceral value' one-scale bar principle is frequently abandoned or obscured.",
+    "priority_fixes": [
+      "Enforce responsive two-column desktop layouts on Receive, Swap, Account, and Settings to eliminate single-column mobile containers stranded in 60%+ empty canvas.",
+      "Fix notification lifecycle and state bugs: dismiss the sticky 'Payment submitted' toast on navigation, harmonize receipt modal with activity detail (same frame #40 and timing), and remove the orphan 'just now' text artifact.",
+      "Implement true visceral value scale across all screens: draw bars strictly at Settings 1 px = $N without stretching to card widths or gradient fading, add a minimum readable delta indicator with zoom for small payments, and add magnitude bars to Activity rows.",
+      "Complete the Swap engine experience: display live exchange rates, slippage, and estimated output for token pairs, and show dual capacity bars for both sold and received tokens in the right rail.",
+      "Clean data legibility and contrast: distinguish the duplicate 'Credit limit updated' rows as 'Your credit line' vs 'Their credit line', brighten capacity captions under bilateral bars to #A1A1AA, and soften the glaring white QR card."
+    ]
+  }
+}

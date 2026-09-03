@@ -1,0 +1,238 @@
+{
+  "reviewer": "openrouter/google/gemini-flash-latest",
+  "screens": [
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/01-home.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 790,
+        "typography": 850,
+        "color": 810,
+        "data_legibility": 830,
+        "layout": 840,
+        "visceral_value": 720,
+        "mobile": 760,
+        "consistency": 840,
+        "trust": 860
+      },
+      "total": 812,
+      "top_issues": [
+        "Home desktop: the grand balance tier bar under $11,500.00 terminates in an ungrounded linear gradient fade on the right, obscuring whether the bar represents total capacity or open headroom.",
+        "Home desktop: the tier legend under Total Balance ('On-chain $0.00', 'Reserve $1,500.00', 'Accounts $10,000.00') repeats numbers already shown in the account breakdown below.",
+        "Home desktop: while the 60/40 two-column split organizes data cleanly (a strong desktop trade-off), the 'RECENT' card repeats identical 'Credit limit updated' entries consecutively with no deduplication or grouped timestamps."
+      ],
+      "fixes": [
+        "Home desktop: replace the right-side gradient mask on `.total-tier-bar` with a solid track outline and explicit max capacity tick mark.",
+        "Home desktop: remove `.tier-legend` row below total balance and embed the three amounts into a segmented tooltip or bar caption.",
+        "Home desktop: add deduplication or a grouped counter badge ('2x') to consecutive identical state transitions in the Recent activity list."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/02-pay.png",
+      "scores": {
+        "hierarchy": 850,
+        "premium": 820,
+        "typography": 840,
+        "color": 830,
+        "data_legibility": 850,
+        "layout": 860,
+        "visceral_value": 800,
+        "mobile": 780,
+        "consistency": 850,
+        "trust": 900
+      },
+      "total": 838,
+      "top_issues": [
+        "Pay desktop: 'This payment' preview displays a tiny 25.00 single pixel/dot without a surrounding background track, making visual comparison hard without reading text.",
+        "Pay desktop: while the right-column Before/After bilateral account comparison is exceptionally clear for transaction impact (trade-off: adds height), the 'Add a note >' trigger is pushed below the fold on compact viewports."
+      ],
+      "fixes": [
+        "Pay desktop: add a subtle background track with tick marks to the 'This payment' micro-bar matching the 1px=$10 scale.",
+        "Pay desktop: move 'Add a note' into the primary amount card directly under the currency selector to prevent CTA displacement."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/03-receipt.png",
+      "scores": {
+        "hierarchy": 840,
+        "premium": 740,
+        "typography": 820,
+        "color": 810,
+        "data_legibility": 830,
+        "layout": 760,
+        "visceral_value": 650,
+        "mobile": 800,
+        "consistency": 780,
+        "trust": 890
+      },
+      "total": 792,
+      "top_issues": [
+        "Receipt desktop: modal dialog is rendered simultaneously with the bottom toast banner ('Payment submitted: 25.00 USDC to Meridian Desk'), creating dual competing completion indicators.",
+        "Receipt desktop: the receipt modal lacks any visceral value bar graphic, communicating committed settlement exclusively through text and metadata."
+      ],
+      "fixes": [
+        "Receipt desktop: suppress or dismiss the bottom submission toast immediately when the deterministic receipt modal mounts.",
+        "Receipt desktop: render a mini bilateral account bar inside the receipt modal showing the new 9,975.00 balance state and the 25.00 deduction."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/04-receive.png",
+      "scores": {
+        "hierarchy": 730,
+        "premium": 670,
+        "typography": 760,
+        "color": 780,
+        "data_legibility": 750,
+        "layout": 520,
+        "visceral_value": 580,
+        "mobile": 790,
+        "consistency": 720,
+        "trust": 750
+      },
+      "total": 705,
+      "top_issues": [
+        "Receive desktop and Settings desktop: both screens lock layout to a narrow ~440px mobile column centered in the 1440px viewport, leaving ~65% of the desktop canvas completely vacant.",
+        "Receive desktop: the amount input features an unstyled solid blue bottom border line that disrupts the card container aesthetic used elsewhere.",
+        "Receive desktop: shows zero visceral value representation of the 'receive up to 40,025.00 instantly' capacity limit."
+      ],
+      "fixes": [
+        "Receive desktop: adopt a two-column desktop layout placing the QR code and invoice link on the left, and inbound capacity bars with pending incoming invoices on the right.",
+        "Receive desktop: remove the bottom border on the amount input in `.receive-amount` and use the uniform `.card` inset styling from Pay.",
+        "Receive desktop: add an inbound bilateral headroom bar under 'receive up to 40,025.00 instantly' at the global 1px=$10 scale."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/05-swap.png",
+      "scores": {
+        "hierarchy": 810,
+        "premium": 700,
+        "typography": 800,
+        "color": 790,
+        "data_legibility": 780,
+        "layout": 650,
+        "visceral_value": 740,
+        "mobile": 770,
+        "consistency": 760,
+        "trust": 740
+      },
+      "total": 754,
+      "top_issues": [
+        "Swap desktop: the right column renders only one small 'YOUR ACCOUNT WITH HUB ONE' card, leaving a massive empty void below it on desktop.",
+        "Swap desktop: the primary 'Swap' button in its disabled/pending quote state uses `--accent-dim` with low-contrast white text, failing legibility standards.",
+        "Swap desktop: displays no price quotation, exchange rate (USDC/WETH), or price impact summary before execution."
+      ],
+      "fixes": [
+        "Swap desktop: fill the right column with a swap routing breakdown card showing the pool/hub quote, fee rate, and before/after token balance bars.",
+        "Swap desktop: adjust disabled button styling in `.swap-submit` to use `--surface-3` background with `--ink-3` text for clear inactive status.",
+        "Swap desktop: display an exchange rate badge (e.g. '1 WETH = 3,450.00 USDC') between the pay and receive input cards."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/06-account.png",
+      "scores": {
+        "hierarchy": 780,
+        "premium": 640,
+        "typography": 810,
+        "color": 800,
+        "data_legibility": 790,
+        "layout": 550,
+        "visceral_value": 860,
+        "mobile": 820,
+        "consistency": 790,
+        "trust": 850
+      },
+      "total": 769,
+      "top_issues": [
+        "Account desktop: single centered narrow column wastes desktop width and causes the persistent bottom toast to directly overlap and obscure the USDT card.",
+        "Account desktop: the bilateral bar implementation with debt, notch, and credit line is the most informative in the app (trade-off), but legend indicators ('— collateral', '— credit line') use tiny 11px font with low-contrast colored dashes."
+      ],
+      "fixes": [
+        "Account desktop: convert the token list on desktop into a 2-column or 3-column responsive card grid, and clear sticky toasts on route change.",
+        "Account desktop: replace dash legend markers in `.bar-legend` with distinct 8x8px square swatches and increase label font size to 12px with `--ink-2`."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/07-activity.png",
+      "scores": {
+        "hierarchy": 790,
+        "premium": 710,
+        "typography": 830,
+        "color": 820,
+        "data_legibility": 840,
+        "layout": 670,
+        "visceral_value": 490,
+        "mobile": 780,
+        "consistency": 800,
+        "trust": 850
+      },
+      "total": 758,
+      "top_issues": [
+        "Activity desktop: the right column is occupied solely by a single empty card ('Select a movement to see its receipt.'), wasting half of the desktop viewport.",
+        "Activity desktop: transaction amounts (+10,000.00 USDC, -25.00 USDC) completely lack visceral value bars, abandoning the wallet's core absolute-scale premise in the primary history view."
+      ],
+      "fixes": [
+        "Activity desktop: default-select the latest transaction on desktop load to populate the receipt pane immediately instead of rendering an empty placeholder card.",
+        "Activity desktop: embed a horizontal proportional magnitude bar under each transaction row amount drawn at the user scale."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/08-activity-detail.png",
+      "scores": {
+        "hierarchy": 870,
+        "premium": 810,
+        "typography": 860,
+        "color": 840,
+        "data_legibility": 880,
+        "layout": 870,
+        "visceral_value": 500,
+        "mobile": 760,
+        "consistency": 850,
+        "trust": 920
+      },
+      "total": 816,
+      "top_issues": [
+        "Activity-detail desktop: while the master-detail receipt pane provides high-trust frame verification (trade-off: desktop only), a stray unstyled 'just now' text string floats disconnected below the transaction list in the bottom-left margin.",
+        "Activity-detail desktop: receipt panel lacks visual bar representation for the -25.00 USDC movement."
+      ],
+      "fixes": [
+        "Activity-detail desktop: remove or correctly position the orphan `.timestamp` element currently overflowing below the list.",
+        "Activity-detail desktop: include a delta visualization bar in the receipt header card showing -25.00 USDC against the Hub One account balance."
+      ]
+    },
+    {
+      "file": "/Users/zigota/xln/design/screenshots/ui/desktop-light/09-settings.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 700,
+        "typography": 810,
+        "color": 810,
+        "data_legibility": 840,
+        "layout": 540,
+        "visceral_value": 880,
+        "mobile": 820,
+        "consistency": 800,
+        "trust": 860
+      },
+      "total": 788,
+      "top_issues": [
+        "Settings desktop: uses a phone-width single column centered in a vast desktop void, requiring vertical scrolling despite abundant screen real estate.",
+        "Settings desktop: the 'Dollars per pixel' slider and preset chips are functional, but lack a live sample bar beneath them to preview the visual effect of changing scale."
+      ],
+      "fixes": [
+        "Settings desktop: reorganize settings into a two-column desktop layout (Left: Scale & Display preview; Right: Runtime, Vault & Accounts).",
+        "Settings desktop: add a live interactive preview bar showing a $1,000 amount rendered at the selected scale directly beneath the preset chips."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 779,
+    "verdict": "The light desktop experience establishes a clean, high-trust fintech aesthetic with strong typography and deterministic verification cues, but it suffers from severe desktop layout abandonment where mobile single-column layouts are centered in vast empty space. In addition, the core visceral-value scale principle is under-applied across history and receive screens, and persistent toast banners leak across routes to obscure content.",
+    "priority_fixes": [
+      "Enforce full desktop two-column layouts across Receive, Account, and Settings to eliminate single-column mobile containers stranded in 60%+ empty canvas.",
+      "Fix the sticky toast notification lifecycle so submission banners auto-dismiss immediately on route change or upon opening settlement receipt modals.",
+      "Extend the 1 px = $N visceral-value absolute bar principle into Activity rows, Receive headroom, and Receipt cards where proportional magnitude is currently absent.",
+      "Remove lingering unstyled artifacts, specifically the duplicate 'Credit limit updated' entries on Home and the orphan 'just now' text on Activity Detail.",
+      "Replace unbounded gradient fade-outs on balance tier bars with framed track outlines and explicit capacity notches to preserve readability."
+    ]
+  }
+}

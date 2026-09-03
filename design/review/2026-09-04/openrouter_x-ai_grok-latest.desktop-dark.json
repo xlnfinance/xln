@@ -1,0 +1,254 @@
+{
+  "reviewer": "openrouter/x-ai/grok-latest",
+  "screens": [
+    {
+      "file": "01-home.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 560,
+        "typography": 700,
+        "color": 680,
+        "data_legibility": 650,
+        "layout": 720,
+        "visceral_value": 220,
+        "mobile": 480,
+        "consistency": 700,
+        "trust": 660
+      },
+      "total": 619,
+      "top_issues": [
+        "Home + Pay + Account desktop: the $11,500 composition bar is stretched to the left column while Hub One’s send/receive bar is stretched to the card; 11.5k and ~100k read as the same width, so 1px=$N is fake.",
+        "Home desktop: the On-chain $0.00 / Reserve $1,500.00 / Accounts $10,000.00 legend under the total repeats the bar; Instant already says the only extra fact.",
+        "Home + Activity + Activity-detail: two identical ‘Credit limit updated · 50,000.00 USDC’ rows with no yours/theirs label, so a 50k credit event looks like a 50k payment.",
+        "Home desktop: hero is ‘$11,500.00’ but the USDC row is ‘11,500.00’ and Hub One uses ‘60,000.00’ with no $; mint is used for sync, reserve, and settled."
+      ],
+      "fixes": [
+        "Draw every bar at Settings scale (1px=$10): length=amount/scale, never width:100%; clip overflow with a right fade and a numeric remainder. $11,500 = 1150px at $10/px; 60k send must be ~5.2× that.",
+        "Delete the three-dot legend under Total balance; keep one caption: ‘Instant · send $60,000 · receive $40,000’.",
+        "Rename the two activity rows ‘Their credit line · 50,000.00 USDC’ and ‘Your credit line · 50,000.00 USDC’ (same labels as the Account card).",
+        "One money string on Home: $11,500.00 / $10,000.00 / $60,000.00. Mint (#34D399) only on settled/positive; sync is a 6px dim dot, reserve is not mint."
+      ]
+    },
+    {
+      "file": "02-pay.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 540,
+        "typography": 620,
+        "color": 700,
+        "data_legibility": 640,
+        "layout": 760,
+        "visceral_value": 380,
+        "mobile": 460,
+        "consistency": 680,
+        "trust": 740
+      },
+      "total": 628,
+      "top_issues": [
+        "Pay desktop: route is drawn three times (You→Hub One→Meridian Desk chips, ROUTE tree, and the Arrives/Delivery table) plus a full 42-char To hex — the form is a map, not a payment.",
+        "Pay desktop: Fee is 0.000050 USDC in the table and 0.000025 in the ROUTE tree; two fees on one payment kills trust.",
+        "Pay desktop: amount hero is ‘25’ while CTA is ‘Pay 25.00 USDC’ and ‘This payment’ is 25.00; the 25-wide tick in the amount card does not share scale with the full-width 60k Hub One bar under it.",
+        "Pay desktop: Delivery ‘Instant Change’ looks like a broken control; the expand icon top-right has no label."
+      ],
+      "fixes": [
+        "Keep one route: the You → Hub One → Meridian Desk chips. Drop the ROUTE tree card or reduce it to a single fee line. Truncate To to 0x499d…ef2bd with copy-on-click; do not wrap the full hex.",
+        "One fee, one place: 0.000050 USDC (or 0.000025) next to Arrives. Delete the other.",
+        "Hero amount ‘25.00’; CTA ‘Pay $25.00 USDC’. Overlay the $25 payment as a 2.5px hatch on the Hub One bar at 1px=$10; do not give ‘This payment’ its own track.",
+        "Replace ‘Instant Change’ with a quiet ‘Arrives instantly’ and put any slow path under a ‘More’ disclosure. Remove the unlabeled expand button."
+      ]
+    },
+    {
+      "file": "03-receipt.png",
+      "scores": {
+        "hierarchy": 700,
+        "premium": 420,
+        "typography": 640,
+        "color": 700,
+        "data_legibility": 680,
+        "layout": 580,
+        "visceral_value": 100,
+        "mobile": 520,
+        "consistency": 420,
+        "trust": 520
+      },
+      "total": 528,
+      "top_issues": [
+        "Receipt + Receive + Swap desktop: toast ‘Payment submitted: 25.00 USDC to Meridian Desk’ sits under a modal that already says PAID / Settled — optimistic language on a committed frame, and the toast then leaks onto Receive and Swap.",
+        "Receipt vs Activity-detail: same payment is Frame #42 and proof …0b0f here, Frame #43 and proof …320b0f in the pane; time is ‘2049 ms’ vs ‘00:15:11’.",
+        "Receipt desktop: ‘Instantly · 2049 ms’ is a bench number, not a bank receipt; Done and the X duplicate; no bar for $25 vs remaining capacity."
+      ],
+      "fixes": [
+        "Delete the submitted toast everywhere. After commit, one receipt surface only (prefer the Activity master-detail pane on desktop; modal is a fallback).",
+        "Pin one evidence triple for this payment: frame height, proof hash, clock time. Reuse it on modal and Activity-detail. Drop milliseconds; ‘Instant’ or ‘2s’ max.",
+        "Receipt body: amount, counterparty, frame, proof (copy), ‘Verified by your runtime’. One close control. Optional: 25px hatch on a scaled Hub One bar, not a second CTA."
+      ]
+    },
+    {
+      "file": "04-receive.png",
+      "scores": {
+        "hierarchy": 700,
+        "premium": 380,
+        "typography": 600,
+        "color": 620,
+        "data_legibility": 540,
+        "layout": 360,
+        "visceral_value": 80,
+        "mobile": 660,
+        "consistency": 480,
+        "trust": 400
+      },
+      "total": 482,
+      "top_issues": [
+        "Receive desktop: amount is 0.00 but a full-width indigo bar fills the field — at 1px=$N a zero invoice is an empty track; this bar lies.",
+        "Receive desktop: three copy verbs (Copy invoice, Copy link, Copy xln:// app link) with no difference stated; YOUR ENTITY ID is a low-contrast 40-char smear with no copy on the row.",
+        "Receive desktop: the whole stack is a ~420px mobile column in a 1440px frame (QR, field, field, hex, two buttons). Pay already showed the correct two-column pattern."
+      ],
+      "fixes": [
+        "If amount is 0.00, draw no fill (0px). If the bar is ‘receive up to 40,025’, label it that and draw 4002.5px at $10/px, clipped — never a decorative underline.",
+        "One primary: ‘Copy link’. Invoice and xln:// go under a single ‘More copy options’ menu. Entity ID: 0xf581…b476 with a copy glyph, 14px tabular, contrast ≥4.5:1.",
+        "Desktop: QR + amount on the left (~480px), note + id + copy on the right. Do not center a phone layout in the canvas."
+      ]
+    },
+    {
+      "file": "05-swap.png",
+      "scores": {
+        "hierarchy": 540,
+        "premium": 360,
+        "typography": 580,
+        "color": 640,
+        "data_legibility": 340,
+        "layout": 400,
+        "visceral_value": 140,
+        "mobile": 540,
+        "consistency": 500,
+        "trust": 280
+      },
+      "total": 432,
+      "top_issues": [
+        "Swap desktop: You pay 100 USDC against You receive 0.00 WETH with a still-visible Swap CTA and no rate, min-received, or empty-book state — it looks possible to spend 100 for nothing.",
+        "Swap desktop: right card repeats the Hub One capacity bar with no 100 USDC hold hatch (spec: holds are hatched) and no before/after, unlike Pay.",
+        "Swap desktop: ‘Same network / Across networks’ is a protocol toggle in the title row; body copy uses ‘move Δ’. Toast leftover from Pay still at the bottom."
+      ],
+      "fixes": [
+        "When the book cannot quote: receive stays 0.00, Swap is disabled at 30% opacity, and a 12px caption reads ‘No WETH book on Hub One’. Never a live CTA on a 100→0 quote.",
+        "Show rate (USDC per WETH), then hatch a 10px hold on the Hub One send side for $100 at 1px=$10. Reuse Pay’s Before/After pair.",
+        "Move network scope under the receive token (‘Hub One · same network’). Write ‘Filled size moves the account delta; nothing settles on-chain.’ Kill the toast."
+      ]
+    },
+    {
+      "file": "06-account.png",
+      "scores": {
+        "hierarchy": 620,
+        "premium": 440,
+        "typography": 640,
+        "color": 360,
+        "data_legibility": 560,
+        "layout": 380,
+        "visceral_value": 280,
+        "mobile": 620,
+        "consistency": 540,
+        "trust": 600
+      },
+      "total": 504,
+      "top_issues": [
+        "Account desktop: legend is collateral=green, credit line=blue, owed=amber, in flight=purple, but the USDC bar is amber|blue halves — right ‘receive’ is painted as ‘credit line’, so the legend is a lie.",
+        "Account desktop: +9,975 owed on a ‘send up to 59,975’ track is drawn as nearly-full left amber; at one scale owed is ~17% of send, not 90%. Collateral 0.00 is mint, which is for positive/settled.",
+        "Account desktop: WETH and USDT empty cards each repeat the 4-color legend, three zero rows, and ‘Canonical state >’; Hub One’s 40-char hex sits above the money. Narrow centered column wastes the rail layout."
+      ],
+      "fixes": [
+        "Paint the bar from the legend: left of notch = stack(own credit indigo, collateral purple, owed amber), right = receive credit; in-flight hatched. If a component is 0, omit it.",
+        "At 1px=$10, left fill for $9,975 owed = 998px of a 5,998px send track (clip). Collateral 0.00 uses the same dim number color as 0.00 WETH, not mint.",
+        "One legend on the USDC card only. Collapse even tokens to a single row ‘WETH 0.00 · even’. Rename ‘Canonical state’ to ‘Signed state’. Desktop: token list left, selected token+bar right. Copy icon on a truncated hub id."
+      ]
+    },
+    {
+      "file": "07-activity.png",
+      "scores": {
+        "hierarchy": 720,
+        "premium": 700,
+        "typography": 700,
+        "color": 780,
+        "data_legibility": 600,
+        "layout": 700,
+        "visceral_value": 100,
+        "mobile": 480,
+        "consistency": 740,
+        "trust": 640
+      },
+      "total": 616,
+      "top_issues": [
+        "Activity desktop: +10,000.00 and −25.00 are the same row height with no bar, so a 400× size difference exists only as digits — visceral value is off.",
+        "Activity desktop: right pane is a short empty card ‘Select a movement to see its receipt’ instead of a full-height detail; ‘5 movements’ is protocol-speak.",
+        "Activity desktop: no time on rows (only TODAY); unsigned 50,000.00 on credit-limit rows can be read as incoming money (same issue as Home)."
+      ],
+      "fixes": [
+        "Add a 1px=$10 bar under each payment amount (10,000 = 1000px clipped; 25 = 2.5px). Non-payments get no bar.",
+        "Make the right pane a full-height empty state: 13px ‘Select a movement’. Header counter: ‘5’ not ‘5 movements’.",
+        "Row meta: ‘Today · 00:15’ (or relative). Credit rows use the yours/theirs labels from the Account card, not a bare 50,000.00."
+      ]
+    },
+    {
+      "file": "08-activity-detail.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 720,
+        "typography": 620,
+        "color": 780,
+        "data_legibility": 560,
+        "layout": 780,
+        "visceral_value": 100,
+        "mobile": 460,
+        "consistency": 400,
+        "trust": 640
+      },
+      "total": 582,
+      "top_issues": [
+        "Activity-detail vs Receipt: Frame #43 vs #42, proof suffix …320b0f vs …0b0f, ‘00:15:11’ vs ‘2049 ms’, ‘PAYMENT · SETTLED’ vs ‘PAID’ — one payment, two evidence sets.",
+        "Activity-detail desktop: ‘Frame #43’ and ‘Frames · 5 committed entries’ collide; ‘00:15:11’ is unlabeled (clock vs duration); ‘just now’ floats under the list off-grid.",
+        "Activity-detail desktop: To is ‘Meridian Desk0x499d0d…f2bd’ with a missing space; still no scaled bar next to −25.00."
+      ],
+      "fixes": [
+        "This pane is the canonical receipt. Modal must clone its fields. One frame height, one proof, one ISO time.",
+        "Rows: To, Via, Frame #43, Time 00:15:11 UTC, Proof (copy). Drop ‘Frames · 5 committed entries’ or rename ‘History · 5 committed frames’ as a link. Put ‘just now’ on the selected row, not in the left margin.",
+        "To: ‘Meridian Desk · 0x499d…f2bd’. Optional 2.5px hatch under −25.00 at 1px=$10."
+      ]
+    },
+    {
+      "file": "09-settings.png",
+      "scores": {
+        "hierarchy": 600,
+        "premium": 580,
+        "typography": 660,
+        "color": 740,
+        "data_legibility": 700,
+        "layout": 480,
+        "visceral_value": 440,
+        "mobile": 560,
+        "consistency": 600,
+        "trust": 720
+      },
+      "total": 608,
+      "top_issues": [
+        "Settings desktop: ‘1 px = $10’ is in the SCALE header, beside the slider, and on the $10 chip — three captions for one value, and there is no live bar preview so the control does not prove itself.",
+        "Settings desktop: VAULT row is ‘Sandbox / sandbox’; RUNTIME ‘Mode embedded’ is internal. Reveal recovery phrase is a peer of Lock with no re-auth step shown.",
+        "Settings desktop: another centered ~560px mobile stack; this is the one screen that should preview visceral scale in the spare column."
+      ],
+      "fixes": [
+        "Keep the $10 chip + one live caption ‘1px = $10’. Right column: a 1150px-clipped bar labeled ‘$11,500 at this scale’ and a 2.5px tick labeled ‘$25’.",
+        "Rename VAULT → Network, value ‘Sandbox’. Hide ‘Mode embedded’ or move under a Debug disclosure. Runtime id truncated with copy. Reveal recovery: require Lock/re-auth, danger styling, not a sibling of Lock.",
+        "Desktop two-column: controls left, scale preview right."
+      ]
+    }
+  ],
+  "overall": {
+    "total": 555,
+    "verdict": "The dark desktop has the right rail, indigo, notch bars, and frame/proof vocabulary, but it still behaves like a mobile wallet parked in a 1440px canvas. Visceral value is not shipping: bars follow card width, Settings’ 1px=$10 is ignored, and a leftover ‘Payment submitted’ toast plus frame #42 vs #43 make settlement feel guessed rather than proven.",
+    "priority_fixes": [
+      "Absolute-scale bars at Settings’ 1px=$N on Home, Pay, Receive, Account: never stretch to card width; clip+fade; $11,500 must read ~1/9 of a $100k capacity bar; hatch holds.",
+      "One committed receipt: delete ‘Payment submitted’ toasts; unify Receipt modal and Activity-detail (same frame, proof, time); never say submitted after settle.",
+      "Bilateral encoding: notch at 0, left=send stack (indigo credit, purple collateral, amber owed, hatched in-flight), right=receive; legend colors must match pixels — drop amber-left/blue-right.",
+      "Use Pay/Activity two-column on Receive, Swap, Account, Settings (QR|invoice, form|quote+before/after, tokens|state, controls|live scale preview).",
+      "Mint only for settled/positive; one money string ($11,500.00 / 25.00 USDC); label the two 50k credit events Yours vs Theirs; drop the Home total legend; disable Swap on a 100→0.00 quote."
+    ]
+  }
+}
