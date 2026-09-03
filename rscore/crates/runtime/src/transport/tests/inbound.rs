@@ -371,6 +371,41 @@ fn user_to_hub_envelope(hub_runtime_id: &str, user_runtime_id: &str) -> Outbound
 }
 
 #[test]
+fn unauthenticated_socket_cannot_send_a_frame_sized_message() {
+    let mut ingress = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        "rrs-ingress-preauth-server",
+        "server",
+    ))
+    .expect("bind ingress");
+    let url = format!("ws://{}/ws", ingress.local_address());
+    let (mut socket, _) = tungstenite::connect(url).expect("raw client");
+    // The server opens with hello_challenge (binary MessagePack).
+    let challenge = socket.read().expect("hello_challenge");
+    assert!(challenge.is_binary() || challenge.is_text());
+    // 64 KiB is the whole pre-auth budget; a frame-sized message before the
+    // hello must never be buffered or decoded by the server.
+    socket
+        .send(tungstenite::Message::Binary(vec![0x03; 96 * 1024].into()))
+        .expect("client write");
+    let reply = socket.read();
+    let rejected = match reply {
+        Err(_) => true,
+        Ok(tungstenite::Message::Close(_)) => true,
+        Ok(message) => !message.to_text().unwrap_or("").contains("hello_ack"),
+    };
+    assert!(rejected, "oversized pre-auth message was accepted");
+    assert!(
+        ingress
+            .recv_timeout(Duration::from_millis(300))
+            .expect("ingress healthy")
+            .is_none(),
+        "nothing may be admitted from an unauthenticated socket",
+    );
+    ingress.shutdown().expect("clean shutdown");
+}
+
+#[test]
 fn canonical_typescript_client_reaches_rust_ingress() {
     let server_seed = "rrs-ingress-typescript-server";
     let server_signer = "server";
