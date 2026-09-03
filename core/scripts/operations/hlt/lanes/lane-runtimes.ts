@@ -695,6 +695,14 @@ const readHostReadiness = async (
   return missing;
 };
 
+const HOST_READINESS_POLL_GAP_MS = 100;
+const TRANSIENT_HOST_CONNECT_CODES = new Set([
+  'FailedToOpenSocket', 'ConnectionRefused', 'ConnectionClosed', 'ECONNREFUSED', 'ECONNRESET', 'EADDRNOTAVAIL',
+]);
+const isTransientHostConnectError = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null
+  && TRANSIENT_HOST_CONNECT_CODES.has(String((error as { code?: unknown }).code));
+
 /** Five host-wide polls for 1,000 users; no per-port HTTP readiness storm. */
 export const waitForLaneHostReadiness = async (
   lanes: readonly LaneRuntime[],
@@ -715,19 +723,30 @@ export const waitForLaneHostReadiness = async (
     const deadline = Date.now() + timeoutMs;
     let pending = [...groups.values()];
     while (pending.length > 0 && Date.now() < deadline) {
-      const results = await Promise.all(pending.map(async group => ({
-        host: group.host,
-        runtimeIds: await readHostReadiness(
-          group.host,
-          group.runtimeIds,
-          hubEntityId,
-          hubRuntimeId,
-          controller.signal,
-          hubProfile,
-        ),
-      })));
+      const results = await Promise.all(pending.map(async group => {
+        try {
+          return {
+            host: group.host,
+            runtimeIds: await readHostReadiness(
+              group.host,
+              group.runtimeIds,
+              hubEntityId,
+              hubRuntimeId,
+              controller.signal,
+              hubProfile,
+            ),
+          };
+        } catch (error) {
+          // Every poll opens a fresh connection to each worker ingress; at
+          // 3,000 users (120 ingresses) the client side can run out of
+          // ephemeral ports (TIME_WAIT) and fail to open a socket. The host
+          // is not unready for that; poll it again inside the deadline.
+          if (!isTransientHostConnectError(error)) throw error;
+          return { host: group.host, runtimeIds: [...group.runtimeIds] };
+        }
+      }));
       pending = results.filter(group => group.runtimeIds.length > 0);
-      if (pending.length > 0) await new Promise(resolve => setTimeout(resolve, 20));
+      if (pending.length > 0) await new Promise(resolve => setTimeout(resolve, HOST_READINESS_POLL_GAP_MS));
     }
     if (pending.length > 0) {
       const missing = pending.flatMap(group => group.runtimeIds);
