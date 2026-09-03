@@ -1364,6 +1364,16 @@ fn persisted_htlc_keys(
     Ok(keys)
 }
 
+fn pending_work_kind(work: &EntityPendingWork) -> &'static str {
+    match work {
+        EntityPendingWork::Account { .. } => "account",
+        EntityPendingWork::LocalBatch { .. } => "local-batch",
+        EntityPendingWork::Command { .. } => "command",
+        EntityPendingWork::ProposerMaterialized { .. } => "proposer-materialized",
+        EntityPendingWork::Projected(_) => "projected",
+    }
+}
+
 fn pending_htlc_keys(
     work: &EntityPendingWork,
 ) -> Result<std::collections::BTreeSet<String>, RuntimeMachineError> {
@@ -1443,9 +1453,11 @@ fn replay_compatible_prefix(
     let mut observed = std::collections::BTreeSet::new();
     let mut compatible = 0_usize;
     let mut complete = expected.is_empty().then_some(0_usize);
+    let mut stop = None;
     for (index, work) in work.iter().enumerate() {
         let keys = pending_htlc_keys(work)?;
-        if keys.iter().any(|key| !expected.contains(key)) {
+        if let Some(unknown) = keys.iter().find(|key| !expected.contains(*key)) {
+            stop = Some(format!("index={index}:kind={}:key={unknown}", pending_work_kind(work)));
             break;
         }
         observed.extend(keys);
@@ -1456,9 +1468,11 @@ fn replay_compatible_prefix(
     }
     let complete = complete.ok_or_else(|| {
         RuntimeMachineError::EntityContextMaterialization(format!(
-            "ENTITY_REPLAY_HTLC_PREFIX_MISSING:{}:{}",
+            "ENTITY_REPLAY_HTLC_PREFIX_MISSING:{}:{}:queue={}:{}",
             expected.len(),
-            observed.len()
+            observed.len(),
+            work.len(),
+            stop.unwrap_or_else(|| "exhausted".into())
         ))
     })?;
     if observed != expected {

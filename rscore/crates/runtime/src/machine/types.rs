@@ -899,7 +899,11 @@ impl RuntimeLimits {
             max_mempool_total_items: 30_000,
             max_entity_inputs_per_frame: 0,
             max_account_inputs_per_frame: 0,
-            max_entity_wire_bytes_per_frame: 10_000_000,
+            // TS admits every queued Entity input into the Runtime frame; the
+            // Entity frame prefix (MAX_ENTITY_FRAME_TXS + byte budget) is the
+            // only cut. A Runtime-level byte cap here split a recorded 1,226
+            // input frame at 968 and broke replay of TS recordings.
+            max_entity_wire_bytes_per_frame: 0,
             checkpoint_period_frames: 1_000,
             canonical_hash_period_frames: 0,
         }

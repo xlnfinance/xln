@@ -341,7 +341,10 @@ impl RuntimeWalReader {
                     "OUTPUT_ROW_ORDER:{height}:{index}"
                 )));
             }
-            output_rows.push(value);
+            // An output row of 10 KB or more is a bounded-value manifest whose
+            // payload lives in 0x11 chunk rows outside this prefix; the outbox
+            // digest binds the payload bytes, never the manifest.
+            output_rows.push(self.bounded_bytes_from_owner(&key, value)?);
         }
         Ok(RawConcreteWalRows {
             height,
@@ -558,7 +561,18 @@ impl RuntimeWalReader {
             }
             bytes.extend(chunk);
         }
-        verify_digest(&bytes, &manifest.digest)?;
+        verify_digest(&bytes, &manifest.digest).map_err(|error| match error {
+            RuntimeLevelDbError::Digest { expected, actual } => RuntimeLevelDbError::Digest {
+                expected,
+                actual: format!(
+                    "{actual}:owner={}:chunks={}:bytes={}",
+                    hex(owner_key),
+                    manifest.chunk_count,
+                    manifest.byte_length
+                ),
+            },
+            other => other,
+        })?;
         Ok(bytes)
     }
 }
@@ -797,7 +811,13 @@ fn entity_context_payload_with(
             bytes.len()
         )));
     }
-    verify_hash(&bytes, expected_digest)?;
+    verify_hash(&bytes, expected_digest).map_err(|error| match error {
+        RuntimeLevelDbError::Digest { expected, actual } => RuntimeLevelDbError::Digest {
+            expected,
+            actual: format!("{actual}:context={replica_id}:kind={path_kind}:index={index}"),
+        },
+        other => other,
+    })?;
     decode_storage_payload(&bytes).map_err(Into::into)
 }
 
@@ -1118,6 +1138,8 @@ mod tests {
         None,
         MissingContextPage,
         WrongOutboxDigest,
+        /// One outbox row of 10 KB or more: a bounded-value manifest plus 0x11 chunk rows, exactly as TS writes it.
+        BoundedOutputRow,
         ForeignContext,
     }
 
@@ -1310,14 +1332,17 @@ mod tests {
         )
         .expect("fixture db");
         let contexts = replay_context_rows(ENTITY, SIGNER, true);
-        let output = crate::transport::msgpack::encode_framed(&serde_json::json!({
+        let mut output_value = serde_json::json!({
             "entityId": format!("0x{}", "33".repeat(32)),
             "runtimeId": format!("0x{}", "44".repeat(20)),
             "signerId": "peer",
             "entityTxs": [],
             "sourceRuntimeFrame": {"height":7,"timestamp":70},
-        }))
-        .expect("output");
+        });
+        if matches!(corruption, WalCorruption::BoundedOutputRow) {
+            output_value["pad"] = serde_json::Value::String("x".repeat(2 * CHUNK_BYTES + 123));
+        }
+        let output = crate::transport::msgpack::encode_framed(&output_value).expect("output");
         let encoded = crate::storage::native::build_runtime_frame_commit(
             crate::storage::native::CanonicalRuntimeFrameDraft {
                 height: 7,
@@ -1371,7 +1396,26 @@ mod tests {
         let mut output_key = [0_u8; 13];
         output_key[0] = KEY_RUNTIME_OUTPUT_ROW;
         output_key[1..9].copy_from_slice(&7_u64.to_be_bytes());
-        database.put(&output_key, &output).expect("output row");
+        if matches!(corruption, WalCorruption::BoundedOutputRow) {
+            assert!(output.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES);
+            let chunk_count = output.len().div_ceil(CHUNK_BYTES);
+            let manifest = crate::transport::msgpack::encode_framed(&serde_json::json!({
+                "kind": "boundedValue",
+                "version": 1,
+                "byteLength": output.len(),
+                "chunkCount": chunk_count,
+                "digest": format!("0x{}", hex(&Sha256::digest(&output))),
+            }))
+            .expect("manifest");
+            database.put(&output_key, &manifest).expect("manifest row");
+            for (index, chunk) in output.chunks(CHUNK_BYTES).enumerate() {
+                let key = chunk_key(&output_key, u32::try_from(index).expect("chunk index"))
+                    .expect("chunk key");
+                database.put(&key, chunk).expect("chunk row");
+            }
+        } else {
+            database.put(&output_key, &output).expect("output row");
+        }
         (RuntimeWalReader { database }, path)
     }
 
@@ -1511,6 +1555,18 @@ mod tests {
         assert_eq!(source.height(), 7);
         assert_eq!(source.entity_contexts().len(), 1);
         assert_eq!(source.outputs().len(), 1);
+        drop(reader);
+        std::fs::remove_dir_all(path).expect("clean fixture");
+    }
+
+    #[test]
+    fn concrete_wal_source_reassembles_bounded_outbox_rows() {
+        let (mut reader, path) = wal_reader(WalCorruption::BoundedOutputRow);
+        let source = reader.concrete_wal_source(7).expect("bounded outbox row reassembled");
+        assert_eq!(source.outputs().len(), 1);
+        assert!(source.outputs()[0].len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES);
+        let raw = reader.raw_concrete_wal_rows(7).expect("raw rows");
+        assert_eq!(raw.output_rows()[0], source.outputs()[0]);
         drop(reader);
         std::fs::remove_dir_all(path).expect("clean fixture");
     }
