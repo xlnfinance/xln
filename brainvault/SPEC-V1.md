@@ -214,7 +214,9 @@ inputs and work settings is the recovery mechanism.
 
 CLI implementations SHOULD print only a short root fingerprint and the first
 public address after derivation. Mnemonics and private material SHOULD require
-exact hidden passphrase rehearsal; empty rehearsal SHOULD exit without reveal.
+exact interactive password confirmation; input SHOULD be hidden by default and
+MAY be visible only through explicit opt-in. Empty confirmation SHOULD exit
+without reveal.
 Passphrases MUST NOT be accepted through command-line arguments because shell
 history and process listings commonly retain argv. These are disclosure rules;
 they do not alter any V1 derivation byte.

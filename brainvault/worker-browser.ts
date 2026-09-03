@@ -38,7 +38,7 @@ self.onmessage = async function(e: MessageEvent) {
           outputType: 'binary',
         });
         const probeTime = performance.now() - probeStart;
-        const estimatedShardTime = probeTime * 16; // Scale to 256MB
+        const estimatedShardTime = probeTime * 16; // Scale to 256 MiB
         self.postMessage({
           type: 'probe_result',
           id,

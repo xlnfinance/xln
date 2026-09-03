@@ -1,10 +1,11 @@
 # BrainVault v1
 
-Memory-hard brainwallet construction. Derive the same wallet from the exact same name, passphrase, and work settings.
+Memory-hard deterministic wallet derivation. The same V1 semantic inputs produce
+the same wallet in every conforming implementation.
 
-**Algorithm:** Argon2id (256MB shards) + BLAKE3
-**Security:** Forces attackers to use RAM, not just CPU
-**Compatibility:** Same inputs = same wallet on any device
+**Algorithm:** Argon2id (256 MiB shards) + BLAKE3
+**Security:** Raises the time and memory cost of every password guess; it does not add entropy
+**Compatibility:** Engine and worker count affect speed only, never the V1 wallet
 
 ## Usage
 
@@ -34,16 +35,16 @@ brainvault
 # level 4 (exactly 10,000 shards), multiplier 1, and all CPUs allowed by RAM.
 bun run bv
 
-# Optional: generate ten random a-z/A-Z/0-9 characters (59.54 bits) with
-# unbiased OS-CSPRNG choices, display once, and require hidden re-entry.
+# Optional: generate ten random a-z/A-Z/0-9 characters (59.54 bits while
+# undisclosed) with unbiased OS-CSPRNG choices. A same-run repeat checks only transcription.
 bunx brainvault --suggest-password
 
 # Default success output is only the root fingerprint and first address.
-# At the final hidden prompt, Enter exits; the exact password reveals mnemonics.
+# At the final password confirmation, Enter exits; the exact password reveals mnemonics.
 bunx brainvault
 
-# Optional convenience on a private screen: echo password/rehearsal input.
-# The password may remain in terminal scrollback; it is still forbidden in argv.
+# Optional convenience on a private screen: echo password/confirmation input.
+# The password can remain in scrollback, recordings, logs, tmux, or photos.
 bunx brainvault --show-password
 
 # Advanced path: also asks level, multiplier, workers, and any available engine.
@@ -54,6 +55,8 @@ bunx brainvault --ask --level 3 --multiplier 1 --workers 32 --engine metal
 bunx brainvault --bench --level 3 --multiplier 10 --workers 32
 
 # Levels select exact shards: 1 / 100 / 1,000 / 10,000 / 100,000 / 1,000,000.
+# They are work presets, not password-security ratings. Levels 1-2 are test/
+# legacy compatibility modes and must not be funded; level 4 is recommended.
 # Ten shards is no longer a creation preset, but exact legacy recovery remains:
 bunx brainvault --ask --shards 10
 
@@ -74,7 +77,7 @@ version. Future fixes must preserve every V1 root and frozen test vector.
 It was captured from macOS Terminal running the actual Metal/C/NEON engine;
 `satoshi` / `hard2guess` and every displayed seed are public demo material and
 must never receive funds. The recording shows real shard progress, public-only
-default output, hidden password rehearsal, and the isolated sensitive view.
+default output, hidden password confirmation, and the isolated sensitive view.
 
 ## Hardware defaults
 
@@ -135,33 +138,66 @@ new frozen default-work root
 
 ## No recovery receipt by design
 
-BrainVault does not create a recovery file, QR code, seed receipt, or cloud
-record. Such an artifact would become a bearer backup with the same loss,
-theft, photography, and copying risks BrainVault is designed to avoid. Recovery
-means remembering the exact username and passphrase plus the level and
-multiplier. The default is deliberately memorable: level 4, multiplier 1.
+BrainVault intentionally writes no recovery file, QR code, seed receipt, or
+cloud record. A record containing a password or mnemonic would be a bearer
+secret. A settings-only note is not itself a spending secret, but it is still an
+artifact to preserve and can link public wallet metadata; this CLI deliberately
+keeps recovery memory-only. Forgetting the exact Username, Password, Shard count,
+or Multiplier permanently loses access. Engine and worker count may change and
+are not recovery inputs. The default is deliberately simple: level 4 and
+multiplier 1.
 
 `--suggest-password` is opt-in. It makes ten independent unbiased choices from
 `a-zA-Z0-9` using the operating-system CSPRNG: 62^10 possibilities, or 59.54
-bits. It displays the result once and requires exact hidden re-entry. Terminal
-scrollback may retain that display, so use it only on a trusted device.
+bits while the result remains undisclosed. It displays the result once and
+requires exact re-entry, which checks transcription only, not long-term memory.
+Terminal scrollback may retain that display, so use it only on a trusted device
+and perform a fresh independent recovery before sending funds.
 
 After derivation BrainVault prints only an eight-hex root fingerprint and the
-first public address, then shows one hidden prompt. Enter exits; entering the
-exact password again opens the mnemonic and address matrix in the terminal's
-alternate screen. Enter or Ctrl+C erases that view and returns to the ordinary
-scrollback, which still contains only the public result. This reduces accidental
-scrollback retention, but cannot defeat screen recording, tmux logging, terminal
-capture, or photography. Any wrong password fails closed. `--show-private-key`
-adds raw keys only after that same rehearsal. `--reveal` remains an inert
-compatibility alias for older invocations. Passwords are forbidden in argv;
-automation must import the library API.
+first receiving address, then shows one password-confirmation prompt. The
+fingerprint is only a quick visual check; the full first address is the
+authoritative recovery check. Enter exits. Entering the exact password opens the
+mnemonic and address matrix in the terminal's alternate screen. Enter, Ctrl+C,
+SIGTERM, or SIGHUP erases that view and returns to ordinary scrollback, which
+still contains only the privacy-sensitive public result. This cannot defeat
+screen recording, tmux logging, terminal capture, photography, SIGKILL, OS swap,
+or crash dumps. Any wrong password fails closed. `--show-private-key` adds raw
+keys only after the same confirmation. `--reveal` remains an inert compatibility
+alias. Passwords are forbidden in argv; automation must import the library API.
 
 `--show-password` is an explicit convenience trade-off for a trusted private
-screen. It echoes every password and rehearsal entry, so those characters can
+screen. It echoes every password and confirmation entry, so those characters can
 remain in ordinary terminal scrollback or a recorded session. It never accepts
 the password through argv and does not change derivation. Hidden input remains
 the default.
+
+Site passwords from `--password` use the same temporary alternate screen and
+are erased after acknowledgement. BrainVault refuses interactive password input
+from pipes or redirects and refuses secret disclosure when the terminal cannot
+provide the isolated screen.
+
+## Long-term recovery practice
+
+- Before funding, start a fresh BrainVault process, re-enter everything from
+  memory, and compare the complete first receiving address.
+- Repeat that independent check periodically. A same-process password
+  confirmation only authorizes display; it is not a recovery test.
+- Preserve authenticated public copies of `SPEC-V1.md`, `vectors-v1.json`, the
+  source, and exact release artifact. They contain no wallet secret.
+- Engine and worker count may change. Username, Password, exact Shard count,
+  Multiplier, and V1 semantics may not.
+- No tool can promise that unaudited future hardware and software will remain
+  available for 100 years; the small frozen specification and vectors are the
+  portability mechanism.
+
+## Wallet import
+
+Import either displayed mnemonic as an existing BIP-39 wallet and leave the
+optional BIP-39 passphrase empty. Never enter the BrainVault Password into that
+field: V1 deliberately derives both mnemonics with an empty BIP-39 passphrase.
+The 24-word PRIMARY and 12-word SECONDARY are separate wallets with separate
+addresses. Verify the corresponding first receiving address before sending funds.
 
 Every interactive engine shows the same dependency-free, two-line terminal
 progress display. Native workers report completed shards over an opt-in stderr
@@ -201,7 +237,8 @@ This directory is the complete npm package boundary. Nothing above
   backend comparison; each timing includes the first four root bytes, and
   `brainvault --smoke` uses the same harness with 2 shards;
 - `--ask` exposes every available Metal, OpenCL, C/NEON, direct native,
-  isolated native, Rust, and WASM engine while showing the latest Mac speed.
+  isolated native, Rust, and WASM engine with a reference measurement from one
+  M3 Ultra; actual speed depends on hardware and load.
   Research variants remain fully selectable and are prefixed `(experimental)`;
 - `--level`, `--shards`, `--factor`, `--multiplier`, `--workers`, and `--engine`
   accept both `--flag value` and `--flag=value`. `--shards` is always exact;
@@ -212,8 +249,11 @@ This directory is the complete npm package boundary. Nothing above
   but prints an explicit memory-hygiene warning and is never the default;
 - the CLI requires at least 8 password characters by default. Existing wallets
   with shorter passwords remain recoverable via `--allow-short-password`.
+  Eight characters is input hygiene, not a security recommendation; a weak or
+  reused password remains unsafe at every work level.
 - new CLI creation accepts printable ASCII only. `--unicode-recovery` retains
-  exact V1 NFKD/UTF-8 recovery for Unicode, controls, and legacy edge cases.
+  V1 NFKD/UTF-8 recovery for terminal-representable Unicode. Use the library API
+  for control-character values a line-oriented terminal cannot represent exactly.
 
 ## Repository topology
 
@@ -353,12 +393,13 @@ Approve only if source and frozen tests prove every invariant below:
 10. User levels map only to exact shard counts: 1/100/1,000/10,000/100,000/
     1,000,000. They never renumber the frozen factor: default level 4 uses
     10,000 shards and internal factor 5. Exact 10-shard legacy recovery remains reproducible.
-11. No recovery receipt, seed file, QR, or network record is created. Suggested
-    passwords are ten independent unbiased OS-CSPRNG selections from the exact
-    62-character a-z/A-Z/0-9 alphabet and are never written by BrainVault.
+11. BrainVault intentionally writes no recovery receipt, seed file, QR, or
+    network record. Suggested passwords are ten independent unbiased OS-CSPRNG
+    selections from the exact 62-character a-z/A-Z/0-9 alphabet and are not
+    intentionally written by BrainVault.
 12. Default CLI output contains only the root fingerprint and first public
-    address. Mnemonics require exact hidden password rehearsal after derivation;
-    password argv and un-rehearsed private-key output are rejected.
+    address. Mnemonics require exact interactive password confirmation after
+    derivation; password argv and unconfirmed private-key output are rejected.
 
 Reject the package if any invariant is false, is not tested, or cannot be
 traced to executable source. Report exact file and line evidence for each item.
@@ -380,8 +421,9 @@ traced to executable source. Report exact file and line evidence for each item.
 - `historical-v1.json` pins retained historical release tarballs by SHA-256;
 - `release.md` defines signed, multi-archive release procedure.
 
-There is deliberately no recovery-receipt artifact. A receipt would recreate a
-physical bearer backup and undermine the memory-only recovery model.
+There is deliberately no recovery-receipt artifact. A secret-bearing receipt
+would become a bearer backup; even a public settings-only receipt would abandon
+the CLI's deliberately memory-only recovery model.
 
 ## Files
 
@@ -436,8 +478,10 @@ All parameters locked for 20+ year compatibility. DO NOT CHANGE.
 
 Name and passphrase must each contain at least one character. They remain exact inputs: leading/trailing whitespace is significant, then V1 applies NFKD normalization. There is no trimming or compatibility path.
 
-The standalone BrainVault package never persists a mnemonic, root, password,
-receipt, or recovery file. Sensitive output exists only after reveal rehearsal.
+The standalone BrainVault package does not intentionally persist a mnemonic,
+root, password, receipt, or recovery file. Sensitive output exists only after
+interactive password confirmation. Operating-system swap, crash dumps, terminal
+logging, recordings, and photographs remain outside that guarantee.
 
 From the monorepo root the CLI route is `bun run bv`; from this package directory
 it is `bun ./brainvault`. The implementation and every cryptographic source

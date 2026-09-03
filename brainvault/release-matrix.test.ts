@@ -36,6 +36,8 @@ for (const workers of workerCases) {
         ? /Running (?:[2-9]|[1-9][0-9]+) engines sequentially/
         : /Running 1 engines sequentially/);
       expect(output).toContain(`${engine === undefined ? 'Root parity' : 'Frozen root check'}: PASS (${matrix.roots[`w${workers}-m${multiplier}`]})`);
-    }, 28_000);
+    // This is a parity gate, not a thermal benchmark. Multiplier 10 runs every
+    // representable engine sequentially and may exceed 28s on a warmed machine.
+    }, 60_000);
   }
 }

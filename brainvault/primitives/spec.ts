@@ -29,7 +29,7 @@
  * 2. JavaScript strings cannot be reliably zeroed. Workers and request state
  *    are short-lived, but a compromised recovery device can steal the input.
  * 3. Users can forget exact capitalization, whitespace, name, passphrase or
- *    factor. Optional recovery rehearsal checks this; it cannot remember for them.
+ *    factor. Same-process confirmation permits display; only a fresh run tests recovery.
  */
 
 import { blake3 } from '@noble/hashes/blake3.js';

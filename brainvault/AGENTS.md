@@ -60,11 +60,13 @@ and boolean parameters remain unchanged unless the task explicitly owns them.
 ## Security
 
 - Fail closed on malformed, missing, duplicate, reordered, or foreign shards.
-- Never accept secrets through argv or print, persist, transmit, or log them.
+- Never accept secrets through argv, persist, transmit, or log them. Printing is
+  allowed only in explicit interactive disclosure modes with their documented
+  terminal warnings and cleanup.
 - Wipe owned secret buffers on success and failure where the runtime permits.
 - Explicit engine failure is fatal. Automatic fallback requires proven parity.
 - Default output remains a fingerprint and first public address. Reveal requires
-  exact hidden passphrase rehearsal.
+  exact interactive password confirmation and a reliable alternate screen.
 - Derivation must not depend on time, randomness, network, engine, or workers.
 
 ## Verification

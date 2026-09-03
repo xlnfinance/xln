@@ -410,8 +410,12 @@ function runCli(cliArgs: readonly string[], input = '') {
   });
 }
 
-function runCliInputTty(extraArgs: readonly string[], interactions: readonly string[]) {
-  const command = ['bun', 'cli.ts', ...extraArgs].join(' ');
+function runCliInputTty(
+  extraArgs: readonly string[],
+  interactions: readonly string[],
+  commandPrefix = 'env TERM=xterm-256color COLUMNS=80 ',
+) {
+  const command = `${commandPrefix}${['bun', 'cli.ts', ...extraArgs].join(' ')}`;
   const script = [
     'set timeout 10',
     `spawn ${command}`,
@@ -425,19 +429,19 @@ function runCliInputTty(extraArgs: readonly string[], interactions: readonly str
   });
 }
 
-function runCliTty(extraArgs: readonly string[], rehearsal = '') {
-  const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
+function runCliTty(extraArgs: readonly string[], confirmation = '') {
+  const command = ['env', 'TERM=xterm-256color', 'COLUMNS=80', 'bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
   const script = [
     'set timeout 10',
     `spawn ${command}`,
     'expect "Username: "',
     'send "alice\\r"',
-    'expect "Password: "',
+    'expect "Password (hidden; typing works): "',
     'send "secret123456\\r"',
-    'expect "Password to reveal recovery material · Enter exits: "',
-    `send "${rehearsal}\\r"`,
-    ...(rehearsal !== 'secret123456' ? [] : [
-      'expect "Press Enter when recorded — this screen will be erased: "',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+    `send "${confirmation}\\r"`,
+    ...(confirmation !== 'secret123456' ? [] : [
+      'expect "Press Enter to clear and exit: "',
       'send "\\r"',
     ]),
     'expect eof',
@@ -453,15 +457,17 @@ function runCliTty(extraArgs: readonly string[], rehearsal = '') {
 }
 
 function runAnimatedCliTty(noColor: boolean) {
-  const environment = noColor ? 'env NO_COLOR=1 TERM=xterm-256color' : 'env -u NO_COLOR TERM=xterm-256color';
+  const environment = noColor
+    ? 'env NO_COLOR=1 TERM=xterm-256color COLUMNS=80'
+    : 'env -u NO_COLOR TERM=xterm-256color COLUMNS=80';
   const script = [
     'set timeout 10',
     `spawn ${environment} bun cli.ts --shards 100 --workers 32 --engine c-neon`,
     'expect "Username: "',
     'send "progress-audit\\r"',
-    'expect "Password: "',
+    'expect "Password (hidden; typing works): "',
     'send "secret123456\\r"',
-    'expect "Password to reveal recovery material · Enter exits: "',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
     'send "\\r"',
     'expect eof',
     'catch wait result',
@@ -478,15 +484,15 @@ function runAnimatedCliTty(noColor: boolean) {
 function runAskCliTty() {
   const script = [
     'set timeout 10',
-    'spawn bun cli.ts --ask --engine native --workers 1 --multiplier 1',
+    'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --ask --engine native --workers 1 --multiplier 1',
     'expect "Username: "',
     'send "alice\\r"',
-    'expect "Password: "',
+    'expect "Password (hidden; typing works): "',
     'send "secret123456\\r"',
     'expect "work level (up/down or j/k, Enter confirms)"',
     // The default is level 4. Three k presses select level 1 before Enter.
     'send "kkk\\r"',
-    'expect "Password to reveal recovery material · Enter exits: "',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
     'send "\\r"',
     'expect eof',
     'catch wait result',
@@ -501,8 +507,8 @@ function runAskCliTty() {
 }
 
 function publicSummary(output: string): { fingerprint: string; address: string } {
-  const fingerprint = output.match(/Root fingerprint: ([0-9a-f]{8})/)?.[1];
-  const address = output.match(/First address:\s+(0x[0-9A-Fa-f]{40})/)?.[1];
+  const fingerprint = output.match(/Wallet fingerprint:\s+([0-9a-f]{8})/)?.[1];
+  const address = output.match(/First receiving address:\s+(0x[0-9A-Fa-f]{40})/)?.[1];
   if (fingerprint === undefined || address === undefined) throw new Error(`BRAINVAULT_PUBLIC_SUMMARY_MISSING:${output}`);
   return { fingerprint, address };
 }
@@ -539,7 +545,17 @@ test('CLI keeps secrets off argv and prints only public summary by default', () 
 
   const nonInteractiveRawKey = runCli(['--show-private-key']);
   expect(nonInteractiveRawKey.exitCode).toBe(1);
-  expect(nonInteractiveRawKey.stderr.toString()).toContain('sensitive output requires an interactive TTY');
+  expect(nonInteractiveRawKey.stderr.toString()).toContain('reliable interactive terminal');
+
+  const piped = runCli(['--shards', '1', '--workers', '1', '--engine', 'native'], 'alice\nsecret123456\n');
+  expect(piped.exitCode).toBe(1);
+  expect(piped.stderr.toString()).toContain('interactive password input requires a TTY');
+  expect(piped.stdout.toString()).not.toContain('secret123456');
+
+  const pipedPasswordMode = runCli(['--password'], 'alice\nsecret123456\n');
+  expect(pipedPasswordMode.exitCode).toBe(1);
+  expect(pipedPasswordMode.stderr.toString()).toContain('interactive password input requires a TTY');
+  expect(pipedPasswordMode.stdout.toString()).not.toContain('secret123456');
 });
 
 test('--show-password visibly echoes password input only when explicitly requested', () => {
@@ -547,41 +563,79 @@ test('--show-password visibly echoes password input only when explicitly request
     '--show-password', '--shards', '1', '--workers', '1', '--engine', 'native',
   ], [
     'expect "Username: "', 'send "alice\\r"',
-    'expect "Password (visible): "', 'send "visible-secret-123\\r"',
-    'expect "Password to reveal recovery material · Enter exits (visible): "', 'send "\\r"',
+    'expect "Password (VISIBLE): "', 'send "visible-secret-123\\r"',
+    'expect "Re-enter password to show recovery words (VISIBLE), or press Enter to exit: "', 'send "\\r"',
   ]);
   const output = visible.stdout.toString();
   expect(visible.exitCode).toBe(0);
-  expect(output).toContain('VISIBLE INPUT');
+  expect(output).toContain('visible password input is ON');
   expect(output).toContain('visible-secret-123');
   expect(output).not.toContain('PRIMARY (24-word)');
+});
+
+test('--show-password covers repeat and password-manager confirmation explicitly', async () => {
+  const repeated = runCliInputTty([
+    '--show-password', '--repeat', '--shards', '1', '--workers', '1', '--engine', 'native',
+  ], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Repeat Username: "', 'send "alice\\r"',
+    'expect "Password (VISIBLE): "', 'send "visible-secret-123\\r"',
+    'expect "Repeat Password (VISIBLE): "', 'send "visible-secret-123\\r"',
+    'expect "Re-enter password to show recovery words (VISIBLE), or press Enter to exit: "', 'send "\\r"',
+  ]);
+  expect(repeated.exitCode).toBe(0);
+  expect(repeated.stdout.toString()).toContain('visible-secret-123');
+
+  const suggested = runCliInputTty(['--show-password', '--suggest-password'], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Generated recovery password"',
+    'expect "Repeat generated password (VISIBLE): "', 'send "deliberately-wrong\\r"',
+  ]);
+  expect(suggested.exitCode).toBe(1);
+  expect(suggested.stdout.toString()).toContain('Suggested password was not repeated exactly');
+
+  const expectedSitePassword = await deriveSitePassword(VECTORS[0]!.expect.masterKey, 'example.com');
+  const managed = runCliInputTty(['--password', '--show-password', '--engine', 'native'], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (VISIBLE): "', 'send "secret123456\\r"',
+    'expect "Level (4): "', 'send "1\\r"',
+    'expect "Re-enter password to enable site-password output (VISIBLE): "', 'send "secret123456\\r"',
+    'expect "Domain (or Enter to exit): "', 'send "example.com\\r"',
+    'expect "Press Enter to clear and continue: "', 'send "\\r"',
+    'expect "Domain (or Enter to exit): "', 'send "\\r"',
+  ]);
+  const managedOutput = managed.stdout.toString();
+  expect(managed.exitCode).toBe(0);
+  expect(managedOutput).toContain(expectedSitePassword);
+  expect(managedOutput).toContain('\x1b[?1049h');
+  expect(managedOutput).toContain('\x1b[?1049l');
 });
 
 test('interactive validation failures return a nonzero status', () => {
   const emptyName = runCliInputTty([], [
     'expect "Username: "', 'send "\\r"',
-    'expect "Password: "', 'send "secret123456\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
   ]);
   expect(emptyName.exitCode).toBe(1);
   expect(emptyName.stdout.toString()).toContain('Username cannot be empty');
 
   const shortPassword = runCliInputTty([], [
     'expect "Username: "', 'send "alice\\r"',
-    'expect "Password: "', 'send "short\\r"',
+    'expect "Password (hidden; typing works): "', 'send "short\\r"',
   ]);
   expect(shortPassword.exitCode).toBe(1);
-  expect(shortPassword.stdout.toString()).toContain('BRAINVAULT_PASSPHRASE_TOO_SHORT');
+  expect(shortPassword.stdout.toString()).toContain('not a security recommendation');
 
   const repeatedName = runCliInputTty(['--repeat'], [
     'expect "Username: "', 'send "alice\\r"',
-    'expect "Repeat Name: "', 'send "bob\\r"',
+    'expect "Repeat Username: "', 'send "bob\\r"',
   ]);
   expect(repeatedName.exitCode).toBe(1);
-  expect(repeatedName.stdout.toString()).toContain('Name entries do not match');
+  expect(repeatedName.stdout.toString()).toContain('Username entries do not match');
 
   const excessiveWorkers = runCliInputTty(['--shards', '1', '--workers', '2'], [
     'expect "Username: "', 'send "alice\\r"',
-    'expect "Password: "', 'send "secret123456\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
   ]);
   expect(excessiveWorkers.exitCode).toBe(1);
   expect(excessiveWorkers.stdout.toString()).toContain('workers exceed the safe hardware limit');
@@ -603,10 +657,10 @@ test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocatio
 
   const passwordScript = [
     'set timeout 5',
-    'spawn bun cli.ts --password',
-    'expect "Name: "',
+    'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --password',
+    'expect "Username: "',
     'send "alice\\r"',
-    'expect "Password: "',
+    'expect "Password (hidden; typing works): "',
     'send "\\003"',
     'expect eof',
     'catch wait result',
@@ -637,19 +691,33 @@ test('CLI advanced menu accepts keyboard navigation and derives the selected lev
   const output = selected.stdout.toString();
   expect(selected.exitCode).toBe(0);
   expect(output).toContain('work level (up/down or j/k, Enter confirms)');
+  expect(output).toContain('4. standard');
+  expect(output).toContain('recommended default');
   expect(output).toContain('1 shards × 1 workers');
   expect(output).toContain('Using native isolated workers (1 workers)');
   expect(publicSummary(output)).toEqual({
     fingerprint: VECTORS[0]!.expect.masterKey.slice(0, 8),
     address: VECTORS[0]!.expect.ethAddr,
   });
+
+  const narrow = runCliInputTty([
+    '--ask', '--engine', 'native', '--workers', '1', '--multiplier', '1',
+  ], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "work level (up/down or j/k, Enter confirms)"', 'send "kkk\\r"',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+    'send "\\r"',
+  ], 'env COLUMNS=40 NO_COLOR=1 TERM=xterm-256color ');
+  expect(narrow.exitCode).toBe(0);
+  expect(narrow.stdout.toString()).toContain('1 shards × 1 workers');
 });
 
-test('exact password rehearsal reveals sensitive output without a reveal command', () => {
+test('exact password confirmation reveals sensitive output without a reveal command', () => {
   const revealed = runCliTty([], 'secret123456');
   const output = revealed.stdout.toString();
   expect(revealed.exitCode).toBe(0);
-  expect(output).toContain('SENSITIVE VIEW');
+  expect(output).toContain('RECOVERY WORDS · SECRET');
   expect(output).toContain(VECTORS[0]!.expect.mnemonic24);
   expect(output).toContain('\x1b[?1049h');
   expect(output).toContain('\x1b[3J');
@@ -658,17 +726,17 @@ test('exact password rehearsal reveals sensitive output without a reveal command
 });
 
 test('Ctrl+C inside sensitive view erases it and exits the entire CLI', () => {
-  const command = ['bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native'].join(' ');
+  const command = ['env', 'TERM=xterm-256color', 'COLUMNS=80', 'bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native'].join(' ');
   const script = [
     'set timeout 10',
     `spawn ${command}`,
     'expect "Username: "',
     'send "alice\\r"',
-    'expect "Password: "',
+    'expect "Password (hidden; typing works): "',
     'send "secret123456\\r"',
-    'expect "Password to reveal recovery material · Enter exits: "',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
     'send "secret123456\\r"',
-    'expect "Press Enter when recorded — this screen will be erased: "',
+    'expect "Press Enter to clear and exit: "',
     'send "\\003"',
     'expect eof',
     'catch wait result',
@@ -686,7 +754,55 @@ test('Ctrl+C inside sensitive view erases it and exits the entire CLI', () => {
   expect(output).not.toContain('AbortError');
 });
 
-test('wrong reveal rehearsal fails closed without a runtime stack trace', () => {
+test('SIGTERM and SIGHUP erase the sensitive screen before exiting', () => {
+  for (const [signal, exitCode] of [['TERM', 143], ['HUP', 129]] as const) {
+    const script = [
+      'set timeout 10',
+      'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --shards 1 --workers 1 --engine native',
+      'expect "Username: "', 'send "alice\\r"',
+      'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+      'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+      'send "secret123456\\r"',
+      'expect "Press Enter to clear and exit: "',
+      `exec kill -${signal} [exp_pid]`,
+      'expect eof',
+      'catch wait result',
+      'exit [lindex $result 3]',
+    ].join('\n');
+    const result = Bun.spawnSync({
+      cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+    });
+    const output = result.stdout.toString();
+    expect(result.exitCode).toBe(exitCode);
+    expect(output).toContain('\x1b[?1049h');
+    expect(output).toContain('\x1b[3J');
+    expect(output).toContain('\x1b[?1049l');
+  }
+});
+
+test('TERM=dumb refuses recovery-word disclosure after a public derivation', () => {
+  const script = [
+    'set timeout 10',
+    'spawn env TERM=dumb NO_COLOR=1 bun cli.ts --shards 1 --workers 1 --engine native',
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "Recovery words unavailable"',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  const result = Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).not.toContain(VECTORS[0]!.expect.mnemonic24);
+
+  const passwordMode = runCliInputTty(['--password'], [], 'env TERM=dumb NO_COLOR=1 ');
+  expect(passwordMode.exitCode).toBe(1);
+  expect(passwordMode.stdout.toString()).toContain('site passwords require alternate-screen support');
+});
+
+test('wrong reveal confirmation fails closed without a runtime stack trace', () => {
   const rejected = runCliTty([], 'wrong-password');
   const output = rejected.stdout.toString();
   expect(rejected.exitCode).toBe(1);
@@ -694,6 +810,20 @@ test('wrong reveal rehearsal fails closed without a runtime stack trace', () => 
   expect(output).not.toContain(VECTORS[0]!.expect.mnemonic24);
   expect(output).not.toContain('BRAINVAULT_REHEARSAL_MISMATCH');
   expect(output).not.toContain('cli.ts:');
+});
+
+test('derivation failures print one safe line without Bun code frames or paths', () => {
+  const rejected = runCliInputTty([
+    '--shards', '1', '--workers', '1', '--multiplier', '2', '--engine', 'metal',
+  ], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+  ]);
+  const output = rejected.stdout.toString();
+  expect(rejected.exitCode).toBe(1);
+  expect(output).toContain('Derivation failed: BRAINVAULT_ENGINE_MULTIPLIER_UNSUPPORTED');
+  expect(output).not.toContain('cli.ts:');
+  expect(output).not.toContain('throw new Error');
 });
 
 test('native progress animates, completes exactly, and respects NO_COLOR', () => {
@@ -715,6 +845,18 @@ test('native progress animates, completes exactly, and respects NO_COLOR', () =>
   expect(plainOutput).toMatch(/(?:[1-9]|[1-9][0-9])%.*[1-9][0-9]* \/ 100 shards/s);
   expect(plainOutput).toContain('100 / 100 shards  ·  32 workers');
   expect(plainOutput).not.toContain('\x1b[38;5;45m');
+
+  const narrow = runCliInputTty([
+    '--shards', '100', '--workers', '32', '--engine', 'c-neon',
+  ], [
+    'expect "Username: "', 'send "narrow-audit\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect "Re-enter password to show recovery words (hidden; typing works), or press Enter to exit: "',
+    'send "\\r"',
+  ], 'env COLUMNS=40 NO_COLOR=1 TERM=xterm-256color ');
+  expect(narrow.exitCode).toBe(0);
+  expect(narrow.stdout.toString()).toContain('100/100');
+  expect(narrow.stdout.toString()).not.toContain('shards/s');
 });
 
 test('CLI benchmark honors inline advanced parameters', () => {
@@ -744,6 +886,8 @@ test('npm launcher preserves the BrainVault v1 CLI entrypoint', () => {
   });
   expect(launched.exitCode).toBe(0);
   expect(launched.stdout.toString()).toStartWith('BrainVault v1 (bv)');
+  expect(launched.stdout.toString()).toContain('Leave the optional BIP-39 passphrase empty');
+  expect(launched.stdout.toString()).toContain('Never enter your BrainVault password into that field');
 });
 
 test('every available wallet engine reproduces the same smoke root', () => {

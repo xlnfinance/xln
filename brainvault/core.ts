@@ -5,12 +5,12 @@
  * Solution: Derive wallet from memorable (name + passphrase + shard count).
  *
  * Algorithm: Argon2id (memory-hard) + BLAKE3 (fast hash)
- * - Each shard: 256MB argon2id (forces attacker to use RAM, not just CPU)
+ * - Each shard: 256 MiB Argon2id (forces attacker to use RAM, not just CPU)
  * - Parallelizable: phone sequential, workstation parallel
- * - Deterministic: same inputs = same wallet on any device
+ * - Deterministic: same V1 semantic inputs = same wallet on every conforming implementation
  *
  * Security: every guess pays for every shard. Attackers can parallelize too,
- * but each concurrent shard needs another 256MB of RAM.
+ * but each concurrent shard needs another 256 MiB of RAM.
  *
  * FROZEN SPEC - DO NOT CHANGE PARAMETERS (breaks all existing wallets)
  */
@@ -34,11 +34,11 @@ export { combineShards, combineShardsWithParams, factorForShardCount, rootDomain
  * unchanged because factor is committed into every V1 root.
  * Formula: 10^(factor-1)
  *
- * Factor 1: 1 shard (256MB)
- * Factor 2: 10 shards (2.5GB)
- * Factor 3: 100 shards (25GB)
- * Factor 4: 1000 shards (256GB)
- * Factor 5: 10000 shards (2.5TB)
+ * Factor 1: 1 shard
+ * Factor 2: 10 shards
+ * Factor 3: 100 shards
+ * Factor 4: 1,000 shards
+ * Factor 5: 10,000 shards
  */
 export function getShardCount(factor: number): number {
   if (

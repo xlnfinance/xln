@@ -5,6 +5,7 @@ export function cliPasswordError(passphrase: string, allowShort: boolean): strin
   if (passphrase.length === 0) return 'BRAINVAULT_PASSPHRASE_INVALID: Password cannot be empty.';
   if (!allowShort && Array.from(passphrase).length < MIN_CLI_PASSWORD_CHARACTERS) {
     return `BRAINVAULT_PASSPHRASE_TOO_SHORT: Password must contain at least ${MIN_CLI_PASSWORD_CHARACTERS} characters. `
+      + 'This minimum is input hygiene, not a security recommendation; weak or reused passwords remain unsafe. '
       + 'Use --allow-short-password only to recover an existing legacy wallet.';
   }
   return undefined;
