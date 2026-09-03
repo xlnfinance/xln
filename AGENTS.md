@@ -1,7 +1,7 @@
 # AGENTS.md
 
 On the first message, explain in 3–4 lines how to work with you: execute autonomously at
->=90% confidence, ask the owner below 90% or for a real protocol choice, and report terse
+>=95% confidence, ask the owner below 95% or for a real protocol choice, and report terse
 results with metrics.
 
 Mission: fintech-grade deterministic xln. J/E/A correctness before features. Pure
@@ -116,8 +116,8 @@ Do not duplicate or weaken it.
 
 ## CONFIDENCE AND AUTHORITY
 
-- >=90% confidence with a clear existing invariant: execute autonomously.
-- <90% or multiple materially different protocol choices: stop and ask the owner.
+- >=95% confidence with a clear existing invariant: execute autonomously.
+- <95% or multiple materially different protocol choices: stop and ask the owner.
 - Consensus/crypto/contract changes require owner confirmation only when they create a new choice;
   do not re-ask a decision already present in the goal, this file or canonical code.
 - Read-only diagnostics and normal implementation steps inside the requested scope need no approval.
