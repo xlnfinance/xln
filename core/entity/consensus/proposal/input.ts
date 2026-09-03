@@ -20,6 +20,7 @@ import {
   getReplicaJRangeValidationError,
 } from '../j-prefix/prefix-round';
 import { preauthenticateEntityProposal } from './preauthentication';
+import { haltRuntimeFailure } from '../../../protocol/errors/failure-taxonomy';
 
 const validateProposalEnvelope = (
   context: ApplyEntityInputContext,
@@ -120,11 +121,59 @@ const validateProposalViewAndJRange = (
   return rejectEntityConsensusInput(context, 'PROPOSAL_J_RANGE_MISMATCH');
 };
 
+const publishLocalPrecommit = (
+  context: ApplyEntityInputContext,
+  frame: EntityFrame,
+  localSignatures: readonly string[],
+  validators: readonly string[],
+): void => {
+  const localSignerId = context.workingReplica.signerId.toLowerCase();
+  for (const validatorId of validators) {
+    if (validatorId.toLowerCase() === localSignerId) continue;
+    context.entityOutbox.push({
+      entityId: context.entityInput.entityId,
+      signerId: validatorId,
+      hashPrecommitFrame: { height: frame.height, frameHash: frame.hash },
+      hashPrecommits: new Map([
+        [context.workingReplica.signerId, [...localSignatures]],
+      ]),
+    });
+  }
+};
+
+const respondToActiveDuplicate = (
+  context: ApplyEntityInputContext,
+  frame: EntityFrame,
+): ApplyEntityInputResult | null => {
+  const { workingReplica } = context;
+  const locked = workingReplica.lockedFrame;
+  if (!locked || locked.hash !== frame.hash) return null;
+  const localSignatures = locked.collectedSigs?.get(workingReplica.signerId.toLowerCase());
+  const candidate = workingReplica.candidate;
+  if (!localSignatures || !candidate) {
+    throw haltRuntimeFailure(
+      'ENTITY_DUPLICATE_PROPOSAL_CACHE_INVALID',
+      `ENTITY_DUPLICATE_PROPOSAL_CACHE_INVALID:${workingReplica.entityId}:` +
+        `${workingReplica.signerId}:${frame.height}:${frame.hash}`,
+    );
+  }
+  publishLocalPrecommit(context, locked, localSignatures, candidate.state.config.validators);
+  return {
+    outcome: { kind: 'noop', reason: 'PROPOSAL_ALREADY_PRECOMMITTED' },
+    newState: workingReplica.state,
+    outputs: context.entityOutbox,
+    jOutputs: [],
+    workingReplica,
+    candidateEffects: [],
+    storageChanges: [],
+  };
+};
+
 const signAndLockProposal = async (
   context: ApplyEntityInputContext,
   frame: EntityFrame,
 ): Promise<ApplyEntityInputResult | null> => {
-  const { env, entityInput, entityOutbox, workingReplica } = context;
+  const { env, workingReplica } = context;
   const replay = await replayProposedEntityFrame(context, frame);
   if (!replay.accepted) return replay.result;
   const { execution } = replay;
@@ -189,17 +238,7 @@ const signAndLockProposal = async (
   };
   workingReplica.candidate = execution;
   workingReplica.lastConsensusProgressAt = env.state.timestamp;
-  for (const validatorId of execution.state.config.validators) {
-    if (validatorId.toLowerCase() === localSignerId) continue;
-    entityOutbox.push({
-      entityId: entityInput.entityId,
-      signerId: validatorId,
-      hashPrecommitFrame: { height: frame.height, frameHash: frame.hash },
-      hashPrecommits: new Map([
-        [workingReplica.signerId, localSignatures],
-      ]),
-    });
-  }
+  publishLocalPrecommit(context, frame, localSignatures, execution.state.config.validators);
   entityLog.debug('proposal.precommit_sent', {
     recipients: Math.max(
       0,
@@ -222,5 +261,7 @@ export const handleProposedFramePrecommit = async (
   if (authenticationResult) return authenticationResult;
   const consensusResult = validateProposalViewAndJRange(context, frame);
   if (consensusResult) return consensusResult;
+  const duplicateResult = respondToActiveDuplicate(context, frame);
+  if (duplicateResult) return duplicateResult;
   return signAndLockProposal(context, frame);
 };

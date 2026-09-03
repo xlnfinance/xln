@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const setup = readFileSync('jurisdictions/scripts/setup-forge-std.sh', 'utf8');
+const buildWorkflow = readFileSync('.github/workflows/build-and-test.yml', 'utf8');
 const contractsPackage = JSON.parse(readFileSync('jurisdictions/package.json', 'utf8')) as {
   scripts: Record<string, string>;
 };
@@ -32,4 +33,12 @@ test('forge-std setup rejects unverifiable, wrong, or dirty tracked checkouts', 
   expect(setup).toContain('ls-files --others --exclude-standard');
   expect(setup).toContain('FORGE_STD_UNTRACKED_FILES');
   expect(setup).toContain('FORGE_STD_CHECKOUT_SYMLINK_FORBIDDEN');
+});
+
+test('every CI job that runs source checks installs forge-std first', () => {
+  const e2eJob = buildWorkflow.slice(buildWorkflow.indexOf('  e2e-tests:'));
+  const setupIndex = e2eJob.indexOf('run: cd jurisdictions && bun run forge:setup');
+  const releaseGateIndex = e2eJob.indexOf('run: bun run gate:ci');
+  expect(setupIndex).toBeGreaterThan(-1);
+  expect(releaseGateIndex).toBeGreaterThan(setupIndex);
 });

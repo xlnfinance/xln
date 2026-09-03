@@ -167,6 +167,9 @@ jobs:
         with:
           version: v1.7.1
 
+      - name: Setup forge-std
+        run: cd jurisdictions && bun run forge:setup
+
       - name: Cache dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:

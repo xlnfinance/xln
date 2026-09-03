@@ -14,6 +14,11 @@ const singleSignerQuorum = createEntityProposalFixture(
   'entity-proposal-preauthentication:single-signer-quorum',
   1n,
 );
+const fourSignerQuorum = createEntityProposalFixture(
+  'entity-proposal-preauthentication:active-duplicate',
+  4n,
+  ['1', '2', '3', '4'],
+);
 
 describe('Entity proposal pre-authentication', () => {
   test('rejects a proposal with no active proposer signature before replay', async () => {
@@ -126,6 +131,94 @@ describe('Entity proposal pre-authentication', () => {
       signerId: validator.signerId,
       proposedFrame: digest.frame,
     })).outcome).toEqual({ kind: 'rejected', code: 'COMMIT_DIGEST_NON_CANONICAL' });
+  });
+
+  test('rejects a signed Entity proposal beyond receiver clock allowance before replay', async () => {
+    const { frame, proposer } = await buildHonestProposal();
+    const validator = createValidator('2');
+    frame.timestamp = validator.env.state.timestamp + 30_001;
+    bindMutatedFrame(frame, proposer, false);
+
+    const result = await applyEntityInput(validator.env, validator.replica, {
+      entityId,
+      signerId: validator.signerId,
+      proposedFrame: frame,
+    });
+
+    expect(result.outcome).toEqual({
+      kind: 'rejected',
+      code: 'PROPOSAL_TIMESTAMP_FUTURE',
+    });
+    expect(result.workingReplica).toEqual(validator.replica);
+    expect(result.outputs).toEqual([]);
+    expect(result.candidateEffects).toEqual([]);
+    expect(result.storageChanges).toEqual([]);
+  });
+
+  test('exact active proposal duplicate preserves accumulated precommits', async () => {
+    const { frame } = await fourSignerQuorum.buildHonestProposal();
+    const validator2 = fourSignerQuorum.createValidator('2');
+    const validator3 = fourSignerQuorum.createValidator('3');
+    const validator4 = fourSignerQuorum.createValidator('4');
+    const proposalInput = (signerId: string) => ({
+      entityId: fourSignerQuorum.entityId,
+      signerId,
+      proposedFrame: structuredClone(frame),
+    });
+    const [prepared2, prepared3, prepared4] = await Promise.all([
+      applyEntityInput(validator2.env, validator2.replica, proposalInput(validator2.signerId)),
+      applyEntityInput(validator3.env, validator3.replica, proposalInput(validator3.signerId)),
+      applyEntityInput(validator4.env, validator4.replica, proposalInput(validator4.signerId)),
+    ]);
+    const precommitFor = (
+      result: typeof prepared2,
+      signerId: string,
+    ) => {
+      const output = result.outputs.find(candidate =>
+        candidate.signerId === signerId && candidate.hashPrecommits);
+      if (!output) throw new Error(`TEST_ENTITY_PRECOMMIT_MISSING:${signerId}`);
+      return output;
+    };
+    const withThirdSignature = await applyEntityInput(
+      validator2.env,
+      prepared2.workingReplica,
+      precommitFor(prepared3, validator2.signerId),
+    );
+    const signersBeforeDuplicate = Array.from(
+      withThirdSignature.workingReplica.lockedFrame?.collectedSigs?.keys() ?? [],
+    ).sort();
+    const cachedLocalPrecommit = withThirdSignature.workingReplica.lockedFrame
+      ?.collectedSigs?.get(validator2.signerId);
+    if (!cachedLocalPrecommit) throw new Error('TEST_ENTITY_LOCAL_PRECOMMIT_MISSING');
+    expect(signersBeforeDuplicate).toHaveLength(3);
+
+    const duplicate = await applyEntityInput(
+      validator2.env,
+      withThirdSignature.workingReplica,
+      proposalInput(validator2.signerId),
+    );
+    expect(duplicate.outcome).toEqual({
+      kind: 'noop',
+      reason: 'PROPOSAL_ALREADY_PRECOMMITTED',
+    });
+    expect(duplicate.workingReplica).toEqual(withThirdSignature.workingReplica);
+    expect(Array.from(
+      duplicate.workingReplica.lockedFrame?.collectedSigs?.keys() ?? [],
+    ).sort()).toEqual(signersBeforeDuplicate);
+    expect(duplicate.outputs).toHaveLength(3);
+    expect(duplicate.outputs.every(output =>
+      output.hashPrecommits?.size === 1 &&
+      output.hashPrecommits.get(validator2.signerId)?.every(
+        (signature, index) => signature === cachedLocalPrecommit[index],
+      ) === true,
+    )).toBe(true);
+
+    const committed = await applyEntityInput(
+      validator2.env,
+      duplicate.workingReplica,
+      precommitFor(prepared4, validator2.signerId),
+    );
+    expect(committed.workingReplica.state.height).toBe(1);
   });
 
   test('requires the certified leader and exact Entity manifest head', async () => {

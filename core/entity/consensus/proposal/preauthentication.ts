@@ -9,6 +9,7 @@ import {
   type ApplyEntityInputResult,
 } from '../input/types';
 import { validateProposedFrameLeader } from './policy';
+import { TIMING } from '../../../config/constants';
 
 const reject = (
   context: ApplyEntityInputContext,
@@ -25,6 +26,12 @@ const hasCanonicalProposalEnvelope = (
   }
   if (!Number.isSafeInteger(frame.timestamp) || frame.timestamp < state.timestamp) {
     return 'PROPOSAL_TIMESTAMP_INVALID';
+  }
+  // The proposer signs the frame clock but does not own the receiver's time.
+  // Without this bound it could advance expiry transitions before the local
+  // Runtime clock, despite valid authority, nonce and old-state lineage.
+  if (frame.timestamp - context.env.state.timestamp > TIMING.TIMESTAMP_DRIFT_MS) {
+    return 'PROPOSAL_TIMESTAMP_FUTURE';
   }
   if (
     !isCanonicalEntityFrameDigest(frame.hash) ||

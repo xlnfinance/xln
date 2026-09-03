@@ -390,6 +390,20 @@ fn entity_input_cannot_smuggle_an_independent_projection() {
 }
 
 #[test]
+fn resident_entity_input_rejects_peer_proposed_frames_fail_closed() {
+    let error = RuntimeEntityInput::decode(serde_json::json!({
+        "entityId": hex32(owner_bytes()),
+        "signerId": entity_signer_id(),
+        "proposedFrame": { "timestamp": 130_001 }
+    }));
+    assert!(matches!(
+        error,
+        Err(RuntimeMachineError::EntityInputFieldUnsupported(field))
+            if field == "proposedFrame"
+    ));
+}
+
+#[test]
 fn scheduled_wake_keeps_its_protocol_lane_and_exact_frame_projection()
 -> Result<(), RuntimeMachineError> {
     let canonical = serde_json::json!({

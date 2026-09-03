@@ -19,12 +19,12 @@ import type { EntityFrame, EntityReplica, EntityState } from '../../entity/types
 import { createEmptyEnv } from '../../runtime';
 import { hexlify } from 'ethers';
 
-const signerLabels = ['1', '2', '3'] as const;
-type SignerLabel = typeof signerLabels[number];
+const defaultSignerLabels = ['1', '2', '3'] as const;
 
 export const createEntityProposalFixture = (
   seed: string,
   threshold = 2n,
+  signerLabels: readonly string[] = defaultSignerLabels,
 ) => {
   const validators = signerLabels.map(label =>
     deriveSignerAddressSync(seed, label).toLowerCase());
@@ -55,10 +55,12 @@ export const createEntityProposalFixture = (
     paybook: { entries: new Map(), feesEarned: 0n },
   });
 
-  const createValidator = (label: SignerLabel) => {
+  const createValidator = (label: string) => {
     const env = createEmptyEnv(`${seed}:${label}`);
     clearSignerKeys(env);
-    const signerId = validators[signerLabels.indexOf(label)]!;
+    const signerIndex = signerLabels.indexOf(label);
+    if (signerIndex < 0) throw new Error(`TEST_ENTITY_SIGNER_LABEL_UNKNOWN:${label}`);
+    const signerId = validators[signerIndex]!;
     registerSignerKey(env, signerId, deriveSignerKeySync(seed, label));
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
@@ -103,7 +105,9 @@ export const createEntityProposalFixture = (
     if (command?.type !== 'entityCommand') {
       throw new Error('TEST_ENTITY_COMMAND_MISSING');
     }
-    command.data.signature = `0x${'00'.repeat(65)}`;
+    // Keep the mutation wire-canonical so proposal pre-authentication reaches
+    // the intended signature/command checks instead of failing shape decode.
+    command.data.signature = `0x${'55'.repeat(64)}01`;
   };
 
   const bindMutatedFrame = (
