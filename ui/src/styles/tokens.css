@@ -74,7 +74,7 @@
 	--dispute: #d9484f;
 	--dispute-dim: rgba(217, 72, 79, 0.12);
 	--btn-ink: #ffffff;
-	--scrim: rgba(20, 23, 30, 0.4);
+	--scrim: rgba(20, 23, 30, 0.5);
 	--shadow-sheet: 0 -18px 60px rgba(20, 23, 30, 0.18);
 	--fade: var(--bg);
 }

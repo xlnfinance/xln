@@ -102,6 +102,21 @@ svg {
 	word-break: break-all;
 }
 
+/* A hash that copies itself on tap; looks like text until hovered. */
+button.hash.copy {
+	background: none;
+	border: 0;
+	padding: 0;
+	text-align: inherit;
+	cursor: copy;
+	border-bottom: 1px dotted transparent;
+}
+
+button.hash.copy:hover {
+	color: var(--ink-2);
+	border-bottom-color: var(--ink-3);
+}
+
 .caps {
 	font-size: 11px;
 	letter-spacing: 0.12em;

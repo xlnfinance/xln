@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { buildWalletPayHref, buildXlnInvoiceDeepLink, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
 import { Bar } from '../components/Bars';
+import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { TokenPicker } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
@@ -144,7 +145,9 @@ export function Receive() {
 				</div>
 				<div className="card">
 					<h3 className="caps">Your entity id</h3>
-					<p className="hash" style={{ marginTop: 8 }}>{entityId}</p>
+					<p style={{ marginTop: 8 }}>
+						<CopyId value={entityId} label="Entity id" full />
+					</p>
 					<p className="note" style={{ marginTop: 10 }}>
 						Anyone with an account route to you can pay this id directly. Payments arrive instantly up to your inbound room.
 					</p>

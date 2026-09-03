@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DeltaBar, DeltaCaption, Legend } from '../components/Bars';
+import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { TokenIcon } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatMoney, formatSigned, getTokenMeta, parseAmount, shortId } from '../runtime/format';
+import { formatMoney, formatSigned, getTokenMeta, parseAmount } from '../runtime/format';
 import { useWallet, type AccountTokenView } from '../runtime/views';
 
 function TokenSection({ token }: { token: AccountTokenView }) {
@@ -146,8 +147,8 @@ export function AccountDetail() {
 							{label}
 							{account?.isHub ? <span className="chip hub">hub</span> : null}
 						</span>
-						<span className="hash" style={{ display: 'block' }} title={counterpartyId.toLowerCase()}>
-							{shortId(counterpartyId.toLowerCase(), 10, 6)}
+						<span style={{ display: 'block' }}>
+							<CopyId value={counterpartyId.toLowerCase()} label="Entity id" />
 						</span>
 					</span>
 				</span>

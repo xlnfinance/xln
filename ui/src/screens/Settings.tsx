@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Sheet } from '../components/Sheet';
 import { Bar } from '../components/Bars';
+import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { clampUsdPerPx, USD_PER_PX_MAX, USD_PER_PX_MIN, useApp, type PlaceKey } from '../runtime/store';
 import { disconnectAdapter, getAdapter } from '../runtime/adapter';
@@ -158,7 +159,7 @@ export function SettingsScreen() {
 			</div>
 			<div className="setting" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
 				<div className="t">Runtime id</div>
-				<span className="hash">{adapter ? adapter.runtimeId : '—'}</span>
+				<CopyId value={adapter ? adapter.runtimeId : ''} label="Runtime id" full />
 			</div>
 			<div className="setting">
 				<div className="t">Frame</div>

@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
+import { Bar } from '../components/Bars';
+import { CopyId } from '../components/CopyId';
 import { Icon, type IconName } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../runtime/store';
-import { dayLabel, formatClock, formatMoney, getTokenMeta, shortId } from '../runtime/format';
+import { dayLabel, formatClock, formatMoney, getTokenMeta } from '../runtime/format';
 import { displayEntityName, useWallet } from '../runtime/views';
+import { usdOf } from '../runtime/financial/prices';
 import { USER_ACTIVITY_TYPES, useMovements, type Movement } from '../runtime/financial/movements';
 
 export { USER_ACTIVITY_TYPES };
@@ -67,14 +70,15 @@ export function ActivityRow({
 	// A credit limit or collateral figure is a setting, not money that moved: keep it out of the money column.
 	const amountInline = movement.kind === 'account' || movement.kind === 'settlement';
 	const subtitle = [party, amountInline && amount ? amount : '', movement.detail].filter(Boolean).join(' · ') || `frame #${movement.height}`;
-	const Tag = onClick ? 'button' : 'div';
+	// Money that moved is drawn at the wallet's one scale, like every other bar.
+	const bar =
+		movement.kind === 'payment' && movement.amount !== null && movement.tokenId !== null
+			? [{ usd: usdOf(movement.tokenId, movement.amount), kind: (movement.direction === 'in' ? 'coll' : 'credit') as 'coll' | 'credit' }]
+			: null;
+	const Tag = onClick ? 'button' : 'span';
 	return (
-		<Tag
-			{...(onClick ? { type: 'button' as const, onClick } : {})}
-			className={`row${onClick ? ' tappable' : ''}${selected ? ' sel' : ''}${first ? ' first' : ''}`}
-			data-testid="activity-row"
-		>
-			<span className="rt">
+		<div className={`row${onClick ? ' tappable' : ''}${selected ? ' sel' : ''}${first ? ' first' : ''}`} data-testid="activity-row">
+			<Tag {...(onClick ? { type: 'button' as const, onClick } : {})} className="rt" style={{ width: '100%', textAlign: 'left' }}>
 				<span className={`ev-ic ${cls}`}>
 					<Icon name={icon} size={15} />
 				</span>
@@ -88,8 +92,13 @@ export function ActivityRow({
 						<span className={`state ${TONE_CLASS[movement.tone]}`}>{movement.state}</span>
 					</span>
 				</span>
-			</span>
-		</Tag>
+			</Tag>
+			{bar ? (
+				<div className="rb">
+					<Bar segments={bar} height={4} />
+				</div>
+			) : null}
+		</div>
 	);
 }
 
@@ -112,7 +121,7 @@ function MovementDetail({ movement, names }: { movement: Movement; names: Map<st
 					<div className="kv">
 						<span className="k">{movement.direction === 'out' ? 'To' : movement.direction === 'in' ? 'From' : 'With'}</span>
 						<span className="v">
-							{displayEntityName(names, movement.counterpartyId)} <span className="mono faint">{shortId(movement.counterpartyId, 8, 4)}</span>
+							{displayEntityName(names, movement.counterpartyId)} <CopyId value={movement.counterpartyId} label="Entity id" head={8} tail={4} />
 						</span>
 					</div>
 				) : null}
@@ -143,8 +152,8 @@ function MovementDetail({ movement, names }: { movement: Movement; names: Map<st
 				{movement.hash ? (
 					<div className="kv">
 						<span className="k">Proof</span>
-						<span className="v mono" style={{ color: 'var(--ink-2)' }}>
-							{shortId(movement.hash, 10, 6)}
+						<span className="v">
+							<CopyId value={movement.hash} label="Proof" />
 						</span>
 					</div>
 				) : null}

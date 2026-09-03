@@ -801,9 +801,9 @@ textarea.input.boxed {
 }
 
 .chips button.active {
-	background: var(--ink);
-	color: var(--bg);
-	border-color: var(--ink);
+	background: var(--accent-dim);
+	color: var(--accent);
+	border-color: transparent;
 	font-weight: 600;
 }
 
@@ -827,6 +827,16 @@ textarea.input.boxed {
 .segc button.active {
 	background: var(--surface-3);
 	color: var(--ink);
+}
+
+:root[data-theme='light'] .segc {
+	background: var(--surface-2);
+	border-color: transparent;
+}
+
+:root[data-theme='light'] .segc button.active {
+	background: var(--surface);
+	box-shadow: 0 1px 2px rgba(20, 23, 30, 0.12);
 }
 
 .hops {

@@ -1,8 +1,11 @@
+import { Bar } from './Bars';
+import { CopyId } from './CopyId';
 import { Icon } from './Icons';
 import { Sheet } from './Sheet';
 import { useApp } from '../runtime/store';
 import { useReceipts } from '../runtime/financial/receipts';
 import { formatClock, formatMoney, getTokenMeta } from '../runtime/format';
+import { usdOf } from '../runtime/financial/prices';
 import { displayEntityName, useWallet } from '../runtime/views';
 
 /**
@@ -50,6 +53,9 @@ export function PaymentReceiptSheet() {
 				<div className="a num" data-testid="receipt-amount">
 					{formatMoney(amount, meta.decimals)} <small>{meta.symbol}</small>
 				</div>
+				<div style={{ margin: '10px 0 6px' }}>
+					<Bar segments={[{ usd: usdOf(meta.symbol === '?' ? 1 : tokenId, amount), kind: sent ? 'credit' : 'coll' }]} height={4} />
+				</div>
 				<div className="to" data-testid="receipt-title">
 					{sent ? 'to' : 'from'} {counterparty ? displayEntityName(names, counterparty) : '—'}
 					{via ? <span className="faint"> via {via}</span> : null}
@@ -71,8 +77,8 @@ export function PaymentReceiptSheet() {
 				{proof ? (
 					<div className="kv">
 						<span className="k">Proof</span>
-						<span className="v mono" style={{ color: 'var(--ink-2)' }}>
-							{proof.slice(0, 10)}…{proof.slice(-4)}
+						<span className="v">
+							<CopyId value={proof} label="Proof" head={10} tail={4} />
 						</span>
 					</div>
 				) : null}
