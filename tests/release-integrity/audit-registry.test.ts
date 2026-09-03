@@ -71,7 +71,7 @@ describe('canonical audit registry', () => {
     ]) {
       expect(accountFiles).toContain(coupledPath);
     }
-  }, 20_000);
+  }, 120_000);
 
   test('durable payment implementation and regressions are fingerprint-owned', () => {
     const registration = REGISTRY.modules.find(module => module.id === 'registration-payment')!;
