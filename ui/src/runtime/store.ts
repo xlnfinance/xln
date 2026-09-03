@@ -28,6 +28,11 @@ const VAULTS_KEY = 'xln-ui-vaults';
 const ACTIVE_VAULT_KEY = 'xln-ui-active-vault';
 const THEME_KEY = 'xln-ui-theme';
 const USD_PER_PX_KEY = 'xln-ui-usd-per-px';
+const SCALE_MODE_KEY = 'xln-ui-scale-mode';
+/** Track the auto scale fits the largest balance into: the hero bar on desktop, the screen width on a phone. */
+const AUTO_FIT_PX = 560;
+const autoFitPx = (): number => Math.min(AUTO_FIT_PX, Math.max(240, (typeof window === 'undefined' ? AUTO_FIT_PX : window.innerWidth) - 56));
+const NICE_STEPS = [1, 2, 5];
 const PLACES_KEY = 'xln-ui-places';
 
 export const USD_PER_PX_MIN = 1;
@@ -75,6 +80,23 @@ function readInitialUsdPerPx(): number {
 	return value;
 }
 
+export type ScaleMode = 'auto' | 'fixed';
+
+function readInitialScaleMode(): ScaleMode {
+	return localStorage.getItem(SCALE_MODE_KEY) === 'fixed' ? 'fixed' : 'auto';
+}
+
+/** Smallest 1-2-5 step (dollars per pixel) at which `maxUsd` fits the auto-fit track. */
+export function niceUsdPerPx(maxUsd: number): number {
+	const raw = Math.max(USD_PER_PX_MIN, maxUsd / autoFitPx());
+	let magnitude = 1;
+	while (magnitude * 10 <= raw) magnitude *= 10;
+	for (const step of NICE_STEPS) {
+		if (step * magnitude >= raw) return clampUsdPerPx(step * magnitude);
+	}
+	return clampUsdPerPx(10 * magnitude);
+}
+
 function readInitialPlaces(): PlaceVisibility {
 	const defaults: PlaceVisibility = { onchain: true, reserve: true, accounts: true };
 	try {
@@ -99,7 +121,12 @@ type AppState = {
 
 	/** Dollars per pixel for every bar. Persisted; drives the --ppu CSS variable. */
 	usdPerPx: number;
+	/** `auto` fits the largest bar on Home to the track; `fixed` pins the user's own scale. */
+	scaleMode: ScaleMode;
 	setUsdPerPx: (usdPerPx: number) => void;
+	setScaleMode: (mode: ScaleMode) => void;
+	/** Home reports its largest bar; in auto mode the scale follows it. */
+	fitScale: (maxUsd: number) => void;
 
 	places: PlaceVisibility;
 	setPlaceVisible: (place: PlaceKey, visible: boolean) => void;
@@ -132,6 +159,8 @@ type AppState = {
 	toasts: Toast[];
 	toast: (text: string, kind?: Toast['kind']) => void;
 	dismissToast: (id: number) => void;
+	/** Drop every toast: a route change or a committed receipt supersedes them. */
+	clearToasts: () => void;
 };
 
 export const useApp = create<AppState>((set, get) => ({
@@ -143,11 +172,24 @@ export const useApp = create<AppState>((set, get) => ({
 	},
 
 	usdPerPx: readInitialUsdPerPx(),
+	scaleMode: readInitialScaleMode(),
+	setScaleMode: mode => {
+		localStorage.setItem(SCALE_MODE_KEY, mode);
+		set({ scaleMode: mode });
+	},
+	fitScale: maxUsd => {
+		if (get().scaleMode !== 'auto' || !(maxUsd > 0)) return;
+		const usdPerPx = niceUsdPerPx(maxUsd);
+		if (usdPerPx === get().usdPerPx) return;
+		applyUsdPerPx(usdPerPx);
+		set({ usdPerPx });
+	},
 	setUsdPerPx: value => {
 		const usdPerPx = clampUsdPerPx(value);
 		localStorage.setItem(USD_PER_PX_KEY, String(usdPerPx));
+		localStorage.setItem(SCALE_MODE_KEY, 'fixed');
 		applyUsdPerPx(usdPerPx);
-		set({ usdPerPx });
+		set({ usdPerPx, scaleMode: 'fixed' });
 	},
 
 	places: readInitialPlaces(),
@@ -210,4 +252,5 @@ export const useApp = create<AppState>((set, get) => ({
 		setTimeout(() => get().dismissToast(id), kind === 'danger' ? 7000 : 4000);
 	},
 	dismissToast: id => set({ toasts: get().toasts.filter(t => t.id !== id) }),
+	clearToasts: () => set({ toasts: [] }),
 }));

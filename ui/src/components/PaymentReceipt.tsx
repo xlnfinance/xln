@@ -2,7 +2,7 @@ import { Icon } from './Icons';
 import { Sheet } from './Sheet';
 import { useApp } from '../runtime/store';
 import { useReceipts } from '../runtime/financial/receipts';
-import { formatMoney, getTokenMeta } from '../runtime/format';
+import { formatClock, formatMoney, getTokenMeta } from '../runtime/format';
 import { displayEntityName, useWallet } from '../runtime/views';
 
 /**
@@ -34,6 +34,8 @@ export function PaymentReceiptSheet() {
 	const elapsedRaw = Number(data['finalizedInMs'] ?? data['elapsedMs'] ?? 0);
 	const elapsed = Number.isFinite(elapsedRaw) && elapsedRaw > 0 ? Math.max(1, Math.floor(elapsedRaw)) : null;
 	const description = String(data['description'] || '').trim();
+	const finalizedAt = Number(data['finalizedAtMs'] ?? 0);
+	const clock = Number.isFinite(finalizedAt) && finalizedAt > 0 ? formatClock(finalizedAt) : '';
 	const proof = String(data['hashlock'] || data['lockId'] || '');
 
 	return (
@@ -57,7 +59,10 @@ export function PaymentReceiptSheet() {
 			<div>
 				<div className="kv">
 					<span className="k">Settled</span>
-					<span className="v st-settled">{elapsed ? `Instantly · ${elapsed} ms` : 'Instantly'}</span>
+					<span className="v st-settled">
+						{clock ? <span className="mono" style={{ color: 'var(--ink-2)', marginRight: 8 }}>{clock}</span> : null}
+						{elapsed ? `in ${elapsed} ms` : 'Instantly'}
+					</span>
 				</div>
 				<div className="kv">
 					<span className="k">Frame</span>

@@ -314,7 +314,7 @@ export function Pay() {
 
 					{chosen && (
 						<div className="card tight">
-							<div className="kv">
+							<div className="kv mobile-only">
 								<span className="k">Route</span>
 								<span className="hops">
 									{chosen.path.map((hop, index) => (
@@ -427,7 +427,11 @@ export function Pay() {
 												{wallet.hubs.has(hop) ? <span className="chip hub">hub</span> : null}
 											</div>
 											<div className="s">
-												{index === 0 ? wallet.jurisdiction || 'sender' : index === chosen.path.length - 1 ? shortId(hop, 10, 6) : `forwards atomically · fee ${formatMoney(fee, meta.decimals, 6)}`}
+												{index === 0
+													? wallet.jurisdiction || 'sender'
+													: index === chosen.path.length - 1
+														? shortId(hop, 10, 6)
+														: `forwards atomically · fee ${formatMoney(fee, meta.decimals, 6)}${chosen.totalFee !== fee ? ` of ${formatMoney(chosen.totalFee, meta.decimals, 6)} total` : ''}`}
 											</div>
 										</div>
 									);

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Icon, type IconName } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../runtime/store';
-import { dayLabel, formatClock, formatMoney, getTokenMeta, shortId, timeAgo } from '../runtime/format';
+import { dayLabel, formatClock, formatMoney, getTokenMeta, shortId } from '../runtime/format';
 import { displayEntityName, useWallet } from '../runtime/views';
 import { USER_ACTIVITY_TYPES, useMovements, type Movement } from '../runtime/financial/movements';
 
@@ -64,6 +64,9 @@ export function ActivityRow({
 	const amount = formatMovementAmount(movement);
 	const { icon, cls } = movementIcon(movement);
 	const party = movementParty(movement, names);
+	// A credit limit or collateral figure is a setting, not money that moved: keep it out of the money column.
+	const amountInline = movement.kind === 'account' || movement.kind === 'settlement';
+	const subtitle = [party, amountInline && amount ? amount : '', movement.detail].filter(Boolean).join(' · ') || `frame #${movement.height}`;
 	const Tag = onClick ? 'button' : 'div';
 	return (
 		<Tag
@@ -77,10 +80,10 @@ export function ActivityRow({
 				</span>
 				<span className="tx">
 					<span className="t">{movement.title}</span>
-					<span className="s">{[party, movement.detail].filter(Boolean).join(' · ') || `frame #${movement.height}`}</span>
+					<span className="s">{subtitle}</span>
 				</span>
 				<span className="r">
-					{amount ? <span className="v num">{amount}</span> : null}
+					{amount && !amountInline ? <span className="v num">{amount}</span> : null}
 					<span className="u">
 						<span className={`state ${TONE_CLASS[movement.tone]}`}>{movement.state}</span>
 					</span>
@@ -185,7 +188,7 @@ export function ActivityScreen() {
 					{movements.length} movements
 				</span>
 			</div>
-			<div className="two-col" style={{ gridTemplateColumns: 'minmax(0,1fr) 400px' }}>
+			<div className="two-col activity">
 				<div>
 					<div className="chips">
 						{FILTERS.map(entry => (
@@ -226,9 +229,6 @@ export function ActivityScreen() {
 					</Sheet>
 				</div>
 			)}
-			<span className="faint" style={{ fontSize: 11, display: 'block', marginTop: 24 }}>
-				{selected ? timeAgo(selected.timestamp) : ''}
-			</span>
 		</div>
 	);
 }

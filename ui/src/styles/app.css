@@ -107,6 +107,10 @@
 	grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
 }
 
+.two-col.activity {
+	grid-template-columns: minmax(0, 1fr) 400px;
+}
+
 .two-col .aside {
 	display: flex;
 	flex-direction: column;
@@ -274,6 +278,8 @@
 .seg {
 	flex: none;
 	height: 100%;
+	/* Any money at all is at least a visible sliver, whatever the scale. */
+	min-width: 2px;
 	width: calc(var(--u) * var(--ppu) * 1px);
 	border-radius: 1.5px;
 	transition: width var(--dur-slow) var(--ease);
@@ -526,6 +532,18 @@
 .sect .more {
 	font-size: 12px;
 	color: var(--ink-2);
+}
+
+button.more {
+	background: none;
+	border: 0;
+	padding: 0;
+	font: inherit;
+	cursor: pointer;
+}
+
+button.more:hover {
+	color: var(--ink);
 }
 
 .card {
@@ -1511,7 +1529,8 @@ textarea.input.boxed {
 
 @media (max-width: 1100px) {
 	.two-col,
-	.two-col.pay {
+	.two-col.pay,
+	.two-col.activity {
 		grid-template-columns: minmax(0, 1fr);
 		gap: 22px;
 	}
@@ -1546,15 +1565,16 @@ textarea.input.boxed {
 
 /* ---------- viewport-only helpers ---------- */
 
+/* !important: these helpers must beat layout rules such as `.two-col .aside { display: flex }`. */
 @media (max-width: 1100px) {
 	.desktop-only {
-		display: none;
+		display: none !important;
 	}
 }
 
 @media (min-width: 1101px) {
 	.mobile-only {
-		display: none;
+		display: none !important;
 	}
 }
 

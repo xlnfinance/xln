@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UsdAmount } from '../components/Amount';
 import { Bar, DeltaBar, DeltaCaption } from '../components/Bars';
@@ -16,6 +16,9 @@ import { ActivityRow } from './Activity';
 export function Home() {
 	const entityId = useApp(s => s.activeEntityId);
 	const places = useApp(s => s.places);
+	const usdPerPx = useApp(s => s.usdPerPx);
+	const scaleMode = useApp(s => s.scaleMode);
+	const fitScale = useApp(s => s.fitScale);
 	const wallet = useWallet(entityId);
 	const navigate = useNavigate();
 	const [open, setOpen] = useState<Set<number>>(() => new Set());
@@ -26,6 +29,15 @@ export function Home() {
 	const recentMovements = recent.movements.slice(0, 4);
 
 	const activeTotals = useMemo(() => wallet.totals.filter(total => total.active), [wallet.totals]);
+
+	// The largest balance drawn on this screen sets the auto scale. Capacity bars
+	// (credit lines dwarf balances) may run past their track and fade: that fade
+	// is the signal that there is more room than money.
+	const largestBarUsd = useMemo(
+		() => Math.max(wallet.usd.net, ...activeTotals.map(total => usdOf(total.tokenId, total.net))),
+		[wallet.usd.net, activeTotals],
+	);
+	useEffect(() => fitScale(largestBarUsd), [largestBarUsd, fitScale]);
 
 	const toggle = (tokenId: number): void =>
 		setOpen(current => {
@@ -53,8 +65,8 @@ export function Home() {
 					<span className="avatar sm">{wallet.name.slice(0, 1).toUpperCase()}</span>
 					<span>
 						<span style={{ display: 'block', lineHeight: 1.2 }}>{wallet.name}</span>
-						<span className="state st-settled" style={{ fontSize: 11 }} data-testid="home-frame">
-							synced · frame {wallet.frameHeight.toLocaleString('en-US')}
+						<span className="state st-settled" style={{ fontSize: 11 }} data-testid="home-frame" title={`Frame ${wallet.frameHeight.toLocaleString('en-US')}`}>
+							synced
 						</span>
 					</span>
 				</span>
@@ -130,10 +142,10 @@ export function Home() {
 
 					<div className="sect">
 						<h3 className="caps">Balances</h3>
-						<span className="more">
-							{activeTotals.length} {activeTotals.length === 1 ? 'token' : 'tokens'}
+						<button type="button" className="more" onClick={() => navigate('/settings')} title="Every bar is drawn to this scale. Change it in Settings.">
+							<span className="num">1 px = ${usdPerPx.toLocaleString('en-US')}{scaleMode === 'auto' ? ' · auto' : ''}</span>
 							{wallet.totals.length > activeTotals.length ? ` · ${wallet.totals.length - activeTotals.length} empty hidden` : ''}
-						</span>
+						</button>
 					</div>
 					{activeTotals.map((total, index) => (
 						<TokenRow
@@ -227,14 +239,7 @@ function TokenRow({
 			<button type="button" className="rt" style={{ width: '100%', textAlign: 'left' }} onClick={onToggle} aria-expanded={open}>
 				<TokenIcon tokenId={total.tokenId} />
 				<span className="tx">
-					<span className="t">
-						{meta.symbol}
-						{total.jurisdictions.map(name => (
-							<span key={name} className="chip">
-								{name}
-							</span>
-						))}
-					</span>
+					<span className="t">{meta.symbol}</span>
 					<span className="s">
 						{meta.name}
 						{places.accounts && total.owed < 0n ? (

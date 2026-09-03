@@ -61,7 +61,7 @@ export function Receive() {
 	};
 
 	return (
-		<div className="screen screen-narrow fade-in">
+		<div className="screen fade-in">
 			<div className="screen-header">
 				<span className="screen-title">
 					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back">
@@ -71,6 +71,7 @@ export function Receive() {
 				</span>
 			</div>
 
+			<div className="two-col">
 			<div className="stack" style={{ alignItems: 'center' }}>
 				{qr && (
 					<div className="qr">
@@ -121,24 +122,34 @@ export function Receive() {
 					</div>
 				)}
 
-				<div style={{ width: '100%' }}>
-					<span className="caps" style={{ display: 'block', marginBottom: 6 }}>
-						Your entity id
-					</span>
-					<p className="hash">{entityId}</p>
-				</div>
+			</div>
 
-				<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, width: '100%' }}>
-					<button type="button" className="btn ghost" onClick={() => void copy(invoice, 'Invoice')}>
-						<Icon name="copy" size={14} /> Copy invoice
-					</button>
-					<button type="button" className="btn" onClick={() => void copy(walletHref, 'Payment link')}>
-						<Icon name="link" size={14} /> Copy link
+			<div className="aside">
+				<div className="card">
+					<h3 className="caps">Share</h3>
+					<p className="note" style={{ marginTop: 10 }}>
+						The link opens this wallet with the amount and note filled in. The invoice is the same request as text, for any xln wallet.
+					</p>
+					<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+						<button type="button" className="btn ghost" onClick={() => void copy(invoice, 'Invoice')}>
+							<Icon name="copy" size={14} /> Copy invoice
+						</button>
+						<button type="button" className="btn" onClick={() => void copy(walletHref, 'Payment link')}>
+							<Icon name="link" size={14} /> Copy link
+						</button>
+					</div>
+					<button type="button" className="btn quiet" style={{ marginTop: 6 }} onClick={() => void copy(deepLink, 'App link')}>
+						Copy xln:// app link
 					</button>
 				</div>
-				<button type="button" className="btn quiet" onClick={() => void copy(deepLink, 'App link')}>
-					Copy xln:// app link
-				</button>
+				<div className="card">
+					<h3 className="caps">Your entity id</h3>
+					<p className="hash" style={{ marginTop: 8 }}>{entityId}</p>
+					<p className="note" style={{ marginTop: 10 }}>
+						Anyone with an account route to you can pay this id directly. Payments arrive instantly up to your inbound room.
+					</p>
+				</div>
+			</div>
 			</div>
 		</div>
 	);

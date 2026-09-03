@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DeltaBar, DeltaCaption, Legend } from '../components/Bars';
 import { Icon } from '../components/Icons';
@@ -6,7 +6,7 @@ import { Sheet } from '../components/Sheet';
 import { TokenIcon } from '../components/TokenPicker';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatMoney, formatSigned, getTokenMeta, parseAmount } from '../runtime/format';
+import { formatMoney, formatSigned, getTokenMeta, parseAmount, shortId } from '../runtime/format';
 import { useWallet, type AccountTokenView } from '../runtime/views';
 
 function TokenSection({ token }: { token: AccountTokenView }) {
@@ -30,9 +30,6 @@ function TokenSection({ token }: { token: AccountTokenView }) {
 			</div>
 			<DeltaBar derived={d} tokenId={token.tokenId} />
 			<DeltaCaption derived={d} format={money} />
-			<div style={{ marginTop: 12 }}>
-				<Legend />
-			</div>
 			<div style={{ marginTop: 14 }}>
 				<div className="kv">
 					<span className="k">Their credit line to you</span>
@@ -44,7 +41,7 @@ function TokenSection({ token }: { token: AccountTokenView }) {
 				</div>
 				<div className="kv">
 					<span className="k">Collateral</span>
-					<span className="v num st-settled">{money(d.collateral)}</span>
+					<span className={`v num${d.collateral > 0n ? ' st-settled' : ''}`}>{money(d.collateral)}</span>
 				</div>
 				{(d.outTotalHold ?? 0n) > 0n || (d.inTotalHold ?? 0n) > 0n ? (
 					<div className="kv">
@@ -56,7 +53,7 @@ function TokenSection({ token }: { token: AccountTokenView }) {
 				) : null}
 			</div>
 			<button type="button" className="btn quiet" style={{ marginTop: 10 }} onClick={() => setDetails(value => !value)}>
-				Canonical state <Icon name={details ? 'chevronDown' : 'chevronRight'} size={13} />
+				Ledger detail <Icon name={details ? 'chevronDown' : 'chevronRight'} size={13} />
 			</button>
 			{details && (
 				<div className="fade-in" style={{ marginTop: 6 }}>
@@ -97,7 +94,20 @@ export function AccountDetail() {
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const toast = useApp(s => s.toast);
 	const wallet = useWallet(entityId);
+	const [showEmpty, setShowEmpty] = useState(false);
 	const account = wallet.accounts.find(entry => entry.counterpartyId === counterpartyId.toLowerCase()) ?? null;
+	// A lane with no position, no credit either way and no collateral is plumbing until money touches it.
+	const lanes = useMemo(() => {
+		const tokens = account?.tokens ?? [];
+		const isEmpty = (token: AccountTokenView): boolean =>
+			token.signed === 0n &&
+			token.derived.ownCreditLimit === 0n &&
+			token.derived.peerCreditLimit === 0n &&
+			token.derived.collateral === 0n &&
+			(token.derived.outTotalHold ?? 0n) === 0n &&
+			(token.derived.inTotalHold ?? 0n) === 0n;
+		return { active: tokens.filter(token => !isEmpty(token)), empty: tokens.filter(isEmpty) };
+	}, [account]);
 	const label = account?.label ?? 'Account';
 
 	const [extending, setExtending] = useState(false);
@@ -125,7 +135,7 @@ export function AccountDetail() {
 	};
 
 	return (
-		<div className="screen screen-narrow fade-in">
+		<div className="screen fade-in">
 			<div className="screen-header">
 				<span className="screen-title">
 					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back">
@@ -136,13 +146,15 @@ export function AccountDetail() {
 							{label}
 							{account?.isHub ? <span className="chip hub">hub</span> : null}
 						</span>
-						<span className="hash" style={{ display: 'block' }}>
-							{counterpartyId.toLowerCase()}
+						<span className="hash" style={{ display: 'block' }} title={counterpartyId.toLowerCase()}>
+							{shortId(counterpartyId.toLowerCase(), 10, 6)}
 						</span>
 					</span>
 				</span>
 			</div>
 
+			<div className="two-col">
+			<div>
 			<div className="actions" style={{ margin: '0 0 18px' }}>
 				<button type="button" className="btn primary" onClick={() => navigate(`/pay?to=${counterpartyId.toLowerCase()}`)}>
 					<Icon name="pay" size={18} />
@@ -171,7 +183,47 @@ export function AccountDetail() {
 					Dispute in progress. Payments through this account are paused.
 				</p>
 			) : null}
-			{account?.tokens.map(token => <TokenSection key={token.tokenId} token={token} />)}
+			{account && lanes.active.length > 0 ? (
+				<div style={{ margin: '0 0 12px' }}>
+					<Legend />
+				</div>
+			) : null}
+			{lanes.active.map(token => (
+				<TokenSection key={token.tokenId} token={token} />
+			))}
+			{lanes.empty.length > 0 ? (
+				<button type="button" className="btn quiet" style={{ marginBottom: 14 }} onClick={() => setShowEmpty(value => !value)}>
+					{showEmpty ? 'Hide' : 'Show'} {lanes.empty.length} empty {lanes.empty.length === 1 ? 'lane' : 'lanes'} ·{' '}
+					{lanes.empty.map(token => getTokenMeta(token.tokenId).symbol).join(', ')}
+				</button>
+			) : null}
+			{showEmpty ? lanes.empty.map(token => <TokenSection key={token.tokenId} token={token} />) : null}
+			</div>
+			<div className="aside">
+				<div className="card">
+					<h3 className="caps">This account</h3>
+					<div className="kv" style={{ marginTop: 8 }}>
+						<span className="k">Counterparty</span>
+						<span className="v">{account?.isHub ? 'Hub' : 'Direct'}</span>
+					</div>
+					<div className="kv">
+						<span className="k">Network</span>
+						<span className="v">{wallet.jurisdiction || '—'}</span>
+					</div>
+					<div className="kv">
+						<span className="k">Frames signed</span>
+						<span className="v num">{(account?.frameHeight ?? 0).toLocaleString('en-US')}</span>
+					</div>
+					<div className="kv">
+						<span className="k">Status</span>
+						<span className={`v ${account?.disputed ? 'st-dispute' : 'st-settled'}`}>{account?.disputed ? 'Disputed' : 'Open'}</span>
+					</div>
+					<p className="note" style={{ marginTop: 12 }}>
+						Every frame here is signed by both of you. The credit line is your cap on what they can owe you; collateral is what is enforceable on-chain.
+					</p>
+				</div>
+			</div>
+			</div>
 
 			{extending && (
 				<Sheet title="Extend credit" onClose={() => setExtending(false)}>

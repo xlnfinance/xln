@@ -146,3 +146,6 @@ ui/tests/test-results/
 
 # Machine-wide stand semaphore (tools/stand-lock.ts); lives beside the main checkout.
 .xln-stand-lock/
+
+# design review raw model streams (contain the screenshots as base64)
+design/review/**/*.jsonl

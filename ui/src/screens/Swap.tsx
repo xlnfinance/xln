@@ -284,6 +284,11 @@ export function Swap() {
 								{...(mode === 'cross' && targetEntity?.jurisdiction?.name ? { chip: targetEntity.jurisdiction.name } : {})}
 							/>
 						</div>
+						{giveText.trim() && !wantText.trim() ? (
+							<div className="note" style={{ marginTop: 8 }}>
+								Set the amount you want. The order rests on your account at that price until {hub?.label ?? 'the hub'} fills it.
+							</div>
+						) : null}
 					</div>
 
 					{hubs.length > 1 && (

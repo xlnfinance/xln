@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { useApp } from '../runtime/store';
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from './Icons';
 import { Toasts } from './Toasts';
@@ -20,6 +22,9 @@ const NAV: Array<{ to: string; label: string; icon: IconName; match: (pathname: 
 
 export function Shell({ children }: { children: ReactNode }) {
 	const { pathname } = useLocation();
+	const clearToasts = useApp(s => s.clearToasts);
+	// A toast belongs to the screen that raised it.
+	useEffect(() => clearToasts(), [pathname, clearToasts]);
 
 	return (
 		<div className="app">

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Sheet } from '../components/Sheet';
+import { Bar } from '../components/Bars';
 import { Icon } from '../components/Icons';
 import { clampUsdPerPx, USD_PER_PX_MAX, USD_PER_PX_MIN, useApp, type PlaceKey } from '../runtime/store';
 import { disconnectAdapter, getAdapter } from '../runtime/adapter';
@@ -18,11 +19,38 @@ const PLACES: Array<{ key: PlaceKey; title: string; detail: string }> = [
 	{ key: 'accounts', title: 'Accounts', detail: 'Bilateral credit and collateral with hubs and people. Instant.' },
 ];
 
+const PREVIEW_AMOUNTS = [100, 1_000, 10_000, 100_000];
+
+/** The scale, shown as money: the same bar the whole wallet draws. */
+function ScalePreview({ usdPerPx }: { usdPerPx: number }) {
+	return (
+		<div className="card">
+			<h3 className="caps">At this scale</h3>
+			{PREVIEW_AMOUNTS.map(amount => (
+				<div key={amount} style={{ marginTop: 12 }}>
+					<div className="kv" style={{ padding: '0 0 6px', border: 0 }}>
+						<span className="k">${amount.toLocaleString('en-US')}</span>
+						<span className="v num" style={{ color: 'var(--ink-3)' }}>
+							{Math.max(1, Math.round(amount / usdPerPx)).toLocaleString('en-US')} px
+						</span>
+					</div>
+					<Bar segments={[{ usd: amount, kind: 'credit' }]} height={6} />
+				</div>
+			))}
+			<p className="note" style={{ marginTop: 14 }}>
+				A bar wider than its card fades out at the edge. Lower the scale to fit big balances, raise it to see small payments.
+			</p>
+		</div>
+	);
+}
+
 export function SettingsScreen() {
 	const theme = useApp(s => s.theme);
 	const setTheme = useApp(s => s.setTheme);
 	const usdPerPx = useApp(s => s.usdPerPx);
 	const setUsdPerPx = useApp(s => s.setUsdPerPx);
+	const scaleMode = useApp(s => s.scaleMode);
+	const setScaleMode = useApp(s => s.setScaleMode);
 	const places = useApp(s => s.places);
 	const setPlaceVisible = useApp(s => s.setPlaceVisible);
 	const vaults = useApp(s => s.vaults);
@@ -44,11 +72,13 @@ export function SettingsScreen() {
 	};
 
 	return (
-		<div className="screen screen-narrow fade-in">
+		<div className="screen fade-in">
 			<div className="screen-header">
 				<span className="screen-title">Settings</span>
 			</div>
 
+			<div className="two-col">
+			<div>
 			<div className="sect" style={{ marginTop: 0 }}>
 				<h3 className="caps">Scale</h3>
 				<span className="more num">1 px = ${roundUsd(usdPerPx)}</span>
@@ -56,7 +86,10 @@ export function SettingsScreen() {
 			<div className="setting first" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
 				<div>
 					<div className="t">Dollars per pixel</div>
-					<div className="s">Every bar in the wallet is drawn to this one scale, so amounts stay comparable at a glance.</div>
+					<div className="s">
+						Every bar in the wallet is drawn to this one scale, so amounts stay comparable at a glance.
+						{scaleMode === 'auto' ? ' Auto follows your largest balance; pick a value to pin it.' : ' Pinned; choose Auto to follow your largest balance.'}
+					</div>
 				</div>
 				<div className="scale-row">
 					<input
@@ -70,8 +103,11 @@ export function SettingsScreen() {
 					<output className="num">1 px = ${roundUsd(usdPerPx)}</output>
 				</div>
 				<div className="chips">
+					<button type="button" className={scaleMode === 'auto' ? 'active' : ''} onClick={() => setScaleMode('auto')} title="Fit the largest bar on Home to the track">
+						Auto
+					</button>
 					{PRESETS.map(value => (
-						<button key={value} type="button" className={usdPerPx === value ? 'active' : ''} onClick={() => setUsdPerPx(value)}>
+						<button key={value} type="button" className={scaleMode === 'fixed' && usdPerPx === value ? 'active' : ''} onClick={() => setUsdPerPx(value)}>
 							${value}
 						</button>
 					))}
@@ -179,6 +215,11 @@ export function SettingsScreen() {
 					</button>
 				</Sheet>
 			)}
+			</div>
+			<div className="aside">
+				<ScalePreview usdPerPx={usdPerPx} />
+			</div>
+			</div>
 		</div>
 	);
 }

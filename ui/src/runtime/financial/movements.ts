@@ -202,6 +202,8 @@ function foldPayment(id: string, events: RuntimeActivityEvent[], self: string, r
 	const recipient = hash && direction === 'out' ? normalizeId(recipients[hash]) || null : null;
 	const withAmount = ordered.find(event => event.amount !== undefined && event.amount !== null && event.tokenId !== undefined);
 	const { tone, state, detail } = paymentTone(ordered);
+	// The receipt names the frame that finalized the payment; the row must name the same one.
+	const finalized = ordered.find(event => event.source === 'runtime_log' && String(event.status || '') === 'finalized');
 	return {
 		id,
 		kind: 'payment',
@@ -214,8 +216,8 @@ function foldPayment(id: string, events: RuntimeActivityEvent[], self: string, r
 		tone,
 		state,
 		detail,
-		height: ordered[0]!.height,
-		timestamp: Math.max(...ordered.map(event => event.timestamp)),
+		height: finalized?.height ?? ordered[0]!.height,
+		timestamp: finalized?.timestamp ?? Math.max(...ordered.map(event => event.timestamp)),
 		hash,
 		events: ordered,
 	};

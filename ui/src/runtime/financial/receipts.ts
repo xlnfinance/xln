@@ -111,6 +111,7 @@ export function startPaymentTerminal(): () => void {
 			}
 			const entityId = useApp.getState().activeEntityId ?? '';
 			const recipientId = event.name === 'HtlcFinalized' ? usePaymentIntents.getState().bind(entityId, event.data) : null;
+			useApp.getState().clearToasts();
 			useReceipts.getState().show(event, recipientId);
 		},
 		onError: error => {
