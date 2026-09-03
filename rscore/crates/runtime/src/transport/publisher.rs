@@ -15,9 +15,9 @@ use super::routing::{
 use super::session::{DirectSession, SessionConfig};
 
 const DEFAULT_MAX_QUEUE_ROWS: usize = 10_000;
-const DEFAULT_MAX_QUEUE_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_QUEUE_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENVELOPE_ROWS: usize = 10_000;
-const DEFAULT_MAX_PLAINTEXT_BYTES: usize = 24 * 1024 * 1024;
+const DEFAULT_MAX_PLAINTEXT_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 const TARGET_RETRY_BACKOFF: Duration = Duration::from_millis(100);
 

@@ -6,9 +6,12 @@
  *
  * One physical LevelDB value is capped at 10 KB. A 4-hop HTLC context carries
  * four gossip Profiles (~2.5–3.1 KB each) plus the prepared HTLC envelope, so
- * the canonical RAM object does not fit in one record. Store a tiny manifest
- * plus path-addressed Profile and HTLC leaves; never byte-chunk an opaque blob,
- * which would create a second storage layout beside the typed records.
+ * the canonical RAM object does not fit in one record. Store a manifest plus
+ * path-addressed Profile and HTLC leaves. Leaves and digest pages are typed
+ * records under 10 KB; the manifest's page lists grow with the frame (a
+ * 2,000-tx Hub frame lists ~370 HTLC pages), so the manifest row alone uses
+ * the same bounded layout as the Runtime frame record. Its digest is over the
+ * whole manifest value, chunked or not.
  */
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type {
@@ -24,6 +27,8 @@ import {
   type EntityContextPayloadHash,
 } from '../../protocol/hashes';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
+import { prepareBoundedStorageValueRows, readBoundedEncodedValue } from '../codec/bounded-value';
+import { LIMITS } from '../../config/constants';
 import {
   keyEntityContextPayload,
   type EntityContextPayloadPathKind,
@@ -33,6 +38,8 @@ import type {
 } from '../types';
 
 export const MAX_ENTITY_CONTEXT_PAYLOAD_BYTES = 10_000;
+/** The manifest is bounded on disk; its logical size follows the frame. */
+const MAX_ENTITY_CONTEXT_MANIFEST_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 
 type StoredEntityContextManifest = Readonly<{
   kind: 'entityContext';
@@ -165,17 +172,20 @@ const prepareRow = (
   rows: PayloadRow[],
 ): EntityContextPayloadHash => {
   const value = encodeBuffer(payload, { omitSymbolKeys: true });
-  if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
+  const maxBytes = pathKind === 'manifest' ? MAX_ENTITY_CONTEXT_MANIFEST_BYTES : MAX_ENTITY_CONTEXT_PAYLOAD_BYTES;
+  if (value.byteLength >= maxBytes) {
     throw new Error(
       `STORAGE_ENTITY_CONTEXT_PAYLOAD_TOO_LARGE:${value.byteLength}:` +
-      `max=${MAX_ENTITY_CONTEXT_PAYLOAD_BYTES}:${payloadBudgetLabel(payload)}`,
+      `max=${maxBytes}:${payloadBudgetLabel(payload)}`,
     );
   }
   const digest = hashContext(value);
-  rows.push({
-    key: keyEntityContextPayload(runtimeHeight, replicaId, pathKind, index),
-    value,
-  });
+  const key = keyEntityContextPayload(runtimeHeight, replicaId, pathKind, index);
+  if (pathKind === 'manifest') {
+    rows.push(...prepareBoundedStorageValueRows(key, value));
+  } else {
+    rows.push({ key, value });
+  }
   return digest;
 };
 
@@ -321,9 +331,10 @@ const readVerifiedPayload = async (
   index: number,
   expectedDigest: EntityContextPayloadHash,
 ): Promise<unknown> => {
-  let value: Buffer;
+  const key = keyEntityContextPayload(runtimeHeight, replicaId, pathKind, index);
+  let value: Buffer | null;
   try {
-    value = await db.get(keyEntityContextPayload(runtimeHeight, replicaId, pathKind, index));
+    value = pathKind === 'manifest' ? await readBoundedEncodedValue(db, key) : await db.get(key);
   } catch (error) {
     throw new Error(
       `STORAGE_ENTITY_CONTEXT_PAYLOAD_MISSING:${runtimeHeight}:${replicaId}:${pathKind}:${index}`,
@@ -332,7 +343,11 @@ const readVerifiedPayload = async (
       },
     );
   }
-  if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
+  if (!value) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_PAYLOAD_MISSING:${runtimeHeight}:${replicaId}:${pathKind}:${index}`);
+  }
+  const maxBytes = pathKind === 'manifest' ? MAX_ENTITY_CONTEXT_MANIFEST_BYTES : MAX_ENTITY_CONTEXT_PAYLOAD_BYTES;
+  if (value.byteLength >= maxBytes) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_PAYLOAD_TOO_LARGE:${replicaId}`);
   }
   const actual = hashContext(value);

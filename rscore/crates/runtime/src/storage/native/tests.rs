@@ -491,10 +491,21 @@ fn context_rows_require_canonical_framed_msgpack_below_ten_kilobytes() {
         ),
         Err(EntityContextPayloadError::NonCanonical),
     ));
+    // Leaves and digest pages are one physical row each; the manifest is the
+    // one row bounded on disk, so only its logical size may pass 10 KB.
+    assert!(!matches!(
+        EntityContextPayloadRow::new(
+            &replica,
+            EntityContextPayloadKind::Manifest,
+            0,
+            vec![0x03; 10_000],
+        ),
+        Err(EntityContextPayloadError::RowBytes(_)),
+    ));
     assert!(matches!(
         EntityContextPayloadRow::new(
             replica,
-            EntityContextPayloadKind::Manifest,
+            EntityContextPayloadKind::HtlcEntry,
             0,
             vec![0x03; 10_000],
         ),

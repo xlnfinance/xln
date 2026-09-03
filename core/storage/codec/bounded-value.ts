@@ -118,7 +118,7 @@ export const prepareBoundedStorageValueRows = (
 export const boundedStorageRowsBytes = (rows: readonly BoundedStorageRow[]): number =>
   rows.reduce((total, row) => total + row.key.byteLength + row.value.byteLength, 0);
 
-const readRawOrNull = async (db: RuntimeDbLike, key: Buffer): Promise<Buffer | null> => {
+const readRawOrNull = async (db: Pick<RuntimeDbLike, 'get'>, key: Buffer): Promise<Buffer | null> => {
   try {
     return await db.get(key);
   } catch (error) {
@@ -128,7 +128,7 @@ const readRawOrNull = async (db: RuntimeDbLike, key: Buffer): Promise<Buffer | n
 };
 
 const readManifestValue = async (
-  db: RuntimeDbLike,
+  db: Pick<RuntimeDbLike, 'get'>,
   ownerKey: Buffer,
   manifest: BoundedValueManifest,
 ): Promise<Buffer> => {
@@ -154,7 +154,7 @@ const readManifestValue = async (
 };
 
 const readEncodedValue = async (
-  db: RuntimeDbLike,
+  db: Pick<RuntimeDbLike, 'get'>,
   ownerKey: Buffer,
 ): Promise<Buffer | null> => {
   const raw = await readRawOrNull(db, ownerKey);
@@ -164,7 +164,7 @@ const readEncodedValue = async (
 };
 
 export const readBoundedEncodedValue = (
-  db: RuntimeDbLike,
+  db: Pick<RuntimeDbLike, 'get'>,
   ownerKey: Buffer,
 ): Promise<Buffer | null> => readEncodedValue(db, ownerKey);
 

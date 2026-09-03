@@ -20,7 +20,9 @@ struct Manifest {
 }
 
 pub(super) fn uses_generic_bounded_layout(key: &[u8]) -> bool {
-    matches!(key.first(), Some(0x18 | 0x19))
+    // 0x14 Entity-context rows: leaves and digest pages stay under one
+    // physical value; the manifest's page lists grow with the frame and chunk.
+    matches!(key.first(), Some(0x14 | 0x18 | 0x19))
 }
 
 pub(super) fn physical_rows(

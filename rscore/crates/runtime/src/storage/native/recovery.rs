@@ -197,12 +197,12 @@ impl NativeRuntimeStore {
                     super::EntityContextPayloadError::Key,
                 ));
             }
-            rows.push(EntityContextPayloadRow::new(
-                replica_id,
-                kind,
-                index,
-                value.to_vec(),
-            )?);
+            let value = if kind == super::entity_context::EntityContextPayloadKind::Manifest {
+                super::bounded::collapse(&mut self.database, &key, &value)?
+            } else {
+                value.to_vec()
+            };
+            rows.push(EntityContextPayloadRow::new(replica_id, kind, index, value)?);
             if !iterator.advance() {
                 break;
             }

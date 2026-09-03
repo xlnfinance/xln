@@ -246,6 +246,51 @@ describe('path-addressed Entity replay contexts', () => {
     expect(restored.get(replicaId)).toEqual(context);
   });
 
+  test('a manifest wider than one physical row is bounded on disk and reads back whole', async () => {
+    const replicaId = `${ENTITY_ID}:${SIGNER_ID}`;
+    // 25,000 prepared HTLCs → 391 digest pages → a manifest past the 10 KB row cap
+    // (a 2,000-tx Hub frame listed ~370 pages and halted the Runtime).
+    const entries = Array.from({ length: 25_000 }, (_, index) => ({
+      binding: {
+        fromEntityId: ENTITY_ID,
+        toEntityId: `0x${index.toString(16).padStart(64, '0')}`,
+        domain: { chainId: 31337, depositoryAddress: `0x${'aa'.repeat(20)}` },
+        accountFrameHash: `0x${'44'.repeat(32)}`,
+        accountHeight: index + 1,
+        envelopeHash: `0x${'55'.repeat(32)}`,
+        hashlock: `0x${index.toString(16).padStart(64, '0')}`,
+        tokenId: 1,
+        amount: 1_000n,
+        timelock: 10n,
+        revealBeforeHeight: 100,
+      },
+      outcome: { kind: 'final' as const, secret: `0x${'77'.repeat(32)}` },
+    }));
+    const context = {
+      version: 1 as const,
+      proposerReplicaId: replicaId,
+      entityId: ENTITY_ID,
+      proposerSignerId: SIGNER_ID,
+      parentFrameHash: `0x${'33'.repeat(32)}`,
+      height: 3,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries, originated: [] },
+    };
+    const prepared = prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[replicaId, context]]));
+    const manifestKey = keyEntityContextPayload(RUNTIME_HEIGHT, replicaId, 'manifest', 0);
+    const manifestRow = prepared.rows.find(row => row.key.equals(manifestKey));
+    expect(manifestRow).toBeDefined();
+    // Every physical row, the manifest included, stays under the record cap; the
+    // manifest's chunk rows carry the rest of it.
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.length).toBeGreaterThan(entries.length + Math.ceil(entries.length / 64) + 1);
+    const restored = await readEntityContextPayloads(
+      memoryReader(prepared.rows), RUNTIME_HEIGHT, prepared.refs,
+    );
+    expect(restored.get(replicaId)).toEqual(context);
+  });
+
   test('binds catch-up context to the recipient Entity without rewriting its proposer', async () => {
     const proposerReplicaId = `${ENTITY_ID}:${SIGNER_ID}`;
     const recipientReplicaId = `${ENTITY_ID}:0x${'55'.repeat(20)}`;

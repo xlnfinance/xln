@@ -326,9 +326,7 @@ impl RuntimeWalReader {
         height: u64,
     ) -> Result<RawConcreteWalRows, RuntimeLevelDbError> {
         let frame_bytes = self.required_bounded_bytes(&frame_key(height))?;
-        let context_prefix = crate::storage::native::entity_context_height_prefix(height)
-            .map_err(|error| RuntimeLevelDbError::Output(format!("CONTEXT_PREFIX:{error:?}")))?;
-        let context_rows = self.prefixed_rows(&context_prefix)?;
+        let context_rows = self.entity_context_rows_reassembled(height)?;
         let mut output_prefix = [0_u8; 9];
         output_prefix[0] = KEY_RUNTIME_OUTPUT_ROW;
         output_prefix[1..9].copy_from_slice(&height.to_be_bytes());
@@ -423,10 +421,32 @@ impl RuntimeWalReader {
         &mut self,
         height: u64,
     ) -> Result<EntityContextPayloadRows, RuntimeLevelDbError> {
+        let rows = self.entity_context_rows_reassembled(height)?;
+        entity_context_rows_from_raw(height, &rows)
+    }
+
+    /// Raw 0x14 rows of one Runtime height. The manifest row is a bounded
+    /// value once its page lists outgrow one physical row (TS writes it
+    /// through the same layout as the frame record); reassemble it here so
+    /// every consumer sees the logical manifest bytes its digest binds.
+    fn entity_context_rows_reassembled(
+        &mut self,
+        height: u64,
+    ) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {
         let prefix =
             entity_context_height_prefix(height).map_err(NativeStorageError::EntityContext)?;
-        let rows = self.prefixed_rows(&prefix)?;
-        entity_context_rows_from_raw(height, &rows)
+        let mut rows = Vec::new();
+        for (key, value) in self.prefixed_rows(&prefix)? {
+            let (_, _, kind, _) =
+                parse_entity_context_payload_key(&key).map_err(NativeStorageError::EntityContext)?;
+            let value = if kind == crate::storage::native::EntityContextPayloadKind::Manifest {
+                self.bounded_bytes_from_owner(&key, value)?
+            } else {
+                value
+            };
+            rows.push((key, value));
+        }
+        Ok(rows)
     }
 
     fn prefixed_rows(&mut self, prefix: &[u8]) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {
@@ -805,7 +825,7 @@ fn entity_context_payload_with(
 ) -> Result<Value, RuntimeLevelDbError> {
     let key = entity_context_key(runtime_height, replica_id, path_kind, index)?;
     let bytes = fetch(&key)?.ok_or_else(|| RuntimeLevelDbError::Missing(hex(&key)))?;
-    if bytes.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES {
+    if path_kind != ENTITY_CONTEXT_MANIFEST && bytes.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES {
         return Err(RuntimeLevelDbError::Output(format!(
             "CONTEXT_TOO_LARGE:{}",
             bytes.len()

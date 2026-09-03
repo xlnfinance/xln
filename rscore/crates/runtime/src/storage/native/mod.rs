@@ -40,7 +40,7 @@ pub use types::{
     RuntimeFrameCommit, RuntimeMachineLeafRow,
 };
 
-const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OUTPUT_ROWS: usize = 10_000;
 

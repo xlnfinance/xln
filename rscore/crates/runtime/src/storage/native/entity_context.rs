@@ -13,6 +13,17 @@ use thiserror::Error;
 mod rebuild;
 
 const MAX_ENTITY_CONTEXT_PAYLOAD_BYTES: usize = 10_000;
+/// TS `MAX_ENTITY_CONTEXT_MANIFEST_BYTES`: the manifest row is bounded on disk
+/// (chunked like the frame record); its logical size follows the frame.
+const MAX_ENTITY_CONTEXT_MANIFEST_BYTES: usize = 100_000_000;
+
+fn row_byte_limit(kind: EntityContextPayloadKind) -> usize {
+    if kind == EntityContextPayloadKind::Manifest {
+        MAX_ENTITY_CONTEXT_MANIFEST_BYTES
+    } else {
+        MAX_ENTITY_CONTEXT_PAYLOAD_BYTES
+    }
+}
 const REFERENCE_PAGE_SIZE: usize = 64;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub(super) const KEY_ENTITY_CONTEXT_PAYLOAD: u8 = 0x14;
@@ -85,7 +96,7 @@ impl EntityContextPayloadRow {
     ) -> Result<Self, EntityContextPayloadError> {
         let replica_id = replica_id.into();
         validate_replica_id(&replica_id)?;
-        validate_canonical_row(&value)?;
+        validate_canonical_row(&value, row_byte_limit(kind))?;
         Ok(Self {
             replica_id,
             kind,
@@ -105,7 +116,7 @@ impl EntityContextPayloadRow {
     ) -> Result<Self, EntityContextPayloadError> {
         let replica_id = replica_id.into();
         validate_replica_id(&replica_id)?;
-        if value.is_empty() || value.len() >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES {
+        if value.is_empty() || value.len() >= row_byte_limit(kind) {
             return Err(EntityContextPayloadError::RowBytes(value.len()));
         }
         Ok(Self {
@@ -374,8 +385,8 @@ struct Manifest {
     htlc_originated_pages: Vec<EntityContextPayloadDigest>,
 }
 
-fn validate_canonical_row(bytes: &[u8]) -> Result<Value, EntityContextPayloadError> {
-    if bytes.is_empty() || bytes.len() >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES {
+fn validate_canonical_row(bytes: &[u8], max_bytes: usize) -> Result<Value, EntityContextPayloadError> {
+    if bytes.is_empty() || bytes.len() >= max_bytes {
         return Err(EntityContextPayloadError::RowBytes(bytes.len()));
     }
     let value = crate::decode_storage_payload(bytes)

@@ -622,7 +622,9 @@ fn put_frame_rows(
         batch.put(&output_key(frame.height, index)?, output);
     }
     for row in frame.entity_contexts.rows() {
-        batch.put(&row.key(frame.height)?, row.value());
+        for (physical_key, physical_value) in physical_rows(&row.key(frame.height)?, row.value())? {
+            batch.put(&physical_key, &physical_value);
+        }
     }
     Ok(())
 }
