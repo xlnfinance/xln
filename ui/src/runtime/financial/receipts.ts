@@ -115,7 +115,10 @@ export function startPaymentTerminal(): () => void {
 			useReceipts.getState().show(event, recipientId);
 		},
 		onError: error => {
-			useApp.getState().toast(error instanceof Error ? error.message : String(error), 'danger');
+			const message = error instanceof Error ? error.message : String(error);
+			// The toast is for the user; the console line is for whoever debugs a missing receipt.
+			console.error('[payment-terminal]', message);
+			useApp.getState().toast(message, 'danger');
 		},
 		cursorStore: sharedPaymentTerminalCursorStore,
 		seenEventStore: sharedPaymentTerminalSeenEventStore,

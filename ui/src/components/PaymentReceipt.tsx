@@ -1,11 +1,9 @@
-import { Bar } from './Bars';
 import { CopyId } from './CopyId';
 import { Icon } from './Icons';
 import { Sheet } from './Sheet';
 import { useApp } from '../runtime/store';
 import { useReceipts } from '../runtime/financial/receipts';
 import { formatClock, formatMoney, getTokenMeta } from '../runtime/format';
-import { usdOf } from '../runtime/financial/prices';
 import { displayEntityName, useWallet } from '../runtime/views';
 
 /**
@@ -52,9 +50,6 @@ export function PaymentReceiptSheet() {
 				</div>
 				<div className="a num" data-testid="receipt-amount">
 					{formatMoney(amount, meta.decimals)} <small>{meta.symbol}</small>
-				</div>
-				<div style={{ margin: '10px 0 6px' }}>
-					<Bar segments={[{ usd: usdOf(meta.symbol === '?' ? 1 : tokenId, amount), kind: sent ? 'credit' : 'coll' }]} height={4} />
 				</div>
 				<div className="to" data-testid="receipt-title">
 					{sent ? 'to' : 'from'} {counterparty ? displayEntityName(names, counterparty) : '—'}
