@@ -1,18 +1,16 @@
 //! Canonical Entity-frame projection and replay prefix selection.
 //!
-//! The modules mirror `core/entity/consensus/frame/` and
-//! `core/entity/consensus/proposal/wire-budget.ts`. They consume decoded WAL
-//! values and never a TypeScript-generated selection count.
+//! The modules mirror `core/entity/consensus/frame/`. They consume decoded
+//! WAL values and never a TypeScript-generated selection count; the replay
+//! prefix itself is selected in `machine::apply` (fit_replay_entity_prefix).
 
 mod account_input_commitment;
 mod j_event;
-mod wire_budget;
 
 use serde_json::Value;
 use thiserror::Error;
 use xln_rscore_entity_kernel::{CanonicalEntityTx, EntityTxKind};
 
-pub use wire_budget::fit_entity_account_input_prefix;
 
 #[derive(Debug, Error)]
 pub enum EntityFrameError {

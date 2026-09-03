@@ -60,7 +60,7 @@ pub use entity_context_json::{
     MaterializedEntityInfraContext, canonical_swap_market_policy,
     decode_entity_deterministic_context,
 };
-pub use entity_frame::{EntityFrameError, fit_entity_account_input_prefix};
+pub use entity_frame::EntityFrameError;
 pub use j_import::{
     JurisdictionContracts, JurisdictionImportRequest, JurisdictionImportResult,
     JurisdictionTokenInfo,
