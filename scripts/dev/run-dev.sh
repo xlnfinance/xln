@@ -18,6 +18,7 @@ WEB_HTTP_PORT="$(xln_web_http_port)"
 CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
+UI_PORT="$(xln_ui_port)"
 ANVIL_BLOCK_TIME="${XLN_ANVIL_BLOCK_TIME:-1}"
 DEV_LOG_DIR="${XLN_DEV_LOG_DIR:-$REPO_ROOT/.logs/dev}"
 MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"
@@ -66,7 +67,7 @@ DEV_RELAY_WEB_URLS="${DEV_WEB_SCHEME}://localhost:${WEB_PORT},http://localhost:$
 export XLN_JURISDICTIONS_PATH="$XLN_RDB_ROOT/jurisdictions.json"
 XLN_MESH_ROOT_SEED_FILE="${XLN_MESH_ROOT_SEED_FILE:-$DEV_DATA_ROOT/secrets/mesh-root.seed}"
 export XLN_MESH_ROOT_SEED="${XLN_MESH_ROOT_SEED:-$(xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE")}"
-export RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT
+export RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT UI_PORT
 export ANVIL_BLOCK_TIME DEV_LOG_DIR MESH_LOG_LEVEL DEV_VERBOSE RUNTIME_VERBOSE_LOGS XLN_LOG_WARN_STDOUT
 export DEV_DATA_ROOT XLN_RDB_ROOT XLN_JDB_ROOT XLN_STORAGE_HISTORY_PATH XLN_STORAGE_HEALTH_DEEP_SCAN ANVIL_TMPDIR XLN_DEV_PID_DIR XLN_DEV_OWNER_FILE
 export DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_SHUTDOWN_TIMEOUT_MS DEV_CUSTODY_SCHEME DEV_RELAY_WEB_URLS
@@ -129,9 +130,10 @@ bun core/scripts/operations/development/print-dev-links.ts \
   --custody-scheme "${DEV_CUSTODY_SCHEME}" \
   --custody-daemon-port "${CUSTODY_DAEMON_PORT}" \
   --watchtower-port "${WATCHTOWER_PORT}" \
+  --ui-port "${UI_PORT}" \
   --keys "$DEV_RADAPTER_KEYS_JSON"
 
-echo "DEV_BOOTING wallet=http://localhost:${WEB_HTTP_PORT}/app api=http://127.0.0.1:${API_PORT}"
+echo "DEV_BOOTING wallet=http://localhost:${WEB_HTTP_PORT}/app ui=http://localhost:${UI_PORT}/ api=http://127.0.0.1:${API_PORT}"
 
 if [[ "$DEV_VERBOSE" != "1" ]]; then
   echo "anvil logs             ${DEV_LOG_DIR}/anvil-${RPC_PORT}.log"

@@ -58,3 +58,8 @@ xln_custody_daemon_port() {
 xln_watchtower_port() {
   xln_derived_port 9100 10
 }
+
+# React wallet (ui/) dev server. Offset 20 keeps clear of API_PORT+10..14 probes.
+xln_ui_port() {
+  xln_derived_port 5183 20
+}

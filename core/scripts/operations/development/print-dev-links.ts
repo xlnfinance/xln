@@ -20,6 +20,7 @@ type Args = {
   custodyScheme: 'http' | 'https';
   custodyDaemonPort: number;
   watchtowerPort: number;
+  uiPort: number;
   keysPath: string;
 };
 
@@ -87,6 +88,7 @@ const args: Args = {
   custodyScheme: schemeFlag('--custody-scheme'),
   custodyDaemonPort: numberFlag('--custody-daemon-port'),
   watchtowerPort: numberFlag('--watchtower-port'),
+  uiPort: numberFlag('--ui-port'),
   keysPath: stringFlag('--keys'),
 };
 
@@ -101,6 +103,7 @@ const watchtower = `http://127.0.0.1:${args.watchtowerPort}`;
 const rows: LinkRow[] = [
   { label: 'wallet', url: `${web}/app` },
   ...(webTls ? [{ label: 'wallet tls', url: `${webTls}/app` }] : []),
+  { label: 'wallet new ui', url: `http://localhost:${args.uiPort}/` },
   { label: 'remote admin import', url: keys.adminImportUrl! },
   { label: 'suggested runtimes', url: `${api}/api/runtime-import?access=admin` },
   { label: 'health admin', url: `${web}/health` },
@@ -131,6 +134,6 @@ console.log(`runtime import key file: ${resolve(args.keysPath)}`);
 console.log('suggested runtimes endpoint lists fresh H/MM/Custody import tokens for the app runtime list.');
 console.log(`expected remote runtimes: ${expectedRemoteRuntimes}`);
 console.log(`local tls: ${webTls ? `enabled at ${webTls}` : 'disabled; localhost HTTP remains a secure browser context'}`);
-console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP, READY');
+console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP, UI, READY');
 console.log(line);
 console.log('');

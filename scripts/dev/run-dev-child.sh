@@ -12,7 +12,7 @@ if [[ -z "$role" ]]; then
 fi
 
 case "$role" in
-  anvil|anvil2|rpc-ready|backend-ready|mesh|watchtower|runtime|vite|vite-http|ready)
+  anvil|anvil2|rpc-ready|backend-ready|mesh|watchtower|runtime|vite|vite-http|ui|ready)
     ;;
   *)
     echo "DEV_CHILD_ROLE_UNKNOWN:${role}" >&2
@@ -31,6 +31,9 @@ require_env() {
 for name in RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT DEV_LOG_DIR MESH_LOG_LEVEL XLN_RDB_ROOT XLN_JDB_ROOT XLN_DEV_PID_DIR XLN_DEV_OWNER_ID; do
   require_env "$name"
 done
+if [[ "$role" == "ui" ]]; then
+  require_env UI_PORT
+fi
 if [[ "$role" == "ready" || "$role" == "backend-ready" ]]; then
   for name in DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_RELAY_WEB_URLS; do
     require_env "$name"
@@ -133,6 +136,16 @@ run_vite() {
     "$REPO_ROOT/frontend/node_modules/.bin/vite" dev "$@"
 }
 
+# React wallet (ui/). It serves the same live-rebuilt runtime bundle the
+# SvelteKit frontend uses, so core edits reach both shells at once.
+run_ui() {
+  cd ui
+  echo "UI_STARTING port=${UI_PORT} runtimeBundleDir=${REPO_ROOT}/frontend/static logLevel=warn"
+  run_owned env \
+    XLN_UI_RUNTIME_BUNDLE_DIR="$REPO_ROOT/frontend/static" \
+    "$REPO_ROOT/ui/node_modules/.bin/vite" --port "$UI_PORT" --strictPort --logLevel warn
+}
+
 wait_for_dev_chains() {
   run_owned bun core/scripts/operations/development/wait-rpc-chain.ts \
     --url "http://127.0.0.1:${RPC_PORT}" \
@@ -212,6 +225,9 @@ case "$role" in
     ;;
   vite-http)
     run_vite "$WEB_HTTP_PORT" --config vite.config.http.ts --logLevel warn
+    ;;
+  ui)
+    run_ui
     ;;
   ready)
     run_owned bun scripts/dev/wait-dev-ready.ts \

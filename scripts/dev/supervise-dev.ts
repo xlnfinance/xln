@@ -14,11 +14,12 @@ export const DEV_ROLES = [
   'runtime',
   'vite',
   'vite-http',
+  'ui',
   'ready',
 ] as const;
 
 const DEV_BACKEND_ROLES = ['mesh', 'watchtower', 'runtime'] as const;
-const DEV_FRONTEND_ROLES = ['vite', 'vite-http', 'ready'] as const;
+const DEV_FRONTEND_ROLES = ['vite', 'vite-http', 'ui', 'ready'] as const;
 const DEV_APPLICATION_ROLES = [...DEV_BACKEND_ROLES, ...DEV_FRONTEND_ROLES] as const;
 const DEV_CHAIN_BARRIER_ROLE = 'rpc-ready' as const;
 const DEV_BACKEND_BARRIER_ROLE = 'backend-ready' as const;
@@ -88,7 +89,7 @@ const signalProcessGroup = (processGroupId: number, signal: NodeJS.Signals): voi
 
 export const shouldEchoDevLine = (role: DevChildRole, line: string, stderr: boolean): boolean => {
   if (stderr || role === 'ready' || role === DEV_CHAIN_BARRIER_ROLE || role === DEV_BACKEND_BARRIER_ROLE) return true;
-  return /^(DEV_|CONTROL_READY|RPC2_JURISDICTION_READY|RUNTIME_IMPORT_READY|VITE_STARTING|Bundled|\s+runtime\.js)/.test(line)
+  return /^(DEV_|CONTROL_READY|RPC2_JURISDICTION_READY|RUNTIME_IMPORT_READY|VITE_STARTING|UI_STARTING|Bundled|\s+runtime\.js)/.test(line)
     || line.includes('baseline ready')
     || line.includes('service.listen')
     || /\b(?:WARN|ERROR|FATAL)\b/.test(line);

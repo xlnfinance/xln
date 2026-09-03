@@ -23,11 +23,12 @@ WEB_HTTP_PORT="$(xln_web_http_port)"
 CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
+UI_PORT="$(xln_ui_port)"
 
 stop_owned_dev_processes "$DEV_OWNER_FILE" "$DEV_PID_DIR" "$ROOT_DIR"
 assert_dev_ports_clear "$DEV_PID_DIR" "$DEV_OWNER_FILE" \
   "$RPC_PORT" "$RPC2_PORT" "$WEB_PORT" "$WEB_HTTP_PORT" "$API_PORT" \
-  "$CUSTODY_PORT" "$CUSTODY_DAEMON_PORT" "$WATCHTOWER_PORT" \
+  "$CUSTODY_PORT" "$CUSTODY_DAEMON_PORT" "$WATCHTOWER_PORT" "$UI_PORT" \
   "$((API_PORT + 10))" "$((API_PORT + 11))" "$((API_PORT + 12))" "$((API_PORT + 13))"
 
 echo "[dev:clean] removing only the canonical dev shard"

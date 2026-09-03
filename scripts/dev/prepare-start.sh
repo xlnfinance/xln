@@ -27,6 +27,7 @@ WEB_HTTP_PORT="$(xln_web_http_port)"
 CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
+UI_PORT="$(xln_ui_port)"
 
 case "$DEV_DATA_ROOT" in
   "$ROOT_DIR"|"${HOME:-__home_unset__}")
@@ -42,6 +43,10 @@ if [[ ! -x "$ROOT_DIR/frontend/node_modules/.bin/vite" \
   echo "DEV_DEPENDENCIES_MISSING:frontend; run: cd frontend && bun install --frozen-lockfile" >&2
   exit 1
 fi
+if [[ ! -x "$ROOT_DIR/ui/node_modules/.bin/vite" || ! -f "$ROOT_DIR/ui/node_modules/@vitejs/plugin-react/package.json" ]]; then
+  echo "DEV_DEPENDENCIES_MISSING:ui; run: cd ui && bun install" >&2
+  exit 1
+fi
 for tool in anvil lsof openssl rsync; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "DEV_DEPENDENCIES_MISSING:${tool}" >&2
@@ -52,7 +57,7 @@ done
 stop_owned_dev_processes "$DEV_OWNER_FILE" "$DEV_PID_DIR" "$ROOT_DIR"
 assert_dev_ports_clear "$DEV_PID_DIR" "$DEV_OWNER_FILE" \
   "$RPC_PORT" "$RPC2_PORT" "$WEB_PORT" "$WEB_HTTP_PORT" "$API_PORT" \
-  "$CUSTODY_PORT" "$CUSTODY_DAEMON_PORT" "$WATCHTOWER_PORT" \
+  "$CUSTODY_PORT" "$CUSTODY_DAEMON_PORT" "$WATCHTOWER_PORT" "$UI_PORT" \
   "$((API_PORT + 10))" "$((API_PORT + 11))" "$((API_PORT + 12))" "$((API_PORT + 13))" \
   "$((API_PORT + 14))"
 rm -f "$DEV_OWNER_FILE" "$DEV_PID_DIR"/*.pid

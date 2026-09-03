@@ -124,7 +124,7 @@ test('dev starts application services only after both exact Anvil chains are rea
   const child = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
   const ownership = readFileSync(join(repoRoot, 'scripts/dev/process-owner.sh'), 'utf8');
   const supervisor = readFileSync(join(repoRoot, 'scripts/dev/supervise-dev.ts'), 'utf8');
-  expect(DEV_ROLES).toEqual(['anvil', 'anvil2', 'mesh', 'watchtower', 'runtime', 'vite', 'vite-http', 'ready']);
+  expect(DEV_ROLES).toEqual(['anvil', 'anvil2', 'mesh', 'watchtower', 'runtime', 'vite', 'vite-http', 'ui', 'ready']);
   expect(runner).toContain('bun scripts/dev/supervise-dev.ts');
   expect(runner).not.toContain('concurrently');
   const firstReady = child.indexOf("--chain-id 31337");

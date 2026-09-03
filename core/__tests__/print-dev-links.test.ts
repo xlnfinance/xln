@@ -55,6 +55,8 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       '8088',
       '--watchtower-port',
       '9100',
+      '--ui-port',
+      '5183',
       '--keys',
       keysPath,
     ];
@@ -69,6 +71,8 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('Wait for DEV_READY');
     expect(banner.stdout).toContain('wallet');
     expect(banner.stdout).toContain('http://localhost:8085/app');
+    expect(banner.stdout).toContain('wallet new ui');
+    expect(banner.stdout).toContain('http://localhost:5183/');
     expect(banner.stdout).not.toContain('https://localhost:8084/app');
     expect(banner.stdout).not.toContain('wallet browser QA');
     expect(banner.stdout).toContain('health admin');
