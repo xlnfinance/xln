@@ -153,9 +153,7 @@ fn inbound_session_replies_after_wal_without_a_second_dial() {
     let first_reply = user.recv_envelope().expect("first hub reply");
     assert_eq!(first_reply["sourceRuntimeHeight"], 1);
     assert_eq!(first_reply["sourceRuntimeId"], hub_runtime_id);
-    let first_completion = publisher
-        .retry_pending()
-        .expect("collect first socket write");
+    let first_completion = wait_for_socket_write(&mut publisher);
     assert_eq!(
         (
             first_completion.rows_published,
@@ -172,9 +170,7 @@ fn inbound_session_replies_after_wal_without_a_second_dial() {
     );
     let second_reply = user.recv_envelope().expect("second hub reply");
     assert_eq!(second_reply["sourceRuntimeHeight"], 2);
-    let second_completion = publisher
-        .retry_pending()
-        .expect("collect second socket write");
+    let second_completion = wait_for_socket_write(&mut publisher);
     assert_eq!(
         (
             second_completion.rows_published,
@@ -334,6 +330,20 @@ fn stalled_inbound_target_does_not_block_a_healthy_target() {
     healthy.shutdown().expect("healthy shutdown");
     drop(store);
     fs::remove_dir_all(base).expect("remove timeout fixture");
+}
+
+/// The reactor reports a socket write on its own thread after the bytes are
+/// on the wire, so the peer can hold the reply before the publisher has seen
+/// the completion. Poll until the write is accounted for.
+fn wait_for_socket_write(publisher: &mut DirectOutboxPublisher) -> PublicationReport {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let report = publisher.retry_pending().expect("collect socket write");
+        if report.rows_published > 0 || Instant::now() >= deadline {
+            return report;
+        }
+        std::thread::yield_now();
+    }
 }
 
 fn wait_for_open_session(ingress: &DirectRuntimeIngress, runtime_id: &str) {
