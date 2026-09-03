@@ -85,6 +85,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       snapshot,
       options,
     );
+    env.persistenceLastMaterializedHeight = env.state.height;
     // A read-only restore never writes, so the engine it starts can never
     // become durable. That is why the benchmark replay may opt in explicitly;
     // silence stays the default.

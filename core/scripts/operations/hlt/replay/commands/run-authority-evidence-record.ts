@@ -41,6 +41,7 @@ const env: NodeJS.ProcessEnv = {
   XLN_HLT_HUBS: 'H1',
   XLN_HLT_MARKET_MAKERS: 'MM',
   XLN_HLT_AUTHORITY_EVIDENCE: '1',
+  XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES: '100',
   XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES: '1',
   XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
   XLN_MM_CROSS_J: '0',
@@ -72,6 +73,7 @@ writeEvidenceBundleProvenance({
     mix: env['XLN_HLT_MIX'] ?? '',
     profile: env['XLN_HLT_PROFILE'] ?? '',
     swapLoadMode: env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] ?? '',
+    materializePeriodFrames: env['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] ?? '',
   },
 });
 console.log(`HLT_RUNTIME_REPLAY_V2 path=${output}`);

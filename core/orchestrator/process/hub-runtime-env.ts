@@ -111,6 +111,10 @@ export const buildHubChildProcessEnv = (
     // Ordinary economic frames retain the production materialization cadence.
     child['XLN_HLT_AUTHORITY_EVIDENCE'] = '1';
     child['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] = outputPath;
+    // Make the release artifact cross one real periodic checkpoint. This is
+    // the production default, pinned here so an operator shell cannot turn
+    // the 110-frame recovery proof into a checkpoint-free WAL tail.
+    child['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES'] = '100';
     // Replay compares the canonical Runtime root at every WAL height.
     child['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = '1';
   }

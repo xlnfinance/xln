@@ -97,10 +97,10 @@ const RUNTIME_CORE_TESTS = [
 
 const quickSteps: GateStep[] = [
   { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
-  // CI starts from a cold Rust target. The full source gate reached 120 s
-  // while compiling a healthy workspace, so its watchdog must cover build
-  // latency rather than misclassify it as a source failure.
-  { name: 'source checks', command: 'bun run check:src', timeoutMs: 300_000 },
+  // CI starts from a cold Rust target. The complete Rust build and test chain
+  // exceeded five minutes on GitHub while every completed test stayed green;
+  // the watchdog must cover cold toolchain latency, not terminate healthy work.
+  { name: 'source checks', command: 'bun run check:src', timeoutMs: 600_000 },
   { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 30_000 },
   { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },
   {

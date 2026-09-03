@@ -540,8 +540,9 @@ export const armAuthorityWave = async (
     return halt('CHECKPOINT_PERIOD_INVALID', { materializePeriod });
   }
   const nextHeight = env.state.height + 1;
+  const lastMaterializedHeight = env.persistenceLastMaterializedHeight ?? 0;
   env.accountAuthorityCheckpointDue = checkpointBarrierDue || nextHeight === 1
-    || (nextHeight - 1) % materializePeriod === 0;
+    || nextHeight - lastMaterializedHeight >= materializePeriod;
   const runtimeSessions = sessionMap(env, true);
   // A zero-account Entity must already own an empty session before the frame
   // that opens its first Account, otherwise Create would have nowhere to run.
@@ -1074,7 +1075,10 @@ export const validateAuthorityCheckpointMaterialization = (
 };
 
 /** The Runtime's own record is durable: release only TS-side frame bookkeeping. */
-export const finalizeAuthorityFrameAfterWal = async (env: RuntimeReplica): Promise<void> => {
+export const finalizeAuthorityFrameAfterWal = async (
+  env: RuntimeReplica,
+  materialized: boolean,
+): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const candidates = pending.get(env);
   if (candidates === undefined) return;
@@ -1098,7 +1102,7 @@ export const finalizeAuthorityFrameAfterWal = async (env: RuntimeReplica): Promi
       });
     }
     report.finalizedFrames += 1;
-    if (env.accountAuthorityCheckpointDue === true) {
+    if (materialized) {
       candidate.session.bootstrapCheckpoint = null;
     }
   }

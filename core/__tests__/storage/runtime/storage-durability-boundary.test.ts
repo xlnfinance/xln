@@ -11,7 +11,7 @@ test('frame commit fsyncs authoritative WAL before updating the rebuildable cach
     'await writeAuthoritativeWalBatch(batches);',
   );
   const accountAuthority = commit.indexOf(
-    'await options.accountAuthority?.afterWalCommit();',
+    'await options.accountAuthority?.afterWalCommit(prepared.shouldMaterialize);',
     authoritative,
   );
   const boundary = commit.indexOf(

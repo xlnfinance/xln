@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::entity_context::EntityContextPayloadRows;
 use super::keys::PathNodeKey;
 
-pub const DEFAULT_CHECKPOINT_PERIOD_FRAMES: u64 = 1_000;
+pub const DEFAULT_CHECKPOINT_PERIOD_FRAMES: u64 = 100;
 
 /// RAM-only wall decomposition of one native WAL append. It is returned to
 /// the committer for diagnostics and never enters HEAD, a frame or checkpoint.

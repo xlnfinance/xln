@@ -38,7 +38,7 @@ describe('storage config', () => {
     const env = createEmptyEnv('sparse-storage-checkpoints');
     env.runtimeConfig = { ...(env.runtimeConfig || {}) };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
-    expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(1_000);
+    expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
     expect(resolveStorageRuntimeConfig(env)).toMatchObject({
       retainSnapshots: Number.MAX_SAFE_INTEGER,

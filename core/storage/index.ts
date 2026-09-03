@@ -631,7 +631,7 @@ export type StorageFrameSaveOptions = {
       checkpoints: readonly RscoreExactCheckpoint[],
     ) => Promise<void>;
     /** Runs immediately after the sole authoritative WAL fsync. */
-    afterWalCommit: () => Promise<void>;
+    afterWalCommit: (materialized: boolean) => Promise<void>;
   }>;
   /**
    * Internal crash-proof seam. Captures the exact frame identity before the
@@ -647,6 +647,7 @@ export type StorageAuthoritativeFrameIdentity = Readonly<{
   frameHash: string;
   postStateHash: string;
   runtimeInput: RuntimeInput;
+  materialized: boolean;
   accountAuthorityCheckpoints: readonly StorageRscoreCheckpointRef[];
 }>;
 
@@ -1487,6 +1488,7 @@ const buildStorageFrameRecordPlan = (
       frameHash: frameRecord.frameHash,
       postStateHash: frameRecord.postStateHash,
       runtimeInput: frameRecord.runtimeInput,
+      materialized: frameRecord.materializedState,
       accountAuthorityCheckpoints: (frameRecord.accountAuthorityCheckpoints ?? [])
         .map(checkpoint => ({ ...checkpoint })),
     } satisfies StorageAuthoritativeFrameIdentity,
@@ -1658,7 +1660,7 @@ const commitStorageFrame = async (
   const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   try {
-    await options.accountAuthority?.afterWalCommit();
+    await options.accountAuthority?.afterWalCommit(prepared.shouldMaterialize);
   } catch (error) {
     throw new AccountAuthorityWalCommitError(error);
   }
@@ -1736,6 +1738,9 @@ const finishStorageFrameSave = (
   committed: CommittedStorageFrame,
   snapshot: StorageSnapshotLifecycleResult,
 ): StorageFrameSaveResult => {
+  if (prepared.shouldMaterialize) {
+    options.env.persistenceLastMaterializedHeight = options.env.state.height;
+  }
   const persistencePerfMs: StoragePersistencePerf = {
     open: prepared.openMs,
     openStages: prepared.openStages,
@@ -1869,7 +1874,7 @@ export const saveRuntimeFrameToStorage = async (
   );
   checkpointPrepare('pendingNodes');
 
-  const authorityCheckpointInputs = options.accountAuthority
+  const authorityCheckpointInputs = options.accountAuthority && prepared.shouldMaterialize
     ? await options.accountAuthority.prepareCheckpoint()
     : [];
   const accountAuthorityCheckpoint = await prepareRscoreCheckpointStorage(

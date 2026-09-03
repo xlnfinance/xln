@@ -223,7 +223,7 @@ const replayOneFrame = async (
     // Replay has no WAL write of its own to wait for: the journal is already
     // durable, so only TS-side frame bookkeeping is released here.
     await assertAuthorityFrameSettled(env);
-    await finalizeAuthorityFrameAfterWal(env);
+    await finalizeAuthorityFrameAfterWal(env, frame.materializedState === true);
   } catch (error) {
     runtimeLog.error('recovery.frame.failed', {
       height,

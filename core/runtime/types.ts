@@ -707,6 +707,12 @@ export interface RuntimeReplica {
    * it on the outbound Account visit; it is never consensus state or WAL.
    */
   accountAuthorityCheckpointDue?: boolean | undefined;
+  /**
+   * Last durable Runtime graph materialization known by this live replica.
+   * This is a storage cursor, not consensus state; recovery derives it from
+   * the verified storage HEAD before replaying the WAL tail.
+   */
+  persistenceLastMaterializedHeight?: number | undefined;
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   /** Ephemeral wall-clock boundary for the active process(); never consensus or WAL state. */
   activeProcessProgressAt?: number;

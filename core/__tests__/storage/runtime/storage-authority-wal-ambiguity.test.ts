@@ -90,7 +90,7 @@ const installNextWalWriteFault = (
 
 const saveSecondFrameWithAuthority = async (
   env: RuntimeReplica,
-  afterWalCommit: () => Promise<void>,
+  afterWalCommit: (materialized: boolean) => Promise<void>,
 ): Promise<unknown> => {
   env.state.height = 2;
   env.state.timestamp = 2_000;

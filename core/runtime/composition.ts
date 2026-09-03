@@ -301,12 +301,12 @@ export const RuntimeFrameStorageError = runtimeStorageApi.RuntimeFrameStorageErr
 export type RuntimeFrameStorageError = InstanceType<typeof RuntimeFrameStorageError>;
 export const saveEnvToDB = runtimeStorageApi.saveEnvToDB;
 export const readPersistedStorageFrameRecord = runtimeStorageApi.readPersistedStorageFrameRecord;
-const readPersistedStorageFramePayloads = runtimeStorageApi.readPersistedStorageFramePayloads;
+export const readPersistedStorageFramePayloads = runtimeStorageApi.readPersistedStorageFramePayloads;
 export const listPersistedEntityIdsAtHeight = runtimeStorageApi.listPersistedEntityIdsAtHeight;
 export const verifyRuntimeChain = runtimeStorageApi.verifyRuntimeChain;
 const resolvePersistedLatestHeight = runtimeStorageApi.resolvePersistedLatestHeight;
 const resolvePersistedCheckpointHeights = runtimeStorageApi.resolvePersistedCheckpointHeights;
-const loadEnvFromStorageByReplay = runtimeStorageApi.loadEnvFromStorageByReplay;
+export const loadEnvFromStorageByReplay = runtimeStorageApi.loadEnvFromStorageByReplay;
 export const {
   getPersistedLatestHeight,
   loadEntityStateFromStorageDb,

@@ -411,7 +411,8 @@ const commitRuntimeFrame = async (
               checkpoints: readonly RscoreExactCheckpoint[],
             ) =>
               validateAuthorityCheckpointMaterialization(candidateEnv, checkpoints),
-            afterWalCommit: () => finalizeAuthorityFrameAfterWal(candidateEnv),
+            afterWalCommit: (materialized: boolean) =>
+              finalizeAuthorityFrameAfterWal(candidateEnv, materialized),
           }]
         : []),
     );

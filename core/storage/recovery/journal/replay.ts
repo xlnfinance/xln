@@ -204,6 +204,7 @@ const finalizeReplay = async (
         ? 'genesis:1'
         : `checkpoint:${target.selectedCheckpointHeight}`,
     latestHeight: target.latestHeight,
+    replayedFrameCount: target.targetHeight - target.selectedCheckpointHeight,
   });
 };
 

@@ -904,7 +904,7 @@ impl RuntimeLimits {
             // only cut. A Runtime-level byte cap here split a recorded 1,226
             // input frame at 968 and broke replay of TS recordings.
             max_entity_wire_bytes_per_frame: 0,
-            checkpoint_period_frames: 1_000,
+            checkpoint_period_frames: 100,
             canonical_hash_period_frames: 0,
         }
     }

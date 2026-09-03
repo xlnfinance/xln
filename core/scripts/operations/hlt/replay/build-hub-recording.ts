@@ -2,10 +2,10 @@
 
 /** Build phase finalizer: turn the closed H1 WAL into one signed replay artifact. */
 
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-import { safeParse } from '../../../../protocol/serialization';
+import { safeParse, safeStringify } from '../../../../protocol/serialization';
 import type { ConcreteCheckpointSourceExport } from '../../../../storage/read/concrete-checkpoint-source';
 import type { HltHubRecordingArtifact } from './recording';
 
@@ -57,8 +57,12 @@ const {
   closeRuntimeDb,
   createEmptyEnv,
   getPersistedLatestHeight,
+  loadEnvFromStorageByReplay,
   readPersistedFrameJournals,
+  readPersistedStorageFramePayloads,
+  readPersistedStorageFrameRecord,
   validateRuntimeRecoveryBundle,
+  verifyRuntimeChain,
 } = runtime;
 const {
   HLT_HUB_RECORDING_SCHEMA,
@@ -70,6 +74,7 @@ const {
   assertCompleteHltAuthorityEvidence,
   assertCanonicalMixedCoverage,
 } = await import('./authority-evidence');
+const { HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES } = await import('../authority-evidence-policy');
 const { buildHltAuthoritySourceBinding } = await import('./source-binding');
 const meshRootSeed = readFileSync(join(workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
 if (!meshRootSeed) throw new Error('HLT_HUB_RECORDING_MESH_ROOT_SEED_MISSING');
@@ -123,6 +128,21 @@ try {
       `expected=${expectedFrames}:actual=${frames.length}`,
     );
   }
+  const periodicCheckpointHeight = baseHeight + HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES;
+  const periodicCheckpoint = await readPersistedStorageFrameRecord(env, periodicCheckpointHeight);
+  const periodicCheckpointPayloads = periodicCheckpoint?.materializedState === true
+    ? await readPersistedStorageFramePayloads(env, periodicCheckpoint)
+    : null;
+  if (
+    periodicCheckpoint?.materializedState !== true ||
+    periodicCheckpoint.runtimeMachineRoot === undefined ||
+    periodicCheckpointPayloads?.runtimeMachine === undefined
+  ) {
+    throw new Error(
+      `HLT_HUB_RECORDING_PERIODIC_CHECKPOINT_MISSING:` +
+      `base=${baseHeight}:expected=${periodicCheckpointHeight}:target=${targetHeight}`,
+    );
+  }
   env.state.height = targetHeight;
   env.state.timestamp = frames.at(-1)!.timestamp;
   const signers = [{ index: 1, address: runtimeId, name: 'H1 Runtime' }];
@@ -152,6 +172,61 @@ try {
   await closeRuntimeDb(env);
   await closeInfraDb(env);
   databasesClosed = true;
+  const checkpointRestartStartedAt = performance.now();
+  const checkpointRestart = await loadEnvFromStorageByReplay(
+    runtimeId,
+    runtimeSeed,
+    undefined,
+    { readOnly: true },
+  );
+  if (!checkpointRestart) throw new Error('HLT_CHECKPOINT_RESTART_MISSING');
+  const checkpointRestartMs = performance.now() - checkpointRestartStartedAt;
+  const replayMeta = Reflect.get(checkpointRestart.env, '__replayMeta') as
+    | Record<string, unknown>
+    | undefined;
+  const checkpointReplayFrames = Number(replayMeta?.['replayedFrameCount']);
+  if (
+    checkpointRestart.env.state.height !== targetHeight ||
+    checkpointRestart.checkpointHeight !== periodicCheckpointHeight ||
+    checkpointRestart.env.persistenceLastMaterializedHeight !== periodicCheckpointHeight ||
+    checkpointReplayFrames !== targetHeight - periodicCheckpointHeight
+  ) {
+    throw new Error(
+      `HLT_CHECKPOINT_RESTART_INVALID:` +
+      `height=${checkpointRestart.env.state.height}:checkpoint=${checkpointRestart.checkpointHeight}:` +
+      `cursor=${String(checkpointRestart.env.persistenceLastMaterializedHeight)}:` +
+      `replayed=${String(checkpointReplayFrames)}`,
+    );
+  }
+  await closeRuntimeDb(checkpointRestart.env);
+  await closeInfraDb(checkpointRestart.env);
+  const fullRestartStartedAt = performance.now();
+  const fullRestart = await verifyRuntimeChain(runtimeId, runtimeSeed, { fromSnapshotHeight: 1 });
+  const fullRestartMs = performance.now() - fullRestartStartedAt;
+  if (!fullRestart.ok || fullRestart.restoredHeight !== targetHeight) {
+    throw new Error(`HLT_FULL_RESTART_INVALID:${safeStringify(fullRestart)}`);
+  }
+  const fullReplayFrames = targetHeight - fullRestart.selectedSnapshotHeight;
+  if (checkpointReplayFrames >= fullReplayFrames) {
+    throw new Error(`HLT_CHECKPOINT_RESTART_NOT_BOUNDED:${checkpointReplayFrames}:${fullReplayFrames}`);
+  }
+  const recoveryReportPath = join(workDir, 'checkpoint-recovery-report.json');
+  writeFileSync(recoveryReportPath, `${safeStringify({
+    schema: 'xln-hlt-checkpoint-recovery-v1',
+    runtimeId,
+    targetHeight,
+    checkpointHeight: periodicCheckpointHeight,
+    checkpointReplayFrames,
+    fullReplayFrames,
+    checkpointRestartMs,
+    fullRestartMs,
+  }, 2)}\n`, { mode: 0o600 });
+  console.log(
+    `HLT_CHECKPOINT_RECOVERY_OK checkpoint=${periodicCheckpointHeight} ` +
+    `checkpointFrames=${checkpointReplayFrames} fullFrames=${fullReplayFrames} ` +
+    `checkpointMs=${checkpointRestartMs.toFixed(1)} fullMs=${fullRestartMs.toFixed(1)} ` +
+    `report=${recoveryReportPath}`,
+  );
   const walPath = join(workDir, 'prod-mesh', 'h1', `${runtimeId}-wal`);
   const binding = await buildHltAuthoritySourceBinding(walPath, runtimeSeed);
   const totals = summarizeHltHubFrames(frames);
@@ -195,6 +270,7 @@ try {
   console.log(
     `HLT_BUILD_RECORDING_OK path=${outputPath} runtime=${runtimeId} ` +
     `heights=${baseHeight}-${targetHeight} frames=${frames.length} ` +
+    `periodicCheckpoint=${periodicCheckpointHeight} ` +
     `entityInputs=${totals.runtimeEntityInputs} outbox=${totals.outboxEnvelopes} ` +
     `runtimeRoots=${authorityEvidence.expectations.runtimeFrames.length}`,
   );
@@ -204,3 +280,10 @@ try {
     await closeInfraDb(env);
   }
 }
+
+// This one-shot finalizer imports the full Runtime composition, whose Bun
+// native worker pool can keep the CLI event loop alive after every owned DB
+// handle has been closed. All artifact writes above are synchronous and the
+// storage handles are closed in the try/finally, so terminate only the
+// successful CLI path after the final evidence line has been emitted.
+process.exit(0);

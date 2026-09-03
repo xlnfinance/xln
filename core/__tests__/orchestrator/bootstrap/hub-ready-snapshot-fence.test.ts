@@ -89,7 +89,7 @@ test('authority evidence captures materialized H1 before MM bootstrap', () => {
   };
   const h1 = buildHubChildProcessEnv({ ...base, hubName: 'H1', sourceEnv });
   const h2 = buildHubChildProcessEnv({ ...base, hubName: 'H2', sourceEnv });
-  expect(h1['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES']).toBeUndefined();
+  expect(h1['XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES']).toBe('100');
   expect(h1['XLN_HLT_AUTHORITY_EVIDENCE']).toBe('1');
   expect(h1['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH']).toBe('/tmp/authority-base.json');
   expect(h1['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES']).toBe('1');

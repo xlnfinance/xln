@@ -152,6 +152,7 @@ type RuntimeStorageSaveOutcome = {
 type AuthoritySaveState = {
   identity?: StorageAuthoritativeFrameIdentity;
   completion?: Promise<void>;
+  completionMaterialized?: boolean;
 };
 
 const createStorageOuterPerfMarks = (
@@ -168,10 +169,18 @@ const createStorageOuterPerfMarks = (
 const completeAccountAuthorityOnce = (
   accountAuthority: AccountAuthoritySave | undefined,
   authorityState: AuthoritySaveState,
+  materialized: boolean,
 ): Promise<void> => {
   if (!accountAuthority) return Promise.resolve();
+  if (
+    authorityState.completionMaterialized !== undefined &&
+    authorityState.completionMaterialized !== materialized
+  ) {
+    throw new Error('STORAGE_AUTHORITY_COMPLETION_MATERIALIZATION_CONFLICT');
+  }
+  authorityState.completionMaterialized = materialized;
   authorityState.completion ??= Promise.resolve()
-    .then(() => accountAuthority.afterWalCommit());
+    .then(() => accountAuthority.afterWalCommit(materialized));
   return authorityState.completion;
 };
 
@@ -249,8 +258,8 @@ const persistRuntimeEnvironment = async (
                 prepareCheckpoint: accountAuthority.prepareCheckpoint,
                 validateCheckpointMaterialization:
                   accountAuthority.validateCheckpointMaterialization,
-                afterWalCommit: () =>
-                  completeAccountAuthorityOnce(accountAuthority, authorityState),
+                afterWalCommit: materialized =>
+                  completeAccountAuthorityOnce(accountAuthority, authorityState, materialized),
               },
             }
           : {}),
@@ -295,7 +304,14 @@ const completeAuthorityAfterProvenCommit = async (
   authorityState: AuthoritySaveState,
 ): Promise<void> => {
   try {
-    await completeAccountAuthorityOnce(accountAuthority, authorityState);
+    if (authorityState.identity === undefined) {
+      throw new Error('STORAGE_COMMITTED_AUTHORITY_IDENTITY_MISSING');
+    }
+    await completeAccountAuthorityOnce(
+      accountAuthority,
+      authorityState,
+      authorityState.identity.materialized,
+    );
   } catch (authorityError) {
     const writeFailure = asError(error);
     const completionFailure = asError(authorityError);

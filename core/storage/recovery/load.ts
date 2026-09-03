@@ -100,6 +100,12 @@ const installRestoredRuntimeFrame = async (
   // Ephemeral replica-envelope state: never persisted, never restored.
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingNetworkOutputs = payloads.runtimeOutputs ?? [];
+  env.persistenceLastMaterializedHeight = source.persistedHandles.reduce(
+    (latest, handle) => handle.latestMaterializedHeight <= targetHeight
+      ? Math.max(latest, handle.latestMaterializedHeight)
+      : latest,
+    0,
+  );
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
   if (payloads.runtimeMachine) {
     await assertCertifiedRegistrationEvidenceStore(env);
@@ -115,6 +121,7 @@ const installRestoredRuntimeFrame = async (
           ? `checkpoint:${selectedSnapshotHeight}`
           : `snapshot:${selectedSnapshotHeight}`,
     latestHeight,
+    replayedFrameCount: 0,
   });
 };
 

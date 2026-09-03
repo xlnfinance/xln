@@ -8,6 +8,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   getRuntimeWalDb,
+  loadEnvFromDB,
   saveEnvToDB,
 } from '../../../runtime';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
@@ -31,6 +32,7 @@ import {
   buildStorageRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
+import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixture';
 
 const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
   const namespacePath = join(dbRoot, runtimeId);
@@ -91,6 +93,7 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
     env.state.height = 1;
     env.state.timestamp = 1_001;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
+    expect(env.persistenceLastMaterializedHeight).toBe(1);
     const firstMaterializedKeys = await runtimeMachineKeys();
     expect(firstMaterializedKeys.size).toBeGreaterThan(0);
 
@@ -98,6 +101,7 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
     env.state.timestamp = 1_002;
     const expectedNonmaterializedHash = computeCanonicalStateHashFromEnv(env);
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
+    expect(env.persistenceLastMaterializedHeight).toBe(1);
     const nonmaterialized = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
     expect(nonmaterialized?.materializedState).toBe(false);
     expect(nonmaterialized?.canonicalStateHash).toBe(expectedNonmaterializedHash);
@@ -119,6 +123,7 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
       runtimeTxs: [{ type: 'checkpointBarrier', data: {} }],
       entityInputs: [],
     }, [], new Map());
+    expect(env.persistenceLastMaterializedHeight).toBe(3);
     const materialized = await readStorageFrameRecord(getRuntimeWalDb(env), 3);
     expect(materialized?.materializedState).toBe(true);
     expect(materialized?.runtimeMachineRoot).toBeDefined();
@@ -156,6 +161,7 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
       runtimeTxs: [{ type: 'checkpointBarrier', data: {} }],
       entityInputs: [],
     }, [], new Map());
+    expect(env.persistenceLastMaterializedHeight).toBe(4);
     expect(await runtimeMachineKeys()).toEqual(nextKeys);
     expect(await getRuntimeWalDb(env).get(adjacentSentinelKey)).toEqual(adjacentSentinelValue);
     expect((await readStorageFramePayloads(getRuntimeWalDb(env), materialized)).runtimeMachine)
@@ -180,6 +186,20 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
       checkedFrames: 4,
     });
 
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+    const restarted = await loadEnvFromDB(runtimeId, seed);
+    expect(restarted?.state.height).toBe(4);
+    expect(restarted?.persistenceLastMaterializedHeight).toBe(4);
+    expect(Reflect.get(restarted ?? {}, '__replayMeta')).toMatchObject({
+      checkpointHeight: 4,
+      replayedFrameCount: 0,
+    });
+    if (restarted) {
+      await closeRuntimeDb(restarted);
+      await closeInfraDb(restarted);
+    }
+
     let corruptedCurrentLeaf = false;
     for await (const key of iterateKeys(getRuntimeWalDb(env), {
       prefix: keyRuntimeMachineTreePrefix(KEY_RUNTIME_MACHINE_LEAF),
@@ -193,6 +213,93 @@ test('canonical frames materialize the Runtime-machine graph only at a barrier',
     expect(corruptedCurrentLeaf).toBe(true);
     await expect(verifyStorageTailIntegrity(getRuntimeWalDb(env)))
       .rejects.toThrow('PERSISTENT_RADIX_EDGE_HASH_MISMATCH');
+  } finally {
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+  }
+});
+
+test('a non-quiescent due frame cannot advance the checkpoint cursor', async () => {
+  const seed = `checkpoint-non-quiescent ${Date.now()} alpha beta gamma`;
+  const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+  const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+  cleanupRuntimeStorage(dbRoot, runtimeId);
+  const env = createEmptyEnv(seed);
+  env.runtimeId = runtimeId;
+  env.dbNamespace = runtimeId;
+  env.quietRuntimeLogs = true;
+  env.runtimeConfig = {
+    ...(env.runtimeConfig || {}),
+    storage: {
+      canonicalHashPeriodFrames: 1,
+      materializePeriodFrames: 2,
+      snapshotPeriodFrames: 100,
+    },
+  };
+  let checkpointsPrepared = 0;
+  const materializedCompletions: boolean[] = [];
+  const accountAuthority = {
+    prepareCheckpoint: async () => {
+      checkpointsPrepared += 1;
+      return [];
+    },
+    validateCheckpointMaterialization: async () => {},
+    afterWalCommit: async (materialized: boolean) => {
+      materializedCompletions.push(materialized);
+    },
+  };
+
+  try {
+    env.state.height = 1;
+    env.state.timestamp = 1_001;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
+    expect(env.persistenceLastMaterializedHeight).toBe(1);
+
+    env.state.height = 2;
+    env.state.timestamp = 1_002;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
+    expect(env.persistenceLastMaterializedHeight).toBe(1);
+
+    const fixture = createEntityProposalFixture(`${seed}:entity`, 1n, ['1']);
+    const { replica, signerId } = fixture.createValidator('1');
+    replica.mempool = [{ type: 'chat', data: { from: signerId, message: 'pending' } }];
+    env.state.eReplicas = new Map([[`${replica.entityId}:${signerId}`, replica]]);
+
+    env.state.height = 3;
+    env.state.timestamp = 1_003;
+    await saveEnvToDB(
+      env,
+      { runtimeTxs: [], entityInputs: [] },
+      [],
+      new Map(),
+      accountAuthority,
+    );
+    expect(checkpointsPrepared).toBe(0);
+    expect(materializedCompletions).toEqual([false]);
+    expect(env.persistenceLastMaterializedHeight).toBe(1);
+    expect(await readStorageHead(getRuntimeWalDb(env))).toMatchObject({
+      latestHeight: 3,
+      latestMaterializedHeight: 1,
+    });
+
+    replica.mempool = [];
+    env.state.height = 4;
+    env.state.timestamp = 1_004;
+    await saveEnvToDB(
+      env,
+      { runtimeTxs: [], entityInputs: [] },
+      [],
+      new Map(),
+      accountAuthority,
+    );
+    expect(checkpointsPrepared).toBe(1);
+    expect(materializedCompletions).toEqual([false, true]);
+    expect(env.persistenceLastMaterializedHeight).toBe(4);
+    expect(await readStorageHead(getRuntimeWalDb(env))).toMatchObject({
+      latestHeight: 4,
+      latestMaterializedHeight: 4,
+    });
   } finally {
     await closeRuntimeDb(env);
     await closeInfraDb(env);

@@ -25,7 +25,6 @@ type Allowance = {
 
 const SCAN_ROOTS = [
   '.github',
-  'brainvault',
   'cli',
   'custody',
   'debates',
@@ -112,71 +111,6 @@ const FORBIDDEN = [
 ] as const;
 
 const ALLOWLIST: readonly Allowance[] = [
-  {
-    file: 'brainvault/experimental/benchmark.ts',
-    match: 'fallback',
-    reason: 'Local CLI default-value parameter; it does not select a compatibility implementation.',
-  },
-  {
-    file: 'brainvault/core.test.ts',
-    match: 'legacy --factor',
-    reason: 'Pins rejection of ambiguous historical Brainvault V1 recovery syntax.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'Legacy recovery only',
-    reason: 'User-facing warning for immutable Brainvault V1 wallet recovery.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'LEGACY_ENGINE_FLAGS',
-    reason: 'Frozen Brainvault V1 command-line recovery spellings remain readable only for wallet recovery.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'legacyEngineFlags',
-    reason: 'Local collection of the frozen Brainvault V1 recovery spellings above.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'workFromLegacyFactor',
-    reason: 'Pure mapping from an immutable Brainvault V1 wallet factor to its committed shard count.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'legacy 1/10/100',
-    reason: 'Help text distinguishing exact shard counts from immutable Brainvault V1 recovery factors.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'a legacy factor',
-    reason: 'Help text for immutable Brainvault V1 wallet recovery.',
-  },
-  {
-    file: 'brainvault/cli.ts',
-    match: 'portable native fallback',
-    reason: 'Brainvault selects one available native crypto backend before derivation; output vectors are identical.',
-  },
-  {
-    file: 'brainvault/core.ts',
-    match: 'legacy factor',
-    reason: 'Documents the immutable factor encoded by existing Brainvault V1 wallets.',
-  },
-  {
-    file: 'brainvault/vectors-v1.json',
-    match: 'legacy-factor-2-ten-shards',
-    reason: 'Frozen external vector identifier authenticated by the Brainvault V1 manifest.',
-  },
-  {
-    file: 'brainvault/cli-policy.ts',
-    match: 'existing legacy wallet',
-    reason: 'Short passphrases are accepted only to recover immutable Brainvault V1 wallets.',
-  },
-  {
-    file: 'brainvault/presets.ts',
-    match: 'legacy recovery',
-    reason: 'Documents the immutable factor encoded by existing Brainvault V1 wallets.',
-  },
   {
     file: 'frontend/svelte.config.js',
     match: "fallback: 'index.html'",

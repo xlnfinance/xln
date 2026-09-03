@@ -7,8 +7,12 @@ export const hltAuthorityEvidenceRecording = (env: NodeJS.ProcessEnv): boolean =
   return true;
 };
 
-/** Owner-approved real-frame tail after the explicit parity base checkpoint. */
-export const HLT_AUTHORITY_MIN_RUNTIME_FRAMES = 110;
+/** Production cadence exercised by the release recorder after its explicit base checkpoint. */
+export const HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES = 100;
+
+/** One periodic checkpoint plus ten real Runtime frames of recovery tail. */
+export const HLT_AUTHORITY_MIN_RUNTIME_FRAMES =
+  HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES + 10;
 
 /** Authority users keep the production relay session alive. Ordinary TPS HLT
  * deliberately measures the direct path only and therefore owns no relay. */

@@ -55,7 +55,7 @@ export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
 // state never changes because of this local policy.
 export const DEFAULT_RETAIN_SNAPSHOTS = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_EPOCH_MAX_BYTES = Number.MAX_SAFE_INTEGER;
-export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 1_000;
+export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 100;
 export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
 export const KEY_HEAD = Buffer.from([0x20]);
