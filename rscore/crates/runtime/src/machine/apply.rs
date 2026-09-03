@@ -4507,10 +4507,11 @@ mod tests {
             state,
             replica: entity_replica,
         };
+        // Two of these exceed the tx byte budget; one fits.
         let tx = || {
             CanonicalEntityTx::from_frame_projection(
                 EntityTxKind::DirectPayment,
-                CanonicalValue::String("x".repeat(3_000_000)),
+                CanonicalValue::String("x".repeat(super::MAX_ENTITY_FRAME_TX_BYTES / 2 + 1_000)),
             )
             .expect("large canonical tx")
         };

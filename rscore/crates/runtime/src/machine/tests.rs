@@ -799,10 +799,13 @@ fn entity_wire_tail_replays_from_full_input_and_blocks_checkpoint_until_drain()
         checkpoint_period_frames: 1,
         ..RuntimeLimits::hlt()
     };
+    // Two of these exceed the tx byte budget; one fits.
     let large = || {
         CanonicalEntityTx::from_frame_projection(
             EntityTxKind::DirectPayment,
-            CanonicalValue::String("x".repeat(3_000_000)),
+            CanonicalValue::String(
+                "x".repeat(xln_rscore_entity_kernel::MAX_ENTITY_FRAME_TX_BYTES / 2 + 1_000),
+            ),
         )
         .expect("large canonical Entity tx")
     };
