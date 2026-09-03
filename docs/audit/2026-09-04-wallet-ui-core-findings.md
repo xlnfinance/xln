@@ -195,3 +195,27 @@ behaviour was not checked; worth one look if both shells must agree.
 
 Evidence: `ui/tests/e2e-payment.spec.ts` (green at HEAD), run logs in the
 2026-09-03 session; screenshots `ui/tests/test-results/ui-*.png`.
+
+## 11. P1 (in-flight, uncommitted) — frame-journal retention change makes committed receipts disappear
+
+Observed 2026-09-04 ~01:50 against the live `bun run dev` bundle
+(`frontend/static/runtime.js` built from the working tree, which carries
+uncommitted changes in `core/storage/index.ts`, `core/storage/keys.ts`,
+`core/storage/recovery/{load,restore}.ts`, `core/storage/recovery/journal/replay.ts`,
+`core/runtime/types.ts` and the test
+`core/__tests__/storage/history/storage-frame-journal-retention.test.ts`;
+`DEFAULT_MATERIALIZE_PERIOD_FRAMES` 1 000 → 100, new
+`persistenceLastMaterializedHeight`).
+
+Symptom: the payment commits (balance −25, Activity shows "Sent"), but the
+wallet's payment-terminal monitor never sees `HtlcFinalized` in
+`readPersistedFrameJournals(env, {fromHeight, toHeight})`, so no receipt and
+no recipient binding. No monitor error is raised. The same wallet code against
+the bundle built from HEAD passes the E2E (`ui/tests/e2e-payment.spec.ts`,
+12 s).
+
+Reading: whatever changed in journal retention/materialization is dropping or
+relocating the frame log entries the SvelteKit `View.svelte` and the React
+wallet both rely on (`PAYMENT_TERMINAL_EVENT_NAMES` over `journal.logs`).
+Please run `cd ui && bun run test:e2e` before landing that storage change; it
+is the only test that exercises the browser-side receipt path.

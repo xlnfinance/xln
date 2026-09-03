@@ -1,0 +1,266 @@
+{
+  "reviewer": "openrouter/x-ai/grok-latest",
+  "screens": [
+    {
+      "file": "01-home.png",
+      "scores": {
+        "hierarchy": 780,
+        "premium": 720,
+        "typography": 740,
+        "color": 780,
+        "data_legibility": 700,
+        "layout": 680,
+        "visceral_value": 620,
+        "responsive": 720,
+        "consistency": 760,
+        "trust": 740
+      },
+      "total": 724,
+      "top_issues": [
+        "Home desktop: the On-chain $0.00 / Reserve $1,500.00 / Accounts $10,000.00 legend under the total restates the stacked bar and the BALANCES row; it is three chips of noise under the hero number.",
+        "Home desktop: the BALANCES USDC bar (~230px for $11,500) is not on the same 1px=$50 scale as the Accounts bilateral bar (send 60k + receive 40k would be 2000px); visceral_value is broken across columns.",
+        "Home desktop: left column is a short stack over a huge empty well; the two-column grid never fills height, so the page feels like a stretched mobile sheet.",
+        "Home desktop: Pay/Receive/Swap are three equal-width capsules; Pay is indigo fill but Receive/Swap are ghost boxes with the same weight as Open account, so primary action hierarchy is only color, not size."
+      ],
+      "fixes": [
+        "Home: delete the three-dot legend under Total balance; keep Instant send/receive as the only caption, or bind the stacked bar to a hover tooltip.",
+        "Home: draw the USDC BALANCES bar and the Hub One account bar on the Settings scale (1px=$50); clip/fade at card edge as Settings already documents.",
+        "Home: pin BALANCES to the bottom of the left column or add a second token row so the left pane matches ACCOUNTS+RECENT height.",
+        "Home: make Pay 1.4× Receive/Swap width or demote Receive/Swap to text buttons under the total."
+      ]
+    },
+    {
+      "file": "02-pay.png",
+      "scores": {
+        "hierarchy": 820,
+        "premium": 760,
+        "typography": 700,
+        "color": 800,
+        "data_legibility": 680,
+        "layout": 780,
+        "visceral_value": 740,
+        "responsive": 800,
+        "consistency": 780,
+        "trust": 860
+      },
+      "total": 772,
+      "top_issues": [
+        "Pay desktop: Amount '25' is display size but 'This payment' shows a stray tick/underscore and 25.00 on the right with no $ or token, so the field looks like a broken composer.",
+        "Pay desktop: the amount card repeats the Hub One bilateral bar that already appears in YOUR ACCOUNT WITH HUB ONE Before; two identical bars on one screen.",
+        "Pay desktop: full 0x address in To is 66-char mono wrapping the card; Meridian Desk is already verified in the corner—truncate to 0x499d…ef2bd.",
+        "Pay desktop: Fee 0.000050 USDC vs Instant vs Delivery Instant Change is a three-row table for a $25 payment; Change is a second CTA competing with Pay 25.00 USDC."
+      ],
+      "fixes": [
+        "Pay: remove the This payment tick; put 25.00 USDC as tabular caption under the big 25, not a second axis.",
+        "Pay: keep the live delta bar only in the right Before/After card; in the amount card show a 25px hatch overlay on the existing send half, not a second full bar.",
+        "Pay: truncate To address; copy lives on click.",
+        "Pay: collapse Fee/Arrives/Delivery to one quiet line 'Instant · fee 0.000050 USDC' with Change as a text link."
+      ]
+    },
+    {
+      "file": "03-receipt.png",
+      "scores": {
+        "hierarchy": 800,
+        "premium": 740,
+        "typography": 760,
+        "color": 780,
+        "data_legibility": 720,
+        "layout": 700,
+        "visceral_value": 400,
+        "responsive": 740,
+        "consistency": 750,
+        "trust": 880
+      },
+      "total": 727,
+      "top_issues": [
+        "Receipt desktop: modal has no money bar, so visceral_value is absent on the only proof of the payment.",
+        "Receipt desktop: Settled 02:00:38 in 2004 ms mixes a clock time with a latency trophy in mint; 2004 ms is a debug metric, not a customer receipt.",
+        "Receipt desktop: PAID + green glyph + 25.00 USDC + Done duplicates the home total already updating behind the dim; the dimmed home still shows Pay as a purple ghost, which reads as failed not complete.",
+        "Receipt desktop: Proof 0x02307451…331f is truncated without copy affordance; Frame #40 is the real trust object and is visually equal to Settled time."
+      ],
+      "fixes": [
+        "Receipt: add a 25px mint bar (1px=$50 → 0.5px at this scale is wrong—drop to caption '25.00 of 11,475.00' or temporarily lower scale) under the amount.",
+        "Receipt: drop in 2004 ms; keep Settled as date-time only.",
+        "Receipt: don't dim Pay into a disabled purple; freeze home or show a success rail.",
+        "Receipt: make Frame #40 the primary meta row; Proof is a copyable mono chip."
+      ]
+    },
+    {
+      "file": "04-receive.png",
+      "scores": {
+        "hierarchy": 640,
+        "premium": 700,
+        "typography": 720,
+        "color": 740,
+        "data_legibility": 680,
+        "layout": 660,
+        "visceral_value": 350,
+        "responsive": 720,
+        "consistency": 730,
+        "trust": 700
+      },
+      "total": 664,
+      "top_issues": [
+        "Receive desktop: a white QR on a black field is the loudest object; amount is 0.00 so the screen is a blank invoice, not a receive amount.",
+        "Receive desktop: the amount field's thin indigo bar is a 0-width decoration, not a 1px=$50 value bar—visceral_value is fake here.",
+        "Receive desktop: Copy invoice / Copy link / Copy xln:// app link are three share verbs; SHARE copy explains the same twice.",
+        "Receive desktop: YOUR ENTITY ID is a raw 40-byte hex dump with no copy button; it undercuts the QR as the canonical id."
+      ],
+      "fixes": [
+        "Receive: default amount empty with a placeholder, not 0.00; grow the QR only after amount is set, or put QR in the right column.",
+        "Receive: replace the fake under-bar with the inbound-room bar (receive up to 40,025) at true scale, hatch the requested amount.",
+        "Receive: one primary Copy link, invoice as overflow.",
+        "Receive: entity id as truncated chip with copy, matching Pay To."
+      ]
+    },
+    {
+      "file": "05-swap.png",
+      "scores": {
+        "hierarchy": 580,
+        "premium": 680,
+        "typography": 700,
+        "color": 720,
+        "data_legibility": 560,
+        "layout": 620,
+        "visceral_value": 500,
+        "responsive": 640,
+        "consistency": 700,
+        "trust": 640
+      },
+      "total": 634,
+      "top_issues": [
+        "Swap desktop: You receive 0.00 WETH with no quote, while You pay 100 USDC is committed-looking; Swap CTA is muted indigo-on-indigo and looks disabled without saying why.",
+        "Swap desktop: right column is a single Hub One bar plus a paragraph; Across networks is an empty toggle—desktop width is unused.",
+        "Swap desktop: USDC sandbox chip next to the token picker is a third label (token, network, hub) crowding the amount row.",
+        "Swap desktop: account bar is not hatched for the 100 USDC hold, so visceral_value does not show the order resting on Δ."
+      ],
+      "fixes": [
+        "Swap: if no fill, CTA label 'Place 100 USDC order' and keep receive as em dash, not 0.00.",
+        "Swap: show orderbook/quote in the right pane when Same network; don't leave half the canvas empty.",
+        "Swap: move sandbox to the page chrome (as Account already has 0x… sandbox).",
+        "Swap: hatch 100px (at $1/px) or 2px (at $50/px) on the send half of the Hub One bar."
+      ]
+    },
+    {
+      "file": "06-account.png",
+      "scores": {
+        "hierarchy": 760,
+        "premium": 740,
+        "typography": 760,
+        "color": 800,
+        "data_legibility": 780,
+        "layout": 700,
+        "visceral_value": 820,
+        "responsive": 720,
+        "consistency": 780,
+        "trust": 840
+      },
+      "total": 770,
+      "top_issues": [
+        "Account desktop: THIS ACCOUNT repeats Hub / sandbox / Open that the header already shows (Hub One hub + 0x5725…); the right card is a glossary, not a pane.",
+        "Account desktop: Pay / Extend credit / Swap sit above the only data card, so the eye hits actions before +9,975.00 they owe you.",
+        "Account desktop: legend collateral / credit line / owed / in flight sits on a hairline with no in-flight hatch on the bar—purple in flight is unused.",
+        "Account desktop: Show 2 empty lanes · WETH, USDT is a text link under a large empty well; empty lanes should be ghost rows at true 0-width, not a reveal."
+      ],
+      "fixes": [
+        "Account: replace THIS ACCOUNT table with frames/proof timeline; keep Status Open as a header dot like Home synced.",
+        "Account: put the USDC lane first, actions as a secondary row or right-rail buttons.",
+        "Account: if in flight is 0, drop it from the legend; if holds exist, hatch them.",
+        "Account: render empty WETH/USDT lanes at 0px with the same notch, not a show link."
+      ]
+    },
+    {
+      "file": "07-activity.png",
+      "scores": {
+        "hierarchy": 720,
+        "premium": 700,
+        "typography": 740,
+        "color": 760,
+        "data_legibility": 740,
+        "layout": 680,
+        "visceral_value": 480,
+        "responsive": 740,
+        "consistency": 720,
+        "trust": 820
+      },
+      "total": 710,
+      "top_issues": [
+        "Activity desktop: only Received has a mint bar; Sent −25.00 has a 1px leftover tick, Credit limit / Account opened have none—bars are badges not a scale.",
+        "Activity desktop: All/Payments/Swaps/Settlement/Accounts chips add five bordered pills for four rows; Settlement vs Accounts vs Payments is taxonomy noise.",
+        "Activity desktop: right inspector duplicates the selected Sent row (amount, settled, via Hub One) while the list still uses a selected fill—two copies of −25.00 USDC.",
+        "Activity desktop and Activity-detail: screens are identical, so the 'detail' state has no extra depth (no frame body, no counterparty bar)."
+      ],
+      "fixes": [
+        "Activity: draw every money row at 1px=$50 (Received 200px, Sent 0.5px→minimum 2px hatch); non-money rows get no bar.",
+        "Activity: default All with a single filter menu, not five chips.",
+        "Activity: inspector should show Hub One Δ before/after and proof copy, not restated To/Via.",
+        "Activity-detail: if it is the same viewport, don't ship a duplicate screenshot as a separate screen; add frame payload."
+      ]
+    },
+    {
+      "file": "08-activity-detail.png",
+      "scores": {
+        "hierarchy": 720,
+        "premium": 700,
+        "typography": 740,
+        "color": 760,
+        "data_legibility": 740,
+        "layout": 680,
+        "visceral_value": 480,
+        "responsive": 740,
+        "consistency": 720,
+        "trust": 820
+      },
+      "total": 710,
+      "top_issues": [
+        "Activity desktop and Activity-detail: identical layout; detail does not zoom the payment (no bilateral after-state, no hashed frame).",
+        "Activity-detail: Frames 5 committed entries vs Frame #40 is two frame concepts unlabeled; trust copy 'From your runtime's committed frames' repeats the receipt Verified by your runtime.",
+        "Activity-detail: To Meridian Desk 0x499d0d…f2bd crams name+hex in one cell, wrapping poorly vs Pay's dedicated To card."
+      ],
+      "fixes": [
+        "Activity-detail: expand the inspector to a true two-pane with Hub One before/after bars at the global scale.",
+        "Activity-detail: one row 'Frame #40 · 5 signed hops' plus copyable proof.",
+        "Activity-detail: stack name and truncated hex like Receive entity id."
+      ]
+    },
+    {
+      "file": "09-settings.png",
+      "scores": {
+        "hierarchy": 780,
+        "premium": 800,
+        "typography": 780,
+        "color": 820,
+        "data_legibility": 800,
+        "layout": 820,
+        "visceral_value": 900,
+        "responsive": 800,
+        "consistency": 780,
+        "trust": 760
+      },
+      "total": 804,
+      "top_issues": [
+        "Settings desktop: 1 px = $50 is shown three times (header, slider end, AT THIS SCALE card)—redundant chrome on the one screen that explains the system.",
+        "Settings desktop: AT THIS SCALE $100 = 2 px is a 2px sliver that is illegible; the card argues for comparability then shows a bar you cannot see.",
+        "Settings desktop: Reveal recovery phrase and Lock are equal ghost buttons at the bottom; recovery is a high-risk action sitting next to Lock with no confirm pattern.",
+        "Settings desktop: On-chain/Reserve/Accounts toggles are on with no preview of Home with them off—trust that hiding a tier won't hide money."
+      ],
+      "fixes": [
+        "Settings: keep 1 px = $50 only on the slider; drop the duplicate in the SCALE header.",
+        "Settings: start the legend at $1,000 (20px) or annotate $100 as a 2px tick with a label, not a bar.",
+        "Settings: Lock as primary quiet; Reveal recovery as destructive text in VAULT with a confirm sheet.",
+        "Settings: caption the HOME toggles 'Hidden tiers stay in Total; only the breakdown hides.'"
+      ]
+    }
+  ],
+  "overall": {
+    "total": 722,
+    "verdict": "Calm indigo dark chrome and the Hub One split bar are close to shipping, but the 1px=$50 law is only true on Account and Settings—Home, Activity, Receive and Swap draw badge-length bars or empty decorations. Desktop two-column is used on Pay and Settings and abandoned as a short left stack plus empty well everywhere else.",
+    "priority_fixes": [
+      "Enforce one scale: Home USDC bar, Hub One send/receive, Pay/Swap overlays, Activity money rows all at Settings 1px=$50 with edge fade—not per-card auto-fit.",
+      "Home: delete the On-chain/Reserve/Accounts numeric legend; let Instant send/receive caption the total; fill the left column so it matches ACCOUNTS+RECENT.",
+      "Receive/Swap: stop showing 0.00 as a value; Receive uses inbound-room bar for requested amount; Swap CTA states Place order and never paints a fake quote.",
+      "Activity: bars only on money, inspector shows Δ+proof not a restated row; do not ship 07 and 08 as duplicates.",
+      "Pay/Receipt: one bilateral bar (Before/After only); drop 2004 ms and the broken This payment tick; Frame #40 + copyable proof as the trust object."
+    ]
+  }
+}
