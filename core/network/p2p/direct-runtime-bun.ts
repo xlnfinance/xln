@@ -848,7 +848,7 @@ const handleDirectMessage = async (
   let msg: RuntimeWsMessage;
   const receivedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   try {
-    msg = deserializeWsMessage(raw);
+    msg = deserializeWsMessage(raw, { authenticated: session.handshakeDone });
     const wireBytes = typeof raw === 'string' ? raw.length : raw.byteLength;
     countOp(`socket.directServer.in.${msg.type}`, wireBytes);
     countOp('socket.directServer.in.deserialize', wireBytes, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - receivedAt) * 1_000) : 0);

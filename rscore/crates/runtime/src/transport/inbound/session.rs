@@ -55,6 +55,9 @@ pub(super) struct AcceptedSession {
     pub peer_guard: PeerGuard,
 }
 
+/// Bound for the unauthenticated handshake (hello_challenge / hello / hello_ack).
+const PREAUTH_MAX_MESSAGE_BYTES: usize = 64 * 1024;
+
 pub(super) fn accept(
     stream: TcpStream,
     serial: u64,
@@ -67,9 +70,12 @@ pub(super) fn accept(
         .set_read_timeout(Some(shared.config.io_timeout))
         .and_then(|()| stream.set_write_timeout(Some(shared.config.io_timeout)))
         .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
+    // TS `LIMITS.MAX_RUNTIME_WS_PREAUTH_MESSAGE_BYTES`: until the hello is
+    // verified the socket may only carry the handshake, so an unauthenticated
+    // peer cannot make this process buffer a frame-sized message.
     let websocket_config = WebSocketConfig::default()
-        .max_message_size(Some(shared.config.max_message_bytes))
-        .max_frame_size(Some(shared.config.max_message_bytes));
+        .max_message_size(Some(PREAUTH_MAX_MESSAGE_BYTES))
+        .max_frame_size(Some(PREAUTH_MAX_MESSAGE_BYTES));
     let mut socket = tungstenite::accept_hdr_with_config(
         stream,
         PathCallback(shared.config.path.clone()),
@@ -91,6 +97,11 @@ pub(super) fn accept(
     let hello = read_value(&mut socket)?;
     let accepted = accept_hello(&shared, &hello, &challenge, &audience)?;
     let peer_guard = register_peer(&shared, &accepted.peer_runtime_id)?;
+    // Authenticated: certified Entity frames may now arrive at full size.
+    socket.set_config(|config| {
+        config.max_message_size = Some(shared.config.max_message_bytes);
+        config.max_frame_size = Some(shared.config.max_message_bytes);
+    });
 
     let server_ephemeral = ephemeral_identity()?;
     let session_public = ephemeral_public_hex(&server_ephemeral);

@@ -28,7 +28,7 @@ import {
   type RelayStore,
 } from '../network/relay/store';
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
+import { forgetRelaySocketRuntimeId, isRelaySocketAuthenticated, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
 import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, toRuntimeWsBytes, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
@@ -2882,7 +2882,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
         let peerMessage: RuntimeWsMessage | null = null;
         let marketMessage: MarketWireRequest | null = null;
         try {
-          peerMessage = deserializeWsMessage(raw as string | Buffer | ArrayBuffer);
+          peerMessage = deserializeWsMessage(raw as string | Buffer | ArrayBuffer, {
+            authenticated: isRelaySocketAuthenticated(ws),
+          });
         } catch (binaryError) {
           try {
             marketMessage = decodeMarketWireRequest(raw.toString());

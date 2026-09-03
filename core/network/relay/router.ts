@@ -125,6 +125,10 @@ const getSocketAuthBinding = (ws: unknown): AuthenticatedRelaySocket[typeof SOCK
     ? (ws as AuthenticatedRelaySocket)[SOCKET_AUTH_BINDING]
     : undefined;
 
+/** A relay socket is authenticated once its verified hello bound a Runtime id to it. */
+export const isRelaySocketAuthenticated = (ws: unknown): boolean =>
+  getRememberedSocketRuntimeId(ws) !== '';
+
 export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];

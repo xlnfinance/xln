@@ -367,10 +367,22 @@ export const serializeWsMessage = (msg: RuntimeWsMessage): Uint8Array => {
 export const serializeWsMessageForDebug = (msg: RuntimeWsMessage): string =>
   serializeTaggedJson(buildRuntimeWsEnvelope(msg));
 
+export const MAX_WS_PREAUTH_MESSAGE_BYTES = LIMITS.MAX_RUNTIME_WS_PREAUTH_MESSAGE_BYTES;
+
+/**
+ * Socket ingress passes `ingress.authenticated`; before the hello is verified
+ * only a handshake-sized message is decoded. Callers that decode frames they
+ * produced or already admitted (tests, debug, replay) omit it and get the full
+ * authenticated bound.
+ */
 export const deserializeWsMessage = (
   raw: string | Buffer | Uint8Array | ArrayBuffer,
+  ingress?: Readonly<{ authenticated: boolean }>,
 ): RuntimeWsMessage => {
   const byteLength = wsMessageByteLength(raw);
+  if (ingress && !ingress.authenticated && byteLength > MAX_WS_PREAUTH_MESSAGE_BYTES) {
+    throw new Error(`WS_MESSAGE_TOO_LARGE_PREAUTH:bytes=${byteLength}:max=${MAX_WS_PREAUTH_MESSAGE_BYTES}`);
+  }
   const maxBytes = resolveRuntimeWsMaxMessageBytes();
   if (byteLength > maxBytes) throw new Error(`WS_MESSAGE_TOO_LARGE:bytes=${byteLength}:max=${maxBytes}`);
   if (typeof raw === 'string') throw new Error('WS_WIRE_BINARY_REQUIRED');

@@ -519,7 +519,7 @@ export class RuntimeWsClient {
 
   private decodeMessage(raw: string | Buffer | ArrayBuffer): RuntimeWsMessage | null {
     try {
-      const msg = deserializeWsMessage(raw);
+      const msg = deserializeWsMessage(raw, { authenticated: this.helloAcknowledged || this.everAuthenticated });
       failfastAssert(!!msg && typeof msg === 'object', 'WS_MSG_NOT_OBJECT', 'WS message must be an object');
       failfastAssert(typeof msg.type === 'string', 'WS_MSG_TYPE_INVALID', 'WS message type must be a string', { msg });
       const transport = this.options.url.includes('/relay') ? 'relay' : 'direct';

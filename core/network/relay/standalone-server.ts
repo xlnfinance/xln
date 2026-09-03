@@ -3,7 +3,7 @@
  */
 
 import { createRelayStore, removeClient, type RelayStore } from './store';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
+import { isRelaySocketAuthenticated, forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
 import {
   canonicalizeRuntimeWsAudience,
   deserializeWsMessage,
@@ -35,8 +35,8 @@ export type StandaloneRelayServer = {
 
 const relayStandaloneLog = createStructuredLogger('relay.standalone');
 
-const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage =>
-  deserializeWsMessage(raw);
+const normalizeMessage = (ws: unknown, raw: string | Buffer | ArrayBuffer): RuntimeWsMessage =>
+  deserializeWsMessage(raw, { authenticated: isRelaySocketAuthenticated(ws) });
 
 export const startStandaloneRelayServer = (options: StandaloneRelayOptions): StandaloneRelayServer => {
   const store = createRelayStore(options.serverId);
@@ -75,7 +75,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       message(ws, message) {
         let msg: RuntimeWsMessage;
         try {
-          msg = normalizeMessage(message as string | Buffer | ArrayBuffer);
+          msg = normalizeMessage(ws, message as string | Buffer | ArrayBuffer);
         } catch (error) {
           ws.send(serializeWsMessage({ type: 'error', error: `Invalid relay message: ${(error as Error).message}` }));
           return;

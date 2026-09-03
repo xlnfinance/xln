@@ -44,7 +44,7 @@ import { getAccountReplica, getEntityReplicaById } from './entities/lookup';
 import { createRelayStore, pushDebugEvent, removeClient } from '../../network/relay/store';
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
+import { forgetRelaySocketRuntimeId, isRelaySocketAuthenticated, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
 import {
   canonicalizeRuntimeWsAudience,
   deserializeWsMessage,
@@ -1043,7 +1043,7 @@ const handleWebSocketMessage = (
     let peerMessage: RuntimeWsMessage | null = null;
     let marketMessage: MarketWireRequest | null = null;
     try {
-      peerMessage = deserializeWsMessage(message);
+      peerMessage = deserializeWsMessage(message, { authenticated: isRelaySocketAuthenticated(ws) });
     } catch (binaryError) {
       try {
         marketMessage = decodeMarketWireRequest(messageText());

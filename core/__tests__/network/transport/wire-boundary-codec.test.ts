@@ -4,6 +4,7 @@ import { keccak256 } from 'ethers';
 
 import {
   DEFAULT_MAX_WS_MESSAGE_BYTES,
+  MAX_WS_PREAUTH_MESSAGE_BYTES,
   deserializeWsMessage,
   resolveRuntimeWsMaxMessageBytes,
   serializeWsMessage,
@@ -104,6 +105,19 @@ describe('WebSocket trusted decode boundary', () => {
     process.env['XLN_WS_MAX_MESSAGE_BYTES'] = '4';
     expect(() => deserializeWsMessage(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff])))
       .toThrow('WS_MESSAGE_TOO_LARGE:bytes=5:max=4');
+  });
+
+  test('an unauthenticated socket only gets a handshake-sized message decoded', () => {
+    delete process.env['XLN_WS_MAX_MESSAGE_BYTES'];
+    const oversized = new Uint8Array(MAX_WS_PREAUTH_MESSAGE_BYTES + 1);
+    oversized[0] = 0x00;
+    expect(() => deserializeWsMessage(oversized, { authenticated: false }))
+      .toThrow(`WS_MESSAGE_TOO_LARGE_PREAUTH:bytes=${MAX_WS_PREAUTH_MESSAGE_BYTES + 1}:max=${MAX_WS_PREAUTH_MESSAGE_BYTES}`);
+    // The same bytes on an authenticated socket reach the codec (and fail there, not on size).
+    expect(() => deserializeWsMessage(oversized, { authenticated: true })).toThrow('WS_WIRE_MESSAGEPACK_REQUIRED');
+    expect(() => deserializeWsMessage(oversized)).toThrow('WS_WIRE_MESSAGEPACK_REQUIRED');
+    const hello = serializeWsMessage({ type: 'ping' });
+    expect(deserializeWsMessage(hello, { authenticated: false })).toEqual({ type: 'ping' });
   });
 
   test('uses one exact 256 MiB authenticated cap for direct and relay frame envelopes', () => {

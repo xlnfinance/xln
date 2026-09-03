@@ -126,6 +126,12 @@ export const LIMITS = {
 
   /** Binary transport/control ceilings; a certified frame (MessagePack + signatures) must fit one WS message. */
   MAX_RUNTIME_WS_MESSAGE_BYTES: 256 * 1024 * 1024,
+  /**
+   * Until a socket's hello is verified it may only carry the handshake
+   * (hello_challenge / hello / hello_ack); an unauthenticated peer never gets
+   * a frame-sized message decoded. rscore inbound uses the same bound.
+   */
+  MAX_RUNTIME_WS_PREAUTH_MESSAGE_BYTES: 64 * 1024,
   MAX_RUNTIME_ADAPTER_MESSAGE_BYTES: 16 * 1024 * 1024,
   MAX_HLT_HOST_BATCH_BODY_BYTES: 32 * 1024 * 1024,
 } as const;
