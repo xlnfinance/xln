@@ -11,10 +11,7 @@ use crate::types::{
     EntityKernelOutput, EntityStateSlice, HtlcPreparedOutcome, PaybookEntry, PaybookState,
     TargetedAccountTx,
 };
-use crate::{
-    DeterministicContext, EntityKernelError, OrderedAccountCommit, ScheduledHook, cancel_hook,
-    schedule_hook,
-};
+use crate::{DeterministicContext, EntityKernelError, OrderedAccountCommit};
 
 const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
 const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
@@ -93,6 +90,48 @@ impl PaybookChanges {
             self.pending.insert(key, None);
         }
         Ok(entry)
+    }
+
+    /// Secret-ack waits whose deadline is at or before `now`, frame-local
+    /// writes included, in (deadline, hashlock) order: the key the hook map
+    /// used to drain `htlc-secret-ack:<hashlock>` by. Mirrors TS
+    /// `collectDerivedDeadlines` / `isSecretAckPendingPayment`.
+    pub(crate) fn due_secret_acks(
+        &self,
+        state: &EntityStateSlice,
+        now: u64,
+    ) -> Result<Vec<(String, String)>, EntityKernelError> {
+        let mut due = Vec::new();
+        let mut consider = |entry: &PaybookEntry| {
+            let (Some(counterparty), Some(deadline), Some(started_at)) = (
+                entry.inbound_entity.as_ref(),
+                entry.secret_ack_deadline_at,
+                entry.secret_ack_started_at,
+            ) else {
+                return;
+            };
+            if entry.secret_ack_pending
+                && entry.secret.is_some()
+                && deadline >= started_at
+                && deadline <= now
+            {
+                due.push((deadline, entry.hashlock.clone(), counterparty.clone()));
+            }
+        };
+        for (key, entry) in state.paybook.entries.iter() {
+            if self.pending.contains_key(key) {
+                continue;
+            }
+            consider(entry);
+        }
+        for entry in self.pending.values().flatten() {
+            consider(entry);
+        }
+        due.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        Ok(due
+            .into_iter()
+            .map(|(_, hashlock, counterparty)| (hashlock, counterparty))
+            .collect())
     }
 
     pub(crate) fn into_mutations(
@@ -511,10 +550,6 @@ pub(crate) fn terminate_route(
     state: &mut EntityStateSlice,
     hashlock: &str,
 ) -> Result<Option<PaybookEntry>, EntityKernelError> {
-    if let Some(crontab) = state.crontab.as_mut() {
-        cancel_hook(crontab, &format!("htlc-secret-ack:{hashlock}"))?;
-        cancel_hook(crontab, &format!("htlc-timeout:{hashlock}"))?;
-    }
     remove_paybook_entry(state, hashlock)
 }
 
@@ -523,10 +558,6 @@ pub(crate) fn terminate_route_in_frame(
     paybook: &mut PaybookChanges,
     hashlock: &str,
 ) -> Result<Option<PaybookEntry>, EntityKernelError> {
-    if let Some(crontab) = state.crontab.as_mut() {
-        cancel_hook(crontab, &format!("htlc-secret-ack:{hashlock}"))?;
-        cancel_hook(crontab, &format!("htlc-timeout:{hashlock}"))?;
-    }
     paybook.remove(state, hashlock)
 }
 
@@ -659,13 +690,8 @@ pub(crate) fn revealed_secret_followup(
         let deadline = timestamp
             .checked_add(SECRET_ACK_TIMEOUT_MS)
             .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?;
+        // The deadline lives on the entry; the wake derives from it.
         route.secret_ack_deadline_at = Some(deadline);
-        let hook = ScheduledHook::htlc_secret_ack_timeout(hashlock.clone(), account, deadline);
-        let crontab = state
-            .crontab
-            .as_mut()
-            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_CRONTAB_MISSING"))?;
-        schedule_hook(crontab, hook)?;
         return paybook.put(route);
     }
     effects.outputs.push(EntityKernelOutput::HtlcFinalized {
@@ -761,14 +787,6 @@ pub(crate) fn dispute_evidence_secret(
             .checked_add(SECRET_ACK_TIMEOUT_MS)
             .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?;
         route.secret_ack_deadline_at = Some(deadline);
-        let crontab = state
-            .crontab
-            .as_mut()
-            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_CRONTAB_MISSING"))?;
-        schedule_hook(
-            crontab,
-            ScheduledHook::htlc_secret_ack_timeout(hashlock.to_string(), inbound, deadline),
-        )?;
     }
     paybook.put(route)
 }
@@ -936,7 +954,19 @@ mod key_tests {
             .expect("route");
         assert!(route.secret_ack_pending);
         assert_eq!(route.outbound_entity.as_deref(), Some("downstream"));
-        assert!(!state.crontab.as_ref().expect("crontab").hooks.is_empty());
+        // No hook: the ack deadline is derived from the entry itself.
+        assert!(state.crontab.as_ref().expect("crontab").hooks.is_empty());
+        let deadline = route.secret_ack_deadline_at.expect("ack deadline");
+        assert_eq!(
+            changes
+                .due_secret_acks(&state, deadline - 1)
+                .expect("not yet due"),
+            Vec::new()
+        );
+        assert_eq!(
+            changes.due_secret_acks(&state, deadline).expect("due"),
+            vec![(hashlock.clone(), "upstream".to_string())]
+        );
     }
 
     #[test]

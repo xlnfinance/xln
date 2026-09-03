@@ -23,7 +23,6 @@ use xln_rscore_engine::{
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, SlotOutcome, SlotWork};
 
 use crate::commitment::compute_commitments;
-use crate::frame_tx_effects::{apply_account_tx_hooks, apply_committed_frame_hooks};
 use crate::j_events::apply_finalized_j_event_batches_in_frame;
 use crate::kernel::{
     PreparedEntityBookStage, apply_entity_transitions, finish_orderbook_stage,
@@ -1228,14 +1227,18 @@ fn apply_collision_fixups(
             next_collision += 1;
             let earlier_forwards = origins_by_account
                 .get(&fixup.account_id)
-                .map_or(0, |positions| positions.iter().filter(|p| **p < fixup.position).count());
+                .map_or(0, |positions| {
+                    positions.iter().filter(|p| **p < fixup.position).count()
+                });
             let total = fixup.queued + earlier_forwards;
             let has_warning = matches!(
                 events.get(index + 1),
                 Some(EntityFrameEvent::Status { message }) if message.starts_with(LEFT_PENDING_PREFIX)
             );
             if total > 0 {
-                let message = format!("{LEFT_PENDING_PREFIX}{total} pending txs while waiting for RIGHT's ACK");
+                let message = format!(
+                    "{LEFT_PENDING_PREFIX}{total} pending txs while waiting for RIGHT's ACK"
+                );
                 if has_warning {
                     events[index + 1] = EntityFrameEvent::Status { message };
                 } else {
@@ -1356,8 +1359,12 @@ fn collect_verdict_certification(
             ..
         } => append_status_events(events, committed_events),
         AccountInputVerdict::AckFrameApplied { ack, frame } => {
-            collect_verdict_certification(account_id, ack, events, hashes, presigned, collisions, position)?;
-            collect_verdict_certification(account_id, frame, events, hashes, presigned, collisions, position)?;
+            collect_verdict_certification(
+                account_id, ack, events, hashes, presigned, collisions, position,
+            )?;
+            collect_verdict_certification(
+                account_id, frame, events, hashes, presigned, collisions, position,
+            )?;
         }
         _ => {}
     }
@@ -1464,7 +1471,12 @@ fn ordered_commits(
                 row.operation_index
             ))
         })?;
-        collect_verdict_commits(row.account_id, &mut row.verdict, &mut commits, inbound_position)?;
+        collect_verdict_commits(
+            row.account_id,
+            &mut row.verdict,
+            &mut commits,
+            inbound_position,
+        )?;
     }
     Ok(commits)
 }
@@ -1775,46 +1787,22 @@ fn apply_scheduled_wake(
     let Some(wake) = wake else {
         return Ok((Vec::new(), Vec::new()));
     };
-    let crontab = state
-        .crontab
-        .as_ref()
-        .ok_or(ResidentEntityError::CrontabMissing)?;
-    let mut requested_locks = BTreeMap::<AccountId, Vec<String>>::new();
-    for hook in crontab.hooks.due(state.timestamp) {
-        let (account, lock_id) = match &hook.kind {
-            ScheduledHookKind::HtlcTimeout {
-                account_id,
-                lock_id,
-            } => (account_id, lock_id),
-            ScheduledHookKind::HtlcSecretAckTimeout {
-                hashlock,
-                counterparty_entity_id,
-            } => (counterparty_entity_id, hashlock),
-            _ => continue,
-        };
-        if state.known_accounts.contains(account) {
-            requested_locks
-                .entry(account_id(account)?)
-                .or_default()
-                .push(lock_id.clone());
-        }
-    }
-    for lock_ids in requested_locks.values_mut() {
-        lock_ids.sort();
-        lock_ids.dedup();
-    }
-    let active = accounts.active_htlc_locks(requested_locks.into_iter().collect())?;
-    let active_text = active
-        .iter()
-        .map(|(account, lock_id)| (account_text(*account), lock_id.clone()))
-        .collect::<BTreeSet<_>>();
+    let now = state.timestamp;
+    // Expired HTLC locks are derived from committed Account state, in
+    // (timelock, lockId) order — the key the hook map used to drain by.
+    let expired_locks = accounts
+        .expired_htlc_locks(now)?
+        .into_iter()
+        .map(|(account, lock_id, _)| (account_text(account), lock_id))
+        .filter(|(account, _)| state.known_accounts.contains(account))
+        .collect::<Vec<_>>();
 
     let dispute_account_ids = state
         .crontab
         .as_ref()
         .ok_or(ResidentEntityError::CrontabMissing)?
         .hooks
-        .due(state.timestamp)
+        .due(now)
         .filter_map(|hook| match &hook.kind {
             ScheduledHookKind::DisputeDeadline { account_id } => Some(account_id.clone()),
             _ => None,
@@ -1840,28 +1828,30 @@ fn apply_scheduled_wake(
         .filter_map(|(account, view)| view.dispute.map(|view| (account_text(account), view)))
         .collect::<BTreeMap<_, _>>();
 
-    let mut secret_acks_requiring_dispute = BTreeSet::new();
-    let due_secret_hooks = state
-        .crontab
-        .as_ref()
-        .ok_or(ResidentEntityError::CrontabMissing)?
-        .hooks
-        .due(state.timestamp)
-        .filter_map(|hook| match &hook.kind {
-            ScheduledHookKind::HtlcSecretAckTimeout {
-                hashlock,
-                counterparty_entity_id,
-            } => Some((hashlock.clone(), counterparty_entity_id.clone())),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    for (hashlock, counterparty) in due_secret_hooks {
-        let Some(route) = paybook.entry(state, &hashlock)? else {
-            continue;
-        };
-        if !route.secret_ack_pending {
-            continue;
+    // Secret-ack deadlines are derived from paybook entries (frame-local
+    // writes included). A deadline whose lock is still active needs a
+    // dispute; one whose lock is gone just terminates the route.
+    let due_secret_acks = paybook.due_secret_acks(state, now)?;
+    let mut requested_locks = BTreeMap::<AccountId, Vec<String>>::new();
+    for (hashlock, counterparty) in &due_secret_acks {
+        if state.known_accounts.contains(counterparty) {
+            requested_locks
+                .entry(account_id(counterparty)?)
+                .or_default()
+                .push(hashlock.clone());
         }
+    }
+    for lock_ids in requested_locks.values_mut() {
+        lock_ids.sort();
+        lock_ids.dedup();
+    }
+    let active = accounts.active_htlc_locks(requested_locks.into_iter().collect())?;
+    let active_text = active
+        .iter()
+        .map(|(account, lock_id)| (account_text(*account), lock_id.clone()))
+        .collect::<BTreeSet<_>>();
+    let mut secret_acks_requiring_dispute = BTreeSet::new();
+    for (hashlock, counterparty) in due_secret_acks {
         if active_text.contains(&(counterparty, hashlock.clone())) {
             secret_acks_requiring_dispute.insert(hashlock);
         } else {
@@ -1878,7 +1868,7 @@ fn apply_scheduled_wake(
         CrontabExecutionContext {
             expected_proposer_signer_id,
             now: state.timestamp,
-            active_htlc_locks: &active_text,
+            expired_htlc_locks: &expired_locks,
             secret_acks_requiring_dispute: &secret_acks_requiring_dispute,
             dispute_views: &dispute_views,
             j_batch_state: state.j_batch_state.as_ref(),
@@ -2167,7 +2157,6 @@ fn apply_resident_entity_round_core_attempt(
                 for account in &created_accounts {
                     state.known_accounts.insert(account.clone());
                 }
-                apply_committed_frame_hooks(&mut state, &commits)?;
                 let mut views =
                     local_account_views(accounts, &state, &[], &commits, &unsafe_frames, context)?;
                 commits_micros = commits_micros.saturating_add(phase_started.elapsed().as_micros());
@@ -2731,7 +2720,6 @@ fn apply_resident_entity_round_core_attempt(
     let outbound = accounts.finish_entity_outbound(prepared, followups)?;
     let outbound_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
-    apply_account_tx_hooks(&mut kernel.state, &kernel.proposal_work)?;
     let (mut final_events, mut final_hashes, final_presigned) = collect_round_certification(
         &EntityRoundResult::default(),
         &outbound,
@@ -2747,7 +2735,11 @@ fn apply_resident_entity_round_core_attempt(
         }
     }
     let mut entity_frame_events = ordered_events;
-    apply_collision_fixups(&mut entity_frame_events, &collisions, &kernel.proposal_tx_origins)?;
+    apply_collision_fixups(
+        &mut entity_frame_events,
+        &collisions,
+        &kernel.proposal_tx_origins,
+    )?;
     let secondary_hashes = ordered_hashes;
     let presigned_manifest = ordered_presigned;
     // Worklist membership alone is not a TS history touch: an Entity envelope
@@ -3364,9 +3356,13 @@ mod tests {
             }],
             ..EntityRoundResult::default()
         };
-        let (_, hashes, _) =
-            collect_round_certification(&EntityRoundResult::default(), &outbound, Vec::new(), &mut Vec::new())
-                .expect("manifest");
+        let (_, hashes, _) = collect_round_certification(
+            &EntityRoundResult::default(),
+            &outbound,
+            Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect("manifest");
         assert!(!hashes.iter().any(|entry| {
             entry.hash == hex_prefixed(&dispute.hash)
                 && entry.kind == HashType::Dispute

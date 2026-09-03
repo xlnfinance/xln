@@ -1,6 +1,5 @@
 import type { HtlcLock } from '../../types/account';
 import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../types';
-import { cancelHook, scheduleHook } from '../scheduler/hook-state';
 import { hasInboundPayment } from './views';
 import type { BookIntentSlotWriter } from '../books/book-intents';
 
@@ -71,23 +70,10 @@ export function armPaymentSecretAckTimeout(
   if (!hasInboundPayment(entry)) {
     throw new Error(`PAYBOOK_SECRET_ACK_INBOUND_REQUIRED:${entry.hashlock}`);
   }
-  if (!state.crontabState) {
-    throw new Error(`PAYBOOK_SECRET_ACK_CRONTAB_MISSING:${entry.hashlock}`);
-  }
-
-  const deadline = state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS;
+  // The deadline lives on the entry; the scheduler derives the wake from it.
   entry.secretAckPending = true;
   entry.secretAckStartedAt = state.timestamp;
-  entry.secretAckDeadlineAt = deadline;
-  scheduleHook(state.crontabState, {
-    id: `htlc-secret-ack:${entry.hashlock}`,
-    triggerAt: deadline,
-    type: 'htlc_secret_ack_timeout',
-    data: {
-      hashlock: entry.hashlock,
-      counterpartyEntityId: entry.inboundEntity,
-    },
-  });
+  entry.secretAckDeadlineAt = state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS;
 }
 
 export function programPaymentTermination(
@@ -97,7 +83,6 @@ export function programPaymentTermination(
 ): void {
   const entry = bookIntentSlot.getPaybookEntry(state, hashlock);
   if (!entry) return;
-  if (state.crontabState) cancelHook(state.crontabState, `htlc-secret-ack:${hashlock}`);
   bookIntentSlot.deletePaybookEntry(state, hashlock);
 }
 
@@ -107,7 +92,6 @@ export function terminatePayment(
   hashlock: string,
 ): void {
   if (!state.paybook.entries.has(hashlock)) return;
-  if (state.crontabState) cancelHook(state.crontabState, `htlc-secret-ack:${hashlock}`);
   state.paybook.entries.delete(hashlock);
 }
 

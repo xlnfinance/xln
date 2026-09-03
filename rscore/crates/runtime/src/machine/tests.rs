@@ -32,6 +32,17 @@ mod cross_j_lifecycle_fixture;
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 pub(super) const SIGNER: &str = "h1-hub";
 
+/// A generic due hook for wake tests. Per-payment deadlines are derived from
+/// Account/paybook state now, so the only persisted one-shot hook kind is the
+/// dispute deadline.
+fn due_hook(account_id: String, name: String, trigger_at: u64) -> ScheduledHook {
+    ScheduledHook {
+        id: format!("dispute-deadline:{name}"),
+        trigger_at,
+        kind: xln_rscore_entity_kernel::ScheduledHookKind::DisputeDeadline { account_id },
+    }
+}
+
 #[test]
 fn materialization_cadence_is_relative_to_the_restored_checkpoint() {
     assert!(materialization_due(1, 0, 100));
@@ -1132,16 +1143,16 @@ fn scheduled_hooks_are_deadline_then_id_ordered() -> Result<(), RuntimeMachineEr
         tasks: BTreeMap::new(),
         hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([
             (
-                "htlc-timeout:later".to_string(),
-                ScheduledHook::htlc_timeout("a".to_string(), "later".to_string(), 300),
+                "dispute-deadline:later".to_string(),
+                due_hook("a".to_string(), "later".to_string(), 300),
             ),
             (
-                "htlc-timeout:b".to_string(),
-                ScheduledHook::htlc_timeout("a".to_string(), "b".to_string(), 200),
+                "dispute-deadline:b".to_string(),
+                due_hook("a".to_string(), "b".to_string(), 200),
             ),
             (
-                "htlc-timeout:a".to_string(),
-                ScheduledHook::htlc_timeout("a".to_string(), "a".to_string(), 200),
+                "dispute-deadline:a".to_string(),
+                due_hook("a".to_string(), "a".to_string(), 200),
             ),
         ]))
         .expect("scheduled hooks"),
@@ -1154,7 +1165,7 @@ fn scheduled_hooks_are_deadline_then_id_ordered() -> Result<(), RuntimeMachineEr
         .due(200)
         .map(|hook| hook.id.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec!["htlc-timeout:a", "htlc-timeout:b"]);
+    assert_eq!(ids, vec!["dispute-deadline:a", "dispute-deadline:b"]);
     Ok(())
 }
 
@@ -1174,8 +1185,8 @@ fn due_hook_runs_one_live_entity_round_without_external_ingress() -> Result<(), 
         .crontab = Some(CrontabState {
         tasks: BTreeMap::new(),
         hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
-            "htlc-timeout:due".to_string(),
-            ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+            "dispute-deadline:due".to_string(),
+            due_hook("peer".to_string(), "due".to_string(), 150),
         )]))
         .expect("scheduled hooks"),
     });
@@ -1258,8 +1269,8 @@ fn exact_apply_does_not_derive_a_due_scheduled_wake() -> Result<(), RuntimeMachi
         .crontab = Some(CrontabState {
         tasks: BTreeMap::new(),
         hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
-            "htlc-timeout:due".to_string(),
-            ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+            "dispute-deadline:due".to_string(),
+            due_hook("peer".to_string(), "due".to_string(), 150),
         )]))
         .expect("scheduled hooks"),
     });
@@ -1314,8 +1325,8 @@ fn recorded_scheduled_wake_replays_exactly_once() -> Result<(), RuntimeMachineEr
             .crontab = Some(CrontabState {
             tasks: BTreeMap::new(),
             hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
-                "htlc-timeout:due".to_string(),
-                ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+                "dispute-deadline:due".to_string(),
+                due_hook("peer".to_string(), "due".to_string(), 150),
             )]))
             .expect("scheduled hooks"),
         });
@@ -1432,7 +1443,7 @@ fn recorded_due_wake_input(due_at: u64) -> Result<RuntimeEntityInput, RuntimeMac
                 "dueAt": due_at,
                 "jobs": [{
                     "kind": "hook",
-                    "id": "htlc-timeout:due",
+                    "id": "dispute-deadline:due",
                     "dueAt": due_at,
                 }],
             },
@@ -1454,8 +1465,8 @@ fn runtime_with_due_hook() -> Result<RuntimeReplica, RuntimeMachineError> {
         .crontab = Some(CrontabState {
         tasks: BTreeMap::new(),
         hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
-            "htlc-timeout:due".to_string(),
-            ScheduledHook::htlc_timeout("peer".to_string(), "due".to_string(), 150),
+            "dispute-deadline:due".to_string(),
+            due_hook("peer".to_string(), "due".to_string(), 150),
         )]))
         .expect("scheduled hooks"),
     });

@@ -313,16 +313,8 @@ fn decode_hook_kind(
             .and_then(|value| js_number(value, name))
     };
     match tag {
-        0 if row.len() == 3 => Ok(ScheduledHookKind::HtlcTimeout {
-            account_id: text_at(1, "crontabHookAccountId")?,
-            lock_id: text_at(2, "crontabHookLockId")?,
-        }),
         1 if row.len() == 2 => Ok(ScheduledHookKind::DisputeDeadline {
             account_id: text_at(1, "crontabHookAccountId")?,
-        }),
-        2 if row.len() == 3 => Ok(ScheduledHookKind::HtlcSecretAckTimeout {
-            hashlock: text_at(1, "crontabHookHashlock")?,
-            counterparty_entity_id: text_at(2, "crontabHookCounterparty")?,
         }),
         3 if row.len() == 1 => Ok(ScheduledHookKind::SettlementWindow),
         4 if row.len() == 1 => Ok(ScheduledHookKind::Watchdog),
@@ -373,9 +365,7 @@ fn decode_crontab(value: &AbiValue) -> Result<Option<CrontabState>, ProcessError
         };
         if text(&hook[2])?
             != match &scheduled.kind {
-                ScheduledHookKind::HtlcTimeout { .. } => "htlc_timeout",
                 ScheduledHookKind::DisputeDeadline { .. } => "dispute_deadline",
-                ScheduledHookKind::HtlcSecretAckTimeout { .. } => "htlc_secret_ack_timeout",
                 ScheduledHookKind::SettlementWindow => "settlement_window",
                 ScheduledHookKind::Watchdog => "watchdog",
                 ScheduledHookKind::HubRebalanceKick { .. } => "hub_rebalance_kick",

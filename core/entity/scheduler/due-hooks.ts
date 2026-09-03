@@ -8,7 +8,7 @@ import type {
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/history/height';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
 import { HTLC_SECRET_ACK_TIMEOUT_MS, programPaymentTermination } from '../paybook/lifecycle';
-import { scheduleHook } from './hook-state';
+import type { DerivedDeadline, DerivedSecretAckTimeout } from './derived-deadlines';
 import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
@@ -18,7 +18,7 @@ import { isDisputeReadyPayment } from '../paybook/views';
 const crontabLog = createStructuredLogger('entity.crontab');
 
 const processSecretAckTimeout = (
-  hook: Extract<ScheduledHook, { type: 'htlc_secret_ack_timeout' }>,
+  hook: DerivedSecretAckTimeout,
   replica: EntityTransitionContext,
   context: CrontabExecutionContext,
   plan: DueHookPlan,
@@ -47,12 +47,9 @@ const processSecretAckTimeout = (
   const queuedStarts = replica.state.jBatchState?.batch.disputeStarts.length ?? 0;
   if (queuedStarts + plan.disputePrepareCounterparties.size >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts
     && !plan.disputePrepareCounterparties.has(counterpartyEntityId)) {
-    if (replica.state.crontabState) {
-      scheduleHook(replica.state.crontabState, {
-        ...hook,
-        triggerAt: replica.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
-      });
-    }
+    // The deadline is the entry's own field; pushing it re-arms the derived wake.
+    const pending = bookIntentSlot.getPaybookEntryForWrite(replica.state, hashlock);
+    if (pending) pending.secretAckDeadlineAt = replica.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS;
     crontabLog.warn('htlc_secret_ack_timeout.deferred', {
       counterparty: shortId(counterpartyEntityId),
       hashlock: shortHash(hashlock),
@@ -72,7 +69,7 @@ const processSecretAckTimeout = (
 
 const processDueHook = (
   env: EntityRuntimeContext,
-  hook: ScheduledHook,
+  hook: ScheduledHook | DerivedDeadline,
   replica: EntityTransitionContext,
   context: CrontabExecutionContext,
   plan: DueHookPlan,
@@ -216,7 +213,7 @@ const appendBatchedHookOutputs = (
 
 export const processDueHooks = (
   env: EntityRuntimeContext,
-  hooks: ScheduledHook[],
+  hooks: ReadonlyArray<ScheduledHook | DerivedDeadline>,
   replica: EntityTransitionContext,
   context: CrontabExecutionContext,
 ): EntityInput[] => {

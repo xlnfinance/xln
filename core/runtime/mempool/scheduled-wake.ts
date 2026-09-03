@@ -2,6 +2,7 @@ import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState }
 import type { RuntimeReplica } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import { crontabTaskDueAt, crontabTaskHasPendingWork } from '../../entity/scheduler';
+import { collectDerivedDeadlines, earliestDerivedDeadline } from '../../entity/scheduler/derived-deadlines';
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeJob,
@@ -95,7 +96,8 @@ export const collectDueScheduledWakeJobs = (
   now: number,
   includePeriodicTasks: boolean,
 ): ScheduledWakeJob[] => {
-  const jobs: ScheduledWakeJob[] = [];
+  const jobs: ScheduledWakeJob[] = collectDerivedDeadlines(state, now)
+    .map(deadline => ({ kind: 'hook' as const, id: deadline.id, dueAt: deadline.triggerAt }));
   for (const hook of state.crontabState?.hooks?.values() ?? []) {
     if (hook.triggerAt <= now) jobs.push({ kind: 'hook', id: hook.id, dueAt: hook.triggerAt });
   }
@@ -122,7 +124,7 @@ const nextReplicaDeadline = (replica: EntityReplica): number | null => {
     const startedAt = replica.lastConsensusProgressAt ?? replica.state.timestamp;
     return startedAt + getEntityLeaderTimeoutMs(voteBody.toView);
   }
-  let next = Infinity;
+  let next = earliestDerivedDeadline(replica.state) ?? Infinity;
   for (const hook of replica.state.crontabState?.hooks?.values() ?? []) {
     next = Math.min(next, hook.triggerAt);
   }

@@ -1734,15 +1734,16 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
     .expect("resident accounts");
     let base_root = accounts.accounts_root();
     let due_at = TIMESTAMP + 60_000;
+    // No hook: the deadline is the lock's own timelock, derived at wake time.
     let crontab = CrontabState {
         tasks: BTreeMap::new(),
-        hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
-            format!("htlc-timeout:{lock_id}"),
-            ScheduledHook::htlc_timeout(peer.to_string(), lock_id.clone(), due_at),
-        )]))
-        .expect("scheduled hooks"),
+        hooks: xln_rscore_entity_kernel::ScheduledHookMap::empty(),
     };
-    let jobs = collect_due_scheduled_wake_jobs(&crontab, due_at, false).expect("due jobs");
+    let jobs = vec![xln_rscore_entity_kernel::ScheduledWakeJob {
+        kind: xln_rscore_entity_kernel::ScheduledWakeJobKind::Hook,
+        id: format!("htlc-timeout:{lock_id}"),
+        due_at,
+    }];
     let mut state = EntityStateSlice::empty(hub.to_string(), due_at);
     state.known_accounts.insert(peer.to_string());
     state.crontab = Some(crontab);
@@ -1834,8 +1835,14 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
     let crontab = CrontabState {
         tasks: BTreeMap::new(),
         hooks: xln_rscore_entity_kernel::ScheduledHookMap::restore(BTreeMap::from([(
-            "htlc-timeout:forged".to_string(),
-            ScheduledHook::htlc_timeout("peer".to_string(), "forged".to_string(), 150),
+            "dispute-deadline:peer".to_string(),
+            ScheduledHook {
+                id: "dispute-deadline:peer".to_string(),
+                trigger_at: 150,
+                kind: xln_rscore_entity_kernel::ScheduledHookKind::DisputeDeadline {
+                    account_id: "peer".to_string(),
+                },
+            },
         )]))
         .expect("scheduled hooks"),
     };

@@ -15,6 +15,7 @@ use xln_rscore_engine::{
     SwapMarketPolicy, SwapOfferSnapshot, TokenId, address_of_private_key,
     propose_account_frame_with_selection,
 };
+use xln_rscore_protocol::JS_MAX_SAFE_INTEGER;
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
@@ -46,6 +47,7 @@ struct InboundOutcome {
     changed: bool,
     proposable: bool,
     has_rebalance_work: bool,
+    lock_deadlines: Vec<(String, u64)>,
 }
 
 /// Borrow the resident head until an Account transition can actually mutate.
@@ -102,7 +104,18 @@ struct OutboundOutcome {
     proposal: Option<ProposalRow>,
     proposable: bool,
     has_rebalance_work: bool,
+    lock_deadlines: Vec<(String, u64)>,
 }
+
+/// Coordinator-side projection of every committed HTLC lock deadline,
+/// `account → [(lockId, timelock)]` sorted by (timelock, lockId). Workers
+/// report an Account's list whenever they seal it, so a wake reads deadlines
+/// without a worker round-trip and without a hook map.
+type LockDeadlines = BTreeMap<AccountId, Vec<(String, u64)>>;
+
+/// Earliest committed HTLC timelock plus the locks due at a wake timestamp,
+/// `(accountId, lockId, timelock)` in (timelock, lockId) order.
+pub type HtlcDeadlineView = (Option<u64>, Vec<(AccountId, String, u64)>);
 
 struct MaterializedAccount {
     leaf: [u8; 32],
@@ -350,6 +363,9 @@ pub struct ResidentConsensusEngine {
     base_rebalance_work: BTreeSet<AccountId>,
     inbound_rebalance_work: Option<BTreeSet<AccountId>>,
     candidate_rebalance_work: Option<BTreeSet<AccountId>>,
+    base_lock_deadlines: LockDeadlines,
+    inbound_lock_deadlines: Option<LockDeadlines>,
+    candidate_lock_deadlines: Option<LockDeadlines>,
     /// RAM-only owner projection of every accepted Account, maintained
     /// incrementally so checkpoint metadata never rescans resident workers.
     /// Owners are written exactly once at genesis and never change, so the
@@ -458,6 +474,7 @@ impl ResidentConsensusEngine {
             .collect::<Result<Vec<_>, _>>()?;
         let base_proposable = proposable_from_entries(&entries)?;
         let base_rebalance_work = rebalance_work_from_entries(&entries)?;
+        let base_lock_deadlines = lock_deadlines_from_entries(&entries)?;
         let signer_owners = entries
             .iter()
             .map(|(account_id, account, _)| (*account_id, *account.replica().owner().as_bytes()))
@@ -484,6 +501,9 @@ impl ResidentConsensusEngine {
             base_rebalance_work,
             inbound_rebalance_work: None,
             candidate_rebalance_work: None,
+            base_lock_deadlines,
+            inbound_lock_deadlines: None,
+            candidate_lock_deadlines: None,
             signer_owners,
             inbound_owner_adds: BTreeMap::new(),
             candidate_owner_adds: BTreeMap::new(),
@@ -547,6 +567,7 @@ impl ResidentConsensusEngine {
 
         let base_proposable = proposable_from_entries(&entries)?;
         let base_rebalance_work = rebalance_work_from_entries(&entries)?;
+        let base_lock_deadlines = lock_deadlines_from_entries(&entries)?;
         let forest = ResidentAccountForest::restore(worker_count, expected.revision, entries)?;
         if forest.len() != expected.account_count {
             return Err(BatchError::CheckpointIncomplete {
@@ -592,6 +613,9 @@ impl ResidentConsensusEngine {
             base_rebalance_work,
             inbound_rebalance_work: None,
             candidate_rebalance_work: None,
+            base_lock_deadlines,
+            inbound_lock_deadlines: None,
+            candidate_lock_deadlines: None,
             signer_owners: signer_rows
                 .iter()
                 .map(|(account_id, owner, _)| (*account_id, *owner))
@@ -623,6 +647,8 @@ impl ResidentConsensusEngine {
         self.candidate_proposable = None;
         self.inbound_rebalance_work = None;
         self.candidate_rebalance_work = None;
+        self.inbound_lock_deadlines = None;
+        self.candidate_lock_deadlines = None;
         self.inbound_owner_adds.clear();
         self.candidate_owner_adds.clear();
         self.round_owner = None;
@@ -893,6 +919,37 @@ impl ResidentConsensusEngine {
             &self.base_rebalance_work
         };
         Ok(!selected.is_empty())
+    }
+
+    /// TS `collectDerivedDeadlines` over Account locks, on the same base or
+    /// candidate view `selected_has_rebalance_work` uses: the earliest committed
+    /// HTLC timelock and every lock due at or before `now`, in (timelock,
+    /// lockId) order. Coordinator-local; no worker round-trip.
+    pub fn selected_htlc_deadlines(
+        &self,
+        expected_accounts_root: [u8; 32],
+        now: u64,
+    ) -> Result<HtlcDeadlineView, BatchError> {
+        let selected = if self
+            .forest
+            .expected_uses_candidate(expected_accounts_root)?
+        {
+            self.candidate_lock_deadlines
+                .as_ref()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else {
+            &self.base_lock_deadlines
+        };
+        Ok(htlc_deadlines(selected, now))
+    }
+
+    /// Every HTLC lock due at or before `now` on the round's active Account
+    /// view, in (timelock, lockId) order.
+    pub fn expired_htlc_locks(
+        &self,
+        now: u64,
+    ) -> Result<Vec<(AccountId, String, u64)>, BatchError> {
+        Ok(htlc_deadlines(self.active_lock_deadlines()?, now).1)
     }
 
     /// Read the committed active/inactive bit only for Accounts named by one
@@ -1456,6 +1513,14 @@ impl ResidentConsensusEngine {
             .unwrap_or(&self.base_rebalance_work))
     }
 
+    fn active_lock_deadlines(&self) -> Result<&LockDeadlines, BatchError> {
+        Ok(self
+            .candidate_lock_deadlines
+            .as_ref()
+            .or(self.inbound_lock_deadlines.as_ref())
+            .unwrap_or(&self.base_lock_deadlines))
+    }
+
     /// First and only inward visit for one Entity input.
     pub fn entity_inbound(
         &mut self,
@@ -1485,6 +1550,7 @@ impl ResidentConsensusEngine {
         let uses_candidate = if continue_inbound {
             if self.inbound_proposable.is_none()
                 || self.inbound_rebalance_work.is_none()
+                || self.inbound_lock_deadlines.is_none()
                 || self.round_owner != Some(request.owner_entity_id)
             {
                 return Err(BatchError::EntityRoundMissing);
@@ -1632,6 +1698,7 @@ impl ResidentConsensusEngine {
                 changed,
                 proposable: proposable(account.as_ref())?,
                 has_rebalance_work: has_rebalance_work(account.as_ref())?,
+                lock_deadlines: lock_deadlines(account.as_ref()),
             };
             if changed && !need_accounts_root && !created {
                 Ok(ResidentAccountAction::PutUnsealed {
@@ -1712,6 +1779,20 @@ impl ResidentConsensusEngine {
         } else {
             self.base_rebalance_work.clone()
         };
+        let mut inbound_lock_deadlines = if continue_inbound {
+            self.inbound_lock_deadlines
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else if uses_candidate {
+            let promoted = self
+                .candidate_lock_deadlines
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            self.base_lock_deadlines = promoted.clone();
+            promoted
+        } else {
+            self.base_lock_deadlines.clone()
+        };
         let mut result = EntityRoundResult {
             revision: batch_revision,
             // Unsealed callers must never consume this pre-round root as a
@@ -1734,6 +1815,11 @@ impl ResidentConsensusEngine {
                 &mut inbound_rebalance_work,
                 account_id,
                 outcome.has_rebalance_work,
+            );
+            set_lock_deadlines(
+                &mut inbound_lock_deadlines,
+                account_id,
+                outcome.lock_deadlines,
             );
             for applied in outcome.applied {
                 let index = usize::try_from(applied.operation_index).map_err(|_| {
@@ -1795,6 +1881,8 @@ impl ResidentConsensusEngine {
         self.candidate_proposable = None;
         self.inbound_rebalance_work = Some(inbound_rebalance_work);
         self.candidate_rebalance_work = None;
+        self.inbound_lock_deadlines = Some(inbound_lock_deadlines);
+        self.candidate_lock_deadlines = None;
         self.round_owner = Some(owner);
         Ok(result)
     }
@@ -2060,6 +2148,7 @@ impl ResidentConsensusEngine {
             })?;
         self.candidate_proposable = None;
         self.candidate_rebalance_work = None;
+        self.candidate_lock_deadlines = None;
         self.candidate_owner_adds.clear();
         Ok(())
     }
@@ -2115,6 +2204,16 @@ impl ResidentConsensusEngine {
                 .clone()
                 .ok_or(BatchError::EntityRoundMissing)?
         };
+        let mut next_lock_deadlines = if continue_candidate {
+            self.candidate_lock_deadlines
+                .take()
+                .or_else(|| self.inbound_lock_deadlines.clone())
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else {
+            self.inbound_lock_deadlines
+                .clone()
+                .ok_or(BatchError::EntityRoundMissing)?
+        };
         let created_ids = entries
             .iter()
             .filter(|(_, work)| work.create.is_some())
@@ -2142,6 +2241,11 @@ impl ResidentConsensusEngine {
                 *account_id,
                 outcome.has_rebalance_work,
             );
+            set_lock_deadlines(
+                &mut next_lock_deadlines,
+                *account_id,
+                outcome.lock_deadlines.clone(),
+            );
             // The worker already sealed this exact leaf while applying the
             // phase; a later within-round phase overwrites it, so the final
             // map entry is always the round's closing commitment.
@@ -2149,6 +2253,7 @@ impl ResidentConsensusEngine {
         }
         self.candidate_proposable = Some(next_proposable);
         self.candidate_rebalance_work = Some(next_rebalance_work);
+        self.candidate_lock_deadlines = Some(next_lock_deadlines);
         Ok(batch)
     }
 
@@ -2425,6 +2530,7 @@ fn apply_outbound_work(
         proposal,
         proposable: proposable(&account)?,
         has_rebalance_work: has_rebalance_work(&account)?,
+        lock_deadlines: lock_deadlines(&account),
     };
     if changed || work.seal {
         let leaf = leaf_root(account_id, &account)?;
@@ -2463,6 +2569,63 @@ fn proposable_from_entries(
         }
     }
     Ok(ready)
+}
+
+/// TS `htlcTimeoutAt`: a lock's deadline is its `timelock` as a safe positive
+/// integer; other values never wake. Sorted by (timelock, lockId).
+fn lock_deadlines(account: &AccountConsensus) -> Vec<(String, u64)> {
+    let mut deadlines = account
+        .replica()
+        .state()
+        .htlc_locks()
+        .filter_map(|lock| {
+            u64::try_from(lock.timelock())
+                .ok()
+                .filter(|value| *value > 0 && *value <= JS_MAX_SAFE_INTEGER)
+                .map(|timelock| (lock.lock_id().to_string(), timelock))
+        })
+        .collect::<Vec<_>>();
+    deadlines.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+    deadlines
+}
+
+fn lock_deadlines_from_entries(
+    entries: &[(AccountId, AccountConsensus, [u8; 32])],
+) -> Result<LockDeadlines, BatchError> {
+    let mut deadlines = LockDeadlines::new();
+    for (account_id, account, _) in entries {
+        set_lock_deadlines(&mut deadlines, *account_id, lock_deadlines(account));
+    }
+    Ok(deadlines)
+}
+
+fn set_lock_deadlines(
+    deadlines: &mut LockDeadlines,
+    account_id: AccountId,
+    next: Vec<(String, u64)>,
+) {
+    if next.is_empty() {
+        deadlines.remove(&account_id);
+    } else {
+        deadlines.insert(account_id, next);
+    }
+}
+
+/// Earliest deadline over every Account plus the locks due at or before
+/// `now`, in (timelock, lockId) order across Accounts.
+fn htlc_deadlines(deadlines: &LockDeadlines, now: u64) -> HtlcDeadlineView {
+    let mut earliest = None::<u64>;
+    let mut due = Vec::new();
+    for (account_id, locks) in deadlines {
+        for (lock_id, timelock) in locks {
+            earliest = Some(earliest.map_or(*timelock, |current| current.min(*timelock)));
+            if *timelock <= now {
+                due.push((*account_id, lock_id.clone(), *timelock));
+            }
+        }
+    }
+    due.sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.1.cmp(&right.1)));
+    (earliest, due)
 }
 
 fn rebalance_work_from_entries(
@@ -2711,5 +2874,64 @@ mod clone_on_mutation_tests {
             cross_j_opening_txs(&[ordinary, incomplete, opening.clone()]),
             vec![opening]
         );
+    }
+}
+
+#[cfg(test)]
+mod lock_deadline_tests {
+    use super::{LockDeadlines, htlc_deadlines, set_lock_deadlines};
+    use crate::AccountId;
+
+    /// Same fixture as core/__tests__/entity/scheduler/derived-deadlines.test.ts:
+    /// (timelock, lockId) order across Accounts, ties broken by lockId text.
+    fn deadline_fixture() -> LockDeadlines {
+        let mut deadlines = LockDeadlines::new();
+        set_lock_deadlines(
+            &mut deadlines,
+            AccountId::from_bytes([0xaa; 32]),
+            vec![("lock-z".to_string(), 100), ("lock-b".to_string(), 200)],
+        );
+        set_lock_deadlines(
+            &mut deadlines,
+            AccountId::from_bytes([0xbb; 32]),
+            vec![("lock-a".to_string(), 200)],
+        );
+        set_lock_deadlines(
+            &mut deadlines,
+            AccountId::from_bytes([0xcc; 32]),
+            Vec::new(),
+        );
+        deadlines
+    }
+
+    #[test]
+    fn htlc_deadlines_order_by_timelock_then_lock_id_across_accounts() {
+        let (earliest, due) = htlc_deadlines(&deadline_fixture(), u64::MAX);
+        assert_eq!(earliest, Some(100));
+        assert_eq!(
+            due.iter()
+                .map(|(_, lock_id, timelock)| (*timelock, lock_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(100, "lock-z"), (200, "lock-a"), (200, "lock-b")]
+        );
+        assert!(!deadline_fixture().contains_key(&AccountId::from_bytes([0xcc; 32])));
+    }
+
+    #[test]
+    fn htlc_deadline_minus_one_is_not_due_and_deadline_is() {
+        let fixture = deadline_fixture();
+        let due_ids = |now: u64| {
+            htlc_deadlines(&fixture, now)
+                .1
+                .into_iter()
+                .map(|(_, lock_id, _)| lock_id)
+                .collect::<Vec<_>>()
+        };
+        assert!(due_ids(99).is_empty());
+        assert_eq!(due_ids(100), vec!["lock-z"]);
+        assert_eq!(due_ids(199), vec!["lock-z"]);
+        assert_eq!(due_ids(200).len(), 3);
+        assert_eq!(due_ids(201).len(), 3);
+        assert_eq!(htlc_deadlines(&LockDeadlines::new(), 1).0, None);
     }
 }

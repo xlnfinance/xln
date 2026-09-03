@@ -81,7 +81,9 @@ pub struct SchedulerExecution {
 pub struct CrontabExecutionContext<'a> {
     pub expected_proposer_signer_id: &'a str,
     pub now: u64,
-    pub active_htlc_locks: &'a BTreeSet<(String, String)>,
+    /// Committed HTLC locks whose timelock has passed, in (timelock, lockId)
+    /// order; derived from Account state by the caller, never from hooks.
+    pub expired_htlc_locks: &'a [(String, String)],
     pub secret_acks_requiring_dispute: &'a BTreeSet<String>,
     pub dispute_views: &'a BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
     pub j_batch_state: Option<&'a JBatchState>,
@@ -347,7 +349,7 @@ pub fn execute_crontab(
     let CrontabExecutionContext {
         expected_proposer_signer_id,
         now,
-        active_htlc_locks,
+        expired_htlc_locks,
         secret_acks_requiring_dispute,
         dispute_views,
         j_batch_state,
@@ -368,28 +370,18 @@ pub fn execute_crontab(
         })?;
     }
 
-    let mut expired_locks = Vec::new();
+    let expired_locks = expired_htlc_locks.to_vec();
+    if let Some(hashlock) = secret_acks_requiring_dispute.iter().next() {
+        return Err(SchedulerError::SecretAckDisputeUnsupported {
+            hashlock: hashlock.clone(),
+        });
+    }
     let mut dispute_finalize_planned = false;
     let mut dispute_broadcast_planned = false;
     let mut commands = Vec::new();
     let mut account_envelope_mutations = Vec::new();
     for hook in &due_hooks {
         match &hook.kind {
-            ScheduledHookKind::HtlcTimeout {
-                account_id,
-                lock_id,
-            } => {
-                if active_htlc_locks.contains(&(account_id.clone(), lock_id.clone())) {
-                    expired_locks.push((account_id.clone(), lock_id.clone()));
-                }
-            }
-            ScheduledHookKind::HtlcSecretAckTimeout { hashlock, .. } => {
-                if secret_acks_requiring_dispute.contains(hashlock) {
-                    return Err(SchedulerError::SecretAckDisputeUnsupported {
-                        hashlock: hashlock.clone(),
-                    });
-                }
-            }
             ScheduledHookKind::HubRebalanceKick { .. } => {
                 let task = next.tasks.get_mut(&CrontabTaskMethod::HubRebalance).ok_or(
                     SchedulerError::UnsupportedTask {
@@ -668,27 +660,23 @@ mod tests {
     }
 
     #[test]
-    fn recomputes_and_drains_all_due_hooks_not_only_diagnostic_prefix() {
-        let mut state = state();
-        add_hook(
-            &mut state,
-            ScheduledHook::htlc_timeout("account-b".to_string(), "b".to_string(), 900),
-        );
-        add_hook(
-            &mut state,
-            ScheduledHook::htlc_timeout("account-a".to_string(), "a".to_string(), 800),
-        );
-        let jobs = collect_due_scheduled_wake_jobs(&state, 1_000, false).expect("due jobs");
+    fn derived_htlc_timeouts_drain_in_caller_order_not_only_diagnostic_prefix() {
+        let state = state();
+        let expired = [
+            ("account-a".to_string(), "a".to_string()),
+            ("account-b".to_string(), "b".to_string()),
+        ];
         let result = execute_crontab(
             &state,
-            &wake(vec![jobs[0].clone()]),
+            &wake(vec![ScheduledWakeJob {
+                kind: ScheduledWakeJobKind::Hook,
+                id: "htlc-timeout:a".to_string(),
+                due_at: 800,
+            }]),
             CrontabExecutionContext {
                 expected_proposer_signer_id: "HUB",
                 now: 1_000,
-                active_htlc_locks: &BTreeSet::from([
-                    ("account-a".to_string(), "a".to_string()),
-                    ("account-b".to_string(), "b".to_string()),
-                ]),
+                expired_htlc_locks: &expired,
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
@@ -700,10 +688,7 @@ mod tests {
         assert_eq!(
             result.commands,
             vec![SchedulerCommand::ProcessHtlcTimeouts {
-                expired_locks: vec![
-                    ("account-a".to_string(), "a".to_string()),
-                    ("account-b".to_string(), "b".to_string()),
-                ],
+                expired_locks: expired.to_vec(),
             }]
         );
     }
@@ -728,7 +713,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
@@ -760,7 +745,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 1_000,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([("peer".into(), dispute_view(false, 9))]),
                 j_batch_state: None,
@@ -786,7 +771,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10_000,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([("peer".into(), dispute_view(true, 9))]),
                 j_batch_state: None,
@@ -844,7 +829,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: PROPOSER,
                 now: NOW,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([(
                     ACCOUNT.into(),
@@ -889,7 +874,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10_000,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([(
                     "peer".into(),
@@ -952,7 +937,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10_000,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([(
                     account_id.clone(),
@@ -1020,7 +1005,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 10_000,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::from([(account_id.clone(), dispute_view(true, 9))]),
                 j_batch_state: Some(&j_batch_state),
@@ -1075,7 +1060,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 1_500,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,
@@ -1099,7 +1084,13 @@ mod tests {
         let mut state = state();
         add_hook(
             &mut state,
-            ScheduledHook::htlc_timeout("account-a".to_string(), "a".to_string(), 800),
+            ScheduledHook {
+                id: "dispute-deadline:account-a".to_string(),
+                trigger_at: 800,
+                kind: ScheduledHookKind::DisputeDeadline {
+                    account_id: "account-a".to_string(),
+                },
+            },
         );
         let original = state.clone();
         let jobs = collect_due_scheduled_wake_jobs(&state, 1_000, false).expect("due jobs");
@@ -1111,7 +1102,7 @@ mod tests {
             CrontabExecutionContext {
                 expected_proposer_signer_id: "hub",
                 now: 1_000,
-                active_htlc_locks: &BTreeSet::new(),
+                expired_htlc_locks: &[],
                 secret_acks_requiring_dispute: &BTreeSet::new(),
                 dispute_views: &BTreeMap::new(),
                 j_batch_state: None,

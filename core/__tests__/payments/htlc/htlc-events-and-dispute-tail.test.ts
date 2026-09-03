@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { executeCrontab, initCrontab, scheduleHook } from '../../../entity/scheduler';
+import { executeCrontab, initCrontab } from '../../../entity/scheduler';
+import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { installCommittedAccountFrameHead } from '../../../account/consensus/frame/committed-envelope';
 import {
@@ -354,16 +355,6 @@ describe('htlc event contract and dispute tail', () => {
       secretAckStartedAt: replica.state.timestamp - 500,
       secretAckDeadlineAt: replica.state.timestamp,
     });
-    scheduleHook(replica.state.crontabState!, {
-      id: `htlc-secret-ack:${hashlock}`,
-      triggerAt: replica.state.timestamp,
-      type: 'htlc_secret_ack_timeout',
-      data: {
-        hashlock,
-        counterpartyEntityId: counterpartyId,
-        inboundLockId,
-      },
-    });
 
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
       manualBroadcastInInput: false,
@@ -411,16 +402,6 @@ describe('htlc event contract and dispute tail', () => {
       secretAckStartedAt: replica.state.timestamp - 500,
       secretAckDeadlineAt: replica.state.timestamp + 30_000,
     });
-    scheduleHook(replica.state.crontabState!, {
-      id: `htlc-secret-ack:${hashlock}`,
-      triggerAt: replica.state.timestamp + 30_000,
-      type: 'htlc_secret_ack_timeout',
-      data: {
-        hashlock,
-        counterpartyEntityId: counterpartyId,
-        inboundLockId,
-      },
-    });
 
     applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
       height: 1,
@@ -440,7 +421,7 @@ describe('htlc event contract and dispute tail', () => {
     }, true, [], undefined, []);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
-    expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(false);
+    expect(collectDerivedDeadlines(replica.state).some((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(false);
   });
 
   test('keeps a forwarded route until the revealed secret is queued upstream', () => {
@@ -502,7 +483,7 @@ describe('htlc event contract and dispute tail', () => {
       secret,
       secretAckPending: true,
     });
-    expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(true);
+    expect(collectDerivedDeadlines(replica.state).some((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(true);
   });
 
   test('queues only the inbound self-cycle resolution until the secret propagates back', () => {

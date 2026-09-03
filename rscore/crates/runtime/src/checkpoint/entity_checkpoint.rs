@@ -203,16 +203,8 @@ fn hook_kind(value: &Value, path: &str) -> Result<ScheduledHookKind, EntityCheck
         )
     };
     let result = match kind {
-        "htlc_timeout" => ScheduledHookKind::HtlcTimeout {
-            account_id: text("accountId")?,
-            lock_id: text("lockId")?,
-        },
         "dispute_deadline" => ScheduledHookKind::DisputeDeadline {
             account_id: text("accountId")?,
-        },
-        "htlc_secret_ack_timeout" => ScheduledHookKind::HtlcSecretAckTimeout {
-            hashlock: text("hashlock")?,
-            counterparty_entity_id: text("counterpartyEntityId")?,
         },
         "settlement_window" => ScheduledHookKind::SettlementWindow,
         "watchdog" => ScheduledHookKind::Watchdog,

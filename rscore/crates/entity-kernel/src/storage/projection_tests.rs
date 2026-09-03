@@ -166,8 +166,14 @@ fn crontab() -> CrontabState {
             },
         )]),
         hooks: crate::ScheduledHookMap::restore(BTreeMap::from([(
-            "htlc-timeout:lock-1".to_string(),
-            ScheduledHook::htlc_timeout(PEER.to_string(), "lock-1".to_string(), 120),
+            format!("dispute-deadline:{PEER}"),
+            ScheduledHook {
+                id: format!("dispute-deadline:{PEER}"),
+                trigger_at: 120,
+                kind: crate::ScheduledHookKind::DisputeDeadline {
+                    account_id: PEER.to_string(),
+                },
+            },
         )]))
         .expect("scheduled hooks"),
     }

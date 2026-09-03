@@ -7,7 +7,6 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { getPerfMs } from '../../../support/time';
 import { normalizeEntityRef } from '../../../orderbook/cross-j/orderbook';
 import { shortId, shortOrder } from '../../../support/logger';
-import { cancelHook, scheduleHook } from '../../scheduler';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import { applyAccountInput } from '../../../account/consensus';
 import { getEntityAccountForWrite } from '../../state/persistent-account-map';
@@ -116,17 +115,6 @@ const applyLocalAccountEffects = async (
     }
     markProposableAccount(context.proposableAccounts, accountId);
     recordAccountChange(context, state, accountId);
-    if (tx.type === 'htlc_lock' && tx.data.timelock && tx.data.lockId && state.crontabState) {
-      scheduleHook(state.crontabState, {
-        id: `htlc-timeout:${tx.data.lockId}`,
-        triggerAt: Number(tx.data.timelock),
-        type: 'htlc_timeout',
-        data: { accountId, lockId: tx.data.lockId },
-      });
-    }
-    if (tx.type === 'htlc_resolve' && tx.data.lockId && state.crontabState) {
-      cancelHook(state.crontabState, `htlc-timeout:${tx.data.lockId}`);
-    }
   }
 };
 

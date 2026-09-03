@@ -195,11 +195,9 @@ const crontabTaskWire = (task: CrontabTaskState): RscoreWireValue[] => [
 
 const hookKindWire = (hook: ScheduledHook): RscoreWireValue[] => {
   switch (hook.type) {
-    case 'htlc_timeout': return [0, hook.data.accountId, hook.data.lockId];
+    // Tags 0 and 2 were the per-payment htlc_timeout / htlc_secret_ack_timeout
+    // hooks; those deadlines are derived from locks and paybook entries now.
     case 'dispute_deadline': return [1, hook.data.accountId];
-    case 'htlc_secret_ack_timeout': return [
-      2, hook.data.hashlock, hook.data.counterpartyEntityId,
-    ];
     case 'settlement_window': return [3];
     case 'watchdog': return [4];
     case 'hub_rebalance_kick': return [5, hook.data.reason, hook.data.counterpartyId];

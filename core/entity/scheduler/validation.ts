@@ -21,9 +21,7 @@ const isTaskMethod = (value: unknown): value is CrontabTaskMethod =>
   value === 'hubRebalance';
 
 const isHookType = (value: unknown): value is ScheduledHookType =>
-  value === 'htlc_timeout' ||
   value === 'dispute_deadline' ||
-  value === 'htlc_secret_ack_timeout' ||
   value === 'settlement_window' ||
   value === 'watchdog' ||
   value === 'hub_rebalance_kick' ||
@@ -153,29 +151,10 @@ const validateHookData = (
   context: string,
 ): ScheduledHook['data'] => {
   switch (type) {
-    case 'htlc_timeout':
-      rejectUnexpectedKeys(data, ['accountId', 'lockId'], context);
-      return {
-        accountId: validateString(data['accountId'], `${context}.accountId`),
-        lockId: validateString(data['lockId'], `${context}.lockId`),
-      };
     case 'dispute_deadline':
       rejectUnexpectedKeys(data, ['accountId'], context);
       return {
         accountId: validateString(data['accountId'], `${context}.accountId`),
-      };
-    case 'htlc_secret_ack_timeout':
-      rejectUnexpectedKeys(
-        data,
-        ['hashlock', 'counterpartyEntityId'],
-        context,
-      );
-      return {
-        hashlock: validateString(data['hashlock'], `${context}.hashlock`),
-        counterpartyEntityId: validateString(
-          data['counterpartyEntityId'],
-          `${context}.counterpartyEntityId`,
-        ),
       };
     case 'settlement_window':
     case 'watchdog':

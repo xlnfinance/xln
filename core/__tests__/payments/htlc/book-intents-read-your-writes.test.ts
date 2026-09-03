@@ -4,6 +4,7 @@ import {
   createBookIntentProgram,
 } from '../../../entity/books/book-intents';
 import { initCrontab } from '../../../entity/scheduler';
+import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
 import { applyCommittedAccountFrameFollowups } from '../../../entity/tx/handlers/account/committed-frame-followups';
 import { applyHtlcSecretFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { programPaymentTermination } from '../../../entity/paybook/lifecycle';
@@ -58,7 +59,7 @@ test('Book program preserves create -> secret/fee -> delete read-your-writes ord
 
   applyBookIntentProgram(state, program);
   expect(state.paybook).toEqual({ entries: new Map(), feesEarned: 1n });
-  expect(state.crontabState.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(false);
+  expect(collectDerivedDeadlines(state).some((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(false);
 });
 
 test('committed resolve followups observe earlier settled flags before deleting route', () => {

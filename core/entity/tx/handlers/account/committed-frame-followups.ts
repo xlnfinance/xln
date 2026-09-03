@@ -2,7 +2,6 @@ import type { AccountFrame, AccountTx } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityState, PaybookEntry } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../support/debug-flags';
-import { cancelHook } from '../../../scheduler';
 import { programPaymentTermination } from '../../../paybook/lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../support/logger';
@@ -57,7 +56,6 @@ const applyCommittedHtlcResolveFollowup = (
   candidateEffects: EntityCandidateEffect[],
   bookIntentSlot: BookIntentSlotWriter | undefined,
 ): void => {
-  if (newState.crontabState) cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
   if (accountTx.data.outcome !== 'secret') return;
   if (!bookIntentSlot) throw new Error('ACCOUNT_INPUT_BOOK_INTENT_SLOT_REQUIRED');
 

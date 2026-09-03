@@ -12,11 +12,11 @@ use xln_rscore_entity_kernel::{
     CanonicalEntityTx, EntityCommandBoard, EntityCommandDisposition, EntityFrameEvent,
     EntityFrameWireMeasureBody, EntityTransitionCertificationRequest, EntityTransitionError,
     EntityTxKind, HashType, JPrefixRangeClaim, LocalEntityOutput, LocalEntityOutputTx,
-    LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_FRAME_TXS,
-    MAX_ENTITY_PROPOSAL_WIRE_BYTES,
+    LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_FRAME_TXS, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
     MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, PendingNonMutatingWake, ResidentEntityOperation,
-    ResidentEntityRequest, ScheduledWake, SchedulerError, UNREGISTERED_ENTITY_COMMAND_STACK_KEY,
-    advance_entity_command_nonce, apply_resident_entity_round_core, assert_signed_entity_command,
+    ResidentEntityRequest, ScheduledWake, ScheduledWakeJob, ScheduledWakeJobKind, SchedulerError,
+    UNREGISTERED_ENTITY_COMMAND_STACK_KEY, advance_entity_command_nonce,
+    apply_resident_entity_round_core, assert_signed_entity_command,
     build_locally_authored_entity_command, build_proposer_materializations,
     build_required_j_prefix_certificate, certify_entity_transition,
     collect_due_scheduled_wake_jobs, current_entity_command_board_hash, decode_local_entity_tx,
@@ -944,11 +944,13 @@ fn internal_wake(
                 .j_batch_state
                 .as_ref()
                 .is_some_and(|batch| batch.sent_batch.is_some()));
+    let derived = derived_wake_jobs(state, replica, frame.timestamp)?;
     let scheduled = scheduled_wake_from_state(
         state,
         &replica.signer_id,
         frame,
         hub_rebalance_has_pending_work,
+        derived,
     )?;
     if !entity_mempool && !account_mempool && scheduled.is_none() {
         return Ok(None);
@@ -960,13 +962,55 @@ fn internal_wake(
     }))
 }
 
+/// TS `collectDerivedDeadlines`: per-payment deadlines come from committed
+/// Account locks (`timelock`) and paybook secret-ack waits, not from hooks.
+/// The jobs keep the historical hook ids so the wake wire is unchanged.
+fn derived_wake_jobs(
+    state: &RuntimeEntityState,
+    replica: &RuntimeEntityReplica,
+    now: u64,
+) -> Result<Vec<ScheduledWakeJob>, RuntimeMachineError> {
+    let (_, due_locks) = replica
+        .accounts
+        .selected_htlc_deadlines(state.accounts_root, now)?;
+    let mut jobs = due_locks
+        .into_iter()
+        .map(|(_, lock_id, timelock)| ScheduledWakeJob {
+            kind: ScheduledWakeJobKind::Hook,
+            id: format!("htlc-timeout:{lock_id}"),
+            due_at: timelock,
+        })
+        .collect::<Vec<_>>();
+    for (_, entry) in state.entity.paybook.entries.iter() {
+        let (Some(deadline), Some(started_at)) =
+            (entry.secret_ack_deadline_at, entry.secret_ack_started_at)
+        else {
+            continue;
+        };
+        if entry.secret_ack_pending
+            && entry.secret.is_some()
+            && entry.inbound_entity.is_some()
+            && deadline >= started_at
+            && deadline <= now
+        {
+            jobs.push(ScheduledWakeJob {
+                kind: ScheduledWakeJobKind::Hook,
+                id: format!("htlc-secret-ack:{}", entry.hashlock),
+                due_at: deadline,
+            });
+        }
+    }
+    Ok(jobs)
+}
+
 fn scheduled_wake_from_state(
     state: &RuntimeEntityState,
     signer_id: &str,
     frame: &RuntimeFrameContext,
     hub_rebalance_has_pending_work: bool,
+    derived: Vec<ScheduledWakeJob>,
 ) -> Result<Option<ScheduledWake>, RuntimeMachineError> {
-    let jobs = match &state.entity.crontab {
+    let mut jobs = match &state.entity.crontab {
         Some(crontab) => collect_due_scheduled_wake_jobs(
             crontab,
             frame.timestamp,
@@ -974,6 +1018,8 @@ fn scheduled_wake_from_state(
         )?,
         None => Vec::new(),
     };
+    jobs.extend(derived);
+    jobs.sort();
     let scheduled = jobs
         .first()
         .map(|first| first.due_at)
@@ -1457,7 +1503,10 @@ fn replay_compatible_prefix(
     for (index, work) in work.iter().enumerate() {
         let keys = pending_htlc_keys(work)?;
         if let Some(unknown) = keys.iter().find(|key| !expected.contains(*key)) {
-            stop = Some(format!("index={index}:kind={}:key={unknown}", pending_work_kind(work)));
+            stop = Some(format!(
+                "index={index}:kind={}:key={unknown}",
+                pending_work_kind(work)
+            ));
             break;
         }
         observed.extend(keys);

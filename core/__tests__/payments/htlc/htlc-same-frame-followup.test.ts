@@ -3,6 +3,7 @@ import { applyCommittedHtlcLockFollowup, applyHtlcSecretFollowups } from '../../
 import { hashOpaqueHtlcCiphertext } from '../../../protocol/htlc/multi-recipient';
 import { quoteHtlcPaymentRoute } from '../../../pathfinding/htlc-quote';
 import { initCrontab } from '../../../entity/scheduler';
+import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
 import { failOriginatedHtlcRoute } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
@@ -331,7 +332,7 @@ describe('same-frame incoming HTLC followup', () => {
       secretAckPending: true,
       secretAckDeadlineAt: durableAckDeadline,
     });
-    expect(state.crontabState.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(true);
+    expect(collectDerivedDeadlines(state).some((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`)).toBe(true);
   });
 
   test('originated lock rejection emits one terminal failure before removing the route', () => {

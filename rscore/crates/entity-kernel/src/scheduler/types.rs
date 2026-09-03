@@ -34,17 +34,11 @@ pub struct CrontabTaskState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Per-payment deadlines (HTLC timeout, secret-ack timeout) are not hooks:
+/// they are derived from Account locks and paybook entries at wake time.
 pub enum ScheduledHookKind {
-    HtlcTimeout {
-        account_id: String,
-        lock_id: String,
-    },
     DisputeDeadline {
         account_id: String,
-    },
-    HtlcSecretAckTimeout {
-        hashlock: String,
-        counterparty_entity_id: String,
     },
     SettlementWindow,
     Watchdog,
@@ -72,34 +66,6 @@ pub struct ScheduledHook {
     pub id: String,
     pub trigger_at: u64,
     pub kind: ScheduledHookKind,
-}
-
-impl ScheduledHook {
-    pub fn htlc_timeout(account_id: String, lock_id: String, trigger_at: u64) -> Self {
-        Self {
-            id: format!("htlc-timeout:{lock_id}"),
-            trigger_at,
-            kind: ScheduledHookKind::HtlcTimeout {
-                account_id,
-                lock_id,
-            },
-        }
-    }
-
-    pub fn htlc_secret_ack_timeout(
-        hashlock: String,
-        counterparty_entity_id: String,
-        trigger_at: u64,
-    ) -> Self {
-        Self {
-            id: format!("htlc-secret-ack:{hashlock}"),
-            trigger_at,
-            kind: ScheduledHookKind::HtlcSecretAckTimeout {
-                hashlock,
-                counterparty_entity_id,
-            },
-        }
-    }
 }
 
 #[derive(Clone)]

@@ -61,6 +61,7 @@ import { TIMING } from '../../config/constants';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { hubRebalanceHandler } from './rebalance';
 import { processDueHooks } from './due-hooks';
+import { collectDerivedDeadlines, compareDeadlines, type DerivedDeadline } from './derived-deadlines';
 import { getRebalanceAccountIds } from '../consensus/account/work-index';
 import { PersistentEntityCollectionMap } from '../state/persistent-collection-map';
 import { cancelHook } from './hook-state';
@@ -143,27 +144,24 @@ export async function executeCrontab(
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
   const allOutputs: EntityOutput[] = [];
 
-  // ── 1. Process scheduled hooks (setTimeout-like, fires once) ──
+  // ── 1. Scheduled hooks (setTimeout-like, fires once) plus the deadlines
+  // derived from Account locks and paybook entries, drained together in
+  // (triggerAt, id) order so same-tick deadlines never depend on how they
+  // were recorded.
+  const dueHooks: Array<ScheduledHook | DerivedDeadline> = collectDerivedDeadlines(replica.state, now);
   if (crontabState.hooks && crontabState.hooks.size > 0) {
-    const dueHooks: ScheduledHook[] = [];
     for (const [id, hook] of crontabState.hooks) {
       if (hook.triggerAt <= now) {
         dueHooks.push(hook);
         cancelHook(crontabState, id); // One-shot: remove after firing
       }
     }
-
-    if (dueHooks.length > 0) {
-      // Map insertion order is not scheduling priority. Deterministically pick
-      // the oldest hook, then its stable id, so same-tick dispute deadlines
-      // cannot depend on historical insertion order.
-      dueHooks.sort((left, right) =>
-        left.triggerAt - right.triggerAt || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
-      );
-      crontabLog.debug('hooks.fired', { entity: shortId(replica.entityId), count: dueHooks.length, timestamp: now });
-      const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
-      allOutputs.push(...hookOutputs);
-    }
+  }
+  if (dueHooks.length > 0) {
+    dueHooks.sort(compareDeadlines);
+    crontabLog.debug('hooks.fired', { entity: shortId(replica.entityId), count: dueHooks.length, timestamp: now });
+    const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
+    allOutputs.push(...hookOutputs);
   }
 
   // ── 2. Process periodic tasks (setInterval-like, fires repeatedly) ──

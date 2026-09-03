@@ -130,10 +130,10 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
     state.orderbookExt = ext;
     state.crontabState = initCrontab();
     scheduleHook(state.crontabState, {
-      id: 'resident-htlc-timeout',
+      id: `dispute-deadline:${counterparty}`,
       triggerAt: state.timestamp + 30_000,
-      type: 'htlc_timeout',
-      data: { accountId: counterparty, lockId: `0x${'bc'.repeat(32)}` },
+      type: 'dispute_deadline',
+      data: { accountId: counterparty },
     });
     const routeHashlock = `0x${'ab'.repeat(32)}`;
     state.paybook.entries.set(routeHashlock, {

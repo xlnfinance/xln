@@ -24,9 +24,7 @@ export interface CrontabTaskState {
 }
 
 export type ScheduledHookType =
-  | 'htlc_timeout'
   | 'dispute_deadline'
-  | 'htlc_secret_ack_timeout'
   | 'settlement_window'
   | 'watchdog'
   | 'hub_rebalance_kick'
@@ -34,25 +32,15 @@ export type ScheduledHookType =
   | 'counterparty_board_hanko_refresh_deadline'
   | 'cross_j_orderbook_sweep';
 
-type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<string, unknown>> = {
+export type ScheduledHookBase<TType extends string, TData extends Record<string, unknown>> = {
   id: string;
   triggerAt: number;
   type: TType;
   data: TData;
 };
 
-type HtlcTimeoutHook = ScheduledHookBase<'htlc_timeout', {
-  accountId: string;
-  lockId: string;
-}>;
-
 type DisputeDeadlineHook = ScheduledHookBase<'dispute_deadline', {
   accountId: string;
-}>;
-
-type HtlcSecretAckTimeoutHook = ScheduledHookBase<'htlc_secret_ack_timeout', {
-  hashlock: string;
-  counterpartyEntityId: string;
 }>;
 
 type SettlementWindowHook = ScheduledHookBase<'settlement_window', Record<string, never>>;
@@ -81,9 +69,7 @@ type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_
 }>;
 
 export type ScheduledHook =
-  | HtlcTimeoutHook
   | DisputeDeadlineHook
-  | HtlcSecretAckTimeoutHook
   | SettlementWindowHook
   | WatchdogHook
   | HubRebalanceKickHook

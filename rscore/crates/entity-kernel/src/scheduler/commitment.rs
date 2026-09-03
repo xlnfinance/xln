@@ -29,26 +29,9 @@ fn task_param(value: &CrontabTaskParam) -> CanonicalValue {
 
 fn hook_data(hook: &ScheduledHookKind) -> Result<CanonicalValue, EntityKernelError> {
     let values = match hook {
-        ScheduledHookKind::HtlcTimeout {
-            account_id,
-            lock_id,
-        } => vec![
-            ("accountId", CanonicalValue::String(account_id.clone())),
-            ("lockId", CanonicalValue::String(lock_id.clone())),
-        ],
         ScheduledHookKind::DisputeDeadline { account_id } => {
             vec![("accountId", CanonicalValue::String(account_id.clone()))]
         }
-        ScheduledHookKind::HtlcSecretAckTimeout {
-            hashlock,
-            counterparty_entity_id,
-        } => vec![
-            ("hashlock", CanonicalValue::String(hashlock.clone())),
-            (
-                "counterpartyEntityId",
-                CanonicalValue::String(counterparty_entity_id.clone()),
-            ),
-        ],
         ScheduledHookKind::SettlementWindow | ScheduledHookKind::Watchdog => Vec::new(),
         ScheduledHookKind::HubRebalanceKick {
             reason,
@@ -102,9 +85,7 @@ fn hook_data(hook: &ScheduledHookKind) -> Result<CanonicalValue, EntityKernelErr
 
 fn hook_type(hook: &ScheduledHookKind) -> &'static str {
     match hook {
-        ScheduledHookKind::HtlcTimeout { .. } => "htlc_timeout",
         ScheduledHookKind::DisputeDeadline { .. } => "dispute_deadline",
-        ScheduledHookKind::HtlcSecretAckTimeout { .. } => "htlc_secret_ack_timeout",
         ScheduledHookKind::SettlementWindow => "settlement_window",
         ScheduledHookKind::Watchdog => "watchdog",
         ScheduledHookKind::HubRebalanceKick { .. } => "hub_rebalance_kick",
@@ -187,21 +168,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn secret_ack_hook_matches_exact_ts_shape_without_derivable_lock_id() {
-        let hashlock = format!("0x{}", "50".repeat(32));
-        let counterparty = format!("0x{}", "ab".repeat(32));
-        let hook = ScheduledHook::htlc_secret_ack_timeout(
-            hashlock.clone(),
-            counterparty.clone(),
-            1_700_000_030_000,
-        );
+    fn dispute_deadline_hook_matches_exact_ts_shape() {
+        let account = format!("0x{}", "ab".repeat(32));
+        let hook = ScheduledHook {
+            id: format!("dispute-deadline:{account}"),
+            trigger_at: 1_700_000_030_000,
+            kind: ScheduledHookKind::DisputeDeadline {
+                account_id: account.clone(),
+            },
+        };
 
         assert_eq!(
-            canonical_hook(&hook).expect("canonical secret-ack hook"),
+            canonical_hook(&hook).expect("canonical dispute-deadline hook"),
             object(vec![
                 (
                     "id",
-                    CanonicalValue::String(format!("htlc-secret-ack:{hashlock}")),
+                    CanonicalValue::String(format!("dispute-deadline:{account}")),
                 ),
                 (
                     "triggerAt",
@@ -209,14 +191,11 @@ mod tests {
                 ),
                 (
                     "type",
-                    CanonicalValue::String("htlc_secret_ack_timeout".to_string()),
+                    CanonicalValue::String("dispute_deadline".to_string()),
                 ),
                 (
                     "data",
-                    object(vec![
-                        ("hashlock", CanonicalValue::String(hashlock)),
-                        ("counterpartyEntityId", CanonicalValue::String(counterparty),),
-                    ]),
+                    object(vec![("accountId", CanonicalValue::String(account))]),
                 ),
             ]),
         );

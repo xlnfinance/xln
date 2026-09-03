@@ -54,6 +54,7 @@ import {
 import { HTLC, LIMITS } from '../../../config/constants';
 
 import { executeCrontab, initCrontab } from '../../../entity/scheduler';
+import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
 import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
@@ -986,14 +987,15 @@ describe('audit fail-fast regressions', () => {
       secretAckStartedAt: env.state.timestamp,
       secretAckDeadlineAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
     });
-    expect(applied.newState.crontabState?.hooks.get(`htlc-secret-ack:${hashlock}`)).toEqual({
+    expect(
+      collectDerivedDeadlines(applied.newState).find((deadline) => deadline.id === `htlc-secret-ack:${hashlock}`),
+    ).toEqual({
       id: `htlc-secret-ack:${hashlock}`,
       triggerAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
       type: 'htlc_secret_ack_timeout',
       data: {
         hashlock,
         counterpartyEntityId: upstreamEntityId,
-        inboundLockId: upstreamLockId,
       },
     });
     expect(applied.accountTxs).toContainEqual({
