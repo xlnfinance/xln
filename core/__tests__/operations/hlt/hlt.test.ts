@@ -53,7 +53,10 @@ import {
   deriveLoadLaneIdentities,
 } from '../../../scripts/operations/hlt/lanes/worker-lanes';
 import { parseSameLoadSchedule } from '../../../scripts/operations/hlt/workload/load-schedule';
-import { collectHltEnvironmentManifest } from '../../../scripts/operations/hlt/boundary/environment-manifest';
+import {
+  collectHltEnvironmentManifest,
+  XLN_HLT_PROVENANCE_PATHS,
+} from '../../../scripts/operations/hlt/boundary/environment-manifest';
 import {
   assertRealisticExchangeDistribution,
   assertBalancedExchangeDistribution,
@@ -112,6 +115,14 @@ const observation = (overrides: Record<string, unknown> = {}) => decodeProductio
 });
 
 describe('production swap load evidence', () => {
+  test('HLT provenance is an explicit production-input whitelist', () => {
+    expect(XLN_HLT_PROVENANCE_PATHS).toContain('core');
+    expect(XLN_HLT_PROVENANCE_PATHS).toContain('rscore');
+    expect(XLN_HLT_PROVENANCE_PATHS).toContain('brainvault');
+    expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('ui');
+    expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('design');
+  });
+
   test('W4 production TPS floors remain below their explicit performance targets', () => {
     expect(HLT_W4_TPS_POLICY).toEqual({
       ts: { releaseFloor: 700, performanceTarget: 2_000 },

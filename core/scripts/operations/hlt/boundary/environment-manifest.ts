@@ -102,6 +102,17 @@ const gitText = (args: readonly string[]): string | null => {
   }
 };
 
+/** Tracked inputs that can change an HLT runtime, its wire/storage contract or its launcher. */
+export const XLN_HLT_PROVENANCE_PATHS = [
+  'core', 'rscore', 'jurisdictions', 'brainvault', 'custody', 'native', 'cli',
+  'scripts', 'tools', 'packages/npm', 'package.json', 'bun.lock', 'tsconfig.json',
+  'tsconfig.runtime.json', 'frozen-core.json', 'VERSION',
+] as const;
+
+const xlnTrackedStatus = (): string | null => gitText([
+  'status', '--short', '--untracked-files=no', '--', ...XLN_HLT_PROVENANCE_PATHS,
+]);
+
 const fileSha256 = (path: string | undefined): string | null => {
   if (!path) return null;
   const resolved = resolve(path);
@@ -111,7 +122,10 @@ const fileSha256 = (path: string | undefined): string | null => {
 
 export const collectHltRunProvenance = (engine: 'ts' | 'rust'): HltRunProvenance => {
   const sha = gitText(['rev-parse', 'HEAD']);
-  const dirty = gitText(['status', '--short', '--untracked-files=no']);
+  // This is an inclusion list, not a growing exclusion list. Reference UIs,
+  // design assets and external workspaces cannot invalidate an HLT number;
+  // every currently direct runtime dependency remains fail-closed here.
+  const dirty = xlnTrackedStatus();
   return {
     gitSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : 'unknown',
     gitDirtyFiles: dirty === null ? -1 : dirty.split('\n').filter(line => line.trim()).length,

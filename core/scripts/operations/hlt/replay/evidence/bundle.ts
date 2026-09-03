@@ -11,6 +11,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import { basename, dirname, join } from 'node:path';
 
 import { safeStringify } from '../../../../../protocol/serialization';
+import { XLN_HLT_PROVENANCE_PATHS } from '../../boundary/environment-manifest';
 import { readHltHubRecordingManifest } from '../recording';
 
 const git = (args: readonly string[]): string => {
@@ -69,7 +70,9 @@ export const writeEvidenceBundleProvenance = (options: Readonly<{
     git: {
       sha: git(['rev-parse', 'HEAD']),
       branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
-      dirtyFiles: git(['status', '--short', '--untracked-files=no']).split('\n').filter(line => line.trim()),
+      dirtyFiles: git([
+        'status', '--short', '--untracked-files=no', '--', ...XLN_HLT_PROVENANCE_PATHS,
+      ]).split('\n').filter(line => line.trim()),
     },
     toolchain: { bun: Bun.version, platform: process.platform, arch: process.arch },
     command: process.argv.slice(1).map(part => basename(part)).join(' '),

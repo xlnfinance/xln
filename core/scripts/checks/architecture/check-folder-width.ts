@@ -49,6 +49,7 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   '.tmp',
   '.vscode',
   '.xln-db',
+  'brainvault',
   'data/tmp',
   'db',
   'frontend/.svelte-kit',
@@ -67,7 +68,7 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   'packages/npm/xlnfinance/app',
   'packages/npm/xlnfinance/dist',
   'reports',
-  'ui/public',
+  'ui',
 ]);
 
 export type FolderWidth = Readonly<{
@@ -76,7 +77,6 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
-  'brainvault': 22,
   'core/__tests__/runtime/observability': 11,
   'core/__tests__/testing/tooling': 11,
   'core/orchestrator/process': 12,
