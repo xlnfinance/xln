@@ -103,3 +103,10 @@ test('mainnet and release gates check disk before expensive browser/runtime gate
     releaseGate.indexOf("if (profile !== 'quick') assertMinDiskFree();"),
   );
 });
+
+test('CI source checks allow one cold Rust workspace build', () => {
+  const releaseGate = readFileSync(join(repoRoot, 'core/scripts/release/run-release-gate.ts'), 'utf8');
+  expect(releaseGate).toContain(
+    "{ name: 'source checks', command: 'bun run check:src', timeoutMs: 300_000 }",
+  );
+});
