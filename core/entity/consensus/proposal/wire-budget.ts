@@ -219,8 +219,9 @@ const fitLiveEntityProposal = async (
   });
 
 /**
- * WAL replay must keep the exact stored txs. Live proposal defers the tail so
- * a Hub frame cannot halt on ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED after apply.
+ * WAL replay must keep the exact stored txs. Live proposal cuts the FIFO prefix
+ * here, before apply, by the same rule replay uses; nothing is deferred after
+ * apply, so a byte bound crossed later is a halt, not a smaller frame.
  *
  * Context size tracks the txs (HTLC routes → gossipProfiles). Measuring a
  * prefix against the full-mempool context underpacks; rematerialize then grow.

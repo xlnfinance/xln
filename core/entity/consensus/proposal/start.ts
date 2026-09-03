@@ -533,19 +533,14 @@ const buildEntityProposal = async (
   return prepared ? certifyEntityProposal(context, selection, prepared, profile) : null;
 };
 
-const isFrameByteLimitError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED') ||
-    message.includes('wire byte limit exceeded');
-};
-
 /**
  * Proposing straight from the mempool: one rejected tx (a peer's invalid
  * certified output, a stale command) must not poison every other tx batched
  * into the same frame — evict exactly that tx and rebuild. Invariant failures
  * keep propagating; only `reject`-disposition frame rejections are evicted.
- * A frame whose applied bytes outgrow the wire budget defers its tail to the
- * next frame instead of halting.
+ * The frame prefix is cut before apply (LIMITS.MAX_ENTITY_FRAME_TXS and the
+ * canonical byte budget); a frame that still outgrows a byte bound after apply
+ * halts, so live and replay derive the same frame from the same FIFO.
  */
 const buildEntityProposalEvictingRejected = async (
   context: ApplyEntityInputContext,
@@ -556,26 +551,6 @@ const buildEntityProposalEvictingRejected = async (
     try {
       return await buildEntityProposal(context, selection, profile);
     } catch (error) {
-      if (isFrameByteLimitError(error) && selection.proposalTxs.length > 1) {
-        // Both byte-limit errors end in `:<actual>:<limit>`; scale the kept
-        // prefix by that ratio (10% margin) instead of blind halving.
-        const message = error instanceof Error ? error.message : String(error);
-        const ratioMatch = /(\d+):(\d+)\s*(?::txs=|$)/.exec(message);
-        const actual = ratioMatch ? Number(ratioMatch[1]) : 0;
-        const limit = ratioMatch ? Number(ratioMatch[2]) : 0;
-        const scaled = actual > limit && limit > 0
-          ? Math.floor(selection.proposalTxs.length * 0.9 * limit / actual)
-          : Math.floor(selection.proposalTxs.length / 2);
-        const keep = Math.max(1, Math.min(scaled, selection.proposalTxs.length - 1));
-        entityLog.warn('proposal.frame_bytes_deferred', {
-          entity: shortId(context.workingReplica.entityId),
-          selected: keep,
-          deferred: selection.proposalTxs.length - keep,
-          error: message.slice(0, 400),
-        });
-        selection.proposalTxs = selection.proposalTxs.slice(0, keep);
-        continue;
-      }
       if (!(error instanceof MalformedEntityFrameInputError) || error.frameTx === undefined) throw error;
       const rejectedTx = error.frameTx as EntityTx;
       const inProposal = selection.proposalTxs.includes(rejectedTx);

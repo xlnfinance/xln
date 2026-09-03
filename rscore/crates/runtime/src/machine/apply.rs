@@ -12,7 +12,8 @@ use xln_rscore_entity_kernel::{
     CanonicalEntityTx, EntityCommandBoard, EntityCommandDisposition, EntityFrameEvent,
     EntityFrameWireMeasureBody, EntityTransitionCertificationRequest, EntityTransitionError,
     EntityTxKind, HashType, JPrefixRangeClaim, LocalEntityOutput, LocalEntityOutputTx,
-    LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_PROPOSAL_WIRE_BYTES,
+    LocalEntityTx, MAX_ENTITY_FRAME_TX_BYTES, MAX_ENTITY_FRAME_TXS,
+    MAX_ENTITY_PROPOSAL_WIRE_BYTES,
     MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS, PendingNonMutatingWake, ResidentEntityOperation,
     ResidentEntityRequest, ScheduledWake, SchedulerError, UNREGISTERED_ENTITY_COMMAND_STACK_KEY,
     advance_entity_command_nonce, apply_resident_entity_round_core, assert_signed_entity_command,
@@ -1024,6 +1025,11 @@ fn prepare_entity_prefix<'a>(
     let mut tx_bytes = 0_usize;
     let mut consumed = 0_usize;
     for work in work {
+        // TS `selectEntityFrameTxByteBudgetWithMeter`: the frame prefix is cut by
+        // count before bytes, deterministically, ahead of any apply.
+        if txs.len() >= MAX_ENTITY_FRAME_TXS {
+            break;
+        }
         match work {
             EntityPendingWork::Account { projected, row, .. } => {
                 if !accept_entity_tx_bytes(&mut tx_bytes, projected, max_tx_bytes)? {
@@ -1472,7 +1478,8 @@ fn fit_replay_entity_prefix(
     entity_context: &CanonicalValue,
     j_prefix_certificate: Option<&CanonicalValue>,
 ) -> Result<(usize, Vec<u8>), RuntimeMachineError> {
-    let (mut candidate, required) = replay_compatible_prefix(work, entity_context)?;
+    let (compatible, required) = replay_compatible_prefix(work, entity_context)?;
+    let mut candidate = compatible.min(MAX_ENTITY_FRAME_TXS);
     let entity_context_bytes = encode_entity_frame_context(entity_context)
         .map_err(EntityTransitionError::from)
         .map_err(RuntimeMachineError::from)?;

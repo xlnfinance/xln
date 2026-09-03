@@ -29,8 +29,15 @@ export const LIMITS = {
   /** Maximum pending transactions in one bilateral Account mempool/frame. */
   ACCOUNT_MEMPOOL_SIZE: 10_000,
 
-  /** Maximum size of a single frame in bytes. 1000 tx frames get a 10KB/tx budget. */
+  /** Maximum canonical bytes of one Entity frame (txs + events + context); consensus bound shared with rscore. */
   MAX_FRAME_SIZE_BYTES: 10_000_000,
+
+  /**
+   * Maximum txs in one Entity frame. Cut deterministically before apply from
+   * the FIFO head (live and replay alike, TS and rscore alike); a frame that
+   * still outgrows a byte bound after apply is a halt, never a retry.
+   */
+  MAX_ENTITY_FRAME_TXS: 1000,
 
   /** Maximum canonical bytes in one signed gossip Profile (aggregate frame budget remains separate). */
   MAX_PROFILE_BYTES: 1024 * 1024,

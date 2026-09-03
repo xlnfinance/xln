@@ -29,7 +29,8 @@ pub use frame::{
     CanonicalEntityTx, EntityFrame, EntityFrameBody, EntityFrameDraft, EntityFrameError,
     EntityFrameEvent, EntityFrameLeader, EntityFrameWireMeasure, EntityFrameWireMeasureBody,
     HashToSign, HashType, MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES,
-    MAX_ENTITY_PROPOSAL_WIRE_BYTES, compute_entity_events_parity_digest, compute_entity_frame_hash,
+    MAX_ENTITY_FRAME_TXS, MAX_ENTITY_PROPOSAL_WIRE_BYTES, compute_entity_events_parity_digest,
+    compute_entity_frame_hash,
     encode_entity_frame_context, measure_entity_frame_tx_bytes, measure_entity_frame_wire,
 };
 pub use j_prefix::{JPrefixRangeClaim, build_required_j_prefix_certificate, sign_j_event_range};

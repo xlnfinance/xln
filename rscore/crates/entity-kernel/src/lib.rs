@@ -77,7 +77,7 @@ pub use consensus::{
     EntitySingleSigner, EntityTransitionCertificationRequest, EntityTransitionError,
     EntityTxCatalogError, EntityTxKind, HashToSign, HashType, JPrefixRangeClaim, LocalEntityOutput,
     LocalEntityOutputTx, MAX_ENTITY_FRAME_BYTES, MAX_ENTITY_FRAME_TX_BYTES,
-    MAX_ENTITY_PROPOSAL_WIRE_BYTES, PendingNonMutatingWake, PresignedManifest,
+    MAX_ENTITY_FRAME_TXS, MAX_ENTITY_PROPOSAL_WIRE_BYTES, PendingNonMutatingWake, PresignedManifest,
     PresignedManifestEntry, ResidentEntityConsensusReplica, build_certified_entity_frame_link,
     build_entity_hash_manifest, build_required_j_prefix_certificate, certify_entity_transition,
     certify_single_signer_entity_frame, compute_entity_consensus_root,

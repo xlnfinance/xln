@@ -340,6 +340,13 @@ const validateHashManifest = (value: unknown, context: string): void => {
   });
 };
 
+/**
+ * A certified frame travels as one transport message: MessagePack body plus
+ * signatures and Hankos, larger than its canonical consensus bytes. The
+ * consensus bound (LIMITS.MAX_FRAME_SIZE_BYTES, canonical, shared with rscore)
+ * is asserted before this; the transport bound is the WS message limit.
+ */
+const MAX_CERTIFIED_ENTITY_FRAME_WIRE_BYTES = LIMITS.MAX_RUNTIME_WS_MESSAGE_BYTES;
 const PLACEHOLDER_ECDSA_SIG = `0x${'11'.repeat(65)}`;
 // A certified EntityFrame retains only its own Hanko. Secondary Hankos are
 // attached to their exact Account/dispute/output payloads before commit.
@@ -372,12 +379,12 @@ const assertEntityFrameCertifiedWireBudget = (
   context: string,
 ): number => {
   const wireBytes = packTransportValue(frame).byteLength;
-  if (wireBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return wireBytes;
+  if (wireBytes <= MAX_CERTIFIED_ENTITY_FRAME_WIRE_BYTES) return wireBytes;
   const part = (value: unknown): number => {
     try { return packTransportValue(value).byteLength; } catch { return -1; }
   };
   throw new FinancialDataCorruptionError(
-    `${context} wire byte limit exceeded: ${wireBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}` +
+    `${context} wire byte limit exceeded: ${wireBytes}:${MAX_CERTIFIED_ENTITY_FRAME_WIRE_BYTES}` +
     `:txs=${part(frame['txs'])}:events=${part(frame['events'])}:context=${part(frame['entityContext'])}` +
     `:hankos=${part(frame['hankos'])}:collectedSigs=${part(frame['collectedSigs'])}`,
   );
@@ -401,7 +408,7 @@ export const assertEstimatedCertifiedEntityFrameWire = (
     hashes.length,
     includeHankos,
   );
-  if (estimatedBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return estimatedBytes;
+  if (estimatedBytes <= MAX_CERTIFIED_ENTITY_FRAME_WIRE_BYTES) return estimatedBytes;
   // Failure path retains the exact historical diagnostics. The hot path uses
   // byte arithmetic and never builds or encodes thousands of placeholder
   // Hanko strings merely to prove the same conservative bound.

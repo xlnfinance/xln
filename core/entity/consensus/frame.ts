@@ -331,8 +331,11 @@ export const createEntityFrameWirePrefixMeter = (txs: EntityTx[]): EntityFrameWi
 };
 
 export const selectEntityFrameTxByteBudgetWithMeter = (
-  txs: EntityTx[],
+  allTxs: EntityTx[],
 ): Readonly<{ txs: EntityTx[]; meter: EntityFrameWirePrefixMeter }> => {
+  const txs = allTxs.length > LIMITS.MAX_ENTITY_FRAME_TXS
+    ? allTxs.slice(0, LIMITS.MAX_ENTITY_FRAME_TXS)
+    : allTxs;
   const meter = createEntityFrameWirePrefixMeter(txs);
   if (meter.txBytes(txs.length) <= MAX_ENTITY_FRAME_TX_BYTES) return { txs, meter };
   const low = largestPrefixWithin(buildEntityFrameTxPrefixBytes(txs), MAX_ENTITY_FRAME_TX_BYTES);

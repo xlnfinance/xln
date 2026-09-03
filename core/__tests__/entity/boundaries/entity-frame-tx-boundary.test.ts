@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { validateProposedEntityFrame, assertEstimatedCertifiedEntityFrameWire } from '../../../entity/consensus/frame/validation';
-import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
+import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxByteBudgetWithMeter, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
 import { packTransportValue } from '../../../protocol/serialization/binary-codec';
 
@@ -125,7 +125,8 @@ test('Entity frame wire fit reserves a third of the 10 MB limit for apply-time e
 });
 
 test('certified Entity frame wire errors name hashesToSign separately from the hash payload', () => {
-  const pad = 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES);
+  // Certified frames are bounded by the transport (WS message) limit, not the canonical frame bound.
+  const pad = 'x'.repeat(LIMITS.MAX_RUNTIME_WS_MESSAGE_BYTES);
   const frame = {
     height: 1,
     parentFrameHash: 'genesis',
@@ -144,7 +145,8 @@ test('certified Entity frame wire errors name hashesToSign separately from the h
 });
 
 test('unsigned Entity frames estimate certified bytes before sign', () => {
-  const pad = 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES);
+  // Certified frames are bounded by the transport (WS message) limit, not the canonical frame bound.
+  const pad = 'x'.repeat(LIMITS.MAX_RUNTIME_WS_MESSAGE_BYTES);
   const frame = {
     height: 1,
     parentFrameHash: 'genesis',
@@ -233,4 +235,15 @@ test('proposal signs only after the estimated certified wire fits', () => {
   const signAt = start.indexOf('signProposalManifest');
   expect(estimateAt).toBeGreaterThan(0);
   expect(estimateAt).toBeLessThan(signAt);
+});
+
+test('Entity frame tx selector cuts the FIFO prefix at MAX_ENTITY_FRAME_TXS before any byte measure', () => {
+  const txs = Array.from({ length: LIMITS.MAX_ENTITY_FRAME_TXS + 1 }, (_, index) => ({
+    type: 'chat' as const,
+    data: { from: signerId, message: `m${index}` },
+  }));
+  const selected = selectEntityFrameTxByteBudgetWithMeter(txs);
+  expect(selected.txs).toEqual(txs.slice(0, LIMITS.MAX_ENTITY_FRAME_TXS));
+  expect(selected.meter.txBytes(LIMITS.MAX_ENTITY_FRAME_TXS)).toBeGreaterThan(0);
+  expect(() => selected.meter.txBytes(LIMITS.MAX_ENTITY_FRAME_TXS + 1)).toThrow('ENTITY_FRAME_WIRE_PREFIX_COUNT_INVALID');
 });
