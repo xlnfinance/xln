@@ -107,9 +107,11 @@ test('offline parity cannot inherit live population, engine, workload or worker 
     XLN_STORAGE_WAL_SYNC: '1',
     XLN_MM_CROSS_J: '0',
     XLN_RSCORE_BINARY: '/tmp/xlnrs',
+    XLN_STAND_LOCK_TOKEN: 'held-token',
   })).toEqual({
     PATH: '/bin',
     XLN_RSCORE_BINARY: '/tmp/xlnrs',
+    XLN_STAND_LOCK_TOKEN: 'held-token',
   });
 });
 

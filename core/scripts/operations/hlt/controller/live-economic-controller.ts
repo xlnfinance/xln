@@ -24,7 +24,12 @@ const PHASE_TIMEOUT_MS = 120_000;
 const RUN_PHASE_TIMEOUT_MS = AUTHORITY_EVIDENCE_GATE_BUDGET_MS;
 const sleep = (ms: number): Promise<void> => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 
-const OFFLINE_PARITY_XLN_ALLOWLIST = new Set(['XLN_RSCORE_BINARY']);
+const OFFLINE_PARITY_XLN_ALLOWLIST = new Set([
+  'XLN_RSCORE_BINARY',
+  // The token changes no replay semantics. It proves both bounded stages ran
+  // while the outer live authority invocation owned the machine slot.
+  'XLN_STAND_LOCK_TOKEN',
+]);
 
 /**
  * Offline parity is derived only from its immutable recording and explicit
