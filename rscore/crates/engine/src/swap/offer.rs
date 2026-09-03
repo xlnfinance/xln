@@ -35,10 +35,10 @@ pub struct SwapOfferSnapshot {
 }
 
 /// Total, same-j and per-side-per-market ceilings (core/config/constants.ts).
-pub const MAX_ACCOUNT_SWAP_OFFERS: usize = 38;
-pub const MAX_ACCOUNT_SAME_J_SWAP_OFFERS: usize = 20;
+pub const MAX_ACCOUNT_SWAP_OFFERS: usize = 50;
+pub const MAX_ACCOUNT_SAME_J_SWAP_OFFERS: usize = 32;
 pub const MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: usize = 18;
-pub const MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: usize = 20;
+pub const MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwapOffer {

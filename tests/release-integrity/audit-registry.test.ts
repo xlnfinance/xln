@@ -1,4 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
+
+// Fingerprint walks (git ls-files + import graph) take 15-30 s on a loaded CI
+// runner while cargo lanes compile; 5 s would kill git mid-walk.
+setDefaultTimeout(120_000);
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -71,7 +75,7 @@ describe('canonical audit registry', () => {
     ]) {
       expect(accountFiles).toContain(coupledPath);
     }
-  }, 120_000);
+  });
 
   test('durable payment implementation and regressions are fingerprint-owned', () => {
     const registration = REGISTRY.modules.find(module => module.id === 'registration-payment')!;

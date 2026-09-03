@@ -25,6 +25,7 @@ import {
   type MarketMakerHealth,
   type MarketMakerTokenIdsByContext,
 } from '../../../orchestrator/mm-node';
+import { MARKET_MAKER_LEVELS_PER_SIDE } from '../../../orchestrator/market-maker/node/mm-node-core';
 import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../../../orchestrator/mesh/mesh-common';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
@@ -253,7 +254,11 @@ test('five-token market maker depth remains canonical through Account and hub ad
     base.state.deltas = PersistentAccountStateMap.fromEntries('deltas', deltas);
     const account = beginAccountStateDraft(base).draft;
     const specs = buildMarketMakerOfferSpecs([hubEntityId], tokenIds, pairIndex);
-    expect(specs).toHaveLength(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
+    // One pair fills both sides up to the MM level count or the same-j cap,
+    // whichever is tighter (10 levels x 2 sides under the 32-offer cap).
+    expect(specs).toHaveLength(
+      2 * Math.min(MARKET_MAKER_LEVELS_PER_SIDE, Math.floor(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS / 2)),
+    );
     for (const spec of specs) {
       const netAuthorization = deriveSwapNetAuthorization(spec.wantAmount, 1);
       const result = await handleSwapOffer(account, {

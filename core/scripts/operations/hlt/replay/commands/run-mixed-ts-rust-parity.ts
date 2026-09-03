@@ -20,6 +20,7 @@ import {
   authorityEvidenceBinary,
 } from '../evidence/gate-support';
 import { readHltHubRecording } from '../recording';
+import { publishEvidenceBundleReplay } from '../evidence/bundle';
 import {
   assertHltAuthoritySourceBinding,
   copyBoundAuthorityWal,
@@ -163,6 +164,14 @@ const publishQaReplayReport = (tsTrial: Record<string, unknown>): void => {
     trials,
   }, 2)}\n`, { mode: 0o600 });
   console.error(`HLT_MIXED_PARITY_QA_REPLAY_REPORT path=${path} trials=${trials.length}`);
+  const bundled = publishEvidenceBundleReplay(recordingPath, `${createdAt}-parity.json`, {
+    schema: 'xln-hlt-evidence-replay-v1',
+    createdAt,
+    gate: collectHltRunProvenance('rust'),
+    accountsRoot: w1['accountsRoot'],
+    trials,
+  });
+  if (bundled) console.error(`HLT_MIXED_PARITY_BUNDLE_REPLAY path=${bundled}`);
 };
 
 const replayTypescript = (workers: number): void => {

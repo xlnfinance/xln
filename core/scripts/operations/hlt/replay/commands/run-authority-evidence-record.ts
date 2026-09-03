@@ -5,7 +5,17 @@
 import { join } from 'node:path';
 
 import { freshAuthorityEvidenceDir, runAuthorityEvidenceGate } from '../evidence/gate-support';
+import { writeEvidenceBundleProvenance } from '../evidence/bundle';
 
+// The work directory IS the portable evidence bundle: recording, closed hub
+// WAL, mesh seed, smoke reports, and PROVENANCE.json. Default it under
+// .logs/hlt-evidence/<utc-stamp> instead of a tmp dir so it survives reboots
+// and can be archived as one folder.
+if (!process.env['XLN_RSCORE_EVIDENCE_DIR']) {
+  process.env['XLN_RSCORE_EVIDENCE_DIR'] = join(
+    process.cwd(), '.logs', 'hlt-evidence', new Date().toISOString().replace(/[:.]/g, '-'),
+  );
+}
 const workDir = freshAuthorityEvidenceDir('xln-runtime-replay-v1-');
 const output = join(workDir, 'hlt-hub-recording.json');
 const env: NodeJS.ProcessEnv = {
@@ -43,9 +53,23 @@ for (const key of [
   'XLN_RSCORE_AUTHORITY_REPLAY', 'XLN_RSCORE_AUTHORITY_RUNTIME_ID',
 ] as const) delete env[key];
 
+const startedAt = new Date().toISOString();
 runAuthorityEvidenceGate({
   label: 'HLT_RUNTIME_REPLAY_V1_RECORD_GATE',
   script: 'core/scripts/operations/hlt/build-chains.ts',
   env,
+});
+writeEvidenceBundleProvenance({
+  bundleDir: workDir,
+  recordingPath: output,
+  startedAt,
+  knobs: {
+    users: env['XLN_HLT_USERS'] ?? '',
+    ratePerUser: env['XLN_HLT_RATE_PER_USER'] ?? '',
+    durationSeconds: env['XLN_HLT_DURATION_S'] ?? '',
+    mix: env['XLN_HLT_MIX'] ?? '',
+    profile: env['XLN_HLT_PROFILE'] ?? '',
+    swapLoadMode: env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] ?? '',
+  },
 });
 console.log(`HLT_RUNTIME_REPLAY_V1 path=${output}`);

@@ -68,14 +68,14 @@ export const LIMITS = {
   MAX_ACCOUNT_TOKEN_ROWS: 128,
 
   /** Aggregate live-offer guard; same-j and cross-j proofs have tighter bounds below. */
-  MAX_ACCOUNT_SWAP_OFFERS: 38,
+  MAX_ACCOUNT_SWAP_OFFERS: 50,
 
   /**
    * Same-j offers become one signed DeltaTransformer program. Twenty offers
    * preserve a full 10x2 price ladder while leaving storage-proof headroom.
    * More market depth belongs in additional maker Entity Accounts.
    */
-  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 20,
+  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 32,
 
   /**
    * Cross-j live offers/Pulls in one bilateral Account. A zero-second signed
@@ -86,7 +86,7 @@ export const LIMITS = {
   MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 18,
 
   /** Maximum live offers for one maker, direction, and economic market. */
-  MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 20,
+  MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 32,
 
   /** Maximum canonical swap offer identifier length. */
   MAX_SWAP_OFFER_ID_LENGTH: 256,
