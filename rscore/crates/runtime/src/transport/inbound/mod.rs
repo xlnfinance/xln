@@ -42,7 +42,7 @@ pub(crate) enum InboundRuntimeEvent {
 use super::RuntimeTransportError;
 use super::crypto::{EncryptionIdentity, encryption_identity};
 
-const DEFAULT_MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 
 pub struct DirectRuntimeIngressConfig {
     pub bind_address: SocketAddr,

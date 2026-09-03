@@ -106,9 +106,9 @@ describe('WebSocket trusted decode boundary', () => {
       .toThrow('WS_MESSAGE_TOO_LARGE:bytes=5:max=4');
   });
 
-  test('uses one exact 32 MiB authenticated cap for direct and relay frame envelopes', () => {
+  test('uses one exact 256 MiB authenticated cap for direct and relay frame envelopes', () => {
     delete process.env['XLN_WS_MAX_MESSAGE_BYTES'];
-    expect(resolveRuntimeWsMaxMessageBytes()).toBe(32 * 1024 * 1024);
+    expect(resolveRuntimeWsMaxMessageBytes()).toBe(256 * 1024 * 1024);
     expect(DEFAULT_MAX_WS_MESSAGE_BYTES).toBe(resolveRuntimeWsMaxMessageBytes());
 
     const atLimit = new Uint8Array(DEFAULT_MAX_WS_MESSAGE_BYTES);

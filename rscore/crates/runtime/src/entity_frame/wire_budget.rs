@@ -13,7 +13,7 @@ use crate::canonical_value_from_tagged_json;
 const BINARY_MAGIC: u8 = 0x03;
 const FRAME_TX_DOMAIN: &[u8] = b"xln:entity-frame-txs:binary";
 const FRAME_DOMAIN: &str = "xln:entity-frame:binary-context-digest";
-const MAX_FRAME_BYTES: usize = 10_000_000;
+const MAX_FRAME_BYTES: usize = 100_000_000;
 const MAX_TX_BYTES: usize = MAX_FRAME_BYTES / 2;
 const MAX_FIT_ATTEMPTS: usize = 16;
 const DUMMY_ROOT: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";

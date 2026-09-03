@@ -29,15 +29,18 @@ export const LIMITS = {
   /** Maximum pending transactions in one bilateral Account mempool/frame. */
   ACCOUNT_MEMPOOL_SIZE: 10_000,
 
-  /** Maximum canonical bytes of one Entity frame (txs + events + context); consensus bound shared with rscore. */
-  MAX_FRAME_SIZE_BYTES: 10_000_000,
+  /**
+   * Maximum canonical bytes of one Entity frame (txs + events + context);
+   * consensus bound shared with rscore. 10 KB per tx for a MAX_ENTITY_FRAME_TXS frame.
+   */
+  MAX_FRAME_SIZE_BYTES: 100_000_000,
 
   /**
    * Maximum txs in one Entity frame. Cut deterministically before apply from
    * the FIFO head (live and replay alike, TS and rscore alike); a frame that
    * still outgrows a byte bound after apply is a halt, never a retry.
    */
-  MAX_ENTITY_FRAME_TXS: 1000,
+  MAX_ENTITY_FRAME_TXS: 10_000,
 
   /** Maximum canonical bytes in one signed gossip Profile (aggregate frame budget remains separate). */
   MAX_PROFILE_BYTES: 1024 * 1024,
@@ -121,8 +124,8 @@ export const LIMITS = {
   MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK: 10_000,
   MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK: 10_000,
 
-  /** Binary transport/control ceilings; all exceed one canonical 10 MB frame. */
-  MAX_RUNTIME_WS_MESSAGE_BYTES: 32 * 1024 * 1024,
+  /** Binary transport/control ceilings; a certified frame (MessagePack + signatures) must fit one WS message. */
+  MAX_RUNTIME_WS_MESSAGE_BYTES: 256 * 1024 * 1024,
   MAX_RUNTIME_ADAPTER_MESSAGE_BYTES: 16 * 1024 * 1024,
   MAX_HLT_HOST_BATCH_BODY_BYTES: 32 * 1024 * 1024,
 } as const;

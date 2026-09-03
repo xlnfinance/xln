@@ -27,7 +27,7 @@ pub const UNREGISTERED_ENTITY_COMMAND_STACK_KEY: &str =
 pub(super) const ENTITY_COMMAND_DOMAIN: &str = "xln:entity-command:binary";
 pub(super) const ENTITY_PROPOSAL_ACTION_DOMAIN: &str = "xln:entity-proposal-action:v1";
 pub(super) const MAX_ENTITY_COMMAND_TXS: usize = 10_000;
-pub(super) const MAX_ENTITY_COMMAND_BYTES: usize = 10_000_000;
+pub(super) const MAX_ENTITY_COMMAND_BYTES: usize = 100_000_000;
 pub(super) const MAX_ENTITY_COMMAND_SIGNERS: usize = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -21,9 +21,9 @@ use super::encoding::{
 const ENTITY_FRAME_TXS_DOMAIN: &[u8] = b"xln:entity-frame-txs:binary";
 const ENTITY_FRAME_DOMAIN: &str = "xln:entity-frame:binary-context-digest";
 const ENTITY_EVENTS_PARITY_DOMAIN: &[u8] = b"xln.rscore.events-parity.v1";
-pub const MAX_ENTITY_FRAME_BYTES: usize = 10_000_000;
+pub const MAX_ENTITY_FRAME_BYTES: usize = 100_000_000;
 /// TS `LIMITS.MAX_ENTITY_FRAME_TXS`: FIFO prefix cut before apply, live and replay alike.
-pub const MAX_ENTITY_FRAME_TXS: usize = 1000;
+pub const MAX_ENTITY_FRAME_TXS: usize = 10_000;
 pub const MAX_ENTITY_FRAME_TX_BYTES: usize = MAX_ENTITY_FRAME_BYTES / 2;
 pub const MAX_ENTITY_PROPOSAL_WIRE_BYTES: usize =
     MAX_ENTITY_FRAME_BYTES - MAX_ENTITY_FRAME_BYTES / 3 - MAX_ENTITY_FRAME_BYTES / 10;
