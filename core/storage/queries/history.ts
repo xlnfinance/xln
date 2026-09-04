@@ -5,7 +5,7 @@ import {
 import { findAccountByCounterparty } from '../../account/state/account-lookup';
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica, RoutedEntityInput } from '../../runtime/types';
-import type { AccountFrame, AccountInput, AccountTx } from '../../types/account';
+import type { AccountAckFrame, AccountFrame, AccountInput, AccountTx } from '../../types/account';
 import type { FrameLogEntry } from '../../types/logging';
 import type {
   PersistedActivityJournal,
@@ -97,6 +97,16 @@ const proposalOf = (input: AccountInput): AccountFrame | null =>
     ? input.proposal.frame
     : null;
 
+const ackOf = (input: AccountInput): AccountAckFrame | null =>
+  input.kind === 'ack'
+    ? input.ack
+    : input.kind === 'ack_frame'
+      ? input.ack ?? null
+      : null;
+
+const accountFrameIdentity = (height: number, frameHash: string): string =>
+  `${height}:${normalize(frameHash)}`;
+
 const accountInputsOf = (envelopes: readonly RoutedEntityInput[]): AccountInput[] => {
   const inputs: AccountInput[] = [];
   for (const envelope of envelopes) {
@@ -126,8 +136,11 @@ const readAccountFrameHistoryRecords = async (
     ? Math.max(0, Number(opts?.maxAccountHeight))
     : Number.MAX_SAFE_INTEGER;
   const boundedLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit || 50))));
-  const records: PersistedAccountFrameRecord[] = [];
-  const seen = new Set<string>();
+  const proposals = new Map<string, {
+    frame: AccountFrame;
+    source: PersistedAccountFrameRecord['source'];
+  }>();
+  const acknowledgements = new Map<string, { runtimeHeight: number; timestamp: number }>();
 
   // One bounded sequential WAL scan. No per-Account queries and no eager fan-out.
   for (let runtimeHeight = 1; runtimeHeight <= maxRuntimeHeight; runtimeHeight += 1) {
@@ -140,25 +153,38 @@ const readAccountFrameHistoryRecords = async (
     ];
     for (const input of inputs) {
       if (!accountInputMatchesAccount(input, entityId, counterpartyId)) continue;
+      const ack = ackOf(input);
+      if (ack && ack.height <= maxAccountHeight) {
+        const identity = accountFrameIdentity(ack.height, ack.frameHash);
+        if (!acknowledgements.has(identity)) {
+          acknowledgements.set(identity, { runtimeHeight, timestamp: runtimeFrame.timestamp });
+        }
+      }
       const frame = proposalOf(input);
       if (!frame || frame.height > maxAccountHeight) continue;
-      const identity = `${frame.height}:${frame.stateHash}`;
-      if (seen.has(identity)) continue;
-      seen.add(identity);
-      records.push({
-        kind: 'accountFrame',
-        entityId: normalize(entityId),
-        counterpartyId: normalize(counterpartyId),
-        accountHeight: frame.height,
-        source: normalize(input.fromEntityId) === normalize(entityId) ? 'ackCommit' : 'counterpartyCommit',
-        frame: structuredClone(frame),
-        runtimeHeight,
-        timestamp: runtimeFrame.timestamp,
-      });
-      if (records.length > boundedLimit) records.shift();
+      const identity = accountFrameIdentity(frame.height, frame.stateHash);
+      if (!proposals.has(identity)) {
+        proposals.set(identity, {
+          frame: structuredClone(frame),
+          source: normalize(input.fromEntityId) === normalize(entityId) ? 'ackCommit' : 'counterpartyCommit',
+        });
+      }
     }
   }
-  return records;
+  const records = Array.from(proposals.entries()).flatMap(([identity, proposal]) => {
+    const committed = acknowledgements.get(identity);
+    return committed ? [{
+      kind: 'accountFrame' as const,
+      entityId: normalize(entityId),
+      counterpartyId: normalize(counterpartyId),
+      accountHeight: proposal.frame.height,
+      source: proposal.source,
+      frame: proposal.frame,
+      runtimeHeight: committed.runtimeHeight,
+      timestamp: committed.timestamp,
+    }] : [];
+  });
+  return records.slice(-boundedLimit);
 };
 
 export const readAccountFrameHistory = async (

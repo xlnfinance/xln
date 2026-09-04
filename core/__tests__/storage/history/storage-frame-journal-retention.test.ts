@@ -21,6 +21,7 @@ import {
   loadEnvFromDB,
   processRuntime,
   readPersistedAccountFrameHistory,
+  readPersistedAccountFrameHistoryRecords,
   readPersistedCheckpointSnapshot,
   readPersistedFrameJournal,
   readPersistedRuntimeActivityJournal,
@@ -58,6 +59,8 @@ import { validateStorageFrameRecordValue } from '../../../storage/schema/authori
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
 import type { RuntimeFrame } from '../../../storage/types';
+import type { RoutedEntityInput } from '../../../runtime/types';
+import type { AccountFrame, AccountInput } from '../../../types/account';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import {
@@ -206,6 +209,83 @@ describe('storage frame journal retention', () => {
     });
     expect(stats).toBeTruthy();
     expect(head.retainedWalBytes).toBe(stats!.walBytes);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('Account history excludes an unacknowledged collision branch', async () => {
+    const env = await createSavedEmptyEnv('account-history-collision');
+    const user = `0x${'11'.repeat(32)}`;
+    const hub = `0x${'22'.repeat(32)}`;
+    const hex = (byte: string, size = 32): string => `0x${byte.repeat(size * 2)}`;
+    const frame = (height: number, stateHash: string, prevFrameHash: string): AccountFrame => ({
+      height,
+      timestamp: height,
+      jHeight: 138,
+      accountTxs: [],
+      prevFrameHash,
+      accountStateRoot: hex('a'),
+      stateHash,
+    });
+    const accountInput = (
+      fromEntityId: string,
+      toEntityId: string,
+      value: Record<string, unknown>,
+    ): AccountInput => ({
+      fromEntityId,
+      toEntityId,
+      domain: { chainId: 1, depositoryAddress: hex('d', 20) },
+      disputeConfig: { leftResponseSeconds: 60, rightResponseSeconds: 60 },
+      ...value,
+    } as AccountInput);
+    const routed = (input: AccountInput): RoutedEntityInput => ({
+      entityId: input.toEntityId,
+      signerId: hex('e', 20),
+      from: hex('f', 20),
+      entityTxs: [{ type: 'accountInput', data: input }],
+    });
+    const loser = frame(17, hex('1'), hex('0'));
+    const winner = frame(17, hex('2'), hex('0'));
+    const final = frame(18, hex('3'), winner.stateHash);
+
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
+    await saveEnvToDB(env, {
+      runtimeTxs: [],
+      entityInputs: [routed(accountInput(hub, user, {
+        kind: 'ack_frame',
+        proposal: { frame: loser },
+      }))],
+    }, [routed(accountInput(user, hub, {
+      kind: 'ack_frame',
+      proposal: { frame: winner },
+    }))], new Map());
+
+    env.state.height = 3;
+    env.state.timestamp = 3_000;
+    await saveEnvToDB(env, {
+      runtimeTxs: [],
+      entityInputs: [routed(accountInput(hub, user, {
+        kind: 'ack_frame',
+        ack: { height: winner.height, frameHash: winner.stateHash },
+        proposal: { frame: final },
+      }))],
+    }, [routed(accountInput(user, hub, {
+      kind: 'ack',
+      ack: { height: final.height, frameHash: final.stateHash },
+    }))], new Map());
+
+    const records = await readPersistedAccountFrameHistoryRecords(env, user, hub, 10);
+    expect(records.map(({ accountHeight, source, frame, runtimeHeight }) => ({
+      accountHeight,
+      source,
+      stateHash: frame.stateHash,
+      runtimeHeight,
+    }))).toEqual([
+      { accountHeight: 17, source: 'ackCommit', stateHash: winner.stateHash, runtimeHeight: 3 },
+      { accountHeight: 18, source: 'counterpartyCommit', stateHash: final.stateHash, runtimeHeight: 3 },
+    ]);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
