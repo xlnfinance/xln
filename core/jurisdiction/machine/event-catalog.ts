@@ -24,7 +24,8 @@ export const ENTITY_PROVIDER_J_EVENTS = {
     'EntityProviderActionExecuted', 'EntityProviderActionCancelled',
   ],
   telemetry: [
-    'ApprovalForAll', 'BoardProposed', 'ControlSharesReleased',
+    'ApprovalForAll', 'BoardCommitted', 'BoardProposed', 'ControlSharesReleased',
+    'ExternalTokenListed',
     'FoundationActionExecuted', 'GovernanceEnabled',
     'ProposalCancelled', 'ShareDepositoryBound', 'TransferBatch',
     'TransferSingle', 'URI',
