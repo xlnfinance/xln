@@ -636,16 +636,16 @@ contract EntityProvider is ERC1155 {
     emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
   }
 
-  function _requireStrictShareMajority(
+  /// @dev DIVIDEND lane only. CONTROL is decided by _requireReserveControlMajority
+  ///      over Depository reserves, never by raw ERC1155 balances.
+  function _requireDividendShareMajority(
     bytes32 entityId,
     bytes32 digest,
-    bool control,
     bytes[] calldata signatures
   ) internal view {
     if (signatures.length == 0) revert MissingShareSupport();
     if (signatures.length > MAX_SHARE_SUPPORTERS) revert TooManyShareSupporters();
-    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
-    uint256 tokenId = control ? controlTokenId : dividendTokenId;
+    (, uint256 tokenId) = getTokenIds(uint256(entityId));
     uint256 totalSupport = 0;
     address previousSigner = address(0);
     for (uint256 i = 0; i < signatures.length; i++) {
@@ -661,8 +661,7 @@ contract EntityProvider is ERC1155 {
       previousSigner = signer;
     }
 
-    uint256 fixedSupply = control ? TOTAL_CONTROL_SUPPLY : TOTAL_DIVIDEND_SUPPLY;
-    if (totalSupport <= fixedSupply / 2) revert InsufficientShareSupport();
+    if (totalSupport <= TOTAL_DIVIDEND_SUPPLY / 2) revert InsufficientShareSupport();
   }
 
   function _requireReserveControlMajority(
@@ -706,7 +705,7 @@ contract EntityProvider is ERC1155 {
       return;
     }
     if (authority == ProposerType.DIVIDEND) {
-      _requireStrictShareMajority(entityId, digest, false, authorizations);
+      _requireDividendShareMajority(entityId, digest, authorizations);
       return;
     }
 
