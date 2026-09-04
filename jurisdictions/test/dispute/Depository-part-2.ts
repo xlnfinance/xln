@@ -1426,4 +1426,100 @@ describe('Depository', () => {
       }),
     ).to.be.revertedWithCustomError(depository, 'E2');
   });
+
+  it('keeps signed token/offdelta shape corruption fail-fast', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const malformedProofbody = proofBody([-100n], [107n, 108n]);
+    const malformedProofbodyHash = proofBodyHash(malformedProofbody);
+    const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const nonce = 1n;
+    const innerHash = await disputeProofHash(depository, accountKey, nonce, malformedProofbodyHash);
+    const start = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({
+        disputeStarts: [
+          {
+            counterentity: right.entityId,
+            nonce,
+            proofbodyHash: malformedProofbodyHash,
+            initialProofbody: malformedProofbody,
+            watchSeed: TEST_WATCH_SEED,
+            sig: signEntityHash(right.entityId, innerHash, right.privateKey),
+            starterInitialArguments: '0x',
+            starterCounterArguments: '0x',
+            starterCounterProofCommitment: ethers.ZeroHash,
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E8');
+    expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
+    expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+  });
+
+  it('never lets a tower start a dispute when no active dispute exists', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , tower] = await ethers.getSigners();
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    const appointmentSequence = 9n;
+    const lastResortWindowSeconds = 16n;
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([-200n], [tokenId]);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: 1n,
+      finalNonce,
+      proposerIsLeft: false,
+      initialProofbodyHash: proofBodyHash(proofBody([0n], [tokenId])),
+      finalProofbody,
+      starterArguments: '0x',
+      otherArguments: '0x',
+      sig: signEntityHash(
+        right.entityId,
+        await disputeProofHash(
+          depository,
+          await accountKeyFor(depository, left.entityId, right.entityId),
+          finalNonce,
+          finalProofbodyHash,
+        ),
+        right.privateKey,
+      ),
+      startedByLeft: true,
+      cooperative: false,
+    };
+    const ownerAuthHash = await watchtowerCounterDisputeHash(
+      depository,
+      tower.address,
+      left.entityId,
+      right.entityId,
+      finalNonce,
+      finalProofbodyHash,
+      lastResortWindowSeconds,
+      appointmentSequence,
+    );
+    const ownerAuthorization = signEntityHash(left.entityId, ownerAuthHash, left.privateKey);
+
+    await expect(
+      depository
+        .connect(tower)
+        .watchtowerCounterDispute(
+          left.entityId,
+          finalization,
+          lastResortWindowSeconds,
+          appointmentSequence,
+          ownerAuthorization,
+        ),
+    ).to.be.revertedWithCustomError(depository, 'E5');
+  });
 });
