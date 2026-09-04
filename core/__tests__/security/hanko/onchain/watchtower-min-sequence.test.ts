@@ -6,8 +6,8 @@ import {
   encodeCancelEntityProviderActionHankoPayload,
   encodeWatchtowerMinSequenceHankoPayload,
   hashWatchtowerMinSequenceHankoPayload,
-} from '../../../hanko/onchain-domain';
-import { watchtowerMinSequenceRevokingAll } from '../../../watchtower/store/appointments';
+} from '../../../../hanko/onchain-domain';
+import { watchtowerMinSequenceRevokingAll } from '../../../../watchtower/store/appointments';
 
 const DOMAIN = {
   chainId: 8453,

@@ -19,7 +19,7 @@ import type {
   TypedEventLog,
   TypedListener,
   TypedContractMethod,
-} from "../../common";
+} from "../../../common";
 
 export interface NoopERC721MockInterface extends Interface {
   getFunction(nameOrSignature: "ownerOf" | "transferFrom"): FunctionFragment;

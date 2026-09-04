@@ -122,6 +122,18 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.MockRevealRegistry__factory>;
     getContractFactory(
+      name: "FalseReturnERC20Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.FalseReturnERC20Mock__factory>;
+    getContractFactory(
+      name: "NoReturnERC20Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.NoReturnERC20Mock__factory>;
+    getContractFactory(
+      name: "SupplyLivenessHarness",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.SupplyLivenessHarness__factory>;
+    getContractFactory(
       name: "NoopERC1155Mock",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.NoopERC1155Mock__factory>;
@@ -137,18 +149,6 @@ declare module "hardhat/types/runtime" {
       name: "ToggleNoopERC721Mock",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ToggleNoopERC721Mock__factory>;
-    getContractFactory(
-      name: "FalseReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.FalseReturnERC20Mock__factory>;
-    getContractFactory(
-      name: "NoReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.NoReturnERC20Mock__factory>;
-    getContractFactory(
-      name: "SupplyLivenessHarness",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.SupplyLivenessHarness__factory>;
     getContractFactory(
       name: "TransformerLivenessHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -294,6 +294,21 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.MockRevealRegistry>;
     getContractAt(
+      name: "FalseReturnERC20Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.FalseReturnERC20Mock>;
+    getContractAt(
+      name: "NoReturnERC20Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.NoReturnERC20Mock>;
+    getContractAt(
+      name: "SupplyLivenessHarness",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.SupplyLivenessHarness>;
+    getContractAt(
       name: "NoopERC1155Mock",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -313,21 +328,6 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.ToggleNoopERC721Mock>;
-    getContractAt(
-      name: "FalseReturnERC20Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.FalseReturnERC20Mock>;
-    getContractAt(
-      name: "NoReturnERC20Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.NoReturnERC20Mock>;
-    getContractAt(
-      name: "SupplyLivenessHarness",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.SupplyLivenessHarness>;
     getContractAt(
       name: "TransformerLivenessHarness",
       address: string | ethers.Addressable,
@@ -448,6 +448,18 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockRevealRegistry>;
     deployContract(
+      name: "FalseReturnERC20Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.FalseReturnERC20Mock>;
+    deployContract(
+      name: "NoReturnERC20Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoReturnERC20Mock>;
+    deployContract(
+      name: "SupplyLivenessHarness",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.SupplyLivenessHarness>;
+    deployContract(
       name: "NoopERC1155Mock",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.NoopERC1155Mock>;
@@ -463,18 +475,6 @@ declare module "hardhat/types/runtime" {
       name: "ToggleNoopERC721Mock",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ToggleNoopERC721Mock>;
-    deployContract(
-      name: "FalseReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.FalseReturnERC20Mock>;
-    deployContract(
-      name: "NoReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoReturnERC20Mock>;
-    deployContract(
-      name: "SupplyLivenessHarness",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SupplyLivenessHarness>;
     deployContract(
       name: "TransformerLivenessHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -620,6 +620,21 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockRevealRegistry>;
     deployContract(
+      name: "FalseReturnERC20Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.FalseReturnERC20Mock>;
+    deployContract(
+      name: "NoReturnERC20Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoReturnERC20Mock>;
+    deployContract(
+      name: "SupplyLivenessHarness",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.SupplyLivenessHarness>;
+    deployContract(
       name: "NoopERC1155Mock",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -639,21 +654,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ToggleNoopERC721Mock>;
-    deployContract(
-      name: "FalseReturnERC20Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.FalseReturnERC20Mock>;
-    deployContract(
-      name: "NoReturnERC20Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoReturnERC20Mock>;
-    deployContract(
-      name: "SupplyLivenessHarness",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SupplyLivenessHarness>;
     deployContract(
       name: "TransformerLivenessHarness",
       args: any[],

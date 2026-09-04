@@ -5,15 +5,15 @@ import {
   ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT,
   ONCHAIN_HANKO_GOLDEN_HASHES,
   ONCHAIN_HANKO_GOLDEN_PAYLOADS,
-} from '../../../../tests/fixtures/onchain-hanko-golden';
+} from '../../../../../tests/fixtures/onchain-hanko-golden';
 
-import { computeBatchHankoHash } from '../../../jurisdiction/machine/batch';
+import { computeBatchHankoHash } from '../../../../jurisdiction/machine/batch';
 import {
   createCooperativeDisputeProofHash,
   createDisputeProofHash,
   createSettlementHashWithNonce,
-} from '../../../protocol/dispute/proof-builder';
-import { computeWatchtowerCounterDisputeAuthorizationHash } from '../../../storage/recovery/bundle/crypto';
+} from '../../../../protocol/dispute/proof-builder';
+import { computeWatchtowerCounterDisputeAuthorizationHash } from '../../../../storage/recovery/bundle/crypto';
 import {
   ENTITY_PROVIDER_ACTION_CANCELLED_EVENT,
   ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC,
@@ -37,7 +37,7 @@ import {
   hashCancelEntityProviderActionHankoPayload,
   hashFinalDisputeProofHankoPayload,
   hashReleaseControlSharesHankoPayload,
-} from '../../../hanko/onchain-domain';
+} from '../../../../hanko/onchain-domain';
 
 const CHAIN_ID = 8453;
 const DEPOSITORY = '0x1111111111111111111111111111111111111111';

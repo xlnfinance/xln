@@ -19,51 +19,38 @@ import type {
   TypedEventLog,
   TypedListener,
   TypedContractMethod,
-} from "../../common";
+} from "../../../common";
 
-export interface ToggleNoopERC1155MockInterface extends Interface {
+export interface ToggleNoopERC721MockInterface extends Interface {
   getFunction(
-    nameOrSignature:
-      | "balanceOf"
-      | "noop"
-      | "safeTransferFrom"
-      | "setNoop"
-      | "totalSupply"
+    nameOrSignature: "noop" | "ownerOf" | "setNoop" | "transferFrom"
   ): FunctionFragment;
 
-  encodeFunctionData(
-    functionFragment: "balanceOf",
-    values: [AddressLike, BigNumberish]
-  ): string;
   encodeFunctionData(functionFragment: "noop", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "safeTransferFrom",
-    values: [AddressLike, AddressLike, BigNumberish, BigNumberish, BytesLike]
+    functionFragment: "ownerOf",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(functionFragment: "setNoop", values: [boolean]): string;
   encodeFunctionData(
-    functionFragment: "totalSupply",
-    values: [BigNumberish]
+    functionFragment: "transferFrom",
+    values: [AddressLike, AddressLike, BigNumberish]
   ): string;
 
-  decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "noop", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "safeTransferFrom",
-    data: BytesLike
-  ): Result;
+  decodeFunctionResult(functionFragment: "ownerOf", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "setNoop", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "totalSupply",
+    functionFragment: "transferFrom",
     data: BytesLike
   ): Result;
 }
 
-export interface ToggleNoopERC1155Mock extends BaseContract {
-  connect(runner?: ContractRunner | null): ToggleNoopERC1155Mock;
+export interface ToggleNoopERC721Mock extends BaseContract {
+  connect(runner?: ContractRunner | null): ToggleNoopERC721Mock;
   waitForDeployment(): Promise<this>;
 
-  interface: ToggleNoopERC1155MockInterface;
+  interface: ToggleNoopERC721MockInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -102,63 +89,38 @@ export interface ToggleNoopERC1155Mock extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  balanceOf: TypedContractMethod<
-    [owner: AddressLike, arg1: BigNumberish],
-    [bigint],
-    "view"
-  >;
-
   noop: TypedContractMethod<[], [boolean], "view">;
 
-  safeTransferFrom: TypedContractMethod<
-    [
-      from: AddressLike,
-      to: AddressLike,
-      arg2: BigNumberish,
-      amount: BigNumberish,
-      arg4: BytesLike
-    ],
-    [void],
-    "nonpayable"
-  >;
+  ownerOf: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
 
   setNoop: TypedContractMethod<[value: boolean], [void], "nonpayable">;
 
-  totalSupply: TypedContractMethod<[arg0: BigNumberish], [bigint], "view">;
+  transferFrom: TypedContractMethod<
+    [from: AddressLike, to: AddressLike, arg2: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
 
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
 
   getFunction(
-    nameOrSignature: "balanceOf"
-  ): TypedContractMethod<
-    [owner: AddressLike, arg1: BigNumberish],
-    [bigint],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "noop"
   ): TypedContractMethod<[], [boolean], "view">;
   getFunction(
-    nameOrSignature: "safeTransferFrom"
-  ): TypedContractMethod<
-    [
-      from: AddressLike,
-      to: AddressLike,
-      arg2: BigNumberish,
-      amount: BigNumberish,
-      arg4: BytesLike
-    ],
-    [void],
-    "nonpayable"
-  >;
+    nameOrSignature: "ownerOf"
+  ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
   getFunction(
     nameOrSignature: "setNoop"
   ): TypedContractMethod<[value: boolean], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "totalSupply"
-  ): TypedContractMethod<[arg0: BigNumberish], [bigint], "view">;
+    nameOrSignature: "transferFrom"
+  ): TypedContractMethod<
+    [from: AddressLike, to: AddressLike, arg2: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
 
   filters: {};
 }

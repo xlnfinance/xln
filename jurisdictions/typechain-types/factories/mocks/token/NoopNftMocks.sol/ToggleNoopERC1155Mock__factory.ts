@@ -13,11 +13,11 @@ import type {
   ContractDeployTransaction,
   ContractRunner,
 } from "ethers";
-import type { NonPayableOverrides } from "../../../common";
+import type { NonPayableOverrides } from "../../../../common";
 import type {
   ToggleNoopERC1155Mock,
   ToggleNoopERC1155MockInterface,
-} from "../../../mocks/NoopNftMocks.sol/ToggleNoopERC1155Mock";
+} from "../../../../mocks/token/NoopNftMocks.sol/ToggleNoopERC1155Mock";
 
 const _abi = [
   {
