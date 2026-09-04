@@ -78,12 +78,6 @@ const FROZEN_CORE_SURFACE = new Set([
   'core/types/jurisdiction-events.ts::type:JBlockFinalized',
 ]);
 
-/** Exact exports of the separately published Brainvault package. */
-const PUBLIC_PACKAGE_SURFACE = new Set([
-  'brainvault/cli-policy.ts::export:MIN_CLI_PASSWORD_CHARACTERS',
-  'brainvault/core.ts::type:BrainvaultKdfParams',
-]);
-
 type NamedBinding = { localName: string; reexport: boolean };
 
 export const findNamedBinding = (source: string, specifier: string, symbol: string): NamedBinding | null => {
@@ -190,10 +184,7 @@ const run = (): void => {
   const runtimeDebt = runtimeActual.filter(
     key => !externalRuntime.includes(key) && !FROZEN_CORE_SURFACE.has(key),
   );
-  const publicPackageSurface = actual.filter(key => PUBLIC_PACKAGE_SURFACE.has(key));
-  const nonRuntimeActual = actual.filter(
-    key => !key.startsWith('core/') && !PUBLIC_PACKAGE_SURFACE.has(key),
-  );
+  const nonRuntimeActual = actual.filter(key => !key.startsWith('core/'));
   const errors = [
     ...runtimeDebt.map(key => `UNUSED_RUNTIME_SURFACE:${key}`),
     ...Object.entries(EXTERNAL_RUNTIME_CONSUMERS).flatMap(([file, proofs]) =>
@@ -205,9 +196,6 @@ const run = (): void => {
     ...[...FROZEN_CORE_SURFACE]
       .filter(key => !frozenSurface.includes(key))
       .map(key => `STALE_FROZEN_CORE_SURFACE:${key}`),
-    ...[...PUBLIC_PACKAGE_SURFACE]
-      .filter(key => !publicPackageSurface.includes(key))
-      .map(key => `STALE_PUBLIC_PACKAGE_SURFACE:${key}`),
     ...nonRuntimeActual.map(key => `UNUSED_NON_RUNTIME_SURFACE:${key}`),
   ];
   if (errors.length > 0) {
@@ -215,7 +203,7 @@ const run = (): void => {
   }
   console.log(
     `UNUSED_SURFACE_OK runtimeDebt=0 externalRuntime=${externalRuntime.length} ` +
-    `publicPackage=${publicPackageSurface.length} nonRuntimeDebt=${nonRuntimeActual.length} new=0 stale=0`,
+    `nonRuntimeDebt=${nonRuntimeActual.length} new=0 stale=0`,
   );
 };
 

@@ -209,6 +209,7 @@ const decodeOutboundPayload = (
       'clearRebalanceActiveQuote',
       'setRebalancePolicy',
       'setRebalanceSubmittedAt',
+      'replaceBoardHankoRefreshMigration',
       'replaceDisputeLifecycle',
       'applyDisputeStarted',
       'applyDisputeFinality',
@@ -293,15 +294,11 @@ const decodeOutboundPayload = (
       input['needShardRoot'],
       'TS_ACCOUNT_WORKER_OUTBOUND_NEED_SHARD_ROOT',
     ),
-    continuation: requireBoolean(
-      input['continuation'],
-      'TS_ACCOUNT_WORKER_OUTBOUND_CONTINUATION',
+    prepareAttempt: requireBoolean(
+      input['prepareAttempt'],
+      'TS_ACCOUNT_WORKER_OUTBOUND_PREPARE_ATTEMPT',
     ),
     frameId: requireString(input['frameId'], 'TS_ACCOUNT_WORKER_OUTBOUND_FRAME'),
-    restorePrevious: requireBoolean(
-      input['restorePrevious'],
-      'TS_ACCOUNT_WORKER_OUTBOUND_RESTORE_PREVIOUS',
-    ),
     timestamp: requireInteger(input['timestamp'], 'TS_ACCOUNT_WORKER_OUTBOUND_TIMESTAMP'),
     jHeight: requireInteger(input['jHeight'], 'TS_ACCOUNT_WORKER_OUTBOUND_JHEIGHT'),
     ...(localBoardAuthority ? { localBoardAuthority } : {}),

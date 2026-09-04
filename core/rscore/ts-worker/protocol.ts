@@ -201,10 +201,9 @@ export type TsAccountWorkerOutboundPayload = Readonly<{
   phase: 'outbound';
   /** Final Account visit requests the one frame-boundary shard seal. */
   needShardRoot: boolean;
-  /** Rust-compatible second visit only for genuine failed-HTLC resolutions. */
-  continuation: boolean;
+  /** This is the worker's first visit in the current Entity-frame attempt. */
+  prepareAttempt: boolean;
   frameId: string;
-  restorePrevious: boolean;
   timestamp: number;
   jHeight: number;
   localBoardAuthority?: TsAccountWorkerCertifiedBoard;

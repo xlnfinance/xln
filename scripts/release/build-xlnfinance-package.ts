@@ -16,7 +16,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { RemoteRuntimeAdapter } from '../../core/api/runtime-adapter/remote';
-import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/primitives/spec';
+import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/src/core/primitives/spec';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const PACKAGE_DIR = join(ROOT, 'packages/npm/xlnfinance');
@@ -100,7 +100,7 @@ const buildPackage = (): void => {
   ]);
   run('bun', [
     'build',
-    'brainvault/worker-native.ts',
+    'brainvault/src/native/workers/native.ts',
     '--target=bun',
     '--external=@node-rs/argon2',
     `--outfile=${join(DIST_DIR, 'brainvault-worker-native.js')}`,
@@ -119,11 +119,16 @@ const buildPackage = (): void => {
   cpSync(join(ROOT, 'jurisdictions/jurisdictions.json'), join(CONFIG_DIR, 'jurisdictions.json'));
 
   const files = [...walkFiles(DIST_DIR), ...walkFiles(APP_DIR), ...walkFiles(CONFIG_DIR)];
+  const packagedPaths = files.map(path => relative(PACKAGE_DIR, path).replaceAll('\\', '/'));
+  const externalSourceLeak = packagedPaths.find(path => path.split('/').includes('brainvault'));
+  if (externalSourceLeak) {
+    throw new Error(`XLNFINANCE_EXTERNAL_BRAINVAULT_SOURCE_INCLUDED:${externalSourceLeak}`);
+  }
   const manifest = {
     schemaVersion: 1,
     version,
-    files: files.map(path => ({
-      path: relative(PACKAGE_DIR, path).replaceAll('\\', '/'),
+    files: files.map((path, index) => ({
+      path: packagedPaths[index]!,
       bytes: statSync(path).size,
       sha256: sha256(path),
     })),

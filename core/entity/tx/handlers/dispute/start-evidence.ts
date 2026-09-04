@@ -55,34 +55,6 @@ export const resolveStoredDisputeStartNonce = (
   return { signedNonce, nonceSource: 'counterpartyHanko' };
 };
 
-const selectCounterDisputeProof = (
-  account: AccountReplica,
-  signedNonce: number,
-  initialProposerIsLeft: boolean,
-) => {
-  const counterHash = account.currentDisputeProofBodyHash;
-  const counterNonce = account.currentDisputeProofNonce;
-  const counterProposerIsLeft = account.currentDisputeProofProposerIsLeft;
-  if (
-    !counterHash ||
-    counterNonce === undefined ||
-    typeof counterProposerIsLeft !== 'boolean'
-  ) return [];
-  const outranksInitial =
-    counterNonce > signedNonce ||
-    (
-      counterNonce === signedNonce &&
-      counterProposerIsLeft &&
-      !initialProposerIsLeft
-    );
-  if (!outranksInitial) return [];
-  return [{
-    proofbodyHash: counterHash,
-    nonce: counterNonce,
-    proposerIsLeft: counterProposerIsLeft,
-  }];
-};
-
 export const loadStartProof = (
   sourceState: EntityState,
   state: EntityState,
@@ -191,7 +163,6 @@ export const buildStarterArguments = (
   account: AccountReplica,
   counterpartyId: string,
   proofBodyHash: string,
-  signedNonce: number,
   overrideInitial: string | undefined,
   env: EntityRuntimeContext,
 ): Pick<
@@ -216,42 +187,10 @@ export const buildStarterArguments = (
       : starterIsLeft
         ? initial.leftArguments
         : initial.rightArguments;
-  const initialProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
-  if (typeof initialProposerIsLeft !== 'boolean') {
-    throw new Error(`DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyId}`);
-  }
-  const candidates = selectCounterDisputeProof(
-    account,
-    signedNonce,
-    initialProposerIsLeft,
-  );
   const warnings = [...initial.warnings];
-  let rawCounter = '0x';
-  let starterCounterProofCommitment = ethers.ZeroHash;
-  if (candidates.length === 1) {
-    const candidate = candidates[0]!;
-    const counter = buildDisputeArgumentsForCurrentState(
-      account,
-      state,
-      env.state,
-      counterpartyId,
-      candidate.proofbodyHash,
-      { secretsSide: starterSide },
-    );
-    rawCounter = starterIsLeft
-      ? counter.leftArguments
-      : counter.rightArguments;
-    starterCounterProofCommitment = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        ['uint256', 'bool', 'bytes32'],
-        [candidate.nonce, candidate.proposerIsLeft, candidate.proofbodyHash],
-      ),
-    );
-    warnings.push(...counter.warnings);
-  }
   const sanitized = sanitizeOptionalDisputeStarterArgumentPair(
     rawInitial,
-    rawCounter,
+    '0x',
     'disputeStart.starterArguments',
   );
   warnings.push(...sanitized.warnings);
@@ -263,6 +202,6 @@ export const buildStarterArguments = (
   return {
     starterInitialArguments: sanitized.initial,
     starterCounterArguments: sanitized.counter,
-    starterCounterProofCommitment,
+    starterCounterProofCommitment: ethers.ZeroHash,
   };
 };

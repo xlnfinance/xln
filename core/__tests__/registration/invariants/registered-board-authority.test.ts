@@ -13,6 +13,7 @@ import { applyEntityInput, selectProposableEntityTxs } from '../../../entity/con
 import {
   getBoardHandoverFrameConfig,
   getPendingBoardHandoverConfig,
+  withBoardAuthority,
 } from '../../../entity/consensus/authority/board-handover';
 import { applyEntityTx } from '../../../entity/tx/apply';
 import { buildQuorumHanko, verifyHankoForHash } from '../../../hanko/signing';
@@ -548,6 +549,107 @@ describe('registered Entity certified board authority', () => {
       expect((error as FailureDispositionError).disposition).toBe('reject');
       expect((error as FailureDispositionError).code).toBe('BOARD_HANDOVER_COUNT_INVALID');
     }
+  });
+
+  test('successor proposes a certified old-to-new board handover exactly once', async () => {
+    const env = createEmptyEnv('registry-board-handover-proposal');
+    env.runtimeSeed = 'registry-board-handover-proposal';
+    env.state.timestamp = 1_001;
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const successorKey = deriveSignerKeySync('registry-board-handover-proposal', '1');
+    const successor = computeAddress(new SigningKey(hex(successorKey)).publicKey).toLowerCase();
+    registerSignerKey(env, successor, successorKey);
+    provisionTestEntityEncryptionKey(env, registeredEntityId);
+    const validatorB = addr('b1');
+    const validatorC = addr('c1');
+    const oldConfig = {
+      mode: 'proposer-based' as const,
+      threshold: 2n,
+      validators: [successor, validatorB, validatorC],
+      shares: { [successor]: 1n, [validatorB]: 1n, [validatorC]: 1n },
+      jurisdiction,
+    };
+    const newConfig = {
+      ...oldConfig,
+      threshold: 1n,
+      validators: [successor],
+      shares: { [successor]: 1n },
+    };
+    const oldBoard = hashBoard(encodeBoard(oldConfig, env)).toLowerCase();
+    const newBoard = hashBoard(encodeBoard(newConfig, env)).toLowerCase();
+    const foundation = event('FoundationBootstrapped', blockHash('31'));
+    const registration = event('EntityRegistered', oldBoard);
+    const activation = event('BoardActivated', newBoard, {
+      height: 3,
+      previousBoardHash: oldBoard,
+    });
+    const mutableState = makeState(registeredEntityId, successor, jurisdiction);
+    mutableState.config = oldConfig;
+    installEvents(env, mutableState, [foundation, registration]);
+    certifyEventPrefix(mutableState, [foundation, registration]);
+    const state = commitEntityFrameCandidateState(mutableState);
+    const activationData = buildJEventRangeData(state, {
+      from: successor,
+      jurisdictionRef: getJEventJurisdictionRef(jurisdiction),
+      event: activation,
+      observedAt: 3,
+      blockNumber: 3,
+      blockHash: activation.blockHash,
+    }, env);
+    const activationBlock = activationData.blocks[0]!;
+    const jHistory = recordValidatorJHistory(undefined, {
+      jurisdictionRef: getJEventJurisdictionRef(jurisdiction),
+      scannedThroughHeight: 3,
+      tipBlockHash: activation.blockHash,
+      headers: [{ jHeight: 3, jBlockHash: activation.blockHash }],
+      blocks: [{
+        jurisdictionRef: getJEventJurisdictionRef(jurisdiction),
+        jHeight: 3,
+        jBlockHash: activationBlock.blockHash,
+        eventsHash: activationBlock.eventsHash,
+        events: activationBlock.events,
+      }],
+    }, state);
+    const handover = {
+      type: 'boardHandover',
+      data: {
+        board: {
+          mode: newConfig.mode,
+          threshold: newConfig.threshold,
+          validators: [...newConfig.validators],
+          shares: { ...newConfig.shares },
+        },
+      },
+    } satisfies EntityTx;
+    const replica = {
+      entityId: registeredEntityId,
+      signerId: successor,
+      entityEncPubKey: '',
+      state,
+      mempool: [handover],
+      isProposer: true,
+      jHistory,
+    } as EntityReplica;
+    const authorityReplica = {
+      ...replica,
+      state: withBoardAuthority(replica.state, newConfig),
+    };
+    const attestation = buildLocalJPrefixAttestation(env, authorityReplica, jHistory);
+    if (!attestation) throw new Error('TEST_BOARD_HANDOVER_J_PREFIX_ATTESTATION_MISSING');
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: registeredEntityId,
+      signerId: successor,
+      jPrefixAttestations: new Map([[successor, attestation]]),
+    });
+
+    expect(result.outcome.kind).toBe('committed');
+    expect(result.workingReplica.state.height).toBe(state.height + 1);
+    expect(result.workingReplica.state.config).toEqual(newConfig);
+    expect(result.workingReplica.mempool).toEqual([]);
+    expect(result.workingReplica.certifiedFrameHead?.frame.txs.map(tx => tx.type))
+      .toEqual(['j_event', 'boardHandover']);
   });
 
   test('one frame applies a contiguous multi-activation board handover', async () => {

@@ -34,6 +34,10 @@ export type RuntimeTraceCollector = {
   stop: () => void;
 };
 
+export type RuntimeTraceScope = RuntimeTraceCollector & {
+  readonly startIndex: number;
+};
+
 /**
  * Explicit test/scenario trace. Production RuntimeReplica state stays bounded; callers
  * that need a complete determinism oracle own this separate lifetime instead.
@@ -52,6 +56,24 @@ export const startRuntimeTraceForTesting = (env: RuntimeReplica): RuntimeTraceCo
     stop: () => {
       if (testingTraceByEnv.get(env) === trace) testingTraceByEnv.delete(env);
     },
+  };
+};
+
+/** Reuse an outer recorder when present; only the creator may stop the collector. */
+export const openRuntimeTraceScopeForTesting = (env: RuntimeReplica): RuntimeTraceScope => {
+  const active = readRuntimeTraceForTesting(env);
+  if (active) {
+    return {
+      snapshots: active,
+      startIndex: active.length,
+      stop: () => {},
+    };
+  }
+  const recorder = startRuntimeTraceForTesting(env);
+  return {
+    snapshots: recorder.snapshots,
+    startIndex: recorder.snapshots.length,
+    stop: recorder.stop,
   };
 };
 

@@ -226,7 +226,7 @@ for (const [path, markers] of [
     'ROUTE_P2P_UNAVAILABLE',
     'requireDeliveryResult(',
     'requireDeliveryDelivered(',
-    'const tryDirectOutputEnvelope = (',
+    'const dispatchDirectOutputEnvelope = (',
     'if (!isDeliveryDelivered(delivery)) return false;',
     'const dispatchP2POutputEnvelope = (',
   ]],

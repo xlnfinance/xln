@@ -74,9 +74,13 @@ const activation = (entityId: string, logIndex = 2): Extract<JurisdictionEvent, 
   },
 });
 
-const installBoardHankoRefreshHook = (state: EntityState, event: ReturnType<typeof activation>): void => {
+const installBoardHankoRefreshHook = (
+  env: RuntimeReplica,
+  state: EntityState,
+  event: ReturnType<typeof activation>,
+): void => {
   openWritableEntityAccounts(state);
-  const pending = markBoardRotationHankoRefreshesPending(state, event);
+  const pending = markBoardRotationHankoRefreshesPending(env, state, event);
   if (!state.crontabState) throw new Error('TEST_BOARD_HANKO_REFRESH_CRONTAB_MISSING');
   scheduleHook(state.crontabState, {
     id: BOARD_HANKO_REFRESH_HOOK_ID,
@@ -185,7 +189,7 @@ test('bad board Hanko refresh account cannot block good output and re-arms only 
   bad.currentDisputeProofHanko = '0x03';
   putCommittedAccount(state, badId, bad);
   putCommittedAccount(state, goodId, good);
-  installBoardHankoRefreshHook(state, activation(sourceEntityId));
+  installBoardHankoRefreshHook(env, state, activation(sourceEntityId));
 
   const evidenceBeforeFirst = captureAccountBoardHankoRefreshEvidence(state, new Set([badId]));
   const first = await handleScheduledWakeEntityTx(
@@ -266,7 +270,7 @@ test('Account advance re-arms the same activation and issues the current frame b
     digest(251),
   );
   putCommittedAccount(state, fixture.counterpartyId, fixture.account);
-  installBoardHankoRefreshHook(state, activation(sourceEntityId, 7));
+  installBoardHankoRefreshHook(env, state, activation(sourceEntityId, 7));
 
   const first = await handleScheduledWakeEntityTx(
     env,
@@ -351,7 +355,7 @@ test('1000 board Hanko refreshes drain in deterministic 32-account frames across
     );
     putCommittedAccount(state, fixture.counterpartyId, fixture.account);
   }
-  installBoardHankoRefreshHook(state, activation(sourceEntityId, 5));
+  installBoardHankoRefreshHook(env, state, activation(sourceEntityId, 5));
   const sourceReplica = {
     entityId: sourceEntityId,
     signerId,

@@ -216,7 +216,6 @@ import { resolveHankoBoardDelays } from '../../../hanko/claims';
 import { verifyHankoForHash } from '../../../hanko/signing';
 import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
 
-import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 
 import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
 

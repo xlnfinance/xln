@@ -195,9 +195,10 @@ export const recordSelectiveRerunFailure = (
   path = DEFAULT_LEDGER_PATH,
 ): void => {
   withLedgerLock(path, () => {
+    const reason = entry.reason.replace(/[\r\n]+/g, ' ').trim().slice(0, 500) || 'unknown-failure';
     const canonicalEntry = decodeEntry({
       ...entry,
-      reason: entry.reason.trim() || 'unknown-failure',
+      reason,
     }, 0);
     const ledger = readSelectiveRerunLedger(path);
     const unresolved = ledger.unresolved.filter(

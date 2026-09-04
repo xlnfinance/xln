@@ -293,7 +293,6 @@ fn collect_r2c_targets(
     liquidity_fee_bps: &BigInt,
     effects: &mut Vec<EntityKernelOutput>,
 ) -> Result<Vec<R2cTarget>, EntityKernelError> {
-    let mut reserves = state.reserves.clone();
     let mut targets = Vec::new();
     for view in views {
         for (token_id, requested_raw) in &view.requested_rebalance {
@@ -464,38 +463,10 @@ fn collect_r2c_targets(
                 continue;
             }
             let requested = requested_raw.min(&uncollateralized).clone();
-            let reserve = reserves.get(&token_id.get()).cloned().unwrap_or_default();
-            let amount = requested.clone().min(reserve.clone());
-            if amount <= BigInt::from(0_u8) {
-                effects.push(diagnostic(
-                    state,
-                    2,
-                    "blocked",
-                    "hub_reserve_zero",
-                    vec![
-                        (
-                            "counterpartyId".into(),
-                            CanonicalValue::String(view.account_id.clone()),
-                        ),
-                        (
-                            "tokenId".into(),
-                            CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(
-                                token_id.get(),
-                            ))),
-                        ),
-                        (
-                            "requestedAmount".into(),
-                            CanonicalValue::String(requested.to_string()),
-                        ),
-                    ],
-                ));
-                continue;
-            }
-            reserves.insert(token_id.get(), reserve - &amount);
             targets.push(R2cTarget {
                 account_id: view.account_id.clone(),
                 token_id: *token_id,
-                amount,
+                amount: requested,
                 requested_at: fee.requested_at,
                 fee_paid_upfront: fee.fee_paid_upfront.clone(),
             });
@@ -515,8 +486,47 @@ fn collect_r2c_targets(
             .cmp(&right.requested_at)
             .then(right.amount.cmp(&left.amount)),
     });
-    targets.truncate(HUB_MAX_R2C_PER_TICK);
-    Ok(targets)
+    let mut reserves = state.reserves.clone();
+    let mut funded = Vec::new();
+    for mut target in targets {
+        if funded.len() == HUB_MAX_R2C_PER_TICK {
+            break;
+        }
+        let reserve = reserves
+            .get(&target.token_id.get())
+            .cloned()
+            .unwrap_or_default();
+        let amount = target.amount.clone().min(reserve.clone());
+        if amount <= BigInt::from(0_u8) {
+            effects.push(diagnostic(
+                state,
+                2,
+                "blocked",
+                "hub_reserve_zero",
+                vec![
+                    (
+                        "counterpartyId".into(),
+                        CanonicalValue::String(target.account_id),
+                    ),
+                    (
+                        "tokenId".into(),
+                        CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(
+                            target.token_id.get(),
+                        ))),
+                    ),
+                    (
+                        "requestedAmount".into(),
+                        CanonicalValue::String(target.amount.to_string()),
+                    ),
+                ],
+            ));
+            continue;
+        }
+        reserves.insert(target.token_id.get(), reserve - &amount);
+        target.amount = amount;
+        funded.push(target);
+    }
+    Ok(funded)
 }
 
 fn workspace_fields(value: &CanonicalValue) -> Option<&[(String, CanonicalValue)]> {
@@ -954,6 +964,73 @@ mod tests {
             Some(CanonicalValue::String(value)) => value,
             _ => panic!("debug event"),
         }
+    }
+
+    fn r2c_view(account_byte: u8, requested: u64, requested_at: u64) -> HubRebalanceAccountView {
+        let token = TokenId::new(1).expect("token");
+        let amount = BigInt::from(requested);
+        let delta = Delta::new(
+            token,
+            BigInt::from(0_u8),
+            -amount.clone(),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+        )
+        .expect("delta");
+        HubRebalanceAccountView {
+            account_id: format!("0x{}", format!("{account_byte:02x}").repeat(32)),
+            owner_side: Side::Left,
+            pending_frame: false,
+            settlement_transition_pending: false,
+            settlement_workspace: None,
+            requested_rebalance: [(token, amount)].into_iter().collect(),
+            fee_state: [(
+                token,
+                HubRebalanceFeeState {
+                    request_id: format!("request-{account_byte:02x}"),
+                    fee_paid_upfront: BigInt::from(1_000_000_u64),
+                    policy_version: 1,
+                    requested_at,
+                    refund: false,
+                    refunded_amount: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            submitted_at_by_token: BTreeMap::new(),
+            deltas: [(token, delta)].into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn amount_priority_funds_later_larger_request_first_when_reserve_is_scarce() {
+        let mut state = hub_state(100);
+        state.reserves.insert(1, BigInt::from(600_u64));
+        let views = [r2c_view(0x22, 400, 1), r2c_view(0x33, 900, 2)];
+        let mut effects = Vec::new();
+
+        let targets = collect_r2c_targets(
+            &state,
+            &views,
+            MatchingStrategy::Amount,
+            1,
+            &BigInt::from(0_u8),
+            &mut effects,
+        )
+        .expect("targets");
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].account_id, format!("0x{}", "33".repeat(32)));
+        assert_eq!(targets[0].amount, BigInt::from(600_u64));
+        assert_eq!(
+            effects.iter().map(diagnostic_event).collect::<Vec<_>>(),
+            ["hub_reserve_zero"]
+        );
     }
 
     #[test]

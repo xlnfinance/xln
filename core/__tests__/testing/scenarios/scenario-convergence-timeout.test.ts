@@ -71,6 +71,20 @@ describe('scenario convergence timeout diagnostics', () => {
     expect(env.pendingNetworkOutputs).toHaveLength(1);
   });
 
+  test('offline local delivery is retained in FIFO backlog until reconnect', async () => {
+    const env = createEmptyEnv('scenario-convergence-timeout:offline-local');
+    env.scenarioMode = true;
+    const first = { entityId, signerId: '4' };
+    const second = { entityId, signerId: '4', entityTxs: [] };
+    env.pendingOutputs = [first, second];
+
+    await processWithOffline(env, undefined, new Set(['4']), 'validator-offline');
+
+    expect(env.pendingOutputs).toEqual([first, second]);
+    await convergeWithOffline(env, new Set(['4']), 1, 'validator-offline');
+    expect(env.pendingOutputs).toEqual([first, second]);
+  });
+
   test('online durable network backlog still fails simulated convergence', async () => {
     const env = createEmptyEnv('scenario-convergence-timeout:mixed-network');
     env.scenarioMode = true;

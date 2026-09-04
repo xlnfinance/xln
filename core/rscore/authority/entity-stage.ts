@@ -23,6 +23,7 @@ import { safeStringify } from '../../protocol/serialization';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
 import type { AccountEnvelopeUpdate } from '../../account/envelope/entity-update';
+import { acceptsExternalAccountInput } from '../../account/consensus/dispute/policy';
 
 const countFrameApplyPhase = (name: string, startedAt: number): void => {
   if (!OP_COUNTERS_ENABLED) return;
@@ -45,12 +46,18 @@ export type AccountAuthorityEntityStageProvider = Readonly<{
   executeAccountOutboundBatch(
     input: AccountAuthorityEntityBatchOutbound,
   ): Promise<AccountAuthorityPreparedOutbound>;
+  discardEntityFrameAttempt(input: Readonly<{
+    ownerEntityId: string;
+    ownerSignerId: string;
+    occurrence: AccountAuthorityEntityOccurrence;
+  }>): Promise<void>;
   executeEntityBooksBatch(input: Readonly<{
     ownerEntityId: string;
+    ownerSignerId: string;
     request: AccountAuthorityFrameBooksRequest;
   }>): Promise<void>;
   installCommittedAccountHankos?(
-    input: AccountAuthorityCommittedHankosRequest,
+    input: AccountAuthorityCommittedHankosRequest & Readonly<{ ownerSignerId: string }>,
   ): Promise<void>;
 }>;
 
@@ -82,6 +89,7 @@ type AccountAuthorityInboundBatchRequest = AccountAuthorityInputRequest & Readon
 
 type AccountAuthorityEntityParent = Readonly<{
   ownerEntityId: string;
+  ownerSignerId: string;
   unsupportedEntityTxTypes: readonly EntityTx['type'][];
   occurrence: AccountAuthorityEntityOccurrence;
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
@@ -111,6 +119,7 @@ export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent &
 
 interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
   readonly ownerEntityId: string;
+  readonly ownerSignerId: string;
   typeScriptExecutionCounts(): TypeScriptAccountExecutionCounts;
   authoritativeExecutionCount(): number;
   discard(): Promise<void>;
@@ -118,6 +127,7 @@ interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapabil
 
 export type AccountAuthorityEntityStageOptions = Readonly<{
   ownerEntityId: string;
+  ownerSignerId: string;
   provider: AccountAuthorityEntityStageProvider;
   occurrence: AccountAuthorityEntityOccurrence;
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
@@ -132,6 +142,7 @@ export type AccountAuthorityEntityStageConfiguration = Readonly<{
 
 export type AccountAuthorityEntityTransition = Readonly<{
   ownerEntityId: string;
+  ownerSignerId: string;
   occurrence?: AccountAuthorityEntityOccurrence | undefined;
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
   deferProposal: boolean;
@@ -158,6 +169,7 @@ export const resolveAccountAuthorityEntityStageOptions = (
   }
   return {
     ownerEntityId: transition.ownerEntityId,
+    ownerSignerId: transition.ownerSignerId,
     provider,
     occurrence,
     ...(transition.trustedLocalRuntimeProtocol === undefined
@@ -213,6 +225,7 @@ const assertNoTypeScriptAccountExecution = (
 
 class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   readonly ownerEntityId: string;
+  readonly ownerSignerId: string;
   private readonly options: AccountAuthorityEntityStageOptions;
   private readonly occurrence: AccountAuthorityEntityOccurrence;
   private unsupportedEntityTxTypes: EntityTx['type'][] | null = null;
@@ -237,10 +250,21 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   private generatedAdmissions: AccountAuthorityPreparedOutbound['generatedAdmissions'] = [];
   private generatedAdmissionCursor = 0;
 
+  private async discardOpenFrameAttempt(): Promise<void> {
+    if (!this.frameOpened) return;
+    await this.options.provider.discardEntityFrameAttempt({
+      ownerEntityId: this.ownerEntityId,
+      ownerSignerId: this.ownerSignerId,
+      occurrence: this.occurrence,
+    });
+    this.frameOpened = false;
+  }
+
   constructor(options: AccountAuthorityEntityStageOptions) {
     assertOccurrence(options.occurrence);
     this.options = options;
     this.ownerEntityId = normalizeEntityId(options.ownerEntityId);
+    this.ownerSignerId = normalizeEntityId(options.ownerSignerId);
     this.occurrence = options.occurrence.kind === 'runtime-input'
       ? { kind: 'runtime-input', inputIndex: options.occurrence.inputIndex }
       : { kind: 'local-event', ordinal: options.occurrence.ordinal };
@@ -253,6 +277,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     }
     return {
       ownerEntityId: this.ownerEntityId,
+      ownerSignerId: this.ownerSignerId,
       unsupportedEntityTxTypes: this.unsupportedEntityTxTypes,
       occurrence: this.occurrence,
       ...(this.options.trustedLocalRuntimeProtocol === undefined
@@ -269,6 +294,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
       throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
     }
+    await this.discardOpenFrameAttempt();
     this.unsupportedEntityTxTypes = [...new Set(request.entityTxs
       .map(tx => tx.type)
       .filter(type => type !== 'accountInput'))].sort();
@@ -291,18 +317,21 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.generatedAdmissionCursor = 0;
     const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const newAccounts = new Map<string, AccountAuthorityInputRequest['account']>();
-    this.inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
+    this.inboundRequests = inboundArrivals(request.entityTxs).flatMap(arrival => {
       const accountId = normalizeEntityId(arrival.accountId);
       const existing = request.accountForWrite(accountId) ?? newAccounts.get(accountId);
       if (existing !== undefined) {
-        return {
+        // Entity owns the frozen-input drop before Account consensus. Do not
+        // speculatively execute an arrival which its parent will never consume.
+        if (!acceptsExternalAccountInput(existing)) return [];
+        return [{
           collectorFrameId: String(request.ownerEntityId),
           accountId,
           account: existing,
           input: arrival.input,
           entityTimestamp: request.entityTimestamp,
           finalizedJHeight: request.finalizedJHeight,
-        };
+        }];
       }
       const created = request.createInboundAccount(arrival.input);
       const actualAccountId = normalizeEntityId(created.account.proofHeader.toEntity);
@@ -313,7 +342,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         throw new Error(`ACCOUNT_AUTHORITY_INBOUND_CREATE_PUBLIC_PINNED:${accountId}`);
       }
       newAccounts.set(accountId, created.account);
-      return {
+      return [{
         collectorFrameId: String(request.ownerEntityId),
         accountId,
         account: created.account,
@@ -333,7 +362,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
           deltaTransformer: created.deltaTransformer,
           publicPinned: false,
         },
-      };
+      }];
     });
     countFrameApplyPhase('inbound.prepare', prepareStartedAt);
     const run = this.options.provider.executeAccountInboundBatch;
@@ -369,6 +398,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.frameBooksExecuted = true;
     await this.options.provider.executeEntityBooksBatch({
       ownerEntityId: this.ownerEntityId,
+      ownerSignerId: this.ownerSignerId,
       request,
     });
   }
@@ -491,6 +521,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         `ACCOUNT_AUTHORITY_GENERATED_ADMISSION_UNCONSUMED:${this.generatedAdmissionCursor}:${this.generatedAdmissions.length}`,
       );
     }
+    this.frameOpened = false;
   }
 
   async installCommittedAccountHankos(request: AccountAuthorityCommittedHankosRequest): Promise<void> {
@@ -499,7 +530,10 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         `ACCOUNT_AUTHORITY_COMMITTED_HANKO_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`,
       );
     }
-    await this.options.provider.installCommittedAccountHankos?.(request);
+    await this.options.provider.installCommittedAccountHankos?.({
+      ...request,
+      ownerSignerId: this.ownerSignerId,
+    });
   }
 
   async beforeTypeScriptAccountExecution(
@@ -654,6 +688,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
 
   async discard(): Promise<void> {
     if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARD_DUPLICATE');
+    await this.discardOpenFrameAttempt();
     this.discarded = true;
   }
 }

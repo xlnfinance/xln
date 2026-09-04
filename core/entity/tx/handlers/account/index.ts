@@ -30,7 +30,8 @@ import {
 } from './lifecycle/result';
 import { addMessage } from '../../../frame-events';
 import { safeStringify } from '../../../../protocol/serialization';
-import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
+import { countOp } from '../../../../support/performance/op-counters';
+import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import { traceAccountApplyHop } from '../../../../support/performance/account-delivery-trace';
 import {
   authorityRecordEnabled,
@@ -193,16 +194,17 @@ const resolvePreparedInboundAccount = (
       entityHeight: state.height,
       rejection: { code: error.code, message: error.message },
     });
-    accountHandlerLog.error('input.evidence_rejected', {
+    accountHandlerLog.debug('input.evidence_rejected', {
       code: error.code,
       from: shortId(input.fromEntityId),
       error: error.message,
       dump,
     });
     addMessage(state, `❌ Rejected account input: ${error.message}`);
-    throw haltRuntimeFailure(
-      'FRAME_CONSENSUS_FAILED',
-      `ACCOUNT_INPUT_EVIDENCE_REJECTED:${error.code}:${error.message}:dump=${dump}`,
+    countOp(`account.input.rejected.${error.code}`);
+    throw new MalformedEntityFrameInputError(
+      'accountInput',
+      `ACCOUNT_INPUT_EVIDENCE_REJECTED:${error.code}:${error.message}`,
     );
   }
 };

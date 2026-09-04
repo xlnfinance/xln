@@ -160,10 +160,14 @@ const accountInput = (request: AccountAuthorityInputRequest): AccountInput => {
 
 const occurrenceFrameId = (
   ownerEntityId: string,
+  ownerSignerId: string,
   occurrence: AccountAuthorityEntityOccurrence,
 ): string => occurrence.kind === 'runtime-input'
-  ? `${ownerEntityId}:runtime-input:${occurrence.inputIndex}`
-  : `${ownerEntityId}:local-event:${occurrence.ordinal}`;
+  ? `${ownerEntityId}:${ownerSignerId}:runtime-input:${occurrence.inputIndex}`
+  : `${ownerEntityId}:${ownerSignerId}:local-event:${occurrence.ordinal}`;
+
+const entityReplicaKey = (ownerEntityId: string, ownerSignerId: string): string =>
+  `${normalize(ownerEntityId)}:${normalize(ownerSignerId)}`;
 
 const inboundEffect = (
   effect: TsAccountWorkerEffect | undefined,
@@ -276,31 +280,47 @@ export class TsAccountWorkerAuthority {
     }
     this.provider = {
       executeAccountInboundBatch: batch => this.#executeInbound(batch),
+      discardEntityFrameAttempt: input => this.#discardFrameAttempt(input),
       executeEntityBooksBatch: input => this.#executeBooks(input),
       executeAccountOutboundBatch: batch => this.#executeOutbound(batch),
       installCommittedAccountHankos: request => this.#installCommittedAccountHankos(request),
     };
   }
 
+  async #discardFrameAttempt(input: Readonly<{
+    ownerEntityId: string;
+    ownerSignerId: string;
+    occurrence: AccountAuthorityEntityOccurrence;
+  }>): Promise<void> {
+    const ownerReplicaKey = entityReplicaKey(input.ownerEntityId, input.ownerSignerId);
+    const coordinator = await this.#coordinators.get(ownerReplicaKey);
+    if (coordinator === undefined) return;
+    await coordinator.discardAccountFrame(
+      occurrenceFrameId(input.ownerEntityId, input.ownerSignerId, input.occurrence),
+    );
+  }
+
   async #executeBooks(input: Readonly<{
     ownerEntityId: string;
+    ownerSignerId: string;
     request: import('../../entity/runtime-context').AccountAuthorityFrameBooksRequest;
   }>): Promise<void> {
-    const ownerEntityId = normalize(input.ownerEntityId);
-    const coordinator = await this.#coordinators.get(ownerEntityId);
+    const ownerReplicaKey = entityReplicaKey(input.ownerEntityId, input.ownerSignerId);
+    const coordinator = await this.#coordinators.get(ownerReplicaKey);
     if (coordinator === undefined) {
-      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_BOOK_COORDINATOR_MISSING:${ownerEntityId}`);
+      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_BOOK_COORDINATOR_MISSING:${ownerReplicaKey}`);
     }
     await coordinator.applyBookIntents(input.request.entityState, input.request.slots);
   }
 
   async #installCommittedAccountHankos(
-    request: import('../../entity/runtime-context').AccountAuthorityCommittedHankosRequest,
+    request: import('../../entity/runtime-context').AccountAuthorityCommittedHankosRequest
+      & Readonly<{ ownerSignerId: string }>,
   ): Promise<void> {
-    const ownerEntityId = normalize(request.ownerEntityId);
-    const coordinator = await this.#coordinators.get(ownerEntityId);
+    const ownerReplicaKey = entityReplicaKey(request.ownerEntityId, request.ownerSignerId);
+    const coordinator = await this.#coordinators.get(ownerReplicaKey);
     if (coordinator === undefined) {
-      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_HANKO_COORDINATOR_MISSING:${ownerEntityId}`);
+      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_HANKO_COORDINATOR_MISSING:${ownerReplicaKey}`);
     }
     const rows = [...new Set(request.touchedAccountIds.map(normalize))].sort().flatMap(accountId => {
       const account = request.entityState.accounts.get(accountId);
@@ -384,7 +404,8 @@ export class TsAccountWorkerAuthority {
 
   async #coordinator(batch: AccountAuthorityEntityBatchInbound): Promise<TsAccountWorkerCoordinator> {
     const ownerEntityId = normalize(batch.ownerEntityId);
-    let pending = this.#coordinators.get(ownerEntityId);
+    const ownerReplicaKey = entityReplicaKey(ownerEntityId, batch.ownerSignerId);
+    let pending = this.#coordinators.get(ownerReplicaKey);
     if (pending === undefined) {
       const jClaimNodes = reachableJClaimNodes(this.#env, batch.entityState.accounts);
       pending = TsAccountWorkerCoordinator.create({
@@ -394,7 +415,7 @@ export class TsAccountWorkerAuthority {
         jReplicas: this.#env.state.jReplicas,
         jClaimNodes,
       });
-      this.#coordinators.set(ownerEntityId, pending);
+      this.#coordinators.set(ownerReplicaKey, pending);
     }
     return pending;
   }
@@ -403,7 +424,7 @@ export class TsAccountWorkerAuthority {
     batch: AccountAuthorityEntityBatchInbound,
   ): Promise<readonly ((request: AccountAuthorityInputRequest) => HandleAccountInputResult)[]> {
     const coordinator = await this.#coordinator(batch);
-    const frameId = occurrenceFrameId(batch.ownerEntityId, batch.occurrence);
+    const frameId = occurrenceFrameId(batch.ownerEntityId, batch.ownerSignerId, batch.occurrence);
     const localBoardAuthority = certifiedBoardFor(this.#env, batch.entityState, batch.ownerEntityId);
     const result = await coordinator.applyAccountInputs({
       frameId,
@@ -460,9 +481,12 @@ export class TsAccountWorkerAuthority {
 
   async #executeOutbound(batch: AccountAuthorityEntityBatchOutbound) {
     const ownerEntityId = normalize(batch.ownerEntityId);
-    const coordinator = await this.#coordinators.get(ownerEntityId);
-    if (coordinator === undefined) throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_COORDINATOR_MISSING:${ownerEntityId}`);
-    const frameId = occurrenceFrameId(ownerEntityId, batch.occurrence);
+    const ownerReplicaKey = entityReplicaKey(ownerEntityId, batch.ownerSignerId);
+    const coordinator = await this.#coordinators.get(ownerReplicaKey);
+    if (coordinator === undefined) {
+      throw new Error(`TS_ACCOUNT_WORKER_PROVIDER_COORDINATOR_MISSING:${ownerReplicaKey}`);
+    }
+    const frameId = occurrenceFrameId(ownerEntityId, batch.ownerSignerId, batch.occurrence);
     const localBoardAuthority = certifiedBoardFor(this.#env, batch.entityState, ownerEntityId);
     const txs = batch.admissions.map(request => {
       if (request.input.kind !== 'enqueue') {

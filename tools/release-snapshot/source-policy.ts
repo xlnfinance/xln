@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { isXlnReleasePath, XLN_RELEASE_PATHS } from './scope.ts';
+
 
 const decode = (value: Uint8Array): string => new TextDecoder().decode(value).trim();
 
@@ -98,6 +100,7 @@ export function assertReleaseTagBindsSource(
   root: string,
   version: string,
   sourceCommit: string,
+  releasePaths: readonly string[] = XLN_RELEASE_PATHS,
 ): void {
   if (!/^[0-9a-f]{40,64}$/i.test(sourceCommit)) {
     throw new Error(`RELEASE_SOURCE_COMMIT_INVALID:${sourceCommit}`);
@@ -139,14 +142,19 @@ export function assertReleaseTagBindsSource(
   const unexpected = new TextDecoder()
     .decode(changed.stdout)
     .split('\0')
-    .filter((path) => path && !allowedPaths.has(path));
+    .filter((path) => path && isXlnReleasePath(path, releasePaths) && !allowedPaths.has(path));
   if (unexpected.length > 0) {
     throw new Error(`RELEASE_TAG_UNATTESTED_PATHS:${unexpected.sort().join(',')}`);
   }
 }
 
-export function assertCleanReleaseSource(root: string): void {
-  const result = Bun.spawnSync(['git', 'status', '--porcelain=v1', '--untracked-files=all'], {
+export function assertCleanReleaseSource(
+  root: string,
+  releasePaths: readonly string[] = XLN_RELEASE_PATHS,
+): void {
+  const result = Bun.spawnSync([
+    'git', 'status', '--porcelain=v1', '--untracked-files=all', '--', ...releasePaths,
+  ], {
     cwd: root,
     stdout: 'pipe',
     stderr: 'pipe',

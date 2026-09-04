@@ -113,7 +113,7 @@ function ensureDir(pathname) {
 }
 
 function buildBrainvaultWorker() {
-  const source = resolve(REPO_ROOT, 'brainvault/worker-browser.ts');
+  const source = resolve(REPO_ROOT, 'brainvault/src/native/workers/browser.ts');
   const output = fromStatic('brainvault-worker.js');
   if (!existsSync(source)) throw new Error(`BRAINVAULT_WORKER_SOURCE_MISSING:${source}`);
 

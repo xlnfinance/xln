@@ -7,6 +7,7 @@ import {
 } from '../../../../account/consensus/flush';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { addMessage } from '../../../frame-events';
+import { acceptsExternalAccountInput } from '../../../../account/consensus/dispute/policy';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 
@@ -30,7 +31,7 @@ export const canProcessFrozenAccountInput = (
   _hasAck: boolean,
   _frameTxTypes: readonly string[],
 ): boolean => {
-  if ((status ?? 'active') === 'active') return true;
+  if (acceptsExternalAccountInput({ status })) return true;
   // Finalization removes activeDispute but deliberately leaves the Account
   // permanently closed. No ordinary peer frame may cross this fence. A future
   // recovery mechanism must use a new, bilateral, domain-separated protocol.

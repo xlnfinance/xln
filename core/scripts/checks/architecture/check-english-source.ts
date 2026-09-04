@@ -23,7 +23,9 @@ const BUNDLED_ARTIFACT_FILES = new Set([
   'ui/public/runtime.js',
 ]);
 
-const EXCLUDED_PREFIXES = ['.archive/', 'ai/'];
+// External projects retain their own source-language policy. Root XLN gates
+// must not classify their implementation or documentation as XLN source.
+const EXCLUDED_PREFIXES = ['.archive/', 'ai/', 'brainvault/'];
 
 const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
   .split(/\r?\n/u)

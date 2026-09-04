@@ -227,3 +227,5 @@ surface or fuse stages 2 and 3.
 - If the user asks why/how or requests discussion, give the reasoning; otherwise lead with results.
 - External auditors/models run only when the owner explicitly requests them. One bounded question,
   immutable SHA, read-only scope, independently verified finding. Never let audit replace execution.
+- Never launch Codex Security scans unless the owner explicitly asks for a Codex Security scan by
+  name. Requests to audit, review, inspect security, or check Solidity mean ordinary manual review.

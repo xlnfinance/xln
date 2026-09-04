@@ -1,5 +1,6 @@
 import type { AccountInputRejectionCode } from '../input/input-rejection';
 import type { AccountTx } from '../../types/account';
+import { TOKENS } from '../../config/constants';
 
 /**
  * FX-1 (proofs/fixes.md, decision D2): `RebalancePolicy.policyVersion` is
@@ -33,10 +34,12 @@ const OUT_OF_PROFILE_TX_KINDS: ReadonlySet<AccountTx['type']> = new Set<AccountT
 const ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE =
   'ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE' as const;
 const ACCOUNT_TX_KIND_OUT_OF_PROFILE = 'ACCOUNT_TX_KIND_OUT_OF_PROFILE' as const;
+const ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE = 'ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE' as const;
 
 export type AccountTxAdmissionErrorCode =
   | typeof ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE
-  | typeof ACCOUNT_TX_KIND_OUT_OF_PROFILE;
+  | typeof ACCOUNT_TX_KIND_OUT_OF_PROFILE
+  | typeof ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE;
 
 /** Typed local-admission violation. Thrown before any mempool mutation. */
 export class AccountTxAdmissionError extends Error {
@@ -44,21 +47,28 @@ export class AccountTxAdmissionError extends Error {
   readonly txType: AccountTx['type'];
   /** Only set for `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE`. */
   readonly policyVersion?: number;
+  /** Only set for `ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE`. */
+  readonly tokenId?: number;
 
   constructor(
     code: AccountTxAdmissionErrorCode,
     txType: AccountTx['type'],
     policyVersion?: number,
+    tokenId?: number,
   ) {
     super(code === ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE
       ? `${ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE}:${txType}:${String(policyVersion)} `
         + `(protocol range 0..=${MAX_POLICY_VERSION})`
-      : `${ACCOUNT_TX_KIND_OUT_OF_PROFILE}:${txType} `
-        + '(profile: pay/HTLC/same-J swap/j-event/rebalance)');
+      : code === ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE
+        ? `${ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE}:${txType}:${String(tokenId)} `
+          + `(protocol range 0..=${TOKENS.MAX_TOKEN_ID})`
+        : `${ACCOUNT_TX_KIND_OUT_OF_PROFILE}:${txType} `
+          + '(profile: pay/HTLC/same-J swap/j-event/rebalance)');
     this.name = 'AccountTxAdmissionError';
     this.code = code;
     this.txType = txType;
     if (policyVersion !== undefined) this.policyVersion = policyVersion;
+    if (tokenId !== undefined) this.tokenId = tokenId;
   }
 }
 
@@ -82,11 +92,24 @@ export const policyVersionOutOfRangeError = (
       )
     : undefined;
 
+const tokenIdOutOfRangeError = (tx: AccountTx): AccountTxAdmissionError | undefined => {
+  if (tx.type !== 'set_credit_limit') return undefined;
+  const tokenId = tx.data.tokenId;
+  return Number.isSafeInteger(tokenId) && tokenId >= 0 && tokenId <= TOKENS.MAX_TOKEN_ID
+    ? undefined
+    : new AccountTxAdmissionError(
+        ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE,
+        tx.type,
+        undefined,
+        tokenId,
+      );
+};
+
 /** First admission violation in the batch, or `undefined` if all are admissible. */
 export const accountTxAdmissionError = (tx: AccountTx): AccountTxAdmissionError | undefined =>
   OUT_OF_PROFILE_TX_KINDS.has(tx.type)
     ? new AccountTxAdmissionError(ACCOUNT_TX_KIND_OUT_OF_PROFILE, tx.type)
-    : policyVersionOutOfRangeError(tx);
+    : policyVersionOutOfRangeError(tx) ?? tokenIdOutOfRangeError(tx);
 
 /**
  * Loud local-admission gate for the enqueue path. Nothing is admitted when
@@ -104,6 +127,12 @@ export const assertAccountTxsAdmissible = (txs: readonly AccountTx[]): void => {
 /** Peer-frame counterpart of a local admission violation. */
 export const accountTxAdmissionInputCode = (
   error: AccountTxAdmissionError,
-): AccountInputRejectionCode => error.code === ACCOUNT_TX_KIND_OUT_OF_PROFILE
-  ? 'ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE'
-  : 'ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE';
+): AccountInputRejectionCode => {
+  if (error.code === ACCOUNT_TX_KIND_OUT_OF_PROFILE) {
+    return 'ACCOUNT_INPUT_FRAME_TX_OUT_OF_PROFILE';
+  }
+  if (error.code === ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE) {
+    return 'ACCOUNT_INPUT_FRAME_TX_TOKEN_ID_OUT_OF_RANGE';
+  }
+  return 'ACCOUNT_INPUT_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE';
+};

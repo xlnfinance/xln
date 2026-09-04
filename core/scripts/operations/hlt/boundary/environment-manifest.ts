@@ -104,7 +104,7 @@ const gitText = (args: readonly string[]): string | null => {
 
 /** Tracked inputs that can change an HLT runtime, its wire/storage contract or its launcher. */
 export const XLN_HLT_PROVENANCE_PATHS = [
-  'core', 'rscore', 'jurisdictions', 'brainvault', 'custody', 'native', 'cli',
+  'core', 'rscore', 'jurisdictions', 'custody', 'native', 'cli',
   'scripts', 'tools', 'packages/npm', 'package.json', 'bun.lock', 'tsconfig.json',
   'tsconfig.runtime.json', 'frozen-core.json', 'VERSION',
 ] as const;
@@ -123,8 +123,8 @@ const fileSha256 = (path: string | undefined): string | null => {
 export const collectHltRunProvenance = (engine: 'ts' | 'rust'): HltRunProvenance => {
   const sha = gitText(['rev-parse', 'HEAD']);
   // This is an inclusion list, not a growing exclusion list. Reference UIs,
-  // design assets and external workspaces cannot invalidate an HLT number;
-  // every currently direct runtime dependency remains fail-closed here.
+  // design assets and external products such as BrainVault cannot invalidate
+  // an XLN HLT number. Their own release pipelines own their integrity.
   const dirty = xlnTrackedStatus();
   return {
     gitSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : 'unknown',

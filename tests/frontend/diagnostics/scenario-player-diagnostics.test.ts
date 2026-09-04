@@ -26,4 +26,13 @@ describe('ScenarioPlayer diagnostics', () => {
     expect(architect).not.toContain('startHTLCTutorial');
     expect(architect).not.toContain('XLN.scenarios.lockAhb');
   });
+
+  test('rejects a live Runtime before enabling deterministic scenario mode', () => {
+    const architect = readFileSync(architectPath, 'utf8');
+    const liveGuard = architect.indexOf('if ($runtimeFrameEnv?.infrastructure)');
+    const scenarioMutation = architect.indexOf('env.scenarioMode = true');
+
+    expect(liveGuard).toBeGreaterThan(0);
+    expect(scenarioMutation).toBeGreaterThan(liveGuard);
+  });
 });

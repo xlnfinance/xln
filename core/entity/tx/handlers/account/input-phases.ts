@@ -28,6 +28,8 @@ import type { AccountJClaimNodeChanges } from '../../../../types/finance/account
 import type { ApplyEntityTxOptions } from '../../apply';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { safeStringify } from '../../../../protocol/serialization';
+import { countOp } from '../../../../support/performance/op-counters';
+import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import {
   applySuccessfulAccountInput,
   type CommittedAccountEffects,
@@ -165,17 +167,21 @@ const finishRejectedAccountInput = (
       entityHeight: state.height,
       rejection: result.rejection,
     });
-    accountHandlerLog.error('frame.input_rejected', {
+    accountHandlerLog.debug('frame.input_rejected', {
       from: shortId(input.fromEntityId),
       code: accountInputPeerRejectionCode(result),
       error: result.rejection.message,
       dump,
     });
     addMessage(state, `❌ Rejected account frame: ${result.rejection.message}`);
-    throw haltRuntimeFailure(
-      'FRAME_CONSENSUS_FAILED',
-      `ACCOUNT_INPUT_INPUT_REJECTED:${result.rejection.code}:` +
-        `${result.rejection.message}:dump=${dump}`,
+    countOp(`account.input.rejected.${result.rejection.code}`);
+    // Account inputs are authenticated peer evidence. Reject the exact parent
+    // Entity transaction so the proposer evicts it and validators reject a
+    // frame containing it. Unknown verifier/reducer failures still propagate
+    // through the fail-stop branches below.
+    throw new MalformedEntityFrameInputError(
+      'accountInput',
+      `ACCOUNT_INPUT_INPUT_REJECTED:${result.rejection.code}:${result.rejection.message}`,
     );
   }
   if (result.rejection.kind === 'tx' || result.rejection.kind === 'validation') {

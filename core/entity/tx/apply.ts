@@ -573,19 +573,9 @@ export const applyEntityTx = async (
   }
 
   try {
-    const dispatcher: EntityTxDispatcher | undefined = entityTxDispatchers[entityTx.type];
-    if (!dispatcher) {
-      const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
-      entityTxLog.warn('unhandled', { type: String(entityTx.type) });
-      return {
-        newState: entityState,
-        outputs: [],
-        storageChanges: [],
-        candidateEffects: [],
-        jOutputs: [],
-        skippedError,
-      };
-    }
+    // Every reducible type has a dispatcher (`satisfies Record<…>` above);
+    // unknown type strings are rejected at both wire boundaries before here.
+    const dispatcher: EntityTxDispatcher = entityTxDispatchers[entityTx.type];
     const reducerStorageChanges: RuntimeOverlayRecord[] = [];
     const reducerCandidateEffects: EntityCandidateEffect[] = [];
     const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {

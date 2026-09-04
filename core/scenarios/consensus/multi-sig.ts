@@ -596,7 +596,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     console.log(
       `   ✅ Frame committed with 4 offline (height ${heightBeforeOffline} → ${s1AfterOffline.state.height})`,
     );
-    console.log('   ✅ Restored validator 4 caught up through certified J finality');
+    console.log('   ✅ Restored validator 4 received the deferred certified commit and finalized J');
 
     console.log('\\n✅ TEST 1 COMPLETE: Byzantine tolerance proven!\\n');
     console.log('   1 + 2 + 3 = 3/4 threshold ✅');

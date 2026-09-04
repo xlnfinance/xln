@@ -171,20 +171,13 @@ const bindVerifiedTargetRuntime = (
     else env.info?.('network', 'ROUTE_TARGET_RUNTIME_BOUND', routeBindingData);
     routed = { ...output, runtimeId: verified };
   } else if (persisted && resolved && persisted !== resolved) {
-    if (verified && verified === resolved) {
-      env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', {
-        entityId: output.entityId,
-        persistedRuntimeId: persisted,
-        resolvedRuntimeId: resolved,
-      });
-      routed = { ...output, runtimeId: resolved };
-    } else {
-      env.warn?.('network', 'ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED', {
-        entityId: output.entityId,
-        persistedRuntimeId: persisted,
-        resolvedRuntimeId: resolved,
-      });
-    }
+    // `verified` is either empty or equal to `persisted` on this branch, so
+    // the change can never be verified here; it is only reported.
+    env.warn?.('network', 'ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED', {
+      entityId: output.entityId,
+      persistedRuntimeId: persisted,
+      resolvedRuntimeId: resolved,
+    });
   }
   return {
     output: routed,

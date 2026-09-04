@@ -8,7 +8,7 @@
  * - C→R settlement pullbacks for excess collateral
  *
  * Critical trigger invariant:
- * request_collateral is triggered by outPeerCredit > r2cRequestSoftLimit (deriveDelta),
+ * request_collateral is triggered by outPeerCredit >= r2cRequestSoftLimit (deriveDelta),
  * NOT by (outCollateral + outPeerCredit).
  * outCollateral is already secured value and must not inflate trigger metric.
  */
@@ -30,6 +30,8 @@ import { formatRuntime } from '../../qa/runtime-ascii';
 import { deriveDelta } from '../../account/utils';
 import { isLeftEntity } from '../../entity/id';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
+import { startRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
+import type { SentJBatch } from '../../jurisdiction/machine/batch';
 import {
   bindScenarioJReplica,
   createJurisdictionConfig,
@@ -79,7 +81,7 @@ function snapshotAccountJProgress(account: AccountState | undefined): AccountJPr
   };
 }
 
-export async function runRebalanceScenario(): Promise<void> {
+export async function runRebalanceScenario(env: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('\n' + '═'.repeat(80));
   console.log('  MULTI-EDGE REBALANCE SCENARIO');
   console.log('  Hub + Alice + Bob + Charlie + Dave');
@@ -96,8 +98,6 @@ export async function runRebalanceScenario(): Promise<void> {
   const transportLabel = jMode === 'browservm' ? 'browservm' : `rpc → ${rpcUrl}`;
   console.log(`\n📦 Setting up JAdapter (${transportLabel})...`);
 
-  const { createEmptyEnv } = await import('../../runtime');
-  let env = createEmptyEnv('rebalance-scenario-seed-2026');
   env.state.timestamp = 1000000;
   env.scenarioMode = true;
   setScenarioStorageEnabled(env, false);
@@ -222,6 +222,13 @@ export async function runRebalanceScenario(): Promise<void> {
           disputeConfig: defaultAccountDisputeConfigForParties(user.id, false, hub.id, true),
           tokenId: USDC_TOKEN_ID,
           creditAmount: 0n,
+          // Disable automatic R→C during setup. Bob and Dave explicitly opt in
+          // after the payments create their unsecured exposure below.
+          rebalancePolicy: {
+            r2cRequestSoftLimit: usd(20_000),
+            hardLimit: usd(20_000),
+            maxAcceptableFee: usd(100),
+          },
         }
       }]
     }]);
@@ -388,11 +395,48 @@ export async function runRebalanceScenario(): Promise<void> {
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
 
+  // Freeze evidence before automatic R→C is enabled. Any later collateral
+  // growth must come from Bob/Dave's explicit policy transition.
+  console.log('\n📊 Verifying user-side unsecured exposure...');
+  const hubAfterPayments = findReplica(env, hub.id)[1].state;
+  const collateralBeforeRebalance = new Map<string, bigint>();
+  const preRebalanceJProgress = new Map<string, { hub: AccountJProgress; user: AccountJProgress }>();
+  const expectedRebalanceUserIds = new Set([bob.id, dave.id]);
+
+  for (const user of users) {
+    const hubAccount = hubAfterPayments.accounts.get(user.id);
+    const delta = hubAccount?.state.deltas.get(USDC_TOKEN_ID);
+    assert(!!hubAccount && !!delta, `Missing Hub↔${user.name} balance before rebalance`, env);
+    const [, userReplica] = findReplica(env, user.id);
+    const userAccount = userReplica.state.accounts.get(hub.id);
+    collateralBeforeRebalance.set(user.id, delta!.collateral);
+    preRebalanceJProgress.set(user.id, {
+      hub: snapshotAccountJProgress(hubAccount!.state),
+      user: snapshotAccountJProgress(userAccount?.state),
+    });
+
+    const userView = deriveDelta(delta!, isLeftEntity(user.id, hub.id));
+    const totalExposure = userView.outCollateral + userView.outPeerCredit;
+    console.log(
+      `  ${user.name}↔Hub: totalExposure=${totalExposure}, secured=${userView.outCollateral}, unsecured=${userView.outPeerCredit}`,
+    );
+    if (expectedRebalanceUserIds.has(user.id)) {
+      assert(
+        userView.outPeerCredit >= usd(1_000),
+        `${user.name} must exceed the automatic R→C threshold (got ${userView.outPeerCredit})`,
+        env,
+      );
+    }
+  }
+
+  const batchNonceBeforeRebalance = hubAfterPayments.jBatchState?.entityNonce ?? 0;
+  const rebalanceTrace = startRuntimeTraceForTesting(env);
+
   // ══════════════════════════════════════════════════════════════
   // REBALANCE POLICIES: Users set their own (CRITICAL-3: auth)
-  // r2cRequestSoftLimit = trigger when uncollateralized credit > this
-  // After payments: Hub↔Bob uncollateralized = $3K, Hub↔Dave = $7K
-  // r2cRequestSoftLimit=$1K → both trigger (uncollateralized > r2cRequestSoftLimit)
+  // r2cRequestSoftLimit = trigger when uncollateralized credit >= this
+  // After payments: Hub↔Bob unsecured = $7.5K, Hub↔Dave = $11.5K.
+  // r2cRequestSoftLimit=$1K → both trigger.
   // ══════════════════════════════════════════════════════════════
   console.log('\n📋 Users setting rebalance policies...');
   for (const user of [bob, dave]) {
@@ -404,7 +448,7 @@ export async function runRebalanceScenario(): Promise<void> {
         data: {
           counterpartyEntityId: hub.id,
           tokenId: USDC_TOKEN_ID,
-          r2cRequestSoftLimit: usd(1_000),       // Trigger when uncollateralized credit > $1K
+          r2cRequestSoftLimit: usd(1_000),       // Trigger when unsecured credit reaches $1K
           hardLimit: usd(20_000),      // Max threshold
           maxAcceptableFee: usd(100),  // Auto-accept fees up to $100
         }
@@ -417,44 +461,8 @@ export async function runRebalanceScenario(): Promise<void> {
   await convergeScenario(env);
   console.log('✅ Rebalance policies set by Bob + Dave');
 
-  // Verify imbalances using deriveDelta
-  console.log('\n📊 Verifying imbalances...');
-  const hubAfterPayments = findReplica(env, hub.id)[1].state;
-  const collateralBeforeRebalance = new Map<string, bigint>();
-
-  for (const user of users) {
-    const acc = hubAfterPayments.accounts.get(user.id);
-    if (!acc) continue;
-    const delta = acc.state.deltas.get(USDC_TOKEN_ID);
-    if (!delta) continue;
-    collateralBeforeRebalance.set(user.id, delta.collateral);
-    const hubIsLeft = isLeftEntity(hub.id, user.id);
-    const derived = deriveDelta(delta, hubIsLeft);
-    const hubExposure = derived.outPeerCredit;
-    const hubOutCollateral = derived.outCollateral;
-    const uncollateralized = hubExposure > hubOutCollateral ? hubExposure - hubOutCollateral : 0n;
-    console.log(
-      `  Hub↔${user.name}: delta=${derived.delta}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}`,
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════
-  // HUB CONFIG: Declare as hub
-  // ══════════════════════════════════════════════════════════════
-  console.log('\n🏦 Hub declares hub config...');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'setHubConfig',
-      data: { matchingStrategy: 'amount', routingFeePPM: 1, baseFee: 0n, minCollateralThreshold: 0n },
-    }]
-  }]);
-  await convergeScenario(env);
-
   const hubConfigSet = findReplica(env, hub.id)[1].state.hubRebalanceConfig;
   assert(hubConfigSet, 'Hub config not set', env);
-  console.log('✅ Hub config set');
 
   // ══════════════════════════════════════════════════════════════
   // REBALANCE: Multi-cycle hub crontab (direct R→C only)
@@ -463,20 +471,6 @@ export async function runRebalanceScenario(): Promise<void> {
   // Cycle 2: hub crontab consumes prepaid requests and broadcasts immediately.
   // ══════════════════════════════════════════════════════════════
   console.log('\n🔄 Running rebalance cycles...');
-  const preRebalanceJProgress = new Map<string, { hub: AccountJProgress; user: AccountJProgress }>();
-  {
-    const hubStateBeforeRebalance = findReplica(env, hub.id)[1].state;
-    for (const user of users) {
-      const hubAcc = hubStateBeforeRebalance.accounts.get(user.id);
-      const [, userReplica] = findReplica(env, user.id);
-      const userAcc = userReplica.state.accounts.get(hub.id);
-      preRebalanceJProgress.set(user.id, {
-        hub: snapshotAccountJProgress(hubAcc?.state),
-        user: snapshotAccountJProgress(userAcc?.state),
-      });
-    }
-  }
-
   // Entity timestamps advance only through committed frames.
   function advanceTime(ms: number) {
     env.state.timestamp += ms;
@@ -501,14 +495,12 @@ export async function runRebalanceScenario(): Promise<void> {
   // Debug: Check state after Cycle 1
   console.log('\n  [After Cycle 1] State:');
   let pendingRequestedTotal = 0n;
-  const requestedByUser = new Map<string, bigint>();
   for (const user of users) {
     const acc = findReplica(env, hub.id)[1].state.accounts.get(user.id);
     if (!acc) continue;
     const ws = acc.state.settlementWorkspace;
     const requested = acc.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
     pendingRequestedTotal += requested;
-    if (requested > 0n) requestedByUser.set(user.id, requested);
     console.log(`    Hub↔${user.name}: ws=${ws?.status || 'none'}, requested=${requested}`);
   }
   if (pendingRequestedTotal === 0n) {
@@ -516,8 +508,6 @@ export async function runRebalanceScenario(): Promise<void> {
   }
 
   // ── Cycle 2: Hub crontab deposits R→C and broadcasts immediately ──
-  const batchNonceBeforeCycle2 =
-    findReplica(env, hub.id)[1].state.jBatchState?.entityNonce ?? 0;
   advanceTime(3100);
   console.log('\n  [Cycle 2] Hub crontab: deposit + broadcast...');
   await process(env, [{
@@ -541,23 +531,15 @@ export async function runRebalanceScenario(): Promise<void> {
     await convergeScenario(env);
   }
 
-  const hubAfterBroadcast = findReplica(env, hub.id)[1].state;
+  let hubAfterBroadcast = findReplica(env, hub.id)[1].state;
   const batchNonceAfterCycle2 = hubAfterBroadcast.jBatchState?.entityNonce ?? 0;
-  const rebalanceExecuted = batchNonceAfterCycle2 > batchNonceBeforeCycle2;
-  if (rebalanceExecuted) {
-    assert(
-      !hubAfterBroadcast.jBatchState?.sentBatch,
-      'Expected hub sentBatch cleared after confirmed broadcast processing',
-      env,
-    );
-  } else {
-    console.log('  ℹ️ No hub rebalance batch was needed; payment-side collateralization already covered the deficits.');
-    assert(
-      !hubAfterBroadcast.jBatchState?.sentBatch,
-      'Hub must not leave a sentBatch latched when no rebalance batch was emitted',
-      env,
-    );
-  }
+  const rebalanceExecuted = batchNonceAfterCycle2 > batchNonceBeforeRebalance;
+  assert(rebalanceExecuted, 'Expected the automatic R→C batch to advance the hub Entity nonce', env);
+  assert(
+    !hubAfterBroadcast.jBatchState?.sentBatch,
+    'Expected hub sentBatch cleared after confirmed broadcast processing',
+    env,
+  );
 
   const getRebalanceTargets = (state: typeof hubAfterBroadcast) =>
     [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
@@ -565,25 +547,35 @@ export async function runRebalanceScenario(): Promise<void> {
       const before = collateralBeforeRebalance.get(userId) ?? INITIAL_COLLATERAL;
       return after > before;
     });
-  const getPaymentCollateralizedTargets = (state: typeof hubAfterBroadcast) =>
-    [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
-      const after = state.accounts.get(userId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-      return after > INITIAL_COLLATERAL;
-    });
-
   let rebalanceTargetUserIds = getRebalanceTargets(hubAfterBroadcast);
   if (rebalanceTargetUserIds.length === 0) {
     // Race guard: confirmed batch can precede local bilateral j-event apply by one tick.
     await syncChain();
     await convergeScenario(env);
-    const hubAfterOneMoreSync = findReplica(env, hub.id)[1].state;
-    rebalanceTargetUserIds = getRebalanceTargets(hubAfterOneMoreSync);
+    hubAfterBroadcast = findReplica(env, hub.id)[1].state;
+    rebalanceTargetUserIds = getRebalanceTargets(hubAfterBroadcast);
   }
-  if (!rebalanceExecuted) {
-    rebalanceTargetUserIds = getPaymentCollateralizedTargets(hubAfterBroadcast);
-    assert(rebalanceTargetUserIds.length > 0, 'Expected payment-side collateralization on at least one account', env);
-  } else {
-    assert(rebalanceTargetUserIds.length > 0, 'Expected at least one account collateralized by hub rebalance', env);
+  assert(
+    rebalanceTargetUserIds.length === expectedRebalanceUserIds.size &&
+      rebalanceTargetUserIds.every(userId => expectedRebalanceUserIds.has(userId)),
+    `Expected only Bob + Dave to be collateralized by auto-rebalance (got ${rebalanceTargetUserIds.map(id => id.slice(-4)).join(',')})`,
+    env,
+  );
+
+  const traceLogs = rebalanceTrace.snapshots.flatMap(snapshot => snapshot.logs ?? []);
+  const requestedByUser = new Map<string, bigint>();
+  for (const user of [bob, dave]) {
+    const receipts = traceLogs.filter(log => {
+      const data = (log.data ?? {}) as Record<string, unknown>;
+      return log.message === 'request_collateral_committed' &&
+        String(data['entityId'] ?? '').toLowerCase() === user.id.toLowerCase() &&
+        String(data['accountId'] ?? '').toLowerCase() === hub.id.toLowerCase() &&
+        Number(data['tokenId']) === USDC_TOKEN_ID;
+    });
+    assert(receipts.length === 1, `${user.name} must commit exactly one collateral request (got ${receipts.length})`, env);
+    const requestedAmount = BigInt(String(receipts[0]!.data?.['requestedAmount'] ?? '0'));
+    assert(requestedAmount > 0n, `${user.name} committed request amount must be positive`, env);
+    requestedByUser.set(user.id, requestedAmount);
   }
 
   // Assert both sides finalized j-events for each account whose collateral increased.
@@ -609,18 +601,16 @@ export async function runRebalanceScenario(): Promise<void> {
       `Expected user-side lastFinalizedJHeight > 0 for ${userId.slice(-4)} (got ${userPost.lastFinalizedJHeight})`,
       env,
     );
-    if (rebalanceExecuted) {
-      assert(
-        hubPost.lastFinalizedJHeight > preHub.lastFinalizedJHeight,
-        `Expected hub-side jHeight growth for ${userId.slice(-4)} (before=${preHub.lastFinalizedJHeight}, after=${hubPost.lastFinalizedJHeight})`,
-        env,
-      );
-      assert(
-        userPost.lastFinalizedJHeight > preUser.lastFinalizedJHeight,
-        `Expected user-side jHeight growth for ${userId.slice(-4)} (before=${preUser.lastFinalizedJHeight}, after=${userPost.lastFinalizedJHeight})`,
-        env,
-      );
-    }
+    assert(
+      hubPost.lastFinalizedJHeight > preHub.lastFinalizedJHeight,
+      `Expected hub-side jHeight growth for ${userId.slice(-4)} (before=${preHub.lastFinalizedJHeight}, after=${hubPost.lastFinalizedJHeight})`,
+      env,
+    );
+    assert(
+      userPost.lastFinalizedJHeight > preUser.lastFinalizedJHeight,
+      `Expected user-side jHeight growth for ${userId.slice(-4)} (before=${preUser.lastFinalizedJHeight}, after=${userPost.lastFinalizedJHeight})`,
+      env,
+    );
     assert(
       hubPost.lastFinalizedJHeight === userPost.lastFinalizedJHeight,
       `Expected bilateral jHeight equality for ${userId.slice(-4)} (hub=${hubPost.lastFinalizedJHeight}, user=${userPost.lastFinalizedJHeight})`,
@@ -629,15 +619,17 @@ export async function runRebalanceScenario(): Promise<void> {
 
     const hubCollateralAfter = hubAcc?.state.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
     const userCollateralAfter = userAcc?.state.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
+    const collateralBefore = collateralBeforeRebalance.get(userId) ?? 0n;
+    const requestedAmount = requestedByUser.get(userId) ?? 0n;
 
     assert(
-      hubCollateralAfter > INITIAL_COLLATERAL,
-      `Expected hub-side collateral > initial for ${userId.slice(-4)} (initial=${INITIAL_COLLATERAL}, after=${hubCollateralAfter})`,
+      hubCollateralAfter === collateralBefore + requestedAmount,
+      `Expected exact hub-side R→C amount for ${userId.slice(-4)} (before=${collateralBefore}, requested=${requestedAmount}, after=${hubCollateralAfter})`,
       env,
     );
     assert(
-      userCollateralAfter > INITIAL_COLLATERAL,
-      `Expected user-side collateral > initial for ${userId.slice(-4)} (initial=${INITIAL_COLLATERAL}, after=${userCollateralAfter})`,
+      userCollateralAfter === collateralBefore + requestedAmount,
+      `Expected exact user-side R→C amount for ${userId.slice(-4)} (before=${collateralBefore}, requested=${requestedAmount}, after=${userCollateralAfter})`,
       env,
     );
     assert(
@@ -646,12 +638,11 @@ export async function runRebalanceScenario(): Promise<void> {
       env,
     );
 
-    if (hubPost.pendingClaimCount > 0n || userPost.pendingClaimCount > 0n) {
-      console.warn(
-        `  ⚠️ Pending authenticated J-claims remain for ${userId.slice(-4)} ` +
-        `(hub=${hubPost.pendingClaimCount}, user=${userPost.pendingClaimCount})`,
-      );
-    }
+    assert(
+      hubPost.pendingClaimCount === 0n && userPost.pendingClaimCount === 0n,
+      `Expected no pending J-claims for ${userId.slice(-4)} (hub=${hubPost.pendingClaimCount}, user=${userPost.pendingClaimCount})`,
+      env,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -669,12 +660,12 @@ export async function runRebalanceScenario(): Promise<void> {
     const delta = acc?.state.deltas.get(USDC_TOKEN_ID);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = delta ? deriveDelta(delta, hubIsLeft) : null;
-    const hubExposure = derived?.outPeerCredit ?? 0n;
+    const unsecured = derived?.outPeerCredit ?? 0n;
     const hubOutCollateral = derived?.outCollateral ?? 0n;
-    const uncollateralized = hubExposure > hubOutCollateral ? hubExposure - hubOutCollateral : 0n;
+    const hubExposure = hubOutCollateral + unsecured;
     const nonce = acc?.state.jNonce || 0;
     console.log(
-      `  Hub↔${user.name}: delta=${derived?.delta ?? 0n}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.state.settlementWorkspace?.status || 'none'}`,
+      `  Hub↔${user.name}: delta=${derived?.delta ?? 0n}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, unsecured=${unsecured}, nonce=${nonce}, ws=${acc?.state.settlementWorkspace?.status || 'none'}`,
     );
   }
 
@@ -720,9 +711,7 @@ export async function runRebalanceScenario(): Promise<void> {
   for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
     const delta = acc?.state.deltas.get(USDC_TOKEN_ID);
-    const before = rebalanceExecuted
-      ? (collateralBeforeRebalance.get(user.id) ?? 0n)
-      : INITIAL_COLLATERAL;
+    const before = collateralBeforeRebalance.get(user.id) ?? 0n;
     const after = delta?.collateral ?? 0n;
     if (after > before) accountsWithTopUp++;
     const pendingHub = acc?.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
@@ -783,11 +772,11 @@ export async function runRebalanceScenario(): Promise<void> {
   };
 
   let pendingAfterBroadcast = getPendingRequests();
-  if (rebalanceExecuted && pendingAfterBroadcast.length > 0) {
+  if (pendingAfterBroadcast.length > 0) {
     console.log(`  ℹ️ Pending requestedRebalance remains after first top-up cycle; running clear cycles...`);
   }
 
-  for (let cycle = 1; cycle <= 3 && rebalanceExecuted && pendingAfterBroadcast.length > 0; cycle++) {
+  for (let cycle = 1; cycle <= 3 && pendingAfterBroadcast.length > 0; cycle++) {
     const beforeByUser = new Map<string, { userId: string; hubPending: bigint; userPending: bigint }>();
     for (const p of pendingAfterBroadcast) {
       beforeByUser.set(p.userName, { userId: p.userId, hubPending: p.hubPending, userPending: p.userPending });
@@ -826,31 +815,68 @@ export async function runRebalanceScenario(): Promise<void> {
   }
 
   const blockingPending = pendingAfterBroadcast.filter(p => trackedRequestUserIds.has(p.userId));
-  if (rebalanceExecuted) {
-    if (blockingPending.length > 0) {
-      console.warn(`  ⚠️ Tracked requestedRebalance not fully cleared after refill cycles:`);
-      for (const p of blockingPending) {
-        console.warn(`     - ${p.userName}(hub=${p.hubPending}, user=${p.userPending})`);
-      }
-    }
-    const nonBlockingPending = pendingAfterBroadcast.filter(p => !trackedRequestUserIds.has(p.userId));
-    if (nonBlockingPending.length > 0) {
-      console.warn(`  ⚠️ Late/untracked requestedRebalance remains after refill cycles:`);
-      for (const p of nonBlockingPending) {
-        console.warn(`     - ${p.userName}(hub=${p.hubPending}, user=${p.userPending})`);
-      }
-    }
-  } else {
-    assert(blockingPending.length === 0, 'No tracked requestedRebalance should remain when rebalance was unnecessary', env);
+  assert(blockingPending.length === 0, 'Tracked requestedRebalance must clear after bilateral finality', env);
+  assert(pendingAfterBroadcast.length === 0, 'No requestedRebalance may remain after the completed cycle', env);
+
+  hubFinal = findReplica(env, hub.id)[1].state;
+  const finalTraceLogs = rebalanceTrace.snapshots.flatMap(snapshot => snapshot.logs ?? []);
+  const allRequestReceipts = finalTraceLogs.filter(log => {
+    const data = (log.data ?? {}) as Record<string, unknown>;
+    return log.message === 'request_collateral_committed' &&
+      String(data['accountId'] ?? '').toLowerCase() === hub.id.toLowerCase() &&
+      Number(data['tokenId']) === USDC_TOKEN_ID;
+  });
+  assert(allRequestReceipts.length === 2, `Expected only Bob + Dave collateral requests (got ${allRequestReceipts.length})`, env);
+
+  const sentBatches = new Map<string, SentJBatch>();
+  for (const snapshot of rebalanceTrace.snapshots) {
+    const hubReplica = Array.from(snapshot.state.eReplicas.values()).find(
+      replica => replica.entityId.toLowerCase() === hub.id.toLowerCase(),
+    );
+    const sent = hubReplica?.state.jBatchState?.sentBatch;
+    if (sent) sentBatches.set(`${sent.batchHash.toLowerCase()}:${sent.entityNonce}`, sent);
+  }
+  const r2cPairs = Array.from(sentBatches.values()).flatMap(sent =>
+    sent.batch.reserveToCollateral
+      .filter(op => op.receivingEntity.toLowerCase() === hub.id.toLowerCase() && op.tokenId === USDC_TOKEN_ID)
+      .flatMap(op => op.pairs.map(pair => ({ sent, pair }))),
+  );
+  assert(r2cPairs.length === 2, `Expected exactly two R→C legs across the full run (got ${r2cPairs.length})`, env);
+
+  const matchedBatches = new Map<string, SentJBatch>();
+  for (const [userId, requestedAmount] of requestedByUser) {
+    const matches = r2cPairs.filter(({ pair }) =>
+      pair.entity.toLowerCase() === userId.toLowerCase() && pair.amount === requestedAmount,
+    );
+    assert(matches.length === 1, `Expected one exact R→C leg for ${userId.slice(-4)} (got ${matches.length})`, env);
+    const sent = matches[0]!.sent;
+    matchedBatches.set(`${sent.batchHash.toLowerCase()}:${sent.entityNonce}`, sent);
+
+    const hubAccount = hubFinal.accounts.get(userId);
+    const [, userReplica] = findReplica(env, userId);
+    const userAccount = userReplica.state.accounts.get(hub.id);
+    const before = collateralBeforeRebalance.get(userId) ?? 0n;
+    const expected = before + requestedAmount;
+    const hubCollateral = hubAccount?.state.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
+    const userCollateral = userAccount?.state.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
+    assert(hubCollateral === expected, `Final hub collateral changed after exact R→C for ${userId.slice(-4)}`, env);
+    assert(userCollateral === expected, `Final user collateral changed after exact R→C for ${userId.slice(-4)}`, env);
+    const hubProgress = snapshotAccountJProgress(hubAccount?.state);
+    const userProgress = snapshotAccountJProgress(userAccount?.state);
     assert(
-      pendingAfterBroadcast.length === 0,
-      'No requestedRebalance should remain when payment-side collateralization already covered the receivers',
+      hubProgress.lastFinalizedJHeight === userProgress.lastFinalizedJHeight &&
+        hubProgress.pendingClaimCount === 0n && userProgress.pendingClaimCount === 0n,
+      `Final bilateral J state diverged for ${userId.slice(-4)}`,
       env,
     );
   }
-
-  hubFinal = findReplica(env, hub.id)[1].state;
-  console.log(`  ✅ Collateral assertions passed (accounts topped up: ${accountsWithTopUp}, rebalanceExecuted=${rebalanceExecuted ? 'yes' : 'no'})`);
+  assert(typeof jadapter.hasProcessedBatch === 'function', 'JAdapter must expose exact batch receipt lookup', env);
+  for (const sent of matchedBatches.values()) {
+    const processed = await jadapter.hasProcessedBatch!(hub.id, sent.batchHash, BigInt(sent.entityNonce));
+    assert(processed, `Missing exact HankoBatchProcessed for nonce ${sent.entityNonce}`, env);
+  }
+  rebalanceTrace.stop();
+  console.log(`  ✅ Collateral assertions passed (accounts topped up: ${accountsWithTopUp}, rebalanceExecuted=yes)`);
 
   console.log('\n' + '═'.repeat(80));
   console.log('  REBALANCE SCENARIO COMPLETE');
@@ -859,12 +885,5 @@ export async function runRebalanceScenario(): Promise<void> {
   // Cleanup
   await jadapter.close();
   restoreStrict();
-}
-
-// Run if executed directly
-if (import.meta.main) {
-  runRebalanceScenario().catch(err => {
-    console.error('❌ Scenario failed:', err);
-    process.exit(1);
-  });
+  return env;
 }

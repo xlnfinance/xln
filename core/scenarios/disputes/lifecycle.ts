@@ -36,7 +36,7 @@ const requireRegistered = (entity: Registered | undefined, name: string): Regist
   return entity;
 };
 
-export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+export async function runDisputeLifecycle(runtimeReplica: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('\n' + '='.repeat(80));
   console.log('  DISPUTE LIFECYCLE SCENARIO (UNILATERAL)');
   console.log('='.repeat(80));
@@ -45,13 +45,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'dispute-lifecycle',
     signerIds: ['2', '3'],
-    seed: 'dispute-lifecycle-deterministic',
-    ...(_existingEnv?.scenarioJAdapterMode
-      ? { mode: _existingEnv.scenarioJAdapterMode }
-      : {}),
-    ...(_existingEnv?.runtimeConfig?.storage?.enabled !== undefined
-      ? { storageEnabled: _existingEnv.runtimeConfig.storage.enabled }
-      : {}),
+    runtimeReplica,
   });
   env.quietRuntimeLogs = true;
   const scenarioDebug = (globalThis as { process?: { env?: Record<string, string | undefined> } })

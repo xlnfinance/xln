@@ -34,7 +34,7 @@ const restoreFailedInput = (
   retainedInput?: RuntimeInput,
 ): void => {
   const { frame, liveEnv } = context;
-  const retry = frame.inputDrained || retainedInput
+  const retry = frame.inputDrained
     ? (() => {
         const attempted =
           retainedInput ??

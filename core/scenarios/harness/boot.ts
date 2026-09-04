@@ -249,6 +249,7 @@ const ensureScenarioRpcReady = async (rpcUrl: string, expectedChainId: number): 
 export interface ScenarioConfig {
   name: string;
   signerIds: string[];
+  runtimeReplica?: RuntimeReplica;
   mode?: JAdapterMode;       // default: JADAPTER_MODE env var → 'rpc'
   rpcUrl?: string;            // Node requires canonical runner or explicit isolated RPC.
   jurisdictionName?: string;  // default: `${name} Demo`
@@ -353,7 +354,7 @@ export async function ensureJAdapter(
 
 /**
  * Single entry point for all scenarios.
- * Creates env + jadapter + jReplica + jurisdiction. Starts event watching.
+ * Initializes the supplied env + jadapter + jReplica + jurisdiction. Starts event watching.
  *
  * Usage:
  *   const { env, jadapter, jurisdiction } = await bootScenario({
@@ -361,14 +362,17 @@ export async function ensureJAdapter(
  *   });
  */
 export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBootResult> {
-  const { createEmptyEnv } = await import('../../runtime');
-
-  // 1. Create fresh env with deterministic seed
-  const seed = config.seed ?? `${config.name}-scenario-seed`;
-  const env = createEmptyEnv(seed);
+  // 1. Reuse the canonical runner-owned replica, or create one for harness callers.
+  const env = config.runtimeReplica ?? (await import('../../runtime')).createEmptyEnv(
+    config.seed ?? `${config.name}-scenario-seed`,
+  );
   env.scenarioMode = true;
-  env.state.timestamp = 1;
-  setScenarioStorageEnabled(env, config.storageEnabled ?? false);
+  if (!config.runtimeReplica) env.state.timestamp = 1;
+  if (config.storageEnabled !== undefined) {
+    setScenarioStorageEnabled(env, config.storageEnabled);
+  } else if (!config.runtimeReplica) {
+    setScenarioStorageEnabled(env, false);
+  }
 
   // 2. Seed signer keys
   requireRuntimeSeed(env, config.name);

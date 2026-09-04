@@ -52,7 +52,7 @@ const config = {
 		},
 		alias: {
 			'@xln/core': '../core',
-			'@xln/brainvault': '../brainvault'
+			'@xln/brainvault': '../brainvault/src'
 		}
 	}
 };

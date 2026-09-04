@@ -49,7 +49,6 @@ export type TsAccountWorkerState = {
   readonly settlementBoardAuthorities: Map<string, string>;
   readonly frameTouchedAccountIds: Set<string>;
   candidateBaseAccounts: PersistentEntityAccountMap | null;
-  inboundPrepared: boolean;
 };
 
 export const workerHeapUsedBytes = (): number => {
@@ -167,7 +166,6 @@ export const initializeWorkerState = (
     ),
     frameTouchedAccountIds: new Set(),
     candidateBaseAccounts: null,
-    inboundPrepared: false,
   };
   return {
     state,

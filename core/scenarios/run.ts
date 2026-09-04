@@ -33,57 +33,10 @@ import {
   buildScenarioIsolatedEnv,
   resolveScenarioIsolatedDbRoot,
 } from './harness/scenario-isolation';
-import { getScenario, SCENARIOS } from './runner/catalog';
+import { getScenario, resolveScenarioSet, SCENARIOS } from './runner/catalog';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 const SCENARIO_PORT_OFFSETS = [0, 1, 2, 3, 4] as const;
-
-const DEFAULT_PARALLEL_SET = [
-  'processbatch',
-  'rebalance',
-  'settle-rebalance',
-  'swap-tps',
-  'lock-ahb',
-  'dispute-lifecycle',
-  'dispute-transformer',
-];
-
-// company-ipo stays in ALL: BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID is a real
-// invariant, not a scenario skip. Exact-rerun it before putting it back in default.
-const ALL_PARALLEL_SET = [
-  'processbatch',
-  'rebalance',
-  'settle-rebalance',
-  'lock-ahb',
-  'dispute-lifecycle',
-  'dispute-transformer',
-  'ahb',
-  'swap',
-  'settle',
-  'htlc-4hop',
-  'grid',
-  'swap-market',
-  'swap-tps',
-  'multi-sig',
-  'company-ipo',
-  'rapid-fire',
-];
-
-const SMOKE_PARALLEL_SET = [
-  'processbatch',
-  'rebalance',
-  'dispute-lifecycle',
-  'dispute-transformer',
-  'swap-tps',
-  'multi-sig',
-];
-
-const resolveParallelSet = (setName?: string): readonly string[] => {
-  const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
-  if (set === 'smoke') return SMOKE_PARALLEL_SET;
-  if (set === 'all' || set === 'everything' || set === 'full-catalog') return ALL_PARALLEL_SET;
-  return DEFAULT_PARALLEL_SET;
-};
 
 const availableScenarioIds = (): string[] => SCENARIOS.map((scenario) => scenario.id);
 
@@ -265,13 +218,20 @@ const acquireScenarioLeases = async (count: number): Promise<LocalTestPortLease[
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
   cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) });
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
-  const scenarios = resolveParallelSet(setName).filter((id) => getScenario(id));
+  const entries = resolveScenarioSet(set).map((id) => {
+    const entry = getScenario(id);
+    if (!entry) throw new Error(`SCENARIO_SET_UNKNOWN_ID:${set}:${id}`);
+    return entry;
+  });
+  const scenarios = entries.map(entry => entry.id);
   if (scenarios.length === 0) {
     console.error('No scenarios configured for parallel run');
     return 1;
   }
 
-  const workers = Math.min(workersArg ?? scenarios.length, scenarios.length);
+  const parallelScenarios = entries.filter(entry => !entry.requiresStress).map(entry => entry.id);
+  const exclusiveScenarios = entries.filter(entry => entry.requiresStress).map(entry => entry.id);
+  const workers = Math.max(1, Math.min(workersArg ?? 4, parallelScenarios.length || 1));
   const logsDir = resolve(process.cwd(), '.logs', 'scenarios-parallel', tsTag());
   mkdirSync(logsDir, { recursive: true });
   const leases = await acquireScenarioLeases(workers);
@@ -282,11 +242,10 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   console.log(`Set       : ${set}`);
   console.log(`Mode      : ${mode}`);
   console.log(`Scenarios : ${scenarios.join(', ')}`);
-  console.log(`Workers   : ${workers}`);
+  console.log(`Workers   : ${workers} parallel; ${exclusiveScenarios.length} exclusive`);
   console.log(`Logs      : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
 
-  let next = 0;
   const results: ParallelResult[] = [];
 
   const runOne = async (
@@ -367,11 +326,12 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
     }
   };
 
+  let nextParallel = 0;
   const workerLoop = async (workerId: number) => {
     while (true) {
-      const idx = next++;
-      if (idx >= scenarios.length) return;
-      const scenario = scenarios[idx]!;
+      const idx = nextParallel++;
+      if (idx >= parallelScenarios.length) return;
+      const scenario = parallelScenarios[idx]!;
       console.log(`▶️  [worker ${workerId}] ${scenario}`);
       const lease = leases[workerId];
       if (!lease) throw new Error(`SCENARIO_WORKER_LEASE_MISSING:${workerId}`);
@@ -389,6 +349,15 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   const startedAt = Date.now();
   try {
     await Promise.all(Array.from({ length: workers }, (_, i) => workerLoop(i)));
+    for (const scenario of exclusiveScenarios) {
+      console.log(`▶️  [exclusive] ${scenario}`);
+      const lease = leases[0];
+      if (!lease) throw new Error('SCENARIO_EXCLUSIVE_LEASE_MISSING');
+      const result = await runOne(scenario, 0, lease);
+      results.push(result);
+      const seconds = (result.durationMs / 1000).toFixed(1);
+      console.log(`${result.status === 'passed' ? '✅' : '❌'} [exclusive] ${scenario} ${result.status} in ${seconds}s`);
+    }
   } finally {
     for (const lease of leases) lease.release();
   }
@@ -430,7 +399,7 @@ async function main() {
   const runAll = !single && (!scenario || scenario === 'all');
 
   if (runAll) {
-    const selected = resolveParallelSet(set).filter((id) => getScenario(id));
+    const selected = resolveScenarioSet((set || process.env['SCENARIO_SET'] || 'full').toLowerCase());
     assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'scenario', targets: selected });
     const code = await runParallelScenarios(requestedMode, workers, set);
     process.exit(code);

@@ -40,7 +40,6 @@ const EXCLUDED_SCENARIOS = new Set([
   'ahb', // triangle demo does not drain under the RPC determinism harness
   'grid', // visual scalability demo; not a consensus correctness oracle
   'rapid-fire', // explicitly stress-only in the registry
-  'swap-tps', // throughput benchmark, not a correctness scenario
 ]);
 
 const requestedScenarioKeys = (): Set<string> => {

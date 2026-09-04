@@ -75,7 +75,7 @@ export const applyCertifiedBoardJEvent = (
     }
   }
 
-  const boardHankoRefresh = markBoardRotationHankoRefreshesPending(newState, event);
+  const boardHankoRefresh = markBoardRotationHankoRefreshesPending(env, newState, event);
   for (const accountId of boardHankoRefresh.dirtyAccounts) dirtyAccounts.add(accountId);
   if (!isLocalEntity) {
     const counterpartyId = event.data.entityId.toLowerCase();

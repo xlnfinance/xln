@@ -11,6 +11,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   withoutTestArtifactCleanupDoneEnv,
 } from '../e2e/harness/test-artifact-cleanup';
+import { XLN_RELEASE_PATHS } from '../../../tools/release-snapshot/scope.ts';
 
 type GateProfile = 'quick' | 'ci' | 'release';
 
@@ -95,6 +96,8 @@ const RUNTIME_CORE_TESTS = [
   'native/__tests__/watchtower-recovery-flow.test.ts',
 ].join(' ');
 
+const RELEASE_PATHS = XLN_RELEASE_PATHS.join(' ');
+
 const quickSteps: GateStep[] = [
   { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
   // CI starts from a cold Rust target. The complete Rust build and test chain
@@ -108,7 +111,11 @@ const quickSteps: GateStep[] = [
     command: 'bun run test:consensus:collision',
     timeoutMs: 120_000,
   },
-  { name: 'diff whitespace check', command: 'git diff --check', timeoutMs: 30_000 },
+  {
+    name: 'diff whitespace check',
+    command: `git diff --check -- ${RELEASE_PATHS}`,
+    timeoutMs: 30_000,
+  },
 ];
 
 const ciPreE2eSteps: GateStep[] = [

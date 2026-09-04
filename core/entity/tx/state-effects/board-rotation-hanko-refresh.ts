@@ -11,6 +11,8 @@ import {
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../../protocol/state/account-input-clone';
+import { applyEntityAccountEnvelopeUpdate } from '../../account-envelope-update';
+import type { EntityRuntimeContext } from '../../runtime-context';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 
@@ -226,6 +228,7 @@ const boardHankoRefreshActivation = (event: BoardActivatedEvent): BoardHankoRefr
 };
 
 export const markBoardRotationHankoRefreshesPending = (
+  env: EntityRuntimeContext,
   state: EntityState,
   event: BoardActivatedEvent,
 ): { activation: BoardHankoRefreshActivation; dirtyAccounts: string[] } => {
@@ -238,16 +241,21 @@ export const markBoardRotationHankoRefreshesPending = (
     const counterpartyId = rawCounterpartyId.toLowerCase();
     if (Number(account.currentHeight) < 1) {
       if (account.boardHankoRefreshMigration) {
-        delete account.boardHankoRefreshMigration;
+        applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+          type: 'replaceBoardHankoRefreshMigration',
+        });
         dirtyAccounts.push(counterpartyId);
       }
       continue;
     }
-    account.boardHankoRefreshMigration = {
-      activationJHeight: activation.jHeight,
-      activationLogIndex: activation.logIndex,
-      reason: 'pending',
-    };
+    applyEntityAccountEnvelopeUpdate(env, counterpartyId, account, {
+      type: 'replaceBoardHankoRefreshMigration',
+      migration: {
+        activationJHeight: activation.jHeight,
+        activationLogIndex: activation.logIndex,
+        reason: 'pending',
+      },
+    });
     dirtyAccounts.push(counterpartyId);
   }
   return { activation, dirtyAccounts: dirtyAccounts.sort() };
@@ -360,6 +368,7 @@ const buildAccountHankoRefreshDraft = (
 };
 
 export const applyBoardRotationHankoRefreshMigrations = (
+  env: EntityRuntimeContext,
   state: EntityState,
   updates: readonly BoardRotationAccountMigration[],
 ): void => {
@@ -369,8 +378,10 @@ export const applyBoardRotationHankoRefreshMigrations = (
   for (const update of updates) {
     const account = getEntityAccountForWrite(state.accounts, update.counterpartyId);
     if (!account) throw new Error(`BOARD_HANKO_REFRESH_MIGRATION_ACCOUNT_MISSING:${update.counterpartyId}`);
-    if (update.marker) account.boardHankoRefreshMigration = { ...update.marker };
-    else delete account.boardHankoRefreshMigration;
+    applyEntityAccountEnvelopeUpdate(env, update.counterpartyId, account, {
+      type: 'replaceBoardHankoRefreshMigration',
+      ...(update.marker ? { migration: update.marker } : {}),
+    });
   }
 };
 

@@ -50,15 +50,11 @@ export const describeEntityInputCommitShape = (input: EntityInputCommitShape): s
   ].join(';');
 };
 
-/**
- * WAL key of one committed context. Several sequential Entity commits of one
- * replica may share a Runtime frame, so the key binds the certified height as
- * well as the applying replica.
- */
-const entityContextCommitKey = (appliedReplicaId: string, height: number): string =>
+/** WAL key of the context required to build or commit one Entity height. */
+const entityContextReplayKey = (appliedReplicaId: string, height: number): string =>
   `${appliedReplicaId.toLowerCase()}:${height}`;
 
-/** Commit one proposer-observed slice under the exact local replica and height that applied it. */
+/** Preserve one proposer-observed slice under its exact local replica and height. */
 export const collectRuntimeEntityContext = (
   contexts: Map<string, EntityInfraContext>,
   inputEntityId: string,
@@ -82,7 +78,7 @@ export const collectRuntimeEntityContext = (
       `RUNTIME_ENTITY_CONTEXT_REPLICA_BINDING_INVALID:expected=${proposerReplicaId}:received=${context.proposerReplicaId}`,
     );
   }
-  const commitKey = entityContextCommitKey(appliedReplicaId, context.height);
+  const commitKey = entityContextReplayKey(appliedReplicaId, context.height);
   const existing = contexts.get(commitKey);
   if (
     existing &&

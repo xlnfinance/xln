@@ -7,7 +7,6 @@ import {
   createBook,
   forkBookState,
   getBestAsk,
-  validateBookStructure,
 } from '../../../../orderbook';
 import { getPerfMs } from '../../../../support/time';
 
@@ -60,10 +59,10 @@ test('one marketable order sweeps 1024 FIFO makers across prices and Patricia pa
   expect(trades.map(event => event.makerOrderId)).toEqual(expected);
   expect(trades.reduce((sum, event) => sum + event.qty, 0n)).toBe(BigInt(orderCount));
   expect(settled.orders.size).toBe(0);
+  expect(settled.bidPages.size).toBe(0);
   expect(settled.askPages.size).toBe(0);
   expect(getBestAsk(settled)).toBeNull();
   expect(computeBookCommitmentHash(settled)).not.toBe(beforeRoot);
-  expect(validateBookStructure(settled).ok).toBe(true);
   expect(elapsedMs).toBeLessThan(1_000);
 
   console.log(JSON.stringify({
@@ -156,6 +155,7 @@ test('lazy maker authority cancels only the consulted stale row and preserves th
     .toEqual(['live-second']);
   expect(settled.orders.has('stale-first')).toBe(false);
   expect(settled.orders.has('untouched-third')).toBe(true);
+  expect(settled.orders.size).toBe(1);
+  expect(getBestAsk(settled)).toBe(2_001n);
   expect(published.orders.size).toBe(3);
-  expect(validateBookStructure(settled).ok).toBe(true);
 });

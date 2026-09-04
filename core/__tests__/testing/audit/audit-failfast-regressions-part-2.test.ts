@@ -55,7 +55,7 @@ import { HTLC, LIMITS } from '../../../config/constants';
 
 import { executeCrontab, initCrontab } from '../../../entity/scheduler';
 import { collectDerivedDeadlines } from '../../../entity/scheduler/derived-deadlines';
-import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/tx/j-events-htlc/route-lifecycle';
+import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/paybook/lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
 
@@ -136,6 +136,11 @@ import { buildSettlementHankoDraft, processCommittedSettlementTransitionFollowup
 import { applyJEvent } from '../../../entity/tx/j-events';
 
 import { applyJEventRange, buildJEventRangeData } from '../../helpers/j-history';
+import {
+  makeAccount as makePersistentAccount,
+  makeState as makePersistentEntityState,
+  putTestAccountDelta,
+} from '../../helpers/cross-j';
 
 import { applyFinalizedAccountJEvents } from '../../../account/tx/handlers/j-events/finality';
 
@@ -1097,9 +1102,9 @@ describe('audit fail-fast regressions', () => {
     attachSigningReplica(env, left.entityId, left.signerId);
     attachSigningReplica(env, right.entityId, right.signerId);
 
-    const receiver = makeProposalAccount([], left.entityId, right.entityId);
+    const receiver = makePersistentAccount(left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
-    receiver.state.deltas.set(1, {
+    putTestAccountDelta(receiver, {
       ...createDefaultDelta(1),
       leftCreditLimit: 10n,
     });
@@ -1161,14 +1166,19 @@ describe('audit fail-fast regressions', () => {
     expect(accountResult.disputeRequired).toBeUndefined();
     expect(safeStringify(receiver)).toBe(before);
 
-    const receiverState = makeEntityState(right.entityId);
-    receiverState.config = makeSingleSignerConfigFor(right.signerId);
+    const receiverState = makePersistentEntityState(
+      right.entityId,
+      right.signerId,
+      makeSingleSignerConfigFor(right.signerId).jurisdiction!,
+      left.entityId,
+    );
     receiverState.timestamp = env.state.timestamp;
     receiverState.accounts.set(left.entityId, forkAccountReplicaShell(receiver));
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
       data: accountInput,
     });
+    expect(applied.skippedError).toContain('ACCOUNT_INPUT_FRAME_STALE_SETTLEMENT_HANKO');
     const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
     expect(rejectedAccount.status).toBe('active');
     expect(rejectedAccount.currentHeight).toBe(0);
@@ -2149,9 +2159,11 @@ describe('audit fail-fast regressions', () => {
     expect(Array.from(env.infrastructure?.currentStorageOverlayMarks?.values() ?? []))
       .toEqual([{ family: 'entity', entityId }]);
 
-    const rejected = await applyEntityTx(env, reduced.newState, { type: '__unknown__' } as unknown as EntityTx);
-    expect(rejected.skippedError).toContain('ENTITY_TX_UNHANDLED');
-    expect(rejected.storageChanges).toEqual([]);
+    // An unknown tx type cannot pass wire validation; at the reducer it is a
+    // local bug that throws and leaves the overlay marks untouched.
+    await expect(
+      applyEntityTx(env, reduced.newState, { type: '__unknown__' } as unknown as EntityTx),
+    ).rejects.toThrow();
     expect(Array.from(env.infrastructure?.currentStorageOverlayMarks?.values() ?? []))
       .toEqual([{ family: 'entity', entityId }]);
 

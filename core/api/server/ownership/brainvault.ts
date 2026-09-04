@@ -17,9 +17,9 @@ import { getBytes } from 'ethers';
 import {
   deriveBrainVaultNative,
   type BrainVaultNativeProgress,
-} from '../../../../brainvault/native.ts';
-import { deriveEthereumAddress, deriveEthereumPrivateKeyAtPath } from '../../../../brainvault/core.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/primitives/spec.ts';
+} from '../../../../brainvault/src/native/index.ts';
+import { deriveEthereumAddress, deriveEthereumPrivateKeyAtPath } from '../../../../brainvault/src/core/index.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/src/core/primitives/spec.ts';
 import { registerSignerKey } from '../../../account/crypto';
 import { deriveMnemonicCustodySeed } from '../../../runtime/registration/entity-creation/mnemonic-seed';
 import type { RuntimeInput, RuntimeReplica } from '../../../runtime/types';

@@ -222,7 +222,6 @@ export const handleDisputeStart = async (
       account,
       counterpartyId,
       proof.proofBodyHash,
-      nonce.signedNonce,
       entityTx.data.starterInitialArguments,
       env,
     ),

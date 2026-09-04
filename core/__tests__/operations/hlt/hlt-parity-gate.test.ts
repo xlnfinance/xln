@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,8 +22,12 @@ test('binds one closed WAL and runtime seed before creating pristine replay copi
   writeFileSync(join(wal, 'nested', '000001.ldb'), Buffer.from([1, 2, 3, 4]));
   try {
     const binding = await buildHltAuthoritySourceBinding(wal, 'runtime-seed');
+    expect(statSync(wal).mode & 0o777).toBe(0o500);
+    expect(statSync(join(wal, 'nested', '000001.ldb')).mode & 0o777).toBe(0o400);
     await expect(assertHltAuthoritySourceBinding(binding, wal, 'runtime-seed')).resolves.toBeUndefined();
     await copyBoundAuthorityWal(wal, copy, binding, 'runtime-seed');
+    expect(statSync(copy).mode & 0o777).toBe(0o700);
+    expect(statSync(join(copy, 'nested', '000001.ldb')).mode & 0o777).toBe(0o600);
     await expect(assertHltAuthoritySourceBinding(binding, copy, 'runtime-seed')).resolves.toBeUndefined();
     writeFileSync(join(copy, 'nested', '000001.ldb'), Buffer.from([1, 2, 3, 5]));
     await expect(assertHltAuthoritySourceBinding(binding, copy, 'runtime-seed'))
@@ -31,6 +35,8 @@ test('binds one closed WAL and runtime seed before creating pristine replay copi
     await expect(assertHltAuthoritySourceBinding(binding, wal, 'different-seed'))
       .rejects.toThrow('HLT_AUTHORITY_SOURCE_RUNTIME_SEED_HASH');
   } finally {
+    chmodSync(wal, 0o700);
+    chmodSync(join(wal, 'nested'), 0o700);
     rmSync(root, { recursive: true, force: true });
   }
 });

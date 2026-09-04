@@ -42,7 +42,7 @@ function requireRegistered(entities: RegisteredEntity[], index: number, label: s
   return entity;
 }
 
-export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+export async function runProcessBatchScenario(runtimeReplica: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('\n' + '═'.repeat(80));
   console.log('  PROCESSBATCH MIXED REBALANCE');
   console.log('  Hub batch with C→R (proofed) + R→C (unilateral)');
@@ -52,10 +52,7 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Pr
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'processbatch',
     signerIds: ['2', '3', '4', '5', '6'],
-    seed: 'processbatch-mixed-seed',
-    ...(_existingEnv?.runtimeConfig?.storage?.enabled !== undefined
-      ? { storageEnabled: _existingEnv.runtimeConfig.storage.enabled }
-      : {}),
+    runtimeReplica,
   });
 
   const jurisdictionChainId = jurisdiction.chainId;

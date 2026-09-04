@@ -368,10 +368,13 @@ function filterOfflineInputs<T extends EntityInput>(
 
   const filtered: T[] = [];
   const dropped: T[] = [];
+  const normalizedOffline = new Set(
+    [...offlineSigners].map(signerId => signerId.trim().toLowerCase()),
+  );
 
   for (const input of inputs) {
-    const signerId = input.signerId;
-    if (signerId && offlineSigners.has(signerId)) {
+    const signerId = input.signerId?.trim().toLowerCase();
+    if (signerId && normalizedOffline.has(signerId)) {
       dropped.push(input);
     } else {
       filtered.push(input);
@@ -394,6 +397,9 @@ const countOnlinePendingNetworkOutputs = (env: RuntimeReplica, offlineSigners: S
   (env.pendingNetworkOutputs ?? [])
     .filter(output => !isExplicitlyOfflineNetworkTarget(output, offlineSigners))
     .length;
+
+const countOnlinePendingOutputs = (env: RuntimeReplica, offlineSigners: Set<string>): number =>
+  filterOfflineInputs(env.pendingOutputs ?? [], offlineSigners).filtered.length;
 
 const boundedDiagnosticText = (value: unknown): string => {
   const normalized = String(value ?? '').trim();
@@ -444,7 +450,7 @@ export async function processWithOffline(
   const pending = env.pendingOutputs || [];
   const { filtered: filteredPending, dropped: droppedPending } = filterOfflineInputs(pending, offlineSigners);
   if (droppedPending.length > 0) {
-    env.info('network', 'OFFLINE_SIGNER_DROP', {
+    env.info('network', 'OFFLINE_SIGNER_DEFERRED', {
       reason,
       source: 'pendingOutputs',
       signers: Array.from(new Set(droppedPending.map(i => i.signerId))),
@@ -457,7 +463,7 @@ export async function processWithOffline(
   const queuedInputs = env.runtimeMempool?.entityInputs || [];
   const { filtered: filteredQueued, dropped: droppedQueued } = filterOfflineInputs(queuedInputs, offlineSigners);
   if (droppedQueued.length > 0) {
-    env.info('network', 'OFFLINE_SIGNER_DROP', {
+    env.info('network', 'OFFLINE_SIGNER_DEFERRED', {
       reason,
       source: 'runtimeInput',
       signers: Array.from(new Set(droppedQueued.map(i => i.signerId))),
@@ -469,7 +475,7 @@ export async function processWithOffline(
 
   const { filtered: filteredInputs, dropped: droppedInputs } = filterOfflineInputs(inputs || [], offlineSigners);
   if (droppedInputs.length > 0) {
-    env.info('network', 'OFFLINE_SIGNER_DROP', {
+    env.info('network', 'OFFLINE_SIGNER_DEFERRED', {
       reason,
       source: 'inputs',
       signers: Array.from(new Set(droppedInputs.map(i => i.signerId))),
@@ -483,7 +489,7 @@ export async function processWithOffline(
   const { filtered: retainedPostProcessInputs, dropped: droppedPostProcessInputs } =
     filterOfflineInputs(postProcessInputs, offlineSigners);
   if (droppedPostProcessInputs.length > 0) {
-    processed.info('network', 'OFFLINE_SIGNER_DROP', {
+    processed.info('network', 'OFFLINE_SIGNER_DEFERRED', {
       reason,
       source: 'postProcess.runtimeInput',
       signers: Array.from(new Set(droppedPostProcessInputs.map(input => input.signerId))),
@@ -491,6 +497,18 @@ export async function processWithOffline(
       entities: Array.from(new Set(droppedPostProcessInputs.map(input => input.entityId))),
     });
     processed.runtimeMempool.entityInputs = retainedPostProcessInputs;
+  }
+  const deferred = [
+    ...droppedPending,
+    ...droppedQueued,
+    ...droppedInputs,
+    ...droppedPostProcessInputs,
+  ];
+  if (deferred.length > 0) {
+    // Offline in these headless scenarios means eventual reliable delivery,
+    // matching the production WAL outbox. Preserve FIFO work until reconnect;
+    // permanent packet loss requires the separate Entity-history sync gate.
+    processed.pendingOutputs = [...deferred, ...(processed.pendingOutputs ?? [])];
   }
   return processed;
 }
@@ -574,7 +592,7 @@ export async function processUntil(
 }
 
 /**
- * Converge with offline signers (drops inputs to specified signerIds)
+ * Converge with offline signers (defers inputs to specified signerIds)
  * Checks BOTH entity-level AND account-level work (like regular converge)
  */
 export async function convergeWithOffline(
@@ -586,7 +604,7 @@ export async function convergeWithOffline(
   for (let i = 0; i < maxCycles; i++) {
     await processWithOffline(env, undefined, offlineSigners, reason);
     let hasWork = false;
-    const pendingOutputs = env.pendingOutputs?.length || 0;
+    const pendingOutputs = countOnlinePendingOutputs(env, offlineSigners);
     const pendingNetwork = countOnlinePendingNetworkOutputs(env, offlineSigners);
     const pendingInbox = env.networkInbox?.length || 0;
     const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;

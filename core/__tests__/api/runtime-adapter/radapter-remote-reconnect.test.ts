@@ -1,7 +1,7 @@
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { expect, test } from 'bun:test';
 
-import { BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/primitives/spec';
+import { BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/src/core/primitives/spec';
 import {
   createPaymentTerminalMonitor,
   PAYMENT_TERMINAL_EVENT_NAMES,

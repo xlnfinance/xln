@@ -82,26 +82,6 @@ const encodeRlpNode = (node: RlpNode): Uint8Array => {
   return encodeRlpPayload(concatBytes(children, payloadLength), true);
 };
 
-const encodeRlpList = (children: readonly Uint8Array[]): Uint8Array => {
-  let payloadLength = 0;
-  for (const child of children) payloadLength += child.byteLength;
-  const lengthBytes = payloadLength <= 55 ? null : rlpLengthBytes(payloadLength);
-  const headerLength = lengthBytes ? 1 + lengthBytes.byteLength : 1;
-  const output = new Uint8Array(headerLength + payloadLength);
-  if (lengthBytes) {
-    output[0] = 0xf7 + lengthBytes.byteLength;
-    output.set(lengthBytes, 1);
-  } else {
-    output[0] = 0xc0 + payloadLength;
-  }
-  let offset = headerLength;
-  for (const child of children) {
-    output.set(child, offset);
-    offset += child.byteLength;
-  }
-  return output;
-};
-
 const TEXT_MEMO_MAX_LENGTH = 64;
 const TEXT_MEMO_MAX = 8192;
 const textMemo = new Map<string, Uint8Array>();
@@ -163,53 +143,6 @@ const canonicalRlpNode = (value: unknown): RlpNode => {
       .sort(([left], [right]) => compareStableText(left, right))
       .map(([key, entry]) => [textNode(key), canonicalRlpNode(entry)] satisfies RlpNode[]);
     return [textNode('object'), ...entries];
-  }
-  throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
-};
-
-const encodeAccountStateValueDirect = (value: unknown): Uint8Array => {
-  if (value === null) return encodeRlpList([encodeText('null')]);
-  if (typeof value === 'boolean') {
-    return encodeRlpList([encodeText('bool'), encodeRlpPayload(Uint8Array.of(value ? 1 : 0), false)]);
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`ACCOUNT_STATE_RLP_NON_FINITE_NUMBER:${String(value)}`);
-    return encodeRlpList([encodeText('number'), encodeText(String(value))]);
-  }
-  if (typeof value === 'bigint') {
-    const magnitude = value < 0n ? -value : value;
-    return encodeRlpList([
-      encodeText('bigint'),
-      encodeRlpPayload(Uint8Array.of(value < 0n ? 1 : 0), false),
-      encodeRlpPayload(bigintMagnitudeBytes(magnitude), false),
-    ]);
-  }
-  if (typeof value === 'string') {
-    return encodeRlpList([encodeText('string'), encodeText(value)]);
-  }
-  if (Array.isArray(value)) {
-    return encodeRlpList([encodeText('array'), ...value.map(encodeAccountStateValueDirect)]);
-  }
-  if (value instanceof Map) {
-    const entries = Array.from(value.entries()).map(([key, entry]) => {
-      const encodedKey = encodeAccountStateValueDirect(key);
-      return {
-        encodedKey,
-        encodedEntry: encodeRlpList([encodedKey, encodeAccountStateValueDirect(entry)]),
-      };
-    }).sort((left, right) => compareBytes(left.encodedKey, right.encodedKey));
-    return encodeRlpList([encodeText('map'), ...entries.map(entry => entry.encodedEntry)]);
-  }
-  if (value instanceof Set) {
-    const entries = Array.from(value.values(), encodeAccountStateValueDirect).sort(compareBytes);
-    return encodeRlpList([encodeText('set'), ...entries]);
-  }
-  if (typeof value === 'object' && value !== null) {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => compareStableText(left, right))
-      .map(([key, entry]) => encodeRlpList([encodeText(key), encodeAccountStateValueDirect(entry)]));
-    return encodeRlpList([encodeText('object'), ...entries]);
   }
   throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
 };

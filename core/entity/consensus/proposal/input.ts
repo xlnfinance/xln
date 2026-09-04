@@ -20,7 +20,6 @@ import {
   getReplicaJRangeValidationError,
 } from '../j-prefix/prefix-round';
 import { preauthenticateEntityProposal } from './preauthentication';
-import { haltRuntimeFailure } from '../../../protocol/errors/failure-taxonomy';
 
 const validateProposalEnvelope = (
   context: ApplyEntityInputContext,
@@ -150,13 +149,11 @@ const respondToActiveDuplicate = (
   if (!locked || locked.hash !== frame.hash) return null;
   const localSignatures = locked.collectedSigs?.get(workingReplica.signerId.toLowerCase());
   const candidate = workingReplica.candidate;
-  if (!localSignatures || !candidate) {
-    throw haltRuntimeFailure(
-      'ENTITY_DUPLICATE_PROPOSAL_CACHE_INVALID',
-      `ENTITY_DUPLICATE_PROPOSAL_CACHE_INVALID:${workingReplica.entityId}:` +
-        `${workingReplica.signerId}:${frame.height}:${frame.hash}`,
-    );
-  }
+  // A prepared leader certificate may install the canonical lock without a
+  // process-local execution or this validator's signature. Replaying the same
+  // authenticated frame reconstructs both; treating that honest state as
+  // corruption lets a relayed proposal halt the validator.
+  if (!localSignatures || !candidate) return null;
   publishLocalPrecommit(context, locked, localSignatures, candidate.state.config.validators);
   return {
     outcome: { kind: 'noop', reason: 'PROPOSAL_ALREADY_PRECOMMITTED' },

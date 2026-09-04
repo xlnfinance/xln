@@ -396,14 +396,10 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       );
     }
     await acceptAuthorityEntityStage(env, result.authorityStage);
-    // A local-event commit (account-work preview or immediate cross-J) is an
-    // Entity frame like any other: its EntityInfraContext is part of the frame
-    // hash and exact replay (native Rust included) consumes one persisted
-    // context per committed frame. Journal it exactly as staged inputs do.
-    if (result.entityContext && !result.entityFrameCommitted) {
-      throw new Error(`RUNTIME_ENTITY_CONTEXT_WITHOUT_COMMITTED_FRAME:${replicaKey}`);
-    }
-    if (result.entityFrameCommitted && result.entityContext) {
+    // Proposal construction reads public infrastructure before a quorum may
+    // commit. Journal that exact context now so replay can rebuild the same
+    // live proposal; committed frames naturally reuse the same keyed value.
+    if (result.entityContext) {
       collectRuntimeEntityContext(
         context.entityContexts,
         input.entityId,

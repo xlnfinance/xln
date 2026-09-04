@@ -16,10 +16,6 @@ import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authoriz
 import { getStaticSwapTokenDimensions } from '../../orderbook';
 import { safeStringify } from '../../protocol/serialization';
 import { buildCurrentDisputeArgumentPlan } from '../../protocol/dispute/arguments';
-import {
-  peekPreparedProposalCommit,
-  preparedCommitKey,
-} from '../../account/consensus/proposal/prepared-commit';
 import { bootScenario, fundEntities, registerEntities } from '../harness/boot';
 import {
   assert,
@@ -283,41 +279,21 @@ const decodeArguments = (encoded: string, context: string): DecodedArguments => 
   };
 };
 
-const pendingDeltaByToken = (account: AccountReplica, frame: AccountFrame, tokenId: number) => {
-  const prepared = peekPreparedProposalCommit(preparedCommitKey(account, frame.stateHash), account.state);
-  const delta = prepared?.state.deltas.get(tokenId);
-  if (!delta) throw new Error(`DISPUTE_TRANSFORMER_PENDING_DELTA_MISSING:${tokenId}`);
-  return delta;
-};
-
 const currentDelta = (account: AccountReplica, tokenId: number) => {
   const delta = account.state.deltas.get(tokenId);
   if (!delta) throw new Error(`DISPUTE_TRANSFORMER_BASE_DELTA_MISSING:${tokenId}`);
   return delta;
 };
 
-const combinedPendingOffdelta = (
-  base: AccountReplica,
-  aliceAccount: AccountReplica,
-  hubAccount: AccountReplica,
-  tokenId: number,
-): bigint => {
-  const initial = currentDelta(base, tokenId).offdelta;
-  return pendingDeltaByToken(aliceAccount, aliceAccount.pendingFrame!, tokenId).offdelta
-    + pendingDeltaByToken(hubAccount, hubAccount.pendingFrame!, tokenId).offdelta
-    - initial;
-};
-
 const readDebtOutstanding = async (jadapter: JAdapter, entityId: string, tokenId: number): Promise<bigint> =>
   BigInt(await jadapter.depository.debtOutstanding(entityId, tokenId));
 
-export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+export async function runDisputeTransformer(runtimeReplica: RuntimeReplica): Promise<RuntimeReplica> {
   const process = await getProcess();
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'dispute-transformer',
     signerIds: ['2', '3', '4', '5'],
-    seed: 'dispute-transformer-deterministic',
-    ...(_existingEnv?.scenarioJAdapterMode ? { mode: _existingEnv.scenarioJAdapterMode } : {}),
+    runtimeReplica,
   });
   env.quietRuntimeLogs = true;
   env.scenarioLogLevel = 'info';
@@ -637,7 +613,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         rightReserve: await jadapter.getReserves(hub.id, tokenId),
         collateral: await jadapter.getCollateral(alice.id, hub.id, tokenId),
         ondelta: currentDelta(baseAccount, tokenId).ondelta,
-        offdelta: combinedPendingOffdelta(baseAccount, alicePendingAccount, hubPendingAccount, tokenId),
+        offdelta: currentDelta(baseAccount, tokenId).offdelta,
       });
     }
 

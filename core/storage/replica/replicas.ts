@@ -2,6 +2,7 @@ import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { compareStableText } from '../../protocol/serialization';
 import {
+  assertSameEntityReplicaEndpointAtEqualHeight,
   buildCertifiedEntityHeadPlan,
   type CertifiedEntityHeadPlan,
 } from './entity-head';
@@ -87,6 +88,9 @@ const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
     const current = lookup.get(entityId);
+    if (current) {
+      assertSameEntityReplicaEndpointAtEqualHeight(entityId, current.replica, replica);
+    }
     if (!current || replica.state.height > current.state.height) {
       lookup.set(entityId, { replicaKey: String(replicaKey), replica, state: replica.state });
     }

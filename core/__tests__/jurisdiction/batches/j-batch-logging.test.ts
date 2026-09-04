@@ -126,10 +126,10 @@ test('removed retired settlement commands cannot mutate the jurisdiction batch',
       },
     } as unknown as EntityTx;
 
-    const result = await applyEntityTx(createEmptyEnv(`retired-${type}`), state, retiredTx);
-
-    expect(result.skippedError).toBe(`ENTITY_TX_UNHANDLED: type=${type}`);
-    expect(result.newState.jBatchState?.batch).toEqual(before);
+    // Retired kinds are rejected at both wire boundaries; reaching the reducer
+    // with one is a local bug and fails loudly instead of being skipped.
+    await expect(applyEntityTx(createEmptyEnv(`retired-${type}`), state, retiredTx)).rejects.toThrow();
+    expect(state.jBatchState?.batch).toEqual(before);
   }
 });
 

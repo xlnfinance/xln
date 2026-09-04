@@ -5,7 +5,6 @@
     "sourceGlobs": [
       "core/**/*.ts",
       "jurisdictions/contracts/**/*.sol",
-      "brainvault/**/*.ts",
       "custody/**/*.ts",
       "frontend/src/lib/components/Entity/**/*",
       "frontend/src/lib/components/PaymentSpotlight.svelte",
@@ -21,7 +20,6 @@
       "core/scenarios/**/*.ts",
       "jurisdictions/test/**/*",
       "tests/**/*.ts",
-      "brainvault/**/*.test.ts",
       "frontend/tests/**/*.ts"
     ],
     "exclusions": [
@@ -223,14 +221,12 @@
       "sourceGlobs": [
         "core/api/runtime-adapter/**/*.ts",
         "core/api/server/**/*.ts",
-        "brainvault/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*radapter*",
         "core/__tests__/**/*rpc*",
-        "tests/unit/brainvault-*.test.ts",
-        "brainvault/*.test.ts"
+        "tests/unit/brainvault-*.test.ts"
       ],
       "dependencies": [
         "storage-recovery",
@@ -461,7 +457,6 @@
         "core/scenarios/**/*.ts",
         "jurisdictions/test/**/*",
         "tests/**/*.ts",
-        "brainvault/**/*.test.ts",
         "frontend/tests/**/*.ts"
       ],
       "dependencies": [
@@ -726,14 +721,12 @@
       "sourceGlobs": [
         "core/api/runtime-adapter/**/*.ts",
         "core/api/server/**/*.ts",
-        "brainvault/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*radapter*",
         "core/__tests__/**/*rpc*",
-        "tests/unit/brainvault-*.test.ts",
-        "brainvault/*.test.ts"
+        "tests/unit/brainvault-*.test.ts"
       ]
     },
     {
@@ -752,14 +745,12 @@
       "sourceGlobs": [
         "core/api/runtime-adapter/**/*.ts",
         "core/api/server/**/*.ts",
-        "brainvault/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
         "core/__tests__/**/*radapter*",
         "core/__tests__/**/*rpc*",
-        "tests/unit/brainvault-*.test.ts",
-        "brainvault/*.test.ts"
+        "tests/unit/brainvault-*.test.ts"
       ]
     },
     {
@@ -1126,7 +1117,6 @@
         "core/scenarios/**/*.ts",
         "jurisdictions/test/**/*",
         "tests/**/*.ts",
-        "brainvault/**/*.test.ts",
         "frontend/tests/**/*.ts"
       ]
     }

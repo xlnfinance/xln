@@ -5,7 +5,11 @@ import {
 } from '../settlement/j-finality';
 import { freezeAccountForDispute } from '../consensus/dispute/policy';
 import { requirePersistentAccountStateMap } from '../state/persistent-state-map';
-import type { AccountFinality, AccountReplica } from '../../types/account';
+import type {
+  AccountBoardHankoRefreshMigration,
+  AccountFinality,
+  AccountReplica,
+} from '../../types/account';
 import type { RebalancePolicy } from '../../types/finance/rebalance';
 
 type DisputeStartedFinality = Extract<
@@ -31,6 +35,11 @@ export type AccountEnvelopeUpdate =
       tokenId: number;
       /** Omitted releases the marker for that token. */
       submittedAt?: number;
+    }>
+  | Readonly<{
+      type: 'replaceBoardHankoRefreshMigration';
+      /** Omitted clears the marker. */
+      migration?: AccountBoardHankoRefreshMigration;
     }>
   | Readonly<{
       type: 'replaceDisputeLifecycle';
@@ -96,6 +105,11 @@ export const applyAccountEnvelopeUpdate = (
     account.shadow.rebalance.submittedAtByToken = update.submittedAt === undefined
       ? submitted.removed(update.tokenId)
       : submitted.updated(update.tokenId, update.submittedAt);
+    return undefined;
+  }
+  if (update.type === 'replaceBoardHankoRefreshMigration') {
+    if (update.migration === undefined) delete account.boardHankoRefreshMigration;
+    else account.boardHankoRefreshMigration = { ...update.migration };
     return undefined;
   }
   if (update.type === 'replaceDisputeLifecycle') {

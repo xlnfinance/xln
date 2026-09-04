@@ -172,6 +172,7 @@ const logEntityInputProfile = (
 const resolveReplicaAuthorityStage = (
   env: RuntimeReplica,
   ownerEntityId: string,
+  ownerSignerId: string,
   occurrence: AccountAuthorityEntityOccurrence | undefined,
   trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
   deferProposal: boolean,
@@ -191,6 +192,7 @@ const resolveReplicaAuthorityStage = (
       env,
       {
         ownerEntityId,
+        ownerSignerId,
         ...(occurrence === undefined ? {} : { occurrence }),
         ...(trustedLocalRuntimeProtocol === undefined ? {} : { trustedLocalRuntimeProtocol }),
         deferProposal,
@@ -280,6 +282,7 @@ export const applyEntityInputToReplica = async (
   const authority = resolveReplicaAuthorityStage(
     env,
     entityReplica.entityId,
+    entityReplica.signerId,
     authorityOccurrence,
     trustedLocalRuntimeProtocol,
     deferProposal,

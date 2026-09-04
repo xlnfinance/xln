@@ -40,7 +40,7 @@
     "types": ["node", "bun", "qrcode"],
     "paths": {
       "@xln/core/*": ["./core/*"],
-      "@xln/brainvault/*": ["./brainvault/*"]
+      "@xln/brainvault/*": ["./brainvault/src/*"]
     }
   },
   "include": ["src/**/*", "playwright.config.ts"],

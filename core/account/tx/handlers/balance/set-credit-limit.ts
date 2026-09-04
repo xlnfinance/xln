@@ -8,10 +8,16 @@
 
 import type { AccountTx } from '../../../../types/account';
 import type { AccountDraftState } from '../../../state/account-state-draft';
+import { AccountDeltaError } from '../../../state/delta';
 import { FINANCIAL } from '../../../../config/constants';
 import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import type { ApplyAccountTxResult } from '../../apply-types';
-import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import {
+  accountTxApplied,
+  accountTxRejected,
+  accountTxValidationRejected,
+  rejectionFromDeltaError,
+} from '../../apply-result';
 
 export function handleSetCreditLimit(
   account: AccountDraftState,
@@ -38,7 +44,13 @@ export function handleSetCreditLimit(
   const side = byLeft ? 'right' : 'left';
 
   const deltaExisted = account.deltas.has(tokenId);
-  const delta = createDeltaDraft(account, tokenId);
+  let delta: ReturnType<typeof createDeltaDraft>;
+  try {
+    delta = createDeltaDraft(account, tokenId);
+  } catch (error) {
+    if (!(error instanceof AccountDeltaError)) throw error;
+    return accountTxRejected(rejectionFromDeltaError(error, tokenId), [error.message]);
+  }
   if (!deltaExisted) {
     events.push(`📊 Created delta for token ${tokenId}`);
   }

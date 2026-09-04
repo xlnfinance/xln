@@ -277,20 +277,11 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
   let skippedProposals: Array<Readonly<{ order: number; accountId: string }>> = [];
   if (input.phase === 'inbound') {
     prepareWorkerAttempt(worker, input.restorePrevious);
-    worker.inboundPrepared = true;
     const transitionStartedAt = getPerfMs();
     effects = await applyInbound(worker, input, workspace, certifiedBoards, jClaims);
     transitionUs = Math.round((getPerfMs() - transitionStartedAt) * 1_000);
   } else {
-    if (input.continuation) {
-      if (!worker.inboundPrepared) {
-        prepareWorkerAttempt(worker, false);
-        worker.inboundPrepared = true;
-      }
-    } else if (!worker.inboundPrepared) {
-      prepareWorkerAttempt(worker, input.restorePrevious);
-      worker.inboundPrepared = true;
-    }
+    if (input.prepareAttempt) prepareWorkerAttempt(worker, false);
     const transitionStartedAt = getPerfMs();
     applyOutboundEnvelopeUpdates(input, workspace);
     const admissions = await applyOutboundTxs(
@@ -314,7 +305,6 @@ const processPhase = async (value: unknown): Promise<TsAccountWorkerPhaseResult>
     proposalUs = Math.round((getPerfMs() - proposalStartedAt) * 1_000);
     effects = [...admissions, ...proposals.effects];
     skippedProposals = proposals.skippedProposals;
-    if (input.continuation) worker.inboundPrepared = false;
   }
   // Publish only after this worker completed every canonical transition. If a
   // sibling fails, the coordinator becomes permanently fatal and kills all isolates.

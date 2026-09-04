@@ -4,10 +4,11 @@ import { computeAccountStateRoot } from '../../../account/commitment/state-root'
 import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { executeCrontab, initCrontab, HUB_PENDING_BROADCAST_STALE_MS } from '../../../entity/scheduler';
+import { getRebalanceAccountIds } from '../../../entity/consensus/account/work-index';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { createEmptyEnv } from '../../../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
-import { makeAccount } from '../../helpers/cross-j';
+import { makeAccount, openWritableEntityAccounts } from '../../helpers/cross-j';
 
 const entityId = `0x${'c5'.repeat(32)}`;
 const signerId = `0x${'da'.repeat(20)}`;
@@ -230,4 +231,63 @@ test('an old submitted request remains latched until bilateral finality or expli
   expect(outputs.flatMap(output => output.entityTxs ?? []).some(tx => tx.type === 'j_broadcast')).toBe(false);
   expect(state.jBatchState?.batch.reserveToCollateral ?? []).toEqual([]);
   expect(state.accounts.get(userId)?.shadow.rebalance.submittedAtByToken.get(tokenId)).toBe(1);
+});
+
+test('amount priority funds a later larger request first when one token reserve is scarce', async () => {
+  const tokenId = 1;
+  const smallUserId = `0x${'f5'.repeat(32)}`;
+  const largeUserId = `0x${'f6'.repeat(32)}`;
+  const makeRequest = (userId: string, amount: bigint, requestedAt: number) => {
+    const account = makeAccount(entityId, userId, jurisdiction);
+    account.state.requestedRebalance = requirePersistentAccountStateMap(
+      account.state.requestedRebalance,
+      'requestedRebalance',
+    ).updated(tokenId, amount);
+    account.state.requestedRebalanceFeeState = requirePersistentAccountStateMap(
+      account.state.requestedRebalanceFeeState,
+      'requestedRebalanceFeeState',
+    ).updated(tokenId, {
+      requestId: `request-${userId.slice(-2)}`,
+      feeTokenId: tokenId,
+      feePaidUpfront: 10n ** 30n,
+      requestedAmount: amount,
+      policyVersion: 1,
+      requestedAt,
+      requestedByLeft: false,
+    });
+    const delta = account.state.deltas.get(tokenId)!;
+    account.state.deltas = requirePersistentAccountStateMap(
+      account.state.deltas,
+      'deltas',
+    ).updated(tokenId, { ...delta, offdelta: -amount });
+    return account;
+  };
+
+  const env = createEmptyEnv('hub-rebalance-amount-priority');
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = true;
+  env.state.timestamp = 1_000_000;
+  const state = makeHubState(env.state.timestamp, 0);
+  state.reserves.set(tokenId, 600n);
+  state.jBatchState = undefined;
+  state.accounts = state.accounts
+    .updated(smallUserId, makeRequest(smallUserId, 400n, 1))
+    .updated(largeUserId, makeRequest(largeUserId, 900n, 2));
+  expect([...getRebalanceAccountIds(state)]).toEqual([smallUserId, largeUserId]);
+  openWritableEntityAccounts(state);
+  state.crontabState = initCrontab();
+  for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
+  const replica = { entityId, signerId, mempool: [], isProposer: true, state } as EntityReplica;
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
+
+  await executeCrontab(env, replica, state.crontabState, {
+    manualBroadcastInInput: false,
+    accountChanges: new Set(),
+  });
+
+  const pairs = (state.jBatchState?.batch.reserveToCollateral ?? [])
+    .flatMap(operation => operation.pairs);
+  expect(pairs).toEqual([{ entity: largeUserId, amount: 600n }]);
+  expect(state.accounts.get(largeUserId)?.shadow.rebalance.submittedAtByToken.get(tokenId)).toBeGreaterThan(0);
+  expect(state.accounts.get(smallUserId)?.shadow.rebalance.submittedAtByToken.has(tokenId)).toBe(false);
 });
