@@ -12,6 +12,10 @@ import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventD
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { JEventApplyResult } from '../../entity/tx/j-events-types';
+import {
+  applyBookIntentProgram,
+  createBookIntentProgram,
+} from '../../entity/books/book-intents';
 
 export type TestJEventRangeInput = {
   from: string;
@@ -96,9 +100,17 @@ export const applyJEventRange = async (
   state: EntityState,
   data: TestJEventRangeInput,
   env: RuntimeReplica,
-): Promise<JEventApplyResult> => applyJEvent(
-  state,
-  buildJEventRangeData(state, data, env),
-  env,
-  createAccountConsensusContext(env),
-);
+): Promise<JEventApplyResult> => {
+  const bookIntents = createBookIntentProgram();
+  const result = await applyJEvent(
+    state,
+    buildJEventRangeData(state, data, env),
+    env,
+    createAccountConsensusContext(env),
+    [],
+    false,
+    bookIntents.openSlot(),
+  );
+  applyBookIntentProgram(result.newState, bookIntents);
+  return result;
+};
