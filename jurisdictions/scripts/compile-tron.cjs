@@ -47,7 +47,7 @@ const input = {
   settings: {
     optimizer: { enabled: true, runs: 1 },
     viaIR: true,
-    evmVersion: 'shanghai',
+    evmVersion: 'cancun',
     outputSelection: {
       '*': {
         '*': [

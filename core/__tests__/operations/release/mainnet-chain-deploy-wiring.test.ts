@@ -163,7 +163,10 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain('[entityProvider.base58, deltaTransformer.base58]');
     expect(script).not.toContain('disputeDelayBlocks');
     expect(script).not.toContain('TRON_DISPUTE_DELAY_MISMATCH');
-    expect(script).toContain('registerExternalToken(0, usdt.base58, 0)');
+    // USDT is listed through the Foundation lane; the deployer key holds no Depository listing power.
+    expect(script).not.toContain('depositoryContract.registerExternalToken(');
+    expect(script).toContain('entityProviderContract.foundationRegisterExternalToken(');
+    expect(script).toContain("require('./foundation-hanko.cjs')");
     expect(script).toContain('TRON_USDT_REGISTRATION_MISMATCH');
     expect(script).toContain('Mainnet deployment requires --yes');
     expect(script).toContain('DEPLOYMENT_ALREADY_EXISTS');
@@ -251,7 +254,7 @@ describe('mainnet chain deployment wiring', () => {
     expect(compile).toContain("[solcCli, '--standard-json']");
     expect(compile).toContain('TRON_SOLC_VERSION_MISMATCH');
     expect(compile).toContain("viaIR: true");
-    expect(compile).toContain("evmVersion: 'shanghai'");
+    expect(compile).toContain("evmVersion: 'cancun'");
     expect(ignore).toContain('/build-tron');
   });
 
