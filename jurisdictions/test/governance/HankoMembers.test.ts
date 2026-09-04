@@ -17,7 +17,7 @@ const abi = ethers.AbiCoder.defaultAbiCoder();
 
 const CLAIMS_ABI = 'tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[]';
 // The retired 3-field envelope: it must no longer decode on chain.
-const LEGACY_HANKO_ABI = ['tuple(bytes32[],bytes,' + CLAIMS_ABI + ')'];
+const THREE_FIELD_HANKO_ABI = ['tuple(bytes32[],bytes,' + CLAIMS_ABI + ')'];
 const ERC1271_MODE = { OWNER: 0, ALWAYS_VALID: 1, REVERT: 2 } as const;
 
 type Claim = [entityId: string, entityIndexes: number[], weights: number[], threshold: number];
@@ -47,8 +47,8 @@ const buildMemberHanko = (
   [[placeholders, packSignatures(hash, privateKeys), encodeClaims(claims), memberSignatures]],
 );
 
-const buildLegacyHanko = (hash: string, privateKeys: string[], placeholders: string[], claims: Claim[]): string =>
-  abi.encode(LEGACY_HANKO_ABI, [[placeholders, packSignatures(hash, privateKeys), encodeClaims(claims)]]);
+const buildThreeFieldHanko = (hash: string, privateKeys: string[], placeholders: string[], claims: Claim[]): string =>
+  abi.encode(THREE_FIELD_HANKO_ABI, [[placeholders, packSignatures(hash, privateKeys), encodeClaims(claims)]]);
 
 /** Plain 65-byte r||s||v(27/28) signature, what an ERC-1271 owner wallet would produce. */
 const ecdsaSignature = (hash: string, privateKey: string): string =>
@@ -141,20 +141,20 @@ describe('HankoVerifier: ERC-1271 contract members (single 4-field envelope)', f
     )).to.deep.equal([soloId, true]);
   });
 
-  it('accepts only the 4-field envelope: legacy, tagged, empty and misaligned encodings fail', async function () {
+  it('accepts only the 4-field envelope: 3-field, tagged, empty and misaligned encodings fail', async function () {
     const { provider, walletId, soloId, hash, ownerSig } = await loadFixture(fixture);
     const claim: Claim = [soloId, [0], [1], 1];
     const current = buildMemberHanko(hash, [], [walletId], [claim], [ownerSig]);
     expect(await provider.verifyHankoSignature(current, hash)).to.deep.equal([soloId, true]);
 
     // The retired 3-field struct is not decodable as HankoBytes any more.
-    const legacy = buildLegacyHanko(hash, [], [walletId], [claim]);
-    expect(ethers.dataLength(legacy)).to.not.equal(65);
-    await expect(provider.verifyHankoSignature(legacy, hash)).to.be.revert(ethers);
-    const legacySigned = buildLegacyHanko(hash, [deriveHardhatPrivateKey(EOA_INDEX)], [], [
+    const threeField = buildThreeFieldHanko(hash, [], [walletId], [claim]);
+    expect(ethers.dataLength(threeField)).to.not.equal(65);
+    await expect(provider.verifyHankoSignature(threeField, hash)).to.be.revert(ethers);
+    const threeFieldSigned = buildThreeFieldHanko(hash, [deriveHardhatPrivateKey(EOA_INDEX)], [], [
       [boardHashOf(encodeBoard(1, [ethers.dataSlice(addressEntityId((await ethers.getSigners())[EOA_INDEX]!.address), 12)], [1])), [0], [1], 1],
     ]);
-    await expect(provider.verifyHankoSignature(legacySigned, hash)).to.be.revert(ethers);
+    await expect(provider.verifyHankoSignature(threeFieldSigned, hash)).to.be.revert(ethers);
     // No version tags: a leading byte breaks the ABI head.
     await expect(provider.verifyHankoSignature(ethers.concat(['0x02', current]), hash)).to.be.revert(ethers);
     await expect(provider.verifyHankoSignature(ethers.concat(['0x01', current]), hash)).to.be.revert(ethers);

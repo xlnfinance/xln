@@ -201,7 +201,7 @@ library HankoVerifier {
   /// contract account that validates `hash` under ERC-1271. Verification is a
   /// gas-capped STATICCALL with exactly 32 return bytes; any other outcome fails
   /// the whole proof (soft, like a bad EOA signature). Empty entries keep the
-  /// legacy zero-power placeholder semantics.
+  /// zero-power placeholder behavior.
   function _validateMemberSignatures(
     bytes32 hash,
     bytes32[] memory placeholders,

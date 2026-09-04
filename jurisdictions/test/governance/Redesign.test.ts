@@ -30,7 +30,7 @@ const BOARD_GRACE_SECONDS = 7 * ONE_DAY;
 const ARTICLES_ABI = 'tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)';
 
 const entityIdOf = (entityNumber: bigint | number): string => ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
-const legacyEntityAddress = (entityNumber: bigint | number): string =>
+const numberAsAddress = (entityNumber: bigint | number): string =>
   ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
 const syntheticMember = (label: string): string =>
   ethers.getAddress(ethers.dataSlice(ethers.keccak256(ethers.toUtf8Bytes(label)), 12));
@@ -257,16 +257,16 @@ describe('EntityProvider deploy-once redesign', function () {
       expect(await provider.balanceOf(entityTreasuryAddress(1), foundationControl)).to.equal(supply);
       expect(await provider.balanceOf(entityTreasuryAddress(1), foundationDividend)).to.equal(supply);
       expect(await provider.balanceOf(signers[0]!.address, foundationControl)).to.equal(0n);
-      expect(await provider.balanceOf(legacyEntityAddress(1), foundationControl)).to.equal(0n);
+      expect(await provider.balanceOf(numberAsAddress(1), foundationControl)).to.equal(0n);
 
       const entityNumber = await registerSingleSignerEntity(provider, signers[1]!.address);
       const treasury = entityTreasuryAddress(entityNumber);
       const [controlTokenId, dividendTokenId] = await provider.getTokenIds(entityNumber);
-      expect(treasury).to.not.equal(legacyEntityAddress(entityNumber));
+      expect(treasury).to.not.equal(numberAsAddress(entityNumber));
       expect(await provider.balanceOf(treasury, controlTokenId)).to.equal(supply);
       expect(await provider.balanceOf(treasury, dividendTokenId)).to.equal(supply);
-      expect(await provider.balanceOf(legacyEntityAddress(entityNumber), controlTokenId)).to.equal(0n);
-      expect(await provider.balanceOf(legacyEntityAddress(entityNumber), dividendTokenId)).to.equal(0n);
+      expect(await provider.balanceOf(numberAsAddress(entityNumber), controlTokenId)).to.equal(0n);
+      expect(await provider.balanceOf(numberAsAddress(entityNumber), dividendTokenId)).to.equal(0n);
 
       const recipient = signers[7]!.address;
       await entityTransferFromTreasury(provider, recipient, controlTokenId, 1_000n, entityNumber, deriveHardhatPrivateKey(1));
