@@ -200,7 +200,15 @@ fn spend_or_issue(
 ) -> bool {
     let swept = sweep(state, token_id);
     if !can_spend(state, token_id, &value) {
-        issue(state, swept, token_id, op_type, op_index, value, BigInt::from(0));
+        issue(
+            state,
+            swept,
+            token_id,
+            op_type,
+            op_index,
+            value,
+            BigInt::from(0),
+        );
         return false;
     }
     if decrease(state, token_id, value.clone()) {
@@ -427,9 +435,10 @@ pub fn simulate_draft_batch_reserve_availability(
     // Depository._processBatch tail: an unrepaid deficit reverts the batch and
     // is reported against the op that opened it (same shape as TS).
     if let Some((token_id, owed)) = deficits.into_iter().next() {
-        let origin = deficit_origins.get(&token_id).cloned().ok_or_else(|| {
-            invalid(format!("DEFICIT_WITHOUT_ORIGIN:{token_id}"))
-        })?;
+        let origin = deficit_origins
+            .get(&token_id)
+            .cloned()
+            .ok_or_else(|| invalid(format!("DEFICIT_WITHOUT_ORIGIN:{token_id}")))?;
         issue(
             &mut state,
             origin.sweep,
