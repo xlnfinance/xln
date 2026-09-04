@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import { decodeHankoAbi, encodeHankoAbi, type HankoAbiEnvelope } from '../../../hanko/abi';
 
 const HANKO_TYPE = ethers.ParamType.from(
-  'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])',
+  'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])',
 );
 const CODER = ethers.AbiCoder.defaultAbiCoder();
 
@@ -40,11 +40,15 @@ const randEnvelope = (): HankoAbiEnvelope => {
       randUint(32),
     ] as const;
   });
-  return [placeholders, packed, claims];
+  const memberSignatures = rand() < 0.5
+    ? []
+    : Array.from({ length: rand() < 0.7 ? placeholders.length : randInt(4) }, () =>
+        randHex(rand() < 0.4 ? 0 : randInt(90)));
+  return [placeholders, packed, claims, memberSignatures];
 };
 
 const toAbiValue = (envelope: HankoAbiEnvelope): unknown[] => [[
-  envelope[0], envelope[1], envelope[2].map(claim => [...claim]),
+  envelope[0], envelope[1], envelope[2].map(claim => [...claim]), envelope[3],
 ]];
 
 const normalize = (decoded: ethers.Result): HankoAbiEnvelope => {
@@ -64,6 +68,7 @@ const normalize = (decoded: ethers.Result): HankoAbiEnvelope => {
         values[6] as bigint,
       ] as const;
     }),
+    Array.from(tuple[3] as ethers.Result) as string[],
   ];
 };
 
@@ -79,20 +84,20 @@ describe('direct Hanko ABI codec', () => {
   });
 
   test('empty envelope matches AbiCoder', () => {
-    const empty: HankoAbiEnvelope = [[], '0x', []];
+    const empty: HankoAbiEnvelope = [[], '0x', [], []];
     const reference = CODER.encode([HANKO_TYPE], toAbiValue(empty));
     expect(encodeHankoAbi(empty)).toBe(reference);
     expect(decodeHankoAbi(reference)).toEqual(empty);
   });
 
   test('rejects truncated input and mirrors AbiCoder leniency elsewhere', () => {
-    const encoded = encodeHankoAbi([[randHex(32)], randHex(65), [[randHex(32), [0n], [1n], 1n, 0n, 0n, 0n]]]);
+    const encoded = encodeHankoAbi([[randHex(32)], randHex(65), [[randHex(32), [0n], [1n], 1n, 0n, 0n, 0n]], [randHex(70)]]);
     expect(() => decodeHankoAbi(encoded.slice(0, encoded.length - 64))).toThrow('HANKO_ABI_OUT_OF_BOUNDS');
     expect(() => decodeHankoAbi('0x')).toThrow('HANKO_ABI_OUT_OF_BOUNDS');
     // Trailing bytes and oversized uint32 words decode like AbiCoder (the
     // canonical re-encode in hanko/codec is what rejects them).
     expect(decodeHankoAbi(`${encoded}00`)).toEqual(normalize(CODER.decode([HANKO_TYPE], `${encoded}00`)));
-    const wide = encodeHankoAbi([[], '0x', [[randHex(32), [0n], [1n], 1n, (1n << 32n) | 7n, 0n, 0n]]]);
+    const wide = encodeHankoAbi([[], '0x', [[randHex(32), [0n], [1n], 1n, (1n << 32n) | 7n, 0n, 0n]], []]);
     expect(decodeHankoAbi(wide)).toEqual(normalize(CODER.decode([HANKO_TYPE], wide)));
     expect(encodeHankoAbi(decodeHankoAbi(wide))).not.toBe(wide);
   });

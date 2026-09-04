@@ -1,4 +1,5 @@
 import { normalizeEntityId } from '../../../entity/id';
+import { compactHankoForChain } from '../../../hanko/short';
 import { batchOpCount, isBatchEmpty } from '../../machine/batch';
 import { assertSealedJBatchBinding } from '../../machine/batch/sealed-batch';
 import { assertEntityProviderActionJTxBinding } from '../../../entity/entity-provider-action';
@@ -52,7 +53,10 @@ const submitEntityProviderAction = async (
       entityProviderAddress: context.addresses.entityProvider,
       depositoryAddress: context.addresses.depository,
     });
-    const events = await context.browserVM.submitEntityProviderAction(jTx.data.intent, jTx.data.hankoSignature, {
+    // Consensus certifies full envelopes; the chain accepts the 65-byte form for
+    // a lazy single-signer entity, so compact at the submission boundary only.
+    const hankoData = compactHankoForChain(jTx.data.hankoSignature, jTx.data.intent.actionHash);
+    const events = await context.browserVM.submitEntityProviderAction(jTx.data.intent, hankoData, {
       entityId: normalizeEntityId(jTx.entityId),
       kind:
         jTx.type === 'entityProviderTransfer'
@@ -128,17 +132,18 @@ const submitBatch = async (
   if (isBatchEmpty(batch)) return { success: true };
   try {
     const externalBatch = batch.externalTokenToReserve.length > 0;
+    const hankoData = compactHankoForChain(batchData.hankoSignature, batchData.batchHash);
     const events =
       externalBatch && options.signerPrivateKey
         ? await context.browserVM.processBatchAs(
             batchData.encodedBatch,
-            batchData.hankoSignature,
+            hankoData,
             BigInt(batchData.entityNonce),
             options.signerPrivateKey,
           )
         : await context.browserVM.processBatch(
             batchData.encodedBatch,
-            batchData.hankoSignature,
+            hankoData,
             BigInt(batchData.entityNonce),
           );
     const receipt = receiptFromEvents(events);

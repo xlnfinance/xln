@@ -17,7 +17,7 @@ test('single-signer Hanko keeps its canonical bytes after hot-path optimization'
   const [hanko] = await signEntityHashes(env, entityId, '1', [digest]);
   expect(hanko).toBeDefined();
   expect(computeIntegrityDigest(ethers.getBytes(hanko!))).toBe(
-    '0x8f37ae2a19338c4c88423d34899eab801b345806b9ce5d809002d0b11ca40915',
+    '0x1b48ba3e4c9a4b7bf77d9818b7b1a2280562df72b9d14cfb18e230492789762c',
   );
   await expect(verifyHankoForHash(hanko!, digest, entityId)).resolves.toEqual({
     valid: true,

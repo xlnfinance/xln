@@ -144,6 +144,8 @@ export type NumberedRegistrationCommandResult = Readonly<{
 type NumberedRegistrationEntityPlan = Readonly<{
   name: string;
   boardHash: string;
+  /** abi.encode(Board) preimage; EntityProvider validates it on chain and hashes it to boardHash. */
+  encodedBoard: string;
   config: ConsensusConfig;
   profileName?: string;
   position?: { x: number; y: number; z: number; jurisdiction?: string };

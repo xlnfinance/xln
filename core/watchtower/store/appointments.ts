@@ -259,6 +259,25 @@ const compareLastResortBundles = (
   return right.slot - left.slot;
 };
 
+/**
+ * Minimum appointment sequence that fences out every appointment in `appointments`
+ * (EntityProvider.setWatchtowerMinSequence): one above the highest stored
+ * appointmentSequence. Returns 1n when nothing is stored (the contract requires
+ * newMinimum > current minimum > 0).
+ */
+export const watchtowerMinSequenceRevokingAll = (
+  appointments: ReadonlyArray<Pick<LastResortTowerAppointment, 'lastResortPayload'>>,
+): bigint => {
+  let highest = 0n;
+  for (const appointment of appointments) {
+    const raw = Number(appointment.lastResortPayload?.appointmentSequence ?? 0);
+    if (!Number.isFinite(raw) || raw <= 0) continue;
+    const sequence = BigInt(Math.floor(raw));
+    if (sequence > highest) highest = sequence;
+  }
+  return highest + 1n;
+};
+
 export const listLatestLastResortAppointments = async (
   context: WatchtowerStoreContext,
 ): Promise<LastResortTowerAppointment[]> => {

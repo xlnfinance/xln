@@ -31,6 +31,7 @@ import {
   type DepositoryHankoDomain,
 } from '../../hanko/onchain-domain.ts';
 import { keccakHexHash } from '../crypto/keccak-text';
+import { assertMoneyAmount, assertMoneyMagnitude } from '../money-cap';
 import type {
   ProofBodyStruct,
   TransformerClauseStruct,
@@ -112,6 +113,9 @@ const assertFinalDeltaCanFinalize = (
   ) {
     throw haltRuntimeFailure("DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW", `DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
   }
+  // Account._validateProofBody reverts E8 above Types.MAX_MONEY (2^200); a
+  // validator must never sign an offdelta the jurisdiction cannot store.
+  assertMoneyMagnitude(offdelta, `PROOFBODY_OFFDELTA:token=${tokenId}`);
   const finalDelta = ondelta + offdelta;
   if (finalDelta < INT256_MIN || finalDelta > INT256_MAX) {
     throw haltRuntimeFailure("DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW", `DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
@@ -155,8 +159,9 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
     .sort(([a], [b]) => a - b)
     .map(([deltaIndex, allowance]) => ({
       deltaIndex,
-      rightAllowance: allowance.rightAllowance,
-      leftAllowance: allowance.leftAllowance,
+      // Account.validateAllowances rejects allowances above MAX_MONEY.
+      rightAllowance: assertMoneyAmount(allowance.rightAllowance, `PROOFBODY_RIGHT_ALLOWANCE:delta=${deltaIndex}`),
+      leftAllowance: assertMoneyAmount(allowance.leftAllowance, `PROOFBODY_LEFT_ALLOWANCE:delta=${deltaIndex}`),
     }));
 }
 
@@ -539,6 +544,15 @@ export function createSettlementHashWithNonce(
   domain: DepositoryHankoDomain,
   nonce: number
 ): string {
+  // Depository/Account cap every reserve, collateral and |ondelta| at
+  // MAX_MONEY (E8); a diff beyond it can never settle, so refuse to sign or
+  // verify it.
+  for (const diff of diffs) {
+    assertMoneyMagnitude(diff.leftDiff, `SETTLEMENT_LEFT_DIFF:token=${diff.tokenId}`);
+    assertMoneyMagnitude(diff.rightDiff, `SETTLEMENT_RIGHT_DIFF:token=${diff.tokenId}`);
+    assertMoneyMagnitude(diff.collateralDiff, `SETTLEMENT_COLLATERAL_DIFF:token=${diff.tokenId}`);
+    assertMoneyMagnitude(diff.ondeltaDiff, `SETTLEMENT_ONDELTA_DIFF:token=${diff.tokenId}`);
+  }
   // Account key is canonical (left:right)
   const accountKey = ethers.solidityPacked(
     ['bytes32', 'bytes32'],

@@ -1,6 +1,7 @@
 /**
  * Direct ABI codec for the Hanko envelope tuple
- * `tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])`.
+ * `tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])`
+ * (HankoVerifier.HankoBytes: placeholders, packedSignatures, claims, memberSignatures).
  *
  * Byte-identical to `AbiCoder.encode/decode` of that type (differential test in
  * `__tests__/security/hanko/hanko-abi.test.ts`). The generic coder parses
@@ -28,10 +29,31 @@ export type HankoAbiEnvelope = readonly [
   placeholders: readonly string[],
   packedSignatures: string,
   claims: readonly HankoAbiClaim[],
+  memberSignatures: readonly string[],
 ];
 
 const uintWord = (value: bigint): string => value.toString(16).padStart(WORD, '0');
 const bytes32Word = (value: string): string => value.slice(2).toLowerCase();
+
+/** ABI `bytes`: length word + payload right-padded to a word boundary. */
+const bytesEnc = (value: string): string => {
+  const hex = value.slice(2).toLowerCase();
+  return uintWord(BigInt(hex.length / 2)) + hex + '0'.repeat((WORD - (hex.length % WORD)) % WORD);
+};
+
+/** ABI `bytes[]`: length word, one offset word per item, then each `bytes` tail. */
+const bytesArrayEnc = (values: readonly string[]): string => {
+  let heads = '';
+  let tails = '';
+  let offset = 32 * values.length;
+  for (let index = 0; index < values.length; index += 1) {
+    const encoded = bytesEnc(values[index]!);
+    heads += uintWord(BigInt(offset));
+    tails += encoded;
+    offset += encoded.length / 2;
+  }
+  return uintWord(BigInt(values.length)) + heads + tails;
+};
 
 const uintArray = (values: readonly bigint[]): string => {
   let out = uintWord(BigInt(values.length));
@@ -56,16 +78,13 @@ const encodeClaim = (claim: HankoAbiClaim): string => {
 
 /** `0x`-prefixed lowercase hex, identical to `AbiCoder.encode([HANKO_TYPE], [envelope])`. */
 export const encodeHankoAbi = (envelope: HankoAbiEnvelope): string => {
-  const [placeholders, packed, claims] = envelope;
-  const packedHex = packed.slice(2).toLowerCase();
-  const packedBytes = packedHex.length / 2;
-  const packedPadded = packedHex + '0'.repeat((WORD - (packedHex.length % WORD)) % WORD);
+  const [placeholders, packed, claims, memberSignatures] = envelope;
 
   let placeholdersEnc = uintWord(BigInt(placeholders.length));
   for (let index = 0; index < placeholders.length; index += 1) {
     placeholdersEnc += bytes32Word(placeholders[index]!);
   }
-  const packedEnc = uintWord(BigInt(packedBytes)) + packedPadded;
+  const packedEnc = bytesEnc(packed);
 
   const claimEncodings = claims.map(encodeClaim);
   let claimsHeads = '';
@@ -78,18 +97,22 @@ export const encodeHankoAbi = (envelope: HankoAbiEnvelope): string => {
     claimOffset += encoded.length / 2;
   }
   const claimsEnc = uintWord(BigInt(claims.length)) + claimsHeads + claimsTails;
+  const membersEnc = bytesArrayEnc(memberSignatures);
 
-  const placeholdersOffset = 3 * 32;
+  const placeholdersOffset = 4 * 32;
   const packedOffset = placeholdersOffset + placeholdersEnc.length / 2;
   const claimsOffset = packedOffset + packedEnc.length / 2;
+  const membersOffset = claimsOffset + claimsEnc.length / 2;
   return '0x'
     + uintWord(32n)
     + uintWord(BigInt(placeholdersOffset))
     + uintWord(BigInt(packedOffset))
     + uintWord(BigInt(claimsOffset))
+    + uintWord(BigInt(membersOffset))
     + placeholdersEnc
     + packedEnc
-    + claimsEnc;
+    + claimsEnc
+    + membersEnc;
 };
 
 class HankoAbiReader {
@@ -156,6 +179,7 @@ export const decodeHankoAbi = (encoded: string): HankoAbiEnvelope => {
   const placeholdersAt = tuple + reader.size(tuple);
   const packedAt = tuple + reader.size(tuple + 32);
   const claimsAt = tuple + reader.size(tuple + 64);
+  const membersAt = tuple + reader.size(tuple + 96);
 
   const placeholderCount = reader.size(placeholdersAt);
   const placeholders: string[] = new Array(placeholderCount);
@@ -179,5 +203,12 @@ export const decodeHankoAbi = (encoded: string): HankoAbiEnvelope => {
       reader.uint32(claimAt + 192),
     ];
   }
-  return [placeholders, packed, claims];
+
+  const memberCount = reader.size(membersAt);
+  const membersBase = membersAt + 32;
+  const memberSignatures: string[] = new Array(memberCount);
+  for (let index = 0; index < memberCount; index += 1) {
+    memberSignatures[index] = reader.bytes(membersBase + reader.size(membersBase + 32 * index));
+  }
+  return [placeholders, packed, claims, memberSignatures];
 };

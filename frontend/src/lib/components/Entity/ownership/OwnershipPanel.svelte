@@ -22,8 +22,10 @@
     targetEntityId: string;
     currentBoardHash: string;
     proposedBoardHash: string;
-    currentBlock: bigint;
-    activateAtBlock: bigint;
+    /** Latest jurisdiction block.timestamp (unix seconds). */
+    currentUnix: bigint;
+    /** Entity.activateAt: unix seconds when the pending board may be activated. */
+    activateAt: bigint;
   } = null;
   export let onReleaseShares: () => void | Promise<void> = () => undefined;
   export let onRefreshTakeover: (targetEntityId: string) => void | Promise<void> = () => undefined;
@@ -38,8 +40,12 @@
   $: proposedBoard = selectedTakeoverStatus?.proposedBoardHash ?? '';
   $: proposalPending = /^0x(?!0{64}$)[0-9a-f]{64}$/.test(proposedBoard);
   $: activationReady = proposalPending
-    && (selectedTakeoverStatus?.activateAtBlock ?? 0n) > 0n
-    && (selectedTakeoverStatus?.currentBlock ?? 0n) >= (selectedTakeoverStatus?.activateAtBlock ?? 0n);
+    && (selectedTakeoverStatus?.activateAt ?? 0n) > 0n
+    && (selectedTakeoverStatus?.currentUnix ?? 0n) >= (selectedTakeoverStatus?.activateAt ?? 0n);
+
+  const formatUnix = (unixSeconds: bigint): string => unixSeconds <= 0n
+    ? '—'
+    : new Date(Number(unixSeconds) * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 
   const compact = (value: string): string => value.length <= 18
     ? value
@@ -129,7 +135,7 @@
           <span>Current board <code>{compact(selectedTakeoverStatus.currentBoardHash)}</code></span>
           {#if proposalPending}
             <span>Proposal <code>{compact(proposedBoard)}</code></span>
-            <span>Activation block {selectedTakeoverStatus.activateAtBlock.toString()} · now {selectedTakeoverStatus.currentBlock.toString()}</span>
+            <span>Activation time {formatUnix(selectedTakeoverStatus.activateAt)} · chain now {formatUnix(selectedTakeoverStatus.currentUnix)}</span>
           {:else}
             <span>No pending board proposal</span>
           {/if}

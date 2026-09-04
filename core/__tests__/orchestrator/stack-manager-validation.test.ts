@@ -142,24 +142,41 @@ describe('Stack Manager exact boundaries', () => {
       .toThrow('STACK_MANAGER_CONTRACT_DEPLOYMENT_ADDRESS_MISMATCH:account');
   });
 
-  test('binds the stablecoin registration to deployer, Depository and exact USDT identity', () => {
+  test('binds the stablecoin listing to deployer, EntityProvider Foundation lane and exact USDT identity', () => {
     const decoded = decodeJurisdictionStackManifest(manifest());
     const codec = new Interface([
+      'function foundationRegisterExternalToken(address depository,uint8 tokenType,address contractAddress,uint256 externalTokenId,bytes hankoData,uint256 actionNonce)',
       'function registerExternalToken(uint8 tokenType,address contractAddress,uint256 externalTokenId)',
     ]);
+    const listing = (depository: string, token: string, hanko = `0x${'ab'.repeat(40)}`, nonce = 1n) =>
+      codec.encodeFunctionData('foundationRegisterExternalToken', [depository, 0, token, 0, hanko, nonce]);
     const canonical = {
       from: decoded.deployer,
-      to: decoded.contracts.depository,
-      data: codec.encodeFunctionData('registerExternalToken', [0, decoded.registeredTokens.USDT.address, 0]),
+      to: decoded.contracts.entityProvider,
+      data: listing(decoded.contracts.depository, decoded.registeredTokens.USDT.address),
     };
     expect(() => assertCanonicalStablecoinRegistration(canonical, decoded)).not.toThrow();
+    // Hanko bytes and Foundation action nonce vary per deployment; only the arguments are pinned.
+    expect(() => assertCanonicalStablecoinRegistration({
+      ...canonical,
+      data: listing(decoded.contracts.depository, decoded.registeredTokens.USDT.address, `0x${'cd'.repeat(65)}`, 7n),
+    }, decoded)).not.toThrow();
     expect(() => assertCanonicalStablecoinRegistration({ ...canonical, from: foundation }, decoded))
       .toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_SENDER_MISMATCH');
-    expect(() => assertCanonicalStablecoinRegistration({ ...canonical, to: decoded.contracts.account }, decoded))
+    expect(() => assertCanonicalStablecoinRegistration({ ...canonical, to: decoded.contracts.depository }, decoded))
       .toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_TARGET_MISMATCH');
     expect(() => assertCanonicalStablecoinRegistration({
       ...canonical,
-      data: codec.encodeFunctionData('registerExternalToken', [0, address('b'), 0]),
+      data: listing(decoded.contracts.depository, address('b')),
+    }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
+    expect(() => assertCanonicalStablecoinRegistration({
+      ...canonical,
+      data: listing(decoded.contracts.account, decoded.registeredTokens.USDT.address),
+    }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
+    // The retired direct Depository listing is no longer canonical.
+    expect(() => assertCanonicalStablecoinRegistration({
+      ...canonical,
+      data: codec.encodeFunctionData('registerExternalToken', [0, decoded.registeredTokens.USDT.address, 0]),
     }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
   });
 

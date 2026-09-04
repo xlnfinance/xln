@@ -13,6 +13,8 @@ import {
   SupplyLivenessHarness__factory,
 } from '../../../../jurisdictions/typechain-types/index.ts';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../../jurisdiction/adapter';
+import { DEFAULT_PRIVATE_KEY } from '../../../jurisdiction/adapter/kernel/factory';
+import { foundationRegisterExternalToken } from '../../../jurisdiction/adapter/operations/foundation-token-listing';
 import { createEmptyEnv } from '../../../runtime';
 import { createTokenCatalogController } from '../../../api/server/catalog/tokens';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -22,8 +24,9 @@ const CHAIN_ID = 31_337;
 const deployEntityProvider = async (signer: ethers.Signer) => {
   const verifier = await new HankoVerifier__factory(signer).deploy({ gasLimit: 15_000_000n });
   await verifier.waitForDeployment();
+  // Hardhat 3 prefixes project sources with "project/" in link references.
   const bytecode = EntityProvider__factory.linkBytecode({
-    'contracts/HankoVerifier.sol:HankoVerifier': await verifier.getAddress(),
+    'project/contracts/HankoVerifier.sol:HankoVerifier': await verifier.getAddress(),
   });
   const provider = await new ethers.ContractFactory(
     EntityProvider__factory.abi,
@@ -233,11 +236,14 @@ test('RPC token registry fails loud when canonical ERC20 metadata is unavailable
       adapter.signer,
     ).deploy(2n);
     await missingMetadata.waitForDeployment();
-    await (await adapter.depository.registerExternalToken(
-      0,
-      await missingMetadata.getAddress(),
-      0,
-    )).wait();
+    // Depository.registerExternalToken is EntityProvider-only; list through the
+    // Foundation lane (the dev deployer key is the genesis Foundation signer).
+    await foundationRegisterExternalToken(adapter.entityProvider, {
+      depository: adapter.addresses.depository,
+      tokenType: 0,
+      contractAddress: await missingMetadata.getAddress(),
+      externalTokenId: 0n,
+    }, DEFAULT_PRIVATE_KEY);
 
     await expect(adapter.getTokenRegistry()).rejects.toThrow('TOKEN_METADATA_UNAVAILABLE');
   } finally {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
+import { encodeSingleSignerBoard } from '../../../entity/factory';
 import { createJAdapter } from '../../../jurisdiction/adapter';
 import { verifyCanonicalReceiptProof } from '../../../jurisdiction/machine/receipt-codec';
 import { createEmptyEnv } from '../../../runtime';
@@ -254,7 +255,7 @@ describe('BrowserVM JAdapter boundary', () => {
         1n,
       );
       const { txHash: registrationHash } = await browserVM.registerNumberedEntitiesBatch([
-        `${'0x'}${'53'.repeat(32)}`,
+        encodeSingleSignerBoard(`0x${'53'.repeat(20)}`),
       ]);
       const blockNumber = browserVM.getBlockHeight();
       browserVM.endJurisdictionBlock();
@@ -311,7 +312,7 @@ describe('BrowserVM JAdapter boundary', () => {
       await adapter.deployStack();
       const browserVM = adapter.getBrowserVM();
       if (!browserVM) throw new Error('BROWSERVM_PROVIDER_MISSING');
-      const registration = await adapter.entityProvider.registerNumberedEntity(`${'0x'}${'54'.repeat(32)}`);
+      const registration = await adapter.entityProvider.registerNumberedEntity(encodeSingleSignerBoard(`0x${'54'.repeat(20)}`));
       const staleHeight = Number((await registration.wait())?.blockNumber ?? 0);
       expect(browserVM.captureChainCheckpoint().blockReceiptRoots.some(([height]) => height === staleHeight))
         .toBe(true);
@@ -332,12 +333,12 @@ describe('BrowserVM JAdapter boundary', () => {
       await adapter.deployStack();
       const browserVM = adapter.getBrowserVM();
       if (!browserVM) throw new Error('BROWSERVM_PROVIDER_MISSING');
-      const first = await adapter.entityProvider.registerNumberedEntity(`${'0x'}${'51'.repeat(32)}`);
+      const first = await adapter.entityProvider.registerNumberedEntity(encodeSingleSignerBoard(`0x${'51'.repeat(20)}`));
       const firstReceipt = await first.wait();
       const persistedHeight = Number(firstReceipt?.blockNumber ?? 0);
       const dumped = await adapter.dumpState();
 
-      await (await adapter.entityProvider.registerNumberedEntity(`${'0x'}${'52'.repeat(32)}`)).wait();
+      await (await adapter.entityProvider.registerNumberedEntity(encodeSingleSignerBoard(`0x${'52'.repeat(20)}`))).wait();
       expect(await adapter.getCurrentBlockNumber?.()).toBeGreaterThan(persistedHeight);
 
       const { chain: _chain, ...missingChain } = dumped;
@@ -369,7 +370,7 @@ describe('BrowserVM JAdapter boundary', () => {
       const beforeSnapshot = await adapter.entityProvider.nextNumber();
       const beforeSnapshotBlock = await adapter.getCurrentBlockNumber?.();
       const snapshot = await adapter.snapshot();
-      await (await adapter.entityProvider.registerNumberedEntity(`${'0x'}${'33'.repeat(32)}`)).wait();
+      await (await adapter.entityProvider.registerNumberedEntity(encodeSingleSignerBoard(`0x${'33'.repeat(20)}`))).wait();
       expect(await adapter.entityProvider.nextNumber()).toBe(beforeSnapshot + 1n);
       await adapter.revert(snapshot);
       expect(await adapter.entityProvider.nextNumber()).toBe(beforeSnapshot);

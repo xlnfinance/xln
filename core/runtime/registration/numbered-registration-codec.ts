@@ -52,7 +52,7 @@ const computeNumberedRegistrationIntentId = (
 
 export const encodeNumberedRegistrationCalldata = (request: NumberedRegistrationRequest): string =>
   entityProviderInterface
-    .encodeFunctionData('registerNumberedEntitiesBatch', [request.entities.map(entity => entity.boardHash)])
+    .encodeFunctionData('registerNumberedEntitiesBatch', [request.entities.map(entity => entity.encodedBoard)])
     .toLowerCase();
 
 export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: NumberedRegistrationRequest): void => {
@@ -93,7 +93,13 @@ export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: 
       throw new Error(`NUMBERED_REGISTRATION_ENTITY_PROVIDER_MISMATCH:${index}`);
     }
     const expectedBoard = numberedRegistrationBytes32(entity.boardHash, 'BOARD_HASH');
-    if (hashBoard(encodeBoard(entity.config, env)).toLowerCase() !== expectedBoard) {
+    if (typeof entity.encodedBoard !== 'string' || !/^0x(?:[0-9a-f]{2})+$/.test(entity.encodedBoard)) {
+      throw new Error(`NUMBERED_REGISTRATION_ENCODED_BOARD_INVALID:${index}`);
+    }
+    if (encodeBoard(entity.config, env).toLowerCase() !== entity.encodedBoard) {
+      throw new Error(`NUMBERED_REGISTRATION_ENCODED_BOARD_MISMATCH:${index}`);
+    }
+    if (hashBoard(entity.encodedBoard).toLowerCase() !== expectedBoard) {
       throw new Error(`NUMBERED_REGISTRATION_BOARD_HASH_MISMATCH:${index}`);
     }
     if (entity.localSignerId !== null) {
@@ -160,9 +166,11 @@ export const buildNumberedRegistrationRequest = (
             localSignerId: address(entity.localSignerId, 'LOCAL_SIGNER'),
             entitySeed: canonicalEntitySeed(entity.entitySeed),
           };
+      const encodedBoard = encodeBoard(config, env).toLowerCase();
       return {
         name: entity.name,
-        boardHash: hashBoard(encodeBoard(config, env)).toLowerCase(),
+        boardHash: hashBoard(encodedBoard).toLowerCase(),
+        encodedBoard,
         config,
         ...ownership,
         ...(entity.profileName ? { profileName: entity.profileName } : {}),

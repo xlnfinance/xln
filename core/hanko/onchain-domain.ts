@@ -55,6 +55,12 @@ export type CancelEntityProviderActionAuthorization = Readonly<{
   cancelledActionKind: number | bigint;
 }>;
 
+export type WatchtowerMinSequenceAuthorization = Readonly<{
+  entityNumber: number | bigint;
+  newMinimum: number | bigint;
+  actionNonce: number | bigint;
+}>;
+
 export type BoardProposalAuthorization = Readonly<{
   entityId: string;
   newBoardHash: string;
@@ -79,6 +85,7 @@ const WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN = ethers.keccak256(
 const ENTITY_TRANSFER_HANKO_LABEL = 'ENTITY_TRANSFER';
 const RELEASE_CONTROL_SHARES_HANKO_LABEL = 'RELEASE_CONTROL_SHARES';
 const CANCEL_ENTITY_PROVIDER_ACTION_HANKO_LABEL = 'CANCEL_ENTITY_PROVIDER_ACTION';
+const WATCHTOWER_MIN_SEQUENCE_HANKO_LABEL = 'WATCHTOWER_MIN_SEQUENCE';
 const BOARD_PROPOSAL_HANKO_DOMAIN = ethers.keccak256(
   ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V1'),
 );
@@ -91,10 +98,13 @@ export const ENTITY_PROVIDER_ACTION_EXECUTED_TOPIC = ethers.id(ENTITY_PROVIDER_A
 export const ENTITY_PROVIDER_ACTION_CANCELLED_EVENT =
   'EntityProviderActionCancelled(bytes32,uint256,bytes32,uint8,bytes32)';
 export const ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC = ethers.id(ENTITY_PROVIDER_ACTION_CANCELLED_EVENT);
+// EntityProvider.EntityProviderActionKind. All three share one entity action nonce lane.
 export const ENTITY_PROVIDER_ACTION_KIND = Object.freeze({
   entityTransfer: 0,
   releaseControlShares: 1,
+  watchtowerMinSequence: 2,
 } as const);
+const MAX_ENTITY_PROVIDER_ACTION_KIND = BigInt(ENTITY_PROVIDER_ACTION_KIND.watchtowerMinSequence);
 
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 // Flat parameter lists go through the direct encoder (byte-identical to
@@ -311,7 +321,7 @@ export const encodeCancelEntityProviderActionHankoPayload = (
     authorization.cancelledActionKind,
     'CANCELLED_ACTION_KIND',
   );
-  if (cancelledActionKind > 1n) {
+  if (cancelledActionKind > MAX_ENTITY_PROVIDER_ACTION_KIND) {
     throw new Error(`INVALID_HANKO_CANCELLED_ACTION_KIND:${cancelledActionKind.toString()}`);
   }
   if (
@@ -331,6 +341,33 @@ export const encodeCancelEntityProviderActionHankoPayload = (
       requireUint(authorization.actionNonce, 'ACTION_NONCE'),
       authorization.cancelledActionHash,
       cancelledActionKind,
+    ],
+  );
+};
+
+/**
+ * EntityProvider.setWatchtowerMinSequence: hash =
+ * keccak256(abi.encodePacked("WATCHTOWER_MIN_SEQUENCE", chainId, ep, entityNumber,
+ * boardEpoch, newMinimum, actionNonce)). Raising the minimum revokes every
+ * older tower appointment (Depository rejects appointmentSequence < min, E2).
+ */
+export const encodeWatchtowerMinSequenceHankoPayload = (
+  domain: EntityProviderHankoDomain,
+  authorization: WatchtowerMinSequenceAuthorization,
+): string => {
+  const [chainId, entityProviderAddress, boardEpoch] = requireEntityProviderDomain(domain);
+  const newMinimum = requireUint(authorization.newMinimum, 'WATCHTOWER_MIN_SEQUENCE');
+  if (newMinimum === 0n) throw new Error('INVALID_HANKO_WATCHTOWER_MIN_SEQUENCE:0');
+  return ethers.solidityPacked(
+    ['string', 'uint256', 'address', 'uint256', 'uint256', 'uint256', 'uint256'],
+    [
+      WATCHTOWER_MIN_SEQUENCE_HANKO_LABEL,
+      chainId,
+      entityProviderAddress,
+      requireUint(authorization.entityNumber, 'ENTITY_NUMBER'),
+      boardEpoch,
+      newMinimum,
+      requireUint(authorization.actionNonce, 'ACTION_NONCE'),
     ],
   );
 };
@@ -411,6 +448,10 @@ export const hashReleaseControlSharesHankoPayload = (
 export const hashCancelEntityProviderActionHankoPayload = (
   ...args: Parameters<typeof encodeCancelEntityProviderActionHankoPayload>
 ): string => keccakHexHash(encodeCancelEntityProviderActionHankoPayload(...args));
+
+export const hashWatchtowerMinSequenceHankoPayload = (
+  ...args: Parameters<typeof encodeWatchtowerMinSequenceHankoPayload>
+): string => keccakHexHash(encodeWatchtowerMinSequenceHankoPayload(...args));
 
 export const hashBoardProposalHankoPayload = (
   ...args: Parameters<typeof encodeBoardProposalHankoPayload>

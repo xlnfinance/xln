@@ -88,6 +88,7 @@ describe('j-batch draft reserve availability', () => {
       availableAfterDebt: 50n,
       debtClaimPaid: 50n,
       remainingDebtAfterSweep: 0n,
+      unrepaidDeficit: 10n,
     });
   });
 
@@ -120,7 +121,7 @@ describe('j-batch draft reserve availability', () => {
     expect(simulation.outgoingDebtByToken.get(1) ?? 0n).toBe(0n);
   });
 
-  test('does not let same-batch settlement fund an earlier reserve transfer', () => {
+  test('lets same-batch settlement proceeds repay an earlier reserve transfer (implicit flash)', () => {
     const entityId = `0x${'dd'.repeat(32)}`;
     const counterparty = `0x${'ee'.repeat(32)}`;
     const batch = createEmptyBatch();
@@ -149,13 +150,42 @@ describe('j-batch draft reserve availability', () => {
 
     const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 0n]]), batch, new Map());
 
+    expect(simulation.issues).toHaveLength(0);
+    expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
+    expect(simulation.deficitByToken.size).toBe(0);
+  });
+
+  test('reports the op that opened an unrepaid implicit-flash deficit', () => {
+    const entityId = `0x${'dd'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'ff'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+    batch.collateralToReserve.push({
+      counterparty: `0x${'ee'.repeat(32)}`,
+      tokenId: 1,
+      amount: 4n,
+      nonce: 1,
+      sig: '0x1234',
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 0n]]), batch, new Map());
+
     expect(simulation.issues).toHaveLength(1);
-    expect(simulation.issues[0]).toMatchObject({
+    expect(simulation.issues[0]).toEqual({
       tokenId: 1,
       opType: 'reserveToReserve',
+      opIndex: 0,
+      failureMode: 'batchRevert',
       requiredAmount: 10n,
       availableAfterDebt: 0n,
+      debtClaimPaid: 0n,
+      remainingDebtAfterSweep: 0n,
+      unrepaidDeficit: 6n,
     });
+    expect(simulation.reservesByToken.get(1)).toBe(0n);
   });
 
   test('allows settlement proceeds to fund later reserve withdrawal', () => {
@@ -276,26 +306,81 @@ describe('j-batch draft reserve availability', () => {
     expect(simulation.reservesByToken.get(2)).toBe(10n);
   });
 
-  test('marks unreturned flashloan as a whole-batch revert', () => {
+  test('implicit flash: a debt-free initiator may spend ahead of holding when the batch repays it', () => {
     const entityId = `0x${'ab'.repeat(32)}`;
     const batch = createEmptyBatch();
-    batch.flashloans.push({ tokenId: 1, amount: 10n });
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'cd'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+    batch.collateralToReserve.push({
+      counterparty: `0x${'cd'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+      nonce: 3,
+      sig: '0x1234',
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map(), batch, new Map());
+
+    expect(simulation.issues).toHaveLength(0);
+    expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
+    expect(simulation.deficitByToken.size).toBe(0);
+  });
+
+  test('implicit flash: an unrepaid deficit is a whole-batch revert', () => {
+    const entityId = `0x${'ab'.repeat(32)}`;
+    const batch = createEmptyBatch();
     batch.reserveToReserve.push({
       receivingEntity: `0x${'cd'.repeat(32)}`,
       tokenId: 1,
       amount: 10n,
     });
 
-    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map(), batch, new Map());
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 4n]]), batch, new Map());
 
     expect(simulation.issues).toHaveLength(1);
     expect(simulation.issues[0]).toMatchObject({
       tokenId: 1,
-      opType: 'flashloan',
+      opType: 'reserveToReserve',
+      opIndex: 0,
+      failureMode: 'batchRevert',
+      requiredAmount: 10n,
+      availableAfterDebt: 4n,
+      unrepaidDeficit: 6n,
+    });
+    expect(simulation.reservesByToken.get(1)).toBe(4n);
+  });
+
+  test('implicit flash: an initiator with outstanding debt in the token can never overdraw', () => {
+    const entityId = `0x${'ab'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'cd'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+    batch.collateralToReserve.push({
+      counterparty: `0x${'cd'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+      nonce: 3,
+      sig: '0x1234',
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 3n]]), batch, new Map([[1, 5n]]));
+
+    expect(simulation.issues).toHaveLength(1);
+    expect(simulation.issues[0]).toMatchObject({
+      tokenId: 1,
+      opType: 'reserveToReserve',
+      opIndex: 0,
       failureMode: 'batchRevert',
       requiredAmount: 10n,
       availableAfterDebt: 0n,
+      debtClaimPaid: 3n,
+      remainingDebtAfterSweep: 2n,
     });
-    expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
   });
 });

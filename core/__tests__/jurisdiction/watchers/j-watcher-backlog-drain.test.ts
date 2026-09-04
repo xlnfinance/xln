@@ -8,7 +8,7 @@ import { ethers } from 'ethers';
 
 import { createEmptyEnv } from '../../../runtime';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../../../account/crypto';
-import { generateLazyEntityId } from '../../../entity/factory';
+import { encodeSingleSignerBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../../jurisdiction/adapter';
 import { createJReplica, createJurisdictionConfig } from '../../../scenarios/harness/boot';
 import {
@@ -37,13 +37,8 @@ const TOKEN_ID = 1;
 const RESERVE_AMOUNT = 123_456n;
 const BACKLOG_BLOCKS = 700;
 
-const singleSignerBoardHash = (privateKey: Uint8Array): string => {
-  const signerAddress = new ethers.Wallet(ethers.hexlify(privateKey)).address;
-  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
-    [[1n, [ethers.zeroPadValue(signerAddress, 32)], [1n], 0n, 0n, 0n]],
-  ));
-};
+const singleSignerEncodedBoard = (privateKey: Uint8Array): string =>
+  encodeSingleSignerBoard(new ethers.Wallet(ethers.hexlify(privateKey)).address);
 
 type ManagedAnvil = {
   child: ChildProcessWithoutNullStreams;
@@ -244,10 +239,11 @@ describe('RPC J-watcher backlog drain', () => {
       CHAIN_ID,
     );
     const signerPrivateKey = getSignerPrivateKey(env, SIGNER_ID);
-    const registeredBoardHash = singleSignerBoardHash(signerPrivateKey);
+    const registeredEncodedBoard = singleSignerEncodedBoard(signerPrivateKey);
+    const registeredBoardHash = hashBoard(registeredEncodedBoard);
     const nextEntityNumber = await adapter.entityProvider.nextNumber();
     const registerReceipt = await (await adapter.entityProvider.registerNumberedEntitiesBatch([
-      registeredBoardHash,
+      registeredEncodedBoard,
     ])).wait();
     if (!registerReceipt || registerReceipt.status !== 1) {
       throw new Error('J_WATCHER_BACKLOG_ENTITY_REGISTRATION_FAILED');

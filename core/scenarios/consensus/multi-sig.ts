@@ -321,9 +321,9 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
       shares: equalShares(registeredValidators),
       jurisdiction,
     };
-    const registeredBoardHash = hashBoard(encodeBoard(registeredConfig, env));
+    const registeredEncodedBoard = encodeBoard(registeredConfig, env);
     const nextEntityNumber = await jadapter.entityProvider.nextNumber();
-    const registration = await jadapter.entityProvider.registerNumberedEntity(registeredBoardHash);
+    const registration = await jadapter.entityProvider.registerNumberedEntity(registeredEncodedBoard);
     const registrationReceipt = await registration.wait();
     assert(registrationReceipt?.status === 1, 'numbered multisig board registered on EntityProvider');
     const registered = {

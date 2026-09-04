@@ -125,12 +125,6 @@ export interface JBatch {
     submitNotBeforeTimestamp?: number;
   }>;
 
-  // Flashloans (for atomic batch execution)
-  flashloans: Array<{
-    tokenId: number;
-    amount: bigint;
-  }>;
-
   // HTLC secret reveals (on-chain hashlock unlocks)
   revealSecrets: Array<{
     transformer: string;
@@ -205,7 +199,6 @@ export interface JBatchState {
 
 export const J_BATCH_CONTRACT_LIMITS = {
   maxTotalOps: 50,
-  maxFlashloans: 8,
   maxSettlements: 32,
   maxSettlementDiffs: 32,
   maxSettlementForgivenessIds: 32,
@@ -255,9 +248,6 @@ export function getJBatchContractLimitIssue(batch: JBatch): string | null {
   const totalOps = batchOpCount(batch);
   if (totalOps > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
     return `total ops ${totalOps}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`;
-  }
-  if (batch.flashloans.length > J_BATCH_CONTRACT_LIMITS.maxFlashloans) {
-    return `flashloans ${batch.flashloans.length}/${J_BATCH_CONTRACT_LIMITS.maxFlashloans}`;
   }
   if (batch.settlements.length > J_BATCH_CONTRACT_LIMITS.maxSettlements) {
     return `settlements ${batch.settlements.length}/${J_BATCH_CONTRACT_LIMITS.maxSettlements}`;
@@ -333,7 +323,6 @@ export function assertJBatchWithinContractLimits(batch: JBatch, context = 'jBatc
  */
 export function createEmptyBatch(): JBatch {
   return {
-    flashloans: [],
     reserveToReserve: [],
     reserveToCollateral: [],
     collateralToReserve: [],
@@ -356,11 +345,10 @@ export function createEmptyBatch(): JBatch {
  */
 export const cloneJBatch = (batch: JBatch): JBatch => structuredClone(batch);
 
-// ABI with C2R shortcut - matches Types.sol Batch struct
-// NOTE: Always use this ABI now that contracts have been recompiled with collateralToReserve
+// Matches Types.sol Batch struct exactly. No flash-mint op: the initiator's
+// implicit flash credit (Types.BatchScratch) needs no batch field.
 const DEPOSITORY_BATCH_ABI =
   'tuple(' +
-    'tuple(uint256 tokenId, uint256 amount)[] flashloans,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
@@ -580,7 +568,6 @@ export function decodeJBatch(encodedBatch: string): JBatch {
 export function summarizeBatch(batch: JBatch): Record<string, unknown> {
   const sample = <T>(arr: T[]) => (arr.length > 0 ? arr[0] : null);
   return {
-    flashloans: { count: batch.flashloans.length, sample: sample(batch.flashloans) },
     reserveToReserve: { count: batch.reserveToReserve.length, sample: sample(batch.reserveToReserve) },
     reserveToCollateral: { count: batch.reserveToCollateral.length, sample: sample(batch.reserveToCollateral) },
     settlements: {
@@ -786,7 +773,6 @@ function assertBatchNotPending(jBatchState: JBatchState, operation: string): voi
  */
 export function isBatchEmpty(batch: JBatch): boolean {
   return (
-    batch.flashloans.length === 0 &&
     batch.reserveToReserve.length === 0 &&
     batch.reserveToCollateral.length === 0 &&
     batch.collateralToReserve.length === 0 &&
@@ -804,7 +790,6 @@ export function isBatchEmpty(batch: JBatch): boolean {
 /** Count total operations in a batch */
 export function batchOpCount(batch: JBatch): number {
   return (
-    batch.flashloans.length +
     batch.reserveToReserve.length +
     batch.reserveToCollateral.length +
     batch.collateralToReserve.length +

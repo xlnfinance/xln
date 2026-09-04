@@ -52,8 +52,7 @@ type OpenDebtTotalsOptions = {
 
 export function countBatchOps(batch: JBatch | null | undefined): number {
   if (!batch) return 0;
-  return (batch.flashloans?.length || 0) +
-    (batch.reserveToCollateral?.length || 0) +
+  return (batch.reserveToCollateral?.length || 0) +
     (batch.collateralToReserve?.length || 0) +
     (batch.settlements?.length || 0) +
     (batch.reserveToReserve?.length || 0) +
@@ -198,14 +197,6 @@ export function buildPendingBatchPreview(
     else neutralItems.push(item);
   };
 
-  for (const [index, op] of (batch.flashloans || []).entries()) {
-    pushItem('increase', {
-      key: `flash-${index}`,
-      title: 'Flashloan',
-      subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount, options)} temporary reserve liquidity`,
-    });
-  }
-
   for (const [index, op] of (batch.externalTokenToReserve || []).entries()) {
     pushItem('increase', {
       key: `e2r-${index}`,
@@ -330,6 +321,13 @@ export function buildOpenOutgoingDebtTotals(options: OpenDebtTotalsOptions): {
   return { count, usdTotal, byToken };
 }
 
+function pendingBatchOpLabel(opType: DraftBatchReserveIssue['opType']): string {
+  if (opType === 'settlement') return 'Settlement';
+  if (opType === 'reserveToExternalToken') return 'Reserve withdrawal';
+  if (opType === 'reserveToCollateral') return 'Reserve → Account';
+  return 'Reserve → Reserve';
+}
+
 export function formatBatchReserveIssue(
   issue: DraftBatchReserveIssue | null,
   options: PendingBatchLabelOptions,
@@ -338,8 +336,9 @@ export function formatBatchReserveIssue(
   const tokenLabel = pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount, options).replace(/^[\d.,\s]+/, '').trim();
   const spendable = pendingBatchTokenAmountLabel(issue.tokenId, issue.availableAfterDebt, options);
   const debtClaim = pendingBatchTokenAmountLabel(issue.tokenId, issue.debtClaimPaid, options);
-  if (issue.opType === 'flashloan') {
-    return `Batch will revert: flashloan requires ${pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount, options)}, but only ${spendable} remains.`;
+  if (issue.unrepaidDeficit > 0n) {
+    const unrepaid = pendingBatchTokenAmountLabel(issue.tokenId, issue.unrepaidDeficit, options);
+    return `Batch will revert: ${pendingBatchOpLabel(issue.opType)} spends ${pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount, options)} ahead of holding it and the batch ends ${unrepaid} short (implicit flash credit must be repaid before the batch ends).`;
   }
   if (issue.opType === 'settlement') {
     return `Settlement will be skipped: debt sweep consumes ${debtClaim} first, leaving only ${spendable} spendable.`;

@@ -179,7 +179,7 @@ test('production RPC registration resumes exact WAL bytes after restart and impo
     });
     const registrationData = adapter.entityProvider.interface.encodeFunctionData(
       'registerNumberedEntitiesBatch',
-      [request.entities.map(entity => entity.boardHash)],
+      [request.entities.map(entity => entity.encodedBoard)],
     );
 
     let rejectedNonce = -1;

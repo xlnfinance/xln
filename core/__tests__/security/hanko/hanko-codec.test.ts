@@ -20,6 +20,8 @@ const signature = (index: number): Uint8Array => {
 };
 
 describe('canonical Hanko wire codec', () => {
+  // Envelope golden re-derived 2026-09-04 with plain AbiCoder over the single
+  // 4-field HankoBytes tuple {placeholders, packedSignatures, claims, memberSignatures}.
   test('matches the independently pinned v1 Board and envelope golden hashes', () => {
     const key = ethers.getBytes(ethers.toBeHex(1n, 32));
     const goldenDigest = ethers.keccak256(ethers.toUtf8Bytes('xln:hanko:v1:golden'));
@@ -38,7 +40,7 @@ describe('canonical Hanko wire codec', () => {
       claims: [{ entityId, entityIndexes: [0n], weights: [1n], threshold: 1n, ...delays }],
     });
     expect(entityId).toBe('0xe3d6aa2ac02777d0796e2996d73c3e203011357aff8b877ee86beab827a8e4f0');
-    expect(ethers.keccak256(hanko)).toBe('0x560d730cce926ec199d5dc8386d2494414ff218ebb940c9d2a69d3b6a08964fb');
+    expect(ethers.keccak256(hanko)).toBe('0x2ff6529255ffbfc79b506c9c3dce1a61bf644942ad38b5c1dcbd63617af6173f');
   });
 
   test('round-trips the canonical Solidity tuple including exact Board delays', () => {

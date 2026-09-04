@@ -5,6 +5,7 @@ import { FailureDispositionError } from '../protocol/errors/failure-taxonomy';
 import { decodeHankoAbi, encodeHankoAbi, type HankoAbiClaim } from './abi';
 import type {
   HankoEnvelope,
+  HankoEnvelopeInput,
   HankoHex,
   HankoRecoveredSignature,
   HankoString,
@@ -21,7 +22,7 @@ import {
 } from '../protocol/crypto/crypto-pool';
 import { countOp } from '../support/performance/op-counters';
 
-// Wire type: tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])
+// Wire type: tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])
 // laid out by the direct codec in ./abi (byte-identical to AbiCoder).
 // Hanko strings are re-decoded several times per input (verify, proposer
 // inspection, witness checks, ack validation). Decoding and signature recovery
@@ -54,6 +55,8 @@ const HANKO_MAX_ENTITIES = 256;
 const HANKO_MAX_CLAIMS = 64;
 const HANKO_MAX_MEMBERS_PER_CLAIM = 256;
 const HANKO_MAX_TOTAL_MEMBERS = 1024;
+// Contract (ERC-1271) members per proof; each costs one capped STATICCALL.
+const HANKO_MAX_MEMBER_SIGNATURES = 8;
 const SECP256K1_HALF_ORDER = BigInt(
   '0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0',
 );
@@ -114,6 +117,15 @@ const encodeClaim = (claim: HankoWireClaim, index: number): HankoAbiClaim => {
 };
 
 const assertContractHankoShape = (envelope: HankoEnvelope): void => {
+  if (
+    envelope.memberSignatures.length !== 0
+    && envelope.memberSignatures.length !== envelope.placeholders.length
+  ) invalidHanko('HANKO_MEMBER_SIGNATURES_INVALID');
+  let memberCount = 0;
+  for (const signature of envelope.memberSignatures) {
+    if (signature.length > 2) memberCount += 1;
+  }
+  if (memberCount > HANKO_MAX_MEMBER_SIGNATURES) invalidHanko('HANKO_PROOF_TOO_LARGE');
   const packedBytes = (envelope.packedSignatures.length - 2) / 2;
   const signatures = signatureCount(packedBytes);
   const totalEntities = envelope.placeholders.length + signatures + envelope.claims.length;
@@ -136,12 +148,19 @@ const assertContractHankoShape = (envelope: HankoEnvelope): void => {
   }
 };
 
-export const encodeHankoEnvelope = (envelope: HankoEnvelope): HankoString => {
+export const encodeHankoEnvelope = (input: HankoEnvelopeInput): HankoString => {
+  const envelope: HankoEnvelope = {
+    placeholders: input.placeholders,
+    packedSignatures: input.packedSignatures,
+    claims: input.claims,
+    memberSignatures: input.memberSignatures ?? [],
+  };
   assertContractHankoShape(envelope);
   const encoded = encodeHankoAbi([
     envelope.placeholders.map((value, index) => asHankoBytes32(value, `PLACEHOLDER_${index}`)),
     asHex(envelope.packedSignatures, 'PACKED_SIGNATURES'),
     envelope.claims.map(encodeClaim),
+    envelope.memberSignatures.map((value, index) => asHex(value, `MEMBER_SIGNATURE_${index}`)),
   ]);
   if ((encoded.length - 2) / 2 > HANKO_MAX_BYTES) invalidHanko('HANKO_PROOF_TOO_LARGE');
   return encoded as HankoString;
@@ -200,15 +219,18 @@ const decodeHankoEnvelopeUncached = (encoded: HankoString): HankoEnvelope => {
   } catch (error) {
     invalidHanko(`HANKO_ABI_DECODE_INVALID:${error instanceof Error ? error.message : String(error)}`);
   }
-  if (tuple.length !== 3) invalidHanko('HANKO_ENVELOPE_LENGTH_INVALID');
+  if (tuple.length !== 4) invalidHanko('HANKO_ENVELOPE_LENGTH_INVALID');
   const placeholders = requireAbiArray(tuple[0], 'PLACEHOLDERS');
   const packedSignatures = tuple[1];
   const claims = requireAbiArray(tuple[2], 'CLAIMS');
+  const memberSignatures = requireAbiArray(tuple[3], 'MEMBER_SIGNATURES');
   const envelope: HankoEnvelope = {
     placeholders: Object.freeze(placeholders.map((value, index) =>
       asHankoBytes32(requireAbiString(value, `PLACEHOLDER_${index}`), `PLACEHOLDER_${index}`))),
     packedSignatures: asHex(requireAbiString(packedSignatures, 'PACKED_SIGNATURES'), 'PACKED_SIGNATURES'),
     claims: Object.freeze(claims.map((claim, index) => freezeClaim(decodeClaim(claim, index)))),
+    memberSignatures: Object.freeze(memberSignatures.map((value, index) =>
+      asHex(requireAbiString(value, `MEMBER_SIGNATURE_${index}`), `MEMBER_SIGNATURE_${index}`))),
   };
   assertContractHankoShape(envelope);
   if (encodeHankoEnvelope(envelope).toLowerCase() !== canonicalInput) {
@@ -426,8 +448,10 @@ export const encodeSignedHanko = (input: Readonly<{
   privateKeys: readonly Uint8Array[];
   placeholders: HankoEnvelope['placeholders'];
   claims: HankoEnvelope['claims'];
+  memberSignatures?: HankoEnvelope['memberSignatures'];
 }>): HankoString => encodeHankoEnvelope({
   placeholders: input.placeholders,
   packedSignatures: signAndPackHankoDigest(input.digest, input.privateKeys),
   claims: input.claims,
+  memberSignatures: input.memberSignatures ?? [],
 });

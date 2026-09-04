@@ -1,4 +1,5 @@
 import type { Signer } from 'ethers';
+import { compactHankoForChain } from '../../../../hanko/short';
 import { ethers } from 'ethers';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { JTx } from '../../../../types/jurisdiction-runtime';
@@ -334,6 +335,9 @@ const executeBatchSubmission = async (
     : context.stack.depository;
   const data = plan.jTx.data;
   const entityNonce = BigInt(data.entityNonce);
+  // Consensus certifies full envelopes; a lazy single-signer entity submits the
+  // 65-byte form the verifier accepts. Applied here only, never in state.
+  const hankoData = compactHankoForChain(data.hankoSignature, data.batchHash);
   const reconcileFailure = async (
     failure: JSubmitResult,
     noActiveDispute: boolean,
@@ -357,7 +361,7 @@ const executeBatchSubmission = async (
   });
   try {
     const estimatedGas = await context.chainIo.estimateGas(
-      () => depository.processBatch.estimateGas(data.encodedBatch, data.hankoSignature, entityNonce),
+      () => depository.processBatch.estimateGas(data.encodedBatch, hankoData, entityNonce),
     );
     const gasLimit = resolveProcessBatchGasLimit(
       estimatedGas,
@@ -367,7 +371,7 @@ const executeBatchSubmission = async (
     const preflightFailure = await preflightProcessBatch({
       depository,
       encodedBatch: data.encodedBatch,
-      hankoData: data.hankoSignature,
+      hankoData,
       entityNonce,
       gasLimit,
       disputeStartDebug: disputeDebug,
@@ -383,7 +387,7 @@ const executeBatchSubmission = async (
       'submitTx:processBatch',
       (nonce, fees) => depository.processBatch(
         data.encodedBatch,
-        data.hankoSignature,
+        hankoData,
         entityNonce,
         { gasLimit, nonce, ...applyBatchFeeOverrides(fees, data.feeOverrides) },
       ),

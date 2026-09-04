@@ -398,7 +398,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
   test('valid nested outbox round-trips without changing frame hash or restore state', async () => {
     const env = createEmptyEnv('storage-runtime-machine-roundtrip');
     const batch = createEmptyBatch();
-    batch.flashloans.push({ tokenId: 1, amount: 7n });
+    batch.reserveToReserve.push({ receivingEntity: `0x${'ab'.repeat(32)}`, tokenId: 1, amount: 7n });
     env.infrastructure = {
       pendingCommittedJOutbox: [{
         jurisdictionName: 'Testnet',

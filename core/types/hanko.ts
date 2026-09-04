@@ -20,7 +20,18 @@ export interface HankoEnvelope {
   readonly placeholders: readonly HankoHex[];
   readonly packedSignatures: HankoHex;
   readonly claims: readonly HankoWireClaim[];
+  /**
+   * Aligned with `placeholders` or empty (HankoVerifier.HankoBytes). A
+   * non-empty entry is an ERC-1271 proof for a contract placeholder. Pure-EOA
+   * boards, i.e. everything this runtime signs today, carry `[]`.
+   */
+  readonly memberSignatures: readonly HankoHex[];
 }
+
+/** Envelope as supplied to the encoder; `memberSignatures` defaults to `[]`. */
+export type HankoEnvelopeInput = Omit<HankoEnvelope, 'memberSignatures'> & {
+  readonly memberSignatures?: readonly HankoHex[];
+};
 
 export interface HankoRecoveredSignature {
   readonly signerEntityId: HankoHex;

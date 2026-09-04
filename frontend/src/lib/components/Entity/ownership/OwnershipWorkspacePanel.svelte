@@ -42,8 +42,8 @@ let takeoverStatus: null | {
   targetEntityId: string;
   currentBoardHash: string;
   proposedBoardHash: string;
-  currentBlock: bigint;
-  activateAtBlock: bigint;
+  currentUnix: bigint;
+  activateAt: bigint;
 } = null;
 
 const errorMessage = (value: unknown, defaultMessage: string): string =>
@@ -125,13 +125,16 @@ const refreshTakeover = async (targetEntityId: string): Promise<void> => {
     const target = requireTakeoverTarget(targetEntityId);
     const jadapter = resolveJAdapter(xln, env, "control-takeover-refresh");
     const entity = await jadapter.entityProvider.entities(target.state.entityId);
+    // Governance delays are seconds: activateBoard needs block.timestamp >= activateAt.
+    const latestBlock = await jadapter.provider.getBlock("latest");
+    if (!latestBlock) throw new Error("CONTROL_TAKEOVER_LATEST_BLOCK_MISSING");
     takeoverTargetId = target.state.entityId.toLowerCase();
     takeoverStatus = {
       targetEntityId: takeoverTargetId,
       currentBoardHash: String(entity.currentBoardHash).toLowerCase(),
       proposedBoardHash: String(entity.proposedBoardHash).toLowerCase(),
-      currentBlock: BigInt(await jadapter.provider.getBlockNumber()),
-      activateAtBlock: BigInt(entity.activateAtBlock),
+      currentUnix: BigInt(latestBlock.timestamp),
+      activateAt: BigInt(entity.activateAt),
     };
   } catch (cause) {
     error = errorMessage(cause, "CONTROL takeover status failed");
@@ -150,13 +153,21 @@ const proposeTakeover = async (targetEntityId: string): Promise<void> => {
     const target = requireTakeoverTarget(targetEntityId);
     const proposerSignerId = resolveEntitySigner(entityId, "control-takeover-propose").toLowerCase();
     const board = buildTakeoverBoard(target);
-    const boardHash = xln.hashBoard(xln.encodeBoard({
+    const encodedBoard = xln.encodeBoard({
       ...board,
       ...(target.state.config.jurisdiction
         ? { jurisdiction: structuredClone(target.state.config.jurisdiction) }
         : {}),
-    }, env)).toLowerCase();
+    }, env);
+    const boardHash = xln.hashBoard(encodedBoard).toLowerCase();
     const jadapter = resolveJAdapter(xln, env, "control-takeover-propose");
+    // proposeBoard accepts only committed (on-chain validated) board preimages.
+    // Only this proposer holds the preimage; commit it before the proposal
+    // carries the bare hash through Entity consensus.
+    if (!(await jadapter.entityProvider.committedBoards(boardHash))) {
+      const commitReceipt = await (await jadapter.entityProvider.commitBoard(encodedBoard)).wait();
+      if (commitReceipt?.status !== 1) throw new Error(`BOARD_COMMIT_FAILED:${boardHash}`);
+    }
     const actionNonce = BigInt(await jadapter.entityProvider.boardActionNonces(target.state.entityId)) + 1n;
     await submitEntityInputs([buildControlBoardProposalInput({
       shareholderEntityId: toEntityId(entityId),

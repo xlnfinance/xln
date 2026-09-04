@@ -6,7 +6,7 @@
 
 import type { ConsensusConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
-import { encodeBoard, generateNumberedEntityId, hashBoard } from '../../entity/factory';
+import { encodeBoard, generateNumberedEntityId } from '../../entity/factory';
 import {
   bindScenarioJReplica,
   createJReplica,
@@ -58,9 +58,11 @@ const registerBoardCompany = async (
     shares: equalShares(validators),
     jurisdiction: actors.jurisdiction,
   };
-  const boardHash = hashBoard(encodeBoard(config, env));
+  // Registration takes the abi.encode(Board) preimage; the contract validates
+  // reachability and stores keccak256 of it as the board hash.
+  const encodedBoard = encodeBoard(config, env);
   const nextNumber = await actors.jadapter.entityProvider.nextNumber();
-  const tx = await actors.jadapter.entityProvider.registerNumberedEntity(boardHash);
+  const tx = await actors.jadapter.entityProvider.registerNumberedEntity(encodedBoard);
   const receipt = await tx.wait();
   if (receipt?.status !== 1) throw new Error('COMPANY_BOARD_REGISTRATION_FAILED');
   const id = generateNumberedEntityId(Number(nextNumber)).toLowerCase();

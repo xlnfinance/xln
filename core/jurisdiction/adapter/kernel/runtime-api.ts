@@ -3,6 +3,7 @@ import { detectEntityType, extractNumberFromEntityId } from '../../../entity/fac
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../../machine/batch';
 import { normalizeEntityId } from '../../../entity/id';
 import { signEntityHashes } from '../../../hanko/signing';
+import { compactHankoForChain } from '../../../hanko/short';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';
@@ -43,10 +44,10 @@ export const submitProcessBatch = async (
     nextNonce,
   );
   const hankos = await signEntityHashes(env, entityId, signerId, [batchHash]);
-  const hankoData = hankos[0];
-  if (!hankoData) {
+  if (!hankos[0]) {
     throw new Error('Failed to build batch hanko signature');
   }
+  const hankoData = compactHankoForChain(hankos[0], batchHash);
 
   const receipt = await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
   return {
@@ -55,10 +56,12 @@ export const submitProcessBatch = async (
   };
 };
 
+// No on-chain name registry (EntityProvider has no nameToNumber/numberToName);
+// human names live relay-side. This returns chain facts only.
 export const getEntityInfoFromChain = async (
   entityId: string,
   jurisdiction: JurisdictionConfig,
-): Promise<{ exists: boolean; entityNumber?: number; name?: string }> => {
+): Promise<{ exists: boolean; entityNumber?: number }> => {
   try {
     const { entityProvider } = await connectJurisdictionContracts(jurisdiction);
     const entityInfo = await entityProvider.entities(entityId);
@@ -66,20 +69,14 @@ export const getEntityInfoFromChain = async (
 
     const entityType = detectEntityType(entityId);
     let entityNumber: number | undefined;
-    let name: string | undefined;
     if (entityType === 'numbered') {
       const extractedNumber = extractNumberFromEntityId(entityId);
-      if (extractedNumber !== null) {
-        entityNumber = extractedNumber;
-        const resolvedName = await entityProvider.numberToName(entityNumber);
-        if (resolvedName) name = resolvedName;
-      }
+      if (extractedNumber !== null) entityNumber = extractedNumber;
     }
 
     return {
       exists: true,
       ...(entityNumber !== undefined ? { entityNumber } : {}),
-      ...(name !== undefined ? { name } : {}),
     };
   } catch (error) {
     throw new Error(

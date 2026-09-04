@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { encodeSingleSignerBoard, hashBoard } from '../../../entity/factory';
 import { createJAdapter } from '../../../jurisdiction/adapter';
 import { parseNumberedEntityRegistrationReceipt } from '../../../runtime/registration/numbered-registration';
 
@@ -9,13 +10,19 @@ describe('numbered Entity registration authority', () => {
   test('receipt parser rejects missing, extra, reordered, and mismatched registrations', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31_338 });
     try {
-      const boardHashes = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`] as const;
-      const receipt = await (await adapter.entityProvider.registerNumberedEntitiesBatch(boardHashes)).wait();
+      // Registration takes abi.encode(Board) preimages; the receipt carries their hashes.
+      const encodedBoards = [
+        encodeSingleSignerBoard(`0x${'11'.repeat(20)}`),
+        encodeSingleSignerBoard(`0x${'22'.repeat(20)}`),
+      ] as const;
+      const boardHashes = encodedBoards.map((board) => hashBoard(board)) as [string, string];
+      const receipt = await (await adapter.entityProvider.registerNumberedEntitiesBatch(encodedBoards)).wait();
       if (!receipt) throw new Error('NUMBERED_REGISTRATION_TEST_RECEIPT_MISSING');
 
+      // Each registration now also emits BoardCommitted before its mint/registration logs.
       expect(parseNumberedEntityRegistrationReceipt(adapter, receipt, boardHashes)).toEqual([
-        { entityNumber: 2, entityId: `0x${'2'.padStart(64, '0')}`, logIndex: 2 },
-        { entityNumber: 3, entityId: `0x${'3'.padStart(64, '0')}`, logIndex: 6 },
+        { entityNumber: 2, entityId: `0x${'2'.padStart(64, '0')}`, logIndex: 3 },
+        { entityNumber: 3, entityId: `0x${'3'.padStart(64, '0')}`, logIndex: 8 },
       ]);
       expect(() => parseNumberedEntityRegistrationReceipt(
         adapter,

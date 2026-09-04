@@ -11,7 +11,7 @@ import { parseReceiptLogsToJEvents } from '../../j-event-log-decoder';
 import { eventCarriers, type FeeOverrides, type RpcReceipt } from '../rpc-boundary';
 import type { JEvent, JSubmitResult } from '../../types';
 import { hashBoardProposalHankoPayload } from '../../../../hanko/onchain-domain';
-import { decodeHankoEnvelope } from '../../../../hanko/codec';
+import { assertChainHankoShape, compactHankoForChain } from '../../../../hanko/short';
 
 type EntityProviderJTx = Extract<
   JTx,
@@ -116,15 +116,17 @@ export const submitEntityProviderAction = async (
   signerPrivateKey: Uint8Array | undefined,
 ): Promise<JSubmitResult> => {
   const { intent } = jTx.data;
-  const hankoSignature = jTx.data.hankoSignature;
-  if (!hankoSignature) {
+  if (!jTx.data.hankoSignature) {
     return {
       success: false,
       error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:` + normalizeEntityId(jTx.entityId),
     };
   }
   try {
-    decodeHankoEnvelope(hankoSignature);
+    assertChainHankoShape(jTx.data.hankoSignature);
+    // Lazy single-signer entities submit the 65-byte form; everything else
+    // keeps the certified envelope. Submission boundary only.
+    const hankoSignature = compactHankoForChain(jTx.data.hankoSignature, intent.actionHash);
     if (context.watchOnly && !signerPrivateKey) {
       throw new Error('JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:entityProviderAction');
     }
@@ -242,6 +244,19 @@ export const submitControlBoardProposal = async (
       }
       if (chainNonce + 1n !== jTx.data.actionNonce) {
         throw new Error(`CONTROL_BOARD_PROPOSAL_CHAIN_NONCE_MISMATCH:${jTx.data.actionNonce}:${chainNonce + 1n}`);
+      }
+      // proposeBoard reverts BoardNotCommitted unless commitBoard(encodedBoard)
+      // validated the preimage (registration auto-commits) or the hash is one of
+      // the entity's retired boards. The JTx carries only the hash, so name it.
+      if (!(await context.entityProvider.committedBoards(jTx.data.newBoardHash))) {
+        const entity = await context.entityProvider.entities(jTx.data.targetEntityId);
+        const hash = jTx.data.newBoardHash.toLowerCase();
+        if (
+          String(entity.previousBoardHash).toLowerCase() !== hash &&
+          String(entity.previousBoardHash2).toLowerCase() !== hash
+        ) {
+          throw new Error(`BOARD_NOT_COMMITTED:${jTx.data.newBoardHash}`);
+        }
       }
       const args = [jTx.data.targetEntityId, jTx.data.newBoardHash, 1, hankos] as const;
       try {

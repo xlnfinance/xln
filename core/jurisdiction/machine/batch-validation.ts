@@ -8,6 +8,7 @@ import {
   requireString,
 } from '../../protocol/boundary/boundary-primitives';
 import type { JBatch } from './batch';
+import { assertMoneyAmount, assertMoneyMagnitude } from '../../protocol/money-cap';
 
 type FieldValidator = (value: unknown, code: string) => unknown;
 
@@ -46,6 +47,9 @@ const integer: FieldValidator = (value, code) => {
   return requireBoundaryInteger(value, code);
 };
 const bigint: FieldValidator = (value, code) => requireBigInt(value, code);
+// Contract MAX_MONEY (Types.sol): amounts, allowances and |diffs| above 2^200 revert E8.
+const money: FieldValidator = (value, code) => assertMoneyAmount(requireBigInt(value, code), code);
+const signedMoney: FieldValidator = (value, code) => assertMoneyMagnitude(requireBigInt(value, code), code);
 const string: FieldValidator = (value, code) => requireString(value, code);
 const bool: FieldValidator = (value, code) => requireBoolean(value, code);
 
@@ -68,7 +72,10 @@ export const validateProofBody = (value: unknown, code: string): unknown => {
     `${code}_RIGHT_RESPONSE_SECONDS`,
   );
   proof['offdeltas'] = requireArray(proof['offdeltas'], `${code}_OFFDELTAS`)
-    .map((entry, index) => requireBigInt(entry, `${code}_OFFDELTAS_${index}`));
+    .map((entry, index) => assertMoneyMagnitude(
+      requireBigInt(entry, `${code}_OFFDELTAS_${index}`),
+      `${code}_OFFDELTAS_${index}`,
+    ));
   proof['tokenIds'] = requireArray(proof['tokenIds'], `${code}_TOKEN_IDS`)
     .map((entry, index) =>
       requireBigInt(entry, `${code}_TOKEN_IDS_${index}`, 0n));
@@ -80,8 +87,8 @@ export const validateProofBody = (value: unknown, code: string): unknown => {
     encodedBatch: string,
     allowances: (allowances, allowanceCode) => validateRecordArray(allowances, allowanceCode, {
       deltaIndex: bigint,
-      rightAllowance: bigint,
-      leftAllowance: bigint,
+      rightAllowance: money,
+      leftAllowance: money,
     }),
     },
   );
@@ -96,31 +103,35 @@ export function validateJBatch(
   requireExactBoundaryKeys(batch, [
     'reserveToExternalToken', 'externalTokenToReserve', 'reserveToReserve',
     'reserveToCollateral', 'collateralToReserve', 'settlements', 'disputeStarts', 'counterDisputes',
-    'disputeFinalizations', 'flashloans', 'revealSecrets', 'hashLadderRegistrations',
+    'disputeFinalizations', 'revealSecrets', 'hashLadderRegistrations',
   ], [], `${code}_FIELDS`);
   validateRecordArray(batch['reserveToExternalToken'], `${code}_R2E`, {
-    receivingEntity: string, tokenId: integer, amount: bigint,
+    receivingEntity: string, tokenId: integer, amount: money,
   });
   validateRecordArray(batch['externalTokenToReserve'], `${code}_E2R`, {
     entity: string, contractAddress: string, externalTokenId: bigint, tokenType: integer,
-    internalTokenId: integer, amount: bigint,
+    internalTokenId: integer, amount: money,
   });
   validateRecordArray(batch['reserveToReserve'], `${code}_R2R`, {
-    receivingEntity: string, tokenId: integer, amount: bigint,
+    receivingEntity: string, tokenId: integer, amount: money,
   });
   validateRecordArray(batch['reserveToCollateral'], `${code}_R2C`, {
     tokenId: integer,
     receivingEntity: string,
-    pairs: (pairs, pairsCode) => validateRecordArray(pairs, pairsCode, { entity: string, amount: bigint }),
+    pairs: (pairs, pairsCode) => validateRecordArray(pairs, pairsCode, { entity: string, amount: money }),
   });
   validateRecordArray(batch['collateralToReserve'], `${code}_C2R`, {
-    counterparty: string, tokenId: integer, amount: bigint, nonce: integer, sig: string,
+    counterparty: string, tokenId: integer, amount: money, nonce: integer, sig: string,
   });
   validateRecordArray(batch['settlements'], `${code}_SETTLEMENTS`, {
     leftEntity: string,
     rightEntity: string,
     diffs: (diffs, diffsCode) => validateRecordArray(diffs, diffsCode, {
-      tokenId: integer, leftDiff: bigint, rightDiff: bigint, collateralDiff: bigint, ondeltaDiff: bigint,
+      tokenId: integer,
+      leftDiff: signedMoney,
+      rightDiff: signedMoney,
+      collateralDiff: signedMoney,
+      ondeltaDiff: signedMoney,
     }),
     forgiveDebtsInTokenIds: (ids, idsCode) =>
       requireArray(ids, idsCode).map((id, index) =>
@@ -149,7 +160,6 @@ export function validateJBatch(
   }, {
     submitNotBeforeTimestamp: integer,
   });
-  validateRecordArray(batch['flashloans'], `${code}_FLASHLOANS`, { tokenId: integer, amount: bigint });
   validateRecordArray(batch['revealSecrets'], `${code}_REVEAL_SECRETS`, { transformer: string, secret: string });
   validateRecordArray(batch['hashLadderRegistrations'], `${code}_HASH_LADDER_REVEALS`, {
     counterpartyEntity: string,

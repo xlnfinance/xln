@@ -4,14 +4,19 @@ import { computeBatchHankoHash, encodeJBatch, type JBatch } from '../jurisdictio
 import { normalizeEntityId } from '../entity/id';
 import { encodeSignedHanko } from './codec';
 import { resolveHankoBoardDelays } from './claims';
+import { compactHankoForChain } from './short';
 
+/**
+ * Chain-bound single-signer Hanko. A signer proving its own lazy entity gets
+ * the 65-byte form; a numbered/registered entity keeps the full envelope.
+ */
 export function buildSingleSignerHanko(
   entityId: string,
   hash: string,
   privateKey: string | Uint8Array,
 ): string {
   const paddedEntityId = ethers.zeroPadValue(normalizeEntityId(entityId), 32).toLowerCase() as `0x${string}`;
-  return encodeSignedHanko({
+  const envelope = encodeSignedHanko({
     digest: hash,
     privateKeys: [typeof privateKey === 'string' ? ethers.getBytes(privateKey) : privateKey],
     placeholders: [],
@@ -22,7 +27,9 @@ export function buildSingleSignerHanko(
       threshold: 1n,
       ...resolveHankoBoardDelays(),
     }],
+    memberSignatures: [],
   });
+  return compactHankoForChain(envelope, hash);
 }
 
 export function prepareSignedBatch(

@@ -40,8 +40,14 @@ const SOLIDITY_LIBRARY_NAMES = new Set<StackContractName>([
   'account', 'depositoryBounds', 'hashLadderRegistry', 'nftCustody', 'hankoVerifier',
 ]);
 
-const DEPOSITORY_REGISTRATION_INTERFACE = new Interface([
-  'function registerExternalToken(uint8 tokenType,address contractAddress,uint256 externalTokenId)',
+/**
+ * Depository.registerExternalToken is callable only by the EntityProvider; the
+ * canonical stablecoin listing is EntityProvider.foundationRegisterExternalToken
+ * authorized by a Foundation Hanko. Hanko bytes and the action nonce vary per
+ * deployment, so only the listing arguments are pinned.
+ */
+const FOUNDATION_TOKEN_LISTING_INTERFACE = new Interface([
+  'function foundationRegisterExternalToken(address depository,uint8 tokenType,address contractAddress,uint256 externalTokenId,bytes hankoData,uint256 actionNonce)',
 ]);
 
 type StablecoinRegistrationTransaction = Readonly<{
@@ -57,14 +63,22 @@ export const assertCanonicalStablecoinRegistration = (
   if (transaction.from.toLowerCase() !== manifest.deployer.toLowerCase()) {
     throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_SENDER_MISMATCH');
   }
-  if ((transaction.to || '').toLowerCase() !== manifest.contracts.depository.toLowerCase()) {
+  if ((transaction.to || '').toLowerCase() !== manifest.contracts.entityProvider.toLowerCase()) {
     throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_TARGET_MISMATCH');
   }
-  const expectedData = DEPOSITORY_REGISTRATION_INTERFACE.encodeFunctionData(
-    'registerExternalToken',
-    [0, manifest.registeredTokens.USDT.address, 0],
-  ).toLowerCase();
-  if (transaction.data.toLowerCase() !== expectedData) {
+  let decoded;
+  try {
+    decoded = FOUNDATION_TOKEN_LISTING_INTERFACE.decodeFunctionData('foundationRegisterExternalToken', transaction.data);
+  } catch {
+    throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
+  }
+  const [depository, tokenType, contractAddress, externalTokenId] = decoded as unknown as [string, bigint, string, bigint];
+  if (
+    String(depository).toLowerCase() !== manifest.contracts.depository.toLowerCase() ||
+    BigInt(tokenType) !== 0n ||
+    String(contractAddress).toLowerCase() !== manifest.registeredTokens.USDT.address.toLowerCase() ||
+    BigInt(externalTokenId) !== 0n
+  ) {
     throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
   }
 };
@@ -194,7 +208,7 @@ export const verifyJurisdictionStack = async (
     !registrationReceipt ||
     registrationReceipt.status !== 1 ||
     registrationReceipt.blockNumber !== registration.blockNumber ||
-    (registrationReceipt.to || '').toLowerCase() !== manifest.contracts.depository.toLowerCase()
+    (registrationReceipt.to || '').toLowerCase() !== manifest.contracts.entityProvider.toLowerCase()
   ) throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_RECEIPT_INVALID');
   if (await registrationReceipt.confirmations() < confirmations) {
     throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_NOT_FINAL');

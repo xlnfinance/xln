@@ -78,6 +78,7 @@ export const ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT = {
   kinds: {
     entityTransfer: 0,
     releaseControlShares: 1,
+    watchtowerMinSequence: 2,
   },
 } as const;
 

@@ -88,7 +88,7 @@ describe('j-batch contract limits', () => {
 
   test('ABI decode returns plain cloneable canonical data', () => {
     const batch = createEmptyBatch();
-    batch.flashloans.push({ tokenId: 1, amount: 2n });
+    batch.reserveToReserve.push({ receivingEntity: `0x${'ab'.repeat(32)}`, tokenId: 1, amount: 2n });
     const decoded = decodeJBatch(encodeJBatch(batch));
 
     expect(decoded).toEqual(batch);

@@ -32,16 +32,17 @@ import { safeStringify } from '../../../protocol/serialization/index.js';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 import { createStructuredLogger } from '../../../support/logger';
 import { isLeftEntity, normalizeEntityId } from '../../../entity/id';
+import { encodeSingleSignerBoard, hashBoard } from '../../../entity/factory';
 import { requireBoundaryUint } from '../../../protocol/boundary-validation';
 import type { EntityProviderActionIntent } from '../../../types/entity-provider-actions';
 import {
   assertEntityProviderActionIntent,
   assertEntityProviderActionResolutionReceipt,
 } from '../../../entity/entity-provider-action';
-import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../../machine/batch';
+import { batchAddSettlement, computeBatchHankoHash, createEmptyBatch, decodeJBatch, summarizeBatch } from '../../machine/batch';
 import { buildExternalTokenToReserveBatch, computeAccountKey } from '../events/contract-codec';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../../../hanko/batch';
-import { decodeHankoEnvelope } from '../../../hanko/codec';
+import { assertChainHankoShape, chainHankoTargetEntityId } from '../../../hanko/short';
 import {
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
@@ -1394,8 +1395,11 @@ export class BrowserVMProvider {
   async getDebts(entityId: string, tokenId: number): Promise<Array<{ amount: bigint; creditor: string }>> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
-    const readUint = async (functionName: '_debtIndex' | '_activeDebtsByToken' | 'debtOutstanding'): Promise<bigint> => {
-      const call = this.depositoryInterface!.encodeFunctionData(functionName, [entityId, tokenId]);
+    // activeDebts is one aggregate counter per entity across all tokens
+    // (Depository.activeDebts); the per-token cursor and outstanding total remain.
+    const readUint = async (functionName: '_debtIndex' | 'activeDebts' | 'debtOutstanding'): Promise<bigint> => {
+      const args = functionName === 'activeDebts' ? [entityId] : [entityId, tokenId];
+      const call = this.depositoryInterface!.encodeFunctionData(functionName, args);
       const result = await this.runReadOnlyCall({
         to: this.depositoryAddress!,
         caller: this.deployerAddress,
@@ -1416,7 +1420,7 @@ export class BrowserVMProvider {
     };
     const [cursor, activeCount, outstanding] = await Promise.all([
       readUint('_debtIndex'),
-      readUint('_activeDebtsByToken'),
+      readUint('activeDebts'),
       readUint('debtOutstanding'),
     ]);
     if (activeCount > BigInt(MAX_BROWSER_VM_DEBT_QUEUE_READS)) {
@@ -1534,11 +1538,14 @@ export class BrowserVMProvider {
       let revertReason: string | null = null;
       const returnData = bytesToHex(result.execResult.returnValue || new Uint8Array());
       try {
-        const claims = decodeHankoEnvelope(hankoData).claims;
-        if (claims.length > 0) {
-          claimedEntityId = claims[claims.length - 1]!.entityId;
-          expectedNextNonce = (await this.getEntityNonce(claimedEntityId)) + 1n;
-        }
+        const batchHash = computeBatchHankoHash(
+          BigInt(this.common.chainId()),
+          this.depositoryAddress.toString(),
+          encodedBatch,
+          nonce,
+        );
+        claimedEntityId = chainHankoTargetEntityId(hankoData, batchHash);
+        expectedNextNonce = (await this.getEntityNonce(claimedEntityId)) + 1n;
         const batch = decodeJBatch(encodedBatch);
         batchSummary = safeStringify(summarizeBatch(batch));
         if (returnData !== '0x') {
@@ -1613,7 +1620,7 @@ export class BrowserVMProvider {
     if (hankoData === '0x') {
       throw new Error('ENTITY_PROVIDER_ACTION_HANKO_MISSING');
     }
-    decodeHankoEnvelope(hankoData);
+    assertChainHankoShape(hankoData);
     assertEntityProviderActionIntent(intent, {
       chainId: this.getChainId(),
       entityProviderAddress: this.entityProviderAddress.toString(),
@@ -1706,6 +1713,7 @@ export class BrowserVMProvider {
     if (supporterHankos.length === 0 || supporterHankos.some((hanko) => !/^0x(?:[0-9a-f]{2})+$/i.test(hanko))) {
       throw new Error('CONTROL_BOARD_PROPOSAL_HANKOS_INVALID');
     }
+    await this.assertBoardCommitted(targetEntityId, newBoardHash);
     const callData = this.entityProviderInterface.encodeFunctionData('proposeBoard', [
       targetEntityId,
       newBoardHash,
@@ -2169,7 +2177,58 @@ export class BrowserVMProvider {
   }
 
   /** Get entity info by ID from EntityProvider contract */
-  async getEntityInfo(entityId: string): Promise<{ exists: boolean; name?: string; currentBoardHash?: string; registrationBlock?: number }> {
+  private describeEntityProviderRevert(result: { execResult: { exceptionError?: unknown; returnValue?: Uint8Array } }): string {
+    const returnData = bytesToHex(result.execResult.returnValue || new Uint8Array());
+    let reason = String(
+      (result.execResult.exceptionError as { error?: unknown } | undefined)?.error ?? result.execResult.exceptionError,
+    );
+    if (returnData !== '0x' && this.entityProviderInterface) {
+      try {
+        const parsed = this.entityProviderInterface.parseError(returnData);
+        if (parsed) reason = `${parsed.name}(${parsed.args.map((arg: unknown) => String(arg)).join(',')})`;
+      } catch {
+        // Keep the raw EVM error when the return data is not a known custom error.
+      }
+    }
+    return `${reason}:returnData=${returnData}`;
+  }
+
+  private async readEntityProvider(functionName: string, args: readonly unknown[]): Promise<ethers.Result> {
+    if (!this.entityProviderAddress || !this.entityProviderInterface) {
+      throw new Error('EntityProvider not deployed');
+    }
+    const callData = this.entityProviderInterface.encodeFunctionData(functionName, [...args]);
+    const result = await this.runReadOnlyCall({
+      to: this.entityProviderAddress,
+      data: hexToBytes(callData as `0x${string}`),
+    });
+    if (result.execResult.exceptionError) {
+      throw new Error(`BROWSERVM_ENTITY_PROVIDER_READ_FAILED:${functionName}:${this.describeEntityProviderRevert(result)}`);
+    }
+    return this.entityProviderInterface.decodeFunctionResult(functionName, result.execResult.returnValue);
+  }
+
+  /**
+   * proposeBoard reverts BoardNotCommitted unless the preimage was validated by
+   * commitBoard (registration auto-commits) or the hash is one of the entity's
+   * retired boards. Surface that as a named failure before spending gas.
+   */
+  private async assertBoardCommitted(targetEntityId: string, newBoardHash: string): Promise<void> {
+    const committed = (await this.readEntityProvider('committedBoards', [newBoardHash]))[0] as boolean;
+    if (committed) return;
+    const entity = (await this.readEntityProvider('entities', [targetEntityId])) as unknown as {
+      previousBoardHash: string;
+      previousBoardHash2: string;
+    };
+    const hash = newBoardHash.toLowerCase();
+    if (
+      String(entity.previousBoardHash).toLowerCase() === hash ||
+      String(entity.previousBoardHash2).toLowerCase() === hash
+    ) return;
+    throw new Error(`BOARD_NOT_COMMITTED:${newBoardHash}`);
+  }
+
+  async getEntityInfo(entityId: string): Promise<{ exists: boolean; currentBoardHash?: string; registrationBlock?: number }> {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
@@ -2188,19 +2247,14 @@ export class BrowserVMProvider {
       throw new Error(`BROWSERVM_GET_ENTITY_INFO_FAILED:${error}`);
     }
 
-    // Decode: (bool exists, bytes32 currentBoardHash, bytes32 proposedBoardHash, uint256 registrationBlock, string name)
+    // Decode: (bool exists, bytes32 currentBoardHash, bytes32 proposedBoardHash, uint256 registrationBlock).
+    // No on-chain name registry: human names are a relay/UI concern.
     const decoded = this.entityProviderInterface.decodeFunctionResult('getEntityInfo', result.execResult.returnValue);
-
-    const nameValue = decoded[4] as string;
-    const result_obj: { exists: boolean; name?: string; currentBoardHash?: string; registrationBlock?: number } = {
+    return {
       exists: decoded[0] as boolean,
       currentBoardHash: decoded[1] as string,
       registrationBlock: Number(decoded[3]),
     };
-    if (nameValue) {
-      result_obj.name = nameValue;
-    }
-    return result_obj;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2620,14 +2674,14 @@ export class BrowserVMProvider {
     return localStorage.getItem(key) !== null;
   }
 
-  /** Register numbered entities via EntityProvider contract */
-  async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<{ entityNumbers: number[]; txHash: string }> {
+  /** Register numbered entities via EntityProvider contract (abi.encode(Board) preimages). */
+  async registerNumberedEntitiesBatch(encodedBoards: string[]): Promise<{ entityNumbers: number[]; txHash: string }> {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
 
     // Encode contract call
-    const callData = this.entityProviderInterface.encodeFunctionData('registerNumberedEntitiesBatch', [boardHashes]);
+    const callData = this.entityProviderInterface.encodeFunctionData('registerNumberedEntitiesBatch', [encodedBoards]);
     const { tx, result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
       createLegacyTx({
         to: this.entityProviderAddress!,
@@ -2638,7 +2692,7 @@ export class BrowserVMProvider {
       }, { common: this.common }).sign(this.deployerPrivKey));
 
     if (result.execResult.exceptionError) {
-      throw new Error(`registerNumberedEntitiesBatch failed: ${result.execResult.exceptionError}`);
+      throw new Error(`registerNumberedEntitiesBatch failed: ${this.describeEntityProviderRevert(result)}`);
     }
 
     // Decode return value - array of uint256 entity numbers
@@ -2647,7 +2701,7 @@ export class BrowserVMProvider {
     const txHash = bytesToHex(tx.hash());
     await this.emitEvents(result.execResult.logs || [], txHash);
 
-    console.log(`[BrowserVM] registerNumberedEntitiesBatch: ${boardHashes.length} entities → [${entityNumbers.join(',')}]`);
+    console.log(`[BrowserVM] registerNumberedEntitiesBatch: ${encodedBoards.length} entities → [${entityNumbers.join(',')}]`);
     return {
       entityNumbers,
       txHash,
@@ -2664,41 +2718,24 @@ export class BrowserVMProvider {
   async registerEntitiesWithSigners(
     signers: Array<{ signerId: string; privateKey: string }>,
   ): Promise<number[]> {
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const encodedBoards: string[] = [];
     const boardHashes: string[] = [];
 
     for (const { signerId, privateKey } of signers) {
-      // Get validator address from private key
-      const wallet = new ethers.Wallet(privateKey);
-      const validatorAddress = wallet.address;
-      // Match Solidity: bytes32(uint256(uint160(address))) - zero-pad address to 32 bytes
-      const validatorEntityId = ethers.zeroPadValue(validatorAddress, 32);
-
-      // Create board with single validator
-      // Board struct: { votingThreshold, entityIds[], votingPowers[], boardChangeDelay, controlChangeDelay, dividendChangeDelay }
-      // NOTE: Must match Solidity's abi.encode(Board) exactly
-      // Solidity memory layout: https://docs.soliditylang.org/en/latest/abi-spec.html
-      const encodedBoard = abiCoder.encode(
-        ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
-        [[
-          1n, // votingThreshold (uint16)
-          [validatorEntityId], // entityIds (bytes32[])
-          [1n], // votingPowers (uint16[])
-          0n, // boardChangeDelay (uint32)
-          0n, // controlChangeDelay (uint32)
-          0n, // dividendChangeDelay (uint32)
-        ]]
-      );
-
-      const boardHash = ethers.keccak256(encodedBoard);
+      // Board with the signer EOA as sole validator; abi.encode(Board) is the
+      // on-chain registration input and keccak256 of it is the board hash.
+      const validatorAddress = new ethers.Wallet(privateKey).address;
+      const encodedBoard = encodeSingleSignerBoard(validatorAddress);
+      const boardHash = hashBoard(encodedBoard);
+      encodedBoards.push(encodedBoard);
       boardHashes.push(boardHash);
 
-      console.log(`[BrowserVM] Entity ${signerId}: validator=${validatorAddress}, entityId=${validatorEntityId.slice(0, 20)}...`);
+      console.log(`[BrowserVM] Entity ${signerId}: validator=${validatorAddress}`);
       console.log(`[BrowserVM]   boardHash=${boardHash}`);
     }
 
     // Register all entities in batch
-    const result = await this.registerNumberedEntitiesBatch(boardHashes);
+    const result = await this.registerNumberedEntitiesBatch(encodedBoards);
     const entityNumbers = result.entityNumbers;
 
     // Verify registration by checking stored boardHashes

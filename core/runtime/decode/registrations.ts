@@ -112,12 +112,13 @@ export const validateNumberedRecord = (value: unknown, code: string): void => {
       const entity = requireBoundaryRecord(raw, `${code}_REQUEST_ENTITY_${index}`);
       requireExactBoundaryKeys(
         entity,
-        ['name', 'boardHash', 'config', 'localSignerId', 'entitySeed'],
+        ['name', 'boardHash', 'encodedBoard', 'config', 'localSignerId', 'entitySeed'],
         ['profileName', 'position'],
         `${code}_REQUEST_ENTITY_${index}_FIELDS`,
       );
       requireString(entity['name'], `${code}_REQUEST_ENTITY_${index}_NAME`);
       requireString(entity['boardHash'], `${code}_REQUEST_ENTITY_${index}_BOARD`);
+      requireString(entity['encodedBoard'], `${code}_REQUEST_ENTITY_${index}_ENCODED_BOARD`);
       validateConsensusConfig(entity['config'], `${code}_REQUEST_ENTITY_${index}_CONFIG`);
       if (entity['localSignerId'] !== null) {
         requireString(entity['localSignerId'], `${code}_REQUEST_ENTITY_${index}_LOCAL_SIGNER`);

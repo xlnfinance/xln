@@ -12,15 +12,12 @@ import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import { maybeApproveSettlement } from '../consensus/ahb-helpers';
 import { requireReplica } from '../consensus/multi-sig';
 import {
+  advanceScenarioPastDisputeTimeout,
   converge,
   findReplica,
   processWithOffline,
   syncChain,
 } from '../harness/helpers';
-import {
-  mineRpcToBlockExact,
-  requireRpcBlockMiningProvider,
-} from '../harness/rpc-block-mining';
 import { executeCompanyAction } from './governance';
 import type { CompanyScenarioActors, CompanyShareTokens } from './model';
 import { CONTROL_IPO_AMOUNT } from './model';
@@ -111,7 +108,16 @@ export const proposeInvestorBoard = async (
     validators: [signer],
     shares: { [signer]: 1n },
   };
-  const boardHash = hashBoard(encodeBoard(config, env)).toLowerCase();
+  const encodedBoard = encodeBoard(config, env);
+  const boardHash = hashBoard(encodedBoard).toLowerCase();
+  // proposeBoard accepts only committed (on-chain validated) preimages. The
+  // proposer holds the board config, so it commits the preimage permissionlessly
+  // before the CONTROL proposal carries the bare hash through Entity consensus.
+  if (!(await actors.jadapter.entityProvider.committedBoards(boardHash))) {
+    const commit = await actors.jadapter.entityProvider.commitBoard(encodedBoard);
+    const commitReceipt = await commit.wait();
+    if (commitReceipt?.status !== 1) throw new Error(`COMPANY_BOARD_COMMIT_FAILED:${boardHash}`);
+  }
   const actionNonce = await actors.jadapter.entityProvider.boardActionNonces(actors.boardCompany.id) + 1n;
   await executeCompanyAction(env, actors.investor, [{
     type: 'entityProviderProposeControlBoard',
@@ -129,21 +135,22 @@ export const proposeInvestorBoard = async (
   return { config, boardHash };
 };
 
-const mineControlDelay = async (
+/**
+ * Governance delays are jurisdiction SECONDS: activateBoard requires
+ * block.timestamp >= Entity.activateAt. Jump both the chain clock and the
+ * runtime clock past that unix deadline (BrowserVM: next block timestamp;
+ * RPC: evm_increaseTime + evm_mine).
+ */
+const advanceControlDelay = async (
+  env: RuntimeReplica,
   actors: CompanyScenarioActors,
 ): Promise<void> => {
   const entity = await actors.jadapter.entityProvider.entities(actors.boardCompany.id);
-  const current = BigInt(await actors.jadapter.provider.getBlockNumber());
-  const target = BigInt(entity.activateAtBlock);
-  if (current >= target) return;
-  const browserVM = actors.jadapter.getBrowserVM();
-  if (!browserVM) {
-    await mineRpcToBlockExact(requireRpcBlockMiningProvider(actors.jadapter.provider), target);
-    return;
+  const activateAt = Number(entity.activateAt);
+  if (!Number.isSafeInteger(activateAt) || activateAt <= 0) {
+    throw new Error(`COMPANY_CONTROL_ACTIVATE_AT_INVALID:${String(entity.activateAt)}`);
   }
-  for (let block = current; block < target; block += 1n) {
-    await browserVM.mineEmptyBlock();
-  }
+  await advanceScenarioPastDisputeTimeout(env, actors.jadapter, activateAt);
 };
 
 export const activateInvestorBoardAndHandover = async (
@@ -151,10 +158,10 @@ export const activateInvestorBoardAndHandover = async (
   actors: CompanyScenarioActors,
   next: { config: ConsensusConfig; boardHash: string },
 ): Promise<void> => {
-  await mineControlDelay(actors);
-  // Batch-mining the governance delay can move the jurisdiction head far past
-  // the durable watcher cursor. Catch up that empty history before activation,
-  // so the next observed block is the exact BoardActivated transition.
+  await advanceControlDelay(env, actors);
+  // Advancing the governance delay can move the jurisdiction head past the
+  // durable watcher cursor. Catch up that history before activation, so the
+  // next observed block is the exact BoardActivated transition.
   await syncChain(env, 20);
   const signer = next.config.validators[0];
   if (!signer) throw new Error('COMPANY_HANDOVER_SIGNER_MISSING');

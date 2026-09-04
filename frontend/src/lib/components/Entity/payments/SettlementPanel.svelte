@@ -249,21 +249,6 @@
       else neutralOps.push(op);
     };
 
-    for (const [index, op] of (Array.isArray(batch.flashloans) ? batch.flashloans : []).entries()) {
-      pushOp(
-        'increase',
-        makeBatchDetailOp(
-          `flashloans-${index}`,
-          'Flashloan',
-          [entityId],
-          [
-            { label: 'Token', value: tokenLabel(op?.tokenId) },
-            { label: 'Amount', value: tokenAmountLabel(op?.tokenId, op?.amount) },
-          ],
-        ),
-      );
-    }
-
     for (const [index, op] of (Array.isArray(batch.externalTokenToReserve) ? batch.externalTokenToReserve : []).entries()) {
       pushOp(
         'increase',
@@ -544,7 +529,6 @@
   function countBatchOps(batch: BatchShape | undefined | null): number {
     if (!batch) return 0;
     return (
-      (batch.flashloans?.length || 0) +
       (batch.reserveToCollateral?.length || 0) +
       (batch.collateralToReserve?.length || 0) +
       (batch.settlements?.length || 0) +
@@ -561,7 +545,6 @@
 
   function batchSummary(batch: BatchShape | undefined | null): Array<{ label: string; count: number }> {
     return [
-      { label: 'Flashloan', count: Number(batch?.flashloans?.length || 0) },
       { label: 'ExternalTokenToReserve', count: Number(batch?.externalTokenToReserve?.length || 0) },
       { label: 'CollateralToReserve', count: Number(batch?.collateralToReserve?.length || 0) },
       { label: 'Settlement', count: Number(batch?.settlements?.length || 0) },

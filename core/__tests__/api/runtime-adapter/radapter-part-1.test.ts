@@ -1308,7 +1308,6 @@ test('runtime adapter view-frame exposes compact pending j-batch operations for 
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.jBatchState = {
     batch: {
-      flashloans: [],
       reserveToReserve: [],
       reserveToCollateral: [],
       collateralToReserve: [],

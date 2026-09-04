@@ -1078,7 +1078,6 @@ const compactProofBodyForBatchView = (proofBody: unknown): unknown => {
 const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => {
   if (!batch) return undefined;
   return {
-    flashloans: compactArrayTail(batch.flashloans, BATCH_VIEW_OP_LIMIT) ?? [],
     reserveToReserve: compactArrayTail(batch.reserveToReserve, BATCH_VIEW_OP_LIMIT) ?? [],
     reserveToCollateral: (compactArrayTail(batch.reserveToCollateral, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,

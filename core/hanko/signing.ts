@@ -257,6 +257,7 @@ export function encodeSingleSignerEntityHankos(
     placeholders: [],
     packedSignatures: packHankoSignatures([toHankoSignature(signature)]),
     claims: [claim],
+    memberSignatures: [],
   }));
 }
 
@@ -549,6 +550,7 @@ export async function buildQuorumHanko(
       threshold: config.threshold,
       ...resolveHankoBoardDelays(config.boardDelays),
     }],
+    memberSignatures: [],
   });
 }
 

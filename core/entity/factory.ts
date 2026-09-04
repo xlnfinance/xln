@@ -153,6 +153,34 @@ export const hashBoard = (encodedBoard: string): string => {
   return ethers.keccak256(ethers.toUtf8Bytes(encodedBoard));
 };
 
+/**
+ * abi.encode(Board) for a 1-of-1 EOA board. EntityProvider registration and
+ * commitBoard take this preimage; the board hash stays keccak256 of it.
+ */
+export const encodeSingleSignerBoard = (signerAddress: string): string => {
+  const address = cachedChecksumAddress(signerAddress);
+  return ethers.AbiCoder.defaultAbiCoder().encode(
+    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
+    [[1, [ethers.zeroPadValue(address, 32)], [1], 0, 0, 0]],
+  );
+};
+
+const ENTITY_TREASURY_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_ENTITY_TREASURY_V1'));
+
+/**
+ * ERC1155 treasury of numbered entity N, mirroring EntityTypes.sol entityTreasury():
+ * address(uint160(uint256(keccak256(abi.encode(keccak256("XLN_ENTITY_TREASURY_V1"), N))))).
+ * Never address(uint160(N)); low addresses are precompiles or L2 system contracts.
+ */
+export const entityTreasuryAddress = (entityNumber: number | bigint): string => {
+  const number = BigInt(entityNumber);
+  if (number <= 0n) throw new Error(`ENTITY_TREASURY_NUMBER_INVALID:${number.toString()}`);
+  const digest = ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(['bytes32', 'uint256'], [ENTITY_TREASURY_DOMAIN, number]),
+  );
+  return ethers.getAddress(`0x${digest.slice(-40)}`);
+};
+
 export const generateLazyEntityId = (
   validators: readonly BoardMemberInput[],
   threshold: bigint,

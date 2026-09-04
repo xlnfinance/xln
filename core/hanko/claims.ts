@@ -230,6 +230,12 @@ const verifyCanonicalHankoStructure = (
   const digest = asHankoBytes32(digestInput, 'DIGEST');
   const envelope = decodeHankoEnvelope(hanko);
   if (envelope.claims.length === 0) invalidHanko('HANKO_CLAIM_REQUIRED');
+  // ERC-1271 member proofs are contract state that only the jurisdiction can
+  // evaluate. Off-chain consensus grants no weight it cannot verify, so an
+  // envelope that relies on one is rejected here (the chain may still accept it).
+  envelope.memberSignatures.forEach((signature, index) => {
+    if (signature.length > 2) invalidHanko(`HANKO_MEMBER_SIGNATURE_UNSUPPORTED:${index}`);
+  });
   assertUnique(envelope.placeholders, 'HANKO_DUPLICATE_PLACEHOLDER');
   assertUnique(envelope.claims.map((claim) => claim.entityId), 'HANKO_DUPLICATE_CLAIM_ENTITY');
   const signatures = recoverHankoSignatures(digest, envelope.packedSignatures);

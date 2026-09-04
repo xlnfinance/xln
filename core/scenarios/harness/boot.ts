@@ -5,6 +5,7 @@
 
 import type { RuntimeReplica } from '../../runtime/types';
 import type { JurisdictionConfig } from '../../entity/types';
+import { encodeSingleSignerBoard, hashBoard } from '../../entity/factory';
 import type { JReplica, JTx } from '../../types/jurisdiction-runtime';
 import type { JAdapter, JAdapterMode } from '../../jurisdiction/adapter/types';
 import { ethers } from 'ethers';
@@ -417,6 +418,8 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
 type ScenarioBoardIdentity = Readonly<{
   signer: string;
   privateKey: Uint8Array;
+  /** abi.encode(Board); EntityProvider registration takes the preimage. */
+  encodedBoard: string;
   boardHash: string;
 }>;
 
@@ -432,18 +435,10 @@ export const resolveScenarioBoardSigner = (env: RuntimeReplica, signerId: string
 function computeBoardIdentity(env: RuntimeReplica, signerId: string): ScenarioBoardIdentity {
   const privateKey = getSignerPrivateKey(env, signerId);
   const signer = resolveScenarioBoardSigner(env, signerId);
-  const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
-  const validatorEntityId = ethers.zeroPadValue(signer, 32);
-
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const encodedBoard = abiCoder.encode(
-    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
-    [[1n, [validatorEntityId], [1n], 0n, 0n, 0n]]
-  );
-
-  const boardHash = ethers.keccak256(encodedBoard);
-  console.log(`[Boot] computeBoardHash(signer=${signerId}): addr=${wallet.address}, entityId=${validatorEntityId.slice(0, 20)}..., boardHash=${boardHash.slice(0, 18)}...`);
-  return { signer, privateKey, boardHash };
+  const encodedBoard = encodeSingleSignerBoard(signer);
+  const boardHash = hashBoard(encodedBoard);
+  console.log(`[Boot] computeBoardHash(signer=${signerId}): addr=${signer}, boardHash=${boardHash.slice(0, 18)}...`);
+  return { signer, privateKey, encodedBoard, boardHash };
 }
 
 /**
@@ -464,14 +459,14 @@ export async function registerEntities(
 ): Promise<RegisteredEntity[]> {
   // 1. Compute board hashes and register on-chain
   const boardIdentities = entities.map(entity => computeBoardIdentity(env, entity.signer));
-  const boardHashes = boardIdentities.map(identity => identity.boardHash);
+  const encodedBoards = boardIdentities.map(identity => identity.encodedBoard);
   const nextEntityNumber = await jadapter.entityProvider.nextNumber();
-  const registerTx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
+  const registerTx = await jadapter.entityProvider.registerNumberedEntitiesBatch(encodedBoards);
   const registerReceipt = await registerTx.wait();
   if (!registerReceipt || registerReceipt.status === 0) {
     throw new Error('registerNumberedEntitiesBatch failed');
   }
-  const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
+  const entityNumbers = encodedBoards.map((_, index) => Number(nextEntityNumber) + index);
 
   // 2. Build entity info from returned numbers
   const result: RegisteredEntity[] = entities.map((e, i) => {
@@ -501,7 +496,7 @@ export async function registerEntities(
         throw new Error(`REGISTER_ENTITY_AUTHORITY_EVIDENCE_MISSING:${registered.id}:${stackKey}`);
       }
       if (
-        evidence.boardHash !== boardHashes[index]!.toLowerCase() ||
+        evidence.boardHash !== boardIdentities[index]!.boardHash.toLowerCase() ||
         evidence.activationHeight !== receiptBlock
       ) {
         throw new Error(`REGISTER_ENTITY_AUTHORITY_EVIDENCE_MISMATCH:${registered.id}`);

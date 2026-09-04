@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ethers } from 'ethers';
 
 import { registerSignerKey, signAccountFrame } from '../../../../account/crypto';
-import { generateLazyEntityId } from '../../../../entity/factory';
+import { encodeSingleSignerBoard, entityTreasuryAddress, generateLazyEntityId } from '../../../../entity/factory';
 import { buildSingleSignerHanko } from '../../../../hanko/batch';
 import {
   hashBoardProposalCancelHankoPayload,
@@ -209,7 +209,11 @@ describe('On-chain Hanko cross-chain replay protection', () => {
       (error: unknown) => error,
     );
     expect(outerReplayFailure).toBeInstanceOf(Error);
-    expect(outerReplayFailure instanceof Error ? outerReplayFailure.message : '').toContain('E4');
+    // A 65-byte Hanko is the identity of whoever signed *this* digest. Over the
+    // chain-B digest the chain-A signature recovers an unowned address, so the
+    // batch runs as that stranger entity and dies at the settlement party check
+    // (E7) instead of at Hanko verification; the initiator is never touched.
+    expect(outerReplayFailure instanceof Error ? outerReplayFailure.message : '').toContain('E7');
     expect(await adapterB.getEntityNonce(initiator.entityId)).toBe(0n);
     expect((await adapterB.getAccountInfo(initiator.entityId, counterparty.entityId)).nonce).toBe(0n);
 
@@ -242,17 +246,23 @@ describe('On-chain Hanko cross-chain replay protection', () => {
       computeBatchHankoHash(BigInt(CHAIN_B), adapterB.addresses.depository, encodedBatchB, 1n),
       initiator.privateKey,
     );
-    expect(await adapterB.depository.processBatch.staticCall(encodedBatchB, correctOuterB, 1n)).toBe(true);
+    // processBatch returns nothing; a non-reverting staticCall is the acceptance signal.
+    await adapterB.depository.processBatch.staticCall(encodedBatchB, correctOuterB, 1n);
     await adapterB.processBatch(encodedBatchB, correctOuterB, 1n);
     expect((await adapterB.getAccountInfo(initiator.entityId, counterparty.entityId)).nonce).toBe(1n);
 
+    // The 1-of-1 initiator board: its hash is the lazy entity id, and its
+    // abi.encode(Board) preimage registers numbered entity #2 on both chains.
     const actionEntityId = generateLazyEntityId([initiator.address], 1n).toLowerCase();
+    const actionEncodedBoard = encodeSingleSignerBoard(initiator.address);
     await Promise.all([
-      adapterA.entityProvider.registerNumberedEntity(actionEntityId).then((tx) => tx.wait()),
-      adapterB.entityProvider.registerNumberedEntity(actionEntityId).then((tx) => tx.wait()),
+      adapterA.entityProvider.registerNumberedEntity(actionEncodedBoard).then((tx) => tx.wait()),
+      adapterB.entityProvider.registerNumberedEntity(actionEncodedBoard).then((tx) => tx.wait()),
     ]);
     const numberedEntityId = ethers.zeroPadValue(ethers.toBeHex(2n), 32);
-    const actionEntityAddress = ethers.getAddress(`0x${actionEntityId.slice(-40)}`);
+    // Entity treasuries are namespaced: funding lands in entityTreasury(lazyId-as-number),
+    // which is exactly where entityTransferTokens(entityNumber = lazyId) debits from.
+    const actionEntityAddress = entityTreasuryAddress(BigInt(actionEntityId));
     const fundingAuthorization = {
       entityNumber: 2n,
       to: actionEntityAddress,
@@ -449,6 +459,15 @@ describe('On-chain Hanko cross-chain replay protection', () => {
 
     const unusedBoardSigner = new ethers.Wallet(ethers.zeroPadValue('0x03', 32));
     const proposedBoardHash = generateLazyEntityId([unusedBoardSigner.address], 1n).toLowerCase();
+    // proposeBoard accepts only committed (on-chain validated) preimages; commit
+    // the same board on both chains so only the Hanko domain differs below.
+    const proposedEncodedBoard = encodeSingleSignerBoard(unusedBoardSigner.address);
+    await Promise.all([
+      adapterA.entityProvider.commitBoard(proposedEncodedBoard).then((tx) => tx.wait()),
+      adapterB.entityProvider.commitBoard(proposedEncodedBoard).then((tx) => tx.wait()),
+    ]);
+    expect(await adapterA.entityProvider.committedBoards(proposedBoardHash)).toBe(true);
+    expect(await adapterB.entityProvider.committedBoards(proposedBoardHash)).toBe(true);
     const proposalAuthorization = {
       entityId: numberedEntityId,
       newBoardHash: proposedBoardHash,
