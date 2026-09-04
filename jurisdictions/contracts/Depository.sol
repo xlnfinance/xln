@@ -491,17 +491,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     // C2R shortcut: direct processing (no Settlement[] allocation)
     // Pure C2R = withdraw `amount` from my share of collateral to my reserve
+    // Account reverts E4/E3 itself; every rejected item aborts the batch.
     for (uint i = 0; i < batch.collateralToReserve.length; i++) {
-      BatchItemResult c2rResult =
-        Account.processC2R(_reserves, _accounts, _collaterals, entityId, batch.collateralToReserve[i], entityProvider);
-      if (c2rResult == BatchItemResult.InvalidSignature) revert E4();
-      if (c2rResult == BatchItemResult.InsufficientBalance) revert E3();
+      Account.processC2R(_reserves, _accounts, _collaterals, entityId, batch.collateralToReserve[i], entityProvider);
     }
 
     // Delegate settlement diffs to Account library, handle debt forgiveness in Depository
     if (batch.settlements.length > 0) {
       _enforceSettlementOutflowDebts(batch.settlements);
-      BatchItemResult[] memory settlementResults = Account.processSettlements(
+      Account.processSettlements(
         _reserves,
         debtOutstanding,
         _accounts,
@@ -512,8 +510,6 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       );
       // Handle debt forgiveness (not in Account due to stack limits)
       for (uint i = 0; i < batch.settlements.length; i++) {
-        if (settlementResults[i] == BatchItemResult.InvalidSignature) revert E4();
-        if (settlementResults[i] == BatchItemResult.InsufficientBalance) revert E3();
         Settlement memory s = batch.settlements[i];
         for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
           uint tokenId = s.forgiveDebtsInTokenIds[j];

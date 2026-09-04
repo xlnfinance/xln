@@ -1167,7 +1167,9 @@ library Account {
 
   // ========== ENTRY POINTS ==========
 
-  /// @notice Process settlements - diffs only (debt handled by Depository)
+  /// @notice Process settlements - diffs only (debt handled by Depository).
+  /// @dev Any rejected settlement reverts the whole batch (E4 signature,
+  ///      E3 balance) directly from the library; there is no soft-fail path.
   function processSettlements(
     mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
     mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
@@ -1176,10 +1178,9 @@ library Account {
     bytes32 entityId,
     Settlement[] memory settlements,
     address entityProvider
-  ) external returns (BatchItemResult[] memory results) {
-    results = new BatchItemResult[](settlements.length);
+  ) external {
     for (uint i = 0; i < settlements.length; i++) {
-      results[i] = _settleDiffs(
+      _settleDiffs(
         _reserves,
         debtOutstanding,
         _accounts,
@@ -1199,7 +1200,7 @@ library Account {
     bytes32 entityId,
     CollateralToReserve memory c2r,
     address entityProvider
-  ) external returns (BatchItemResult) {
+  ) external {
     bool isLeft = entityId < c2r.counterparty;
     bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
     bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
@@ -1234,14 +1235,12 @@ library Account {
     // C2R authorizes a fresh movement of funds, not historical evidence. A
     // rotated-out board must never retain spending authority during its grace.
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(c2r.sig, hash);
-    if (!valid || recoveredEntity != c2r.counterparty) {
-      return BatchItemResult.InvalidSignature;
-    }
+    if (!valid || recoveredEntity != c2r.counterparty) revert E4();
 
     // Apply diffs
     uint tokenId = c2r.tokenId;
     AccountCollateral storage col = _collaterals[acct_key][tokenId];
-    if (col.collateral < amount) return BatchItemResult.InsufficientBalance;
+    if (col.collateral < amount) revert E3();
 
     _increaseReserve(_reserves, entityId, tokenId, amount);
     _decreaseCollateral(col, amount);
@@ -1269,8 +1268,6 @@ library Account {
       nonce: _accounts[acct_key].nonce
     });
     emit AccountSettled(settled);
-
-    return BatchItemResult.Applied;
   }
 
   /// @notice Process dispute starts only
@@ -1461,7 +1458,7 @@ library Account {
     bytes32 initiator,
     Settlement memory s,
     address entityProvider
-  ) internal returns (BatchItemResult) {
+  ) internal {
     bytes32 leftEntity = s.leftEntity;
     bytes32 rightEntity = s.rightEntity;
     if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
@@ -1507,15 +1504,13 @@ library Account {
     // counterparty's current board may authorize it. Historical board grace is
     // reserved for dispute evidence below.
     try IEntityProvider(entityProvider).verifyCurrentHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-      if (!valid || recoveredEntity != counterparty) {
-        return BatchItemResult.InvalidSignature;
-      }
+      if (!valid || recoveredEntity != counterparty) revert E4();
     } catch {
-      return BatchItemResult.InvalidSignature;
+      revert E4();
     }
 
     // A settlement is one signed bilateral state transition. Check every
-    // balance first so an expected state race skips the whole settlement,
+    // balance first so an expected state race rejects the whole settlement,
     // never a prefix of its token diffs.
     for (uint j = 0; j < s.diffs.length; j++) {
       SettlementDiff memory diff = s.diffs[j];
@@ -1524,15 +1519,15 @@ library Account {
       if (
         diff.leftDiff < 0 &&
         _spendableReserve(_reserves, debtOutstanding, leftEntity, tokenId) < uint(-diff.leftDiff)
-      ) return BatchItemResult.InsufficientBalance;
+      ) revert E3();
       if (
         diff.rightDiff < 0 &&
         _spendableReserve(_reserves, debtOutstanding, rightEntity, tokenId) < uint(-diff.rightDiff)
-      ) return BatchItemResult.InsufficientBalance;
+      ) revert E3();
       if (
         diff.collateralDiff < 0 &&
         _collaterals[acct_key][tokenId].collateral < uint(-diff.collateralDiff)
-      ) return BatchItemResult.InsufficientBalance;
+      ) revert E3();
     }
 
     // Apply diffs through the same int256.max-capped reserve helpers used by
@@ -1621,8 +1616,6 @@ library Account {
       nonce: _accounts[acct_key].nonce
     });
     emit AccountSettled(settled);
-
-    return BatchItemResult.Applied;
   }
 
   function _spendableReserve(

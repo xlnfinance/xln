@@ -334,12 +334,6 @@ struct Batch {
 
 // ========== ENUMS ==========
 
-enum BatchItemResult {
-  Applied,
-  InvalidSignature,
-  InsufficientBalance
-}
-
 enum MessageType {
   CooperativeUpdate,
   DisputeProof,
