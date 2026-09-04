@@ -150,6 +150,7 @@ export const planAccountJClaimLocalAdmission = (
   localIsLeft: boolean,
 ): AccountJClaimLocalAdmissionPlan => {
   const events = canonicalEvents(tx.data.events);
+  if (tx.data.jHeight <= account.lastFinalizedJHeight) return { verdict: 'duplicate' };
   const eventsHash = canonicalJurisdictionEventsHash(events);
   for (const side of ['left', 'right'] as const) {
     const record = buildRecord(account, domain, side, tx.data, events);

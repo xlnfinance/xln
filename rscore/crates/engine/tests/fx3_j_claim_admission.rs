@@ -14,9 +14,10 @@ use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountInputEnvelope,
     AccountRejection, AccountReplica, AccountSettledEvent, AccountState, AccountTx, BoardDelays,
-    DepositoryAddress, Disposition, EntityId, IncomingFrame, IncomingOutcome, JEventClaimTx,
-    JEventMetadata, JurisdictionEvent, ProposalOutcome, ProposedFrame, ReceiverClock,
-    SigningIdentity, TokenId, ValidationRejection, WatchSeed,
+    DepositoryAddress, Disposition, EntityId, IncomingAck, IncomingFrame, IncomingOutcome,
+    JEventClaimTx, JEventMetadata, JurisdictionEvent, ProposalOutcome, ProposedFrame,
+    ReceiverClock, SigningIdentity, TokenId, ValidationRejection, WatchSeed,
+    apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, propose_account_frame,
 };
 
@@ -189,6 +190,22 @@ fn deliver(
         false,
     )
     .expect("peer frame commits")
+}
+
+fn acknowledge(sender: &mut Party, receiver: &Party, proposed: &ProposedFrame, hanko: Vec<u8>) {
+    let peer_envelope = envelope(&sender.account, receiver.entity_id.as_bytes());
+    apply_exact_incoming_ack(
+        &mut sender.account,
+        &peer_envelope,
+        IncomingAck {
+            height: proposed.frame.height,
+            frame_hash: proposed.state_hash,
+            frame_hanko: Some(hanko),
+            dispute: None,
+        },
+        false,
+    )
+    .expect("sender commits on ack");
 }
 
 fn propose(
@@ -450,4 +467,58 @@ fn earlier_queued_claim_conflict_is_typed_rejected() {
     );
     // The earlier honest claim is untouched.
     assert_eq!(left.account.mempool().len(), 1);
+}
+
+#[test]
+fn late_local_claims_at_or_below_bilateral_finality_are_duplicate_skips() {
+    let (mut left, mut right) = parties();
+    let market = std::sync::Arc::new(xln_rscore_engine::SwapMarketPolicy::default());
+
+    let admitted = right
+        .account
+        .admit_txs(vec![raw_claim(5, 0x77, 3)], "fx3:finality-right")
+        .expect("right claim admitted");
+    assert_eq!(admitted.admitted, 1);
+    let ProposalOutcome::Proposed(right_frame) = propose(&mut right, &market) else {
+        panic!("right proposal expected");
+    };
+    let IncomingOutcome::Committed { ack_hanko, .. } =
+        deliver(&mut left, &right, &right_frame, &market)
+    else {
+        panic!("left commits right proposal");
+    };
+    acknowledge(&mut right, &left, &right_frame, ack_hanko);
+
+    let admitted = left
+        .account
+        .admit_txs(vec![raw_claim(5, 0x77, 3)], "fx3:finality-left")
+        .expect("left matching claim admitted");
+    assert_eq!(admitted.admitted, 1);
+    let ProposalOutcome::Proposed(left_frame) = propose(&mut left, &market) else {
+        panic!("left proposal expected");
+    };
+    let IncomingOutcome::Committed { ack_hanko, .. } =
+        deliver(&mut right, &left, &left_frame, &market)
+    else {
+        panic!("right commits left proposal");
+    };
+    acknowledge(&mut left, &right, &left_frame, ack_hanko);
+
+    for account in [&left.account, &right.account] {
+        assert_eq!(account.replica().state().last_finalized_j_height(), 5);
+        let carried = account.replica().state().carried();
+        assert_eq!(carried.left_pending_j_claims.count, 0);
+        assert_eq!(carried.right_pending_j_claims.count, 0);
+    }
+    let summary = left
+        .account
+        .admit_txs(
+            vec![raw_claim(5, 0x77, 3), raw_claim(4, 0x66, 2), survivor_row()],
+            "fx3:late-finalized",
+        )
+        .expect("late observations are duplicate data");
+    assert_eq!(summary.admitted, 1);
+    assert_eq!(summary.duplicates, 2);
+    assert!(summary.rejections.is_empty());
+    assert_eq!(left.account.mempool(), [survivor_row()]);
 }

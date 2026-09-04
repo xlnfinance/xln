@@ -6,7 +6,7 @@ use crate::j_claims::events::{MAX_SAFE_INTEGER, canonical_events, canonical_even
 use crate::j_claims::proof::{ProofResult, create, inspect};
 use crate::j_claims::store::apply_changes;
 use crate::j_claims::types::{JClaimStatus, JClaimTransition, JEventClaimTx};
-use crate::{AccountIdentity, JClaimProof, Side, StateError, ValidationRejection};
+use crate::{AccountIdentity, AccountState, JClaimProof, Side, StateError, ValidationRejection};
 
 pub(crate) struct AccountJEventClaimAdmission {
     events: Vec<JurisdictionEvent>,
@@ -158,21 +158,22 @@ pub(crate) enum LocalClaimPlan {
 }
 
 pub(crate) fn plan_local_claim(
-    identity: &AccountIdentity,
-    left: &JClaimAccumulator,
-    right: &JClaimAccumulator,
+    state: &AccountState,
     queued: &[QueuedClaimWitness],
     tx: &JEventClaimTx,
-    store: &JClaimStore,
     owner_side: Side,
 ) -> Result<LocalClaimPlan, StateError> {
     let events = canonical_events(&tx.events)?;
-    let records = build_records(identity, tx, &events)?;
+    if tx.j_height <= state.last_finalized_j_height() {
+        return Ok(LocalClaimPlan::Duplicate);
+    }
+    let records = build_records(state.identity(), tx, &events)?;
+    let carried = state.carried();
     for (accumulator, expected, side) in [
-        (left, &records.0, Side::Left),
-        (right, &records.1, Side::Right),
+        (&carried.left_pending_j_claims, &records.0, Side::Left),
+        (&carried.right_pending_j_claims, &records.1, Side::Right),
     ] {
-        let proof = create(store, accumulator.root, expected)?;
+        let proof = create(state.j_claim_store(), accumulator.root, expected)?;
         let result = inspect(accumulator.root, expected, &proof)?.result;
         let ProofResult::Member(actual) = result else {
             continue;

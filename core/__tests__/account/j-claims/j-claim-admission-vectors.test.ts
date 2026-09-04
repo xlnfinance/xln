@@ -301,6 +301,16 @@ const setupCommittedPeerClaim = async (harness: VectorHarness, height: number, b
   const proposed = await harness.propose('beta');
   expect(isProposedAccountFrame(proposed)).toBe(true);
   await harness.deliver('beta');
+  await harness.ack('alpha');
+};
+
+const setupFinalizedClaim = async (harness: VectorHarness, height: number, blockByte: number): Promise<void> => {
+  await setupCommittedPeerClaim(harness, height, blockByte);
+  const admitted = await harness.admitClaim('alpha', height, blockByte);
+  expect(admitted.ok && admitted.admittedAccountTxCount).toBe(1);
+  const proposed = await harness.propose('alpha');
+  expect(isProposedAccountFrame(proposed)).toBe(true);
+  await harness.deliver('alpha');
   await harness.ack('beta');
 };
 
@@ -440,5 +450,26 @@ describe('FX-3 j-claim admission vectors (proofs/fixes.md D4)', () => {
     }]);
     // The earlier honest claim is untouched.
     expect(harness.mempoolTypes('alpha')).toEqual(['j_event_claim']);
+  });
+
+  test('late local claims at or below bilateral finality are duplicate skips', async () => {
+    const harness = new VectorHarness();
+    await setupFinalizedClaim(harness, 5, 0x77);
+    for (const side of ['alpha', 'beta'] as const) {
+      const state = harness.committed(side).state;
+      expect(state.lastFinalizedJHeight).toBe(5);
+      expect(state.leftPendingJClaims.count).toBe(0n);
+      expect(state.rightPendingJClaims.count).toBe(0n);
+    }
+
+    const result = await harness.enqueue('alpha', [
+      harness.buildClaimTx(5, 0x77),
+      harness.buildClaimTx(4, 0x66),
+      harness.payment(),
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.admittedAccountTxCount).toBe(1);
+    expect(result.ok && result.admissionRejections).toBeUndefined();
+    expect(harness.mempoolTypes('alpha')).toEqual(['direct_payment']);
   });
 });

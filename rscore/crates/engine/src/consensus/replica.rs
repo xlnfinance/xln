@@ -622,14 +622,10 @@ impl AccountConsensus {
                 continue;
             }
             if let AccountTx::JEventClaim(claim) = &tx {
-                let carried = self.replica.state().carried();
                 let plan = plan_local_claim(
-                    self.replica.state().identity(),
-                    &carried.left_pending_j_claims,
-                    &carried.right_pending_j_claims,
+                    self.replica.state(),
                     &queued,
                     claim,
-                    self.replica.state().j_claim_store(),
                     self.replica.owner_side(),
                 )?;
                 match plan {
