@@ -81,4 +81,13 @@ Open items the last quorum flagged and I did NOT change (decide with the owner):
 - A cross-J `cross_pull_close` for an unknown pullId returns "already closed" (TS and
   Rust alike) — decide whether to reject.
 - Sub-lot remainders rest until expiry sweep or cancel (dust terminality deleted on purpose).
+- Self-emitted `requestCrossJurisdictionClear` outputs use `config.validators[0]` as signer
+  while `assertSelfRuntimeContinuations` expects `route.sourceHubSignerId`; equal for
+  single-signer hubs (the only supported topology today), would halt a multi-validator hub.
+  Use `crossJurisdictionRouteSignerHint(route, entityId)` when multisig hubs return.
+- TS `handleCrossPullClose` reports `swap_cancelled` (source offer retired) while Rust
+  emits `SwapOfferRemove`; parity fixtures accept both — collapse to one outcome.
+- The target hub's route mirror learns progress only from the carried `crossPullClose`
+  route (no notice reaches the target hub when the source hub owns the book); fine for
+  settlement, blind for UI/salvage until close — decide whether the target hub needs the notice.
 ---
