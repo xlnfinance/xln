@@ -333,11 +333,6 @@ impl ResidentRuntimeService {
         let mut selected = None;
         for _ in 0..count {
             let mut watcher = self.j_watchers.pop_front().expect("bounded watcher queue");
-            if Instant::now() < watcher.next_poll {
-                self.j_watchers.push_back(watcher);
-                continue;
-            }
-            watcher.next_poll = Instant::now() + watcher.poll_interval;
             if let Some(prefix_input) = crate::machine::build_pending_local_j_prefix_entity_input(
                 self.processor.replica()?,
                 watcher.config.entity_id.as_bytes(),
@@ -358,6 +353,11 @@ impl ResidentRuntimeService {
                 self.j_watchers.push_back(watcher);
                 return Ok(Some(report));
             }
+            if Instant::now() < watcher.next_poll {
+                self.j_watchers.push_back(watcher);
+                continue;
+            }
+            watcher.next_poll = Instant::now() + watcher.poll_interval;
             let certified_height = self
                 .processor
                 .replica()?
@@ -438,15 +438,11 @@ impl ResidentRuntimeService {
             },
         )
         .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
-        let prefix_input = if has_semantic_batches {
-            crate::machine::build_local_j_prefix_entity_input(
-                self.processor.replica()?,
-                &observation,
-            )
-            .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?
-        } else {
-            None
-        };
+        let prefix_input = crate::machine::build_local_j_prefix_entity_input(
+            self.processor.replica()?,
+            &observation,
+        )
+        .map_err(|error| ResidentRuntimeServiceError::JWatcher(error.to_string()))?;
         self.pending_runtime_txs
             .extend(ordered_j_observation_txs(&observation));
         self.finalized_j_height = self.finalized_j_height.max(next_cursor.scanned_through);

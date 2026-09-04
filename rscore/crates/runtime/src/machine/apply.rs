@@ -681,21 +681,6 @@ fn local_j_prefix_attestable_height(
     Ok(Some(base_height))
 }
 
-/// `true` unless the native base-claim path can honestly attest exactly
-/// `base_height` this round (see `local_j_prefix_attestable_height`). `true`
-/// routes to `JPrefixError::PendingLocalEventUnsupported`, refusing to
-/// certify rather than guessing.
-fn j_prefix_pending_local_event(
-    replica_metadata: &serde_json::Value,
-    base_height: u64,
-    has_j_history_finality: bool,
-) -> Result<bool, String> {
-    Ok(
-        local_j_prefix_attestable_height(replica_metadata, base_height, has_j_history_finality)?
-            != Some(base_height),
-    )
-}
-
 fn command_board(slot: &EntityApplySlot) -> Result<EntityCommandBoard, RuntimeMachineError> {
     command_board_for_replica(&slot.replica)
 }
@@ -3124,7 +3109,7 @@ fn apply_entity_group(
             .insert(position, EntityPendingWork::Projected(prepared.tx.clone()));
     }
 
-    let j_prefix_pending_local_event = j_prefix_pending_local_event(
+    let j_prefix_attestable_height = local_j_prefix_attestable_height(
         &slot.replica.replica_metadata,
         slot.state.entity.last_finalized_j_height,
         slot.state.entity.j_history_finality.is_some(),
@@ -3132,6 +3117,8 @@ fn apply_entity_group(
     .map_err(|error| {
         RuntimeMachineError::ReplicaMetadata(format!("J_PREFIX_HISTORY_DECODE:{error}"))
     })?;
+    let j_prefix_pending_local_event =
+        j_prefix_attestable_height != Some(slot.state.entity.last_finalized_j_height);
     let parent_frame_hash = slot
         .replica
         .entity_consensus
@@ -3151,9 +3138,14 @@ fn apply_entity_group(
         && prepared_j_range.is_none()
         && fit_j_prefix_certificate.is_some()
     {
-        return Err(RuntimeMachineError::ReplicaMetadata(
-            "J_PREFIX_PENDING_RANGE_WITHOUT_OBSERVATION".into(),
-        ));
+        return Err(RuntimeMachineError::ReplicaMetadata(format!(
+            "J_PREFIX_PENDING_RANGE_WITHOUT_OBSERVATION:entity={}:signer={}:entityHeight={}:baseHeight={}:attestableHeight={:?}:runtimeHeight={runtime_height}",
+            render_word(&group_key.entity_id),
+            group_key.signer_id,
+            slot.state.entity.height,
+            slot.state.entity.last_finalized_j_height,
+            j_prefix_attestable_height,
+        )));
     }
 
     // A derived AccountWork group is the TS `queueCommittedAccountWork`
@@ -4747,7 +4739,7 @@ mod tests {
         assert_eq!(evidence[1].account_state_root, [0x81; 32]);
     }
 
-    use super::j_prefix_pending_local_event;
+    use super::local_j_prefix_attestable_height;
 
     fn j_history(
         scanned_through_height: u64,
@@ -4776,7 +4768,10 @@ mod tests {
     #[test]
     fn j_prefix_base_case_fully_caught_up_is_not_pending() {
         let metadata = j_history(35, 35, &[], &[]);
-        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(false));
+        assert_eq!(
+            local_j_prefix_attestable_height(&metadata, 35, true),
+            Ok(Some(35))
+        );
     }
 
     #[test]
@@ -4784,19 +4779,28 @@ mod tests {
         // contiguousThroughHeight already advanced to 36 with zero events:
         // the base-claim path must not silently certify stale height 35.
         let metadata = j_history(36, 36, &[], &[]);
-        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(true));
+        assert_eq!(
+            local_j_prefix_attestable_height(&metadata, 35, true),
+            Ok(Some(36))
+        );
     }
 
     #[test]
     fn j_prefix_missing_local_history_refuses() {
         let metadata = serde_json::json!({});
-        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(true));
+        assert_eq!(
+            local_j_prefix_attestable_height(&metadata, 35, true),
+            Ok(None)
+        );
     }
 
     #[test]
     fn j_prefix_semantic_event_refuses() {
         let metadata = j_history(36, 35, &[36], &[]);
-        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(true));
+        assert_eq!(
+            local_j_prefix_attestable_height(&metadata, 35, true),
+            Ok(None)
+        );
     }
 
     #[test]
