@@ -308,3 +308,34 @@ finalize is offered only from `activeDispute`.
   → `RUNTIME_ENTITY_INPUT_APPLY_FAILED` → `RUNTIME_LOOP_HALTED`. The symbol no longer exists in the tree an hour
   later, so this is recorded only as a data point: a user's `prepareDispute` on a freshly opened sandbox account
   should be rejected, never halt the runtime.
+
+## 16. One undeliverable entity output halts the whole user runtime (`SIGNER_RESOLUTION_FAILED`)
+
+- Where: `core/runtime/delivery/entity-output-signer.ts:118` throws `SIGNER_RESOLUTION_FAILED: Entity output
+  <self>-><peer> entityId=<peer>` when the peer's signer/encryption key is not known yet (no gossip profile);
+  the runtime loop treats it as a fatal apply error → `RUNTIME_LOOP_ERROR` → `RUNTIME_LOOP_HALTED`.
+- Reproduced 2026-09-04 with the React wallet against xln.finance: the relay socket had not connected yet
+  (dev proxy failure), the wallet sent `openAccount` to hub H1, and the *user's* runtime halted for good.
+  A browser wallet on a flaky connection will hit this on its very first action.
+- Suggested fix: keep the output in the outbox and retry once the profile arrives (the same queue the relay
+  reconnect already uses), or reject that single entity tx with a user-visible error. Halting is for
+  consensus/state corruption, not for a missing peer key.
+
+## 17. Browser runtime's direct link to the hub fails `WS_DIRECT_SERVER_AUTH_INVALID:Frame mac does not match session key`
+
+- Observed 2026-09-04 on `bun run dev` from the React wallet (embedded runtime, relay joined, gossip accepted):
+  the runtime dials the hub's advertised direct endpoint `ws://127.0.0.1:8092/ws`, the hello is acknowledged,
+  then the first frame fails MAC verification and the link closes (`WS_DIRECT_FATAL`, twice). Traffic falls back
+  to the relay, so the account still opens — but every browser wallet pays a failed direct handshake per hub.
+- Where to look: `core/network/p2p/ws-client.ts` session-key derivation vs the direct-server side of the mesh
+  hub; the SvelteKit wallet on the same stack is the control case.
+
+## 18. Production relay refuses every browser: `400 WebSocket audience not configured` (ops)
+
+- `wss://xln.finance/relay` answers `HTTP/1.1 400 … WebSocket audience not configured` to any upgrade (verified
+  with curl --http1.1 and a Bun WebSocket on 2026-09-04); `http://127.0.0.1:8080/relay` on the box answers 101.
+  The relay derives its hello audience from the request Host and needs the operator's web URLs
+  (`--relay-web-urls`, as `scripts/dev/run-dev-child.sh:201` passes for dev). `scripts/operations/start-server.sh`
+  sets `PUBLIC_WS_BASE_URL=wss://xln.finance` but the running pm2 process (11 days up, checkout 452 commits
+  behind) does not have the audience configured, so no hosted wallet can join the network until it is restarted
+  with the current script/flags.

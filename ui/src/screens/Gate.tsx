@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icons';
 import { Logo } from '../components/Logo';
 import { useApp } from '../runtime/store';
 import { bootEmbeddedDemo, connectSandbox } from '../runtime/sandbox';
+import { bootHostedVault, detectStack, type Stack } from '../runtime/hosted';
 import {
 	FACTOR_PRESETS,
 	customWork,
@@ -17,6 +18,18 @@ type GateMode = 'landing' | 'create' | 'import' | 'remote';
 
 export function Gate() {
 	const [mode, setMode] = useState<GateMode>('landing');
+
+	/** The xln stack serving this page (local orchestrator or xln.finance); null on a static host. */
+	const [stack, setStack] = useState<Stack | null | undefined>(undefined);
+	useEffect(() => {
+		let alive = true;
+		void detectStack().then(found => {
+			if (alive) setStack(found);
+		});
+		return () => {
+			alive = false;
+		};
+	}, []);
 	const [busyStep, setBusyStep] = useState<string | null>(null);
 	const [progress, setProgress] = useState<BrainvaultProgress | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -90,13 +103,9 @@ export function Gate() {
 			}
 			setProgress(null);
 			const vaultId = runtimeIdForSeed(result.mnemonic).toLowerCase();
-			await bootEmbeddedDemo(result.mnemonic, {
-				vaultId,
-				vaultName: name.trim(),
-				kind: 'brainvault',
-				selfLabel: name.trim(),
-				onStep: step => setBusyStep(step),
-			});
+			const vaultOptions = { vaultId, vaultName: name.trim(), kind: 'brainvault' as const, selfLabel: name.trim(), onStep: (step: string) => setBusyStep(step) };
+			if (stack) await bootHostedVault(result.mnemonic, { ...vaultOptions, stack });
+			else await bootEmbeddedDemo(result.mnemonic, vaultOptions);
 			toast('Vault created. Write nothing down: your name and passphrase are the backup.');
 		});
 	};
@@ -106,13 +115,9 @@ export function Gate() {
 			const seed = phrase.trim().toLowerCase().replace(/\s+/g, ' ');
 			if (!isValidMnemonic(seed)) throw new Error('That is not a valid BIP39 phrase');
 			const vaultId = runtimeIdForSeed(seed).toLowerCase();
-			await bootEmbeddedDemo(seed, {
-				vaultId,
-				vaultName: 'Imported vault',
-				kind: 'mnemonic',
-				selfLabel: 'Main',
-				onStep: step => setBusyStep(step),
-			});
+			const vaultOptions = { vaultId, vaultName: 'Imported vault', kind: 'mnemonic' as const, selfLabel: 'Main', onStep: (step: string) => setBusyStep(step) };
+			if (stack) await bootHostedVault(seed, { ...vaultOptions, stack });
+			else await bootEmbeddedDemo(seed, vaultOptions);
 		});
 	};
 
@@ -178,6 +183,13 @@ export function Gate() {
 			<GateMark />
 			<h1 className="gate-title">xln</h1>
 			<p className="gate-sub muted">Your runtime. Your proofs. Your money.</p>
+			<p className="gate-stack muted" data-testid="gate-stack" data-state={stack === undefined ? 'probing' : stack ? 'online' : 'offline'}>
+				{stack === undefined
+					? 'Looking for a network at this address…'
+					: stack
+						? `${stack.jurisdiction.name} · hub ${stack.hubs[0]?.name ?? 'none'} · ${new URL(stack.apiBase).host}`
+						: 'No xln network at this address. Vaults boot the offline sandbox.'}
+			</p>
 
 			{error ? (
 				<p className="gate-error" role="alert">

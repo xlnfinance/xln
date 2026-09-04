@@ -2128,3 +2128,9 @@ textarea.input.boxed {
 	from { opacity: 0.2; }
 	to { opacity: 1; }
 }
+
+.gate-stack {
+	font-size: 12px;
+	margin: -6px 0 18px;
+	font-variant-numeric: tabular-nums;
+}

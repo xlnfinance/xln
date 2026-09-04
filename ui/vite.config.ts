@@ -47,13 +47,32 @@ const sharedBundleDir = process.env['XLN_UI_RUNTIME_BUNDLE_DIR'];
 
 /** Path prefix the hosted build lives under (xln.finance/ui/). Dev and tests stay at the root. */
 const base = process.env['XLN_UI_BASE'] ?? '/';
+/**
+ * Dev only: the stack this dev server resolves to, exactly like frontend/vite.config.ts.
+ * `bun run dev` exports API_PORT (the local orchestrator); XLN_UI_STACK_ORIGIN overrides it
+ * (e.g. https://xln.finance). Without either the page has no API and the Gate offers the sandbox only.
+ */
+const stackOrigin = process.env['XLN_UI_STACK_ORIGIN'] ?? (process.env['API_PORT'] ? `http://127.0.0.1:${process.env['API_PORT']}` : '');
 
 export default defineConfig({
 	base,
+	// A TLS stack (xln.finance) cannot be WebSocket-proxied by this dev server; the wallet dials its relay directly.
+	define: { __XLN_STACK_ORIGIN__: JSON.stringify(stackOrigin) },
 	plugins: [react(), ...(sharedBundleDir ? [sharedRuntimeBundle(sharedBundleDir)] : [])],
 	server: {
 		port: 5183,
 		strictPort: true,
+		...(stackOrigin
+			? {
+					proxy: {
+						'/api': { target: stackOrigin, changeOrigin: true, secure: false },
+						'/rpc': { target: stackOrigin, changeOrigin: true, secure: false },
+						// The relay derives its hello audience from the request Host; keep the browser's own.
+						'/relay': { target: stackOrigin, ws: true, changeOrigin: false, secure: false },
+						'/ws': { target: stackOrigin, ws: true, changeOrigin: false, secure: false },
+					},
+				}
+			: {}),
 		fs: {
 			// brainvault workers, runtime types and shared frontend logic live one level up.
 			allow: ['..'],

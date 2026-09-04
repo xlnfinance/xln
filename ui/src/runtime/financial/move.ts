@@ -146,7 +146,6 @@ export function hasSentBatch(frame: RuntimeAdapterViewFrame | null): boolean {
 export function countBatchOps(batch: JBatch | null | undefined): number {
 	if (!batch) return 0;
 	return (
-		(batch.flashloans?.length || 0) +
 		(batch.reserveToCollateral?.length || 0) +
 		(batch.collateralToReserve?.length || 0) +
 		(batch.settlements?.length || 0) +

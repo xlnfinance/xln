@@ -110,7 +110,7 @@ export async function readTakeoverStatus(entityId: string, signerId: string, tar
 		currentBoardHash: normalize(entity.currentBoardHash),
 		proposedBoardHash: normalize(entity.proposedBoardHash),
 		currentBlock: BigInt(await jadapter.provider.getBlockNumber()),
-		activateAtBlock: BigInt(entity.activateAtBlock),
+		activateAtBlock: BigInt(entity.activateAt),
 	};
 }
 

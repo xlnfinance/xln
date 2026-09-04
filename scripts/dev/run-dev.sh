@@ -62,7 +62,7 @@ DEV_CUSTODY_SCHEME=http
 case "${CUSTODY_HTTPS:-}" in
   1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]) DEV_CUSTODY_SCHEME=https ;;
 esac
-DEV_RELAY_WEB_URLS="${DEV_WEB_SCHEME}://localhost:${WEB_PORT},http://localhost:${WEB_HTTP_PORT}"
+DEV_RELAY_WEB_URLS="${DEV_WEB_SCHEME}://localhost:${WEB_PORT},http://localhost:${WEB_HTTP_PORT},http://localhost:${UI_PORT}"
 
 export XLN_JURISDICTIONS_PATH="$XLN_RDB_ROOT/jurisdictions.json"
 XLN_MESH_ROOT_SEED_FILE="${XLN_MESH_ROOT_SEED_FILE:-$DEV_DATA_ROOT/secrets/mesh-root.seed}"

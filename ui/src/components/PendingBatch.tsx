@@ -41,7 +41,6 @@ export function batchItems(batch: JBatch, self: string, names: Map<string, strin
 	(batch.disputeStarts ?? []).forEach((_, index) => items.push({ key: `ds-${index}`, title: 'Dispute start', detail: 'on-chain proof' }));
 	(batch.counterDisputes ?? []).forEach((_, index) => items.push({ key: `cd-${index}`, title: 'Dispute answer', detail: 'on-chain proof' }));
 	(batch.disputeFinalizations ?? []).forEach((_, index) => items.push({ key: `df-${index}`, title: 'Dispute finalize', detail: 'on-chain proof' }));
-	(batch.flashloans ?? []).forEach((op, index) => items.push({ key: `fl-${index}`, title: 'Flashloan', detail: money(op.tokenId, op.amount) }));
 	(batch.revealSecrets ?? []).forEach((_, index) => items.push({ key: `rs-${index}`, title: 'Reveal secret', detail: 'HTLC on-chain' }));
 	(batch.hashLadderRegistrations ?? []).forEach((_, index) => items.push({ key: `hl-${index}`, title: 'Hash ladder', detail: 'registration' }));
 	return items;

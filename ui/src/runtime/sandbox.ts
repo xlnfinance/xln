@@ -40,7 +40,7 @@ function usd(amount: number): bigint {
 	return BigInt(amount) * usdcScale;
 }
 
-function findReplicaState(env: RuntimeReplica, entityId: string) {
+export function findReplicaState(env: RuntimeReplica, entityId: string) {
 	for (const [key, replica] of env.state.eReplicas?.entries?.() ?? []) {
 		const keyEntityId = String(key).split(':')[0] ?? '';
 		if (keyEntityId.toLowerCase() === entityId.toLowerCase()) return replica;
@@ -48,7 +48,7 @@ function findReplicaState(env: RuntimeReplica, entityId: string) {
 	return undefined;
 }
 
-function accountReady(env: RuntimeReplica, entityId: string, counterpartyId: string): boolean {
+export function accountReady(env: RuntimeReplica, entityId: string, counterpartyId: string): boolean {
 	const replica = findReplicaState(env, entityId);
 	return Boolean(replica?.state?.accounts?.get?.(counterpartyId));
 }
@@ -64,7 +64,7 @@ function creditApplied(env: RuntimeReplica, entityId: string, counterpartyId: st
 	return derived.ownCreditLimit + derived.peerCreditLimit >= minTotal;
 }
 
-async function sendEntity(entityId: string, signerId: string, entityTxs: EntityTx[]): Promise<void> {
+export async function sendEntity(entityId: string, signerId: string, entityTxs: EntityTx[]): Promise<void> {
 	await requireAdapter().send({ runtimeTxs: [], entityInputs: [{ entityId, signerId, entityTxs }] });
 }
 
