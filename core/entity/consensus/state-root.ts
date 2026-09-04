@@ -76,7 +76,6 @@ export const ENTITY_STATE_ROOT_FIELDS = [
   'swapTradingPairs',
   'crossJurisdictionSwaps',
   'crossJurisdictionAuthorizations',
-  'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions',
   'hubRebalanceConfig',
   'lending',
@@ -460,7 +459,6 @@ const projectEntityConsensusState = (
         'settlementContinuations',
         'crossJurisdictionSwaps',
         'crossJurisdictionAuthorizations',
-        'pendingCrossJurisdictionFillAcks',
         'crossJurisdictionBookAdmissions',
       ].includes(field))
       .filter((field) => Object.hasOwn(state, field))
@@ -505,9 +503,6 @@ const projectEntityConsensusState = (
       : {}),
     ...(state.crossJurisdictionAuthorizations
       ? { crossJurisdictionAuthorizations: entityCollectionCommitment(state.crossJurisdictionAuthorizations, cold) }
-      : {}),
-    ...(state.pendingCrossJurisdictionFillAcks
-      ? { pendingCrossJurisdictionFillAcks: entityCollectionCommitment(state.pendingCrossJurisdictionFillAcks, cold) }
       : {}),
     ...(state.crossJurisdictionBookAdmissions
       ? { crossJurisdictionBookAdmissions: entityCollectionCommitment(state.crossJurisdictionBookAdmissions, cold) }

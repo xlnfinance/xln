@@ -6,18 +6,8 @@ export const ENTITY_TX_CROSS_J_SCHEMAS = {
   registerCrossJurisdictionSwap: ROUTE,
   prepareCrossJurisdictionSwap: ROUTE,
   crossJurisdictionFillNotice: {
-    required: {
-      orderId: 'string', fillSeq: 'integer', incrementalSourceAmount: 'bigint',
-      incrementalTargetAmount: 'bigint', cumulativeSourceAmount: 'bigint',
-      cumulativeTargetAmount: 'bigint', cumulativeFillRatio: 'integer', pairId: 'string',
-    },
-    optional: {
-      routeHash: 'string', previousFillSeq: 'integer', fillNumerator: 'bigint',
-      fillDenominator: 'bigint', priceImprovementMode: 'string',
-      priceImprovementAmount: 'bigint', priceImprovementTokenId: 'integer',
-      cancelRemainder: 'boolean', priceTicks: 'bigint',
-    },
-    literals: { priceImprovementMode: ['source_savings'] },
+    required: { orderId: 'string', fillSeq: 'integer', cumulativeFillRatio: 'integer' },
+    optional: { routeHash: 'string', cancelRemainder: 'boolean' },
   },
   requestCrossJurisdictionClear: {
     required: { orderId: 'string' },
@@ -38,20 +28,6 @@ export const ENTITY_TX_CROSS_J_SCHEMAS = {
   admitCrossJurisdictionBookOrder: {
     required: { route: 'record' },
     optional: { reason: 'string' },
-  },
-  applyCrossJurisdictionBookProgress: {
-    required: {
-      orderId: 'string', sourceEntityId: 'string', fillSeq: 'integer',
-      incrementalSourceAmount: 'bigint', incrementalTargetAmount: 'bigint',
-      cumulativeSourceAmount: 'bigint', cumulativeTargetAmount: 'bigint',
-      cumulativeFillRatio: 'integer',
-    },
-    optional: {
-      fillNumerator: 'bigint', fillDenominator: 'bigint', priceImprovementMode: 'string',
-      priceImprovementAmount: 'bigint', priceImprovementTokenId: 'integer',
-      cancelRemainder: 'boolean', reason: 'string',
-    },
-    literals: { priceImprovementMode: ['source_savings'] },
   },
   removeCrossJurisdictionBookOrder: {
     required: { orderId: 'string', sourceEntityId: 'string' },

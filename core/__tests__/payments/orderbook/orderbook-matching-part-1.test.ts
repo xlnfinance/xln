@@ -10,13 +10,11 @@ import { removeCrossJurisdictionBookOrderByRouteId } from '../../../orderbook/cr
 
 import { processOrderbookCancels, processOrderbookSwaps } from '../../../entity/tx/handlers/account/index';
 
-import { applyCrossJurisdictionBookProgressToState } from '../../../entity/tx/handlers/cross-j/book-order';
 
 import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve/index';
 
 import { createEmptyEnv } from '../../../runtime';
 
-import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../../extensions/cross-j/fill-ack';
 
 import {
   deriveCanonicalSwapFillRatio,

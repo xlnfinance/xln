@@ -735,37 +735,4 @@ describe('state cloning', () => {
         .toThrow();
     }
   });
-
-  test('Entity candidate isolates only claimed cross-j leaves', () => {
-    const state = makeProjectionReplica().state as any;
-    state.crossJurisdictionSwaps = new Map([['order-1', makeCrossJurisdictionRoute()]]);
-    state.pendingCrossJurisdictionFillAcks = new Map([[
-      'ack-1',
-      {
-        accountId: 'account-1',
-        tx: {
-          type: 'cross_swap_fill_ack',
-          data: {
-            offerId: 'order-1',
-            fillSeq: 1,
-            cumulativeFillRatio: 10,
-            fillNumerator: 1n,
-            fillDenominator: 2n,
-          },
-        },
-        storedAt: 1,
-        reason: 'test',
-      },
-    ]]);
-
-    const candidate = createEntityFrameCandidateState(state);
-    const route = getEntityCollectionValueForWrite(candidate.crossJurisdictionSwaps!, 'order-1');
-    const pending = getEntityCollectionValueForWrite(candidate.pendingCrossJurisdictionFillAcks!, 'ack-1');
-    if (!route || !pending) throw new Error('TEST_ENTITY_CANDIDATE_CROSS_J_LEAF_MISSING');
-    route.source.amount = 999n;
-    (pending.tx as any).data.fillNumerator = 999n;
-
-    expect(state.crossJurisdictionSwaps.get('order-1').source.amount).toBe(100n);
-    expect(state.pendingCrossJurisdictionFillAcks.get('ack-1').tx.data.fillNumerator).toBe(1n);
-  });
 });

@@ -405,7 +405,6 @@ export const appendDefaultProposerCrossJMaterializations = (
     const account = accountId ? replica.state.accounts.get(accountId) : undefined;
     if (
       !account ||
-      account.state.swapOffers?.has(route.orderId) ||
       !account.state.pulls?.has(route.sourcePull.pullId) ||
       accountHasCrossPullCloseQueued(account, route.sourcePull.pullId)
     ) continue;

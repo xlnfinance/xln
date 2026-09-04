@@ -104,12 +104,7 @@ describe('persisted EntityTx decoder', () => {
       data: {
         orderId: 'order-1',
         fillSeq: 1,
-        incrementalSourceAmount: 2n,
-        incrementalTargetAmount: 3n,
-        cumulativeSourceAmount: 2n,
-        cumulativeTargetAmount: 3n,
         cumulativeFillRatio: 32_768,
-        pairId: '1:2',
       },
     }, 'WAL_CROSS_J').type).toBe('crossJurisdictionFillNotice');
 

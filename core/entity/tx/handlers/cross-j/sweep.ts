@@ -89,7 +89,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
     );
     outputs.push(...clear.outputs);
     accountTxs.push(...(clear.accountTxs ?? []));
-    if (clear.accountTxs?.some(operation => operation.tx.type === 'cross_swap_fill_ack')) closedOffers++;
+    if (clear.accountTxs?.some(operation => operation.tx.type === 'cross_pull_close')) closedOffers++;
   }
   addMessage(
     newState,

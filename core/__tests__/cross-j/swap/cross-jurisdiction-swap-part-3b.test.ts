@@ -14,7 +14,6 @@ import { accountInputAck, accountInputProposal } from '../../../account/consensu
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 
 import {
-  collectCommittedCrossJurisdictionCancelAcks,
   processOrderbookCancels,
   routeRemoteCrossJurisdictionBookCancels,
 } from '../../../entity/tx/handlers/account/index';
@@ -69,11 +68,8 @@ import {
   hasCrossJurisdictionCommittedFill,
   hashCrossJurisdictionCloseBinary,
   isCrossJurisdictionRouteTransitionAllowed,
-  projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionFillProgress,
-  validateCrossJurisdictionQuantization,
   withCanonicalCrossJurisdictionRouteHash,
-  withCrossJurisdictionClaimProgress,
   withCrossJurisdictionCloseProofProgress,
   cloneCrossJurisdictionRoute,
 } from '../../../extensions/cross-j/index';
@@ -97,15 +93,12 @@ const buildPreparedCrossJurisdictionRoute = (
   );
 
 import {
-  buildCrossJurisdictionCancelAck,
-  buildCrossJurisdictionFillAck,
   buildCrossJurisdictionMarketOffer,
   getCrossJurisdictionRouteRemainingAmounts,
   mergeCrossJurisdictionBookAdmission,
   resolveCrossJurisdictionExecutionPriceTicks,
 } from '../../../extensions/cross-j/orderbook';
 
-import { buildCrossJurisdictionPendingFillFromAck } from '../../../extensions/cross-j/fill-ack';
 
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,

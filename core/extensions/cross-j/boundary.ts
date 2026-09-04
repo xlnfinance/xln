@@ -26,7 +26,6 @@ const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'crossJurisdictionForceSiblingDispute',
   'orderbookSweepCrossJurisdiction',
   'admitCrossJurisdictionBookOrder',
-  'applyCrossJurisdictionBookProgress',
   'removeCrossJurisdictionBookOrder',
   'crossJurisdictionBookOrderRemoved',
 ]);

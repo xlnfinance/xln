@@ -518,7 +518,6 @@ pub struct EntityStateSlice {
     pub lending: Option<LendingState>,
     pub cross_jurisdiction_swaps: Option<EntityCanonicalCollection>,
     pub cross_jurisdiction_authorizations: Option<EntityCanonicalCollection>,
-    pub pending_cross_jurisdiction_fill_acks: Option<EntityCanonicalCollection>,
     pub cross_jurisdiction_book_admissions: Option<EntityCanonicalCollection>,
     /// Exact committed `jHistoryFinality` anchor. Native J-event finalization
     /// mutates it together with `last_finalized_j_height`; both fields must be
@@ -564,7 +563,6 @@ impl EntityStateSlice {
             lending: None,
             cross_jurisdiction_swaps: None,
             cross_jurisdiction_authorizations: None,
-            pending_cross_jurisdiction_fill_acks: None,
             cross_jurisdiction_book_admissions: None,
             j_history_finality: None,
         }

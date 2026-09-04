@@ -3,29 +3,24 @@ import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-ta
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
 import { compareCanonicalText } from '../../../../../../orderbook/swap-execution';
 import {
-  buildCrossJurisdictionFillAck,
+  buildCrossJurisdictionFillInstruction,
+  type CrossJurisdictionFillInstruction,
 } from '../../../../../../extensions/cross-j/orderbook';
 import { crossJurisdictionAssetKey } from '../../../../../../extensions/cross-j/market';
-import { buildCrossJurisdictionPendingFillFromAck } from '../../../../../../extensions/cross-j/fill-ack';
 import {
   buildCrossMarketOfferFromBookOrder,
   parseNamespacedOrderId,
 } from '../helpers';
-import { hasQueuedCrossSwapAckForEntityState } from '../queue';
-import { getCrossAdmission } from './pass';
 import { removeCrossBookOrderAfterFill } from './book';
 import type { CrossOrderbookPass } from './types';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
-type PlannedCrossAck = NonNullable<
-  ReturnType<typeof buildCrossJurisdictionFillAck>
->;
 
-const assertPlannedCrossAckConservation = (
-  plans: readonly PlannedCrossAck[],
+const assertPlannedCrossFillConservation = (
+  plans: readonly CrossJurisdictionFillInstruction[],
 ): void => {
   const netByAsset = new Map<string, bigint>();
-  for (const { instruction } of plans) {
+  for (const instruction of plans) {
     const sourceKey = crossJurisdictionAssetKey(
       instruction.route.source.jurisdiction,
       instruction.route.source.tokenId,
@@ -52,8 +47,8 @@ const assertPlannedCrossAckConservation = (
   }
 };
 
-const planCrossAcks = (pass: CrossOrderbookPass): PlannedCrossAck[] => {
-  const planned: PlannedCrossAck[] = [];
+const planCrossFills = (pass: CrossOrderbookPass): CrossJurisdictionFillInstruction[] => {
+  const planned: CrossJurisdictionFillInstruction[] = [];
   const orderIds = [...pass.aggregatedFills.keys()].sort(compareCanonicalText);
   for (const orderId of orderIds) {
     const fill = pass.aggregatedFills.get(orderId);
@@ -68,84 +63,60 @@ const planCrossAcks = (pass: CrossOrderbookPass): PlannedCrossAck[] => {
       orderId,
       'ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER',
     );
-    if (
-      hasQueuedCrossSwapAckForEntityState(
-        pass.hubState,
-        accountId,
-        offerId,
-      )
-    ) {
-      pass.suspendedOrderIds.add(orderId);
-      continue;
-    }
-    const ack = buildCrossJurisdictionFillAck(
+    const instruction = buildCrossJurisdictionFillInstruction(
       accountId,
       offerId,
       orderId,
       meta,
       fill,
     );
-    if (!ack) {
-      throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_ACK_MISSING", `ORDERBOOK_CROSS_J_FILL_ACK_MISSING: order=${orderId} ` +
+    if (!instruction) {
+      throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_INSTRUCTION_MISSING", `ORDERBOOK_CROSS_J_FILL_INSTRUCTION_MISSING: order=${orderId} ` +
         `account=${accountId} offer=${offerId} filledLots=${fill.filledLots}`);
     }
-    planned.push(ack);
+    planned.push(instruction);
   }
   return planned;
 };
 
-const commitCrossAck = (
+const commitCrossFill = (
   pass: CrossOrderbookPass,
-  ack: PlannedCrossAck,
+  instruction: CrossJurisdictionFillInstruction,
 ): void => {
-  const { accountId, offerId, orderId } = ack.instruction;
+  const { orderId } = instruction;
   const meta =
     pass.crossLiveOfferMeta.get(orderId) ??
     buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
   if (!meta) {
     throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_META_MISSING", `ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
   }
-  const admission = getCrossAdmission(pass, accountId, offerId);
-  if (admission) {
-    const pendingFill = buildCrossJurisdictionPendingFillFromAck(
-      ack.tx,
-      Number(pass.hubState.timestamp || 0),
-    );
-    if (pendingFill) admission.pendingFill = pendingFill;
-    else delete admission.pendingFill;
-    admission.updatedAt = Number(
-      pass.hubState.timestamp || admission.updatedAt || 0,
-    );
-  }
-  orderbookCrossLog.debug('ack', {
-    account: shortOrder(accountId, 12),
-    offer: shortOrder(offerId, 12),
-    cancel: ack.tx.data.cancelRemainder,
-    ratio: ack.tx.data.cumulativeFillRatio,
-    exact:
-      ack.tx.data.fillNumerator !== undefined &&
-      ack.tx.data.fillDenominator !== undefined
-        ? `${ack.tx.data.fillNumerator}/${ack.tx.data.fillDenominator}`
-        : 'none',
-    source: ack.tx.data.cumulativeSourceAmount?.toString(),
+  orderbookCrossLog.debug('fill', {
+    account: shortOrder(instruction.accountId, 12),
+    offer: shortOrder(instruction.offerId, 12),
+    cancel: instruction.cancelRemainder,
+    ratio: instruction.fillRatio,
   });
-  if (ack.tx.data.cancelRemainder) {
+  if (instruction.cancelRemainder) {
     removeCrossBookOrderAfterFill(
       pass,
       meta.pairId,
       orderId,
-      'cross-fill-ack-terminal',
+      'cross-fill-terminal',
     );
   }
-  pass.crossJurisdictionFills.push(ack.instruction);
-  pass.accountTxs.push({ accountId, tx: ack.tx });
+  pass.crossJurisdictionFills.push(instruction);
 };
 
-export const finalizeCrossOrderbookAcks = (
+/**
+ * Fill progress is Hub-internal. The matcher records exact progress per order;
+ * the Entity frame applies it to the admitted route (book owner) and to the
+ * source Hub route mirror, and the ladder reveal at close settles both
+ * Account legs. Nothing here enters a bilateral Account frame.
+ */
+export const finalizeCrossOrderbookFills = (
   pass: CrossOrderbookPass,
 ): void => {
-  // Plan every leg before any Account mempool or admission mutation.
-  const planned = planCrossAcks(pass);
-  assertPlannedCrossAckConservation(planned);
-  for (const ack of planned) commitCrossAck(pass, ack);
+  const planned = planCrossFills(pass);
+  assertPlannedCrossFillConservation(planned);
+  for (const instruction of planned) commitCrossFill(pass, instruction);
 };

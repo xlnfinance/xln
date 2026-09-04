@@ -50,12 +50,11 @@ const nestedCommandTxs: EntityTx[] = [{ type: 'chat', data: { from: 'owner', mes
 const CASES = [
   { type: 'accountInput', data: accountInput },
   { type: 'admitCrossJurisdictionBookOrder', data: { route, reason: 'admit' } },
-  { type: 'applyCrossJurisdictionBookProgress', data: { orderId: 'order-1', sourceEntityId: A, fillSeq: 1, incrementalSourceAmount: 5n, incrementalTargetAmount: 7n, cumulativeSourceAmount: 5n, cumulativeTargetAmount: 7n, cumulativeFillRatio: 65_535, fillNumerator: 1n, fillDenominator: 1n, cancelRemainder: false, reason: 'fill' } },
   { type: 'boardHandover', data: { board: { mode: 'proposer-based', threshold: 1n, validators: ['owner'], shares: { owner: 1n } } } },
   { type: 'chat', data: { from: 'owner', message: 'hello' } },
   { type: 'chatMessage', data: { message: 'hello', timestamp: 100, metadata: { type: 'test', counterpartyId: B } } },
   { type: 'crossJurisdictionBookOrderRemoved', data: { orderId: 'order-1', sourceEntityId: A, sourceAccountId: B, route, removedAt: 100, reason: 'done' } },
-  { type: 'crossJurisdictionFillNotice', data: { orderId: 'order-1', routeHash: H, previousFillSeq: 0, fillSeq: 1, incrementalSourceAmount: 5n, incrementalTargetAmount: 7n, cumulativeSourceAmount: 5n, cumulativeTargetAmount: 7n, cumulativeFillRatio: 65_535, fillNumerator: 1n, fillDenominator: 1n, cancelRemainder: false, pairId: '1/2' } },
+  { type: 'crossJurisdictionFillNotice', data: { orderId: 'order-1', routeHash: H, fillSeq: 1, cumulativeFillRatio: 65_535, cancelRemainder: false } },
   { type: 'crossJurisdictionForceSiblingDispute', data: { routeId: 'route-1', observedCounterpartyEntityId: B, observedAt: 100 } },
   { type: 'crossJurisdictionSalvage', data: { routeId: 'route-1', binary: '0x01', fillRatio: 1, sourceEntityId: A, sourceCounterpartyEntityId: B, observedAt: 100 } },
   { type: 'crossPullClose', data: { counterpartyEntityId: B, pullId: 'pull-1', binary: '0x01', proof, route, description: 'close' } },
@@ -126,10 +125,10 @@ if (Bun.env['RSCORE_GENERATE_ENTITY_TX_WIRE'] === '1') {
     await Bun.write(VECTORS, `${safeStringify(rows, 2)}\n`);
   });
 } else describe('EntityTx wire', () => {
-  test('production TypeScript admission covers exactly the canonical 63-kind catalog', () => {
+  test('production TypeScript admission covers exactly the canonical 62-kind catalog', () => {
     expect(validatedCases().map(tx => tx.type)).toEqual([...ENTITY_TX_TYPES]);
     expect(vectors().map(row => row.name)).toEqual([...ENTITY_TX_TYPES]);
-    expect(new Set(ENTITY_TX_TYPES).size).toBe(63);
+    expect(new Set(ENTITY_TX_TYPES).size).toBe(62);
   });
   test('TypeScript writes the reviewed shared bytes', () => {
     const recorded = new Map(vectors().map(row => [row.name, row.bytes]));

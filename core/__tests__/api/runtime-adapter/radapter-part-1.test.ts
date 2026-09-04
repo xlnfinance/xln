@@ -2604,66 +2604,6 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
   });
 });
 
-test('runtime adapter view-frame caps route-heavy core maps under wire budget', async () => {
-  const env = makeEnv();
-  const replica = Array.from(env.state.eReplicas.values())[0]!;
-  const largeNote = 'x'.repeat(4_000);
-  replica.state.crossJurisdictionSwaps = new Map();
-  for (let index = 0; index < 400; index += 1) {
-    const id = `route-${index.toString().padStart(3, '0')}`;
-    const route = {
-      orderId: id,
-      makerEntityId: entityId,
-      hubEntityId: counterpartyId,
-      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      source: {
-        jurisdiction: 'Testnet',
-        entityId,
-        counterpartyEntityId: counterpartyId,
-        tokenId: 1,
-        amount: 1n,
-      },
-      target: {
-        jurisdiction: 'Tron',
-        entityId: counterpartyId,
-        counterpartyEntityId: entityId,
-        tokenId: 2,
-        amount: 1n,
-      },
-      status: 'resting',
-      createdAt: index,
-      updatedAt: index,
-      note: largeNote,
-    };
-    replica.state.htlcRoutes.set(id, { id, note: largeNote } as any);
-    replica.htlcNotes?.set(id, largeNote);
-    replica.state.crossJurisdictionSwaps.set(id, route as any);
-  }
-
-  const frame = await resolveRuntimeAdapterRead<{
-    activeEntity: {
-      core: {
-        htlcRoutes: Map<string, unknown>;
-        htlcNotes?: Map<string, unknown>;
-        crossJurisdictionSwaps?: Map<string, unknown>;
-        pendingCrossJurisdictionFillAcks?: Map<string, unknown>;
-        crossJurisdictionBookAdmissions?: Map<string, unknown>;
-      };
-    } | null;
-  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', { accountsLimit: 1, booksLimit: 1 });
-  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'route-budget', ok: true, payload: frame });
-  const core = frame.activeEntity?.core;
-
-  expect(encoded.byteLength).toBeLessThan(1_048_576);
-  expect('entityEncPrivKey' in (core ?? {})).toBe(false);
-  expect(core?.htlcRoutes.size).toBeLessThanOrEqual(20);
-  expect(core?.htlcNotes?.size ?? 0).toBeLessThanOrEqual(20);
-  expect(core?.crossJurisdictionSwaps?.size ?? 0).toBeLessThanOrEqual(20);
-  expect(core?.pendingCrossJurisdictionFillAcks?.size ?? 0).toBeLessThanOrEqual(20);
-  expect(core?.crossJurisdictionBookAdmissions?.size ?? 0).toBeLessThanOrEqual(20);
-});
-
 test('runtime adapter view-frame excludes unbounded core internals from remote snapshots', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;

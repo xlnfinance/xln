@@ -205,7 +205,7 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
     'signerId', 'isProposer', 'prevFrameHash', 'externalWallet',
     'deferredAccountProposals', 'jBatchState', 'outDebtsByToken',
     'inDebtsByToken', 'swapTradingPairs', 'crossJurisdictionSwaps',
-    'pendingCrossJurisdictionFillAcks', 'crossJurisdictionBookAdmissions',
+    'crossJurisdictionBookAdmissions',
     'orderbookReferrals', 'orderbookHubProfile', 'hubRebalanceConfig',
     'paybookOpen', 'metrics',
   ], 'PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');

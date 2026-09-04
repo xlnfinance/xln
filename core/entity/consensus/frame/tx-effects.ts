@@ -6,19 +6,11 @@ import type { EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { getPerfMs } from '../../../support/time';
 import { normalizeEntityRef } from '../../../orderbook/cross-j/orderbook';
-import { shortId, shortOrder } from '../../../support/logger';
+import { shortId } from '../../../support/logger';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import { applyAccountInput } from '../../../account/consensus';
 import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import { entityLog } from '../entity-log';
-import {
-  buildCrossJurisdictionFillNoticeOutput,
-  drainCommittedCrossJurisdictionCancelAcks,
-  drainPendingCrossJurisdictionFillAcks,
-  ownsSourceHubRouteForFillAck,
-  stashPendingCrossJurisdictionFillAck,
-} from '../account/cross-j-fill-ack';
-import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import type { ApplyEntityTxsInOrderContext } from './application-types';
 import type {
   SwapCancelEvent,
@@ -50,35 +42,7 @@ const applyLocalAccountEffects = async (
 ): Promise<void> => {
   for (const { accountId, tx } of accountTxs) {
     const visible = state.accounts.get(accountId);
-    if (tx.type === 'cross_swap_fill_ack' && !visible?.state.swapOffers?.has(tx.data.offerId)) {
-      const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
-      if (!routed) {
-        if (ownsSourceHubRouteForFillAck(state, tx)) {
-          stashPendingCrossJurisdictionFillAck(
-            context.env,
-            state,
-            accountId,
-            tx,
-            visible ? 'source_offer_not_committed' : 'source_account_not_committed',
-          );
-          continue;
-        }
-        throw haltRuntimeFailure("CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING", `CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING: account=${accountId} ` +
-          `offer=${tx.data.offerId} entity=${state.entityId}`);
-      }
-      context.allOutputs.push(routed);
-      entityLog.info('crossj.sibling_fill_notice_routed', {
-        owner: shortId(routed.entityId, 8),
-        account: shortId(accountId, 8),
-        offer: shortOrder(tx.data.offerId, 8),
-      });
-      continue;
-    }
     if (!visible) {
-      if (tx.type === 'cross_swap_fill_ack') {
-        throw haltRuntimeFailure("CROSS_J_FILL_ACK_ACCOUNT_MISSING", `CROSS_J_FILL_ACK_ACCOUNT_MISSING: account=${accountId} ` +
-          `offer=${tx.data.offerId} entity=${state.entityId}`);
-      }
       entityLog.warn('mempool_op.account_missing', {
         account: shortId(accountId, 8),
         tx: tx.type,
@@ -110,9 +74,6 @@ const applyLocalAccountEffects = async (
       { kind: 'enqueue', txs: [tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
-    if (tx.type === 'cross_swap_fill_ack') {
-      appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, context.allOutputs);
-    }
     markProposableAccount(context.proposableAccounts, accountId);
     recordAccountChange(context, state, accountId);
   }
@@ -185,22 +146,6 @@ export const applyEntityTxReturnedEffects = async (
     effects.swapOffersCancelled,
   );
   markTxAccountsProposable(context, state, entityTx);
-  await drainPendingCrossJurisdictionFillAcks(
-    context.env,
-    context.accountConsensusContext,
-    state,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.candidateEffects,
-    context.allOutputs,
-  );
-  await drainCommittedCrossJurisdictionCancelAcks(
-    context.accountConsensusContext,
-    state,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.allOutputs,
-  );
   const elapsedMs = Math.round(getPerfMs() - txProfileStartMs);
   const profile = context.frameProfileTxTotals.get(entityTx.type) ?? {
     count: 0,

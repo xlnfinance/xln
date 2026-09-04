@@ -15,7 +15,6 @@ import {
 import {
   accountInputAck,
   accountInputProposal,
-  accountInputReferenceHeight,
 } from '../../../../account/consensus/flush';
 import { addMessage } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
@@ -65,36 +64,6 @@ export type PreparedAccountConsensusRun = Readonly<{
   inputFrameTxs: string[];
   securityContext: AccountInputSecurityContext;
 }>;
-
-const logCrossFillAckResult = (
-  context: AccountInputPhaseContext,
-  result: Awaited<ReturnType<typeof applyAccountInput>>,
-  pendingBeforeTxs: string[],
-  inputFrameTxs: string[],
-): void => {
-  const { state, input, account, counterpartyId } = context;
-  const touchesCrossFillAck =
-    pendingBeforeTxs.includes('cross_swap_fill_ack') ||
-    inputFrameTxs.includes('cross_swap_fill_ack') ||
-    (result.ok ? result.committedFrames ?? [] : []).some(({ frame }) =>
-      frame.accountTxs.some(tx => tx.type === 'cross_swap_fill_ack'));
-  if (!touchesCrossFillAck) return;
-  accountHandlerLog.debug('cross_fill_ack.input_result', {
-    entity: shortId(state.entityId),
-    counterparty: shortId(counterpartyId),
-    inputHeight: accountInputReferenceHeight(input),
-    hasPrevHanko: Boolean(accountInputAck(input)),
-    inputFrameTxs,
-    pendingBeforeTxs,
-    pendingAfter: account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [],
-    currentHeight: account.currentHeight,
-    committedTxs: (result.ok ? result.committedFrames ?? [] : []).map(({ frame }) =>
-      frame.accountTxs.map(tx => tx.type)),
-    events: result.events,
-    ok: result.ok,
-    error: result.ok ? undefined : accountInputFailureMessage(result),
-  });
-};
 
 const rejectEmptyAccountInput = (context: AccountInputPhaseContext): never => {
   const { state, input } = context;
@@ -256,14 +225,8 @@ export const prepareAccountConsensusRun = (
 
 export const completeAccountConsensusRun = (
   context: AccountInputPhaseContext,
-  prepared: PreparedAccountConsensusRun,
-  result: Awaited<ReturnType<typeof applyAccountInput>>,
+  _prepared: PreparedAccountConsensusRun,
+  _result: Awaited<ReturnType<typeof applyAccountInput>>,
 ): void => {
   context.checkpointProfile('consensus');
-  logCrossFillAckResult(
-    context,
-    result,
-    prepared.pendingBeforeTxs,
-    prepared.inputFrameTxs,
-  );
 };

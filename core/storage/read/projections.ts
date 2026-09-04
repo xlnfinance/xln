@@ -29,7 +29,6 @@ export type EntityStorageTreeField =
   | 'settlementContinuations'
   | 'crossJurisdictionSwaps'
   | 'crossJurisdictionAuthorizations'
-  | 'pendingCrossJurisdictionFillAcks'
   | 'crossJurisdictionBookAdmissions';
 
 type StorageCrontabScalarState = Pick<CrontabState, 'tasks'>;
@@ -120,10 +119,6 @@ export const projectEntityCoreDoc = (
     ...withDefinedProperty(
       'crossJurisdictionAuthorizations',
       state.crossJurisdictionAuthorizations && projectCrossJurisdictionRoutes(state.crossJurisdictionAuthorizations),
-    ),
-    ...withDefinedProperty(
-      'pendingCrossJurisdictionFillAcks',
-      state.pendingCrossJurisdictionFillAcks && projectStorageMap(state.pendingCrossJurisdictionFillAcks),
     ),
     ...withDefinedProperty(
       'crossJurisdictionBookAdmissions',

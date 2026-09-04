@@ -11,7 +11,6 @@ import {
   cloneCrossJurisdictionCloseProof,
 } from '../../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../../protocol/htlc/hash-ladder';
-import { buildCrossJurisdictionCancelAck } from '../../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../../orderbook/cross-j';
 import { prepareEntityTxState } from '../../../state-clone';
 import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
@@ -23,7 +22,6 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../../types/account';
 import { findAccountKey, normalizeEntityRef } from '../../account-key';
 import {
-  accountHasCrossSwapAckQueued,
   accountHasCrossPullCloseQueued,
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
@@ -106,44 +104,6 @@ const requestClearThroughSourceAccount = (
   route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
   newState.crossJurisdictionSwaps?.set(orderId, route);
   addMessage(newState, `🌉 Cross-j clear ${orderId} queued through source Account`);
-  return { newState, outputs, accountTxs };
-};
-
-const closeLiveSourceOffer = (
-  context: ClearContext,
-  route: CrossJurisdictionSwapRoute,
-  accountId: string | null,
-  storageChanges: RuntimeOverlayRecord[],
-): CrossJurisdictionClearResult | undefined => {
-  const { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
-  const account = accountId ? newState.accounts.get(accountId) : undefined;
-  const liveOffer = account?.state.swapOffers?.get(orderId);
-  const ratio = getCrossJurisdictionCommittedFillAmounts(route).fillRatio;
-  if (!liveOffer?.crossJurisdiction || (!cancelRemainder && ratio <= 0)) return undefined;
-  if (!accountId || !account) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${route.source.entityId}`);
-    return { newState, outputs, accountTxs };
-  }
-  if (accountHasCrossSwapAckQueued(account, orderId)) {
-    addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for account offer close ack`);
-    return { newState, outputs, accountTxs };
-  }
-
-  const removedFromBook = cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
-  accountTxs.push({ accountId, tx: buildCrossJurisdictionCancelAck(orderId, route) });
-  const requestedAt = deterministicEntityTimestamp(newState, env);
-  transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
-  route.pendingClearRequestedAt = requestedAt;
-  route.clearingPolicy = 'cancel_and_clear';
-  newState.crossJurisdictionSwaps?.set(orderId, route);
-  const firstValidator = entityState.config.validators[0];
-  if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(
-    newState,
-    removedFromBook
-      ? `🌉 Cross-j clear ${orderId} removed live book order and queued account offer close before pull reveal`
-      : `🌉 Cross-j clear ${orderId} queued account offer close before pull reveal`,
-  );
   return { newState, outputs, accountTxs };
 };
 
@@ -270,8 +230,11 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const committedFill = getCrossJurisdictionCommittedFillAmounts(canonicalRoute);
   const ratio = committedFill.fillRatio;
   const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
-  const liveOfferResult = closeLiveSourceOffer(context, canonicalRoute, accountId, storageChanges);
-  if (liveOfferResult) return liveOfferResult;
+  // The user-side Account offer stays open until the pull close deletes it;
+  // only a still-resting local book row has to leave before the reveal.
+  if (accountId && cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges)) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} removed live book order`);
+  }
   if (ratio <= 0) return requestPureCancel(context, canonicalRoute, accountId);
   return requestFilledRouteReveal(context, canonicalRoute, accountId, ratio);
 };
@@ -326,9 +289,6 @@ const validateClearMaterialization = (
   if (!accountId || !account?.state.pulls?.has(route.sourcePull.pullId)) {
     throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING", `CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
   }
-  if (account.state.swapOffers?.has(orderId)) {
-    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN", `CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN:${orderId}`);
-  }
   if (accountHasCrossPullCloseQueued(account, route.sourcePull.pullId)) {
     throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED", `CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
   }
@@ -343,31 +303,13 @@ const buildSourceCloseAccountTxs = (
 ): AccountTxTarget[] => {
   const sourcePull = route.sourcePull;
   if (!sourcePull) throw haltRuntimeFailure("CROSS_J_CLEAR_SOURCE_PULL_MISSING", `CROSS_J_CLEAR_SOURCE_PULL_MISSING:${route.orderId}`);
-  const accountTxs: AccountTxTarget[] = [{
+  return [{
     accountId,
     tx: {
       type: 'cross_pull_close',
       data: { pullId: sourcePull.pullId, binary, proof },
     },
   }];
-  const sourceSavingsAmount = route.priceImprovementSourceAmount ?? 0n;
-  if (sourceSavingsAmount <= 0n) return accountTxs;
-  accountTxs.push({
-    accountId,
-    tx: {
-      type: 'direct_payment',
-      data: {
-        tokenId: Number(route.source.tokenId),
-        amount: sourceSavingsAmount,
-        route: [route.source.entityId],
-        deliveryMode: 'direct',
-        description: `cross-j-source-savings:${route.orderId}`,
-        fromEntityId: route.source.counterpartyEntityId,
-        toEntityId: route.source.entityId,
-      },
-    },
-  });
-  return accountTxs;
 };
 
 /**

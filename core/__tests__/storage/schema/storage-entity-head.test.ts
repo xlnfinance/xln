@@ -76,7 +76,6 @@ const makeGenesis = (signerId: string): EntityState => {
     profile: { name: 'head', isHub: false, avatar: '', bio: '', website: '' },
     paybook: { entries: new Map(), feesEarned: 0n },
     swapTradingPairs: [],
-    pendingCrossJurisdictionFillAcks: new Map(),
     crossJurisdictionBookAdmissions: new Map(),
   };
 };

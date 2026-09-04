@@ -202,9 +202,6 @@ const mutators = {
   crossJurisdictionAuthorizations: state => {
     state.crossJurisdictionAuthorizations = new Map([['auth', { marker: 'cross-auth' } as never]]);
   },
-  pendingCrossJurisdictionFillAcks: state => {
-    state.pendingCrossJurisdictionFillAcks = new Map([['ack', { marker: 'cross-ack' } as never]]);
-  },
   settlementContinuations: state => {
     state.settlementContinuations = new Map([['settlement', { marker: 'continuation' } as never]]);
   },

@@ -192,7 +192,6 @@ const CORE_FILES = {
     'account/tx/handlers/swap/offer/index.ts',     // Account-level swap offer placement
     'account/tx/handlers/swap/resolve/index.ts',   // Swap settlement / hashladder resolution
     'account/tx/handlers/swap/lifecycle/cancel.ts',    // Swap cancellation
-    'account/tx/handlers/swap/cross-fill-ack/index.ts', // Cross-j fill acknowledgement processing
     'orderbook/cross-j/index.ts',            // Cross-j book types and conversion helpers
     'network/relay/market/snapshot.ts',            // Market snapshot projection
     'network/relay/market/subscriptions.ts',       // Orderbook streaming subscriptions
@@ -358,7 +357,6 @@ const CROSS_FILES = {
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
     'extensions/cross-j/index.ts',
-    'extensions/cross-j/fill-ack.ts',
     'extensions/cross-j/market.ts',
     'extensions/cross-j/orderbook.ts',
     'extensions/cross-j/boundary.ts',
@@ -390,7 +388,6 @@ const CROSS_FILES = {
     'account/tx/handlers/swap/resolve/index.ts',
     'account/tx/handlers/swap/lifecycle/cancel.ts',
     'storage/queries/history.ts',
-    'account/tx/handlers/swap/cross-fill-ack/index.ts',
     'account/tx/handlers/balance/add-delta.ts',
     'account/tx/handlers/j-events/claim.ts',
     'account/tx/handlers/settlement/transition.ts',
@@ -398,7 +395,6 @@ const CROSS_FILES = {
     'orderbook/types.ts',
     'orderbook/core.ts',
     'orderbook/cross-j/index.ts',
-    'orderbook/validity.ts',
     'network/relay/market/snapshot.ts',
     'network/relay/market/subscription-limiter.ts',
     'network/relay/market/subscriptions.ts',
@@ -449,7 +445,6 @@ const CROSS_FILES = {
     'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
     'core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
     'core/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
-    'core/__tests__/payments/orderbook/orderbook-validity.test.ts',
     'core/__tests__/payments/orderbook/orderbook-relay-url.test.ts',
     'core/__tests__/payments/swap/swap-order-preparation.test.ts',
     'core/__tests__/market/invariants/market-subscription-stack.test.ts',
@@ -731,7 +726,6 @@ const ORDERBOOK_FILES = {
     'orderbook/types.ts',
     'orderbook/core.ts',
     'orderbook/cross-j/index.ts',
-    'orderbook/validity.ts',
     'network/relay/market/snapshot.ts',
     'network/relay/market/subscription-limiter.ts',
     'network/relay/market/subscriptions.ts',
@@ -751,7 +745,6 @@ const ORDERBOOK_FILES = {
     'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
     'core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
     'core/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
-    'core/__tests__/payments/orderbook/orderbook-validity.test.ts',
     'core/__tests__/payments/orderbook/orderbook-relay-url.test.ts',
     'core/__tests__/market/invariants/market-subscription-stack.test.ts',
     'core/__tests__/market/invariants/market-subscription-limiter.test.ts',
@@ -801,7 +794,6 @@ const SWAP_FILES = {
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
-    'orderbook/validity.ts',
     'network/relay/market/snapshot.ts',
     'api/server/health/market-maker.ts',
   ]),
@@ -823,7 +815,6 @@ const SWAP_FILES = {
   ],
   tests: uniqueFiles([
     'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
-    'core/__tests__/payments/orderbook/orderbook-validity.test.ts',
     'core/__tests__/payments/swap/swap-order-preparation.test.ts',
     'core/__tests__/payments/invariants/price-improvement.test.ts',
     'tests/e2e/swap/e2e-swap.spec.ts',
@@ -916,7 +907,6 @@ swaps executable and disputable.
 2. Runtime model: \`types/cross-jurisdiction.ts\`, \`extensions/cross-j/index.ts\`,
    \`extensions/cross-j/orderbook.ts\`, \`entity/consensus/index.ts\`.
 3. Execution path: \`entity/tx/handlers/cross-j-*.ts\`,
-   \`account/tx/handlers/swap/cross-fill-ack/index.ts\`,
    \`account/tx/handlers/swap/resolve/index.ts\`, then orderbook matching.
 4. Backstop: \`cross-j-salvage.ts\`, \`protocol/dispute/arguments.ts\`,
    \`entity/tx/handlers/dispute/index.ts\`, watchtower action, and dispute docs.
@@ -930,7 +920,7 @@ requestCrossJurisdictionSwap
   -> prepare/commit/register source and target route state
   -> admitCrossJurisdictionBookOrder at canonical book owner
   -> orderbook-matching-cross records a firm fill
-  -> cross_swap_fill_ack mirrors the fill into the source account
+  -> book owner applies the uint16 fill ratio; crossJurisdictionFillNotice carries it to the source hub
   -> paired cross_pull_close claims the hashladder-backed ratio on both legs
   -> clear/sweep closes terminal book and route state
   -> salvage/dispute path handles non-cooperative completion
@@ -1262,7 +1252,7 @@ requestCrossJurisdictionSwap
   -> cross-j setup/admission
   -> remote book order
   -> book owner matching
-  -> cross_swap_fill_ack / fill notice
+  -> crossJurisdictionFillNotice (hub-internal ratio, non-authoritative)
   -> paired cross_pull_close on both sides
   -> clear/sweep/salvage if something breaks
   -> dispute path if salvage cannot finish off-chain
@@ -1275,7 +1265,6 @@ Read these together:
 - \`core/extensions/cross-j/boundary.ts\`
 - \`core/orderbook/cross-j/orderbook.ts\`
 - \`core/entity/tx/handlers/cross-j-*.ts\`
-- \`core/account/tx/handlers/swap/cross-fill-ack/index.ts\`
 
 Design rule: expected market failures (no liquidity, no market, quote expired)
 are terminal user-visible swap failures/cancellations, not protocol fatals.
@@ -1396,7 +1385,6 @@ xln/
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
-      account/tx/handlers/swap/cross-fill-ack/index.ts ${fileSizes['core/account/tx/handlers/swap/cross-fill-ack/index.ts'] || '?'} lines - Fill ACK processing
       relay/market-subscriptions.ts ${fileSizes['core/network/relay/market/subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['core/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/health/market-maker.ts ${fileSizes['core/api/server/health/market-maker.ts'] || '?'} lines - MM readiness health

@@ -666,30 +666,6 @@ export interface DerivedDelta {
 }
 
 // Account transaction types
-export type CrossSwapFillAckData = {
-  offerId: string;
-  routeHash?: string;
-  previousFillSeq?: number;
-  fillSeq?: number;
-  incrementalSourceAmount?: bigint;
-  incrementalTargetAmount?: bigint;
-  cumulativeSourceAmount?: bigint;
-  cumulativeTargetAmount?: bigint;
-  cumulativeFillRatio: number;
-  fillNumerator: bigint;
-  fillDenominator: bigint;
-  ackKind?: 'fill' | 'cancel';
-  executionSourceAmount?: bigint;
-  executionTargetAmount?: bigint;
-  priceImprovementMode?: 'source_savings';
-  priceImprovementAmount?: bigint;
-  priceImprovementTokenId?: number;
-  cancelRemainder?: boolean;
-  comment?: string;
-  priceTicks?: bigint;
-  pairId?: string;
-};
-
 export type AccountTx =
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route: string[]; description?: string; fromEntityId: string; toEntityId: string; deliveryMode: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>; trustedGatewayEntityId?: string } }
   | {
@@ -834,14 +810,6 @@ export type AccountTx =
         proof: CrossJurisdictionCloseProof;
       };
     }
-  | {
-      /** Exact target-leg mirror paired atomically with one source fill ACK. */
-      type: 'cross_pull_progress';
-      data: {
-        pullId: string;
-        fill: CrossSwapFillAckData;
-      };
-    }
   // === SWAP TRANSACTION TYPES ===
   | {
       type: 'swap_offer';
@@ -897,10 +865,6 @@ export type AccountTx =
         restingQuantizedGive?: bigint;
         restingQuantizedWant?: bigint;
       };
-    }
-  | {
-      type: 'cross_swap_fill_ack';
-      data: CrossSwapFillAckData;
     }
   // === ATOMIC SETTLEMENT WORKSPACE TRANSITION ===
   | {

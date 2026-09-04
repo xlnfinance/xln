@@ -4,7 +4,6 @@ import type {
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionRouteDomain,
-  CrossJurisdictionSettlementPolicy,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
   CrossJurisdictionSwapStatus,
@@ -83,14 +82,6 @@ export const HASHABLE_CROSS_J_ROUTE_DOMAIN_FIELDS = [
   'targetAssetRef',
 ] as const satisfies readonly (keyof CrossJurisdictionRouteDomain)[];
 
-export const HASHABLE_CROSS_J_SETTLEMENT_POLICY_FIELDS = [
-  'roundingMode',
-  'maxSourceDust',
-  'maxTargetDust',
-  'minSourceFillAmount',
-  'minTargetFillAmount',
-] as const satisfies readonly (keyof CrossJurisdictionSettlementPolicy)[];
-
 export const HASHABLE_CROSS_J_TIME_POLICY_FIELDS = [
   'runtimeClock',
   'settlementClock',
@@ -103,18 +94,7 @@ export const HASHABLE_CROSS_J_PULL_BINDING_FIELDS = [
   'orderId',
   'routeHash',
   'leg',
-  'sourceCloseProof',
   'status',
-  'cumulativeFillRatio',
-  'fillSeq',
-  'fillNumerator',
-  'fillDenominator',
-  'claimedRatio',
-  'filledSourceAmount',
-  'filledTargetAmount',
-  'sourceClaimed',
-  'targetClaimed',
-  'clearingPolicy',
 ] as const satisfies readonly (keyof CrossJurisdictionPullBinding)[];
 
 const HASHABLE_CROSS_J_REGISTRY_RECORD_FIELDS = [
@@ -155,13 +135,10 @@ export const HASHABLE_CROSS_J_SWAP_ROUTE_FIELDS = [
   'fillDenominator',
   'filledSourceAmount',
   'filledTargetAmount',
-  'priceImprovementSourceAmount',
   'pendingClearRequestedAt',
   'domain',
-  'settlementPolicy',
   'timePolicy',
   'clearingPolicy',
-  'priceImprovementMode',
   'riskMode',
   'claimedRatio',
   'sourceRegistryFillRatio',
@@ -191,7 +168,6 @@ export type CrossJNestedFieldCoverage = [
   AssertNever<FieldGap<CrossJurisdictionCloseProof, typeof HASHABLE_CROSS_J_CLOSE_PROOF_FIELDS>>,
   AssertNever<FieldGap<CrossJurisdictionDisputeConfig, typeof HASHABLE_CROSS_J_DISPUTE_CONFIG_FIELDS>>,
   AssertNever<FieldGap<CrossJurisdictionRouteDomain, typeof HASHABLE_CROSS_J_ROUTE_DOMAIN_FIELDS>>,
-  AssertNever<FieldGap<CrossJurisdictionSettlementPolicy, typeof HASHABLE_CROSS_J_SETTLEMENT_POLICY_FIELDS>>,
   AssertNever<FieldGap<CrossJurisdictionTimePolicy, typeof HASHABLE_CROSS_J_TIME_POLICY_FIELDS>>,
   AssertNever<FieldGap<CrossJurisdictionPullBinding, typeof HASHABLE_CROSS_J_PULL_BINDING_FIELDS>>,
   AssertNever<FieldGap<SourceRegistryRecord, typeof HASHABLE_CROSS_J_REGISTRY_RECORD_FIELDS>>,

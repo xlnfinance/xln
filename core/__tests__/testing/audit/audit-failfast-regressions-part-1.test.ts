@@ -60,8 +60,6 @@ import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { isLeftEntity } from '../../../entity/id';
 
 import {
-  CROSS_J_PENDING_FILL_ACK_TTL_MS,
-  MAX_PENDING_CROSS_J_FILL_ACKS,
   applyEntityInput,
 } from '../../../entity/consensus/index';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';

@@ -143,7 +143,6 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   paybook: { entries: new Map(), feesEarned: 0n },
   crontabState: initCrontab(),
   swapTradingPairs: [],
-  pendingCrossJurisdictionFillAcks: new Map(),
   crossJurisdictionBookAdmissions: new Map(),
 });
 

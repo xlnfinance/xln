@@ -33,7 +33,6 @@ export const STORAGE_ENTITY_FIELD_TAG = Object.freeze({
   swapTradingPairs: 29,
   crossJurisdictionSwaps: 30,
   crossJurisdictionAuthorizations: 31,
-  pendingCrossJurisdictionFillAcks: 32,
   crossJurisdictionBookAdmissions: 33,
   hubRebalanceConfig: 34,
   orderbookHubProfile: 35,

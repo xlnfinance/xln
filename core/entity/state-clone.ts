@@ -1,7 +1,6 @@
 import type { EntityReplica, EntityState } from './types';
 import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/finance/lending';
 import {
-  cloneCrossJurisdictionAccountTxRoute,
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j';
@@ -84,20 +83,6 @@ const cloneCrossJurisdictionState = (
     target.crossJurisdictionAuthorizations = new EntityCollectionCandidateMap(
       source.crossJurisdictionAuthorizations,
       cloneCrossJurisdictionRoute,
-    );
-  }
-  if (source.pendingCrossJurisdictionFillAcks) {
-    const forkPending = (
-      pending: NonNullable<EntityState['pendingCrossJurisdictionFillAcks']> extends Map<string, infer Value>
-        ? Value
-        : never,
-    ) => ({
-      ...pending,
-      tx: cloneCrossJurisdictionAccountTxRoute(structuredClone(pending.tx)) as typeof pending.tx,
-    });
-    target.pendingCrossJurisdictionFillAcks = new EntityCollectionCandidateMap(
-      source.pendingCrossJurisdictionFillAcks,
-      forkPending,
     );
   }
   if (source.crossJurisdictionBookAdmissions) {
@@ -185,7 +170,6 @@ const isolateEntityFrameShell = (
     lending: _lending,
     crossJurisdictionSwaps: _crossJurisdictionSwaps,
     crossJurisdictionAuthorizations: _crossJurisdictionAuthorizations,
-    pendingCrossJurisdictionFillAcks: _pendingCrossJurisdictionFillAcks,
     crossJurisdictionBookAdmissions: _crossJurisdictionBookAdmissions,
     deferredAccountProposals: _deferredAccountProposals,
     settlementContinuations: _settlementContinuations,
@@ -274,9 +258,6 @@ export const commitEntityFrameCandidateState = (
   }
   if (state.crossJurisdictionAuthorizations instanceof EntityCollectionCandidateMap) {
     state.crossJurisdictionAuthorizations = state.crossJurisdictionAuthorizations.sealCandidate();
-  }
-  if (state.pendingCrossJurisdictionFillAcks instanceof EntityCollectionCandidateMap) {
-    state.pendingCrossJurisdictionFillAcks = state.pendingCrossJurisdictionFillAcks.sealCandidate();
   }
   if (state.crossJurisdictionBookAdmissions instanceof EntityCollectionCandidateMap) {
     state.crossJurisdictionBookAdmissions = state.crossJurisdictionBookAdmissions.sealCandidate();

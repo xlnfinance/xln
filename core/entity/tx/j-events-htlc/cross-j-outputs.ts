@@ -1,11 +1,11 @@
 import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
-import type { AccountTx } from '../../../types/account';
-import type { EntityInput, EntityOutput, EntityState } from '../../types';
+import type { EntityInput } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { crossJurisdictionRouteSigner } from '../../../extensions/cross-j/boundary';
-import { buildCrossJurisdictionFillNoticeTx } from '../../../extensions/cross-j/fill-ack';
+import { buildCrossJurisdictionFillNoticeTx } from '../../../extensions/cross-j/fill-notice';
+import type { CrossJurisdictionFillInstruction } from '../../../extensions/cross-j/orderbook';
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -35,35 +35,21 @@ export const buildCrossJurisdictionEntityOutput = (
   };
 };
 
-const buildCrossJurisdictionTargetFillNoticeOutput = (
-  currentEntityState: EntityState,
-  tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
+/** Hub-internal fill progress from the canonical book owner to the source Hub. */
+export const buildCrossJurisdictionFillNoticeOutput = (
+  instruction: CrossJurisdictionFillInstruction,
 ): EntityInput => {
-  const route = currentEntityState.crossJurisdictionSwaps?.get(tx.data.offerId);
-  if (!route) throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ROUTE_MISSING", `CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${tx.data.offerId}`);
-  const current = normalizeEntityRef(currentEntityState.entityId);
+  const route = instruction.route;
   const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-  if (current !== sourceHub) {
-    throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_SOURCE_HUB_REQUIRED", `CROSS_J_TARGET_PROGRESS_SOURCE_HUB_REQUIRED:${tx.data.offerId}:${current}:${sourceHub}`);
-  }
-  const targetHub = normalizeEntityRef(route.target.entityId);
-  const targetSigner = normalizeEntityRef(route.targetHubSignerId || '');
-  if (!targetHub || !targetSigner || targetHub === sourceHub) {
-    throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ROUTE_INVALID", `CROSS_J_TARGET_PROGRESS_ROUTE_INVALID:${tx.data.offerId}:${sourceHub}:${targetHub}`);
+  const signerId = normalizeEntityRef(route.sourceHubSignerId || '');
+  if (!sourceHub || !signerId) {
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_SOURCE_HUB_MISSING", `CROSS_J_FILL_NOTICE_SOURCE_HUB_MISSING:${instruction.offerId}`);
   }
   return buildCrossJurisdictionEntityOutput(
-    targetHub,
-    targetSigner,
-    [buildCrossJurisdictionFillNoticeTx(tx, route.source.entityId)],
+    sourceHub,
+    signerId,
+    [buildCrossJurisdictionFillNoticeTx(instruction)],
   );
-};
-
-export const appendCrossJurisdictionTargetProgressAfterAdmission = (
-  currentEntityState: EntityState,
-  tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  outputs: EntityOutput[],
-): void => {
-  outputs.push(buildCrossJurisdictionTargetFillNoticeOutput(currentEntityState, tx));
 };
 
 /** Exact Account protocol output; publication revalidates its bilateral route. */

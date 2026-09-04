@@ -290,8 +290,6 @@ const classifyCommittedSwapCancels = (
         finalSwapCancelScope(account, tx.data.offerId);
     } else if (tx.type === 'swap_resolve') {
       futureScopeByOffer.set(tx.data.offerId, true);
-    } else if (tx.type === 'cross_swap_fill_ack') {
-      futureScopeByOffer.set(tx.data.offerId, false);
     } else if (tx.type === 'swap_offer') {
       futureScopeByOffer.set(tx.data.offerId, !tx.data.crossJurisdiction);
     }
@@ -310,13 +308,6 @@ const applyCommittedCrossJurisdictionSwapFollowup = (
     }
     const event = buildCommittedSwapOfferEvent(account, counterpartyId, accountTx.data.offerId);
     if (event) effects.swapOffersCreated.push(event);
-  } else if (accountTx.type === 'cross_swap_fill_ack') {
-    const event = buildCommittedSwapOfferEvent(account, counterpartyId, accountTx.data.offerId);
-    if (event) {
-      effects.swapOffersCreated.push(event);
-    } else {
-      effects.swapOffersCancelled.push({ offerId: accountTx.data.offerId, accountId: counterpartyId });
-    }
   } else if (accountTx.type === 'swap_cancel_request') {
     effects.swapCancelRequests.push({ offerId: accountTx.data.offerId, accountId: counterpartyId });
   }
@@ -366,7 +357,6 @@ const applyCommittedFrameTransactions = async (
         frame.timestamp,
         effects.swapOffersCreated,
         options?.storageChanges ?? [],
-        effects.candidateEffects,
       );
       if (!crossJurisdictionHandled) {
         await applyCommittedHtlcLockFollowup(

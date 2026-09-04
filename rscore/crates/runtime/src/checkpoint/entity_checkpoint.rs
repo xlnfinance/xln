@@ -48,7 +48,6 @@ const CONSENSUS_FIELDS: &[&str] = &[
     "swapTradingPairs",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
-    "pendingCrossJurisdictionFillAcks",
     "crossJurisdictionBookAdmissions",
     "hubRebalanceConfig",
     "lending",
@@ -83,7 +82,6 @@ const STORAGE_CORE_FIELDS: &[&str] = &[
     "swapTradingPairs",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
-    "pendingCrossJurisdictionFillAcks",
     "crossJurisdictionBookAdmissions",
     "hubRebalanceConfig",
     "lending",
@@ -103,7 +101,6 @@ const COLLECTION_FIELDS: &[&str] = &[
     "settlementContinuations",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
-    "pendingCrossJurisdictionFillAcks",
     "crossJurisdictionBookAdmissions",
 ];
 
@@ -446,6 +443,6 @@ mod tests {
 
     #[test]
     fn consensus_allowlist_matches_typescript_field_count() {
-        assert_eq!(CONSENSUS_FIELDS.len(), 32);
+        assert_eq!(CONSENSUS_FIELDS.len(), 31);
     }
 }

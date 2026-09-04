@@ -3,14 +3,13 @@ import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 import { normalizeEntityRef } from '../account-key';
 import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
-import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
+import type { EntityInput, EntityOutput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import {
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
-  assertCrossJurisdictionPriceImprovementMode,
   getCrossJurisdictionCommittedProofRatio,
   getCrossJurisdictionCommittedFillAmounts,
   hashCrossJurisdictionCloseBinary,
@@ -23,8 +22,12 @@ import {
 } from '../../../extensions/cross-j/index';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
-  crossJurisdictionBookAdmissionKeyFor,
+  buildCrossJurisdictionFillProgressData,
+  type CrossJurisdictionFillProgressData,
+} from '../../../extensions/cross-j/fill-notice';
+import {
   markCrossJurisdictionBookAdmissionClosed,
+  type CrossJurisdictionFillInstruction,
 } from '../../../extensions/cross-j/orderbook';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../support/logger';
@@ -34,9 +37,13 @@ import { getEntityCollectionValueForWrite, ensureEntityCollectionCandidate } fro
 import { cancelHook, scheduleHook } from '../../scheduler';
 import {
   buildCrossJurisdictionEntityOutput,
+  buildCrossJurisdictionFillNoticeOutput,
   crossJurisdictionRouteSignerHint,
 } from '../j-events-htlc/cross-j-outputs';
-import { applyCrossJurisdictionBookProgressToState , handleAdmitCrossJurisdictionBookOrderEntityTx } from './cross-j/book-order';
+import {
+  applyCrossJurisdictionBookFillToState,
+  handleAdmitCrossJurisdictionBookOrderEntityTx,
+} from './cross-j/book-order';
 import type { SwapOfferEvent } from './account';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');
@@ -102,13 +109,13 @@ const assertCrossPullCloseAllowed = (
   ) {
     throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_STATE_INVALID", `CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
   }
-  // CANON (owner, 2026-08-07): informational fill progress never gates a
-  // close. The Account layer already verified the ladder reveal against
-  // partialRoot at exactly this ratio, and the hub's real fill legally runs
-  // AHEAD of its last "matched X%" message, so a close above the informed
-  // ratio is normal. Only a rollback BELOW informed fill is invalid: informed
-  // progress is monotonic, and un-matching what both sides were told would be
-  // the hub rewriting history, not lagging delivery.
+  // CANON (owner, 2026-08-07): Hub-internal fill progress never gates a close.
+  // The Account layer already verified the ladder reveal against partialRoot
+  // at exactly this ratio, and the hub's real fill legally runs AHEAD of the
+  // last progress this mirror saw, so a close above the mirrored ratio is
+  // normal. Only a rollback BELOW mirrored fill is invalid: progress is
+  // monotonic, and un-matching what the Hub already recorded would be the hub
+  // rewriting history, not lagging delivery.
   const committedRatio = committedCrossJurisdictionRatio(route);
   if (fillRatio < committedRatio) {
     throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_ROLLBACK", `CROSS_J_PULL_CLOSE_ROLLBACK: route=${route.orderId} ` +
@@ -165,7 +172,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
   env: EntityRuntimeContext,
   newState: EntityState,
   route: CrossJurisdictionSwapRoute,
-  outputs: EntityInput[],
+  outputs: EntityOutput[],
   reason: string,
   storageChanges: RuntimeOverlayRecord[],
 ): void => {
@@ -191,88 +198,6 @@ const removeOrRouteCrossJurisdictionBookOrder = (
         reason,
       },
   }]));
-};
-
-const requireCrossFillAckNumber = (
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  field: 'fillSeq' | 'cumulativeFillRatio',
-): number => {
-  const value = accountTx.data[field];
-  if (!Number.isFinite(Number(value))) {
-    throw haltRuntimeFailure("CROSS_J_FILL_ACK_FIELD_MISSING", `CROSS_J_FILL_ACK_FIELD_MISSING: offer=${accountTx.data.offerId} field=${field}`);
-  }
-  return Math.floor(Number(value));
-};
-
-const requireCrossFillAckBigInt = (
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  field:
-    | 'incrementalSourceAmount'
-    | 'incrementalTargetAmount'
-    | 'cumulativeSourceAmount'
-    | 'cumulativeTargetAmount',
-): bigint => {
-  const value = accountTx.data[field];
-  if (value === undefined) {
-    throw haltRuntimeFailure("CROSS_J_FILL_ACK_FIELD_MISSING", `CROSS_J_FILL_ACK_FIELD_MISSING: offer=${accountTx.data.offerId} field=${field}`);
-  }
-  return BigInt(value);
-};
-
-const buildCrossJurisdictionBookProgressTx = (
-  route: CrossJurisdictionSwapRoute,
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  reason: string,
-): Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }> => ({
-  type: 'applyCrossJurisdictionBookProgress',
-  data: {
-    orderId: route.orderId,
-    sourceEntityId: route.source.entityId,
-    fillSeq: requireCrossFillAckNumber(accountTx, 'fillSeq'),
-    incrementalSourceAmount: requireCrossFillAckBigInt(accountTx, 'incrementalSourceAmount'),
-    incrementalTargetAmount: requireCrossFillAckBigInt(accountTx, 'incrementalTargetAmount'),
-    cumulativeSourceAmount: requireCrossFillAckBigInt(accountTx, 'cumulativeSourceAmount'),
-    cumulativeTargetAmount: requireCrossFillAckBigInt(accountTx, 'cumulativeTargetAmount'),
-    cumulativeFillRatio: requireCrossFillAckNumber(accountTx, 'cumulativeFillRatio'),
-    fillNumerator: accountTx.data.fillNumerator,
-    fillDenominator: accountTx.data.fillDenominator,
-    ...(accountTx.data.priceImprovementMode ? { priceImprovementMode: accountTx.data.priceImprovementMode } : {}),
-    ...(accountTx.data.priceImprovementAmount !== undefined ? { priceImprovementAmount: accountTx.data.priceImprovementAmount } : {}),
-    ...(accountTx.data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: accountTx.data.priceImprovementTokenId } : {}),
-    ...(accountTx.data.cancelRemainder !== undefined ? { cancelRemainder: accountTx.data.cancelRemainder } : {}),
-    reason,
-  },
-});
-
-const applyOrRouteCrossJurisdictionBookProgress = (
-  env: EntityRuntimeContext,
-  newState: EntityState,
-  route: CrossJurisdictionSwapRoute,
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  outputs: EntityInput[],
-  storageChanges: RuntimeOverlayRecord[],
-  candidateEffects: EntityCandidateEffect[],
-): void => {
-  const tx = buildCrossJurisdictionBookProgressTx(route, accountTx, 'fill_ack_committed');
-  const owner = resolveLocalBookOwner(newState, route);
-  if (owner.isCurrent) {
-    // Source account consensus has committed the ACK in this same entity frame.
-    // Apply the book-owner projection immediately; waiting for a self-output
-    // would leave one matcher tick with updated account state and stale book qty.
-    applyCrossJurisdictionBookProgressToState(
-      env,
-      newState,
-      tx.data,
-      storageChanges,
-      candidateEffects,
-    );
-    return;
-  }
-  outputs.push(buildCrossJurisdictionEntityOutput(
-    owner.ownerId,
-    requireRouteSignerHint(route, owner.ownerId),
-    [tx],
-  ));
 };
 
 const committedPullMatchesRoute = (
@@ -585,109 +510,40 @@ const applyCrossPullCloseFollowup = (
   return true;
 };
 
-const applyCommittedFillAckProgress = (
+const applyCommittedFillProgress = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
+  fill: CrossJurisdictionFillProgressData,
   ratio: number,
 ): void => {
   const currentRatio = committedCrossJurisdictionRatio(route);
-  if (accountTx.data.cancelRemainder && ratio <= currentRatio) {
+  if (fill.cancelRemainder && ratio <= currentRatio) {
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', state.timestamp);
     route.clearingPolicy = 'cancel_and_clear';
     return;
   }
   const nextRoute = applyCrossJurisdictionFillProgress(route, {
-    fillSeq: accountTx.data.fillSeq,
+    fillSeq: fill.fillSeq,
     cumulativeFillRatio: ratio,
-    // Account consensus commits exact rational economics. The uint16 ratio is
-    // only the hash-ladder/dispute projection and must never replace them.
-    fillNumerator: accountTx.data.fillNumerator,
-    fillDenominator: accountTx.data.fillDenominator,
-    incrementalSourceAmount: accountTx.data.incrementalSourceAmount,
-    incrementalTargetAmount: accountTx.data.incrementalTargetAmount,
-    cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
-    cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
-  }, state.timestamp, 'CROSS_J_COMMITTED_FILL_ACK_INVALID');
+    fillNumerator: BigInt(ratio),
+    fillDenominator: BigInt(CROSS_J_MAX_FILL_RATIO),
+  }, state.timestamp, 'CROSS_J_FILL_PROGRESS_INVALID');
   transitionCrossJurisdictionRouteStatus(route, nextRoute.status, state.timestamp);
   Object.assign(route, nextRoute);
-  if ((accountTx.data.priceImprovementAmount ?? 0n) > 0n) {
-    route.priceImprovementSourceAmount =
-      (route.priceImprovementSourceAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
-  }
-  // Mirror the Account transition: a terminal fill - including a sub-lot dust
-  // remainder the taker did not explicitly cancel - requests the clear.
-  const { terminal, dustClose } = isCrossJurisdictionFillTerminal(route, {
-    nextRatio: ratio,
-    cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
-    cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
-    ...(accountTx.data.cancelRemainder !== undefined
-      ? { cancelRemainder: accountTx.data.cancelRemainder }
-      : {}),
-  });
-  if (terminal) {
+  if (isCrossJurisdictionFillTerminal(route, { nextRatio: ratio, cancelRemainder: fill.cancelRemainder })) {
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', state.timestamp);
-    route.clearingPolicy =
-      accountTx.data.cancelRemainder || dustClose || ratio < CROSS_J_MAX_FILL_RATIO
-        ? 'cancel_and_clear'
-        : 'full_fill';
+    route.clearingPolicy = fill.cancelRemainder || ratio < CROSS_J_MAX_FILL_RATIO
+      ? 'cancel_and_clear'
+      : 'full_fill';
   }
 };
 
-const closeOrProgressCrossJurisdictionBook = (
-  env: EntityRuntimeContext,
+const requestClearFromSourceHub = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  ratio: number,
-  outputs: EntityInput[],
-  storageChanges: RuntimeOverlayRecord[],
-  candidateEffects: EntityCandidateEffect[],
+  cancelRemainder: boolean,
+  outputs: EntityOutput[],
 ): void => {
-  if (normalizeEntityRef(state.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
-    return;
-  }
-  // The Account transition closes the offer on a sub-lot remainder too, so this
-  // must use the same terminal predicate. Deriving terminality from the tx
-  // flags alone leaves the source offer deleted with its pulls bound until
-  // expiry, because the clear is never requested.
-  const { terminal } = isCrossJurisdictionFillTerminal(route, {
-    nextRatio: ratio,
-    cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
-    cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
-    ...(accountTx.data.cancelRemainder !== undefined
-      ? { cancelRemainder: accountTx.data.cancelRemainder }
-      : {}),
-  });
-  if (!terminal) {
-    applyOrRouteCrossJurisdictionBookProgress(
-      env,
-      state,
-      route,
-      accountTx,
-      outputs,
-      storageChanges,
-      candidateEffects,
-    );
-    return;
-  }
-  const admission = state.crossJurisdictionBookAdmissions?.get(
-    crossJurisdictionBookAdmissionKeyFor(route.source.entityId, route.orderId),
-  );
-  const removalAlreadyCommitted = Boolean(
-    accountTx.data.cancelRemainder && admission?.pendingCancel?.bookRemovalCommittedAt,
-  );
-  if (removalAlreadyCommitted) {
-    markCrossJurisdictionBookAdmissionClosed(
-      state,
-      route.source.entityId,
-      route.orderId,
-      Number(state.timestamp || env.state.timestamp || 0),
-      'cancel_ack_committed',
-    );
-  } else {
-    removeOrRouteCrossJurisdictionBookOrder(env, state, route, outputs, 'fill_ack_closed', storageChanges);
-  }
   const signerId = String(state.config.validators[0] || '').trim().toLowerCase();
   if (!signerId) throw haltRuntimeFailure("CROSS_J_SELF_SIGNER_MISSING", `CROSS_J_SELF_SIGNER_MISSING:${route.orderId}:${state.entityId}`);
   outputs.push({
@@ -697,102 +553,99 @@ const closeOrProgressCrossJurisdictionBook = (
       type: 'requestCrossJurisdictionClear',
       data: {
         orderId: route.orderId,
-        cancelRemainder: Boolean(accountTx.data.cancelRemainder),
+        cancelRemainder,
       },
     }],
   });
 };
 
-const applyFillAckFollowup = (
+/**
+ * Source-Hub view of Hub-internal fill progress. The route mirror is what the
+ * proposer reveals against; a terminal fill (or cancel) requests the clear.
+ * Returns false for an exact duplicate (durable sibling delivery may retry).
+ */
+export const applySourceHubCrossJurisdictionFillProgress = (
   env: EntityRuntimeContext,
   newState: EntityState,
-  accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
-  outputs: EntityInput[],
+  fill: CrossJurisdictionFillProgressData,
+  outputs: EntityOutput[],
   storageChanges: RuntimeOverlayRecord[],
-  candidateEffects: EntityCandidateEffect[],
 ): boolean => {
-  assertCrossJurisdictionPriceImprovementMode(
-    accountTx.data.priceImprovementMode,
-    accountTx.data.offerId,
-  );
-  const ratio = getCrossJurisdictionCommittedProofRatio({
-    orderId: accountTx.data.offerId,
-    cumulativeFillRatio: accountTx.data.cumulativeFillRatio,
-    fillNumerator: accountTx.data.fillNumerator,
-    fillDenominator: accountTx.data.fillDenominator,
-  });
   const routes = newState.crossJurisdictionSwaps;
   const route = routes
-    ? getEntityCollectionValueForWrite(routes, accountTx.data.offerId)
+    ? getEntityCollectionValueForWrite(routes, fill.orderId)
     : undefined;
   if (!route) {
-    // A committed account ACK is canonical money progress. If the entity route
-    // mirror is gone, silently accepting the ACK leaves the shared book stale
-    // and hides projection corruption. Never rehydrate or skip here.
-    throw haltRuntimeFailure("CROSS_J_FILL_ACK_ROUTE_MISSING", `CROSS_J_FILL_ACK_ROUTE_MISSING: entity=${shortId(newState.entityId)} ` +
-      `offer=${shortOrder(accountTx.data.offerId, 12)} ratio=${ratio} cancel=${Boolean(accountTx.data.cancelRemainder)}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_ROUTE_MISSING", `CROSS_J_FILL_ROUTE_MISSING: entity=${shortId(newState.entityId)} ` +
+      `offer=${shortOrder(fill.orderId, 12)} ratio=${fill.cumulativeFillRatio} cancel=${Boolean(fill.cancelRemainder)}`);
   }
+  if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
+    throw haltRuntimeFailure("CROSS_J_FILL_SOURCE_HUB_REQUIRED", `CROSS_J_FILL_SOURCE_HUB_REQUIRED: order=${fill.orderId} entity=${newState.entityId}`);
+  }
+  if (
+    fill.routeHash &&
+    route.routeHash &&
+    fill.routeHash.toLowerCase() !== route.routeHash.toLowerCase()
+  ) {
+    throw haltRuntimeFailure("CROSS_J_FILL_ROUTE_HASH_MISMATCH", `CROSS_J_FILL_ROUTE_HASH_MISMATCH: order=${fill.orderId} got=${fill.routeHash} expected=${route.routeHash}`);
+  }
+  if (isCrossJurisdictionTerminalStatus(route.status)) return false;
+  // Once the clear is requested the ladder reveal is the only remaining
+  // authority: a late fill must never re-open or raise the ratio.
+  if (route.status === 'clear_requested' || route.status === 'clearing') return false;
+  const ratio = Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(fill.cumulativeFillRatio) || 0)));
+  const currentSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  const incomingSeq = Math.floor(Number(fill.fillSeq));
+  const isCancel = Boolean(fill.cancelRemainder) && incomingSeq === currentSeq;
+  if (!isCancel && incomingSeq === currentSeq && ratio !== committedCrossJurisdictionRatio(route)) {
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_STALE_CONFLICT", `CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${fill.orderId} seq=${incomingSeq} ratio=${ratio}`);
+  }
+  if (!isCancel && incomingSeq <= currentSeq) return false;
 
   const previousStatus = route.status;
-  applyCommittedFillAckProgress(newState, route, accountTx, ratio);
+  applyCommittedFillProgress(newState, route, fill, ratio);
   route.updatedAt = newState.timestamp;
-  crossJFollowupLog.debug('fill_ack.applied', {
+  crossJFollowupLog.debug('fill.applied', {
     entity: shortId(newState.entityId),
-    offer: shortOrder(accountTx.data.offerId, 12),
+    offer: shortOrder(fill.orderId, 12),
     previousStatus,
     status: route.status,
     ratio,
     fillSeq: route.fillSeq,
-    cancel: accountTx.data.cancelRemainder,
+    cancel: fill.cancelRemainder,
   });
 
-  closeOrProgressCrossJurisdictionBook(
-    env,
-    newState,
-    route,
-    accountTx,
-    ratio,
-    outputs,
-    storageChanges,
-    candidateEffects,
-  );
+  if (!isCrossJurisdictionFillTerminal(route, { nextRatio: ratio, cancelRemainder: fill.cancelRemainder })) return true;
+  // The book owner already removed its row for a terminal progress; only a
+  // local book still needs the removal and the admission close here.
+  if (resolveLocalBookOwner(newState, route).isCurrent) {
+    removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'fill_closed', storageChanges);
+  }
+  requestClearFromSourceHub(newState, route, Boolean(fill.cancelRemainder), outputs);
   return true;
 };
 
-const applyTargetProgressFollowup = (
+/**
+ * Book-owner entry point for a matched or cancelled cross-j order. Applies the
+ * progress to the admitted route and book row, then hands the same progress
+ * to the source Hub: locally when it is this Entity, otherwise as a durable
+ * sibling output. Nothing here touches an Account frame.
+ */
+export const applyCrossJurisdictionOrderbookFill = (
+  env: EntityRuntimeContext,
   newState: EntityState,
-  counterpartyId: string,
-  accountTx: Extract<AccountTx, { type: 'cross_pull_progress' }>,
-): boolean => {
-  const fillAck: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
-    type: 'cross_swap_fill_ack',
-    data: accountTx.data.fill,
-  };
-  const routes = newState.crossJurisdictionSwaps;
-  const route = routes
-    ? getEntityCollectionValueForWrite(routes, fillAck.data.offerId)
-    : undefined;
-  if (!route) {
-    throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ROUTE_MISSING", `CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${fillAck.data.offerId}`);
+  instruction: CrossJurisdictionFillInstruction,
+  outputs: EntityOutput[],
+  storageChanges: RuntimeOverlayRecord[],
+): void => {
+  const data = buildCrossJurisdictionFillProgressData(instruction);
+  applyCrossJurisdictionBookFillToState(env, newState, instruction.accountId, data, storageChanges);
+  const sourceHub = normalizeEntityRef(instruction.route.source.counterpartyEntityId);
+  if (sourceHub === normalizeEntityRef(newState.entityId)) {
+    applySourceHubCrossJurisdictionFillProgress(env, newState, data, outputs, storageChanges);
+    return;
   }
-  const role = getCommittedPullRole(
-    route,
-    normalizeEntityRef(newState.entityId),
-    normalizeEntityRef(counterpartyId),
-    accountTx.data.pullId,
-  );
-  if (role?.leg !== 'target') {
-    throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ACCOUNT_MISMATCH", `CROSS_J_TARGET_PROGRESS_ACCOUNT_MISMATCH:${fillAck.data.offerId}:${accountTx.data.pullId}`);
-  }
-  const ratio = getCrossJurisdictionCommittedProofRatio({
-    orderId: fillAck.data.offerId,
-    cumulativeFillRatio: fillAck.data.cumulativeFillRatio,
-    fillNumerator: fillAck.data.fillNumerator,
-    fillDenominator: fillAck.data.fillDenominator,
-  });
-  applyCommittedFillAckProgress(newState, route, fillAck, ratio);
-  route.updatedAt = newState.timestamp;
-  return true;
+  outputs.push(buildCrossJurisdictionFillNoticeOutput(instruction));
 };
 
 export function applyCommittedCrossJurisdictionAccountTxFollowup(
@@ -804,7 +657,6 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   committedAt: number,
   swapOffersCreated: SwapOfferEvent[],
   storageChanges: RuntimeOverlayRecord[],
-  candidateEffects: EntityCandidateEffect[],
 ): boolean {
   if (accountTx.type === 'cross_pull_lock') {
     return queueBookAdmissionOnCommittedPull(
@@ -820,19 +672,6 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   }
   if (accountTx.type === 'cross_pull_close') {
     return applyCrossPullCloseFollowup(env, newState, counterpartyId, accountTx, outputs, storageChanges);
-  }
-  if (accountTx.type === 'cross_pull_progress') {
-    return applyTargetProgressFollowup(newState, counterpartyId, accountTx);
-  }
-  if (accountTx.type === 'cross_swap_fill_ack') {
-    return applyFillAckFollowup(
-      env,
-      newState,
-      accountTx,
-      outputs,
-      storageChanges,
-      candidateEffects,
-    );
   }
   return false;
 }

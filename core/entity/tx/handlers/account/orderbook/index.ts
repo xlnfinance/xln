@@ -17,7 +17,7 @@ import {
   splitWorkingOrderbookOffers,
   type OrderbookProcessOptions,
 } from './helpers';
-import { finalizeCrossOrderbookAcks } from './cross/acks';
+import { finalizeCrossOrderbookFills } from './cross/fills';
 import { crossBookQtyLots } from './cross/book';
 import { processCrossOrderbookOffer } from './cross/offer';
 import { createCrossOrderbookPass } from './cross/pass';
@@ -53,7 +53,7 @@ const processCrossJurisdictionOrderbookOffers = (
   for (const offer of input.crossJurisdictionSwapOffers) {
     processCrossOrderbookOffer(pass, offer);
   }
-  finalizeCrossOrderbookAcks(pass);
+  finalizeCrossOrderbookFills(pass);
 };
 
 const processSameAccountOrderbookOffers = (
@@ -90,11 +90,12 @@ const processSameAccountOrderbookOffers = (
  * - same-chain rows require an offer already stored in account.swapOffers
  * - cross-chain rows require account.swapOffers or an admitted cross book route
  * - same-chain fills settle with account-level swap_resolve
- * - cross-chain fills settle with cross_swap_fill_ack plus hash-ledger pull clear
+ * - cross-chain fills are Hub-internal progress (never an Account tx); the
+ *   hash-ledger pull close settles both legs at the final ratio
  * - cross-chain partial fills keep the existing book row alive; terminal fills
  *   and explicit cancels remove it permanently
  * - never refresh/repair a book row from route data; admitted cross routes may
- *   only validate existing row metadata and produce fill notices
+ *   only validate existing row metadata and produce fill progress
  *
  * The orderbook is one hot-cache matcher. Same/cross differ only in
  * materialization and post-match settlement.

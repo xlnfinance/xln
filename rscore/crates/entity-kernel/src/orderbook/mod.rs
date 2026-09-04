@@ -12,6 +12,7 @@ mod types;
 #[cfg(feature = "bench")]
 pub use benchmark::{OrderbookBenchmarkResult, run_orderbook_benchmark};
 pub use commitment::compute_book_commitment_hash;
+pub(crate) use matcher::apply_cross_jurisdiction_fill_deltas;
 pub use math::PRICE_SCALE as ORDERBOOK_PRICE_SCALE;
 pub use page::{BookPricePageEntrySnapshot, BookPricePageSnapshot};
 pub use policy::{
@@ -27,4 +28,3 @@ pub(crate) use matcher::{
     OrderbookPairJob, OrderbookPairResult, PreparedOrderbookStage, SameJOutputDelta,
     install_orderbook_outputs, prepare_orderbook_outputs, validate_orderbook_outputs,
 };
-pub(crate) use math::lot_scale;

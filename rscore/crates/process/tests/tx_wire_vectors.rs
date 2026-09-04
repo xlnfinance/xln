@@ -20,17 +20,18 @@ fn vectors() -> Vec<(String, Vec<u8>)> {
     // A flat array of {name, bytes}; parsing it by hand keeps this crate free
     // of a JSON dependency it needs nowhere else.
     let mut rows = Vec::new();
-    for chunk in text.split("\"name\":").skip(1) {
-        let name = chunk
-            .split('"')
-            .nth(1)
-            .unwrap_or_else(|| panic!("vector name in {chunk}"))
-            .to_string();
-        let hex = chunk
-            .split("\"bytes\":")
+    let quoted = |chunk: &str, key: &str| -> Option<String> {
+        chunk
+            .split(&format!("\"{key}\":"))
             .nth(1)
             .and_then(|rest| rest.split('"').nth(1))
-            .unwrap_or_else(|| panic!("vector bytes for {name}"));
+            .map(str::to_string)
+    };
+    // Each `{ ... }` object carries both keys; their order is whatever the
+    // TypeScript serializer chose, so read each key independently.
+    for chunk in text.split('{').skip(1) {
+        let name = quoted(chunk, "name").unwrap_or_else(|| panic!("vector name in {chunk}"));
+        let hex = quoted(chunk, "bytes").unwrap_or_else(|| panic!("vector bytes for {name}"));
         let bytes = (0..hex.len())
             .step_by(2)
             .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("hex"))

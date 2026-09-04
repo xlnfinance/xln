@@ -6,15 +6,11 @@ import {
   CROSS_J_MAX_FILL_RATIO,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
-  projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionFillProgress,
-  withCrossJurisdictionClaimProgress,
 } from '../../../extensions/cross-j';
-import { buildCrossJurisdictionPendingFillFromAck } from '../../../extensions/cross-j/fill-ack';
 import { HASHLADDER_MAX_FILL_RATIO } from '../../../protocol/htlc/hash-ladder';
 import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../../../orderbook/swap-execution';
 import { UINT16_MAX } from '../../../config/constants';
-import type { AccountTx } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 
 const readText = (path: string): string => {
@@ -114,41 +110,7 @@ requireCondition(progress.value.nextRatio === quarterProofRatio, 'fill progress 
 requireCondition(progress.value.incrementalSourceAmount === 10_000_000_000_000_000n, 'fill progress source increment drifted');
 requireCondition(progress.value.incrementalTargetAmount === 25_000_000_000_000_000_000n, 'fill progress target increment drifted');
 
-const claimed = withCrossJurisdictionClaimProgress(exactRoute, quarterProofRatio, 2_000);
-requireCondition(claimed.sourceClaimed === committed.filledSourceAmount, 'claim progress must reuse exact source amount');
-requireCondition(claimed.targetClaimed === committed.filledTargetAmount, 'claim progress must reuse exact target amount');
 
-const pendingAck = buildCrossJurisdictionPendingFillFromAck({
-  type: 'cross_swap_fill_ack',
-  data: {
-    offerId: exactRoute.orderId,
-    fillSeq: 1,
-    cumulativeFillRatio: quarterProofRatio,
-    fillNumerator: 1n,
-    fillDenominator: 4n,
-    incrementalSourceAmount: 10_000_000_000_000_000n,
-    incrementalTargetAmount: 25_000_000_000_000_000_000n,
-    cumulativeSourceAmount: 10_000_000_000_000_000n,
-    cumulativeTargetAmount: 25_000_000_000_000_000_000n,
-    executionSourceAmount: 10_000_000_000_000_000n,
-    executionTargetAmount: 25_000_000_000_000_000_000n,
-    cancelRemainder: false,
-  },
-} as Extract<AccountTx, { type: 'cross_swap_fill_ack' }>, 2_000);
-if (!pendingAck) {
-  throw new Error('pending fill ACK was not built');
-}
-requireCondition(pendingAck?.cumulativeFillRatio === quarterProofRatio, 'pending fill ACK must derive exact proof ratio');
-requireCondition(getCrossJurisdictionCommittedProofRatio(pendingAck) === quarterProofRatio, 'pending fill must be proof-ratio readable');
-
-assertThrows(
-  () => projectCrossJurisdictionQuantizedClaim(100n, {
-    cumulativeFillRatio: 0,
-    fillNumerator: 1n,
-    orderId: 'canonical-fill-scan',
-  }),
-  'CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:canonical-fill-scan',
-);
 const invalidProgress = validateCrossJurisdictionFillProgress(makeRoute(), {
   fillSeq: 1,
   cumulativeFillRatio: 0,
@@ -189,14 +151,6 @@ requireCondition(
 );
 
 for (const [path, markers] of [
-  ['core/entity/consensus/account/cross-j-fill-ack.ts', [
-    'export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;',
-    'currentEntityState.pendingCrossJurisdictionFillAcks.size >= MAX_PENDING_CROSS_J_FILL_ACKS',
-    '`CROSS_J_FILL_ACK_PENDING_CAPACITY: entity=${currentEntityState.entityId} `',
-    "entityLog.warn('crossj.fill_ack_ttl_expired_preserved'",
-    'preserveEvidence: true',
-    'Do not delete this pending ack silently',
-  ]],
   ['core/extensions/cross-j/index.ts', [
     'getCrossJurisdictionCommittedProofRatio',
     'getCrossJurisdictionCommittedFillAmounts',
@@ -204,14 +158,10 @@ for (const [path, markers] of [
     'Runtime order progress is exact.',
     'uint16 projection used by hash-ladder/dispute plumbing',
   ]],
-  ['core/extensions/cross-j/fill-ack.ts', [
-    'getCrossJurisdictionCommittedProofRatio',
-    'const getCrossJurisdictionFillAckProofRatio',
-  ]],
   ['core/extensions/cross-j/orderbook.ts', [
     'getCrossJurisdictionCommittedFillAmounts',
     'exactFillRatioToUint16',
-    'Keep settlement amounts exact.',
+    'single\n  // representation shared by the cooperative close, the ladder reveal and the\n  // on-chain dispute',
   ]],
   ['core/entity/tx/handlers/account-cross-j-followups.ts', [
     'getCrossJurisdictionCommittedProofRatio',
@@ -226,12 +176,6 @@ for (const [path, markers] of [
     'verifyHashLadderBinary',
     'verifiedFillRatio !== claimedFillRatio',
     'Off-chain fill progress is informational only',
-  ]],
-  ['core/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts', [
-    'MAX_PENDING_CROSS_J_FILL_ACKS',
-    'pendingCrossJurisdictionFillAcks = new Map();',
-    ").rejects.toThrow('CROSS_J_FILL_ACK_PENDING_CAPACITY');",
-    'expect(cappedState.pendingCrossJurisdictionFillAcks.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);',
   ]],
 ] as const) {
   const text = readText(path);

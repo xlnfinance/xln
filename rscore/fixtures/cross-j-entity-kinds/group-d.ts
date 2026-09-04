@@ -139,7 +139,6 @@ const projectState = (value: EntityState) => ({
   })),
   crossJurisdictionSwaps: collection(value.crossJurisdictionSwaps),
   crossJurisdictionAuthorizations: collection(value.crossJurisdictionAuthorizations),
-  pendingCrossJurisdictionFillAcks: collection(value.pendingCrossJurisdictionFillAcks),
   crossJurisdictionBookAdmissions: collection(value.crossJurisdictionBookAdmissions),
 });
 
@@ -210,36 +209,11 @@ const bookState = (route: CrossJurisdictionSwapRoute): EntityState => {
   return value;
 };
 
-const resolvingBookState = (route: CrossJurisdictionSwapRoute): EntityState => {
-  const value = bookState(route);
-  const key = `${SOURCE_USER}:${route.orderId}`;
-  const current = value.crossJurisdictionBookAdmissions!.get(key)!;
-  value.crossJurisdictionBookAdmissions = PersistentEntityCollectionMap.from(new Map([[key, {
-      ...current,
-      status: 'resolving',
-      pendingCancel: {
-        sourceAccountId: SOURCE_USER,
-        requestedAt: NOW,
-        reason: 'group-d-progress-after-cancel',
-      },
-    }]]));
-  return value;
-};
-
-const progressData = (route: CrossJurisdictionSwapRoute) => ({
+const noticeData = (route: CrossJurisdictionSwapRoute) => ({
   orderId: route.orderId,
-  sourceEntityId: SOURCE_USER,
-  fillId: `${route.orderId}:1`,
-  fillSeq: 2,
+  routeHash: route.routeHash!,
+  fillSeq: Math.floor(Number(route.fillSeq ?? 0)) + 1,
   cumulativeFillRatio: 65_535,
-  fillNumerator: 1n,
-  fillDenominator: 1n,
-  incrementalSourceAmount: 500n,
-  incrementalTargetAmount: 450n,
-  cumulativeSourceAmount: 1_000n,
-  cumulativeTargetAmount: 900n,
-  priceImprovementMode: 'source_savings' as const,
-  reason: 'group-d-progress',
 });
 
 const addPull = (value: EntityState, peer: string, route: CrossJurisdictionSwapRoute, role: 'source' | 'target') => {
@@ -290,11 +264,6 @@ export const executeCrossJEntityKindsGroupD = async () => {
     state(SOURCE_HUB, SOURCE_HUB_SIGNER, SOURCE_USER),
     { type: 'admitCrossJurisdictionBookOrder', data: { route: { ...preparedRoute(), status: 'resting' }, reason: 'group-d-admit' } },
   ));
-  cases.push(await runCase(
-    'applyCrossJurisdictionBookProgress',
-    resolvingBookState(route),
-    { type: 'applyCrossJurisdictionBookProgress', data: progressData(route) },
-  ));
   const { routeHash: _routeHash, ...routeWithoutHash } = route;
   const remoteBookRoute = withCanonicalCrossJurisdictionRouteHash({
     ...routeWithoutHash,
@@ -332,7 +301,7 @@ export const executeCrossJEntityKindsGroupD = async () => {
   cases.push(await runCase(
     'crossJurisdictionFillNotice',
     notice,
-    { type: 'crossJurisdictionFillNotice', data: progressData({ ...route, fillSeq: 0 } as CrossJurisdictionSwapRoute) },
+    { type: 'crossJurisdictionFillNotice', data: noticeData(route) },
   ));
 
   const clearStart = state(SOURCE_HUB, SOURCE_HUB_SIGNER, SOURCE_USER, route);

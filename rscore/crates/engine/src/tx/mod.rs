@@ -10,7 +10,7 @@ use num_bigint::BigInt;
 
 use crate::{CanonicalValue, HtlcLockTx, HtlcResolveTx, JEventClaimTx, StateError, TokenId};
 
-pub const ACCOUNT_TX_TYPES: [&str; 23] = [
+pub const ACCOUNT_TX_TYPES: [&str; 21] = [
     "direct_payment",
     "lending_fund",
     "lending_borrow_request",
@@ -27,11 +27,9 @@ pub const ACCOUNT_TX_TYPES: [&str; 23] = [
     "htlc_resolve",
     "cross_pull_lock",
     "cross_pull_close",
-    "cross_pull_progress",
     "swap_offer",
     "swap_cancel_request",
     "swap_resolve",
-    "cross_swap_fill_ack",
     "settle_transition",
     "j_event_claim",
 ];
@@ -252,12 +250,6 @@ pub enum AccountTx {
     CrossPullClose {
         data: CanonicalValue,
     },
-    CrossPullProgress {
-        data: CanonicalValue,
-    },
-    CrossSwapFillAck {
-        data: CanonicalValue,
-    },
     SettleTransition {
         data: CanonicalValue,
     },
@@ -284,11 +276,9 @@ impl AccountTx {
             Self::HtlcResolve(_) => "htlc_resolve",
             Self::CrossPullLock { .. } => "cross_pull_lock",
             Self::CrossPullClose { .. } => "cross_pull_close",
-            Self::CrossPullProgress { .. } => "cross_pull_progress",
             Self::SwapOffer { .. } => "swap_offer",
             Self::SwapCancelRequest { .. } => "swap_cancel_request",
             Self::SwapResolve { .. } => "swap_resolve",
-            Self::CrossSwapFillAck { .. } => "cross_swap_fill_ack",
             Self::SettleTransition { .. } => "settle_transition",
             Self::JEventClaim(_) => "j_event_claim",
         }

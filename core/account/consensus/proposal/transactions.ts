@@ -104,7 +104,6 @@ const createTransactionEffects = (): ProposalTransactionEffects => ({
  */
 const OPTIMISTIC_ACCOUNT_TX_TYPES = new Set<AccountTx['type']>([
   'swap_resolve',
-  'cross_swap_fill_ack',
   'cross_pull_lock',
   'swap_offer',
   'htlc_lock',
@@ -221,10 +220,6 @@ const throwCriticalProposalFailure = (
   if (tx.type === 'settle_transition') {
     throw new Error(`SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.data.kind}:${reason}`);
   }
-  if (tx.type === 'cross_swap_fill_ack') {
-    throw haltRuntimeFailure("CROSS_J_FILL_ACK_PROPOSAL_FAILED", `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${tx.data.offerId} ` +
-      `seq=${tx.data.fillSeq} error=${reason}`);
-  }
   // swap_resolve is emitted only by the deterministic matcher. Rejecting it
   // as ordinary user input would commit the already-matched book while
   // silently discarding its bilateral settlement, permanently diverging the
@@ -244,9 +239,6 @@ const throwCriticalProposalFailure = (
   }
   if (tx.type === 'cross_pull_close') {
     throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_PROPOSAL_FAILED", `CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
-  }
-  if (tx.type === 'cross_pull_progress') {
-    throw haltRuntimeFailure("CROSS_J_PULL_PROGRESS_PROPOSAL_FAILED", `CROSS_J_PULL_PROGRESS_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
   }
 };
 

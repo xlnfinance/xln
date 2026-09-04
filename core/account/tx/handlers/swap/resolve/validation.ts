@@ -48,7 +48,7 @@ const resolveCanonicalOffer = (
   if (offer.crossJurisdiction) {
     return failure(
       events,
-      'Cross-jurisdiction offers must use cross_swap_fill_ack/requestCrossJurisdictionClear',
+      'Cross-jurisdiction offers settle through requestCrossJurisdictionClear/cross_pull_close',
     );
   }
   // `commitSwapOffer` and every requantization write price and quantized

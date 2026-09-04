@@ -19,8 +19,8 @@ const OPTIONAL = [
   'targetHubSignerId', 'targetSignerId', 'bookHubSignerId', 'sourcePull', 'targetPull',
   'sourceCloseProof', 'targetCloseProof', 'priceTicks', 'fillSeq', 'cumulativeFillRatio',
   'fillNumerator', 'fillDenominator', 'filledSourceAmount', 'filledTargetAmount',
-  'priceImprovementSourceAmount', 'pendingClearRequestedAt', 'domain', 'settlementPolicy',
-  'timePolicy', 'clearingPolicy', 'priceImprovementMode', 'riskMode', 'claimedRatio',
+  'pendingClearRequestedAt', 'domain',
+  'timePolicy', 'clearingPolicy', 'riskMode', 'claimedRatio',
   'sourceRegistryFillRatio', 'targetRegistryFillRatio', 'sourceRegistryRecord',
   'targetRegistryRecord', 'pendingSourceRegistryReveal', 'pendingTargetRegistryReveal',
   'sourceClaimed', 'targetClaimed', 'expiresAt', 'settledAt', 'error', 'memo',
@@ -37,7 +37,7 @@ const integerFields = [
 ] as const;
 const bigintFields = [
   'priceTicks', 'fillNumerator', 'fillDenominator', 'filledSourceAmount',
-  'filledTargetAmount', 'priceImprovementSourceAmount', 'sourceClaimed', 'targetClaimed',
+  'filledTargetAmount', 'sourceClaimed', 'targetClaimed',
 ] as const;
 
 const requireLiteral = (value: unknown, allowed: readonly string[], code: string): void => {
@@ -110,17 +110,6 @@ const validateDomain = (value: unknown, code: string): void => {
   }
 };
 
-const validateSettlementPolicy = (value: unknown, code: string): void => {
-  const policy = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(policy, ['roundingMode', 'maxSourceDust', 'maxTargetDust'], [
-    'minSourceFillAmount', 'minTargetFillAmount',
-  ], `${code}_FIELDS`);
-  requireLiteral(policy['roundingMode'], ['uint16_ceil'], `${code}_ROUNDING`);
-  for (const field of ['maxSourceDust', 'maxTargetDust', 'minSourceFillAmount', 'minTargetFillAmount']) {
-    if (policy[field] !== undefined) requireBigInt(policy[field], `${code}_${field}`, 0n);
-  }
-};
-
 const validateTimePolicy = (value: unknown, code: string): void => {
   const policy = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(policy, [
@@ -168,7 +157,6 @@ export function assertCrossJurisdictionSwapRoute(
   if (route['sourceCloseProof'] !== undefined) validateCloseProof(route['sourceCloseProof'], `${code}_SOURCE_CLOSE`);
   if (route['targetCloseProof'] !== undefined) validateCloseProof(route['targetCloseProof'], `${code}_TARGET_CLOSE`);
   if (route['domain'] !== undefined) validateDomain(route['domain'], `${code}_DOMAIN`);
-  if (route['settlementPolicy'] !== undefined) validateSettlementPolicy(route['settlementPolicy'], `${code}_SETTLEMENT`);
   if (route['timePolicy'] !== undefined) validateTimePolicy(route['timePolicy'], `${code}_TIME`);
   if (route['sourceRegistryRecord'] !== undefined) validateRegistryRecord(route['sourceRegistryRecord'], `${code}_SOURCE_REGISTRY`);
   if (route['targetRegistryRecord'] !== undefined) validateRegistryRecord(route['targetRegistryRecord'], `${code}_TARGET_REGISTRY`);
@@ -179,7 +167,6 @@ export function assertCrossJurisdictionSwapRoute(
     'clearing', 'settled', 'cancelled', 'expired',
   ], `${code}_STATUS`);
   if (route['clearingPolicy'] !== undefined) requireLiteral(route['clearingPolicy'], ['manual', 'full_fill', 'cancel_and_clear'], `${code}_CLEARING`);
-  if (route['priceImprovementMode'] !== undefined) requireLiteral(route['priceImprovementMode'], ['source_savings'], `${code}_PRICE_MODE`);
   if (route['riskMode'] !== undefined) requireLiteral(route['riskMode'], [
     'fully_collateralized', 'partially_collateralized', 'credit_line', 'unsecured_internalized',
   ], `${code}_RISK`);

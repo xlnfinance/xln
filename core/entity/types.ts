@@ -3,7 +3,7 @@ import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from 
 import type { DebtEntry } from '../types/finance/debt';
 import type { JHistoryFinality, JPrefixAttestation, JPrefixCertificate, JPrefixRound, ValidatorJHistory } from '../types/jurisdiction-events';
 import type { HankoString } from '../types/hanko';
-import type { AccountOutput, AccountTx, RuntimeOverlayRecord } from '../types/account';
+import type { AccountOutput, RuntimeOverlayRecord } from '../types/account';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { LendingState } from '../types/finance/lending';
 import type {
@@ -207,15 +207,6 @@ export interface EntitySwapPair {
 }
 
 
-interface PendingCrossJurisdictionFillAck {
-  accountId: string;
-  tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-  storedAt: number;
-  ttlExpiredAt?: number;
-  reason?: string;
-}
-
-
 type ExternalWalletBalanceRecord = {
   tokenAddress: string;
   tokenId?: number;
@@ -327,10 +318,6 @@ export interface EntityState {
   // Exact one-shot user authorization. Both user sibling Entities record the
   // same immutable intent before either prepared Account leg is admissible.
   crossJurisdictionAuthorizations?: Map<string, CrossJurisdictionSwapRoute>;
-  // Fill notices can outrun the local account frame that materializes the
-  // source-side offer. Keep the ack durably in entity state until the account
-  // offer is visible instead of throwing every runtime loop.
-  pendingCrossJurisdictionFillAcks?: Map<string, PendingCrossJurisdictionFillAck>;
   // Cross-jurisdiction book admission is local hub gate state. A cross order
   // can enter the shared matcher only after source and target account frames
   // both committed their cross_pull_lock receipts.

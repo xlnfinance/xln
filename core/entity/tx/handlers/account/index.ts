@@ -45,7 +45,6 @@ export {
 export type { AccountHandlerResult } from './lifecycle/result';
 export type { AccountTxTarget } from './orderbook/queue';
 export {
-  collectCommittedCrossJurisdictionCancelAcks,
   processOrderbookCancels,
   routeRemoteCrossJurisdictionBookCancels,
 } from './orderbook/cancels';

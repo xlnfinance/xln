@@ -157,13 +157,3 @@ export const accountHasCrossPullCloseQueued = (
   return account.mempool.some(isResolve) ||
     Boolean(account.pendingFrame?.accountTxs?.some(isResolve));
 };
-
-export const accountHasCrossSwapAckQueued = (
-  account: AccountStateFromEntity,
-  offerId: string,
-): boolean => {
-  const isAck = (tx: AccountTx): boolean =>
-    tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId;
-  return account.mempool.some(isAck) ||
-    Boolean(account.pendingFrame?.accountTxs?.some(isAck));
-};

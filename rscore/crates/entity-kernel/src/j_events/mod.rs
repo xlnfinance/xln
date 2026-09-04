@@ -31,8 +31,6 @@ pub(crate) fn account_tx_kind(tx: &AccountTx) -> &'static str {
         AccountTx::RebalanceRefund { .. } => "rebalance_refund",
         AccountTx::CrossPullLock { .. } => "cross_pull_lock",
         AccountTx::CrossPullClose { .. } => "cross_pull_close",
-        AccountTx::CrossPullProgress { .. } => "cross_pull_progress",
-        AccountTx::CrossSwapFillAck { .. } => "cross_swap_fill_ack",
         AccountTx::SettleTransition { .. } => "settle_transition",
         AccountTx::SwapOffer { .. } => "swap_offer",
         AccountTx::SwapResolve { .. } => "swap_resolve",

@@ -84,10 +84,9 @@ pub(crate) struct CrossJurisdictionMarket {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CrossJurisdictionBookFill {
-    pub account_id: String,
-    pub offer_id: String,
     pub route: CanonicalValue,
-    pub ack_data: CanonicalValue,
+    /// Ratio-only Hub-internal progress: the `crossJurisdictionFillNotice` data.
+    pub data: CanonicalValue,
 }
 
 /// One dispute-preparation decision for a cross-j Account offer. The route is
@@ -349,8 +348,6 @@ fn route_hash(route: &CanonicalValue, kind: EntityTxKind) -> Result<String, Enti
     let source = field(route, "source").ok_or_else(|| invalid(kind, "SOURCE_MISSING"))?;
     let target = field(route, "target").ok_or_else(|| invalid(kind, "TARGET_MISSING"))?;
     let domain = field(route, "domain").ok_or_else(|| invalid(kind, "DOMAIN_MISSING"))?;
-    let settlement = field(route, "settlementPolicy")
-        .ok_or_else(|| invalid(kind, "SETTLEMENT_POLICY_MISSING"))?;
     let time = field(route, "timePolicy").ok_or_else(|| invalid(kind, "TIME_POLICY_MISSING"))?;
     let source_dispute = canonical_dispute_config(route, "sourceDisputeConfig", kind)?;
     let target_dispute = canonical_dispute_config(route, "targetDisputeConfig", kind)?;
@@ -389,7 +386,6 @@ fn route_hash(route: &CanonicalValue, kind: EntityTxKind) -> Result<String, Enti
         Token::Int(signed_u256(&price_ticks, kind, "PRICE_TICKS")?),
         Token::Uint(U256::from(expires_at)),
         raw(text(route, "riskMode")),
-        raw(text(route, "priceImprovementMode")),
         raw(text(domain, "protocol")),
         raw(text(domain, "hashSchema")),
         raw(text(domain, "sourceStackId")),
@@ -400,27 +396,6 @@ fn route_hash(route: &CanonicalValue, kind: EntityTxKind) -> Result<String, Enti
         raw(text(domain, "targetDeltaTransformerAddress")),
         raw(text(domain, "sourceAssetRef")),
         raw(text(domain, "targetAssetRef")),
-        raw(text(settlement, "roundingMode")),
-        Token::Uint(positive_u256(
-            &required_bigint(settlement, "maxSourceDust", kind)?,
-            kind,
-            "MAX_SOURCE_DUST",
-        )?),
-        Token::Uint(positive_u256(
-            &required_bigint(settlement, "maxTargetDust", kind)?,
-            kind,
-            "MAX_TARGET_DUST",
-        )?),
-        Token::Uint(positive_u256(
-            &bigint(settlement, "minSourceFillAmount").unwrap_or_default(),
-            kind,
-            "MIN_SOURCE_FILL",
-        )?),
-        Token::Uint(positive_u256(
-            &bigint(settlement, "minTargetFillAmount").unwrap_or_default(),
-            kind,
-            "MIN_TARGET_FILL",
-        )?),
         raw(text(time, "runtimeClock")),
         raw(text(time, "settlementClock")),
         raw(text(time, "deadlineConversion")),
@@ -516,43 +491,6 @@ fn canonical_route(
     ));
     set(&mut canonical, "domain", CanonicalValue::Object(domain))?;
 
-    let supplied_settlement = field(&canonical, "settlementPolicy");
-    let default_dust =
-        |amount: &BigInt| (amount + BigInt::from(65_534_u32)) / BigInt::from(65_535_u32);
-    let max_source_dust = supplied_settlement
-        .and_then(|value| bigint(value, "maxSourceDust"))
-        .unwrap_or_else(|| default_dust(&source_amount));
-    let max_target_dust = supplied_settlement
-        .and_then(|value| bigint(value, "maxTargetDust"))
-        .unwrap_or_else(|| default_dust(&target_amount));
-    if max_source_dust.sign() == Sign::Minus || max_target_dust.sign() == Sign::Minus {
-        return Err(invalid(kind, "SETTLEMENT_DUST_NEGATIVE"));
-    }
-    let mut settlement = vec![
-        ("roundingMode".into(), string("uint16_ceil")),
-        (
-            "maxSourceDust".into(),
-            CanonicalValue::BigInt(max_source_dust),
-        ),
-        (
-            "maxTargetDust".into(),
-            CanonicalValue::BigInt(max_target_dust),
-        ),
-    ];
-    for name in ["minSourceFillAmount", "minTargetFillAmount"] {
-        if let Some(value) = supplied_settlement.and_then(|value| bigint(value, name)) {
-            if value.sign() == Sign::Minus {
-                return Err(invalid(kind, format!("{name}:NEGATIVE")));
-            }
-            settlement.push((name.into(), CanonicalValue::BigInt(value)));
-        }
-    }
-    set(
-        &mut canonical,
-        "settlementPolicy",
-        CanonicalValue::Object(settlement),
-    )?;
-
     let supplied_time = field(&canonical, "timePolicy");
     let runtime_expires = supplied_time
         .and_then(|value| unsigned(value, "runtimeExpiresAtMs"))
@@ -583,11 +521,6 @@ fn canonical_route(
         return Err(invalid(kind, format!("RISK_MODE:{risk}")));
     }
     set(&mut canonical, "riskMode", string("fully_collateralized"))?;
-    if let Some(mode) = text(&canonical, "priceImprovementMode")
-        && mode != "source_savings"
-    {
-        return Err(invalid(kind, format!("PRICE_IMPROVEMENT_MODE:{mode}")));
-    }
     canonical_dispute_config(&canonical, "sourceDisputeConfig", kind)?;
     canonical_dispute_config(&canonical, "targetDisputeConfig", kind)?;
     let expected = route_hash(&canonical, kind)?;
@@ -1975,12 +1908,6 @@ fn apply_materialize_clear(
             format!("SOURCE_PULL_ACCOUNT_MISSING:{order_id}"),
         ));
     }
-    if view.swap_offers.contains_key(&order_id) {
-        return Err(invalid(
-            tx.kind,
-            format!("SOURCE_OFFER_STILL_OPEN:{order_id}"),
-        ));
-    }
     if view.pending_cross_pull_close_ids.contains(&source_pull_id) {
         return Err(invalid(
             tx.kind,
@@ -2001,29 +1928,13 @@ fn apply_materialize_clear(
         format!("Cross-j {order_id} paired target close {ratio}/65535"),
         tx.kind,
     )?;
-    let mut account_txs = vec![AccountTx::CrossPullClose {
+    let account_txs = vec![AccountTx::CrossPullClose {
         data: CanonicalValue::Object(vec![
             ("pullId".into(), string(&source_pull_id)),
             ("binary".into(), string(binary)),
             ("proof".into(), expected_proof),
         ]),
     }];
-    let source_savings = bigint(&route, "priceImprovementSourceAmount").unwrap_or_default();
-    if source_savings > BigInt::from(0) {
-        let source = field(&route, "source").ok_or_else(|| invalid(tx.kind, "SOURCE_MISSING"))?;
-        let token_id = xln_rscore_engine::TokenId::new(required_u32(source, "tokenId", tx.kind)?)
-            .map_err(|error| invalid(tx.kind, error.to_string()))?;
-        account_txs.push(AccountTx::DirectPayment {
-            token_id,
-            amount: source_savings,
-            route: vec![source_user.clone()],
-            description: Some(format!("cross-j-source-savings:{order_id}")),
-            from_entity_id: source_hub,
-            to_entity_id: source_user.clone(),
-            delivery_mode: xln_rscore_engine::DeliveryMode::Direct,
-            trusted_gateway_entity_id: None,
-        });
-    }
     collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![target, LocalEntityOutput::non_mutating_wake(local)],
@@ -2047,7 +1958,6 @@ fn semantic_order_id(tx: &CanonicalEntityTx) -> Option<&str> {
             field(data, "proof").and_then(|proof| text(proof, "orderId"))
         }
         EntityTxKind::CrossJurisdictionFillNotice
-        | EntityTxKind::ApplyCrossJurisdictionBookProgress
         | EntityTxKind::RemoveCrossJurisdictionBookOrder
         | EntityTxKind::CrossJurisdictionBookOrderRemoved
         | EntityTxKind::RequestCrossJurisdictionClear
@@ -2144,7 +2054,7 @@ fn required_text(
 }
 
 fn authorize_semantic_role(
-    state: &EntityStateSlice,
+    _state: &EntityStateSlice,
     source: &str,
     target: &str,
     tx: &CanonicalEntityTx,
@@ -2171,40 +2081,13 @@ fn authorize_semantic_role(
             assert_source(tx.kind, source, [source_hub])?;
             assert_target(tx.kind, target, &book_owner)
         }
-        EntityTxKind::ApplyCrossJurisdictionBookProgress => {
-            let order_id = required_text(data, "orderId", tx)?;
-            let claimed_source = required_text(data, "sourceEntityId", tx)?;
-            let admission_key = format!("{claimed_source}:{order_id}");
-            let admission = state
-                .cross_jurisdiction_book_admissions
-                .as_ref()
-                .and_then(|values| values.get(&admission_key))
-                .ok_or_else(|| {
-                    runtime_invalid(format!(
-                        "RUNTIME_OUTPUT_BOOK_ADMISSION_MISSING:{claimed_source}:{order_id}"
-                    ))
-                })?;
-            if text(admission, "routeHash").map(normalized)
-                != text(route, "routeHash").map(normalized)
-                || text(admission, "bookOwnerEntityId").map(normalized) != Some(book_owner.clone())
-            {
+        EntityTxKind::CrossJurisdictionFillNotice => {
+            if target != source_hub {
                 return Err(runtime_invalid(format!(
-                    "RUNTIME_OUTPUT_BOOK_ADMISSION_ROUTE_MISMATCH:{claimed_source}:{order_id}"
+                    "RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:{target}"
                 )));
             }
-            assert_source(tx.kind, source, [source_hub])?;
-            assert_target(tx.kind, target, &book_owner)
-        }
-        EntityTxKind::CrossJurisdictionFillNotice => {
-            if target == source_hub {
-                assert_source(tx.kind, source, [book_owner])
-            } else if target == target_hub {
-                assert_source(tx.kind, source, [source_hub])
-            } else {
-                Err(runtime_invalid(format!(
-                    "RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:{target}"
-                )))
-            }
+            assert_source(tx.kind, source, [book_owner])
         }
         EntityTxKind::CrossPullClose => {
             let counterparty = required_text(data, "counterpartyEntityId", tx)?;
@@ -2522,6 +2405,294 @@ fn route_tx(
     )
 }
 
+fn route_hash_matches(data: &CanonicalValue, route: &CanonicalValue) -> bool {
+    match (
+        text(data, "routeHash").filter(|value| !value.is_empty()),
+        text(route, "routeHash").filter(|value| !value.is_empty()),
+    ) {
+        (Some(actual), Some(expected)) => normalized(actual) == normalized(expected),
+        _ => true,
+    }
+}
+
+fn mark_admission_closed(
+    admission: &mut CanonicalValue,
+    closed_at: u64,
+    reason: &str,
+    kind: EntityTxKind,
+) -> Result<(), EntityKernelError> {
+    let now = number(closed_at, kind, "TIMESTAMP")?;
+    set(admission, "status", string("closed"))?;
+    set(admission, "closedAt", now.clone())?;
+    set(admission, "closeReason", string(reason))?;
+    set(admission, "updatedAt", now)?;
+    Ok(())
+}
+
+/// Book-owner projection of Hub-internal fill progress (TS
+/// `applyCrossJurisdictionBookFillToState`). Applied in the same Entity frame
+/// that matched (or cancelled) the order; never an Account tx. Returns the
+/// orderbook deltas that keep the local book row equal to the route remainder.
+fn apply_book_fill_to_state(
+    state: &mut EntityStateSlice,
+    source_entity: &str,
+    data: &CanonicalValue,
+) -> Result<Vec<SameJOutputDelta>, EntityKernelError> {
+    let kind = EntityTxKind::CrossJurisdictionFillNotice;
+    let order_id = text(data, "orderId")
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid(kind, "ORDER_ID_MISSING"))?
+        .to_string();
+    let admission_key = format!("{source_entity}:{order_id}");
+    let mut admission = state
+        .cross_jurisdiction_book_admissions
+        .as_ref()
+        .and_then(|values| values.get(&admission_key))
+        .cloned()
+        .ok_or_else(|| {
+            invalid(
+                kind,
+                format!("CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING:{order_id}:{source_entity}"),
+            )
+        })?;
+    let status = text(&admission, "status").unwrap_or("");
+    // The book owner already closed this order (terminal fill or an earlier
+    // cancel); a repeated cancel request has nothing left to decide.
+    if status == "closed" && canonical_bool(data, "cancelRemainder") {
+        return Ok(Vec::new());
+    }
+    if status != "admitted" && status != "resolving" {
+        return Err(invalid(
+            kind,
+            format!("CROSS_J_BOOK_PROGRESS_ADMISSION_NOT_ADMITTED:{order_id}:{status}"),
+        ));
+    }
+    let admitted = field(&admission, "route")
+        .ok_or_else(|| invalid(kind, format!("ADMISSION_ROUTE_MISSING:{order_id}")))?;
+    let mut route = canonical_route(admitted, kind)?;
+    let local = normalized(&state.entity_id);
+    let owner = route_book_owner(&route);
+    if owner != local {
+        return Err(invalid(
+            kind,
+            format!("CROSS_J_BOOK_PROGRESS_WRONG_OWNER:{order_id}:{owner}:{local}"),
+        ));
+    }
+    let now = number(state.timestamp, kind, "TIMESTAMP")?;
+    let (current_ratio, _, _) = committed_fill(&route, kind)?;
+    let current_seq = unsigned(&route, "fillSeq").unwrap_or(0);
+    let incoming_seq =
+        unsigned(data, "fillSeq").ok_or_else(|| invalid(kind, "FILL_SEQ_MISSING"))?;
+    let ratio =
+        unsigned(data, "cumulativeFillRatio").ok_or_else(|| invalid(kind, "FILL_RATIO_MISSING"))?;
+    let cancel = canonical_bool(data, "cancelRemainder");
+    if current_seq == incoming_seq && current_ratio == ratio {
+        set(&mut admission, "updatedAt", now)?;
+        if cancel {
+            mark_admission_closed(&mut admission, state.timestamp, "cancel_request", kind)?;
+        }
+        collection(&mut state.cross_jurisdiction_book_admissions)
+            .insert(admission_key, admission)?;
+        return Ok(Vec::new());
+    }
+    if incoming_seq <= current_seq {
+        return Err(invalid(
+            kind,
+            format!("CROSS_J_BOOK_PROGRESS_STALE:{order_id}:{incoming_seq}:{current_seq}"),
+        ));
+    }
+    committed::with_fill_progress(
+        &mut route,
+        incoming_seq,
+        ratio,
+        state.timestamp,
+        kind,
+        "CROSS_J_BOOK_PROGRESS_INVALID",
+    )?;
+    if cancel {
+        set(&mut route, "status", string("clear_requested"))?;
+        set(&mut route, "updatedAt", now.clone())?;
+        set(&mut route, "clearingPolicy", string("cancel_and_clear"))?;
+    }
+    set(&mut admission, "route", route.clone())?;
+    set(&mut admission, "updatedAt", now)?;
+    // The source Hub owns its route mirror and applies the same progress right
+    // after this (locally or from the fill notice); only a remote book owner
+    // keeps its mirror coherent here for salvage/UI.
+    let source_hub = nested_text(&route, "source", "counterpartyEntityId")
+        .map(normalized)
+        .ok_or_else(|| invalid(kind, "SOURCE_HUB_MISSING"))?;
+    if source_hub != local
+        && let Some(mirror) = state
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .and_then(|routes| routes.get(&order_id))
+            .cloned()
+    {
+        let merged = committed::merge_route(Some(&mirror), &route)?;
+        collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), merged)?;
+    }
+    let partially_filled = text(&route, "status") == Some("partially_filled");
+    let deltas = if partially_filled {
+        let (account_id, offer) = cross_jurisdiction_working_offer(&route)?;
+        vec![SameJOutputDelta::Upsert {
+            account_id,
+            offer: Box::new(offer),
+        }]
+    } else {
+        mark_admission_closed(
+            &mut admission,
+            state.timestamp,
+            if cancel {
+                "cancel_request"
+            } else {
+                "fill_closed"
+            },
+            kind,
+        )?;
+        vec![SameJOutputDelta::Remove {
+            account_id: source_entity.to_string(),
+            offer_id: order_id,
+        }]
+    };
+    collection(&mut state.cross_jurisdiction_book_admissions).insert(admission_key, admission)?;
+    Ok(deltas)
+}
+
+/// Hub-side handling of a committed user `swap_cancel_request` for a cross-j
+/// order (TS `routeRemoteCrossJurisdictionBookCancels` +
+/// `processOrderbookCancels`). The user only asks; the book owner removes the
+/// row and the source Hub clears the pull pair at the committed progress.
+pub(crate) fn apply_cross_jurisdiction_cancel_request(
+    state: &mut EntityStateSlice,
+    account_id: &str,
+    offer_id: &str,
+    account_view: Option<&crate::local_financial::LocalAccountFinancialView>,
+) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
+    let kind = EntityTxKind::RemoveCrossJurisdictionBookOrder;
+    let route = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .and_then(|routes| routes.get(offer_id))
+        .cloned()
+        .ok_or_else(|| invalid(kind, format!("ROUTE_MISSING:{offer_id}")))?;
+    let local = normalized(&state.entity_id);
+    let source_hub = nested_text(&route, "source", "counterpartyEntityId")
+        .map(normalized)
+        .ok_or_else(|| invalid(kind, "SOURCE_HUB_MISSING"))?;
+    // Only the source Hub acts on a cross-j cancel request (TS collectSwapEvents).
+    if local != source_hub {
+        return Ok(CrossJurisdictionApplyResult::default());
+    }
+    let source_entity = nested_text(&route, "source", "entityId")
+        .map(normalized)
+        .ok_or_else(|| invalid(kind, "SOURCE_ENTITY_MISSING"))?;
+    let admission_key = format!("{source_entity}:{offer_id}");
+    let owner = route_book_owner(&route);
+    if owner.is_empty() {
+        return Err(invalid(
+            kind,
+            format!("CROSS_J_CANCEL_BOOK_OWNER_MISSING:{offer_id}"),
+        ));
+    }
+    if owner != local {
+        if route_signer(&route, &owner).is_none() {
+            return Err(invalid(
+                kind,
+                format!("CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING:{offer_id}:{owner}"),
+            ));
+        }
+        if let Some(mut admission) = state
+            .cross_jurisdiction_book_admissions
+            .as_ref()
+            .and_then(|values| values.get(&admission_key))
+            .cloned()
+            && text(&admission, "status") != Some("closed")
+        {
+            let now = number(state.timestamp, kind, "TIMESTAMP")?;
+            set(&mut admission, "status", string("resolving"))?;
+            set(&mut admission, "resolvingAt", now.clone())?;
+            set(&mut admission, "updatedAt", now)?;
+            collection(&mut state.cross_jurisdiction_book_admissions)
+                .insert(admission_key, admission)?;
+        }
+        return Ok(CrossJurisdictionApplyResult {
+            outputs: vec![routed_for_route(
+                &route,
+                &owner,
+                vec![projected(
+                    kind,
+                    CanonicalValue::Object(vec![
+                        ("orderId".into(), string(offer_id)),
+                        ("sourceEntityId".into(), string(&source_entity)),
+                        ("sourceAccountId".into(), string(account_id)),
+                        ("route".into(), route.clone()),
+                        ("reason".into(), string("cancel_request")),
+                    ]),
+                )?],
+                kind,
+            )?],
+            ..CrossJurisdictionApplyResult::default()
+        });
+    }
+    // Local book: only the matcher owns the canonical book (TS returns without
+    // an orderbook extension), and a cancel for an offer that is already gone
+    // is a no-op.
+    if state.orderbook.is_none()
+        || !account_view.is_some_and(|view| view.swap_offers.contains_key(offer_id))
+    {
+        return Ok(CrossJurisdictionApplyResult::default());
+    }
+    let admitted = state
+        .cross_jurisdiction_book_admissions
+        .as_ref()
+        .and_then(|values| values.get(&admission_key))
+        .and_then(|admission| field(admission, "route"))
+        .cloned()
+        .unwrap_or_else(|| route.clone());
+    let (ratio, _, _) = committed_fill(&admitted, kind)?;
+    let mut fields = vec![("orderId".into(), string(offer_id))];
+    if let Some(route_hash) = text(&admitted, "routeHash").filter(|value| !value.is_empty()) {
+        fields.push(("routeHash".into(), string(route_hash)));
+    }
+    fields.extend([
+        (
+            "fillSeq".into(),
+            number(
+                unsigned(&admitted, "fillSeq").unwrap_or(0),
+                kind,
+                "FILL_SEQ",
+            )?,
+        ),
+        (
+            "cumulativeFillRatio".into(),
+            number(ratio, kind, "FILL_RATIO")?,
+        ),
+        ("cancelRemainder".into(), CanonicalValue::Bool(true)),
+    ]);
+    let mut result = CrossJurisdictionApplyResult {
+        orderbook_deltas: vec![SameJOutputDelta::Remove {
+            account_id: account_id.to_string(),
+            offer_id: offer_id.to_string(),
+        }],
+        ..CrossJurisdictionApplyResult::default()
+    };
+    let committed = commit_cross_jurisdiction_book_fill(
+        state,
+        CrossJurisdictionBookFill {
+            route: admitted,
+            data: CanonicalValue::Object(fields),
+        },
+    )?;
+    extend_cross_jurisdiction_result(&mut result, committed);
+    Ok(result)
+}
+
+/// Book-owner entry point for a matched or cancelled cross-j order (TS
+/// `applyCrossJurisdictionOrderbookFill`). Applies the progress to the admitted
+/// route and book row, then hands the same progress to the source Hub: locally
+/// when it is this Entity, otherwise as a durable sibling output. Nothing here
+/// touches an Account frame.
 pub(crate) fn commit_cross_jurisdiction_book_fill(
     state: &mut EntityStateSlice,
     fill: CrossJurisdictionBookFill,
@@ -2533,131 +2704,23 @@ pub(crate) fn commit_cross_jurisdiction_book_fill(
     let source_hub = nested_text(&fill.route, "source", "counterpartyEntityId")
         .map(normalized)
         .ok_or_else(|| invalid(kind, "SOURCE_HUB_MISSING"))?;
-    let admission_key = format!("{source_entity}:{}", fill.offer_id);
-    if let Some(mut admission) = state
-        .cross_jurisdiction_book_admissions
-        .as_ref()
-        .and_then(|values| values.get(&admission_key))
-        .cloned()
-    {
-        let fill_seq = unsigned(&fill.ack_data, "fillSeq").unwrap_or(0);
-        let ratio = unsigned(&fill.ack_data, "cumulativeFillRatio").unwrap_or(0);
-        let cumulative_source = required_bigint(&fill.ack_data, "cumulativeSourceAmount", kind)?;
-        let cumulative_target = required_bigint(&fill.ack_data, "cumulativeTargetAmount", kind)?;
-        let route_hash = text(&fill.ack_data, "routeHash").unwrap_or_default();
-        let fill_id_preimage = format!(
-            "{route_hash}|{}|{fill_seq}|{ratio}|{cumulative_source}|{cumulative_target}",
-            fill.offer_id,
-        );
-        let fill_id = format!("0x{}", hex(&Keccak256::digest(fill_id_preimage.as_bytes())));
-        let now = CanonicalValue::Number(
-            CanonicalNumber::try_from_u64(state.timestamp)
-                .map_err(|_| invalid(kind, "TIMESTAMP_UNSAFE"))?,
-        );
-        let mut pending_fields = vec![
-            ("fillId".into(), string(&fill_id)),
-            ("ackKind".into(), string("fill")),
-            (
-                "fillSeq".into(),
-                field(&fill.ack_data, "fillSeq")
-                    .expect("validated fillSeq")
-                    .clone(),
-            ),
-            (
-                "cumulativeFillRatio".into(),
-                field(&fill.ack_data, "cumulativeFillRatio")
-                    .expect("validated ratio")
-                    .clone(),
-            ),
-            (
-                "cumulativeSourceAmount".into(),
-                CanonicalValue::BigInt(cumulative_source),
-            ),
-            (
-                "cumulativeTargetAmount".into(),
-                CanonicalValue::BigInt(cumulative_target),
-            ),
-            (
-                "fillNumerator".into(),
-                field(&fill.ack_data, "fillNumerator")
-                    .ok_or_else(|| invalid(kind, "FILL_NUMERATOR_MISSING"))?
-                    .clone(),
-            ),
-            (
-                "fillDenominator".into(),
-                field(&fill.ack_data, "fillDenominator")
-                    .ok_or_else(|| invalid(kind, "FILL_DENOMINATOR_MISSING"))?
-                    .clone(),
-            ),
-            ("routeHash".into(), string(route_hash)),
-            ("updatedAt".into(), now.clone()),
-            ("firstSeenAt".into(), now.clone()),
-        ];
-        if let Some(previous) = field(&fill.ack_data, "previousFillSeq") {
-            pending_fields.push(("previousFillSeq".into(), previous.clone()));
-        }
-        set(
-            &mut admission,
-            "pendingFill",
-            CanonicalValue::Object(pending_fields),
-        )?;
-        set(&mut admission, "updatedAt", now)?;
-        collection(&mut state.cross_jurisdiction_book_admissions)
-            .insert(admission_key, admission)?;
-    }
-
+    let mut result = CrossJurisdictionApplyResult {
+        orderbook_deltas: apply_book_fill_to_state(state, &source_entity, &fill.data)?,
+        ..CrossJurisdictionApplyResult::default()
+    };
     if normalized(&state.entity_id) == source_hub {
-        return Ok(CrossJurisdictionApplyResult {
-            outputs: Vec::new(),
-            proposal_work: vec![AccountProposalWork {
-                account_id: fill.account_id,
-                txs: vec![AccountTx::CrossSwapFillAck {
-                    data: fill.ack_data,
-                }],
-            }],
-            events: Vec::new(),
-            orderbook_deltas: Vec::new(),
-            account_envelope_mutations: Vec::new(),
-        });
-    }
-    let mut notice_fields = vec![("orderId".into(), string(&fill.offer_id))];
-    for name in [
-        "routeHash",
-        "previousFillSeq",
-        "fillSeq",
-        "incrementalSourceAmount",
-        "incrementalTargetAmount",
-        "cumulativeSourceAmount",
-        "cumulativeTargetAmount",
-        "cumulativeFillRatio",
-        "fillNumerator",
-        "fillDenominator",
-        "priceImprovementMode",
-        "priceImprovementAmount",
-        "priceImprovementTokenId",
-        "cancelRemainder",
-        "priceTicks",
-        "pairId",
-    ] {
-        if let Some(value) = field(&fill.ack_data, name) {
-            notice_fields.push((name.into(), value.clone()));
+        if let Some(applied) = committed::apply_source_hub_fill_progress(state, &fill.data, kind)? {
+            extend_cross_jurisdiction_result(&mut result, applied);
         }
+        return Ok(result);
     }
-    Ok(CrossJurisdictionApplyResult {
-        outputs: vec![routed_for_route(
-            &fill.route,
-            &source_hub,
-            vec![projected(
-                EntityTxKind::CrossJurisdictionFillNotice,
-                CanonicalValue::Object(notice_fields),
-            )?],
-            kind,
-        )?],
-        proposal_work: Vec::new(),
-        events: Vec::new(),
-        orderbook_deltas: Vec::new(),
-        account_envelope_mutations: Vec::new(),
-    })
+    result.outputs.push(routed_for_route(
+        &fill.route,
+        &source_hub,
+        vec![projected(kind, fill.data)?],
+        kind,
+    )?);
+    Ok(result)
 }
 
 fn validate_route_identity(
@@ -2856,23 +2919,8 @@ fn pull_binding(
         ),
         ("leg".into(), CanonicalValue::String(leg.into())),
     ];
-    for field_name in [
-        "sourceCloseProof",
-        "status",
-        "cumulativeFillRatio",
-        "fillSeq",
-        "fillNumerator",
-        "fillDenominator",
-        "claimedRatio",
-        "filledSourceAmount",
-        "filledTargetAmount",
-        "sourceClaimed",
-        "targetClaimed",
-        "clearingPolicy",
-    ] {
-        if let Some(value) = field(route, field_name) {
-            fields.push((field_name.into(), value.clone()));
-        }
+    if let Some(value) = field(route, "status") {
+        fields.push(("status".into(), value.clone()));
     }
     Ok(CanonicalValue::Object(fields))
 }
@@ -3230,34 +3278,10 @@ fn apply_remove_book_order(
     if text(&admission, "routeHash").map(normalized) != Some(route_hash) {
         return Err(invalid(tx.kind, "CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH"));
     }
-    if let Some(pending) = field(&admission, "pendingCancel")
-        && text(pending, "sourceAccountId").map(normalized) != Some(source_account.clone())
-    {
-        return Err(invalid(tx.kind, "CROSS_J_CANCEL_SOURCE_ACCOUNT_MISMATCH"));
-    }
     let now = CanonicalValue::Number(
         CanonicalNumber::try_from_u64(state.timestamp)
             .map_err(|_| invalid(tx.kind, "TIMESTAMP_UNSAFE"))?,
     );
-    if field(&admission, "pendingCancel").is_none() {
-        set(
-            &mut admission,
-            "pendingCancel",
-            CanonicalValue::Object(vec![
-                ("sourceAccountId".into(), string(&source_account)),
-                ("requestedAt".into(), now.clone()),
-                ("reason".into(), string(reason)),
-            ]),
-        )?;
-    }
-    if text(&admission, "status") != Some("closed") {
-        set(&mut admission, "status", string("resolving"))?;
-        if field(&admission, "resolvingAt").is_none() {
-            set(&mut admission, "resolvingAt", now.clone())?;
-        }
-    }
-    set(&mut admission, "updatedAt", now.clone())?;
-
     let source_hub = nested_text(&route, "source", "counterpartyEntityId")
         .map(normalized)
         .ok_or_else(|| invalid(tx.kind, "SOURCE_HUB_MISSING"))?;
@@ -3278,14 +3302,10 @@ fn apply_remove_book_order(
             ("reason".into(), string(reason)),
         ]),
     )?;
-    if field(&admission, "pendingFill").is_none() {
-        set(&mut admission, "status", string("closed"))?;
-        set(&mut admission, "closedAt", now.clone())?;
-        set(&mut admission, "closeReason", string(reason))?;
-        remove(&mut admission, "pendingFill")?;
-        remove(&mut admission, "pendingCancel")?;
-        set(&mut admission, "updatedAt", now)?;
-    }
+    set(&mut admission, "status", string("closed"))?;
+    set(&mut admission, "closedAt", now.clone())?;
+    set(&mut admission, "closeReason", string(reason))?;
+    set(&mut admission, "updatedAt", now)?;
     collection(&mut state.cross_jurisdiction_book_admissions).insert(admission_key, admission)?;
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![routed_for_route(&route, &source_hub, vec![ack], tx.kind)?],
@@ -3351,26 +3371,9 @@ fn apply_book_order_removed(
             CanonicalNumber::try_from_u64(removed_at)
                 .map_err(|_| invalid(tx.kind, "REMOVED_AT_UNSAFE"))?,
         );
-        let mut pending = field(&admission, "pendingCancel")
-            .cloned()
-            .unwrap_or_else(|| CanonicalValue::Object(Vec::new()));
-        set(&mut pending, "sourceAccountId", string(&source_account))?;
-        if field(&pending, "requestedAt").is_none() {
-            set(&mut pending, "requestedAt", now.clone())?;
-        }
-        if field(&pending, "reason").is_none() {
-            set(&mut pending, "reason", string(reason))?;
-        }
-        if field(&pending, "bookRemovalCommittedAt").is_none() {
-            set(&mut pending, "bookRemovalCommittedAt", now.clone())?;
-        }
-        set(&mut admission, "pendingCancel", pending)?;
-        if text(&admission, "status") != Some("closed") {
-            set(&mut admission, "status", string("resolving"))?;
-            if field(&admission, "resolvingAt").is_none() {
-                set(&mut admission, "resolvingAt", now.clone())?;
-            }
-        }
+        set(&mut admission, "status", string("closed"))?;
+        set(&mut admission, "closedAt", now.clone())?;
+        set(&mut admission, "closeReason", string(reason))?;
         set(&mut admission, "updatedAt", now)?;
         collection(&mut state.cross_jurisdiction_book_admissions)
             .insert(admission_key, admission)?;
@@ -3384,8 +3387,25 @@ fn apply_book_order_removed(
         .is_some_and(|ids| {
             matches!(ids, CanonicalValue::Array(values) if values.iter().any(|value| value == &string(&order_id)))
         });
+    // The remote book owner removed the row; the source Hub now clears the
+    // pull pair at the committed progress (pure cancel or partial reveal).
+    let outputs = if pending_dispute_removal {
+        Vec::new()
+    } else {
+        vec![routed(
+            &source_hub,
+            None,
+            vec![projected(
+                EntityTxKind::RequestCrossJurisdictionClear,
+                CanonicalValue::Object(vec![
+                    ("orderId".into(), string(&order_id)),
+                    ("cancelRemainder".into(), CanonicalValue::Bool(true)),
+                ]),
+            )?],
+        )]
+    };
     Ok(CrossJurisdictionApplyResult {
-        outputs: Vec::new(),
+        outputs,
         proposal_work: Vec::new(),
         events: vec![EntityFrameEvent::Status {
             message: format!(
@@ -4584,74 +4604,6 @@ fn apply_salvage(
     })
 }
 
-fn cancel_ack_data(
-    route: &CanonicalValue,
-    order_id: &str,
-    kind: EntityTxKind,
-) -> Result<CanonicalValue, EntityKernelError> {
-    let (ratio, source_amount, target_amount) = committed_fill(route, kind)?;
-    let fill_seq = unsigned(route, "fillSeq").unwrap_or(0);
-    Ok(CanonicalValue::Object(vec![
-        ("offerId".into(), string(order_id)),
-        (
-            "routeHash".into(),
-            string(text(route, "routeHash").unwrap_or("")),
-        ),
-        (
-            "previousFillSeq".into(),
-            number(fill_seq, kind, "PREVIOUS_FILL_SEQ")?,
-        ),
-        ("fillSeq".into(), number(fill_seq, kind, "FILL_SEQ")?),
-        (
-            "incrementalSourceAmount".into(),
-            CanonicalValue::BigInt(BigInt::from(0)),
-        ),
-        (
-            "incrementalTargetAmount".into(),
-            CanonicalValue::BigInt(BigInt::from(0)),
-        ),
-        (
-            "cumulativeSourceAmount".into(),
-            CanonicalValue::BigInt(source_amount),
-        ),
-        (
-            "cumulativeTargetAmount".into(),
-            CanonicalValue::BigInt(target_amount),
-        ),
-        (
-            "cumulativeFillRatio".into(),
-            number(ratio, kind, "FILL_RATIO")?,
-        ),
-        (
-            "fillNumerator".into(),
-            bigint(route, "fillNumerator")
-                .map(CanonicalValue::BigInt)
-                .unwrap_or_else(|| CanonicalValue::BigInt(BigInt::from(0))),
-        ),
-        (
-            "fillDenominator".into(),
-            bigint(route, "fillDenominator")
-                .map(CanonicalValue::BigInt)
-                .unwrap_or_else(|| CanonicalValue::BigInt(BigInt::from(1))),
-        ),
-        ("ackKind".into(), string("cancel")),
-        (
-            "executionSourceAmount".into(),
-            CanonicalValue::BigInt(BigInt::from(0)),
-        ),
-        (
-            "executionTargetAmount".into(),
-            CanonicalValue::BigInt(BigInt::from(0)),
-        ),
-        ("cancelRemainder".into(), CanonicalValue::Bool(true)),
-        ("comment".into(), string("cross-j-cancel-request")),
-        (
-            "pairId".into(),
-            string(text(route, "venueId").unwrap_or("")),
-        ),
-    ]))
-}
-
 fn queue_target_close(
     route: &CanonicalValue,
     binary: &str,
@@ -4769,13 +4721,79 @@ fn apply_clear_request(
     let view = account_views
         .get(&source_user)
         .ok_or_else(|| invalid(tx.kind, format!("ACCOUNT_VIEW_MISSING:{source_user}")))?;
-    let live_offer = view
-        .swap_offers
-        .get(&order_id)
-        .and_then(|offer| offer.cross_jurisdiction.as_ref())
-        .is_some();
-    if live_offer && (cancel_remainder || ratio > 0) {
-        if view.pending_cross_swap_ack_ids.contains(&order_id) {
+    // The user-side Account offer stays open until the pull close deletes it;
+    // only a still-resting local book row has to leave before the reveal.
+    let mut prelude = CrossJurisdictionApplyResult::default();
+    if state.orderbook.as_ref().is_some_and(|orderbook| {
+        orderbook
+            .pair_by_order
+            .contains_key(&format!("{source_user}:{order_id}"))
+    }) {
+        prelude.orderbook_deltas.push(SameJOutputDelta::Remove {
+            account_id: source_user.clone(),
+            offer_id: order_id.clone(),
+        });
+        prelude.events.push(EntityFrameEvent::Status {
+            message: format!("🌉 Cross-j clear {order_id} removed live book order"),
+        });
+    }
+    let tail = (|| -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
+        let source_pull_id = field(&route, "sourcePull")
+            .and_then(|pull| text(pull, "pullId"))
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| invalid(tx.kind, "SOURCE_PULL_ID_MISSING"))?
+            .to_string();
+        if ratio == 0 {
+            if !cancel_remainder || !view.pulls.contains_key(&source_pull_id) {
+                return Ok(CrossJurisdictionApplyResult::default());
+            }
+            let proof = build_close_proof(&route, "0x", tx.kind)?;
+            set(&mut route, "sourceCloseProof", proof.clone())?;
+            set(&mut route, "status", string("clearing"))?;
+            set(
+                &mut route,
+                "updatedAt",
+                number(state.timestamp, tx.kind, "TIMESTAMP")?,
+            )?;
+            // TS builds the paired target close from the route before recording
+            // the local clear request policy on the stored mirror.
+            let target = queue_target_close(
+                &route,
+                "0x",
+                &proof,
+                format!("Cross-j {order_id} paired pure-cancel target close"),
+                tx.kind,
+            )?;
+            set(
+                &mut route,
+                "pendingClearRequestedAt",
+                number(state.timestamp, tx.kind, "TIMESTAMP")?,
+            )?;
+            set(&mut route, "clearingPolicy", string("cancel_and_clear"))?;
+            collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
+            return Ok(CrossJurisdictionApplyResult {
+                outputs: vec![target, LocalEntityOutput::non_mutating_wake(local)],
+                proposal_work: vec![AccountProposalWork {
+                    account_id: source_user,
+                    txs: vec![AccountTx::CrossPullClose {
+                        data: CanonicalValue::Object(vec![
+                            ("pullId".into(), string(source_pull_id)),
+                            ("binary".into(), string("0x")),
+                            ("proof".into(), proof),
+                        ]),
+                    }],
+                }],
+                events: vec![EntityFrameEvent::Status {
+                    message: format!(
+                        "🌉 Cross-j clear {order_id} queued atomic Hub pure-cancel close"
+                    ),
+                }],
+                ..CrossJurisdictionApplyResult::default()
+            });
+        }
+        if !view.pulls.contains_key(&source_pull_id)
+            || view.pending_cross_pull_close_ids.contains(&source_pull_id)
+        {
             return Ok(CrossJurisdictionApplyResult::default());
         }
         set(&mut route, "status", string("clear_requested"))?;
@@ -4784,111 +4802,28 @@ fn apply_clear_request(
             "pendingClearRequestedAt",
             number(state.timestamp, tx.kind, "TIMESTAMP")?,
         )?;
-        set(&mut route, "clearingPolicy", string("cancel_and_clear"))?;
-        let ack = cancel_ack_data(&route, &order_id, tx.kind)?;
+        set(
+            &mut route,
+            "clearingPolicy",
+            string(if cancel_remainder || ratio < 65_535 {
+                "cancel_and_clear"
+            } else {
+                "full_fill"
+            }),
+        )?;
         collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
-        return Ok(CrossJurisdictionApplyResult {
+        Ok(CrossJurisdictionApplyResult {
             outputs: vec![LocalEntityOutput::non_mutating_wake(local)],
-            proposal_work: vec![AccountProposalWork {
-                account_id: source_user.clone(),
-                txs: vec![AccountTx::CrossSwapFillAck { data: ack }],
-            }],
             events: vec![EntityFrameEvent::Status {
                 message: format!(
-                    "🌉 Cross-j clear {order_id} {}",
-                    if state.orderbook.is_some() {
-                        "removed live book order and queued account offer close before pull reveal"
-                    } else {
-                        "queued account offer close before pull reveal"
-                    }
+                    "🌉 Cross-j clear {order_id} awaiting proposer reveal ratio={ratio}/65535"
                 ),
             }],
-            orderbook_deltas: vec![SameJOutputDelta::Remove {
-                account_id: source_user,
-                offer_id: order_id,
-            }],
-            account_envelope_mutations: Vec::new(),
-        });
-    }
-    let source_pull_id = field(&route, "sourcePull")
-        .and_then(|pull| text(pull, "pullId"))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| invalid(tx.kind, "SOURCE_PULL_ID_MISSING"))?
-        .to_string();
-    if ratio == 0 {
-        if !cancel_remainder || !view.pulls.contains_key(&source_pull_id) {
-            return Ok(CrossJurisdictionApplyResult::default());
-        }
-        let proof = build_close_proof(&route, "0x", tx.kind)?;
-        set(&mut route, "sourceCloseProof", proof.clone())?;
-        set(&mut route, "status", string("clearing"))?;
-        set(
-            &mut route,
-            "updatedAt",
-            number(state.timestamp, tx.kind, "TIMESTAMP")?,
-        )?;
-        set(
-            &mut route,
-            "pendingClearRequestedAt",
-            number(state.timestamp, tx.kind, "TIMESTAMP")?,
-        )?;
-        set(&mut route, "clearingPolicy", string("cancel_and_clear"))?;
-        let target = queue_target_close(
-            &route,
-            "0x",
-            &proof,
-            format!("Cross-j {order_id} paired pure-cancel target close"),
-            tx.kind,
-        )?;
-        collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
-        return Ok(CrossJurisdictionApplyResult {
-            outputs: vec![target, LocalEntityOutput::non_mutating_wake(local)],
-            proposal_work: vec![AccountProposalWork {
-                account_id: source_user,
-                txs: vec![AccountTx::CrossPullClose {
-                    data: CanonicalValue::Object(vec![
-                        ("pullId".into(), string(source_pull_id)),
-                        ("binary".into(), string("0x")),
-                        ("proof".into(), proof),
-                    ]),
-                }],
-            }],
-            events: vec![EntityFrameEvent::Status {
-                message: format!("🌉 Cross-j clear {order_id} queued atomic Hub pure-cancel close"),
-            }],
             ..CrossJurisdictionApplyResult::default()
-        });
-    }
-    if !view.pulls.contains_key(&source_pull_id)
-        || view.pending_cross_pull_close_ids.contains(&source_pull_id)
-    {
-        return Ok(CrossJurisdictionApplyResult::default());
-    }
-    set(&mut route, "status", string("clear_requested"))?;
-    set(
-        &mut route,
-        "pendingClearRequestedAt",
-        number(state.timestamp, tx.kind, "TIMESTAMP")?,
-    )?;
-    set(
-        &mut route,
-        "clearingPolicy",
-        string(if cancel_remainder || ratio < 65_535 {
-            "cancel_and_clear"
-        } else {
-            "full_fill"
-        }),
-    )?;
-    collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
-    Ok(CrossJurisdictionApplyResult {
-        outputs: vec![LocalEntityOutput::non_mutating_wake(local)],
-        events: vec![EntityFrameEvent::Status {
-            message: format!(
-                "🌉 Cross-j clear {order_id} awaiting proposer reveal ratio={ratio}/65535"
-            ),
-        }],
-        ..CrossJurisdictionApplyResult::default()
-    })
+        })
+    })()?;
+    extend_cross_jurisdiction_result(&mut prelude, tail);
+    Ok(prelude)
 }
 
 fn extend_cross_jurisdiction_result(
@@ -4962,7 +4897,7 @@ fn apply_orderbook_sweep(
         if cleared.proposal_work.iter().any(|work| {
             work.txs
                 .iter()
-                .any(|tx| matches!(tx, AccountTx::CrossSwapFillAck { .. }))
+                .any(|tx| matches!(tx, AccountTx::CrossPullClose { .. }))
         }) {
             closed_offers += 1;
         }
@@ -5023,23 +4958,40 @@ fn scaled_amount(total: &BigInt, numerator: &BigInt, denominator: &BigInt) -> Bi
     }
 }
 
-fn gcd(mut left: BigInt, mut right: BigInt) -> BigInt {
-    while right != BigInt::from(0) {
-        let next = &left % &right;
-        left = right;
-        right = next;
+/// TS `exactFillRatioToUint16`: the smallest uint16 whose floor projection of
+/// `denominator` reaches `numerator`.
+fn exact_fill_ratio_to_u16(numerator: &BigInt, denominator: &BigInt) -> u64 {
+    const MAX: u64 = 65_535;
+    if numerator <= &BigInt::from(0) {
+        return 0;
     }
-    left
+    if numerator >= denominator {
+        return MAX;
+    }
+    let max = BigInt::from(MAX);
+    let mut coarse =
+        u64::try_from((numerator * &max + denominator - BigInt::from(1)) / denominator)
+            .unwrap_or(MAX)
+            .min(MAX);
+    while coarse > 0 && (denominator * BigInt::from(coarse - 1)) / &max >= *numerator {
+        coarse -= 1;
+    }
+    while coarse < MAX && (denominator * BigInt::from(coarse)) / &max < *numerator {
+        coarse += 1;
+    }
+    coarse
 }
 
+/// Order progress is the target-side fill as one uint16 ratio: the single
+/// representation shared by the cooperative close, the ladder reveal and the
+/// on-chain dispute. Both legs claim exactly floor(total * ratio / 65535); the
+/// Hub absorbs the sub-step difference to the executed book amounts (TS
+/// `buildCrossJurisdictionFillInstruction`).
 pub(crate) fn build_cross_jurisdiction_book_fill(
-    account_id: String,
-    offer_id: String,
+    offer_id: &str,
     route: CanonicalValue,
     execution_source_amount: BigInt,
     execution_target_amount: BigInt,
-    price_ticks: BigInt,
-    pair_id: String,
 ) -> Result<CrossJurisdictionBookFill, EntityKernelError> {
     let kind = EntityTxKind::CrossJurisdictionFillNotice;
     if execution_source_amount <= BigInt::from(0) || execution_target_amount <= BigInt::from(0) {
@@ -5051,120 +5003,31 @@ pub(crate) fn build_cross_jurisdiction_book_fill(
     {
         return Err(invalid(kind, "CROSS_J_FILL_EXECUTION_OVERFLOW"));
     }
-    let mut numerator = &market.filled_target + &execution_target_amount;
-    let mut denominator = market.target_total.clone();
-    let divisor = gcd(numerator.clone(), denominator.clone());
-    numerator /= &divisor;
-    denominator /= divisor;
-    let cumulative_source = scaled_amount(&market.source_total, &numerator, &denominator);
-    let cumulative_target = scaled_amount(&market.target_total, &numerator, &denominator);
-    let settlement_source = &cumulative_source - &market.filled_source;
-    let settlement_target = &cumulative_target - &market.filled_target;
-    if settlement_target != execution_target_amount || settlement_source < execution_source_amount {
-        return Err(invalid(kind, "CROSS_J_FILL_SETTLEMENT_DIVERGED"));
-    }
-    let ratio_big = if numerator >= denominator {
-        BigInt::from(65_535_u32)
-    } else {
-        (&numerator * BigInt::from(65_535_u32) + &denominator - BigInt::from(1)) / &denominator
-    };
-    let fill_ratio =
-        u64::try_from(ratio_big).map_err(|_| invalid(kind, "CROSS_J_FILL_RATIO_U16"))?;
+    let fill_ratio = exact_fill_ratio_to_u16(
+        &(&market.filled_target + &execution_target_amount),
+        &market.target_total,
+    );
     if fill_ratio <= market.previous_fill_ratio {
         return Err(invalid(kind, "CROSS_J_FILL_RATIO_NOT_ADVANCED"));
     }
-    let price_improvement = &settlement_source - &execution_source_amount;
+    // A full fill is terminal through the ratio itself; `cancelRemainder` is
+    // only the matcher's explicit cancel of an unfilled remainder.
     let fill_seq = unsigned(&route, "fillSeq").unwrap_or(0).saturating_add(1);
-    let mut fields = vec![
-        ("offerId".into(), string(&offer_id)),
-        (
-            "previousFillSeq".into(),
-            CanonicalValue::Number(
-                CanonicalNumber::try_from_u64(fill_seq - 1)
-                    .map_err(|_| invalid(kind, "PREVIOUS_FILL_SEQ_UNSAFE"))?,
-            ),
-        ),
-        (
-            "fillSeq".into(),
-            CanonicalValue::Number(
-                CanonicalNumber::try_from_u64(fill_seq)
-                    .map_err(|_| invalid(kind, "FILL_SEQ_UNSAFE"))?,
-            ),
-        ),
-        (
-            "incrementalSourceAmount".into(),
-            CanonicalValue::BigInt(settlement_source.clone()),
-        ),
-        (
-            "incrementalTargetAmount".into(),
-            CanonicalValue::BigInt(settlement_target.clone()),
-        ),
-        (
-            "cumulativeSourceAmount".into(),
-            CanonicalValue::BigInt(cumulative_source.clone()),
-        ),
-        (
-            "cumulativeTargetAmount".into(),
-            CanonicalValue::BigInt(cumulative_target.clone()),
-        ),
-        (
-            "cumulativeFillRatio".into(),
-            CanonicalValue::Number(
-                CanonicalNumber::try_from_u64(fill_ratio)
-                    .map_err(|_| invalid(kind, "FILL_RATIO_UNSAFE"))?,
-            ),
-        ),
-        ("fillNumerator".into(), CanonicalValue::BigInt(numerator)),
-        (
-            "fillDenominator".into(),
-            CanonicalValue::BigInt(denominator),
-        ),
-        ("ackKind".into(), string("fill")),
-        (
-            "executionSourceAmount".into(),
-            CanonicalValue::BigInt(execution_source_amount),
-        ),
-        (
-            "executionTargetAmount".into(),
-            CanonicalValue::BigInt(execution_target_amount),
-        ),
-        ("priceImprovementMode".into(), string("source_savings")),
-    ];
-    if price_improvement > BigInt::from(0) {
-        fields.push((
-            "priceImprovementAmount".into(),
-            CanonicalValue::BigInt(price_improvement),
-        ));
-        fields.push((
-            "priceImprovementTokenId".into(),
-            CanonicalValue::Number(
-                CanonicalNumber::try_from_u64(u64::from(required_u32(
-                    field(&route, "source").ok_or_else(|| invalid(kind, "SOURCE_MISSING"))?,
-                    "tokenId",
-                    kind,
-                )?))
-                .map_err(|_| invalid(kind, "PRICE_IMPROVEMENT_TOKEN_UNSAFE"))?,
-            ),
-        ));
-    }
-    let terminal = fill_ratio >= 65_535 || cumulative_target >= market.target_total;
-    fields.extend([
-        ("cancelRemainder".into(), CanonicalValue::Bool(terminal)),
-        (
-            "comment".into(),
-            string(format!("cross-j-hashledger-fill:{fill_ratio}")),
-        ),
-        ("priceTicks".into(), CanonicalValue::BigInt(price_ticks)),
-        ("pairId".into(), string(&pair_id)),
-    ]);
-    if let Some(route_hash) = text(&route, "routeHash") {
+    let mut fields = vec![("orderId".into(), string(offer_id))];
+    if let Some(route_hash) = text(&route, "routeHash").filter(|value| !value.is_empty()) {
         fields.push(("routeHash".into(), string(route_hash)));
     }
+    fields.extend([
+        ("fillSeq".into(), number(fill_seq, kind, "FILL_SEQ")?),
+        (
+            "cumulativeFillRatio".into(),
+            number(fill_ratio, kind, "FILL_RATIO")?,
+        ),
+        ("cancelRemainder".into(), CanonicalValue::Bool(false)),
+    ]);
     Ok(CrossJurisdictionBookFill {
-        account_id,
-        offer_id,
         route,
-        ack_data: CanonicalValue::Object(fields),
+        data: CanonicalValue::Object(fields),
     })
 }
 
@@ -5357,329 +5220,11 @@ fn canonical_bool(value: &CanonicalValue, name: &str) -> bool {
     matches!(field(value, name), Some(CanonicalValue::Bool(true)))
 }
 
-/// A fill notice never mutates the Entity route. The Account ACK/progress is
-/// the canonical financial transition; its later committed Account output is
-/// what advances the Entity mirror and the book-owner projection.
+/// Hub-internal fill progress delivered from the canonical book owner to the
+/// source Hub (sibling Entities of one Runtime). The source Hub owns the ladder
+/// seed, so it alone decides when the order is terminal and asks its proposer
+/// for the reveal. Users learn the outcome from the pull close.
 fn apply_fill_notice(
-    state: &EntityStateSlice,
-    tx: &CanonicalEntityTx,
-) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
-    let data = tx
-        .frame_data()
-        .ok_or_else(|| invalid(tx.kind, "DATA_MISSING"))?;
-    let order_id = text(data, "orderId")
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| invalid(tx.kind, "ORDER_ID_MISSING"))?;
-    let route = state
-        .cross_jurisdiction_swaps
-        .as_ref()
-        .and_then(|routes| routes.get(order_id))
-        .ok_or_else(|| invalid(tx.kind, format!("ROUTE_MISSING:{order_id}")))?;
-    if let (Some(actual), Some(expected)) = (text(data, "routeHash"), text(route, "routeHash"))
-        && normalized(actual) != normalized(expected)
-    {
-        return Err(invalid(
-            tx.kind,
-            format!("ROUTE_HASH_MISMATCH:{actual}:{expected}"),
-        ));
-    }
-    if let Some(mode) = text(data, "priceImprovementMode")
-        && mode != "source_savings"
-    {
-        return Err(invalid(tx.kind, format!("PRICE_IMPROVEMENT_MODE:{mode}")));
-    }
-    let local = normalized(&state.entity_id);
-    let source_hub = nested_text(route, "source", "counterpartyEntityId")
-        .map(normalized)
-        .ok_or_else(|| invalid(tx.kind, "SOURCE_HUB_MISSING"))?;
-    let target_hub = nested_text(route, "target", "entityId")
-        .map(normalized)
-        .ok_or_else(|| invalid(tx.kind, "TARGET_HUB_MISSING"))?;
-    let (peer, source_role) = if local == source_hub {
-        (
-            nested_text(route, "source", "entityId")
-                .map(normalized)
-                .ok_or_else(|| invalid(tx.kind, "SOURCE_USER_MISSING"))?,
-            true,
-        )
-    } else if local == target_hub {
-        (
-            nested_text(route, "target", "counterpartyEntityId")
-                .map(normalized)
-                .ok_or_else(|| invalid(tx.kind, "TARGET_USER_MISSING"))?,
-            false,
-        )
-    } else {
-        return Err(invalid(tx.kind, format!("HUB_REQUIRED:{order_id}:{local}")));
-    };
-    if !state.known_accounts.contains(&peer) {
-        return Err(invalid(
-            tx.kind,
-            format!("ACCOUNT_MISSING:{order_id}:{peer}"),
-        ));
-    }
-    if !matches!(text(route, "status"), Some("resting" | "partially_filled")) {
-        return Err(invalid(
-            tx.kind,
-            format!(
-                "STATUS_INVALID:{order_id}:{}",
-                text(route, "status").unwrap_or("")
-            ),
-        ));
-    }
-    let target_pull_id = field(route, "targetPull")
-        .and_then(|pull| text(pull, "pullId"))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| invalid(tx.kind, "TARGET_PULL_MISSING"))?;
-
-    let current_seq = unsigned(route, "fillSeq").unwrap_or(0);
-    let incoming_seq =
-        unsigned(data, "fillSeq").ok_or_else(|| invalid(tx.kind, "FILL_SEQ_MISSING"))?;
-    let cancel = canonical_bool(data, "cancelRemainder");
-    let (prior_ratio, prior_source, prior_target) = committed_fill(route, tx.kind)?;
-    let same_committed = || -> Result<bool, EntityKernelError> {
-        let (numerator, denominator, ratio) = exact_fill(data, tx.kind)?;
-        let source = field(route, "source").ok_or_else(|| invalid(tx.kind, "SOURCE_MISSING"))?;
-        let target = field(route, "target").ok_or_else(|| invalid(tx.kind, "TARGET_MISSING"))?;
-        Ok(ratio == prior_ratio
-            && scaled_amount(
-                &required_bigint(source, "amount", tx.kind)?,
-                &numerator,
-                &denominator,
-            ) == prior_source
-            && scaled_amount(
-                &required_bigint(target, "amount", tx.kind)?,
-                &numerator,
-                &denominator,
-            ) == prior_target
-            && bigint(data, "cumulativeSourceAmount") == Some(prior_source.clone())
-            && bigint(data, "cumulativeTargetAmount") == Some(prior_target.clone()))
-    };
-    if incoming_seq <= current_seq && !cancel {
-        if incoming_seq == current_seq && !same_committed()? {
-            return Err(invalid(tx.kind, "STALE_CONFLICT"));
-        }
-        return Ok(CrossJurisdictionApplyResult {
-            events: vec![EntityFrameEvent::Status {
-                message: format!("🌉 Cross-j fill notice {order_id} duplicate seq {incoming_seq}"),
-            }],
-            ..CrossJurisdictionApplyResult::default()
-        });
-    }
-
-    let same_seq_cancel = cancel && incoming_seq == current_seq;
-    let ack_data = if same_seq_cancel {
-        if !same_committed()?
-            || bigint(data, "incrementalSourceAmount") != Some(BigInt::from(0))
-            || bigint(data, "incrementalTargetAmount") != Some(BigInt::from(0))
-        {
-            return Err(invalid(tx.kind, "CANCEL_PROGRESS_MISMATCH"));
-        }
-        let mut fields = vec![
-            ("offerId".into(), string(order_id)),
-            (
-                "previousFillSeq".into(),
-                number(current_seq, tx.kind, "PREVIOUS_FILL_SEQ")?,
-            ),
-            ("fillSeq".into(), number(current_seq, tx.kind, "FILL_SEQ")?),
-            (
-                "incrementalSourceAmount".into(),
-                CanonicalValue::BigInt(BigInt::from(0)),
-            ),
-            (
-                "incrementalTargetAmount".into(),
-                CanonicalValue::BigInt(BigInt::from(0)),
-            ),
-            (
-                "cumulativeSourceAmount".into(),
-                CanonicalValue::BigInt(prior_source),
-            ),
-            (
-                "cumulativeTargetAmount".into(),
-                CanonicalValue::BigInt(prior_target),
-            ),
-            (
-                "cumulativeFillRatio".into(),
-                number(prior_ratio, tx.kind, "FILL_RATIO")?,
-            ),
-        ];
-        for name in ["fillNumerator", "fillDenominator"] {
-            fields.push((
-                name.into(),
-                field(data, name).expect("exact ratio validated").clone(),
-            ));
-        }
-        fields.extend([
-            ("ackKind".into(), string("cancel")),
-            (
-                "executionSourceAmount".into(),
-                CanonicalValue::BigInt(BigInt::from(0)),
-            ),
-            (
-                "executionTargetAmount".into(),
-                CanonicalValue::BigInt(BigInt::from(0)),
-            ),
-            ("cancelRemainder".into(), CanonicalValue::Bool(true)),
-        ]);
-        if let Some(pair_id) = field(data, "pairId") {
-            fields.push(("pairId".into(), pair_id.clone()));
-        }
-        fields.push(("comment".into(), string("cross-j-cancel-request")));
-        if let Some(route_hash) = text(route, "routeHash") {
-            fields.push(("routeHash".into(), string(route_hash)));
-        }
-        CanonicalValue::Object(fields)
-    } else {
-        if incoming_seq != current_seq.saturating_add(1) {
-            return Err(invalid(
-                tx.kind,
-                format!("FILL_SEQ:{current_seq}:{incoming_seq}"),
-            ));
-        }
-        if let Some(previous) = unsigned(data, "previousFillSeq")
-            && previous != current_seq
-        {
-            return Err(invalid(
-                tx.kind,
-                format!("PREVIOUS_FILL_SEQ:{previous}:{current_seq}"),
-            ));
-        }
-        let (numerator, denominator, next_ratio) = exact_fill(data, tx.kind)?;
-        if next_ratio <= prior_ratio {
-            return Err(invalid(
-                tx.kind,
-                format!("NON_MONOTONIC_RATIO:{prior_ratio}:{next_ratio}"),
-            ));
-        }
-        let source = field(route, "source").ok_or_else(|| invalid(tx.kind, "SOURCE_MISSING"))?;
-        let target = field(route, "target").ok_or_else(|| invalid(tx.kind, "TARGET_MISSING"))?;
-        let cumulative_source = scaled_amount(
-            &required_bigint(source, "amount", tx.kind)?,
-            &numerator,
-            &denominator,
-        );
-        let cumulative_target = scaled_amount(
-            &required_bigint(target, "amount", tx.kind)?,
-            &numerator,
-            &denominator,
-        );
-        let incremental_source = &cumulative_source - &prior_source;
-        let incremental_target = &cumulative_target - &prior_target;
-        if incremental_source <= BigInt::from(0) || incremental_target <= BigInt::from(0) {
-            return Err(invalid(tx.kind, "NO_INCREMENTAL_AMOUNT"));
-        }
-        for (name, expected) in [
-            ("incrementalSourceAmount", &incremental_source),
-            ("incrementalTargetAmount", &incremental_target),
-            ("cumulativeSourceAmount", &cumulative_source),
-            ("cumulativeTargetAmount", &cumulative_target),
-        ] {
-            if bigint(data, name).as_ref() != Some(expected) {
-                return Err(invalid(tx.kind, format!("AMOUNT_MISMATCH:{name}")));
-            }
-        }
-        let improvement = bigint(data, "priceImprovementAmount").unwrap_or_default();
-        if improvement.sign() == Sign::Minus || improvement > incremental_source {
-            return Err(invalid(tx.kind, "PRICE_IMPROVEMENT_AMOUNT"));
-        }
-        let execution_source = &incremental_source - &improvement;
-        let terminal = cancel || next_ratio >= 65_535;
-        let mut fields = vec![
-            ("offerId".into(), string(order_id)),
-            (
-                "previousFillSeq".into(),
-                number(current_seq, tx.kind, "PREVIOUS_FILL_SEQ")?,
-            ),
-            ("fillSeq".into(), number(incoming_seq, tx.kind, "FILL_SEQ")?),
-            (
-                "incrementalSourceAmount".into(),
-                CanonicalValue::BigInt(incremental_source),
-            ),
-            (
-                "incrementalTargetAmount".into(),
-                CanonicalValue::BigInt(incremental_target.clone()),
-            ),
-            (
-                "cumulativeSourceAmount".into(),
-                CanonicalValue::BigInt(cumulative_source),
-            ),
-            (
-                "cumulativeTargetAmount".into(),
-                CanonicalValue::BigInt(cumulative_target),
-            ),
-            (
-                "cumulativeFillRatio".into(),
-                number(next_ratio, tx.kind, "FILL_RATIO")?,
-            ),
-            ("fillNumerator".into(), CanonicalValue::BigInt(numerator)),
-            (
-                "fillDenominator".into(),
-                CanonicalValue::BigInt(denominator),
-            ),
-            ("ackKind".into(), string("fill")),
-            (
-                "executionSourceAmount".into(),
-                CanonicalValue::BigInt(execution_source),
-            ),
-            (
-                "executionTargetAmount".into(),
-                CanonicalValue::BigInt(incremental_target),
-            ),
-            ("cancelRemainder".into(), CanonicalValue::Bool(terminal)),
-        ];
-        if let Some(pair_id) = field(data, "pairId") {
-            fields.push(("pairId".into(), pair_id.clone()));
-        }
-        fields.push((
-            "comment".into(),
-            string(format!("cross-j-hashledger-fill:{next_ratio}")),
-        ));
-        if let Some(route_hash) = text(route, "routeHash") {
-            fields.push(("routeHash".into(), string(route_hash)));
-        }
-        for name in [
-            "priceImprovementMode",
-            "priceImprovementAmount",
-            "priceImprovementTokenId",
-            "priceTicks",
-        ] {
-            if let Some(value) = field(data, name) {
-                fields.push((name.into(), value.clone()));
-            }
-        }
-        CanonicalValue::Object(fields)
-    };
-
-    let queued_ratio = unsigned(&ack_data, "cumulativeFillRatio")
-        .ok_or_else(|| invalid(tx.kind, "FILL_RATIO_MISSING"))?;
-    let tx = if source_role {
-        AccountTx::CrossSwapFillAck { data: ack_data }
-    } else {
-        AccountTx::CrossPullProgress {
-            data: CanonicalValue::Object(vec![
-                ("pullId".into(), string(target_pull_id)),
-                ("fill".into(), ack_data),
-            ]),
-        }
-    };
-    Ok(CrossJurisdictionApplyResult {
-        outputs: vec![LocalEntityOutput::non_mutating_wake(local)],
-        proposal_work: vec![AccountProposalWork {
-            account_id: peer,
-            txs: vec![tx],
-        }],
-        events: vec![EntityFrameEvent::Status {
-            message: format!(
-                "🌉 Cross-j {} progress {order_id} queued {queued_ratio}/65535",
-                if source_role { "source" } else { "target" }
-            ),
-        }],
-        orderbook_deltas: Vec::new(),
-        account_envelope_mutations: Vec::new(),
-    })
-}
-
-fn apply_progress(
     state: &mut EntityStateSlice,
     tx: &CanonicalEntityTx,
 ) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
@@ -5690,97 +5235,18 @@ fn apply_progress(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| invalid(tx.kind, "ORDER_ID_MISSING"))?
         .to_string();
-    let source_entity = text(data, "sourceEntityId")
-        .map(normalized)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| invalid(tx.kind, "SOURCE_ENTITY_MISSING"))?;
-    let reason = text(data, "reason").filter(|reason| !reason.is_empty());
-    let suffix = reason.map_or_else(String::new, |reason| format!(": {reason}"));
-    let progress_message = format!("🌉 Cross-j book progress {order_id}{suffix}");
-    let admission_key = format!("{source_entity}:{order_id}");
-    let mut admission = state
-        .cross_jurisdiction_book_admissions
-        .as_ref()
-        .and_then(|values| values.get(&admission_key))
-        .cloned()
-        .ok_or_else(|| {
-            invalid(
-                tx.kind,
-                format!("ADMISSION_MISSING:{order_id}:{source_entity}"),
-            )
-        })?;
-    let status = text(&admission, "status").unwrap_or("");
-    let cancel_pending = status == "resolving" && field(&admission, "pendingCancel").is_some();
-    if status != "admitted" && !cancel_pending {
-        return Err(invalid(
-            tx.kind,
-            format!("ADMISSION_NOT_ADMITTED:{order_id}:{status}"),
-        ));
-    }
-    let admitted_route = field(&admission, "route")
-        .cloned()
-        .ok_or_else(|| invalid(tx.kind, format!("ADMISSION_ROUTE_MISSING:{order_id}")))?;
-    collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), admitted_route)?;
-    let (route, terminal) = committed::apply_fill(state, data, "cross_j_book_progress")?;
-    set(&mut admission, "route", route.clone())?;
-    remove(&mut admission, "pendingFill")?;
-    set(
-        &mut admission,
-        "updatedAt",
-        CanonicalValue::Number(
-            CanonicalNumber::try_from_u64(state.timestamp)
-                .map_err(|_| invalid(tx.kind, "TIMESTAMP_UNSAFE"))?,
-        ),
-    )?;
-    if cancel_pending {
-        let source_hub = nested_text(&route, "source", "counterpartyEntityId")
-            .map(normalized)
-            .ok_or_else(|| invalid(tx.kind, "SOURCE_HUB_MISSING"))?;
-        if normalized(&state.entity_id) != source_hub {
-            set(&mut admission, "status", string("closed"))?;
-            set(
-                &mut admission,
-                "closedAt",
-                CanonicalValue::Number(
-                    CanonicalNumber::try_from_u64(state.timestamp)
-                        .map_err(|_| invalid(tx.kind, "TIMESTAMP_UNSAFE"))?,
-                ),
-            )?;
-            let reason = field(&admission, "pendingCancel")
-                .and_then(|pending| text(pending, "reason"))
-                .unwrap_or("cancel_request_after_fill")
-                .to_string();
-            set(&mut admission, "closeReason", string(reason))?;
-        }
-        collection(&mut state.cross_jurisdiction_book_admissions)
-            .insert(admission_key, admission)?;
-        return Ok(CrossJurisdictionApplyResult {
-            events: vec![EntityFrameEvent::Status {
-                message: progress_message,
-            }],
-            ..CrossJurisdictionApplyResult::default()
-        });
-    }
-    collection(&mut state.cross_jurisdiction_book_admissions).insert(admission_key, admission)?;
-    let orderbook_deltas = if terminal {
-        vec![SameJOutputDelta::Remove {
-            account_id: source_entity,
-            offer_id: order_id,
-        }]
+    let seq = unsigned(data, "fillSeq").ok_or_else(|| invalid(tx.kind, "FILL_SEQ_MISSING"))?;
+    let ratio = unsigned(data, "cumulativeFillRatio")
+        .ok_or_else(|| invalid(tx.kind, "FILL_RATIO_MISSING"))?;
+    let applied = committed::apply_source_hub_fill_progress(state, data, tx.kind)?;
+    let message = if applied.is_some() {
+        format!("🌉 Cross-j fill notice {order_id} applied {ratio}")
     } else {
-        let (account_id, offer) = cross_jurisdiction_working_offer(&route)?;
-        vec![SameJOutputDelta::Upsert {
-            account_id,
-            offer: Box::new(offer),
-        }]
+        format!("🌉 Cross-j fill notice {order_id} duplicate seq {seq}")
     };
-    Ok(CrossJurisdictionApplyResult {
-        orderbook_deltas,
-        events: vec![EntityFrameEvent::Status {
-            message: progress_message,
-        }],
-        ..Default::default()
-    })
+    let mut result = applied.unwrap_or_default();
+    result.events.push(EntityFrameEvent::Status { message });
+    Ok(result)
 }
 
 /// Apply one ordered list of cross-j Entity transactions. Each accepted input
@@ -5819,7 +5285,6 @@ pub fn apply_cross_jurisdiction_entity_txs(
                 apply_orderbook_sweep(state, account_views, authority, tx)?
             }
             EntityTxKind::CrossJurisdictionFillNotice => apply_fill_notice(state, tx)?,
-            EntityTxKind::ApplyCrossJurisdictionBookProgress => apply_progress(state, tx)?,
             EntityTxKind::RemoveCrossJurisdictionBookOrder => apply_remove_book_order(state, tx)?,
             EntityTxKind::CrossJurisdictionBookOrderRemoved => {
                 apply_book_order_removed(state, account_views, tx)?
@@ -6166,7 +5631,7 @@ mod tests {
         .expect("canonical route");
         assert_eq!(
             text(&canonical, "routeHash"),
-            Some("0x166c6b1459d2972fb90464386f629afca89b7e55c4b4404feb50f6b34af5eaa9")
+            Some("0xc7256dc31e315883c77c1743527b1a8b5b4966db203cecb91cfbfeab7c444f03")
         );
         assert_eq!(text(&canonical, "bookOwnerEntityId"), Some("source-hub"));
         assert_eq!(
@@ -6174,118 +5639,6 @@ mod tests {
             Some(
                 "cross:stack:1:0x1111111111111111111111111111111111111111:2/stack:2:0x2222222222222222222222222222222222222222:1"
             )
-        );
-    }
-
-    fn half_fill_data(id_field: &str) -> CanonicalValue {
-        obj(vec![
-            (id_field, string("order-1")),
-            ("sourceEntityId", string("source-user")),
-            (
-                "fillSeq",
-                number(1, EntityTxKind::ApplyCrossJurisdictionBookProgress, "SEQ").expect("seq"),
-            ),
-            (
-                "cumulativeFillRatio",
-                number(
-                    32_768,
-                    EntityTxKind::ApplyCrossJurisdictionBookProgress,
-                    "RATIO",
-                )
-                .expect("ratio"),
-            ),
-            ("fillNumerator", CanonicalValue::BigInt(BigInt::from(1))),
-            ("fillDenominator", CanonicalValue::BigInt(BigInt::from(2))),
-            (
-                "incrementalSourceAmount",
-                CanonicalValue::BigInt(BigInt::from(500_000_000_000_000_000_u64)),
-            ),
-            (
-                "incrementalTargetAmount",
-                CanonicalValue::BigInt(BigInt::from(1_000_000_u64)),
-            ),
-            (
-                "cumulativeSourceAmount",
-                CanonicalValue::BigInt(BigInt::from(500_000_000_000_000_000_u64)),
-            ),
-            (
-                "cumulativeTargetAmount",
-                CanonicalValue::BigInt(BigInt::from(1_000_000_u64)),
-            ),
-        ])
-    }
-
-    fn admitted_source_book() -> EntityStateSlice {
-        let canonical = canonical_route(
-            &route("resting", true),
-            EntityTxKind::AdmitCrossJurisdictionBookOrder,
-        )
-        .expect("canonical route");
-        let mut state = EntityStateSlice::empty("source-hub", 2_000);
-        apply_admit(
-            &mut state,
-            &tx(EntityTxKind::AdmitCrossJurisdictionBookOrder, canonical),
-        )
-        .expect("admit source book");
-        state
-    }
-
-    #[test]
-    fn routed_book_progress_updates_the_admission_route_and_orderbook_once() {
-        let mut state = admitted_source_book();
-        let progress = CanonicalEntityTx::from_frame_projection(
-            EntityTxKind::ApplyCrossJurisdictionBookProgress,
-            half_fill_data("orderId"),
-        )
-        .expect("progress tx");
-        let result = apply_progress(&mut state, &progress).expect("book progress");
-        assert!(matches!(
-            result.orderbook_deltas.as_slice(),
-            [SameJOutputDelta::Upsert { account_id, offer }]
-                if account_id == "source-user"
-                    && offer.offer_id == "order-1"
-                    && offer.give_amount == BigInt::from(500_000_000_000_000_000_u64)
-                    && offer.want_amount == BigInt::from(1_000_000_u64)
-        ));
-        let admission = state
-            .cross_jurisdiction_book_admissions
-            .as_ref()
-            .and_then(|values| values.get("source-user:order-1"))
-            .expect("admission");
-        let admitted_route = field(admission, "route").expect("admission route");
-        assert_eq!(unsigned(admitted_route, "fillSeq"), Some(1));
-        assert_eq!(
-            bigint(admitted_route, "filledSourceAmount"),
-            Some(BigInt::from(500_000_000_000_000_000_u64))
-        );
-    }
-
-    #[test]
-    fn committed_fill_ack_uses_the_same_book_progress_transition() {
-        let mut state = admitted_source_book();
-        let applied = committed::apply_committed_account_tx_followup(
-            &mut state,
-            "source-user",
-            2_000,
-            &AccountTx::CrossSwapFillAck {
-                data: half_fill_data("offerId"),
-            },
-        )
-        .expect("committed fill ack")
-        .expect("cross-j followup");
-        assert!(matches!(
-            applied.orderbook_deltas.as_slice(),
-            [SameJOutputDelta::Upsert { account_id, offer }]
-                if account_id == "source-user" && offer.offer_id == "order-1"
-        ));
-        let admission = state
-            .cross_jurisdiction_book_admissions
-            .as_ref()
-            .and_then(|values| values.get("source-user:order-1"))
-            .expect("admission");
-        assert_eq!(
-            field(admission, "route").and_then(|route| unsigned(route, "fillSeq")),
-            Some(1)
         );
     }
 
@@ -6378,7 +5731,6 @@ mod tests {
                 pulls: BTreeMap::new(),
                 swap_offers: BTreeMap::new(),
                 pending_cross_pull_close_ids: Default::default(),
-                pending_cross_swap_ack_ids: Default::default(),
                 dispute: Some(xln_rscore_batch::ResidentAccountDisputeView {
                     status: "dispute_preparing".into(),
                     dispute_prepare: Some(obj(vec![(
@@ -6504,20 +5856,20 @@ mod tests {
         let target_pull = field(route, "targetPull").expect("target pull");
         assert_eq!(
             text(source_pull, "pullId"),
-            Some("0xe7e1766f78adf8fbcc2d52396d7245e205fbdec0bdc70e884f15487771c8f897")
+            Some("0x726bfbdb8921187a8d5a33f8a5c02e4267d00d287943de0b7289f9bc873fec8a")
         );
         assert_eq!(
             text(target_pull, "pullId"),
-            Some("0xd3d3858eae161b38724b54d5dc850b290f81773d8c00d36e3765892e78020bc6")
+            Some("0x3a364f50b40a101154c0c5487d11780c13963e41898aea48b21d96a128cb78fb")
         );
         for pull in [source_pull, target_pull] {
             assert_eq!(
                 text(pull, "fullHash"),
-                Some("0xb2f8ec09dccf5c668c6584704f74d259b576b315cfeee4a15d3471e6c3e0ca25")
+                Some("0x85d1f23053fcbb6ff75ec137614a65cc3e69bf653f8ed825e0a8c64f0dd05820")
             );
             assert_eq!(
                 text(pull, "partialRoot"),
-                Some("0x6f3eda4369d749c3e6df77f2330a78c831a701130a262ab266400cc2987cdeca")
+                Some("0xd689b6ea1a3d07594be5a117f83838ab198c34bff673b43b67164420c51cf188")
             );
         }
     }

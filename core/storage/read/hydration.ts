@@ -273,10 +273,6 @@ export const hydrateEntityStateFromStorage = (options: {
       core.crossJurisdictionAuthorizations && PersistentEntityCollectionMap.from(core.crossJurisdictionAuthorizations),
     ),
     ...withDefinedProperty(
-      'pendingCrossJurisdictionFillAcks',
-      core.pendingCrossJurisdictionFillAcks && PersistentEntityCollectionMap.from(core.pendingCrossJurisdictionFillAcks),
-    ),
-    ...withDefinedProperty(
       'crossJurisdictionBookAdmissions',
       core.crossJurisdictionBookAdmissions && PersistentEntityCollectionMap.from(core.crossJurisdictionBookAdmissions),
     ),

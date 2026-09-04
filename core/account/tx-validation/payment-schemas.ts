@@ -38,7 +38,6 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
       crossJurisdiction: 'record', crossJurisdictionRoute: 'record',
     },
   },
-  cross_pull_progress: { required: { pullId: 'string', fill: 'record' } },
   swap_offer: {
     required: {
       offerId: 'string', giveTokenId: 'integer', giveTokenDecimals: 'integer', giveAmount: 'bigint',
@@ -59,19 +58,5 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
       restingGiveAmount: 'bigint', restingWantAmount: 'bigint',
       restingQuantizedGive: 'bigint', restingQuantizedWant: 'bigint',
     },
-  },
-  cross_swap_fill_ack: {
-    required: { offerId: 'string', cumulativeFillRatio: 'integer' },
-    optional: {
-      routeHash: 'string', previousFillSeq: 'integer', fillSeq: 'integer',
-      incrementalSourceAmount: 'bigint', incrementalTargetAmount: 'bigint',
-      cumulativeSourceAmount: 'bigint', cumulativeTargetAmount: 'bigint',
-      fillNumerator: 'bigint', fillDenominator: 'bigint', ackKind: 'string',
-      executionSourceAmount: 'bigint', executionTargetAmount: 'bigint',
-      priceImprovementMode: 'string', priceImprovementAmount: 'bigint',
-      priceImprovementTokenId: 'integer', cancelRemainder: 'boolean',
-      comment: 'string', priceTicks: 'bigint', pairId: 'string',
-    },
-    literals: { ackKind: ['fill', 'cancel'], priceImprovementMode: ['source_savings'] },
   },
 } as const satisfies Readonly<Record<string, AccountTxDataSchema>>;

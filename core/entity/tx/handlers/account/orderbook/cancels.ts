@@ -13,9 +13,9 @@ import {
 } from '../../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../support/logger';
 import {
-  buildCrossJurisdictionCancelAck,
-  markCrossJurisdictionBookCancelPending,
-  markCrossJurisdictionBookRemovalCommitted,
+  buildCrossJurisdictionCancelInstruction,
+  crossJurisdictionBookAdmissionKeyFor,
+  markCrossJurisdictionBookAdmissionResolving,
   type CrossJurisdictionFillInstruction,
 } from '../../../../../extensions/cross-j/orderbook';
 import { crossJurisdictionBookOwnerRef } from '../../../../../orderbook/cross-j/orderbook';
@@ -24,7 +24,6 @@ import {
   crossJurisdictionRouteSignerHint,
 } from '../../../j-events-htlc/cross-j-outputs';
 import {
-  hasQueuedCrossSwapAckForEntityState,
   queueUniqueSwapResolveForEntityState,
   type AccountTxTarget,
 } from './queue';
@@ -38,7 +37,6 @@ const orderbookLog = createStructuredLogger('orderbook');
 
 export interface RoutedOrderbookCancels {
   localBookCancels: SwapCancelRequestEvent[];
-  accountTxs: AccountTxTarget[];
   outputs: EntityInput[];
 }
 
@@ -47,9 +45,8 @@ const normalizeEntityRef = (value: string): string => String(value || '').trim()
 /**
  * A cross-j cancel commits on the source Account, while the canonical book can
  * belong to the source hub's sibling Entity. Route that book mutation through
- * the trusted local Runtime cascade and keep the settlement ACK on the source
- * Account. The Runtime drains the local removal before exposing the Account
- * proposal as an external side effect.
+ * the trusted local Runtime cascade; the removal acknowledgement then requests
+ * the clear on the source Hub.
  */
 export function routeRemoteCrossJurisdictionBookCancels(
   env: EntityRuntimeContext,
@@ -57,7 +54,6 @@ export function routeRemoteCrossJurisdictionBookCancels(
   cancels: SwapCancelRequestEvent[],
 ): RoutedOrderbookCancels {
   const localBookCancels: SwapCancelRequestEvent[] = [];
-  const accountTxs: AccountTxTarget[] = [];
   const outputs: EntityInput[] = [];
   const currentEntityId = normalizeEntityRef(sourceHubState.entityId);
 
@@ -91,10 +87,9 @@ export function routeRemoteCrossJurisdictionBookCancels(
     if (!bookOwnerSignerId) {
       throw haltRuntimeFailure("CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING", `CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING:offer=${cancel.offerId}:owner=${bookOwnerEntityId}`);
     }
-    markCrossJurisdictionBookCancelPending(
+    markCrossJurisdictionBookAdmissionResolving(
       sourceHubState,
       route,
-      cancel.accountId,
       Number(sourceHubState.timestamp || env.state.timestamp || 0),
     );
     outputs.push(buildCrossJurisdictionEntityOutput(bookOwnerEntityId, bookOwnerSignerId, [{
@@ -109,43 +104,15 @@ export function routeRemoteCrossJurisdictionBookCancels(
     }]));
   }
 
-  return { localBookCancels, accountTxs, outputs };
-}
-
-export function collectCommittedCrossJurisdictionCancelAcks(
-  sourceHubState: EntityState,
-): AccountTxTarget[] {
-  const accountTxs: AccountTxTarget[] = [];
-  const currentEntityId = normalizeEntityRef(sourceHubState.entityId);
-  const admissions = Array.from(sourceHubState.crossJurisdictionBookAdmissions?.entries() ?? [])
-    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-  for (const [, admission] of admissions) {
-    const pending = admission.pendingCancel;
-    if (!pending?.bookRemovalCommittedAt) continue;
-    const route = sourceHubState.crossJurisdictionSwaps?.get(admission.orderId);
-    if (!route) {
-      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ROUTE_MISSING", `CROSS_J_CANCEL_ACK_ROUTE_MISSING:order=${admission.orderId}`);
-    }
-    if (normalizeEntityRef(route.source.counterpartyEntityId) !== currentEntityId) continue;
-    const account = sourceHubState.accounts.get(pending.sourceAccountId);
-    if (!account?.state.swapOffers?.has(admission.orderId)) {
-      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_SOURCE_OFFER_MISSING", `CROSS_J_CANCEL_ACK_SOURCE_OFFER_MISSING:account=${pending.sourceAccountId}:order=${admission.orderId}`);
-    }
-    if (hasQueuedCrossSwapAckForEntityState(sourceHubState, pending.sourceAccountId, admission.orderId)) {
-      continue;
-    }
-    accountTxs.push({
-      accountId: pending.sourceAccountId,
-      tx: buildCrossJurisdictionCancelAck(admission.orderId, route),
-    });
-  }
-  return accountTxs;
+  return { localBookCancels, outputs };
 }
 
 /**
  * Apply hub-decided orderbook cancels and enqueue the account-level settlement.
  * This mutates only the orderbook extension and returns account mempool ops for
  * the entity orchestrator to commit through the normal account frame path.
+ * A cross-j cancel is Hub-internal progress: the source Hub requests the clear
+ * at the committed fill and the pull close settles the remainder.
  */
 export function processOrderbookCancels(
   hubState: EntityState,
@@ -200,22 +167,16 @@ export function processOrderbookCancels(
 
     const offer = account?.state.swapOffers?.get(offerId);
     if (offer?.crossJurisdiction) {
-      markCrossJurisdictionBookRemovalCommitted(
-        hubState,
-        offer.crossJurisdiction,
-        accountId,
-        Number(hubState.timestamp || 0),
-        'cancel_request',
+      const admission = hubState.crossJurisdictionBookAdmissions?.get(
+        crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
       );
-      if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) {
-        orderbookLog.debug('crossj.cancel_ack_waiting_for_fill', {
-          offer: shortOrder(offerId, 8),
-          account: shortId(accountId, 8),
-        });
-        continue;
-      }
-      accountTxs.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
-      orderbookLog.debug('crossj.cancel_ack_queued', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
+      crossJurisdictionFills.push(buildCrossJurisdictionCancelInstruction(
+        accountId,
+        offerId,
+        namespacedOrderId,
+        admission?.route ?? offer.crossJurisdiction,
+      ));
+      orderbookLog.debug('crossj.cancel_queued', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
       continue;
     }
 

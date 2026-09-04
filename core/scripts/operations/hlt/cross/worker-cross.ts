@@ -291,9 +291,9 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
         if (performance.now() > deadline) {
           throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_REQUOTE_TIMEOUT:${byPair.size}:${prepared.length}`);
         }
-        // Suspended maker fill-acks flush on the book owner's next entity
-        // frame; a quiescent hub never produces one. A minimal credit bump
-        // keeps the book-owner entities framing while the maker requotes.
+        // Book-owner progress and clear requests land on the owner's next
+        // entity frame; a quiescent hub never produces one. A minimal credit
+        // bump keeps the book-owner entities framing while the maker requotes.
         if (process.env['XLN_CROSS_LOAD_REQUOTE_NUDGE'] === '1' && performance.now() >= nextNudgeAt) {
           nextNudgeAt = performance.now() + 1_000;
           nudgeSeq += 1;

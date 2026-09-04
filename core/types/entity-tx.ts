@@ -314,21 +314,9 @@ type EntityTxPayload =
       data: {
         orderId: string;
         routeHash?: string;
-        previousFillSeq?: number;
         fillSeq: number;
-        incrementalSourceAmount: bigint;
-        incrementalTargetAmount: bigint;
-        cumulativeSourceAmount: bigint;
-        cumulativeTargetAmount: bigint;
         cumulativeFillRatio: number; // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
-        fillNumerator: bigint;
-        fillDenominator: bigint;
-        priceImprovementMode?: 'source_savings';
-        priceImprovementAmount?: bigint;
-        priceImprovementTokenId?: number;
         cancelRemainder?: boolean;
-        priceTicks?: bigint;
-        pairId: string;
       };
     }
   | {
@@ -374,26 +362,6 @@ type EntityTxPayload =
       type: 'admitCrossJurisdictionBookOrder';
       data: {
         route: CrossJurisdictionSwapRoute;
-        reason?: string;
-      };
-    }
-  | {
-      type: 'applyCrossJurisdictionBookProgress';
-      data: {
-        orderId: string;
-        sourceEntityId: string;
-        fillSeq: number;
-        incrementalSourceAmount: bigint;
-        incrementalTargetAmount: bigint;
-        cumulativeSourceAmount: bigint;
-        cumulativeTargetAmount: bigint;
-        cumulativeFillRatio: number; // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
-        fillNumerator: bigint;
-        fillDenominator: bigint;
-        priceImprovementMode?: 'source_savings';
-        priceImprovementAmount?: bigint;
-        priceImprovementTokenId?: number;
-        cancelRemainder?: boolean;
         reason?: string;
       };
     }

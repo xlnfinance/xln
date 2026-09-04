@@ -41,7 +41,6 @@ pub struct EntityStateSnapshot {
     pub lending: Option<crate::LendingState>,
     pub cross_jurisdiction_swaps: Option<EntityCanonicalCollection>,
     pub cross_jurisdiction_authorizations: Option<EntityCanonicalCollection>,
-    pub pending_cross_jurisdiction_fill_acks: Option<EntityCanonicalCollection>,
     pub cross_jurisdiction_book_admissions: Option<EntityCanonicalCollection>,
     pub j_history_finality: Option<CanonicalValue>,
     pub expected_owned_sections: Vec<EntityConsensusSection>,
@@ -506,7 +505,6 @@ pub fn restore_entity_state(
         lending: snapshot.lending,
         cross_jurisdiction_swaps: snapshot.cross_jurisdiction_swaps,
         cross_jurisdiction_authorizations: snapshot.cross_jurisdiction_authorizations,
-        pending_cross_jurisdiction_fill_acks: snapshot.pending_cross_jurisdiction_fill_acks,
         cross_jurisdiction_book_admissions: snapshot.cross_jurisdiction_book_admissions,
         j_history_finality: snapshot.j_history_finality,
     };
@@ -554,7 +552,6 @@ pub fn capture_entity_state(
         lending: state.lending.clone(),
         cross_jurisdiction_swaps: state.cross_jurisdiction_swaps.clone(),
         cross_jurisdiction_authorizations: state.cross_jurisdiction_authorizations.clone(),
-        pending_cross_jurisdiction_fill_acks: state.pending_cross_jurisdiction_fill_acks.clone(),
         cross_jurisdiction_book_admissions: state.cross_jurisdiction_book_admissions.clone(),
         j_history_finality: state.j_history_finality.clone(),
         expected_owned_sections: compute_entity_owned_sections(

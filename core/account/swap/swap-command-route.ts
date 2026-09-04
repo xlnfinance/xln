@@ -113,7 +113,6 @@ export const buildCrossJurisdictionSwapIntent = (input: Readonly<{
     },
     targetDisputeConfig: { ...input.target.disputeConfig },
     priceTicks: input.priceTicks,
-    priceImprovementMode: 'source_savings',
     status: 'intent',
     createdAt: now,
     updatedAt: now,

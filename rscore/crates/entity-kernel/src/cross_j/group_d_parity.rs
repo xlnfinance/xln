@@ -43,7 +43,6 @@ struct StateProjection {
     accounts: Vec<AccountProjection>,
     cross_jurisdiction_swaps: CollectionProjection,
     cross_jurisdiction_authorizations: CollectionProjection,
-    pending_cross_jurisdiction_fill_acks: CollectionProjection,
     cross_jurisdiction_book_admissions: CollectionProjection,
 }
 
@@ -147,8 +146,6 @@ fn state(projection: &StateProjection) -> EntityStateSlice {
     state.cross_jurisdiction_swaps = collection(&projection.cross_jurisdiction_swaps);
     state.cross_jurisdiction_authorizations =
         collection(&projection.cross_jurisdiction_authorizations);
-    state.pending_cross_jurisdiction_fill_acks =
-        collection(&projection.pending_cross_jurisdiction_fill_acks);
     state.cross_jurisdiction_book_admissions =
         collection(&projection.cross_jurisdiction_book_admissions);
     state
@@ -209,7 +206,6 @@ fn empty_account_view(owner_is_left: bool) -> LocalAccountFinancialView {
         pulls: BTreeMap::new(),
         swap_offers: BTreeMap::new(),
         pending_cross_pull_close_ids: BTreeSet::new(),
-        pending_cross_swap_ack_ids: BTreeSet::new(),
         dispute: None,
     }
 }
@@ -329,11 +325,6 @@ fn assert_state(case_name: &str, actual: &EntityStateSlice, expected: &StateProj
         root(&actual.cross_jurisdiction_authorizations),
         expected.cross_jurisdiction_authorizations.root,
         "{case_name} authorizations root"
-    );
-    assert_eq!(
-        root(&actual.pending_cross_jurisdiction_fill_acks),
-        expected.pending_cross_jurisdiction_fill_acks.root,
-        "{case_name} fill ACK root"
     );
     assert_eq!(
         root(&actual.cross_jurisdiction_book_admissions),
@@ -519,7 +510,7 @@ fn group_d_cross_j_entity_kinds_match_typescript() {
         fixture.canonical_source,
         "TypeScript applyEntityTx cross-j Group D semantic transitions"
     );
-    assert_eq!(fixture.cases.len(), 12, "all Group D kinds");
+    assert_eq!(fixture.cases.len(), 11, "all Group D kinds");
     for case in fixture.cases {
         let transaction = tx(&case.tx);
         if transaction.kind == EntityTxKind::CrossJurisdictionForceSiblingDispute {

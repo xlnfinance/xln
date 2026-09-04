@@ -82,7 +82,6 @@ import { handleCrossJurisdictionSalvageEntityTx } from './handlers/cross-j/salva
 import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from './handlers/cross-j/force-sibling-dispute';
 import { handleOrderbookSweepCrossJurisdictionEntityTx } from './handlers/cross-j/sweep';
 import {
-  handleApplyCrossJurisdictionBookProgressEntityTx,
   handleAdmitCrossJurisdictionBookOrderEntityTx,
   handleCrossJurisdictionBookOrderRemovedEntityTx,
   handleRemoveCrossJurisdictionBookOrderEntityTx,
@@ -521,7 +520,7 @@ const entityTxDispatchers = {
   prepareCrossJurisdictionSwap: (env, state, tx, options) => handlePrepareCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>, options),
   materializeCrossJurisdictionSwap: (env, state, tx, options) => handleMaterializeCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionSwap' }>, options),
   registerCrossJurisdictionSwap: (env, state, tx, options) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>, options),
-  crossJurisdictionFillNotice: (_env, state, tx, options) => handleCrossJurisdictionFillNoticeEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>, options?.mutableFrameState),
+  crossJurisdictionFillNotice: (env, state, tx, options) => handleCrossJurisdictionFillNoticeEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>, options?.storageChanges, options?.mutableFrameState),
   materializeCrossJurisdictionClear: (env, state, tx, options) => handleMaterializeCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>, options?.mutableFrameState),
   requestCrossJurisdictionClear: (env, state, tx, options) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>, options?.storageChanges, options?.mutableFrameState),
   crossJurisdictionSalvage: (env, state, tx, options) => handleCrossJurisdictionSalvageEntityTx(
@@ -541,7 +540,6 @@ const entityTxDispatchers = {
     ),
   orderbookSweepCrossJurisdiction: (env, state, tx, options) => handleOrderbookSweepCrossJurisdictionEntityTx(env, state, tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>, options?.storageChanges, options?.mutableFrameState),
   admitCrossJurisdictionBookOrder: (env, state, tx, options) => handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>, options),
-  applyCrossJurisdictionBookProgress: (env, state, tx, options) => handleApplyCrossJurisdictionBookProgressEntityTx(env, state, tx as Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>, options),
   removeCrossJurisdictionBookOrder: (env, state, tx, options) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>, options),
   crossJurisdictionBookOrderRemoved: (env, state, tx, options) => handleCrossJurisdictionBookOrderRemovedEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>, options),
   placeSwapOffer: (_env, state, tx, options) => handlePlaceSwapOfferRequest(state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),

@@ -522,6 +522,19 @@ fn apply_commit_transitions(
                             transition.outputs.len()
                         )));
                     }
+                    let applied = crate::cross_j::apply_cross_jurisdiction_cancel_request(
+                        state,
+                        &commit.account_id,
+                        offer_id,
+                        local_account_views.get(&commit.account_id),
+                    )?;
+                    deltas.extend(applied.orderbook_deltas);
+                    routed_entity_outputs.extend(applied.outputs);
+                    entity_events.extend(applied.events);
+                    for work in applied.proposal_work {
+                        account_txs
+                            .extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
+                    }
                 } else {
                     deltas.push(swap_cancel_delta(
                         &commit.account_id,
@@ -559,10 +572,7 @@ fn apply_commit_transitions(
                     transition.tx.wire_name()
                 )));
             }
-            AccountTx::CrossPullLock { .. }
-            | AccountTx::CrossPullClose { .. }
-            | AccountTx::CrossPullProgress { .. }
-            | AccountTx::CrossSwapFillAck { .. } => {
+            AccountTx::CrossPullLock { .. } | AccountTx::CrossPullClose { .. } => {
                 return Err(EntityKernelError::output(format!(
                     "CROSS_J_COMMITTED_FOLLOWUP_NOT_HANDLED:{}",
                     transition.tx.wire_name()
@@ -1098,6 +1108,16 @@ pub(crate) fn finish_orderbook_stage(
                 account_txs.extend(work.txs.into_iter().map(|tx| (work.account_id.clone(), tx)));
             }
             result.routed_entity_outputs.extend(applied.outputs);
+            result.local_events.extend(applied.events);
+            let orderbook = result
+                .state
+                .orderbook
+                .as_mut()
+                .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"))?;
+            crate::orderbook::apply_cross_jurisdiction_fill_deltas(
+                orderbook,
+                &applied.orderbook_deltas,
+            )?;
         }
         if effects.matched_swaps > 0 {
             result.outputs.push(EntityKernelOutput::SwapMatched {

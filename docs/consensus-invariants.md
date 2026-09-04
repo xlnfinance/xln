@@ -62,10 +62,11 @@ order, on BOTH jurisdictions. There are no signed fill receipts and none may
 be added: a Hanko-signed receipt path was explicitly rejected because ladder
 reveals are far cheaper in gas, and two authorities is how conservation broke.
 
-**rule:** off-chain fill progress (`cross_swap_fill_ack` / `cross_pull_progress`)
-is INFORMATIONAL only — the hub saying "matched X%" with exact amounts but no
-secrets. It is bookkeeping and UX, never authorization, and must never gate a
-close or a dispute. Revealing ladder secrets off-chain is forbidden: the ladder
+**rule:** off-chain fill progress is Hub-internal and INFORMATIONAL only —
+one uint16 ratio per order carried between the book owner and the source Hub
+(`crossJurisdictionFillNotice`), never an Account transaction and never signed
+by a user. It is bookkeeping, never authorization, and must never gate a close
+or a dispute; users learn the outcome from the pull close. Revealing ladder secrets off-chain is forbidden: the ladder
 is single-shot, an escaped secret is spent forever.
 
 **rule:** ladder secrets are revealed in exactly two places:

@@ -397,8 +397,15 @@ export const buildCrossMarketOfferFromBookOrder = (
   );
   const account = state.accounts.get(accountId);
   const offer = account?.state.swapOffers?.get(offerId);
+  const admission = state.crossJurisdictionBookAdmissions?.get(
+    crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
+  );
   if (account && offer?.crossJurisdiction) {
     const entityRefs = resolveStoredOfferEntityRefs(account.state, offer);
+    // The Account offer carries the route as opened; fill progress is
+    // Hub-internal and lives on the admitted route. The book row must be
+    // validated against the progressed remainder, never the frozen opening.
+    const progressedRoute = admission?.route ?? offer.crossJurisdiction;
     return buildCrossJurisdictionMarketOffer(
       normalizeSwapOfferForOrderbook(
         {
@@ -417,7 +424,7 @@ export const buildCrossMarketOfferFromBookOrder = (
           minNetReceive: offer.minNetReceive,
           priceTicks: offer.priceTicks,
           timeInForce: offer.timeInForce,
-          crossJurisdiction: offer.crossJurisdiction,
+          crossJurisdiction: progressedRoute,
         },
         accountId,
       ),
@@ -425,9 +432,6 @@ export const buildCrossMarketOfferFromBookOrder = (
     );
   }
 
-  const admission = state.crossJurisdictionBookAdmissions?.get(
-    crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
-  );
   if (!admission || admission.status !== 'admitted') return null;
 
   const remaining = getCrossJurisdictionRouteRemainingAmounts(admission.route);

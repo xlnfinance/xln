@@ -15,7 +15,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import type { RuntimeReplica } from '../../runtime/types';
@@ -144,7 +144,7 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
   // bilateral readiness on BOTH runtimes.
   // Keep process-coordination files outside the child DB roots: teardown may
   // remove those roots only after every child has acknowledged shutdown.
-  const barrierDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xln-cross-j-barrier-'));
+  const barrierDir = fs.mkdtempSync(path.join(tmpdir(), 'xln-cross-j-barrier-'));
   console.log(`[cross-j] relay ${relayUrl}`);
   console.log(`[cross-j] barrierDir ${barrierDir}`);
 

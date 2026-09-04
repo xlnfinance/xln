@@ -7,10 +7,9 @@
 use thiserror::Error;
 
 /// Closed canonical EntityTx discriminant set shared with TypeScript.
-pub const ENTITY_TX_TYPES: [&str; 63] = [
+pub const ENTITY_TX_TYPES: [&str; 62] = [
     "accountInput",
     "admitCrossJurisdictionBookOrder",
-    "applyCrossJurisdictionBookProgress",
     "boardHandover",
     "chat",
     "chatMessage",
@@ -77,7 +76,6 @@ pub const ENTITY_TX_TYPES: [&str; 63] = [
 pub enum EntityTxKind {
     AccountInput,
     AdmitCrossJurisdictionBookOrder,
-    ApplyCrossJurisdictionBookProgress,
     BoardHandover,
     Chat,
     ChatMessage,
@@ -151,7 +149,6 @@ impl EntityTxKind {
         let kind = match value {
             "accountInput" => Self::AccountInput,
             "admitCrossJurisdictionBookOrder" => Self::AdmitCrossJurisdictionBookOrder,
-            "applyCrossJurisdictionBookProgress" => Self::ApplyCrossJurisdictionBookProgress,
             "boardHandover" => Self::BoardHandover,
             "chat" => Self::Chat,
             "chatMessage" => Self::ChatMessage,
@@ -221,7 +218,6 @@ impl EntityTxKind {
         match self {
             Self::AccountInput => "accountInput",
             Self::AdmitCrossJurisdictionBookOrder => "admitCrossJurisdictionBookOrder",
-            Self::ApplyCrossJurisdictionBookProgress => "applyCrossJurisdictionBookProgress",
             Self::BoardHandover => "boardHandover",
             Self::Chat => "chat",
             Self::ChatMessage => "chatMessage",

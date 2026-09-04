@@ -248,7 +248,7 @@ const applySwapTx = (
     });
     return;
   }
-  if (tx.type !== 'swap_cancel_request' && tx.type !== 'swap_resolve' && tx.type !== 'cross_swap_fill_ack') return;
+  if (tx.type !== 'swap_cancel_request' && tx.type !== 'swap_resolve') return;
   const row = rows.get(tx.data.offerId);
   if (!row) return;
   row.lastUpdatedHeight = height;
@@ -269,20 +269,7 @@ const applySwapTx = (
       feeAmount: tx.data.feeAmount ?? null,
       comment: tx.data.comment ?? '',
     });
-    return;
   }
-  row.resolves.push({
-    fillRatio: tx.data.cumulativeFillRatio,
-    fillNumerator: tx.data.fillNumerator,
-    fillDenominator: tx.data.fillDenominator,
-    height,
-    cancelRemainder: tx.data.cancelRemainder ?? tx.data.ackKind === 'cancel',
-    executionGiveAmount: tx.data.executionSourceAmount ?? null,
-    executionWantAmount: tx.data.executionTargetAmount ?? null,
-    feeTokenId: null,
-    feeAmount: null,
-    comment: tx.data.comment ?? '',
-  });
 };
 
 const readAccountSwapHistoryPage = async (

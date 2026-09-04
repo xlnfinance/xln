@@ -310,37 +310,13 @@ const assertRuntimeBookOutputAuthority = (
       assertSemanticTarget(tx.type, target, routeBookOwner(route));
       return true;
     }
-    case 'applyCrossJurisdictionBookProgress': {
-      const admission = Array.from(currentState.crossJurisdictionBookAdmissions?.values() ?? []).find(
-        candidate =>
-          candidate.orderId === tx.data.orderId &&
-          normalizeEntityRef(candidate.sourceEntityId) === normalizeEntityRef(tx.data.sourceEntityId),
-      );
-      if (!admission) {
-        throw new Error(`RUNTIME_OUTPUT_BOOK_ADMISSION_MISSING:${tx.data.sourceEntityId}:${tx.data.orderId}`);
-      }
-      const route = requireSemanticRoute(currentState, tx.data.orderId);
-      if (
-        normalizeEntityRef(admission.routeHash) !== normalizeEntityRef(route.routeHash) ||
-        normalizeEntityRef(admission.bookOwnerEntityId) !== routeBookOwner(route)
-      ) {
-        throw new Error(`RUNTIME_OUTPUT_BOOK_ADMISSION_ROUTE_MISMATCH:${tx.data.sourceEntityId}:${tx.data.orderId}`);
-      }
-      assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
-      assertSemanticTarget(tx.type, target, routeBookOwner(route));
-      return true;
-    }
     case 'crossJurisdictionFillNotice': {
       const route = requireSemanticRoute(currentState, tx.data.orderId);
       const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-      const targetHub = normalizeEntityRef(route.target.entityId);
-      if (target === sourceHub) {
-        assertSemanticSource(tx.type, source, [routeBookOwner(route)]);
-      } else if (target === targetHub) {
-        assertSemanticSource(tx.type, source, [sourceHub]);
-      } else {
+      if (target !== sourceHub) {
         throw new Error(`RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:${target}`);
       }
+      assertSemanticSource(tx.type, source, [routeBookOwner(route)]);
       return true;
     }
     default:
@@ -538,7 +514,6 @@ const assertSelfRuntimeContinuations = (
 const runtimeOutputRouteId = (tx: EntityTx): string | undefined => {
   switch (tx.type) {
     case 'crossJurisdictionFillNotice':
-    case 'applyCrossJurisdictionBookProgress':
     case 'removeCrossJurisdictionBookOrder':
     case 'requestCrossJurisdictionClear':
       return tx.data.orderId;

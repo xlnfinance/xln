@@ -468,12 +468,6 @@ pub fn transaction(value: &AbiValue) -> Result<AccountTx, AccountWireRestoreErro
         20 => canonical_tx(fields, "crossPullClose", |data| AccountTx::CrossPullClose {
             data,
         }),
-        21 => canonical_tx(fields, "crossPullProgress", |data| {
-            AccountTx::CrossPullProgress { data }
-        }),
-        22 => canonical_tx(fields, "crossSwapFillAck", |data| {
-            AccountTx::CrossSwapFillAck { data }
-        }),
         23 => canonical_tx(fields, "settleTransition", |data| {
             AccountTx::SettleTransition { data }
         }),
