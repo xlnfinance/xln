@@ -6,12 +6,12 @@ Paste this to the next agent (Claude / Codex / GPT) as-is.
 
 You continue the XLN cross-jurisdiction swap simplification. Work ONLY in the git
 worktree `/Users/zigota/xln-layer1` (branch `crossj-layer1-progress`, top commit
-`007f88ae7`; base `adde297ae`). Never edit or merge `main`. One stable commit per
+latest commit on the branch; base `adde297ae`). Never edit or merge `main`. One stable commit per
 step. Answer in Russian, tersely. Owner rules: delete more than you add; TS canon
 first, then Rust parity; cancel is decided by the book owner/hub, the user only
 requests; ask the owner before choosing LLM models for quorums (use the newest).
 
-## State you inherit (all gates green on `007f88ae7`)
+## State you inherit (all gates green on the branch head)
 Layer 1 is DONE: fill progress is Hub-internal, one uint16 ratio per order.
 - matcher → `CrossJurisdictionFillInstruction` (`core/extensions/cross-j/orderbook.ts`)
   → book owner applies it in the same Entity frame
