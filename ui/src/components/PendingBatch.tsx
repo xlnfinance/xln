@@ -89,6 +89,11 @@ export function PendingBatch({ wallet, compact = false }: { wallet: WalletView; 
 			<div className="sect" style={{ marginTop: 0 }}>
 				<h3 className="caps">
 					{mode === 'draft' ? 'On-chain batch' : 'Batch on the chain'} · {mode === 'draft' ? draftCount : sentCount}
+					{!open ? (
+						<span className="faint" style={{ textTransform: 'none', letterSpacing: 0, marginLeft: 8 }}>
+							{Array.from(new Set(items.map(item => item.title))).slice(0, 3).join(' · ')}
+						</span>
+					) : null}
 				</h3>
 				<button type="button" className="more" onClick={() => setOpen(value => !value)}>
 					{open ? 'Hide' : 'Show'}

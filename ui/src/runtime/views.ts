@@ -9,6 +9,7 @@ import type {
 import { useAdapterRead, type ReadState } from './hooks';
 import { peekXLN } from './xln-loader';
 import { usdOf } from './financial/prices';
+import { disputeView, settlementView, type AccountDoc, type DisputePhase, type SettlementPhase } from './financial/manage';
 
 /**
  * One projection read per committed frame, the same `view-frame` the SvelteKit
@@ -37,7 +38,12 @@ export type AccountView = {
 	isHub: boolean;
 	tokens: AccountTokenView[];
 	disputed: boolean;
+	dispute: DisputePhase;
+	/** 'none' when no settlement workspace is open on this account. */
+	settlement: SettlementPhase;
 	frameHeight: number;
+	/** The full account document, for management screens that need policy and workspace detail. */
+	doc: AccountDoc;
 };
 
 /** Money that lives outside bilateral accounts: on-chain wallet or Depository reserve. */
@@ -148,6 +154,7 @@ export function useWallet(entityId: string | null): WalletView {
 				tokens.push({ tokenId: Number(tokenId), delta, derived, signed: isLeft ? total : -total });
 			}
 			tokens.sort((a, b) => a.tokenId - b.tokenId);
+			const dispute = disputeView(doc, isLeft, core?.jBatchState?.batch ?? null);
 			accounts.push({
 				counterpartyId,
 				isLeft,
@@ -155,7 +162,10 @@ export function useWallet(entityId: string | null): WalletView {
 				isHub: hubs.has(counterpartyId),
 				tokens,
 				disputed: Boolean(doc.activeDispute) || String(doc.status || '').toLowerCase() === 'disputed',
+				dispute: dispute.phase,
+				settlement: settlementView(doc, isLeft)?.phase ?? 'none',
 				frameHeight: Number(doc.currentFrame?.height ?? 0),
+				doc,
 			});
 		}
 		accounts.sort((a, b) => (a.isHub === b.isHub ? a.label.localeCompare(b.label) : a.isHub ? -1 : 1));

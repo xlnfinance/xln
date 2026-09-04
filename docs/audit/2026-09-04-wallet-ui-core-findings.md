@@ -219,3 +219,28 @@ relocating the frame log entries the SvelteKit `View.svelte` and the React
 wallet both rely on (`PAYMENT_TERMINAL_EVENT_NAMES` over `journal.logs`).
 Please run `cd ui && bun run test:e2e` before landing that storage change; it
 is the only test that exercises the browser-side receipt path.
+
+## 12. P1 — embedded runtime never applies its own `DisputeStarted` log to the account
+
+Observed 2026-09-04 in the React wallet sandbox (BrowserVM jurisdiction, user
+and Hub One in one runtime), reproducible with `cd ui && bun run test:e2e`
+(`tests/e2e-manage.spec.ts`).
+
+Steps: `prepareDispute` on the user↔hub account → account `status` becomes
+`disputed`, the dispute start joins `jBatchState.batch.disputeStarts` → `j_broadcast`
+→ BrowserVM logs `DisputeStarted` + `HankoBatchProcessed` (block 23, 1 op) →
+`[j.event] history.finalized_by_entity range=23-23` for the user and `22-23` for
+the hub → `sentBatch` clears.
+
+After that, on both sides (`view-frame` accounts and `entity/{id}/account/{cp}`):
+`status: 'disputed'`, `activeDispute: undefined`, `disputePrepare: undefined`.
+No `dispute_started.*` jEventLog line is emitted, so
+`applyDisputeStartedJEvent` (`core/entity/tx/j-events.ts:957`) is either not
+reached for this event or bails before `applyEntityAccountEnvelopeUpdate(...,
+'applyDisputeStarted')`. The account is frozen forever with no challenge
+window, no finalize path and no way back. Reserve→collateral through the same
+batch path (`ReserveToCollateral`) does apply, so the finality plumbing itself
+works; the gap is specific to the dispute events.
+
+Wallet side: the account shows "Dispute sent" until `activeDispute` arrives;
+finalize is offered only from `activeDispute`.
