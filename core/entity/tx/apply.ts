@@ -83,9 +83,9 @@ import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from './handlers/c
 import { handleOrderbookSweepCrossJurisdictionEntityTx } from './handlers/cross-j/sweep';
 import {
   handleAdmitCrossJurisdictionBookOrderEntityTx,
-  handleCrossJurisdictionBookOrderRemovedEntityTx,
   handleRemoveCrossJurisdictionBookOrderEntityTx,
 } from './handlers/cross-j/book-order';
+import { handleCrossJurisdictionBookOrderRemovedEntityTx } from './handlers/cross-j/book-removal-ack';
 import { handleScheduledWakeEntityTx } from './handlers/system/scheduled-wake';
 import {
   handleEntityProviderCancelAction,

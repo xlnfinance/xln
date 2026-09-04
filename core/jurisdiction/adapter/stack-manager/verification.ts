@@ -72,7 +72,7 @@ export const assertCanonicalStablecoinRegistration = (
   } catch {
     throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
   }
-  const [depository, tokenType, contractAddress, externalTokenId] = decoded as unknown as [string, bigint, string, bigint];
+  const [depository, tokenType, contractAddress, externalTokenId] = decoded;
   if (
     String(depository).toLowerCase() !== manifest.contracts.depository.toLowerCase() ||
     BigInt(tokenType) !== 0n ||

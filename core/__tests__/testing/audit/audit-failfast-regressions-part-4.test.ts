@@ -109,8 +109,8 @@ import { buildCrossJurisdictionEntityOutput } from '../../../entity/tx/j-events-
 
 import {
   handleAdmitCrossJurisdictionBookOrderEntityTx,
-  handleCrossJurisdictionBookOrderRemovedEntityTx,
 } from '../../../entity/tx/handlers/cross-j/book-order';
+import { handleCrossJurisdictionBookOrderRemovedEntityTx } from '../../../entity/tx/handlers/cross-j/book-removal-ack';
 
 import type { SwapOfferEvent } from '../../../entity/tx/handlers/account/index';
 

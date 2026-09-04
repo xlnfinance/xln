@@ -2,10 +2,8 @@ import { expect, test } from 'bun:test';
 
 import { computeCanonicalEntityConsensusStateHashCold } from '../../../../entity/consensus/state-root';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../../../../entity/tx/handlers/account-cross-j-followups';
-import {
-  handleCrossJurisdictionBookOrderRemovedEntityTx,
-  handleRemoveCrossJurisdictionBookOrderEntityTx,
-} from '../../../../entity/tx/handlers/cross-j/book-order';
+import { handleCrossJurisdictionBookOrderRemovedEntityTx } from '../../../../entity/tx/handlers/cross-j/book-removal-ack';
+import { handleRemoveCrossJurisdictionBookOrderEntityTx } from '../../../../entity/tx/handlers/cross-j/book-order';
 import { applyAccountTxToMutableReplica } from '../../../../account/tx/apply';
 import { createDefaultDelta } from '../../../../account/state/delta';
 import {

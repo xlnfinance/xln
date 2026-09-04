@@ -2216,14 +2216,11 @@ export class BrowserVMProvider {
   private async assertBoardCommitted(targetEntityId: string, newBoardHash: string): Promise<void> {
     const committed = (await this.readEntityProvider('committedBoards', [newBoardHash]))[0] as boolean;
     if (committed) return;
-    const entity = (await this.readEntityProvider('entities', [targetEntityId])) as unknown as {
-      previousBoardHash: string;
-      previousBoardHash2: string;
-    };
+    const entity = await this.readEntityProvider('entities', [targetEntityId]);
     const hash = newBoardHash.toLowerCase();
     if (
-      String(entity.previousBoardHash).toLowerCase() === hash ||
-      String(entity.previousBoardHash2).toLowerCase() === hash
+      String(entity[1]).toLowerCase() === hash ||
+      String(entity[8]).toLowerCase() === hash
     ) return;
     throw new Error(`BOARD_NOT_COMMITTED:${newBoardHash}`);
   }
