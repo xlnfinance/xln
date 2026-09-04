@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readNativeOutput } from '../src/native/children.ts';
 import { readNativeProgress } from '../src/native/progress.ts';
 
 function stream(text: string): ReadableStream<Uint8Array> {
@@ -19,4 +20,13 @@ test('native progress protocol rejects malformed or unsafe counters', async () =
   await expect(readNativeProgress(stream('BVP1 0\n'))).rejects.toThrow('BRAINVAULT_NATIVE_PROGRESS_INVALID');
   await expect(readNativeProgress(stream('BVP1 nope\n'))).rejects.toThrow('BRAINVAULT_NATIVE_PROGRESS_INVALID');
   await expect(readNativeProgress(stream('BVP1 9007199254740992\n'))).rejects.toThrow('BRAINVAULT_NATIVE_PROGRESS_INVALID');
+});
+
+test('native child streams reject data beyond their protocol bounds', async () => {
+  await expect(readNativeProgress(stream('x'.repeat((64 * 1024) + 1))))
+    .rejects.toThrow('BRAINVAULT_NATIVE_STDERR_LIMIT');
+  await expect(readNativeProgress(stream('BVP1 1\nBVP1 1\n'), undefined, 1))
+    .rejects.toThrow('BRAINVAULT_NATIVE_STDERR_LIMIT');
+  await expect(readNativeOutput(stream('12345'), 4))
+    .rejects.toThrow('BRAINVAULT_NATIVE_STDOUT_LIMIT');
 });

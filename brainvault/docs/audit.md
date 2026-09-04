@@ -44,13 +44,13 @@ foreign results before the canonical fold.
 
 | Path | Review | Physical lines | Skills |
 | --- | --- | ---: | --- |
-| WASM compatibility | `../src/native/workers/wasm.ts`, collector, native orchestrator | included in 957 native lines | Web Workers, hash-wasm, transfer buffers |
-| Portable native | `../src/native/workers/native.ts`, collector, native orchestrator | included in 957 native lines | Bun workers, @node-rs/argon2 |
+| WASM compatibility | `../src/native/workers/wasm.ts`, collector, native orchestrator | included in 1,010 native lines | Web Workers, hash-wasm, transfer buffers |
+| Portable native | `../src/native/workers/native.ts`, collector, native orchestrator | included in 1,010 native lines | Bun workers, @node-rs/argon2 |
 | Apple C/NEON | native boundary + `../src/native/source/c/brainvault_argon2.c` | 192 first-party C | C11, stdin/stdout framing, memory erasure |
 | M3 Ultra Metal hybrid | `hybrid.ts`, collector, children, binary integrity, Metal host/kernel, C bridge | 1,358 Metal + 192 C bridge | Objective-C, Metal, GPU buffers, subprocess isolation |
 
 The complete first-party native orchestration layer outside `source/` and
-`prebuilds/` is 957 physical TypeScript lines. The Metal host and kernel are
+`prebuilds/` is 1,010 physical TypeScript lines. The Metal host and kernel are
 1,358 lines. The C build additionally compiles 13,274 lines of pinned upstream
 Argon2/SSE2NEON code. Review vendor hashes/provenance and diff those directories
 against upstream; do not treat them as authored BrainVault semantics.
@@ -84,7 +84,7 @@ For terminal secrecy, read `../src/cli/policy.ts` before the larger
 `../src/cli/index.ts`. Verify pseudo-TTY tests in `../tests/core.test.ts` for
 hidden input, confirmation, alternate-screen cleanup, signals, `TERM=dumb`,
 non-TTY rejection, `NO_COLOR`, and error sanitization. The CLI directory is
-2,294 physical lines; it owns interaction, not derivation semantics.
+2,295 physical lines; it owns interaction, not derivation semantics.
 
 For supply chain, read:
 

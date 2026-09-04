@@ -1,8 +1,13 @@
 .PHONY: all secure secure-m3 no-wipe no-wipe-m3 prebuild clean
 
 MACOS_MIN := 11.0
-PORTABLE_FLAGS := -C target-cpu=apple-m1 -C link-arg=-mmacosx-version-min=$(MACOS_MIN)
-M3_FLAGS := -C target-cpu=apple-m3 -C link-arg=-mmacosx-version-min=$(MACOS_MIN)
+# Rust retains panic source locations even in stripped binaries. Map the local
+# checkout to one stable virtual root so an auditor rebuilding elsewhere gets
+# the same bytes instead of a binary containing the builder's private path.
+SOURCE_ROOT := $(realpath $(CURDIR))
+SOURCE_MAP := --remap-path-prefix=$(SOURCE_ROOT)=/brainvault-rust-src
+PORTABLE_FLAGS := -C target-cpu=apple-m1 -C link-arg=-mmacosx-version-min=$(MACOS_MIN) $(SOURCE_MAP)
+M3_FLAGS := -C target-cpu=apple-m3 -C link-arg=-mmacosx-version-min=$(MACOS_MIN) $(SOURCE_MAP)
 CARGO_BUILD := cargo build --offline --release --locked
 PREBUILD_DIR := ../../prebuilds/darwin-arm64
 

@@ -335,6 +335,73 @@ test('invalid accelerator progress terminates the native child', async () => {
   expect(pids).toEqual([]);
 }, 5_000);
 
+test('native children receive no inherited loader-injection environment', async () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const previous = process.env.LD_PRELOAD;
+  process.env.LD_PRELOAD = '/tmp/brainvault-must-not-reach-native';
+  const password = new TextEncoder().encode('benchmark-password');
+  const salt = await createShardSalt('benchmark-user', 0, 1);
+  let message = '';
+  try {
+    await deriveHybridNativeShards({
+      engine: 'metal', password, salts: [salt], memoryKiB: 262144, requestedCpuWorkers: 1,
+      paths: {
+        packageRoot: PACKAGE_ROOT,
+        cpuExecutable: `${PACKAGE_ROOT}/src/native/prebuilds/darwin-arm64/brainvault-argon2`,
+        acceleratorExecutable: `${PACKAGE_ROOT}/tests/fixtures/native-failure.ts`,
+        metalLibrary: `${PACKAGE_ROOT}/src/native/prebuilds/darwin-arm64/argon2.metallib`,
+      },
+    });
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (previous === undefined) delete process.env.LD_PRELOAD;
+    else process.env.LD_PRELOAD = previous;
+    password.fill(0);
+    salt.fill(0);
+  }
+  expect(message).toBe('BRAINVAULT_ACCELERATOR_CHILD_FAILED:7');
+});
+
+for (const [fixtureName, expectedError] of [
+  ['native-invalid-progress-hang.ts', 'BRAINVAULT_NATIVE_PROGRESS_INVALID'],
+  ['native-oversized.ts', 'BRAINVAULT_NATIVE_STDOUT_LIMIT'],
+] as const) {
+  test(`${fixtureName} is force-terminated after a bounded protocol failure`, async () => {
+    if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+    const fixture = `${PACKAGE_ROOT}/tests/fixtures/${fixtureName}`;
+    const password = new TextEncoder().encode('benchmark-password');
+    const salt = await createShardSalt('benchmark-user', 0, 1);
+    const started = performance.now();
+    let message = '';
+    try {
+      await deriveHybridNativeShards({
+        engine: 'metal', password, salts: [salt], memoryKiB: 262144, requestedCpuWorkers: 1,
+        onProgress: () => {},
+        paths: {
+          packageRoot: PACKAGE_ROOT,
+          cpuExecutable: `${PACKAGE_ROOT}/src/native/prebuilds/darwin-arm64/brainvault-argon2`,
+          acceleratorExecutable: fixture,
+          metalLibrary: `${PACKAGE_ROOT}/src/native/prebuilds/darwin-arm64/argon2.metallib`,
+        },
+      });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      password.fill(0);
+      salt.fill(0);
+    }
+    const found = Bun.spawnSync({ cmd: ['pgrep', '-f', fixture], stderr: 'pipe', stdout: 'pipe' });
+    const pids = found.exitCode === 0
+      ? found.stdout.toString().trim().split('\n').filter(Boolean).map(Number)
+      : [];
+    for (const pid of pids) if (Number.isSafeInteger(pid) && pid > 1) process.kill(pid, 'SIGKILL');
+    expect(message).toBe(expectedError);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(pids).toEqual([]);
+  }, 5_000);
+}
+
 test('every accelerator reproduces frozen ASCII, Unicode/NUL, and ordered smoke vectors', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
   const vectorFile = await Bun.file(`${PACKAGE_ROOT}/tests/data/vectors-v1.json`).json() as {

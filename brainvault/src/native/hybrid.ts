@@ -1,7 +1,10 @@
 import { cpus, totalmem } from 'node:os';
 import { verifyBundledExecutable, verifyBundledFile } from '../packaging/binary-integrity.ts';
 import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './progress.ts';
-import { terminateNativeChildGroup, trackNativeChild, type NativeChild } from './children.ts';
+import {
+  nativeChildEnvironment, readNativeOutput, terminateNativeChildGroup,
+  trackNativeChild, type NativeChild,
+} from './children.ts';
 
 const INPUT_MAGIC = 0x32435642;
 const HEADER_BYTES = 24;
@@ -145,11 +148,10 @@ async function runJob(
     onProgress(completed);
   };
   const child = trackNativeChild(Bun.spawn([job.executable], {
-    env: {
-      ...process.env,
+    env: nativeChildEnvironment({
       ...job.environment,
       ...(onProgress === undefined ? {} : { [BRAINVAULT_NATIVE_PROGRESS_ENV]: '1' }),
-    },
+    }),
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -157,20 +159,18 @@ async function runJob(
   children.add(child);
   child.stdin.write(input);
   child.stdin.end();
-  let stdout: ArrayBuffer;
+  let output: Buffer;
   let exitCode: number;
   try {
-    [stdout, , exitCode] = await Promise.all([
-      new Response(child.stdout).arrayBuffer(),
-      readNativeProgress(child.stderr, acceptProgress),
+    [output, , exitCode] = await Promise.all([
+      readNativeOutput(child.stdout, job.count * OUTPUT_BYTES),
+      readNativeProgress(child.stderr, acceptProgress, job.count),
       child.exited,
     ]);
   } catch (error) {
-    child.kill();
-    await child.exited;
+    await terminateNativeChildGroup([child]);
     throw error;
   }
-  const output = Buffer.from(stdout);
   if (exitCode !== 0) {
     output.fill(0);
     throw new Error(`BRAINVAULT_ACCELERATOR_CHILD_FAILED:${exitCode}`);

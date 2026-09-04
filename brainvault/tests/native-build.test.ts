@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -100,19 +100,27 @@ test('locked native release builds are byte-reproducible', () => {
     expect(sha256(m3First)).toBe(sha256(`${PACKAGE_ROOT}/src/native/prebuilds/darwin-arm64/brainvault-argon2-m3`));
 
     const rustRoot = `${PACKAGE_ROOT}/src/native/source/rust`;
+    const relocatedRustRoot = join(temp, 'relocated-rust-source');
+    cpSync(rustRoot, relocatedRustRoot, { recursive: true });
     const cargoHome = join(temp, 'empty-cargo-home');
     mkdirSync(cargoHome);
-    const buildRust = (target: string, noWipe: boolean, cpu: 'apple-m1' | 'apple-m3') => Bun.spawnSync({
+    const buildRust = (
+      sourceRoot: string,
+      target: string,
+      noWipe: boolean,
+      cpu: 'apple-m1' | 'apple-m3',
+    ) => Bun.spawnSync({
       cmd: [
         'cargo', 'build', '--offline', '--release', '--locked',
         ...(noWipe ? ['--no-default-features'] : []), '--target-dir', target,
       ],
-      cwd: rustRoot,
+      cwd: sourceRoot,
       env: {
         ...process.env,
         CARGO_HOME: cargoHome,
         MACOSX_DEPLOYMENT_TARGET: '11.0',
-        RUSTFLAGS: `-C target-cpu=${cpu} -C link-arg=-mmacosx-version-min=11.0`,
+        RUSTFLAGS: `-C target-cpu=${cpu} -C link-arg=-mmacosx-version-min=11.0 `
+          + `--remap-path-prefix=${realpathSync(sourceRoot)}=/brainvault-rust-src`,
       },
       stderr: 'pipe',
       stdout: 'pipe',
@@ -122,8 +130,9 @@ test('locked native release builds are byte-reproducible', () => {
         const variant = `${cpu === 'apple-m3' ? 'm3' : 'm1'}${noWipe ? '-no-wipe' : ''}`;
         const first = join(temp, `rust-${variant}-1`);
         const second = join(temp, `rust-${variant}-2`);
-        expect(buildRust(first, noWipe, cpu).exitCode).toBe(0);
-        expect(buildRust(second, noWipe, cpu).exitCode).toBe(0);
+        expect(buildRust(rustRoot, first, noWipe, cpu).exitCode).toBe(0);
+        const secondRoot = cpu === 'apple-m1' && !noWipe ? relocatedRustRoot : rustRoot;
+        expect(buildRust(secondRoot, second, noWipe, cpu).exitCode).toBe(0);
         const prebuildName = `brainvault-argon2-rust${noWipe ? '-no-wipe' : ''}${cpu === 'apple-m3' ? '-m3' : ''}`;
         const firstBinary = join(first, `release/${prebuildName}`);
         const secondBinary = join(second, `release/${prebuildName}`);
@@ -221,4 +230,4 @@ test('locked native release builds are byte-reproducible', () => {
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
-}, 60_000);
+}, 120_000);

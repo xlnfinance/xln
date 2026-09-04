@@ -52,7 +52,10 @@ import {
 import { verifyBundledExecutable } from '../packaging/binary-integrity.ts';
 import { acceleratorPlan, deriveHybridNativeShards, type AcceleratorEngine } from '../native/hybrid.ts';
 import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from '../native/progress.ts';
-import { terminateNativeChildren, trackNativeChild } from '../native/children.ts';
+import {
+  nativeChildEnvironment, readNativeOutput, terminateNativeChildGroup,
+  terminateNativeChildren, trackNativeChild,
+} from '../native/children.ts';
 import {
   BRAINVAULT_DEFAULT_LEVEL,
   BRAINVAULT_LEVEL_NAMES,
@@ -1014,30 +1017,28 @@ async function deriveExecutableShards(
       input.set(await createShardSalt(name, index, shardCount, algId), header.length + password.length + (index * 32));
     }
     const child = trackNativeChild(Bun.spawn([verifiedExecutable], {
-      env: {
-        ...process.env,
+      env: nativeChildEnvironment({
         ...(onProgress === undefined ? {} : { [BRAINVAULT_NATIVE_PROGRESS_ENV]: '1' }),
-      },
+      }),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
     }));
     child.stdin.write(input);
     child.stdin.end();
-    let stdoutBytes: ArrayBuffer;
+    let nativeOutput: Buffer;
     let status: number;
     try {
-      [stdoutBytes, , status] = await Promise.all([
-        new Response(child.stdout).arrayBuffer(),
-        readNativeProgress(child.stderr, acceptProgress),
+      [nativeOutput, , status] = await Promise.all([
+        readNativeOutput(child.stdout, shardCount * BRAINVAULT_V1.SHARD_OUTPUT_BYTES),
+        readNativeProgress(child.stderr, acceptProgress, shardCount),
         child.exited,
       ]);
     } catch (error) {
-      child.kill();
-      await child.exited;
+      await terminateNativeChildGroup([child]);
       throw error;
     }
-    output = Buffer.from(stdoutBytes);
+    output = nativeOutput;
     exitCode = status;
   } finally {
     password.fill(0);

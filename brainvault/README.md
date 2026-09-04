@@ -71,8 +71,8 @@ blank-line discounts, or generated code.
 | --- | --- | ---: | --- |
 | Same 32-byte root | `src/core/primitives/spec.ts`, `kdf.ts`, `src/core/canonical.ts` | 289 | TypeScript, UTF-8/NFKD, Argon2id, BLAKE3 |
 | Same wallets and addresses | add `encoding.ts`, `src/core/index.ts` | 588 total | BIP-39, BIP-32, Ethereum derivation |
-| Terminal never reveals by accident | `src/cli/` | 2,294 | Bun, TTY/readline, Unix signals |
-| Scheduling cannot change the root | `src/native/` except `source/` and `prebuilds/` | 957 | workers, subprocesses, fail-closed validation |
+| Terminal never reveals by accident | `src/cli/` | 2,295 | Bun, TTY/readline, Unix signals |
+| Scheduling cannot change the root | `src/native/` except `source/` and `prebuilds/` | 1,010 | workers, subprocesses, fail-closed validation |
 | npm and binary integrity | `src/packaging/` | 137 | tar, SHA-256, Mach-O reproducibility |
 | M3 Ultra Metal work | `src/native/source/metal/` host + kernel | 1,358 | Objective-C, Metal, GPU memory model |
 | Apple C/NEON work | first-party C bridge | 192 | C11, process I/O, memory wiping |

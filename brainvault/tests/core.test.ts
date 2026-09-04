@@ -831,11 +831,10 @@ function runSignalDuringNativeDerivation(signal: 'TERM' | 'HUP') {
         `${digest}  src/native/prebuilds/darwin-arm64/brainvault-argon2-m3`,
       ));
     const cliPidFile = join(temp, 'cli.pid');
-    const nativePidFile = join(temp, 'native.pid');
     const wrapper = join(PACKAGE_ROOT, 'tests/fixtures/cli-signal-wrapper.ts');
     const script = [
       'set timeout 10',
-      `spawn env NO_COLOR=1 TERM=xterm-256color bun ${wrapper} ${join(packageRoot, 'brainvault')} ${cliPidFile} ${nativePidFile} --shards 100 --workers 32 --engine c-neon`,
+      `spawn env NO_COLOR=1 TERM=xterm-256color bun ${wrapper} ${join(packageRoot, 'brainvault')} ${cliPidFile} --shards 100 --workers 32 --engine c-neon`,
       'expect "Username: "', 'send "signal-audit\\r"',
       'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
       'expect { "1 / 100 shards" {} timeout { exit 99 } }',
