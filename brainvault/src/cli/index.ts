@@ -597,9 +597,9 @@ Flags:
   operating-system CSPRNG. It is shown once in a temporary sensitive screen,
   must be repeated, and is then erased from the ordinary terminal view.
 - --unicode-recovery
-  Permit non-ASCII input for existing V1 wallet recovery using NFKD/UTF-8 semantics.
-  For values a terminal cannot represent exactly, use the library API and verify
-  the remembered first address. New CLI wallet creation accepts printable ASCII.
+  Legacy no-op retained for old recovery instructions. Unicode input is accepted
+  by default and uses the frozen V1 NFKD/UTF-8 semantics. For values a terminal
+  cannot represent exactly, use the library API and verify the complete first address.
 
 Examples:
 - bunx brainvault
@@ -612,7 +612,8 @@ Examples:
 Recovery rule:
 - You must use the same V1 Username + Password + Shard count + multiplier
   to reproduce the same master key.
-- Capitalization and every space are exact for printable-ASCII creation.
+- Capitalization and every space are exact. Unicode is accepted; V1 NFKD makes
+  canonically or compatibility-equivalent spellings intentionally identical.
 - Engine and worker count do not affect the wallet.
 
 Wallet import:

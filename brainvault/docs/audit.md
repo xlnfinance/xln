@@ -8,7 +8,7 @@ All line counts below are physical source lines from the 2.2.0 candidate. They
 include comments and blank lines and are guarded by package tests. A smaller
 number is easier to navigate; it is not proof of safety.
 
-## 1. Root identity — 289 lines
+## 1. Root identity — 294 lines
 
 Read in this order:
 
@@ -18,12 +18,12 @@ Read in this order:
 4. `../src/core/canonical.ts` for factor math, indexed validation, and ordered BLAKE3;
 5. `../tests/data/vectors-v1.json` for independent expected bytes and roots.
 
-The executable files in items 2–4 total 289 physical lines. Required skills:
+The executable files in items 2–4 total 294 physical lines. Required skills:
 TypeScript, byte encodings, Unicode normalization, Argon2id, and BLAKE3 domain
 separation. They import no CLI, filesystem, network, clock, scheduler, wallet, or
 native accelerator code.
 
-## 2. Wallet projection — 588 total lines
+## 2. Wallet projection — 603 total lines
 
 Add:
 
@@ -33,7 +33,7 @@ Add:
 
 Required skills: BIP-39 with an empty optional passphrase, BIP-32, secp256k1,
 Ethereum address derivation, and the `ethers` API. The root and wallet layer
-together total 588 physical lines.
+together total 603 physical lines.
 
 ## 3. Execution paths
 
@@ -84,7 +84,7 @@ For terminal secrecy, read `../src/cli/policy.ts` before the larger
 `../src/cli/index.ts`. Verify pseudo-TTY tests in `../tests/core.test.ts` for
 hidden input, confirmation, alternate-screen cleanup, signals, `TERM=dumb`,
 non-TTY rejection, `NO_COLOR`, and error sanitization. The CLI directory is
-2,295 physical lines; it owns interaction, not derivation semantics.
+2,296 physical lines; it owns interaction, not derivation semantics.
 
 For supply chain, read:
 

@@ -1,5 +1,4 @@
 export const MIN_CLI_PASSWORD_CHARACTERS = 8;
-const PRINTABLE_ASCII = /^[\x20-\x7e]+$/;
 const TERMINAL_CONTROL = /\p{Cc}/u;
 
 export function publicErrorCode(error: unknown, unknownCode: string): string {
@@ -52,11 +51,12 @@ export function cliDomainError(domain: string): string | undefined {
 }
 
 export function cliCreationCharacterError(
-  name: string,
-  passphrase: string,
-  unicodeRecovery: boolean,
-): string | undefined {
-  if (unicodeRecovery || (PRINTABLE_ASCII.test(name) && PRINTABLE_ASCII.test(passphrase))) return undefined;
-  return 'BRAINVAULT_ASCII_CREATION_REQUIRED: use printable ASCII for new wallets, '
-    + 'or --unicode-recovery for exact recovery of an existing Unicode/control-character wallet.';
+  _name: string,
+  _passphrase: string,
+  _unicodeRecovery: boolean,
+): undefined {
+  // V1 owns Unicode normalization, so the CLI must not create a second,
+  // ASCII-only input language. The legacy flag remains accepted because old
+  // recovery instructions may contain it, but Unicode is valid without it.
+  return undefined;
 }

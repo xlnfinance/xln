@@ -47,7 +47,7 @@ Before funding, close BrainVault, start a fresh process, enter everything again,
 and compare the **complete first receiving address**. Same-process confirmation
 only authorizes disclosure; it is not a recovery test.
 
-## Auditor entrance: five files, 588 lines
+## Auditor entrance: five files, 603 lines
 
 Do not read the repository alphabetically. Read the ownership chain:
 
@@ -62,16 +62,16 @@ src/core/canonical.ts           indexed validation + ordered BLAKE3 fold
 src/core/index.ts               mnemonics, keys, addresses
 ```
 
-The executable root in `spec.ts + kdf.ts + canonical.ts` is **289 physical
+The executable root in `spec.ts + kdf.ts + canonical.ts` is **294 physical
 lines**. Adding strict encoding and all wallet projection code makes the complete
-portable wallet meaning **588 physical lines**. Neither number includes tests,
+portable wallet meaning **603 physical lines**. Neither number includes tests,
 blank-line discounts, or generated code.
 
 | What you want to trust | Additional review | Physical lines | Useful skills |
 | --- | --- | ---: | --- |
-| Same 32-byte root | `src/core/primitives/spec.ts`, `kdf.ts`, `src/core/canonical.ts` | 289 | TypeScript, UTF-8/NFKD, Argon2id, BLAKE3 |
-| Same wallets and addresses | add `encoding.ts`, `src/core/index.ts` | 588 total | BIP-39, BIP-32, Ethereum derivation |
-| Terminal never reveals by accident | `src/cli/` | 2,295 | Bun, TTY/readline, Unix signals |
+| Same 32-byte root | `src/core/primitives/spec.ts`, `kdf.ts`, `src/core/canonical.ts` | 294 | TypeScript, UTF-8/NFKD, Argon2id, BLAKE3 |
+| Same wallets and addresses | add `encoding.ts`, `src/core/index.ts` | 603 total | BIP-39, BIP-32, Ethereum derivation |
+| Terminal never reveals by accident | `src/cli/` | 2,296 | Bun, TTY/readline, Unix signals |
 | Scheduling cannot change the root | `src/native/` except `source/` and `prebuilds/` | 1,010 | workers, subprocesses, fail-closed validation |
 | npm and binary integrity | `src/packaging/` | 137 | tar, SHA-256, Mach-O reproducibility |
 | M3 Ultra Metal work | `src/native/source/metal/` host + kernel | 1,358 | Objective-C, Metal, GPU memory model |
@@ -145,10 +145,13 @@ bunx brainvault --password
 `--reveal` requests an early sensitive-terminal capability check; it remains a
 compatibility alias and never bypasses the final password confirmation.
 
-New CLI creation accepts printable ASCII and preserves capitalization and every
-space. `--unicode-recovery` exists for V1 NFKD/UTF-8 recovery. The CLI requires
-eight password characters as input hygiene; it is not a safety claim. Existing
-short-password wallets remain recoverable with `--allow-short-password`.
+CLI creation and recovery accept Unicode using the frozen V1 NFKD/UTF-8 rule.
+Capitalization and every space remain exact; canonically or compatibility-
+equivalent Unicode spellings intentionally normalize to the same bytes.
+`--unicode-recovery` is a legacy no-op retained for old recovery instructions.
+The CLI requires eight password characters as input hygiene; it is not a safety
+claim. Existing short-password wallets remain recoverable with
+`--allow-short-password`.
 
 Programmatic use from this directory:
 
@@ -212,7 +215,7 @@ bun add --exact --ignore-scripts brainvault@2.2.0
 Nothing in BrainVault has run. Read `node_modules/brainvault/README.md`, then:
 
 1. Authenticate the exact source commit or signed release through another channel.
-2. Audit `docs/spec-v1.md`, `tests/data/vectors-v1.json`, and the 588-line path.
+2. Audit `docs/spec-v1.md`, `tests/data/vectors-v1.json`, and the 603-line path.
 3. Audit exact dependencies in `docs/dependency-lock.audit` and `package.json`.
 4. Run `bun run verify:source` in the package. On Apple Silicon it builds every
    native artifact twice from vendored source and requires byte equality with

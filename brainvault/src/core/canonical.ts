@@ -39,6 +39,11 @@ export async function combineShardsWithParams(
   factor: number,
   params: BrainvaultKdfParams = {},
 ): Promise<Uint8Array> {
+  // Array position is the canonical shard index at this pure boundary. Opaque
+  // Argon2 outputs carry no recoverable provenance of their own; every
+  // concurrent/native caller must first use shard-collector, which rejects a
+  // duplicate, missing, malformed, wrong-index, or foreign response and then
+  // materializes this array in numeric index order.
   const kdf = resolveKdfParams(params);
   if (shards.length < 1) throw new Error('BRAINVAULT_SHARDS_EMPTY');
   for (const [index, shard] of shards.entries()) {

@@ -151,9 +151,16 @@ export async function entropyToMnemonic(entropy: Uint8Array): Promise<string> {
   }
 }
 
-/**
- * Derive Ethereum address from mnemonic + optional passphrase
- */
+function requireEmptyBip39Passphrase(passphrase: string): void {
+  // BrainVault's password is consumed by Argon2id before mnemonic creation.
+  // Reusing it in BIP-39 would silently select a different, non-canonical
+  // wallet that cannot be recovered by the frozen V1 instructions.
+  if (passphrase !== '') {
+    throw new Error('BRAINVAULT_BIP39_PASSPHRASE_FORBIDDEN');
+  }
+}
+
+/** Derive the frozen V1 primary Ethereum address. */
 export async function deriveEthereumAddress(
   mnemonic: string,
   passphrase: string = ''
@@ -169,6 +176,7 @@ async function deriveEthereumAddressAtPath(
   path: string,
   passphrase: string = ''
 ): Promise<string> {
+  requireEmptyBip39Passphrase(passphrase);
   const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, path);
   return wallet.address;
 }
@@ -182,6 +190,7 @@ export async function deriveEthereumPrivateKeyAtPath(
   path: string,
   passphrase: string = ''
 ): Promise<string> {
+  requireEmptyBip39Passphrase(passphrase);
   const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, path);
   return wallet.privateKey;
 }
@@ -196,6 +205,7 @@ export async function deriveEthereumAddressMatrix(
   passphrase: string = '',
   count: number = 5
 ): Promise<{ standard: string[]; ledgerLive: string[] }> {
+  requireEmptyBip39Passphrase(passphrase);
   if (!Number.isInteger(count) || count < 1) {
     throw new Error('Address matrix count must be a positive integer');
   }

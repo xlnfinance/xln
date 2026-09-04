@@ -549,8 +549,15 @@ test('frozen primary and secondary wallet projections require an empty BIP-39 pa
       .toBe('0x341c055336e121ee7b59c44a17a14ab54c7fbe91af3b863fcf034436dfd0e1bc');
     expect(await deriveEthereumPrivateKeyAtPath(mnemonic12, "m/44'/60'/0'/0/0", ''))
       .toBe('0x0629efa17a38592ea767eb43c679da13f7d28248ed518c7b3f400e5a09871264');
-    expect(await deriveEthereumAddress(mnemonic24, 'BrainVault password'))
-      .toBe('0x4F1557BCc80C24b23A58D88e690a405597601cfB');
+    await expect(deriveEthereumAddress(mnemonic24, 'BrainVault password'))
+      .rejects.toThrow('BRAINVAULT_BIP39_PASSPHRASE_FORBIDDEN');
+    await expect(deriveEthereumAddressMatrix(mnemonic24, 'BrainVault password', 1))
+      .rejects.toThrow('BRAINVAULT_BIP39_PASSPHRASE_FORBIDDEN');
+    await expect(deriveEthereumPrivateKeyAtPath(
+      mnemonic24,
+      "m/44'/60'/0'/0/0",
+      'BrainVault password',
+    )).rejects.toThrow('BRAINVAULT_BIP39_PASSPHRASE_FORBIDDEN');
     expect(await deriveEthereumAddress(mnemonic24, '')).toBe(VECTORS[0]!.expect.ethAddr);
   } finally {
     root.fill(0);
@@ -1152,9 +1159,10 @@ test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocatio
   expect(oversized.stderr.toString()).toContain('BRAINVAULT_WORKERS_EXCEED_MEMORY_LIMIT');
 });
 
-test('CLI defaults to printable ASCII while preserving explicit Unicode recovery', () => {
+test('CLI accepts exact Unicode input without a recovery-only switch', () => {
   expect(cliCreationCharacterError('alice', 'secret123456', false)).toBeUndefined();
-  expect(cliCreationCharacterError('café', 'secret123456', false)).toContain('BRAINVAULT_ASCII_CREATION_REQUIRED');
+  expect(cliCreationCharacterError('Алиса', 'секрет-пароль', false)).toBeUndefined();
+  expect(cliCreationCharacterError('café', 'secrét-password', false)).toBeUndefined();
   expect(cliCreationCharacterError('café', 'secrét-password', true)).toBeUndefined();
   expect(cliPasswordError('1234567', false)).toContain('BRAINVAULT_PASSPHRASE_TOO_SHORT');
   expect(cliPasswordError('1234567', true)).toBeUndefined();
