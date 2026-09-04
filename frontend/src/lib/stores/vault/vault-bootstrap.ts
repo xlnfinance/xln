@@ -1,12 +1,9 @@
 import type { JurisdictionConfig } from '@xln/core/api/public/runtime-module';
-import { errorLog } from '../errorLogStore';
-import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord, readJsonUnknown } from '$lib/utils/boundary';
 import {
-  type FaucetResult,
   type HealthMachine,
   type HealthPayload,
   type JurisdictionsPayload,
-  type Runtime,
 } from './vault-recovery';
 
 const isJurisdictionsPayload = (value: unknown): value is JurisdictionsPayload =>
@@ -77,60 +74,3 @@ export const fetchJurisdictions = async (baseOrigin?: string): Promise<Jurisdict
   }
   throw lastError ?? new Error('Failed to fetch /api/jurisdictions');
 };
-
-export async function fundSignerWalletViaFaucet(address: string): Promise<void> {
-  try {
-    // Call testnet faucet API (Faucet A - ERC20 to wallet)
-    const apiBase = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-    const response = await fetch(`${apiBase}/api/faucet/erc20`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userAddress: address,
-        tokenSymbol: 'USDC',
-        amount: '100',
-      }),
-    });
-
-    const raw = await response.text();
-    let result: FaucetResult | null = null;
-    if (raw) {
-      try {
-        const payload = parseJsonUnknown(raw, 'FAUCET_RESPONSE_JSON_INVALID');
-        if (isUnknownRecord(payload) &&
-          (payload['success'] === undefined || typeof payload['success'] === 'boolean') &&
-          (payload['txHash'] === undefined || typeof payload['txHash'] === 'string') &&
-          (payload['error'] === undefined || typeof payload['error'] === 'string')) {
-          result = {
-            ...(payload['success'] === undefined ? {} : { success: payload['success'] }),
-            ...(payload['txHash'] === undefined ? {} : { txHash: payload['txHash'] }),
-            ...(payload['error'] === undefined ? {} : { error: payload['error'] }),
-          };
-        } else {
-          throw new Error('FAUCET_RESPONSE_INVALID');
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (!response.ok) {
-      const errorMsg = result?.error || `Faucet failed (${response.status})`;
-      errorLog.log('Faucet failed', 'Runtime Funding', { address, error: errorMsg });
-      return;
-    }
-
-    if (!result?.success) {
-      errorLog.log('Faucet failed', 'Runtime Funding', { address, error: result?.error || 'Unknown faucet error' });
-    }
-  } catch (err) {
-    errorLog.log('Failed to call faucet', 'Runtime Funding', { address, error: err });
-  }
-}
-
-export async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<void> {
-  if (!runtime) return;
-  for (const signer of runtime.signers) {
-    await fundSignerWalletViaFaucet(signer.address);
-  }
-}

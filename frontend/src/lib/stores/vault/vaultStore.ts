@@ -131,7 +131,6 @@ import { decodePersistedVaultState } from './vault-persistence-decoder';
 import {
   resolveJurisdictionChainId,
   fetchJurisdictions,
-  fundSignerWalletViaFaucet,
 } from './vault-bootstrap';
 import {
   getRuntimeFatalDiagnostics,
@@ -2151,7 +2150,6 @@ export const vaultOperations = {
         // Store entityId in signer
         runtime.signers[0]!.entityId = entityId;
         runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
-        await fundSignerWalletViaFaucet(signerAddress);
 
         for (const secondary of secondaryJurisdictionImports) {
           const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);

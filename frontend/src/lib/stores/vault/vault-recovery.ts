@@ -228,8 +228,6 @@ export type HealthPayload = {
 
 export type JurisdictionsPayload = { version?: string; jurisdictions: Record<string, ApiJurisdictionConfig> };
 
-export type FaucetResult = { success?: boolean; txHash?: string; error?: string };
-
 export type RuntimeP2PHandle = {
   isConnected?: () => boolean;
   isConnecting?: () => boolean;

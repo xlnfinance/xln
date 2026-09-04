@@ -394,9 +394,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain(
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );
-    expect(vaultStore).toContain('await fundSignerWalletViaFaucet(signerAddress);');
-    expect(vaultStore).not.toContain('void fundSignerWalletViaFaucet(signerAddress);');
-    expect(vaultStore).not.toContain('fundSignerWalletViaFaucet(secondaryAddress)');
+    expect(vaultStore).not.toContain('fundSignerWalletViaFaucet');
   });
 
   test('hub drains relocated gossip before starting any network route', () => {
