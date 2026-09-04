@@ -58,6 +58,8 @@ import {
   buildStorageReplicaMetaCommitment,
   inspectStorageReplicaMetaEntries,
 } from '../../../../storage/replica/replicas';
+import { computeRuntimePostStateComponentDigests } from '../../../../storage/hashes';
+import { buildReplayVerifiableRuntimePostStateView } from '../../../../storage/wal/snapshot';
 import type { RuntimeRecoveryBundleV1 } from '../../../../storage/recovery/bundle/types';
 import type { PersistedFrameJournal } from '../../../../storage/types';
 import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profile';
@@ -541,8 +543,16 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
         if (frame.height === diagnosticEventsHeight) {
           const replicaMetaCommitment = buildStorageLiveReplicaMetaCommitment(env);
           const checkpointReplicaMetaCommitment = buildStorageReplicaMetaCommitment(env);
+          const runtimePostState = buildReplayVerifiableRuntimePostStateView(env);
+          const runtimeComponentDigests = computeRuntimePostStateComponentDigests(runtimePostState);
+          console.error(`HLT_REPLAY_RUNTIME_COMPONENTS:${frame.height}:${safeStringify({
+            runtimeComponentDigests,
+            pendingCommittedJOutboxCount: env.infrastructure?.pendingCommittedJOutbox?.length ?? 0,
+          })}`);
           console.error(`HLT_REPLAY_ENTITY_EVENTS:${frame.height}:${safeStringify(
             {
+              runtimeComponentDigests,
+              pendingCommittedJOutbox: env.infrastructure?.pendingCommittedJOutbox ?? [],
               replicaMetaDigest: replicaMetaCommitment.digest,
               replicaMetaEntries: inspectStorageReplicaMetaEntries(replicaMetaCommitment.entries),
               checkpointReplicaMetaDigest: checkpointReplicaMetaCommitment.digest,
