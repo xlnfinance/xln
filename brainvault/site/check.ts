@@ -37,7 +37,9 @@ async function localGates(): Promise<string> {
   gate(html.includes('bunx brainvault'), 'primary launch command disappeared');
   gate(html.includes('brainvault@2.1.0'), 'audited package version disappeared');
   gate(!html.includes('__cf_email__') && !html.includes('/cdn-cgi/'), 'Cloudflare rewrote source HTML');
-  gate(headers.includes('Cache-Control: public, max-age=0, must-revalidate, no-transform'), 'HTML must forbid proxy rewriting');
+  const noTransform = 'Cache-Control: public, max-age=0, must-revalidate, no-transform';
+  gate(headers.includes(`/index.html\n  ${noTransform}`), 'index.html must forbid proxy rewriting');
+  gate(headers.includes(`/\n  ${noTransform}`), 'the public root must forbid proxy rewriting');
   gate(headers.includes("connect-src 'none'"), 'CSP must keep network connections disabled');
   gate(headers.includes("frame-ancestors 'none'"), 'CSP must prevent framing');
   gate(headers.includes('Strict-Transport-Security: max-age=31536000; includeSubDomains'), 'HSTS policy drifted');
