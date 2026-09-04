@@ -15,6 +15,34 @@ navigation?.addEventListener('click', (event) => {
   navigation.classList.remove('open');
 });
 
+const installTabs = Array.from(document.querySelectorAll('[data-install-tab]'));
+
+function selectInstallTab(tab) {
+  const selected = tab.getAttribute('data-install-tab');
+  for (const candidate of installTabs) {
+    candidate.setAttribute('aria-selected', String(candidate === tab));
+  }
+  for (const panel of document.querySelectorAll('[data-install-panel]')) {
+    panel.hidden = panel.getAttribute('data-install-panel') !== selected;
+  }
+}
+
+for (const tab of installTabs) {
+  tab.addEventListener('click', () => selectInstallTab(tab));
+  tab.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+      return;
+    }
+    event.preventDefault();
+    const offset = event.key === 'ArrowRight' ? 1 : -1;
+    const next = installTabs[(installTabs.indexOf(tab) + offset + installTabs.length) % installTabs.length];
+    next?.focus();
+    if (next) {
+      selectInstallTab(next);
+    }
+  });
+}
+
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     const value = button.getAttribute('data-copy');

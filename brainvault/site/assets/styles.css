@@ -46,18 +46,18 @@ h2 { max-width: 1000px; margin-bottom: 48px; font-size: clamp(46px,6vw,84px); li
 .button.primary { color: var(--bg); border-color: var(--text); background: var(--text); }
 .fineprint, .plain-note { max-width: 700px; margin: 24px 0 0; color: var(--muted); font-size: 13px; }
 
-.terminal { border: 1px solid var(--strong); background: var(--surface); box-shadow: 0 30px 100px #000; }
-.terminal-top { display: flex; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font: 9px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-.terminal-body { padding: clamp(25px,3vw,38px); font: 12px/1.8 var(--mono); }
-.terminal-body p { margin-bottom: 8px; white-space: nowrap; }
-.terminal-body p span { display: inline-block; width: 105px; color: var(--muted); }
-.terminal-body small { color: var(--muted); }
-.command { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
-.command code { font-size: 13px; }
-.command button, .run-command button, .audit-prompt button { min-width: 48px; min-height: 36px; padding: 7px 11px; border: 1px solid var(--strong); color: var(--text); background: transparent; font: 600 9px var(--mono); text-transform: uppercase; cursor: pointer; }
-.progress { height: 1px; margin: 24px 0; background: #2d2d2a; }
-.progress i { display: block; width: 78%; height: 1px; background: var(--text); }
-.terminal-body .done::before { content: "✓"; margin-right: 9px; }
+.installer { min-width: 0; border: 1px solid var(--strong); background: var(--surface); box-shadow: 0 30px 100px #000; }
+.install-tabs { display: flex; border-bottom: 1px solid var(--line); }
+.install-tabs button { flex: 1; min-height: 50px; border: 0; border-right: 1px solid var(--line); color: var(--muted); background: transparent; font: 600 10px var(--mono); text-transform: uppercase; cursor: pointer; }
+.install-tabs button:last-child { border-right: 0; }
+.install-tabs button[aria-selected="true"] { color: var(--text); background: rgba(255,255,255,.04); }
+.install-panel { min-height: 310px; padding: clamp(26px,3vw,38px); }
+.install-panel > p { color: var(--muted); font: 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.install-panel > small { display: block; max-width: 440px; color: var(--muted); }
+.install-command { position: relative; margin: 42px 0 36px; padding-right: 64px; }
+.install-command pre { overflow-x: auto; margin: 0; color: var(--text); font: 13px/1.75 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.install-command button, .run-command button, .audit-prompt button { min-width: 48px; min-height: 36px; padding: 7px 11px; border: 1px solid var(--strong); color: var(--text); background: transparent; font: 600 9px var(--mono); text-transform: uppercase; cursor: pointer; }
+.install-command button { position: absolute; top: -9px; right: 0; }
 
 .metrics { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3,1fr); width: 100%; margin-top: 24px; border-block: 1px solid var(--line); }
 .metrics div { display: flex; align-items: center; gap: 22px; min-height: 122px; padding: 24px 34px; border-right: 1px solid var(--line); }
@@ -134,7 +134,7 @@ footer a:hover { color: var(--text); }
 
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; min-height: auto; padding-block: 90px; }
-  .terminal { max-width: 650px; }
+  .installer { max-width: 650px; }
   .metrics { grid-template-columns: 1fr; }
   .metrics div { min-height: 95px; padding-inline: 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .metrics div:last-child { border: 0; }
@@ -162,7 +162,9 @@ footer a:hover { color: var(--text); }
   h1 { font-size: clamp(52px,17vw,76px); }
   h2 { margin-bottom: 36px; font-size: clamp(42px,13vw,62px); }
   .section { padding-block: 88px; scroll-margin-top: 64px; }
-  .terminal-body { overflow-x: auto; }
+  .install-panel { min-height: 285px; }
+  .install-command { padding-right: 0; }
+  .install-command button { position: static; margin-top: 20px; }
   .metrics { width: calc(100% - 32px); }
   .two-lines { grid-template-columns: 1fr; }
   .two-lines p { min-height: 135px; padding-inline: 0; border-right: 0; border-bottom: 1px solid var(--line); }
