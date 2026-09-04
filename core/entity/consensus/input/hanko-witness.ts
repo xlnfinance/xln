@@ -352,7 +352,19 @@ export const attachHankoWitnessToOutputs = (
       // attachment is post-commit witness material, so mutate an isolated
       // bounded protocol copy instead of writing through the readonly alias.
       const hankoAttachedInput = cloneIsolatedAccountInput(accountInput);
-      attachedCount += attachAccountInputHankos(hankoAttachedInput, state, hankoWitness, entityHeight, false);
+      const boardHankoRefresh = accountInputBoardHankoRefresh(hankoAttachedInput);
+      const persistBoardRefresh = boardHankoRefresh !== undefined && state !== undefined;
+      const writableAccount = boardHankoRefresh && state
+        ? getEntityAccountForWrite(state.accounts, hankoAttachedInput.toEntityId)
+        : undefined;
+      attachedCount += attachAccountInputHankos(
+        hankoAttachedInput,
+        state,
+        hankoWitness,
+        entityHeight,
+        persistBoardRefresh,
+        writableAccount,
+      );
       tx.data = hankoAttachedInput;
     }
   }

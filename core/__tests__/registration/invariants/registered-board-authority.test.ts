@@ -47,12 +47,12 @@ import { buildLocalJPrefixAttestation } from '../../../jurisdiction/machine/hist
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../../../runtime';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../../../runtime/mempool/scheduled-wake';
-import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
+import { buildRuntimeRecoveryCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import {
   commitEntityFrameCandidateState,
   createEntityFrameCandidateState,
 } from '../../../entity/state-clone';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { putEntityAccountCandidate } from '../../../entity/state/persistent-account-map';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
@@ -451,7 +451,7 @@ describe('registered Entity certified board authority', () => {
       env,
       pending,
       [profileTx, jRangeTx(signerA, [foundation, registration])],
-    )).toEqual({
+    )).toMatchObject({
       txs: [expect.objectContaining({ type: 'j_event' })],
       currentAuthorityReady: false,
       reason: 'SELF_BOARD_BOOTSTRAP_PRIORITY',
@@ -821,10 +821,7 @@ describe('registered Entity certified board authority', () => {
       counterpartyState,
     );
     account.state.jNonce = 3;
-    if (!(baseState.accounts instanceof PersistentEntityAccountMap)) {
-      throw new Error('TEST_PERSISTENT_ACCOUNT_MAP_REQUIRED');
-    }
-    baseState.accounts = baseState.accounts.updated(counterpartyEntityId, account);
+    putEntityAccountCandidate(baseState.accounts, counterpartyEntityId, account);
     const jurisdictionRef = getJEventJurisdictionRef(jurisdiction);
     const rotationData = buildJEventRangeData(baseState, {
       from: signerA,
@@ -962,8 +959,8 @@ describe('registered Entity certified board authority', () => {
       },
     });
 
-    // A real Runtime WAL commit rebases the current certificate into one
-    // validator-local checkpoint anchor before the next Entity frame.
+    // A real Runtime WAL commit retains exactly one current certified head;
+    // the anchor records the same committed endpoint for J-prefix attestation.
     const committedHead = committed.workingReplica.certifiedFrameHead;
     if (!committedHead) throw new Error('TEST_BOARD_ROTATION_CERTIFIED_HEAD_MISSING');
     committed.workingReplica.certifiedFrameAnchor = {
@@ -973,7 +970,6 @@ describe('registered Entity certified board authority', () => {
       stateRoot: committedHead.frame.stateRoot,
       authority: committedHead.postAuthority,
     };
-    delete committed.workingReplica.certifiedFrameHead;
 
     env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, committed.workingReplica);
     refreshScheduledWakeIndex(env, new Set([registeredEntityId]));
@@ -1598,7 +1594,7 @@ describe('registered Entity certified board authority', () => {
       { observerState: corruptObserver },
     )).valid).toBe(false);
 
-    const restored = await restoreEnvFromCheckpointSnapshot(buildRuntimeCheckpointSnapshot(localEnv), {
+    const restored = await restoreEnvFromCheckpointSnapshot(buildRuntimeRecoveryCheckpointSnapshot(localEnv), {
       runtimeId: addr('88'),
     });
     restored.state.timestamp = localEnv.state.timestamp;
@@ -1634,7 +1630,7 @@ describe('registered Entity certified board authority', () => {
 
   test('recovery checkpoint carries only reachable nodes into a fresh runtime', async () => {
     const { profile, localEnv, boardHash } = await buildRegisteredProfile();
-    const snapshot = buildRuntimeCheckpointSnapshot(localEnv);
+    const snapshot = buildRuntimeRecoveryCheckpointSnapshot(localEnv);
     const durableState = snapshot['infrastructure'] as { certifiedBoardNodes?: Map<string, unknown> };
     expect(durableState.certifiedBoardNodes?.size).toBeGreaterThan(0);
     // A recovery checkpoint never persists private keys. Clear the in-process

@@ -840,15 +840,26 @@ describe('multisig secondary Hanko production', () => {
       1,
       [setup.counterpartyId, secondCounterpartyId],
     )).toBe(4);
-    if (firstHankoTx.data.kind !== 'hanko' || secondHankoTx.data.kind !== 'hanko') {
+    const attachedFirstAccount = setup.state.accounts.get(setup.counterpartyId);
+    const attachedSecondAccount = setup.state.accounts.get(secondCounterpartyId);
+    const attachedFirstTx = attachedFirstAccount?.mempool.find(
+      (tx): tx is Extract<AccountTx, { type: 'settle_transition' }> => tx.type === 'settle_transition',
+    );
+    const attachedSecondTx = attachedSecondAccount?.mempool.find(
+      (tx): tx is Extract<AccountTx, { type: 'settle_transition' }> => tx.type === 'settle_transition',
+    );
+    if (
+      attachedFirstTx?.type !== 'settle_transition' || attachedFirstTx.data.kind !== 'hanko' ||
+      attachedSecondTx?.type !== 'settle_transition' || attachedSecondTx.data.kind !== 'hanko'
+    ) {
       throw new Error('TEST_SETTLEMENT_HANKO_INVALID');
     }
-    expect(firstHankoTx.data.settlementHanko).toBe(witness.get(firstHash)?.hanko);
-    expect(secondHankoTx.data.settlementHanko).toBe(witness.get(secondHash)?.hanko);
-    expect(firstHankoTx.data.settlementHanko).not.toBe(secondHankoTx.data.settlementHanko);
-    expect(firstHankoTx.data.postProof.hanko).toBe(witness.get(firstPostHash)?.hanko);
-    expect(secondHankoTx.data.postProof.hanko).toBe(witness.get(secondPostHash)?.hanko);
-    expect(firstAccount.state.settlementWorkspace.leftHanko).toBeUndefined();
-    expect(firstAccount.state.settlementWorkspace.rightHanko).toBeUndefined();
+    expect(attachedFirstTx.data.settlementHanko).toBe(witness.get(firstHash)?.hanko);
+    expect(attachedSecondTx.data.settlementHanko).toBe(witness.get(secondHash)?.hanko);
+    expect(attachedFirstTx.data.settlementHanko).not.toBe(attachedSecondTx.data.settlementHanko);
+    expect(attachedFirstTx.data.postProof.hanko).toBe(witness.get(firstPostHash)?.hanko);
+    expect(attachedSecondTx.data.postProof.hanko).toBe(witness.get(secondPostHash)?.hanko);
+    expect(attachedFirstAccount?.state.settlementWorkspace?.leftHanko).toBeUndefined();
+    expect(attachedFirstAccount?.state.settlementWorkspace?.rightHanko).toBeUndefined();
   });
 });

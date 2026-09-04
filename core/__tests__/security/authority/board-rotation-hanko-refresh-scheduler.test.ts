@@ -34,14 +34,25 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { addr, makeAccount, makeState, openWritableEntityAccounts } from '../../helpers/cross-j';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
-import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import {
+  EntityAccountCandidateMap,
+  PersistentEntityAccountMap,
+} from '../../../entity/state/persistent-account-map';
+import {
+  commitEntityFrameCandidateState,
+  createEntityFrameCandidateState,
+} from '../../../entity/state-clone';
 
 const putCommittedAccount = (
   state: EntityState,
   counterpartyId: string,
   account: ReturnType<typeof makeAccount>,
 ): void => {
+  if (state.accounts instanceof EntityAccountCandidateMap) {
+    state.accounts.set(counterpartyId, account);
+    commitEntityFrameCandidateState(state);
+    return;
+  }
   if (!(state.accounts instanceof PersistentEntityAccountMap)) {
     throw new Error('TEST_PERSISTENT_ACCOUNT_MAP_REQUIRED');
   }
