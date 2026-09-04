@@ -318,17 +318,19 @@ model leaderboard.
 | --- | --- | --- |
 | GPT-5.6 Sol, max | Highest overall closure value: produced concrete severity-ranked issues on the earlier candidate, then checked the targeted remediations against source and regressions. | Final targeted review: 1000/1000 PASS |
 | Claude Opus 5, max | Highest surgical density: caught a mismatch/error path and documentation math/line-count drift that broader reviews missed, then independently verified the fixes. | Final targeted review: 1000/1000 PASS |
-| Grok 4.6 | Useful corroboration on an earlier candidate, but it found no new issue and its PASS could not be counted after the candidate changed. | Historical PASS only |
-| Claude Fable 5.1 | Was given the final narrow Mac fast-path question but did not return a report within the hard budget. | NO VERDICT; excluded |
-| Kimi K3 and the fast-model batch | Read material but did not produce a usable final report after a finalization request. | NO VERDICT; excluded |
-| Gemini run | Could not start because the required authenticated route was unavailable. | UNAVAILABLE; excluded |
+| Grok 4.6 | Highest late-stage product value: rejected an otherwise polished landing because it appeared to assign the standard path only to PRIMARY and Ledger Live only to SECONDARY. The spec gives both path families to both wallets; the site copy was corrected. | 880/1000 BLOCK; one validated UX finding fixed |
+| Kimi K3 | Completed a broad fixed-candidate review with no blocking finding. Useful corroboration, but it did not catch the later wallet-path wording issue. | 1000/1000 PASS on the pre-fix site candidate |
+| Gemini 3.7 Flash, DeepSeek v4 Flash, and GLM 5.3 Flash | Fast independent passes were useful for coverage and non-blocking notes. Agreement was not treated as proof, and all three predated the final wallet-path wording fix. | 1000/1000 PASS each on the pre-fix site candidate |
+| Claude Fable 5.1 and later Sol/Qwen runs | Did not return a bounded final report before the release cutoff. Long-running processes were not counted as evidence. | NO VERDICT; excluded |
 
 The most effective combination was not “the most models.” It was:
 
 1. Sol for systematic requirement coverage and closure;
 2. Opus for a compact adversarial second pass;
-3. local deterministic tests, packaging checks, reproducible builds, and runtime
-   observation as the authority over both.
+3. Grok for one concrete late-stage product contradiction that the unanimous
+   fast-model PASS group missed;
+4. local deterministic tests, packaging checks, reproducible builds, and runtime
+   observation as the authority over all of them.
 
 The stalled models still taught one useful lesson: progress without a bounded
 final deliverable has zero quorum weight.

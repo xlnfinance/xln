@@ -34,6 +34,12 @@ for (const button of document.querySelectorAll('[data-copy]')) {
   });
 }
 
+const demoVideo = document.querySelector('.demo-frame video');
+if (demoVideo instanceof HTMLVideoElement && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  demoVideo.autoplay = false;
+  demoVideo.pause();
+}
+
 const year = document.querySelector('#year');
 if (year) {
   year.textContent = String(new Date().getFullYear());

@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#090b0d" />
+    <meta name="theme-color" content="#050505" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <meta
       name="description"
-      content="BrainVault is a frozen, memory-hard deterministic wallet derivation protocol. Run it with Bun, verify the source, and recover the same wallet anywhere."
+      content="Recreate the same wallet from a strong secret through deliberate memory-hard work. No physical seed required. No server to trust."
     />
     <meta
       name="keywords"
@@ -15,19 +15,24 @@
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://brainvault.sh/" />
-    <meta property="og:title" content="BrainVault — Remember less. Verify more." />
+    <meta property="og:title" content="BrainVault — Your wallet, mined from memory." />
     <meta
       property="og:description"
-      content="A frozen, memory-hard route from remembered inputs to independently recoverable wallets."
+      content="You wait once per recovery. An attacker pays for every guess. No physical seed required. No server to trust."
     />
+    <meta property="og:image" content="https://brainvault.sh/og-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="BrainVault — Your wallet, mined from memory." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="BrainVault — Remember less. Verify more." />
+    <meta name="twitter:title" content="BrainVault — Your wallet, mined from memory." />
     <meta
       name="twitter:description"
-      content="Auditable deterministic wallet derivation with Argon2id, BLAKE3, frozen vectors, and reproducible Apple Silicon prebuilds."
+      content="A local, open-source, memory-hard route back to the same wallet."
     />
+    <meta name="twitter:image" content="https://brainvault.sh/og-card.png" />
     <link rel="canonical" href="https://brainvault.sh/" />
-    <title>BrainVault — Memory-hard deterministic wallet recovery</title>
+    <title>BrainVault — Your wallet, mined from memory</title>
     <link rel="stylesheet" href="./styles.css" />
     <script type="application/ld+json">
       {
@@ -55,16 +60,17 @@
           <path d="m11 14 7-4 7 4v8l-7 4-7-4z" />
           <circle cx="18" cy="18" r="2.5" />
         </svg>
-        <span>BrainVault</span><sup>V1</sup>
+        <span>BrainVault</span>
       </a>
       <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav">
         Menu
       </button>
       <nav id="nav" aria-label="Primary navigation">
-        <a href="#how">Protocol</a>
+        <a href="#compare">Compare</a>
+        <a href="#how">How it works</a>
         <a href="#run">Run</a>
-        <a href="#audit">Audit</a>
-        <a href="#evidence">Evidence</a>
+        <a href="#performance">Speed</a>
+        <a href="#warnings">Safety</a>
         <a class="nav-cta" href="https://github.com/xlnfinance/xln/tree/main/brainvault">Source ↗</a>
       </nav>
     </header>
@@ -72,30 +78,37 @@
     <main id="main">
       <section class="hero section" id="top">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="status-dot"></span> Frozen protocol · local execution · zero accounts</p>
-          <h1>Remember less.<br /><span>Verify more.</span></h1>
+          <p class="eyebrow">Open source · local only · fixed recipe</p>
+          <h1>Your wallet,<br /><span>mined from memory.</span></h1>
+          <p class="hero-thesis">You wait once per recovery. An attacker pays for every guess.</p>
           <p class="lede">
-            BrainVault turns the same remembered inputs into the same wallets—through deliberately
-            expensive, memory-hard work. No recovery file. No server. No silent fallback.
+            No physical seed required. No account. No server to trust.
+          </p>
+          <p class="hero-explainer">
+            “Mined” means recomputed through 10,000 Argon2id memory-hard jobs—not cryptocurrency
+            mining. The same exact inputs recreate the same wallet.
           </p>
           <div class="hero-actions">
-            <a class="button primary" href="#run">Run BrainVault</a>
-            <a class="button secondary" href="#audit">Audit before trust</a>
+            <a class="button primary" href="#seed-problem">See why it exists</a>
+            <a class="button secondary" href="#run">Run BrainVault</a>
           </div>
           <p class="microcopy">
-            BrainVault raises the cost of guessing. It cannot make a weak or reused password strong.
+            The work raises the cost of each guess. It cannot make a weak, personal, or reused password strong.
           </p>
         </div>
 
         <div class="terminal-card" aria-label="BrainVault command example">
           <div class="terminal-head">
             <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
-            <span>private terminal</span>
-            <span class="verified">verified</span>
+            <span>your computer</span>
+            <span class="verified">local only</span>
           </div>
           <div class="terminal-body">
-            <p><span class="prompt">$</span> bunx brainvault</p>
-            <p class="muted">BRAINVAULT V1 · deterministic wallet recovery</p>
+            <div class="terminal-command">
+              <p><span class="prompt">$</span> bunx brainvault</p>
+              <button type="button" data-copy="bunx brainvault" aria-label="Copy bunx brainvault command">Copy</button>
+            </div>
+            <p class="muted">BRAINVAULT · deterministic wallet recovery</p>
             <p><span class="label">Work preset</span> level 4 · 10,000 shards</p>
             <p><span class="label">Password</span> <span class="secret">••••••••••••••••</span> <span class="muted">typing works</span></p>
             <div class="terminal-progress"><span></span></div>
@@ -107,76 +120,184 @@
         </div>
       </section>
 
-      <section class="proof-strip" aria-label="Verification summary">
-        <div><strong>85/85</strong><span>package tests</span></div>
-        <div><strong>102,499</strong><span>assertions</span></div>
-        <div><strong>12/12</strong><span>release matrix</span></div>
-        <div><strong>11/11</strong><span>engine parity</span></div>
-        <div><strong>M1 + M3</strong><span>reproducible prebuilds</span></div>
+      <section class="principles" aria-label="What makes BrainVault different">
+        <div><strong>No required seed backup</strong><span>Recovery comes from exact inputs, not from preserving one physical copy.</span></div>
+        <div><strong>No remote trust</strong><span>Your secret stays on the computer you control. There is no BrainVault account.</span></div>
+        <div><strong>State-of-the-art memory hardening</strong><span>Standardized <a href="https://www.rfc-editor.org/rfc/rfc9106.html">Argon2id</a> v0x13 spends 256 MiB per numbered job instead of relying on a home-grown fast hash.</span></div>
+        <div><strong>One fixed recipe</strong><span>Faster computers may reduce the wait. They are never allowed to change the wallet.</span></div>
       </section>
 
-      <section class="section statement">
-        <p class="section-number">01 / Why</p>
-        <h2>A recovery protocol should outlive its fastest implementation.</h2>
+      <section class="section statement" id="seed-problem">
+        <p class="section-number">01 / The seed problem</p>
+        <h2>Twelve words.<br />A lifetime of hiding them.</h2>
         <div class="statement-grid">
           <p>
-            BrainVault V1 freezes every byte that matters: normalization, salts, Argon2id parameters,
-            shard ordering, the BLAKE3 fold, mnemonic projection, and wallet paths.
+            A seed phrase is a bearer key. Anyone who photographs, copies, or finds it can control
+            the wallet. Protecting every copy becomes a permanent physical-security job.
           </p>
           <p>
-            Engines, worker counts, timing, and hardware may change. Given the same semantic inputs,
-            the 32-byte root must not. Frozen vectors make that claim executable rather than aspirational.
+            Lose the last readable copy and nobody can help. BrainVault removes the required physical
+            seed backup: exact inputs recreate the wallet from a public recipe instead.
           </p>
         </div>
+        <div class="burden-grid" aria-label="The two seed phrase failure modes">
+          <article><span>If it is found</span><strong>The finder has the key.</strong></article>
+          <article><span>If it is lost</span><strong>You no longer have the key.</strong></article>
+        </div>
+      </section>
+
+      <section class="section legacy">
+        <p class="section-number">02 / Why brainwallets failed</p>
+        <h2>They removed the paper—and made guessing cheap.</h2>
+        <div class="legacy-grid">
+          <div>
+            <p>
+              The original idea was irresistible: remember a phrase and recreate a wallet anywhere.
+              But people chose predictable phrases, and early tools turned each phrase into a key with
+              math designed to run fast.
+            </p>
+            <p>
+              Attackers could test enormous dictionaries offline. A sentence felt private to its owner
+              while remaining easy for a machine to predict.
+            </p>
+          </div>
+          <div class="failure-formula" aria-label="Why classic brainwallets were unsafe">
+            <span>Predictable human phrase</span>
+            <i>+</i>
+            <span>Fast, repeatable hash</span>
+            <i>=</i>
+            <strong>Cheap guesses at scale</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="section comparison" id="compare">
+        <div class="section-heading">
+          <div>
+            <p class="section-number">At a glance</p>
+            <h2>A different standard for long-term recovery.</h2>
+          </div>
+          <p>
+            BrainVault does not pretend to beat a random seed at raw entropy. It solves a different
+            problem: carrying one physical master key through decades. It is built as a public,
+            fixed, memory-first recipe that independent implementations can preserve.
+          </p>
+        </div>
+
+        <p class="comparison-swipe">Swipe horizontally to compare all three →</p>
+        <div class="comparison-scroll" tabindex="0" aria-label="Comparison of standard mnemonic wallets, BrainVault, and classic brainwallets">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">What matters</th>
+                <th scope="col"><span>Standard mnemonic</span><small>12 or 24 seed words</small></th>
+                <th scope="col" class="brainvault-column"><span>BrainVault</span><small>Memory-first recovery</small></th>
+                <th scope="col"><span>Classic brainwallet</span><small>Human phrase + fast hash</small></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">What must survive</th>
+                <td>In normal use, a readable 12- or 24-word physical or digital copy.</td>
+                <td class="brainvault-column"><strong>Exact knowledge:</strong> username, secret, shard count, and multiplier. No copy is required.</td>
+                <td>The exact remembered phrase and the original derivation recipe.</td>
+              </tr>
+              <tr>
+                <th scope="row">Starting entropy</th>
+                <td><span class="rating strong">Strong</span>128 or 256 generated bits when created correctly.</td>
+                <td class="brainvault-column"><span class="rating caution">▲ Input-dependent</span>59.54 bits with the built-in generator; unknown for a human-created secret.</td>
+                <td><span class="rating weak">Usually weak</span>Human phrases are patterned and cannot be honestly scored.</td>
+              </tr>
+              <tr>
+                <th scope="row">One offline guess</th>
+                <td>Relatively cheap to validate, but a correctly generated seed has an enormous search space.</td>
+                <td class="brainvault-column"><strong>Deliberately expensive:</strong> 10,000 numbered Argon2id jobs at the recommended setting.</td>
+                <td><strong>Cheap:</strong> commonly one fast hash, enabling large dictionary attacks.</td>
+              </tr>
+              <tr>
+                <th scope="row">Physical discovery</th>
+                <td>The seed copy is a bearer key. Finding it is enough to take the wallet.</td>
+                <td class="brainvault-column"><strong>No required artifact to find.</strong> An optional backup reintroduces this risk.</td>
+                <td>No required artifact, but guessable phrases can be attacked without finding anything.</td>
+              </tr>
+              <tr>
+                <th scope="row">Recovery experience</th>
+                <td>Fast and widely supported once the seed is available.</td>
+                <td class="brainvault-column">A deliberate, hardware-dependent wait on every recovery.</td>
+                <td>Instant—which also makes every attacker guess instant.</td>
+              </tr>
+              <tr>
+                <th scope="row">Wallet compatibility</th>
+                <td><span class="rating strong">Native standard</span>Broad BIP-39 wallet support.</td>
+                <td class="brainvault-column"><span class="rating strong">Standard output</span>Creates BIP-39 mnemonics and established Ethereum paths after derivation.</td>
+                <td>Varies by tool and may not follow a maintained standard.</td>
+              </tr>
+              <tr>
+                <th scope="row">Permanent failure</th>
+                <td>The last copy is lost, damaged, or stolen.</td>
+                <td class="brainvault-column">Any exact input is forgotten, mistyped, or chosen weakly.</td>
+                <td>The phrase is guessed or forgotten.</td>
+              </tr>
+              <tr class="verdict-row">
+                <th scope="row">Best fit</th>
+                <td><strong>The established default</strong> when you can secure a physical seed for life.</td>
+                <td class="brainvault-column"><strong>Built to become the memory-first standard</strong> for people who accept deliberate recovery work and exact-input discipline.</td>
+                <td><strong>Do not use.</strong> Convenience came from making attacks cheap.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="comparison-note">
+          All three fail if malware or a camera captures private material during recovery. BrainVault
+          changes storage and guessing economics; it does not make the surrounding computer trusted.
+        </p>
       </section>
 
       <section class="section protocol" id="how">
         <div class="section-heading">
           <div>
-            <p class="section-number">02 / Protocol</p>
-            <h2>One frozen path.<br />Three useful projections.</h2>
+            <p class="section-number">03 / The BrainVault difference</p>
+            <h2>Every guess has to do the work.</h2>
           </div>
           <p>
-            Each shard costs 256 MiB of memory. Results may finish in any order, but they are accepted
-            and folded only by their canonical numeric index.
+            The recommended setting runs 10,000 numbered Argon2id jobs. You repeat the work when you
+            recover. An attacker repeats it for every candidate secret.
           </p>
         </div>
 
-        <div class="flow" role="img" aria-label="BrainVault V1 derivation flow">
+        <div class="cost-split" aria-label="Recovery cost compared with attack cost">
+          <article><span>You</span><strong>One candidate</strong><p>Recover occasionally, using the exact secret you already know.</p></article>
+          <article><span>Attacker</span><strong>Every candidate</strong><p>Pay the full time and memory cost again for every guess.</p></article>
+        </div>
+
+        <div class="flow" aria-label="BrainVault derivation flow">
           <article class="flow-node inputs">
-            <span class="node-index">A</span>
-            <h3>Semantic inputs</h3>
-            <ul>
-              <li>Username</li>
-              <li>Password</li>
-              <li>Exact shard count</li>
-              <li>Multiplier</li>
-            </ul>
-          </article>
-          <span class="flow-arrow" aria-hidden="true">→</span>
-          <article class="flow-node normalize">
-            <span class="node-index">B</span>
-            <h3>Canonical bytes</h3>
-            <p>NFKD normalization<br />then exact UTF-8</p>
+            <span class="node-index">01</span>
+            <h3>Enter exact details</h3>
+            <p>Username, password, and work settings are read only on your computer.</p>
+            <small>Why: one changed character intentionally opens a different wallet.</small>
           </article>
           <span class="flow-arrow" aria-hidden="true">→</span>
           <article class="flow-node argon">
-            <span class="node-index">C</span>
-            <h3>Indexed Argon2id</h3>
-            <p>v0x13 · 256 MiB<br />t=1 · p=1 · 32 bytes</p>
+            <span class="node-index">02</span>
+            <h3>Make guessing costly</h3>
+            <p>The recommended setting performs 10,000 memory-heavy Argon2id jobs.</p>
+            <small>Why: mass password guessing must pay a large memory bill every time.</small>
             <div class="shard-stack" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           </article>
           <span class="flow-arrow" aria-hidden="true">→</span>
           <article class="flow-node fold">
-            <span class="node-index">D</span>
-            <h3>Ordered BLAKE3</h3>
-            <p>Shard 0 → N<br />domain-bound fold</p>
+            <span class="node-index">03</span>
+            <h3>Combine in fixed order</h3>
+            <p>Fast and slow machines may finish jobs differently. BrainVault always combines them by number.</p>
+            <small>Why: hardware and worker count can change waiting time, never the wallet.</small>
           </article>
           <span class="flow-arrow" aria-hidden="true">→</span>
           <article class="flow-node root">
-            <span class="node-index">E</span>
-            <h3>32-byte root</h3>
-            <code>dc2090d6…c3485</code>
+            <span class="node-index">04</span>
+            <h3>Create one wallet root</h3>
+            <p>The fixed result is converted into wallet seed words and optional site passwords.</p>
+            <small>Why: the same root recreates the same outputs without a BrainVault account.</small>
           </article>
         </div>
 
@@ -185,65 +306,134 @@
           <article>
             <span>01</span>
             <h3>PRIMARY wallet</h3>
-            <p>Independent 24-word mnemonic. Standard Ethereum derivation path.</p>
+            <p>A 24-word wallet with both standard and Ledger Live Ethereum address families.</p>
           </article>
           <article>
             <span>02</span>
             <h3>SECONDARY wallet</h3>
-            <p>Separate 12-word mnemonic. Ledger Live derivation path.</p>
+            <p>A completely separate 12-word wallet with the same two address families.</p>
           </article>
           <article>
             <span>03</span>
             <h3>Site passwords</h3>
-            <p>Domain-separated credentials shown only on a temporary sensitive screen.</p>
+            <p>Repeatable per-site credentials, revealed only on a temporary private screen.</p>
           </article>
         </div>
         <p class="protocol-note">
-          Wallet import always uses an <strong>empty optional BIP-39 passphrase</strong>. PRIMARY and
-          SECONDARY are separate wallets, not two views of one seed.
+          When importing either wallet, leave the optional <strong>BIP-39 passphrase empty</strong>.
+          PRIMARY and SECONDARY are separate wallets, not two versions of the same one.
         </p>
+
+        <details class="technical-recipe">
+          <summary>For experts: see the exact versioned recipe</summary>
+          <dl>
+            <div><dt>Input bytes</dt><dd>NFKD normalization, then exact UTF-8</dd></div>
+            <div><dt>Each numbered job</dt><dd>Argon2id v0x13 · 262,144 KiB · t=1 · p=1 · 32 bytes</dd></div>
+            <div><dt>Combination</dt><dd>Domain-bound BLAKE3 fold in numeric shard order</dd></div>
+            <div><dt>Wallet import</dt><dd>Frozen derivation paths · empty optional BIP-39 passphrase</dd></div>
+          </dl>
+        </details>
+      </section>
+
+      <section class="section secret-section" id="secret">
+        <div class="section-heading">
+          <div>
+            <p class="section-number">04 / Your recovery secret</p>
+            <h2>Generate it. Recover it twice. Keep it in your head.</h2>
+          </div>
+          <p>
+            BrainVault makes each guess expensive. Your secret still determines how many useful
+            guesses an attacker has to try.
+          </p>
+        </div>
+
+        <div class="secret-grid">
+          <article class="secret-card featured">
+            <div class="card-top"><span>Quantified randomness</span><em>59.54 bits</em></div>
+            <h3>Ten random characters</h3>
+            <p>BrainVault can generate ten independent letters and numbers using your operating system’s secure random source. Learn the exact capitalization.</p>
+            <div class="code-line"><code>bunx brainvault --suggest-password</code><button type="button" data-copy="bunx brainvault --suggest-password" aria-label="Copy generated secret command">Copy</button></div>
+            <small>Why: machine choices have countable strength. BrainVault shows the result once, requires an exact repeat, and then clears that temporary screen.</small>
+          </article>
+          <article class="secret-card">
+            <div class="card-top"><span>Before funding</span><em>Required practice</em></div>
+            <h3>Recover it independently</h3>
+            <p>Close the first session. Later, enter everything again from memory and compare the complete first receiving address.</p>
+            <small>Why: repeating it immediately proves typing. A fresh recovery proves that your actual long-term recovery process works.</small>
+          </article>
+          <article class="secret-card caution">
+            <div class="card-top"><span>Backup-first</span><em>Optional</em></div>
+            <h3>Generate, then back it up</h3>
+            <p>Use the random option and preserve the exact secret offline. You keep BrainVault’s deterministic recovery while adding protection against forgetting.</p>
+            <small>The copy becomes sensitive physical material. Anyone who learns the complete recovery inputs can recreate the wallet.</small>
+          </article>
+        </div>
+
+        <aside class="backup-callout">
+          <div><span>The point of BrainVault</span><strong>Your secret lives in your head.</strong></div>
+          <p>
+            You may still write down the exact recovery secret and settings. That adds a second route
+            if memory fails, but it is optional—and the paper or file becomes sensitive material you
+            must hide. BrainVault’s distinctive mode is recovery without needing that copy.
+          </p>
+        </aside>
+      </section>
+
+      <section class="section demo-section" id="demo">
+        <div class="demo-heading">
+          <p class="section-number">See the real flow</p>
+          <h2>One terminal.<br />Nothing sent away.</h2>
+          <p>The recording uses public demonstration inputs and a wallet that must never receive funds.</p>
+        </div>
+        <figure class="demo-frame">
+          <video autoplay muted loop playsinline controls preload="metadata" poster="./brainvault-terminal-demo-poster.png" aria-label="BrainVault terminal demonstration">
+            <source src="./brainvault-terminal-demo.mp4" type="video/mp4" />
+            Your browser cannot play the BrainVault terminal demonstration.
+          </video>
+          <figcaption>Real CLI sequence, public demo secret. Enter real recovery inputs only in your own trusted terminal.</figcaption>
+        </figure>
       </section>
 
       <section class="section run" id="run">
         <div class="section-heading">
           <div>
-            <p class="section-number">03 / Run</p>
-            <h2>Choose your trust boundary.</h2>
+            <p class="section-number">05 / Run</p>
+            <h2>Choose how much you want to verify.</h2>
           </div>
-          <p>Convenience first, or source first. The protocol output is identical.</p>
+          <p>Every route must produce the same wallet. The difference is what you inspect before entering a real secret.</p>
         </div>
 
         <div class="run-grid">
           <article class="command-card featured">
             <div class="card-top"><span>Fast start</span><em>01</em></div>
-            <h3>Run from npm</h3>
+            <h3>Try the published package</h3>
             <p>
-              Downloads and immediately runs the CLI. Best after you trust the exact published package.
+              <code>bunx</code> downloads BrainVault from npm and starts it. Use public demo inputs first.
             </p>
             <div class="code-line"><code>bunx brainvault</code><button type="button" data-copy="bunx brainvault" aria-label="Copy bunx command">Copy</button></div>
             <ul class="check-list">
-              <li>No install lifecycle scripts</li>
-              <li>Bundled Apple binaries hash-verified before use</li>
-              <li>Runtime engine failure is fatal</li>
+              <li><strong>No install scripts.</strong> Downloading the package cannot quietly run a build step.</li>
+              <li><strong>Binary hash check.</strong> The fast Apple helper is rejected if its bytes changed.</li>
+              <li><strong>No silent fallback.</strong> A selected engine either works correctly or stops.</li>
             </ul>
           </article>
 
           <article class="command-card">
             <div class="card-top"><span>Audited copy</span><em>02</em></div>
-            <h3>Inspect before execution</h3>
-            <p>Install an exact version inertly, review it, then invoke the audited files directly.</p>
+            <h3>Inspect an exact package</h3>
+            <p>Place one fixed version on disk without letting it execute, then inspect those exact files.</p>
             <pre><code>mkdir brainvault-audit
 cd brainvault-audit
 bun init -y
 bun add --exact --ignore-scripts \
   brainvault@2.1.0</code></pre>
-            <a class="text-link" href="#audit">Continue with the audit path ↓</a>
+            <a class="text-link" href="#audit">Why this is stronger ↓</a>
           </article>
 
           <article class="command-card">
             <div class="card-top"><span>Source checkout</span><em>03</em></div>
-            <h3>Pin, build, compare</h3>
-            <p>Authenticate a commit, audit source and dependencies, then prove every native prebuild.</p>
+            <h3>Rebuild it yourself</h3>
+            <p>Read the source, lock every dependency, and prove that the fast native program comes from that source.</p>
             <pre><code>cd xln/brainvault
 bun install --offline \
   --frozen-lockfile --ignore-scripts
@@ -254,150 +444,170 @@ bun ./brainvault --smoke</code></pre>
         </div>
 
         <aside class="truth-callout">
-          <span>What <code>bunx</code> actually does</span>
+          <span>Why the three routes exist</span>
           <p>
-            It does <strong>not</strong> compile Rust, C, or Metal during installation. On Apple Silicon,
-            BrainVault selects a bundled prebuild and verifies its release-manifest hash before execution.
-            If the binary itself is inside your threat model, use the source-verification path first.
+            Convenience means trusting npm to deliver the published files. Inspection lets you see the
+            exact files before they run. Rebuilding goes further: it checks that the bundled Apple binary
+            can be reproduced from reviewed source. <code>bunx</code> itself does not compile Rust, C, or Metal.
           </p>
         </aside>
       </section>
 
-      <section class="section silicon">
-        <p class="section-number">04 / Apple Silicon</p>
+      <section class="section silicon" id="performance">
+        <p class="section-number">06 / State-of-the-art Argon2id</p>
+        <div class="benchmark-strip" aria-label="Measured BrainVault default on one M3 Ultra">
+          <div><strong>10,000</strong><span>Argon2id jobs in every default recovery—and in every attacker guess.</span></div>
+          <div><strong>14.064 s</strong><span>Median end-to-end wait on the exact M3 Ultra measured below.</span></div>
+          <div><strong>30.27%</strong><span>Faster than the previous safe plan, measured in alternating runs.</span></div>
+        </div>
         <div class="silicon-grid">
           <div>
-            <h2>Measured speed.<br />Conservative defaults.</h2>
+            <h2>Practical for recovery. Expensive for guessing.</h2>
             <p>
-              There is an M1-compatible baseline and a separate M3-family prebuild. Every shipped Apple
-              executable targets macOS 11.0 and is rebuilt twice during source verification.
+              You may recover a wallet only a few times. An attacker may need millions of guesses.
+              BrainVault deliberately spends time and memory on every attempt so that repetition is costly.
             </p>
+            <p class="measured-note">Other Macs may be slower or faster; no M5 time is claimed until it is measured.</p>
           </div>
           <div class="hardware-cards">
             <article>
               <span class="chip">M1 · M2 · M4 · M5</span>
-              <h3>C / NEON</h3>
-              <p>Verified CPU path is the automatic default until a machine profile has repeatable measurements.</p>
+              <h3>Broad Apple compatibility</h3>
+              <p>The conservative CPU version works across Apple Silicon. It is selected when no faster machine profile has been repeatedly measured.</p>
             </article>
             <article class="active">
               <span class="chip">Exact measured M3 Ultra</span>
-              <h3>Metal + C / NEON</h3>
-              <p>Automatic only for multiplier 1 and 1,000+ shards on the measured 32-core, 512-GiB profile.</p>
+              <h3>Measured acceleration</h3>
+              <p>The tuned GPU and CPU version is automatic only on the exact hardware where its behavior and speed were measured.</p>
             </article>
+            <dl class="machine-profile">
+              <div><dt>Exact test machine</dt><dd><strong>32 CPU · 80 GPU · 512 GiB</strong><span>The M3 Ultra configuration behind these numbers.</span></dd></div>
+              <div><dt>Work split</dt><dd><strong>8,000 Metal · 2,000 C/NEON</strong><span>The GPU and CPU share the same 10,000 fixed jobs.</span></dd></div>
+              <div><dt>Concurrency</dt><dd><strong>8×40 GPU · 32 CPU</strong><span>Many jobs run together; their final order remains fixed.</span></dd></div>
+              <div><dt>Working memory</dt><dd><strong>88 GiB live arenas</strong><span>Temporary memory used during derivation, then wiped where the runtime permits.</span></dd></div>
+              <div><dt>Typical total wait</dt><dd><strong>14.064s vs 20.169s</strong><span>Median end-to-end time for the new and previous safe plans.</span></dd></div>
+              <div><dt>Measured gain</dt><dd><strong>30.27% faster</strong><span>Three alternating runs per plan—not a one-run headline.</span></dd></div>
+            </dl>
           </div>
         </div>
         <p class="silicon-footnote">
-          Custom multipliers stay on CPU engines. Selecting a faster engine can change timing only—never recovery semantics.
+          Why this matters: acceleration may reduce your wait, but it is never allowed to change the
+          wallet. These figures measure speed, not the strength of a human-chosen password.
         </p>
       </section>
 
       <section class="section audit" id="audit">
         <div class="section-heading">
           <div>
-            <p class="section-number">05 / Maximum paranoia</p>
-            <h2>Trust is a sequence,<br />not a download button.</h2>
+            <p class="section-number">07 / Maximum paranoia</p>
+            <h2>You do not have to trust the download.</h2>
           </div>
           <p>
-            This is the strongest practical path shipped with BrainVault. A failed step is a stop, not permission to fall back.
+            Experts can inspect the recipe, freeze every dependency, rebuild the native helpers, and test known results before using a real password.
           </p>
         </div>
 
-        <ol class="audit-steps">
-          <li>
-            <span>01</span>
-            <div><h3>Authenticate and audit the code</h3><p>Pin an immutable commit through an independent channel. Begin with the 289-line canonical root surface and frozen vectors.</p></div>
-            <code>SPEC-V1.md · primitives/* · canonical.ts</code>
-          </li>
-          <li>
-            <span>02</span>
-            <div><h3>Audit dependency integrity</h3><p>Review exact versions, registry integrity, licenses, vendored native source, and the complete shipped manifest.</p></div>
-            <code>package.json · bun.lock · MANIFEST.sha256</code>
-          </li>
-          <li>
-            <span>03</span>
-            <div><h3>Install inertly and go offline</h3><p>Populate only an audited cache, disconnect networking, freeze the lock, and disable all lifecycle scripts.</p></div>
-            <code>bun install --offline --frozen-lockfile --ignore-scripts</code>
-          </li>
-          <li>
-            <span>04</span>
-            <div><h3>Rebuild every native artifact twice</h3><p>Clean, locked builds must match each other and every bundled M1/M3 prebuild byte-for-byte after normalized signing.</p></div>
-            <code>bun run verify:source</code>
-          </li>
-          <li>
-            <span>05</span>
-            <div><h3>Prove vectors, failures, and engine parity</h3><p>Run the package suite, 12-way release matrix, native release checks, and cross-engine smoke before real secrets.</p></div>
-            <code>bun run check · bun run test:matrix · bun ./brainvault --smoke</code>
-          </li>
-          <li>
-            <span>06</span>
-            <div><h3>Recover privately, then independently repeat</h3><p>Use a clean offline machine with no recording. Freshly derive again and compare the complete first address before funding.</p></div>
-            <code>No tmux · no camera · no network · no copied seed</code>
-          </li>
-        </ol>
+        <details class="audit-disclosure">
+          <summary><strong>Open the maximum-assurance checklist</strong><span>Six steps · intended for expert review</span></summary>
+          <ol class="audit-steps">
+            <li>
+              <span>01</span>
+              <div><h3>Pin one exact version</h3><p>Verify an immutable commit through another channel. Why: a branch name or web page can change after you review it.</p></div>
+              <code>git commit · signed release hash</code>
+            </li>
+            <li>
+              <span>02</span>
+              <div><h3>Read the recipe and its dependencies</h3><p>Inspect frozen parameters, exact package versions, vendored native source, and the manifest. Why: these files determine what will execute.</p></div>
+              <code>SPEC-V1.md · primitives/* · bun.lock · MANIFEST.sha256</code>
+            </li>
+            <li>
+              <span>03</span>
+              <div><h3>Install without executing package scripts</h3><p>Prepare an audited cache, disconnect networking, freeze the lockfile, and disable lifecycle scripts. Why: installation should only place reviewed files.</p></div>
+              <code>bun install --offline --frozen-lockfile --ignore-scripts</code>
+            </li>
+            <li>
+              <span>04</span>
+              <div><h3>Rebuild every native helper twice</h3><p>Two clean builds must match each other and the bundled Apple binaries. Why: matching bytes connect reviewed source to the fast executable.</p></div>
+              <code>bun run verify:source</code>
+            </li>
+            <li>
+              <span>05</span>
+              <div><h3>Run known answers and failure tests</h3><p>Check frozen examples, worker combinations, malformed results, and every available engine. Why: speed paths must never create a different wallet.</p></div>
+              <code>bun run check · bun run test:matrix · bun ./brainvault --smoke</code>
+            </li>
+            <li>
+              <span>06</span>
+              <div><h3>Recover twice before funding</h3><p>Close the first run, derive again independently, and compare the complete first address. Why: this tests what you will actually need during recovery.</p></div>
+              <code>Offline · no recording · no copied seed</code>
+            </li>
+          </ol>
 
-        <div class="no-shortcut">
-          <h3>Why there is no <code>bun run build</code></h3>
-          <p>
-            TypeScript runs directly in Bun, and “it compiled” proves almost nothing. <code>verify:source</code>
-            proves the stronger property: two clean native builds reproduce the audited, manifest-covered prebuilds.
-          </p>
-        </div>
+          <div class="no-shortcut">
+            <h3>Why there is no generic <code>bun run build</code></h3>
+            <p>
+              TypeScript already runs directly in Bun, so “it compiled” says little. <code>verify:source</code>
+              checks something stronger: clean native builds reproduce the exact bundled binaries.
+            </p>
+          </div>
+        </details>
       </section>
 
       <section class="section evidence" id="evidence">
-        <div class="section-heading">
-          <div>
-            <p class="section-number">06 / Evidence</p>
-            <h2>Claims with executable teeth.</h2>
+        <details class="evidence-disclosure">
+          <summary>
+            <span class="section-number">08 / Verification record</span>
+            <strong>See the tests and reproducibility evidence</strong>
+            <small>Optional technical detail · closed by default</small>
+          </summary>
+
+          <div class="evidence-body">
+            <p>
+              These checks apply to one fixed release candidate. They are reproducible evidence,
+              not a guarantee about future code or the strength of a user's password.
+            </p>
+            <div class="evidence-facts">
+              <article><h3>Frozen vectors</h3><p>Known inputs have permanent expected outputs, so protocol drift becomes a test failure.</p></article>
+              <article><h3>Release matrix</h3><p>Worker counts and memory multipliers are checked because performance settings must not reorder results.</p></article>
+              <article><h3>Engine parity</h3><p>Every available implementation must produce the same full root, not merely a matching short fingerprint.</p></article>
+              <article><h3>Reproducible builds</h3><p>The M1-compatible and M3-family native binaries are rebuilt twice and compared byte-for-byte.</p></article>
+            </div>
+            <article class="root-card">
+              <span>Public benchmark vector</span>
+              <code>dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485</code>
+              <p>This public demonstration root matched across all available benchmark engines.</p>
+            </article>
+            <details class="model-reviews">
+              <summary>Advisory model-assisted reviews</summary>
+              <p>
+                External models were used as advisory reviewers on fixed candidates. Their opinions are
+                not certification and are not part of the trust path. Source, vectors, tests, and
+                reproducible builds are the independently checkable evidence.
+              </p>
+            </details>
           </div>
-          <p>Current release-candidate evidence, not a promise about unreviewed future builds.</p>
-        </div>
-
-        <div class="evidence-grid">
-          <article class="score-card">
-            <span class="score">1000<small>/1000</small></span>
-            <h3>GPT-5.6 Sol · max</h3>
-            <blockquote>“All ten remediations are present in shipped source with targeted regression assertions.”</blockquote>
-            <p>Independent targeted post-fix review · advisory, not certification.</p>
-          </article>
-          <article class="score-card">
-            <span class="score">1000<small>/1000</small></span>
-            <h3>Claude Opus 5 · max</h3>
-            <blockquote>“Domain cannot contain terminal control characters.”</blockquote>
-            <p>Independent targeted post-fix review · advisory, not certification.</p>
-          </article>
-          <article class="root-card">
-            <span>Canonical benchmark root</span>
-            <code>dc2090d65af300c74384ca36adf16ff993c43f4947ee9a0f09e8055f009c3485</code>
-            <p>Identical across all 11 available engines in the 1,000-shard release benchmark.</p>
-          </article>
-        </div>
-
-        <p class="evidence-note">
-          Model reviews are a second pair of eyes, not formal security certification. Timeouts and unavailable models are not counted.
-          The source, vectors, manifest, reproducible builds, and tests remain the evidence that users can independently verify.
-        </p>
+        </details>
       </section>
 
-      <section class="section warnings">
-        <p class="section-number">07 / Read before funding</p>
+      <section class="section warnings" id="warnings">
+        <p class="section-number">09 / Before real money</p>
         <div class="warnings-grid">
-          <h2>There is no<br />“forgot password.”</h2>
+          <h2>Failure is permanent. Practice recovery first.</h2>
           <ul>
-            <li><strong>Eight characters is input hygiene, not safety.</strong> Use a strong, unique password you can reproduce exactly.</li>
-            <li><strong>Your first address is public but privacy-sensitive.</strong> Sharing it links activity.</li>
-            <li><strong>There is intentionally no recovery receipt.</strong> Wrong inputs deterministically create a different wallet.</li>
-            <li><strong>Loss is irreversible.</strong> Confirm recovery independently before moving meaningful funds.</li>
-            <li><strong>No terminal can defeat cameras, recording, swap, crash dumps, or SIGKILL.</strong> Control the machine and room.</li>
+            <li><strong>A long input is not automatically a strong input.</strong> Eight characters is only basic hygiene. Use a unique password that cannot be guessed from personal facts or reused leaks.</li>
+            <li><strong>Exact means exact.</strong> Capitalization, spaces, username, shard count, and multiplier all matter. A mistake creates a different valid wallet rather than an error message.</li>
+            <li><strong>There is no reset desk.</strong> BrainVault stores nothing and nobody can restore forgotten details. That independence is also the central risk.</li>
+            <li><strong>Your address reveals financial activity.</strong> The first address is safe to receive funds but privacy-sensitive to publish or associate with your identity.</li>
+            <li><strong>The surrounding computer still matters.</strong> Alternate screens cannot defeat cameras, recordings, swap, crash dumps, malware, or a forced power loss.</li>
           </ul>
         </div>
       </section>
 
       <section class="section final-cta">
-        <p class="eyebrow"><span class="status-dot"></span> BrainVault V1 is frozen forever</p>
-        <h2>Derive locally.<br />Recover independently.</h2>
+        <p class="eyebrow">Nothing stored · nobody to reset it</p>
+        <h2>Recover it twice.<br />Then fund it.</h2>
+        <p class="final-copy">Derive once, close the session, start again independently, and compare the complete first address—not only the short fingerprint.</p>
         <div class="hero-actions">
-          <a class="button primary" href="#run">Choose a run path</a>
+          <a class="button primary" href="#run">Review the run options</a>
           <a class="button secondary" href="https://github.com/xlnfinance/xln/tree/main/brainvault">Read the source ↗</a>
         </div>
       </section>

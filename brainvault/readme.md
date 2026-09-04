@@ -1,11 +1,59 @@
-# BrainVault v1
+# BrainVault
 
-Memory-hard deterministic wallet derivation. The same V1 semantic inputs produce
-the same wallet in every conforming implementation.
+> **Your wallet, mined from memory.**<br>
+> You wait once per recovery. An attacker pays for every guess.<br>
+> No physical seed required. No account. No server to trust.
 
-**Algorithm:** Argon2id (256 MiB shards) + BLAKE3
-**Security:** Raises the time and memory cost of every password guess; it does not add entropy
-**Compatibility:** Engine and worker count affect speed only, never the V1 wallet
+BrainVault is a memory-hard, deterministic wallet derivation protocol. The same
+exact Username, Password, Shard count, and Multiplier recreate the same wallets
+on every conforming implementation. It runs locally and intentionally writes no
+seed, recovery receipt, account, or cloud record.
+
+This replaces one risk; it does not abolish risk. A conventional random mnemonic
+has high machine-generated entropy but must be stored. BrainVault can remove that
+physical bearer backup, but the remembered inputs become the recovery boundary.
+Argon2id makes every guess expensive; it cannot turn a weak or reused password
+into a strong one. Forget one exact input and the wallet is permanently lost.
+
+**Algorithm:** Argon2id (256 MiB per shard) + ordered BLAKE3 fold<br>
+**Recommended work:** level 4, exactly 10,000 shards, multiplier 1<br>
+**Compatibility:** engine and worker count change speed only, never the wallet
+
+## If serious money depends on it
+
+Do not trust a download, testimonial, or this README. Use BrainVault only after
+you can defend this sequence yourself:
+
+1. Read the frozen protocol and vectors: `SPEC-V1.md` and `vectors-v1.json`.
+2. Audit the complete 289-line root path: `primitives/spec.ts`,
+   `primitives/kdf.ts`, and `canonical.ts`.
+3. Audit wallet projection in `core.ts` and dependency pins in `bun.lock`.
+4. Run `bun run verify:source`; on Apple Silicon it rebuilds every shipped native
+   artifact twice from vendored source and requires byte-for-byte agreement.
+5. Run the test ladder, then perform two fresh offline recoveries and compare the
+   complete first receiving address before funding.
+
+<details>
+<summary><strong>Why does a small protocol ship 224 files?</strong></summary>
+
+The trusted root is deliberately small: 289 lines across three files. Most of
+the package is review evidence and reproducible acceleration, not additional
+wallet semantics:
+
+- `primitives/`, `canonical.ts`, and `core.ts` define the portable protocol and
+  wallet projections;
+- `cli.ts`, workers, and `native*.ts` own interaction and scheduling only;
+- `prebuilds/` contains hash-checked Apple Silicon executables;
+- `experimental/argon2-{c,rust,metal,opencl}/` contains their complete pinned
+  source, third-party licenses, and offline build inputs;
+- tests, frozen vectors, the dependency audit lock, and `MANIFEST.sha256` make
+  every release claim mechanically checkable.
+
+Start with the five files in steps 1–3 above. Expand into CLI, native, or package
+code only for the property you want to trust. Deleting the vendored sources would
+make the folder look smaller while forcing users to trust opaque prebuilt bytes.
+
+</details>
 
 ## Usage
 
