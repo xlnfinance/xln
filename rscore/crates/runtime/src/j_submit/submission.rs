@@ -7,7 +7,9 @@ use xln_rscore_entity_kernel::j_batch::JBatchFeeOverrides;
 use xln_rscore_entity_kernel::{
     EntityProviderActionIntent, EntityProviderActionPayload, hash_entity_provider_action,
 };
-use xln_rscore_hanko::{claims::BoardAuthorityValidator, verify_canonical_hanko};
+use xln_rscore_hanko::{
+    claims::BoardAuthorityValidator, compact_hanko_for_chain, verify_canonical_hanko,
+};
 
 use crate::j_watcher::JsonRpc;
 
@@ -585,6 +587,10 @@ impl<'a> JSubmitter<'a> {
             board_authority,
         )
         .map_err(|error| JSubmitError::Hanko(error.to_string()))?;
+        // Consensus and durable state retain one full proof envelope. Match
+        // TypeScript by applying the optional 65-byte shortcut only at RPC.
+        let chain_hanko = compact_hanko_for_chain(&sealed.hanko, &batch_hash)
+            .map_err(|error| JSubmitError::Hanko(error.to_string()))?;
         let onchain_nonce = self.entity_nonce(&sealed.entity_id)?;
         if onchain_nonce >= sealed.nonce {
             return Ok(JSubmitOutcome::AwaitingAuthenticatedEvidence);
@@ -611,7 +617,7 @@ impl<'a> JSubmitter<'a> {
         {
             return Err(JSubmitError::Transaction("operator-unfunded"));
         }
-        let calldata = process_batch_calldata(&encoded, &sealed.hanko, sealed.nonce);
+        let calldata = process_batch_calldata(&encoded, &chain_hanko, sealed.nonce);
         let gas_limit = self.gas_limit_to(&operator, &self.config.depository_address, &calldata)?;
         let (max_priority_fee_per_gas, max_fee_per_gas) = self.fees(fee_overrides)?;
         let transaction = Eip1559Transaction {

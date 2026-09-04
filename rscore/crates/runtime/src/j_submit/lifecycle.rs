@@ -366,17 +366,13 @@ pub(super) fn hanko_for_kind(
     )
 }
 
-/// The batch Hanko as the chain receives it: the certified envelope, compacted
-/// to the 65-byte form when it is one EOA proving its own lazy entity (parity:
-/// `compactHankoForChain` at `rpc-submission.ts`).
+/// The certified batch Hanko exactly as consensus produced it. The durable
+/// attempt retains this envelope; chain-only compaction belongs to submission.
 fn hanko_for(
     replica: &RuntimeEntityReplica,
     batch_hash: &str,
 ) -> Result<Vec<u8>, JSubmitLifecycleError> {
-    let hanko = hanko_for_kind(replica, batch_hash, "jBatch")?;
-    let digest: [u8; 32] = fixed_hex(batch_hash, "BATCH_HASH")?;
-    xln_rscore_hanko::compact_hanko_for_chain(&hanko, &digest)
-        .map_err(|cause| error(format!("BATCH_HANKO_SHAPE:{cause}")))
+    hanko_for_kind(replica, batch_hash, "jBatch")
 }
 
 pub(super) fn pending_tx_type(value: &Value) -> Result<&str, JSubmitLifecycleError> {
@@ -1167,6 +1163,50 @@ fn string(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_batch_hanko_retains_the_full_consensus_envelope() {
+        let mut replica = crate::machine::tests::replica(crate::RuntimeLimits::default())
+            .expect("runtime replica");
+        let private_key = [7_u8; 32];
+        let signer = xln_rscore_crypto::address_of_private_key(&private_key).expect("signer");
+        let entity_id = xln_rscore_hanko::lazy_single_signer_entity_id(&signer);
+        let batch_hash = [0x44_u8; 32];
+        let envelope = xln_rscore_hanko::build_single_signer_hanko_envelope(
+            &entity_id,
+            &batch_hash,
+            &private_key,
+            1,
+            1,
+            xln_rscore_hanko::BoardDelays::default(),
+        )
+        .expect("full Hanko envelope");
+        let entity_replica = replica
+            .e_replicas
+            .values_mut()
+            .next()
+            .expect("entity replica");
+        entity_replica.replica_metadata = json!({
+            "hankoWitness": {
+                "__xlnType": "Map",
+                "value": [[hex(&batch_hash), {
+                    "hanko": hex(&envelope),
+                    "type": "jBatch"
+                }]]
+            }
+        });
+
+        let durable = hanko_for(entity_replica, &hex(&batch_hash)).expect("durable Hanko");
+        assert_eq!(durable, envelope);
+        assert!(durable.len() > xln_rscore_hanko::short::SHORT_HANKO_BYTES);
+        assert_eq!(
+            xln_rscore_hanko::compact_hanko_for_chain(&durable, &batch_hash)
+                .expect("chain Hanko")
+                .len(),
+            xln_rscore_hanko::short::SHORT_HANKO_BYTES,
+        );
+    }
+
     #[test]
     fn attempt_id_matches_typescript_safe_stringify_vector() {
         let retry = RetryJSubmitData {
