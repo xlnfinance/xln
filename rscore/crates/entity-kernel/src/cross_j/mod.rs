@@ -3360,6 +3360,12 @@ fn apply_book_order_removed(
             "CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH",
         ));
     }
+    // Exact removal ACKs can race the atomic close/finality that retires the
+    // source offer. Once the route is terminal there is no remaining removal
+    // to confirm, and another clear output would resurrect completed work.
+    if terminal_route(current) {
+        return Ok(CrossJurisdictionApplyResult::default());
+    }
     let admission_key = format!("{source_entity}:{order_id}");
     if let Some(mut admission) = state
         .cross_jurisdiction_book_admissions
@@ -5761,6 +5767,59 @@ mod tests {
             [(account, crate::AccountEnvelopeMutation::ConfirmDisputeBookRemoval { order_id })]
                 if account == "target-user" && order_id == "order-1"
         ));
+    }
+
+    #[test]
+    fn terminal_book_removal_ack_is_an_exact_idempotent_noop() {
+        let mut route = route("cancelled", true);
+        set(&mut route, "bookOwnerEntityId", string("target-hub")).expect("book owner");
+        let canonical = canonical_route(&route, EntityTxKind::CrossJurisdictionBookOrderRemoved)
+            .expect("route");
+        let mut source_hub = EntityStateSlice::empty("source-hub", 2_000);
+        source_hub.cross_jurisdiction_swaps = Some(
+            EntityCanonicalCollection::from_entries([("order-1".into(), canonical.clone())])
+                .expect("routes"),
+        );
+        let ack = CanonicalEntityTx::from_frame_projection(
+            EntityTxKind::CrossJurisdictionBookOrderRemoved,
+            obj(vec![
+                ("orderId", string("order-1")),
+                ("sourceEntityId", string("source-user")),
+                ("sourceAccountId", string("source-user")),
+                ("route", canonical),
+                (
+                    "removedAt",
+                    number(
+                        2_000,
+                        EntityTxKind::CrossJurisdictionBookOrderRemoved,
+                        "TIME",
+                    )
+                    .unwrap(),
+                ),
+                ("reason", string("cancel_request")),
+            ]),
+        )
+        .expect("ack");
+        let before = source_hub
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .expect("routes")
+            .root_hash();
+        for _ in 0..2 {
+            let result = apply_book_order_removed(&mut source_hub, &BTreeMap::new(), &ack)
+                .expect("terminal ack");
+            assert!(result.outputs.is_empty());
+            assert!(result.events.is_empty());
+            assert!(result.account_envelope_mutations.is_empty());
+            assert_eq!(
+                source_hub
+                    .cross_jurisdiction_swaps
+                    .as_ref()
+                    .expect("routes")
+                    .root_hash(),
+                before,
+            );
+        }
     }
 
     #[test]

@@ -296,6 +296,27 @@ export const executeCrossJEntityKindsGroupD = async () => {
       route: remoteBookRoute, removedAt, reason: 'group-d-remove',
     } },
   ));
+  const terminalRoute = withCanonicalCrossJurisdictionRouteHash({
+    ...remoteBookRoute,
+    status: 'cancelled',
+    updatedAt: NOW + 1,
+  });
+  const removedAfterTerminal = state(SOURCE_HUB, SOURCE_HUB_SIGNER, SOURCE_USER, terminalRoute);
+  const closedAdmission = admission(terminalRoute);
+  closedAdmission.status = 'closed';
+  closedAdmission.closedAt = NOW;
+  closedAdmission.closeReason = 'settled';
+  removedAfterTerminal.crossJurisdictionBookAdmissions = PersistentEntityCollectionMap.from(new Map([
+    [`${SOURCE_USER}:${terminalRoute.orderId}`, closedAdmission],
+  ]));
+  cases.push(await runCase(
+    'crossJurisdictionBookOrderRemovedAfterTerminal',
+    removedAfterTerminal,
+    { type: 'crossJurisdictionBookOrderRemoved', data: {
+      orderId: terminalRoute.orderId, sourceEntityId: SOURCE_USER, sourceAccountId: SOURCE_USER,
+      route: terminalRoute, removedAt, reason: 'group-d-remove',
+    } },
+  ));
   const notice = state(SOURCE_HUB, SOURCE_HUB_SIGNER, SOURCE_USER, route);
   addPull(notice, SOURCE_USER, route, 'source');
   cases.push(await runCase(

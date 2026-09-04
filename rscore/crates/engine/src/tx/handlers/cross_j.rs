@@ -11,7 +11,7 @@ use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_account_state_
 use crate::swap::{MAX_ACCOUNT_CROSS_J_SWAP_OFFERS, MAX_ACCOUNT_SWAP_OFFERS};
 use crate::tx::apply_types::MutationDecision;
 use crate::{
-    AccountOutput, AccountRejection, AccountReplica, Side, StateError, TokenId, TransitionError,
+    AccountRejection, AccountReplica, Side, StateError, TokenId, TransitionError,
     ValidationRejection,
 };
 
@@ -707,9 +707,8 @@ pub(crate) fn apply_pull_close(
     let bound_offer = (leg == "source")
         .then(|| account.state().swap_offer(&order_id))
         .flatten()
-        .filter(|offer| offer.cross_jurisdiction().is_some())
-        .map(|offer| offer.maker_is_left());
-    if let Some(maker_is_left) = bound_offer {
+        .is_some_and(|offer| offer.cross_jurisdiction().is_some());
+    if bound_offer {
         account
             .state_mut()
             .remove_swap_offer(&order_id)
@@ -718,13 +717,10 @@ pub(crate) fn apply_pull_close(
             "🌉 Cross-j offer {} closed with pull",
             crate::state::identity::js_prefix(&order_id, 8),
         ));
-        return Ok(MutationDecision::with_outputs(
-            events,
-            vec![AccountOutput::SwapOfferRemove {
-                offer_id: order_id,
-                maker_is_left,
-            }],
-        ));
+        // The Entity cross-j transition owns remote-book removal and clear
+        // followup. Publishing a same-j Account removal here would create a
+        // second orderbook authority.
+        return Ok(MutationDecision::applied(events));
     }
     Ok(MutationDecision::applied(events))
 }
@@ -1088,13 +1084,7 @@ mod tests {
         let applied = SequentialAccountEngine::apply(&bound_offer_replica(), Side::Left, &close)
             .expect("source close");
         assert_eq!(applied.verdict(), &AccountVerdict::Applied);
-        assert!(matches!(
-            applied.outputs(),
-            [AccountOutput::SwapOfferRemove {
-                offer_id,
-                maker_is_left: true,
-            }] if offer_id == "order-1"
-        ));
+        assert!(applied.outputs().is_empty());
         let closed = applied.committed().expect("close candidate");
         assert_eq!(closed.state().pull_count(), 0);
         assert_eq!(closed.state().swap_offer_count(), 0);

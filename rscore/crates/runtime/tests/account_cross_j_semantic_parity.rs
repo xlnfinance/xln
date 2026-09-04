@@ -211,12 +211,7 @@ fn assert_step(account: &mut AccountReplica, input: &Value, expected: &ExpectedS
     *account = candidate;
 }
 
-// Cross-J is out of scope until core Rust parity is final. Known shape gap:
-// a source-leg cross_pull_close that retires the bound offer emits
-// SwapOfferRemove in Rust (engine cross_j.rs) while TypeScript reports the
-// `swap_cancelled` outcome; the fixture generator counts outcome-based outputs.
 #[test]
-#[ignore = "cross-J out of scope until Rust parity; re-integrate after"]
 fn cross_j_account_transitions_match_the_shared_typescript_vector() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("shared cross-J fixture");
     assert_eq!(fixture.version, 1);

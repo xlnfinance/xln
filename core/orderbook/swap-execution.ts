@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
 
-import { compareCanonicalText, swapKey, type SwapKey } from './swap-keys.ts';
+import { compareCanonicalText, swapKey } from './swap-keys.ts';
 import { computeSwapPriceTicksForDimensions, deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { UINT16_MAX } from '../config/constants.ts';
@@ -159,7 +159,7 @@ export function markWorkingOrderbookOffer(offer: NormalizedOrderbookOffer): Work
   } as SameJurisdictionWorkingOrderbookOffer;
 }
 
-export { compareCanonicalText, swapKey, type SwapKey };
+export { compareCanonicalText, swapKey };
 
 export interface ExactFillRatio {
   numerator: bigint;

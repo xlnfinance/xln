@@ -510,7 +510,7 @@ fn group_d_cross_j_entity_kinds_match_typescript() {
         fixture.canonical_source,
         "TypeScript applyEntityTx cross-j Group D semantic transitions"
     );
-    assert_eq!(fixture.cases.len(), 11, "all Group D kinds");
+    assert_eq!(fixture.cases.len(), 12, "all Group D cases");
     for case in fixture.cases {
         let transaction = tx(&case.tx);
         if transaction.kind == EntityTxKind::CrossJurisdictionForceSiblingDispute {

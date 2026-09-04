@@ -1105,8 +1105,7 @@ export async function readCrossResolveSnapshots(
           const fillRatio = Number(route.cumulativeFillRatio || 0);
           const filledSource = BigInt(String(route.filledSourceAmount ?? '0'));
           const filledTarget = BigInt(String(route.filledTargetAmount ?? '0'));
-          const improvement = BigInt(String(route.priceImprovementSourceAmount ?? '0'));
-          const executionGiveAmount = String(filledSource - improvement);
+          const executionGiveAmount = String(filledSource);
           const executionWantAmount = String(filledTarget);
           if (fillRatio <= 0 && executionGiveAmount === '0' && executionWantAmount === '0') continue;
           const offerId = String(route.orderId || '');

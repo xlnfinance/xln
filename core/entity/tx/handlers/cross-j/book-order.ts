@@ -384,7 +384,22 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
   const visible = newState.accounts.get(entityTx.data.sourceAccountId);
   const offer = visible?.state.swapOffers?.get(route.orderId);
   const currentRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
-  if (!visible || !offer?.crossJurisdiction || !currentRoute) {
+  if (!currentRoute) {
+    throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING", `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:` +
+        `account=${entityTx.data.sourceAccountId}`);
+  }
+  if (normalizeEntityRef(currentRoute.routeHash || '') !== normalizeEntityRef(route.routeHash || '')) {
+    throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH", `CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH:order=${route.orderId}`);
+  }
+  // An exact ACK may arrive after the atomic close/finality retired the source
+  // offer. The terminal route is the durable proof that no removal remains to
+  // confirm; re-emitting clear would resurrect work. A different route hash is
+  // rejected above so an adversary cannot hide a conflicting ACK behind this
+  // idempotent fence.
+  if (isCrossJurisdictionTerminalStatus(currentRoute.status)) {
+    return { newState, outputs: [], accountTxs: [] };
+  }
+  if (!visible || !offer?.crossJurisdiction) {
     throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING", `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:` +
         `account=${entityTx.data.sourceAccountId}`);
   }

@@ -195,8 +195,9 @@ const applyStep = async (
     pullCount: account.state.pulls?.size ?? 0,
     offerCount: account.state.swapOffers.size,
     events: result.events,
-    outputCount: (result.candidateEffects?.length ?? 0) +
-      (result.outcome === 'swap_offer_created' || result.outcome === 'swap_cancelled' ? 1 : 0),
+    // Cross-j orderbook lifecycle is projected by the Entity transition. Only
+    // explicit Account candidate effects belong in the cross-language outbox.
+    outputCount: result.candidateEffects?.length ?? 0,
     ...(account.state.swapOffers.get('order-1')
       ? { offer: account.state.swapOffers.get('order-1') }
       : {}),
@@ -217,6 +218,7 @@ export const executeCrossJAccountSemanticVector = async () => {
       { name: 'source-offer', steps: [
         await applyStep(sourceOffer, 'sourceLock', txs.sourceLock, false, 1, 1_000, 10),
         await applyStep(sourceOffer, 'swapOffer', txs.swapOffer, true, 1, 1_000, 10),
+        await applyStep(sourceOffer, 'sourceClose', txs.sourceClose, false, 1, 2_000, 20),
       ] },
       { name: 'source-zero-close', steps: [
         await applyStep(sourceClose, 'sourceLock', txs.sourceLock, false, 1, 1_000, 10),

@@ -6,34 +6,34 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { applyEntityTx } from '../../../entity/tx/apply';
-import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../account/tx/apply';
-import { createDefaultDelta } from '../../../account/state/delta';
-import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { createEmptyEnv } from '../../../runtime';
+import { applyEntityTx } from '../../../../entity/tx/apply';
+import { applyAccountTxToMutableReplica as applyAccountTx } from '../../../../account/tx/apply';
+import { createDefaultDelta } from '../../../../account/state/delta';
+import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
+import { createEmptyEnv } from '../../../../runtime';
 import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
-} from '../../../extensions/cross-j/index';
+} from '../../../../extensions/cross-j/index';
 import {
   buildCrossJurisdictionCancelInstruction,
   buildCrossJurisdictionFillInstruction,
   crossJurisdictionBookAdmissionKeyFor,
   mergeCrossJurisdictionBookAdmission,
   type CrossJurisdictionFillInstruction,
-} from '../../../extensions/cross-j/orderbook';
-import { applyCrossJurisdictionOrderbookFill } from '../../../entity/tx/handlers/account-cross-j-followups';
-import { buildCrossMarketOfferFromBookOrder } from '../../../entity/tx/handlers/account/orderbook/helpers';
-import { createBook, getBookOrder } from '../../../orderbook';
-import { replaceOrderbookPair } from '../../../orderbook/order-index';
-import { crossJurisdictionBookQtyLots } from '../../../orderbook/cross-j/quantity';
-import { createOrderbookExtState, getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE } from '../../../orderbook/types';
-import { swapKey } from '../../../orderbook/swap-execution';
-import type { EntityInput, EntityState } from '../../../entity/types';
-import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+} from '../../../../extensions/cross-j/orderbook';
+import { applyCrossJurisdictionOrderbookFill } from '../../../../entity/tx/handlers/account-cross-j-followups';
+import { buildCrossMarketOfferFromBookOrder } from '../../../../entity/tx/handlers/account/orderbook/helpers';
+import { createBook, getBookOrder } from '../../../../orderbook';
+import { replaceOrderbookPair } from '../../../../orderbook/order-index';
+import { crossJurisdictionBookQtyLots } from '../../../../orderbook/cross-j/quantity';
+import { createOrderbookExtState, getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE } from '../../../../orderbook/types';
+import { swapKey } from '../../../../orderbook/swap-execution';
+import type { EntityInput, EntityState } from '../../../../entity/types';
+import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import {
   addr,
   entity,
@@ -44,7 +44,7 @@ import {
   makeState,
   putTestAccountDelta,
   putTestAccountSwapOffer,
-} from '../../helpers/cross-j';
+} from '../../../helpers/cross-j';
 
 const eth = makeJurisdiction('Ethereum', 1, '11', '12');
 const base = makeJurisdiction('Base', 8453, '21', '22');

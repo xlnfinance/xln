@@ -157,13 +157,34 @@
             "wantTokenId": 2
           },
           "offerCount": 1,
-          "outputCount": 1,
+          "outputCount": 0,
           "pullCount": 1,
           "pullsRoot": "0x66e1069411103bb3b6b3410d3daf99da3646a6c490b0a633b31b0dee15fd80e4",
           "rightHold": "0",
           "swapOffersRoot": "0x8c94978c62027de9a2b155f2b43f4dd79c3c4f64506f03da7deaaca700348718",
           "timestamp": 1000,
           "txType": "swap_offer"
+        },
+        {
+          "accountStateRoot": "0x8d4b12da38ee4ee1309a8173d3bb64753cc613395e886dde13dca0e901d3f34a",
+          "byLeft": false,
+          "deltasRoot": "0x62704334cae4e132e9f86c3a7d7bd62a526bccec95ee7bac6ab63951f75cecd3",
+          "events": [
+            "🪝 Cross-j pull closed: 0x595611... ratio 0/65535 claimed 0 released 100",
+            "🌉 Cross-j offer order-1 closed with pull"
+          ],
+          "height": 20,
+          "input": "sourceClose",
+          "leftHold": "0",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 0,
+          "pullsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 2000,
+          "txType": "cross_pull_close"
         }
       ]
     },

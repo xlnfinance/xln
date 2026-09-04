@@ -55,4 +55,3 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
 } as const satisfies {
   [Kind in AccountTx['type']]: readonly AllKeys<AccountTxData<Kind>>[];
 };
-
