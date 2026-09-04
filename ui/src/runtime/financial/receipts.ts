@@ -62,16 +62,12 @@ async function readEmbeddedReceipts(request: PaymentTerminalReadRequest): Promis
 		throw new Error(`PAYMENT_TERMINAL_RUNTIME_MISMATCH:${request.runtimeId}`);
 	}
 	const xln = await getXLN();
-	const journals = await xln.readPersistedFrameJournals(env, {
-		fromHeight: request.fromHeight,
-		toHeight: request.toHeight,
-		limit: 500,
-	});
-	const byHeight = new Map(journals.map(journal => [journal.height, journal]));
+	// Frame logs live in the runtime-activity view since core ee77386af; the
+	// plain frame journal returns `logs: []` (docs/audit/2026-09-04-wallet-ui-core-findings.md #14).
 	const receipts: PaymentTerminalReceiptPage['receipts'] = [];
 	let scannedThroughHeight = request.fromHeight - 1;
 	for (let height = request.fromHeight; height <= request.toHeight; height += 1) {
-		const journal = byHeight.get(height);
+		const journal = await xln.readPersistedRuntimeActivityJournal(env, height);
 		if (!journal) break;
 		receipts.push({ height, logs: journal.logs ?? [] });
 		scannedThroughHeight = height;

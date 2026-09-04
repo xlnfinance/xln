@@ -56,6 +56,10 @@ test.describe('wallet UI guided tour', () => {
 		test.setTimeout(900_000);
 		const pageErrors: string[] = [];
 		page.on('pageerror', error => pageErrors.push(error.message));
+		// A halted runtime looks like a stuck tour; the browser console names the invariant that halted it.
+		page.on('console', message => {
+			if (message.type() === 'error') process.stdout.write(`[browser] ${message.text().slice(0, 400)}\n`);
+		});
 
 		await page.goto('/');
 		const existing = page.getByRole('button', { name: /^Sandbox/ }).first();

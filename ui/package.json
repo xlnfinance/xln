@@ -7,6 +7,7 @@
 		"runtime:bundle": "XLN_RUNTIME_BUNDLE_OUT=ui/public/runtime.js bash ../scripts/build-runtime.sh",
 		"dev": "bun run runtime:bundle && vite",
 		"build": "bun run runtime:bundle && vite build",
+		"build:hosted": "XLN_UI_BASE=/ui/ bun run build",
 		"preview": "vite preview",
 		"check": "tsc --noEmit -p tsconfig.json",
 		"test:e2e": "bunx playwright test -c playwright.config.ts"

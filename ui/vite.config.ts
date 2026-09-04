@@ -45,7 +45,11 @@ function sharedRuntimeBundle(dir: string): Plugin {
 
 const sharedBundleDir = process.env['XLN_UI_RUNTIME_BUNDLE_DIR'];
 
+/** Path prefix the hosted build lives under (xln.finance/ui/). Dev and tests stay at the root. */
+const base = process.env['XLN_UI_BASE'] ?? '/';
+
 export default defineConfig({
+	base,
 	plugins: [react(), ...(sharedBundleDir ? [sharedRuntimeBundle(sharedBundleDir)] : [])],
 	server: {
 		port: 5183,

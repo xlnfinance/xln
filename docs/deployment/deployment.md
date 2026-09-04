@@ -96,6 +96,33 @@ location ~ ^/rpc[2-8]$ {
 }
 ```
 
+### `/ui/` — the React wallet
+
+`https://xln.finance/ui/` serves `ui/dist` built with `bun run build:hosted`
+(vite `base=/ui/`, router basename and runtime bundle follow it). The build
+lives in a separate worktree (`/root/xln-ui`, detached at `origin/main`) so a
+UI deploy never changes the checkout the pm2 services run from:
+
+```bash
+bun run deploy:ui        # = ssh root@xln.finance 'bash -s' < scripts/deployment/deploy-ui.sh
+```
+
+nginx (inside the 443 server block, before `location /`):
+
+```nginx
+location = /ui { return 301 /ui/; }
+location ^~ /ui/ {
+    alias /root/xln-ui/ui/dist/;
+    try_files $uri $uri/ /ui/index.html;
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+    location ~* /ui/assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
+    location ~* /ui/(runtime|account-worker)\.js$ { add_header Cache-Control "no-store, must-revalidate"; }
+}
+```
+
+The wallet loads `/ui/runtime.js` (its own bundle pair) and talks to the same
+`/api/*`, `/ws` and `/relay` surfaces as the SvelteKit app.
+
 ### `/c` and `/c.txt`
 
 Keep both endpoints:

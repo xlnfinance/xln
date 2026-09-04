@@ -8,6 +8,7 @@ import { Palette } from './Palette';
 import { Tour } from './Tour';
 import { useExternalWalletSync } from '../runtime/financial/external';
 import { useWallet } from '../runtime/views';
+import { Logo } from './Logo';
 
 /**
  * Destinations only. Pay, Receive and Swap are flows pushed over Home with a
@@ -48,7 +49,7 @@ export function Shell({ children }: { children: ReactNode }) {
 			<Tour />
 			<nav className="rail" aria-label="Primary">
 				<div className="rail-mark" aria-hidden>
-					△
+					<Logo size={22} />
 				</div>
 				{NAV.map(item => (
 					<NavLink

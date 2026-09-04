@@ -159,6 +159,7 @@
     "deploy:chains:mainnet": "cd jurisdictions && bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
     "deploy:mainnets": "bun run deploy:chains:mainnet",
     "deploy:frontend": "./scripts/deployment/deploy-platform.sh --frontend",
+    "deploy:ui": "ssh root@xln.finance 'bash -s' < scripts/deployment/deploy-ui.sh",
     "deploy:full": "./scripts/deployment/deploy-platform.sh --frontend",
     "deploy:fresh": "./scripts/deployment/deploy-platform.sh --fresh",
     "deploy:prod": "./scripts/deployment/deploy-platform.sh --remote root@xln.finance --push --frontend --fresh --production --reset-mesh",

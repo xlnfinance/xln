@@ -4,7 +4,7 @@
  * their rubric scores.
  *
  *   bun ui/tools/design-shots.ts                       # 1. take the shots
- *   bun ui/tools/design-review.ts [--models a,b] [--variants x,y]
+ *   bun ui/tools/design-review.ts [--tier cheap|smart] [--models a,b] [--variants x,y]
  *                                                      # 2. ask the reviewers
  *   → design/review/<date>/<model>.<variant>.json + summary.md
  *
@@ -19,7 +19,16 @@ import { join, resolve } from 'node:path';
 const REPO_ROOT = resolve(import.meta.dir, '../..');
 const SHOTS_ROOT = join(REPO_ROOT, 'design/screenshots/ui');
 const RUBRIC = join(REPO_ROOT, 'design/review/rubric.md');
-const DEFAULT_MODELS = ['zai-coding-cn/glm-4.6v', 'openrouter/google/gemini-flash-latest', 'openrouter/x-ai/grok-latest'];
+/**
+ * Two juries. `cheap` (default) runs after every iteration: four vision models
+ * from four vendors, pennies per pass. `smart` runs once at the end of a polish
+ * round. Pick with --tier or override with --models.
+ */
+const TIERS: Record<string, string[]> = {
+	cheap: ['zai-coding-cn/glm-5.3-flash', 'openrouter/google/gemini-flash-latest', 'openrouter/mistralai/mistral-small-2603', 'openrouter/minimax/minimax-m3:free'],
+	smart: ['openrouter/moonshotai/kimi-k3', 'openrouter/google/gemini-pro-latest', 'openrouter/x-ai/grok-latest', 'openrouter/anthropic/claude-sonnet-5'],
+};
+const DEFAULT_MODELS = TIERS[process.argv[process.argv.indexOf('--tier') + 1] ?? ''] ?? TIERS['cheap']!;
 const PARAMETERS = ['hierarchy', 'premium', 'typography', 'color', 'data_legibility', 'layout', 'visceral_value', 'responsive', 'consistency', 'trust'] as const;
 const REVIEW_TIMEOUT_MS = 15 * 60_000;
 
