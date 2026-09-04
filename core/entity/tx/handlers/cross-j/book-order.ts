@@ -53,6 +53,7 @@ import {
   crossJurisdictionRouteSignerHint,
 } from '../../j-events-htlc/cross-j-outputs';
 import { draftPreparedDisputeStartIfReady } from '../dispute';
+import { applySourceHubCrossJurisdictionFillProgress } from '../account-cross-j-followups';
 import type { CrossJurisdictionFillProgressData } from '../../../../extensions/cross-j/fill-notice';
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
@@ -428,20 +429,23 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     );
     return { newState: drafted.newState, outputs: drafted.outputs, accountTxs: [] };
   }
-  // The remote book owner removed the row; the source Hub now clears the pull
-  // pair at the committed progress (pure cancel or partial reveal).
-  const signerId = String(newState.config.validators[0] || '').trim().toLowerCase();
-  if (!signerId) throw haltRuntimeFailure("CROSS_J_SELF_SIGNER_MISSING", `CROSS_J_SELF_SIGNER_MISSING:${route.orderId}:${newState.entityId}`);
-  addMessage(newState, `🌉 Cross-j book removal committed ${route.orderId}`);
-  const clearOutputs: EntityInput[] = [{
-    entityId: newState.entityId,
-    signerId,
-    entityTxs: [{
-      type: 'requestCrossJurisdictionClear',
-      data: { orderId: route.orderId, cancelRemainder: true },
-    }],
-  }];
-  return { newState, outputs: clearOutputs, accountTxs: [] };
+  // The remote book owner removed the row: the same cancel progress the local
+  // book owner would have applied, so one function decides the clear.
+  const outputs: EntityInput[] = [];
+  const applied = applySourceHubCrossJurisdictionFillProgress(env, newState, {
+    orderId: route.orderId,
+    ...(currentRoute.routeHash ? { routeHash: currentRoute.routeHash } : {}),
+    fillSeq: Math.max(0, Math.floor(Number(currentRoute.fillSeq ?? 0) || 0)),
+    cumulativeFillRatio: getCrossJurisdictionCommittedProofRatio(currentRoute),
+    cancelRemainder: true,
+  }, outputs, options?.storageChanges ?? []);
+  addMessage(
+    newState,
+    applied
+      ? `🌉 Cross-j book removal committed ${route.orderId}`
+      : `🌉 Cross-j book removal already cleared ${route.orderId}`,
+  );
+  return { newState, outputs, accountTxs: [] };
 };
 
 export const handleRemoveCrossJurisdictionBookOrderEntityTx = (

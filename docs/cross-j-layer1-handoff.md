@@ -71,22 +71,25 @@ stand scenarios in parallel with other heavy runs (mm-mesh false-fails on conten
    then Rust.
 4. Report per step: net LOC, list of deleted surfaces, gate results. No praise.
 
-Open items the last quorum flagged and I did NOT change (decide with the owner):
-- TS halts the runtime on an invalid sibling `crossJurisdictionFillNotice`
-  (`CROSS_J_FILL_NOTICE_STALE_CONFLICT` / `CROSS_J_FILL_PROGRESS_INVALID`) while Rust
-  rejects the frame; both fail loud, but the taxonomy differs.
+Owner decisions already taken (do not reopen): no Account-level ratio marker — the
+Runtime close cohort is the cross-leg ratio equality; ONE decision point for the clear
+(removal-ACK and terminal fill both go through `applySourceHubCrossJurisdictionFillProgress`
+/ `apply_source_hub_fill_progress`); TS and Rust both fail-stop on invalid sibling data
+(same code tag, Rust wraps it in `ENTITY_LOCAL_TX_INVALID`); multisig hubs are out of scope;
+sub-lot remainders rest until expiry sweep or cancel.
+
+Open items (decide with the owner):
 - Rust `committed_pull_close` requires proof amounts == committed mirror amounts
   (`ECONOMICS_MISMATCH`); TS only forbids a ratio rollback. Same-ratio inputs agree
   (mirror amounts are floor(total·r/65535)); pick one rule for both.
 - A cross-J `cross_pull_close` for an unknown pullId returns "already closed" (TS and
   Rust alike) — decide whether to reject.
-- Sub-lot remainders rest until expiry sweep or cancel (dust terminality deleted on purpose).
-- Self-emitted `requestCrossJurisdictionClear` outputs use `config.validators[0]` as signer
-  while `assertSelfRuntimeContinuations` expects `route.sourceHubSignerId`; equal for
-  single-signer hubs (the only supported topology today), would halt a multi-validator hub.
-  Use `crossJurisdictionRouteSignerHint(route, entityId)` when multisig hubs return.
 - TS `handleCrossPullClose` reports `swap_cancelled` (source offer retired) while Rust
   emits `SwapOfferRemove`; parity fixtures accept both — collapse to one outcome.
+- Rust orderbook keeps a separate `offers` map + `resolving_offers` suspension set and
+  re-materializes cross-J rows from offers; TS resizes the book row in place.
+  `apply_cross_jurisdiction_fill_deltas` mimics TS inside that model — in the rewrite,
+  mutate the row directly and drop the detour.
 - The target hub's route mirror learns progress only from the carried `crossPullClose`
   route (no notice reaches the target hub when the source hub owns the book); fine for
   settlement, blind for UI/salvage until close — decide whether the target hub needs the notice.

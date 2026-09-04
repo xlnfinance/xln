@@ -3393,37 +3393,59 @@ fn apply_book_order_removed(
         .is_some_and(|ids| {
             matches!(ids, CanonicalValue::Array(values) if values.iter().any(|value| value == &string(&order_id)))
         });
-    // The remote book owner removed the row; the source Hub now clears the
-    // pull pair at the committed progress (pure cancel or partial reveal).
-    let outputs = if pending_dispute_removal {
-        Vec::new()
+    // The remote book owner removed the row: the same cancel progress the local
+    // book owner would have applied, so one function decides the clear.
+    let mut result = CrossJurisdictionApplyResult::default();
+    let message = if pending_dispute_removal {
+        format!("🌉 Cross-j dispute book removal confirmed {order_id}")
     } else {
-        vec![routed(
-            &source_hub,
-            None,
-            vec![projected(
-                EntityTxKind::RequestCrossJurisdictionClear,
-                CanonicalValue::Object(vec![
-                    ("orderId".into(), string(&order_id)),
-                    ("cancelRemainder".into(), CanonicalValue::Bool(true)),
-                ]),
-            )?],
-        )]
-    };
-    Ok(CrossJurisdictionApplyResult {
-        outputs,
-        proposal_work: Vec::new(),
-        events: vec![EntityFrameEvent::Status {
-            message: format!(
-                "🌉 Cross-j {} {order_id}",
-                if pending_dispute_removal {
-                    "dispute book removal confirmed"
-                } else {
-                    "book removal committed"
-                }
+        let current = state
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .and_then(|values| values.get(&order_id))
+            .cloned()
+            .ok_or_else(|| invalid(tx.kind, "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING"))?;
+        let (ratio, _, _) = committed_fill(&current, tx.kind)?;
+        let mut fields = vec![("orderId".into(), string(&order_id))];
+        if let Some(route_hash) = text(&current, "routeHash").filter(|value| !value.is_empty()) {
+            fields.push(("routeHash".into(), string(route_hash)));
+        }
+        fields.extend([
+            (
+                "fillSeq".into(),
+                number(
+                    unsigned(&current, "fillSeq").unwrap_or(0),
+                    tx.kind,
+                    "FILL_SEQ",
+                )?,
             ),
-        }],
-        orderbook_deltas: Vec::new(),
+            (
+                "cumulativeFillRatio".into(),
+                number(ratio, tx.kind, "FILL_RATIO")?,
+            ),
+            ("cancelRemainder".into(), CanonicalValue::Bool(true)),
+        ]);
+        let applied = committed::apply_source_hub_fill_progress(
+            state,
+            &CanonicalValue::Object(fields),
+            tx.kind,
+        )?;
+        let message = if applied.is_some() {
+            format!("🌉 Cross-j book removal committed {order_id}")
+        } else {
+            format!("🌉 Cross-j book removal already cleared {order_id}")
+        };
+        if let Some(applied) = applied {
+            extend_cross_jurisdiction_result(&mut result, applied);
+        }
+        message
+    };
+    result.events.push(EntityFrameEvent::Status { message });
+    Ok(CrossJurisdictionApplyResult {
+        outputs: result.outputs,
+        proposal_work: result.proposal_work,
+        events: result.events,
+        orderbook_deltas: result.orderbook_deltas,
         account_envelope_mutations: pending_dispute_removal
             .then_some((
                 source_account,

@@ -1806,6 +1806,7 @@
                 "bookHubSignerId": "0x6262626262626262626262626262626262626262",
                 "bookOwnerEntityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
                 "claimedRatio": 32768,
+                "clearingPolicy": "cancel_and_clear",
                 "createdAt": 10000,
                 "cumulativeFillRatio": 32768,
                 "domain": {
@@ -1873,7 +1874,7 @@
                   "tokenId": 1
                 },
                 "sourceSignerId": "0x5151515151515151515151515151515151515151",
-                "status": "partially_filled",
+                "status": "clear_requested",
                 "target": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -1920,7 +1921,7 @@
               }
             ]
           ],
-          "root": "0xb97c179c348ff11d26b3435fe1d572f3d400a95309da0e583a190e0d37edd932"
+          "root": "0x4efa95a144303b0745c751d467b0eaa0da59d0892cec09dda70d7cd041143e56"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
