@@ -2,9 +2,8 @@
  * Rapid-Fire Payment Stress Test
  *
  * Tests bilateral consensus under high load:
- * - Alice→Hub→Bob: $1 payments every 100ms
- * - Bob→Hub→Alice: $1 reverse payments every 100ms
- * - Continuous for 10 seconds (100 payments each direction)
+ * - Alice→Hub→Bob: 100 batched $1 payments
+ * - Bob→Hub→Alice: 100 batched $1 reverse payments
  * - Total: 200 payments, ~400 bilateral frames
  *
  * This stress-tests:
@@ -33,6 +32,7 @@ import { getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFr
 import { DEFAULT_TOKENS } from '../../jurisdiction/machine/config/default-tokens';
 import { isLeftEntity } from '../../account/utils';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
+import { openRuntimeTraceScopeForTesting } from '../../runtime/observability/runtime-trace';
 
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
 
@@ -166,13 +166,23 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   const paymentAmount = ONE; // $1 per payment
   const paymentCount = 100;
   const batchSize = 5; // Smaller batches for better convergence
+  const forwardSenderDebit = quoteHtlcPaymentRoute(
+    env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC, paymentAmount,
+  ).senderLockAmount;
+  const reverseSenderDebit = quoteHtlcPaymentRoute(
+    env.gossip.getProfiles(), [bob.id, hub.id, alice.id], USDC, paymentAmount,
+  ).senderLockAmount;
 
   let forwardCount = 0;
   let reverseCount = 0;
+  const expectedReceipts = new Map<string, string>();
   const startTime = getPerfMs();
+  let totalTime = 0;
+  const paymentTrace = openRuntimeTraceScopeForTesting(env);
 
-  console.log(`🚀 Sending ${paymentCount} payments each direction ($1 every ~100ms)...\n`);
+  console.log(`🚀 Sending ${paymentCount} payments each direction...\n`);
 
+  try {
   for (let batch = 0; batch < paymentCount / batchSize; batch++) {
     const batchStart = getPerfMs();
 
@@ -180,6 +190,8 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
     const batchInputs: EntityInput[] = [];
 
     for (let i = 0; i < batchSize; i++) {
+      const forwardDescription = `Forward #${forwardCount++}`;
+      expectedReceipts.set(forwardDescription, bob.id);
       // Forward: Alice → Hub → Bob
       batchInputs.push({
         entityId: alice.id,
@@ -190,14 +202,16 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
             targetEntityId: bob.id,
             tokenId: USDC,
             amount: paymentAmount,
-            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC, paymentAmount).senderLockAmount,
+            maxSenderDebit: forwardSenderDebit,
             route: [alice.id, hub.id, bob.id],
             deliveryMode: 'instant',
-            description: `Forward #${forwardCount++}`,
+            description: forwardDescription,
           },
         }],
       });
 
+      const reverseDescription = `Reverse #${reverseCount++}`;
+      expectedReceipts.set(reverseDescription, alice.id);
       // Reverse: Bob → Hub → Alice
       batchInputs.push({
         entityId: bob.id,
@@ -208,10 +222,10 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
             targetEntityId: alice.id,
             tokenId: USDC,
             amount: paymentAmount,
-            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [bob.id, hub.id, alice.id], USDC, paymentAmount).senderLockAmount,
+            maxSenderDebit: reverseSenderDebit,
             route: [bob.id, hub.id, alice.id],
             deliveryMode: 'instant',
-            description: `Reverse #${reverseCount++}`,
+            description: reverseDescription,
           },
         }],
       });
@@ -225,18 +239,21 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
 
     const elapsed = getPerfMs() - batchStart;
     if (batch % 2 === 0) {
-      console.log(`   Batch ${batch + 1}/10: ${batchSize * 2} payments in ${elapsed}ms (${forwardCount} fwd, ${reverseCount} rev)`);
+      console.log(`   Batch ${batch + 1}/${paymentCount / batchSize}: ${batchSize * 2} payments in ${elapsed}ms (${forwardCount} fwd, ${reverseCount} rev)`);
     }
   }
 
-  const totalTime = getPerfMs() - startTime;
+  totalTime = getPerfMs() - startTime;
   console.log(`\n✅ Stress test complete: ${forwardCount + reverseCount} payments in ${totalTime}ms`);
-  console.log(`   Throughput: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} payments/sec`);
+  console.log(`   Scenario rate: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} receipts/sec (not HLT TPS)`);
 
   // Final convergence - drain all pending ACKs
   console.log('\n🔄 Final convergence (draining all pending frames)...');
   await converge(env, 200); // High-load needs many rounds to drain
   console.log('   ✅ All frames settled\n');
+  } finally {
+    paymentTrace.stop();
+  }
 
   // ============================================================================
   // VERIFICATION
@@ -244,6 +261,32 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('                   VERIFICATION                                ');
   console.log('═══════════════════════════════════════════════════════════════\n');
+
+  const receivedByDescription = new Map<string, Record<string, unknown>>();
+  const receiptErrors: string[] = [];
+  const paymentSnapshots = paymentTrace.snapshots.slice(paymentTrace.startIndex);
+  for (const log of paymentSnapshots.flatMap(snapshot => snapshot.logs ?? [])) {
+    if (log.message !== 'HtlcReceived') continue;
+    const data = (log.data ?? {}) as Record<string, unknown>;
+    const description = String(data['description'] ?? '');
+    const expectedRecipient = expectedReceipts.get(description);
+    if (!expectedRecipient) continue;
+    if (receivedByDescription.has(description)) receiptErrors.push(`duplicate:${description}`);
+    if (String(data['entityId'] ?? '').toLowerCase() !== expectedRecipient.toLowerCase()) {
+      receiptErrors.push(`recipient:${description}`);
+    }
+    if (String(data['fromEntity'] ?? '').toLowerCase() !== hub.id.toLowerCase()) {
+      receiptErrors.push(`final-hop:${description}`);
+    }
+    if (BigInt(String(data['amount'] ?? '0')) !== paymentAmount) receiptErrors.push(`amount:${description}`);
+    if (Number(data['tokenId']) !== USDC) receiptErrors.push(`token:${description}`);
+    receivedByDescription.set(description, data);
+  }
+  assert(receiptErrors.length === 0, `Receipt integrity errors: ${receiptErrors.slice(0, 5).join(',')}`);
+  assert(receivedByDescription.size === expectedReceipts.size,
+    `Committed receipts ${receivedByDescription.size}/${expectedReceipts.size}`);
+  assert(new Set([...receivedByDescription.values()].map(data => String(data['hashlock']))).size ===
+    expectedReceipts.size, 'Every committed payment must have one unique hashlock');
 
   // Equal traffic in both directions should leave only symmetric routing-fee spread.
   const ahDelta = getOffdelta(env, alice.id, hub.id, USDC);
@@ -255,11 +298,12 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log(`   Alice→Hub: ${alicePerspective} (Alice perspective)`);
   console.log(`   Hub→Bob:   ${hubPerspective} (Hub perspective)`);
 
-  const feeCarryCap = usd(paymentCount);
-  assert(alicePerspective === -hubPerspective, `Fee carry is symmetric across both hub edges: ${alicePerspective} === -(${hubPerspective})`);
-  assert(alicePerspective <= 0n, `Alice-Hub fee carry debits the sender side: ${alicePerspective}`);
-  assert(hubPerspective >= 0n, `Hub-Bob fee carry credits the opposite side: ${hubPerspective}`);
-  assert(alicePerspective >= -feeCarryCap, `Fee carry stays bounded under total sent volume: ${alicePerspective} >= -${feeCarryCap}`);
+  const expectedForwardFees = (forwardSenderDebit - paymentAmount) * BigInt(paymentCount);
+  const expectedReverseFees = (reverseSenderDebit - paymentAmount) * BigInt(paymentCount);
+  assert(alicePerspective === -expectedForwardFees,
+    `Alice-Hub exact fee carry: ${alicePerspective} === -${expectedForwardFees}`);
+  assert(hubPerspective === expectedReverseFees,
+    `Hub-Bob exact fee carry: ${hubPerspective} === ${expectedReverseFees}`);
 
   // Check no stuck mempools
   let totalMempool = 0;
@@ -284,7 +328,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log('✅ RAPID-FIRE STRESS TEST COMPLETE!');
   console.log(`   Payments: ${forwardCount + reverseCount}`);
   console.log(`   Duration: ${(totalTime / 1000).toFixed(1)}s`);
-  console.log(`   Throughput: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} tx/s`);
+  console.log(`   Scenario receipt rate: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)}/s (not HLT TPS)`);
   console.log(`   Frames: ${env.state.height}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
   } finally {

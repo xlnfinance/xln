@@ -221,6 +221,34 @@ describe('Entity proposal pre-authentication', () => {
     expect(committed.workingReplica.state.height).toBe(1);
   });
 
+  test('replays and signs a certificate-installed lock missing local execution', async () => {
+    const { frame } = await fourSignerQuorum.buildHonestProposal();
+    const validator = fourSignerQuorum.createValidator('2');
+    validator.replica.lockedFrame = structuredClone(frame);
+
+    const result = await applyEntityInput(validator.env, validator.replica, {
+      entityId: fourSignerQuorum.entityId,
+      signerId: validator.signerId,
+      proposedFrame: structuredClone(frame),
+    });
+
+    expect(result.outcome).toEqual({ kind: 'committed' });
+    expect(result.workingReplica.candidate?.frameHash).toBe(frame.hash);
+    expect(
+      result.workingReplica.lockedFrame?.collectedSigs?.has(
+        validator.signerId,
+      ),
+    ).toBe(true);
+    expect(result.outputs).toHaveLength(3);
+    expect(
+      result.outputs.every(
+        output =>
+          output.hashPrecommitFrame?.frameHash === frame.hash &&
+          output.hashPrecommits?.has(validator.signerId) === true,
+      ),
+    ).toBe(true);
+  });
+
   test('requires the certified leader and exact Entity manifest head', async () => {
     const validator = createValidator('2');
     const invalidLeader = await buildHonestProposal();

@@ -91,15 +91,19 @@ export class TsAccountWorkerCoordinator {
   readonly #workerCount: number;
   readonly #logicalShardToWorker: readonly number[];
   readonly #rootTree: TsAccountCanonicalRoot;
-  readonly #openFrameWorkerIndexes = new Set<number>();
   readonly #attemptTouchedWorkerIndexes = new Set<number>();
   readonly #candidateWorkerIndexes = new Set<number>();
   #candidateBaseRoot: string | null = null;
   #candidateBaseSnapshot: ReturnType<TsAccountCanonicalRoot['snapshot']> | null = null;
-  #openFrameRestorePrevious = false;
   #fatal: Error | null = null;
   #inFlight = false;
   #openFrameId: string | null = null;
+  #openFrameContext: Readonly<{
+    entityTimestamp: number;
+    finalizedJHeight: number;
+    owningEntityIsHub: boolean;
+    localBoardAuthority?: NonNullable<TsApplyAccountInputsRequest['localBoardAuthority']>;
+  }> | null = null;
   readonly initialization: TsAccountWorkerInitialization;
 
   private constructor(
@@ -215,6 +219,51 @@ export class TsAccountWorkerCoordinator {
 
   get accountsRoot(): string {
     return this.#rootTree.root;
+  }
+
+  /** Roll back a recoverably rejected Entity fitting attempt to its exact Account parent. */
+  async discardAccountFrame(frameIdInput: string): Promise<void> {
+    const frameId = requireWorkerFrameId(frameIdInput);
+    this.#assertUsable();
+    if (this.#openFrameId === null) return;
+    if (this.#openFrameId !== frameId || this.#openFrameContext === null) {
+      throw new Error(`TS_ACCOUNT_WORKER_DISCARD_FRAME_MISMATCH:${frameId}:${this.#openFrameId}`);
+    }
+    if (this.#candidateBaseSnapshot === null || this.#candidateBaseRoot === null) {
+      throw new Error(`TS_ACCOUNT_WORKER_DISCARD_BASE_MISSING:${frameId}`);
+    }
+    const context = this.#openFrameContext;
+    const dispatches: PhaseDispatch[] = [...this.#attemptTouchedWorkerIndexes]
+      .sort((left, right) => left - right)
+      .map(workerIndex => ({
+        workerIndex,
+        payload: {
+          phase: 'inbound',
+          needShardRoot: false,
+          frameId,
+          restorePrevious: true,
+          entityTimestamp: context.entityTimestamp,
+          finalizedJHeight: context.finalizedJHeight,
+          owningEntityIsHub: context.owningEntityIsHub,
+          ...(context.localBoardAuthority
+            ? { localBoardAuthority: context.localBoardAuthority }
+            : {}),
+          inputs: [],
+        },
+    }));
+    await this.#runPhase(dispatches, true, 0, false);
+    this.#rootTree.restore(this.#candidateBaseSnapshot);
+    if (this.#rootTree.root !== this.#candidateBaseRoot) {
+      throw new Error(
+        `TS_ACCOUNT_WORKER_DISCARD_ROOT_MISMATCH:${this.#candidateBaseRoot}:${this.#rootTree.root}`,
+      );
+    }
+    this.#attemptTouchedWorkerIndexes.clear();
+    this.#candidateWorkerIndexes.clear();
+    this.#candidateBaseRoot = null;
+    this.#candidateBaseSnapshot = null;
+    this.#openFrameId = null;
+    this.#openFrameContext = null;
   }
 
   /** Install post-Entity-quorum proof bytes without reopening financial state. */
@@ -436,8 +485,6 @@ export class TsAccountWorkerCoordinator {
     } else {
       throw new Error(`TS_ACCOUNT_WORKER_EXPECTED_ROOT_MISMATCH:${expectedAccountsRoot}:${this.#rootTree.root}`);
     }
-    this.#openFrameRestorePrevious = restorePrevious;
-    this.#openFrameWorkerIndexes.clear();
     this.#attemptTouchedWorkerIndexes.clear();
     const buckets = Array.from({ length: this.#workerCount }, () =>
       [] as Array<{
@@ -478,7 +525,7 @@ export class TsAccountWorkerCoordinator {
             phase: 'inbound',
             needShardRoot: false,
             frameId,
-            restorePrevious,
+            restorePrevious: restorePrevious && this.#candidateWorkerIndexes.has(workerIndex),
             entityTimestamp: input.entityTimestamp,
             finalizedJHeight: input.finalizedJHeight,
             owningEntityIsHub: input.owningEntityIsHub,
@@ -488,12 +535,14 @@ export class TsAccountWorkerCoordinator {
         };
       });
     const result = await this.#runPhase(dispatches, true, input.inputs.length, false);
-    for (const [workerIndex, inputs] of buckets.entries()) {
-      if (inputs.length === 0) continue;
-      this.#openFrameWorkerIndexes.add(workerIndex);
-      this.#attemptTouchedWorkerIndexes.add(workerIndex);
-    }
+    for (const workerIndex of dispatchWorkerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
     this.#openFrameId = frameId;
+    this.#openFrameContext = {
+      entityTimestamp: input.entityTimestamp,
+      finalizedJHeight: input.finalizedJHeight,
+      owningEntityIsHub: input.owningEntityIsHub,
+      ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
+    };
     return result;
   }
 
@@ -578,7 +627,7 @@ export class TsAccountWorkerCoordinator {
         }
         return envelopeUpdates.length > 0 || txs.length > 0 || proposalsForWorker.length > 0;
       });
-    const selectedWorkerIndexes = [...new Set([...this.#openFrameWorkerIndexes, ...activeWorkerIndexes])]
+    const selectedWorkerIndexes = [...new Set([...this.#attemptTouchedWorkerIndexes, ...activeWorkerIndexes])]
       .sort((left, right) => left - right);
     const dispatches: PhaseDispatch[] = selectedWorkerIndexes.map(workerIndex => {
       const txs = txBuckets[workerIndex];
@@ -592,9 +641,8 @@ export class TsAccountWorkerCoordinator {
         payload: {
           phase: 'outbound',
           needShardRoot: true,
-          continuation: false,
+          prepareAttempt: !this.#attemptTouchedWorkerIndexes.has(workerIndex),
           frameId,
-          restorePrevious: this.#openFrameRestorePrevious,
           timestamp: input.timestamp,
           jHeight: input.jHeight,
           ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
@@ -610,7 +658,7 @@ export class TsAccountWorkerCoordinator {
       input.txs.length + input.proposals.length,
       true,
     );
-    for (const workerIndex of activeWorkerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
+    for (const workerIndex of selectedWorkerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
     return result;
   }
 
@@ -685,9 +733,8 @@ export class TsAccountWorkerCoordinator {
       return { workerIndex, payload: {
         phase: 'outbound',
         needShardRoot: true,
-        continuation: true,
+        prepareAttempt: !this.#attemptTouchedWorkerIndexes.has(workerIndex),
         frameId,
-        restorePrevious: false,
         timestamp: input.timestamp,
         jHeight: input.jHeight,
         ...(input.localBoardAuthority ? { localBoardAuthority: input.localBoardAuthority } : {}),
@@ -700,13 +747,13 @@ export class TsAccountWorkerCoordinator {
       ? undefined
       : await this.#runPhase(dispatches, true, input.txs.length + input.proposals.length, true);
     for (const workerIndex of workerIndexes) this.#attemptTouchedWorkerIndexes.add(workerIndex);
-    this.#openFrameWorkerIndexes.clear();
     this.#candidateWorkerIndexes.clear();
     for (const workerIndex of this.#attemptTouchedWorkerIndexes) {
       this.#candidateWorkerIndexes.add(workerIndex);
     }
     this.#attemptTouchedWorkerIndexes.clear();
     this.#openFrameId = null;
+    this.#openFrameContext = null;
     return result;
   }
 

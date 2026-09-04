@@ -112,6 +112,7 @@ import type {
   StoragePersistenceBoundaryHook,
   StoragePersistenceProgressHook,
   StorageRuntimeConfig,
+  StorageReplicaLookup,
 } from './types';
 import { resolveStorageRuntimeConfig } from './database/config';
 import { prepareStorageBookGraphWrite } from './commit/book-graph';
@@ -1017,59 +1018,40 @@ const resolveStorageAppendPosition = async (
   };
 };
 
-const collectAuxiliaryTreeOwners = (env: RuntimeReplica): AuxiliaryTreeOwner[] => {
-  const owners = new Map<string, AuxiliaryTreeOwner>();
-  for (const replica of env.state.eReplicas.values()) {
-    const entityId = replica.entityId.toLowerCase();
-    const candidate: AuxiliaryTreeOwner = {
+const collectAuxiliaryTreeOwners = (replicas: StorageReplicaLookup): AuxiliaryTreeOwner[] =>
+  [...replicas.entries()].map(([entityId, { state }]) => ({
       entityId,
-      ...(replica.state.certifiedBoardState?.boardRegistryRoot
-        ? { certifiedBoardRoot: replica.state.certifiedBoardState.boardRegistryRoot }
+      ...(state.certifiedBoardState?.boardRegistryRoot
+        ? { certifiedBoardRoot: state.certifiedBoardState.boardRegistryRoot }
         : {}),
-      accounts: [...replica.state.accounts]
+      accounts: [...state.accounts]
         .map(([counterpartyId, account]) => ({
           counterpartyId: counterpartyId.toLowerCase(),
           leftPendingJClaims: account.state.leftPendingJClaims,
           rightPendingJClaims: account.state.rightPendingJClaims,
         }))
         .sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId)),
-    };
-    const previous = owners.get(entityId);
-    if (previous) {
-      const left = encodeBuffer(previous);
-      const right = encodeBuffer(candidate);
-      if (!left.equals(right)) throw new Error(`AUXILIARY_PATH_OWNER_STATE_CONFLICT:${entityId}`);
-      continue;
-    }
-    owners.set(entityId, candidate);
-  }
-  return [...owners.values()].sort((left, right) => left.entityId.localeCompare(right.entityId));
-};
-
-const auxiliaryRowsChanged = (env: RuntimeReplica): boolean => {
-  const state = env.infrastructure;
-  return Boolean(
-    state?.pendingCertifiedBoardNodes instanceof Map && state.pendingCertifiedBoardNodes.size > 0 ||
-    state?.pendingAccountJClaimNodes instanceof Map && state.pendingAccountJClaimNodes.size > 0 ||
-    state?.pendingAccountJClaimNodeDeletes instanceof Set && state.pendingAccountJClaimNodeDeletes.size > 0
-  );
-};
+    }));
 
 const preparePathKeyedAuxiliaryPlan = async (
   env: RuntimeReplica,
   walDb: RuntimeDbLike,
-  force: boolean,
+  shouldMaterialize: boolean,
+  replicas: StorageReplicaLookup,
 ) => {
-  const safeAccountJClaimDeletes = getSafePendingAccountJClaimDeletes(env);
-  if (!force && !auxiliaryRowsChanged(env)) {
+  // Path-keyed auxiliary trees are part of the materialized Entity/Account
+  // graph. Advancing or garbage-collecting them on an ordinary WAL frame
+  // would leave the durable checkpoint root pointing at deleted path nodes.
+  if (!shouldMaterialize) {
     return {
       puts: [] as ReadonlyArray<Readonly<{ key: Buffer; value: Buffer }>>,
       dels: [] as readonly Buffer[],
-      safeAccountJClaimDeletes,
+      safeAccountJClaimDeletes: [] as readonly string[],
     };
   }
+  const safeAccountJClaimDeletes = getSafePendingAccountJClaimDeletes(env);
   const projected = preparePathKeyedAuxiliaryRows({
-    owners: collectAuxiliaryTreeOwners(env),
+    owners: collectAuxiliaryTreeOwners(replicas),
     certifiedBoardStore: getCertifiedBoardNodeStore(env),
     accountJClaimStore: getAccountJClaimNodeStore(env),
   });
@@ -1709,14 +1691,16 @@ const commitStorageFrame = async (
   }
   const state = prepared.state;
   state.currentStorageOverlayMarks = new Map();
-  state.pendingCertifiedBoardNodes = new Map();
+  if (prepared.shouldMaterialize) {
+    state.pendingCertifiedBoardNodes = new Map();
+    finalizePersistedAccountJClaimNodes(
+      options.env,
+      batches.safeAccountJClaimDeletes,
+    );
+  }
   if (prepared.checkpointedLineagePlan) {
     state.storageReplicaMetaKeys = new Set(commitments.liveReplicaMetaKeys);
   }
-  finalizePersistedAccountJClaimNodes(
-    options.env,
-    batches.safeAccountJClaimDeletes,
-  );
   const postCommitMs =
     options.getPerfMs() - currentWriteStartedAt - currentCacheWriteMs;
   return {
@@ -1871,6 +1855,7 @@ export const saveRuntimeFrameToStorage = async (
     options.env,
     walDb,
     prepared.shouldMaterialize,
+    prepared.replicaLookup,
   );
   checkpointPrepare('pendingNodes');
 

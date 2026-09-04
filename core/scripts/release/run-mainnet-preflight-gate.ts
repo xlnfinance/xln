@@ -14,6 +14,7 @@ import {
   withoutTestArtifactCleanupDoneEnv,
 } from '../e2e/harness/test-artifact-cleanup';
 
+import { XLN_RELEASE_PATHS } from '../../../tools/release-snapshot/scope';
 export type MainnetPreflightArgs = {
   dryRun: boolean;
   allowDirty: boolean;
@@ -216,7 +217,9 @@ const main = async (): Promise<void> => {
   const gitHead = spawnText('git', ['rev-parse', 'HEAD']);
   if (!gitHead) throw new Error('MAINNET_PREFLIGHT_GIT_HEAD_UNAVAILABLE');
 
-  const dirty = await runTextCommand('git status --short');
+  const dirty = await runTextCommand(
+    `git status --short --untracked-files=all -- ${XLN_RELEASE_PATHS.join(' ')}`,
+  );
   if (dirty.code !== 0) throw new Error(`MAINNET_PREFLIGHT_GIT_STATUS_UNAVAILABLE:${dirty.stderr || dirty.stdout}`);
   if (dirty.stdout.trim() && !args.allowDirty) {
     throw new Error(`MAINNET_PREFLIGHT_DIRTY_WORKTREE:\n${dirty.stdout}`);

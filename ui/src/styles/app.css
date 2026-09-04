@@ -2118,3 +2118,13 @@ textarea.input.boxed {
 	max-height: calc(100vh - 32px);
 	overflow-y: auto;
 }
+
+/* Mark: the lit layer glows when a frame commits (Logo lit=…). */
+.logo-lit {
+	filter: drop-shadow(0 0 5px var(--accent));
+	animation: logo-lit 900ms ease-out;
+}
+@keyframes logo-lit {
+	from { opacity: 0.2; }
+	to { opacity: 1; }
+}

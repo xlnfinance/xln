@@ -63,6 +63,7 @@ describe('TS Account worker genuine HTLC proposal rejection', () => {
     const authority = new TsAccountWorkerAuthority(env, 2);
     const common = {
       ownerEntityId: owner,
+      ownerSignerId: signerId,
       unsupportedEntityTxTypes: [],
       occurrence: { kind: 'runtime-input' as const, inputIndex: 0 },
       deferProposal: false,

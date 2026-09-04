@@ -119,17 +119,21 @@ const assertExactCertifiedHead = (
   return link;
 };
 
-const assertSameEndpoint = (entityId: string, left: ReplicaEntry, right: ReplicaEntry): void => {
-  if (left.replica.state.height !== right.replica.state.height) return;
-  const leftStateRoot = computeCanonicalEntityConsensusStateHash(left.replica.state);
-  const rightStateRoot = computeCanonicalEntityConsensusStateHash(right.replica.state);
-  const leftHead = replicaHeadHash(left.replica);
-  const rightHead = replicaHeadHash(right.replica);
+export const assertSameEntityReplicaEndpointAtEqualHeight = (
+  entityId: string,
+  left: EntityReplica,
+  right: EntityReplica,
+): void => {
+  if (left.state.height !== right.state.height) return;
+  const leftStateRoot = computeCanonicalEntityConsensusStateHash(left.state);
+  const rightStateRoot = computeCanonicalEntityConsensusStateHash(right.state);
+  const leftHead = replicaHeadHash(left);
+  const rightHead = replicaHeadHash(right);
   if (leftStateRoot === rightStateRoot && leftHead === rightHead) return;
   throw new Error(
     `STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE:entity=${entityId}:` +
-      `height=${left.replica.state.height}:left=${left.replica.signerId}@${leftHead}/${leftStateRoot}:` +
-      `right=${right.replica.signerId}@${rightHead}/${rightStateRoot}`,
+      `height=${left.state.height}:left=${left.signerId}@${leftHead}/${leftStateRoot}:` +
+      `right=${right.signerId}@${rightHead}/${rightStateRoot}`,
   );
 };
 
@@ -160,7 +164,13 @@ const buildPlan = (
       const entry = ordered[index]!;
       const link = assertExactCertifiedHead(entityId, entry);
       headByReplicaKey.set(entry.replicaKey, link);
-      if (index > 0) assertSameEndpoint(entityId, ordered[index - 1]!, entry);
+      if (index > 0) {
+        assertSameEntityReplicaEndpointAtEqualHeight(
+          entityId,
+          ordered[index - 1]!.replica,
+          entry.replica,
+        );
+      }
     }
     const selected = ordered.at(-1)!;
     lookup.set(entityId, {

@@ -11,11 +11,12 @@
  *
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
-import { test, expect, type Browser, type BrowserContext, type Page } from '../../global-setup.mts';
+import { allowDebugIncident, test, expect, type Browser, type BrowserContext, type Page } from '../../global-setup.mts';
 import { deriveDelta, getTokenInfo } from '../../../core/account/utils';
+import { computeBatchHankoHash, decodeJBatch } from '../../../core/jurisdiction/machine/batch';
 import { ethers } from 'ethers';
 import { timedStep } from '../../utils/e2e-timing.mts';
-import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from '../../utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, getHealth, resetProdServer, waitForNamedHubs } from '../../utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
@@ -37,7 +38,7 @@ import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
 /**
  * REBALANCE INVARIANT (do not "simplify" this in future edits):
  *
- * Auto request_collateral MUST trigger ONLY from deriveDelta(...).outPeerCredit > r2cRequestSoftLimit.
+ * Auto request_collateral MUST trigger ONLY from deriveDelta(...).outPeerCredit >= r2cRequestSoftLimit.
  * - outPeerCredit = currently used peer credit (actual risk surface).
  * - outCollateral = already posted collateral; it must NOT be added to trigger metric.
  *
@@ -51,8 +52,37 @@ const INIT_TIMEOUT = 30_000;
 const USDC_TOKEN_ID = 1;
 const USDC_DECIMALS = getTokenInfo(USDC_TOKEN_ID).decimals;
 const USDC_UNIT = 10n ** BigInt(USDC_DECIMALS);
+const DEPOSITORY_BATCH_INTERFACE = new ethers.Interface([
+  'function processBatch(bytes encodedBatch, bytes hankoData, uint256 nonce)',
+  'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed batchHash, uint256 nonce)',
+]);
+const PROCESS_BATCH_SELECTOR = ethers.id('processBatch(bytes,bytes,uint256)').slice(0, 10).toLowerCase();
+const HANKO_BATCH_TOPIC = ethers.id('HankoBatchProcessed(bytes32,bytes32,uint256)').toLowerCase();
 
 const usdcUnits = (wholeTokens: bigint): bigint => wholeTokens * USDC_UNIT;
+
+type PendingRpcTransaction = {
+  hash?: string;
+  input?: string;
+  to?: string | null;
+};
+
+type RpcTransactionReceipt = {
+  blockNumber?: string;
+  logs?: Array<{
+    address?: string;
+    data?: string;
+    topics?: string[];
+  }>;
+  status?: string;
+  transactionHash?: string;
+};
+
+type PendingRebalanceBatch = {
+  batchHash: string;
+  entityNonce: bigint;
+  transactionHash: string;
+};
 
 type RelayTimelineEvent = {
   ts: number;
@@ -160,6 +190,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function persistedEventHasAccount(event: PersistedFrameEvent, accountId: string): boolean {
   return String(event.data?.accountId || '').toLowerCase() === accountId.toLowerCase();
+}
+
+function persistedEventHasAccountToken(
+  event: PersistedFrameEvent,
+  accountId: string,
+  tokenId: number,
+): boolean {
+  return persistedEventHasAccount(event, accountId) && Number(event.data?.tokenId) === tokenId;
 }
 
 async function readDebugTimeline(
@@ -593,6 +631,146 @@ async function injectEmptyTestnetLiveness(page: Page): Promise<number> {
   return bursts;
 }
 
+async function callTestnetRpc<T>(page: Page, method: string, params: unknown[] = []): Promise<T> {
+  const response = await page.request.post(`${API_BASE_URL}/rpc`, {
+    data: { jsonrpc: '2.0', id: 1, method, params },
+  });
+  const body = await response.json().catch(() => null) as {
+    error?: unknown;
+    result?: T;
+  } | null;
+  if (!response.ok() || !body || body.error !== undefined || !Object.hasOwn(body, 'result')) {
+    throw new Error(`TESTNET_RPC_FAILED:${method}:${response.status()}:${JSON.stringify(body)}`);
+  }
+  return body.result as T;
+}
+
+async function pauseUserJurisdictionWatchers(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    type WatcherFenceWindow = typeof window & {
+      __xln?: { instance?: { stopJurisdictionWatchersAndWait?: (env: unknown) => Promise<void> } };
+      isolatedEnv?: { infrastructure?: { jurisdictionWatchersPaused?: boolean } };
+    };
+    const view = window as WatcherFenceWindow;
+    const env = view.isolatedEnv;
+    const stop = view.__xln?.instance?.stopJurisdictionWatchersAndWait;
+    if (!env?.infrastructure) throw new Error('REBALANCE_WATCHER_FENCE_ENV_MISSING');
+    if (typeof stop !== 'function') throw new Error('REBALANCE_WATCHER_FENCE_API_MISSING');
+    env.infrastructure.jurisdictionWatchersPaused = true;
+    await stop(env);
+  });
+}
+
+async function readActiveChainRebalanceState(page: Page, entityId: string, hubId: string) {
+  return page.evaluate(async ({ entityId, hubId, tokenId }) => {
+    type ChainReader = {
+      addresses?: { depository?: string };
+      chainId?: number;
+      getCollateral?: (left: string, right: string, tokenId: number) => Promise<bigint>;
+    };
+    const view = window as typeof window & {
+      __xln?: { instance?: { getActiveJAdapter?: (env: unknown) => ChainReader | null } };
+      isolatedEnv?: unknown;
+    };
+    const adapter = view.__xln?.instance?.getActiveJAdapter?.(view.isolatedEnv);
+    if (!adapter?.getCollateral) throw new Error('REBALANCE_CHAIN_READER_MISSING');
+    const depository = String(adapter.addresses?.depository || '');
+    const chainId = Number(adapter.chainId);
+    if (!/^0x[0-9a-f]{40}$/i.test(depository)) throw new Error(`REBALANCE_DEPOSITORY_INVALID:${depository}`);
+    if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error(`REBALANCE_CHAIN_ID_INVALID:${chainId}`);
+    return {
+      chainId,
+      collateral: String(await adapter.getCollateral(entityId, hubId, tokenId)),
+      depository,
+    };
+  }, { entityId, hubId, tokenId: USDC_TOKEN_ID });
+}
+
+async function waitForPendingRebalanceBatch(
+  page: Page,
+  input: {
+    chainId: number;
+    depository: string;
+    entityId: string;
+    expectedAmount: bigint;
+    hubId: string;
+  },
+): Promise<PendingRebalanceBatch> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const block = await callTestnetRpc<{ transactions?: PendingRpcTransaction[] } | null>(page, 'eth_getBlockByNumber', ['pending', true]);
+    for (const transaction of block?.transactions ?? []) {
+      const data = String(transaction.input || '');
+      if (String(transaction.to || '').toLowerCase() !== input.depository.toLowerCase()) continue;
+      if (!data.toLowerCase().startsWith(PROCESS_BATCH_SELECTOR)) continue;
+      const parsed = DEPOSITORY_BATCH_INTERFACE.parseTransaction({ data });
+      if (!parsed || parsed.name !== 'processBatch') throw new Error('REBALANCE_PENDING_BATCH_DECODE_FAILED');
+      const encodedBatch = String(parsed.args.encodedBatch);
+      const batch = decodeJBatch(encodedBatch);
+      const amount = batch.reserveToCollateral.reduce((total, operation) => {
+        if (operation.tokenId !== USDC_TOKEN_ID) return total;
+        if (operation.receivingEntity.toLowerCase() !== input.hubId.toLowerCase()) return total;
+        return total + operation.pairs.reduce(
+          (pairTotal, pair) => pair.entity.toLowerCase() === input.entityId.toLowerCase()
+            ? pairTotal + pair.amount
+            : pairTotal,
+          0n,
+        );
+      }, 0n);
+      if (amount === 0n) continue;
+      if (amount !== input.expectedAmount) {
+        throw new Error(`REBALANCE_PENDING_AMOUNT_MISMATCH:${amount}:${input.expectedAmount}`);
+      }
+      const entityNonce = BigInt(parsed.args.nonce);
+      const transactionHash = String(transaction.hash || '');
+      if (!/^0x[0-9a-f]{64}$/i.test(transactionHash)) {
+        throw new Error(`REBALANCE_PENDING_TX_HASH_INVALID:${transactionHash}`);
+      }
+      return {
+        batchHash: computeBatchHankoHash(
+          BigInt(input.chainId),
+          input.depository,
+          encodedBatch,
+          entityNonce,
+        ),
+        entityNonce,
+        transactionHash,
+      };
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`REBALANCE_PENDING_BATCH_TIMEOUT:${input.entityId}:${input.hubId}`);
+}
+
+async function waitForTransactionReceipt(page: Page, transactionHash: string): Promise<RpcTransactionReceipt> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const receipt = await callTestnetRpc<RpcTransactionReceipt | null>(
+      page,
+      'eth_getTransactionReceipt',
+      [transactionHash],
+    );
+    if (receipt) return receipt;
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`REBALANCE_MINED_RECEIPT_TIMEOUT:${transactionHash}`);
+}
+
+async function countExactHankoBatchLogs(
+  page: Page,
+  depository: string,
+  entityId: string,
+  batchHash: string,
+): Promise<number> {
+  const logs = await callTestnetRpc<unknown[]>(page, 'eth_getLogs', [{
+    address: depository,
+    fromBlock: '0x0',
+    toBlock: 'latest',
+    topics: [HANKO_BATCH_TOPIC, entityId, batchHash],
+  }]);
+  return logs.length;
+}
+
 async function faucetAmount(page: Page, userEntityId: string, hubEntityId: string, amountUsd: string) {
   const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
   expect(runtimeId, 'runtimeId must exist before faucetAmount').toBeTruthy();
@@ -900,14 +1078,17 @@ async function readAccountFlowState(page: Page, hubId: string) {
 }
 
 async function readAccountJEventClaims(page: Page, hubId: string) {
-  return page.evaluate(({ hubId }) => {
+  return page.evaluate(async ({ hubId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.state?.eReplicas) return null;
+    const readHistory = (window as any).__xln?.instance?.readPersistedAccountFrameHistory;
+    if (typeof readHistory !== 'function') throw new Error('PERSISTED_ACCOUNT_HISTORY_API_UNAVAILABLE');
     const target = String(hubId || '').toLowerCase();
     for (const [key, rep] of env.state.eReplicas.entries()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
-      const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
+      const accountEntityId = String(rep.state?.entityId || '').toLowerCase();
+      const history = await readHistory(env, accountEntityId, hubId, 200);
       const claims: Array<{
         frameHeight: number;
         jHeight: number;
@@ -943,7 +1124,7 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
         }
       }
       return {
-        accountEntityId: String(rep.state?.entityId || '').toLowerCase(),
+        accountEntityId,
         counterpartyId: target,
         claims,
       };
@@ -982,7 +1163,9 @@ async function readRebalanceState(page: Page, hubId: string) {
         },
         localIsLeft,
         hubIsLeft,
+        leftPendingJClaims: String(accountState.leftPendingJClaims?.count || 0n),
         requested: requested.toString(),
+        rightPendingJClaims: String(accountState.rightPendingJClaims?.count || 0n),
         lastFinalizedJHeight: Number(accountState.lastFinalizedJHeight || 0),
         currentHeight: Number(acc.currentHeight || 0),
         hasPolicy: !!policy,
@@ -1023,7 +1206,9 @@ async function readRebalanceState(page: Page, hubId: string) {
     hubOutCollateral: hubOutCollateral.toString(),
     hubOutTotalHold: hubOutTotalHold.toString(),
     hubFreeOutCollateral: hubFreeOutCollateral.toString(),
+    leftPendingJClaims: String(raw.leftPendingJClaims || '0'),
     lastFinalizedJHeight: Number(raw.lastFinalizedJHeight || 0),
+    rightPendingJClaims: String(raw.rightPendingJClaims || '0'),
     currentHeight: Number(raw.currentHeight || 0),
     hasPolicy: Boolean(raw.hasPolicy),
   };
@@ -1096,9 +1281,14 @@ async function driveFaucetsUntilRequestCollateralCommitted(
 ) {
   const softLimitUnits = opts.softLimitUnits ?? DEFAULT_REBALANCE_SOFT_LIMIT_UNITS;
   const maxFaucets = opts.maxFaucets ?? 14;
-  let receiptCursor = opts.receiptCursor ?? await getPersistedReceiptCursor(page);
+  const cycleCursor = opts.receiptCursor ?? await getPersistedReceiptCursor(page);
   let faucets = 0;
   let lastSnapshot = await readRebalanceState(page, opts.hubId);
+  if (!lastSnapshot) throw new Error(`REBALANCE_BASELINE_MISSING:${opts.hubId}`);
+  if (BigInt(lastSnapshot.requested || '0') !== 0n) {
+    throw new Error(`REBALANCE_BASELINE_REQUEST_PENDING:${opts.hubId}`);
+  }
+  const initialCollateral = BigInt(lastSnapshot.collateral || '0');
 
   for (; faucets < maxFaucets; faucets++) {
     const baseline = {
@@ -1116,29 +1306,34 @@ async function driveFaucetsUntilRequestCollateralCommitted(
     // useful diagnostics but may be absent when an embedded browser Runtime
     // completes the whole request/settlement cycle between two polls.
     const persisted = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: receiptCursor,
+      cursor: cycleCursor,
       eventNames: ['request_collateral_committed'],
       entityId: opts.entityId,
     });
-    receiptCursor = persisted.cursor;
-    const committed = persisted.events.find((event) =>
-      String(event.data?.accountId || '').toLowerCase() === opts.hubId.toLowerCase(),
-    );
+    const committed = persisted.events.find((event) => {
+      const eventAccountId = String(event.data?.accountId || '').toLowerCase();
+      const eventTokenId = Number(event.data?.tokenId);
+      return eventAccountId === opts.hubId.toLowerCase() && eventTokenId === USDC_TOKEN_ID;
+    });
     if (committed) {
       return { faucets: faucets + 1, snapshot: lastSnapshot, committed };
     }
 
-    if (BigInt(lastSnapshot.uncollateralized || '0') <= softLimitUnits) {
+    const triggeredOrSettled =
+      BigInt(lastSnapshot.uncollateralized || '0') >= softLimitUnits ||
+      BigInt(lastSnapshot.collateral || '0') > initialCollateral;
+    if (!triggeredOrSettled) {
       continue;
     }
 
     const latestCommit = await waitForPersistedFrameEventMatch(page, {
-      cursor: receiptCursor,
+      cursor: cycleCursor,
       eventName: 'request_collateral_committed',
       entityId: opts.entityId,
       timeoutMs: 30_000,
       predicate: (event) =>
-        String(event.data?.accountId || '').toLowerCase() === opts.hubId.toLowerCase(),
+        String(event.data?.accountId || '').toLowerCase() === opts.hubId.toLowerCase() &&
+        Number(event.data?.tokenId) === USDC_TOKEN_ID,
     });
     lastSnapshot = await readRebalanceState(page, opts.hubId);
     return { faucets: faucets + 1, snapshot: lastSnapshot, committed: latestCommit };
@@ -1322,7 +1517,7 @@ test.describe('Rebalance E2E', () => {
     // Drive from committed account state. The faucet endpoint only confirms input acceptance;
     // rebalance must be tested after the account frame actually advances.
     // Keep the local Testnet watcher producing authenticated empty-prefix
-    // liveness while the sixth faucet crosses the soft limit. Empty prefixes
+    // liveness while the fifth faucet reaches the inclusive soft limit. Empty prefixes
     // cannot change the Entity nonce and must not starve the J submit.
     const emptyLiveness = injectEmptyTestnetLiveness(page);
     const firstTrigger = await timedStep('rebalance.drive_to_first_request', () =>
@@ -1604,17 +1799,19 @@ test.describe('Rebalance E2E', () => {
     }
   });
 
-  // Scenario: once an account is secured, a reload must restore the same state and the watcher must
-  // still drive the next rebalance cycle without manual repair.
-  test('persistence: secured rebalance survives reload and watcher resumes', { tag: '@resilience' }, async ({ page }) => {
-    let scenarioStartedAt = 0;
-    const rebalanceConsole: string[] = [];
+  // Crash after the exact R2C receipt is mined but before either Runtime can
+  // finalize it. H1 must restore the economic latch; the user must restore the
+  // durable request and then contribute the second bilateral J claim.
+  test('persistence: mined rebalance survives H1 and user restart exactly once', { tag: '@resilience' }, async ({ page }) => {
+    allowDebugIncident({ source: 'orchestrator', code: 'CHILD_UNEXPECTED_EXIT', message: 'child.unexpected_exit' });
+    allowDebugIncident({
+      source: 'orchestrator',
+      code: 'H1_UNEXPECTED_EXIT',
+      message: 'H1_UNEXPECTED_EXIT code=null signal=SIGKILL',
+    });
     const criticalConsole: string[] = [];
     page.on('console', (msg) => {
       const text = msg.text();
-      if (/AUTO-REBALANCE|Auto-rebalance|request_collateral|counterparty-not-hub|missing-hub-fee-policy/.test(text)) {
-        rebalanceConsole.push(text);
-      }
       if (/FRAME_CONSENSUS_FAILED|Frame hash verification failed|Runtime loop error|RUNTIME_LOOP_HALTED/.test(text)) {
         criticalConsole.push(text);
       }
@@ -1625,12 +1822,6 @@ test.describe('Rebalance E2E', () => {
       try {
         localStorage.setItem('xln-app-mode', 'user');
         localStorage.setItem('xln-onboarding-complete', 'true');
-        const rawSettings = localStorage.getItem('xln-settings');
-        const parsedSettings = rawSettings ? JSON.parse(rawSettings) : {};
-        localStorage.setItem('xln-settings', JSON.stringify({
-          ...parsedSettings,
-          balanceRefreshMs: 1000,
-        }));
       } catch {
         // no-op
       }
@@ -1643,208 +1834,159 @@ test.describe('Rebalance E2E', () => {
     const hubId = await timedStep('rebalance_persist.discover_hub', () => discoverPrimaryHub(page));
     await timedStep('rebalance_persist.wait_hub_profile', () => waitForHubProfile(page, hubId));
     await timedStep('rebalance_persist.connect_hub', () => connectHub(page, entityId, signerId, hubId));
-    scenarioStartedAt = Date.now();
-    const firstSettlementCursor = await getPersistedReceiptCursor(page);
+    const cycleCursor = await getPersistedReceiptCursor(page);
+    const baseline = await readRebalanceState(page, hubId);
+    expect(baseline, 'rebalance restart baseline must exist').toBeTruthy();
+    const chainBefore = await readActiveChainRebalanceState(page, entityId, hubId);
+    expect(BigInt(chainBefore.collateral)).toBe(BigInt(baseline!.collateral));
+    const healthBefore = await getHealth(page, API_BASE_URL);
+    const h1Before = healthBefore?.process?.children?.find((child) => child.role === 'hub' && child.name === 'H1');
+    expect(healthBefore?.systemOk, 'mesh must be healthy before H1 crash').toBe(true);
+    expect(h1Before?.online, 'H1 must be online before crash').toBe(true);
+    expect(h1Before?.pid, 'H1 PID must be observable').toBeGreaterThan(0);
+    const oldPid = Number(h1Before!.pid);
+    const oldRestartCount = Number(h1Before!.restartCount || 0);
+    await pauseUserJurisdictionWatchers(page);
 
-    const firstPersistTrigger = await timedStep('rebalance_persist.drive_to_first_request', () =>
-      driveFaucetsUntilRequestCollateralCommitted(page, {
-        entityId,
-        hubId,
-        scenarioStartedAt,
-      }));
-    await markE2EPhase(page, 'rebalance_persist.first_trigger_done', {
-      phase: 'trigger',
-      entityId,
-      details: {
-        hubId,
-        count: firstPersistTrigger.faucets,
-        requestedAt: firstPersistTrigger.committed?.data?.requestedAt,
-        snapshot: firstPersistTrigger.snapshot,
-      },
-    });
-
-    let firstSnapshot: any = null;
-    const firstStateTimeline: Array<Record<string, unknown>> = [];
-    const firstWaitStartedAt = Date.now();
-    await timedStep('rebalance_persist.wait_first_secured_cycle', async () => {
-      while (Date.now() - firstWaitStartedAt < 90_000) {
-        firstSnapshot = await readRebalanceState(page, hubId);
-        if (firstSnapshot) {
-          firstStateTimeline.push({
-            atMs: Date.now() - firstWaitStartedAt,
-            requested: firstSnapshot.requested,
-            uncollateralized: firstSnapshot.uncollateralized,
-            collateral: firstSnapshot.collateral,
-            jHeight: firstSnapshot.lastFinalizedJHeight,
-            frame: firstSnapshot.currentHeight,
-          });
-        }
-        if (
-          firstSnapshot &&
-          BigInt(firstSnapshot.requested || '0') === 0n &&
-          BigInt(firstSnapshot.uncollateralized || '0') === 0n &&
-          BigInt(firstSnapshot.collateral || '0') > 0n &&
-          Number(firstSnapshot.lastFinalizedJHeight || 0) > 0
-        ) {
-          break;
-        }
-        await page.waitForTimeout(500);
+    const crashBoundary = await timedStep('rebalance_persist.mine_then_crash_h1', async () => {
+      let h1Frozen = false;
+      let automineDisabled = false;
+      try {
+        await callTestnetRpc<unknown>(page, 'evm_setAutomine', [false]);
+        automineDisabled = true;
+        const trigger = await driveFaucetsUntilRequestCollateralCommitted(page, {
+          entityId,
+          hubId,
+          scenarioStartedAt: Date.now(),
+          receiptCursor: cycleCursor,
+        });
+        const requestedAmount = BigInt(String(trigger.committed.data?.requestedAmount || '0'));
+        if (requestedAmount <= 0n) throw new Error(`REBALANCE_REQUEST_AMOUNT_INVALID:${requestedAmount}`);
+        const pending = await waitForPendingRebalanceBatch(page, {
+          chainId: chainBefore.chainId,
+          depository: chainBefore.depository,
+          entityId,
+          expectedAmount: requestedAmount,
+          hubId,
+        });
+        process.kill(oldPid, 'SIGSTOP');
+        h1Frozen = true;
+        await callTestnetRpc<unknown>(page, 'anvil_mine', ['0x1']);
+        const receipt = await waitForTransactionReceipt(page, pending.transactionHash);
+        process.kill(oldPid, 'SIGKILL');
+        h1Frozen = false;
+        return { pending, receipt, requestedAmount, trigger };
+      } finally {
+        if (h1Frozen) process.kill(oldPid, 'SIGCONT');
+        if (automineDisabled) await callTestnetRpc<unknown>(page, 'evm_setAutomine', [true]);
       }
     });
 
-    const initialDiagnostics = await readRebalanceDiagnostics(page, hubId);
-    const initialArtifacts = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
-    const initialDebugDump = buildRebalanceFailureDump({
-      entityId,
-      hubId,
-      snapshot: firstSnapshot,
-      diagnostics: initialDiagnostics,
-      rebalanceSteps: [],
-      stateTimeline: firstStateTimeline,
-      rebalanceConsole: [...rebalanceConsole, ...criticalConsole],
-      phaseMarkers: initialArtifacts.phaseMarkers,
-      debugErrors: initialArtifacts.debugErrors,
-      frameEvents: initialArtifacts.frameEvents,
+    const receiptLog = crashBoundary.receipt.logs?.find((log) =>
+      String(log.address || '').toLowerCase() === chainBefore.depository.toLowerCase()
+      && String(log.topics?.[0] || '').toLowerCase() === HANKO_BATCH_TOPIC);
+    if (!receiptLog?.data || !receiptLog.topics) throw new Error('REBALANCE_HANKO_RECEIPT_MISSING');
+    const hanko = DEPOSITORY_BATCH_INTERFACE.parseLog({ data: receiptLog.data, topics: receiptLog.topics });
+    if (!hanko || hanko.name !== 'HankoBatchProcessed') throw new Error('REBALANCE_HANKO_RECEIPT_INVALID');
+    const minedJHeight = Number(BigInt(crashBoundary.receipt.blockNumber || '0x0'));
+    expect(crashBoundary.receipt.status, 'R2C transaction must succeed').toBe('0x1');
+    expect(crashBoundary.receipt.transactionHash?.toLowerCase()).toBe(crashBoundary.pending.transactionHash.toLowerCase());
+    expect(String(hanko.args.entityId).toLowerCase()).toBe(hubId.toLowerCase());
+    expect(String(hanko.args.batchHash).toLowerCase()).toBe(crashBoundary.pending.batchHash.toLowerCase());
+    expect(BigInt(hanko.args.nonce)).toBe(crashBoundary.pending.entityNonce);
+    expect(minedJHeight).toBeGreaterThan(Number(baseline!.lastFinalizedJHeight));
+
+    await expect.poll(async () => {
+      const health = await getHealth(page, API_BASE_URL);
+      const child = health?.process?.children?.find((candidate) => candidate.role === 'hub' && candidate.name === 'H1');
+      const hub = health?.hubs?.find((candidate) => candidate.name === 'H1');
+      return {
+        hubOnline: hub?.online === true,
+        processOnline: child?.online === true,
+        replaced: Number(child?.pid || 0) > 0 && Number(child?.pid) !== oldPid,
+        restarted: Number(child?.restartCount || 0) > oldRestartCount,
+        systemOk: health?.systemOk === true,
+      };
+    }, { timeout: 90_000, intervals: [250, 500, 1000] }).toEqual({
+      hubOnline: true,
+      processOnline: true,
+      replaced: true,
+      restarted: true,
+      systemOk: true,
     });
 
-    expect(firstSnapshot, `first secured snapshot missing\n${initialDebugDump}`).toBeTruthy();
-    expect(BigInt(firstSnapshot.requested || '0'), `requested must clear before reload\n${initialDebugDump}`).toBe(0n);
-    expect(BigInt(firstSnapshot.uncollateralized || '0'), `uncollateralized must clear before reload\n${initialDebugDump}`).toBe(0n);
-    expect(BigInt(firstSnapshot.collateral || '0'), `collateral must be positive before reload\n${initialDebugDump}`).toBeGreaterThan(0n);
-    expect(Number(firstSnapshot.lastFinalizedJHeight || 0), `jHeight must finalize before reload\n${initialDebugDump}`).toBeGreaterThan(0);
+    await expect.poll(async () => {
+      const snapshot = await readRebalanceState(page, hubId);
+      return BigInt(snapshot?.leftPendingJClaims || '0') + BigInt(snapshot?.rightPendingJClaims || '0');
+    }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBe(1);
+    await page.waitForTimeout(3_000); // More than two canonical one-second H1 scheduler ticks.
 
-    const settledBeforeReload = {
-      requested: BigInt(firstSnapshot.requested || '0'),
-      uncollateralized: BigInt(firstSnapshot.uncollateralized || '0'),
-      collateral: BigInt(firstSnapshot.collateral || '0'),
-      jHeight: Number(firstSnapshot.lastFinalizedJHeight || 0),
-    };
-    const firstSettlement = await waitForPersistedFrameEventMatch(page, {
-      cursor: firstSettlementCursor,
-      eventName: 'account_settled_finalized_bilateral',
-      entityId,
-      predicate: (event) =>
-        persistedEventHasAccount(event, hubId)
-        && event.frameHeight > firstPersistTrigger.committed.frameHeight,
-    });
+    const pendingState = await readRebalanceState(page, hubId);
     const claimSnapshotBeforeReload = await readAccountJEventClaims(page, hubId);
-    const uniqueSettleKeysBeforeReload = new Set(
-      (claimSnapshotBeforeReload?.claims || []).map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`),
-    );
-    const currentHeightBeforeReload = Number(firstSnapshot.currentHeight || 0);
-
-    await reloadRuntimeAndWaitReady(page, rebalanceConsole, 'rebalance_persist.reload_page');
-    await timedStep('rebalance_persist.reload_assert_secured_state', async () => {
-      await expect.poll(async () => {
-        const reloaded = await readRebalanceState(page, hubId);
-        return {
-          requested: BigInt(reloaded?.requested || '0'),
-          uncollateralized: BigInt(reloaded?.uncollateralized || '0'),
-          collateral: BigInt(reloaded?.collateral || '0'),
-          jHeight: Number(reloaded?.lastFinalizedJHeight || 0),
-        };
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toEqual(settledBeforeReload);
-    });
-    const secondSettlementCursor = await getPersistedReceiptCursor(page);
-
-    const secondPersistTrigger = await timedStep('rebalance_persist.drive_to_second_request', () =>
-      driveFaucetsUntilRequestCollateralCommitted(page, {
-        entityId,
-        hubId,
-        scenarioStartedAt,
-      }));
-    await markE2EPhase(page, 'rebalance_persist.second_trigger_done', {
-      phase: 'second-cycle-trigger',
+    const claimsBeforeReload = (claimSnapshotBeforeReload?.claims || []).filter((claim) =>
+      claim.txHash.toLowerCase() === crashBoundary.pending.transactionHash.toLowerCase());
+    const pendingJournal = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: cycleCursor,
       entityId,
-      details: {
-        hubId,
-        count: secondPersistTrigger.faucets,
-        requestedAt: secondPersistTrigger.committed?.data?.requestedAt,
-        snapshot: secondPersistTrigger.snapshot,
-      },
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
     });
+    const exactPendingEvents = pendingJournal.events.filter((event) =>
+      persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID));
+    const chainAfterRestart = await readActiveChainRebalanceState(page, entityId, hubId);
+    expect(exactPendingEvents.map((event) => event.message)).toEqual(['request_collateral_committed']);
+    expect(BigInt(pendingState?.requested || '0')).toBe(crashBoundary.requestedAmount);
+    expect(BigInt(pendingState?.collateral || '0')).toBe(BigInt(baseline!.collateral));
+    expect(Number(pendingState?.lastFinalizedJHeight || 0)).toBe(Number(baseline!.lastFinalizedJHeight));
+    expect(BigInt(chainAfterRestart.collateral) - BigInt(chainBefore.collateral)).toBe(crashBoundary.requestedAmount);
+    expect(await countExactHankoBatchLogs(page, chainBefore.depository, hubId, crashBoundary.pending.batchHash)).toBe(1);
+    expect(claimsBeforeReload).toHaveLength(1);
 
-    let postReloadSnapshot: any = null;
-    const secondWaitStartedAt = Date.now();
-    await timedStep('rebalance_persist.wait_second_secured_cycle', async () => {
-      while (Date.now() - secondWaitStartedAt < 120_000) {
-        postReloadSnapshot = await readRebalanceState(page, hubId);
-        const claimSnapshotNow = await readAccountJEventClaims(page, hubId);
-        const uniqueSettleKeysNow = new Set(
-          (claimSnapshotNow?.claims || []).map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`),
-        );
-        const hasSecondSettlement =
-          uniqueSettleKeysNow.size >= uniqueSettleKeysBeforeReload.size + 1 ||
-          Number(postReloadSnapshot?.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight;
-        if (
-          postReloadSnapshot &&
-          Number(postReloadSnapshot.currentHeight || 0) > currentHeightBeforeReload &&
-          Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight &&
-          BigInt(postReloadSnapshot.requested || '0') === 0n &&
-          BigInt(postReloadSnapshot.uncollateralized || '0') === 0n &&
-          hasSecondSettlement
-        ) {
-          break;
-        }
-        await page.waitForTimeout(500);
-      }
-    });
-
-    const finalDiagnostics = await readRebalanceDiagnostics(page, hubId);
-    const finalArtifacts = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
-    const finalDebugDump = buildRebalanceFailureDump({
-      entityId,
-      hubId,
-      snapshot: postReloadSnapshot,
-      diagnostics: finalDiagnostics,
-      rebalanceSteps: [],
-      stateTimeline: firstStateTimeline,
-      rebalanceConsole: [...rebalanceConsole, ...criticalConsole],
-      phaseMarkers: finalArtifacts.phaseMarkers,
-      debugErrors: finalArtifacts.debugErrors,
-      frameEvents: finalArtifacts.frameEvents,
-    });
-    const secondSettlement = await waitForPersistedFrameEventMatch(page, {
-      cursor: secondSettlementCursor,
+    await reloadRuntimeAndWaitReady(page, criticalConsole, 'rebalance_persist.reload_user_before_finality');
+    expect(await page.evaluate(() => Boolean((window as any).isolatedEnv?.infrastructure?.jurisdictionWatchersPaused))).toBe(false);
+    const finalizedReceipt = await waitForPersistedFrameEventMatch(page, {
+      cursor: cycleCursor,
       eventName: 'account_settled_finalized_bilateral',
       entityId,
-      predicate: (event) =>
-        persistedEventHasAccount(event, hubId)
-        && event.frameHeight > secondPersistTrigger.committed.frameHeight
-        && event.frameHeight > firstSettlement.frameHeight,
+      timeoutMs: 60_000,
+      predicate: (event) => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID),
     });
-    const claimSnapshotAfterReload = await readAccountJEventClaims(page, hubId);
-    const uniqueSettleKeysAfterReload = new Set(
-      (claimSnapshotAfterReload?.claims || []).map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`),
-    );
+    let finalState: Awaited<ReturnType<typeof readRebalanceState>> = null;
+    await expect.poll(async () => {
+      finalState = await readRebalanceState(page, hubId);
+      return Boolean(finalState
+        && BigInt(finalState.requested) === 0n
+        && BigInt(finalState.uncollateralized) === 0n
+        && Number(finalState.lastFinalizedJHeight) === minedJHeight);
+    }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBe(true);
+    const finalClaimSnapshot = await readAccountJEventClaims(page, hubId);
+    const finalClaims = (finalClaimSnapshot?.claims || []).filter((claim) =>
+      claim.txHash.toLowerCase() === crashBoundary.pending.transactionHash.toLowerCase());
+    expect(finalClaims).toHaveLength(2);
 
-    expect(postReloadSnapshot, `post-reload secured snapshot missing\n${finalDebugDump}`).toBeTruthy();
-    expect(Number(postReloadSnapshot.currentHeight || 0) > currentHeightBeforeReload, `account frame height must advance after reload second cycle\n${finalDebugDump}`).toBe(true);
-    expect(Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight, `jHeight must advance after reload second cycle\n${finalDebugDump}`).toBe(true);
-    expect(BigInt(postReloadSnapshot.requested || '0'), `requested must clear after reload second cycle\n${finalDebugDump}`).toBe(0n);
-    expect(BigInt(postReloadSnapshot.uncollateralized || '0'), `uncollateralized must clear after reload second cycle\n${finalDebugDump}`).toBe(0n);
-    expect(
-      firstSettlement.frameHeight > firstPersistTrigger.committed.frameHeight,
-      `first durable settlement must follow its request commit\n${finalDebugDump}`,
-    ).toBe(true);
-    expect(
-      secondSettlement.frameHeight > secondPersistTrigger.committed.frameHeight,
-      `second durable settlement must follow its request commit\n${finalDebugDump}`,
-    ).toBe(true);
-    expect(
-      secondSettlement.frameHeight > firstSettlement.frameHeight,
-      `post-reload durable settlement must be distinct from the first cycle\n${finalDebugDump}`,
-    ).toBe(true);
-    const finalizedJHeightAdvancedAfterReload = Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight;
-    expect(
-      uniqueSettleKeysAfterReload.size >= uniqueSettleKeysBeforeReload.size + 1 ||
-        finalizedJHeightAdvancedAfterReload,
-      `must have a new settlement after reload second cycle\n${finalDebugDump}`,
-    ).toBe(true);
-    expect(criticalConsole.length, `critical consensus/runtime errors during reload persistence flow:\n${criticalConsole.join('\n')}`).toBe(0);
+    const readExactCycle = async () => (await readPersistedFrameEventsSinceCursor(page, {
+      cursor: cycleCursor,
+      entityId,
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+    })).events.filter((event) => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID));
+    const durableCycle = await readExactCycle();
+    expect(durableCycle.map((event) => event.message)).toEqual([
+      'request_collateral_committed',
+      'account_settled_finalized_bilateral',
+    ]);
+    expect(await readExactCycle(), 'journal order and receipts must survive user reload').toEqual(durableCycle);
+    expect(finalizedReceipt.frameHeight).toBeGreaterThan(crashBoundary.trigger.committed.frameHeight);
+    expect(Number(finalizedReceipt.data?.jHeight)).toBe(minedJHeight);
+    expect(new Set(finalClaims.map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`)).size).toBe(1);
+    for (const claim of finalClaims) {
+      expect([claim.leftEntity, claim.rightEntity].sort()).toEqual([entityId.toLowerCase(), hubId.toLowerCase()].sort());
+      expect(claim.jHeight).toBe(minedJHeight);
+    }
+    expect(BigInt(finalState!.collateral) - BigInt(baseline!.collateral)).toBe(crashBoundary.requestedAmount);
+    expect((await readActiveChainRebalanceState(page, entityId, hubId)).collateral).toBe(finalState!.collateral);
+    expect(criticalConsole, `critical consensus/runtime errors:\n${criticalConsole.join('\n')}`).toEqual([]);
   });
 
-  // Scenario: six faucets cross the 500 soft limit. Two more faucets while that
+  // Scenario: five faucets reach the inclusive 500 soft limit. Two more faucets while that
   // request is pending remain below a fresh soft limit and must not top it up.
   test('edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch', { tag: '@resilience' }, async ({ page }) => {
     let scenarioStartedAt = 0;
@@ -1896,7 +2038,7 @@ test.describe('Rebalance E2E', () => {
     });
     const pendingSnapshot: any = firstTrigger.snapshot;
     const firstRequestCommit: any = firstTrigger.committed;
-    expect(firstTrigger.faucets, 'the first request must start only after six 100-unit faucets').toBe(6);
+    expect(firstTrigger.faucets, 'the first request must start on the fifth 100-unit faucet').toBe(5);
     await markE2EPhase(page, 'rebalance_edge.request_committed', {
       phase: 'trigger-confirmed',
       entityId,

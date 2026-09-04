@@ -186,14 +186,7 @@ ensure_main_branch_for_push() {
 }
 
 ensure_clean_worktree_for_remote_deploy() {
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "REMOTE_DEPLOY_DIRTY_WORKTREE: commit or stash tracked changes first" >&2
-    exit 1
-  fi
-  if [ -n "$(git ls-files --others --exclude-standard)" ]; then
-    echo "REMOTE_DEPLOY_UNTRACKED_FILES: commit, ignore, or remove them first" >&2
-    exit 1
-  fi
+  bun "$REPO_ROOT/tools/release-snapshot/assert-clean.ts" "$REPO_ROOT"
 }
 
 ensure_committed_contract_artifacts() {

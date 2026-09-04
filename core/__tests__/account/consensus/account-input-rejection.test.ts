@@ -21,6 +21,7 @@ import {
 } from '../../../account/consensus/result';
 import { fintsPositiveAccountConsensusResult } from '../../types/fints/results/account-consensus-result.positive';
 import { openWritableEntityAccounts } from '../../helpers/cross-j';
+import { handleSetCreditLimit } from '../../../account/tx/handlers/balance/set-credit-limit';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -220,6 +221,39 @@ describe('typed Account input rejection', () => {
     expect(observedAuthorities).toEqual([{ allowPreviousBoard: true }]);
     expect(account.currentHeight).toBe(1);
     expect(account.pendingFrame).toBeUndefined();
+  });
+
+  test('ACK older than the immediate predecessor is an idempotent no-op', async () => {
+    const env = createEmptyEnv('account-input-obsolete-ack');
+    env.quietRuntimeLogs = true;
+    const account = createAccount();
+    account.currentHeight = 3;
+    account.currentFrame = {
+      ...account.currentFrame,
+      height: 3,
+      prevFrameHash: `0x${'44'.repeat(32)}`,
+      stateHash: `0x${'55'.repeat(32)}`,
+    };
+    const stale = ackInput(account);
+    stale.ack.height = 1;
+    stale.ack.frameHash = `0x${'aa'.repeat(32)}`;
+    stale.ack.frameHanko = `0x${'bb'.repeat(65)}`;
+    let verificationCalls = 0;
+    const context = withVerifier(
+      createAccountConsensusContext(env),
+      async () => {
+        verificationCalls += 1;
+        return { valid: false, entityId: null };
+      },
+    );
+    const before = safeStringify(account);
+
+    const result = await applyAccountInput(context, account, stale);
+
+    expect(result.ok).toBe(true);
+    expect(result.events).toContain('ℹ️ Ignored stale ACK 1 (current=3)');
+    expect(verificationCalls).toBe(0);
+    expect(safeStringify(account)).toBe(before);
   });
 
   test('valid bundled ACK stays committed when the successor proposal is invalid', async () => {
@@ -501,6 +535,61 @@ describe('typed Account input rejection', () => {
     }
   });
 
+  test('signed set_credit_limit token 70000 is rejected before replay', async () => {
+    const env = createEmptyEnv('account-input-credit-token-domain');
+    env.quietRuntimeLogs = true;
+    const account = createAccount();
+    const tokenId = 70_000;
+    const frame = {
+      height: 1,
+      timestamp: 0,
+      jHeight: 0,
+      accountTxs: [{ type: 'set_credit_limit' as const, data: { tokenId, amount: 1n } }],
+      prevFrameHash: 'genesis',
+      accountStateRoot: computeAccountStateRoot(account.state),
+      deltas: [],
+      stateHash: '',
+      byLeft: false,
+    };
+    frame.stateHash = computeFrameHash(frame);
+    const input: Extract<AccountInput, { kind: 'ack_frame' }> = {
+      kind: 'ack_frame',
+      fromEntityId: account.proofHeader.toEntity,
+      toEntityId: account.proofHeader.fromEntity,
+      domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
+      watchSeed: account.state.watchSeed,
+      proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
+    };
+    let verificationCalls = 0;
+    const context = withVerifier(
+      createAccountConsensusContext(env),
+      async () => {
+        verificationCalls += 1;
+        return { valid: true, entityId: input.fromEntityId };
+      },
+    );
+    const before = safeStringify(account);
+
+    const result = await applyAccountInput(context, account, input);
+
+    expect(accountInputPeerRejectionCode(result))
+      .toBe('ACCOUNT_INPUT_FRAME_TX_TOKEN_ID_OUT_OF_RANGE');
+    expect(accountInputFailureMessage(result)).toContain(
+      'ACCOUNT_TX_TOKEN_ID_OUT_OF_RANGE:set_credit_limit:70000',
+    );
+    expect(verificationCalls).toBe(0);
+    expect(safeStringify(account)).toBe(before);
+
+    const reducerResult = handleSetCreditLimit(account.state, frame.accountTxs[0], false);
+    expect(reducerResult.ok).toBe(false);
+    if (reducerResult.ok) throw new Error('SET_CREDIT_LIMIT_TOKEN_REJECTION_REQUIRED');
+    expect(reducerResult.rejection).toMatchObject({
+      kind: 'delta_token_invalid',
+      tokenId,
+    });
+  });
+
   test('local verifier failure is never downgraded to an Account input rejection', async () => {
     const env = createEmptyEnv('account-input-local-verifier-fatal');
     env.quietRuntimeLogs = true;
@@ -545,7 +634,7 @@ describe('typed Account input rejection', () => {
   });
 });
 
-test('authenticated Runtime Account poison halts loudly without mutating the live replica', async () => {
+test('authenticated Runtime Account poison is rejected without halting or mutating Account state', async () => {
   const fixture = createEntityProposalFixture('account-input-runtime-continuation', 1n);
   const target = fixture.createValidator('1');
   const peerEntity = `0x${'77'.repeat(32)}`;
@@ -568,7 +657,7 @@ test('authenticated Runtime Account poison halts loudly without mutating the liv
     getP2P: () => null,
   };
 
-  await expect(applyMergedEntityInputs(
+  const applied = await applyMergedEntityInputs(
     target.env,
     [{
       from: `0x${'99'.repeat(20)}`,
@@ -579,12 +668,14 @@ test('authenticated Runtime Account poison halts loudly without mutating the liv
     }],
     [],
     { isReplay: false, routingDeps },
-  )).rejects.toThrow(
-    'ACCOUNT_INPUT_EVIDENCE_REJECTED:ACCOUNT_INPUT_WATCH_SEED_INVALID',
   );
+  expect(applied.inputOutcomes).toHaveLength(2);
+  expect(applied.inputOutcomes.every(outcome => outcome.outcome.kind === 'committed')).toBe(true);
+  expect(applied.inputOutcomes.every(outcome => !outcome.entityFrameCommitted)).toBe(true);
   expect(
     target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.accounts.get(peerEntity)
       ?.currentHeight,
   ).toBe(0);
   expect(target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.height).toBe(0);
+  expect(target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.mempool).toEqual([]);
 });

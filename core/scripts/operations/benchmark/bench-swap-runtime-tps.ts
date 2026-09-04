@@ -169,66 +169,55 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
   sourceDelta.leftHold = sourceAmount * BigInt(swaps);
   account.state.deltas = requirePersistentAccountStateMap(account.state.deltas, 'deltas')
     .updated(1, sourceDelta);
-  const template = buildPreparedCrossJurisdictionRoute({
-    orderId: 'cross-template',
-    makerEntityId: sourceUser,
-    hubEntityId: sourceHub,
-    bookOwnerEntityId: sourceHub,
-    venueId: 'cross:bench-source:1/bench-target:1',
-    sourceDisputeConfig: { ...account.state.disputeConfig },
-    targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-    source: {
-      jurisdiction: `stack:1:${addr('11')}`,
-      entityId: sourceUser,
-      counterpartyEntityId: sourceHub,
-      tokenId: 1,
-      amount: sourceAmount,
-    },
-    target: {
-      jurisdiction: `stack:2:${addr('22')}`,
-      entityId: targetHub,
-      counterpartyEntityId: targetUser,
-      tokenId: 1,
-      amount: targetAmount,
-    },
-    priceImprovementMode: 'source_savings',
-    status: 'intent',
-    createdAt: 1_000,
-    updatedAt: 1_000,
-    expiresAt: 61_000,
-  }, { runtimeSeed: 'swap-runtime-bench', now: 1_000 });
-  let templateRoute: CrossJurisdictionSwapRoute = {
-    ...template,
-    status: 'resting' as const,
-  };
-  account.state.pulls = requirePersistentAccountStateMap(
-    account.state.pulls!,
-    'pulls',
-  ).updated(templateRoute.sourcePull!.pullId, {
-    pullId: templateRoute.sourcePull!.pullId,
-    tokenId: templateRoute.sourcePull!.tokenId,
-    amount: templateRoute.sourcePull!.signedAmount,
-    claimedRatio: 0,
-    claimedAmount: 0n,
-    fullHash: templateRoute.sourcePull!.fullHash,
-    partialRoot: templateRoute.sourcePull!.partialRoot,
-    crossJurisdiction: buildCrossJurisdictionPullBinding(templateRoute, 'source'),
-    createdHeight: 0,
-    createdTimestamp: 1_000,
-  });
   for (let index = 0; index < swaps; index += 1) {
     const orderId = `cross-${index}`;
-    // This benchmark measures account handler throughput after admission.
-    // Route-hash and receipt uniqueness are covered by security tests; repeating
-    // one canonical route keeps setup out of the measured hot path.
     const route: CrossJurisdictionSwapRoute = {
-      ...templateRoute,
-      source: { ...templateRoute.source },
-      target: { ...templateRoute.target },
-      sourcePull: { ...templateRoute.sourcePull! },
-      targetPull: { ...templateRoute.targetPull! },
+      ...buildPreparedCrossJurisdictionRoute({
+        orderId,
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        bookOwnerEntityId: sourceHub,
+        venueId: 'cross:bench-source:1/bench-target:1',
+        sourceDisputeConfig: { ...account.state.disputeConfig },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        source: {
+          jurisdiction: `stack:1:${addr('11')}`,
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: sourceAmount,
+        },
+        target: {
+          jurisdiction: `stack:2:${addr('22')}`,
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: targetAmount,
+        },
+        priceImprovementMode: 'source_savings',
+        status: 'intent',
+        createdAt: 1_000 + index,
+        updatedAt: 1_000 + index,
+        expiresAt: 61_000 + index,
+      }, { runtimeSeed: 'swap-runtime-bench', now: 1_000 + index }),
       status: 'resting' as const,
     };
+    const sourcePull = route.sourcePull!;
+    account.state.pulls = requirePersistentAccountStateMap(account.state.pulls!, 'pulls').updated(
+      sourcePull.pullId,
+      {
+        pullId: sourcePull.pullId,
+        tokenId: sourcePull.tokenId,
+        amount: sourcePull.signedAmount,
+        claimedRatio: 0,
+        claimedAmount: 0n,
+        fullHash: sourcePull.fullHash,
+        partialRoot: sourcePull.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+        createdHeight: 0,
+        createdTimestamp: 1_000 + index,
+      },
+    );
     const offer: SwapOffer = {
       offerId: orderId,
       giveTokenId: route.source.tokenId,
@@ -267,7 +256,7 @@ const sameResolveTx = (index: number): AccountTx => ({
   },
 });
 
-const crossAckTx = (index: number): AccountTx => ({
+const crossAckTx = (index: number, cancelRemainder = true): AccountTx => ({
   type: 'cross_swap_fill_ack',
   data: {
     offerId: `cross-${index}`,
@@ -284,7 +273,7 @@ const crossAckTx = (index: number): AccountTx => ({
     priceImprovementMode: 'source_savings',
     priceImprovementAmount: 1n,
     priceImprovementTokenId: 1,
-    cancelRemainder: true,
+    cancelRemainder,
     pairId: 'cross:bench-source:1/bench-target:1',
   },
 });
@@ -312,6 +301,7 @@ const applyAccountFrame = async (
 const runPass = async (
   swaps: number,
   txsPerFrame: number,
+  cancelCrossRemainder = true,
 ): Promise<{ same: AccountReplica; cross: AccountReplica; elapsedMs: number; sameElapsedMs: number; crossElapsedMs: number }> => {
   const same = seedSameSwapAccount(swaps);
   const cross = seedCrossSwapAccount(swaps);
@@ -329,7 +319,7 @@ const runPass = async (
   for (let index = 0; index < swaps; index += txsPerFrame) {
     const txs = Array.from(
       { length: Math.min(txsPerFrame, swaps - index) },
-      (_, offset) => crossAckTx(index + offset),
+      (_, offset) => crossAckTx(index + offset, cancelCrossRemainder),
     );
     const startedAt = getPerfMs();
     await applyAccountFrame(cross, txs, 2_000 + index, 2 + index);
@@ -338,8 +328,45 @@ const runPass = async (
   return { same, cross, elapsedMs: sameElapsedMs + crossElapsedMs, sameElapsedMs, crossElapsedMs };
 };
 
+const requireEconomicState: (condition: boolean, error: string) => asserts condition = (condition, error) => {
+  if (!condition) throw new Error(`SWAP_RUNTIME_BENCH_ECONOMICS:${error}`);
+};
+
+export const proveSwapRuntimeEconomics = async (): Promise<void> => {
+  const { same, cross } = await runPass(1, 1, false);
+  const sameGive = same.state.deltas.get(2);
+  const sameWant = same.state.deltas.get(1);
+  requireEconomicState(same.state.swapOffers.size === 0, 'SAME_OFFER_NOT_CLOSED');
+  requireEconomicState(sameGive?.leftHold === 0n, 'SAME_GIVE_HOLD_NOT_RELEASED');
+  requireEconomicState(sameGive?.offdelta === -SWAP_LOT_SCALE, 'SAME_GIVE_DELTA');
+  requireEconomicState(sameWant?.offdelta === 3_000n * SWAP_LOT_SCALE, 'SAME_WANT_DELTA');
+
+  const source = cross.state.deltas.get(1);
+  const crossPulls = cross.state.pulls;
+  requireEconomicState(crossPulls !== undefined, 'CROSS_PULLS_MISSING');
+  const pulls = [...crossPulls.values()];
+  const binding = pulls[0]?.crossJurisdiction;
+  requireEconomicState(cross.state.swapOffers.size === 0, 'CROSS_OFFER_NOT_CLOSED');
+  requireEconomicState(source?.leftHold === SWAP_LOT_SCALE, 'CROSS_SOURCE_HOLD_RELEASED_EARLY');
+  requireEconomicState(pulls.length === 1, 'CROSS_PULL_COUNT');
+  requireEconomicState(binding?.status === 'clear_requested', 'CROSS_PULL_STATUS');
+  requireEconomicState(binding?.fillSeq === 1, 'CROSS_FILL_SEQUENCE');
+  requireEconomicState(binding?.cumulativeFillRatio === 65_535, 'CROSS_FILL_RATIO');
+  requireEconomicState(binding?.fillNumerator === 1n && binding.fillDenominator === 1n, 'CROSS_EXACT_RATIO');
+  requireEconomicState(
+    binding?.filledSourceAmount === SWAP_LOT_SCALE && binding.sourceClaimed === SWAP_LOT_SCALE,
+    'CROSS_SOURCE_FILL',
+  );
+  requireEconomicState(
+    binding?.filledTargetAmount === 2n * SWAP_LOT_SCALE && binding.targetClaimed === 2n * SWAP_LOT_SCALE,
+    'CROSS_TARGET_FILL',
+  );
+  requireEconomicState(binding?.clearingPolicy === 'full_fill', 'CROSS_CLEARING_POLICY');
+};
+
 export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenchmarkResult> => {
   if (cli.txsPerFrame > 5) throw new Error(`SWAP_RUNTIME_BENCH_FRAME_TOO_LARGE:${cli.txsPerFrame}:5`);
+  await proveSwapRuntimeEconomics();
   if (cli.warmup > 0) await runPass(cli.warmup, cli.txsPerFrame);
   const { same, cross, elapsedMs, sameElapsedMs, crossElapsedMs } = await runPass(cli.swaps, cli.txsPerFrame);
   if (same.state.swapOffers.size !== 0) throw new Error(`SAME_OFFERS_LEFT:${same.state.swapOffers.size}`);

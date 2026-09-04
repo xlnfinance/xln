@@ -66,7 +66,7 @@ export type TreeNode = {
 export type ExcludedFile = {
   path: string;
   bytes: number;
-  reason: 'generated' | 'vendor' | 'release-artifact';
+  reason: 'generated' | 'vendor' | 'release-artifact' | 'outside-release-scope';
 };
 
 export type ReleaseSnapshot = {

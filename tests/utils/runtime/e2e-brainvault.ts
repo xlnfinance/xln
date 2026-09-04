@@ -5,7 +5,7 @@ import {
   deriveShard,
   entropyToMnemonic,
   factorForShardCount,
-} from '../../../brainvault/core';
+} from '../../../brainvault/src/core/index';
 
 export type BrainvaultCliOutput = {
   mnemonic24: string;

@@ -64,6 +64,7 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   'jurisdictions/forge-cache',
   'jurisdictions/forge-out',
   'jurisdictions/lib',
+  'jurisdictions/.typechain-hardhat',
   'jurisdictions/typechain-types',
   'packages/npm/xlnfinance/app',
   'packages/npm/xlnfinance/dist',

@@ -385,7 +385,7 @@ test('one uncertified Account cannot block BoardActivated Hanko refreshes for ce
     },
   ].sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId)));
   const candidate = createEntityFrameCandidateState(state);
-  applyBoardRotationHankoRefreshMigrations(candidate, result.accountMigrations);
+  applyBoardRotationHankoRefreshMigrations(env, candidate, result.accountMigrations);
   const migratedUncertified = candidate.accounts.get(uncertifiedId)!;
   const migratedCertified = candidate.accounts.get(certifiedId)!;
   expect(migratedUncertified.boardHankoRefreshMigration).toEqual(

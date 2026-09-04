@@ -19,7 +19,7 @@ export const SCENARIOS: ScenarioMetadata[] = [
     id: 'rebalance', name: 'Reserve Rebalance',
     description: 'Reserve rebalancing through the settlement pipeline', tags: ['settlement', 'rebalance'],
     browserSafe: false, browserUnsafeReason: 'Requires the external RPC settlement adapter.',
-    run: async () => (await import('../settlement/rebalance')).runRebalanceScenario(),
+    run: async (env) => (await import('../settlement/rebalance')).runRebalanceScenario(env),
   },
   {
     id: 'lock-ahb', name: 'HTLC Multi-Hop (A→H→B)',
@@ -62,12 +62,6 @@ export const SCENARIOS: ScenarioMetadata[] = [
     id: 'swap-market', name: 'Multi-Party Swap Market',
     description: 'Eight traders across three orderbooks', tags: ['swap', 'orderbook', 'stress'],
     browserSafe: true, run: async (env) => (await import('../market/swap-market')).swapMarket(env),
-  },
-  {
-    id: 'swap-tps', name: 'Swap TPS Benchmark',
-    description: 'Native orderbook throughput benchmark', tags: ['swap', 'orderbook', 'benchmark'],
-    browserSafe: false, browserUnsafeReason: 'Benchmark uses Node-only timing and throughput gates.', requiresStress: true,
-    run: async (env) => (await import('../market/swap-tps')).swapTps(env),
   },
   {
     id: 'multi-sig', name: 'Multi-Signer BFT',
@@ -113,7 +107,7 @@ export const SCENARIOS: ScenarioMetadata[] = [
   {
     id: 'cross-j', name: 'Cross-Jurisdiction Swap',
     description: 'Swap routed across jurisdiction adapters', tags: ['swap', 'cross-j', 'rpc'],
-    browserSafe: false, browserUnsafeReason: 'Requires multiple external jurisdiction adapters.',
+    browserSafe: false, browserUnsafeReason: 'Requires multiple external jurisdiction adapters.', requiresStress: true,
     run: async (env) => (await import('../cross-j')).crossJ(env),
   },
   {
@@ -132,3 +126,19 @@ export const getScenariosByTag = (tag: string): ScenarioMetadata[] =>
 
 export const getBrowserScenarios = (): ScenarioMetadata[] =>
   SCENARIOS.filter((scenario) => scenario.browserSafe);
+
+const SMOKE_SCENARIOS = [
+  'processbatch',
+  'rebalance',
+  'dispute-lifecycle',
+  'dispute-transformer',
+  'multi-sig',
+] as const;
+
+export const resolveScenarioSet = (set: string): readonly string[] => {
+  if (set === 'smoke') return SMOKE_SCENARIOS;
+  if (['all', 'everything', 'full', 'full-catalog'].includes(set)) {
+    return SCENARIOS.map(scenario => scenario.id);
+  }
+  throw new Error(`UNKNOWN_SCENARIO_SET:${set}`);
+};

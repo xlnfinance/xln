@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#050505"/>
+  <g stroke="#242424" stroke-width="1">
+    <path d="M56 0v630M1144 0v630M0 56h1200M0 574h1200"/>
+  </g>
+  <g transform="translate(72 64)" fill="none" stroke="#f2f2ee" stroke-width="3">
+    <path d="M0 12 20 0l20 12v24L20 48 0 36z"/>
+    <path d="m10 18 10-6 10 6v12l-10 6-10-6z"/>
+    <circle cx="20" cy="24" r="3" fill="#f2f2ee"/>
+  </g>
+  <text x="132" y="99" fill="#f2f2ee" font-family="Arial, Helvetica, sans-serif" font-size="29" font-weight="700">BrainVault</text>
+  <text x="72" y="235" fill="#f2f2ee" font-family="Georgia, 'Times New Roman', serif" font-size="75">Your wallet,</text>
+  <text x="72" y="320" fill="#f2f2ee" font-family="Georgia, 'Times New Roman', serif" font-size="75">mined from memory.</text>
+  <text x="75" y="394" fill="#aaa9a3" font-family="Arial, Helvetica, sans-serif" font-size="25">You wait once per recovery. An attacker pays for every guess.</text>
+  <g fill="#d7d6d0" font-family="Arial, Helvetica, sans-serif" font-size="20">
+    <text x="75" y="491">NO PHYSICAL SEED REQUIRED</text>
+    <text x="442" y="491">LOCAL ONLY</text>
+    <text x="643" y="491">ARGON2ID</text>
+    <text x="854" y="491">OPEN SOURCE</text>
+  </g>
+  <text x="75" y="550" fill="#777772" font-family="Menlo, Consolas, monospace" font-size="18">brainvault.sh · bunx brainvault</text>
+</svg>

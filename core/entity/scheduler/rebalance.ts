@@ -217,7 +217,6 @@ const evaluateR2CRequest = (
   counterpartyId: string,
   tokenId: number,
   requestedAmountRaw: bigint,
-  effectiveReserves: Map<number, bigint>,
 ): R2CTarget | null => {
   if (requestedAmountRaw <= 0n) return null;
   const request = validateR2CRequestPolicy(
@@ -258,35 +257,42 @@ const evaluateR2CRequest = (
   }
   const requestedAmount =
     requestedAmountRaw > uncollateralized ? uncollateralized : requestedAmountRaw;
-  const reserve = effectiveReserves.get(tokenId) ?? 0n;
-  const amount = requestedAmount > reserve ? reserve : requestedAmount;
-  if (amount <= 0n) {
-    console.warn(
-      `⚠️ R→C request pending but skipped (zero reserve): token=${tokenId} ` +
-      `cp=${counterpartyId.slice(-4)} requested=${requestedAmount}`,
-    );
-    run.debug({
-      step: 2,
-      status: 'blocked',
-      event: 'hub_reserve_zero',
-      counterpartyId,
-      tokenId,
-      requestedAmount: String(requestedAmount),
-    });
-    return null;
-  }
-  effectiveReserves.set(tokenId, reserve - amount);
   return {
     counterpartyId,
     tokenId,
-    amount,
+    amount: requestedAmount,
     requestedAt: request.requestedAt,
     feePaidUpfront: request.feePaidUpfront,
   };
 };
 
+const fundR2CTarget = (
+  run: RebalanceRun,
+  target: R2CTarget,
+  effectiveReserves: Map<number, bigint>,
+): R2CTarget | null => {
+  const reserve = effectiveReserves.get(target.tokenId) ?? 0n;
+  const amount = target.amount > reserve ? reserve : target.amount;
+  if (amount <= 0n) {
+    console.warn(
+      `⚠️ R→C request pending but skipped (zero reserve): token=${target.tokenId} ` +
+      `cp=${target.counterpartyId.slice(-4)} requested=${target.amount}`,
+    );
+    run.debug({
+      step: 2,
+      status: 'blocked',
+      event: 'hub_reserve_zero',
+      counterpartyId: target.counterpartyId,
+      tokenId: target.tokenId,
+      requestedAmount: String(target.amount),
+    });
+    return null;
+  }
+  effectiveReserves.set(target.tokenId, reserve - amount);
+  return { ...target, amount };
+};
+
 const collectR2CTargets = (run: RebalanceRun): R2CTarget[] => {
-  const effectiveReserves = new Map(run.replica.state.reserves);
   const targets: R2CTarget[] = [];
   for (const counterpartyId of getRebalanceAccountIds(run.replica.state)) {
     const account = run.replica.state.accounts.get(counterpartyId);
@@ -298,7 +304,6 @@ const collectR2CTargets = (run: RebalanceRun): R2CTarget[] => {
         counterpartyId,
         tokenId,
         amount,
-        effectiveReserves,
       );
       if (target) targets.push(target);
     }
@@ -316,13 +321,22 @@ const collectR2CTargets = (run: RebalanceRun): R2CTarget[] => {
       compareBigAsc(BigInt(left.requestedAt), BigInt(right.requestedAt)) ||
       compareBigDesc(left.amount, right.amount));
   }
-  if (targets.length > HUB_MAX_R2C_PER_TICK) {
+  const effectiveReserves = new Map(run.replica.state.reserves);
+  const funded: R2CTarget[] = [];
+  let scanned = 0;
+  for (const requested of targets) {
+    if (funded.length >= HUB_MAX_R2C_PER_TICK) break;
+    const target = fundR2CTarget(run, requested, effectiveReserves);
+    scanned += 1;
+    if (target) funded.push(target);
+  }
+  if (scanned < targets.length) {
     console.warn(
       `⚠️ Hub rebalance: capped R→C targets this tick ` +
       `${HUB_MAX_R2C_PER_TICK}/${targets.length}`,
     );
   }
-  return targets.slice(0, HUB_MAX_R2C_PER_TICK);
+  return funded;
 };
 
 const queueR2CTargets = (

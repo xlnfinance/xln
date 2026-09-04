@@ -9,23 +9,17 @@ import {
 import { ensureRuntimeConfig } from '../../../runtime/loop/loop-environment.ts';
 import { decodeRuntimeConfig } from '../../../storage/wal/runtime-machine-schema';
 import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
-import { measureRuntimeFrameCloneBytes } from '../../../runtime/frame/clone';
 
 describe('storage config', () => {
-  test('keeps performance budgets opt-in and measures deterministic clone payload bytes', () => {
+  test('keeps performance budgets opt-in', () => {
     const env = createEmptyEnv('frame-performance-budget');
     expect(env.runtimeConfig?.performance).toBeUndefined();
-    const first = measureRuntimeFrameCloneBytes(env);
-    const second = measureRuntimeFrameCloneBytes(env);
-    expect(first).toBeGreaterThan(0);
-    expect(second).toBe(first);
-
     env.runtimeConfig = {
       ...env.runtimeConfig,
-      performance: { maxCloneBytes: first, maxReducerMs: 25 },
+      performance: { maxCloneBytes: 4_096, maxReducerMs: 25 },
     };
     expect(ensureRuntimeConfig(env).performance).toEqual({
-      maxCloneBytes: first,
+      maxCloneBytes: 4_096,
       maxReducerMs: 25,
     });
     env.runtimeConfig.performance = { maxWalMs: 0 };

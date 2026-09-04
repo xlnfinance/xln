@@ -34,12 +34,12 @@ CLI / workers / native schedulers
    V1 encoding / salt / KDF
 ```
 
-- `primitives/spec.ts` owns frozen bytes, constants, normalization, and salts.
-- `primitives/kdf.ts` owns one canonical Argon2id shard.
-- `canonical.ts` owns ordered root combination and has no I/O or wallet code.
-- `core.ts` owns wallet projections and the public library API.
+- `src/core/primitives/spec.ts` owns frozen bytes, constants, normalization, and salts.
+- `src/core/primitives/kdf.ts` owns one canonical Argon2id shard.
+- `src/core/canonical.ts` owns ordered root combination and has no I/O or wallet code.
+- `src/core/index.ts` owns wallet projections and the public library API.
 - Workers and native engines may schedule work only. They may not define V1.
-- `cli.ts` owns interaction and disclosure policy. It may not reimplement V1.
+- `src/cli/index.ts` owns interaction and disclosure policy. It may not reimplement V1.
 
 Keep lower-level mechanics behind their existing module. A new export or wider
 visibility is an API change and requires a concrete caller, test, and rationale.

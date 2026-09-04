@@ -1,6 +1,6 @@
 import { createHash, type Hash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { cp, lstat, readdir } from 'node:fs/promises';
+import { chmod, cp, lstat, readdir } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 
 export const HLT_AUTHORITY_SOURCE_BINDING_ALGORITHM = 'sha256' as const;
@@ -43,6 +43,34 @@ const listWalFiles = async (root: string, directory = root): Promise<string[]> =
   return files;
 };
 
+const setWalTreeMode = async (
+  directory: string,
+  directoryMode: number,
+  fileMode: number,
+): Promise<void> => {
+  const stat = await lstat(directory);
+  if (!stat.isDirectory()) throw new Error(`HLT_AUTHORITY_SOURCE_WAL_NOT_DIRECTORY:${directory}`);
+  await chmod(directory, directoryMode);
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`HLT_AUTHORITY_SOURCE_WAL_SYMLINK:${path}`);
+    if (entry.isDirectory()) {
+      await setWalTreeMode(path, directoryMode, fileMode);
+    } else if (entry.isFile()) {
+      await chmod(path, fileMode);
+    } else {
+      throw new Error(`HLT_AUTHORITY_SOURCE_WAL_ENTRY:${path}`);
+    }
+  }
+};
+
+const freezeAuthorityWalTree = (walPath: string): Promise<void> =>
+  setWalTreeMode(resolve(walPath), 0o500, 0o400);
+
+const thawReplayWalTree = (walPath: string): Promise<void> =>
+  setWalTreeMode(resolve(walPath), 0o700, 0o600);
+
 export const hashAuthorityWalTree = async (walPath: string): Promise<string> => {
   const root = resolve(walPath);
   const rootStat = await lstat(root);
@@ -63,11 +91,17 @@ export const hashAuthorityWalTree = async (walPath: string): Promise<string> => 
 export const buildHltAuthoritySourceBinding = async (
   walPath: string,
   runtimeSeed: string,
-): Promise<HltAuthoritySourceBinding> => ({
-  algorithm: HLT_AUTHORITY_SOURCE_BINDING_ALGORITHM,
-  runtimeSeedHash: hashRuntimeSeed(runtimeSeed),
-  walTreeHash: await hashAuthorityWalTree(walPath),
-});
+): Promise<HltAuthoritySourceBinding> => {
+  // A LevelDB opened only for reading still rewrites LOG/CURRENT/MANIFEST.
+  // Freeze the closed evidence source before hashing so every replay must use
+  // a writable pristine copy and can never mutate the portable authority WAL.
+  await freezeAuthorityWalTree(walPath);
+  return {
+    algorithm: HLT_AUTHORITY_SOURCE_BINDING_ALGORITHM,
+    runtimeSeedHash: hashRuntimeSeed(runtimeSeed),
+    walTreeHash: await hashAuthorityWalTree(walPath),
+  };
+};
 
 export const assertHltAuthoritySourceBinding = async (
   binding: HltAuthoritySourceBinding,
@@ -94,5 +128,9 @@ export const copyBoundAuthorityWal = async (
   runtimeSeed: string,
 ): Promise<void> => {
   await cp(source, target, { recursive: true, errorOnExist: true, force: false });
-  await assertHltAuthoritySourceBinding(binding, target, runtimeSeed);
+  try {
+    await assertHltAuthoritySourceBinding(binding, target, runtimeSeed);
+  } finally {
+    await thawReplayWalTree(target);
+  }
 };

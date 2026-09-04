@@ -101,6 +101,29 @@ const handleRepeatedCurrentAck = async (
   return { kind: 'fallthrough' };
 };
 
+const handleObsoleteAck = (
+  account: AccountReplica,
+  input: AccountInput,
+  ackHeight: number | undefined,
+  events: string[],
+): PendingAckFrameResult | undefined => {
+  const currentHeight = Number(account.currentHeight ?? 0);
+  if (ackHeight === undefined || ackHeight >= currentHeight - 1) return undefined;
+  events.push(`ℹ️ Ignored stale ACK ${ackHeight} (current=${currentHeight})`);
+  countOp('account.ack.staleIgnored');
+  ackLog.debug('frame.stale_ignored', {
+    height: ackHeight,
+    currentHeight,
+    from: shortId(input.fromEntityId),
+  });
+  // An ancestor ACK cannot identify or mutate any live proposal. At-least-once
+  // transport may deliver it after several newer frames have committed, so it
+  // is a deterministic no-op. A bundled fresh proposal still continues below.
+  return accountInputProposal(input)
+    ? { kind: 'fallthrough' }
+    : { kind: 'return', result: accountInputApplied({ events }) };
+};
+
 export const immediatePredecessorAckError = async (
   account: AccountReplica,
   input: AccountInput,
@@ -387,6 +410,8 @@ export const handlePendingAckFrame = async (
 ): Promise<PendingAckFrameResult> => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
+  const obsolete = handleObsoleteAck(account, input, ackHeight, events);
+  if (obsolete) return obsolete;
   if (ack) {
     const repeated = await handleRepeatedCurrentAck(
       account,

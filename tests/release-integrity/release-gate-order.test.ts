@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 
+import { XLN_RELEASE_PATHS } from '../../tools/release-snapshot/scope.ts';
+
 const isCrossJReleaseTest = (name: string): boolean => (
   name.endsWith('.test.ts') &&
   ['cross-j', 'cross-jurisdiction', 'hash-ladder', 'pull-registry'].some(marker => name.includes(marker))
@@ -15,6 +17,20 @@ const collectCrossJReleaseTests = (directory: string): string[] => (
 );
 
 describe('release gate ordering', () => {
+  test('scopes diff cleanliness to the central XLN release paths', () => {
+    const result = Bun.spawnSync({
+      cmd: ['bun', 'core/scripts/release/run-release-gate.ts', '--quick', '--plan'],
+      cwd: process.cwd(),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const expected = `git diff --check -- ${XLN_RELEASE_PATHS.join(' ')}`;
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain(expected);
+    expect(expected).not.toContain('brainvault');
+  });
+
   test('every GitHub workflow action is pinned to an immutable commit', () => {
     const workflows = readdirSync('.github/workflows')
       .filter(name => name.endsWith('.yml'))
@@ -70,7 +86,7 @@ describe('release gate ordering', () => {
     const expectedFamily = collectCrossJReleaseTests('core/__tests__').sort();
 
     expect(result.exitCode).toBe(0);
-    expect(expectedFamily).toHaveLength(20);
+    expect(expectedFamily).toHaveLength(25);
     expect(plannedFamily).toEqual(expectedFamily);
   });
 

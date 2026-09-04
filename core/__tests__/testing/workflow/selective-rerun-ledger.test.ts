@@ -118,6 +118,20 @@ describe('selective rerun ledger', () => {
     expect(readSelectiveRerunLedger(path).unresolved[0]?.reason).toBe('unknown-failure');
   }));
 
+  test('records a bounded one-line reason without masking the original failure', () => withLedger(path => {
+    recordSelectiveRerunFailure({
+      kind: 'scenario',
+      target: 'company-ipo',
+      failedCodeHash: CODE_HASH,
+      failedAt: '2026-08-14T00:00:00.000Z',
+      reason: `primary failure\n${'stack '.repeat(120)}`,
+    }, path);
+    const reason = readSelectiveRerunLedger(path).unresolved[0]?.reason;
+    expect(reason?.startsWith('primary failure stack')).toBe(true);
+    expect(reason).not.toContain('\n');
+    expect(reason?.length).toBe(500);
+  }));
+
   test('scenario help is side-effect free and cannot erase E2E evidence', () => {
     const evidenceDirectory = resolve(process.cwd(), '.logs', 'e2e-parallel');
     const sentinel = join(evidenceDirectory, `help-sentinel-${String(process.pid)}`);

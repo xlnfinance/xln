@@ -112,6 +112,7 @@ const runFrame = async (
   try {
     const common = {
       ownerEntityId: OWNER,
+      ownerSignerId: SIGNER,
       unsupportedEntityTxTypes: ['entityCommand'] as const,
       occurrence: { kind: 'runtime-input' as const, inputIndex: 0 },
       deferProposal: false,

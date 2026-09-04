@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
 import type { AccountEnvelopeUpdate } from '../../../account/envelope/entity-update';
 import { applyEntityAccountEnvelopeUpdate } from '../../../entity/account-envelope-update';
 import type { AccountAuthorityEntityStageCapability } from '../../../entity/runtime-context';
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { handleSetRebalancePolicyEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
+import {
+  applyBoardRotationHankoRefreshMigrations,
+  markBoardRotationHankoRefreshesPending,
+} from '../../../entity/tx/state-effects/board-rotation-hanko-refresh';
 import type { EntityState } from '../../../entity/types';
 import { createEmptyEnv } from '../../../runtime';
 import { TsAccountWorkerAuthority } from '../../../rscore/ts-worker';
@@ -24,10 +29,16 @@ const JURISDICTION = makeJurisdiction('worker-envelope-update', 31_337, '55', '6
 
 const buildEntityState = (): EntityState => {
   const state = makeState(OWNER, SIGNER, JURISDICTION);
-  openWritableEntityAccounts(state).set(
-    COUNTERPARTY,
-    makeAccount(OWNER, COUNTERPARTY, JURISDICTION),
-  );
+  const account = makeAccount(OWNER, COUNTERPARTY, JURISDICTION);
+  account.currentHeight = 1;
+  account.currentFrame = {
+    ...account.currentFrame,
+    height: 1,
+    timestamp: 1,
+    prevFrameHash: 'genesis',
+  };
+  account.currentFrame.stateHash = computeFrameHash(account.currentFrame);
+  openWritableEntityAccounts(state).set(COUNTERPARTY, account);
   return state;
 };
 
@@ -54,6 +65,7 @@ const rootAfter = async (workers: number, write: EntityWrite): Promise<string> =
   try {
     const common = {
       ownerEntityId: OWNER,
+      ownerSignerId: SIGNER,
       unsupportedEntityTxTypes: ['entityCommand'] as const,
       occurrence: { kind: 'runtime-input' as const, inputIndex: 0 },
       deferProposal: false,
@@ -142,12 +154,38 @@ const releaseRebalanceSubmittedAt: EntityWrite = (state, env) => {
   });
 };
 
+const markBoardHankoRefreshPending: EntityWrite = (state, env) => {
+  markBoardRotationHankoRefreshesPending(env, state, {
+    type: 'BoardActivated',
+    blockNumber: 44,
+    blockHash: `0x${'44'.repeat(32)}`,
+    transactionHash: `0x${'45'.repeat(32)}`,
+    logIndex: 2,
+    data: {
+      entityId: OWNER,
+      previousBoardHash: `0x${'46'.repeat(32)}`,
+      newBoardHash: `0x${'47'.repeat(32)}`,
+      previousBoardValidUntil: '1700604800',
+    },
+  });
+};
+
+const clearBoardHankoRefresh: EntityWrite = (state, env) => {
+  markBoardHankoRefreshPending(state, env);
+  applyBoardRotationHankoRefreshMigrations(env, state, [{
+    counterpartyId: COUNTERPARTY,
+    marker: null,
+  }]);
+};
+
 describe('Entity-owned Account envelope updates', () => {
   for (const [name, write] of [
     ['setRebalancePolicy', setRebalancePolicy],
     ['dispute preparation', prepareAccountDispute],
     ['rebalance submitted marker', stampRebalanceSubmittedAt],
     ['rebalance submitted release', releaseRebalanceSubmittedAt],
+    ['board Hanko refresh marker', markBoardHankoRefreshPending],
+    ['board Hanko refresh release', clearBoardHankoRefresh],
   ] as const) {
     test(`${name} has identical W0/W1/W4 roots`, async () => {
       const inline = await rootAfter(0, write);

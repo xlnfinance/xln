@@ -22,7 +22,6 @@ const readText = (path: string): string => {
       'core/runtime/composition.ts',
       'core/api/public/runtime-public.ts',
       'core/runtime/frame/apply.ts',
-      'core/runtime/frame/clone.ts',
       'core/runtime/frame/dispatch.ts',
       'core/runtime/frame/intake/execution-state.ts',
       'core/runtime/frame/lifecycle/finish.ts',

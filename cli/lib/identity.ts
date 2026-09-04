@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
 import { validateMnemonic, generateMnemonic } from 'bip39';
-import { deriveBrainVaultNative } from '../../brainvault/native.ts';
+import { deriveBrainVaultNative } from '../../brainvault/src/native/index.ts';
 import type { CliSettings } from './settings';
 
 export type WalletRecord = {

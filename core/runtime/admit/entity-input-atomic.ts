@@ -26,7 +26,6 @@ import {
   type StagedEntityInput,
 } from './entity-input-staging.ts';
 import { safeStringify } from '../../protocol/serialization';
-import { authorityDriverEnabled } from '../../rscore/authority-driver';
 
 export const atomicPairInputsMatch = (
   first: RoutedEntityInput,
@@ -225,7 +224,6 @@ const discardAtomicAuthorityStages = async (
 };
 
 const assertAtomicPairEligibility = (
-  env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
 ): void => {
   // A plain payment input is never stamped and must never be entangled with
@@ -234,14 +232,6 @@ const assertAtomicPairEligibility = (
     throw new Error(
       `RUNTIME_ATOMIC_PAIR_MISSING_CROSS_J_STAMP:${pair[0].entityId}:${pair[1].entityId}`,
     );
-  }
-  // One authority owner cannot hold two sibling savepoints. The TypeScript-only
-  // path handles same-Entity pairs as ordinary inputs before this boundary.
-  if (
-    authorityDriverEnabled(env)
-    && normalizeEntityKey(pair[0].entityId) === normalizeEntityKey(pair[1].entityId)
-  ) {
-    throw new Error(`RUNTIME_CROSS_J_ATOMIC_PAIR_ENTITY_COLLISION:${pair[0].entityId}`);
   }
 };
 
@@ -270,7 +260,7 @@ export const applyAtomicEntityInputPair = async (
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {
-  assertAtomicPairEligibility(env, pair);
+  assertAtomicPairEligibility(pair);
   const entityIds: [string, string] = [pair[0].entityId, pair[1].entityId];
   const indexes: [number, number] = [
     firstInputIndex,
@@ -321,20 +311,6 @@ export const applyAtomicEntityInputPair = async (
     return;
   }
 
-  if (staged[0].replicaKey === staged[1].replicaKey) {
-    await discardAtomicAuthorityStages(env, staged);
-    throw new Error(
-      `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION:${staged[0].replicaKey}`,
-    );
-  }
-  const stageOwners = staged.flatMap(entry =>
-    entry.result.authorityStage === null
-      ? []
-      : [entry.result.authorityStage.ownerEntityId]);
-  if (stageOwners.length === 2 && stageOwners[0] === stageOwners[1]) {
-    await discardAtomicAuthorityStages(env, staged);
-    throw new Error(`RUNTIME_ATOMIC_AUTHORITY_OWNER_COLLISION:${stageOwners[0]}`);
-  }
   if (!staged.every(stagedAtomicLegCommitted)) {
     await discardAtomicAuthorityStages(env, staged);
     if (options.isReplay) {

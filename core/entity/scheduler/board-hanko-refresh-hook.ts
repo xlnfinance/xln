@@ -37,7 +37,7 @@ export const processBoardHankoRefreshHook = (
     activation,
     hook.data.afterCounterpartyId,
   );
-  applyBoardRotationHankoRefreshMigrations(replica.state, drafts.accountMigrations);
+  applyBoardRotationHankoRefreshMigrations(env, replica.state, drafts.accountMigrations);
   plan.outputs.push(...drafts.outputs);
   context.hashesToSign.push(...drafts.hashesToSign);
   for (const update of drafts.accountMigrations) {

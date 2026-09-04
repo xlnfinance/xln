@@ -19,6 +19,30 @@ function run(root: string, args: string[]): void {
 }
 
 describe('release source policy', () => {
+  test('ignores dirty external projects outside the production whitelist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-release-external-'));
+    try {
+      run(root, ['git', 'init', '--quiet']);
+      mkdirSync(join(root, 'core'));
+      mkdirSync(join(root, 'brainvault'));
+      writeFileSync(join(root, 'core', 'runtime.ts'), 'export const value = 1;\n');
+      mkdirSync(join(root, 'brainvault', 'experimental'));
+      writeFileSync(join(root, 'brainvault', 'experimental', 'benchmark.ts'), 'export const external = 1;\n');
+      run(root, ['git', 'add', '.']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'fixture']);
+
+      writeFileSync(join(root, 'brainvault', 'experimental', 'benchmark.ts'), 'export const external = 2;\n');
+      expect(() => assertCleanReleaseSource(root)).not.toThrow();
+      writeFileSync(join(root, 'brainvault', 'core.ts'), 'export const integrated = 1;\n');
+      expect(() => assertCleanReleaseSource(root)).not.toThrow();
+      rmSync(join(root, 'brainvault', 'core.ts'));
+      writeFileSync(join(root, 'core', 'runtime.ts'), 'export const value = 2;\n');
+      expect(() => assertCleanReleaseSource(root)).toThrow('RELEASE_SOURCE_DIRTY');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('rejects dirty or untracked source while accepting an exact commit', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-release-source-'));
     try {
@@ -26,13 +50,13 @@ describe('release source policy', () => {
       writeFileSync(join(root, 'source.ts'), 'export const value = 1;\n');
       run(root, ['git', 'add', 'source.ts']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'fixture']);
-      expect(() => assertCleanReleaseSource(root)).not.toThrow();
+      expect(() => assertCleanReleaseSource(root, ['source.ts'])).not.toThrow();
 
       writeFileSync(join(root, 'source.ts'), 'export const value = 2;\n');
-      expect(() => assertCleanReleaseSource(root)).toThrow('RELEASE_SOURCE_DIRTY');
+      expect(() => assertCleanReleaseSource(root, ['source.ts'])).toThrow('RELEASE_SOURCE_DIRTY');
       run(root, ['git', 'checkout', '--quiet', '--', 'source.ts']);
       writeFileSync(join(root, 'untracked.ts'), 'export {};\n');
-      expect(() => assertCleanReleaseSource(root)).toThrow('RELEASE_SOURCE_DIRTY');
+      expect(() => assertCleanReleaseSource(root, ['source.ts', 'untracked.ts'])).toThrow('RELEASE_SOURCE_DIRTY');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -206,14 +230,14 @@ describe('release source policy', () => {
       run(root, ['git', 'add', 'docs/releases']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'release artifact']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'release']);
-      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source)).not.toThrow();
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source, ['source.ts'])).not.toThrow();
 
       run(root, ['git', 'tag', '-d', 'v0.1.8']);
       writeFileSync(join(root, 'runtime.ts'), 'export const injected = true;\n');
       run(root, ['git', 'add', 'runtime.ts']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'unattested code']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'unsafe release']);
-      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source))
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source, ['source.ts', 'runtime.ts']))
         .toThrow('RELEASE_TAG_UNATTESTED_PATHS:runtime.ts');
 
       run(root, ['git', 'tag', '-d', 'v0.1.8']);
@@ -225,12 +249,12 @@ describe('release source policy', () => {
       run(root, ['git', 'add', 'docs/releases']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'rename signed source']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'rename attack']);
-      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source))
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source, ['source.ts']))
         .toThrow('RELEASE_TAG_UNATTESTED_PATHS:source.ts');
 
       run(root, ['git', 'tag', '-d', 'v0.1.8']);
       run(root, ['git', 'tag', 'v0.1.8']);
-      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source)).toThrow('RELEASE_TAG_NOT_ANNOTATED');
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source, ['source.ts'])).toThrow('RELEASE_TAG_NOT_ANNOTATED');
 
       run(root, ['git', 'tag', '-d', 'v0.1.8']);
       run(root, ['git', 'checkout', '--quiet', '--orphan', 'unrelated']);
@@ -239,7 +263,7 @@ describe('release source policy', () => {
       run(root, ['git', 'add', 'unrelated.txt']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'unrelated history']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'wrong release']);
-      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source)).toThrow('RELEASE_TAG_SOURCE_MISMATCH');
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source, ['source.ts'])).toThrow('RELEASE_TAG_SOURCE_MISMATCH');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -37,6 +37,7 @@ import {
 import {
   areStorageCheckpointReplicasConverged,
   areStorageCheckpointReplicasQuiescent,
+  buildLiveReplicaMetaPlan,
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitment,
 } from '../../../storage/replica/replicas';
@@ -272,5 +273,26 @@ describe('certified Entity current head', () => {
     replica.mempool = [];
     applyCertifiedEntityHeadPlan(env, buildCertifiedEntityHeadPlan(env));
     expect(replica.certifiedFrameHead).toBeUndefined();
+  });
+
+  test('ordinary WAL selects the highest replica but rejects a same-height state fork', async () => {
+    const { env, signerId, genesis } = makeRuntime('storage-live-replica-selection');
+    const h1 = await certifyNextFrame(env, signerId, genesis);
+    const current = installReplica(env, signerId, h1.state, h1.link);
+    const laggingSigner = address('42');
+    const lagging: EntityReplica = {
+      ...current,
+      signerId: laggingSigner,
+      state: { ...genesis },
+    };
+    env.state.eReplicas.set(`${genesis.entityId}:${laggingSigner}`, lagging);
+
+    expect(buildLiveReplicaMetaPlan(env).lookup.get(genesis.entityId)?.state.height).toBe(1);
+    expect(areStorageCheckpointReplicasConverged(env)).toBe(false);
+
+    lagging.state = { ...h1.state, timestamp: h1.state.timestamp + 1 };
+    expect(() => buildLiveReplicaMetaPlan(env)).toThrow(
+      'STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE',
+    );
   });
 });

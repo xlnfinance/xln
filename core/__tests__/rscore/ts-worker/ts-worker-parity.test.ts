@@ -4,13 +4,22 @@ import type { AccountConsensusContext } from '../../../account/consensus/context
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { attachHankoWitnessesToState } from '../../../entity/consensus/input/hanko-witness';
+import {
+  getEntityAccountForWrite,
+  PersistentEntityAccountMap,
+} from '../../../entity/state/persistent-account-map';
 import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
-import { makeAccount } from '../../helpers/cross-j';
+import {
+  makeAccount,
+  makeJurisdiction,
+  makeState,
+  openWritableEntityAccounts,
+} from '../../helpers/cross-j';
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
-import { TsAccountWorkerCoordinator } from '../../../rscore/ts-worker';
+import { TsAccountWorkerAuthority, TsAccountWorkerCoordinator } from '../../../rscore/ts-worker';
 import { tsAccountLogicalShard } from '../../../rscore/ts-worker/sharding';
 import { createWorkerConsensusContext, type TsAccountWorkerState } from '../../../rscore/ts-worker/worker-state';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
@@ -552,6 +561,113 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(coordinator.accountsRoot).toBe(beforeRoot);
   });
 
+  test('co-located signer replicas retain their own valid Hanko subset', async () => {
+    const accountId = `0xabc${'2'.repeat(61)}`;
+    const signerA = `0x${'41'.repeat(20)}`;
+    const signerB = `0x${'42'.repeat(20)}`;
+    const jurisdiction = makeJurisdiction(
+      PARITY_JURISDICTION.name,
+      PARITY_JURISDICTION.chainId,
+      'dd',
+      'ee',
+    );
+    const env = createEmptyEnv('ts-worker-replica-hanko-isolation');
+    env.state.jReplicas.set(PARITY_JURISDICTION.name, PARITY_JURISDICTION);
+    const authority = new TsAccountWorkerAuthority(env, 1);
+    const stateFor = (signerId: string) => {
+      const state = makeState(OWNER, signerId, jurisdiction);
+      openWritableEntityAccounts(state).set(accountId, parityAccount(accountId));
+      return state;
+    };
+    const stateA = stateFor(signerA);
+    const stateB = stateFor(signerB);
+
+    const prepare = async (state: typeof stateA, ownerSignerId: string, inputIndex: number) => {
+      const account = getEntityAccountForWrite(state.accounts, accountId);
+      if (!account) throw new Error('PARITY_REPLICA_HANKO_ACCOUNT_MISSING');
+      const common = {
+        ownerEntityId: OWNER,
+        ownerSignerId,
+        unsupportedEntityTxTypes: [],
+        occurrence: { kind: 'runtime-input' as const, inputIndex },
+        deferProposal: false,
+      };
+      const parentRoot = state.accounts.rootHash();
+      await authority.provider.executeAccountInboundBatch({
+        ...common,
+        expectedAccountsRoot: parentRoot,
+        entityState: state,
+        entityContext: undefined,
+        requests: [],
+      });
+      const prepared = await authority.provider.executeAccountOutboundBatch({
+        ...common,
+        entityState: state,
+        entityHeight: 1,
+        accountForWrite: candidateId => getEntityAccountForWrite(state.accounts, candidateId),
+        admissions: [{
+          collectorFrameId: OWNER,
+          account,
+          input: { kind: 'enqueue', txs: [paymentTx(accountId, 1n)] },
+          entityTimestamp: state.timestamp,
+          finalizedJHeight: state.lastFinalizedJHeight,
+        }],
+        proposals: [{
+          collectorFrameId: OWNER,
+          account,
+          timestamp: state.timestamp,
+          jHeight: state.lastFinalizedJHeight,
+          entityTimestamp: state.timestamp,
+          finalizedJHeight: state.lastFinalizedJHeight,
+          selectionIsWholeMempool: true,
+        }],
+        envelopeUpdates: [],
+        materializeAccountIds: [],
+      });
+      const proposal = prepared.proposals[0]?.result;
+      if (!proposal?.ok || proposal.outcome !== 'proposed') {
+        throw new Error('PARITY_REPLICA_HANKO_PROPOSAL_MISSING');
+      }
+      return proposal.hashesToSign ?? [];
+    };
+
+    try {
+      const hashesA = await prepare(stateA, signerA, 0);
+      const hashesB = await prepare(stateB, signerB, 1);
+      expect(hashesB).toEqual(hashesA);
+      const install = async (
+        state: typeof stateA,
+        ownerSignerId: string,
+        marker: string,
+      ) => {
+        const hankos = new Map(hashesA.map(entry => [entry.hash, {
+          hash: entry.hash,
+          hanko: `0x${marker.repeat(65)}`,
+          type: entry.type,
+          entityHeight: 1,
+          createdAt: state.timestamp,
+        }] as const));
+        const root = state.accounts.rootHash();
+        attachHankoWitnessesToState(state, hankos, 1, [accountId]);
+        expect(state.accounts.rootHash()).toBe(root);
+        await authority.provider.installCommittedAccountHankos?.({
+          ownerEntityId: OWNER,
+          ownerSignerId,
+          entityState: state,
+          entityHeight: 1,
+          touchedAccountIds: [accountId],
+          hankos,
+        });
+        return getEntityAccountForWrite(state.accounts, accountId)?.currentFrameHanko;
+      };
+      const hankoA = await install(stateA, signerA, 'a1');
+      const hankoB = await install(stateB, signerB, 'b2');
+      expect(hankoA).not.toBe(hankoB);
+    } finally {
+      await authority.close();
+    }
+  });
+
   test('exact duplicate inbound delivery replays without changing the root', async () => {
     const input = (await fixtureInboundInputs())[0];
     if (!input) throw new Error('PARITY_DUPLICATE_INPUT_MISSING');
@@ -589,6 +705,52 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(first.effects).toHaveLength(1);
     expect(second.effects).toHaveLength(1);
     expect(coordinator.accountsRoot).toBe(firstRoot);
+  });
+
+  test('discarded inbound fitting attempt restores the exact Account parent', async () => {
+    const input = (await fixtureInboundInputs())[0];
+    if (!input) throw new Error('PARITY_DISCARD_INPUT_MISSING');
+    const accountId = input.fromEntityId;
+    const coordinator = await TsAccountWorkerCoordinator.create({
+      ownerEntityId: OWNER,
+      workerCount: 2,
+      accounts: new Map([[accountId, parityAccount(accountId, true)]]),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    const parentRoot = coordinator.accountsRoot;
+    const apply = () => coordinator.applyAccountInputs({
+      frameId: 'discarded-fitting-attempt',
+      expectedAccountsRoot: parentRoot,
+      entityTimestamp: 1_000,
+      finalizedJHeight: 0,
+      owningEntityIsHub: false,
+      inputs: [{ accountId, input }],
+    });
+    const rejectedAttempt = await apply();
+    const prepare = () => coordinator.prepareAccountFrames({
+      frameId: 'discarded-fitting-attempt',
+      timestamp: 1_000,
+      jHeight: 0,
+      envelopeUpdates: [],
+      txs: [],
+      proposals: [],
+    });
+    const rejectedOutbound = await prepare();
+    expect(rejectedOutbound.accountsRoot).not.toBe(parentRoot);
+    await coordinator.discardAccountFrame('discarded-fitting-attempt');
+    expect(coordinator.accountsRoot).toBe(parentRoot);
+    const retry = await apply();
+    expect(digest(retry.effects)).toBe(digest(rejectedAttempt.effects));
+    const retryOutbound = await prepare();
+    expect(retryOutbound.accountsRoot).toBe(rejectedOutbound.accountsRoot);
+    await coordinator.finishAccountFrames({
+      frameId: 'discarded-fitting-attempt',
+      timestamp: 1_000,
+      jHeight: 0,
+      envelopeUpdates: [],
+      txs: [],
+      proposals: [],
+    });
   });
 
   test('inbound genesis installs the canonical Account shell on its owning worker', async () => {
@@ -716,6 +878,54 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     expect(outbound.accountsRoot).toBe(PersistentEntityAccountMap.fromEntries(
       [[accountId, sequential]], OWNER, computeEntityAccountValueHash,
     ).rootHash());
+  });
+
+  test('next-frame retry restores the accepted post-genesis Account parent', async () => {
+    const accountId = `0x457${'c'.repeat(61)}`;
+    const coordinator = await TsAccountWorkerCoordinator.create({
+      ownerEntityId: OWNER,
+      workerCount: 2,
+      accounts: new Map(),
+      jReplicas: new Map([[PARITY_JURISDICTION.name, PARITY_JURISDICTION]]),
+    });
+    await coordinator.applyAccountInputs({
+      frameId: 'post-genesis-parent', expectedAccountsRoot: coordinator.accountsRoot,
+      entityTimestamp: 1_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+    });
+    const genesis = await coordinator.proposeAccountFrames({
+      frameId: 'post-genesis-parent', timestamp: 1_000, jHeight: 0,
+      envelopeUpdates: [],
+      txs: [{
+        accountId,
+        txs: [paymentTx(accountId, 1n)],
+        initialAccount: projectPortableAccountDoc(parityAccount(accountId)),
+      }],
+      proposals: [],
+    });
+    const acceptedParentRoot = genesis.accountsRoot;
+    if (acceptedParentRoot === undefined) throw new Error('POST_GENESIS_PARENT_ROOT_MISSING');
+
+    const runNextAttempt = async (frameId: string) => {
+      await coordinator.applyAccountInputs({
+        frameId, expectedAccountsRoot: acceptedParentRoot,
+        entityTimestamp: 2_000, finalizedJHeight: 0, owningEntityIsHub: false, inputs: [],
+      });
+      return coordinator.proposeAccountFrames({
+        frameId, timestamp: 2_000, jHeight: 0,
+        envelopeUpdates: [{
+          accountId,
+          update: { type: 'setRebalanceSubmittedAt', tokenId: 1, submittedAt: 2_000 },
+        }],
+        txs: [],
+        proposals: [],
+      });
+    };
+
+    const first = await runNextAttempt('post-genesis-next-first');
+    expect(first.accountsRoot).not.toBe(acceptedParentRoot);
+    const replay = await runNextAttempt('post-genesis-next-replay');
+    expect(replay.accountsRoot).toBe(first.accountsRoot);
+    expect(digest(replay.effects)).toBe(digest(first.effects));
   });
 
   test('outbound returns only touched post-Accounts without a duplicate checkpoint channel', async () => {

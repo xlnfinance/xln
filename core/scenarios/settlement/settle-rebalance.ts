@@ -27,12 +27,14 @@ import {
 import { bootScenario, registerEntities, type RegisteredEntity } from '../harness/boot';
 import { userAutoApprove } from '../../entity/tx/handlers/payments/settle';
 import { deriveDelta } from '../../account/utils';
+import { getDefaultRebalancePolicyForToken } from '../../account/config/defaults';
 import { isLeftEntity } from '../../entity/id';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
-import { startRuntimeTraceForTesting } from '../../runtime/observability/runtime-trace';
+import { openRuntimeTraceScopeForTesting } from '../../runtime/observability/runtime-trace';
 import { ethers } from 'ethers';
 import { quoteHtlcPaymentRoute } from '../../pathfinding/htlc-quote';
+import type { SentJBatch } from '../../jurisdiction/machine/batch';
 
 const USDC = 1;
 const convergeScenario = (env: RuntimeReplica, maxCycles = 15): Promise<void> => converge(env, maxCycles);
@@ -47,7 +49,7 @@ const requireRegisteredEntity = (
   return entity;
 };
 
-export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+export async function runSettleRebalance(runtimeReplica: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('=' .repeat(80));
   console.log('  MERGED SETTLEMENT + REBALANCE SCENARIO');
   console.log('  Hub + Alice + Bob + Charlie + Dave');
@@ -64,7 +66,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'settle-rebalance',
     signerIds: ['2', '3', '4', '5', '6'],
-    seed: 'settle-rebalance-deterministic',
+    runtimeReplica,
   });
 
   env.quietRuntimeLogs = true;
@@ -415,20 +417,160 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   }
   await convergeScenario(env);
 
-  // Hub declares as hub
-  await process(env, [{
-    entityId: hub.id, signerId: hub.signer,
-    entityTxs: [{ type: 'setHubConfig', data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n } }]
-  }]);
-  // Hub activation releases two independent Account rebalance lanes plus
-  // their shared on-chain batch/finality round; keep the bound explicit.
-  await convergeScenario(env, 30);
+  const hubBeforeMixedRebalance = findReplica(env, hub.id)[1].state;
+  const hubReserveBeforeMixedRebalance = hubBeforeMixedRebalance.reserves.get(USDC) || 0n;
+  const rebalanceEvidenceBefore = new Map(users.map(user => {
+    const account = hubBeforeMixedRebalance.accounts.get(user.id);
+    const delta = account?.state.deltas.get(USDC);
+    assert(account && delta, `Missing Hub<>${user.name} baseline`, env);
+    return [user.id, {
+      collateral: delta.collateral,
+      ondelta: delta.ondelta,
+      jNonce: account.state.jNonce,
+      lastFinalizedJHeight: account.state.lastFinalizedJHeight || 0,
+    }] as const;
+  }));
+  const expectedC2R = new Map<string, bigint>();
+  const c2rSoftLimit = getDefaultRebalancePolicyForToken(USDC).r2cRequestSoftLimit;
+  for (const user of [alice, charlie]) {
+    const account = hubBeforeMixedRebalance.accounts.get(user.id);
+    const delta = account?.state.deltas.get(USDC);
+    assert(delta, `Missing C→R baseline for ${user.name}`, env);
+    const derived = deriveDelta(delta, isLeftEntity(hub.id, user.id));
+    assert(derived.outTotalHold !== undefined, `Missing C→R hold for ${user.name}`, env);
+    const free = derived.outCollateral > derived.outTotalHold
+      ? derived.outCollateral - derived.outTotalHold
+      : 0n;
+    assert(free > c2rSoftLimit, `${user.name} must qualify for C→R`, env);
+    expectedC2R.set(user.id, free);
+  }
+  assert(expectedC2R.get(alice.id) === usd(5_100), 'Alice exact C→R fixture changed', env);
+  assert(expectedC2R.get(charlie.id) === usd(5_000), 'Charlie exact C→R fixture changed', env);
+
+  // Enabling the hub is the causal boundary: no earlier convergence can
+  // consume the mixed rebalance while this trace is active.
+  const mixedRebalanceTrace = openRuntimeTraceScopeForTesting(env);
+  try {
+    await process(env, [{
+      entityId: hub.id, signerId: hub.signer,
+      entityTxs: [{ type: 'setHubConfig', data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n } }]
+    }]);
+    await convergeScenario(env, 30);
+    await waitForNoSentBatch('mixed-rebalance');
+    await syncChain(env, 2);
+    await convergeScenario(env, 30);
+  } finally {
+    mixedRebalanceTrace.stop();
+  }
 
   const hubConfig = findReplica(env, hub.id)[1].state.hubRebalanceConfig;
   assert(hubConfig, 'Hub config should be set', env);
 
+  const mixedSnapshots = mixedRebalanceTrace.snapshots.slice(mixedRebalanceTrace.startIndex);
+  const mixedTraceLogs = mixedSnapshots.flatMap(snapshot => snapshot.logs ?? []);
+  const requestedByUser = new Map<string, bigint>();
+  for (const user of [bob, dave]) {
+    const receipts = mixedTraceLogs.filter(log => {
+      const data = (log.data ?? {}) as Record<string, unknown>;
+      return log.message === 'request_collateral_committed' &&
+        String(data['entityId'] ?? '').toLowerCase() === user.id.toLowerCase() &&
+        String(data['accountId'] ?? '').toLowerCase() === hub.id.toLowerCase() &&
+        Number(data['tokenId']) === USDC;
+    });
+    assert(receipts.length === 1, `${user.name} must commit exactly one collateral request`, env);
+    requestedByUser.set(user.id, BigInt(String(receipts[0]?.data?.['requestedAmount'] ?? '0')));
+  }
+  assert(requestedByUser.get(bob.id) === 2_999_600_000n, 'Bob exact R→C fixture changed', env);
+  assert(requestedByUser.get(dave.id) === 6_999_200_000n, 'Dave exact R→C fixture changed', env);
+
+  const sentBatches = new Map<string, SentJBatch>();
+  for (const snapshot of mixedSnapshots) {
+    const hubReplica = [...snapshot.state.eReplicas.values()].find(
+      replica => replica.entityId.toLowerCase() === hub.id.toLowerCase(),
+    );
+    const sent = hubReplica?.state.jBatchState?.sentBatch;
+    if (sent) sentBatches.set(`${sent.batchHash.toLowerCase()}:${sent.entityNonce}`, sent);
+  }
+  assert(sentBatches.size > 0, 'PHASE7_NO_FRESH_J_BATCH', env);
+  const sentValues = [...sentBatches.values()];
+  const r2cPairs = sentValues.flatMap(sent => sent.batch.reserveToCollateral
+    .filter(op => op.receivingEntity.toLowerCase() === hub.id.toLowerCase() && op.tokenId === USDC)
+    .flatMap(op => op.pairs.map(pair => ({ sent, pair }))));
+  const c2rOps = sentValues.flatMap(sent => sent.batch.collateralToReserve
+    .filter(op => op.tokenId === USDC)
+    .map(op => ({ sent, op })));
+  assert(r2cPairs.length === requestedByUser.size, `Expected ${requestedByUser.size} exact R→C legs`, env);
+  assert(c2rOps.length === expectedC2R.size, `Expected ${expectedC2R.size} exact C→R legs`, env);
+  for (const [userId, amount] of requestedByUser) {
+    assert(
+      r2cPairs.filter(({ pair }) => pair.entity.toLowerCase() === userId.toLowerCase() && pair.amount === amount).length === 1,
+      `Missing unique exact R→C leg for ${userId.slice(-4)}`,
+      env,
+    );
+  }
+  for (const [userId, amount] of expectedC2R) {
+    assert(
+      c2rOps.filter(({ op }) => op.counterparty.toLowerCase() === userId.toLowerCase() && op.amount === amount).length === 1,
+      `Missing unique exact C→R leg for ${userId.slice(-4)}`,
+      env,
+    );
+  }
+  assert(
+    sentValues.every(sent => sent.batch.settlements.length === 0),
+    'Pure C→R must use only the compressed collateralToReserve lane',
+    env,
+  );
+  assert(typeof jadapter.hasProcessedBatch === 'function', 'Exact batch receipt lookup required', env);
+  for (const sent of sentValues) {
+    assert(
+      await jadapter.hasProcessedBatch(hub.id, sent.batchHash, BigInt(sent.entityNonce)),
+      `Missing processed receipt for batch nonce ${sent.entityNonce}`,
+      env,
+    );
+  }
+
+  const hubAfterMixedRebalance = findReplica(env, hub.id)[1].state;
+  const totalR2C = [...requestedByUser.values()].reduce((sum, amount) => sum + amount, 0n);
+  const totalC2R = [...expectedC2R.values()].reduce((sum, amount) => sum + amount, 0n);
+  assert(
+    (hubAfterMixedRebalance.reserves.get(USDC) || 0n) ===
+      hubReserveBeforeMixedRebalance - totalR2C + totalC2R,
+    'Hub reserve must conserve exact mixed rebalance legs',
+    env,
+  );
+  for (const user of users) {
+    const before = rebalanceEvidenceBefore.get(user.id);
+    assert(before, `Missing rebalance baseline for ${user.name}`, env);
+    const hubAccount = hubAfterMixedRebalance.accounts.get(user.id);
+    const [, userReplica] = findReplica(env, user.id);
+    const userAccount = userReplica.state.accounts.get(hub.id);
+    const expectedCollateral = before.collateral +
+      (requestedByUser.get(user.id) || 0n) - (expectedC2R.get(user.id) || 0n);
+    const hubDelta = hubAccount?.state.deltas.get(USDC);
+    const userDelta = userAccount?.state.deltas.get(USDC);
+    assert(hubDelta?.collateral === expectedCollateral, `${user.name} hub collateral mismatch`, env);
+    assert(userDelta?.collateral === expectedCollateral, `${user.name} peer collateral mismatch`, env);
+    assert(hubDelta?.ondelta === userDelta?.ondelta, `${user.name} bilateral ondelta mismatch`, env);
+    assert(hubAccount?.state.jNonce === userAccount?.state.jNonce, `${user.name} bilateral nonce mismatch`, env);
+    assert(!hubAccount?.state.settlementWorkspace && !userAccount?.state.settlementWorkspace,
+      `${user.name} settlement workspace must clear`, env);
+    if (expectedC2R.has(user.id)) {
+      assert((hubAccount?.state.jNonce || 0) > before.jNonce, `${user.name} C→R nonce must advance`, env);
+    }
+    if (requestedByUser.has(user.id)) {
+      assert((hubAccount?.state.requestedRebalance.get(USDC) || 0n) === 0n,
+        `${user.name} request must clear`, env);
+      assert(!hubAccount?.state.requestedRebalanceFeeState.has(USDC),
+        `${user.name} fee state must clear`, env);
+      assert(!hubAccount?.shadow.rebalance.submittedAtByToken.has(USDC),
+        `${user.name} exact-once latch must clear`, env);
+      assert((hubAccount?.state.lastFinalizedJHeight || 0) > before.lastFinalizedJHeight,
+        `${user.name} finalized J height must advance`, env);
+    }
+  }
+
   console.log = originalLog;
-  console.log('--- TEST 6 PASSED: policies + hub config set ---');
+  console.log('--- TEST 6 PASSED: exact mixed R→C + C→R batch finalized ---');
   console.log = quietLog;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -454,7 +596,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
 
   // Production history is intentionally bounded to one snapshot. This
   // scenario owns the multi-frame trace only for the causal assertion below.
-  const phase65Trace = startRuntimeTraceForTesting(env);
+  const phase65Trace = openRuntimeTraceScopeForTesting(env);
   try {
     await process(env, [{
       entityId: hub.id,
@@ -480,10 +622,13 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     for (let i = 0; i < 80; i++) {
       advanceTime(i < 20 ? 50 : 100);
       await process(env);
+      await syncChain(env, 1);
       daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
       daveRequestedAfterHtlc = daveAccountAfterHtlc?.state.requestedRebalance.get(USDC) || 0n;
       daveCollateralAfterHtlc = daveAccountAfterHtlc?.state.deltas.get(USDC)?.collateral || 0n;
-      const phase65Logs = phase65Trace.snapshots.flatMap((snapshot) => snapshot.logs ?? []);
+      const phase65Logs = phase65Trace.snapshots
+        .slice(phase65Trace.startIndex)
+        .flatMap((snapshot) => snapshot.logs ?? []);
       phase65HtlcReceived = phase65Logs.some((log) => {
         const data = (log.data ?? {}) as Record<string, unknown>;
         return log.message === 'HtlcReceived' &&
@@ -501,8 +646,10 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
           String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
           Number(data['tokenId']) === USDC;
       });
+      const hubSentBatch = findReplica(env, hub.id)[1].state.jBatchState?.sentBatch;
       if (phase65HtlcReceived && phase65HtlcFinalized && phase65RequestCollateralCommitted &&
-        (daveRequestedAfterHtlc > 0n || daveCollateralAfterHtlc > daveCollateralBeforeHtlc)) {
+        daveRequestedAfterHtlc === 0n && daveCollateralAfterHtlc > daveCollateralBeforeHtlc &&
+        !hubSentBatch) {
         break;
       }
     }
@@ -510,7 +657,6 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     phase65Trace.stop();
   }
 
-  const phase65TopUpApplied = daveCollateralAfterHtlc > daveCollateralBeforeHtlc;
   assert(phase65HtlcReceived, 'Expected Dave to receive HTLC before request_collateral', env);
   assert(phase65HtlcFinalized, 'Expected HTLC to finalize before request_collateral', env);
   assert(
@@ -519,130 +665,72 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     env,
   );
   assert(
-    daveRequestedAfterHtlc > 0n || daveCollateralAfterHtlc > daveCollateralBeforeHtlc,
-    `Expected pending request OR fulfilled top-up after HTLC resolve (requested=${daveRequestedAfterHtlc}, collateral ${daveCollateralBeforeHtlc}->${daveCollateralAfterHtlc})`,
+    daveRequestedAfterHtlc === 0n && daveCollateralAfterHtlc > daveCollateralBeforeHtlc,
+    `Expected finalized top-up after HTLC resolve (requested=${daveRequestedAfterHtlc}, collateral ${daveCollateralBeforeHtlc}->${daveCollateralAfterHtlc})`,
     env,
   );
+  const phase65Snapshots = phase65Trace.snapshots.slice(phase65Trace.startIndex);
+  const phase65Receipts = phase65Snapshots.flatMap(snapshot => snapshot.logs ?? []).filter(log => {
+    const data = (log.data ?? {}) as Record<string, unknown>;
+    return log.message === 'request_collateral_committed' &&
+      String(data['entityId'] ?? '').toLowerCase() === dave.id.toLowerCase() &&
+      String(data['accountId'] ?? '').toLowerCase() === hub.id.toLowerCase() &&
+      Number(data['tokenId']) === USDC;
+  });
+  assert(phase65Receipts.length === 1, 'Expected one exact post-HTLC collateral request', env);
+  const phase65RequestedAmount = BigInt(String(phase65Receipts[0]?.data?.['requestedAmount'] ?? '0'));
+  assert(
+    daveCollateralAfterHtlc === daveCollateralBeforeHtlc + phase65RequestedAmount,
+    'Post-HTLC R→C amount must equal its committed request',
+    env,
+  );
+  const phase65SentBatches = new Map<string, SentJBatch>();
+  for (const snapshot of phase65Snapshots) {
+    const hubReplica = [...snapshot.state.eReplicas.values()].find(
+      replica => replica.entityId.toLowerCase() === hub.id.toLowerCase(),
+    );
+    const sent = hubReplica?.state.jBatchState?.sentBatch;
+    if (sent) phase65SentBatches.set(`${sent.batchHash.toLowerCase()}:${sent.entityNonce}`, sent);
+  }
+  const phase65Pairs = [...phase65SentBatches.values()].flatMap(sent =>
+    sent.batch.reserveToCollateral
+      .filter(op => op.receivingEntity.toLowerCase() === hub.id.toLowerCase() && op.tokenId === USDC)
+      .flatMap(op => op.pairs.map(pair => ({ sent, pair }))),
+  );
+  assert(
+    phase65Pairs.filter(({ pair }) =>
+      pair.entity.toLowerCase() === dave.id.toLowerCase() && pair.amount === phase65RequestedAmount).length === 1,
+    'Expected one exact post-HTLC R→C batch leg',
+    env,
+  );
+  const hubDaveAfterHtlc = findReplica(env, hub.id)[1].state.accounts.get(dave.id);
+  assert(
+    hubDaveAfterHtlc?.state.deltas.get(USDC)?.collateral === daveCollateralAfterHtlc,
+    'Post-HTLC collateral must be bilateral-equal',
+    env,
+  );
+  assert(!hubDaveAfterHtlc?.state.requestedRebalance.has(USDC), 'Post-HTLC request must clear', env);
+  assert(!hubDaveAfterHtlc?.state.requestedRebalanceFeeState.has(USDC), 'Post-HTLC fee state must clear', env);
+  assert(!hubDaveAfterHtlc?.shadow.rebalance.submittedAtByToken.has(USDC), 'Post-HTLC latch must clear', env);
 
   console.log = originalLog;
   console.log('--- TEST 6.5 PASSED ---');
   console.log = quietLog;
 
-  // Ensure previous R→C batch from phase 6.5 is fully observed/finalized before C→R cycles.
-  await waitForNoSentBatch('phase6.5->phase7');
-
   // ══════════════════════════════════════════════════════════════════════════
-  // PHASE 7: HUB CRONTAB REBALANCE
+  // PHASE 7: FINAL VERIFICATION
   // ══════════════════════════════════════════════════════════════════════════
-  console.log = originalLog;
-  console.log('\n--- TEST 7: Hub Crontab Rebalance ---');
-  console.log = quietLog;
-
-  const rebalanceEvidenceBefore = new Map<string, { collateral: bigint }>();
-  for (const user of users) {
-    const account = findReplica(env, hub.id)[1].state.accounts.get(user.id);
-    const coll = account?.state.deltas.get(USDC)?.collateral || 0n;
-    rebalanceEvidenceBefore.set(user.id, { collateral: coll });
-  }
-
-  // Cycle 1: Hub detects C→R (Alice, Charlie) + R→C (Bob, Dave)
-  advanceTime(31000);
-  await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [] }]);
-  for (let i = 0; i < 15; i++) { advanceTime(100); await process(env); }
-  await convergeScenario(env);
-
-  // Cycle 2: Hub executes signed settlements + deposits
-  advanceTime(31000);
-  await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [] }]);
-  for (let i = 0; i < 15; i++) { advanceTime(100); await process(env); }
-  await convergeScenario(env);
-
-  // Check jBatch has ops
-  const hubBatch = findReplica(env, hub.id)[1].state.jBatchState?.batch;
-  const totalOps = (hubBatch?.reserveToCollateral?.length || 0) +
-    (hubBatch?.collateralToReserve?.length || 0) +
-    (hubBatch?.settlements?.length || 0);
-
-  const useManualBroadcast = jadapter.mode === 'browservm';
-
-  if (totalOps > 0) {
-    if (useManualBroadcast) {
-      // BrowserVM path: submit directly
-      await process(env, [{
-        entityId: hub.id, signerId: hub.signer,
-        entityTxs: [{ type: 'j_broadcast', data: {} }]
-      }]);
-      advanceTime(150);
-      await process(env);
-      await syncChain(env, 5);
-    } else {
-      // RPC path: avoid duplicate submissions; let crontab side-effects broadcast.
-      for (let i = 0; i < 6; i++) {
-        advanceTime(350);
-        await process(env);
-        await syncChain(env, 1);
-      }
-    }
-  } else {
-    // Extra cycle
-    advanceTime(31000);
-    await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [] }]);
-    for (let i = 0; i < 15; i++) { advanceTime(100); await process(env); }
-    await convergeScenario(env);
-
-    const hubBatch2 = findReplica(env, hub.id)[1].state.jBatchState?.batch;
-    const totalOps2 = (hubBatch2?.reserveToCollateral?.length || 0) +
-      (hubBatch2?.collateralToReserve?.length || 0) +
-      (hubBatch2?.settlements?.length || 0);
-
-    if (totalOps2 > 0) {
-      if (useManualBroadcast) {
-        await process(env, [{
-          entityId: hub.id, signerId: hub.signer,
-          entityTxs: [{ type: 'j_broadcast', data: {} }]
-        }]);
-        advanceTime(150);
-        await process(env);
-        await syncChain(env, 5);
-      } else {
-        for (let i = 0; i < 6; i++) {
-          advanceTime(350);
-          await process(env);
-          await syncChain(env, 1);
-        }
-      }
-    }
-  }
-
-  console.log = originalLog;
-  console.log('--- TEST 7: Rebalance batch submitted ---');
-
-  await waitForNoSentBatch('phase7->phase8');
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // PHASE 8: FINAL VERIFICATION
-  // ══════════════════════════════════════════════════════════════════════════
-  console.log('\n--- TEST 8: Final Verification ---');
+  console.log('\n--- TEST 7: Final Verification ---');
 
   const hubFinal = findReplica(env, hub.id)[1].state;
 
-  // Mixed flow nonce expectations:
-  // - Alice had manual settlement in Phase 3 => nonce >= 1
-  // - Other users may also increment nonce if C→R settlement path executed
   const aliceNonce = hubFinal.accounts.get(alice.id)?.state.jNonce || 0;
   assert(aliceNonce >= 1, `Hub<>Alice nonce should be >= 1 after manual settlement (got ${aliceNonce})`, env);
   console.log(`  Hub<>Alice nonce=${aliceNonce}`);
-  const nonAliceNonces: Array<{ name: string; nonce: number }> = [];
   for (const user of [bob, charlie, dave]) {
     const nonce = hubFinal.accounts.get(user.id)?.state.jNonce || 0;
-    nonAliceNonces.push({ name: user.name, nonce });
     console.log(`  Hub<>${user.name} nonce=${nonce}`);
   }
-  assert(
-    nonAliceNonces.some(({ nonce }) => nonce > 0),
-    `Expected at least one non-Alice nonce increment from C→R flow, got [${nonAliceNonces.map(n => `${n.name}:${n.nonce}`).join(', ')}]`,
-    env,
-  );
 
   // Workspace cleanup: all should be cleared
   for (const user of users) {
@@ -670,7 +758,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
 
   // Final state summary
   const hubFinalReserve = hubFinal.reserves.get(USDC) || 0n;
-  console.log(`\n  Hub reserve: $${hubFinalReserve / 10n**18n}`);
+  console.log(`\n  Hub reserve: $${hubFinalReserve / usd(1)}`);
   for (const user of users) {
     const delta = hubFinal.accounts.get(user.id)?.state.deltas.get(USDC);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
@@ -679,35 +767,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     console.log(`  Hub<>${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, nonce=${nonce}`);
   }
 
-  const collateralDecreasedUsers: string[] = [];
-  const collateralIncreasedUsers: string[] = [];
-  for (const user of users) {
-    const before = rebalanceEvidenceBefore.get(user.id) || { collateral: 0n };
-    const hubAccount = hubFinal.accounts.get(user.id);
-    const afterCollateral = hubAccount?.state.deltas.get(USDC)?.collateral || 0n;
-    if (afterCollateral < before.collateral) collateralDecreasedUsers.push(user.name);
-    if (afterCollateral > before.collateral) collateralIncreasedUsers.push(user.name);
-  }
-  const hasNonAliceSettle = nonAliceNonces.some(({ nonce }) => nonce > 0);
-  assert(
-    collateralDecreasedUsers.length > 0 || hasNonAliceSettle,
-    `Expected C→R evidence via collateral drop or non-Alice nonce increment (users=${collateralDecreasedUsers.join(',') || 'n/a'}; nonces=[${nonAliceNonces.map(n => `${n.name}:${n.nonce}`).join(', ')}])`,
-    env,
-  );
-  const hasAboveInitialCollateral = users.some(user => {
-    const after = hubFinal.accounts.get(user.id)?.state.deltas.get(USDC)?.collateral || 0n;
-    return after > usd(5_000);
-  });
-  assert(
-    phase65TopUpApplied || collateralIncreasedUsers.length > 0 || hasAboveInitialCollateral,
-    `Expected R→C evidence (phase6.5 top-up or collateral growth above initial)`,
-    env,
-  );
-  console.log(
-    `  C→R users: [${collateralDecreasedUsers.join(', ')}], R→C users: [${collateralIncreasedUsers.join(', ')}]`,
-  );
-
-  console.log('\n--- TEST 8 PASSED ---');
+  console.log('\n--- TEST 7 PASSED ---');
 
   // ══════════════════════════════════════════════════════════════════════════
   // CLEANUP
@@ -725,11 +785,4 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
       console.log = originalLog;
     }
   }
-}
-
-// Run if executed directly
-if (import.meta.main) {
-  runSettleRebalance()
-    .then(() => process.exit(0))
-    .catch((err) => { console.error('Scenario failed:', err); process.exit(1); });
 }

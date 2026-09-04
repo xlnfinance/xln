@@ -346,6 +346,7 @@ describe('production startup wiring', () => {
     };
 
     expect(deploy).toContain('build_remote_frontend_archive');
+    expect(deploy).toContain('bun "$REPO_ROOT/tools/release-snapshot/assert-clean.ts" "$REPO_ROOT"');
     expect(deploy).toContain('ensure_committed_contract_artifacts');
     expect(deploy).toContain('CONTRACT_ARTIFACTS_NOT_COMMITTED');
     expect(deploy).toContain(

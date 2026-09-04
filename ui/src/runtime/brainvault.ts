@@ -5,7 +5,7 @@ import {
 	factorForShardCount,
 	getShardCount,
 	validateInputs,
-} from '../../../brainvault/core.ts';
+} from '../../../brainvault/src/core/index.ts';
 
 export type BrainvaultWork = {
 	factor: number;
@@ -60,7 +60,7 @@ type WorkerMessage = {
 };
 
 function createBrainvaultWorker(): Worker {
-	return new Worker(new URL('../../../brainvault/worker-browser.ts', import.meta.url), { type: 'module' });
+	return new Worker(new URL('../../../brainvault/src/native/workers/browser.ts', import.meta.url), { type: 'module' });
 }
 
 /**

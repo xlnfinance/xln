@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icons';
+import { Logo } from '../components/Logo';
 import { useApp } from '../runtime/store';
 import { bootEmbeddedDemo, connectSandbox } from '../runtime/sandbox';
 import {
@@ -373,7 +374,7 @@ export function Gate() {
 function GateMark() {
 	return (
 		<div className="rail-mark gate-mark" aria-hidden>
-			△
+			<Logo size={26} />
 		</div>
 	);
 }

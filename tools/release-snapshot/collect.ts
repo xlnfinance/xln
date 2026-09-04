@@ -13,6 +13,7 @@ import type {
   TreeNode,
 } from './types.ts';
 import { collectFrozenCore, readFrozenManifest, sourceDependencySpecifiers } from '../frozen-core/core.ts';
+import { isXlnReleasePath } from './scope.ts';
 
 type SccFile = {
   Language?: string;
@@ -72,6 +73,7 @@ function listRepositoryFiles(root: string): string[] {
 }
 
 export function releaseSnapshotExclusion(path: string): ExcludedFile['reason'] | null {
+  if (!isXlnReleasePath(path)) return 'outside-release-scope';
   if (path.startsWith(RELEASE_ARTIFACT_PREFIX)) return 'release-artifact';
   if (GENERATED_FILES.has(path) || GENERATED_PREFIXES.some((prefix) => path.startsWith(prefix))) return 'generated';
   if (path.startsWith('.archive/') || path.startsWith('vendor/')) return 'vendor';
@@ -345,8 +347,9 @@ export function collectSnapshot(input: {
 }): ReleaseSnapshot {
   const root = resolve(input.root);
   const listed = listRepositoryFiles(root);
+  const scoped = listed.filter(path => isXlnReleasePath(path));
   const excluded: ExcludedFile[] = [];
-  const included = listed.filter((path) => {
+  const included = scoped.filter((path) => {
     const reason = releaseSnapshotExclusion(path);
     if (!reason) return true;
     const absolute = resolve(root, path);
@@ -377,7 +380,7 @@ export function collectSnapshot(input: {
   }));
   return {
     schemaVersion: 1,
-    toolVersion: '1.0.0',
+    toolVersion: '1.1.0',
     collector: { name: 'scc', version: scc.version },
     release: {
       version: input.version,

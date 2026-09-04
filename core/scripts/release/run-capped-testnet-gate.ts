@@ -12,6 +12,7 @@ import {
 } from '../e2e/harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';
 import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
+import { XLN_RELEASE_PATHS } from '../../../tools/release-snapshot/scope';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 
@@ -248,7 +249,9 @@ const main = async (): Promise<void> => {
 
   const commit = await runTextCommand('git rev-parse HEAD');
   if (commit.code !== 0) throw new Error(`GIT_COMMIT_UNAVAILABLE:${commit.stderr || commit.stdout}`);
-  const dirty = await runTextCommand('git status --short');
+  const dirty = await runTextCommand(
+    `git status --short --untracked-files=all -- ${XLN_RELEASE_PATHS.join(' ')}`,
+  );
   if (dirty.code !== 0) throw new Error(`GIT_STATUS_UNAVAILABLE:${dirty.stderr || dirty.stdout}`);
   if (dirty.stdout.trim() && !args.allowDirty) {
     throw new Error(`CAPPED_TESTNET_DIRTY_WORKTREE:\n${dirty.stdout}`);

@@ -286,16 +286,13 @@ const failIncompleteCrossJCohort = (
   throw new Error(`CROSS_J_INCOMPLETE_COHORT_DROPPED:${group.targetRuntimeId}`);
 };
 
-const tryDirectOutputEnvelope = (
+const dispatchDirectOutputEnvelope = (
   env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
-  deps: RuntimeOutputRoutingDeps,
-): boolean => {
-  const state = deps.ensureRuntimeInfrastructure(env);
-  const directDispatch = state.directEntityInputsDispatch;
-  if (!directDispatch) return false;
+  directDispatch: NonNullable<ReturnType<RuntimeOutputRoutingDeps['ensureRuntimeInfrastructure']>['directEntityInputsDispatch']>,
+): void => {
   const delivery = requireDeliveryResult(
     directDispatch(
       group.targetRuntimeId,
@@ -324,7 +321,6 @@ const tryDirectOutputEnvelope = (
     sourceRuntimeHeight: envelope.sourceRuntimeHeight,
     outputs: summarizeAccountEnvelopeOutputs(sendable),
   });
-  return true;
 };
 
 const dispatchP2POutputEnvelope = (
@@ -395,9 +391,7 @@ const dispatchOutputEnvelope = (
     // A Runtime that owns a duplex direct server has one authoritative peer
     // socket map. Falling through to relay after a direct miss forks transport
     // ordering and can erase Account ACKs after synchronous outbox retirement.
-    if (!tryDirectOutputEnvelope(env, group, sendable, envelope, deps)) {
-      throw new Error(`ROUTE_DIRECT_DISPATCH_INVARIANT:${group.targetRuntimeId}`);
-    }
+    dispatchDirectOutputEnvelope(env, group, sendable, envelope, state.directEntityInputsDispatch);
     return;
   }
   dispatchP2POutputEnvelope(env, group, sendable, envelope, deps);

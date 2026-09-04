@@ -166,7 +166,12 @@ export async function connectRemote(wsUrl: string, authKey?: string): Promise<Ru
 
 /** Dev-only: lets the browser console and E2E debugging read the live adapter. */
 if (import.meta.env.DEV) {
-	(window as typeof window & { __xln?: { adapter: () => RuntimeAdapter | null } }).__xln = { adapter: () => currentAdapter };
+	(window as typeof window & { __xln?: Record<string, unknown> }).__xln = {
+		adapter: () => currentAdapter,
+		env: () => currentEnv,
+		xln: () => getXLN(),
+		store: useApp,
+	};
 }
 
 export function requireAdapter(): RuntimeAdapter {

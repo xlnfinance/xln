@@ -171,7 +171,12 @@ describe('authority Account creation collection', () => {
     };
 
     await expect(applyAccountInputToEntity(state, input, env, accountContext))
-      .rejects.toThrow('ACCOUNT_INPUT_INPUT_REJECTED:ACCOUNT_INPUT_FRAME_HANKO_INVALID');
+      .rejects.toMatchObject({
+        name: 'MalformedEntityFrameInputError',
+        rejection: expect.stringContaining(
+          'ACCOUNT_INPUT_INPUT_REJECTED:ACCOUNT_INPUT_FRAME_HANKO_INVALID',
+        ),
+      });
     const wave = buildAuthorityWave(FRAME_ID);
     if (wave.kind !== 'wave') throw new Error(`TEST_WAVE_REQUIRED:${wave.kind}`);
     const entity = wave.entities[0];

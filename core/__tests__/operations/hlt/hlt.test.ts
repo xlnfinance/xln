@@ -118,7 +118,9 @@ describe('production swap load evidence', () => {
   test('HLT provenance is an explicit production-input whitelist', () => {
     expect(XLN_HLT_PROVENANCE_PATHS).toContain('core');
     expect(XLN_HLT_PROVENANCE_PATHS).toContain('rscore');
-    expect(XLN_HLT_PROVENANCE_PATHS).toContain('brainvault');
+    expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('brainvault');
+    expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('brainvault/core.ts');
+    expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('brainvault/experimental');
     expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('ui');
     expect(XLN_HLT_PROVENANCE_PATHS).not.toContain('design');
   });

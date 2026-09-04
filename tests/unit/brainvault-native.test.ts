@@ -4,8 +4,8 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { deriveBrainVaultNative } from '../../brainvault/native';
-import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/primitives/spec';
+import { deriveBrainVaultNative } from '../../brainvault/src/native/index';
+import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/src/core/primitives/spec';
 import { validateRuntimeAdapterWireMessage } from '../../core/api/runtime-adapter/wire-schema';
 import { createBrainVaultOwnerController } from '../../core/api/server/ownership/brainvault';
 import type { EntityReplica, RuntimeInput, RuntimeReplica } from '../../core/runtime/types';

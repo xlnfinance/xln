@@ -5,9 +5,16 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { runSwapRuntimeBenchmark } from '../../scripts/operations/benchmark/bench-swap-runtime-tps';
+import {
+  proveSwapRuntimeEconomics,
+  runSwapRuntimeBenchmark,
+} from '../../scripts/operations/benchmark/bench-swap-runtime-tps';
 
 describe('swap Account-frame batching benchmark', () => {
+  test('proves exact same-J settlement and cross-J fill progress', async () => {
+    await expect(proveSwapRuntimeEconomics()).resolves.toBeUndefined();
+  });
+
   test('counts exact same/cross Account frames at the five-transaction ceiling', async () => {
     const result = await runSwapRuntimeBenchmark({
       swaps: 10,

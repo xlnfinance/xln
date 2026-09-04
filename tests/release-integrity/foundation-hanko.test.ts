@@ -83,6 +83,11 @@ describe('Foundation release Hanko', () => {
 
   test('includes the canonical Bun lockfile in the signed code root', () => {
     expect(releaseSnapshotExclusion('bun.lock')).toBeNull();
+    expect(releaseSnapshotExclusion('core/runtime.ts')).toBeNull();
+    expect(releaseSnapshotExclusion('brainvault/core.ts')).toBe('outside-release-scope');
+    expect(releaseSnapshotExclusion('brainvault/experimental/benchmark.ts')).toBe('outside-release-scope');
+    expect(releaseSnapshotExclusion('ui/src/App.tsx')).toBe('outside-release-scope');
+    expect(releaseSnapshotExclusion('design/screenshots/ui/home.png')).toBe('outside-release-scope');
     const base = [{ path: 'core/runtime.ts', sha256: '11'.repeat(32) }];
     const withLock = [...base, { path: 'bun.lock', sha256: '22'.repeat(32) }];
     const changedLock = [...base, { path: 'bun.lock', sha256: '33'.repeat(32) }];

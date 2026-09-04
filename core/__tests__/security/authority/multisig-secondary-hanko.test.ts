@@ -401,6 +401,7 @@ describe('multisig secondary Hanko production', () => {
     });
     const outbound = proposed.outputs.find(output => output.proposedFrame)?.proposedFrame;
     if (!outbound) throw new Error('TEST_OUTBOUND_ENTITY_PROPOSAL_MISSING');
+    expect(proposed.entityContext).toEqual(outbound.entityContext);
 
     const wireJson = safeStringify(outbound);
     expect(wireJson).not.toContain('entityEncPrivKey');

@@ -244,3 +244,67 @@ works; the gap is specific to the dispute events.
 
 Wallet side: the account shows "Dispute sent" until `activeDispute` arrives;
 finalize is offered only from `activeDispute`.
+
+## 13. Account-worker URL is root-absolute; the runtime bundle cannot be hosted under a path prefix
+
+- Where: `core/rscore/ts-worker/coordinator-client.ts:44-50` — in a browser the coordinator spawns
+  `new URL('/account-worker.js', location.origin)`.
+- Effect: any host that serves the runtime bundle below a prefix (xln.finance/ui/, a CDN folder, an
+  iframe on another path) requests the worker from the site root. On xln.finance the root has no
+  `account-worker.js` at all (`frontend/build/` of 2026-08-23 ships only `runtime.js`), so the
+  default worker pool (`canonicalTsAccountWorkerCount()` = min(8, hardwareConcurrency)) fails with
+  `TS_ACCOUNT_WORKER_ERROR` for every browser runtime that does not pin `XLN_TS_ACCOUNT_WORKERS=0`.
+- Wallet workaround (ui/src/runtime/xln-loader.ts): the React wallet sets a `process.env`
+  shim with `XLN_TS_ACCOUNT_WORKERS='0'` before importing `runtime.js`, selecting the canonical
+  inline account transition. One user with a handful of accounts gains nothing from eight module
+  workers and boots faster without them, but the switch is a global hack rather than an API.
+- Suggested fix: derive the worker beside the bundle — `new URL('./account-worker.js', import.meta.url)`
+  (bundlers keep `import.meta.url` pointing at the loaded runtime.js) — and accept an explicit
+  override such as `globalThis.XLN_ACCOUNT_WORKER_URL` or a `createRuntime({ accountWorkers })`
+  option so hosts and single-user wallets choose the pool size without a fake `process`.
+
+## 14. `readPersistedFrameJournals` silently returns `logs: []` since ee77386af; every frame-log consumer built on it went blind
+
+- Where: `core/storage/queries/history.ts` — `buildRecoveryJournalFromStorageFrame(frame, payloads, logs = [])`
+  (ee77386af "certify portable TS Rust runtime parity", 2026-09-04 01:23). Before that commit the journal
+  carried `structuredClone(frame.logs)`; now `readPersistedFrameJournal` calls the builder without the third
+  argument, so the public `readPersistedFrameJournals` (exported through `core/runtime/composition.ts:325`)
+  keeps its signature and shape but never has a log entry. Logs moved to the runtime-activity view
+  (`readPersistedRuntimeActivityJournal/Record/Page`, `core/storage/history/runtime-activity-view.ts`).
+- Effect (reproduced 2026-09-04 on the wallet sandbox): a 25 USDC HTLC payment commits (Home shows
+  "Sent −25.00 · settled", height 70→76) but `readPersistedFrameJournals(env,{fromHeight:66,toHeight:76})`
+  returns eleven journals with `logs.length === 0`, so `HtlcFinalized`/`HtlcReceived`/`HtlcFailed` never reach
+  `createPaymentTerminalMonitor` and no receipt is shown. Consumers still on the old reader:
+  `frontend/src/lib/view/View.svelte:190` (payment spotlight — the SvelteKit app has the same blind spot),
+  `ui/src/runtime/financial/receipts.ts` (fixed the same day: reads `readPersistedRuntimeActivityJournal`
+  per height; payment E2E green again), `frontend/src/lib/stores/vault/vaultStore.ts:513` (heights only — unaffected).
+- Why it slipped: the type still declares `logs: FrameLogEntry[]`, so nothing failed to compile, and the E2E
+  suites covering receipts had been running against a runtime bundle built before the commit.
+- Suggested fix: fill `logs` in `readPersistedFrameJournal` from the activity view (the activity readers already
+  call `ensureRuntimeActivityView`), or drop `logs` from `PersistedFrameJournal` so callers fail loudly; either
+  way migrate `View.svelte:190`.
+
+## 15. BrowserVM state is persisted inside a 10 KB-capped runtime-machine graph row; a sandbox halts once its trie outgrows the cap
+
+- Where: `core/storage/wal/runtime-machine-graph.ts:42` (`MAX_RUNTIME_MACHINE_GRAPH_ROW_BYTES = 10_000`) and
+  `boundedRow` at `:236-241`, which throws `STORAGE_RUNTIME_MACHINE_GRAPH_ROW_TOO_LARGE` instead of splitting.
+  The row that overflows is the jurisdiction replica's `browserVMState.trieData[…]` value (key path decodes to
+  `kind / name / browserVMState / property / trieData / array / index …`), written from
+  `core/jurisdiction/adapter/browservm/browservm-state.ts`.
+- Effect (wallet tour E2E, 2026-09-04, bundle from the working tree): after the on-chain steps of the tour (move
+  reserve→collateral, hub r2c for the collateral request) the frame commit fails with
+  `RUNTIME_FRAME_STORAGE_NOT-COMMITTED:STORAGE_RUNTIME_MACHINE_GRAPH_ROW_TOO_LARGE:36694:…` →
+  `RUNTIME_LOOP_HALTED`. From then on nothing commits: swaps rest "open" forever, the tour's trade chapter never
+  counts a fill. Any embedded-BrowserVM wallet will hit this after a few dozen on-chain transactions, because the
+  EVM trie only grows.
+- Suggested fix: chunk large graph leaves (the radix graph already splits objects/arrays; a single trie node blob
+  should be split by byte range or stored in the blob store keyed by hash), or persist BrowserVM state as its own
+  WAL stream with a size budget instead of one bounded row. At minimum surface the failure as a jurisdiction
+  fault, not a runtime halt.
+
+### Observed on the uncommitted working tree (not a tracked-code finding)
+- 2026-09-04 06:35 snapshot of the owner's in-progress dispute refactor: `prepareDispute` from the wallet threw
+  `DISPUTE_CANDIDATE_SNAPSHOT_MISSING:disputeStart.counter:<proofBodyHash>` (`localDisputeProofSnapshot` missing)
+  → `RUNTIME_ENTITY_INPUT_APPLY_FAILED` → `RUNTIME_LOOP_HALTED`. The symbol no longer exists in the tree an hour
+  later, so this is recorded only as a data point: a user's `prepareDispute` on a freshly opened sandbox account
+  should be rejected, never halt the runtime.

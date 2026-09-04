@@ -321,16 +321,20 @@ const signProposalManifest = async (
 
 const assertProposalPrefix = (
   env: EntityRuntimeContext,
-  replica: EntityReplica,
+  committedReplica: EntityReplica,
+  authorityReplica: EntityReplica,
   selection: EntityProposalSelection,
   view: number,
 ): void => {
   const { proposalJPrefixCertificate, proposalTxs } = selection;
-  assertProposerJRangesMatchLocalHistory(env, replica, proposalTxs);
-  assertFrameJPrefix(env, replica, {
-    height: replica.state.height + 1,
-    parentFrameHash: getPrevFrameHash(replica.state),
-    leader: { proposerSignerId: replica.signerId.toLowerCase(), view },
+  // The activation chain starts at the committed board. The resulting prefix
+  // certificate and leader are authenticated by the board installed by that
+  // same frame; using it for both checks would apply the handover twice.
+  assertProposerJRangesMatchLocalHistory(env, committedReplica, proposalTxs);
+  assertFrameJPrefix(env, authorityReplica, {
+    height: committedReplica.state.height + 1,
+    parentFrameHash: getPrevFrameHash(committedReplica.state),
+    leader: { proposerSignerId: authorityReplica.signerId.toLowerCase(), view },
     txs: proposalTxs,
     ...(proposalJPrefixCertificate ? { jPrefixCertificate: proposalJPrefixCertificate } : {}),
   });
@@ -386,7 +390,7 @@ const fitAndApplyEntityProposal = async (
     ? workingReplica
     : { ...workingReplica, state: withBoardAuthority(workingReplica.state, authorityConfig) };
   const leader = getReplicaProposalLeader(authorityReplica);
-  assertProposalPrefix(env, authorityReplica, selection, leader.view);
+  assertProposalPrefix(env, workingReplica, authorityReplica, selection, leader.view);
   markProposalPhase(env, 'apply.entity.proposal.wire-fit');
   const fitted = await fitEntityProposalToWireBudget({
     env,
@@ -650,6 +654,10 @@ export const startEntityProposalIfReady = async (
     return result;
   }
   workingReplica.proposal = frame;
+  // Recovery rebuilds live proposals from Runtime WAL inputs rather than
+  // persisting the proposal envelope. Journal the exact public infra context
+  // at creation time; waiting for a later quorum commit is too late for replay.
+  context.entityContext = frame.entityContext;
   entityLog.debug('proposal.created', {
     frame: shortHash(frame.hash),
     txs: frame.txs.length,

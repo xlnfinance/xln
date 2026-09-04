@@ -205,6 +205,12 @@
       seed = DEMO_RUNTIME_SEED;
       console.warn(`[${label}] No runtime seed found; using demo seed.`);
     }
+    // Fail before any mutation. The live wallet env is also published through
+    // runtimeFrameEnv; changing its scenarioMode first silently stops the
+    // Runtime loop and turns the J watcher into manual polling.
+    if ($runtimeFrameEnv?.infrastructure) {
+      throw new Error(`${label}: detached scenario unexpectedly owns live infrastructure`);
+    }
     const env = $runtimeFrameEnv ?? XLN.createEmptyEnv(seed ?? null);
     if (!$runtimeFrameEnv) runtimeFrameEnv.set(env);
 
@@ -216,10 +222,6 @@
       ...env.runtimeConfig,
       storage: { ...env.runtimeConfig?.storage, enabled: false },
     };
-    if (env.infrastructure) {
-      throw new Error(`${label}: detached scenario unexpectedly owns live infrastructure`);
-    }
-
     if (seed !== null && seed !== undefined && env.runtimeSeed !== seed) {
       env.runtimeSeed = seed;
     }
