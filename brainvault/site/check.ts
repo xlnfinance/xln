@@ -35,7 +35,9 @@ async function localGates(): Promise<string> {
   gate(html.includes('<title>BrainVault — Your wallet, mined from memory</title>'), 'title drifted');
   gate(html.includes('<link rel="canonical" href="https://brainvault.sh/" />'), 'canonical URL drifted');
   gate(html.includes('bunx brainvault'), 'primary launch command disappeared');
-  gate(html.includes('brainvault@2.1.0'), 'audited package version disappeared');
+  gate(html.includes('brainvault@2.2.0'), 'audited package version disappeared');
+  gate(html.includes('data-copy-target="#audit-prompt"'), 'copyable audit prompt disappeared');
+  gate(html.includes('never a safety score'), 'adversarial audit instructions drifted');
   gate(!html.includes('__cf_email__') && !html.includes('/cdn-cgi/'), 'Cloudflare rewrote source HTML');
   const noTransform = 'Cache-Control: public, max-age=0, must-revalidate, no-transform';
   gate(headers.includes(`/index.html\n  ${noTransform}`), 'index.html must forbid proxy rewriting');
@@ -75,16 +77,16 @@ async function liveGates(localHtml: string): Promise<void> {
 
   const liveHtml = await response.text();
   gate(liveHtml === localHtml, 'deployed HTML differs byte-for-byte from source');
-  gate(liveHtml.includes('brainvault@2.1.0'), 'Cloudflare corrupted the pinned npm command');
+  gate(liveHtml.includes('brainvault@2.2.0'), 'Cloudflare corrupted the pinned npm command');
   gate(!liveHtml.includes('__cf_email__') && !liveHtml.includes('/cdn-cgi/'), 'Cloudflare injected email decoding');
 
   for (const asset of [
-    'styles.css',
-    'script.js',
-    'favicon.svg',
-    'og-card.png',
-    'brainvault-terminal-demo-poster.png',
-    'brainvault-terminal-demo.mp4',
+    'assets/styles.css',
+    'assets/script.js',
+    'assets/favicon.svg',
+    'assets/og-card.png',
+    'assets/brainvault-terminal-demo-poster.png',
+    'assets/brainvault-terminal-demo.mp4',
   ]) {
     const assetUrl = new URL(asset, liveUrl);
     assetUrl.searchParams.set('site-gate', Date.now().toString(36));

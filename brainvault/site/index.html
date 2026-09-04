@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#050505" />
-    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
     <meta
       name="description"
       content="Recreate the same wallet from a strong secret through deliberate memory-hard work. No physical seed required. No server to trust."
@@ -20,7 +20,7 @@
       property="og:description"
       content="You wait once per recovery. An attacker pays for every guess. No physical seed required. No server to trust."
     />
-    <meta property="og:image" content="https://brainvault.sh/og-card.png" />
+    <meta property="og:image" content="https://brainvault.sh/assets/og-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="BrainVault — Your wallet, mined from memory." />
@@ -30,10 +30,10 @@
       name="twitter:description"
       content="A local, open-source, memory-hard route back to the same wallet."
     />
-    <meta name="twitter:image" content="https://brainvault.sh/og-card.png" />
+    <meta name="twitter:image" content="https://brainvault.sh/assets/og-card.png" />
     <link rel="canonical" href="https://brainvault.sh/" />
     <title>BrainVault — Your wallet, mined from memory</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./assets/styles.css" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -41,14 +41,14 @@
         "name": "BrainVault",
         "applicationCategory": "SecurityApplication",
         "operatingSystem": "macOS, Linux, Windows",
-        "softwareVersion": "2.1.0",
+        "softwareVersion": "2.2.0",
         "url": "https://brainvault.sh/",
         "codeRepository": "https://github.com/xlnfinance/xln/tree/main/brainvault",
         "license": "https://github.com/xlnfinance/xln/blob/main/brainvault/LICENSE",
         "description": "Frozen V1 memory-hard deterministic wallet derivation using Argon2id and BLAKE3."
       }
     </script>
-    <script src="./script.js" defer></script>
+    <script src="./assets/script.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -114,7 +114,7 @@
               <button type="button" data-copy="bunx brainvault" aria-label="Copy bunx brainvault command">Copy</button>
             </div>
             <p class="muted">BRAINVAULT · deterministic wallet recovery</p>
-            <p><span class="label">Work preset</span> level 4 · 10,000 shards</p>
+            <p><span class="label">Work choice</span> Standard · 10,000 · recommended</p>
             <p><span class="label">Password</span> <span class="secret">••••••••••••••••</span> <span class="muted">typing works</span></p>
             <div class="terminal-progress"><span></span></div>
             <p><span class="success">✓</span> Canonical root derived</p>
@@ -401,8 +401,8 @@
             <span class="signal positive"><i aria-hidden="true">✓</i>Private output hidden</span>
             <span class="signal negative"><i aria-hidden="true">×</i>No secrets on this site</span>
           </div>
-          <video autoplay muted loop playsinline controls preload="metadata" poster="./brainvault-terminal-demo-poster.png" aria-label="BrainVault terminal demonstration">
-            <source src="./brainvault-terminal-demo.mp4" type="video/mp4" />
+          <video autoplay muted loop playsinline controls preload="metadata" poster="./assets/brainvault-terminal-demo-poster.png" aria-label="BrainVault terminal demonstration">
+            <source src="./assets/brainvault-terminal-demo.mp4" type="video/mp4" />
             Your browser cannot play the BrainVault terminal demonstration.
           </video>
           <figcaption>Real CLI sequence, public demo secret. Enter real recovery inputs only in your own trusted terminal.</figcaption>
@@ -444,7 +444,7 @@
 cd brainvault-audit
 bun init -y
 bun add --exact --ignore-scripts \
-  brainvault@2.1.0</code></pre>
+  brainvault@2.2.0</code></pre>
             <div class="assurance-meter level-two" aria-label="Source verification depth: 2 of 3">
               <span>Source verification</span><i aria-hidden="true"><b></b><b></b><b></b></i><strong>2 / 3</strong>
             </div>
@@ -545,7 +545,7 @@ bun ./brainvault --smoke</code></pre>
             <li>
               <span>02</span>
               <div><h3>Read the recipe and its dependencies</h3><p>Inspect frozen parameters, exact package versions, vendored native source, and the manifest. Why: these files determine what will execute.</p></div>
-              <code>SPEC-V1.md · primitives/* · bun.lock · MANIFEST.sha256</code>
+              <code>docs/spec-v1.md · src/core/* · bun.lock · docs/manifest.sha256</code>
             </li>
             <li>
               <span>03</span>
@@ -575,6 +575,21 @@ bun ./brainvault --smoke</code></pre>
               TypeScript already runs directly in Bun, so “it compiled” says little. <code>verify:source</code>
               checks something stronger: clean native builds reproduce the exact bundled binaries.
             </p>
+          </div>
+
+          <div class="audit-prompt-card">
+            <div class="audit-prompt-heading">
+              <div>
+                <span>Bring your own reviewer</span>
+                <h3>Ask an AI to challenge the code—not endorse it.</h3>
+              </div>
+              <button type="button" data-copy-target="#audit-prompt" aria-label="Copy adversarial BrainVault audit prompt">Copy audit prompt</button>
+            </div>
+            <p>
+              Run this inside the exact BrainVault folder you plan to trust. It forces the reviewer
+              to show file-and-line evidence and to separate proven properties from unknowns.
+            </p>
+            <pre id="audit-prompt">Audit this BrainVault package adversarially. Do not trust its README, comments, binaries, tests, or prior reviews. Read AGENTS.md, docs/spec-v1.md, src/core/, then follow each execution boundary. Assess: (1) realistic entropy of human and generated inputs; (2) whether Argon2id changes only guess cost, never missing entropy; (3) trade-offs versus a random BIP-39 mnemonic and a classic fast-hash brainwallet; (4) byte-exact V1 determinism and engine parity; (5) secret disclosure, terminal, malformed-worker, fallback, memory-wipe, dependency, install-script, manifest, and prebuilt-binary attack paths. Run relevant tests without using real secrets. Report only reproducible P0/P1/P2 findings with file:line evidence and the smallest failing test. List unverified boundaries separately. End with a conditional verdict, never a safety score.</pre>
           </div>
         </details>
       </section>
@@ -655,7 +670,7 @@ bun ./brainvault --smoke</code></pre>
         <span>BrainVault</span>
       </a>
       <p>Open source. No analytics. No wallet connection. Never enter a secret on this website.</p>
-      <div><a href="https://github.com/xlnfinance/xln/tree/main/brainvault">GitHub</a><a href="https://github.com/xlnfinance/xln/blob/main/brainvault/SPEC-V1.md">Specification</a><span>© <span id="year">2026</span></span></div>
+      <div><a href="https://github.com/xlnfinance/xln/tree/main/brainvault">GitHub</a><a href="https://github.com/xlnfinance/xln/blob/main/brainvault/docs/spec-v1.md">Specification</a><span>© <span id="year">2026</span></span></div>
     </footer>
   </body>
 </html>
