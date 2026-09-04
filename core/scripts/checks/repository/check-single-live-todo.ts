@@ -15,6 +15,7 @@ const GENERATED_OR_VENDOR_DIRS = new Set([
   'db-tmp',
   'node_modules',
   'playwright-report',
+  'target',
   'test-results',
 ]);
 const GENERATED_PREFIXES = [
